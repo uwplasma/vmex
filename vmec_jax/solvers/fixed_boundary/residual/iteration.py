@@ -2407,6 +2407,13 @@ def solve_fixed_boundary_residual_iter(
                     and need_lamcal is False
                 )
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
+                _apply_rz_preconditioner_current = partial(
+                    _rz_preconditioner_apply_local,
+                    mats=mats,
+                    jmax=jmax,
+                    use_precomputed=preconditioner_use_precomputed_tridi_policy,
+                    use_lax_tridi=preconditioner_use_lax_tridi_policy,
+                )
                 if use_apply_payload_fusion:
                     _, f_norm1 = _cached_or_current_f_norm1_jax(
                         vmec2000_control=bool(vmec2000_control),
@@ -2468,26 +2475,14 @@ def solve_fixed_boundary_residual_iter(
                     preconditioner_outputs_scaled = True
                     preconditioner_fsq1_ready = True
                 else:
-                    frzl_rz = _rz_preconditioner_apply_local(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                    )
+                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
                     frzl_lam_pre = frzl_rz
                 if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
                     # The fused GPU-oriented path returns only scaled update
                     # payloads.  Full accepted-trace replay also needs the raw
                     # R/Z-preconditioned force, so materialize it only for that
                     # opt-in diagnostic/validation mode.
-                    frzl_rz = _rz_preconditioner_apply_local(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                    )
+                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
                 if (not use_apply_payload_fusion) and host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
                     # Asymmetric (lasym) components default to None — the downstream
@@ -2556,6 +2551,13 @@ def solve_fixed_boundary_residual_iter(
                     and need_lamcal is False
                 )
                 frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats) if bool(getattr(cfg, "lasym", False)) else frzl
+                _apply_rz_preconditioner_current = partial(
+                    _rz_preconditioner_apply_local,
+                    mats=mats,
+                    jmax=jmax,
+                    use_precomputed=preconditioner_use_precomputed_tridi_policy,
+                    use_lax_tridi=preconditioner_use_lax_tridi_policy,
+                )
                 if use_apply_payload_fusion:
                     _, f_norm1 = _cached_or_current_f_norm1_jax(
                         vmec2000_control=bool(vmec2000_control),
@@ -2617,26 +2619,14 @@ def solve_fixed_boundary_residual_iter(
                     preconditioner_outputs_scaled = True
                     preconditioner_fsq1_ready = True
                 else:
-                    frzl_rz = _rz_preconditioner_apply_local(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                    )
+                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
                     frzl_lam_pre = frzl_rz
                 if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
                     # The fused GPU-oriented path returns only scaled update
                     # payloads.  Full accepted-trace replay also needs the raw
                     # R/Z-preconditioned force, so materialize it only for that
                     # opt-in diagnostic/validation mode.
-                    frzl_rz = _rz_preconditioner_apply_local(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                    )
+                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
                 if (not use_apply_payload_fusion) and host_update_assembly:
                     # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
                     # Asymmetric (lasym) components default to None — the downstream
