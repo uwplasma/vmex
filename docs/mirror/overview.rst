@@ -143,11 +143,10 @@ Current solver status:
   when terminal step-status histories are not produced.  The same convergence
   rows also record CLI finish budgets, finish residuals, finish modes, and
   fallback flags so fast-path final residuals can be separated from raw
-  fixed-iteration trajectories.  The same convergence rows also record target
-  and fitted
-  side/corner orientation spans, covariance anisotropy ranges, and valid-axis
-  fractions so low-mode boundary fits can be audited before interpreting
-  residual trends.  ``--resolution-preset target`` writes the current target
+  fixed-iteration trajectories.  They also record target and fitted side/corner
+  orientation spans, covariance anisotropy ranges, and valid-axis fractions so
+  low-mode boundary fits can be audited before interpreting residual trends.
+  ``--resolution-preset target`` writes the current target
   ladder, ``ns = 7,9,15`` and ``mpol:ntor = 5:20,6:24``.  Office GPU runs of
   that ladder reached total-``fsq`` convergence at ``ftol=1e-8`` for all six
   rows with VMEC2000 outputs present; strict component convergence remains a
