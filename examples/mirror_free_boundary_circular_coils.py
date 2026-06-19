@@ -52,7 +52,7 @@ from vmec_jax.mirror import (
 
 
 CIRCULAR_COIL_BETA_SCAN_SCHEMA = "mirror_free_boundary_circular_coil_beta_scan"
-CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.10"
+CIRCULAR_COIL_BETA_SCAN_SCHEMA_VERSION = "0.11"
 CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS = (1.0, 0.5, 0.25, 0.125)
 CIRCULAR_COIL_BETA_SCAN_LS_REALIZED_RETRY_FACTORS = (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625)
 CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
@@ -96,6 +96,7 @@ CIRCULAR_COIL_BETA_SCAN_TOP_LEVEL_FIELDS = (
     "ls_boundary_ridge",
     "ls_boundary_ridge_candidates",
     "ls_boundary_polynomial_degree",
+    "ls_boundary_accept_tolerance",
     "ls_boundary_realized_retry_factors",
     "ls_boundary_step_rows_total",
     "ls_boundary_coupled_trial_requested",
@@ -573,6 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ls-boundary-ridge", type=float, default=1.0e-8)
     parser.add_argument("--ls-boundary-ridge-candidates", type=str, default="")
     parser.add_argument("--ls-boundary-polynomial-degree", type=int, default=4)
+    parser.add_argument("--ls-boundary-accept-tolerance", type=float, default=1.0e-4)
     parser.add_argument(
         "--ls-boundary-realized-retry-factors",
         type=str,
@@ -943,6 +945,7 @@ def _ls_boundary_step_summary_from_step(
     residual_function,
     grid,
     line_search_factors,
+    accept_tolerance: float,
     write_plots: bool,
     figure_dir: Path,
     name: str,
@@ -957,7 +960,7 @@ def _ls_boundary_step_summary_from_step(
             {
                 "factor": float(factor),
                 "selected": bool(np.isclose(float(factor), step.line_search_factor)),
-                "accepted": bool(trial_residual.value <= step.residual.value + 1.0e-12),
+                "accepted": bool(trial_residual.value <= step.residual.value + float(accept_tolerance)),
                 "residual_value": float(trial_residual.value),
                 "equilibrium_rms": float(trial_residual.equilibrium_rms),
                 "lcfs_value": float(trial_residual.lcfs_value),
@@ -1016,6 +1019,7 @@ def _run_ls_boundary_step(
     ridge: float,
     ridge_candidates: tuple[float, ...] | None,
     polynomial_degree: int,
+    accept_tolerance: float,
     write_plots: bool,
     figure_dir: Path,
     name: str,
@@ -1039,12 +1043,14 @@ def _run_ls_boundary_step(
         ridge=ridge,
         ridge_candidates=ridge_candidates,
         line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+        accept_tolerance=accept_tolerance,
     )
     return _ls_boundary_step_summary_from_step(
         step=step,
         residual_function=residual_function,
         grid=grid,
         line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+        accept_tolerance=accept_tolerance,
         write_plots=write_plots,
         figure_dir=figure_dir,
         name=name,
@@ -1186,6 +1192,7 @@ def _ls_boundary_step_summary_with_realized_factor(
     factor: float,
     residual,
     grid,
+    accept_tolerance: float,
 ) -> dict[str, object]:
     """Return an LS summary whose trial fields match one realized retry factor."""
 
@@ -1201,7 +1208,7 @@ def _ls_boundary_step_summary_with_realized_factor(
         if np.isclose(float(trial_row["factor"]), factor):
             factor_row_found = True
             trial_row["selected"] = True
-            trial_row["accepted"] = bool(residual.value <= step.residual.value + 1.0e-12)
+            trial_row["accepted"] = bool(residual.value <= step.residual.value + float(accept_tolerance))
             trial_row["residual_value"] = float(residual.value)
             trial_row["equilibrium_rms"] = float(residual.equilibrium_rms)
             trial_row["lcfs_value"] = float(residual.lcfs_value)
@@ -1213,7 +1220,7 @@ def _ls_boundary_step_summary_with_realized_factor(
             {
                 "factor": factor,
                 "selected": True,
-                "accepted": bool(residual.value <= step.residual.value + 1.0e-12),
+                "accepted": bool(residual.value <= step.residual.value + float(accept_tolerance)),
                 "residual_value": float(residual.value),
                 "equilibrium_rms": float(residual.equilibrium_rms),
                 "lcfs_value": float(residual.lcfs_value),
@@ -1224,7 +1231,7 @@ def _ls_boundary_step_summary_with_realized_factor(
     candidate_summary = dict(summary)
     candidate_summary.update(
         {
-            "accepted": bool(residual.value <= step.residual.value + 1.0e-12),
+            "accepted": bool(residual.value <= step.residual.value + float(accept_tolerance)),
             "line_search_factor": factor,
             "coefficients_new": [float(value) for value in candidate_coefficients],
             "residual_value_after": float(residual.value),
@@ -1266,6 +1273,7 @@ def _run_ls_boundary_coupled_loop(
     ridge: float,
     ridge_candidates: tuple[float, ...] | None,
     polynomial_degree: int,
+    accept_tolerance: float,
     realized_retry_factors: tuple[float, ...] | None,
     write_plots: bool,
 ) -> list[dict[str, object]]:
@@ -1299,6 +1307,7 @@ def _run_ls_boundary_coupled_loop(
             residual_function=residual_function,
             grid=grid,
             line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+            accept_tolerance=accept_tolerance,
             write_plots=write_plots,
             figure_dir=outdir / "figures" / f"fixed_boundary_beta_{label}_ls_loop_step_{step_index}",
             name=f"free_boundary_circular_coils_beta_{step_label}",
@@ -1331,6 +1340,7 @@ def _run_ls_boundary_coupled_loop(
                 factor=factor,
                 residual=candidate_residual,
                 grid=grid,
+                accept_tolerance=accept_tolerance,
             )
             trial_label = (
                 step_label if np.isclose(factor, step.line_search_factor) else f"{step_label}_f{_factor_label(factor)}"
@@ -1466,6 +1476,7 @@ def _run_ls_boundary_coupled_loop(
         ridge=ridge,
         ridge_candidates=ridge_candidates,
         line_search_factors=CIRCULAR_COIL_BETA_SCAN_LS_LINE_SEARCH_FACTORS,
+        accept_tolerance=accept_tolerance,
     )
 
     rows: list[dict[str, object]] = []
@@ -1659,6 +1670,7 @@ def _beta_scan_summary(
     ls_boundary_ridge: float,
     ls_boundary_ridge_candidates: tuple[float, ...] | None,
     ls_boundary_polynomial_degree: int,
+    ls_boundary_accept_tolerance: float,
     ls_boundary_realized_retry_factors: tuple[float, ...] | None,
 ) -> dict[str, object]:
     """Return top-level status fields for the circular-coil beta scan."""
@@ -1723,6 +1735,7 @@ def _beta_scan_summary(
         if ls_requested and ls_boundary_ridge_candidates is not None
         else None,
         "ls_boundary_polynomial_degree": int(ls_boundary_polynomial_degree) if ls_requested else None,
+        "ls_boundary_accept_tolerance": float(ls_boundary_accept_tolerance) if ls_requested else None,
         "ls_boundary_realized_retry_factors": [float(value) for value in ls_boundary_realized_retry_factors]
         if run_ls_boundary_coupled_loop and ls_boundary_realized_retry_factors is not None
         else None,
@@ -2241,6 +2254,7 @@ def _run_fixed_boundary_baseline_cases(
     ls_boundary_ridge: float,
     ls_boundary_ridge_candidates: tuple[float, ...] | None,
     ls_boundary_polynomial_degree: int,
+    ls_boundary_accept_tolerance: float,
     ls_boundary_realized_retry_factors: tuple[float, ...] | None,
     write_plots: bool,
 ) -> list[dict[str, object]]:
@@ -2423,6 +2437,7 @@ def _run_fixed_boundary_baseline_cases(
                 ridge=ls_boundary_ridge,
                 ridge_candidates=ls_boundary_ridge_candidates,
                 polynomial_degree=ls_boundary_polynomial_degree,
+                accept_tolerance=ls_boundary_accept_tolerance,
                 write_plots=write_plots,
                 figure_dir=outdir / "figures" / f"fixed_boundary_beta_{label}",
                 name=f"free_boundary_circular_coils_beta_{label}",
@@ -2470,6 +2485,7 @@ def _run_fixed_boundary_baseline_cases(
                 ridge=ls_boundary_ridge,
                 ridge_candidates=ls_boundary_ridge_candidates,
                 polynomial_degree=ls_boundary_polynomial_degree,
+                accept_tolerance=ls_boundary_accept_tolerance,
                 realized_retry_factors=ls_boundary_realized_retry_factors,
                 write_plots=write_plots,
             )
@@ -2566,6 +2582,7 @@ def run_case(
     ls_boundary_ridge: float = 1.0e-8,
     ls_boundary_ridge_candidates: tuple[float, ...] | None = None,
     ls_boundary_polynomial_degree: int = 4,
+    ls_boundary_accept_tolerance: float = 1.0e-4,
     ls_boundary_realized_retry_factors: tuple[float, ...] | None = CIRCULAR_COIL_BETA_SCAN_LS_REALIZED_RETRY_FACTORS,
     write_plots: bool = True,
 ) -> Path:
@@ -2597,6 +2614,8 @@ def run_case(
         raise ValueError("ls_boundary_max_relative_step must be positive")
     if float(ls_boundary_ridge) < 0.0:
         raise ValueError("ls_boundary_ridge must be nonnegative")
+    if float(ls_boundary_accept_tolerance) < 0.0:
+        raise ValueError("ls_boundary_accept_tolerance must be nonnegative")
     if ls_boundary_ridge_candidates is not None:
         candidates = tuple(float(value) for value in ls_boundary_ridge_candidates)
         if not candidates:
@@ -2685,6 +2704,7 @@ def run_case(
             ls_boundary_ridge=ls_boundary_ridge,
             ls_boundary_ridge_candidates=ls_boundary_ridge_candidates,
             ls_boundary_polynomial_degree=ls_boundary_polynomial_degree,
+            ls_boundary_accept_tolerance=ls_boundary_accept_tolerance,
             ls_boundary_realized_retry_factors=ls_boundary_realized_retry_factors,
             write_plots=write_plots,
         )
@@ -2724,6 +2744,7 @@ def run_case(
             ls_boundary_ridge=ls_boundary_ridge,
             ls_boundary_ridge_candidates=ls_boundary_ridge_candidates,
             ls_boundary_polynomial_degree=ls_boundary_polynomial_degree,
+            ls_boundary_accept_tolerance=ls_boundary_accept_tolerance,
             ls_boundary_realized_retry_factors=ls_boundary_realized_retry_factors,
         ),
         "coil_radius": float(coil_radius),
@@ -2803,6 +2824,7 @@ def main() -> None:
             else _parse_float_list(args.ls_boundary_ridge_candidates)
         ),
         ls_boundary_polynomial_degree=args.ls_boundary_polynomial_degree,
+        ls_boundary_accept_tolerance=args.ls_boundary_accept_tolerance,
         ls_boundary_realized_retry_factors=(
             None
             if not args.ls_boundary_realized_retry_factors.strip()

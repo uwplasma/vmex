@@ -25107,6 +25107,7 @@ Results:
 ### User input needed
 
 No user input is needed for the next technical step.
+
 ---
 ## 209. Stricter Free-Boundary Target-Merit Smoke
 
@@ -25706,6 +25707,126 @@ Results:
 - Public API/source simplification: `100%` for the current mirror package
   structure.
 - PR merge readiness overall: `99.90%`, pending production free-boundary LCFS
+  decision/evidence, broader differentiable solved-state promotion, final
+  checks, and review decision on deferred lanes.
+
+### User input needed
+
+No user input is needed for the next technical step.
+
+---
+## 214. Free-Boundary Frozen-LS Acceptance Tolerance
+
+### Steps taken
+
+- Added `--ls-boundary-accept-tolerance` to the root circular-coil
+  free-boundary example and recorded it in the beta-scan metrics.
+- Bumped the circular-coil beta-scan schema from `0.10` to `0.11`.
+- Threaded the tolerance through both the one-step LS diagnostic and guarded
+  coupled-loop LS calls.
+- Updated LS step summaries and realized-retry summaries to use the same
+  tolerance as the solver, so near-neutral frozen LS steps that are accepted by
+  policy actually run realized fixed-boundary trials and report MOUT/LCFS
+  metrics.
+- Kept a strict-regression test path by passing
+  `--ls-boundary-accept-tolerance 0` in the test that verifies an unaccepted LS
+  step is reported as skipped.
+
+### Results obtained
+
+- The default frozen-LS accept tolerance is now `1e-4`; this lets the realized
+  fixed-boundary merit guard decide near-neutral frozen steps instead of
+  stopping before the fixed-boundary trial.
+- The low-resolution `target_merit = 0.1` probe improved again:
+  - schema: `0.11`;
+  - accept tolerance: `0.0001`;
+  - workflow status:
+    `ls_boundary_coupled_loop_not_converged_free_boundary`;
+  - stop reasons: `{"None": 24, "rejected_merit_increase": 3}`;
+  - total loop rows: `27`; accepted rows: `24`.
+- Per-beta low-resolution results for `baseline_maxiter = 5`,
+  `max_relative_step = 0.05`, `fsq_growth_limit = 1.5`, and
+  `max_steps = 12`:
+  - beta `1%`: unchanged, accepted `4` steps, last accepted merit
+    `0.11218420163031764`, then rejected a worsening realized trial;
+  - beta `3%`: accepted `10` steps, last accepted merit
+    `0.1187472264498367`, then rejected a worsening realized trial;
+  - beta `10%`: accepted `10` steps, last accepted merit
+    `0.1187472264498367`, then rejected a worsening realized trial.
+- A deeper realized retry ladder down to `0.00390625` did not accept the final
+  rejected step.  The best final trial for beta `3%` and `10%` was
+  `0.11887246115960315`, still above the last accepted `0.1187472264498367`.
+- This closes the prior `ls_step_not_accepted` plateau for the local 3% and
+  10% beta rows, but the stricter `0.1` target remains open.  The next
+  meaningful step is still a better boundary solve policy, not just smaller
+  realized retry factors.
+
+### How it was tested
+
+```bash
+python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m214_accept_tol_target010_v2 --betas 1,3,10 --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 5 --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 12 --ls-boundary-coupled-loop-target-merit 0.1 --ls-boundary-coupled-loop-fsq-growth-limit 1.5 --ls-boundary-max-relative-step 0.05 --no-plots
+python examples/mirror_free_boundary_circular_coils.py --outdir results/mirror/free_boundary_circular_coils_m214_accept_tol_deeper_retry_target010 --betas 1,3,10 --ntheta 8 --nxi 11 --n-segments 64 --run-fixed-boundary-baseline --baseline-maxiter 5 --run-ls-boundary-coupled-loop --ls-boundary-coupled-loop-steps 16 --ls-boundary-coupled-loop-target-merit 0.1 --ls-boundary-coupled-loop-fsq-growth-limit 1.5 --ls-boundary-max-relative-step 0.05 --ls-boundary-realized-retry-factors 1,0.5,0.25,0.125,0.0625,0.03125,0.015625,0.0078125,0.00390625 --no-plots
+python -m pytest tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_step_reports_reduction tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_trial_reports_realized_solve tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_ls_boundary_coupled_loop_reports_guarded_steps tests/mirror/test_mirror_examples.py::test_root_free_boundary_circular_coils_coupled_loop_reports_target_merit_convergence -q
+python -m pytest tests/mirror/test_mirror_examples.py -q
+python -m ruff check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m ruff format --check examples/mirror_free_boundary_circular_coils.py tests/mirror/test_mirror_examples.py
+python -m sphinx -W -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Focused schema/coupled-loop tests passed: `4 passed in 15.12s`.
+- Full root mirror example tests passed: `37 passed in 191.23s`.
+- Ruff check and Ruff format check passed for the touched files.
+- Sphinx docs build passed with warnings as errors.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The implementation stays localized to
+  `examples/mirror_free_boundary_circular_coils.py`; no core solver API was
+  changed for this host-side diagnostic policy.
+- The tolerance is exposed and recorded rather than hidden as a magic constant,
+  making runs reproducible and preserving strict mode through an explicit
+  `--ls-boundary-accept-tolerance 0`.
+- Tests remain in `tests/mirror/test_mirror_examples.py` because this is a
+  root-example CLI/schema contract.
+- Generated probe outputs remain under ignored `results/mirror/...` paths.
+
+### Best next steps
+
+1. Commit and push this M214 tranche, update the draft PR body, and snapshot
+   checks without waiting on long-running jobs.
+2. Implement a real boundary solve-policy improvement for the remaining
+   `0.1187` plateau, likely by promoting the reduced residual-vector nonlinear
+   solve into the circular-coil workflow or adding a trust-region/mode-filtered
+   step policy.
+3. After local improvement below `0.1`, run a heavier `ns`/`nxi`/beta ladder on
+   `ssh office` and compare runtime/memory against the current host-side CLI
+   path before declaring the lane production-ready.
+
+### Completion percentages after M214
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.70%` overall for the diagnostic/reduced solver
+  scope; the local 3% and 10% beta rows no longer stall at unaccepted frozen LS
+  steps, but production LCFS convergence below `0.1` remains open.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.9%`.
+- ESSOS circular-coil mirror beta scan: `99.55%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.91%`, pending production free-boundary LCFS
   decision/evidence, broader differentiable solved-state promotion, final
   checks, and review decision on deferred lanes.
 
