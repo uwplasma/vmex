@@ -12,6 +12,7 @@ from vmec_jax.mirror import (
     PsiPrimeProfile,
     circular_loop_field_rz,
     mirror_boundary_from_on_axis_bz,
+    mirror_boundary_from_two_coil_flux_tube,
     on_axis_mirror_ratio,
     run_mirror_fixed_boundary,
     two_coil_field_rz,
@@ -76,6 +77,32 @@ def test_circular_loop_off_axis_field_matches_direct_biot_savart_quadrature():
 
     assert np.allclose(field.br, br_quad, rtol=2.0e-10, atol=2.0e-10)
     assert np.allclose(field.bz, bz_quad, rtol=2.0e-10, atol=2.0e-10)
+
+
+def test_two_coil_flux_tube_boundary_helper_matches_explicit_on_axis_construction():
+    config = MirrorConfig(MirrorResolution(ns=7, ntheta=1, nxi=17, mpol=0), z_min=-1.0, z_max=1.0)
+    grid = config.build_grid()
+    coil_radius = 0.35
+    separation = 2.0
+    current = 1.0e6
+    psi_value = 0.012
+    bz_axis = two_coil_on_axis_bz(
+        grid.z,
+        coil_radius_m=coil_radius,
+        separation_m=separation,
+        current_a=current,
+    )
+
+    explicit = mirror_boundary_from_on_axis_bz(psi_value, grid.z, bz_axis)
+    helper = mirror_boundary_from_two_coil_flux_tube(
+        psi_value,
+        grid.z,
+        coil_radius_m=coil_radius,
+        separation_m=separation,
+        current_a=current,
+    )
+
+    assert np.allclose(helper.radius_on_grid(grid), explicit.radius_on_grid(grid), rtol=0.0, atol=0.0)
 
 
 def test_two_coil_flux_tube_mirror_axis_field_matches_analytic_bz():

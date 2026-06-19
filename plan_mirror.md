@@ -21630,3 +21630,84 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 178. Two-Coil Flux-Tube Helper Equivalence Coverage
+
+### Steps taken
+
+- Added a focused test for `mirror_boundary_from_two_coil_flux_tube` in
+  `tests/mirror/test_two_coil_axisym_benchmark.py`.
+- Verified that the convenience helper produces the same boundary radii as the
+  explicit analytic two-coil on-axis field plus
+  `mirror_boundary_from_on_axis_bz` construction.
+- Kept this as test coverage only; no source behavior changed.
+
+### Results obtained
+
+- The two-coil benchmark lane now directly protects the public convenience
+  constructor used by examples and downstream scripts.
+- Existing on-axis, off-axis Biot-Savart, and fixed-boundary axis-field tests
+  remain unchanged; this adds the missing wrapper-equivalence gate.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python -m ruff format tests/mirror/test_two_coil_axisym_benchmark.py
+python -m ruff check tests/mirror/test_two_coil_axisym_benchmark.py
+JAX_ENABLE_X64=1 pytest tests/mirror/test_two_coil_axisym_benchmark.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+git diff --check
+```
+
+Results:
+
+- Ruff format left the file unchanged.
+- Ruff check passed.
+- Focused two-coil benchmark tests passed: `4 passed in 1.10s`.
+- Full mirror suite passed on the updated head: `228 passed, 1 skipped in
+  195.09s`.
+- Whitespace check passed.
+
+### File structure and best-practice notes
+
+- The new test lives in the existing two-coil benchmark module, beside the
+  analytic circular-loop, off-axis Biot-Savart, and fixed-boundary checks.
+- The test compares public helper output through the normal `MirrorBoundary`
+  grid-evaluation API instead of inspecting internal boundary fields.
+- No generated result files or figures were added to the repository.
+
+### Best next steps
+
+1. Commit and push M178.
+2. Update the draft PR body validation note to include the `228 passed,
+   1 skipped` full mirror-suite result.
+3. Re-check CI after the latest push has had time to finish, inspecting only
+   failed jobs.
+4. Continue the completion audit with the fixed-boundary solver and
+   residual-Newton/preconditioning lanes.
+
+### Completion percentages after M178
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `91%`.
+- Residual Newton / preconditioning: `92%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `87%`.
+- Plotting and `vmec --plot` mirror support: `97%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `95%`.
+- Mirror-Boozer-like diagnostics: `88%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
