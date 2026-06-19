@@ -26264,3 +26264,107 @@ with `/usr/bin/time -v` capturing wall time and maximum resident set size.
 ### User input needed
 
 No user input is needed for the next technical step.
+
+---
+## 218. Merge-Readiness Audit And Readiness-Matrix Sync
+
+### Steps taken
+
+- Started the final merge-readiness audit after M217 rather than waiting on
+  GitHub CI.
+- Checked the local branch and PR state:
+  - local branch clean at the M217 plan commit before the audit edit;
+  - draft PR #21 remained in draft state;
+  - one-shot CI snapshot had no failed jobs at the latest head, with several
+    jobs still in progress or queued.
+- Searched source, docs, examples, tests, README, and plan logs for stale
+  public wording around schema `0.12`, pending adaptive degree fallback, and
+  outdated target-merit claims.
+- Found one public-doc mismatch in `docs/mirror/readiness.rst`: the
+  free-boundary circular-coil row still described the older `target_merit=0.2`
+  smoke and did not mention M217 adaptive polynomial-degree candidate evidence.
+- Updated the readiness matrix to say:
+  - the coupled-loop smoke reaches `target_merit=0.1`;
+  - the row uses a two-step reduced residual-vector inner-solve fallback;
+  - the schema records adaptive even-polynomial degree candidates, selected
+    degree, per-degree attempts, selected ridge candidate, and conditioning;
+  - office GPU evidence covers `(ns, nxi) = (7, 11)`, `(9, 15)`, and
+    `(11, 17)`;
+  - the `(9, 15)` beta 1% row uses degree 8 only after degree 4 misses the
+    target.
+
+### Results obtained
+
+- The public readiness matrix now matches the M217 schema and office ladder.
+- The stale public-doc search has no remaining matches for:
+  - `schema version ``0.12```;
+  - `version ``0.12```;
+  - `target_merit=0.2`;
+  - adaptive degree fallback described as pending.
+- The tracked generated-file audit remained unchanged: large generated example
+  outputs and M217 result trees are ignored under `results/`, while existing
+  tracked docs figures and small example data are pre-existing repository
+  assets.
+
+### How it was tested
+
+```bash
+rg -n 'schema version ``0\\.12``|version ``0\\.12``|target_merit=0\\.2|adaptive .*degree.*pending|degree.*fallback.*next|office .*ladder.*next' docs examples vmec_jax tests README.md -g '!docs/_build/**' -g '!results/**'
+python -m sphinx -W -j auto -b html docs docs/_build/html
+git diff --check
+```
+
+Results:
+
+- Stale public wording search: no matches.
+- Sphinx warning-as-error docs build: passed.
+- Whitespace check: passed.
+
+### File structure and best-practice notes
+
+- The only source-of-truth adjustment in this audit tranche is
+  `docs/mirror/readiness.rst`.
+- The readiness row continues to label the circular-coil free-boundary path as
+  `diagnostic`, which is accurate because the host-side circular-coil workflow
+  is not yet the final differentiable production free-boundary solver API.
+- No generated output was added or tracked.
+
+### Best next steps
+
+1. Commit and push the readiness-matrix sync.
+2. Re-check CI after enough time has elapsed for the current pushed head.
+3. If CI stays green, continue the final full-plan audit by checking the
+   explicit review gate in `docs/mirror/readiness.rst` against current
+   evidence:
+   - full local mirror tests;
+   - Sphinx warning-as-error docs;
+   - PR body pointing to the latest plan section;
+   - no generated output drift;
+   - no failing GitHub checks.
+4. Keep the PR draft until the final audit is complete and the user is ready
+   for review.
+
+### Completion percentages after M218
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99.9%`.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `99.9%`.
+- ESSOS circular-coil mirror beta scan: `99.9%`.
+- Public API/source simplification: `100%` for the current mirror package
+  structure.
+- PR merge readiness overall: `99.965%`, pending the final explicit review-gate
+  audit and final CI result.
+
+### User input needed
+
+No user input is needed for the next technical step.

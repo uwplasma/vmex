@@ -89,14 +89,19 @@ Current Scope
        reduction, actual reduction, and optional adaptive ridge-candidate
        diagnostics.  Beta-scan status values can now represent target-merit
        convergence when every requested beta row reaches it.  Plotted beta-scan
-       and reduced-vector benchmark evidence are present, and a low-resolution
-       coupled-loop smoke reaches target merit for the default 1%, 3%, and 10%
-       beta rows to ``target_merit=0.2`` with ``baseline_maxiter=5``, a ``0.05``
-       relative boundary-step cap, and an explicit ``fsq`` growth guard.  The
-       LS boundary diagnostic records its even-polynomial degree, selected
-       ridge candidate, and Jacobian conditioning, and safely rejects
-       nonpositive high-order trial boundaries.  This is not yet a converged
-       production free-boundary equilibrium solver.
+       and reduced-vector benchmark evidence are present, and the coupled-loop
+       smoke reaches target merit for the default 1%, 3%, and 10% beta rows to
+       ``target_merit=0.1`` with ``baseline_maxiter=5``, a ``0.05`` relative
+       boundary-step cap, a two-step reduced residual-vector inner-solve
+       fallback, and an explicit ``fsq`` growth guard.  The circular-coil scan
+       schema records adaptive even-polynomial degree candidates, selected
+       degree, per-degree attempts, selected ridge candidate, Jacobian
+       conditioning, and safe rejection of nonpositive high-order trial
+       boundaries.  Office GPU evidence covers ``(ns, nxi) = (7, 11)``,
+       ``(9, 15)``, and ``(11, 17)`` with all requested beta rows below
+       ``target_merit=0.1``; the ``(9, 15)`` beta 1% row uses degree 8 only
+       after degree 4 misses the target.  This is not yet a converged production
+       free-boundary equilibrium solver.
    * - ESSOS beta-scan fixture
      - diagnostic
      - The 1%, 3%, and 10% beta cases share a compact JSON/CSV schema with
