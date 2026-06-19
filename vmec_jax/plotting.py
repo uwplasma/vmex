@@ -805,6 +805,12 @@ def _default_example_outdir(subdir: str, case: str, outdir: str | Path | None) -
     return root / "examples" / "outputs" / subdir / case
 
 
+def _ensure_plot_outdir(outdir: str | Path | None, *, default: str | Path) -> Path:
+    path = Path(default if outdir is None else outdir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _extent_from_grids(theta: np.ndarray, zeta: np.ndarray) -> tuple[float, float, float, float]:
     z0 = float(np.min(zeta))
     z1 = float(np.max(zeta))
@@ -1121,10 +1127,7 @@ def plot_3d_boundary_comparison(
 
     wout_init = _load_wout_if_path(wout_initial)
     wout_final_obj = _load_wout_if_path(wout_final)
-    if outdir is None:
-        outdir = Path(".")
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     return _plot_3d_boundary_comparison(wout_init, wout_final_obj, outdir)
 
 
@@ -1219,10 +1222,7 @@ def plot_bmag_contours(
 
     wout_init = _load_wout_if_path(wout_initial)
     wout_final_obj = _load_wout_if_path(wout_final)
-    if outdir is None:
-        outdir = Path(".")
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     return _plot_bmag_contours(wout_init, wout_final_obj, outdir)
 
 
@@ -1353,8 +1353,7 @@ def plot_boozer_bmag_contours_from_state(
     phi2d, theta2d = np.meshgrid(phi, theta)
     levels = _line_contour_levels(bmag, count=25)
 
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
     cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
     fig.colorbar(cs, ax=ax, label="|B| (T)")
@@ -1459,8 +1458,7 @@ def plot_boozmn_bmag_contours(
 
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_BoozerB_contours.png"
 
     fig, axes = plt.subplots(1, len(selected), figsize=(7.5 * len(selected), 4.6), squeeze=False)
@@ -1512,10 +1510,7 @@ def plot_boozer_lcfs_bmag_comparison(
 
     initial_path = Path(wout_initial)
     final_path = Path(wout_final)
-    if outdir is None:
-        outdir = final_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=final_path.parent)
 
     booz_initial = run_booz_xform(
         initial_path,
@@ -1597,8 +1592,7 @@ def plot_boozmn_mode_families(
     order = np.argsort(-outer_amp)[: max(1, min(int(max_modes), amp.shape[0]))]
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_Boozer_mode_families.png"
 
     fig, ax = plt.subplots(1, 1, figsize=(8.5, 5.2))
@@ -1659,8 +1653,7 @@ def plot_boozmn_spectrum(
 
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_Boozer_lcfs_spectrum.png"
 
     fig, ax = plt.subplots(1, 1, figsize=(max(8.0, 0.24 * len(order)), 5.0))
@@ -1695,10 +1688,7 @@ def plot_boozmn(
     """Generate polished Boozer-coordinate diagnostic plots from ``boozmn``."""
 
     boozmn_path = Path(boozmn_path)
-    if outdir is None:
-        outdir = boozmn_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=boozmn_path.parent)
     paths = {
         "bmag_contours": plot_boozmn_bmag_contours(boozmn_path, outdir=outdir, name=name),
         "mode_families": plot_boozmn_mode_families(boozmn_path, outdir=outdir, name=name),
@@ -1871,10 +1861,7 @@ def plot_objective_history(
     """Plot objective, aspect-ratio, and optional iota history from JSON."""
 
     history_path = Path(history_path)
-    if outdir is None:
-        outdir = history_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=history_path.parent)
     return _plot_objective_history(history_path, outdir)
 
 
@@ -1896,10 +1883,7 @@ def plot_qh_optimization(
     wout_final_path = Path(wout_final_path)
     history_path = Path(history_path)
 
-    if outdir is None:
-        outdir = history_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=history_path.parent)
 
     p1 = plot_3d_boundary_comparison(wout_initial_path, wout_final_path, outdir=outdir)
     p2 = plot_bmag_contours(wout_initial_path, wout_final_path, outdir=outdir)
@@ -1973,10 +1957,7 @@ def plot_wout(
     from .wout import read_wout as _read_wout
 
     wout_path = Path(wout_path)
-    if outdir is None:
-        outdir = wout_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=wout_path.parent)
 
     if name is None:
         stem = wout_path.stem  # e.g. "wout_nfp4_QH"
