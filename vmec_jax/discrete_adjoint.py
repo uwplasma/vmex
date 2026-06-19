@@ -469,30 +469,31 @@ class ResidualCheckpointTape:
     jvp_only: bool = False
 
 
+_RESIDUAL_TRACE_DIAGNOSTIC_FIELDS = (
+    ("iter2", "iter2_history", int),
+    ("step_status", "step_status_history", object),
+    ("restart_reason", "restart_reason_history", object),
+    ("pre_restart_reason", "pre_restart_reason_history", object),
+    ("time_step", "time_step_history", float),
+    ("dt_eff", "dt_eff_history", float),
+    ("update_rms", "update_rms_history", float),
+    ("include_edge", "include_edge_history", int),
+    ("zero_m1", "zero_m1_history", int),
+    ("fsq_curr", "w_curr_history", float),
+    ("fsq_try", "w_try_history", float),
+    ("fsq_prev", "fsq_prev_history", float),
+    ("r00", "r00_history", float),
+    ("z00", "z00_history", float),
+    ("wb", "wb_history", float),
+    ("wp", "wp_history", float),
+    ("w_vmec", "w_vmec_history", float),
+)
+_RESIDUAL_TRACE_OUTPUT_FIELDS = _RESIDUAL_TRACE_DIAGNOSTIC_FIELDS + (("state_advanced", None, bool),)
+
+
 def _empty_trace() -> ResidualIterationTrace:
-    empty_i = np.zeros((0,), dtype=int)
-    empty_f = np.zeros((0,), dtype=float)
-    empty_o = np.zeros((0,), dtype=object)
-    empty_b = np.zeros((0,), dtype=bool)
     return ResidualIterationTrace(
-        iter2=empty_i,
-        step_status=empty_o,
-        restart_reason=empty_o,
-        pre_restart_reason=empty_o,
-        time_step=empty_f,
-        dt_eff=empty_f,
-        update_rms=empty_f,
-        include_edge=empty_i,
-        zero_m1=empty_i,
-        fsq_curr=empty_f,
-        fsq_try=empty_f,
-        fsq_prev=empty_f,
-        r00=empty_f,
-        z00=empty_f,
-        wb=empty_f,
-        wp=empty_f,
-        w_vmec=empty_f,
-        state_advanced=empty_b,
+        **{name: np.zeros((0,), dtype=dtype) for name, _diagnostic_key, dtype in _RESIDUAL_TRACE_OUTPUT_FIELDS}
     )
 
 
@@ -610,76 +611,24 @@ def residual_iteration_trace_from_result(result) -> ResidualIterationTrace:
     if not isinstance(diagnostics, dict):
         raise TypeError("result.diagnostics must be a dict")
 
-    iter2 = _array_from_diag(diagnostics, "iter2_history", dtype=int)
-    step_status = _array_from_diag(diagnostics, "step_status_history", dtype=object)
-    restart_reason = _array_from_diag(diagnostics, "restart_reason_history", dtype=object)
-    pre_restart_reason = _array_from_diag(diagnostics, "pre_restart_reason_history", dtype=object)
-    time_step = _array_from_diag(diagnostics, "time_step_history", dtype=float)
-    dt_eff = _array_from_diag(diagnostics, "dt_eff_history", dtype=float)
-    update_rms = _array_from_diag(diagnostics, "update_rms_history", dtype=float)
-    include_edge = _array_from_diag(diagnostics, "include_edge_history", dtype=int)
-    zero_m1 = _array_from_diag(diagnostics, "zero_m1_history", dtype=int)
-    fsq_curr = _array_from_diag(diagnostics, "w_curr_history", dtype=float)
-    fsq_try = _array_from_diag(diagnostics, "w_try_history", dtype=float)
-    fsq_prev = _array_from_diag(diagnostics, "fsq_prev_history", dtype=float)
-    r00 = _array_from_diag(diagnostics, "r00_history", dtype=float)
-    z00 = _array_from_diag(diagnostics, "z00_history", dtype=float)
-    wb = _array_from_diag(diagnostics, "wb_history", dtype=float)
-    wp = _array_from_diag(diagnostics, "wp_history", dtype=float)
-    w_vmec = _array_from_diag(diagnostics, "w_vmec_history", dtype=float)
-
+    fields = {
+        name: _array_from_diag(diagnostics, diagnostic_key, dtype=dtype)
+        for name, diagnostic_key, dtype in _RESIDUAL_TRACE_DIAGNOSTIC_FIELDS
+    }
     lengths = {
         int(arr.shape[0])
-        for arr in (
-            iter2,
-            step_status,
-            restart_reason,
-            pre_restart_reason,
-            time_step,
-            dt_eff,
-            update_rms,
-            include_edge,
-            zero_m1,
-            fsq_curr,
-            fsq_try,
-            fsq_prev,
-            r00,
-            z00,
-            wb,
-            wp,
-            w_vmec,
-        )
+        for arr in fields.values()
         if arr.ndim >= 1 and arr.shape[0] > 0
     }
     if len(lengths) > 1:
         raise ValueError(f"inconsistent residual trace lengths: {sorted(lengths)}")
 
     rejected = np.isin(
-        step_status,
+        fields["step_status"],
         np.asarray(["rejected", "restart_bad_progress", "restart_bad_jacobian"], dtype=object),
     )
-    state_advanced = ~rejected
-
-    return ResidualIterationTrace(
-        iter2=iter2,
-        step_status=step_status,
-        restart_reason=restart_reason,
-        pre_restart_reason=pre_restart_reason,
-        time_step=time_step,
-        dt_eff=dt_eff,
-        update_rms=update_rms,
-        include_edge=include_edge,
-        zero_m1=zero_m1,
-        fsq_curr=fsq_curr,
-        fsq_try=fsq_try,
-        fsq_prev=fsq_prev,
-        r00=r00,
-        z00=z00,
-        wb=wb,
-        wp=wp,
-        w_vmec=w_vmec,
-        state_advanced=state_advanced,
-    )
+    fields["state_advanced"] = ~rejected
+    return ResidualIterationTrace(**fields)
 
 
 def _compact_tape_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
@@ -725,24 +674,7 @@ def concat_residual_iteration_traces(traces: list[ResidualIterationTrace]) -> Re
         return np.concatenate(parts, axis=0)
 
     return ResidualIterationTrace(
-        iter2=_cat("iter2").astype(int, copy=False),
-        step_status=_cat("step_status").astype(object, copy=False),
-        restart_reason=_cat("restart_reason").astype(object, copy=False),
-        pre_restart_reason=_cat("pre_restart_reason").astype(object, copy=False),
-        time_step=_cat("time_step").astype(float, copy=False),
-        dt_eff=_cat("dt_eff").astype(float, copy=False),
-        update_rms=_cat("update_rms").astype(float, copy=False),
-        include_edge=_cat("include_edge").astype(int, copy=False),
-        zero_m1=_cat("zero_m1").astype(int, copy=False),
-        fsq_curr=_cat("fsq_curr").astype(float, copy=False),
-        fsq_try=_cat("fsq_try").astype(float, copy=False),
-        fsq_prev=_cat("fsq_prev").astype(float, copy=False),
-        r00=_cat("r00").astype(float, copy=False),
-        z00=_cat("z00").astype(float, copy=False),
-        wb=_cat("wb").astype(float, copy=False),
-        wp=_cat("wp").astype(float, copy=False),
-        w_vmec=_cat("w_vmec").astype(float, copy=False),
-        state_advanced=_cat("state_advanced").astype(bool, copy=False),
+        **{name: _cat(name).astype(dtype, copy=False) for name, _diagnostic_key, dtype in _RESIDUAL_TRACE_OUTPUT_FIELDS}
     )
 
 
