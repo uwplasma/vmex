@@ -84,6 +84,32 @@ def accepted_control_ptau_arrays(
     return arrays if ns >= 2 else None
 
 
+def accepted_control_ptau_host_from_payload(
+    payload: tuple[Any, Any, Any] | None,
+    *,
+    device_get_floats: Callable[..., tuple[float, ...]],
+) -> tuple[float | None, tuple[float, float] | None, bool]:
+    """Materialize an accepted-controller payload on the host.
+
+    The hot residual loop treats payload failures as cache misses and falls back
+    to direct host transfer. Keeping that behavior here avoids duplicating the
+    same defensive unpacking around pre-fused and lazily computed ptau payloads.
+    """
+
+    if payload is None:
+        return None, None, False
+    try:
+        fsq1_payload, ptau_min_payload, ptau_max_payload = payload
+        fsq1, ptau_min, ptau_max = device_get_floats(
+            fsq1_payload,
+            ptau_min_payload,
+            ptau_max_payload,
+        )
+    except Exception:
+        return None, None, False
+    return float(fsq1), (float(ptau_min), float(ptau_max)), True
+
+
 def maybe_dump_jacobian_terms(
     *,
     k: Any,
@@ -133,6 +159,7 @@ def maybe_dump_ptau(
 
 __all__ = [
     "accepted_control_ptau_arrays",
+    "accepted_control_ptau_host_from_payload",
     "maybe_dump_jacobian_terms",
     "maybe_dump_ptau",
     "ptau_minmax",

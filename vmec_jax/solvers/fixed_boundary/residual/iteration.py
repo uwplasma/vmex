@@ -174,6 +174,7 @@ from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
 from vmec_jax.solvers.fixed_boundary.residual import preconditioner_payload as _precond_payload_facade
 from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     accepted_control_ptau_arrays as _accepted_control_ptau_arrays_helper,
+    accepted_control_ptau_host_from_payload as _accepted_control_ptau_host_from_payload,
     maybe_dump_jacobian_terms as _maybe_dump_jacobian_terms_helper,
     maybe_dump_ptau as _maybe_dump_ptau_helper,
     ptau_minmax as _ptau_minmax_helper,
@@ -4195,41 +4196,38 @@ def solve_fixed_boundary_residual_iter(
                 control_payload_used = False
                 if accepted_control_ptau_payload is not None:
                     t_fsq1_payload_get_start = time.perf_counter() if timing_enabled else None
-                    try:
-                        fsq1_payload, ptau_min_payload, ptau_max_payload = accepted_control_ptau_payload
-                        fsq1, min_tau_ptau_payload, max_tau_ptau_payload = _device_get_floats(
-                            fsq1_payload,
-                            ptau_min_payload,
-                            ptau_max_payload,
+                    fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
+                        _accepted_control_ptau_host_from_payload(
+                            accepted_control_ptau_payload,
+                            device_get_floats=_device_get_floats,
                         )
-                        accepted_control_ptau_host = (min_tau_ptau_payload, max_tau_ptau_payload)
-                        control_payload_used = True
-                    except Exception:
-                        control_payload_used = False
-                    finally:
-                        if timing_enabled and t_fsq1_payload_get_start is not None:
-                            timing_stats["iteration_control_fsq1_payload_get"] += time.perf_counter() - float(
-                                t_fsq1_payload_get_start
-                            )
+                    )
+                    if control_payload_used:
+                        fsq1 = float(fsq1_payload_host)
+                    if timing_enabled and t_fsq1_payload_get_start is not None:
+                        timing_stats["iteration_control_fsq1_payload_get"] += time.perf_counter() - float(
+                            t_fsq1_payload_get_start
+                        )
                 if (not control_payload_used) and use_control_payload:
                     ptau_arrays = _scan_math_kernel_arrays_from_k(k)
                     payload_fn = _accepted_control_payload_jit()
                     if ptau_arrays is not None and payload_fn is not None:
                         t_fsq1_payload_get_start = time.perf_counter() if timing_enabled else None
                         try:
-                            fsq1_payload, ptau_min_payload, ptau_max_payload = payload_fn(
+                            payload = payload_fn(
                                 fsq1_j,
                                 *ptau_arrays,
                                 _ptau_context.pshalf_jax,
                                 _ptau_context.ohs_jax,
                             )
-                            fsq1, min_tau_ptau_payload, max_tau_ptau_payload = _device_get_floats(
-                                fsq1_payload,
-                                ptau_min_payload,
-                                ptau_max_payload,
+                            fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
+                                _accepted_control_ptau_host_from_payload(
+                                    payload,
+                                    device_get_floats=_device_get_floats,
+                                )
                             )
-                            accepted_control_ptau_host = (min_tau_ptau_payload, max_tau_ptau_payload)
-                            control_payload_used = True
+                            if control_payload_used:
+                                fsq1 = float(fsq1_payload_host)
                         except Exception:
                             control_payload_used = False
                         finally:

@@ -13,6 +13,7 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import resolve_vmec2000_print_context
 from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     accepted_control_ptau_arrays,
+    accepted_control_ptau_host_from_payload,
     maybe_dump_jacobian_terms,
     maybe_dump_ptau,
     ptau_minmax,
@@ -144,6 +145,17 @@ def test_ptau_wrapper_dispatches_and_preserves_call_time_dump_arguments() -> Non
     assert accepted_control_ptau_arrays("k", kernel_arrays_from_k=lambda _k: (np.ones((1,)),)) is None
     arrays = accepted_control_ptau_arrays("k", kernel_arrays_from_k=lambda _k: (np.ones((2,)),))
     assert arrays is not None
+    fsq1, ptau_host, used = accepted_control_ptau_host_from_payload(
+        (np.asarray(1.25), np.asarray(-0.5), np.asarray(0.75)),
+        device_get_floats=lambda *args: tuple(float(np.asarray(arg)) for arg in args),
+    )
+    assert used is True
+    assert fsq1 == 1.25
+    assert ptau_host == (-0.5, 0.75)
+    assert accepted_control_ptau_host_from_payload(
+        (np.asarray(1.0),),
+        device_get_floats=lambda *args: tuple(float(np.asarray(arg)) for arg in args),
+    ) == (None, None, False)
 
     jacobian_dump = {}
     maybe_dump_jacobian_terms(k="k", s="s", iter_idx=7, dump_func=lambda **kwargs: jacobian_dump.update(kwargs))
