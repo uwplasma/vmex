@@ -1177,70 +1177,33 @@ def solve_fixed_boundary_residual_iter(
         iter_idx: int | None = None,
         iter2: int | None = None,
     ):
+        force_kwargs = {
+            "include_edge": include_edge,
+            "include_edge_residual": include_edge_residual,
+            "zero_m1": zero_m1,
+            "freeb_bsqvac_half": freeb_bsqvac_half,
+            "constraint_rcon0": constraint_rcon0,
+            "constraint_zcon0": constraint_zcon0,
+            "constraint_precond_diag": constraint_precond_diag,
+            "constraint_tcon": constraint_tcon,
+            "constraint_precond_active": constraint_precond_active,
+            "constraint_tcon_active": constraint_tcon_active,
+            "iter_idx": iter_idx,
+        }
         if warmup_iters > 0 and (iter2 is not None) and (int(iter2) <= warmup_iters):
             if has_jax():
                 import jax
 
                 with jax.disable_jit():
-                    return _compute_forces_impl(
-                        state,
-                        include_edge=include_edge,
-                        include_edge_residual=include_edge_residual,
-                        zero_m1=zero_m1,
-                        freeb_bsqvac_half=freeb_bsqvac_half,
-                        constraint_rcon0=constraint_rcon0,
-                        constraint_zcon0=constraint_zcon0,
-                        constraint_precond_diag=constraint_precond_diag,
-                        constraint_tcon=constraint_tcon,
-                        constraint_precond_active=constraint_precond_active,
-                        constraint_tcon_active=constraint_tcon_active,
-                        iter_idx=iter_idx,
-                    )
-            return _compute_forces_impl(
-                state,
-                include_edge=include_edge,
-                include_edge_residual=include_edge_residual,
-                zero_m1=zero_m1,
-                freeb_bsqvac_half=freeb_bsqvac_half,
-                constraint_rcon0=constraint_rcon0,
-                constraint_zcon0=constraint_zcon0,
-                constraint_precond_diag=constraint_precond_diag,
-                constraint_tcon=constraint_tcon,
-                constraint_precond_active=constraint_precond_active,
-                constraint_tcon_active=constraint_tcon_active,
-                iter_idx=iter_idx,
-            )
+                    return _compute_forces_impl(state, **force_kwargs)
+            return _compute_forces_impl(state, **force_kwargs)
         # NumPy fast path: use pure-NumPy force computation when available.
         # This eliminates all JAX dispatch overhead from the per-iteration loop.
         if _compute_forces_np is not None:
-            return _compute_forces_np(
-                state,
-                include_edge=include_edge,
-                include_edge_residual=include_edge_residual,
-                zero_m1=zero_m1,
-                freeb_bsqvac_half=freeb_bsqvac_half,
-                constraint_rcon0=constraint_rcon0,
-                constraint_zcon0=constraint_zcon0,
-                constraint_precond_diag=constraint_precond_diag,
-                constraint_tcon=constraint_tcon,
-                constraint_precond_active=constraint_precond_active,
-                constraint_tcon_active=constraint_tcon_active,
-                iter_idx=iter_idx,
-            )
-        return _compute_forces(
-            state,
-            include_edge=include_edge,
-            include_edge_residual=include_edge_residual,
-            zero_m1=zero_m1,
-            constraint_rcon0=constraint_rcon0,
-            constraint_zcon0=constraint_zcon0,
-            constraint_precond_diag=constraint_precond_diag,
-            constraint_tcon=constraint_tcon,
-            constraint_precond_active=constraint_precond_active,
-            constraint_tcon_active=constraint_tcon_active,
-            iter_idx=iter_idx,
-            **({"freeb_bsqvac_half": freeb_bsqvac_half} if freeb_bsqvac_half is not None else {}),
-        )
+            return _compute_forces_np(state, **force_kwargs)
+        if freeb_bsqvac_half is None:
+            force_kwargs = {key: value for key, value in force_kwargs.items() if key != "freeb_bsqvac_half"}
+        return _compute_forces(state, **force_kwargs)
 
     _t_setup_index_constants = _setup_timer_start()
     mpol = int(static.cfg.mpol)
