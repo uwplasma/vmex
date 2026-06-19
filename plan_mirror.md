@@ -22299,3 +22299,98 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 185. Free-Boundary Vector-LS Plot Coverage
+
+### Steps taken
+
+- Audited the free-boundary lane docs, readiness matrix, reduced residual-vector
+  benchmark, and existing tests.
+- Confirmed the diagnostic-vs-production claim boundary is explicit: the
+  circular-coil bridge is documented as an LCFS pilot/reduced residual-vector
+  prototype, not a converged production free-boundary equilibrium solve.
+- Identified one concrete artifact gap: the reduced vector-LS benchmark was
+  tested only with `--no-plots`, so its backend summary, radius-profile, and
+  solve-history plots could regress unnoticed.
+- Added a plotted root-example smoke test for
+  `examples/mirror_free_boundary_vector_ls_benchmark.py`.
+- The new test reuses the existing metrics validator and checks that all three
+  generated PNGs are readable and nonblank.
+
+### Results obtained
+
+- The reduced free-boundary residual-vector benchmark now has both no-plot
+  numerical/schema coverage and plotted artifact coverage.
+- The free-boundary lane keeps its current diagnostic scope while strengthening
+  the benchmark artifacts used to compare finite-difference, JAX forward, JAX
+  reverse, and automatic Jacobian backends.
+- No generated figures were added to the repository.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_free_boundary_vector_ls_benchmark.py \
+  --outdir /tmp/mirror_vector_ls_plot_probe \
+  --nxi 9
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_vector_ls_benchmark_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_vector_ls_benchmark_writes_nonblank_plots -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- Plot probe wrote nonblank backend-summary, radius-profile, and solve-history
+  figures.
+- Focused vector-LS example tests passed: `2 passed in 4.76s`.
+- Ruff check and format check passed.
+- Full mirror suite passed: `233 passed, 1 skipped in 221.88s`.
+
+### File structure and best-practice notes
+
+- The new test stays in `tests/mirror/test_mirror_examples.py` beside the
+  existing root-example smoke tests.
+- It uses the existing example-level JSON validator, then checks only generic
+  image readability and nonblank content to avoid brittle pixel snapshots.
+- The benchmark remains a lightweight reduced residual-vector diagnostic; it
+  does not run coupled fixed-boundary pilot solves.
+
+### Best next steps
+
+1. Commit and push M185.
+2. Update the draft PR body with section 185 and the `233 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the latest push.
+4. Continue the completion audit across remaining validation percentages,
+   especially two-coil/finite-current convergence and fixed-boundary solve
+   promotion language.
+
+### Completion percentages after M185
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `93%`.
+- Residual Newton / preconditioning: `94%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `93%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

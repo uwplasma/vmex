@@ -214,6 +214,32 @@ def test_root_free_boundary_vector_ls_benchmark_runs_without_plots(tmp_path):
     )
 
 
+def test_root_free_boundary_vector_ls_benchmark_writes_nonblank_plots(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_free_boundary_vector_ls_benchmark.py",
+            "--outdir",
+            str(tmp_path / "vector_ls_benchmark_plots"),
+            "--nxi",
+            "9",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    module = _load_root_example("mirror_free_boundary_vector_ls_benchmark.py")
+    module["validate_vector_ls_benchmark_metrics"](metrics)
+    assert set(metrics["figures"]) == {"summary", "radius_profiles", "solve_residual_history"}
+    for path in metrics["figures"].values():
+        pixels = image.imread(path)
+        assert pixels.ndim in (2, 3)
+        assert float(np.std(pixels)) > 1.0e-4
+
+
 def test_root_stellarator_hybrid_boundary_example_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
