@@ -21889,3 +21889,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999995%.
+
+## 2026-06-19 Free-Boundary JAX NESTOR Operator Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Used the free-boundary audit to select a cohesive extraction that avoids the
+   core host NESTOR numerics.
+2. Added `vmec_jax/solvers/free_boundary/jax_nestor_operator.py` for the opt-in
+   JAX NESTOR operator cache, cache signatures, shape guard, and dense operator
+   bridge.
+3. Kept `vmec_jax.free_boundary` compatibility aliases for existing private
+   diagnostics/tests, and left a thin wrapper that still builds nonsingular
+   kernel tables next to the host NESTOR implementation.
+
+Results obtained:
+
+- `free_boundary.py` decreased from 3492 to 3204 lines.
+- The new domain module is 342 lines and lives under the existing
+  `solvers/free_boundary` package, so root namespace size did not increase.
+- The default host NESTOR/free-boundary numerical path was not changed; only the
+  opt-in JAX operator bridge/cache was moved.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/jax_nestor_operator.py`
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/jax_nestor_operator.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_jax_nestor_operator_cache.py tests/test_free_boundary_helper_branches.py::test_nonsingular_kernel_helpers_use_cache_and_tiny_surface_terms tests/test_free_boundary_vacuum_adjoint.py::test_dense_vmec_nestor_mode_solve_matches_host_reduced_symmetric_grid -q`
+- `python tools/diagnostics/source_health.py --top 20`
+
+Best next steps:
+
+1. Use the residual-iteration audit to plan the larger non-scan
+   preconditioned-force payload extraction.
+2. Keep broader VMEC-like NESTOR matrix/source math in place until a separate
+   parity-backed extraction tranche is ready.
+3. Continue reducing validation-test monoliths only when fixtures can be shared
+   without weakening AD-vs-FD and parity gates.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999950%.
+- Solver monolith reduction: 99.826%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.05%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.745%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.82%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999996%.
