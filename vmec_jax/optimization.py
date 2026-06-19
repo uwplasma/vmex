@@ -286,12 +286,6 @@ def make_qs_residuals_fn(
         smooth_min_abs_iota_residual_func=smooth_min_abs_iota_residual,
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FixedBoundaryExactOptimizer
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class FixedBoundaryExactOptimizer:
     """Exact fixed-boundary optimizer built on VMEC solves and AD callbacks.
 
@@ -496,8 +490,6 @@ class FixedBoundaryExactOptimizer:
         """Half/full-mesh flux-profile data used by objective callbacks."""
 
         return self._flux
-
-    # ── private helpers ───────────────────────────────────────────────────────
 
     def _resolve_solver_device(self, solver_device: str | None) -> str | None:
         name = "auto" if solver_device is None else str(solver_device).strip().lower()
@@ -1075,8 +1067,6 @@ class FixedBoundaryExactOptimizer:
         self._remember_exact_jacobian(exact_param_key, out, self._last_jacobian_residual)
         self._profile_add("jacobian_total", time.perf_counter() - t_total)
         return out
-
-    # ── public residual / Jacobian interface ──────────────────────────────────
 
     def residual_fun(self, params) -> np.ndarray:
         """Exact residual at *params* (builds adjoint tape, cached)."""
@@ -1718,8 +1708,6 @@ class FixedBoundaryExactOptimizer:
 
         return build_residual_linear_operator(self, params)
 
-    # ── tracked Jacobian for history + cache callbacks ────────────────────────
-
     def _jacobian_fun_tracked(self, params):
         self._last_jacobian_key[0] = self._exact_cache_key(params)
         self._last_jacobian_residual = None
@@ -1796,8 +1784,6 @@ class FixedBoundaryExactOptimizer:
             clear_replay_scan_caches()
             clear_preconditioner_jit_caches()
             clear_numpy_force_caches()
-
-    # ── utilities ─────────────────────────────────────────────────────────────
 
     def clear_caches(self) -> None:
         """Release JIT and exact-solve caches."""
@@ -2040,8 +2026,6 @@ class FixedBoundaryExactOptimizer:
         self._exact_history_rejected_count += 1
         return False
 
-    # ── main entry point ──────────────────────────────────────────────────────
-
     def run(
         self,
         params0,
@@ -2075,10 +2059,8 @@ class FixedBoundaryExactOptimizer:
         params0_arr = np.asarray(params0, dtype=float)
         scalar_cost_only_trials_used: bool | None = None
 
-        # ── initial evaluation ──────────────────────────────────────────────
         state0, entry0, cost0, qs_total0, aspect0 = self._initial_run_evaluation(params0_arr)
 
-        # ── outer least-squares loop ────────────────────────────────────────
         method_requested = str(method).strip().lower().replace("-", "_")
         method_key, scipy_lsmr_maxiter, method_auto_reason = self._resolve_optimizer_method(
             method_requested,
@@ -2142,11 +2124,6 @@ class FixedBoundaryExactOptimizer:
         result["method_auto_reason"] = method_auto_reason
         self._post_jacobian_clear()
 
-        # ── final evaluation ────────────────────────────────────────────────
-        # Use the exact cache when available (avoids a fresh full VMEC solve
-        # that can OOM after a long optimization session).  If the optimizer's
-        # final point cannot be exactly replayed, prefer a prior exact accepted
-        # point; never use a relaxed trial solve for final artifacts.
         selected_best_exact = bool(result.pop("_selected_best_exact_point", False))
         optimizer_exception = result.pop("_optimizer_exception", None)
         (
@@ -2163,7 +2140,6 @@ class FixedBoundaryExactOptimizer:
             selected_best_exact=selected_best_exact,
         )
 
-        # ── assemble history dump ───────────────────────────────────────────
         history_dump = build_run_history_dump(
             label="Optimisation",
             max_nfev=max_nfev,
@@ -2205,9 +2181,6 @@ class FixedBoundaryExactOptimizer:
             callback_trace=(self._callback_trace_dump() if self._callback_trace_enabled else None),
         )
 
-        # Private, non-serializable convenience payload for scripts that want
-        # to write wout files without rerunning the VMEC solve immediately after
-        # optimization. save_history() only persists `_history_dump`.
         return self._attach_run_private_payload(
             result,
             state_initial=state0,
