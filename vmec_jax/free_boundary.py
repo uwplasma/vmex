@@ -1251,6 +1251,87 @@ def _nestor_runtime_next_and_dump_source(ctx: dict[str, Any]) -> tuple[NestorRun
     return runtime_next, gsource_dump
 
 
+def _nestor_external_step_result(ctx_in: dict[str, Any]) -> tuple[NestorSolveResult, NestorRuntimeState]:
+    """Assemble NESTOR result, runtime cache, optional trace, and debug dump."""
+
+    ctx = dict(ctx_in)
+    vac_total = ctx["vac_total"]
+    bsqvac = np.asarray(vac_total.bsqvac)
+    ctx["bsqvac"] = bsqvac
+    solve_time = max(0.0, time.perf_counter() - ctx["ts"])
+    ctx["solve_time"] = solve_time
+
+    diagnostics = _nestor_step_diagnostics(ctx)
+
+    trace_arrays = None
+    if bool(ctx["collect_trace_arrays"]):
+        trace_arrays = _nestor_trace_arrays(
+            sample=ctx["sample"],
+            vac_total=vac_total,
+            gsource_vmec=ctx["gsource_vmec"],
+            potvac=ctx["potvac"],
+            bvec_mode=ctx["bvec_mode"],
+            bvec_mode_nonsing=ctx["bvec_mode_nonsing"],
+            bvec_mode_analytic=ctx["bvec_mode_analytic"],
+            grpmn_nonsing=ctx["grpmn_nonsing"],
+            grpmn_analytic=ctx["grpmn_analytic"],
+            grpmn_total=ctx["grpmn_total"],
+            amatrix_mode_from_grpmn=ctx["amatrix_mode_from_grpmn"],
+            cache=ctx["cache"],
+        )
+
+    res = NestorSolveResult(
+        vac_total=vac_total,
+        phi=ctx["phi"],
+        reused=bool(ctx["reuse_step"]),
+        solve_time_s=solve_time,
+        sample_time_s=ctx["sample_time"],
+        model=ctx["used_mode"],
+        diagnostics=diagnostics,
+        trace_arrays=trace_arrays,
+    )
+    runtime_next, gsource_dump = _nestor_runtime_next_and_dump_source(ctx)
+    static = ctx["static"]
+    _maybe_dump_scalpot_jax(
+        iter_idx=ctx["iter_idx"],
+        ivac=int(ctx["ivac"]),
+        reused=bool(ctx["reuse_step"]),
+        mode=ctx["used_mode"],
+        rhs=np.asarray(ctx["rhs"], dtype=float),
+        phi=np.asarray(ctx["phi"], dtype=float),
+        vac=vac_total,
+        cache=ctx["cache"],
+        sample=ctx["sample"],
+        mf=max(0, int(getattr(static.cfg, "mpol", 1)) + 1),
+        nf=max(0, int(getattr(static.cfg, "ntor", 0))),
+        nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
+        lasym=bool(getattr(static.cfg, "lasym", False)),
+        wint_vmec=np.asarray(ctx["wint_vmec"], dtype=float),
+        gsource_vmec=gsource_dump,
+        potvac=None if ctx["potvac"] is None else np.asarray(ctx["potvac"], dtype=float),
+        bvec_mode=None if ctx["bvec_mode"] is None else np.asarray(ctx["bvec_mode"], dtype=float),
+        bvec_mode_nonsing=None
+        if ctx["bvec_mode_nonsing"] is None
+        else np.asarray(ctx["bvec_mode_nonsing"], dtype=float),
+        bvec_mode_analytic=None
+        if ctx["bvec_mode_analytic"] is None
+        else np.asarray(ctx["bvec_mode_analytic"], dtype=float),
+        source_cache_iter=int(runtime_next.source_cache_iter),
+        matrix_override_applied=bool(ctx["matrix_override_applied"]),
+        amatrix_mode_pre=None
+        if ctx["amatrix_mode_pre"] is None
+        else np.asarray(ctx["amatrix_mode_pre"], dtype=float),
+        amatrix_mode_from_grpmn=None
+        if ctx["amatrix_mode_from_grpmn"] is None
+        else np.asarray(ctx["amatrix_mode_from_grpmn"], dtype=float),
+        grpmn_nonsing=None if ctx["grpmn_nonsing"] is None else np.asarray(ctx["grpmn_nonsing"], dtype=float),
+        grpmn_analytic=None if ctx["grpmn_analytic"] is None else np.asarray(ctx["grpmn_analytic"], dtype=float),
+        grpmn_total=None if ctx["grpmn_total"] is None else np.asarray(ctx["grpmn_total"], dtype=float),
+        plascur=float(ctx["plascur"]),
+    )
+    return res, runtime_next
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -1574,71 +1655,7 @@ def nestor_external_only_step(
         vacuum_channels_time_s += max(0.0, time.perf_counter() - t_phase)
         used_mode = mode_for_step
 
-    bsqvac = np.asarray(vac_total.bsqvac)
-    solve_time = max(0.0, time.perf_counter() - ts)
-
-    diagnostics = _nestor_step_diagnostics(locals())
-
-    trace_arrays = None
-    if bool(collect_trace_arrays):
-        trace_arrays = _nestor_trace_arrays(
-            sample=sample,
-            vac_total=vac_total,
-            gsource_vmec=gsource_vmec,
-            potvac=potvac,
-            bvec_mode=bvec_mode,
-            bvec_mode_nonsing=bvec_mode_nonsing,
-            bvec_mode_analytic=bvec_mode_analytic,
-            grpmn_nonsing=grpmn_nonsing,
-            grpmn_analytic=grpmn_analytic,
-            grpmn_total=grpmn_total,
-            amatrix_mode_from_grpmn=amatrix_mode_from_grpmn,
-            cache=cache,
-        )
-
-    res = NestorSolveResult(
-        vac_total=vac_total,
-        phi=phi,
-        reused=bool(reuse_step),
-        solve_time_s=solve_time,
-        sample_time_s=sample_time,
-        model=used_mode,
-        diagnostics=diagnostics,
-        trace_arrays=trace_arrays,
-    )
-    runtime_next, gsource_dump = _nestor_runtime_next_and_dump_source(locals())
-    _maybe_dump_scalpot_jax(
-        iter_idx=iter_idx,
-        ivac=int(ivac),
-        reused=bool(reuse_step),
-        mode=used_mode,
-        rhs=np.asarray(rhs, dtype=float),
-        phi=np.asarray(phi, dtype=float),
-        vac=vac_total,
-        cache=cache,
-        sample=sample,
-        mf=max(0, int(getattr(static.cfg, "mpol", 1)) + 1),
-        nf=max(0, int(getattr(static.cfg, "ntor", 0))),
-        nfp=max(1, int(getattr(static.cfg, "nfp", 1))),
-        lasym=bool(getattr(static.cfg, "lasym", False)),
-        wint_vmec=np.asarray(wint_vmec, dtype=float),
-        gsource_vmec=gsource_dump,
-        potvac=None if potvac is None else np.asarray(potvac, dtype=float),
-        bvec_mode=None if bvec_mode is None else np.asarray(bvec_mode, dtype=float),
-        bvec_mode_nonsing=None if bvec_mode_nonsing is None else np.asarray(bvec_mode_nonsing, dtype=float),
-        bvec_mode_analytic=None if bvec_mode_analytic is None else np.asarray(bvec_mode_analytic, dtype=float),
-        source_cache_iter=int(runtime_next.source_cache_iter),
-        matrix_override_applied=bool(matrix_override_applied),
-        amatrix_mode_pre=None if amatrix_mode_pre is None else np.asarray(amatrix_mode_pre, dtype=float),
-        amatrix_mode_from_grpmn=None
-        if amatrix_mode_from_grpmn is None
-        else np.asarray(amatrix_mode_from_grpmn, dtype=float),
-        grpmn_nonsing=None if grpmn_nonsing is None else np.asarray(grpmn_nonsing, dtype=float),
-        grpmn_analytic=None if grpmn_analytic is None else np.asarray(grpmn_analytic, dtype=float),
-        grpmn_total=None if grpmn_total is None else np.asarray(grpmn_total, dtype=float),
-        plascur=float(plascur),
-    )
-    return res, runtime_next
+    return _nestor_external_step_result(locals())
 
 
 def sample_external_vacuum_diagnostics(
