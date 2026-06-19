@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from functools import partial
 import os
 import time
@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from vmec_jax._compat import has_jax, jax, jnp, jit
+from vmec_jax._solve_runtime import _dataclass_from_namespace
 from vmec_jax.field import TWOPI
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import evaluate_initial_axis_reset as _evaluate_initial_axis_reset
 from vmec_jax.solvers.fixed_boundary.jit_cache import (
@@ -210,11 +211,7 @@ class Vmec2000ScanControllerContext:
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "Vmec2000ScanControllerContext":
         """Build the scan context from resolved residual-iteration locals."""
 
-        names = [field.name for field in fields(cls)]
-        missing = [name for name in names if name not in overrides and name not in namespace]
-        if missing:
-            raise KeyError(f"Missing VMEC2000 scan context fields: {', '.join(missing)}")
-        return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
+        return _dataclass_from_namespace(cls, namespace, label="VMEC2000 scan", overrides=overrides)
 
 
 def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> SolveVmecResidualResult:

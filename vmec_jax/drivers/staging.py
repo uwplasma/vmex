@@ -9,11 +9,13 @@ monkeypatch seams while the long public workflow remains readable.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 import time
 from typing import Any, Callable
 
 import numpy as np
+
+from vmec_jax._solve_runtime import _dataclass_from_namespace
 
 
 @dataclass(frozen=True)
@@ -51,11 +53,7 @@ class FixedBoundaryStageRunnerContext:
 
     @classmethod
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "FixedBoundaryStageRunnerContext":
-        names = [field.name for field in fields(cls)]
-        try:
-            return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
-        except KeyError as exc:
-            raise KeyError(f"Missing fixed-boundary stage-runner context field: {exc.args[0]}") from exc
+        return _dataclass_from_namespace(cls, namespace, label="fixed-boundary stage-runner", overrides=overrides)
 
 
 @dataclass(frozen=True)
@@ -146,11 +144,7 @@ class Vmec2000StagedSolveContext:
 
     @classmethod
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "Vmec2000StagedSolveContext":
-        names = [field.name for field in fields(cls)]
-        try:
-            return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
-        except KeyError as exc:
-            raise KeyError(f"Missing VMEC2000 staged-solve context field: {exc.args[0]}") from exc
+        return _dataclass_from_namespace(cls, namespace, label="VMEC2000 staged-solve", overrides=overrides)
 
 
 @dataclass(frozen=True)

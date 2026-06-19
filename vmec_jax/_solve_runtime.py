@@ -6,6 +6,7 @@ implementation while avoiding imports of solver physics code.
 
 from __future__ import annotations
 
+from dataclasses import fields
 import hashlib
 import os
 from typing import Any, NamedTuple
@@ -23,6 +24,16 @@ class ScanFallbackPolicy(NamedTuple):
     accept_frac: float
     fsq_factor: float
     improve: float
+
+
+def _dataclass_from_namespace(cls, namespace: dict[str, Any], /, *, label: str, overrides: dict[str, Any]):
+    """Build a dataclass context from local variables plus explicit overrides."""
+
+    names = [field.name for field in fields(cls)]
+    missing = [name for name in names if name not in overrides and name not in namespace]
+    if missing:
+        raise KeyError(f"Missing {label} context fields: {', '.join(missing)}")
+    return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
 
 
 def _hash_array_bytes(a: Any) -> str:

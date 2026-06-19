@@ -8,10 +8,12 @@ bounded retry/fallback bookkeeping without changing public behavior.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
+
+from vmec_jax._solve_runtime import _dataclass_from_namespace
 
 
 @dataclass(frozen=True)
@@ -75,11 +77,7 @@ class FixedBoundaryFinishContext:
 
     @classmethod
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "FixedBoundaryFinishContext":
-        names = [field.name for field in fields(cls)]
-        try:
-            return cls(**{name: overrides[name] if name in overrides else namespace[name] for name in names})
-        except KeyError as exc:
-            raise KeyError(f"Missing fixed-boundary finish context field: {exc.args[0]}") from exc
+        return _dataclass_from_namespace(cls, namespace, label="fixed-boundary finish", overrides=overrides)
 
 
 def _empty_finish_diagnostics(diag: dict, *, converged: bool, strict: bool, total: bool) -> dict:
