@@ -2172,70 +2172,57 @@ class FixedBoundaryExactOptimizer:
         )
         if method_auto_reason is not None:
             self._profile_add(f"method_auto_{method_key}", 0.0)
-        if method_key == "gauss_newton":
-            result = gauss_newton_least_squares(
-                self.residual_fun,
-                self._jacobian_fun_tracked,
-                params0_arr,
-                forward_residual_fun=self.forward_residual_fun,
-                post_jacobian_callback=self._post_jacobian_clear,
-                exact_residual_after_jacobian_fun=self._exact_residual_after_jacobian,
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                xtol=xtol,
-                x_scale=x_scale,
-                verbose=verbose,
-            )
-        elif method_key in ("scalar_trust", "adjoint_trust", "gradient_trust"):
-            result, scalar_cost_only_trials_used = run_scalar_trust_exact_optimizer(
-                self,
-                params0_arr,
-                x_scale=x_scale,
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                scalar_step_bound=scalar_step_bound,
-                scalar_cost_only_trials=scalar_cost_only_trials,
-            )
-        elif method_key in ("lbfgs", "lbfgs_adjoint"):
-            result = run_lbfgs_adjoint_exact_optimizer(
-                self,
-                params0_arr,
-                x_scale=x_scale,
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                verbose=verbose,
-                lbfgs_step_bound=lbfgs_step_bound,
-            )
-        elif method_key in ("scipy_matrix_free", "matrix_free", "scipy_mf"):
-            result, scipy_lsmr_maxiter = run_scipy_matrix_free_exact_optimizer(
-                self,
-                params0_arr,
-                x_scale=x_scale,
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                xtol=xtol,
-                verbose=verbose,
-                scipy_lsmr_maxiter=scipy_lsmr_maxiter,
-            )
-        elif method_key == "scipy":
-            result = run_scipy_dense_exact_optimizer(
-                self,
-                params0_arr,
-                x_scale=x_scale,
-                max_nfev=max_nfev,
-                ftol=ftol,
-                gtol=gtol,
-                xtol=xtol,
-                verbose=verbose,
-                scipy_tr_solver=scipy_tr_solver,
-                scipy_lsmr_maxiter=scipy_lsmr_maxiter,
-            )
-        else:
-            raise ValueError(f"Unknown optimization method '{method}'.")
+        common = dict(x_scale=x_scale, max_nfev=max_nfev, ftol=ftol, gtol=gtol)
+        match method_key:
+            case "gauss_newton":
+                result = gauss_newton_least_squares(
+                    self.residual_fun,
+                    self._jacobian_fun_tracked,
+                    params0_arr,
+                    forward_residual_fun=self.forward_residual_fun,
+                    post_jacobian_callback=self._post_jacobian_clear,
+                    exact_residual_after_jacobian_fun=self._exact_residual_after_jacobian,
+                    **common,
+                    xtol=xtol,
+                    verbose=verbose,
+                )
+            case "scalar_trust" | "adjoint_trust" | "gradient_trust":
+                result, scalar_cost_only_trials_used = run_scalar_trust_exact_optimizer(
+                    self,
+                    params0_arr,
+                    **common,
+                    scalar_step_bound=scalar_step_bound,
+                    scalar_cost_only_trials=scalar_cost_only_trials,
+                )
+            case "lbfgs" | "lbfgs_adjoint":
+                result = run_lbfgs_adjoint_exact_optimizer(
+                    self,
+                    params0_arr,
+                    **common,
+                    verbose=verbose,
+                    lbfgs_step_bound=lbfgs_step_bound,
+                )
+            case "scipy_matrix_free" | "matrix_free" | "scipy_mf":
+                result, scipy_lsmr_maxiter = run_scipy_matrix_free_exact_optimizer(
+                    self,
+                    params0_arr,
+                    **common,
+                    xtol=xtol,
+                    verbose=verbose,
+                    scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+                )
+            case "scipy":
+                result = run_scipy_dense_exact_optimizer(
+                    self,
+                    params0_arr,
+                    **common,
+                    xtol=xtol,
+                    verbose=verbose,
+                    scipy_tr_solver=scipy_tr_solver,
+                    scipy_lsmr_maxiter=scipy_lsmr_maxiter,
+                )
+            case _:
+                raise ValueError(f"Unknown optimization method '{method}'.")
         result["method"] = method_key
         result["method_requested"] = method_requested
         result["method_auto_reason"] = method_auto_reason
