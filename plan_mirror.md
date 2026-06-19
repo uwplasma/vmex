@@ -22394,3 +22394,112 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 186. Residual-Newton Convergence-Grid Plot Coverage
+
+### Steps taken
+
+- Audited the fixed-boundary residual-Newton convergence-grid lane and its
+  existing tests.
+- Confirmed the example already has no-plot numerical/schema coverage for the
+  small two-coil row and finite-current lambda-residual diagnostics.
+- Identified a remaining artifact gap: the convergence-grid plots and selected
+  best-row mirror plot bundle were not exercised by automated tests.
+- Added a plotted root-example smoke test for
+  `examples/mirror_residual_newton_convergence_grid.py` at the same small
+  `ns=5`, `nxi=9`, `maxiter=2`, `residual_linear_maxiter=8` settings used by
+  the existing no-plot test.
+- Added a small shared `_assert_nonblank_image` helper in
+  `tests/mirror/test_mirror_examples.py` and reused it for existing plotted
+  example checks.
+
+### Results obtained
+
+- The residual-Newton convergence-grid example now has automated coverage for:
+  - resolution heatmap;
+  - budget plot;
+  - residual-history plot;
+  - residual-component plot;
+  - selected best-row `mout` artifact;
+  - representative best-row 3D boundary and mirror-Boozer-like diagnostic
+    plots.
+- This closes a plot/reporting gap in the fixed-boundary convergence lane
+  without changing the solver implementation or raising CI budgets.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_residual_newton_convergence_grid.py \
+  --outdir /tmp/mirror_residual_newton_convergence_plot_probe \
+  --ns-array 5 \
+  --nxi-array 9 \
+  --maxiter-array 2 \
+  --residual-linear-maxiter-array 8 \
+  --preconditioners radial_xi_tridi
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_finite_current_pitch_example_writes_nonblank_field_line_plots \
+  tests/mirror/test_mirror_examples.py::test_root_free_boundary_vector_ls_benchmark_writes_nonblank_plots \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_parameter_gradients_example_matrix_free_writes_plot \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_residual_newton_convergence_grid_writes_nonblank_plots -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- Plot probe wrote nonblank convergence-grid figures and selected best-row
+  mirror plots.
+- Focused plotted-example group passed: `5 passed in 30.05s`.
+- Ruff check and format check passed.
+- Full mirror suite passed: `234 passed, 1 skipped in 225.50s`.
+
+### File structure and best-practice notes
+
+- The new coverage stays in `tests/mirror/test_mirror_examples.py` with other
+  root-example smoke tests.
+- The helper removes repeated image-readability assertions without adding new
+  testing dependencies.
+- The test protects report artifacts using generic nonblank checks rather than
+  brittle pixel snapshots.
+- Generated convergence figures remain in pytest temporary directories or
+  ignored result paths.
+
+### Best next steps
+
+1. Commit and push M186.
+2. Update the draft PR body with section 186 and the `234 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the latest push.
+4. Continue the final audit, focusing next on whether two-coil and
+   finite-current convergence percentages should be promoted, explicitly
+   deferred, or backed by another benchmark gate.
+
+### Completion percentages after M186
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `94%`.
+- Residual Newton / preconditioning: `95%`.
+- Two-coil and manufactured validation: `93%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `93%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

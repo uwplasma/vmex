@@ -28,6 +28,12 @@ def _load_root_example(script_name: str):
     return runpy.run_path(str(script))
 
 
+def _assert_nonblank_image(path: str | Path, image_module, *, min_std: float = 1.0e-4) -> None:
+    pixels = image_module.imread(path)
+    assert pixels.ndim in (2, 3)
+    assert float(np.std(pixels)) > float(min_std)
+
+
 def test_mirror_examples_write_readable_outputs_without_plots(tmp_path):
     cases = [
         ("fixed_cylinder.py", {"maxiter": 1, "write_plots": False}),
@@ -158,9 +164,7 @@ def test_root_finite_current_pitch_example_writes_nonblank_field_line_plots(tmp_
         path = figure_dir / name
         assert path.exists()
         assert path.stat().st_size > 4096
-        pixels = image.imread(path)
-        assert pixels.ndim in (2, 3)
-        assert float(np.std(pixels)) > 0.0
+        _assert_nonblank_image(path, image, min_std=0.0)
 
 
 def test_root_free_boundary_vector_ls_benchmark_runs_without_plots(tmp_path):
@@ -235,9 +239,7 @@ def test_root_free_boundary_vector_ls_benchmark_writes_nonblank_plots(tmp_path):
     module["validate_vector_ls_benchmark_metrics"](metrics)
     assert set(metrics["figures"]) == {"summary", "radius_profiles", "solve_residual_history"}
     for path in metrics["figures"].values():
-        pixels = image.imread(path)
-        assert pixels.ndim in (2, 3)
-        assert float(np.std(pixels)) > 1.0e-4
+        _assert_nonblank_image(path, image)
 
 
 def test_root_stellarator_hybrid_boundary_example_runs_without_plots(tmp_path):
@@ -1163,9 +1165,7 @@ def test_root_implicit_parameter_gradients_example_matrix_free_writes_plot(tmp_p
 
     figures = metrics["figures"]
     assert set(figures) == {"directional_gradients"}
-    pixels = image.imread(figures["directional_gradients"])
-    assert pixels.size > 0
-    assert float(np.std(pixels)) > 1.0e-4
+    _assert_nonblank_image(figures["directional_gradients"], image)
 
 
 def test_root_implicit_solve_benchmark_runs_without_plots(tmp_path):
@@ -1294,6 +1294,51 @@ def test_root_residual_newton_convergence_grid_runs_without_plots(tmp_path):
     assert row["residual_a_cap_adjacent_norm"] >= 0.0
     assert row["residual_lam_interior_xi_norm"] >= 0.0
     assert metrics["histories"][0]["row_id"] == row["row_id"]
+
+
+def test_root_residual_newton_convergence_grid_writes_nonblank_plots(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_residual_newton_convergence_grid.py",
+            "--outdir",
+            str(tmp_path / "convergence_grid_plots"),
+            "--ns-array",
+            "5",
+            "--nxi-array",
+            "9",
+            "--maxiter-array",
+            "2",
+            "--residual-linear-maxiter-array",
+            "8",
+            "--preconditioners",
+            "radial_xi_tridi",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    figure_names = {Path(path).name for path in metrics["figures"]}
+    assert figure_names == {
+        "residual_newton_convergence_resolution_heatmap.png",
+        "residual_newton_convergence_budget.png",
+        "residual_newton_convergence_history.png",
+        "residual_newton_convergence_components.png",
+    }
+    for path in metrics["figures"]:
+        _assert_nonblank_image(path, image)
+
+    best = metrics["selected_artifacts"]["best_residual"]
+    assert Path(best["mout"]).exists()
+    figure_dir = Path(best["figures"])
+    for name in [
+        "best_two_coil_residual_newton_mirror_boundary_3d.png",
+        "best_two_coil_residual_newton_mirror_boozer_like_diagnostics.png",
+    ]:
+        _assert_nonblank_image(figure_dir / name, image)
 
 
 def test_root_residual_newton_convergence_grid_finite_current_reports_lambda_residual(tmp_path):
