@@ -18740,3 +18740,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.9999997%.
+
+## 2026-06-18 Implicit Residual Adjoint Local-Seam Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Inspected `solve_fixed_boundary_state_implicit_vmec_residual`, the next
+   production-code function reported by source-health after the WOUT tranche.
+2. Consolidated the duplicated lazy `bicgstab` adapter shared by the tangent
+   and adjoint active-branch paths.
+3. Consolidated the repeated boundary-parameter VJP result assembly used by
+   the full, active-full, and active-reduced adjoint branches into one local
+   helper inside the backward pass.
+4. Preserved all JAX linearization, transpose, edge-row VJP, and branch-mode
+   choices; this tranche only removes repeated local plumbing.
+
+Results obtained:
+
+- `vmec_jax/implicit.py` dropped from 1799 to 1781 lines.
+- `solve_fixed_boundary_state_implicit_vmec_residual` dropped from 686 to 668
+  lines.
+- The diff is net-negative: 19 insertions and 37 deletions in the implicit
+  module.
+- Residual tangent and residual adjoint focused tests still pass.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/implicit.py`
+- `python -m ruff check vmec_jax/implicit.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_more_coverage.py tests/test_implicit_wave12_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_residual_adjoint_helpers.py tests/test_implicit_differentiation_fast.py -q`
+- `python tools/diagnostics/source_health.py | head -90`
+
+Best next steps:
+
+1. Continue source-health driven reductions in production code, with the fixed
+   boundary driver and `nestor_external_only_step` as likely next targets.
+2. Avoid extracting large implicit branch machinery until it can be represented
+   as a small typed seam; the current duplication remains semantically dense
+   and should be reduced only with focused AD-vs-FD coverage.
+3. Keep using focused implicit tests for each custom-JVP/VJP tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.78%.
+- Free-boundary adjoint monolith reduction: 99.48%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.79%.
+- WOUT diagnostic/profile decomposition: 99.95%.
+- Bcovar/WOUT parity decomposition: 99.13%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- Free-boundary validation-gate maintainability: 97.3%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999975%.

@@ -1260,6 +1260,11 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
 
     residual_tangent_mode = str(getattr(implicit, "residual_tangent_mode", "opaque")).strip().lower()
 
+    def _active_bicgstab_solve(*args, **kwargs):
+        from jax.scipy.sparse.linalg import bicgstab
+
+        return bicgstab(*args, **kwargs)
+
     def _state_tangent_from_boundary_tangent(
         st_star,
         zero_m1_star,
@@ -1399,11 +1404,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )[1]
         rhs = jnp.asarray(boundary_tangent)
 
-        def _active_bicgstab_solve(*args, **kwargs):
-            from jax.scipy.sparse.linalg import bicgstab
-
-            return bicgstab(*args, **kwargs)
-
         active_tangent_result = _solve_active_residual_tangent_linearized(
             stationarity_jvp_active,
             stationarity_vjp_active,
@@ -1528,6 +1528,17 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 ct_state_full,
             )
 
+        def _boundary_param_vjp_result(vjp_start, cotangent):
+            dRcos, dRsin, dZcos, dZsin = cotangent
+            edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin = _edge_boundary_vjp()
+            _vmec_backward_profile_log("boundary_param_vjp_done", vjp_start)
+            return (
+                edge_dRcos - dRcos,
+                edge_dRsin - dRsin,
+                edge_dZcos - dZcos,
+                edge_dZsin - dZsin,
+            )
+
         residual_adjoint_mode = str(getattr(implicit, "residual_adjoint_mode", "auto")).strip().lower()
         if (not bool(static.cfg.lasym)) and (not _vmec_disable_reduced_active_enabled()):
             active_setup_start = time.perf_counter()
@@ -1598,15 +1609,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                         return jnp.take(grad_active_full, active_keep_idx)
 
                     _, vjp_fun = jax.vjp(G_params, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
-                    dRcos, dRsin, dZcos, dZsin = vjp_fun(jnp.asarray(lam))
-                    edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin = _edge_boundary_vjp()
-                    _vmec_backward_profile_log("boundary_param_vjp_done", vjp_start)
-                    return (
-                        edge_dRcos - dRcos,
-                        edge_dRsin - dRsin,
-                        edge_dZcos - dZcos,
-                        edge_dZsin - dZsin,
-                    )
+                    return _boundary_param_vjp_result(vjp_start, vjp_fun(jnp.asarray(lam)))
             else:
                 z_idx = _stellsym_reduced_z_indices(rz_idx=rz_idx_np, K=int(K_active), idx00=idx00)
                 lam_sc_idx, lam_cs_idx, lam_maps = _stellsym_lambda_mn_indices(
@@ -1691,15 +1694,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                         )
 
                     _, vjp_fun = jax.vjp(G_params, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
-                    dRcos, dRsin, dZcos, dZsin = vjp_fun(jnp.asarray(lam))
-                    edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin = _edge_boundary_vjp()
-                    _vmec_backward_profile_log("boundary_param_vjp_done", vjp_start)
-                    return (
-                        edge_dRcos - dRcos,
-                        edge_dRsin - dRsin,
-                        edge_dZcos - dZcos,
-                        edge_dZsin - dZsin,
-                    )
+                    return _boundary_param_vjp_result(vjp_start, vjp_fun(jnp.asarray(lam)))
 
             active_linearize_start = time.perf_counter()
             residual_star_active, residual_jvp_active = jax.linearize(stationarity_fun_active, x_active_star)
@@ -1709,11 +1704,6 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 active_linearize_start,
                 residual_size=int(np.prod(np.shape(residual_star_active))),
             )
-
-            def _active_bicgstab_solve(*args, **kwargs):
-                from jax.scipy.sparse.linalg import bicgstab
-
-                return bicgstab(*args, **kwargs)
 
             active_adjoint_result = _solve_active_residual_adjoint_linearized(
                 residual_jvp_active,
@@ -1754,15 +1744,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
                 )
 
             _, vjp_fun = jax.vjp(G_params, eRcos_star, eRsin_star, eZcos_star, eZsin_star)
-            dRcos, dRsin, dZcos, dZsin = vjp_fun(jnp.asarray(lam))
-            edge_dRcos, edge_dRsin, edge_dZcos, edge_dZsin = _edge_boundary_vjp()
-            _vmec_backward_profile_log("boundary_param_vjp_done", vjp_start)
-            return (
-                edge_dRcos - dRcos,
-                edge_dRsin - dRsin,
-                edge_dZcos - dZcos,
-                edge_dZsin - dZsin,
-            )
+            return _boundary_param_vjp_result(vjp_start, vjp_fun(jnp.asarray(lam)))
 
         linearize_start = time.perf_counter()
         residual_star, residual_jvp = jax.linearize(stationarity_fun, st_star)
