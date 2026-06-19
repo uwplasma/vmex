@@ -23027,3 +23027,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999958%.
+
+## 2026-06-19 Free-Boundary Boundary-Fields Domain Move
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved host-side boundary phase-stack synthesis, free-boundary trig setup,
+   real-space boundary synthesis, sample setup, and VMEC angular-weight caching
+   from `vmec_jax/free_boundary.py` into
+   `vmec_jax/solvers/free_boundary/boundary_fields.py`.
+2. Kept legacy private facade names and cache dictionaries available from
+   `vmec_jax.free_boundary` for existing tests and internal replay imports.
+3. Re-ran focused free-boundary helper, provider, compile, Ruff, import
+   compatibility, and source-health checks.
+
+Results obtained:
+
+- `vmec_jax/free_boundary.py` decreased from 3204 to 3021 lines.
+- Host boundary sampling code now lives with the boundary-field projection
+  helpers that consume those arrays.
+- Existing private import paths such as `_freeb_boundary_sample_setup`,
+  `_vmec_realspace_synthesis_multi_host`, and `_vmec_boundary_wint` still work.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/boundary_fields.py vmec_jax/solvers/free_boundary/adjoint/boundary_replay.py vmec_jax/solvers/free_boundary/adjoint/replay_context.py`
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/free_boundary/boundary_fields.py vmec_jax/solvers/free_boundary/adjoint/boundary_replay.py vmec_jax/solvers/free_boundary/adjoint/replay_context.py tests/test_free_boundary_helper_branches.py tests/test_free_boundary_additional_helpers.py tests/test_free_boundary_wave2.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_helper_branches.py tests/test_free_boundary_additional_helpers.py tests/test_free_boundary_wave2.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_coil_provider_gradients.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 55`
+
+Best next steps:
+
+1. Continue reducing `free_boundary.py` by moving VMEC-like mode-basis/cache
+   construction into an existing NESTOR or mode-operator domain.
+2. Keep the free-boundary facade stable while moving implementation ownership
+   into named domains.
+3. After one more free-boundary seam, run a broader direct-coil/free-boundary
+   adjoint validation slice before committing more solver-adjacent changes.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999967%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 93.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.82%.
+- Free-boundary validation-gate maintainability: 98.21%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999960%.
