@@ -91,10 +91,14 @@ from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     evaluate_residual_force_from_state as _evaluate_residual_force_from_state,  # noqa: F401 - compatibility alias for tests/internal users.
+    make_residual_force_evaluator as _make_residual_force_evaluator,
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
     backtracking_momentum_search as _backtracking_momentum_search,
+    candidate_state_from_deltas as _candidate_state_from_deltas_helper,
+    candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
+    delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     force_update_rms as _force_update_rms,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_force_update_rms as _host_force_update_rms,
@@ -933,86 +937,35 @@ def solve_fixed_boundary_residual_iter(
             cfg=cfg,
         )
 
-    def _compute_forces(
-        state: VMECState,
-        *,
-        include_edge: bool,
-        include_edge_residual: bool | None = None,
-        zero_m1: Any,
-        freeb_bsqvac_half: Any | None = None,
-        constraint_rcon0: Any | None = None,
-        constraint_zcon0: Any | None = None,
-        constraint_precond_diag: tuple[Any, Any] | None = None,
-        constraint_tcon: Any | None = None,
-        constraint_precond_active: Any | None = None,
-        constraint_tcon_active: Any | None = None,
-        iter_idx: int | None = None,
-    ):
-        scan_debug_force_enabled = os.getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
-        dump_hlo_force_tomnsps = _runtime_env_enabled(os.getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", ""))
-
-        def _dump_force_tomnsps_hlo(*, label, fn, args, kwargs) -> None:
-            _maybe_dump_hlo_kernel(
-                label=label,
-                fn=fn,
-                args=args,
-                kwargs=kwargs,
-                static=static,
-                wout_like=wout_like,
-                force=True,
-            )
-
-        force_eval = _evaluate_residual_force_from_state(
-            state=state,
-            static=static,
-            wout_like=wout_like,
-            trig=trig,
-            s=s,
-            signgs=signgs,
-            constraint_tcon0=constraint_tcon0,
-            freeb_pres_scale=freeb_pres_scale,
-            apply_lforbal=apply_lforbal,
-            apply_m1_constraints=bool(apply_m1_constraints),
-            include_edge=bool(include_edge),
-            include_edge_residual=include_edge_residual,
-            zero_m1=zero_m1,
-            freeb_bsqvac_half=freeb_bsqvac_half,
-            constraint_rcon0=constraint_rcon0,
-            constraint_zcon0=constraint_zcon0,
-            constraint_precond_diag=constraint_precond_diag,
-            constraint_tcon=constraint_tcon,
-            constraint_precond_active=constraint_precond_active,
-            constraint_tcon_active=constraint_tcon_active,
-            iter_idx=iter_idx,
-            scan_debug_force_enabled=bool(scan_debug_force_enabled),
-            dump_hlo_force_tomnsps=bool(dump_hlo_force_tomnsps),
-            hlo_dump_func=_dump_force_tomnsps_hlo,
-            dump_hooks={
-                "bsube": _maybe_dump_bsube,
-                "bsube_terms": _maybe_dump_bsube_terms,
-                "bsubh": _maybe_dump_bsubh,
-                "bsubs": _maybe_dump_bsubs,
-                "lulv": _maybe_dump_lulv,
-                "jacobian_terms": _maybe_dump_jacobian_terms,
-                "precond_inputs": _maybe_dump_precond_inputs,
-                "gmetric": _maybe_dump_gmetric,
-                "force_kernels": _maybe_dump_force_kernels,
-                "tomnsps": _maybe_dump_tomnsps,
-                "gc": _maybe_dump_gc,
-                "gcx2": _maybe_dump_gcx2,
-                "scalars": _maybe_dump_scalars,
-            },
-        )
-        return (
-            force_eval.kernels,
-            force_eval.frzl_full,
-            force_eval.gcr2,
-            force_eval.gcz2,
-            force_eval.gcl2,
-            force_eval.rz_scale,
-            force_eval.l_scale,
-            force_eval.norms,
-        )
+    _compute_forces = _make_residual_force_evaluator(
+        static=static,
+        wout_like=wout_like,
+        trig=trig,
+        s=s,
+        signgs=signgs,
+        constraint_tcon0=constraint_tcon0,
+        freeb_pres_scale=freeb_pres_scale,
+        apply_lforbal=apply_lforbal,
+        apply_m1_constraints=bool(apply_m1_constraints),
+        runtime_env_enabled=_runtime_env_enabled,
+        getenv=os.getenv,
+        maybe_dump_hlo_kernel=_maybe_dump_hlo_kernel,
+        dump_hooks={
+            "bsube": _maybe_dump_bsube,
+            "bsube_terms": _maybe_dump_bsube_terms,
+            "bsubh": _maybe_dump_bsubh,
+            "bsubs": _maybe_dump_bsubs,
+            "lulv": _maybe_dump_lulv,
+            "jacobian_terms": _maybe_dump_jacobian_terms,
+            "precond_inputs": _maybe_dump_precond_inputs,
+            "gmetric": _maybe_dump_gmetric,
+            "force_kernels": _maybe_dump_force_kernels,
+            "tomnsps": _maybe_dump_tomnsps,
+            "gc": _maybe_dump_gc,
+            "gcx2": _maybe_dump_gcx2,
+            "scalars": _maybe_dump_scalars,
+        },
+    )
 
     _hlo_dump_helpers.maybe_dump_initial_residual_hlo_kernels(
         state0=state0,
@@ -2328,77 +2281,46 @@ def solve_fixed_boundary_residual_iter(
                 use_numpy_arrays: bool,
                 use_numpy_enforce: bool,
             ) -> VMECState:
-                array = np.asarray if use_numpy_arrays else jnp.asarray
-                candidate = VMECState(
-                    layout=state.layout,
-                    Rcos=array(state.Rcos) + array(dR_value),
-                    Rsin=array(state.Rsin) + array(dR_sin_value),
-                    Zcos=array(state.Zcos) + array(dZ_cos_value),
-                    Zsin=array(state.Zsin) + array(dZ_value),
-                    Lcos=array(state.Lcos) + array(dL_cos_value),
-                    Lsin=array(state.Lsin) + array(dL_value),
-                )
-                if use_numpy_enforce:
-                    candidate = _enforce_fixed_boundary_and_axis_np(
-                        candidate,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                        precomputed_axis_mask=_precomputed_axis_mask_np,
-                    )
-                else:
-                    candidate = _enforce_fixed_boundary_and_axis(
-                        candidate,
-                        static,
-                        edge_Rcos=edge_Rcos,
-                        edge_Rsin=edge_Rsin,
-                        edge_Zcos=edge_Zcos,
-                        edge_Zsin=edge_Zsin,
-                        enforce_edge=not bool(free_boundary_enabled),
-                        enforce_lambda_axis=True,
-                        idx00=idx00,
-                    )
-                return _apply_vmec_lambda_axis_rules(candidate)
-
-            def _delta_tuple_from_blocks(dt, transforms, *blocks, use_numpy_lasym_zeros: bool = False):
-                rcc, rss, rsc, rcs, zsc, zcs, zcc, zss, lsc, lcs, lcc, lss = blocks
-                mn_cos_to_signed, mn_sin_to_signed, mn_cos_to_signed_lambda, mn_sin_to_signed_lambda = transforms
-                dR = dt * mn_cos_to_signed(rcc, rss)
-                dZ = dt * mn_sin_to_signed(zsc, zcs)
-                dL = dt * mn_sin_to_signed_lambda(lsc, lcs)
-                if bool(cfg.lasym):
-                    dR_sin = dt * mn_sin_to_signed(rsc, rcs)
-                    dZ_cos = dt * mn_cos_to_signed(zcc, zss)
-                    dL_cos = dt * mn_cos_to_signed_lambda(lcc, lss)
-                elif use_numpy_lasym_zeros:
-                    # Reuse preallocated arrays on the host-update path.
-                    dR_sin = _zeros_dR_np
-                    dZ_cos = _zeros_dR_np
-                    dL_cos = _zeros_dR_np
-                else:
-                    dR_sin = jnp.zeros_like(dR)
-                    dZ_cos = jnp.zeros_like(dR)
-                    dL_cos = jnp.zeros_like(dR)
-                return (dR, dR_sin, dZ_cos, dZ, dL_cos, dL)
-
-            def _candidate_state_from_delta_tuple(deltas, *, scale: float = 1.0, use_numpy_arrays: bool = False, use_numpy_enforce: bool = False) -> VMECState:
-                if float(scale) != 1.0:
-                    deltas = tuple(float(scale) * value for value in deltas)
-                dR, dR_sin, dZ_cos, dZ, dL_cos, dL = deltas
-                return _candidate_state_from_deltas(
-                    dR_value=dR,
-                    dR_sin_value=dR_sin,
-                    dZ_cos_value=dZ_cos,
-                    dZ_value=dZ,
-                    dL_cos_value=dL_cos,
-                    dL_value=dL,
+                return _candidate_state_from_deltas_helper(
+                    state=state,
+                    static=static,
+                    dR_value=dR_value,
+                    dR_sin_value=dR_sin_value,
+                    dZ_cos_value=dZ_cos_value,
+                    dZ_value=dZ_value,
+                    dL_cos_value=dL_cos_value,
+                    dL_value=dL_value,
                     use_numpy_arrays=use_numpy_arrays,
                     use_numpy_enforce=use_numpy_enforce,
+                    edge_Rcos=edge_Rcos,
+                    edge_Rsin=edge_Rsin,
+                    edge_Zcos=edge_Zcos,
+                    edge_Zsin=edge_Zsin,
+                    free_boundary_enabled=bool(free_boundary_enabled),
+                    idx00=idx00,
+                    precomputed_axis_mask=_precomputed_axis_mask_np,
+                    enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
+                    enforce_fixed_boundary_and_axis_np=_enforce_fixed_boundary_and_axis_np,
+                    apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
+                )
+
+            def _delta_tuple_from_blocks(dt, transforms, *blocks, use_numpy_lasym_zeros: bool = False):
+                return _delta_tuple_from_blocks_helper(
+                    dt,
+                    transforms,
+                    *blocks,
+                    lasym=bool(cfg.lasym),
+                    zeros_dR_np=_zeros_dR_np,
+                    use_numpy_lasym_zeros=use_numpy_lasym_zeros,
+                )
+
+            def _candidate_state_from_delta_tuple(deltas, *, scale: float = 1.0, use_numpy_arrays: bool = False, use_numpy_enforce: bool = False) -> VMECState:
+                return _candidate_state_from_delta_tuple_helper(
+                    deltas,
+                    scale=scale,
+                    use_numpy_arrays=use_numpy_arrays,
+                    use_numpy_enforce=use_numpy_enforce,
+                    candidate_from_deltas=_candidate_state_from_deltas,
                 )
 
             constraint_rcon0_current = None

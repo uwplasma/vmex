@@ -26,6 +26,7 @@ __all__ = [
     "residual_force_gcx2_after_edge_policy",
     "residual_force_z_nan_guard",
     "resolve_residual_force_mask_pack",
+    "make_residual_force_evaluator",
 ]
 
 
@@ -495,3 +496,98 @@ def evaluate_residual_force_from_state(
         l_scale=l_scale,
         norms=norms,
     )
+
+
+def make_residual_force_evaluator(
+    *,
+    static: Any,
+    wout_like: Any,
+    trig: Any,
+    s: Any,
+    signgs: int,
+    constraint_tcon0: Any,
+    freeb_pres_scale: Any,
+    apply_lforbal: bool,
+    apply_m1_constraints: bool,
+    runtime_env_enabled: Callable[[str], bool],
+    getenv: Callable[[str, str], str],
+    maybe_dump_hlo_kernel: Callable[..., None],
+    dump_hooks: Mapping[str, Callable[..., None]],
+    evaluate_force_func: Callable[..., ResidualForceEvaluationResult] = evaluate_residual_force_from_state,
+) -> Callable[..., tuple[Any, Any, Any, Any, Any, Any, Any, Any]]:
+    """Build the solver's compact ``state -> force tuple`` evaluator.
+
+    The residual iteration loop historically carried this wrapper as a nested
+    function because it needs access to many diagnostic hooks.  Keeping the
+    wrapper here makes the force path reusable while the caller still owns the
+    concrete dump hooks and HLO policy.
+    """
+
+    def _compute_forces(
+        state,
+        *,
+        include_edge: bool,
+        include_edge_residual: bool | None = None,
+        zero_m1: Any,
+        freeb_bsqvac_half: Any | None = None,
+        constraint_rcon0: Any | None = None,
+        constraint_zcon0: Any | None = None,
+        constraint_precond_diag: tuple[Any, Any] | None = None,
+        constraint_tcon: Any | None = None,
+        constraint_precond_active: Any | None = None,
+        constraint_tcon_active: Any | None = None,
+        iter_idx: int | None = None,
+    ):
+        scan_debug_force_enabled = getenv("VMEC_JAX_SCAN_DEBUG_FORCE", "") not in ("", "0")
+        dump_hlo_force_tomnsps = runtime_env_enabled(getenv("VMEC_JAX_DUMP_HLO_FORCE_TOMNSPS", ""))
+
+        def _dump_force_tomnsps_hlo(*, label, fn, args, kwargs) -> None:
+            maybe_dump_hlo_kernel(
+                label=label,
+                fn=fn,
+                args=args,
+                kwargs=kwargs,
+                static=static,
+                wout_like=wout_like,
+                force=True,
+            )
+
+        force_eval = evaluate_force_func(
+            state=state,
+            static=static,
+            wout_like=wout_like,
+            trig=trig,
+            s=s,
+            signgs=signgs,
+            constraint_tcon0=constraint_tcon0,
+            freeb_pres_scale=freeb_pres_scale,
+            apply_lforbal=apply_lforbal,
+            apply_m1_constraints=bool(apply_m1_constraints),
+            include_edge=bool(include_edge),
+            include_edge_residual=include_edge_residual,
+            zero_m1=zero_m1,
+            freeb_bsqvac_half=freeb_bsqvac_half,
+            constraint_rcon0=constraint_rcon0,
+            constraint_zcon0=constraint_zcon0,
+            constraint_precond_diag=constraint_precond_diag,
+            constraint_tcon=constraint_tcon,
+            constraint_precond_active=constraint_precond_active,
+            constraint_tcon_active=constraint_tcon_active,
+            iter_idx=iter_idx,
+            scan_debug_force_enabled=bool(scan_debug_force_enabled),
+            dump_hlo_force_tomnsps=bool(dump_hlo_force_tomnsps),
+            hlo_dump_func=_dump_force_tomnsps_hlo,
+            dump_hooks=dump_hooks,
+        )
+        return (
+            force_eval.kernels,
+            force_eval.frzl_full,
+            force_eval.gcr2,
+            force_eval.gcz2,
+            force_eval.gcl2,
+            force_eval.rz_scale,
+            force_eval.l_scale,
+            force_eval.norms,
+        )
+
+    return _compute_forces

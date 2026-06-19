@@ -59,6 +59,126 @@ class BacktrackingMomentumSearchResult(NamedTuple):
     accepted: bool
 
 
+def candidate_state_from_deltas(
+    *,
+    state: Any,
+    static: Any,
+    dR_value: Any,
+    dR_sin_value: Any,
+    dZ_cos_value: Any,
+    dZ_value: Any,
+    dL_cos_value: Any,
+    dL_value: Any,
+    use_numpy_arrays: bool,
+    use_numpy_enforce: bool,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    free_boundary_enabled: bool,
+    idx00: int,
+    precomputed_axis_mask: Any,
+    enforce_fixed_boundary_and_axis: Any,
+    enforce_fixed_boundary_and_axis_np: Any,
+    apply_vmec_lambda_axis_rules: Any,
+):
+    """Build a candidate VMEC state after one residual update proposal."""
+
+    from ....state import VMECState
+
+    array = np.asarray if use_numpy_arrays else jnp.asarray
+    candidate = VMECState(
+        layout=state.layout,
+        Rcos=array(state.Rcos) + array(dR_value),
+        Rsin=array(state.Rsin) + array(dR_sin_value),
+        Zcos=array(state.Zcos) + array(dZ_cos_value),
+        Zsin=array(state.Zsin) + array(dZ_value),
+        Lcos=array(state.Lcos) + array(dL_cos_value),
+        Lsin=array(state.Lsin) + array(dL_value),
+    )
+    if use_numpy_enforce:
+        candidate = enforce_fixed_boundary_and_axis_np(
+            candidate,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_edge=not bool(free_boundary_enabled),
+            enforce_lambda_axis=True,
+            idx00=idx00,
+            precomputed_axis_mask=precomputed_axis_mask,
+        )
+    else:
+        candidate = enforce_fixed_boundary_and_axis(
+            candidate,
+            static,
+            edge_Rcos=edge_Rcos,
+            edge_Rsin=edge_Rsin,
+            edge_Zcos=edge_Zcos,
+            edge_Zsin=edge_Zsin,
+            enforce_edge=not bool(free_boundary_enabled),
+            enforce_lambda_axis=True,
+            idx00=idx00,
+        )
+    return apply_vmec_lambda_axis_rules(candidate)
+
+
+def delta_tuple_from_blocks(
+    dt,
+    transforms,
+    *blocks,
+    lasym: bool,
+    zeros_dR_np: Any | None = None,
+    use_numpy_lasym_zeros: bool = False,
+):
+    """Transform velocity blocks into physical R/Z/lambda update arrays."""
+
+    rcc, rss, rsc, rcs, zsc, zcs, zcc, zss, lsc, lcs, lcc, lss = blocks
+    mn_cos_to_signed, mn_sin_to_signed, mn_cos_to_signed_lambda, mn_sin_to_signed_lambda = transforms
+    dR = dt * mn_cos_to_signed(rcc, rss)
+    dZ = dt * mn_sin_to_signed(zsc, zcs)
+    dL = dt * mn_sin_to_signed_lambda(lsc, lcs)
+    if bool(lasym):
+        dR_sin = dt * mn_sin_to_signed(rsc, rcs)
+        dZ_cos = dt * mn_cos_to_signed(zcc, zss)
+        dL_cos = dt * mn_cos_to_signed_lambda(lcc, lss)
+    elif use_numpy_lasym_zeros:
+        dR_sin = zeros_dR_np
+        dZ_cos = zeros_dR_np
+        dL_cos = zeros_dR_np
+    else:
+        dR_sin = jnp.zeros_like(dR)
+        dZ_cos = jnp.zeros_like(dR)
+        dL_cos = jnp.zeros_like(dR)
+    return (dR, dR_sin, dZ_cos, dZ, dL_cos, dL)
+
+
+def candidate_state_from_delta_tuple(
+    deltas,
+    *,
+    scale: float,
+    use_numpy_arrays: bool,
+    use_numpy_enforce: bool,
+    candidate_from_deltas: Any,
+):
+    """Build a candidate state from an already transformed delta tuple."""
+
+    if float(scale) != 1.0:
+        deltas = tuple(float(scale) * value for value in deltas)
+    dR, dR_sin, dZ_cos, dZ, dL_cos, dL = deltas
+    return candidate_from_deltas(
+        dR_value=dR,
+        dR_sin_value=dR_sin,
+        dZ_cos_value=dZ_cos,
+        dZ_value=dZ,
+        dL_cos_value=dL_cos,
+        dL_value=dL,
+        use_numpy_arrays=use_numpy_arrays,
+        use_numpy_enforce=use_numpy_enforce,
+    )
+
+
 def zero_velocity_blocks_like(*blocks):
     """Return zeroed velocity blocks with each input block's shape and dtype."""
 
