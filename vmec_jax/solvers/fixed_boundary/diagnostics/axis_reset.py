@@ -20,6 +20,15 @@ class InitialAxisResetDecision(NamedTuple):
     reset: bool
 
 
+class InitialAxisResetEvaluation(NamedTuple):
+    """Initial force/Jacobian diagnostics and reset decision."""
+
+    decision: InitialAxisResetDecision
+    fsq_phys: float | None
+    bad_jacobian_ptau: bool | None
+    bad_jacobian_state: bool
+
+
 def initial_force_physical_fsq(*, norms: Any, gcr2: Any, gcz2: Any, gcl2: Any) -> float | None:
     """Return the physical initial residual used to gate axis reset attempts."""
 
@@ -54,10 +63,7 @@ def bad_jacobian_ptau_from_minmax(
         min_tau = float(np.asarray(ptau_min))
         max_tau = float(np.asarray(ptau_max))
         tau_scale = max(abs(min_tau), abs(max_tau))
-        if float(ptau_tol_rel) > 0.0:
-            tau_tol = max(abs(float(ptau_tol)), float(ptau_tol_rel) * float(tau_scale))
-        else:
-            tau_tol = max(abs(float(ptau_tol)), 0.0)
+        tau_tol = max(abs(float(ptau_tol)), max(float(ptau_tol_rel), 0.0) * float(tau_scale))
         return bad_jacobian_from_tau_range(min_tau=min_tau, max_tau=max_tau, abs_tol=tau_tol)
     except Exception:
         return None
@@ -76,15 +82,7 @@ def merge_axis_reset_state(*, st: VMECState, st_axis: VMECState, static, full_re
     Rsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Rsin), jnp.asarray(st.Rsin))
     Zcos = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zcos), jnp.asarray(st.Zcos))
     Zsin = jnp.where(mask_m0[None, :] != 0, jnp.asarray(st_axis.Zsin), jnp.asarray(st.Zsin))
-    return VMECState(
-        layout=st.layout,
-        Rcos=Rcos,
-        Rsin=Rsin,
-        Zcos=Zcos,
-        Zsin=Zsin,
-        Lcos=st.Lcos,
-        Lsin=st.Lsin,
-    )
+    return VMECState(layout=st.layout, Rcos=Rcos, Rsin=Rsin, Zcos=Zcos, Zsin=Zsin, Lcos=st.Lcos, Lsin=st.Lsin)
 
 
 def initial_axis_reset_decision(
@@ -123,22 +121,85 @@ def initial_axis_reset_decision(
         bool(vmec2000_control) and bool(lmove_axis) and bool(lthreed) and bool(axis_reset_always_3d)
     )
     return InitialAxisResetDecision(
-        bad_jacobian=bool(bad_jacobian),
-        force_reset=bool(force_reset),
-        reset=bool(axis_reset_enabled) and (bool(bad_jacobian) or bool(force_reset)),
+        bool(bad_jacobian), bool(force_reset), bool(axis_reset_enabled) and (bool(bad_jacobian) or bool(force_reset))
     )
 
 
-def write_axis_reset_dump(
+def evaluate_initial_axis_reset(
     *,
-    axis_dump_dir: str | os.PathLike[str] | None,
-    ns: int,
-    ntor: int,
-    used_state_guess: bool,
-    raxis_cc,
-    raxis_cs,
-    zaxis_cc,
-    zaxis_cs,
+    axis_reset_enabled: bool, norms: Any, gcr2: Any, gcz2: Any, gcl2: Any,
+    k: Any, state: VMECState, static: Any, trig: Any, s: Any,
+    badjac_use_state: bool, ptau_tol: float, ptau_tol_rel: float,
+    axis_reset_fsq_min: float, force_axis_reset: bool, axis_reset_always_3d: bool,
+    vmec2000_control: bool, lmove_axis: bool, debug_enabled: bool = False,
+    ptau_minmax_from_k_host: Callable[[Any], tuple[Any | None, Any | None]],
+    vmec_half_mesh_jacobian_from_state_func: Callable[..., Any],
+) -> InitialAxisResetEvaluation:
+    """Evaluate VMEC-style initial magnetic-axis reset diagnostics."""
+
+    fsq_phys = initial_force_physical_fsq(norms=norms, gcr2=gcr2, gcz2=gcz2, gcl2=gcl2)
+    bad_jacobian_ptau = None
+    bad_jacobian_state = False
+    if bool(axis_reset_enabled):
+        try:
+            ptau_min, ptau_max = ptau_minmax_from_k_host(k)
+        except Exception:
+            ptau_min, ptau_max = None, None
+        bad_jacobian_ptau = bad_jacobian_ptau_from_minmax(
+            ptau_min=ptau_min,
+            ptau_max=ptau_max,
+            ptau_tol=ptau_tol,
+            ptau_tol_rel=ptau_tol_rel,
+        )
+        if bool(badjac_use_state):
+            try:
+                jac = vmec_half_mesh_jacobian_from_state_func(
+                    state=state, modes=static.modes, trig=trig, s=s,
+                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                    lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                    mask_even=getattr(static, "m_is_even", None),
+                    mask_odd=getattr(static, "m_is_odd", None),
+                )
+                tau = jnp.asarray(jac.tau)
+                tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
+                min_tau = float(np.asarray(jnp.min(tau_use)))
+                max_tau = float(np.asarray(jnp.max(tau_use)))
+                tau_scale = max(abs(min_tau), abs(max_tau))
+                bad_jacobian_state = bad_jacobian_from_tau_range(
+                    min_tau=min_tau,
+                    max_tau=max_tau,
+                    abs_tol=max(1.0e-12, 1.0e-2 * tau_scale),
+                )
+            except Exception:
+                bad_jacobian_state = False
+
+    decision = initial_axis_reset_decision(
+        bad_jacobian_ptau=bad_jacobian_ptau, bad_jacobian_state=bad_jacobian_state,
+        badjac_use_state=badjac_use_state, fsq_phys=fsq_phys,
+        axis_reset_fsq_min=axis_reset_fsq_min, force_axis_reset=force_axis_reset,
+        axis_reset_always_3d=axis_reset_always_3d,
+        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+        vmec2000_control=vmec2000_control, lmove_axis=lmove_axis,
+        axis_reset_enabled=axis_reset_enabled,
+    )
+    if bool(debug_enabled):
+        try:
+            fsq_debug = float("nan") if fsq_phys is None else float(fsq_phys)
+            print(
+                "[axis_reset] fsq0="
+                f"{fsq_debug:.6e} axis_reset_fsq_min={axis_reset_fsq_min:.3e} "
+                f"badjac_ptau={bad_jacobian_ptau} badjac_state={bad_jacobian_state} "
+                f"badjac_used={bool(decision.bad_jacobian)}",
+                flush=True,
+            )
+        except Exception:
+            pass
+    return InitialAxisResetEvaluation(decision, fsq_phys, bad_jacobian_ptau, bool(bad_jacobian_state))
+
+
+def write_axis_reset_dump(
+    *, axis_dump_dir: str | os.PathLike[str] | None, ns: int, ntor: int, used_state_guess: bool,
+    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs,
 ) -> bool:
     """Write optional magnetic-axis reset coefficients for diagnostics."""
 
