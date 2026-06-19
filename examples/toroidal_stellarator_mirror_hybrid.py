@@ -6,9 +6,14 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 
 import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import vmec_jax as vj
 from vmec_jax.namelist import write_indata

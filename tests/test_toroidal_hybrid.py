@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import json
-import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +21,12 @@ from vmec_jax.toroidal_hybrid import (
     toroidal_stellarator_mirror_hybrid_indata,
     toroidal_stellarator_mirror_hybrid_metrics,
 )
+
+
+def _assert_nonblank_image(path: str, image_module) -> None:
+    pixels = image_module.imread(path)
+    assert pixels.size > 0
+    assert float(np.std(pixels)) > 1.0e-4
 
 
 def test_toroidal_hybrid_boundary_is_stellarator_symmetric_and_corner_localized():
@@ -187,8 +192,6 @@ def test_toroidal_hybrid_indata_rejects_non_stellarator_symmetric_samples(monkey
 
 
 def test_toroidal_hybrid_example_runs_without_plots(tmp_path: Path):
-    env = dict(os.environ)
-    env["PYTHONPATH"] = f"{Path.cwd()}{os.pathsep}{env.get('PYTHONPATH', '')}"
     completed = subprocess.run(
         [
             sys.executable,
@@ -219,7 +222,6 @@ def test_toroidal_hybrid_example_runs_without_plots(tmp_path: Path):
         ],
         check=True,
         capture_output=True,
-        env=env,
         text=True,
     )
 
@@ -244,9 +246,47 @@ def test_toroidal_hybrid_example_runs_without_plots(tmp_path: Path):
     assert metrics["sample_parameters"]["corner_power"] == 2.0
 
 
+def test_toroidal_hybrid_example_writes_nonblank_plots(tmp_path: Path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/toroidal_stellarator_mirror_hybrid.py",
+            "--outdir",
+            str(tmp_path / "hybrid_plots"),
+            "--ntheta-fit",
+            "64",
+            "--nzeta-fit",
+            "64",
+            "--ntor",
+            "10",
+            "--side-minor-modulation",
+            "0.16",
+            "--side-elongation",
+            "0.35",
+            "--side-power",
+            "2.0",
+            "--corner-amplitude",
+            "0.025",
+            "--corner-ellipticity",
+            "0.22",
+            "--corner-rotation",
+            "0.42",
+            "--corner-power",
+            "2.0",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    assert set(metrics["figures"]) == {"lcfs_3d", "top_view", "cross_sections", "region_orientation"}
+    for path in metrics["figures"].values():
+        _assert_nonblank_image(path, image)
+
+
 def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
-    env = dict(os.environ)
-    env["PYTHONPATH"] = f"{Path.cwd()}{os.pathsep}{env.get('PYTHONPATH', '')}"
     completed = subprocess.run(
         [
             sys.executable,
@@ -269,7 +309,6 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
         ],
         check=True,
         capture_output=True,
-        env=env,
         text=True,
     )
 
@@ -339,9 +378,39 @@ def test_toroidal_hybrid_convergence_example_runs_without_solve(tmp_path: Path):
     assert float(csv_row["fitted_valid_corner_orientation_span"]) > 0.05
 
 
+def test_toroidal_hybrid_convergence_example_writes_nonblank_no_solve_plots(tmp_path: Path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/toroidal_stellarator_mirror_hybrid_convergence.py",
+            "--outdir",
+            str(tmp_path / "hybrid_convergence_plots"),
+            "--ns-array",
+            "7,9",
+            "--mode-pairs",
+            "5:20",
+            "--ntheta-fit",
+            "64",
+            "--nzeta-fit",
+            "64",
+            "--side-power",
+            "2.0",
+            "--corner-power",
+            "2.0",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    summary = json.loads(Path(completed.stdout.strip()).read_text())
+    assert set(summary["figures"]) == {"convergence", "orientation"}
+    for path in summary["figures"].values():
+        _assert_nonblank_image(path, image)
+
+
 def test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve(tmp_path: Path):
-    env = dict(os.environ)
-    env["PYTHONPATH"] = f"{Path.cwd()}{os.pathsep}{env.get('PYTHONPATH', '')}"
     completed = subprocess.run(
         [
             sys.executable,
@@ -362,7 +431,6 @@ def test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve(tmp
         ],
         check=True,
         capture_output=True,
-        env=env,
         text=True,
     )
 

@@ -22078,3 +22078,132 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 183. Toroidal Hybrid Standalone Plot Coverage
+
+### Steps taken
+
+- Audited the toroidal stellarator-mirror hybrid lane after M182.
+- Found that the root-level toroidal hybrid scripts failed when run exactly as
+  README commands unless `PYTHONPATH` was pre-set:
+  - `examples/toroidal_stellarator_mirror_hybrid.py`;
+  - `examples/toroidal_stellarator_mirror_hybrid_convergence.py`.
+- Added the same repository-root `sys.path` bootstrap used by the other
+  root-level mirror examples so the scripts work as standalone commands from
+  the repository root.
+- Removed the test-only `PYTHONPATH` shim from toroidal hybrid example tests so
+  CI covers the real user command path.
+- Added plotted smoke tests for:
+  - the toroidal hybrid boundary example's LCFS, top-view, cross-section, and
+    side/corner orientation plots;
+  - the no-solve toroidal hybrid convergence example's convergence and
+    orientation-preservation plots.
+- The new tests verify that each PNG exists, is readable by Matplotlib, and is
+  nonblank.
+
+### Results obtained
+
+- The README-style toroidal hybrid commands now run without a manually prepared
+  `PYTHONPATH`.
+- The toroidal hybrid plotting lane now has end-to-end coverage for both the
+  boundary example and the no-solve convergence report.
+- The no-solve convergence report remains lightweight, while still protecting
+  the orientation-preservation artifact needed before higher-budget solved
+  convergence studies.
+
+### How it was tested
+
+Commands run:
+
+```bash
+python examples/toroidal_stellarator_mirror_hybrid.py \
+  --outdir /tmp/toroidal_hybrid_plot_probe \
+  --ntheta-fit 64 --nzeta-fit 64 --ntor 10 \
+  --side-minor-modulation 0.16 --side-elongation 0.35 --side-power 2.0 \
+  --corner-amplitude 0.025 --corner-ellipticity 0.22 \
+  --corner-rotation 0.42 --corner-power 2.0
+python examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  --outdir /tmp/toroidal_hybrid_convergence_plot_probe \
+  --ns-array 7,9 --mode-pairs 5:20 \
+  --ntheta-fit 64 --nzeta-fit 64 \
+  --side-power 2.0 --corner-power 2.0
+python -m ruff check \
+  examples/toroidal_stellarator_mirror_hybrid.py \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+python -m ruff format --check \
+  examples/toroidal_stellarator_mirror_hybrid.py \
+  examples/toroidal_stellarator_mirror_hybrid_convergence.py \
+  tests/test_toroidal_hybrid.py
+pytest \
+  tests/test_toroidal_hybrid.py::test_toroidal_hybrid_example_runs_without_plots \
+  tests/test_toroidal_hybrid.py::test_toroidal_hybrid_example_writes_nonblank_plots \
+  tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_runs_without_solve \
+  tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_writes_nonblank_no_solve_plots \
+  tests/test_toroidal_hybrid.py::test_toroidal_hybrid_convergence_example_scans_shape_cases_without_solve -q
+pytest tests/test_toroidal_hybrid.py -q
+JAX_ENABLE_X64=1 pytest tests/mirror tests/test_toroidal_hybrid.py -q
+```
+
+Results:
+
+- Standalone plotted toroidal hybrid probe wrote nonblank `lcfs_3d`,
+  `top_view`, `cross_sections`, and `region_orientation` PNGs.
+- Standalone plotted convergence probe wrote nonblank `convergence` and
+  `orientation` PNGs.
+- Ruff check and format check passed.
+- Focused toroidal hybrid example/plot tests passed: `5 passed in 5.96s`.
+- Full toroidal hybrid test file passed: `28 passed in 6.65s`.
+- Combined mirror plus toroidal hybrid validation passed: `260 passed,
+  1 skipped in 223.64s`.
+
+### File structure and best-practice notes
+
+- The standalone import bootstrap is local to the two root-level example
+  scripts, matching the pattern already used by other root mirror examples.
+- The plot tests stay in `tests/test_toroidal_hybrid.py`, next to the toroidal
+  hybrid geometry, indata, convergence, and helper tests.
+- No generated images are tracked; probes used `/tmp`, while tests use pytest
+  temporary directories.
+- The convergence plot coverage stays on the no-solve path, so it protects the
+  geometry/report artifacts without increasing CI runtime with toroidal fixed
+  boundary solves.
+
+### Best next steps
+
+1. Commit and push M183.
+2. Update the draft PR body to include the `260 passed, 1 skipped` combined
+   mirror plus toroidal-hybrid validation result and the standalone hybrid plot
+   coverage.
+3. Inspect only failed CI jobs after the latest push; queued jobs can finish in
+   the background.
+4. Continue the completion audit, with likely next targets being final
+   free-boundary documentation boundaries, Boozer-like diagnostic promotion
+   wording, or a higher-budget toroidal hybrid solved convergence study if time
+   and runtime budget allow.
+
+### Completion percentages after M183
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `93%`.
+- Residual Newton / preconditioning: `94%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `89%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.
