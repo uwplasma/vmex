@@ -662,6 +662,88 @@ def same_branch_report_anchor_params(
     )
 
 
+def same_branch_params_for_scale(
+    base_params: CoilFieldParams,
+    direction_x: np.ndarray,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+):
+    """Return the complete-FD coil-parameter callback for a report direction."""
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return apply_coil_variables(
+            base_params,
+            direction_x * float(scale),
+            variables,
+            current_step=float(args.current_step),
+            dof_step=float(args.dof_step),
+        )
+
+    return params_for
+
+
+def same_branch_objective_values_callback(
+    *,
+    args: argparse.Namespace,
+    qs_surfaces: list[float],
+    scalar_value_fns: dict[str, Any],
+    requested_report_keys: set[str],
+):
+    """Return physical scalar values for complete-solve same-branch reports."""
+
+    needs_boozer_qs = "boozer_qs_total" in requested_report_keys
+
+    def objective_fn(payload: dict[str, Any]) -> dict[str, float]:
+        run_like = SimpleNamespace(
+            result=payload["result"],
+            state=payload["result"].state,
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=payload["init"].signgs,
+        )
+        summary = summarize_run(
+            run_like,
+            payload["params"],
+            objective=np.nan,
+            wall_s=np.nan,
+            target_aspect=float(args.target_aspect),
+            target_iota=float(args.target_iota),
+            helicity_m=int(args.helicity_m),
+            helicity_n=int(args.helicity_n),
+            qs_surfaces=qs_surfaces,
+            qs_ntheta=int(args.qs_ntheta),
+            qs_nphi=int(args.qs_nphi),
+        )
+        total = objective_from_summary(
+            summary,
+            residual_weight=float(args.residual_weight),
+            qs_weight=float(args.qs_weight),
+            aspect_weight=float(args.aspect_weight),
+            iota_weight=float(args.iota_weight),
+        )
+        values = {
+            "objective": total,
+            "state_norm": scalar_value_fns["state_norm"](payload),
+            "residual_proxy": float(summary.get("residual_proxy") or 0.0),
+            "qs_total": float(summary["qs_total"]) if summary.get("qs_total") is not None else np.nan,
+            "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
+            "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
+            "lcfs_boundary_moment": scalar_value_fns["lcfs_boundary_moment"](payload),
+            "accepted_bnormal_rms": scalar_value_fns["accepted_bnormal_rms"](payload),
+            "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
+            if summary.get("free_boundary_bnormal_rms") is not None
+            else np.nan,
+        }
+        if needs_boozer_qs:
+            values["boozer_qs_total"] = scalar_value_fns["boozer_qs_total"](payload)
+        for key in sorted(requested_report_keys):
+            if key not in values and key in scalar_value_fns:
+                values[key] = scalar_value_fns[key](payload)
+        return values
+
+    return objective_fn
+
+
 def write_same_branch_validation_report(
     *,
     input_path: Path,
@@ -722,70 +804,19 @@ def write_same_branch_validation_report(
     vector_keys = parse_same_branch_vector_keys(getattr(args, "same_branch_report_vector_keys", None))
     scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
     requested_report_keys = {scalar_key} if mode == "scalar" else set(vector_keys) if mode == "vector" else set()
-    needs_boozer_qs = "boozer_qs_total" in requested_report_keys
 
     scalar_value_fns, scalar_replay_fns = same_branch_scalar_function_registry(
         args=args,
         qs_surfaces=qs_surfaces,
         qs_angle_cache_for_static=qs_angle_cache_for_static,
     )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return apply_coil_variables(
-            base_params,
-            direction_x * float(scale),
-            variables,
-            current_step=float(args.current_step),
-            dof_step=float(args.dof_step),
-        )
-
-    def objective_fn(payload: dict[str, Any]) -> dict[str, float]:
-        run_like = SimpleNamespace(
-            result=payload["result"],
-            state=payload["result"].state,
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=payload["init"].signgs,
-        )
-        summary = summarize_run(
-            run_like,
-            payload["params"],
-            objective=np.nan,
-            wall_s=np.nan,
-            target_aspect=float(args.target_aspect),
-            target_iota=float(args.target_iota),
-            helicity_m=int(args.helicity_m),
-            helicity_n=int(args.helicity_n),
-            qs_surfaces=qs_surfaces,
-            qs_ntheta=int(args.qs_ntheta),
-            qs_nphi=int(args.qs_nphi),
-        )
-        total = objective_from_summary(
-            summary,
-            residual_weight=float(args.residual_weight),
-            qs_weight=float(args.qs_weight),
-            aspect_weight=float(args.aspect_weight),
-            iota_weight=float(args.iota_weight),
-        )
-        values = {
-            "objective": total,
-            "state_norm": scalar_value_fns["state_norm"](payload),
-            "residual_proxy": float(summary.get("residual_proxy") or 0.0),
-            "qs_total": float(summary["qs_total"]) if summary.get("qs_total") is not None else np.nan,
-            "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
-            "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
-            "lcfs_boundary_moment": scalar_value_fns["lcfs_boundary_moment"](payload),
-            "accepted_bnormal_rms": scalar_value_fns["accepted_bnormal_rms"](payload),
-            "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
-            if summary.get("free_boundary_bnormal_rms") is not None
-            else np.nan,
-        }
-        if needs_boozer_qs:
-            values["boozer_qs_total"] = scalar_value_fns["boozer_qs_total"](payload)
-        for key in sorted(requested_report_keys):
-            if key not in values and key in scalar_value_fns:
-                values[key] = scalar_value_fns[key](payload)
-        return values
+    params_for = same_branch_params_for_scale(base_params, direction_x, variables, args)
+    objective_fn = same_branch_objective_values_callback(
+        args=args,
+        qs_surfaces=qs_surfaces,
+        scalar_value_fns=scalar_value_fns,
+        requested_report_keys=requested_report_keys,
+    )
 
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
