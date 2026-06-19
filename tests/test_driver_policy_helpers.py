@@ -15,6 +15,7 @@ from vmec_jax.drivers import runtime as driver_runtime
 from vmec_jax.drivers import solve as driver_solve
 from vmec_jax.drivers.policy import (
     dynamic_scan_probe_settings,
+    resolve_fixed_boundary_solver_dispatch,
     resolve_fixed_boundary_stage_policy,
     resolve_driver_signgs,
     resolve_driver_step_size,
@@ -60,6 +61,50 @@ def test_normalize_solver_mode_handles_aliases_case_and_defaults(solver_mode, pe
 def test_normalize_solver_mode_reports_valid_modes():
     with pytest.raises(ValueError, match="Expected one of: accelerated, default, parity"):
         driver._normalize_solver_mode(solver_mode="not-a-mode", performance_mode=False)
+
+
+def test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics():
+    fast = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=True,
+        verbose=False,
+        use_scan=None,
+        getenv=lambda _key, _default: "",
+    )
+    assert fast.solver == "vmec2000_iter"
+    assert fast.use_scan is True
+    assert fast.scan_minimal_default is True
+
+    fast_no_scan = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_scan",
+        performance_mode=True,
+        verbose=True,
+        use_scan=False,
+        getenv=lambda _key, _default: "",
+    )
+    assert fast_no_scan.solver == "vmec2000_iter"
+    assert fast_no_scan.use_scan is False
+    assert fast_no_scan.scan_minimal_default is None
+
+    parity = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        verbose=True,
+        use_scan=True,
+        getenv=lambda _key, _default: "",
+    )
+    assert parity.solver == "vmec2000_iter"
+    assert parity.use_scan is False
+
+    forced_scan = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        verbose=True,
+        use_scan=False,
+        getenv=lambda key, default: "1" if key == "VMEC_JAX_USE_SCAN" else default,
+    )
+    assert forced_scan.solver == "vmec2000_iter"
+    assert forced_scan.use_scan is True
 
 
 def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():

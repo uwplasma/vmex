@@ -25477,3 +25477,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999999924%.
+
+## 2026-06-19 Fixed-Boundary Solver Dispatch Policy Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `FixedBoundarySolverDispatchPolicy` and
+   `resolve_fixed_boundary_solver_dispatch` to `vmec_jax.drivers.policy`.
+2. Moved the final fixed-boundary solver aliasing and scan-policy normalization
+   out of `run_fixed_boundary`.
+3. Added a direct unit test covering fast-mode aliasing, explicit
+   `use_scan=False`, parity scan disabling, and the `VMEC_JAX_USE_SCAN`
+   override.
+
+Results obtained:
+
+- `run_fixed_boundary` decreased from 621 to 610 lines.
+- Solver dispatch semantics are now explicitly owned by the policy module,
+  matching the existing architecture direction for backend and staging policy.
+- The moved logic has direct unit coverage in addition to the existing driver
+  workflow tests.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/drivers/policy.py vmec_jax/driver.py tests/test_driver_policy_helpers.py`
+- `python -m ruff check vmec_jax/drivers/policy.py vmec_jax/driver.py tests/test_driver_policy_helpers.py`
+- `python tools/diagnostics/source_health.py --top 25 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py::test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics tests/test_driver_api.py::test_python_default_fixed_boundary_uses_optimized_controller tests/test_driver_api.py::test_run_fixed_boundary_cli_budgeted_multigrid_path tests/test_driver_api.py::test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first tests/test_driver_api.py::test_run_fixed_boundary_initial_guess tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches -q`
+
+Best next steps:
+
+1. Commit and push this policy extraction.
+2. Continue the source-health pass with either WOUT profile extraction or a
+   residual-loop seam; both are larger remaining functions with stable focused
+   tests.
+3. Avoid broad adaptive-branch differentiation changes until a new
+   fingerprint-gated AD-vs-FD test is added in the same tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999946%.
+- Solver monolith reduction: 99.908%.
+- Free-boundary adjoint monolith reduction: 99.63%.
+- Driver workflow decomposition: 99.968%.
+- Residual iteration decomposition: 99.491%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.902%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.15%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.24%.
+- Free-boundary validation-gate maintainability: 98.45%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999999925%.

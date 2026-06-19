@@ -64,6 +64,15 @@ class FixedBoundaryStagePolicy:
     ns_stages: list[int]
 
 
+@dataclass(frozen=True)
+class FixedBoundarySolverDispatchPolicy:
+    """Final solver alias and scan policy used by the public driver."""
+
+    solver: str
+    use_scan: bool
+    scan_minimal_default: bool | None
+
+
 def host_update_assembly_driver_default(
     *,
     cfg,
@@ -242,6 +251,43 @@ def resolve_initial_fixed_boundary_policy(
         accelerated_mode=bool(accelerated_mode),
         use_scan=bool(use_scan_eff),
         cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode_eff),
+    )
+
+
+def resolve_fixed_boundary_solver_dispatch(
+    *,
+    solver_lower: str,
+    performance_mode: bool,
+    verbose: bool,
+    use_scan: bool | None,
+    getenv=os.getenv,
+) -> FixedBoundarySolverDispatchPolicy:
+    """Normalize final fixed-boundary solver aliases and scan policy."""
+
+    solver_eff = str(solver_lower)
+    use_scan_eff = use_scan
+    if bool(performance_mode) and solver_eff == "vmec2000_iter":
+        solver_eff = "vmec2000_iter_fast"
+
+    scan_minimal_default = True if (bool(performance_mode) and (not bool(verbose))) else None
+
+    if solver_eff in ("vmec2000_iter_fast", "vmec2000_scan"):
+        # Respect explicitly-passed use_scan=False. Only default to scan=True
+        # when the caller did not explicitly opt out.
+        if use_scan_eff is not False:
+            use_scan_eff = True
+        solver_eff = "vmec2000_iter"
+    # Parity mode defaults to the VMEC2000 non-scan control path unless
+    # explicitly forced via environment variables.
+    if solver_eff == "vmec2000_iter" and (not bool(performance_mode)):
+        use_scan_eff = False
+    if getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
+        use_scan_eff = True
+
+    return FixedBoundarySolverDispatchPolicy(
+        solver=str(solver_eff),
+        use_scan=bool(use_scan_eff),
+        scan_minimal_default=scan_minimal_default,
     )
 
 

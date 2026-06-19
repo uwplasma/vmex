@@ -66,6 +66,7 @@ _resolve_axis_infer_missing_policy = _driver_policy_helpers.resolve_axis_infer_m
 _resolve_driver_signgs = _driver_policy_helpers.resolve_driver_signgs
 _resolve_driver_step_size = _driver_policy_helpers.resolve_driver_step_size
 _resolve_fixed_boundary_solver_device_name = _driver_policy_helpers.resolve_fixed_boundary_solver_device_name
+_resolve_fixed_boundary_solver_dispatch = _driver_policy_helpers.resolve_fixed_boundary_solver_dispatch
 _resolve_jit_forces_auto_policy = _driver_policy_helpers.resolve_jit_forces_auto_policy
 _resolve_stage_jit_settings = _driver_policy_helpers.resolve_stage_jit_settings
 _resolve_vmec2000_jit_forces_policy = _driver_policy_helpers.resolve_vmec2000_jit_forces_policy
@@ -994,27 +995,16 @@ def run_fixed_boundary(
             run_container=FixedBoundaryRun,
         )
 
-    if performance_mode:
-        if solver_lower == "vmec2000_iter":
-            solver_lower = "vmec2000_iter_fast"
-
-    # Fast mode keeps minimal history only when not printing (verbose=False).
-    scan_minimal_default = True if (bool(performance_mode) and (not bool(verbose))) else None
-
-    solver = solver_lower
-    if solver in ("vmec2000_iter_fast", "vmec2000_scan"):
-        # Respect an explicitly-passed use_scan=False (e.g. CPU CLI fast path
-        # that uses the Python loop instead of lax.scan).  Only default to
-        # scan=True when the caller did not explicitly opt out.
-        if use_scan is not False:
-            use_scan = True
-        solver = "vmec2000_iter"
-    # Parity mode defaults to the VMEC2000 non-scan control path unless
-    # explicitly forced via environment variables.
-    if solver == "vmec2000_iter" and (not bool(performance_mode)):
-        use_scan = False
-    if os.getenv("VMEC_JAX_USE_SCAN", "") not in ("", "0"):
-        use_scan = True
+    dispatch_policy = _resolve_fixed_boundary_solver_dispatch(
+        solver_lower=solver_lower,
+        performance_mode=bool(performance_mode),
+        verbose=bool(verbose),
+        use_scan=use_scan,
+        getenv=os.getenv,
+    )
+    solver = dispatch_policy.solver
+    use_scan = bool(dispatch_policy.use_scan)
+    scan_minimal_default = dispatch_policy.scan_minimal_default
     if solver in _driver_solve_helpers.FIXED_BOUNDARY_OPTIMIZER_SOLVERS:
         static, bdy, flux, prof, pressure = static_profile_cache.ensure()
         res = _driver_solve_helpers.run_fixed_boundary_optimizer_solver(
