@@ -1078,8 +1078,7 @@ def wout_minimal_from_fixed_boundary(
     wout_timing: dict[str, float] = {}
     t_wout_total_start = _timing_start(bool(wout_timing_enabled))
 
-    if converged is None:
-        converged = True
+    converged = True if converged is None else bool(converged)
 
     lbsubs = lbsubs_from_indata_and_env(indata)
 
@@ -1570,11 +1569,7 @@ def wout_minimal_from_fixed_boundary(
     # Nyquist-reconstructed path is used only for consistency checks.
 
     if wout_light:
-        buco = np.zeros((ns,), dtype=float)
-        bvco = np.zeros((ns,), dtype=float)
-        jcuru = np.zeros((ns,), dtype=float)
-        jcurv = np.zeros((ns,), dtype=float)
-        equif = np.zeros((ns,), dtype=float)
+        buco, bvco, jcuru, jcurv, equif = (np.zeros((ns,), dtype=float) for _ in range(5))
     else:
         t_equif = _timing_start(bool(wout_timing_enabled))
         buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
@@ -1667,10 +1662,7 @@ def wout_minimal_from_fixed_boundary(
         phipf_internal=phipf_internal,
         lamscale=lamscale,
     )
-    if fsqt is None:
-        fsqt_out = np.zeros((100,), dtype=float)
-    else:
-        fsqt_out = np.asarray(fsqt, dtype=float)
+    fsqt_out = np.zeros((100,), dtype=float) if fsqt is None else np.asarray(fsqt, dtype=float)
 
     _wout_debug_helpers.dump_wrout_modes_if_requested(
         ns=int(ns),

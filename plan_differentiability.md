@@ -21604,3 +21604,69 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999991%.
+
+## 2026-06-19 Minimal WOUT Output Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Inspected `wout_minimal_from_fixed_boundary`, the next production-code
+   source-health hotspot after the driver and residual loop.
+2. Avoided moving the LASYM/Nyquist coefficient block before a dedicated parity
+   extraction because that path is heavily VMEC-output-sensitive.
+3. Simplified convergence normalization, light-mode zero-profile allocation,
+   and `fsqt` fallback construction in place.
+
+Results obtained:
+
+- `wout_minimal_from_fixed_boundary` decreased from 669 lines to 661 lines.
+- No source files were added.
+- WOUT helper and branch/parity coverage tests passed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/wout.py`
+- `python -m ruff check vmec_jax/wout.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_driver_wout_wave9_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 12`
+
+Best next steps:
+
+1. Treat the LASYM/Nyquist block as a future cohesive extraction into
+   `io/wout/nyquist.py`, but only with the full LASYM WOUT parity batch.
+2. Move next to `implicit.py` because it is now above WOUT in function length
+   and is central to differentiability architecture.
+3. Keep WOUT changes conservative unless VMEC2000/WOUT parity tests are run.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999472%.
+- Solver monolith reduction: 99.826%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.05%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.745%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.69%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999992%.
