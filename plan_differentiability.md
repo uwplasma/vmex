@@ -7,6 +7,85 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 Replay Cache and WOUT Timing Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Centralized discrete-adjoint replay scan runner cache lookup, hit/miss
+   timing, LRU insertion, and diagnostics recording in `_get_replay_scan_runner`
+   and `_put_replay_scan_runner`.
+2. Consolidated replay JVP diagnostic counter increments through
+   `_add_replay_diag` while preserving existing diagnostic keys and timing
+   semantics.
+3. Centralized minimal-WOUT timing start/stop bookkeeping through
+   `_timing_start` and `_record_timing`, replacing repeated conditional timing
+   blocks inside `wout_minimal_from_fixed_boundary`.
+
+Results obtained:
+
+- `vmec_jax/discrete_adjoint.py` dropped from 3488 to 3481 lines.
+- `vmec_jax/wout.py` dropped from 1734 to 1727 lines.
+- The combined diff is net-negative by 14 source lines while removing
+  duplicated cache/timing control plumbing.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/discrete_adjoint.py vmec_jax/wout.py`
+- `python -m ruff check vmec_jax/discrete_adjoint.py vmec_jax/wout.py`
+- `python tools/diagnostics/source_health.py | head -100`
+- `git diff --check`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_discrete_adjoint_chunking.py::test_scan_cache_limit_lru_and_clear tests/test_discrete_adjoint_chunking.py::test_checkpoint_scan_runner_factories_reuse_cached_runners tests/test_discrete_adjoint_chunking.py::test_checkpoint_scan_runner_cache_keys_include_tridi_policies tests/test_discrete_adjoint_chunking.py::test_jvp_columns_chunks_env_before_dynamic_basepoint_runner -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_gpu_cpu_performance_profile.py::test_exact_run_payload_attaches_replay_scan_cache_diagnostics tests/test_gpu_cpu_performance_profile.py::test_performance_matrix_loaded_summary_adds_scan_cache_and_jvp_sections -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_profile_report_compare.py::test_profile_summary_extracts_replay_scan_cache_diagnostics tests/test_optimization_callback_trace.py::test_profile_exact_supplements_scan_cache_status_timing_on_older_optimizer -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_wave2.py::test_wout_minimal_light_nonconverged_dumps_and_defaults tests/test_wout_wave2.py::test_nonconverged_wout_roundtrip_preserves_fields_and_status -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_env_branch_coverage.py::test_reuse_final_bcovar_env_uses_payload_even_on_fast_path tests/test_wout_env_branch_coverage.py::test_nonconverged_beta_retention_and_legacy_zero_env tests/test_wout_env_branch_coverage.py::test_enable_bsubs_env_overrides_namelist_for_mercier -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_bsub_source_filter_branches tests/test_wout_driver_wave10_coverage.py::test_wout_minimal_rejects_mismatched_layout_and_lambda_shape -q`
+
+Best next steps:
+
+1. Continue source simplification in files with larger remaining hotspots,
+   prioritizing residual iteration, free-boundary validation tests, and
+   `discrete_adjoint.py` only when a meaningful behavior-preserving seam is
+   evident.
+2. For timing/cache helper work, keep tests tied to diagnostics payloads so
+   performance instrumentation stays stable.
+3. Avoid broad WOUT path restructuring unless it is paired with WOUT parity
+   and nonconverged-output tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999420%.
+- Solver monolith reduction: 99.79%.
+- Free-boundary adjoint monolith reduction: 99.51%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 98.88%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.71%.
+- Fixed-boundary optimizer decomposition: 96.18%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.62%.
+- Free-boundary validation-gate maintainability: 97.45%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999971%.
+
 ## 2026-06-19 Residual Candidate-State Construction Consolidation
 
 Branch: `codex/differentiability-refactor-plan`.

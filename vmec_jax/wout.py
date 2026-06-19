@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import time
 from typing import Any
 
 import numpy as np
@@ -120,6 +121,15 @@ def _solve_jxbforce_collocation(A: np.ndarray, rhs: np.ndarray) -> np.ndarray | 
             return sol
         except np.linalg.LinAlgError:
             return None
+
+
+def _timing_start(enabled: bool) -> float | None:
+    return time.perf_counter() if bool(enabled) else None
+
+
+def _record_timing(timing: dict[str, float], key: str, start: float | None) -> None:
+    if start is not None:
+        timing[key] = time.perf_counter() - start
 
 
 def _validate_wint_trig(trig) -> int:
@@ -1059,11 +1069,7 @@ def wout_minimal_from_fixed_boundary(
     wout_fast_bcovar = runtime_options.fast_bcovar
     field_options = minimal_wout_field_options_from_env(wout_light=bool(wout_light))
     wout_timing: dict[str, float] = {}
-    t_wout_total_start = None
-    if wout_timing_enabled:
-        import time as _time
-
-        t_wout_total_start = _time.perf_counter()
+    t_wout_total_start = _timing_start(bool(wout_timing_enabled))
 
     if converged is None:
         converged = True
@@ -1085,8 +1091,7 @@ def wout_minimal_from_fixed_boundary(
     nmax_nyq = int(np.max(np.abs(nyq_modes.n))) if int(nyq_modes.K) > 0 else 0
     mmax_base = max(int(mpol) - 1, mmax_nyq)
     nmax_base = max(int(ntor), nmax_nyq)
-    if wout_timing_enabled:
-        t0 = _time.perf_counter()
+    t0 = _timing_start(bool(wout_timing_enabled))
     trig = vmec_trig_tables(
         ntheta=int(cfg.ntheta),
         nzeta=int(cfg.nzeta),
@@ -1096,8 +1101,7 @@ def wout_minimal_from_fixed_boundary(
         lasym=bool(lasym),
         dtype=np.asarray(state.Rcos).dtype,
     )
-    if wout_timing_enabled:
-        wout_timing["trig_tables_s"] = _time.perf_counter() - t0
+    _record_timing(wout_timing, "trig_tables_s", t0)
 
     geom = _synthesize_wout_geometry_from_state(
         state=state,
@@ -1288,8 +1292,7 @@ def wout_minimal_from_fixed_boundary(
             bsubv_e=np.asarray(bc.bsubv_e),
             trig=trig,
         )
-    if wout_timing_enabled:
-        t0 = _time.perf_counter()
+    t0 = _timing_start(bool(wout_timing_enabled))
     bsubs_half = _compute_bsubs_half_mesh(
         state=state,
         geom_modes=static.modes,
@@ -1308,8 +1311,7 @@ def wout_minimal_from_fixed_boundary(
         force_zu12=zu12_bss,
         apply_scalxc=field_options.apply_bss_scalxc,
     )
-    if wout_timing_enabled:
-        wout_timing["bsubs_half_s"] = _time.perf_counter() - t0
+    _record_timing(wout_timing, "bsubs_half_s", t0)
     # In VMEC's fileout path, jxbforce is called before wrout and updates bsubs
     # to a full-mesh representation via:
     #   bsubs(js) = 0.5*(bsubs(js) + bsubs(js+1)), js=2..ns-1
@@ -1330,8 +1332,7 @@ def wout_minimal_from_fixed_boundary(
     skip_bsub_filter = field_options.skip_bsub_filter
     filter_from_raw = field_options.filter_from_raw
 
-    if wout_timing_enabled:
-        t0 = _time.perf_counter()
+    t0 = _timing_start(bool(wout_timing_enabled))
     if bool(lasym):
         use_lasym_loop = field_options.use_lasym_loop
         if (not skip_bsub_filter) and field_options.lasym_filter:
@@ -1489,9 +1490,8 @@ def wout_minimal_from_fixed_boundary(
             gmnc, gmns, bsupumnc, bsupumns, bsupvmnc, bsupvmns, bsubumnc,
             bsubumns, bsubvmnc, bsubvmns, bsubsmns, bsubsmnc, bmnc, bmns,
         ) = sym_nyq
-    if wout_timing_enabled:
-        wout_timing["nyquist_coeffs_s"] = _time.perf_counter() - t0
-        t0 = _time.perf_counter()
+    _record_timing(wout_timing, "nyquist_coeffs_s", t0)
+    t0 = _timing_start(bool(wout_timing_enabled))
 
     # Optional debug path: reconstruct physical real-space fields from the
     # Nyquist coefficients. This is *not* required for the default Mercier/jdotb
@@ -1512,8 +1512,7 @@ def wout_minimal_from_fixed_boundary(
         basis_nyq = build_helical_basis(nyq_modes, grid_nyq, cache=True)
         bsubu_phys = np.asarray(eval_fourier(bsubumnc, bsubumns, basis_nyq))
         bsubv_phys = np.asarray(eval_fourier(bsubvmnc, bsubvmns, basis_nyq))
-    if wout_timing_enabled:
-        t_bsub_filter = _time.perf_counter()
+    t_bsub_filter = _timing_start(bool(wout_timing_enabled))
     if (not bool(lasym)) and (not skip_bsub_filter):
         if filter_from_raw:
             # Match jxbforce.f directly: filter from the real-space bsubu/bsubv
@@ -1563,20 +1562,17 @@ def wout_minimal_from_fixed_boundary(
                 nmax_force=int(ntor),
                 s=np.asarray(s, dtype=float),
             )
-    if wout_timing_enabled:
-        wout_timing["bsub_filter_s"] = _time.perf_counter() - t_bsub_filter
+    _record_timing(wout_timing, "bsub_filter_s", t_bsub_filter)
     # Match VMEC wrout: bsubu/bsubv Fourier output uses the jxbforce-filtered
     # fields, not the raw bcovar fields.
     bsubu_out = np.asarray(bsubu_diag, dtype=float)
     bsubv_out = np.asarray(bsubv_diag, dtype=float)
-    if wout_timing_enabled:
-        t_bsub_coeffs = _time.perf_counter()
+    t_bsub_coeffs = _timing_start(bool(wout_timing_enabled))
     if not bool(lasym):
         bsubumnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubu_out, modes=nyq_modes, trig=trig)
         bsubvmnc = _vmec_wrout_nyquist_cos_coeffs(f=bsubv_out, modes=nyq_modes, trig=trig)
         _zero_first_surface(bsubumnc, bsubvmnc)
-    if wout_timing_enabled:
-        wout_timing["bsub_coeffs_s"] = _time.perf_counter() - t_bsub_coeffs
+    _record_timing(wout_timing, "bsub_coeffs_s", t_bsub_coeffs)
     # Keep bsubsmns from the direct bsubs_half computation (wrout.f). The
     # Nyquist-reconstructed path is used only for consistency checks.
 
@@ -1587,8 +1583,7 @@ def wout_minimal_from_fixed_boundary(
         jcurv = np.zeros((ns,), dtype=float)
         equif = np.zeros((ns,), dtype=float)
     else:
-        if wout_timing_enabled:
-            t_equif = _time.perf_counter()
+        t_equif = _timing_start(bool(wout_timing_enabled))
         buco, bvco, jcuru, jcurv, equif = _compute_equif_wout(
             bsubu=bsubu_out,
             bsubv=bsubv_out,
@@ -1600,8 +1595,7 @@ def wout_minimal_from_fixed_boundary(
             trig=trig,
             s=s,
         )
-        if wout_timing_enabled:
-            wout_timing["equif_s"] = _time.perf_counter() - t_equif
+        _record_timing(wout_timing, "equif_s", t_equif)
 
     # Current profile metadata for VMECPlot2.
     current_metadata = _wout_current_profile_metadata_from_indata(indata)
@@ -1664,8 +1658,7 @@ def wout_minimal_from_fixed_boundary(
 
     lamscale = float(np.asarray(lamscale_from_phips(flux.phips, s)))
 
-    if wout_timing_enabled:
-        wout_timing["jxbforce_mercier_s"] = _time.perf_counter() - t0
+    _record_timing(wout_timing, "jxbforce_mercier_s", t0)
 
     lmns = _lambda_wout_from_full_mesh(
         lam_full=main_geom.lmns_internal,
