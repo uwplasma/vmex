@@ -292,7 +292,9 @@ extends that differentiability check to source, pressure-profile,
 current-profile, flux-profile, and polynomial-boundary parameters. It compares
 custom VJP directional derivatives against forward sensitivity contractions and
 separately solved finite-difference roots, then writes JSON metrics and an
-optional summary plot.
+optional summary plot. The default solve method is the dense reference; pass
+``--solve-method matrix_free_cg`` to exercise the same custom-VJP contract with
+the matrix-free JAX CG linear solve.
 
 The root-level ``examples/mirror_implicit_solve_benchmark.py`` script benchmarks
 the same forward implicit wrapper over a small ``ns``/``nxi`` ladder. It writes

@@ -21964,3 +21964,117 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+
+---
+## 182. Matrix-Free Implicit-Parameter Gradient Example Coverage
+
+### Steps taken
+
+- Audited the differentiable fixed-boundary API, the differentiability docs,
+  and the root implicit-gradient examples.
+- Confirmed existing unit tests already compare profile and polynomial-boundary
+  custom VJPs against explicit adjoints, forward sensitivities, matrix-free
+  sensitivity solves, and independently solved finite-difference perturbed
+  roots.
+- Added a root-example test that runs
+  `examples/mirror_implicit_parameter_gradients.py` through the
+  `matrix_free_cg` path for pressure-profile and polynomial-boundary
+  parameters with plots enabled.
+- The new test verifies accepted metrics, finite-difference agreement, forward
+  sensitivity agreement, and that the plotted directional-gradient PNG is
+  readable and nonblank.
+- Updated `docs/mirror/differentiability.rst` and `examples/mirror/README.md`
+  so the documented validation surface matches the tested dense and
+  matrix-free custom-VJP paths.
+
+### Results obtained
+
+- The documented implicit-parameter example now has direct automated coverage
+  for the matrix-free pressure/boundary custom-VJP path.
+- The differentiability example's plotted validation artifact is protected by a
+  content check rather than only by manual inspection.
+- The differentiable fixed-boundary lane remains a validated prototype, but the
+  pressure/profile/boundary method gates now have stronger end-to-end example
+  coverage.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_implicit_parameter_gradients.py \
+  --outdir /tmp/mirror_implicit_parameter_gradients_matrix_free_probe \
+  --solve-method matrix_free_cg \
+  --families pressure,boundary \
+  --no-plots
+JAX_ENABLE_X64=1 python examples/mirror_implicit_parameter_gradients.py \
+  --outdir /tmp/mirror_implicit_parameter_gradients_plot_probe \
+  --families pressure,boundary
+JAX_ENABLE_X64=1 pytest tests/mirror/test_mirror_examples.py::test_root_implicit_parameter_gradients_example_matrix_free_writes_plot -q
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_parameter_gradients_example_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_parameter_gradients_example_matrix_free_writes_plot \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_solve_benchmark_runs_without_plots -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+python -m sphinx -W -b html docs docs/_build/html
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- Matrix-free pressure/boundary probe accepted both rows.
+- Plot probe wrote a nonblank `mirror_implicit_parameter_gradients.png`.
+- Focused matrix-free plotted example test passed: `1 passed in 14.75s`.
+- Adjacent implicit-example tests passed: `3 passed in 37.98s`.
+- Ruff check and format check passed for the touched Python test file.
+- Sphinx docs build passed with warnings as errors.
+- Full mirror suite passed: `232 passed, 1 skipped in 218.85s`.
+
+### File structure and best-practice notes
+
+- The new coverage stays in `tests/mirror/test_mirror_examples.py` beside the
+  other root-example smoke tests.
+- Documentation updates are limited to the mirror differentiability page and
+  mirror example README, keeping the validation contract near the public entry
+  points users will run.
+- Generated figures remain under temporary or ignored output directories; no
+  binary artifacts were added to the repository.
+- The matrix-free test uses a small pressure/boundary family subset to keep CI
+  runtime controlled while covering both profile and geometry-parameter VJPs.
+
+### Best next steps
+
+1. Commit and push M182.
+2. Update the draft PR body to include the `232 passed, 1 skipped` full
+   mirror-suite result and matrix-free implicit-gradient coverage.
+3. Check the latest PR head for failing CI jobs after the push, without
+   spending time waiting on queued jobs.
+4. Continue the completion audit with the next remaining non-100% lane,
+   likely toroidal hybrid convergence readiness or the final free-boundary
+   documentation boundary.
+
+### Completion percentages after M182
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `93%`.
+- Fixed-boundary axisymmetric solve: `93%`.
+- Residual Newton / preconditioning: `94%`.
+- Two-coil and manufactured validation: `92%`.
+- Finite-current pitch validation: `92%`.
+- Plotting and `vmec --plot` mirror support: `98%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `96%`.
+- Mirror-Boozer-like diagnostics: `89%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `95%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

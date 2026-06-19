@@ -75,6 +75,13 @@ perturbed roots. These are the first differentiable solved-state contracts, but
 only for reduced axisymmetric source, profile-coefficient, and polynomial
 boundary-coefficient perturbations.
 
+The parameter-gradient example
+``examples/mirror_implicit_parameter_gradients.py`` applies the same custom-VJP
+contracts to source, pressure-profile, current-profile, flux-profile, and
+polynomial-boundary perturbations.  Its tiny-grid validation covers the dense
+reference path, a matrix-free JAX CG pressure/boundary path, finite-difference
+perturbed roots, and the optional plotted directional-gradient summary.
+
 The benchmark example ``examples/mirror_implicit_solve_benchmark.py`` compares
 dense and matrix-free wrapper calls on a small ``ns``/``nxi`` ladder and writes
 JSON, CSV, and optional runtime/memory/error plots under ``results/``.

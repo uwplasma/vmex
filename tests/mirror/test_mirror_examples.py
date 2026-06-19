@@ -1106,6 +1106,42 @@ def test_root_implicit_parameter_gradients_example_runs_without_plots(tmp_path):
         assert row["custom_vs_finite_difference_relative_error"] < 1.0e-3
 
 
+def test_root_implicit_parameter_gradients_example_matrix_free_writes_plot(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_implicit_parameter_gradients.py",
+            "--outdir",
+            str(tmp_path / "implicit_parameter_gradients_matrix_free"),
+            "--solve-method",
+            "matrix_free_cg",
+            "--families",
+            "pressure,boundary",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    path = Path(completed.stdout.strip())
+    metrics = json.loads(path.read_text())
+    assert metrics["solve_method"] == "matrix_free_cg"
+    assert metrics["families"] == ["pressure", "boundary"]
+    assert metrics["accepted"]
+    for row in metrics["rows"]:
+        assert row["accepted"]
+        assert row["perturbed_residual_norm"] < 1.0e-10
+        assert row["custom_vs_forward_relative_error"] < 1.0e-8
+        assert row["custom_vs_finite_difference_relative_error"] < 1.0e-3
+
+    figures = metrics["figures"]
+    assert set(figures) == {"directional_gradients"}
+    pixels = image.imread(figures["directional_gradients"])
+    assert pixels.size > 0
+    assert float(np.std(pixels)) > 1.0e-4
+
+
 def test_root_implicit_solve_benchmark_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
