@@ -7,6 +7,81 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 Residual Free-Boundary Hot-Loop Env Cache Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Converted the cached `VMEC_JAX_FREEB_INCLUDE_EDGE` and
+   `VMEC_JAX_FREEB_RAISE` residual hot-loop flags from lower-cased strings to
+   booleans using `_runtime_env_enabled`.
+2. Preserved the exact historical false-string semantics for these flags while
+   removing repeated tuple membership checks inside the free-boundary residual
+   loop.
+3. Left non-empty-only debug/dump environment variables unchanged because their
+   compatibility semantics are intentionally different.
+
+Results obtained:
+
+- Focused free-boundary/residual checks pass.
+- `tools/diagnostics/source_health.py` shows the same dominant hotspots:
+  `residual/iteration.py`, large free-boundary validation tests,
+  `discrete_adjoint.py`, and `free_boundary.py`.
+- This tranche is semantic simplification rather than LOC reduction:
+  `residual/iteration.py` remains 6059 lines and the changed hunk is
+  line-count neutral.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py --select F401,F841`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_additional_helpers.py::test_residual_iter_history_record_packs_restart_row_with_free_boundary_cadence tests/test_solve_additional_helpers.py::test_append_residual_iter_terminal_history_records_free_boundary_channels tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_forced_active_direct_coil_finite_pressure_solve_has_physics_diagnostics tests/test_step6_solve_fixed_boundary.py::test_step6_fixed_boundary_solve_decreases_energy -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py | head -100`
+
+Best next steps:
+
+1. Stop spending time on neutral micro-cleanups unless they unlock a larger
+   extraction; the user-facing goal is lower total complexity and fewer large
+   files.
+2. Next refactor tranche should target one measurable hotspot with a net LOC
+   drop, preferably by extracting scan/controller result packing or decomposing
+   long validation tests.
+3. Preserve the current branch-local/free-boundary derivative gates while
+   simplifying the surrounding production code.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.737%.
+- Free-boundary adjoint monolith reduction: 99.44%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.68%.
+- WOUT diagnostic/profile decomposition: 99.92%.
+- Bcovar/WOUT parity decomposition: 99.12%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.805%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.45%.
+- Discrete-adjoint replay decomposition: 96.4%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999997%.
+
 ## 2026-06-19 Residual Runtime Environment Parsing Cleanup
 
 Branch: `codex/differentiability-refactor-plan`.

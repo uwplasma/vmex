@@ -2726,9 +2726,9 @@ def solve_fixed_boundary_residual_iter(
 
     # Cache os.getenv calls that would otherwise be repeated every iteration
     # in the hot loop below (saves ~9 os.getenv calls × ~2144 iters = ~19k calls).
-    _env_freeb_include_edge = os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0").strip().lower()
+    _env_freeb_include_edge = _runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0"))
     _env_force_edge_residual = os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower()
-    _env_freeb_raise = os.getenv("VMEC_JAX_FREEB_RAISE", "").strip().lower()
+    _env_freeb_raise = _runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_RAISE", ""))
     _env_debug_iter = os.getenv("VMEC_JAX_DEBUG_ITER", "").strip()
     _env_dump_lam = os.getenv("VMEC_JAX_DUMP_LAM", "")
     _env_dump_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "")
@@ -2816,7 +2816,7 @@ def solve_fixed_boundary_residual_iter(
                 # interior mesh; free-boundary coupling enters through the
                 # dedicated edge `rbsq` terms in `forces.f`, not by enabling
                 # generic edge residual rows.
-                include_edge = _env_freeb_include_edge not in ("", "0", "false", "no")
+                include_edge = _env_freeb_include_edge
             else:
                 include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
             if track_history:
@@ -2950,7 +2950,7 @@ def solve_fixed_boundary_residual_iter(
                                 int(freeb_nvacskip),
                             )
                 except Exception:
-                    if _env_freeb_raise not in ("", "0", "false", "no"):
+                    if _env_freeb_raise:
                         raise
                     freeb_bsqvac_half_current = None
                     freeb_nestor_trace_current = None
@@ -3017,7 +3017,7 @@ def solve_fixed_boundary_residual_iter(
                     freeb_nestor_trial_solve_time_history.append(0.0)
                     freeb_nestor_trial_sample_time_history.append(0.0)
                     freeb_nestor_trial_failed_history.append(1)
-                    if _env_freeb_raise not in ("", "0", "false", "no"):
+                    if _env_freeb_raise:
                         raise
                     return freeb_bsqvac_half_current
 
