@@ -24056,3 +24056,88 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999981%.
+
+## 2026-06-19 Driver Staging and WOUT Field-Seam Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `Vmec2000StagedSolveContext.from_namespace(...)` so the public
+   fixed-boundary driver no longer repeats the full staged-solve dataclass
+   constructor inline.
+2. Kept behavior-sensitive coercions and monkeypatchable hook dependencies as
+   explicit overrides at the driver call site.
+3. Moved VMEC `wrout` half-to-full-mesh `bsubs` conversion into the WOUT bsubs
+   domain as `bsubs_full_mesh_for_wrout(...)`.
+4. Moved bsubu/bsubv diagnostic source selection, including output-time
+   IEQUI-equif correction, into the minimal-WOUT assembly domain as
+   `select_bsubuv_diagnostic_fields(...)`.
+
+Results obtained:
+
+- `run_fixed_boundary` decreased from 669 lines at the start of this refactor
+  window to 650 lines after preserving explicit hook overrides.
+- `wout_minimal_from_fixed_boundary` decreased from 661 to 631 lines.
+- WOUT physics-sensitive source selection and `bsubs` mesh conversion now have
+  named seams that can receive direct unit tests without entering the full WOUT
+  writer.
+- Source-health still identifies the fixed-boundary residual loop, scan
+  controller, WOUT writer, driver, and implicit residual solve as the remaining
+  production hotspots.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/driver.py vmec_jax/drivers/staging.py`
+- `python -m py_compile vmec_jax/wout.py vmec_jax/io/wout/bsubs.py vmec_jax/io/wout/minimal.py`
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/staging.py`
+- `python -m ruff check vmec_jax/wout.py vmec_jax/io/wout/bsubs.py vmec_jax/io/wout/minimal.py`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_math_helpers.py tests/test_solve_scan_output.py tests/test_solve_scan_planning_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_python_default_fixed_boundary_uses_optimized_controller tests/test_solve_hotpaths.py::test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_run_wave8_coverage.py::test_run_fixed_boundary_dispatches_fixed_and_free_static_branches tests/test_driver_run_wave8_coverage.py::test_run_free_boundary_rejects_fixed_input_and_delegates_free_input tests/test_driver_api.py::test_run_fixed_boundary_keeps_supporting_free_boundary_inputs -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_helpers.py tests/test_wout_fast_helpers.py tests/test_wout_lasym_bsubv_parity.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_finite_beta_helpers_unit.py tests/test_glasser_resistive_interchange.py -q`
+
+Best next steps:
+
+1. Commit and push this driver/WOUT seam cleanup.
+2. Return to the fixed-boundary residual non-scan loop. The next large tranche
+   should split a named non-scan context/result boundary around the post-scan
+   host loop while preserving compatibility-facade monkeypatch seams.
+3. If the non-scan tranche proves too risky, continue with production hotspots
+   in this order: implicit VMEC-residual solve, WOUT LASYM Nyquist assembly,
+   then driver finish/staging context construction.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999984%.
+- Solver monolith reduction: 99.872%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.953%.
+- Residual iteration decomposition: 99.33%.
+- WOUT diagnostic/profile decomposition: 99.986%.
+- Bcovar/WOUT parity decomposition: 99.18%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.895%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.40%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999982%.

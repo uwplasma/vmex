@@ -816,11 +816,26 @@ def bsubuv_parity_from_bcovar(
     return bsubu_even, bsubu_odd, bsubv_even, bsubv_odd
 
 
+def bsubs_full_mesh_for_wrout(*, bsubs_half: np.ndarray) -> np.ndarray:
+    """Convert half-mesh ``bsubs`` to VMEC ``wrout`` full-mesh convention."""
+
+    bsubs_full = np.asarray(bsubs_half, dtype=float).copy()
+    ns = int(bsubs_full.shape[0])
+    if ns > 0:
+        bsubs_full[0] = 0.0
+    if ns > 2:
+        bsubs_full[1:-1] = 0.5 * (bsubs_full[1:-1] + bsubs_full[2:])
+        bsubs_full[0] = 2.0 * bsubs_full[1] - bsubs_full[2]
+        bsubs_full[-1] = 2.0 * bsubs_full[-1] - bsubs_full[-2]
+    return bsubs_full
+
+
 
 __all__ = [
     "bsubuv_parity_from_bcovar",
     "bsubuv_parity_from_coeffs",
     "bsubuv_parity_from_realspace_jxbforce",
     "bsubuv_parity_from_state",
+    "bsubs_full_mesh_for_wrout",
     "compute_bsubs_half_mesh",
 ]
