@@ -22930,3 +22930,97 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 191. Implicit Solve Benchmark Plot Coverage
+
+### Steps taken
+
+- Audited the differentiable solved-state lane after M190 and identified that
+  `examples/mirror_implicit_solve_benchmark.py` had no automated plot coverage.
+- Rechecked the current external differentiability guidance for custom JAX
+  derivative rules, JAXopt implicit differentiation, and Lineax-style linear
+  solver abstractions to keep the lane aligned with implicit/linear-solve
+  differentiation rather than unrolled CLI solves.
+- Ran a plotted implicit-solve benchmark probe at the existing small CI
+  settings: `ns=5`, `nxi=7`, and `repeat=1`.
+- Added a plotted smoke test that verifies dense and matrix-free CG benchmark
+  rows, CSV output, matrix-free error/residual tolerances, and a nonblank
+  runtime/memory/error summary plot.
+
+### Results obtained
+
+- The implicit solve benchmark now has automated coverage for its review-facing
+  summary plot as well as the dense-vs-matrix-free CG JSON/CSV contract.
+- The test keeps dense solves as the tiny-grid correctness reference and checks
+  the matrix-free CG row against the existing `1e-5` relative-error tolerance.
+- This strengthens the differentiable solved-state API lane without changing
+  the public API or differentiating through host-side benchmark/reporting code.
+
+### How it was tested
+
+Commands run:
+
+```bash
+JAX_ENABLE_X64=1 python examples/mirror_implicit_solve_benchmark.py \
+  --outdir /tmp/mirror_implicit_solve_benchmark_plot_probe \
+  --ns-array 5 \
+  --nxi-array 7 \
+  --repeat 1
+JAX_ENABLE_X64=1 pytest \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_solve_benchmark_runs_without_plots \
+  tests/mirror/test_mirror_examples.py::test_root_implicit_solve_benchmark_writes_nonblank_plot -q
+python -m ruff check tests/mirror/test_mirror_examples.py
+python -m ruff format --check tests/mirror/test_mirror_examples.py
+JAX_ENABLE_X64=1 pytest tests/mirror -q
+```
+
+Results:
+
+- The temporary probe wrote the benchmark metrics JSON, CSV, and nonblank
+  `mirror_implicit_solve_benchmark.png` figure.
+- Focused implicit benchmark tests passed: `2 passed in 16.46s`.
+- Ruff check and format check passed.
+- Full mirror suite passed: `239 passed, 1 skipped in 258.71s`.
+
+### File structure and best-practice notes
+
+- The new coverage stays in `tests/mirror/test_mirror_examples.py`, beside the
+  no-plot implicit solve benchmark test.
+- The benchmark example keeps host-side timing, memory tracing, CSV writing,
+  and plotting out of the differentiable API; the differentiable path remains
+  the reduced JAX residual and implicit linear-solve wrappers.
+- No generated benchmark artifacts were committed.
+
+### Best next steps
+
+1. Commit and push M191.
+2. Update the draft PR body with section 191 and the `239 passed, 1 skipped`
+   full mirror-suite result.
+3. Inspect only failed CI jobs after the push.
+4. Continue the final audit with toroidal-hybrid convergence/readiness and the
+   ESSOS/free-boundary diagnostic evidence that remains below 100%.
+
+### Completion percentages after M191
+
+- Geometry/grids/bases: `94%`.
+- Field/energy/residual kernels: `95%`.
+- Fixed-boundary axisymmetric solve: `96%`.
+- Residual Newton / preconditioning: `96%`.
+- Two-coil and manufactured validation: `95%`.
+- Finite-current pitch validation: `94%`.
+- Plotting and `vmec --plot` mirror support: `99%`.
+- I/O schema and docs: `100%`.
+- Differentiable solved-state API: `97%`.
+- Mirror-Boozer-like diagnostics: `94%`.
+- Free-boundary mirror lane: `99%` overall, with reduced residual-vector
+  nonlinear solve scope complete and benchmark plots covered.
+- Straight-axis hybrid support fixture lane: `100%` for support-fixture scope.
+- Toroidal stellarator-mirror hybrid lane: `96%`.
+- ESSOS circular-coil mirror beta scan: `97%`.
+- Public API/source simplification: `100%` for the mirror package initializer.
+- PR merge readiness overall: `99%`.
+
+### User input needed
+
+No user input is needed.

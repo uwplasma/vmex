@@ -1286,6 +1286,38 @@ def test_root_implicit_solve_benchmark_runs_without_plots(tmp_path):
     assert max(row["relative_error_vs_dense"] for row in matrix_free_rows) < 1.0e-5
 
 
+def test_root_implicit_solve_benchmark_writes_nonblank_plot(tmp_path):
+    image = pytest.importorskip("matplotlib.image")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "examples/mirror_implicit_solve_benchmark.py",
+            "--outdir",
+            str(tmp_path / "implicit_solve_benchmark_plots"),
+            "--ns-array",
+            "5",
+            "--nxi-array",
+            "7",
+            "--repeat",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    assert metrics["accepted"]
+    assert Path(metrics["csv"]).exists()
+    assert set(metrics["figures"]) == {"summary"}
+    _assert_nonblank_image(metrics["figures"]["summary"], image)
+    rows = {(row["method"], row["vector_size"]): row for row in metrics["rows"]}
+    assert set(rows) == {("dense", 45), ("matrix_free_cg", 45)}
+    assert rows[("dense", 45)]["relative_error_vs_dense"] == pytest.approx(0.0)
+    assert rows[("matrix_free_cg", 45)]["relative_error_vs_dense"] < 1.0e-5
+    assert rows[("matrix_free_cg", 45)]["linear_residual_relative"] < 1.0e-5
+
+
 def test_root_solver_comparison_example_runs_without_plots(tmp_path):
     completed = subprocess.run(
         [
