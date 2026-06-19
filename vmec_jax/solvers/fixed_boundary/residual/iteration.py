@@ -20,7 +20,7 @@ from functools import partial
 import time
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 
@@ -80,10 +80,7 @@ from vmec_jax.solvers.fixed_boundary.residual.state_setup import (
     build_residual_state_setup as _build_residual_state_setup,
 )
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
-    attach_residual_iter_timing_diagnostics as _attach_residual_iter_timing_diagnostics,
-    build_residual_iter_resume_state_from_namespace as _build_residual_iter_resume_state_from_namespace,
-    final_free_boundary_residual_reports_from_namespace as _final_free_boundary_residual_reports_from_namespace,
-    finalize_residual_iter_result as _finalize_residual_iter_result,
+    finalize_residual_iter_from_namespace as _finalize_residual_iter_from_namespace,
     precompile_only_residual_iter_result as _precompile_only_residual_iter_result,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_cache import (
@@ -4659,99 +4656,14 @@ def solve_fixed_boundary_residual_iter(
         if timing_enabled and t_iteration_post_update_start is not None:
             timing_stats["iteration_post_update"] += time.perf_counter() - float(t_iteration_post_update_start)
 
-    t_finalize_start = time.perf_counter() if timing_enabled else None
-    final_freeb = _final_free_boundary_residual_reports_from_namespace(
+    return _finalize_residual_iter_from_namespace(
         locals(),
+        result_type=SolveVmecResidualResult,
         nestor_external_only_step_func=nestor_external_only_step,
         residual_fsq_from_norms_func=_residual_fsq_from_norms,
         device_get_floats_func=_device_get_floats,
-    )
-    converged_strict_final, converged_total_final, _ = _residual_convergence_flags(
-        fsqr=final_freeb["final_fsqr_report"],
-        fsqz=final_freeb["final_fsqz_report"],
-        fsql=final_freeb["final_fsql_report"],
-        ftol=ftol,
-        fsq_total_target=fsq_total_target,
-    )
-    t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
-    diag: Dict[str, Any] = {
-        "ftol": ftol,
-        "requested_ftol": float(ftol),
-        "gamma": gamma,
-        "step_size": float(step_size),
-        "precond_radial_alpha": float(precond_radial_alpha),
-        "precond_lambda_alpha": float(precond_lambda_alpha),
-        "strict_update": bool(strict_update),
-        "reference_mode": bool(reference_mode),
-        "use_restart_triggers": bool(use_restart_triggers),
-        "use_direct_fallback": bool(use_direct_fallback),
-        "max_update_rms": float(max_update_rms),
-        "converged": bool(converged),
-        "converged_strict": bool(converged_strict_final),
-        "converged_by_total_fsq": bool(converged_total_final),
-        "final_fsqr": float(final_freeb["final_fsqr_report"]),
-        "final_fsqz": float(final_freeb["final_fsqz_report"]),
-        "final_fsql": float(final_freeb["final_fsql_report"]),
-        "pre_update_final_fsqr": float(fsqr_f),
-        "pre_update_final_fsqz": float(fsqz_f),
-        "pre_update_final_fsql": float(fsql_f),
-        "final_residual_recomputed_on_accepted_state": bool(final_freeb["final_residual_recomputed"]),
-        "badjac_use_state": bool(badjac_use_state),
-        "badjac_mode": badjac_mode,
-        "badjac_state_probe": bool(badjac_state_probe),
-        "badjac_initial_state_probe_iters": int(badjac_initial_state_probe_iters),
-        "light_history": bool(light_history),
-        "resume_state_mode": str(resume_state_mode),
-        "fsq_total_target": fsq_total_target,
-        "ijacob": int(ijacob),
-        "bad_resets": int(bad_resets),
-        "iter1_final": int(iter1),
-        "res0": float(res0),
-        **_residual_iter_history_diagnostics(locals()),
-        "free_boundary": {
-            "enabled": bool(free_boundary_enabled),
-            "nvacskip": int(freeb_nvacskip),
-            "nvskip0": int(freeb_nvskip0),
-            "ivac": int(freeb_ivac),
-            "ivacskip": int(freeb_ivacskip),
-            "couple_edge": bool(freeb_couple_edge),
-            "nestor_model": str(final_freeb["final_nestor_model"]),
-            "vacuum_stub": bool(final_freeb["final_vacuum_stub"]),
-            "activate_fsq": None if free_boundary_activate_fsq is None else float(free_boundary_activate_fsq),
-            "plascur": float(freeb_plascur),
-            "last_nestor_diagnostics": dict(final_freeb["final_nestor_diagnostics"]),
-            "final_nestor_recompute_attempted": bool(final_freeb["final_nestor_recompute_attempted"]),
-            "final_nestor_recompute_failed": bool(final_freeb["final_nestor_recompute_failed"]),
-            "final_nestor_sample_time_s": float(final_freeb["final_nestor_sample_time_s"]),
-            "final_nestor_solve_time_s": float(final_freeb["final_nestor_solve_time_s"]),
-        },
-    }
-    diag = _attach_residual_iter_timing_diagnostics(
-        diag,
-        timing_stats,
-        timing_enabled=bool(timing_enabled),
-        timing_detail_enabled=bool(timing_detail_enabled),
-        finalize_diag_build_start=t_finalize_diag_build_start,
-        iteration_loop_start=t_iteration_loop_start,
-        finalize_start=t_finalize_start,
-        solve_wall_start=float(_solve_wall_start),
-    )
-    diag["resume_state"] = _build_residual_iter_resume_state_from_namespace(
-        locals(),
-        resume_state_mode=str(resume_state_mode),
-    )
-    return _finalize_residual_iter_result(
-        result_type=SolveVmecResidualResult,
-        state=state,
-        w_history=w_history,
-        fsqr2_history=fsqr2_history,
-        fsqz2_history=fsqz2_history,
-        fsql2_history=fsql2_history,
-        grad_rms_history=grad_rms_history,
-        step_history=step_history,
-        diagnostics=diag,
+        residual_convergence_flags_func=_residual_convergence_flags,
+        residual_iter_history_diagnostics_func=_residual_iter_history_diagnostics,
         attach_free_boundary_diagnostics=_attach_freeb_diag,
         return_final_force_payload=bool(return_final_force_payload),
-        converged=bool(converged),
-        final_force_payload=k,
     )

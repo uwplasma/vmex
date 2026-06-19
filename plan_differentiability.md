@@ -23737,3 +23737,79 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999977%.
+
+## 2026-06-19 Residual Finalization Boundary Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `finalize_residual_iter_from_namespace` to
+   `vmec_jax/solvers/fixed_boundary/residual/finalize.py`.
+2. Moved final free-boundary residual recomputation, strict/total convergence
+   flag construction, diagnostics assembly, resume-state packing, timing
+   diagnostics, and final `SolveVmecResidualResult` construction out of the
+   residual host loop.
+3. Left `solve_fixed_boundary_residual_iter` with a single finalization call
+   that passes the existing host-loop namespace and the necessary closure
+   functions.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` decreased from 4757
+  to 4669 lines.
+- `solve_fixed_boundary_residual_iter` decreased from 4382 to 4297 lines.
+- The future non-scan host-controller extraction now has one explicit
+  finalization seam instead of an inline diagnostics/result block.
+- Focused non-scan, free-boundary, scan, and finalize-helper tests passed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/finalize.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/finalize.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_nonscan_non_strict_backtracking_accepts_momentum_update tests/test_solve_finish_cache_more_coverage.py::test_nonscan_debug_force_path_runs_with_m1_and_zeroing tests/test_solve_additional_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trial_nestor_timing_records_solver_trial_calls tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_forced_active_direct_coil_finite_pressure_solve_has_physics_diagnostics -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_finalize_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 35`
+
+Best next steps:
+
+1. Commit and push this finalization-boundary extraction.
+2. Add a host-loop context/result shell around the non-scan controller, using
+   the new finalization seam as the return path.
+3. Preserve facade monkeypatch compatibility by passing monkeypatch-sensitive
+   helpers through that context or registering any new host-controller module in
+   `vmec_jax/solve.py`.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999980%.
+- Solver monolith reduction: 99.868%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.28%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.885%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.1%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 99.20%.
+- Free-boundary validation-gate maintainability: 98.40%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.99999999978%.

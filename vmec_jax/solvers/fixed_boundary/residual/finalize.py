@@ -33,6 +33,7 @@ __all__ = [
     "build_residual_iter_resume_state_payload",
     "build_residual_iter_resume_state_from_namespace",
     "finalize_residual_iter_result",
+    "finalize_residual_iter_from_namespace",
     "precompile_only_residual_iter_result",
     "vmec2000_state_only_scan_result",
     "vmec2000_traced_scan_result",
@@ -245,6 +246,129 @@ def finalize_residual_iter_result(
         except Exception:
             pass
     return result
+
+
+def finalize_residual_iter_from_namespace(
+    namespace: Mapping[str, Any],
+    *,
+    result_type: type,
+    nestor_external_only_step_func: Callable[..., Any],
+    residual_fsq_from_norms_func: Callable[..., Any],
+    device_get_floats_func: Callable[..., tuple[float, ...]],
+    residual_convergence_flags_func: Callable[..., tuple[bool, bool, float]],
+    residual_iter_history_diagnostics_func: Callable[[Mapping[str, Any]], dict[str, Any]],
+    attach_free_boundary_diagnostics: Callable[[Any], Any],
+    return_final_force_payload: bool,
+) -> Any:
+    """Assemble the final residual-iteration result from host-loop locals.
+
+    This function is intentionally namespace-based for now: it preserves the
+    existing VMEC host-controller state names while giving the large non-scan
+    loop a single, explicit finalization seam.
+    """
+
+    ns = namespace
+    timing_enabled = bool(ns["timing_enabled"])
+    t_finalize_start = time.perf_counter() if timing_enabled else None
+    final_freeb = final_free_boundary_residual_reports_from_namespace(
+        ns,
+        nestor_external_only_step_func=nestor_external_only_step_func,
+        residual_fsq_from_norms_func=residual_fsq_from_norms_func,
+        device_get_floats_func=device_get_floats_func,
+    )
+    converged_strict_final, converged_total_final, _ = residual_convergence_flags_func(
+        fsqr=final_freeb["final_fsqr_report"],
+        fsqz=final_freeb["final_fsqz_report"],
+        fsql=final_freeb["final_fsql_report"],
+        ftol=ns["ftol"],
+        fsq_total_target=ns["fsq_total_target"],
+    )
+    t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
+    diag: dict[str, Any] = {
+        "ftol": ns["ftol"],
+        "requested_ftol": float(ns["ftol"]),
+        "gamma": ns["gamma"],
+        "step_size": float(ns["step_size"]),
+        "precond_radial_alpha": float(ns["precond_radial_alpha"]),
+        "precond_lambda_alpha": float(ns["precond_lambda_alpha"]),
+        "strict_update": bool(ns["strict_update"]),
+        "reference_mode": bool(ns["reference_mode"]),
+        "use_restart_triggers": bool(ns["use_restart_triggers"]),
+        "use_direct_fallback": bool(ns["use_direct_fallback"]),
+        "max_update_rms": float(ns["max_update_rms"]),
+        "converged": bool(ns["converged"]),
+        "converged_strict": bool(converged_strict_final),
+        "converged_by_total_fsq": bool(converged_total_final),
+        "final_fsqr": float(final_freeb["final_fsqr_report"]),
+        "final_fsqz": float(final_freeb["final_fsqz_report"]),
+        "final_fsql": float(final_freeb["final_fsql_report"]),
+        "pre_update_final_fsqr": float(ns["fsqr_f"]),
+        "pre_update_final_fsqz": float(ns["fsqz_f"]),
+        "pre_update_final_fsql": float(ns["fsql_f"]),
+        "final_residual_recomputed_on_accepted_state": bool(final_freeb["final_residual_recomputed"]),
+        "badjac_use_state": bool(ns["badjac_use_state"]),
+        "badjac_mode": ns["badjac_mode"],
+        "badjac_state_probe": bool(ns["badjac_state_probe"]),
+        "badjac_initial_state_probe_iters": int(ns["badjac_initial_state_probe_iters"]),
+        "light_history": bool(ns["light_history"]),
+        "resume_state_mode": str(ns["resume_state_mode"]),
+        "fsq_total_target": ns["fsq_total_target"],
+        "ijacob": int(ns["ijacob"]),
+        "bad_resets": int(ns["bad_resets"]),
+        "iter1_final": int(ns["iter1"]),
+        "res0": float(ns["res0"]),
+        **residual_iter_history_diagnostics_func(ns),
+        "free_boundary": {
+            "enabled": bool(ns["free_boundary_enabled"]),
+            "nvacskip": int(ns["freeb_nvacskip"]),
+            "nvskip0": int(ns["freeb_nvskip0"]),
+            "ivac": int(ns["freeb_ivac"]),
+            "ivacskip": int(ns["freeb_ivacskip"]),
+            "couple_edge": bool(ns["freeb_couple_edge"]),
+            "nestor_model": str(final_freeb["final_nestor_model"]),
+            "vacuum_stub": bool(final_freeb["final_vacuum_stub"]),
+            "activate_fsq": (
+                None
+                if ns["free_boundary_activate_fsq"] is None
+                else float(ns["free_boundary_activate_fsq"])
+            ),
+            "plascur": float(ns["freeb_plascur"]),
+            "last_nestor_diagnostics": dict(final_freeb["final_nestor_diagnostics"]),
+            "final_nestor_recompute_attempted": bool(final_freeb["final_nestor_recompute_attempted"]),
+            "final_nestor_recompute_failed": bool(final_freeb["final_nestor_recompute_failed"]),
+            "final_nestor_sample_time_s": float(final_freeb["final_nestor_sample_time_s"]),
+            "final_nestor_solve_time_s": float(final_freeb["final_nestor_solve_time_s"]),
+        },
+    }
+    diag = attach_residual_iter_timing_diagnostics(
+        diag,
+        ns["timing_stats"],
+        timing_enabled=timing_enabled,
+        timing_detail_enabled=bool(ns["timing_detail_enabled"]),
+        finalize_diag_build_start=t_finalize_diag_build_start,
+        iteration_loop_start=ns["t_iteration_loop_start"],
+        finalize_start=t_finalize_start,
+        solve_wall_start=float(ns["_solve_wall_start"]),
+    )
+    diag["resume_state"] = build_residual_iter_resume_state_from_namespace(
+        ns,
+        resume_state_mode=str(ns["resume_state_mode"]),
+    )
+    return finalize_residual_iter_result(
+        result_type=result_type,
+        state=ns["state"],
+        w_history=ns["w_history"],
+        fsqr2_history=ns["fsqr2_history"],
+        fsqz2_history=ns["fsqz2_history"],
+        fsql2_history=ns["fsql2_history"],
+        grad_rms_history=ns["grad_rms_history"],
+        step_history=ns["step_history"],
+        diagnostics=diag,
+        attach_free_boundary_diagnostics=attach_free_boundary_diagnostics,
+        return_final_force_payload=bool(return_final_force_payload),
+        converged=bool(ns["converged"]),
+        final_force_payload=ns["k"],
+    )
 
 
 def _empty_history_result(
