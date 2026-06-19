@@ -20869,3 +20869,71 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.999999981%.
+
+## 2026-06-19 Free-Boundary Dump Payload Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Rebalanced from residual iteration to the next production hotspot,
+   `vmec_jax/free_boundary.py`.
+2. Simplified optional array insertion in `_maybe_dump_scalpot_jax` by replacing
+   repeated optional-axis and derivative-array blocks with compact keyed loops.
+3. Avoided the dense NESTOR numerical operator and adaptive free-boundary
+   branch policy; this change is limited to diagnostics/dump payload assembly.
+
+Results obtained:
+
+- `free_boundary.py` decreased from 3499 to 3492 lines.
+- Dump payload keys and dtype conversions are preserved:
+  `axis_r_full`, `axis_z_full`, `axis_r_parity`, `axis_z_parity`, `Ruu`,
+  `Ruv`, `Rvv`, `Zuu`, `Zuv`, and `Zvv`.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m ruff check vmec_jax/free_boundary.py vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_coil_provider_forward.py tests/test_free_boundary_coil_provider_gradients.py -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue trimming `free_boundary.py` only through diagnostics/cache setup
+   helpers unless a stronger parity gate is run.
+2. Return to `discrete_adjoint.py` for replay/helper consolidation, since it is
+   the next production hotspot after `free_boundary.py`.
+3. Keep branch claims conservative: these cleanups do not change adaptive
+   free-boundary differentiability status.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999456%.
+- Solver monolith reduction: 99.825%.
+- Free-boundary adjoint monolith reduction: 99.54%.
+- Driver workflow decomposition: 99.945%.
+- Residual iteration decomposition: 99.04%.
+- WOUT diagnostic/profile decomposition: 99.975%.
+- Bcovar/WOUT parity decomposition: 99.15%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.82%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.74%.
+- Fixed-boundary optimizer decomposition: 96.22%.
+- Plotting/WOUT visualization decomposition: 96.80%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.75%.
+- Discrete-adjoint replay decomposition: 96.62%.
+- Free-boundary validation-gate maintainability: 97.96%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.999999982%.

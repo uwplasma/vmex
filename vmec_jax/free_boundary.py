@@ -2344,28 +2344,21 @@ def _maybe_dump_scalpot_jax(
         )
     except Exception:
         pass
-    if sample.axis_r_full is not None:
-        out["axis_r_full"] = np.asarray(sample.axis_r_full, dtype=float)
-    if sample.axis_z_full is not None:
-        out["axis_z_full"] = np.asarray(sample.axis_z_full, dtype=float)
-    if sample.axis_r_parity is not None:
-        out["axis_r_parity"] = np.asarray(sample.axis_r_parity, dtype=float)
-    if sample.axis_z_parity is not None:
-        out["axis_z_parity"] = np.asarray(sample.axis_z_parity, dtype=float)
+    for key in ("axis_r_full", "axis_z_full", "axis_r_parity", "axis_z_parity"):
+        if (value := getattr(sample, key)) is not None:
+            out[key] = np.asarray(value, dtype=float)
     if plascur is not None:
         out["plascur"] = np.asarray(float(plascur), dtype=float)
-    if sample.ruu is not None:
-        out["Ruu"] = np.asarray(sample.ruu, dtype=float)
-    if sample.ruv is not None:
-        out["Ruv"] = np.asarray(sample.ruv, dtype=float)
-    if sample.rvv is not None:
-        out["Rvv"] = np.asarray(sample.rvv, dtype=float)
-    if sample.zuu is not None:
-        out["Zuu"] = np.asarray(sample.zuu, dtype=float)
-    if sample.zuv is not None:
-        out["Zuv"] = np.asarray(sample.zuv, dtype=float)
-    if sample.zvv is not None:
-        out["Zvv"] = np.asarray(sample.zvv, dtype=float)
+    for source, key in (
+        ("ruu", "Ruu"),
+        ("ruv", "Ruv"),
+        ("rvv", "Rvv"),
+        ("zuu", "Zuu"),
+        ("zuv", "Zuv"),
+        ("zvv", "Zvv"),
+    ):
+        if (value := getattr(sample, source)) is not None:
+            out[key] = np.asarray(value, dtype=float)
     if source_cache_iter is not None:
         out["source_cache_iter"] = np.asarray(int(source_cache_iter), dtype=np.int64)
     out["matrix_override_applied"] = np.asarray(1 if bool(matrix_override_applied) else 0, dtype=np.int64)
