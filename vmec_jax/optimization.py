@@ -807,43 +807,8 @@ class FixedBoundaryExactOptimizer:
         return np.asarray(fn(state), dtype=float)
 
     _callback_point_id = _state_cache.callback_point_id
-
-    def _trace_callback_event(
-        self,
-        kind: str,
-        params,
-        *,
-        source: str,
-        wall_time_s: float,
-    ) -> None:
-        if not getattr(self, "_callback_trace_enabled", False):
-            return
-        cache_key = self._exact_cache_key(params)
-        previous_key = getattr(self, "_callback_previous_key", None)
-        event = {
-            "index": len(self._callback_trace),
-            "kind": str(kind),
-            "source": str(source),
-            "point_id": self._callback_point_id(cache_key),
-            "same_as_previous": bool(previous_key == cache_key),
-            "wall_time_s": float(wall_time_s),
-        }
-        self._callback_trace.append(event)
-        self._callback_previous_key = cache_key
-
-    def _callback_trace_dump(self) -> dict:
-        events = list(getattr(self, "_callback_trace", []))
-        summary: dict[str, dict[str, float | int]] = {}
-        for event in events:
-            key = f"{event['kind']}:{event['source']}"
-            rec = summary.setdefault(key, {"count": 0, "wall_time_s": 0.0})
-            rec["count"] = int(rec["count"]) + 1
-            rec["wall_time_s"] = float(rec["wall_time_s"]) + float(event["wall_time_s"])
-        return {
-            "enabled": bool(getattr(self, "_callback_trace_enabled", False)),
-            "events": events,
-            "summary": {key: summary[key] for key in sorted(summary)},
-        }
+    _trace_callback_event = _profiling.trace_callback_event
+    _callback_trace_dump = _profiling.callback_trace_dump
 
     _exact_cache_key = staticmethod(_state_cache.exact_cache_key)
     _remember_initial_state = _state_cache.remember_initial_state

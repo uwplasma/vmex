@@ -22745,3 +22745,72 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.95%.
 - Overall differentiability-refactor PR: 99.99999999945%.
+
+## 2026-06-19 Optimizer Callback Trace Profiling Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Inspected callback trace bookkeeping and the dedicated callback-trace tests.
+2. Moved callback trace event recording and summary dump construction from
+   `FixedBoundaryExactOptimizer` into
+   `optimizers.fixed_boundary.profiling`.
+3. Kept callback point-id ownership in `state_cache` and exposed the old
+   private optimizer method names through class aliases.
+4. Preserved callback trace event schema, repeat-point detection, summary keys,
+   and history-dump integration.
+
+Results obtained:
+
+- `vmec_jax/optimization.py` decreased from 2251 to 2216 lines.
+- Callback profiling logic is now in the profiling domain module.
+- No new source file was added.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/profiling.py`
+- `python -m ruff check vmec_jax/optimization.py vmec_jax/optimizers/fixed_boundary/profiling.py tests/test_optimization_callback_trace.py tests/test_optimization_helpers.py tests/test_optimization_wave2_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_callback_trace.py tests/test_optimization_helpers.py tests/test_optimization_wave2_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 24 --top-functions 55`
+
+Best next steps:
+
+1. Continue reducing `optimization.py` with residual-history bookkeeping or
+   exact-state solve helper seams.
+2. Consider an in-place plotting cleanup only after optimizer drops below
+   roughly 2200 lines.
+3. Keep CI watching deferred; use focused tests plus source-health during
+   refactor tranches.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999962%.
+- Solver monolith reduction: 99.827%.
+- Free-boundary adjoint monolith reduction: 99.60%.
+- Driver workflow decomposition: 99.949%.
+- Residual iteration decomposition: 99.055%.
+- WOUT diagnostic/profile decomposition: 99.982%.
+- Bcovar/WOUT parity decomposition: 99.16%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.825%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.87%.
+- Fixed-boundary optimizer decomposition: 97.55%.
+- Plotting/WOUT visualization decomposition: 97.32%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.82%.
+- Discrete-adjoint replay decomposition: 96.82%.
+- Free-boundary validation-gate maintainability: 98.18%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9999999995%.

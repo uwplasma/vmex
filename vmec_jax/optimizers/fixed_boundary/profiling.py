@@ -12,6 +12,8 @@ import time
 
 import numpy as np
 
+from .state_cache import callback_point_id
+
 
 _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
     ("tape_solve_call_s", "exact_tape_build_solve_call"),
@@ -20,6 +22,49 @@ _EXACT_TAPE_BUILD_TIMING_PROFILE_NAMES = (
     ("tape_dynamic_payload_build_s", "exact_tape_build_dynamic_payload"),
     ("tape_trace_stack_s", "exact_tape_build_trace_stack"),
 )
+
+
+def trace_callback_event(
+    optimizer,
+    kind: str,
+    params,
+    *,
+    source: str,
+    wall_time_s: float,
+) -> None:
+    """Append a residual/Jacobian callback event when tracing is enabled."""
+
+    if not getattr(optimizer, "_callback_trace_enabled", False):
+        return
+    cache_key = optimizer._exact_cache_key(params)
+    previous_key = getattr(optimizer, "_callback_previous_key", None)
+    event = {
+        "index": len(optimizer._callback_trace),
+        "kind": str(kind),
+        "source": str(source),
+        "point_id": callback_point_id(optimizer, cache_key),
+        "same_as_previous": bool(previous_key == cache_key),
+        "wall_time_s": float(wall_time_s),
+    }
+    optimizer._callback_trace.append(event)
+    optimizer._callback_previous_key = cache_key
+
+
+def callback_trace_dump(optimizer) -> dict:
+    """Return callback trace events plus a stable kind/source summary."""
+
+    events = list(getattr(optimizer, "_callback_trace", []))
+    summary: dict[str, dict[str, float | int]] = {}
+    for event in events:
+        key = f"{event['kind']}:{event['source']}"
+        rec = summary.setdefault(key, {"count": 0, "wall_time_s": 0.0})
+        rec["count"] = int(rec["count"]) + 1
+        rec["wall_time_s"] = float(rec["wall_time_s"]) + float(event["wall_time_s"])
+    return {
+        "enabled": bool(getattr(optimizer, "_callback_trace_enabled", False)),
+        "events": events,
+        "summary": {key: summary[key] for key in sorted(summary)},
+    }
 
 
 def profile_solver_free_boundary_timing(optimizer, diagnostics, *, profile_prefix: str) -> None:
