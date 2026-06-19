@@ -2882,6 +2882,40 @@ def _nestor_trace_arrays(
     return out
 
 
+def _nestor_legacy_fast_reuse(
+    *,
+    runtime: NestorRuntimeState,
+    runtime_cache: Any,
+    runtime_mode: str,
+) -> tuple[NestorSolveResult, NestorRuntimeState]:
+    bsqvac = np.asarray(runtime.bsqvac)
+    zeros = {key: np.zeros_like(bsqvac) for key in ("bu", "bv", "bsupu", "bsupv", "bnormal", "bnormal_unit", "g_uu", "g_uv", "g_vv", "det_guv")}
+    optional_cache = {
+        key: None if getattr(runtime, key, None) is None else np.asarray(getattr(runtime, key), dtype=float)
+        for key in ("gsource_cached", "source_sym_cached", "bvec_nonsing_cached")
+    }
+    return (
+        NestorSolveResult(
+            vac_total=VacuumBoundaryFields(bsqvac=bsqvac, **zeros),
+            phi=np.asarray(runtime.phi),
+            reused=True,
+            solve_time_s=0.0,
+            sample_time_s=0.0,
+            model=runtime_mode,
+        ),
+        NestorRuntimeState(
+            operator_cache=runtime_cache,
+            phi=np.asarray(runtime.phi),
+            bsqvac=np.asarray(bsqvac),
+            mode=runtime_mode,
+            update_count=int(runtime.update_count),
+            reuse_count=int(runtime.reuse_count) + 1,
+            source_cache_iter=int(getattr(runtime, "source_cache_iter", -1)),
+            **optional_cache,
+        ),
+    )
+
+
 def nestor_external_only_step(
     *,
     state: Any,
@@ -2921,47 +2955,11 @@ def nestor_external_only_step(
     force_rhs_reuse = _env_truthy("VMEC_JAX_FREEB_REUSE_RHS_UPDATE", default=True)
 
     if int(ivac) != 1 and runtime is not None and not force_rhs_reuse:
-        # Legacy fast reuse mode: hold previous potential/bsqvac unchanged.
-        bsqvac = np.asarray(runtime.bsqvac)
-        z = np.zeros_like(bsqvac)
-        vac_total = VacuumBoundaryFields(
-            bu=z,
-            bv=z,
-            bsupu=z,
-            bsupv=z,
-            bsqvac=bsqvac,
-            bnormal=z,
-            bnormal_unit=z,
-            g_uu=z,
-            g_uv=z,
-            g_vv=z,
-            det_guv=z,
+        return _nestor_legacy_fast_reuse(
+            runtime=runtime,
+            runtime_cache=runtime_cache,
+            runtime_mode=runtime_mode,
         )
-        res = NestorSolveResult(
-            vac_total=vac_total,
-            phi=np.asarray(runtime.phi),
-            reused=True,
-            solve_time_s=0.0,
-            sample_time_s=0.0,
-            model=runtime_mode,
-        )
-        runtime_next = NestorRuntimeState(
-            operator_cache=runtime_cache,
-            phi=np.asarray(runtime.phi),
-            bsqvac=np.asarray(bsqvac),
-            mode=runtime_mode,
-            update_count=int(runtime.update_count),
-            reuse_count=int(runtime.reuse_count) + 1,
-            source_cache_iter=int(runtime_source_cache_iter),
-            gsource_cached=None if runtime_gsource_cached is None else np.asarray(runtime_gsource_cached, dtype=float),
-            source_sym_cached=None
-            if runtime_source_sym_cached is None
-            else np.asarray(runtime_source_sym_cached, dtype=float),
-            bvec_nonsing_cached=None
-            if runtime_bvec_nonsing_cached is None
-            else np.asarray(runtime_bvec_nonsing_cached, dtype=float),
-        )
-        return res, runtime_next
 
     t0 = time.perf_counter()
     sample = _sample_external_boundary_arrays(

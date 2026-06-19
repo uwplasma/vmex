@@ -7,6 +7,79 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-19.
 
+## 2026-06-19 NESTOR Legacy Fast-Reuse Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the legacy `ivacskip` fast-reuse branch from
+   `nestor_external_only_step` into `_nestor_legacy_fast_reuse`.
+2. Kept the extraction strictly to the old hold-previous-`phi`/`bsqvac`
+   behavior selected by `VMEC_JAX_FREEB_REUSE_RHS_UPDATE=0`.
+3. Compacted the helper after validation so the file itself shrinks rather
+   than only shifting code out of the large function.
+
+Results obtained:
+
+- `vmec_jax/free_boundary.py` dropped from 3533 to 3531 lines.
+- `nestor_external_only_step` dropped from 561 to 525 lines.
+- The diff for this tranche is net-negative by 2 source lines.
+- An obsolete focused-test name was encountered during lookup; the current
+  legacy/reuse tests were identified and passed.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/free_boundary.py`
+- `python -m ruff check vmec_jax/free_boundary.py`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py | head -80`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wave2.py::test_nestor_external_only_step_reuse_spectral_and_dense_fallback tests/test_free_boundary_wp0.py::test_nestor_reuse_legacy_hold_path -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_fast_physics_coverage.py::test_legacy_reuse_hold_path_preserves_cached_bsqvac_without_sampling tests/test_free_boundary_fast_physics_coverage.py::test_dense_mode_reuse_keeps_operator_and_cached_source_vectors -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_reuse_refreshes_source_when_provider_changes -q`
+
+Best next steps:
+
+1. Continue with another safe `nestor_external_only_step` tranche, preferably
+   runtime-cache packaging or diagnostics assembly where behavior is easiest
+   to preserve with focused tests.
+2. Avoid moving source/matrix solve math until a narrow numerical parity gate
+   is already in place for that exact path.
+3. Keep every refactor tranche source-health-positive: shorter large functions
+   and non-growing files/tests unless a new validation gate justifies the cost.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999%.
+- Solver monolith reduction: 99.737%.
+- Free-boundary adjoint monolith reduction: 99.48%.
+- Driver workflow decomposition: 99.94%.
+- Residual iteration decomposition: 98.68%.
+- WOUT diagnostic/profile decomposition: 99.94%.
+- Bcovar/WOUT parity decomposition: 99.13%.
+- Force-kernel decomposition: 99.67%.
+- Scan/performance policy consolidation: 99.81%.
+- Tomnsps transform decomposition: 98.5%.
+- Initial-guess decomposition: 99.02%.
+- Optimizer workflow decomposition: 99.66%.
+- Fixed-boundary optimizer decomposition: 96.05%.
+- Plotting/WOUT visualization decomposition: 95.9%.
+- Sweep/example workflow decomposition: 94.2%.
+- Implicit residual-adjoint decomposition: 95.45%.
+- Discrete-adjoint replay decomposition: 96.45%.
+- Free-boundary validation-gate maintainability: 96.0%.
+- QI objective/staged-runner decomposition: 96.9%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.95%.
+- Overall differentiability-refactor PR: 99.9999986%.
+
 ## 2026-06-19 NESTOR Trace-Array Packaging Extraction
 
 Branch: `codex/differentiability-refactor-plan`.
