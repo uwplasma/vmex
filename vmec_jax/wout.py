@@ -409,29 +409,11 @@ def _apply_bsubv_equif_correction(
     )
 
 
-def _compute_bsubs_half_mesh(**kwargs) -> np.ndarray:
-    """Compute bsubs on the half mesh using VMEC's bss.f conventions."""
-    return _wout_bsubs_helpers.compute_bsubs_half_mesh(**kwargs)
-
-
-def _bsubuv_parity_from_state(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Construct parity-separated bsubu/bsubv using VMEC internal even/odd splitting."""
-    return _wout_bsubs_helpers.bsubuv_parity_from_state(**kwargs)
-
-
-def _bsubuv_parity_from_coeffs(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Split bsubu/bsubv into even/odd m parity using Fourier coefficients."""
-    return _wout_bsubs_helpers.bsubuv_parity_from_coeffs(**kwargs)
-
-
-def _bsubuv_parity_from_realspace_jxbforce(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Recover jxbforce parity channels directly from real-space bsubu/bsubv."""
-    return _wout_bsubs_helpers.bsubuv_parity_from_realspace_jxbforce(**kwargs)
-
-
-def _bsubuv_parity_from_bcovar(**kwargs) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Construct parity-separated bsubu/bsubv from bcovar even components."""
-    return _wout_bsubs_helpers.bsubuv_parity_from_bcovar(**kwargs)
+_compute_bsubs_half_mesh = _wout_bsubs_helpers.compute_bsubs_half_mesh
+_bsubuv_parity_from_state = _wout_bsubs_helpers.bsubuv_parity_from_state
+_bsubuv_parity_from_coeffs = _wout_bsubs_helpers.bsubuv_parity_from_coeffs
+_bsubuv_parity_from_realspace_jxbforce = _wout_bsubs_helpers.bsubuv_parity_from_realspace_jxbforce
+_bsubuv_parity_from_bcovar = _wout_bsubs_helpers.bsubuv_parity_from_bcovar
 
 
 def _jxbforce_getbsubs_coeffs_lasym_false(
