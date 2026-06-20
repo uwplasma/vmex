@@ -599,13 +599,11 @@ def solve_fixed_boundary_residual_iter(
     signgs = startup_policy.signgs
     fsq_total_target = startup_policy.fsq_total_target
     lambda_update_scale = startup_policy.lambda_update_scale
-    enforce_vmec_lambda_axis = startup_policy.enforce_vmec_lambda_axis
     vmec2000_control = startup_policy.vmec2000_control
     badjac_use_state = startup_policy.badjac_use_state
     resume_state_mode = startup_policy.resume_state_mode
     ptau_tol = startup_policy.ptau_tol
     reference_mode = startup_policy.reference_mode
-    jit_precompile = startup_policy.jit_precompile
     use_direct_fallback = startup_policy.use_direct_fallback
     vmecpp_restart = startup_policy.vmecpp_restart
     verbose_vmec2000_table = startup_policy.verbose_vmec2000_table
@@ -720,7 +718,7 @@ def solve_fixed_boundary_residual_iter(
     # without overwriting stored axis coefficients; only enforce the gauge here.
     _apply_vmec_lambda_axis_rules = partial(
         _apply_vmec_lambda_axis_rules_to_state,
-        enforce_vmec_lambda_axis=enforce_vmec_lambda_axis,
+        enforce_vmec_lambda_axis=startup_policy.enforce_vmec_lambda_axis,
         host_update_assembly=host_update_assembly,
         idx00=idx00,
     )
@@ -974,7 +972,7 @@ def solve_fixed_boundary_residual_iter(
 
     _maybe_precompile_residual_force_kernels(
         jit_forces=bool(jit_forces),
-        jit_precompile=bool(jit_precompile),
+        jit_precompile=bool(startup_policy.jit_precompile),
         has_jax_func=has_jax,
         jax_module=jax,
         jnp_module=jnp,
