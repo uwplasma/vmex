@@ -1585,6 +1585,18 @@ def solve_fixed_boundary_residual_iter(
     _dump_freeb_axis_trace = _dump_freeb_axis_trace_record
     _dump_evolve_trace = partial(_maybe_dump_evolve_trace_record, static=static)
 
+    def _current_velocity_blocks() -> _ResidualVelocityBlocks:
+        return _ResidualVelocityBlocks(vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss)
+
+    def _set_velocity_blocks(blocks: _ResidualVelocityBlocks) -> None:
+        nonlocal vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss
+        vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss = blocks
+
+    def _current_force_blocks() -> _ResidualVelocityBlocks:
+        return _ResidualVelocityBlocks(
+            frcc_u, frss_u, frsc_u, frcs_u, fzsc_u, fzcs_u, fzcc_u, fzss_u, flsc_u, flcs_u, flcc_u, flss_u
+        )
+
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
@@ -3403,12 +3415,8 @@ def solve_fixed_boundary_residual_iter(
             b1=float(b1),
             fac=float(fac),
             state=state,
-            velocities=_ResidualVelocityBlocks(
-                vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss
-            ),
-            forces=_ResidualVelocityBlocks(
-                frcc_u, frss_u, frsc_u, frcs_u, fzsc_u, fzcs_u, fzcc_u, fzss_u, flsc_u, flcs_u, flcc_u, flss_u
-            ),
+            velocities=_current_velocity_blocks(),
+            forces=_current_force_blocks(),
         )
 
         if timing_enabled and t_iteration_control_evolve_start is not None:
@@ -3537,34 +3545,8 @@ def solve_fixed_boundary_residual_iter(
                 update_rms_preclip = None
                 scl = 1.0
             else:
-                velocity_blocks = _ResidualVelocityBlocks(
-                    vRcc,
-                    vRss,
-                    vRsc,
-                    vRcs,
-                    vZsc,
-                    vZcs,
-                    vZcc,
-                    vZss,
-                    vLsc,
-                    vLcs,
-                    vLcc,
-                    vLss,
-                )
-                force_blocks = _ResidualVelocityBlocks(
-                    frcc_u,
-                    frss_u,
-                    frsc_u,
-                    frcs_u,
-                    fzsc_u,
-                    fzcs_u,
-                    fzcc_u,
-                    fzss_u,
-                    flsc_u,
-                    flcs_u,
-                    flcc_u,
-                    flss_u,
-                )
+                velocity_blocks = _current_velocity_blocks()
+                force_blocks = _current_force_blocks()
                 if host_update_assembly:
                     update_result = _host_momentum_update_np(
                         velocities=velocity_blocks,
@@ -3587,9 +3569,7 @@ def solve_fixed_boundary_residual_iter(
                         dt_eff=dt_eff,
                         compute_update_rms=need_update_rms,
                     )
-                (vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss) = (
-                    update_result.velocities
-                )
+                _set_velocity_blocks(update_result.velocities)
                 update_rms_j = (
                     update_result.update_rms if need_update_rms else jnp.asarray(0.0, dtype=jnp.asarray(vRcc).dtype)
                 )
@@ -3905,12 +3885,8 @@ def solve_fixed_boundary_residual_iter(
             w_curr = fsqr_f + fsqz_f + fsql_f
             non_strict_update = _backtracking_momentum_search(
                 state=state,
-                velocities=_ResidualVelocityBlocks(
-                    vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss
-                ),
-                forces=_ResidualVelocityBlocks(
-                    frcc_u, frss_u, frsc_u, frcs_u, fzsc_u, fzcs_u, fzcc_u, fzss_u, flsc_u, flcs_u, flcc_u, flss_u
-                ),
+                velocities=_current_velocity_blocks(),
+                forces=_current_force_blocks(),
                 time_step=float(time_step),
                 step_size=float(step_size),
                 b1=float(b1),
@@ -3929,9 +3905,7 @@ def solve_fixed_boundary_residual_iter(
                 ),
             )
             state = non_strict_update.state
-            (vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss) = (
-                non_strict_update.velocities
-            )
+            _set_velocity_blocks(non_strict_update.velocities)
             dt_eff = non_strict_update.dt_eff
             update_rms = non_strict_update.update_rms
             step_status = non_strict_update.step_status
@@ -3956,12 +3930,8 @@ def solve_fixed_boundary_residual_iter(
             b1=float(b1),
             fac=float(fac),
             state=state,
-            velocities=_ResidualVelocityBlocks(
-                vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss
-            ),
-            forces=_ResidualVelocityBlocks(
-                frcc_u, frss_u, frsc_u, frcs_u, fzsc_u, fzcs_u, fzcc_u, fzss_u, flsc_u, flcs_u, flcc_u, flss_u
-            ),
+            velocities=_current_velocity_blocks(),
+            forces=_current_force_blocks(),
         )
         _maybe_dump_xc(
             state=state,
