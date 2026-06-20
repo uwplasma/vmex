@@ -1917,6 +1917,147 @@ def _assert_native_rejected_adaptive_gate(
     assert adaptive_gate["differentiates_run_free_boundary"] is False
 
 
+def _aspect_state_norm_qs_scalar_map(payload):
+    from vmec_jax._compat import jnp
+    from vmec_jax.state import pack_state
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    state = payload["result"].state
+    packed = pack_state(state)
+    return {
+        "aspect": equilibrium_aspect_ratio_from_state(state=state, static=payload["init"].static),
+        "state_norm": 0.5 * jnp.vdot(packed, packed),
+        "qs_total": _qs_total_from_state(state, payload["init"].static, payload["init"].indata, payload["init"].signgs),
+    }
+
+
+def _aspect_state_norm_qs_replay_scalar_fns():
+    from vmec_jax._compat import jnp
+    from vmec_jax.state import pack_state
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    return {
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "state_norm": lambda replay, _payload: 0.5 * jnp.vdot(
+            pack_state(replay["state"]),
+            pack_state(replay["state"]),
+        ),
+        "qs_total": lambda replay, payload: _qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+    }
+
+
+def _aspect_qs_boundary_scalar_map(payload):
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    state = payload["result"].state
+    return {
+        "aspect": equilibrium_aspect_ratio_from_state(state=state, static=payload["init"].static),
+        "qs_total": _qs_total_from_state(state, payload["init"].static, payload["init"].indata, payload["init"].signgs),
+        "lcfs_boundary_moment": _lcfs_boundary_moment_from_state(state, payload["init"].static),
+    }
+
+
+def _aspect_qs_boundary_replay_scalar_fns():
+    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
+
+    return {
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "qs_total": lambda replay, payload: _qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "lcfs_boundary_moment": lambda replay, payload: _lcfs_boundary_moment_from_state(
+            replay["state"],
+            payload["init"].static,
+        ),
+    }
+
+
+def _native_rejected_slot_scalars_report(
+    *,
+    input_path: Path,
+    base_params: CoilFieldParams,
+    direction: CoilFieldParams,
+    params_for,
+    scalar_map,
+    replay_scalar_fns: dict,
+    scalar_keys: tuple[str, ...],
+    rtol: dict,
+    atol: dict,
+    base_value_atol: dict,
+    replay_kwargs_extra: dict | None = None,
+    solve_kwargs_extra: dict | None = None,
+) -> dict:
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_branch_local_scalars_report_from_complete_fd,
+        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
+        direct_coil_same_branch_complete_solve_fd_report,
+    )
+
+    solve_kwargs = {
+        "max_iter": 3,
+        "step_size": 0.9,
+        "ftol": 1.0e-12,
+        "use_restart_triggers": True,
+        "vmecpp_restart": True,
+        "free_boundary_activate_fsq": 1.0e99,
+    }
+    if solve_kwargs_extra:
+        solve_kwargs.update(solve_kwargs_extra)
+    complete_report = direct_coil_same_branch_complete_solve_fd_report(
+        input_path,
+        base_params,
+        params_for=params_for,
+        objective_fn=scalar_map,
+        eps=0.25,
+        solve_kwargs=solve_kwargs,
+        fingerprint_rtol=1.0e-6,
+        fingerprint_atol=1.0e-9,
+    )
+    _assert_native_rejected_slot_branch(complete_report)
+    replay_kwargs = {"use_stacked_step_controls": True, "use_accepted_only_fast_path": False}
+    if replay_kwargs_extra:
+        replay_kwargs.update(replay_kwargs_extra)
+    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
+        params=base_params,
+        direction_params=direction,
+        complete_payload=complete_report["base"],
+        scalar_keys=scalar_keys,
+        production_values=_complete_report_base_values(complete_report),
+        replay_payload={"init": complete_report["base"]["init"]},
+        scalar_fn=scalar_map,
+        replay_scalar_fns=replay_scalar_fns,
+        replay_kwargs=replay_kwargs,
+        include_payload=False,
+        include_replay_graph_metadata=False,
+    )
+    _assert_native_rejected_branch_local_contract(branch_local)
+    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        complete_report,
+        branch_local,
+        scalar_keys=scalar_keys,
+        rtol=rtol,
+        atol=atol,
+        base_value_atol=base_value_atol,
+    )
+    assert scalars_report["passed"], scalars_report
+    _assert_native_rejected_adaptive_gate(complete_report, scalars_report, scalar_keys=scalar_keys)
+    return {"complete_report": complete_report, "branch_local": branch_local, "scalars_report": scalars_report}
+
+
 def _assert_same_branch_physical_and_adaptive_scalar_gates(
     complete_report: dict,
     scalars_report: dict,
@@ -2779,14 +2920,6 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
-        direct_coil_branch_local_scalars_report_from_complete_fd,
-        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-        direct_coil_same_branch_complete_solve_fd_report,
-    )
-    from vmec_jax.state import pack_state
-    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
-    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
@@ -2811,102 +2944,21 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
             base_currents=base_currents * (1.0 + 0.002 * float(scale)),
         )
 
-    def scalar_map(payload):
-        state = payload["result"].state
-        packed = pack_state(state)
-        qs = quasisymmetry_ratio_residual_from_state(
-            state=state,
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=int(payload["init"].signgs),
-            surfaces=[0.5],
-            helicity_m=1,
-            helicity_n=0,
-            ntheta=7,
-            nphi=8,
-        )
-        return {
-            "aspect": equilibrium_aspect_ratio_from_state(
-                state=state,
-                static=payload["init"].static,
-            ),
-            "state_norm": 0.5 * jnp.vdot(packed, packed),
-            "qs_total": qs["total"],
-        }
-
-    solve_kwargs = {
-        "max_iter": 3,
-        "step_size": 0.9,
-        "ftol": 1.0e-12,
-        "use_restart_triggers": True,
-        "vmecpp_restart": True,
-        "free_boundary_activate_fsq": 1.0e99,
-    }
-    complete_report = direct_coil_same_branch_complete_solve_fd_report(
-        input_path,
-        base_params,
+    scalar_keys = ("aspect", "state_norm", "qs_total")
+    reports = _native_rejected_slot_scalars_report(
+        input_path=input_path,
+        base_params=base_params,
+        direction=direction,
         params_for=params_for,
-        objective_fn=scalar_map,
-        eps=0.25,
-        solve_kwargs=solve_kwargs,
-        fingerprint_rtol=1.0e-6,
-        fingerprint_atol=1.0e-9,
-    )
-    _assert_native_rejected_slot_branch(complete_report)
-    production_values = _complete_report_base_values(complete_report)
-    replay_scalar_fns = {
-        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-        ),
-        "state_norm": lambda replay, _payload: 0.5 * jnp.vdot(
-            pack_state(replay["state"]),
-            pack_state(replay["state"]),
-        ),
-        "qs_total": lambda replay, payload: quasisymmetry_ratio_residual_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=int(payload["init"].signgs),
-            surfaces=[0.5],
-            helicity_m=1,
-            helicity_n=0,
-            ntheta=7,
-            nphi=8,
-        )["total"],
-    }
-    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
-        params=base_params,
-        direction_params=direction,
-        complete_payload=complete_report["base"],
-        scalar_keys=("aspect", "state_norm", "qs_total"),
-        production_values=production_values,
-        replay_payload={"init": complete_report["base"]["init"]},
-        scalar_fn=scalar_map,
-        replay_scalar_fns=replay_scalar_fns,
-        replay_kwargs={
-            "use_stacked_step_controls": True,
-            "use_accepted_only_fast_path": False,
-        },
-        include_payload=False,
-        include_replay_graph_metadata=False,
-    )
-    _assert_native_rejected_branch_local_contract(branch_local)
-
-    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
-        complete_report,
-        branch_local,
-        scalar_keys=("aspect", "state_norm", "qs_total"),
+        scalar_map=_aspect_state_norm_qs_scalar_map,
+        replay_scalar_fns=_aspect_state_norm_qs_replay_scalar_fns(),
+        scalar_keys=scalar_keys,
         rtol={"aspect": 5.0e-3, "state_norm": 5.0e-3, "qs_total": 2.0e-2},
         atol={"aspect": 5.0e-8, "state_norm": 5.0e-8, "qs_total": 1.0e-8},
         base_value_atol={"aspect": 2.0e-3, "state_norm": 2.0e-3, "qs_total": 2.0e-3},
     )
-    assert scalars_report["passed"], scalars_report
-    _assert_native_rejected_adaptive_gate(
-        complete_report,
-        scalars_report,
-        scalar_keys=("aspect", "state_norm", "qs_total"),
-    )
+    complete_report = reports["complete_report"]
+    scalars_report = reports["scalars_report"]
 
     changed_branch_report = deepcopy(complete_report)
     changed_branch_report["branch_compatibility"]["same_branch"] = False
@@ -2921,7 +2973,7 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
     changed_branch_gate = _native_rejected_adaptive_gate_report(
         changed_branch_report,
         scalars_report,
-        scalar_keys=("aspect", "state_norm", "qs_total"),
+        scalar_keys=scalar_keys,
     )
     assert changed_branch_gate["passed"] is False
     assert changed_branch_gate["same_branch"] is False
@@ -2939,11 +2991,6 @@ def test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_f
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
     from vmec_jax.finite_beta import finite_beta_scalars_from_state
-    from vmec_jax.free_boundary_adjoint import (
-        direct_coil_branch_local_scalars_report_from_complete_fd,
-        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-        direct_coil_same_branch_complete_solve_fd_report,
-    )
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
@@ -2980,67 +3027,30 @@ def test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_f
     def scalar_map(payload):
         return {"betatotal": betatotal_from_state(payload["result"].state, payload)}
 
-    solve_kwargs = {
-        "max_iter": 3,
-        "step_size": 0.9,
-        "ftol": 1.0e-12,
-        "use_restart_triggers": True,
-        "vmecpp_restart": True,
-        "free_boundary_activate_fsq": 1.0e99,
-    }
-    complete_report = direct_coil_same_branch_complete_solve_fd_report(
-        input_path,
-        base_params,
+    scalar_keys = ("betatotal",)
+    reports = _native_rejected_slot_scalars_report(
+        input_path=input_path,
+        base_params=base_params,
+        direction=direction,
         params_for=params_for,
-        objective_fn=scalar_map,
-        eps=0.25,
-        solve_kwargs=solve_kwargs,
-        fingerprint_rtol=1.0e-6,
-        fingerprint_atol=1.0e-9,
-    )
-    _assert_native_rejected_slot_branch(complete_report)
-    production_values = _complete_report_base_values(complete_report)
-    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
-        params=base_params,
-        direction_params=direction,
-        complete_payload=complete_report["base"],
-        scalar_keys=("betatotal",),
-        production_values=production_values,
-        replay_payload={"init": complete_report["base"]["init"]},
-        scalar_fn=scalar_map,
+        scalar_map=scalar_map,
         replay_scalar_fns={
             "betatotal": lambda replay, payload: betatotal_from_state(replay["state"], payload),
         },
-        replay_kwargs={
-            "use_stacked_step_controls": True,
-            "use_accepted_only_fast_path": False,
-        },
-        include_payload=False,
-        include_replay_graph_metadata=False,
-    )
-    _assert_native_rejected_branch_local_contract(branch_local)
-
-    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
-        complete_report,
-        branch_local,
-        scalar_keys=("betatotal",),
+        scalar_keys=scalar_keys,
         rtol={"betatotal": 1.0e-2},
         atol={"betatotal": 1.0e-8},
         base_value_atol={"betatotal": 2.0e-3},
     )
-    assert scalars_report["passed"], scalars_report
-    _assert_native_rejected_adaptive_gate(
-        complete_report,
-        scalars_report,
-        scalar_keys=("betatotal",),
-    )
+    complete_report = reports["complete_report"]
+    scalars_report = reports["scalars_report"]
 
     changed_branch_report = deepcopy(complete_report)
     changed_branch_report["branch_compatibility"]["same_branch"] = False
     changed_branch_gate = _native_rejected_adaptive_gate_report(
         changed_branch_report,
         scalars_report,
-        scalar_keys=("betatotal",),
+        scalar_keys=scalar_keys,
     )
     assert changed_branch_gate["passed"] is False
     assert changed_branch_gate["same_full_loop_branch_fingerprint"] is False
@@ -3055,14 +3065,6 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
-        direct_coil_branch_local_scalars_report_from_complete_fd,
-        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-        direct_coil_same_branch_complete_solve_fd_report,
-    )
-    from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
-    from vmec_jax.state import pack_state
-    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
@@ -3089,106 +3091,24 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
             base_currents=base_currents,
         )
 
-    def scalar_map(payload):
-        state = payload["result"].state
-        packed = pack_state(state)
-        qs = quasisymmetry_ratio_residual_from_state(
-            state=state,
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=int(payload["init"].signgs),
-            surfaces=[0.5],
-            helicity_m=1,
-            helicity_n=0,
-            ntheta=7,
-            nphi=8,
-        )
-        return {
-            "aspect": equilibrium_aspect_ratio_from_state(
-                state=state,
-                static=payload["init"].static,
-            ),
-            "state_norm": 0.5 * jnp.vdot(packed, packed),
-            "qs_total": qs["total"],
-        }
-
-    solve_kwargs = {
-        "max_iter": 3,
-        "step_size": 0.9,
-        "ftol": 1.0e-12,
-        "use_restart_triggers": True,
-        "vmecpp_restart": True,
-        "free_boundary_activate_fsq": 1.0e99,
-    }
-    complete_report = direct_coil_same_branch_complete_solve_fd_report(
-        input_path,
-        base_params,
+    scalar_keys = ("aspect", "state_norm", "qs_total")
+    reports = _native_rejected_slot_scalars_report(
+        input_path=input_path,
+        base_params=base_params,
+        direction=direction,
         params_for=params_for,
-        objective_fn=scalar_map,
-        eps=0.25,
-        solve_kwargs=solve_kwargs,
-        fingerprint_rtol=1.0e-6,
-        fingerprint_atol=1.0e-9,
-    )
-    _assert_native_rejected_slot_branch(complete_report)
-    production_values = _complete_report_base_values(complete_report)
-    replay_scalar_fns = {
-        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-        ),
-        "state_norm": lambda replay, _payload: 0.5 * jnp.vdot(
-            pack_state(replay["state"]),
-            pack_state(replay["state"]),
-        ),
-        "qs_total": lambda replay, payload: quasisymmetry_ratio_residual_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=int(payload["init"].signgs),
-            surfaces=[0.5],
-            helicity_m=1,
-            helicity_n=0,
-            ntheta=7,
-            nphi=8,
-        )["total"],
-    }
-    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
-        params=base_params,
-        direction_params=direction,
-        complete_payload=complete_report["base"],
-        scalar_keys=("aspect", "state_norm", "qs_total"),
-        production_values=production_values,
-        replay_payload={"init": complete_report["base"]["init"]},
-        scalar_fn=scalar_map,
-        replay_scalar_fns=replay_scalar_fns,
-        replay_kwargs={
-            "use_stacked_step_controls": True,
-            "use_accepted_only_fast_path": False,
-        },
-        include_payload=False,
-        include_replay_graph_metadata=False,
-    )
-    assert branch_local["uses_production_forward"] is True
-    assert branch_local["derivative_mode"] == "directional_jvp"
-    assert branch_local["replay_option_flags"]["directional_jvp_fast_path"] == "none"
-    assert branch_local["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
-    _assert_native_rejected_branch_local_contract(branch_local)
-
-    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
-        complete_report,
-        branch_local,
-        scalar_keys=("aspect", "state_norm", "qs_total"),
+        scalar_map=_aspect_state_norm_qs_scalar_map,
+        replay_scalar_fns=_aspect_state_norm_qs_replay_scalar_fns(),
+        scalar_keys=scalar_keys,
         rtol={"aspect": 5.0e-3, "state_norm": 5.0e-3, "qs_total": 2.0e-2},
         atol={"aspect": 5.0e-8, "state_norm": 5.0e-8, "qs_total": 1.0e-8},
         base_value_atol={"aspect": 2.0e-3, "state_norm": 2.0e-3, "qs_total": 2.0e-3},
     )
-    assert scalars_report["passed"], scalars_report
-    _assert_native_rejected_adaptive_gate(
-        complete_report,
-        scalars_report,
-        scalar_keys=("aspect", "state_norm", "qs_total"),
-    )
+    branch_local = reports["branch_local"]
+    assert branch_local["uses_production_forward"] is True
+    assert branch_local["derivative_mode"] == "directional_jvp"
+    assert branch_local["replay_option_flags"]["directional_jvp_fast_path"] == "none"
+    assert branch_local["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
 
 
 @pytest.mark.py311_coverage_only
@@ -3200,12 +3120,6 @@ def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matc
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
-        direct_coil_branch_local_scalars_report_from_complete_fd,
-        direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-        direct_coil_same_branch_complete_solve_fd_report,
-    )
-    from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
@@ -3233,92 +3147,27 @@ def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matc
             base_currents=base_currents * (1.0 + current_fraction * float(scale)),
         )
 
-    def scalar_map(payload):
-        state = payload["result"].state
-        return {
-            "aspect": equilibrium_aspect_ratio_from_state(
-                state=state,
-                static=payload["init"].static,
-            ),
-            "qs_total": _qs_total_from_state(state, payload["init"].static, payload["init"].indata, payload["init"].signgs),
-            "lcfs_boundary_moment": _lcfs_boundary_moment_from_state(state, payload["init"].static),
-        }
-
-    solve_kwargs = {
-        "max_iter": 3,
-        "step_size": 0.9,
-        "ftol": 1.0e-12,
-        "use_restart_triggers": True,
-        "vmecpp_restart": True,
-        "free_boundary_activate_fsq": 1.0e99,
-        "adjoint_trace_mode": "branch",
-    }
-    complete_report = direct_coil_same_branch_complete_solve_fd_report(
-        input_path,
-        base_params,
+    scalar_keys = ("aspect", "qs_total", "lcfs_boundary_moment")
+    reports = _native_rejected_slot_scalars_report(
+        input_path=input_path,
+        base_params=base_params,
+        direction=direction,
         params_for=params_for,
-        objective_fn=scalar_map,
-        eps=0.25,
-        solve_kwargs=solve_kwargs,
-        fingerprint_rtol=1.0e-6,
-        fingerprint_atol=1.0e-9,
+        scalar_map=_aspect_qs_boundary_scalar_map,
+        replay_scalar_fns=_aspect_qs_boundary_replay_scalar_fns(),
+        scalar_keys=scalar_keys,
+        rtol={"aspect": 5.0e-3, "qs_total": 2.0e-2, "lcfs_boundary_moment": 5.0e-3},
+        atol={"aspect": 5.0e-8, "qs_total": 1.0e-8, "lcfs_boundary_moment": 5.0e-8},
+        base_value_atol={"aspect": 2.0e-3, "qs_total": 2.0e-3, "lcfs_boundary_moment": 2.0e-3},
+        replay_kwargs_extra={"state_only_replay": True},
+        solve_kwargs_extra={"adjoint_trace_mode": "branch"},
     )
-    _assert_native_rejected_slot_branch(complete_report)
-    production_values = _complete_report_base_values(complete_report)
-    replay_scalar_fns = {
-        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-        ),
-        "qs_total": lambda replay, payload: _qs_total_from_state(
-            replay["state"],
-            payload["init"].static,
-            payload["init"].indata,
-            payload["init"].signgs,
-        ),
-        "lcfs_boundary_moment": lambda replay, payload: _lcfs_boundary_moment_from_state(
-            replay["state"],
-            payload["init"].static,
-        ),
-    }
-    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
-        params=base_params,
-        direction_params=direction,
-        complete_payload=complete_report["base"],
-        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
-        production_values=production_values,
-        replay_payload={"init": complete_report["base"]["init"]},
-        scalar_fn=scalar_map,
-        replay_scalar_fns=replay_scalar_fns,
-        replay_kwargs={
-            "use_stacked_step_controls": True,
-            "use_accepted_only_fast_path": False,
-            "state_only_replay": True,
-        },
-        include_payload=False,
-        include_replay_graph_metadata=False,
-    )
+    branch_local = reports["branch_local"]
     assert branch_local["uses_production_forward"] is True
     assert branch_local["derivative_mode"] == "directional_jvp"
     assert branch_local["replay_option_flags"]["state_only_replay"] is True
     assert branch_local["replay_option_flags"]["directional_jvp_fast_path"] == "none"
     assert branch_local["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
-    _assert_native_rejected_branch_local_contract(branch_local)
-
-    scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
-        complete_report,
-        branch_local,
-        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
-        rtol={"aspect": 5.0e-3, "qs_total": 2.0e-2, "lcfs_boundary_moment": 5.0e-3},
-        atol={"aspect": 5.0e-8, "qs_total": 1.0e-8, "lcfs_boundary_moment": 5.0e-8},
-        base_value_atol={"aspect": 2.0e-3, "qs_total": 2.0e-3, "lcfs_boundary_moment": 2.0e-3},
-    )
-    assert scalars_report["passed"], scalars_report
-    _assert_native_rejected_adaptive_gate(
-        complete_report,
-        scalars_report,
-        scalar_keys=("aspect", "qs_total", "lcfs_boundary_moment"),
-    )
 
 
 @pytest.mark.py311_coverage_only
