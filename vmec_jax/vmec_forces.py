@@ -901,7 +901,7 @@ def _finish_vmec_rz_force_kernels(
     if constraint_start is not None:
         _vmec_force_profile_log("constraint_done", constraint_start)
 
-    result = VmecRZForceKernels(
+    return VmecRZForceKernels(
         armn_e=armn_e,
         armn_o=armn_o,
         brmn_e=brmn_e + con.rcon_force,
@@ -936,7 +936,6 @@ def _finish_vmec_rz_force_kernels(
         constraint_rcon0=con.rcon0 if bool(include_constraint_offsets) else None,
         constraint_zcon0=con.zcon0 if bool(include_constraint_offsets) else None,
     )
-    return result
 
 
 def _diff_forward_half_noavg(a):
@@ -1526,36 +1525,34 @@ def vmec_forces_rz_from_wout_reference_fields(
     blmn_odd = psqrts * blmn_even
 
     # `bc` object is used only for downstream scaling helpers; provide the pieces we need.
-    class _BC:
-        pass
-
-    bc_obj = _BC()
     from .vmec_jacobian import VmecHalfMeshJacobian
 
-    bc_obj.jac = VmecHalfMeshJacobian(
-        r12=jac.r12,
-        rs=jac.rs,
-        zs=jac.zs,
-        ru12=jac.ru12,
-        zu12=jac.zu12,
-        tau=tau,
-        sqrtg=sqrtg,
+    bc_obj = SimpleNamespace(
+        jac=VmecHalfMeshJacobian(
+            r12=jac.r12,
+            rs=jac.rs,
+            zs=jac.zs,
+            ru12=jac.ru12,
+            zu12=jac.zu12,
+            tau=tau,
+            sqrtg=sqrtg,
+        ),
+        guu=guu_metric,
+        guv=guv_metric,
+        gvv=gvv_metric,
+        bsubu=bsubu,
+        bsubv=bsubv,
+        lamscale=lamscale,
+        bsq=bsq,
+        clmn_even=clmn_even,
+        clmn_odd=clmn_odd,
+        blmn_even=blmn_even,
+        blmn_odd=blmn_odd,
+        bsubu_e=bsubu_e,
+        bsubv_e=bsubv_e,
+        bsubu_e_scaled=clmn_even,
+        bsubv_e_scaled=blmn_even,
     )
-    bc_obj.guu = guu_metric
-    bc_obj.guv = guv_metric
-    bc_obj.gvv = gvv_metric
-    bc_obj.bsubu = bsubu
-    bc_obj.bsubv = bsubv
-    bc_obj.lamscale = lamscale
-    bc_obj.bsq = bsq
-    bc_obj.clmn_even = clmn_even
-    bc_obj.clmn_odd = clmn_odd
-    bc_obj.blmn_even = blmn_even
-    bc_obj.blmn_odd = blmn_odd
-    bc_obj.bsubu_e = bsubu_e
-    bc_obj.bsubv_e = bsubv_e
-    bc_obj.bsubu_e_scaled = clmn_even
-    bc_obj.bsubv_e_scaled = blmn_even
 
     return _finish_vmec_rz_force_kernels(
         state=state,

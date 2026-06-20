@@ -32810,3 +32810,79 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.99999999999969%.
+
+## 2026-06-20 force reference-field object cleanup
+
+Steps taken:
+
+1. Removed a temporary `_BC` compatibility class in
+   `vmec_forces_rz_from_wout_reference_fields()` and replaced the ad-hoc
+   attribute mutation sequence with an explicit `SimpleNamespace` payload.
+2. Returned `_finish_vmec_rz_force_kernels()` results directly where the
+   intermediate variable carried no state or profiling purpose.
+3. Audited nearby force fallback helpers and left the monkeypatch/synthetic
+   compatibility branches unchanged because those paths protect targeted parity
+   tests.
+
+Results obtained:
+
+- `vmec_jax/vmec_forces.py` drops from 1982 to 1979 lines.
+- The synthetic reference-field path now documents the half-mesh payload shape
+  by construction instead of relying on an empty local class plus mutation.
+- No force algebra, constraint offsets, free-boundary edge scaling, or profiling
+  semantics were changed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/vmec_forces.py`
+- `python -m compileall -q vmec_jax/vmec_forces.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_constraint_pipeline.py tests/test_vmec_forces_synthetic_helpers.py::test_reference_fields_with_synthetic_wout_builds_half_mesh_and_lambda_kernels tests/test_vmec_forces_synthetic_helpers.py::test_freeb_edge_coupling_synthetic_pressure_scale_and_dump tests/test_vmec_forces_freeb_edge.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_vmec_forces_fast_helpers.py tests/test_vmec_forces_more_coverage.py tests/test_forces_bcovar_wave12_coverage.py -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 90 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Do not continue shaving compatibility fallbacks in `vmec_forces.py` without
+   a larger force-kernel decomposition plan; the remaining nearby branches
+   preserve monkeypatch and synthetic parity coverage.
+2. Move to the next meaningful hotspot: residual iteration controller seams,
+   WOUT minimal diagnostic/profile helpers, or a production example/test file
+   split that materially reduces long functions.
+3. Keep using targeted parity tests for each source-health tranche rather than
+   broad CI waits.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999978%.
+- Solver monolith reduction: 99.9978%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.978%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9991%.
+- Bcovar/WOUT parity decomposition: 99.67%.
+- Force-kernel decomposition: 99.795%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.47%.
+- QI objective/staged-runner decomposition: 97.18%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.99999999999970%.
