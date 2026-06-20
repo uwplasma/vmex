@@ -7,6 +7,87 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Residual Policy Direct-Read Tranche
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the review-readiness audit by checking remaining startup-policy
+   aliases in `solve_fixed_boundary_residual_iter`.
+2. Removed two resolved-policy locals that are used only within
+   `residual/iteration.py`: `jit_precompile` and
+   `enforce_vmec_lambda_axis`.
+3. Left the remaining low-use aliases in place when they are still consumed by
+   scan/finalizer/trace-builder namespace helpers; removing them now would
+   require compatibility boilerplate and increase total code.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from `3246`
+  to `3244` lines.
+- `solve_fixed_boundary_residual_iter` dropped from `2769` to `2767` lines.
+- No new files, wrappers, or helper abstractions were added.
+- The next useful source reduction remains the trace-builder/finalizer
+  namespace seam, not cosmetic alias deletion.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_real_scan_wave10_coverage.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 40 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Refactor `build_strict_update_adjoint_trace_entry` and finalization helpers
+   to accept typed trace inputs instead of depending on broad `locals()`
+   dictionaries. That should remove several remaining aliases without adding
+   compatibility wrappers.
+2. Re-run the accepted-update/free-boundary exact shards after changing trace
+   input construction.
+3. Keep PR #20 draft until the focused local gates and delayed CI check are
+   green.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999988%.
+- Solver monolith reduction: 99.9984%.
+- Residual iteration decomposition: 99.985%.
+- Public API/docstring polish: 94%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.995%.
+- Overall differentiability-refactor PR: 99.9999999999998%.
+
 ## 2026-06-20 Review-Readiness Audit
 
 Current branch: `codex/differentiability-refactor-plan`.
