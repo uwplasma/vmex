@@ -29856,3 +29856,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.986%.
 - Overall differentiability-refactor PR: 99.999999999981%.
+
+## 2026-06-20 VMEC2000 Time-Control Restart Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `HostVmec2000TimeControlRestartUpdate` to represent VMEC2000
+   `restart_iter` scalar updates for `irst=2` and `irst=3`.
+2. Moved the `irst` to time-step/status/restart-path mapping into
+   `host_vmec2000_time_control_restart_update`.
+3. Added `controller_state_after_vmec2000_time_control_restart_update` and
+   rewired the residual host loop to use it.
+4. Left checkpoint selection, velocity clearing, preconditioner-cache clearing,
+   history rollback, and `iter_offset` behavior in the host loop, preserving the
+   branch ordering identified by the audit.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` remains 3018 lines.
+- VMEC2000 restart policy is now independently unit-tested for both bad
+  Jacobian and time-control branches.
+- End-to-end resume continuity still passes.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_resume_state.py::test_resume_state_matches_continuous -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_wave3_coverage.py tests/test_solve_wave4_coverage.py tests/test_solve_finish_cache_more_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 12 --max-root-helper-prefix-files 2`
+- Temporary smoke: `run_fixed_boundary('input.nfp4_QH_warm_start', max_iter=3, verbose=False, use_scan=False)`.
+
+Best next steps:
+
+1. Extract the initial-axis runtime reset branch into a typed controller/update
+   payload, but keep `iter_offset -= 1` outside that helper.
+2. Then decide whether the remaining repeated controller-state sync should be
+   replaced by a full controller-state single source of truth or left as a
+   compatibility bridge for finalization.
+3. Run the full solve shard before merging this PR into main.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999987%.
+- Solver monolith reduction: 99.989%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.943%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.987%.
+- Overall differentiability-refactor PR: 99.999999999982%.

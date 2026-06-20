@@ -9,6 +9,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     backtracking_momentum_search,
     controller_state_after_catastrophic_restart_update,
     controller_state_after_pre_restart_update,
+    controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_namespace,
     controller_state_from_resume_state,
     controller_state_legacy_payload,
@@ -19,6 +20,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_force_update_rms,
     host_momentum_update_np,
     host_pre_restart_trigger_update,
+    host_vmec2000_time_control_restart_update,
     initial_residual_controller_state,
     initial_residual_velocity_state,
     momentum_update_jax,
@@ -313,6 +315,88 @@ def test_controller_state_applies_restart_update_payloads() -> None:
     assert after_catastrophic.bad_resets == 5
     assert after_catastrophic.bad_growth_streak == state.bad_growth_streak
     assert after_catastrophic.huge_force_restart_count == state.huge_force_restart_count
+
+
+def test_vmec2000_time_control_restart_update_preserves_restart_iter_semantics() -> None:
+    bad_jac = host_vmec2000_time_control_restart_update(
+        irst=2,
+        time_step=0.2,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        ijacob=4,
+        bad_resets=5,
+        iter2=9,
+        fsq_prev_before=1.25,
+        fsq0_prev_before=2.5,
+        k_ndamp=3,
+    )
+
+    assert bad_jac.time_step == pytest.approx(0.18)
+    assert bad_jac.ijacob == 5
+    assert bad_jac.step_status == "restart_bad_jacobian"
+    assert bad_jac.restart_reason == "bad_jacobian"
+    assert bad_jac.restart_path == "vmec2000_bad_jacobian"
+    assert bad_jac.bad_resets == 6
+    assert bad_jac.iter1 == 9
+    assert bad_jac.fsq_prev == pytest.approx(1.25)
+    assert bad_jac.fsq0_prev == pytest.approx(2.5)
+    np.testing.assert_allclose(bad_jac.inv_tau, [0.15 / 0.18] * 3)
+
+    bad_progress = host_vmec2000_time_control_restart_update(
+        irst=3,
+        time_step=0.206,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        ijacob=4,
+        bad_resets=5,
+        iter2=9,
+        fsq_prev_before=1.25,
+        fsq0_prev_before=2.5,
+        k_ndamp=2,
+    )
+
+    assert bad_progress.time_step == pytest.approx(0.2)
+    assert bad_progress.ijacob == 4
+    assert bad_progress.step_status == "restart_time_control"
+    assert bad_progress.restart_reason == "time_control"
+    assert bad_progress.restart_path == "vmec2000_time_control"
+    np.testing.assert_allclose(bad_progress.inv_tau, [0.15 / 0.2] * 2)
+
+
+def test_controller_state_applies_vmec2000_time_control_restart_update() -> None:
+    state = initial_residual_controller_state(
+        step_size=0.2,
+        k_ndamp=2,
+        initial_flip_sign=-1.0,
+        state_checkpoint="checkpoint",
+    )._replace(res0=0.1, res1=0.2, prev_rz_fsq=0.3, bad_growth_streak=4)
+    update = host_vmec2000_time_control_restart_update(
+        irst=2,
+        time_step=0.2,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        ijacob=3,
+        bad_resets=4,
+        iter2=5,
+        fsq_prev_before=6.0,
+        fsq0_prev_before=7.0,
+        k_ndamp=2,
+    )
+
+    got = controller_state_after_vmec2000_time_control_restart_update(state, update)
+
+    assert got.time_step == pytest.approx(0.18)
+    assert got.inv_tau == update.inv_tau
+    assert got.fsq_prev == pytest.approx(6.0)
+    assert got.fsq0_prev == pytest.approx(7.0)
+    assert got.iter1 == 5
+    assert got.ijacob == 4
+    assert got.bad_resets == 5
+    assert got.bad_growth_streak == 0
+    assert got.flip_sign == pytest.approx(-1.0)
+    assert got.res0 == pytest.approx(0.1)
+    assert got.res1 == pytest.approx(0.2)
+    assert got.prev_rz_fsq == pytest.approx(0.3)
 
 
 def test_host_momentum_update_np_matches_strict_update_formula_and_rms() -> None:

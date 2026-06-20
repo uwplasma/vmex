@@ -237,6 +237,81 @@ class HostPreRestartTriggerUpdate(NamedTuple):
     huge_force_restart_count: int
 
 
+class HostVmec2000TimeControlRestartUpdate(NamedTuple):
+    """Scalar state after a VMEC2000 time-control restart."""
+
+    time_step: float
+    ijacob: int
+    step_status: str
+    restart_reason: str
+    restart_path: str
+    bad_resets: int
+    iter1: int
+    fsq_prev: float
+    fsq0_prev: float
+    inv_tau: list[float]
+
+
+def host_vmec2000_time_control_restart_update(
+    *,
+    irst: int,
+    time_step: float,
+    restart_badjac_factor: float,
+    restart_badprog_factor: float,
+    ijacob: int,
+    bad_resets: int,
+    iter2: int,
+    fsq_prev_before: float,
+    fsq0_prev_before: float,
+    k_ndamp: int,
+) -> HostVmec2000TimeControlRestartUpdate:
+    """Return VMEC2000 ``restart_iter`` scalar updates for time control."""
+
+    if int(irst) == 2:
+        time_step_next = max(float(restart_badjac_factor) * float(time_step), 1.0e-12)
+        ijacob_next = int(ijacob) + 1
+        step_status = "restart_bad_jacobian"
+        restart_reason = "bad_jacobian"
+        restart_path = "vmec2000_bad_jacobian"
+    else:
+        time_step_next = max(float(time_step) / float(restart_badprog_factor), 1.0e-12)
+        ijacob_next = int(ijacob)
+        step_status = "restart_time_control"
+        restart_reason = "time_control"
+        restart_path = "vmec2000_time_control"
+
+    return HostVmec2000TimeControlRestartUpdate(
+        time_step=float(time_step_next),
+        ijacob=int(ijacob_next),
+        step_status=step_status,
+        restart_reason=restart_reason,
+        restart_path=restart_path,
+        bad_resets=int(bad_resets) + 1,
+        iter1=int(iter2),
+        fsq_prev=float(fsq_prev_before),
+        fsq0_prev=float(fsq0_prev_before),
+        inv_tau=[0.15 / float(time_step_next)] * int(k_ndamp),
+    )
+
+
+def controller_state_after_vmec2000_time_control_restart_update(
+    state: ResidualControllerState,
+    update: HostVmec2000TimeControlRestartUpdate,
+) -> ResidualControllerState:
+    """Apply VMEC2000 time-control restart scalars to controller state."""
+
+    return state._replace(
+        time_step=float(update.time_step),
+        inv_tau=list(update.inv_tau),
+        fsq_prev=float(update.fsq_prev),
+        fsq0_prev=float(update.fsq0_prev),
+        iter1=int(update.iter1),
+        ijacob=int(update.ijacob),
+        bad_resets=int(update.bad_resets),
+        bad_growth_streak=0,
+    )
+
+
 def controller_state_after_pre_restart_update(
     state: ResidualControllerState,
     update: HostPreRestartTriggerUpdate,

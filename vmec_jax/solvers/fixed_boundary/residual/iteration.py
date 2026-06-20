@@ -105,6 +105,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
     controller_state_after_catastrophic_restart_update as _controller_state_after_catastrophic_restart_update,
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
+    controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_namespace as _controller_state_from_namespace,
     controller_state_from_resume_state as _controller_state_from_resume_state,
     controller_state_values as _controller_state_values,
@@ -112,6 +113,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
+    host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
     initial_residual_controller_state as _initial_residual_controller_state,
     initial_residual_velocity_state as _initial_residual_velocity_state,
     residual_evolve_coefficients as _residual_evolve_coefficients,
@@ -2837,37 +2839,37 @@ def solve_fixed_boundary_residual_iter(
                 fsq0 = tc.fsq0
                 res0 = tc.res0
                 res1 = tc.res1
-                irst_tc = tc.irst
-                if tc.initialized:
-                    state_checkpoint = state
-                if tc.store_checkpoint:
+                if tc.initialized or tc.store_checkpoint:
                     state_checkpoint = state
                 if tc.restart:
                     pre_restart_reason = tc.pre_restart_reason
                     state = state_checkpoint
                     _zero_all_velocity_blocks()
-                    # VMEC2000 `restart_iter`: irst=2 (bad-jac) -> dt*0.9,
-                    # irst=3 (time-control) -> dt/1.03.
-                    if irst_tc == 2:
-                        time_step = max(restart_badjac_factor * time_step, 1e-12)
-                        ijacob += 1
-                        step_status = "restart_bad_jacobian"
-                        restart_reason = "bad_jacobian"
-                    else:
-                        time_step = max(time_step / restart_badprog_factor, 1e-12)
-                        step_status = "restart_time_control"
-                        restart_reason = "time_control"
-                    bad_resets += 1
-                    iter1 = iter2
+                    restart_update = _host_vmec2000_time_control_restart_update(
+                        irst=int(tc.irst),
+                        time_step=float(time_step),
+                        restart_badjac_factor=float(restart_badjac_factor),
+                        restart_badprog_factor=float(restart_badprog_factor),
+                        ijacob=int(ijacob),
+                        bad_resets=int(bad_resets),
+                        iter2=int(iter2),
+                        fsq_prev_before=float(fsq_prev_before),
+                        fsq0_prev_before=float(fsq0_prev_before),
+                        k_ndamp=int(k_ndamp),
+                    )
+                    _set_controller_state(
+                        _controller_state_after_vmec2000_time_control_restart_update(
+                            _controller_state_from_namespace(locals()),
+                            restart_update,
+                        )
+                    )
+                    step_status = restart_update.step_status
+                    restart_reason = restart_update.restart_reason
                     freeb_controls_cached = None
-                    bad_growth_streak = 0
-                    fsq_prev = fsq_prev_before
-                    fsq0_prev = fsq0_prev_before
-                    inv_tau = [0.15 / time_step] * k_ndamp
                     _clear_preconditioner_cache_locals()
                     force_bcovar_update = True
                     _append_current_zero_update_history(
-                        restart_path="vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control",
+                        restart_path=restart_update.restart_path,
                         step_status=step_status,
                         restart_reason=restart_reason,
                         pre_restart_reason=pre_restart_reason,
