@@ -503,6 +503,10 @@ def test_jit_strict_momentum_update_proposal_preserves_vmec_channel_order() -> N
     velocities = _blocks(offset=0.0)
     forces = _blocks(offset=20.0)
     captured = {}
+    output_keys = (
+        "vRcc_after vRss_after vRsc_after vRcs_after vZsc_after vZcs_after "
+        "vZcc_after vZss_after vLsc_after vLcs_after vLcc_after vLss_after"
+    ).split()
 
     def strict_update_step_jit_func(static, **kwargs):
         captured["static"] = static
@@ -510,21 +514,8 @@ def test_jit_strict_momentum_update_proposal_preserves_vmec_channel_order() -> N
 
         def step_fn(*args):
             captured["args"] = args
-            return {
-                "state_post": "updated-state",
-                "update_rms_postclip": np.asarray(0.125),
-                "vRcc_after": np.asarray([1.0]),
-                "vRss_after": np.asarray([2.0]),
-                "vRsc_after": np.asarray([3.0]),
-                "vRcs_after": np.asarray([4.0]),
-                "vZsc_after": np.asarray([5.0]),
-                "vZcs_after": np.asarray([6.0]),
-                "vZcc_after": np.asarray([7.0]),
-                "vZss_after": np.asarray([8.0]),
-                "vLsc_after": np.asarray([9.0]),
-                "vLcs_after": np.asarray([10.0]),
-                "vLcc_after": np.asarray([11.0]),
-                "vLss_after": np.asarray([12.0]),
+            return {"state_post": "updated-state", "update_rms_postclip": np.asarray(0.125)} | {
+                key: np.asarray([float(idx)]) for idx, key in enumerate(output_keys, start=1)
             }
 
         return step_fn
@@ -546,39 +537,19 @@ def test_jit_strict_momentum_update_proposal_preserves_vmec_channel_order() -> N
         strict_update_step_jit_func=strict_update_step_jit_func,
     )
 
-    assert captured["static"] == "static"
-    assert captured["kwargs"] == {
-        "limit_update_rms": False,
-        "need_update_rms": True,
-        "divide_by_scalxc_for_update": True,
-        "enforce_edge": True,
+    input_attrs = "rcc rss zsc zcs lsc lcs rsc rcs zcc zss lcc lss".split()
+    expected_channels = [getattr(velocities, name) for name in input_attrs]
+    expected_channels += [getattr(forces, name) for name in input_attrs]
+    assert captured == {
+        "static": "static",
+        "kwargs": {
+            "limit_update_rms": False,
+            "need_update_rms": True,
+            "divide_by_scalxc_for_update": True,
+            "enforce_edge": True,
+        },
+        "args": captured["args"],
     }
-    expected_channels = (
-        velocities.rcc,
-        velocities.rss,
-        velocities.zsc,
-        velocities.zcs,
-        velocities.lsc,
-        velocities.lcs,
-        velocities.rsc,
-        velocities.rcs,
-        velocities.zcc,
-        velocities.zss,
-        velocities.lcc,
-        velocities.lss,
-        forces.rcc,
-        forces.rss,
-        forces.zsc,
-        forces.zcs,
-        forces.lsc,
-        forces.lcs,
-        forces.rsc,
-        forces.rcs,
-        forces.zcc,
-        forces.zss,
-        forces.lcc,
-        forces.lss,
-    )
     assert captured["args"][:6] == ("state", 0.2, 0.3, 0.4, 0.5, -1.0)
     for got, expected in zip(captured["args"][6:-1], expected_channels):
         np.testing.assert_allclose(got, expected)
