@@ -127,21 +127,16 @@ class Vmec2000ScanControllerContext:
     _scan_backend_name: Any
     _scan_chunk_settings: Any
     _tree_has_tracer: Any
-    auto_flip_force: Any
     axis_reset_always_3d: Any
     axis_reset_coeffs: Any
     axis_reset_done: Any
     axis_reset_fsq_min: Any
     backtracking: Any
-    badjac_initial_state_probe_iters: Any
-    badjac_mode: Any
-    badjac_state_probe: Any
     badjac_use_state: Any
     cfg: Any
     constraint_active_false: Any
     constraint_tcon0: Any
     delta_s: Any
-    dump_ptau_state: Any
     edge_Rcos: Any
     edge_Rsin: Any
     edge_Zcos: Any
@@ -160,7 +155,6 @@ class Vmec2000ScanControllerContext:
     jit_forces: Any
     lambda_update_scale: Any
     lambda_update_scale_j: Any
-    light_history: Any
     limit_dt_from_force: Any
     limit_update_rms: Any
     lmove_axis: Any
@@ -171,17 +165,10 @@ class Vmec2000ScanControllerContext:
     preconditioner_use_lax_tridi: Any
     preconditioner_use_precomputed_tridi: Any
     ptau_tol: Any
-    ptau_tol_rel: Any
     reference_mode: Any
     resume_state: Any
     resume_state_mode: Any
     s: Any
-    scan_fallback_accept_frac: Any
-    scan_fallback_badjac_limit: Any
-    scan_fallback_enabled: Any
-    scan_fallback_fsq_abs: Any
-    scan_fallback_fsq_factor: Any
-    scan_fallback_iters: Any
     scan_minimal_default: Any
     stage_prev_fsq: Any
     stage_prev_fsq_j: Any
@@ -196,7 +183,6 @@ class Vmec2000ScanControllerContext:
     strict_update: Any
     trig: Any
     use_direct_fallback: Any
-    use_restart_triggers: Any
     verbose: Any
     verbose_vmec2000_table: Any
     vmec2000_control: Any
@@ -350,14 +336,14 @@ def _build_vmec2000_scan_runtime(ctx: Vmec2000ScanControllerContext, state_init:
         nrange=ctx.nrange,
         resume_state=ctx.resume_state,
         state_only=bool(ctx.state_only),
-        scan_fallback_enabled=bool(ctx.scan_fallback_enabled),
+        scan_fallback_enabled=bool(ctx.startup_policy.scan_fallback_enabled),
         force_chunked_scan=bool(ctx.startup_policy.force_chunked_scan),
         preconditioner_use_precomputed_tridi=ctx.preconditioner_use_precomputed_tridi,
         preconditioner_use_lax_tridi=ctx.preconditioner_use_lax_tridi,
         verbose=bool(ctx.verbose),
         vmec2000_control=bool(ctx.vmec2000_control),
         verbose_vmec2000_table=bool(ctx.verbose_vmec2000_table),
-        light_history=bool(ctx.light_history),
+        light_history=bool(ctx.startup_policy.light_history),
         scan_minimal_default=ctx.scan_minimal_default,
         dump_any=bool(ctx.startup_policy.dump_any),
         fsq_total_target=ctx.fsq_total_target,
@@ -394,7 +380,7 @@ def _build_vmec2000_scan_runtime(ctx: Vmec2000ScanControllerContext, state_init:
         use_direct_fallback=bool(ctx.use_direct_fallback),
         reference_mode=bool(ctx.reference_mode),
         strict_update=bool(ctx.strict_update),
-        auto_flip_force=bool(ctx.auto_flip_force),
+        auto_flip_force=bool(ctx.startup_policy.auto_flip_force),
     )
 
 
@@ -413,11 +399,11 @@ def _scan_debug_selection_from_env() -> ScanDebugSelection:
 def _scan_fallback_control_arrays(*, ctx: Vmec2000ScanControllerContext, dtype: Any) -> ScanFallbackControlArrays:
     startup_policy = ctx.startup_policy
     return ScanFallbackControlArrays(
-        iters=jnp.asarray(int(ctx.scan_fallback_iters), dtype=jnp.int32),
-        badjac_limit=jnp.asarray(int(ctx.scan_fallback_badjac_limit), dtype=jnp.int32),
-        accept_frac=jnp.asarray(float(ctx.scan_fallback_accept_frac), dtype=dtype),
-        fsq_factor=jnp.asarray(float(ctx.scan_fallback_fsq_factor), dtype=dtype),
-        fsq_abs=jnp.asarray(float(ctx.scan_fallback_fsq_abs), dtype=dtype),
+        iters=jnp.asarray(int(ctx.startup_policy.scan_fallback_iters), dtype=jnp.int32),
+        badjac_limit=jnp.asarray(int(ctx.startup_policy.scan_fallback_badjac_limit), dtype=jnp.int32),
+        accept_frac=jnp.asarray(float(ctx.startup_policy.scan_fallback_accept_frac), dtype=dtype),
+        fsq_factor=jnp.asarray(float(ctx.startup_policy.scan_fallback_fsq_factor), dtype=dtype),
+        fsq_abs=jnp.asarray(float(ctx.startup_policy.scan_fallback_fsq_abs), dtype=dtype),
         improve=jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype),
     )
 
@@ -548,9 +534,9 @@ def _prepare_vmec2000_scan_step_payload(
         vmec2000_control=bool(ctx.vmec2000_control),
         use_apply_payload_fusion=bool(use_apply_payload_fusion),
         badjac_use_state=bool(ctx.badjac_use_state),
-        dump_ptau_state=bool(ctx.dump_ptau_state),
-        badjac_state_probe=bool(ctx.badjac_state_probe),
-        badjac_initial_state_probe_iters=int(ctx.badjac_initial_state_probe_iters),
+        dump_ptau_state=bool(ctx.startup_policy.dump_ptau_state),
+        badjac_state_probe=bool(ctx.startup_policy.badjac_state_probe),
+        badjac_initial_state_probe_iters=int(ctx.startup_policy.badjac_initial_state_probe_iters),
         ptau_min=ptau_min,
         ptau_max=ptau_max,
         ptau_tol=ctx.ptau_tol,
@@ -634,7 +620,7 @@ def _advance_vmec2000_scan_step(step_ctx: ScanStepContext, carry_adv: _ScanCarry
         dump_timecontrol_scan=bool(step_ctx.scan_runtime.dump_timecontrol_scan),
         scan_timecontrol_dumper=step_ctx.scan_timecontrol_dumper,
         vmec2000_fact=constants.vmec2000_fact,
-        use_restart_triggers=bool(ctx.use_restart_triggers),
+        use_restart_triggers=bool(ctx.startup_policy.use_restart_triggers),
         vmecpp_restart=bool(ctx.vmecpp_restart),
         k_preconditioner_update_interval=constants.preconditioner_update_interval,
         stage_prev_fsq=ctx.stage_prev_fsq_j,
@@ -898,7 +884,7 @@ def _prepare_scan_initial_force_and_axis_reset(
         s=s,
         badjac_use_state=bool(badjac_use_state),
         ptau_tol=ptau_tol,
-        ptau_tol_rel=ctx.ptau_tol_rel,
+        ptau_tol_rel=ctx.startup_policy.ptau_tol_rel,
         axis_reset_fsq_min=ctx.axis_reset_fsq_min,
         force_axis_reset=bool(ctx.force_axis_reset),
         axis_reset_always_3d=bool(ctx.axis_reset_always_3d),
@@ -1107,7 +1093,7 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
             and (not bool(inputs.scan_minimal))
             and os.getenv("VMEC_JAX_DUMP_PTAU", "") not in ("", "0")
         ),
-        badjac_mode=ctx.badjac_mode,
+        badjac_mode=ctx.startup_policy.badjac_mode,
         dump_ptau=ctx._maybe_dump_ptau,
         badjac_use_state=bool(inputs.badjac_use_state),
         badjac_state_probe=bool(inputs.badjac_state_probe),
@@ -1123,8 +1109,9 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     _scan_backend_name = ctx._scan_backend_name
     _tree_has_tracer = ctx._tree_has_tracer
     axis_reset_coeffs = ctx.axis_reset_coeffs
-    badjac_initial_state_probe_iters = ctx.badjac_initial_state_probe_iters
-    badjac_state_probe = ctx.badjac_state_probe
+    startup_policy = ctx.startup_policy
+    badjac_initial_state_probe_iters = startup_policy.badjac_initial_state_probe_iters
+    badjac_state_probe = startup_policy.badjac_state_probe
     badjac_use_state = ctx.badjac_use_state
     cfg = ctx.cfg
     constraint_active_false = ctx.constraint_active_false
@@ -1142,17 +1129,17 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     reference_mode = ctx.reference_mode
     resume_state = ctx.resume_state
     s = ctx.s
-    scan_fallback_accept_frac = ctx.scan_fallback_accept_frac
-    scan_fallback_badjac_limit = ctx.scan_fallback_badjac_limit
-    scan_fallback_fsq_abs = ctx.scan_fallback_fsq_abs
-    scan_fallback_fsq_factor = ctx.scan_fallback_fsq_factor
-    scan_fallback_iters = ctx.scan_fallback_iters
+    scan_fallback_accept_frac = startup_policy.scan_fallback_accept_frac
+    scan_fallback_badjac_limit = startup_policy.scan_fallback_badjac_limit
+    scan_fallback_fsq_abs = startup_policy.scan_fallback_fsq_abs
+    scan_fallback_fsq_factor = startup_policy.scan_fallback_fsq_factor
+    scan_fallback_iters = startup_policy.scan_fallback_iters
     stage_transition_factor = ctx.stage_transition_factor
     stage_transition_scale = ctx.stage_transition_scale
     static = ctx.static
     step_size = ctx.step_size
     trig = ctx.trig
-    use_restart_triggers = ctx.use_restart_triggers
+    use_restart_triggers = startup_policy.use_restart_triggers
     verbose = ctx.verbose
     verbose_vmec2000_table = ctx.verbose_vmec2000_table
     vmec2000_control = ctx.vmec2000_control

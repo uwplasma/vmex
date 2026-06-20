@@ -503,6 +503,7 @@ def _dispatch_vmec2000_residual_scan(
 ) -> ResidualScanPathResult:
     """Run the VMEC2000 residual scan and decide whether to fall back."""
 
+    startup_policy = namespace["startup_policy"]
     scan_result = hooks.run_vmec2000_scan(
         hooks.scan_context_type.from_namespace(
             namespace,
@@ -515,18 +516,18 @@ def _dispatch_vmec2000_residual_scan(
         state,
     )
     attach_freeb_diag = namespace["_attach_freeb_diag"]
-    if namespace["scan_fallback_enabled"] and (not bool(namespace["state_only"])):
+    if startup_policy.scan_fallback_enabled and (not bool(namespace["state_only"])):
         fallback_decision = hooks.scan_fallback_decision(
             diagnostics=scan_result.diagnostics,
             fsqr_history=scan_result.fsqr2_history,
             fsqz_history=scan_result.fsqz2_history,
             fsql_history=scan_result.fsql2_history,
             max_iter=int(namespace["max_iter"]),
-            fallback_iters=int(namespace["scan_fallback_iters"]),
-            badjac_limit=int(namespace["scan_fallback_badjac_limit"]),
-            fsq_abs=float(namespace["scan_fallback_fsq_abs"]),
-            accept_frac=float(namespace["scan_fallback_accept_frac"]),
-            fsq_factor=float(namespace["scan_fallback_fsq_factor"]),
+            fallback_iters=int(startup_policy.scan_fallback_iters),
+            badjac_limit=int(startup_policy.scan_fallback_badjac_limit),
+            fsq_abs=float(startup_policy.scan_fallback_fsq_abs),
+            accept_frac=float(startup_policy.scan_fallback_accept_frac),
+            fsq_factor=float(startup_policy.scan_fallback_fsq_factor),
         )
         if fallback_decision.fallback:
             if namespace["verbose"]:
@@ -608,7 +609,7 @@ def _dispatch_accelerated_residual_scan(
         jit_cache_put_func=hooks.jit_cache_put,
         record_scan_runner_cache_miss_categories_func=hooks.record_scan_runner_cache_miss_categories,
         perf_counter=hooks.perf_counter,
-        differentiating_scan=bool(namespace["differentiating_scan"]),
+        differentiating_scan=bool(namespace["startup_policy"].differentiating_scan),
     )
     return ResidualScanPathResult(
         handled=True,
@@ -645,10 +646,11 @@ def dispatch_residual_scan_path(
             return scan_outcome
         return scan_outcome
 
+    startup_policy = namespace["startup_policy"]
     if (
         namespace["backtracking"]
-        or namespace["use_restart_triggers"]
-        or namespace["auto_flip_force"]
+        or startup_policy.use_restart_triggers
+        or startup_policy.auto_flip_force
         or namespace["limit_dt_from_force"]
         or namespace["limit_update_rms"]
         or namespace["strict_update"]
