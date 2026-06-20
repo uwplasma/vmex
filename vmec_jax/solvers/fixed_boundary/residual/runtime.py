@@ -92,6 +92,35 @@ def resolve_free_boundary_iteration_controls(
     )
 
 
+def dump_xc_with_velocity_blocks(
+    *,
+    dump_xc: Callable[..., Any],
+    state: Any,
+    velocities: Any,
+    static: Any,
+    iter_idx: int,
+) -> Any:
+    """Forward a residual state and named velocity-memory bundle to XC dumping."""
+
+    return dump_xc(
+        state=state,
+        vRcc=velocities.rcc,
+        vRss=velocities.rss,
+        vZsc=velocities.zsc,
+        vZcs=velocities.zcs,
+        vLsc=velocities.lsc,
+        vLcs=velocities.lcs,
+        vRsc=velocities.rsc,
+        vRcs=velocities.rcs,
+        vZcc=velocities.zcc,
+        vZss=velocities.zss,
+        vLcc=velocities.lcc,
+        vLss=velocities.lss,
+        static=static,
+        iter_idx=int(iter_idx),
+    )
+
+
 def resolve_residual_profile_window(
     *,
     profile_window_env: str,

@@ -63,6 +63,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _record_setup_timing as _runtime_record_setup_timing,
     _setup_timer_start as _runtime_setup_timer_start,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
+    dump_xc_with_velocity_blocks as _dump_xc_with_velocity_blocks,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window as _resolve_residual_profile_window,
 )
@@ -2874,20 +2875,10 @@ def solve_fixed_boundary_residual_iter(
                     update_rms=0.0,
                     step_status=step_status,
                 )
-                _maybe_dump_xc(
+                _dump_xc_with_velocity_blocks(
+                    dump_xc=_maybe_dump_xc,
                     state=state_before_restart,
-                    vRcc=velocity_blocks_before.rcc,
-                    vRss=velocity_blocks_before.rss,
-                    vZsc=velocity_blocks_before.zsc,
-                    vZcs=velocity_blocks_before.zcs,
-                    vLsc=velocity_blocks_before.lsc,
-                    vLcs=velocity_blocks_before.lcs,
-                    vRsc=velocity_blocks_before.rsc,
-                    vRcs=velocity_blocks_before.rcs,
-                    vZcc=velocity_blocks_before.zcc,
-                    vZss=velocity_blocks_before.zss,
-                    vLcc=velocity_blocks_before.lcc,
-                    vLss=velocity_blocks_before.lss,
+                    velocities=velocity_blocks_before,
                     static=static,
                     iter_idx=int(iter2),
                 )
@@ -3309,20 +3300,10 @@ def solve_fixed_boundary_residual_iter(
             velocities=velocity_blocks,
             forces=force_blocks,
         )
-        _maybe_dump_xc(
+        _dump_xc_with_velocity_blocks(
+            dump_xc=_maybe_dump_xc,
             state=state,
-            vRcc=velocity_blocks.rcc,
-            vRss=velocity_blocks.rss,
-            vZsc=velocity_blocks.zsc,
-            vZcs=velocity_blocks.zcs,
-            vLsc=velocity_blocks.lsc,
-            vLcs=velocity_blocks.lcs,
-            vRsc=velocity_blocks.rsc,
-            vRcs=velocity_blocks.rcs,
-            vZcc=velocity_blocks.zcc,
-            vZss=velocity_blocks.zss,
-            vLcc=velocity_blocks.lcc,
-            vLss=velocity_blocks.lss,
+            velocities=velocity_blocks,
             static=static,
             iter_idx=int(iter2),
         )

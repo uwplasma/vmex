@@ -24,9 +24,11 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _scan_print_uses_io_callback,
     _setup_timer_start,
     _vmec_freeb_plascur_from_bcovar,
+    dump_xc_with_velocity_blocks,
     resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window,
 )
+from vmec_jax.solvers.fixed_boundary.residual.update import ResidualVelocityBlocks
 
 
 class _Result:
@@ -220,6 +222,40 @@ def test_resolve_free_boundary_iteration_controls_reuses_cached_values() -> None
     assert out.ivac_effective == 2
     assert trace_calls[0]["cached"] is True
     assert trace_calls[0]["fsq_rz_prev"] == pytest.approx(0.25)
+
+
+def test_dump_xc_with_velocity_blocks_forwards_legacy_velocity_names() -> None:
+    calls = []
+    velocities = ResidualVelocityBlocks(*(f"v{idx}" for idx in range(12)))
+
+    got = dump_xc_with_velocity_blocks(
+        dump_xc=lambda **kwargs: calls.append(kwargs) or "dumped",
+        state="state",
+        velocities=velocities,
+        static="static",
+        iter_idx=17,
+    )
+
+    assert got == "dumped"
+    assert calls == [
+        {
+            "state": "state",
+            "vRcc": "v0",
+            "vRss": "v1",
+            "vZsc": "v4",
+            "vZcs": "v5",
+            "vLsc": "v8",
+            "vLcs": "v9",
+            "vRsc": "v2",
+            "vRcs": "v3",
+            "vZcc": "v6",
+            "vZss": "v7",
+            "vLcc": "v10",
+            "vLss": "v11",
+            "static": "static",
+            "iter_idx": 17,
+        }
+    ]
 
 
 def test_ptau_dump_enabled_requires_env_and_directory():
