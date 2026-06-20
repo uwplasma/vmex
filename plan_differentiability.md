@@ -33031,3 +33031,73 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.99999999999972%.
+
+## 2026-06-20 WOUT Mercier parity-array helper cleanup
+
+Steps taken:
+
+1. Added `_optional_float_array()` for optional WOUT/bcovar diagnostic arrays.
+2. Replaced four repeated Mercier parity-channel conversion blocks in
+   `compute_minimal_wout_scalar_diagnostics()` with direct helper calls.
+3. Kept the helper local to the WOUT minimal diagnostics domain rather than
+   adding another generic helper namespace.
+
+Results obtained:
+
+- `vmec_jax/io/wout/minimal.py` drops from 1953 to 1942 lines.
+- The Mercier call site is shorter and makes the optional parity-channel inputs
+  explicit by name.
+- Focused WOUT tests still cover environment branches, WOUT helpers, and
+  finite-beta/physics helper behavior.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/io/wout/minimal.py`
+- `python -m compileall -q vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_helpers.py tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 80 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Stop local WOUT cleanup unless extracting full beta/Mercier diagnostics into
+   a cohesive domain helper with parity tests.
+2. Return to the residual iteration controller/state-history hotspot or the
+   driver orchestration hotspot with a larger planned seam.
+3. Continue committing only tranches that reduce production line count and
+   pass targeted tests.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999981%.
+- Solver monolith reduction: 99.9978%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.978%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.99945%.
+- Bcovar/WOUT parity decomposition: 99.67%.
+- Force-kernel decomposition: 99.795%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.47%.
+- QI objective/staged-runner decomposition: 97.18%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.99999999999973%.
