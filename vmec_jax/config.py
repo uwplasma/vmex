@@ -33,6 +33,14 @@ class FreeBoundaryConfig:
 
 @dataclass(frozen=True)
 class VMECConfig:
+    """Resolved VMEC discretization and boundary-mode configuration.
+
+    This is the lightweight, typed view of ``&INDATA`` used by setup and solver
+    kernels.  It stores only values that define array shapes, Fourier grids,
+    symmetry, and free-boundary runtime policy; profile data and iteration
+    controls remain in ``InData`` so namelist semantics stay VMEC-compatible.
+    """
+
     mpol: int
     ntor: int
     ns: int
@@ -91,6 +99,8 @@ def _extcur_from_indata(indata: InData) -> tuple[float, ...]:
 
 
 def config_from_indata(indata: InData) -> VMECConfig:
+    """Build a ``VMECConfig`` from parsed ``&INDATA`` values."""
+
     mpol = indata.get_int("MPOL", 6)
     ntor = indata.get_int("NTOR", 0)
     # VMEC commonly uses NS_ARRAY = [coarse, ..., fine]. For setup we want the *finest*.
@@ -156,6 +166,8 @@ def _resolve_input_relative_paths(cfg: VMECConfig, *, input_path: str | Path) ->
 
 
 def load_config(path: str | Path) -> tuple[VMECConfig, InData]:
+    """Read an input deck and return both resolved config and raw namelist."""
+
     indata = read_indata(path)
     cfg = _resolve_input_relative_paths(config_from_indata(indata), input_path=path)
     return cfg, indata

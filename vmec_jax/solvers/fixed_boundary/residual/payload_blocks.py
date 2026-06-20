@@ -17,6 +17,8 @@ from ....vmec_tomnsp import TomnspsRZL
 
 
 class ForceBlocks(NamedTuple):
+    """Residual force blocks in VMEC's symmetric/asymmetric Fourier channels."""
+
     frcc: Any
     frss: Any
     fzsc: Any

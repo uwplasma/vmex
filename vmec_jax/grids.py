@@ -18,6 +18,12 @@ TWOPI = 2.0 * np.pi
 
 @dataclass(frozen=True)
 class AngleGrid:
+    """Uniform VMEC angular grid over one field period.
+
+    ``theta`` is the poloidal angle and ``zeta`` is VMEC's internal toroidal
+    field-period angle.  Physical toroidal angle is ``zeta / nfp``.
+    """
+
     theta: np.ndarray  # (ntheta,)
     zeta: np.ndarray   # (nzeta,)
     nfp: int

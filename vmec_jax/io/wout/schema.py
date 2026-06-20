@@ -13,6 +13,14 @@ from ...modes import vmec_mode_table
 
 @dataclass(frozen=True)
 class WoutData:
+    """In-memory representation of the VMEC ``wout_*.nc`` schema.
+
+    The fields mirror VMEC2000 naming and mesh conventions as closely as
+    possible so parity tests can compare arrays directly.  Optional or newer
+    diagnostics are still represented with concrete arrays/scalars so plotting,
+    validation, and optimization code can use one uniform object.
+    """
+
     path: Path
     ns: int
     mpol: int

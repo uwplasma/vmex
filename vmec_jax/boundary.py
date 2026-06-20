@@ -56,6 +56,13 @@ def boundary_aspect_ratio_from_static(boundary: BoundaryCoeffs, static) -> jax.A
 
 @dataclass(frozen=True)
 class BoundaryCoeffs:
+    """Physical boundary Fourier coefficients aligned with a ``ModeTable``.
+
+    The arrays store the input-facing ``R/Z`` cosine and sine channels for the
+    same ``(m, n)`` mode ordering.  This is the object optimization examples
+    manipulate when boundary degrees of freedom are exposed to autodiff.
+    """
+
     # Each is shape (K,), aligned with ModeTable
     R_cos: np.ndarray
     R_sin: np.ndarray

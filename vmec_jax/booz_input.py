@@ -68,6 +68,14 @@ def _equilibrium_flux_profiles(
 
 @dataclass(frozen=True)
 class BoozXformInputs:
+    """Differentiable VMEC-to-Boozer input payload.
+
+    The coefficient arrays follow the ``booz_xform_jax`` convention and are
+    registered as a PyTree so QI/QS objectives can differentiate through the
+    VMEC-to-Boozer preparation step.  Stellarator-symmetric channels are always
+    present; ``lasym`` channels are optional and may be ``None``.
+    """
+
     rmnc: Any
     zmns: Any
     lmns: Any

@@ -8,6 +8,8 @@ from typing import Any
 
 @dataclass(frozen=True)
 class LambdaGDOptions:
+    """Validated controls for lambda-only gradient descent."""
+
     max_iter: int
     max_backtracks: int
     bt_factor: float
@@ -17,6 +19,8 @@ class LambdaGDOptions:
 
 @dataclass(frozen=True)
 class FixedBoundaryGDOptions:
+    """Validated controls for full fixed-boundary gradient descent."""
+
     max_iter: int
     max_backtracks: int
     bt_factor: float
@@ -25,6 +29,8 @@ class FixedBoundaryGDOptions:
 
 @dataclass(frozen=True)
 class FixedBoundaryLBFGSOptions:
+    """Validated controls for fixed-boundary L-BFGS optimization."""
+
     history_size: int
     max_iter: int
     max_backtracks: int
@@ -34,6 +40,8 @@ class FixedBoundaryLBFGSOptions:
 
 @dataclass(frozen=True)
 class ResidualLBFGSOptions:
+    """Validated controls for L-BFGS on the VMEC force residual objective."""
+
     w_rz: float
     w_l: float
     objective_scale: float | None
@@ -47,6 +55,8 @@ class ResidualLBFGSOptions:
 
 @dataclass(frozen=True)
 class ResidualGNOptions:
+    """Validated controls for Gauss-Newton/CG VMEC residual minimization."""
+
     damping: float | None
     damping_increase: float
     damping_decrease: float
@@ -65,6 +75,8 @@ class ResidualGNOptions:
 
 @dataclass(frozen=True)
 class ResidualIterationOptions:
+    """Validated controls for the VMEC2000-style residual iteration loop."""
+
     max_iter: int
     step_size: float
     precompile_only: bool

@@ -142,6 +142,14 @@ def _parse_key(key: str) -> Tuple[str, Tuple[int, ...] | None]:
 
 @dataclass
 class InData:
+    """Parsed VMEC ``&INDATA`` namelist.
+
+    ``scalars`` stores ordinary assignments while ``indexed`` stores VMEC-style
+    indexed arrays such as ``RBC(n,m)`` and ``ZBS(n,m)``.  The helper accessors
+    intentionally keep VMEC's permissive input behavior: malformed or missing
+    values fall back to caller-provided defaults.
+    """
+
     scalars: Dict[str, Value]
     indexed: Dict[str, Dict[Tuple[int, ...], Scalar]]
     source_path: str | None = None

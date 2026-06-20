@@ -134,6 +134,8 @@ def _free_boundary_static_inputs(
 
 @dataclass(frozen=True)
 class ExampleData:
+    """Loaded example input plus optional reference WOUT and reconstructed state."""
+
     input_path: Path
     wout_path: Optional[Path]
     cfg: VMECConfig
