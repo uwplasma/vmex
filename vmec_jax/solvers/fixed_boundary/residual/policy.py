@@ -17,6 +17,7 @@ from .... import _solve_runtime
 from .config import (
     HEAVY_DUMP_ENVS,
     LIGHT_DUMP_ENVS,
+    bad_jacobian_tau_tolerance,
     parse_bad_jacobian_config,
     resolve_chunked_scan_config,
     resolve_dump_history_config,
@@ -65,6 +66,19 @@ class Vmec2000TimeControlDecision(NamedTuple):
     store_checkpoint: bool
     restart: bool
     pre_restart_reason: str
+
+
+class BadJacobianTauDecision(NamedTuple):
+    min_tau: float
+    max_tau: float
+    bad_jacobian: bool
+    finite: bool
+
+
+class BadJacobianSelection(NamedTuple):
+    bad_jacobian: bool
+    min_tau: float
+    max_tau: float
 
 
 class ResidualIterHistoryRecord(NamedTuple):
@@ -360,6 +374,79 @@ def append_zero_update_history_record(
     )
     append_residual_iter_history_record(rec, **history_record_lists)
     return True
+
+
+def bad_jacobian_tau_decision(
+    *,
+    min_tau: float | None,
+    max_tau: float | None,
+    vmec2000_control: bool,
+    ptau_tol: float,
+) -> BadJacobianTauDecision:
+    """Classify a VMEC Jacobian sign change from tau bounds.
+
+    VMEC2000 uses the configured absolute ``ptau`` tolerance.  The modern
+    residual controller keeps the historical relative guard used in the solver
+    loop to avoid flagging tiny numerical sign changes around zero.
+    """
+
+    if min_tau is None or max_tau is None:
+        return BadJacobianTauDecision(float("nan"), float("nan"), False, False)
+
+    min_tau_f = float(min_tau)
+    max_tau_f = float(max_tau)
+    finite = bool(np.isfinite(min_tau_f) and np.isfinite(max_tau_f))
+    if not finite:
+        return BadJacobianTauDecision(min_tau_f, max_tau_f, False, False)
+
+    if bool(vmec2000_control):
+        tau_tol = bad_jacobian_tau_tolerance(ptau_tol=ptau_tol, ptau_tol_rel=0.0, tau_scale=0.0)
+    else:
+        tau_scale = max(abs(min_tau_f), abs(max_tau_f))
+        tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
+    bad_jacobian = (min_tau_f < -tau_tol) and (max_tau_f > tau_tol)
+    return BadJacobianTauDecision(min_tau_f, max_tau_f, bool(bad_jacobian), True)
+
+
+def bad_jacobian_requires_state_jacobian(
+    *,
+    badjac_use_state: bool,
+    dump_ptau_state: bool,
+    state_probe: bool,
+    ptau_decision: BadJacobianTauDecision | None,
+) -> bool:
+    """Return whether the expensive state-Jacobian path is needed."""
+
+    return (
+        bool(badjac_use_state)
+        or bool(dump_ptau_state)
+        or bool(state_probe)
+        or ptau_decision is None
+        or bool(ptau_decision.bad_jacobian)
+    )
+
+
+def select_bad_jacobian_decision(
+    *,
+    badjac_use_state: bool,
+    ptau_decision: BadJacobianTauDecision | None,
+    state_decision: BadJacobianTauDecision,
+) -> BadJacobianSelection:
+    """Select the authoritative bad-Jacobian result for this controller mode."""
+
+    if bool(badjac_use_state):
+        return BadJacobianSelection(
+            bool(state_decision.bad_jacobian),
+            float(state_decision.min_tau),
+            float(state_decision.max_tau),
+        )
+    if ptau_decision is None:
+        return BadJacobianSelection(False, float("nan"), float("nan"))
+    return BadJacobianSelection(
+        bool(ptau_decision.bad_jacobian),
+        float(ptau_decision.min_tau),
+        float(ptau_decision.max_tau),
+    )
 
 
 def residual_iter_history_diagnostics(namespace: Mapping[str, Any]) -> dict[str, Any]:

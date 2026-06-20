@@ -30,7 +30,6 @@ from vmec_jax.solvers.fixed_boundary.residual import policy as _residual_iter_po
 from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS as _HEAVY_DUMP_ENVS,
     LIGHT_DUMP_ENVS as _LIGHT_DUMP_ENVS,
-    bad_jacobian_tau_tolerance as _bad_jacobian_tau_tolerance,
     resolve_axis_reset_config as _resolve_axis_reset_config,
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_host_profile_setup as _resolve_host_profile_setup,
@@ -42,6 +41,8 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
     append_preconditioned_residual_history as _append_preconditioned_residual_history,
     append_zero_update_history_record as _append_zero_update_history_record,
+    bad_jacobian_requires_state_jacobian as _bad_jacobian_requires_state_jacobian,
+    bad_jacobian_tau_decision as _bad_jacobian_tau_decision,
     host_restart_decision as _host_restart_decision,
     new_residual_iter_histories as _new_residual_iter_histories,
     numpy_preconditioner_apply_policy as _numpy_preconditioner_apply_policy,
@@ -49,6 +50,7 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     resolve_residual_iter_startup_policy as _resolve_residual_iter_startup_policy,
     scan_fallback_decision as _scan_fallback_decision,
     scan_fallback_message as _scan_fallback_message,
+    select_bad_jacobian_decision as _select_bad_jacobian_decision,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
@@ -2965,30 +2967,26 @@ def solve_fixed_boundary_residual_iter(
                             timing_stats["iteration_control_badjac_ptau_get"] += time.perf_counter() - float(
                                 t_badjac_ptau_get_start
                             )
+                ptau_decision = None
                 if min_tau_ptau is not None and max_tau_ptau is not None:
-                    if bool(vmec2000_control):
-                        tau_tol = _bad_jacobian_tau_tolerance(
-                            ptau_tol=ptau_tol,
-                            ptau_tol_rel=0.0,
-                            tau_scale=0.0,
-                        )
-                        bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
-                    else:
-                        tau_scale = max(abs(min_tau_ptau), abs(max_tau_ptau))
-                        tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
-                        bad_jacobian_ptau = (min_tau_ptau < -tau_tol) and (max_tau_ptau > tau_tol)
+                    ptau_decision = _bad_jacobian_tau_decision(
+                        min_tau=min_tau_ptau,
+                        max_tau=max_tau_ptau,
+                        vmec2000_control=bool(vmec2000_control),
+                        ptau_tol=ptau_tol,
+                    )
+                    bad_jacobian_ptau = bool(ptau_decision.bad_jacobian)
 
                 state_probe = _should_probe_bad_jacobian_state(
                     state_probe=bool(badjac_state_probe),
                     initial_state_probe_iters=int(badjac_initial_state_probe_iters),
                     iter_idx=int(iter2),
                 )
-                need_state_jac = (
-                    badjac_use_state
-                    or dump_ptau_state
-                    or state_probe
-                    or (bad_jacobian_ptau is None)
-                    or bool(bad_jacobian_ptau)
+                need_state_jac = _bad_jacobian_requires_state_jacobian(
+                    badjac_use_state=bool(badjac_use_state),
+                    dump_ptau_state=bool(dump_ptau_state),
+                    state_probe=bool(state_probe),
+                    ptau_decision=ptau_decision,
                 )
                 if need_state_jac:
                     t_badjac_state_jacobian_start = time.perf_counter() if timing_enabled else None
@@ -3038,33 +3036,32 @@ def solve_fixed_boundary_residual_iter(
                         timing_stats["iteration_control_badjac_state_jacobian"] += time.perf_counter() - float(
                             t_badjac_state_jacobian_start
                         )
-                    if np.isfinite(min_tau_state) and np.isfinite(max_tau_state):
-                        if bool(vmec2000_control):
-                            tau_tol = _bad_jacobian_tau_tolerance(
-                                ptau_tol=ptau_tol,
-                                ptau_tol_rel=0.0,
-                                tau_scale=0.0,
-                            )
-                            bad_jacobian_state = (min_tau_state < -tau_tol) and (max_tau_state > tau_tol)
-                        else:
-                            tau_scale = max(abs(min_tau_state), abs(max_tau_state))
-                            tau_tol = max(1.0e-12, 1.0e-3 * tau_scale)
-                            bad_jacobian_state = (min_tau_state < -tau_tol) and (max_tau_state > tau_tol)
-                    else:
-                        bad_jacobian_state = False
+                    state_decision = _bad_jacobian_tau_decision(
+                        min_tau=min_tau_state,
+                        max_tau=max_tau_state,
+                        vmec2000_control=bool(vmec2000_control),
+                        ptau_tol=ptau_tol,
+                    )
+                    bad_jacobian_state = bool(state_decision.bad_jacobian)
                 else:
                     min_tau_state = float("nan")
                     max_tau_state = float("nan")
                     bad_jacobian_state = False
+                    state_decision = _bad_jacobian_tau_decision(
+                        min_tau=min_tau_state,
+                        max_tau=max_tau_state,
+                        vmec2000_control=bool(vmec2000_control),
+                        ptau_tol=ptau_tol,
+                    )
 
-                if badjac_use_state:
-                    bad_jacobian = bad_jacobian_state
-                    min_tau = min_tau_state
-                    max_tau = max_tau_state
-                else:
-                    bad_jacobian = bool(bad_jacobian_ptau) if bad_jacobian_ptau is not None else False
-                    min_tau = min_tau_ptau if min_tau_ptau is not None else float("nan")
-                    max_tau = max_tau_ptau if max_tau_ptau is not None else float("nan")
+                badjac_selection = _select_bad_jacobian_decision(
+                    badjac_use_state=bool(badjac_use_state),
+                    ptau_decision=ptau_decision,
+                    state_decision=state_decision,
+                )
+                bad_jacobian = bool(badjac_selection.bad_jacobian)
+                min_tau = float(badjac_selection.min_tau)
+                max_tau = float(badjac_selection.max_tau)
 
                 _maybe_dump_ptau(
                     iter_idx=int(iter2),

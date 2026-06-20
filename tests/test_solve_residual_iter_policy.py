@@ -9,6 +9,8 @@ from vmec_jax.solvers.fixed_boundary.options import validate_residual_iteration_
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
     append_preconditioned_residual_history,
     append_zero_update_history_record,
+    bad_jacobian_requires_state_jacobian,
+    bad_jacobian_tau_decision,
     host_restart_decision,
     host_update_assembly_policy,
     numpy_preconditioner_apply_policy,
@@ -17,6 +19,7 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     resolve_restart_flags,
     scan_fallback_decision,
     scan_fallback_message,
+    select_bad_jacobian_decision,
     stage_transition_restart_reason,
 )
 
@@ -136,6 +139,115 @@ def test_append_zero_update_history_record_builds_aligned_converged_row():
     assert record_lists["step_status_history"] == ["converged"]
     assert record_lists["iter2_history"] == [9]
     assert record_lists["freeb_ivac_history"] == [1]
+
+
+def test_bad_jacobian_tau_decision_preserves_vmec2000_absolute_tolerance():
+    clear_sign_change = bad_jacobian_tau_decision(
+        min_tau=-1.0e-4,
+        max_tau=2.0e-4,
+        vmec2000_control=True,
+        ptau_tol=1.0e-5,
+    )
+    assert clear_sign_change.finite
+    assert clear_sign_change.bad_jacobian
+
+    below_absolute_tol = bad_jacobian_tau_decision(
+        min_tau=-1.0e-6,
+        max_tau=2.0e-6,
+        vmec2000_control=True,
+        ptau_tol=1.0e-5,
+    )
+    assert below_absolute_tol.finite
+    assert not below_absolute_tol.bad_jacobian
+
+    missing_tau = bad_jacobian_tau_decision(
+        min_tau=None,
+        max_tau=1.0,
+        vmec2000_control=True,
+        ptau_tol=0.0,
+    )
+    assert not missing_tau.finite
+    assert not missing_tau.bad_jacobian
+
+
+def test_bad_jacobian_tau_decision_preserves_modern_relative_guard():
+    tiny_numerical_crossing = bad_jacobian_tau_decision(
+        min_tau=-1.0e-13,
+        max_tau=2.0e-13,
+        vmec2000_control=False,
+        ptau_tol=0.0,
+    )
+    assert tiny_numerical_crossing.finite
+    assert not tiny_numerical_crossing.bad_jacobian
+
+    clear_modern_crossing = bad_jacobian_tau_decision(
+        min_tau=-1.0,
+        max_tau=2.0,
+        vmec2000_control=False,
+        ptau_tol=0.0,
+    )
+    assert clear_modern_crossing.bad_jacobian
+
+
+def test_bad_jacobian_state_probe_and_selection_policy():
+    no_probe = bad_jacobian_requires_state_jacobian(
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        state_probe=False,
+        ptau_decision=bad_jacobian_tau_decision(
+            min_tau=1.0,
+            max_tau=2.0,
+            vmec2000_control=True,
+            ptau_tol=0.0,
+        ),
+    )
+    assert not no_probe
+
+    assert bad_jacobian_requires_state_jacobian(
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        state_probe=False,
+        ptau_decision=None,
+    )
+    assert bad_jacobian_requires_state_jacobian(
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        state_probe=False,
+        ptau_decision=bad_jacobian_tau_decision(
+            min_tau=-1.0,
+            max_tau=2.0,
+            vmec2000_control=True,
+            ptau_tol=0.0,
+        ),
+    )
+
+    ptau_decision = bad_jacobian_tau_decision(
+        min_tau=-1.0,
+        max_tau=2.0,
+        vmec2000_control=True,
+        ptau_tol=0.0,
+    )
+    state_decision = bad_jacobian_tau_decision(
+        min_tau=1.0,
+        max_tau=2.0,
+        vmec2000_control=True,
+        ptau_tol=0.0,
+    )
+    selected_ptau = select_bad_jacobian_decision(
+        badjac_use_state=False,
+        ptau_decision=ptau_decision,
+        state_decision=state_decision,
+    )
+    assert selected_ptau.bad_jacobian
+    assert selected_ptau.min_tau == pytest.approx(-1.0)
+
+    selected_state = select_bad_jacobian_decision(
+        badjac_use_state=True,
+        ptau_decision=ptau_decision,
+        state_decision=state_decision,
+    )
+    assert not selected_state.bad_jacobian
+    assert selected_state.min_tau == pytest.approx(1.0)
 
 
 def test_host_update_assembly_policy_matches_cpu_non_scan_defaults():
