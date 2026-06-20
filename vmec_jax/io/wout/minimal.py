@@ -363,6 +363,11 @@ def _zero_wout_scalar_profiles(ns: int, count: int) -> tuple[np.ndarray, ...]:
     return tuple(np.zeros((int(ns),), dtype=float) for _ in range(int(count)))
 
 
+def _optional_float_array(obj: Any, name: str) -> np.ndarray | None:
+    value = getattr(obj, name, None)
+    return None if value is None else np.asarray(value, dtype=float)
+
+
 def env_enabled(value: str | None, *, false_values: tuple[str, ...] = ("", "0", "false", "no")) -> bool:
     """Return whether a VMEC-JAX environment toggle should be considered enabled."""
 
@@ -814,26 +819,10 @@ def compute_minimal_wout_scalar_diagnostics(
                 sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
                 bsubu=bsubu_merc,
                 bsubv=bsubv_merc,
-                bsubu_parity_even=(
-                    None
-                    if getattr(bc, "bsubu_parity_even", None) is None
-                    else np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
-                ),
-                bsubu_parity_odd=(
-                    None
-                    if getattr(bc, "bsubu_parity_odd", None) is None
-                    else np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
-                ),
-                bsubv_parity_even=(
-                    None
-                    if getattr(bc, "bsubv_parity_even", None) is None
-                    else np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
-                ),
-                bsubv_parity_odd=(
-                    None
-                    if getattr(bc, "bsubv_parity_odd", None) is None
-                    else np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
-                ),
+                bsubu_parity_even=_optional_float_array(bc, "bsubu_parity_even"),
+                bsubu_parity_odd=_optional_float_array(bc, "bsubu_parity_odd"),
+                bsubv_parity_even=_optional_float_array(bc, "bsubv_parity_even"),
+                bsubv_parity_odd=_optional_float_array(bc, "bsubv_parity_odd"),
                 bsupu=np.asarray(bsupu_bss, dtype=float),
                 bsupv=np.asarray(bsupv_bss, dtype=float),
                 trig=trig,
