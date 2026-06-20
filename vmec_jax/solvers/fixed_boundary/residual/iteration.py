@@ -1354,11 +1354,6 @@ def solve_fixed_boundary_residual_iter(
     def _pop_iteration_histories() -> None:
         _pop_residual_iter_rollback_histories(_rollback_history_lists)
 
-    _maybe_dump_time_control = _maybe_dump_time_control_record
-    _dump_time_control_trace = _dump_time_control_trace_record
-    _maybe_dump_checkpoint = _maybe_dump_checkpoint_record
-    _dump_freeb_control_trace = _dump_freeb_control_trace_record
-    _dump_freeb_axis_trace = _dump_freeb_axis_trace_record
     _dump_evolve_trace = partial(_maybe_dump_evolve_trace_record, static=static)
 
     def _zero_all_velocity_blocks() -> None:
@@ -1485,7 +1480,7 @@ def solve_fixed_boundary_residual_iter(
                 prev_rz_fsq=float(prev_rz_fsq),
                 activate_fsq=free_boundary_activate_fsq,
                 iter_controls_func=_free_boundary_iter_controls_vmec,
-                dump_freeb_control_trace=_dump_freeb_control_trace,
+                dump_freeb_control_trace=_dump_freeb_control_trace_record,
             )
             freeb_ivac = freeb_control.ivac
             freeb_ivacskip = freeb_control.ivacskip
@@ -1751,7 +1746,7 @@ def solve_fixed_boundary_residual_iter(
                     pr1_axis = np.asarray(k.pr1_even, dtype=float)
                     pz1_axis = np.asarray(k.pz1_even, dtype=float)
                     if pr1_axis.ndim >= 3 and pz1_axis.ndim >= 3:
-                        _dump_freeb_axis_trace(
+                        _dump_freeb_axis_trace_record(
                             iter2=int(iter2),
                             axis_r=np.asarray(pr1_axis[0, 0, :], dtype=float).reshape(-1),
                             axis_z=np.asarray(pz1_axis[0, 0, :], dtype=float).reshape(-1),
@@ -2574,9 +2569,9 @@ def solve_fixed_boundary_residual_iter(
                     vmec2000_fact=float(vmec2000_fact),
                     time_step=float(time_step),
                     time_control_decision=_vmec2000_time_control_decision,
-                    dump_time_control_trace=_dump_time_control_trace,
-                    maybe_dump_checkpoint=_maybe_dump_checkpoint,
-                    maybe_dump_time_control=_maybe_dump_time_control,
+                    dump_time_control_trace=_dump_time_control_trace_record,
+                    maybe_dump_checkpoint=_maybe_dump_checkpoint_record,
+                    maybe_dump_time_control=_maybe_dump_time_control_record,
                 )
                 fsq = tc.fsq
                 fsq0 = tc.fsq0

@@ -1,4 +1,4 @@
-"""Pure helpers for performance hotspot instrumentation tests.
+"""Pure fixed-boundary performance instrumentation helpers.
 
 These helpers keep cache-key and timing-bucket behavior testable without
 building VMEC tapes or launching accelerator work.

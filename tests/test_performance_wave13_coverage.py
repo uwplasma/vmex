@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vmec_jax.performance_hotspot_helpers import (
+from vmec_jax.solvers.fixed_boundary.performance import (
     accumulate_scan_device_ready_timing,
     exact_parameter_cache_key,
     exact_parameter_cache_key_fingerprint,

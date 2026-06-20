@@ -6,7 +6,7 @@ from collections import OrderedDict
 import os
 from typing import Any
 
-from ...performance_hotspot_helpers import scan_cache_miss_category_counts
+from .performance import scan_cache_miss_category_counts
 
 
 def jit_cache_limit(env_name: str, default: int) -> int:

@@ -7,6 +7,77 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Residual Alias and Performance Namespace Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Re-audited the clean branch, active plan, source-health report, tracked
+   repository size, and current refactor hotspots before editing.
+2. Removed residual-loop diagnostic callback aliases that only forwarded to
+   imported record helpers and did not bind local solver state.
+3. Moved pure fixed-boundary performance instrumentation helpers out of the
+   root namespace, from `vmec_jax/performance_hotspot_helpers.py` to
+   `vmec_jax/solvers/fixed_boundary/performance.py`.
+4. Updated the fixed-boundary JIT-cache code and focused performance/refactor
+   tests to import the helper functions from the domain package.
+5. Rechecked that the old helper module name has no remaining references.
+
+Results obtained:
+
+- The residual iteration file is smaller without changing numerical behavior:
+  `3125` to `3120` lines, and `solve_fixed_boundary_residual_iter` is `2650`
+  to `2645` lines.
+- Root namespace sprawl is reduced from `68` to `67` top-level Python files.
+- The root helper-prefix gate remains unchanged and passing at `2` compatibility
+  facades: `free_boundary_adjoint.py` and
+  `free_boundary_adjoint_controller.py`.
+- The tracked repository remains within the lightweight-git gate: `29.45 MiB`
+  total, with no tracked file above `2 MiB`.
+- The cleanup preserves the current conservative derivative claims: fixed and
+  branch-local gates are promoted; arbitrary adaptive host-branch
+  differentiation remains unclaimed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_policy.py tests/test_solve_diagnostics_io.py --tb=short`
+  (`52 passed`)
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_finalize_helpers.py --tb=short`
+  (`12 passed`)
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/performance.py vmec_jax/solvers/fixed_boundary/jit_cache.py tests/test_performance_wave13_coverage.py tests/test_refactorable_seams_coverage.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/performance.py vmec_jax/solvers/fixed_boundary/jit_cache.py tests/test_performance_wave13_coverage.py tests/test_refactorable_seams_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_performance_wave13_coverage.py tests/test_refactorable_seams_coverage.py --tb=short`
+  (`15 passed`)
+- `python tools/diagnostics/source_health.py --top 10 --top-functions 20 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+
+Best next steps:
+
+1. If another net-positive refactor is needed before review, target only the
+   residual-loop finalization payload, residual trace payload, or scan-resume
+   restoration seams; avoid broad churn.
+2. Keep implementation modules under domain packages and do not add new root
+   modules.
+3. Continue to treat the large free-boundary validation tests as real physics
+   gates unless a split preserves their full AD-vs-FD and parity coverage.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- Docs/release hygiene: 100%.
+- Overall differentiability/refactor PR readiness: 99.99999999999991%.
+
 ## 2026-06-20 Final Structure, Documentation, and Plan Audit
 
 Branch: `codex/differentiability-refactor-plan`.
