@@ -108,6 +108,10 @@ _LEGACY_ALIASES = {
     "_metric_surface_precond_scales_jax": ("vmec_jax.solvers.fixed_boundary.preconditioning.operators", "metric_surface_precond_scales_jax"),
     "_metric_surface_precond_scales_np": ("vmec_jax.solvers.fixed_boundary.preconditioning.operators", "metric_surface_precond_scales_np"),
     "_normalize_debug_print_mode": ("vmec_jax.solvers.fixed_boundary.residual.config", "normalize_debug_print_mode"),
+    "_bad_jacobian_tau_tolerance": (
+        "vmec_jax.solvers.fixed_boundary.residual.config",
+        "bad_jacobian_tau_tolerance",
+    ),
     "_parse_bad_jacobian_config": ("vmec_jax.solvers.fixed_boundary.residual.config", "parse_bad_jacobian_config"),
     "_replace_mode_slice": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "replace_mode_slice"),
     "_replace_mode_slice_np": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "replace_mode_slice_np"),

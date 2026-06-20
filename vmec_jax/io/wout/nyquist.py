@@ -216,8 +216,15 @@ def minimal_wout_lasym_nyquist_coefficients(
     modes: ModeTable,
     trig: Any,
     use_loop: bool,
+    nyquist_cos_coeffs_func: Any | None = None,
+    nyquist_sin_coeffs_func: Any | None = None,
 ) -> SymmetricNyquistCoefficientPayload:
     """Return VMEC ``wrout`` Nyquist coefficients for ``LASYM = T``."""
+
+    if nyquist_cos_coeffs_func is None:
+        nyquist_cos_coeffs_func = vmec_wrout_nyquist_cos_coeffs
+    if nyquist_sin_coeffs_func is None:
+        nyquist_sin_coeffs_func = vmec_wrout_nyquist_sin_coeffs
 
     pres_h = np.asarray(pres, dtype=float)[:, None, None]
     bmag = np.sqrt(2.0 * np.abs(np.asarray(bc.bsq) - pres_h))
@@ -263,20 +270,20 @@ def minimal_wout_lasym_nyquist_coefficients(
             for key in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsubsmnc", "bsupumns", "bsupvmns")
         )
     else:
-        gmnc = vmec_wrout_nyquist_cos_coeffs(f=sqrtg_sym, modes=modes, trig=trig)
-        bmnc = vmec_wrout_nyquist_cos_coeffs(f=bmag_sym, modes=modes, trig=trig)
-        bsubumnc = vmec_wrout_nyquist_cos_coeffs(f=bsubu_sym, modes=modes, trig=trig)
-        bsubvmnc = vmec_wrout_nyquist_cos_coeffs(f=bsubv_sym, modes=modes, trig=trig)
-        bsupumnc = vmec_wrout_nyquist_cos_coeffs(f=bsupu_sym, modes=modes, trig=trig)
-        bsupvmnc = vmec_wrout_nyquist_cos_coeffs(f=bsupv_sym, modes=modes, trig=trig)
-        bsubsmns = vmec_wrout_nyquist_sin_coeffs(f=bsubs_sym, modes=modes, trig=trig)
-        gmns = vmec_wrout_nyquist_sin_coeffs(f=sqrtg_asym, modes=modes, trig=trig)
-        bmns = vmec_wrout_nyquist_sin_coeffs(f=bmag_asym, modes=modes, trig=trig)
-        bsubumns = vmec_wrout_nyquist_sin_coeffs(f=bsubu_asym, modes=modes, trig=trig)
-        bsubvmns = vmec_wrout_nyquist_sin_coeffs(f=bsubv_asym, modes=modes, trig=trig)
-        bsupumns = vmec_wrout_nyquist_sin_coeffs(f=bsupu_asym, modes=modes, trig=trig)
-        bsupvmns = vmec_wrout_nyquist_sin_coeffs(f=bsupv_asym, modes=modes, trig=trig)
-        bsubsmnc = vmec_wrout_nyquist_cos_coeffs(f=bsubs_asym, modes=modes, trig=trig)
+        gmnc = nyquist_cos_coeffs_func(f=sqrtg_sym, modes=modes, trig=trig)
+        bmnc = nyquist_cos_coeffs_func(f=bmag_sym, modes=modes, trig=trig)
+        bsubumnc = nyquist_cos_coeffs_func(f=bsubu_sym, modes=modes, trig=trig)
+        bsubvmnc = nyquist_cos_coeffs_func(f=bsubv_sym, modes=modes, trig=trig)
+        bsupumnc = nyquist_cos_coeffs_func(f=bsupu_sym, modes=modes, trig=trig)
+        bsupvmnc = nyquist_cos_coeffs_func(f=bsupv_sym, modes=modes, trig=trig)
+        bsubsmns = nyquist_sin_coeffs_func(f=bsubs_sym, modes=modes, trig=trig)
+        gmns = nyquist_sin_coeffs_func(f=sqrtg_asym, modes=modes, trig=trig)
+        bmns = nyquist_sin_coeffs_func(f=bmag_asym, modes=modes, trig=trig)
+        bsubumns = nyquist_sin_coeffs_func(f=bsubu_asym, modes=modes, trig=trig)
+        bsubvmns = nyquist_sin_coeffs_func(f=bsubv_asym, modes=modes, trig=trig)
+        bsupumns = nyquist_sin_coeffs_func(f=bsupu_asym, modes=modes, trig=trig)
+        bsupvmns = nyquist_sin_coeffs_func(f=bsupv_asym, modes=modes, trig=trig)
+        bsubsmnc = nyquist_cos_coeffs_func(f=bsubs_asym, modes=modes, trig=trig)
 
     m_mask = np.asarray(modes.m, dtype=int)
     n_mask = np.asarray(modes.n, dtype=int)
