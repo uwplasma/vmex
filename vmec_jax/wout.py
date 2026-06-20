@@ -112,6 +112,16 @@ def _solve_jxbforce_collocation(A: np.ndarray, rhs: np.ndarray) -> np.ndarray | 
     return _wout_jxbforce_helpers._solve_jxbforce_collocation(A, rhs)
 
 
+def _minimal_wout_lasym_nyquist_coefficients_facade(**kwargs):
+    """Use facade-level Nyquist hooks for legacy monkeypatch/debug workflows."""
+
+    return minimal_wout_lasym_nyquist_coefficients(
+        **kwargs,
+        nyquist_cos_coeffs_func=_vmec_wrout_nyquist_cos_coeffs,
+        nyquist_sin_coeffs_func=_vmec_wrout_nyquist_sin_coeffs,
+    )
+
+
 def _jxbforce_getbsubs_coeffs_lasym_false(**kwargs) -> np.ndarray | None:
     return _wout_jxbforce_helpers._jxbforce_getbsubs_coeffs_lasym_false(**kwargs)
 
@@ -712,7 +722,7 @@ def wout_minimal_from_fixed_boundary(
         filter_symmetric_loop_func=_filter_bsubuv_jxbforce_loop,
         filter_symmetric_parity_func=_filter_bsubuv_jxbforce_parity,
         pshalf_from_s_func=_pshalf_from_s,
-        lasym_nyquist_coefficients_func=minimal_wout_lasym_nyquist_coefficients,
+        lasym_nyquist_coefficients_func=_minimal_wout_lasym_nyquist_coefficients_facade,
         symmetric_nyquist_coefficients_func=minimal_wout_symmetric_nyquist_coefficients,
         nyquist_cos_coeffs_func=_vmec_wrout_nyquist_cos_coeffs,
         zero_first_surface_func=_zero_first_surface,
