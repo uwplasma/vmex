@@ -13,7 +13,7 @@ import time
 from collections.abc import Mapping
 from contextlib import nullcontext
 import types
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -176,6 +176,16 @@ from vmec_jax.solvers.free_boundary.adjoint import trace_fingerprint as _trace_f
 from vmec_jax.solvers.free_boundary.adjoint import boundary_replay as _boundary_replay_module
 from vmec_jax.solvers.free_boundary.adjoint import direct_coil_replay as _direct_coil_replay_module
 from vmec_jax.solvers.free_boundary.adjoint import vmec_nestor as _vmec_nestor_module
+
+
+class _CurrentOnlyDirectionalJVPConfig(NamedTuple):
+    active: bool
+    base_leaf: Any
+    direction_leaf: Any
+    fixed_gamma: Any
+    fixed_gamma_dash: Any
+    geometry_source: str
+
 
 __all__ = [
     "_finite_difference_jacobian",
@@ -706,6 +716,45 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
     }
 
 
+def _current_only_directional_jvp_config(
+    params: Any,
+    direction_params: Any,
+    *,
+    current_only_coil_geometry: Any | None,
+    timings: dict[str, float],
+) -> _CurrentOnlyDirectionalJVPConfig:
+    """Return cached-geometry current-only JVP inputs when applicable."""
+
+    inactive = _CurrentOnlyDirectionalJVPConfig(False, None, None, None, None, "none")
+    try:
+        from vmec_jax.external_fields.coils_jax import CoilFieldParams, build_coil_field_geometry
+    except Exception:
+        return inactive
+    if not isinstance(params, CoilFieldParams) or not isinstance(direction_params, CoilFieldParams):
+        return inactive
+    direction_dofs = np.asarray(direction_params.base_curve_dofs, dtype=float)
+    if np.any(direction_dofs):
+        return inactive
+
+    if current_only_coil_geometry is None:
+        t0 = time.perf_counter()
+        fixed_gamma, fixed_gamma_dash, _fixed_currents = build_coil_field_geometry(params)
+        timings["current_only_coil_geometry_build_wall_s"] = float(time.perf_counter() - t0)
+        geometry_source = "built"
+    else:
+        fixed_gamma, fixed_gamma_dash = current_only_coil_geometry[:2]
+        timings["current_only_coil_geometry_build_wall_s"] = 0.0
+        geometry_source = "cached"
+    return _CurrentOnlyDirectionalJVPConfig(
+        True,
+        jnp.asarray(params.base_currents),
+        jnp.asarray(direction_params.base_currents),
+        fixed_gamma,
+        fixed_gamma_dash,
+        geometry_source,
+    )
+
+
 def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     input_path: Any | None = None,
     params: Any | None = None,
@@ -850,37 +899,17 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     current_only_geometry_source = "none"
     if direction_params is not None:
         derivative_mode = "directional_jvp"
-        current_only_direction = False
-        current_direction_leaf = None
-        current_base_leaf = None
-        try:
-            from .external_fields import CoilFieldParams
-
-            if isinstance(params, CoilFieldParams) and isinstance(direction_params, CoilFieldParams):
-                direction_dofs = np.asarray(direction_params.base_curve_dofs, dtype=float)
-                current_only_direction = not np.any(direction_dofs)
-                if current_only_direction:
-                    current_base_leaf = jnp.asarray(params.base_currents)
-                    current_direction_leaf = jnp.asarray(direction_params.base_currents)
-        except Exception:
-            current_only_direction = False
-            current_direction_leaf = None
-            current_base_leaf = None
-
-        if current_only_direction and current_base_leaf is not None and current_direction_leaf is not None:
+        current_jvp = _current_only_directional_jvp_config(
+            params,
+            direction_params,
+            current_only_coil_geometry=current_only_coil_geometry,
+            timings=timings,
+        )
+        if current_jvp.active:
             directional_fast_path = "current_only"
             directional_uses_fixed_coil_geometry = True
-            from .external_fields import build_coil_field_geometry, apply_stellarator_symmetry_to_currents
-
-            if current_only_coil_geometry is None:
-                t0 = time.perf_counter()
-                fixed_gamma, fixed_gamma_dash, _fixed_currents = build_coil_field_geometry(params)
-                timings["current_only_coil_geometry_build_wall_s"] = float(time.perf_counter() - t0)
-                current_only_geometry_source = "built"
-            else:
-                fixed_gamma, fixed_gamma_dash = current_only_coil_geometry[:2]
-                timings["current_only_coil_geometry_build_wall_s"] = 0.0
-                current_only_geometry_source = "cached"
+            current_only_geometry_source = str(current_jvp.geometry_source)
+            from vmec_jax.external_fields.coils_jax import apply_stellarator_symmetry_to_currents
 
             def _fixed_geometry_for_currents(base_currents):
                 expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
@@ -888,7 +917,7 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
                     nfp=params.nfp,
                     stellsym=params.stellsym,
                 )
-                return fixed_gamma, fixed_gamma_dash, expanded_currents
+                return current_jvp.fixed_gamma, current_jvp.fixed_gamma_dash, expanded_currents
 
             def _replay_scalars_current_only(base_currents):
                 replay = direct_coil_accepted_trace_controller_replay_objective_jax(
@@ -900,8 +929,8 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
                 )
                 return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
 
-            jvp_primal = (current_base_leaf,)
-            jvp_tangent = (current_direction_leaf,)
+            jvp_primal = (current_jvp.base_leaf,)
+            jvp_tangent = (current_jvp.direction_leaf,)
             jvp_fn = _replay_scalars_current_only
         else:
             jvp_primal = (params,)

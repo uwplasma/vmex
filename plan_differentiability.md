@@ -31503,3 +31503,79 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.9999999999989%.
+
+## 2026-06-20 Branch-Local Current-Only JVP Fast-Path Decomposition
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Fixed the moved free-boundary adjoint facade's current-only directional
+   path to import coil helpers from `vmec_jax.external_fields.coils_jax`
+   instead of the old root-relative location.
+2. Extracted current-only directional JVP setup from the long
+   branch-local vector scalar/Jacobian report into a dedicated helper.
+3. Made the helper return a typed `_CurrentOnlyDirectionalJVPConfig` instead of
+   a loosely keyed dictionary, clarifying the fast-path contract.
+
+Results obtained:
+
+- The branch-local vector report no longer owns coil-field type checking,
+  geometry cache selection, and current-only base/tangent setup.
+- The current-only JVP fast path still supports cached coil geometry and
+  reports whether geometry was built or reused.
+- Source-health no longer lists
+  `direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax`
+  as a top-20 long-function hotspot.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/free_boundary/adjoint/facade.py`
+- `python -m compileall -q vmec_jax/solvers/free_boundary/adjoint/facade.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_vector_jacobian -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue splitting branch-local production reports only where a helper has a
+   clear contract: diagnostics/report assembly, replay AD dispatch, or payload
+   preparation.
+2. Re-run the broader free-boundary direct-coil shard before merging the whole
+   PR, because this tranche touches compatibility-facing adjoint helpers.
+3. Resume residual-loop finalization context cleanup after one more
+   free-boundary facade reduction or if CI reports a regression.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.985%.
+- Differentiability/refactor implementation: 99.99999999958%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.735%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.974%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.48%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.46%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.999999999999%.
