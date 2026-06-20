@@ -64,6 +64,8 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _setup_timer_start as _runtime_setup_timer_start,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
     dump_xc_with_velocity_blocks as _dump_xc_with_velocity_blocks,
+    record_update_state_ready_timing as _record_update_state_ready_timing,
+    record_update_total_timing as _record_update_total_timing,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window as _resolve_residual_profile_window,
 )
@@ -3198,18 +3200,15 @@ def solve_fixed_boundary_residual_iter(
                     update_rms = restart_update.update_rms
                     if bool(clear_cache_after_catastrophic):
                         _clear_preconditioner_cache_locals()
-            if timing_enabled and t_state_update_start is not None:
-                t_state_update_dispatch_done = time.perf_counter()
-                try:
-                    if has_jax():
-                        jax.block_until_ready(state.Rcos)
-                except Exception:
-                    pass
-                t_state_update_ready_done = time.perf_counter()
-                timing_stats["update_state_ready"] += (
-                    t_state_update_ready_done - float(t_state_update_dispatch_done)
-                )
-                timing_stats["update_state"] += t_state_update_ready_done - float(t_state_update_start)
+            _record_update_state_ready_timing(
+                timing_enabled=bool(timing_enabled),
+                timing_stats=timing_stats,
+                start=t_state_update_start,
+                state=state,
+                perf_counter=time.perf_counter,
+                has_jax=has_jax,
+                jax_module=jax,
+            )
             t_trace_finalize_start = time.perf_counter() if timing_enabled and adjoint_trace else None
             if adjoint_trace:
                 _finalize_strict_update_adjoint_trace_entry(
@@ -3220,13 +3219,15 @@ def solve_fixed_boundary_residual_iter(
                 adjoint_step_trace_history.append(trace_entry)
             if timing_enabled and t_trace_finalize_start is not None:
                 timing_stats["update_trace_finalize"] += time.perf_counter() - float(t_trace_finalize_start)
-            if timing_enabled and t_update_start is not None:
-                try:
-                    if has_jax():
-                        jax.block_until_ready(state.Rcos)
-                except Exception:
-                    pass
-                timing_stats["update"] += time.perf_counter() - float(t_update_start)
+            _record_update_total_timing(
+                timing_enabled=bool(timing_enabled),
+                timing_stats=timing_stats,
+                start=t_update_start,
+                state=state,
+                perf_counter=time.perf_counter,
+                has_jax=has_jax,
+                jax_module=jax,
+            )
             timing_stats["iterations"] += 1
         else:
             w_curr = fsqr_f + fsqz_f + fsql_f
