@@ -212,6 +212,7 @@ from vmec_jax.solvers.fixed_boundary.results import (
     SolveVmecResidualResult,
 )
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
+    initial_axis_reset_runtime_decision as _initial_axis_reset_runtime_decision,
     reset_axis_from_boundary as _reset_axis_from_boundary_impl,
     run_initial_axis_reset_setup as _run_initial_axis_reset_setup,
 )
@@ -3100,15 +3101,20 @@ def solve_fixed_boundary_residual_iter(
             # and ijacob==0, retry with an improved axis guess.
             if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis) and (iter2 == 1):
                 fsq_curr = fsqr_f + fsqz_f + fsql_f
-                huge_initial_forces = (not np.isfinite(fsq_curr)) or (fsq_curr > 1.0e2)
-                force_axis_reset_init = bool(force_axis_reset) or (
-                    bool(getattr(cfg, "lthreed", True)) and axis_reset_always_3d
+                axis_runtime_decision = _initial_axis_reset_runtime_decision(
+                    bad_jacobian=bool(bad_jacobian),
+                    fsq_phys=fsq_curr,
+                    axis_reset_fsq_min=float(axis_reset_fsq_min),
+                    force_axis_reset=bool(force_axis_reset),
+                    axis_reset_always_3d=bool(axis_reset_always_3d),
+                    lthreed=bool(getattr(cfg, "lthreed", True)),
+                    vmec2000_control=bool(vmec2000_control),
+                    lmove_axis=bool(lmove_axis),
                 )
-                if (not force_axis_reset_init) and axis_reset_fsq_min > 0.0:
-                    if np.isfinite(fsq_curr) and (fsq_curr < axis_reset_fsq_min):
-                        bad_jacobian = False
-                        huge_initial_forces = False
-                if bad_jacobian or huge_initial_forces or force_axis_reset_init:
+                bad_jacobian = bool(axis_runtime_decision.bad_jacobian)
+                huge_initial_forces = bool(axis_runtime_decision.huge_initial_forces)
+                force_axis_reset_init = bool(axis_runtime_decision.force_reset)
+                if axis_runtime_decision.reset:
                     if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
                         if bad_jacobian or force_axis_reset_init:
                             print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)

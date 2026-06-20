@@ -10,6 +10,7 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
     bad_jacobian_from_tau_range,
     bad_jacobian_ptau_from_minmax,
     initial_force_physical_fsq,
+    initial_axis_reset_runtime_decision,
     reset_axis_from_boundary,
 )
 from vmec_jax.solve import (
@@ -203,6 +204,66 @@ def test_reset_axis_from_boundary_fallback_coefficients_preserve_non_axis_modes(
 def test_initial_axis_reset_decision_branch_matrix(kwargs, expected):
     decision = _initial_axis_reset_decision(**kwargs)
     assert (decision.bad_jacobian, decision.force_reset, decision.reset) == expected
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            dict(
+                bad_jacobian=True,
+                fsq_phys=0.25,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+            ),
+            (False, False, False, False),
+        ),
+        (
+            dict(
+                bad_jacobian=False,
+                fsq_phys=np.inf,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+            ),
+            (False, True, False, True),
+        ),
+        (
+            dict(
+                bad_jacobian=False,
+                fsq_phys=0.25,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=True,
+                lthreed=True,
+            ),
+            (False, False, True, True),
+        ),
+        (
+            dict(
+                bad_jacobian=True,
+                fsq_phys=2.0,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+                axis_reset_enabled=False,
+            ),
+            (True, False, False, False),
+        ),
+    ],
+)
+def test_initial_axis_reset_runtime_decision_preserves_in_loop_gate(kwargs, expected):
+    decision = initial_axis_reset_runtime_decision(**kwargs)
+    assert (
+        decision.bad_jacobian,
+        decision.huge_initial_forces,
+        decision.force_reset,
+        decision.reset,
+    ) == expected
 
 
 def test_initial_axis_reset_shared_bad_jacobian_helpers():

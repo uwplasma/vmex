@@ -20,6 +20,15 @@ class InitialAxisResetDecision(NamedTuple):
     reset: bool
 
 
+class InitialAxisResetRuntimeDecision(NamedTuple):
+    """Pure in-loop decision for the VMEC2000 first-step axis retry."""
+
+    bad_jacobian: bool
+    huge_initial_forces: bool
+    force_reset: bool
+    reset: bool
+
+
 class InitialAxisResetEvaluation(NamedTuple):
     """Initial force/Jacobian diagnostics and reset decision."""
 
@@ -136,6 +145,39 @@ def initial_axis_reset_decision(
     )
     return InitialAxisResetDecision(
         bool(bad_jacobian), bool(force_reset), bool(axis_reset_enabled) and (bool(bad_jacobian) or bool(force_reset))
+    )
+
+
+def initial_axis_reset_runtime_decision(
+    *,
+    bad_jacobian: bool,
+    fsq_phys: float,
+    axis_reset_fsq_min: float,
+    force_axis_reset: bool,
+    axis_reset_always_3d: bool,
+    lthreed: bool,
+    vmec2000_control: bool = True,
+    lmove_axis: bool = True,
+    axis_reset_enabled: bool = True,
+) -> InitialAxisResetRuntimeDecision:
+    """Return the in-loop VMEC2000 first-step axis-reset decision."""
+
+    fsq_curr = float(fsq_phys)
+    huge_initial_forces = (not np.isfinite(fsq_curr)) or (fsq_curr > 1.0e2)
+    force_reset = bool(force_axis_reset) or (
+        bool(vmec2000_control) and bool(lmove_axis) and bool(lthreed) and bool(axis_reset_always_3d)
+    )
+    bad_jacobian_next = bool(bad_jacobian)
+    if (not force_reset) and float(axis_reset_fsq_min) > 0.0:
+        if np.isfinite(fsq_curr) and (fsq_curr < float(axis_reset_fsq_min)):
+            bad_jacobian_next = False
+            huge_initial_forces = False
+    reset = bool(axis_reset_enabled) and (bool(bad_jacobian_next) or bool(huge_initial_forces) or bool(force_reset))
+    return InitialAxisResetRuntimeDecision(
+        bool(bad_jacobian_next),
+        bool(huge_initial_forces),
+        bool(force_reset),
+        bool(reset),
     )
 
 
