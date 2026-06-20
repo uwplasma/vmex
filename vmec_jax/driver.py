@@ -15,7 +15,6 @@ import os
 import time
 from typing import Any, Optional
 
-import numpy as np
 from .boundary import boundary_from_indata
 from .config import VMECConfig, load_config
 from .energy import _iotaf_from_iotas, flux_profiles_from_indata, flux_profiles_from_indata_host_default
@@ -76,6 +75,7 @@ _result_meets_requested_ftol = _driver_policy_helpers.result_meets_requested_fto
 _sanitize_minimal_resume_state_for_finish = _driver_policy_helpers.sanitize_minimal_resume_state_for_finish
 _sanitize_resume_state_for_grid_change = _driver_policy_helpers.sanitize_resume_state_for_grid_change
 _sanitize_resume_state_for_same_grid = _driver_policy_helpers.sanitize_resume_state_for_same_grid
+np = _driver_policy_helpers.np  # Compatibility seam for legacy helper monkeypatch tests.
 _cat_result_history = _driver_result_helpers.cat_result_history
 _copy_final_force_payload = _driver_result_helpers.copy_final_force_payload
 _merge_stage_chunk_results = _driver_result_helpers.merge_stage_chunk_results
@@ -338,25 +338,6 @@ save_npz = _driver_io_helpers.save_npz
 
 _STEP_SIZE_SENTINEL = object()
 _MAX_ITER_SENTINEL = object()
-
-
-def _stage_array_list(value):
-    """Return VMEC stage arrays as Python lists with legacy driver semantics."""
-
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return value
-    if isinstance(value, tuple):
-        return list(value)
-    try:
-        if isinstance(value, np.ndarray):
-            return list(value.tolist())
-    except Exception:
-        pass
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        return [value]
-    return None
 
 
 def _driver_resume_step_size_value(*, step_size, indata) -> float:
@@ -684,7 +665,6 @@ def run_fixed_boundary(
         restart_solver_state_present=restart_solver_state is not None,
         ns_override=ns_override,
         stage_transition_heuristic=stage_transition_heuristic,
-        stage_array_list_func=_stage_array_list,
         getenv=os.getenv,
     )
     ns_list_input = stage_policy.ns_list_input
@@ -977,8 +957,8 @@ def run_fixed_boundary(
         nstep = len(ns_stages)
         niter_array = indata.get("NITER_ARRAY", None)
         ftol_array = indata.get("FTOL_ARRAY", None)
-        niter_list = _stage_array_list(niter_array)
-        ftol_list = _stage_array_list(ftol_array)
+        niter_list = _as_list_like(niter_array)
+        ftol_list = _as_list_like(ftol_array)
         niter_stages, ftol_stages, niter_stages_input, _ftol_stages_input = _resolve_vmec2000_stage_controls(
             nstep=int(nstep),
             niter_list=niter_list,

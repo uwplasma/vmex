@@ -153,7 +153,6 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.io import (
     _maybe_dump_time_control_record,
     _normalize_adjoint_trace_mode,
     _normalize_resume_state_mode,
-    _pack_resume_state_record,
     _should_print_vmec2000_row,
     _vmec2000_cadence_selected,
 )
@@ -618,8 +617,6 @@ def solve_fixed_boundary_residual_iter(
         if verbose:
             print("[solve_fixed_boundary_residual_iter] jit_forces disabled (debug dumps enabled)")
     track_history = startup_policy.track_history
-
-    _pack_resume_state = partial(_pack_resume_state_record, mode=resume_state_mode)
 
     from vmec_jax.static import build_static
     from vmec_jax.boundary import boundary_from_indata

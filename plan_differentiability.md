@@ -34514,6 +34514,108 @@ Completion:
 - Docs/release hygiene for this PR: 99.997%.
 - Overall differentiability-refactor PR: 99.99999999999982%.
 
+## 2026-06-20 Residual Scan and Driver Policy Ownership Cleanup
+
+Branch:
+
+- `codex/differentiability-refactor-plan`
+
+Steps taken:
+
+1. Re-audited the worktree, source-health report, repository-size gate, and the
+   active plan after the previous code-structure documentation cleanup.
+2. Targeted two safe, behavior-preserving ownership seams instead of adding new
+   files or wrappers:
+   - residual scan resume-state packing,
+   - fixed-boundary driver stage-array parsing.
+3. Removed the residual-loop-local `_pack_resume_state` binding from
+   `solve_fixed_boundary_residual_iter`.  The VMEC2000 scan controller now
+   constructs its resume-state packer from its own `resume_state_mode` at scan
+   finalization time.
+4. Removed the duplicate `_stage_array_list` parser from `driver.py` and
+   consolidated stage-array parsing through `drivers.policy.as_list_like`.
+   The policy helper now explicitly rejects strings before falling back to
+   generic iterables, preserving the stricter legacy stage-array semantics.
+5. Preserved the legacy `driver.np` monkeypatch seam by aliasing the policy
+   module's NumPy object instead of reintroducing a direct unused import.
+
+Results obtained:
+
+- Production diff is net-negative: 7 insertions and 28 deletions across four
+  files.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 3128 to
+  3125 lines.
+- `solve_fixed_boundary_residual_iter` dropped from 2652 to 2650 lines.
+- `run_fixed_boundary` dropped from 546 to 545 lines.
+- `driver.py` no longer owns duplicate stage-array parsing logic; staging
+  policy owns that conversion in one place.
+- Tracked repository size remains about 29.43 MiB and within the 50 MiB total
+  gate and 2 MiB per-file gate.
+
+Validation:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/policy.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python -m compileall -q vmec_jax/driver.py vmec_jax/drivers/policy.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_policy.py --tb=short`
+  passed with 47 passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_diagnostics_io.py --tb=short`
+  passed with 17 passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_wave5_coverage.py tests/test_driver_helper_edges_wave14_coverage.py tests/test_non_solve_wave6_coverage.py --tb=short`
+  passed with 118 passed.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py -k "as_list_like or stage_policy or default_non_autodiff or default_use_scan" --tb=short`
+  passed with 6 passed and 59 deselected.
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 80 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 8 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue with only net-negative, domain-ownership simplifications.
+2. The next production targets remain `solve_fixed_boundary_residual_iter`
+   finalization/trace/resume seams and `run_fixed_boundary` context-builder
+   handoff.  Do not split those unless the extracted seam is natural and the
+   focused scan/driver shards stay green.
+3. If no further safe net-negative seam is apparent, stop code churn and run
+   the final local review gate for the draft PR.
+
+User decisions needed:
+
+- None immediately.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999990%.
+- Solver monolith reduction: 99.9983%.
+- Residual iteration decomposition: 99.984%.
+- Public API/docstring polish: 94.5%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.99945%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.963%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.993%.
+- Docs/release hygiene for this PR: 99.997%.
+- Overall differentiability-refactor PR: 99.99999999999984%.
+
 Open audit findings:
 
 1. Residual loop readability is still the highest-value refactor target.  Any

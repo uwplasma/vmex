@@ -14,6 +14,7 @@ from vmec_jax._compat import has_jax, jax, jnp, jit
 from vmec_jax._solve_runtime import _dataclass_from_namespace
 from vmec_jax.field import TWOPI
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import evaluate_initial_axis_reset as _evaluate_initial_axis_reset
+from vmec_jax.solvers.fixed_boundary.diagnostics.io import _pack_resume_state_record
 from vmec_jax.solvers.fixed_boundary.jit_cache import (
     jit_cache_get as _jit_cache_get,
     jit_cache_put as _jit_cache_put,
@@ -118,7 +119,6 @@ class Vmec2000ScanControllerContext:
     _mn_cos_to_signed_physical_lambda: Any
     _mn_sin_to_signed_physical: Any
     _mn_sin_to_signed_physical_lambda: Any
-    _pack_resume_state: Any
     _ptau_minmax: Any
     _ptau_minmax_from_k_host: Any
     _reset_axis_from_boundary: Any
@@ -1059,7 +1059,7 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
         fsq_total_target=inputs.fsq_total_target,
         max_iter=int(inputs.max_iter),
         resume_state_mode=str(ctx.resume_state_mode),
-        pack_resume_state=ctx._pack_resume_state,
+        pack_resume_state=partial(_pack_resume_state_record, mode=str(ctx.resume_state_mode)),
         free_boundary_enabled=bool(inputs.free_boundary_enabled),
         freeb_nvacskip=int(ctx.freeb_nvacskip),
         freeb_nvskip0=int(ctx.freeb_nvskip0),

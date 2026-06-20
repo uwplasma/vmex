@@ -566,6 +566,8 @@ def as_list_like(value):
         pass
     if isinstance(value, (int, float, np.integer, np.floating)):
         return [value]
+    if isinstance(value, str):
+        return None
     try:
         return list(value)
     except Exception:
