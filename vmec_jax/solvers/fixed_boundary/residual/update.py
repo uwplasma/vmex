@@ -132,12 +132,6 @@ def controller_state_from_resume_state(
     )
 
 
-def controller_state_values(state: ResidualControllerState) -> tuple[Any, ...]:
-    """Return controller fields in legacy scalar-local order."""
-
-    return tuple(state)
-
-
 def controller_state_legacy_payload(state: ResidualControllerState) -> dict[str, Any]:
     """Return legacy controller keys for resume-state diagnostics."""
 

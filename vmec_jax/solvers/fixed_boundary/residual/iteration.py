@@ -109,7 +109,6 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_resume_state as _controller_state_from_resume_state,
-    controller_state_values as _controller_state_values,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
@@ -1242,7 +1241,7 @@ def solve_fixed_boundary_residual_iter(
     (
         time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
         prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
-    ) = _controller_state_values(controller_state)
+    ) = tuple(controller_state)
 
     def _set_controller_state(next_state: _ResidualControllerState) -> None:
         nonlocal controller_state, time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob
@@ -1252,7 +1251,7 @@ def solve_fixed_boundary_residual_iter(
         (
             time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
             prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
-        ) = _controller_state_values(controller_state)
+        ) = tuple(controller_state)
 
     def _current_controller_state() -> _ResidualControllerState:
         return _ResidualControllerState(
@@ -1271,6 +1270,10 @@ def solve_fixed_boundary_residual_iter(
             huge_force_restart_count=int(huge_force_restart_count),
             state_checkpoint=state_checkpoint,
         )
+
+    def _apply_controller_update(update_func, update) -> None:
+        _set_controller_state(update_func(_current_controller_state(), update))
+
     _initial_velocity = _initial_residual_velocity_state(
         state=state,
         mpol=mpol,
@@ -2652,7 +2655,7 @@ def solve_fixed_boundary_residual_iter(
                     axis_reset_update = _host_axis_reset_update(
                         state, float(time_step), int(iter2), float(prev_rz_fsq_before), int(k_ndamp)
                     )
-                    _set_controller_state(_controller_after_axis_reset(_current_controller_state(), axis_reset_update))
+                    _apply_controller_update(_controller_after_axis_reset, axis_reset_update)
                     _zero_primary_velocity_blocks()
                     axis_reset_done = True
                     freeb_controls_cached = None
@@ -2716,11 +2719,8 @@ def solve_fixed_boundary_residual_iter(
                         fsq0_prev_before=float(fsq0_prev_before),
                         k_ndamp=int(k_ndamp),
                     )
-                    _set_controller_state(
-                        _controller_state_after_vmec2000_time_control_restart_update(
-                            _current_controller_state(),
-                            restart_update,
-                        )
+                    _apply_controller_update(
+                        _controller_state_after_vmec2000_time_control_restart_update, restart_update
                     )
                     step_status = restart_update.step_status
                     restart_reason = restart_update.restart_reason
@@ -2801,12 +2801,7 @@ def solve_fixed_boundary_residual_iter(
                     fsq0_prev_before=float(fsq0_prev_before),
                     k_ndamp=int(k_ndamp),
                 )
-                _set_controller_state(
-                    _controller_state_after_pre_restart_update(
-                        _current_controller_state(),
-                        pre_restart_update,
-                    )
-                )
+                _apply_controller_update(_controller_state_after_pre_restart_update, pre_restart_update)
                 time_step_iter = pre_restart_update.time_step_iter
                 step_status = pre_restart_update.step_status
                 freeb_controls_cached = None
@@ -3137,12 +3132,7 @@ def solve_fixed_boundary_residual_iter(
                         max_coeff_delta_rms=float(max_coeff_delta_rms),
                         max_update_rms=float(max_update_rms),
                     )
-                    _set_controller_state(
-                        _controller_state_after_catastrophic_restart_update(
-                            _current_controller_state(),
-                            restart_update,
-                        )
-                    )
+                    _apply_controller_update(_controller_state_after_catastrophic_restart_update, restart_update)
                     restart_reason = restart_update.restart_reason
                     step_status = restart_update.step_status
                     restart_path = restart_update.restart_path

@@ -857,6 +857,88 @@ def _constraint_kernels_from_state(
     )
 
 
+def _finish_vmec_rz_force_kernels(
+    *,
+    state,
+    static,
+    wout,
+    bc,
+    indata,
+    constraint_tcon0: float | None,
+    psqrts,
+    force_terms,
+    parity_terms,
+    constraint_options: dict[str, Any] | None = None,
+    profile_constraint: bool = False,
+    include_constraint_offsets: bool = False,
+) -> VmecRZForceKernels:
+    """Apply VMEC constraint add-back and package R/Z force kernels."""
+
+    (
+        armn_e, armn_o, brmn_e, brmn_o, crmn_e, crmn_o,
+        azmn_e, azmn_o, bzmn_e, bzmn_o, czmn_e, czmn_o,
+    ) = force_terms
+    (
+        pr1_0, pr1_1, pz1_0, pz1_1, pru_0, pru_1,
+        pzu_0, pzu_1, prv_0, prv_1, pzv_0, pzv_1,
+    ) = parity_terms
+    options = {} if constraint_options is None else dict(constraint_options)
+    if indata is not None and constraint_tcon0 is None:
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
+    constraint_start = time.perf_counter() if bool(profile_constraint) else None
+    con = _constraint_kernels_from_state(
+        state=state,
+        static=static,
+        wout=wout,
+        bc=bc,
+        pru_0=pru_0,
+        pru_1=pru_1,
+        pzu_0=pzu_0,
+        pzu_1=pzu_1,
+        constraint_tcon0=constraint_tcon0,
+        **options,
+    )
+    if constraint_start is not None:
+        _vmec_force_profile_log("constraint_done", constraint_start)
+
+    result = VmecRZForceKernels(
+        armn_e=armn_e,
+        armn_o=armn_o,
+        brmn_e=brmn_e + con.rcon_force,
+        brmn_o=brmn_o + con.rcon_force * psqrts,
+        crmn_e=crmn_e,
+        crmn_o=crmn_o,
+        azmn_e=azmn_e,
+        azmn_o=azmn_o,
+        bzmn_e=bzmn_e + con.zcon_force,
+        bzmn_o=bzmn_o + con.zcon_force * psqrts,
+        czmn_e=czmn_e,
+        czmn_o=czmn_o,
+        bc=bc,
+        arcon_e=con.arcon_e,
+        arcon_o=con.arcon_o,
+        azcon_e=con.azcon_e,
+        azcon_o=con.azcon_o,
+        gcon=con.gcon,
+        tcon=con.tcon,
+        pr1_even=pr1_0,
+        pr1_odd=pr1_1,
+        pz1_even=pz1_0,
+        pz1_odd=pz1_1,
+        pru_even=pru_0,
+        pru_odd=pru_1,
+        pzu_even=pzu_0,
+        pzu_odd=pzu_1,
+        prv_even=prv_0,
+        prv_odd=prv_1,
+        pzv_even=pzv_0,
+        pzv_odd=pzv_1,
+        constraint_rcon0=con.rcon0 if bool(include_constraint_offsets) else None,
+        constraint_zcon0=con.zcon0 if bool(include_constraint_offsets) else None,
+    )
+    return result
+
+
 def _diff_forward_half_noavg(a):
     """VMEC's forward difference a(js) <- a(js+1) - a(js)."""
     a = jnp.asarray(a)
@@ -1223,81 +1305,34 @@ def vmec_forces_rz_from_wout(
 
     armn_e, armn_o, azmn_e, azmn_o = _apply_freeb_edge_forcing(locals())
 
-    # ---------------------------------------------------------------------
-    # Constraint force pipeline: compute gcon from ztemp via alias and apply
-    # the constraint force kernels to B-terms (forces.f "CONSTRAINT FORCE").
-    # ---------------------------------------------------------------------
-    # VMEC default: `tcon0 = 1` (see `readin.f`).
-    # If caller passed an explicit value, do not override it from `indata`.
-    if indata is not None and constraint_tcon0 is None:
-        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
-    constraint_start = time.perf_counter()
-    con = _constraint_kernels_from_state(
+    result = _finish_vmec_rz_force_kernels(
         state=state_geom,
         static=static,
         wout=wout,
         bc=bc,
-        pru_0=pru_0,
-        pru_1=pru_1,
-        pzu_0=pzu_0,
-        pzu_1=pzu_1,
+        indata=indata,
         constraint_tcon0=constraint_tcon0,
-        tcon_override=constraint_tcon,
-        precond_diag_override=constraint_precond_diag,
-        precond_active=constraint_precond_active,
-        tcon_active=constraint_tcon_active,
-        rcon0_override=constraint_rcon0,
-        zcon0_override=constraint_zcon0,
-        trig=trig,
-        iter_idx=iter_idx,
-    )
-    _vmec_force_profile_log("constraint_done", constraint_start)
-
-    brmn_e = brmn_e + con.rcon_force
-    bzmn_e = bzmn_e + con.zcon_force
-    brmn_o = brmn_o + con.rcon_force * psqrts
-    bzmn_o = bzmn_o + con.zcon_force * psqrts
-
-    arcon_e = con.arcon_e
-    arcon_o = con.arcon_o
-    azcon_e = con.azcon_e
-    azcon_o = con.azcon_o
-    gcon = con.gcon
-
-    result = VmecRZForceKernels(
-        armn_e=armn_e,
-        armn_o=armn_o,
-        brmn_e=brmn_e,
-        brmn_o=brmn_o,
-        crmn_e=crmn_e,
-        crmn_o=crmn_o,
-        azmn_e=azmn_e,
-        azmn_o=azmn_o,
-        bzmn_e=bzmn_e,
-        bzmn_o=bzmn_o,
-        czmn_e=czmn_e,
-        czmn_o=czmn_o,
-        bc=bc,
-        arcon_e=arcon_e,
-        arcon_o=arcon_o,
-        azcon_e=azcon_e,
-        azcon_o=azcon_o,
-        gcon=gcon,
-        tcon=con.tcon,
-        pr1_even=pr1_0,
-        pr1_odd=pr1_1,
-        pz1_even=pz1_0,
-        pz1_odd=pz1_1,
-        pru_even=pru_0,
-        pru_odd=pru_1,
-        pzu_even=pzu_0,
-        pzu_odd=pzu_1,
-        prv_even=prv_0,
-        prv_odd=prv_1,
-        pzv_even=pzv_0,
-        pzv_odd=pzv_1,
-        constraint_rcon0=con.rcon0,
-        constraint_zcon0=con.zcon0,
+        psqrts=psqrts,
+        force_terms=(
+            armn_e, armn_o, brmn_e, brmn_o, crmn_e, crmn_o,
+            azmn_e, azmn_o, bzmn_e, bzmn_o, czmn_e, czmn_o,
+        ),
+        parity_terms=(
+            pr1_0, pr1_1, pz1_0, pz1_1, pru_0, pru_1,
+            pzu_0, pzu_1, prv_0, prv_1, pzv_0, pzv_1,
+        ),
+        constraint_options={
+            "tcon_override": constraint_tcon,
+            "precond_diag_override": constraint_precond_diag,
+            "precond_active": constraint_precond_active,
+            "tcon_active": constraint_tcon_active,
+            "rcon0_override": constraint_rcon0,
+            "zcon0_override": constraint_zcon0,
+            "trig": trig,
+            "iter_idx": iter_idx,
+        },
+        profile_constraint=True,
+        include_constraint_offsets=True,
     )
     _vmec_force_profile_log("force_done", force_start)
     return result
@@ -1522,60 +1557,22 @@ def vmec_forces_rz_from_wout_reference_fields(
     bc_obj.bsubu_e_scaled = clmn_even
     bc_obj.bsubv_e_scaled = blmn_even
 
-    # VMEC default: `tcon0 = 1` (see `readin.f`).
-    # If caller passed an explicit value, do not override it from `indata`.
-    if indata is not None and constraint_tcon0 is None:
-        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
-    con = _constraint_kernels_from_state(
+    return _finish_vmec_rz_force_kernels(
         state=state,
         static=static,
         wout=wout,
         bc=bc_obj,
-        pru_0=pru_0,
-        pru_1=pru_1,
-        pzu_0=pzu_0,
-        pzu_1=pzu_1,
+        indata=indata,
         constraint_tcon0=constraint_tcon0,
-        tcon_override=None,
-    )
-
-    brmn_e = brmn_e + con.rcon_force
-    bzmn_e = bzmn_e + con.zcon_force
-    brmn_o = brmn_o + con.rcon_force * psqrts
-    bzmn_o = bzmn_o + con.zcon_force * psqrts
-
-    return VmecRZForceKernels(
-        armn_e=armn_e,
-        armn_o=armn_o,
-        brmn_e=brmn_e,
-        brmn_o=brmn_o,
-        crmn_e=crmn_e,
-        crmn_o=crmn_o,
-        azmn_e=azmn_e,
-        azmn_o=azmn_o,
-        bzmn_e=bzmn_e,
-        bzmn_o=bzmn_o,
-        czmn_e=czmn_e,
-        czmn_o=czmn_o,
-        bc=bc_obj,
-        arcon_e=con.arcon_e,
-        arcon_o=con.arcon_o,
-        azcon_e=con.azcon_e,
-        azcon_o=con.azcon_o,
-        gcon=con.gcon,
-        tcon=con.tcon,
-        pr1_even=pr1_0,
-        pr1_odd=pr1_1,
-        pz1_even=pz1_0,
-        pz1_odd=pz1_1,
-        pru_even=pru_0,
-        pru_odd=pru_1,
-        pzu_even=pzu_0,
-        pzu_odd=pzu_1,
-        prv_even=prv_0,
-        prv_odd=prv_1,
-        pzv_even=pzv_0,
-        pzv_odd=pzv_1,
+        psqrts=psqrts,
+        force_terms=(
+            armn_e, armn_o, brmn_e, brmn_o, crmn_e, crmn_o,
+            azmn_e, azmn_o, bzmn_e, bzmn_o, czmn_e, czmn_o,
+        ),
+        parity_terms=(
+            pr1_0, pr1_1, pz1_0, pz1_1, pru_0, pru_1,
+            pzu_0, pzu_1, prv_0, prv_1, pzv_0, pzv_1,
+        ),
     )
 
 
