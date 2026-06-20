@@ -29336,3 +29336,79 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.981%.
 - Overall differentiability-refactor PR: 99.999999999974%.
+
+## 2026-06-20 Driver and Plotting Net-Line Simplification
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Shortened the embedded `run_fixed_boundary` docstring to a concise API
+   summary that points users to the guide for full option details.
+2. Removed three stale private driver aliases that had no in-repo references.
+3. Replaced duplicated raw/best-so-far objective stage segmentation in
+   `plotting.py` with one shared `_stage_segments` helper while preserving the
+   existing `_best_so_far_stage_segments` test/debug seam.
+
+Results obtained:
+
+- Net diff: 22 insertions, 85 deletions (`-63` lines).
+- `vmec_jax/driver.py` dropped to 1139 lines.
+- `run_fixed_boundary` dropped from 601 to 546 lines.
+- `vmec_jax/plotting.py` dropped from 1997 to 1992 lines and remains below the
+  source-health file warning threshold.
+- Plotting objective history still shows raw accepted-callback traces plus
+  dashed best-so-far overlays.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/plotting.py tests/test_plotting_unit.py tests/test_plotting_fast_helpers.py tests/test_init_plotting_wave12_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_plotting_unit.py tests/test_plotting_fast_helpers.py tests/test_init_plotting_wave12_coverage.py -q`
+- `python -m ruff check vmec_jax/driver.py vmec_jax/plotting.py tests/test_driver_policy_helpers.py tests/test_driver_run_wave8_coverage.py tests/test_driver_wave12_coverage.py tests/test_plotting_fast_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_run_wave8_coverage.py tests/test_driver_wave12_coverage.py tests/test_plotting_fast_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_policy_helpers.py tests/test_driver_wave5_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_driver_helper_edges_wave14_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 40 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue with net-negative simplification tranches where possible.
+2. The next high-value production candidates are:
+   - residual-loop state/cache/checkpoint mutation in `residual/iteration.py`,
+   - optimizer exact-callback cache/history machinery in `optimization.py`,
+   - WOUT minimal payload/context handoff in `wout.py`.
+3. Avoid removing private driver aliases that are still covered by compatibility
+   tests; they are downstream/debug seams, not dead code.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999997%.
+- Solver monolith reduction: 99.986%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.91%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.90%.
+- Fixed-boundary optimizer decomposition: 98.30%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.982%.
+- Overall differentiability-refactor PR: 99.999999999975%.

@@ -1689,6 +1689,29 @@ def _objective_iota_series(hist: list[dict]) -> list[float] | None:
     return [h.get("iota", np.nan) for h in hist]
 
 
+def _stage_segments(
+    values: Iterable[float],
+    stage_boundaries: Iterable[int],
+    *,
+    best_so_far: bool,
+    floor: float = 1e-16,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split objective values by stage, optionally applying best-so-far filtering."""
+    vals = [float(v) for v in values]
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    start = 0
+    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
+    for stop in stops + [len(vals)]:
+        if stop <= start:
+            continue
+        x_segment = np.arange(start, stop, dtype=int)
+        y_raw = np.asarray(vals[start:stop], dtype=float)
+        y_segment = np.minimum.accumulate(np.maximum(y_raw, floor)) if best_so_far else y_raw
+        segments.append((x_segment, y_segment))
+        start = stop
+    return segments
+
+
 def _best_so_far_stage_segments(
     values: Iterable[float],
     stage_boundaries: Iterable[int],
@@ -1696,37 +1719,7 @@ def _best_so_far_stage_segments(
     floor: float = 1e-16,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Split objective values by stage and return best-so-far traces per stage."""
-    vals = [float(v) for v in values]
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
-    start = 0
-    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
-    for stop in stops + [len(vals)]:
-        if stop <= start:
-            continue
-        x_segment = np.arange(start, stop, dtype=int)
-        y_segment = np.minimum.accumulate([max(v, floor) for v in vals[start:stop]])
-        segments.append((x_segment, y_segment))
-        start = stop
-    return segments
-
-
-def _raw_stage_segments(
-    values: Iterable[float],
-    stage_boundaries: Iterable[int],
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Split raw objective values by stage without monotone filtering."""
-    vals = [float(v) for v in values]
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
-    start = 0
-    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
-    for stop in stops + [len(vals)]:
-        if stop <= start:
-            continue
-        x_segment = np.arange(start, stop, dtype=int)
-        y_segment = np.asarray(vals[start:stop], dtype=float)
-        segments.append((x_segment, y_segment))
-        start = stop
-    return segments
+    return _stage_segments(values, stage_boundaries, best_so_far=True, floor=floor)
 
 
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
@@ -1756,7 +1749,9 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     # but plot the raw accepted-callback history so users can see whether the
     # optimizer is actually moving. A thin dashed best-so-far overlay preserves
     # the monotone diagnostic without hiding rejected/rebounded steps.
-    for i, (x_segment, y_segment) in enumerate(_raw_stage_segments(qs_vals, data.get("stage_boundaries", []))):
+    for i, (x_segment, y_segment) in enumerate(
+        _stage_segments(qs_vals, data.get("stage_boundaries", []), best_so_far=False)
+    ):
         ax1.semilogy(
             x_segment,
             np.maximum(y_segment, 1e-16),

@@ -42,8 +42,6 @@ from .solve import (
 from .static import VMECStatic, build_static
 from .wout import WoutData, read_wout, state_from_wout
 
-_FSQ_COMPONENT_NAMES = _driver_policy_helpers.FSQ_COMPONENT_NAMES
-_VALID_SOLVER_MODES = _driver_policy_helpers.VALID_SOLVER_MODES
 _accelerated_cli_budgeted_stage_iters = _driver_policy_helpers.accelerated_cli_budgeted_stage_iters
 _accelerated_cli_budgeted_total_iters = _driver_policy_helpers.accelerated_cli_budgeted_total_iters
 _accelerated_fsq_total_target_from_ftol = _driver_policy_helpers.accelerated_fsq_total_target_from_ftol
@@ -78,7 +76,6 @@ _result_meets_requested_ftol = _driver_policy_helpers.result_meets_requested_fto
 _sanitize_minimal_resume_state_for_finish = _driver_policy_helpers.sanitize_minimal_resume_state_for_finish
 _sanitize_resume_state_for_grid_change = _driver_policy_helpers.sanitize_resume_state_for_grid_change
 _sanitize_resume_state_for_same_grid = _driver_policy_helpers.sanitize_resume_state_for_same_grid
-_aggregate_stage_chunk_timing = _driver_result_helpers.aggregate_stage_chunk_timing
 _cat_result_history = _driver_result_helpers.cat_result_history
 _copy_final_force_payload = _driver_result_helpers.copy_final_force_payload
 _merge_stage_chunk_results = _driver_result_helpers.merge_stage_chunk_results
@@ -597,72 +594,17 @@ def run_fixed_boundary(
     _auto_cli_fixed_boundary_mode: bool = True,
     _solver_device_context_active: bool = False,
 ):
-    """Run a vmec_jax solve from an ``input.*`` file.
+    """Run a VMEC solve from an ``input.*`` file.
 
-    This is the main public driver and remains backward compatible with older
-    scripts that called :func:`run_fixed_boundary` for both fixed-boundary and
-    free-boundary decks. If ``LFREEB = T`` in the input namelist, the shared
-    free-boundary path is used automatically. New code that wants to make the
-    operating mode explicit should prefer :func:`run_free_boundary` for
-    free-boundary decks.
+    This is the main public fixed-boundary driver and the backward-compatible
+    entry point for free-boundary decks with ``LFREEB = T``. Prefer
+    :func:`run_free_boundary` when the free-boundary mode should be explicit.
 
-    Parameters
-    ----------
-    input_path:
-        Path to a VMEC-style ``input.*`` file.
-    solver:
-        ``"vmec2000_iter"`` (VMEC-style multigrid iteration; default),
-        ``"gd"`` (gradient descent), ``"lbfgs"``, ``"vmec_lbfgs"``, or
-        ``"vmec_gn"`` (VMEC residual objective).
-    use_initial_guess:
-        If True, skip the solve and return the initialized state.
-    ns_override:
-        If provided, overrides the radial resolution (ns) used to build the state.
-    restart_state:
-        If provided, use this VMECState as the initial condition instead of
-        building a new boundary-based guess. This disables multigrid staging.
-    restart_wout_path:
-        If provided, load the `wout_*.nc` file and use its state as the initial
-        condition (same effect as `restart_state`). This disables multigrid
-        staging.
-    restart_solver_state:
-        Optional solver-state dictionary returned by ``solve_fixed_boundary_residual_iter``
-        (``diagnostics["resume_state"]``). When supplied with ``solver="vmec2000_iter"``,
-        the time-step/momentum/preconditioner cache is resumed. This disables multigrid
-        staging.
-    cli_fixed_boundary_mode:
-        Internal CLI-only flag for non-differentiable fixed-boundary policy
-        overrides. Library callers should leave this as False.
-    solver_device:
-        Optional JAX default-device override for the solver body. ``None`` uses
-        the automatic policy, which routes known CPU-shaped conservative paths
-        away from a GPU default backend. Use ``"default"`` to opt out of
-        automatic rerouting, or ``"cpu"``/``"gpu"`` to force a device context.
-    vmec_project:
-        If True (default), re-project the initial guess through the VMEC
-        internal grid/weights before returning or solving.
-    verbose:
-        If True (default), print VMEC-style iteration progress and a summary.
-    jit_forces:
-        If True (default), JIT the force kernels. If ``"auto"``, disable JIT
-        for very small workloads to reduce first-iteration latency.
-    performance_mode:
-        If True, allow the optimized fixed-boundary policy instead of strict
-        VMEC2000 parity. Auto-selected public runs use the VMEC-control
-        non-scan loop on CPU and the scan-lifted loop on GPU/CUDA/ROCm; explicit
-        accelerated/fast-mode requests keep the scan path unless ``use_scan`` is
-        set to False.
-    solver_mode:
-        Optional explicit solver policy. Supported values:
-        ``"default"`` (current parity-guarded fast path),
-        ``"parity"`` (strict VMEC2000-style control path), and
-        ``"accelerated"`` (experimental non-parity path that prioritizes
-        final residual/quality and device residency).
-
-    Returns
-    -------
-    FixedBoundaryRun
-        Shared run container for both fixed-boundary and free-boundary solves.
+    Common controls are ``solver`` (``"vmec2000_iter"``, ``"gd"``, ``"lbfgs"``,
+    ``"vmec_lbfgs"``, or ``"vmec_gn"``), ``solver_mode`` (``"default"``,
+    ``"parity"``, or ``"accelerated"``), ``solver_device`` (``None``,
+    ``"default"``, ``"cpu"``, or ``"gpu"``), restart inputs, and VMEC iteration
+    budgets. Full option details are documented in the user guide.
     """
     t_start = time.perf_counter()
     max_iter_overridden = max_iter is not _MAX_ITER_SENTINEL
