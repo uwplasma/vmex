@@ -188,6 +188,17 @@ class _CurrentOnlyDirectionalJVPConfig(NamedTuple):
     geometry_source: str
 
 
+class _BranchLocalScalarDerivativeResult(NamedTuple):
+    replay_values: Any
+    jacobian: Any
+    gradients: dict[str, Any]
+    directional_values: Any
+    derivative_mode: str
+    directional_fast_path: str
+    directional_uses_fixed_coil_geometry: bool
+    current_only_geometry_source: str
+
+
 __all__ = """
 _finite_difference_jacobian
 accepted_trace_effective_state_pre
@@ -754,6 +765,199 @@ def _branch_local_trace_replay_diagnostics(
     return diagnostics
 
 
+def _branch_local_scalar_derivatives(
+    *,
+    params: Any,
+    direction_params: Any | None,
+    replay_traces: tuple[Any, ...],
+    replay_plan: Mapping[str, Any] | None,
+    replay_options: Mapping[str, Any],
+    scalar_fn_seq: tuple[Any, ...],
+    keys: tuple[str, ...],
+    ad_mode: str,
+    replay_scalars_fn: Any,
+    current_only_coil_geometry: Any | None,
+    timings: dict[str, float],
+) -> _BranchLocalScalarDerivativeResult:
+    """Evaluate branch-local replay scalars and their selected derivative mode."""
+
+    jacobian = None
+    gradients: dict[str, Any] = {}
+    directional_values = None
+    derivative_mode = "full_jacobian_vjp"
+    directional_fast_path = "none"
+    directional_uses_fixed_coil_geometry = False
+    current_only_geometry_source = "none"
+
+    if direction_params is not None:
+        derivative_mode = "directional_jvp"
+        current_jvp = _current_only_directional_jvp_config(
+            params,
+            direction_params,
+            current_only_coil_geometry=current_only_coil_geometry,
+            timings=timings,
+        )
+        if current_jvp.active:
+            directional_fast_path = "current_only"
+            directional_uses_fixed_coil_geometry = True
+            current_only_geometry_source = str(current_jvp.geometry_source)
+            from vmec_jax.external_fields.coils_jax import apply_stellarator_symmetry_to_currents
+
+            def _fixed_geometry_for_currents(base_currents):
+                expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
+                    base_currents,
+                    nfp=params.nfp,
+                    stellsym=params.stellsym,
+                )
+                return current_jvp.fixed_gamma, current_jvp.fixed_gamma_dash, expanded_currents
+
+            def _replay_scalars_current_only(base_currents):
+                replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+                    params.with_arrays(base_currents=base_currents),
+                    replay_traces[0]["state_pre"],
+                    replay_plan=replay_plan,
+                    coil_geometry=_fixed_geometry_for_currents(base_currents),
+                    **replay_options,
+                )
+                return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
+
+            jvp_primal = (current_jvp.base_leaf,)
+            jvp_tangent = (current_jvp.direction_leaf,)
+            jvp_fn = _replay_scalars_current_only
+        else:
+            jvp_primal = (params,)
+            jvp_tangent = (direction_params,)
+            jvp_fn = replay_scalars_fn
+
+        t0 = time.perf_counter()
+        replay_values, directional_values = jax.jvp(jvp_fn, jvp_primal, jvp_tangent)
+        timings["replay_jvp_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        replay_values, directional_values = _block_until_ready_for_timing((replay_values, directional_values))
+        timings["replay_jvp_ready_s"] = float(time.perf_counter() - t0)
+        timings["replay_jvp_wall_s"] = timings["replay_jvp_dispatch_s"] + timings["replay_jvp_ready_s"]
+        # Compatibility timing keys: no full VJP/Jacobian was built.
+        timings["replay_vjp_wall_s"] = 0.0
+        timings["replay_pullbacks_wall_s"] = 0.0
+        timings["jacobian_stack_ready_s"] = 0.0
+    else:
+        t0 = time.perf_counter()
+        replay_values, pullback = jax.vjp(replay_scalars_fn, params)
+        timings["replay_vjp_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        replay_values = _block_until_ready_for_timing(replay_values)
+        timings["replay_vjp_ready_s"] = float(time.perf_counter() - t0)
+        basis = jnp.eye(len(keys), dtype=jnp.asarray(replay_values).dtype)
+        t0 = time.perf_counter()
+        jacobian = _pytree_pullback_basis_jax(pullback, basis)
+        timings["replay_pullbacks_dispatch_s"] = float(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        jacobian = _block_until_ready_for_timing(jacobian)
+        timings["replay_pullbacks_ready_s"] = float(time.perf_counter() - t0)
+        timings["replay_vjp_wall_s"] = timings["replay_vjp_dispatch_s"] + timings["replay_vjp_ready_s"]
+        timings["replay_pullbacks_wall_s"] = (
+            timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
+        )
+        # Pullback readiness already materialized the full Jacobian pytree.
+        # Keep the timing key for report compatibility without re-walking it.
+        timings["jacobian_stack_ready_s"] = 0.0
+        basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
+        gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
+
+    return _BranchLocalScalarDerivativeResult(
+        replay_values=replay_values,
+        jacobian=jacobian,
+        gradients=gradients,
+        directional_values=directional_values,
+        derivative_mode=derivative_mode,
+        directional_fast_path=directional_fast_path,
+        directional_uses_fixed_coil_geometry=directional_uses_fixed_coil_geometry,
+        current_only_geometry_source=current_only_geometry_source,
+    )
+
+
+def _branch_local_scalar_report(
+    *,
+    derivative_result: _BranchLocalScalarDerivativeResult,
+    keys: tuple[str, ...],
+    all_values: Mapping[str, Any],
+    production_values_source: str,
+    replay_payload_source: str,
+    payload: Mapping[str, Any],
+    include_payload: bool,
+    include_replay_graph_metadata: bool,
+    traces: tuple[Any, ...],
+    include_trace_replay_diagnostics: bool,
+    timings: dict[str, float],
+    total_start: float,
+    ad_mode: str,
+    replay_options: Mapping[str, Any],
+    replay_plan: Mapping[str, Any] | None,
+    graph_metadata: Mapping[str, Any],
+    replay_branch_metadata: Mapping[str, Any],
+    controller_slot_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Assemble the public branch-local scalar/Jacobian report."""
+
+    replay_values = derivative_result.replay_values
+    values = {key: float(all_values[key]) for key in keys}
+    replay_value_map = {key: replay_values[index] for index, key in enumerate(keys)}
+    base_abs_delta = {
+        key: abs(float(np.asarray(replay_values[index], dtype=float)) - float(values[key]))
+        for index, key in enumerate(keys)
+    }
+    directional_derivatives = (
+        None
+        if derivative_result.directional_values is None
+        else {key: derivative_result.directional_values[index] for index, key in enumerate(keys)}
+    )
+    diagnostics = _branch_local_trace_replay_diagnostics(
+        traces,
+        include_trace_replay_diagnostics=bool(include_trace_replay_diagnostics),
+        timings=timings,
+    )
+    timings["total_wall_s"] = float(time.perf_counter() - total_start)
+    return {
+        "contract": "production-forward branch-local run_free_boundary scalar values/Jacobian",
+        "uses_production_forward": True,
+        "differentiates_adaptive_controller": False,
+        "differentiates_run_free_boundary": False,
+        "differentiates_fixed_accepted_branch": True,
+        "replay_ad_mode": ad_mode,
+        "derivative_mode": derivative_result.derivative_mode,
+        "scalar_keys": keys,
+        "values": values,
+        "all_values": all_values,
+        "production_values_source": production_values_source,
+        "replay_payload_source": replay_payload_source,
+        "replay_values": replay_values,
+        "replay_value_map": replay_value_map,
+        "base_abs_delta": base_abs_delta,
+        "max_base_abs_delta": max(base_abs_delta.values()) if base_abs_delta else 0.0,
+        "jacobian": derivative_result.jacobian,
+        "grads": derivative_result.gradients,
+        "directional_derivatives": directional_derivatives,
+        "payload": payload if bool(include_payload) else None,
+        "includes_payload": bool(include_payload),
+        "includes_replay_graph_metadata": bool(include_replay_graph_metadata),
+        "timings": timings,
+        "trace_replay_diagnostics": diagnostics,
+        "replay_graph_metadata": graph_metadata,
+        "replay_branch_metadata": replay_branch_metadata,
+        "controller_slot_summary": controller_slot_summary,
+        "replay_option_flags": _branch_local_replay_option_flags(
+            replay_options,
+            replay_plan=replay_plan,
+            ad_mode=ad_mode,
+            extra={
+                "directional_jvp_fast_path": derivative_result.directional_fast_path,
+                "directional_uses_fixed_coil_geometry": derivative_result.directional_uses_fixed_coil_geometry,
+                "current_only_coil_geometry_source": derivative_result.current_only_geometry_source,
+            },
+        ),
+    }
+
+
 def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     input_path: Any | None = None,
     params: Any | None = None,
@@ -777,34 +981,12 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
     require_active_trace: bool = True,
     current_only_coil_geometry: Any | None = None,
 ) -> dict[str, Any]:
-    """Return production-forward branch-local values and a scalar Jacobian.
+    """Return production values plus branch-local replay derivatives.
 
-    This is the vector-valued counterpart of
-    :func:`direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax`.
-    The values are evaluated from a real direct-coil complete solve payload,
-    while the Jacobian is computed by replaying the fixed accepted branch with
-    a vector-output custom-VJP seam.  The contract is intentionally narrow: it
-    differentiates direct-coil parameters through the saved accepted branch and
-    does not differentiate adaptive host-controller branch changes.
-
-    If ``direction_params`` is supplied, the helper computes only the
-    directional derivatives ``J @ direction_params`` using ``jax.jvp`` instead
-    of materializing the full Jacobian.  This is the fast path for production
-    validation reports that compare against one complete-solve central
-    finite-difference direction.
-
-    ``scalar_fn(payload)`` must return a mapping of production scalar values.
-    Callers that already have the production base values can pass
-    ``production_values`` to avoid recomputing them from ``scalar_fn``.
-    ``replay_scalar_fns`` maps the same scalar keys to callables of the form
-    ``fn(replay, payload)`` that evaluate those scalars from the JAX-visible
-    accepted-controller replay.  ``replay_payload`` can be supplied to pass a
-    slim context into those functions, avoiding closure capture of a full
-    complete-solve payload during cold replay/JVP graph construction.  Set
-    ``include_payload=False`` for production reports that only need scalar
-    values/derivatives and should not retain the full complete-solve payload.
-    Set ``include_replay_graph_metadata=False`` when a compact production
-    report does not need structural replay metadata.
+    The production values come from a complete direct-coil solve; derivatives
+    come from the fixed accepted-branch replay, so adaptive host branch changes
+    remain outside the differentiated contract.  Supplying ``direction_params``
+    switches from full Jacobian VJP to directional JVP.
     """
 
     if jax is None:  # pragma: no cover - JAX is required for this helper.
@@ -889,147 +1071,39 @@ def direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
 
     _replay_scalars = _replay_scalars_direct if ad_mode == "direct" else _replay_scalars_custom_vjp
 
-    derivative_mode = "full_jacobian_vjp"
-    jacobian = None
-    gradients: dict[str, Any] = {}
-    directional_values = None
-    directional_fast_path = "none"
-    directional_uses_fixed_coil_geometry = False
-    current_only_geometry_source = "none"
-    if direction_params is not None:
-        derivative_mode = "directional_jvp"
-        current_jvp = _current_only_directional_jvp_config(
-            params,
-            direction_params,
-            current_only_coil_geometry=current_only_coil_geometry,
-            timings=timings,
-        )
-        if current_jvp.active:
-            directional_fast_path = "current_only"
-            directional_uses_fixed_coil_geometry = True
-            current_only_geometry_source = str(current_jvp.geometry_source)
-            from vmec_jax.external_fields.coils_jax import apply_stellarator_symmetry_to_currents
-
-            def _fixed_geometry_for_currents(base_currents):
-                expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
-                    base_currents,
-                    nfp=params.nfp,
-                    stellsym=params.stellsym,
-                )
-                return current_jvp.fixed_gamma, current_jvp.fixed_gamma_dash, expanded_currents
-
-            def _replay_scalars_current_only(base_currents):
-                replay = direct_coil_accepted_trace_controller_replay_objective_jax(
-                    params.with_arrays(base_currents=base_currents),
-                    replay_traces_for_scalars[0]["state_pre"],
-                    replay_plan=replay_plan_for_scalars,
-                    coil_geometry=_fixed_geometry_for_currents(base_currents),
-                    **replay_options,
-                )
-                return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
-
-            jvp_primal = (current_jvp.base_leaf,)
-            jvp_tangent = (current_jvp.direction_leaf,)
-            jvp_fn = _replay_scalars_current_only
-        else:
-            jvp_primal = (params,)
-            jvp_tangent = (direction_params,)
-            jvp_fn = _replay_scalars
-
-        t0 = time.perf_counter()
-        replay_values, directional_values = jax.jvp(
-            jvp_fn,
-            jvp_primal,
-            jvp_tangent,
-        )
-        timings["replay_jvp_dispatch_s"] = float(time.perf_counter() - t0)
-        t0 = time.perf_counter()
-        replay_values, directional_values = _block_until_ready_for_timing((replay_values, directional_values))
-        timings["replay_jvp_ready_s"] = float(time.perf_counter() - t0)
-        timings["replay_jvp_wall_s"] = timings["replay_jvp_dispatch_s"] + timings["replay_jvp_ready_s"]
-        # Compatibility timing keys: no full VJP/Jacobian was built.
-        timings["replay_vjp_wall_s"] = 0.0
-        timings["replay_pullbacks_wall_s"] = 0.0
-        timings["jacobian_stack_ready_s"] = 0.0
-    else:
-        t0 = time.perf_counter()
-        replay_values, pullback = jax.vjp(_replay_scalars, params)
-        timings["replay_vjp_dispatch_s"] = float(time.perf_counter() - t0)
-        t0 = time.perf_counter()
-        replay_values = _block_until_ready_for_timing(replay_values)
-        timings["replay_vjp_ready_s"] = float(time.perf_counter() - t0)
-        basis = jnp.eye(len(keys), dtype=jnp.asarray(replay_values).dtype)
-        t0 = time.perf_counter()
-        jacobian = _pytree_pullback_basis_jax(pullback, basis)
-        timings["replay_pullbacks_dispatch_s"] = float(time.perf_counter() - t0)
-        t0 = time.perf_counter()
-        jacobian = _block_until_ready_for_timing(jacobian)
-        timings["replay_pullbacks_ready_s"] = float(time.perf_counter() - t0)
-        timings["replay_vjp_wall_s"] = timings["replay_vjp_dispatch_s"] + timings["replay_vjp_ready_s"]
-        timings["replay_pullbacks_wall_s"] = (
-            timings["replay_pullbacks_dispatch_s"] + timings["replay_pullbacks_ready_s"]
-        )
-        # Pullback readiness already materialized the full Jacobian pytree.
-        # Keep the timing key for report compatibility without re-walking it.
-        timings["jacobian_stack_ready_s"] = 0.0
-        basis_gradients = _pytree_unstack_leading_axis_jax(jacobian, len(keys))
-        gradients = {key: basis_gradients[index] for index, key in enumerate(keys)}
-    values = {key: float(all_values[key]) for key in keys}
-    replay_value_map = {key: replay_values[index] for index, key in enumerate(keys)}
-    base_abs_delta = {
-        key: abs(float(np.asarray(replay_values[index], dtype=float)) - float(values[key]))
-        for index, key in enumerate(keys)
-    }
-    directional_derivatives = (
-        None
-        if directional_values is None
-        else {key: directional_values[index] for index, key in enumerate(keys)}
-    )
-    diagnostics = _branch_local_trace_replay_diagnostics(
-        traces,
-        include_trace_replay_diagnostics=bool(include_trace_replay_diagnostics),
+    derivative_result = _branch_local_scalar_derivatives(
+        params=params,
+        direction_params=direction_params,
+        replay_traces=replay_traces_for_scalars,
+        replay_plan=replay_plan_for_scalars,
+        replay_options=replay_options,
+        scalar_fn_seq=scalar_fn_seq,
+        keys=keys,
+        ad_mode=ad_mode,
+        replay_scalars_fn=_replay_scalars,
+        current_only_coil_geometry=current_only_coil_geometry,
         timings=timings,
     )
-    timings["total_wall_s"] = float(time.perf_counter() - total_start)
-    return {
-        "contract": "production-forward branch-local run_free_boundary scalar values/Jacobian",
-        "uses_production_forward": True,
-        "differentiates_adaptive_controller": False,
-        "differentiates_run_free_boundary": False,
-        "differentiates_fixed_accepted_branch": True,
-        "replay_ad_mode": ad_mode,
-        "derivative_mode": derivative_mode,
-        "scalar_keys": keys,
-        "values": values,
-        "all_values": all_values,
-        "production_values_source": production_values_source,
-        "replay_payload_source": replay_payload_source,
-        "replay_values": replay_values,
-        "replay_value_map": replay_value_map,
-        "base_abs_delta": base_abs_delta,
-        "max_base_abs_delta": max(base_abs_delta.values()) if base_abs_delta else 0.0,
-        "jacobian": jacobian,
-        "grads": gradients,
-        "directional_derivatives": directional_derivatives,
-        "payload": payload if bool(include_payload) else None,
-        "includes_payload": bool(include_payload),
-        "includes_replay_graph_metadata": bool(include_replay_graph_metadata),
-        "timings": timings,
-        "trace_replay_diagnostics": diagnostics,
-        "replay_graph_metadata": graph_metadata,
-        "replay_branch_metadata": replay_branch_metadata,
-        "controller_slot_summary": controller_slot_summary,
-        "replay_option_flags": _branch_local_replay_option_flags(
-            replay_options,
-            replay_plan=replay_plan_for_scalars,
-            ad_mode=ad_mode,
-            extra={
-                "directional_jvp_fast_path": directional_fast_path,
-                "directional_uses_fixed_coil_geometry": directional_uses_fixed_coil_geometry,
-                "current_only_coil_geometry_source": current_only_geometry_source,
-            },
-        ),
-    }
+    return _branch_local_scalar_report(
+        derivative_result=derivative_result,
+        keys=keys,
+        all_values=all_values,
+        production_values_source=production_values_source,
+        replay_payload_source=replay_payload_source,
+        payload=payload,
+        include_payload=bool(include_payload),
+        include_replay_graph_metadata=bool(include_replay_graph_metadata),
+        traces=traces,
+        include_trace_replay_diagnostics=bool(include_trace_replay_diagnostics),
+        timings=timings,
+        total_start=total_start,
+        ad_mode=ad_mode,
+        replay_options=replay_options,
+        replay_plan=replay_plan_for_scalars,
+        graph_metadata=graph_metadata,
+        replay_branch_metadata=replay_branch_metadata,
+        controller_slot_summary=controller_slot_summary,
+    )
 
 
 def direct_coil_fixed_trace_custom_vjp_objective_jax(
