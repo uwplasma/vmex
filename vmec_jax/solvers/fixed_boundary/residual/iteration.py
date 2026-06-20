@@ -2862,55 +2862,25 @@ def solve_fixed_boundary_residual_iter(
                     and os.getenv("VMEC_JAX_DUMP_PTAU", "") in ("", "0")
                     and jax.default_backend() != "cpu"
                 )
-                control_payload_used = False
-                if accepted_control_ptau_payload is not None:
-                    t_fsq1_payload_get_start = time.perf_counter() if timing_enabled else None
-                    fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
-                        _accepted_control_ptau_host_from_payload(
-                            accepted_control_ptau_payload,
-                            device_get_floats=_device_get_floats,
-                        )
-                    )
-                    if control_payload_used:
-                        fsq1 = float(fsq1_payload_host)
-                    if timing_enabled and t_fsq1_payload_get_start is not None:
-                        timing_stats["iteration_control_fsq1_payload_get"] += time.perf_counter() - float(
-                            t_fsq1_payload_get_start
-                        )
-                if (not control_payload_used) and use_control_payload:
-                    ptau_arrays = _scan_math_kernel_arrays_from_k(k)
-                    payload_fn = _accepted_control_payload_jit()
-                    if ptau_arrays is not None and payload_fn is not None:
-                        t_fsq1_payload_get_start = time.perf_counter() if timing_enabled else None
-                        try:
-                            payload = payload_fn(
-                                fsq1_j,
-                                *ptau_arrays,
-                                _ptau_context.pshalf_jax,
-                                _ptau_context.ohs_jax,
-                            )
-                            fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
-                                _accepted_control_ptau_host_from_payload(
-                                    payload,
-                                    device_get_floats=_device_get_floats,
-                                )
-                            )
-                            if control_payload_used:
-                                fsq1 = float(fsq1_payload_host)
-                        except Exception:
-                            control_payload_used = False
-                        finally:
-                            if timing_enabled and t_fsq1_payload_get_start is not None:
-                                timing_stats["iteration_control_fsq1_payload_get"] += time.perf_counter() - float(
-                                    t_fsq1_payload_get_start
-                                )
-                if not control_payload_used:
-                    t_fsq1_direct_get_start = time.perf_counter() if timing_enabled else None
-                    fsq1 = float(jax.device_get(fsq1_j))
-                    if timing_enabled and t_fsq1_direct_get_start is not None:
-                        timing_stats["iteration_control_fsq1_direct_get"] += time.perf_counter() - float(
-                            t_fsq1_direct_get_start
-                        )
+                control_payload = _precond_payload_facade.materialize_accepted_control_payload(
+                    accepted_control_ptau_payload=accepted_control_ptau_payload,
+                    use_control_payload=bool(use_control_payload),
+                    fsq1_j=fsq1_j,
+                    k=k,
+                    ptau_pshalf_jax=_ptau_context.pshalf_jax,
+                    ptau_ohs_jax=_ptau_context.ohs_jax,
+                    timing_enabled=bool(timing_enabled),
+                    timing_stats=timing_stats,
+                    perf_counter=time.perf_counter,
+                    jax_module=jax,
+                    device_get_floats=_device_get_floats,
+                    accepted_control_ptau_host_from_payload=_accepted_control_ptau_host_from_payload,
+                    scan_math_kernel_arrays_from_k=_scan_math_kernel_arrays_from_k,
+                    accepted_control_payload_jit=_accepted_control_payload_jit,
+                )
+                fsq1 = control_payload.fsq1
+                accepted_control_ptau_host = control_payload.accepted_control_ptau_host
+                control_payload_used = control_payload.control_payload_used
             if timing_enabled and t_iteration_control_fsq1_start is not None:
                 timing_stats["iteration_control_fsq1"] += time.perf_counter() - float(t_iteration_control_fsq1_start)
             precond_diag_host: tuple[float, float, float] | None = None
