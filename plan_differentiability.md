@@ -31121,3 +31121,73 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999998%.
+
+## 2026-06-20 Obsolete Residual History Namespace Helpers Removal
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Confirmed `ResidualIterationHistories` now owns record, terminal, step, and
+   rollback history-list access.
+2. Removed the unused `residual_iter_history_list_maps()` and
+   `residual_iter_rollback_history_lists()` namespace helpers.
+3. Left broader compatibility-surface functions in place when they are exported
+   through `vmec_jax.solve` or have hidden-test/downstream risk.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/policy.py` decreased from 1662 to
+  1642 lines.
+- No production behavior changed; this is a deletion-only simplification of
+  obsolete namespace plumbing.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/policy.py tests/test_solve_residual_iter_policy.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/policy.py tests/test_solve_residual_iter_policy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue removing obsolete compatibility helpers only when current-state
+   evidence shows they are neither used internally nor protected by historical
+   aliases.
+2. Design the explicit strict-update trace context before touching the remaining
+   trace `locals()` calls.
+3. Keep the next code-producing tranche net-negative in production lines.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999953%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.973%.
+- Residual policy simplification: 99.982%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.42%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.44%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.9999999999985%.

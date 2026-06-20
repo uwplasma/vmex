@@ -136,26 +136,6 @@ _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS = (
 ).split()
 
 
-def residual_iter_history_list_maps(
-    namespace: Mapping[str, Any],
-    *,
-    free_boundary_enabled: bool,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return aligned append-list maps for host residual iteration histories."""
-
-    record_lists = {key: namespace[key] for key in _RESIDUAL_ITER_HISTORY_RECORD_KEYS}
-    terminal_lists = {key: namespace[key] for key in _RESIDUAL_ITER_TERMINAL_HISTORY_KEYS}
-    record_lists["free_boundary_enabled"] = bool(free_boundary_enabled)
-    terminal_lists["free_boundary_enabled"] = bool(free_boundary_enabled)
-    return record_lists, terminal_lists
-
-
-def residual_iter_rollback_history_lists(namespace: Mapping[str, Any]) -> tuple[list[Any], ...]:
-    """Return host-loop history lists that must roll back on retry/restart."""
-
-    return tuple(namespace[key] for key in _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS)
-
-
 def pop_residual_iter_rollback_histories(histories: tuple[list[Any], ...]) -> None:
     """Pop one optimistic history row from every aligned residual history list."""
 
