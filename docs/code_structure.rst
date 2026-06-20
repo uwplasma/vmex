@@ -14,6 +14,12 @@ Core public surfaces:
   and ``vmec_jax/wout.py`` are compatibility facades.  Keep them thin; new
   implementation logic should live in the domain packages below.
 
+The current root namespace still contains historical compatibility modules.
+Treat those as a migration burden, not as a pattern to copy.  New production
+code should not add another root-level module unless it is a documented public
+facade; put kernels, controllers, diagnostics, validation gates, and workflow
+helpers in the domain packages below.
+
 Numerical domains:
 
 - ``vmec_jax/solvers/fixed_boundary/`` contains fixed-boundary VMEC iteration,
@@ -107,3 +113,16 @@ The diagnostic is report-only by default on this draft PR so it can guide
 large tranches without creating a brittle gate.  Ratchet it with
 ``--fail-lines`` only after a target module has been split and compatibility,
 physics, and parity tests are green.
+
+Current review guardrails:
+
+- Do not add new root-level implementation modules.
+- Keep compatibility facades outside hot JAX/VMEC loops.
+- Put new fixed-boundary solver work under ``solvers/fixed_boundary/`` and new
+  free-boundary/direct-coil work under ``solvers/free_boundary/`` or
+  ``external_fields/``.
+- Put new differentiable objective terms under ``optimizers/`` or the focused
+  physics modules, then expose them through the public API only after tests and
+  docs exist.
+- Keep branch-local free-boundary derivative claims separate from arbitrary
+  adaptive host-branch differentiation claims.

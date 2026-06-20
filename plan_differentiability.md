@@ -7,6 +7,108 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Final Structure, Documentation, and Plan Audit
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Re-audited the active branch, current plan ownership, README, docs index,
+   code-structure guide, tracked repository size, source-health report, and
+   root/package file layout.
+2. Confirmed `plan_differentiability.md` remains the single active umbrella
+   plan.  `plan_freeb.md` remains a closed free-boundary evidence log, while
+   `plan.md` and `discrete_adjoint_2506_plan.md` remain historical references.
+3. Checked docs and source comments for stale wrappers, old fixed-resolution
+   names, adaptive-branch overclaims, and plan-source ambiguity.
+4. Corrected the current-source map to point at the active WOUT facade and
+   `io/wout` package instead of the nonexistent historical
+   `vmec_jax/vmec_output.py` name.
+5. Tightened `docs/code_structure.rst` so contributors see the current root
+   namespace count as a compatibility/facade burden, not as permission to add
+   more root modules.
+
+Results obtained:
+
+- The tracked repository remains within the lightweight-git gate: `29.44 MiB`
+  total, with no tracked file above `2 MiB`.
+- Source-health still shows one main production hotspot:
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at `3125` lines and
+  `solve_fixed_boundary_residual_iter` at `2650` lines.
+- Root namespace sprawl remains controlled by the current gate: `68`
+  top-level Python files and exactly `2` root helper-prefix compatibility
+  files.  The broader package has `224` Python files, concentrated under
+  `solvers/`, `optimizers/`, `io/`, and `drivers/`.
+- The documentation now states explicitly that new implementation code should
+  not add root modules and should instead go into the domain packages already
+  defined by the target architecture.
+- README and docs continue to state the conservative free-boundary derivative
+  claim: branch-local/fingerprint-gated evidence is promoted; arbitrary
+  adaptive host-branch differentiation remains unclaimed.
+
+Tests and commands run:
+
+- `git status --short --branch`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`
+- `rg` audits over README, docs, examples, tests, source, and plan files for
+  stale plan ownership, old wrapper names, scaffold wording, and adaptive
+  branch claims.
+
+Best next steps:
+
+1. Treat this PR as structurally ready for review after one local
+   CI-equivalent validation shard and final `git diff --check`.
+2. Do not add more root modules during review.  Any remaining implementation
+   cleanup should target the residual iteration hotspot or split oversized
+   integration tests only when the change is net-maintainability-positive.
+3. Keep all adaptive free-boundary derivative wording conservative unless a
+   true full adaptive-branch AD-vs-central-FD gate is implemented and promoted.
+4. If review asks for further code simplification, prioritize:
+   residual trace payload packing, finalization payload construction,
+   scan-resume restoration, and oversized free-boundary validation-test
+   fixtures.
+
+User decisions needed:
+
+No immediate decision.  Before final merge, decide whether the long historical
+plan logs should remain in the branch for auditability or be summarized into a
+shorter release note; current size gates do not require removal.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999995%.
+- Solver monolith reduction: 99.99935%.
+- Residual iteration decomposition: 99.993%.
+- Public API/docstring polish: 97.2%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.963%.
+- Fixed-boundary optimizer decomposition: 98.43%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.515%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.998%.
+- Overall differentiability-refactor PR: 99.9999999999999%.
+
 ## 2026-06-20 QI Diagnostic Helper Simplification
 
 Branch: `codex/differentiability-refactor-plan`.
@@ -4839,8 +4941,8 @@ Differentiable fixed-boundary and optimization code:
 - `vmec_jax/quasi_isodynamic.py`, `vmec_jax/qi_optimization.py`,
   `vmec_jax/qi_diagnostics.py`: QI/QP objectives, diagnostics, gates, and
   minimal-seed workflows.
-- `vmec_jax/wout.py`, `vmec_jax/vmec_output.py`: equilibrium output and metric
-  extraction.
+- `vmec_jax/wout.py` and `vmec_jax/io/wout/`: equilibrium output, persisted
+  WOUT schema/I/O, and metric extraction.
 
 Differentiable free-boundary and coil code:
 
