@@ -833,7 +833,6 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
     )
 
     ns, nt2, nzeta = bsubu.shape
-    nt1 = int(getattr(trig, "ntheta1", nt2))
     nt3 = int(getattr(trig, "ntheta3", nt2))
     if nt3 < nt2:
         nt3 = nt2
@@ -846,43 +845,24 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
         trig, nt2=nt2, mnyq=mnyq, nnyq=nnyq
     )
 
-    def _expand_sym_to_full(sym: np.ndarray) -> np.ndarray:
-        return _vmec_symoutput_expand(sym=sym, asym=None, trig=trig)
-
-    def _extend_parity_to_full(par0: np.ndarray, par1: np.ndarray) -> np.ndarray:
-        full = np.zeros((nt3, nzeta), dtype=float)
-        full[:nt2, :] = par0 + par1
-        if nt3 == nt2:
-            return full
-        i0 = np.arange(nt2, dtype=int)
-        ir0 = np.where(i0 == 0, 0, nt1 - i0)
-        kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
-        mask = ir0 >= nt2
-        if np.any(mask):
-            ir = ir0[mask]
-            ref0 = par0[mask][:, kk]
-            ref1 = par1[mask][:, kk]
-            full[ir, :] = ref0 - ref1
-        return full
-
     if bsubu.shape[1] == nt3:
         bsubu_full = bsubu
         bsubv_full = bsubv
     else:
-        bsubu_full = _expand_sym_to_full(bsubu)
-        bsubv_full = _expand_sym_to_full(bsubv)
+        bsubu_full = _vmec_symoutput_expand(sym=bsubu, asym=None, trig=trig)
+        bsubv_full = _vmec_symoutput_expand(sym=bsubv, asym=None, trig=trig)
 
     if bsupu.shape[1] == nt3:
         bsupu_full = bsupu
         bsupv_full = bsupv
     else:
-        bsupu_full = _expand_sym_to_full(bsupu[:, :nt2, :])
-        bsupv_full = _expand_sym_to_full(bsupv[:, :nt2, :])
+        bsupu_full = _vmec_symoutput_expand(sym=bsupu[:, :nt2, :], asym=None, trig=trig)
+        bsupv_full = _vmec_symoutput_expand(sym=bsupv[:, :nt2, :], asym=None, trig=trig)
 
     if sqrtg.shape[1] == nt3:
         sqrtg_full = sqrtg
     else:
-        sqrtg_full = _expand_sym_to_full(sqrtg[:, :nt2, :])
+        sqrtg_full = _vmec_symoutput_expand(sym=sqrtg[:, :nt2, :], asym=None, trig=trig)
 
     if bsubs.shape[1] == nt3:
         bsubs_out = bsubs.copy()
@@ -952,10 +932,10 @@ def _jxbforce_apply_bsubs_correction_lasym_true(
                         tsinn2 = sinmu[j, m] * cosnvn[k, n]
                         bsubsv_a[j, k] += tsinn1 * c3 + tsinn2 * c4
 
-        bsubs_full = _extend_parity_to_full(bsubs_a, bsubs_s)
+        bsubs_full = _vmec_symoutput_expand(sym=bsubs_a[None, ...], asym=bsubs_s[None, ...], trig=trig)[0]
         bsubs_out[js] = bsubs_full
-        bsubsu_out[js] = _extend_parity_to_full(bsubsu_s, bsubsu_a)
-        bsubsv_out[js] = _extend_parity_to_full(bsubsv_s, bsubsv_a)
+        bsubsu_out[js] = _vmec_symoutput_expand(sym=bsubsu_s[None, ...], asym=bsubsu_a[None, ...], trig=trig)[0]
+        bsubsv_out[js] = _vmec_symoutput_expand(sym=bsubsv_s[None, ...], asym=bsubsv_a[None, ...], trig=trig)[0]
 
     if ns > 2:
         bsubs_out[0] = 2.0 * bsubs_out[1] - bsubs_out[2]
