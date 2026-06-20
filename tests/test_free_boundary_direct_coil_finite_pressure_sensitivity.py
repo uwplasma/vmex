@@ -2400,6 +2400,197 @@ def _production_scalar_rtol(scalar_keys: tuple[str, ...]) -> dict[str, float]:
     }
 
 
+def _select_finite_direct_coil_replay_trace(init, base_params: CoilFieldParams, active_traces: list[dict]) -> SimpleNamespace:
+    from vmec_jax._compat import jnp
+    from vmec_jax.free_boundary import _sample_external_boundary_arrays
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_boundary_bsqvac_jax,
+        direct_coil_boundary_replay_context,
+    )
+
+    for include_analytic in (True, False):
+        for candidate_idx, candidate_trace in enumerate(active_traces):
+            sample = _sample_external_boundary_arrays(
+                state=candidate_trace["state_pre"],
+                static=init.static,
+                plascur=float(
+                    candidate_trace.get("freeb_plascur_for_bsqvac", candidate_trace.get("freeb_plascur", 0.0))
+                ),
+                external_field_provider_kind="direct_coils",
+                external_field_provider_params=base_params,
+            )
+            context = direct_coil_boundary_replay_context(init.static, {"R": sample.R})
+            nestor_trace = candidate_trace.get("freeb_nestor_trace")
+            if not isinstance(nestor_trace, dict):
+                continue
+
+            def replay_from_coils(
+                params: CoilFieldParams,
+                *,
+                sample=sample,
+                context=context,
+                nestor_trace=nestor_trace,
+                include_analytic=bool(include_analytic),
+            ):
+                return direct_coil_boundary_bsqvac_jax(
+                    params,
+                    R=jnp.asarray(sample.R),
+                    Z=jnp.asarray(sample.Z),
+                    phi=jnp.asarray(sample.phi),
+                    Ru=jnp.asarray(sample.Ru),
+                    Zu=jnp.asarray(sample.Zu),
+                    Rv=jnp.asarray(sample.Rv),
+                    Zv=jnp.asarray(sample.Zv),
+                    ruu=jnp.asarray(sample.ruu),
+                    ruv=jnp.asarray(sample.ruv),
+                    rvv=jnp.asarray(sample.rvv),
+                    zuu=jnp.asarray(sample.zuu),
+                    zuv=jnp.asarray(sample.zuv),
+                    zvv=jnp.asarray(sample.zvv),
+                    basis=context["basis"],
+                    tables=context["tables"],
+                    signgs=int(init.signgs),
+                    nvper=context["nvper"],
+                    br_add=jnp.asarray(nestor_trace["br_axis"]),
+                    bp_add=jnp.asarray(nestor_trace["bp_axis"]),
+                    bz_add=jnp.asarray(nestor_trace["bz_axis"]),
+                    wint=jnp.asarray(context["wint"]),
+                    include_analytic=include_analytic,
+                )
+
+            replay0 = replay_from_coils(base_params)
+            bsqvac0 = replay0["bsqvac"]
+            bsqvac0_np = np.asarray(bsqvac0, dtype=float)
+            if np.all(np.isfinite(bsqvac0_np)) and float(np.linalg.norm(bsqvac0_np)) > 0.0:
+                return SimpleNamespace(
+                    index=candidate_idx,
+                    trace=candidate_trace,
+                    nestor_trace=nestor_trace,
+                    basis=context["basis"],
+                    replay_from_coils=replay_from_coils,
+                    replay0=replay0,
+                    bsqvac0=bsqvac0,
+                    analytic_replay=bool(include_analytic),
+                )
+    raise AssertionError("No finite accepted direct-coil replay trace found")
+
+
+def _assert_selected_direct_coil_replay_matches_trace(selected: SimpleNamespace) -> None:
+    from vmec_jax.free_boundary_adjoint import vacuum_boundary_fields_from_mode_coeffs_jax
+
+    trace = selected.trace
+    nestor_trace = selected.nestor_trace
+    bsqvac0 = selected.bsqvac0
+    assert bsqvac0.shape == np.asarray(trace["freeb_bsqvac_half"]).shape
+    assert np.all(np.isfinite(np.asarray(bsqvac0, dtype=float)))
+    assert float(np.linalg.norm(np.asarray(bsqvac0, dtype=float))) > 0.0
+    np.testing.assert_allclose(
+        np.asarray(nestor_trace["bsqvac"]),
+        np.asarray(trace["freeb_bsqvac_half"]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    trace_channels = vacuum_boundary_fields_from_mode_coeffs_jax(
+        nestor_trace["potvac"],
+        basis=selected.basis,
+        bu_ext=nestor_trace["bu_ext"],
+        bv_ext=nestor_trace["bv_ext"],
+        g_uu=nestor_trace["g_uu"],
+        g_uv=nestor_trace["g_uv"],
+        g_vv=nestor_trace["g_vv"],
+    )
+    np.testing.assert_allclose(
+        np.asarray(trace_channels["bsqvac"]),
+        np.asarray(nestor_trace["bsqvac"]),
+        rtol=1.0e-13,
+        atol=1.0e-12,
+    )
+    if selected.analytic_replay:
+        np.testing.assert_allclose(
+            np.asarray(selected.replay0["mode_solution"]["mode_coeffs"]),
+            np.asarray(nestor_trace["potvac"]),
+            rtol=1.0e-13,
+            atol=1.0e-12,
+        )
+        bsqvac_delta = np.asarray(bsqvac0, dtype=float) - np.asarray(trace["freeb_bsqvac_half"], dtype=float)
+        bsqvac_rel = np.linalg.norm(bsqvac_delta) / max(
+            1.0,
+            np.linalg.norm(np.asarray(trace["freeb_bsqvac_half"], dtype=float)),
+        )
+        assert bsqvac_rel < 1.0e-13
+
+
+def _assert_trace_force_channels_and_step_replay(trace: dict, static):
+    from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
+    from vmec_jax.free_boundary_adjoint import accepted_trace_effective_state_pre
+    from vmec_jax.state import pack_state
+    from vmec_jax.vmec_tomnsp import TomnspsRZL
+
+    traced_rz_force = TomnspsRZL(
+        **{
+            name: trace[f"frzl_rz_{name}"]
+            for name in (
+                "frcc", "frss", "fzsc", "fzcs", "flsc", "flcs",
+                "frsc", "frcs", "fzcc", "fzss", "flcc", "flss",
+            )
+        }
+    )
+    traced_force = preconditioned_force_channels_from_rz_output(
+        frzl_rz=traced_rz_force,
+        lam_prec=trace["lam_prec"],
+        w_mode_mn=trace["w_mode_mn"],
+        lambda_update_scale=trace["lambda_update_scale"],
+    )
+    for key in ("frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u"):
+        np.testing.assert_allclose(np.asarray(traced_force[key]), np.asarray(trace[key]), rtol=0.0, atol=0.0)
+
+    effective_state_pre = accepted_trace_effective_state_pre(trace)
+    exact_step = _strict_accepted_step_from_trace(trace, static, state_pre=effective_state_pre)
+    np.testing.assert_allclose(
+        np.asarray(pack_state(exact_step["state_post"])),
+        np.asarray(pack_state(trace["state_post"])),
+        rtol=0.0,
+        atol=0.0,
+    )
+    return effective_state_pre
+
+
+def _assert_strict_update_coil_directional_derivative_matches_fd(
+    *,
+    init,
+    trace: dict,
+    effective_state_pre,
+    base_params: CoilFieldParams,
+    direction: CoilFieldParams,
+    bsqvac_from_coils,
+) -> None:
+    from vmec_jax._compat import jnp
+    from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
+    from vmec_jax.free_boundary_adjoint import pytree_directional_derivative_check_jax
+    from vmec_jax.state import pack_state
+
+    def objective(params: CoilFieldParams):
+        out = strict_update_one_step_from_trace(
+            effective_state_pre,
+            init.static,
+            trace,
+            freeb_bsqvac_half=bsqvac_from_coils(params),
+            enforce_edge=False,
+        )
+        state_post = jnp.asarray(pack_state(out["step"]["state_post"]))
+        force_norm = jnp.asarray(out["force"]["frcc_u"])
+        return 0.5 * jnp.vdot(state_post, state_post) + 1.0e-3 * jnp.vdot(force_norm, force_norm)
+
+    check = pytree_directional_derivative_check_jax(objective, base_params, direction, eps=1.0e-3)
+    exact = float(np.asarray(check["exact_directional"]))
+    fd = float(np.asarray(check["fd_directional"]))
+    assert np.isfinite(exact)
+    assert np.isfinite(fd)
+    assert abs(exact) > 1.0e-16
+    assert abs(fd) > 1.0e-16
+    np.testing.assert_allclose(exact, fd, rtol=3.0e-3, atol=1.0e-10)
+
+
 def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     *,
     input_path: Path,
@@ -3529,12 +3720,8 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.discrete_adjoint import (
-        preconditioned_force_channels_from_rz_output,
-        strict_update_one_step_from_trace,
-    )
+    from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
     from vmec_jax.driver import run_free_boundary
-    from vmec_jax.free_boundary import _sample_external_boundary_arrays
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_controller_replay_objective_jax,
         direct_coil_accepted_trace_controller_replay_plan,
@@ -3544,16 +3731,12 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         direct_coil_accepted_trace_step_controls_jax,
         direct_coil_accepted_trace_step_policy_segments,
         direct_coil_accepted_trace_replay_objective_jax,
-        direct_coil_boundary_bsqvac_jax,
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
         free_boundary_boundary_geometry_jax,
-        pytree_directional_derivative_check_jax,
-        vacuum_boundary_fields_from_mode_coeffs_jax,
     )
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
     from vmec_jax.state import pack_state, unpack_state
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
@@ -3604,158 +3787,29 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         base_currents=base_currents * 0.02,
     )
 
-    selected = None
-    for include_analytic in (True, False):
-        for candidate_idx, candidate_trace in enumerate(active_traces):
-            sample = _sample_external_boundary_arrays(
-                state=candidate_trace["state_pre"],
-                static=init.static,
-                plascur=float(
-                    candidate_trace.get("freeb_plascur_for_bsqvac", candidate_trace.get("freeb_plascur", 0.0))
-                ),
-                external_field_provider_kind="direct_coils",
-                external_field_provider_params=base_params,
-            )
-            context = direct_coil_boundary_replay_context(init.static, {"R": sample.R})
-            candidate_nestor_trace = candidate_trace.get("freeb_nestor_trace")
-            if not isinstance(candidate_nestor_trace, dict):
-                continue
-
-            def _candidate_replay_from_coils(params: CoilFieldParams):
-                return direct_coil_boundary_bsqvac_jax(
-                    params,
-                    R=jnp.asarray(sample.R),
-                    Z=jnp.asarray(sample.Z),
-                    phi=jnp.asarray(sample.phi),
-                    Ru=jnp.asarray(sample.Ru),
-                    Zu=jnp.asarray(sample.Zu),
-                    Rv=jnp.asarray(sample.Rv),
-                    Zv=jnp.asarray(sample.Zv),
-                    ruu=jnp.asarray(sample.ruu),
-                    ruv=jnp.asarray(sample.ruv),
-                    rvv=jnp.asarray(sample.rvv),
-                    zuu=jnp.asarray(sample.zuu),
-                    zuv=jnp.asarray(sample.zuv),
-                    zvv=jnp.asarray(sample.zvv),
-                    basis=context["basis"],
-                    tables=context["tables"],
-                    signgs=int(init.signgs),
-                    nvper=context["nvper"],
-                    br_add=jnp.asarray(candidate_nestor_trace["br_axis"]),
-                    bp_add=jnp.asarray(candidate_nestor_trace["bp_axis"]),
-                    bz_add=jnp.asarray(candidate_nestor_trace["bz_axis"]),
-                    wint=jnp.asarray(context["wint"]),
-                    include_analytic=bool(include_analytic),
-                )
-
-            candidate_replay0 = _candidate_replay_from_coils(base_params)
-            candidate_bsqvac0 = candidate_replay0["bsqvac"]
-            candidate_bsqvac0_np = np.asarray(candidate_bsqvac0, dtype=float)
-            if np.all(np.isfinite(candidate_bsqvac0_np)) and float(np.linalg.norm(candidate_bsqvac0_np)) > 0.0:
-                selected = (
-                    candidate_idx,
-                    candidate_trace,
-                    candidate_nestor_trace,
-                    context["basis"],
-                    _candidate_replay_from_coils,
-                    candidate_replay0,
-                    candidate_bsqvac0,
-                    bool(include_analytic),
-                )
-                break
-        if selected is not None:
-            break
-
-    assert selected is not None, "No finite accepted direct-coil replay trace found"
-    selected_idx, trace, nestor_trace, basis, replay_from_coils, replay0, bsqvac0, analytic_replay = selected
-    assert selected_idx + 1 < len(active_traces), "Selected trace must have a following trace for two-step replay"
-    trace1 = active_traces[selected_idx + 1]
+    selected = _select_finite_direct_coil_replay_trace(init, base_params, active_traces)
+    assert selected.index + 1 < len(active_traces), "Selected trace must have a following trace for two-step replay"
+    trace = selected.trace
+    trace1 = active_traces[selected.index + 1]
+    replay_from_coils = selected.replay_from_coils
 
     def bsqvac_from_coils(params: CoilFieldParams):
         return replay_from_coils(params)["bsqvac"]
 
-    assert bsqvac0.shape == np.asarray(trace["freeb_bsqvac_half"]).shape
-    assert np.all(np.isfinite(np.asarray(bsqvac0, dtype=float)))
-    assert float(np.linalg.norm(np.asarray(bsqvac0, dtype=float))) > 0.0
-    np.testing.assert_allclose(
-        np.asarray(nestor_trace["bsqvac"]),
-        np.asarray(trace["freeb_bsqvac_half"]),
-        rtol=0.0,
-        atol=0.0,
-    )
-    trace_channels = vacuum_boundary_fields_from_mode_coeffs_jax(
-        nestor_trace["potvac"],
-        basis=basis,
-        bu_ext=nestor_trace["bu_ext"],
-        bv_ext=nestor_trace["bv_ext"],
-        g_uu=nestor_trace["g_uu"],
-        g_uv=nestor_trace["g_uv"],
-        g_vv=nestor_trace["g_vv"],
-    )
-    np.testing.assert_allclose(
-        np.asarray(trace_channels["bsqvac"]),
-        np.asarray(nestor_trace["bsqvac"]),
-        rtol=1.0e-13,
-        atol=1.0e-12,
-    )
-    if analytic_replay:
-        np.testing.assert_allclose(
-            np.asarray(replay0["mode_solution"]["mode_coeffs"]),
-            np.asarray(nestor_trace["potvac"]),
-            rtol=1.0e-13,
-            atol=1.0e-12,
-        )
-        bsqvac_delta = np.asarray(bsqvac0, dtype=float) - np.asarray(trace["freeb_bsqvac_half"], dtype=float)
-        bsqvac_rel = np.linalg.norm(bsqvac_delta) / max(
-            1.0,
-            np.linalg.norm(np.asarray(trace["freeb_bsqvac_half"], dtype=float)),
-        )
-        assert bsqvac_rel < 1.0e-13
+    _assert_selected_direct_coil_replay_matches_trace(selected)
 
     # The accepted trace must be exactly replayable once the force channels have
     # been computed. This protects accepted-output correctness separately from
     # the harder coil -> NESTOR -> force reconstruction path below.
-    traced_rz_force = TomnspsRZL(
-        **{name: trace[f"frzl_rz_{name}"] for name in ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs", "frsc", "frcs", "fzcc", "fzss", "flcc", "flss")}
+    effective_state_pre = _assert_trace_force_channels_and_step_replay(trace, init.static)
+    _assert_strict_update_coil_directional_derivative_matches_fd(
+        init=init,
+        trace=trace,
+        effective_state_pre=effective_state_pre,
+        base_params=base_params,
+        direction=direction,
+        bsqvac_from_coils=bsqvac_from_coils,
     )
-    traced_force = preconditioned_force_channels_from_rz_output(
-        frzl_rz=traced_rz_force,
-        lam_prec=trace["lam_prec"],
-        w_mode_mn=trace["w_mode_mn"],
-        lambda_update_scale=trace["lambda_update_scale"],
-    )
-    for key in ("frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u"):
-        np.testing.assert_allclose(np.asarray(traced_force[key]), np.asarray(trace[key]), rtol=0.0, atol=0.0)
-
-    effective_state_pre = accepted_trace_effective_state_pre(trace)
-    exact_step = _strict_accepted_step_from_trace(trace, init.static, state_pre=effective_state_pre)
-    np.testing.assert_allclose(
-        np.asarray(pack_state(exact_step["state_post"])),
-        np.asarray(pack_state(trace["state_post"])),
-        rtol=0.0,
-        atol=0.0,
-    )
-
-    def objective(params: CoilFieldParams):
-        out = strict_update_one_step_from_trace(
-            effective_state_pre,
-            init.static,
-            trace,
-            freeb_bsqvac_half=bsqvac_from_coils(params),
-            enforce_edge=False,
-        )
-        state_post = jnp.asarray(pack_state(out["step"]["state_post"]))
-        force_norm = jnp.asarray(out["force"]["frcc_u"])
-        return 0.5 * jnp.vdot(state_post, state_post) + 1.0e-3 * jnp.vdot(force_norm, force_norm)
-
-    check = pytree_directional_derivative_check_jax(objective, base_params, direction, eps=1.0e-3)
-    exact = float(np.asarray(check["exact_directional"]))
-    fd = float(np.asarray(check["fd_directional"]))
-    assert np.isfinite(exact)
-    assert np.isfinite(fd)
-    assert abs(exact) > 1.0e-16
-    assert abs(fd) > 1.0e-16
-    np.testing.assert_allclose(exact, fd, rtol=3.0e-3, atol=1.0e-10)
 
     flat0 = jnp.asarray(pack_state(effective_state_pre))
 

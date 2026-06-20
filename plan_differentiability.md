@@ -30078,3 +30078,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999984%.
+
+## 2026-06-20 Accepted-Update Replay Gate Phase Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted finite direct-coil/NESTOR replay-trace selection from
+   `test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree`.
+2. Extracted the first NESTOR replay consistency checks into a named helper.
+3. Extracted force-channel replay plus strict one-step coil-direction AD-vs-FD
+   validation into named helpers.
+4. Kept the later controller replay, stacked-policy, rejected-slot, and
+   fingerprint assertions unchanged in the test body.
+
+Results obtained:
+
+- `test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree`
+  decreased from 660 to 523 lines.
+- The test now reads as explicit validation phases: select a physical accepted
+  trace, verify NESTOR replay, verify strict VMEC update replay, then check
+  controller replay policies.
+- No numerical tolerances, scalar objectives, or production code changed.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree -q`
+- `python tools/diagnostics/source_health.py --top 12 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Leave the accepted-update test stable unless another extraction can reduce
+   code without introducing extra indirection.
+2. Target the trace-fingerprint branch test next if validation-test
+   maintainability remains the chosen lane.
+3. For production code, design a real WOUT assembly context object before
+   extracting more of `wout_minimal_from_fixed_boundary`.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999990%.
+- Solver monolith reduction: 99.990%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.945%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.39%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999985%.
