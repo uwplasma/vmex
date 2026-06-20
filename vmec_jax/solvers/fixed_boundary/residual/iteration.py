@@ -201,7 +201,7 @@ from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
 )
 from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
     can_reassemble_precond_mats as _can_reassemble_precond_mats,
-    empty_preconditioner_cache_snapshot as _empty_preconditioner_cache_snapshot,
+    PreconditionerCacheState as _PreconditionerCacheState,
     pshalf_from_s_jax as _pshalf_from_s_jax,
     pshalf_from_s_np as _pshalf_from_s_np,
     radial_tridi_smooth_dirichlet as _radial_tridi_smooth_dirichlet,
@@ -1368,46 +1368,12 @@ def solve_fixed_boundary_residual_iter(
     # This materially affects the nonlinear iteration trace because the
     # Garabedian time-step control depends on ratios of the *preconditioned*
     # residual scalars.
-    (
-        vmec2000_cache_valid,
-        cache_precond_diag,
-        cache_tcon,
-        cache_norms,
-        cache_rz_scale,
-        cache_l_scale,
-        cache_rz_norm,
-        cache_f_norm1,
-        cache_prec_rz_mats,
-        cache_prec_rz_jmax,
-        cache_prec_lam_prec,
-        cache_prec_faclam,
-        cache_prec_lam_debug,
-    ) = _empty_preconditioner_cache_snapshot()
+    precond_cache = _PreconditionerCacheState()
     cache_constraint_rcon0 = None
     cache_constraint_zcon0 = None
 
     def _clear_preconditioner_cache_locals() -> None:
-        nonlocal vmec2000_cache_valid
-        nonlocal cache_precond_diag, cache_tcon, cache_norms, cache_rz_scale, cache_l_scale
-        nonlocal cache_rz_norm, cache_f_norm1
-        nonlocal cache_prec_rz_mats, cache_prec_rz_jmax, cache_prec_lam_prec
-        nonlocal cache_prec_faclam, cache_prec_lam_debug
-
-        (
-            vmec2000_cache_valid,
-            cache_precond_diag,
-            cache_tcon,
-            cache_norms,
-            cache_rz_scale,
-            cache_l_scale,
-            cache_rz_norm,
-            cache_f_norm1,
-            cache_prec_rz_mats,
-            cache_prec_rz_jmax,
-            cache_prec_lam_prec,
-            cache_prec_faclam,
-            cache_prec_lam_debug,
-        ) = _empty_preconditioner_cache_snapshot()
+        precond_cache.clear()
 
     bcovar_update_history = history_lists["bcovar_update_history"]
     _rollback_history_lists = history_lists.rollback_lists()
@@ -1439,19 +1405,7 @@ def solve_fixed_boundary_residual_iter(
             vLcs = _as_velocity(resume_state.get("vLcs", vLcs))
 
         state_checkpoint = resume_state.get("state_checkpoint", state)
-        vmec2000_cache_valid = bool(resume_state.get("vmec2000_cache_valid", vmec2000_cache_valid))
-        cache_precond_diag = resume_state.get("cache_precond_diag", cache_precond_diag)
-        cache_tcon = resume_state.get("cache_tcon", cache_tcon)
-        cache_norms = resume_state.get("cache_norms", cache_norms)
-        cache_rz_scale = resume_state.get("cache_rz_scale", cache_rz_scale)
-        cache_l_scale = resume_state.get("cache_l_scale", cache_l_scale)
-        cache_rz_norm = resume_state.get("cache_rz_norm", cache_rz_norm)
-        cache_f_norm1 = resume_state.get("cache_f_norm1", cache_f_norm1)
-        cache_prec_rz_mats = resume_state.get("cache_prec_rz_mats", cache_prec_rz_mats)
-        cache_prec_rz_jmax = resume_state.get("cache_prec_rz_jmax", cache_prec_rz_jmax)
-        cache_prec_lam_prec = resume_state.get("cache_prec_lam_prec", cache_prec_lam_prec)
-        cache_prec_faclam = resume_state.get("cache_prec_faclam", cache_prec_faclam)
-        cache_prec_lam_debug = resume_state.get("cache_prec_lam_debug", cache_prec_lam_debug)
+        precond_cache.update_from_resume_state(resume_state)
         cache_constraint_rcon0 = resume_state.get("cache_constraint_rcon0", cache_constraint_rcon0)
         cache_constraint_zcon0 = resume_state.get("cache_constraint_zcon0", cache_constraint_zcon0)
         if free_boundary_enabled:
@@ -1469,9 +1423,6 @@ def solve_fixed_boundary_residual_iter(
     )
 
     def _refresh_preconditioner_cache(k, *, iter2: int):
-        nonlocal cache_prec_lam_prec, cache_prec_faclam, cache_prec_lam_debug
-        nonlocal cache_prec_rz_mats, cache_prec_rz_jmax
-
         refresh = _precond_payload_facade.refresh_preconditioner_cache_runtime(
             k=k,
             cfg=cfg,
@@ -1491,24 +1442,24 @@ def solve_fixed_boundary_residual_iter(
             maybe_dump_lam_prec=_maybe_dump_lam_prec,
             maybe_dump_precond_mats=_maybe_dump_precond_mats,
             maybe_dump_lamcal=_maybe_dump_lamcal,
-            vmec2000_cache_valid=bool(vmec2000_cache_valid),
+            vmec2000_cache_valid=bool(precond_cache.valid),
             need_bcovar_update=bool(need_bcovar_update),
             precond_cache_seeded_from_bcovar_update=bool(precond_cache_seeded_from_bcovar_update),
             precond_expected_jmax=int(precond_expected_jmax),
             precond_jmax_override=precond_jmax_override,
             preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_policy,
             preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_policy,
-            cache_prec_lam_prec=cache_prec_lam_prec,
-            cache_prec_faclam=cache_prec_faclam,
-            cache_prec_lam_debug=cache_prec_lam_debug,
-            cache_prec_rz_mats=cache_prec_rz_mats,
-            cache_prec_rz_jmax=cache_prec_rz_jmax,
+            cache_prec_lam_prec=precond_cache.prec_lam_prec,
+            cache_prec_faclam=precond_cache.prec_faclam,
+            cache_prec_lam_debug=precond_cache.prec_lam_debug,
+            cache_prec_rz_mats=precond_cache.prec_rz_mats,
+            cache_prec_rz_jmax=precond_cache.prec_rz_jmax,
         )
-        cache_prec_lam_prec = refresh.cache_prec_lam_prec
-        cache_prec_faclam = refresh.cache_prec_faclam
-        cache_prec_lam_debug = refresh.cache_prec_lam_debug
-        cache_prec_rz_mats = refresh.cache_prec_rz_mats
-        cache_prec_rz_jmax = refresh.cache_prec_rz_jmax
+        precond_cache.prec_lam_prec = refresh.cache_prec_lam_prec
+        precond_cache.prec_faclam = refresh.cache_prec_faclam
+        precond_cache.prec_lam_debug = refresh.cache_prec_lam_debug
+        precond_cache.prec_rz_mats = refresh.cache_prec_rz_mats
+        precond_cache.prec_rz_jmax = refresh.cache_prec_rz_jmax
         return (
             refresh.lam_prec,
             refresh.mats,
@@ -1721,7 +1672,7 @@ def solve_fixed_boundary_residual_iter(
                 zero_m1_history.append(int(zero_m1_val > 0.5))
 
             need_bcovar_update = bool(vmec2000_control) and (
-                (not bool(vmec2000_cache_valid))
+                (not bool(precond_cache.valid))
                 or bool(force_bcovar_update)
                 or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
             )
@@ -1731,14 +1682,18 @@ def solve_fixed_boundary_residual_iter(
             bcovar_update_history.append(int(bool(need_bcovar_update)))
 
             use_cached_precond = (
-                bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update))
+                bool(vmec2000_control) and bool(precond_cache.valid) and (not bool(need_bcovar_update))
             )
             constraint_precond_diag = (
-                cache_precond_diag if (use_cached_precond and cache_precond_diag is not None) else zero_precond_diag
+                precond_cache.precond_diag
+                if (use_cached_precond and precond_cache.precond_diag is not None)
+                else zero_precond_diag
             )
             # VMEC updates tcon only when refreshing the 1D preconditioner
             # blocks; between refreshes it reuses the last tcon profile.
-            constraint_tcon_override = cache_tcon if (use_cached_precond and cache_tcon is not None) else zero_tcon
+            constraint_tcon_override = (
+                precond_cache.tcon if (use_cached_precond and precond_cache.tcon is not None) else zero_tcon
+            )
             if host_update_assembly and _jnp_true_bool is not None:
                 # Use pre-cached bool scalars — avoids 2 jnp.asarray dispatches/iter.
                 constraint_precond_active = _jnp_true_bool if use_cached_precond else _jnp_false_bool
@@ -1950,8 +1905,8 @@ def solve_fixed_boundary_residual_iter(
                 _record_compute_force_timing("main", t_compute_start, gcr2)
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
             norms_used = (
-                cache_norms
-                if (bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)))
+                precond_cache.norms
+                if (bool(vmec2000_control) and bool(precond_cache.valid) and (not bool(need_bcovar_update)))
                 else norms_current
             )
             use_host_residual_metrics = (
@@ -2007,14 +1962,14 @@ def solve_fixed_boundary_residual_iter(
                 norms_used=norms_used,
                 print_fn=print,
             )
-            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
-                rz_scale = cache_rz_scale
-                l_scale = cache_l_scale
+            if bool(vmec2000_control) and bool(precond_cache.valid) and (not bool(need_bcovar_update)):
+                rz_scale = precond_cache.rz_scale
+                l_scale = precond_cache.l_scale
             preconditioner_cache_update_trace = False
             if bool(vmec2000_control) and bool(need_bcovar_update):
                 if constraint_tcon0 is None or float(constraint_tcon0) == 0.0:
-                    cache_precond_diag = None
-                    cache_tcon = jnp.zeros((int(s.shape[0]),), dtype=jnp.asarray(state.Rcos).dtype)
+                    precond_cache.precond_diag = None
+                    precond_cache.tcon = jnp.zeros((int(s.shape[0]),), dtype=jnp.asarray(state.Rcos).dtype)
                 else:
                     from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
 
@@ -2041,27 +1996,29 @@ def solve_fixed_boundary_residual_iter(
                             ru12=k.bc.jac.ru12,
                             zu12=k.bc.jac.zu12,
                         )
-                    cache_precond_diag = (ard1, azd1)
-                    cache_tcon = np.asarray(k.tcon) if host_update_assembly else jnp.asarray(k.tcon)
-                cache_norms = norms_used
-                cache_rz_scale = rz_scale
-                cache_l_scale = l_scale
+                    precond_cache.precond_diag = (ard1, azd1)
+                    precond_cache.tcon = np.asarray(k.tcon) if host_update_assembly else jnp.asarray(k.tcon)
+                precond_cache.norms = norms_used
+                precond_cache.rz_scale = rz_scale
+                precond_cache.l_scale = l_scale
                 if host_update_assembly:
                     # NumPy path: avoids JAX dispatch + XLA blocking for fnorm1.
-                    cache_rz_norm = _rz_norm_np(state)  # Python float
-                    cache_f_norm1 = (1.0 / cache_rz_norm) if cache_rz_norm != 0.0 else float("inf")
+                    precond_cache.rz_norm = _rz_norm_np(state)  # Python float
+                    precond_cache.f_norm1 = (
+                        (1.0 / precond_cache.rz_norm) if precond_cache.rz_norm != 0.0 else float("inf")
+                    )
                 else:
-                    cache_rz_norm = _rz_norm(state)
-                    cache_f_norm1 = jnp.where(
-                        jnp.asarray(cache_rz_norm) != 0.0,
-                        1.0 / jnp.asarray(cache_rz_norm),
-                        jnp.asarray(float("inf"), dtype=jnp.asarray(cache_rz_norm).dtype),
+                    precond_cache.rz_norm = _rz_norm(state)
+                    precond_cache.f_norm1 = jnp.where(
+                        jnp.asarray(precond_cache.rz_norm) != 0.0,
+                        1.0 / jnp.asarray(precond_cache.rz_norm),
+                        jnp.asarray(float("inf"), dtype=jnp.asarray(precond_cache.rz_norm).dtype),
                     )
                 if not bool(cfg.lasym):
                     t_precond_refresh_seed_start = time.perf_counter() if timing_enabled else None
-                    cache_prec_lam_prec = _lambda_preconditioner(k.bc)
-                    cache_prec_faclam = None
-                    cache_prec_lam_debug = None
+                    precond_cache.prec_lam_prec = _lambda_preconditioner(k.bc)
+                    precond_cache.prec_faclam = None
+                    precond_cache.prec_lam_debug = None
                     mats, _jmin, jmax = _rz_preconditioner_matrices_local(
                         bc=k.bc,
                         k=k,
@@ -2069,9 +2026,9 @@ def solve_fixed_boundary_residual_iter(
                         use_precomputed=preconditioner_use_precomputed_tridi_policy,
                         use_lax_tridi=preconditioner_use_lax_tridi_policy,
                     )
-                    cache_prec_rz_mats = mats
-                    cache_prec_rz_jmax = None if _tree_has_tracer(k) else int(jmax)
-                    precond_cache_seeded_from_bcovar_update = cache_prec_rz_jmax is not None
+                    precond_cache.prec_rz_mats = mats
+                    precond_cache.prec_rz_jmax = None if _tree_has_tracer(k) else int(jmax)
+                    precond_cache_seeded_from_bcovar_update = precond_cache.prec_rz_jmax is not None
                     preconditioner_cache_update_trace = True
                     if timing_enabled and t_precond_refresh_seed_start is not None:
                         seed_dt = time.perf_counter() - float(t_precond_refresh_seed_start)
@@ -2080,7 +2037,7 @@ def solve_fixed_boundary_residual_iter(
                         timing_stats["precond_refresh"] += seed_dt
                         timing_stats["preconditioner"] += seed_dt
                         timing_stats["precond_refresh_calls"] = int(timing_stats["precond_refresh_calls"]) + 1
-                vmec2000_cache_valid = True
+                precond_cache.valid = True
             if host_update_assembly or use_host_residual_metrics:
                 # fsqr/fsqz/fsql are already Python floats from the NumPy path above.
                 fsqr_f, fsqz_f, fsql_f = fsqr, fsqz, fsql
@@ -2217,10 +2174,10 @@ def solve_fixed_boundary_residual_iter(
                     lambda_update_scale_j=lambda_update_scale_j,
                     lconm1=bool(getattr(static.cfg, "lconm1", True)),
                     vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    vmec2000_cache_valid=bool(precond_cache.valid),
                     need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=cache_rz_norm,
-                    cache_f_norm1=cache_f_norm1,
+                    cache_rz_norm=precond_cache.rz_norm,
+                    cache_f_norm1=precond_cache.f_norm1,
                     host_update_assembly=bool(host_update_assembly),
                     use_fused_precond_output_scaling=bool(use_fused_precond_output_scaling),
                     scale_m1_rhs=bool(cfg.lthreed) or bool(getattr(cfg, "lasym", False)),
@@ -2454,10 +2411,10 @@ def solve_fixed_boundary_residual_iter(
                     frzl_pre=frzl_pre,
                     frzl_pre_host=frzl_pre_host,
                     vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    vmec2000_cache_valid=bool(precond_cache.valid),
                     need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=cache_rz_norm,
-                    cache_f_norm1=cache_f_norm1,
+                    cache_rz_norm=precond_cache.rz_norm,
+                    cache_f_norm1=precond_cache.f_norm1,
                     state=state,
                     delta_s=float(delta_s),
                     numpy_module=np,
@@ -2483,10 +2440,10 @@ def solve_fixed_boundary_residual_iter(
                     gcl2_p=gcl2_p,
                     frzl_pre=frzl_pre,
                     vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    vmec2000_cache_valid=bool(precond_cache.valid),
                     need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=cache_rz_norm,
-                    cache_f_norm1=cache_f_norm1,
+                    cache_rz_norm=precond_cache.rz_norm,
+                    cache_f_norm1=precond_cache.f_norm1,
                     state=state,
                     delta_s=delta_s,
                     jnp_module=jnp,

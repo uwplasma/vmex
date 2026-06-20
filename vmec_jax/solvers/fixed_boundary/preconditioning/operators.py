@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import os
-from typing import Any, Callable, NamedTuple
+from typing import Any, Callable, Mapping, NamedTuple
 
 import numpy as np
 
@@ -69,6 +70,77 @@ class PreconditionerCacheSnapshot(NamedTuple):
     prec_lam_prec: Any
     prec_faclam: Any | None
     prec_lam_debug: Any | None
+
+
+_PRECONDITIONER_CACHE_RESUME_KEYS = {
+    "vmec2000_cache_valid": "valid",
+    "cache_precond_diag": "precond_diag",
+    "cache_tcon": "tcon",
+    "cache_norms": "norms",
+    "cache_rz_scale": "rz_scale",
+    "cache_l_scale": "l_scale",
+    "cache_rz_norm": "rz_norm",
+    "cache_f_norm1": "f_norm1",
+    "cache_prec_rz_mats": "prec_rz_mats",
+    "cache_prec_rz_jmax": "prec_rz_jmax",
+    "cache_prec_lam_prec": "prec_lam_prec",
+    "cache_prec_faclam": "prec_faclam",
+    "cache_prec_lam_debug": "prec_lam_debug",
+}
+
+
+@dataclass
+class PreconditionerCacheState:
+    """Mutable residual-loop cache for VMEC2000 1D preconditioner payloads."""
+
+    valid: bool = False
+    precond_diag: Any = None
+    tcon: Any = None
+    norms: Any = None
+    rz_scale: Any = None
+    l_scale: Any = None
+    rz_norm: Any = None
+    f_norm1: Any = None
+    prec_rz_mats: Any = None
+    prec_rz_jmax: int | None = None
+    prec_lam_prec: Any = None
+    prec_faclam: Any | None = None
+    prec_lam_debug: Any | None = None
+
+    def clear(self) -> None:
+        """Invalidate all cached preconditioner payloads in place."""
+
+        self.valid = False
+        self.precond_diag = None
+        self.tcon = None
+        self.norms = None
+        self.rz_scale = None
+        self.l_scale = None
+        self.rz_norm = None
+        self.f_norm1 = None
+        self.prec_rz_mats = None
+        self.prec_rz_jmax = None
+        self.prec_lam_prec = None
+        self.prec_faclam = None
+        self.prec_lam_debug = None
+
+    def update_from_resume_state(self, resume_state: Mapping[str, Any]) -> None:
+        """Restore legacy resume-state cache fields into the mutable cache."""
+
+        for resume_key, attr_name in _PRECONDITIONER_CACHE_RESUME_KEYS.items():
+            if resume_key in resume_state:
+                value = resume_state[resume_key]
+                if attr_name == "valid":
+                    value = bool(value)
+                setattr(self, attr_name, value)
+
+    def legacy_resume_payload(self) -> dict[str, Any]:
+        """Return the public resume-state keys expected by existing drivers."""
+
+        return {
+            resume_key: getattr(self, attr_name)
+            for resume_key, attr_name in _PRECONDITIONER_CACHE_RESUME_KEYS.items()
+        }
 
 
 class PreconditionerCacheUpdate(NamedTuple):

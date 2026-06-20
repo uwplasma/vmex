@@ -9,6 +9,7 @@ from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
     LambdaPreconditionerOutputs,
     PreconditionerCacheSnapshot,
     PreconditionerCacheDecision,
+    PreconditionerCacheState,
     PreconditionerCacheUpdate,
     empty_preconditioner_cache_snapshot,
     lambda_preconditioner_outputs,
@@ -251,6 +252,48 @@ def test_empty_preconditioner_cache_snapshot_matches_iteration_tuple_order() -> 
     assert got.valid is False
     assert got.prec_rz_jmax is None
     assert got.prec_lam_debug is None
+
+
+def test_preconditioner_cache_state_round_trips_legacy_resume_payload() -> None:
+    cache = PreconditionerCacheState()
+    cache.update_from_resume_state(
+        {
+            "vmec2000_cache_valid": 1,
+            "cache_precond_diag": ("diag",),
+            "cache_tcon": "tcon",
+            "cache_norms": "norms",
+            "cache_rz_scale": "rz-scale",
+            "cache_l_scale": "l-scale",
+            "cache_rz_norm": 2.0,
+            "cache_f_norm1": 0.5,
+            "cache_prec_rz_mats": "mats",
+            "cache_prec_rz_jmax": 7,
+            "cache_prec_lam_prec": "lam",
+            "cache_prec_faclam": "faclam",
+            "cache_prec_lam_debug": "debug",
+        }
+    )
+
+    payload = cache.legacy_resume_payload()
+
+    assert payload["vmec2000_cache_valid"] is True
+    assert payload["cache_precond_diag"] == ("diag",)
+    assert payload["cache_tcon"] == "tcon"
+    assert payload["cache_norms"] == "norms"
+    assert payload["cache_rz_scale"] == "rz-scale"
+    assert payload["cache_l_scale"] == "l-scale"
+    assert payload["cache_rz_norm"] == 2.0
+    assert payload["cache_f_norm1"] == 0.5
+    assert payload["cache_prec_rz_mats"] == "mats"
+    assert payload["cache_prec_rz_jmax"] == 7
+    assert payload["cache_prec_lam_prec"] == "lam"
+    assert payload["cache_prec_faclam"] == "faclam"
+    assert payload["cache_prec_lam_debug"] == "debug"
+
+    cache.clear()
+    cleared = cache.legacy_resume_payload()
+    assert cleared["vmec2000_cache_valid"] is False
+    assert all(cleared[key] is None for key in cleared if key != "vmec2000_cache_valid")
 
 
 def _cache_update_inputs(**overrides):

@@ -84,6 +84,7 @@ _LEGACY_ALIASES = {
     "_gc_from_frzl": ("vmec_jax.solvers.fixed_boundary.diagnostics.force", "gc_from_frzl"),
     "_free_boundary_iter_controls": ("vmec_jax.solvers.free_boundary.control", "free_boundary_iter_controls"),
     "_initial_axis_reset_decision": ("vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset", "initial_axis_reset_decision"),
+    "_initialize_scan_resume_state": ("vmec_jax.solvers.fixed_boundary.scan.resume", "initialize_scan_resume_state"),
     "_jit_cache_limit": ("vmec_jax.solvers.fixed_boundary.jit_cache", "jit_cache_limit"),
     "_mask_scan_restart_force_payload": ("vmec_jax.solvers.fixed_boundary.scan.payload", "mask_scan_restart_force_payload"),
     "_merge_axis_reset_state": ("vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset", "merge_axis_reset_state"),

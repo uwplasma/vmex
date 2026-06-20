@@ -109,6 +109,11 @@ def build_residual_iter_resume_state_from_namespace(
     mode = str(resume_state_mode)
     if mode == "none":
         return None
+    if "precond_cache" in namespace:
+        namespace = {
+            **namespace["precond_cache"].legacy_resume_payload(),
+            **dict(namespace),
+        }
     base_kwargs = {key: namespace[key] for key in _RESUME_BASE_KEYS}
     heavy = None
     if mode == "full":
