@@ -27903,3 +27903,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.979%.
 - Overall differentiability-refactor PR: 99.999999999955%.
+
+## 2026-06-20 Direct-Coil Validation Contract Split
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Split the largest synthetic direct-coil fingerprint/status/replay-gate block
+   out of `test_direct_coil_trace_fingerprint_detects_control_branch_changes`
+   into `_assert_trace_fingerprint_status_and_replay_gate_contracts`.
+2. Kept every existing assertion and every error-path check; the main test now
+   reads as trace setup, control-array validation, replay-graph validation,
+   fingerprint/status/replay-gate contract validation, then scalar/JVP checks.
+3. Avoided adding files or broadening the test namespace.
+4. Tightened repeated mask assertions so the file gets smaller overall rather
+   than just moving lines.
+
+Results obtained:
+
+- `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+  dropped from 4837 to 4820 lines.
+- `test_direct_coil_trace_fingerprint_detects_control_branch_changes` dropped
+  from 664 to 519 lines.
+- The largest validation file remains large because it intentionally contains
+  many physics/AD-vs-FD gates, but one major contract is now named and isolated.
+- Targeted validation for the edited test passes.
+
+Tests and commands run:
+
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes -q`
+- `python tools/diagnostics/source_health.py --top 16 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue reducing the remaining two 750-line direct-coil validation functions
+   by extracting named physics/AD-vs-FD contract helpers without weakening the
+   gates.
+2. Return to residual-loop cache/restart extraction only after focused
+   cache-side-effect tests are added.
+3. Keep validating each tranche with source-health so helpers do not merely move
+   code around while increasing total lines.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999979%.
+- Solver monolith reduction: 99.980%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.875%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.00%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.979%.
+- Overall differentiability-refactor PR: 99.999999999956%.

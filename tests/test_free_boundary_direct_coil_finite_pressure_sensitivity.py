@@ -469,51 +469,31 @@ def _assert_direct_coil_trace_replay_graph_contracts(trace0: dict, trace1: dict,
     return axis_trace0, changed_static_trace
 
 
-@pytest.mark.py311_coverage_only
-def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    from vmec_jax._compat import jax, jnp
+def _assert_trace_fingerprint_status_and_replay_gate_contracts(trace0: dict, trace1: dict, trace2: dict):
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_branch_metadata,
         direct_coil_accepted_trace_controller_replay_plan,
         direct_coil_accepted_trace_controller_slot_summary,
         direct_coil_accepted_trace_controller_controls_jax,
-        direct_coil_accepted_trace_fingerprint_delta_summary,
-        direct_coil_accepted_trace_preconditioner_controls_jax,
-        direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_status_masks,
-        direct_coil_accepted_trace_fingerprint,
-        direct_coil_accepted_trace_fingerprint_delta,
         direct_coil_same_branch_replay_gate_report,
         free_boundary_adjoint_trace_replay_diagnostics,
         _accepted_trace_segment_is_unconditionally_accepted,
     )
 
-    z = np.arange(6.0).reshape(2, 3)
-    trace0 = _synthetic_direct_coil_trace(z)
-    trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0)
-    trace2 = _synthetic_direct_coil_trace(z, dt_eff=0.125, bsqvac_scale=4.0)
-    _assert_direct_coil_trace_control_array_contracts(trace0, trace1, z)
-    axis_trace0, changed_static_trace = _assert_direct_coil_trace_replay_graph_contracts(trace0, trace1, z)
-
     branch_metadata = direct_coil_accepted_trace_branch_metadata([trace0, trace1])
     branch_slot_summary = direct_coil_accepted_trace_controller_slot_summary(branch_metadata)
     assert branch_metadata["n_steps"] == 2
     assert branch_metadata["n_free_boundary_replay_steps"] == 2
-    assert branch_slot_summary == {
-        "n_steps": 2,
-        "active_slots": 2,
-        "accepted_slots": 2,
-        "rejected_slots": 0,
-        "done_markers": 1,
-        "active_free_boundary_slots": 2,
-        "accepted_free_boundary_slots": 2,
-        "fixed_rejected_controller_slot_present": False,
-    }
+    assert branch_slot_summary == {"n_steps": 2, "active_slots": 2, "accepted_slots": 2, "rejected_slots": 0, "done_markers": 1, "active_free_boundary_slots": 2, "accepted_free_boundary_slots": 2, "fixed_rejected_controller_slot_present": False}
     assert branch_metadata["fingerprint"]["n_freeb_steps"] == 2
-    assert np.array_equal(np.asarray(branch_metadata["accepted_mask"]), np.asarray([True, True]))
-    assert np.array_equal(np.asarray(branch_metadata["done_mask"]), np.asarray([False, True]))
-    assert np.array_equal(np.asarray(branch_metadata["reset_to_trace_pre"]), np.asarray([False, False]))
-    assert np.array_equal(np.asarray(branch_metadata["active_free_boundary_mask"]), np.asarray([True, True]))
+    for key, expected in (
+        ("accepted_mask", [True, True]),
+        ("done_mask", [False, True]),
+        ("reset_to_trace_pre", [False, False]),
+        ("active_free_boundary_mask", [True, True]),
+    ):
+        assert np.array_equal(np.asarray(branch_metadata[key]), np.asarray(expected))
     assert branch_metadata["preconditioner_policy_segment_summary"][0]["free_boundary_replay_steps"] == 2
     assert _accepted_trace_segment_is_unconditionally_accepted(branch_metadata["masks"], start=0, stop=2)
     status_rejected_trace = {**trace1, "step_status": "rejected"}
@@ -526,8 +506,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     status_metadata = direct_coil_accepted_trace_branch_metadata([trace0, status_rejected_trace])
     status_slot_summary = direct_coil_accepted_trace_controller_slot_summary(status_metadata)
     assert status_metadata["step_status"] == ("accepted", "rejected")
-    assert np.array_equal(np.asarray(status_metadata["accepted_mask"]), np.asarray([True, False]))
-    assert np.array_equal(np.asarray(status_metadata["rejected_mask"]), np.asarray([False, True]))
+    for key, expected in (("accepted_mask", [True, False]), ("rejected_mask", [False, True])):
+        assert np.array_equal(np.asarray(status_metadata[key]), np.asarray(expected))
     assert status_metadata["preconditioner_policy_segment_summary"][0]["rejected_steps"] == 1
     assert status_slot_summary["accepted_slots"] == 1
     assert status_slot_summary["rejected_slots"] == 1
@@ -536,8 +516,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
         [trace0, status_rejected_trace],
         accept_mask=np.asarray([True, True]),
     )
-    assert np.array_equal(np.asarray(override_status_metadata["accepted_mask"]), np.asarray([True, True]))
-    assert np.array_equal(np.asarray(override_status_metadata["rejected_mask"]), np.asarray([False, False]))
+    for key, expected in (("accepted_mask", [True, True]), ("rejected_mask", [False, False])):
+        assert np.array_equal(np.asarray(override_status_metadata[key]), np.asarray(expected))
     override_plan = direct_coil_accepted_trace_controller_replay_plan(
         [trace0, status_rejected_trace],
         static=SimpleNamespace(cfg=SimpleNamespace(nfp=1, mpol=2, ntor=0, lasym=False)),
@@ -547,12 +527,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     )
     assert override_plan["status_masks"]["step_status"] == ("accepted", "rejected")
     assert np.array_equal(np.asarray(override_plan["controls"]["accept"]), np.asarray([True, False]))
-    branch_metadata_json = direct_coil_accepted_trace_branch_metadata(
-        [trace0, trace1],
-        accept_mask=np.asarray([True, False]),
-        done_mask=np.asarray([False, False]),
-        json_safe=True,
-    )
+    branch_metadata_json = direct_coil_accepted_trace_branch_metadata([trace0, trace1], accept_mask=np.asarray([True, False]), done_mask=np.asarray([False, False]), json_safe=True)
     rejected_slot_summary = direct_coil_accepted_trace_controller_slot_summary(branch_metadata_json)
     json.dumps(branch_metadata_json, allow_nan=False)
     assert branch_metadata_json["accepted_mask"] == [True, False]
@@ -569,20 +544,18 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     assert padded_diagnostics["differentiates_adaptive_controller"] is False
     assert padded_diagnostics["n_steps"] == 3
     assert padded_diagnostics["branch_fingerprint"]["n_steps"] == 3
-    assert np.array_equal(np.asarray(padded_diagnostics["masks"]["active"]), np.asarray([True, True, False]))
-    assert np.array_equal(np.asarray(padded_diagnostics["masks"]["accepted"]), np.asarray([True, True, False]))
-    assert np.array_equal(np.asarray(padded_diagnostics["masks"]["rejected"]), np.asarray([False, False, False]))
-    assert np.array_equal(np.asarray(padded_diagnostics["masks"]["done"]), np.asarray([False, True, True]))
+    for key, expected in (
+        ("active", [True, True, False]),
+        ("accepted", [True, True, False]),
+        ("rejected", [False, False, False]),
+        ("done", [False, True, True]),
+    ):
+        assert np.array_equal(np.asarray(padded_diagnostics["masks"][key]), np.asarray(expected))
     assert padded_diagnostics["replay_diagnostics"]["preconditioner_policy_n_segments"] == 1
     assert padded_diagnostics["replay_diagnostics"]["scalar_controls_stackable"] is True
     assert padded_diagnostics["replay_diagnostics"]["array_controls_stackable"] is True
     assert padded_diagnostics["replay_diagnostics"]["preconditioner_controls_stackable"] is True
-    padded_json = free_boundary_adjoint_trace_replay_diagnostics(
-        {"diagnostics": {"adjoint_step_trace": [trace0, trace1, trace2]}},
-        accept_mask=np.asarray([True, True, False]),
-        done_mask=np.asarray([False, True, False]),
-        json_safe=True,
-    )
+    padded_json = free_boundary_adjoint_trace_replay_diagnostics({"diagnostics": {"adjoint_step_trace": [trace0, trace1, trace2]}}, accept_mask=np.asarray([True, True, False]), done_mask=np.asarray([False, True, False]), json_safe=True)
     json.dumps(padded_json, allow_nan=False)
     assert padded_json["masks"]["done"] == [False, True, True]
     with pytest.raises(RuntimeError, match="adjoint_trace=True"):
@@ -618,24 +591,34 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     mismatch_synthetic_report["trace_replay_diagnostics"]["minus"] = "missing"
     mismatch_gate = direct_coil_same_branch_replay_gate_report(mismatch_synthetic_report)
     assert not mismatch_gate["passed"]
-    _assert_errors_contain(
-        mismatch_gate,
-        "base: missing branch fingerprint",
-        "plus: n_steps mismatch",
-        "plus: fingerprint n_steps mismatch",
-        "plus: fingerprint n_freeb_steps mismatch",
-        "plus: freeb_sizes mismatch",
-        "plus: mask 'active' has shape",
-        "plus: no accepted active free-boundary replay slots",
-        "plus: scalar controls are not stackable",
-        "plus: array controls are not stackable",
-        "plus: no preconditioner policy segments",
-        "minus: missing replay diagnostics",
+    _assert_errors_contain(mismatch_gate, "base: missing branch fingerprint", "plus: n_steps mismatch", "plus: fingerprint n_steps mismatch", "plus: fingerprint n_freeb_steps mismatch", "plus: freeb_sizes mismatch", "plus: mask 'active' has shape", "plus: no accepted active free-boundary replay slots", "plus: scalar controls are not stackable", "plus: array controls are not stackable", "plus: no preconditioner policy segments", "minus: missing replay diagnostics")
+    return synthetic_report, branch_metadata
+
+
+@pytest.mark.py311_coverage_only
+def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vmec_jax._compat import jax, jnp
+
+    z = np.arange(6.0).reshape(2, 3)
+    trace0 = _synthetic_direct_coil_trace(z)
+    trace1 = _synthetic_direct_coil_trace(z, dt_eff=0.25, bsqvac_scale=3.0)
+    trace2 = _synthetic_direct_coil_trace(z, dt_eff=0.125, bsqvac_scale=4.0)
+    _assert_direct_coil_trace_control_array_contracts(trace0, trace1, z)
+    axis_trace0, changed_static_trace = _assert_direct_coil_trace_replay_graph_contracts(trace0, trace1, z)
+    synthetic_report, branch_metadata = _assert_trace_fingerprint_status_and_replay_gate_contracts(
+        trace0,
+        trace1,
+        trace2,
     )
 
     from vmec_jax.free_boundary_adjoint import (
         _block_until_ready_for_timing,
         _pytree_batched_directional_vdot_jax,
+        direct_coil_accepted_trace_fingerprint,
+        direct_coil_accepted_trace_fingerprint_delta,
+        direct_coil_accepted_trace_fingerprint_delta_summary,
+        direct_coil_accepted_trace_preconditioner_controls_jax,
+        direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_controller_custom_vjp_scalars_jax,
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
