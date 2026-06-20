@@ -168,7 +168,7 @@ def build_residual_ptau_bindings(
     accepted_control_ptau_arrays_helper: Any,
     scan_kernel_arrays_from_k_func: Any,
     has_jax_func: Any,
-) -> tuple[Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any]:
     """Bind ptau min/max helpers once during residual-solve setup."""
 
     context = build_context_func(
@@ -197,7 +197,7 @@ def build_residual_ptau_bindings(
         accepted_control_ptau_arrays_helper,
         kernel_arrays_from_k=scan_kernel_arrays_from_k_func,
     )
-    return minmax_from_k_host, minmax, accepted_control_arrays
+    return context, minmax_from_k_host, minmax, accepted_control_arrays
 
 
 def resolve_free_boundary_setup_policy(

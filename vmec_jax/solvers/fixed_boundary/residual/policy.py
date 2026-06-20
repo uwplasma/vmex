@@ -214,6 +214,12 @@ class ResidualIterationHistories:
     def rollback_lists(self) -> tuple[list[Any], ...]:
         return tuple(self.lists[key] for key in _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS)
 
+    def append_bad_jacobian(self, track_history: bool, min_tau: float, max_tau: float, bad_flag: bool) -> None:
+        if bool(track_history):
+            self.lists["min_tau_history"].append(float(min_tau))
+            self.lists["max_tau_history"].append(float(max_tau))
+            self.lists["bad_jacobian_history"].append(int(bool(bad_flag)))
+
     def append_preconditioned(
         self,
         *,

@@ -851,7 +851,7 @@ def solve_fixed_boundary_residual_iter(
     _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
     _t_setup_ptau_constants = _setup_timer_start()
-    _ptau_minmax_from_k_host, _ptau_minmax, _accepted_control_ptau_arrays = _build_residual_ptau_bindings(
+    _ptau_bindings = _build_residual_ptau_bindings(
         s=s,
         has_jax_value=has_jax(),
         s_has_tracer=_tree_has_tracer(s),
@@ -867,6 +867,7 @@ def solve_fixed_boundary_residual_iter(
         scan_kernel_arrays_from_k_func=_scan_math_kernel_arrays_from_k,
         has_jax_func=has_jax,
     )
+    _ptau_context, _ptau_minmax_from_k_host, _ptau_minmax, _accepted_control_ptau_arrays = _ptau_bindings
     _record_setup_timing("setup_ptau_constants", _t_setup_ptau_constants)
     _maybe_dump_jacobian_terms = partial(
         _maybe_dump_jacobian_terms_helper,
@@ -1212,16 +1213,7 @@ def solve_fixed_boundary_residual_iter(
         "freeb_nestor_trial_failed_history",
     )
     adjoint_step_trace_history = history_lists["adjoint_step_trace_history"]
-    min_tau_history, max_tau_history, bad_jacobian_history = history_lists.many(
-        "min_tau_history", "max_tau_history", "bad_jacobian_history"
-    )
     grad_rms_history, step_history = history_lists.many("grad_rms_history", "step_history")
-
-    def _append_badjac_history(min_tau_value: float, max_tau_value: float, bad_flag: bool) -> None:
-        if track_history:
-            min_tau_history.append(float(min_tau_value))
-            max_tau_history.append(float(max_tau_value))
-            bad_jacobian_history.append(int(bool(bad_flag)))
 
     r00_last = float("nan")
     z00_last = float("nan")
@@ -2610,7 +2602,7 @@ def solve_fixed_boundary_residual_iter(
                 )
 
                 if np.isfinite(min_tau) and np.isfinite(max_tau):
-                    _append_badjac_history(min_tau, max_tau, bool(bad_jacobian))
+                    history_lists.append_bad_jacobian(track_history, min_tau, max_tau, bool(bad_jacobian))
                     if bad_jacobian and _env_dump_badjac not in ("", "0"):
                         dump_dir = _env_dump_dir
                         if dump_dir:
@@ -2621,9 +2613,9 @@ def solve_fixed_boundary_residual_iter(
                             except Exception:
                                 pass
                 else:
-                    _append_badjac_history(float("nan"), float("nan"), False)
+                    history_lists.append_bad_jacobian(track_history, float("nan"), float("nan"), False)
             else:
-                _append_badjac_history(float("nan"), float("nan"), False)
+                history_lists.append_bad_jacobian(track_history, float("nan"), float("nan"), False)
 
             # VMEC eqsolve: after the first evolve step, if the Jacobian is bad
             # and ijacob==0, retry with an improved axis guess.
