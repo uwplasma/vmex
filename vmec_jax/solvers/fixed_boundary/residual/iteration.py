@@ -107,8 +107,8 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
     initial_residual_velocity_state as _initial_residual_velocity_state,
-    scale_velocity_blocks as _scale_velocity_blocks,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
+    strict_trial_evaluation as _strict_trial_evaluation,
     zero_velocity_blocks_like as _zero_velocity_blocks_like,
 )
 from vmec_jax.field import TWOPI
@@ -3539,60 +3539,35 @@ def solve_fixed_boundary_residual_iter(
                 state_try = update_proposal.state
             probe_bad_jacobian = False
             if need_trial_eval:
-                freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
-                w_try = _trial_residual_total(
-                    state_try,
-                    freeb_bsqvac_half_trial,
+                trial_eval = _strict_trial_evaluation(
+                    state_try=state_try,
+                    velocities=_current_velocity_blocks(),
+                    update_deltas=update_deltas,
+                    update_rms=update_rms,
+                    dt_eff=float(dt_eff),
+                    w_curr=float(w_curr),
+                    backtracking=bool(backtracking),
+                    reference_mode=bool(reference_mode),
+                    host_update_assembly=bool(host_update_assembly),
                     zero_m1_value=zero_m1,
-                    timing_label="trial",
+                    zero_m1_host=float(np.asarray(zero_m1)),
+                    zero_m1_probe_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
+                    candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
+                    freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
+                    trial_residual_total=_trial_residual_total,
                 )
-                w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
-                if bool(reference_mode) and (float(np.asarray(zero_m1)) > 0.5):
-                    w_probe = _trial_residual_total(
-                        state_try,
-                        freeb_bsqvac_half_trial,
-                        zero_m1_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
-                    )
-                    if (not np.isfinite(w_probe)) or (w_probe > 1.0e2 * max(w_curr, 1e-30)):
-                        probe_bad_jacobian = True
-                        w_try = float("inf")
-                        w_try_ratio = float("inf")
+                state_try = trial_eval.state
+                _set_velocity_blocks(trial_eval.velocities)
+                dt_eff = trial_eval.dt_eff
+                update_rms = trial_eval.update_rms
+                w_try = trial_eval.w_try
+                w_try_ratio = trial_eval.w_try_ratio
+                probe_bad_jacobian = trial_eval.probe_bad_jacobian
             else:
                 w_try = w_curr
                 w_try_ratio = 1.0
 
-            # The reference iteration is typically stable under its restart
-            # triggers, but our parity-path preconditioners are still evolving.
-            # Add a small,
-            # bounded backtracking on the position update (not the force
-            # evaluation) to prevent systematic residual growth.
-            alpha = 1.0
             accept_ratio = 1.001 if backtracking else float("inf")
-            if np.isfinite(w_try) and (w_try > accept_ratio * max(w_curr, 1e-30)):
-                for _ in range(8):
-                    alpha *= 0.5
-                    state_try = _candidate_state_from_delta_tuple(
-                        update_deltas,
-                        scale=alpha,
-                        use_numpy_arrays=False,
-                        use_numpy_enforce=bool(host_update_assembly),
-                    )
-                    freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
-                    w_try = _trial_residual_total(
-                        state_try,
-                        freeb_bsqvac_half_trial,
-                        zero_m1_value=zero_m1,
-                        timing_label="trial",
-                    )
-                    w_try_ratio = w_try / max(w_curr, 1e-30) if np.isfinite(w_try) else float("inf")
-                    if np.isfinite(w_try) and (w_try <= accept_ratio * max(w_curr, 1e-30)):
-                        # Keep momentum consistent with the smaller step.
-                        vRcc, vRss, vZsc, vZcs, vLsc, vLcs = _scale_velocity_blocks(
-                            alpha, vRcc, vRss, vZsc, vZcs, vLsc, vLcs
-                        )
-                        update_rms *= alpha
-                        dt_eff *= alpha
-                        break
 
             # Require (near) monotone improvement; otherwise fall back to the
             # restart/timestep control path.

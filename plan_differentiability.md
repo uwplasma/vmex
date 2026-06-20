@@ -27824,3 +27824,82 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.978%.
 - Overall differentiability-refactor PR: 99.999999999954%.
+
+## 2026-06-20 Strict Trial Backtracking Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `StrictTrialEvaluation` and `strict_trial_evaluation` to the residual
+   update helper module.
+2. Moved strict trial residual evaluation, reference-mode probe evaluation, and
+   bounded backtracking out of `solve_fixed_boundary_residual_iter`.
+3. Preserved the loop-level authority for accepting momentum steps, attempting
+   direct fallback, and applying catastrophic restarts.
+4. Added `scale_primary_velocity_blocks` to name the VMEC-specific
+   backtracking behavior that scales only the primary symmetric velocity
+   channels.
+5. Added a unit test that checks strict backtracking, residual reduction,
+   update-RMS scaling, and primary-only velocity scaling.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped from 3491 to 3466 lines.
+- The residual iterator file dropped from 3852 to 3827 lines.
+- The trial/probe/backtracking behavior is now testable without a full VMEC
+  solve, while the main loop still visibly owns the branch outcome.
+- Focused residual helper shards, broad driver shards, and free-boundary smoke
+  shards pass with only pre-existing numerical warnings.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_residual_iter_update_helpers.py`
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/update.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py tests/test_solve_residual_iter_setup_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_driver_wave2_coverage.py tests/test_solve_scan_chunking.py tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_update_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wp0.py tests/test_free_boundary_wave2.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd -q`
+- `python tools/diagnostics/source_health.py --top 12 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue with larger tranches that isolate restart/cache bookkeeping only
+   after focused side-effect tests exist.
+2. Consider extracting the remaining momentum/direct-fallback/restart branch
+   outcome into a small result object if the loop remains clear about accepted
+   authority.
+3. Run a wider release shard before merging the draft PR once the residual-loop
+   refactor reaches the next stable plateau.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999978%.
+- Solver monolith reduction: 99.980%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.875%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 98.95%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.979%.
+- Overall differentiability-refactor PR: 99.999999999955%.

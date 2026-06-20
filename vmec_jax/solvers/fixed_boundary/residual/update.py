@@ -95,6 +95,19 @@ class StrictMomentumProposal(NamedTuple):
     scale: float
 
 
+class StrictTrialEvaluation(NamedTuple):
+    """Trial residual/backtracking result for a strict momentum proposal."""
+
+    state: Any
+    velocities: ResidualVelocityBlocks
+    dt_eff: float
+    update_rms: float | None
+    w_try: float
+    w_try_ratio: float
+    probe_bad_jacobian: bool
+    alpha: float
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -466,6 +479,105 @@ def strict_momentum_update_proposal(
     )
 
 
+def scale_primary_velocity_blocks(scale: float, velocities: ResidualVelocityBlocks) -> ResidualVelocityBlocks:
+    """Scale VMEC's primary symmetric velocity memory used by backtracking."""
+
+    return ResidualVelocityBlocks(
+        float(scale) * velocities.rcc,
+        float(scale) * velocities.rss,
+        velocities.rsc,
+        velocities.rcs,
+        float(scale) * velocities.zsc,
+        float(scale) * velocities.zcs,
+        velocities.zcc,
+        velocities.zss,
+        float(scale) * velocities.lsc,
+        float(scale) * velocities.lcs,
+        velocities.lcc,
+        velocities.lss,
+    )
+
+
+def strict_trial_evaluation(
+    *,
+    state_try: Any,
+    velocities: ResidualVelocityBlocks,
+    update_deltas: tuple[Any, ...],
+    update_rms: float | None,
+    dt_eff: float,
+    w_curr: float,
+    backtracking: bool,
+    reference_mode: bool,
+    host_update_assembly: bool,
+    zero_m1_value: Any,
+    zero_m1_host: float,
+    zero_m1_probe_value: Any,
+    candidate_state_from_delta_tuple: Any,
+    freeb_bsqvac_half_for_trial_state: Any,
+    trial_residual_total: Any,
+    max_backtracks: int = 8,
+    probe_growth_factor: float = 1.0e2,
+) -> StrictTrialEvaluation:
+    """Evaluate and optionally backtrack one strict momentum trial state."""
+
+    freeb_bsqvac_half_trial = freeb_bsqvac_half_for_trial_state(state_try)
+    w_try = trial_residual_total(
+        state_try,
+        freeb_bsqvac_half_trial,
+        zero_m1_value=zero_m1_value,
+        timing_label="trial",
+    )
+    w_try_ratio = float(w_try) / max(float(w_curr), 1.0e-30) if np.isfinite(w_try) else float("inf")
+    probe_bad_jacobian = False
+    if bool(reference_mode) and float(zero_m1_host) > 0.5:
+        w_probe = trial_residual_total(
+            state_try,
+            freeb_bsqvac_half_trial,
+            zero_m1_value=zero_m1_probe_value,
+        )
+        if (not np.isfinite(w_probe)) or (w_probe > float(probe_growth_factor) * max(float(w_curr), 1.0e-30)):
+            probe_bad_jacobian = True
+            w_try = float("inf")
+            w_try_ratio = float("inf")
+
+    alpha = 1.0
+    accept_ratio = 1.001 if bool(backtracking) else float("inf")
+    if np.isfinite(w_try) and (w_try > accept_ratio * max(float(w_curr), 1.0e-30)):
+        for _ in range(int(max_backtracks)):
+            alpha *= 0.5
+            state_try = candidate_state_from_delta_tuple(
+                update_deltas,
+                scale=alpha,
+                use_numpy_arrays=False,
+                use_numpy_enforce=bool(host_update_assembly),
+            )
+            freeb_bsqvac_half_trial = freeb_bsqvac_half_for_trial_state(state_try)
+            w_try = trial_residual_total(
+                state_try,
+                freeb_bsqvac_half_trial,
+                zero_m1_value=zero_m1_value,
+                timing_label="trial",
+            )
+            w_try_ratio = float(w_try) / max(float(w_curr), 1.0e-30) if np.isfinite(w_try) else float("inf")
+            if np.isfinite(w_try) and (w_try <= accept_ratio * max(float(w_curr), 1.0e-30)):
+                velocities = scale_primary_velocity_blocks(alpha, velocities)
+                if update_rms is not None:
+                    update_rms = float(update_rms) * alpha
+                dt_eff = float(dt_eff) * alpha
+                break
+
+    return StrictTrialEvaluation(
+        state=state_try,
+        velocities=velocities,
+        dt_eff=float(dt_eff),
+        update_rms=update_rms,
+        w_try=float(w_try),
+        w_try_ratio=float(w_try_ratio),
+        probe_bad_jacobian=bool(probe_bad_jacobian),
+        alpha=float(alpha),
+    )
+
+
 def host_catastrophic_restart_update(
     *,
     probe_bad_jacobian: bool,
@@ -700,12 +812,15 @@ _HostCatastrophicRestartUpdate = HostCatastrophicRestartUpdate
 _HostPreRestartTriggerUpdate = HostPreRestartTriggerUpdate
 _DirectForceFallbackTrial = DirectForceFallbackTrial
 _StrictMomentumProposal = StrictMomentumProposal
+_StrictTrialEvaluation = StrictTrialEvaluation
 _zero_velocity_blocks_like = zero_velocity_blocks_like
 _scale_velocity_blocks = scale_velocity_blocks
+_scale_primary_velocity_blocks = scale_primary_velocity_blocks
 _host_force_update_rms = host_force_update_rms
 _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
 _strict_momentum_update_proposal = strict_momentum_update_proposal
+_strict_trial_evaluation = strict_trial_evaluation
 _host_catastrophic_restart_update = host_catastrophic_restart_update
 _host_pre_restart_trigger_update = host_pre_restart_trigger_update
 _direct_force_fallback_trial = direct_force_fallback_trial

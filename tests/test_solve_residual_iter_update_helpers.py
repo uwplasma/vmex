@@ -16,6 +16,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     momentum_update_jax,
     scale_velocity_blocks,
     strict_momentum_update_proposal,
+    strict_trial_evaluation,
     zero_velocity_blocks_like,
 )
 
@@ -293,6 +294,45 @@ def test_direct_force_fallback_trial_caps_step_and_reports_residual() -> None:
     assert result.state == pytest.approx(-expected_dt)
     assert result.residual == pytest.approx(2.0 - 2.0 * expected_dt)
     assert result.update_rms == pytest.approx(host_force_update_rms(expected_dt, *forces))
+
+
+def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> None:
+    velocities = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+
+    def candidate_state_from_delta_tuple(_deltas, *, scale, **_kwargs):
+        return float(scale)
+
+    def trial_residual_total(state, _bsqvac, **_kwargs):
+        return 2.0 if float(state) > 0.75 else 0.9
+
+    result = strict_trial_evaluation(
+        state_try=1.0,
+        velocities=velocities,
+        update_deltas=tuple(np.ones((2, 3)) for _ in range(6)),
+        update_rms=0.4,
+        dt_eff=0.2,
+        w_curr=1.0,
+        backtracking=True,
+        reference_mode=False,
+        host_update_assembly=False,
+        zero_m1_value=1.0,
+        zero_m1_host=1.0,
+        zero_m1_probe_value=0.0,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+        freeb_bsqvac_half_for_trial_state=lambda state: None,
+        trial_residual_total=trial_residual_total,
+    )
+
+    assert result.alpha == pytest.approx(0.5)
+    assert result.state == pytest.approx(0.5)
+    assert result.dt_eff == pytest.approx(0.1)
+    assert result.update_rms == pytest.approx(0.2)
+    assert result.w_try == pytest.approx(0.9)
+    assert not result.probe_bad_jacobian
+    for block_name in ("rcc", "rss", "zsc", "zcs", "lsc", "lcs"):
+        np.testing.assert_allclose(getattr(result.velocities, block_name), 0.5)
+    for block_name in ("rsc", "rcs", "zcc", "zss", "lcc", "lss"):
+        np.testing.assert_allclose(getattr(result.velocities, block_name), 1.0)
 
 
 def test_free_boundary_control_module_reexports_velocity_helpers() -> None:
