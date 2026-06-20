@@ -10,7 +10,14 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
     grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy,
 )
-from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import resolve_vmec2000_print_context
+from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    print_compact_converged_status,
+    print_compact_physical_residual_status,
+    print_compact_residual_iteration_update_status,
+    print_residual_iteration_update_status,
+    resolve_vmec2000_print_context,
+    sample_vmec_iteration_scalars,
+)
 from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     accepted_control_ptau_arrays,
     accepted_control_ptau_host_from_payload,
@@ -225,6 +232,212 @@ def test_resolve_vmec2000_print_context_forwards_rows_and_cadence() -> None:
     assert rows[0]["iter_idx"] == 6
     assert rows[0]["lasym"]
     assert rows[0]["scan_print_mode"] == "debug_print"
+
+
+def test_sample_vmec_iteration_scalars_preserves_host_vmec2000_rounding() -> None:
+    scalars = sample_vmec_iteration_scalars(
+        need_scalar=True,
+        k=SimpleNamespace(
+            pr1_even=np.asarray([[[1.23456]]]),
+            pz1_even=np.asarray([[[-0.56789]]]),
+        ),
+        state=SimpleNamespace(Rcos=np.zeros((1, 1)), Zcos=np.zeros((1, 1))),
+        norms_current=SimpleNamespace(wb=2.0, wp=3.0),
+        m0_mask=np.asarray([True]),
+        lasym=True,
+        host_update_assembly=True,
+        vmec2000_control=True,
+        gamma=2.0,
+        twopi=2.0,
+        previous_r00=9.0,
+        previous_z00=8.0,
+        previous_wb=7.0,
+        previous_wp=6.0,
+        tree_has_tracer=lambda _value: False,
+        device_get_floats=lambda *_values: (_ for _ in ()).throw(AssertionError("device path not expected")),
+        jnp_module=np,
+    )
+
+    assert scalars.r00 == 1.235
+    assert scalars.z00 == -0.5679
+    assert scalars.wb == 2.0
+    assert scalars.wp == 3.0
+    assert scalars.w_vmec == 20.0
+
+
+def test_sample_vmec_iteration_scalars_falls_back_to_state_and_previous_values() -> None:
+    state = SimpleNamespace(
+        Rcos=np.asarray([[1.0, 2.0, 4.0]]),
+        Zcos=np.asarray([[3.0, 5.0, 7.0]]),
+    )
+    fallback = sample_vmec_iteration_scalars(
+        need_scalar=True,
+        k=SimpleNamespace(),
+        state=state,
+        norms_current=SimpleNamespace(wb=0.25, wp=0.5),
+        m0_mask=np.asarray([True, False, True]),
+        lasym=True,
+        host_update_assembly=True,
+        vmec2000_control=False,
+        gamma=2.0,
+        twopi=2.0,
+        previous_r00=9.0,
+        previous_z00=8.0,
+        previous_wb=7.0,
+        previous_wp=6.0,
+        tree_has_tracer=lambda _value: False,
+        device_get_floats=lambda *_values: (_ for _ in ()).throw(AssertionError("device path not expected")),
+        jnp_module=np,
+    )
+    assert fallback.r00 == 5.0
+    assert fallback.z00 == 10.0
+    assert fallback.w_vmec == 3.0
+
+    previous = sample_vmec_iteration_scalars(
+        need_scalar=False,
+        k=SimpleNamespace(),
+        state=state,
+        norms_current=SimpleNamespace(wb=0.25, wp=0.5),
+        m0_mask=np.asarray([True, False, True]),
+        lasym=True,
+        host_update_assembly=True,
+        vmec2000_control=False,
+        gamma=2.0,
+        twopi=2.0,
+        previous_r00=9.0,
+        previous_z00=8.0,
+        previous_wb=7.0,
+        previous_wp=6.0,
+        tree_has_tracer=lambda _value: False,
+        device_get_floats=lambda *_values: (_ for _ in ()).throw(AssertionError("device path not expected")),
+        jnp_module=np,
+    )
+    assert previous.r00 == 9.0
+    assert previous.z00 == 8.0
+    assert previous.w_vmec == 52.0
+
+
+def test_sample_vmec_iteration_scalars_uses_device_callback_when_host_path_is_unavailable() -> None:
+    seen = []
+
+    scalars = sample_vmec_iteration_scalars(
+        need_scalar=True,
+        k=SimpleNamespace(
+            pr1_even=np.asarray([[[1.5]]]),
+            pz1_even=np.asarray([[[2.5]]]),
+        ),
+        state=SimpleNamespace(Rcos=np.zeros((1, 1)), Zcos=np.zeros((1, 1))),
+        norms_current=SimpleNamespace(wb=3.0, wp=4.0),
+        m0_mask=np.asarray([True]),
+        lasym=False,
+        host_update_assembly=False,
+        vmec2000_control=False,
+        gamma=3.0,
+        twopi=2.0,
+        previous_r00=0.0,
+        previous_z00=0.0,
+        previous_wb=0.0,
+        previous_wp=0.0,
+        tree_has_tracer=lambda _value: True,
+        device_get_floats=lambda *values: seen.append(values) or tuple(float(np.asarray(value)) for value in values),
+        jnp_module=np,
+    )
+
+    assert len(seen) == 1
+    assert scalars.r00 == 1.5
+    assert scalars.z00 == 0.0
+    assert scalars.w_vmec == 20.0
+
+
+def test_residual_status_helpers_route_compact_and_vmec2000_rows() -> None:
+    messages = []
+
+    assert print_compact_physical_residual_status(
+        verbose=True,
+        vmec2000_control=False,
+        verbose_vmec2000_table=False,
+        iter_idx=2,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        include_edge=True,
+        print_func=lambda message, **_kwargs: messages.append(message),
+    )
+    assert "iter=002" in messages[-1]
+
+    assert not print_compact_converged_status(
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        target=4.0,
+        print_func=lambda message, **_kwargs: messages.append(message),
+    )
+    assert "converged" not in messages[-1]
+
+    assert print_compact_residual_iteration_update_status(
+        verbose=True,
+        vmec2000_control=False,
+        verbose_vmec2000_table=False,
+        precond_diag_floats=lambda: (4.0, 5.0, 6.0),
+        iter_idx=3,
+        dt_eff=0.25,
+        update_rms=0.125,
+        step_status="accepted",
+        print_func=lambda message, **_kwargs: messages.append(message),
+    )
+    assert "step_status=accepted" in messages[-1]
+
+    vmec_rows = []
+    assert not print_residual_iteration_update_status(
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        should_print_vmec2000=lambda _iter_idx, _max_iter: False,
+        print_vmec2000_iter_row=lambda **kwargs: vmec_rows.append(kwargs),
+        precond_diag_floats=lambda: (7.0, 8.0, 9.0),
+        iter_idx=4,
+        max_iter=10,
+        compact_iter_idx=3,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        dt_eff=0.0,
+        update_rms=0.0,
+        time_step=0.9,
+        r00=1.25,
+        z00=-0.5,
+        w_mhd=6.0,
+        step_status="rejected",
+    )
+    assert not vmec_rows
+
+    assert print_residual_iteration_update_status(
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        should_print_vmec2000=lambda _iter_idx, _max_iter: False,
+        print_vmec2000_iter_row=lambda **kwargs: vmec_rows.append(kwargs),
+        precond_diag_floats=lambda: (7.0, 8.0, 9.0),
+        iter_idx=4,
+        max_iter=10,
+        compact_iter_idx=3,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        dt_eff=0.0,
+        update_rms=0.0,
+        time_step=0.9,
+        r00=1.25,
+        z00=-0.5,
+        w_mhd=6.0,
+        step_status="converged",
+        force_vmec2000_row=True,
+    )
+    assert vmec_rows[-1]["fsqr1"] == 7.0
+    assert vmec_rows[-1]["r00"] == 1.25
 
 
 def test_scan_adapter_contexts_delegate_runtime_and_scan_contracts() -> None:

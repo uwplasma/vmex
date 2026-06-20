@@ -127,9 +127,6 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.io import (
     _format_checkpoint_log_row as _format_checkpoint_log_row,
     _format_evolve_trace_row as _format_evolve_trace_row,
     _format_freeb_control_trace_row as _format_freeb_control_trace_row,
-    _format_residual_converged_message,
-    _format_residual_iteration_update_message,
-    _format_residual_physical_status_message,
     _format_time_control_log_row as _format_time_control_log_row,
     _legacy_dump_record_path as _legacy_dump_record_path,
     _legacy_single_dump_iter_selected as _legacy_single_dump_iter_selected,
@@ -172,7 +169,12 @@ from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
     safe_dt_from_force_blocks as _safe_dt_from_force_blocks,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    print_compact_converged_status as _print_compact_converged_status,
+    print_compact_physical_residual_status as _print_compact_physical_residual_status,
+    print_compact_residual_iteration_update_status as _print_compact_residual_iteration_update_status,
+    print_residual_iteration_update_status as _print_residual_iteration_update_status,
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
+    sample_vmec_iteration_scalars as _sample_vmec_iteration_scalars,
 )
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ResidualScanPathHooks,
@@ -2171,57 +2173,30 @@ def solve_fixed_boundary_residual_iter(
                 nstep_screen=nstep_screen,
             )
             need_scalar = bool(sample_vmec) or (bool(verbose) and (not bool(vmec2000_control)))
-            if need_scalar:
-                if host_update_assembly and (not _tree_has_tracer(k)):
-                    try:
-                        r00_val = float(np.asarray(k.pr1_even)[0, 0, 0])
-                        z00_val = float(np.asarray(k.pz1_even)[0, 0, 0]) if bool(cfg.lasym) else 0.0
-                    except Exception:
-                        if not np.any(m0_mask):
-                            r00_val = float("nan")
-                            z00_val = float("nan")
-                        else:
-                            r00_val = float(np.sum(np.asarray(state.Rcos)[0, m0_mask]))
-                            z00_val = float(np.sum(np.asarray(state.Zcos)[0, m0_mask])) if bool(cfg.lasym) else 0.0
-                    wb_val = float(np.asarray(norms_current.wb))
-                    wp_val = float(np.asarray(norms_current.wp))
-                else:
-                    try:
-                        r00_j = jnp.asarray(k.pr1_even)[0, 0, 0]
-                        if bool(cfg.lasym):
-                            z00_j = jnp.asarray(k.pz1_even)[0, 0, 0]
-                        else:
-                            z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
-                    except Exception:
-                        if not np.any(m0_mask):
-                            r00_j = jnp.asarray(float("nan"))
-                            z00_j = jnp.asarray(float("nan"))
-                        else:
-                            r00_j = jnp.sum(jnp.asarray(state.Rcos)[0, m0_mask])
-                            if bool(cfg.lasym):
-                                z00_j = jnp.sum(jnp.asarray(state.Zcos)[0, m0_mask])
-                            else:
-                                z00_j = jnp.asarray(0.0, dtype=jnp.asarray(r00_j).dtype)
-                    # `norms_used` may be cached (VMEC2000 `ns4=25` behavior), but
-                    # `norms_current` already reflects the current bcovar state and
-                    # therefore matches VMEC's printed wb/wp without recomputing.
-                    wb_j = jnp.asarray(norms_current.wb)
-                    wp_j = jnp.asarray(norms_current.wp)
-                    r00_val, z00_val, wb_val, wp_val = _device_get_floats(r00_j, z00_j, wb_j, wp_j)
-                if bool(vmec2000_control):
-                    # Match VMEC's printed precision (E11.3) for parity checks.
-                    r00_val = float(f"{float(r00_val):.3E}")
-                    z00_val = float(f"{float(z00_val):.3E}")
-            else:
-                r00_val = r00_last
-                z00_val = z00_last
-                wb_val = wb_last
-                wp_val = wp_last
-            r00_last = float(r00_val)
-            z00_last = float(z00_val)
-            wb_last = float(wb_val)
-            wp_last = float(wp_val)
-            w_vmec_last = (wb_last + wp_last / (gamma - 1.0)) * float(TWOPI * TWOPI)
+            vmec_scalars = _sample_vmec_iteration_scalars(
+                need_scalar=bool(need_scalar),
+                k=k,
+                state=state,
+                norms_current=norms_current,
+                m0_mask=m0_mask,
+                lasym=bool(cfg.lasym),
+                host_update_assembly=bool(host_update_assembly),
+                vmec2000_control=bool(vmec2000_control),
+                gamma=float(gamma),
+                twopi=float(TWOPI),
+                previous_r00=float(r00_last),
+                previous_z00=float(z00_last),
+                previous_wb=float(wb_last),
+                previous_wp=float(wp_last),
+                tree_has_tracer=_tree_has_tracer,
+                device_get_floats=_device_get_floats,
+                jnp_module=jnp,
+            )
+            r00_last = vmec_scalars.r00
+            z00_last = vmec_scalars.z00
+            wb_last = vmec_scalars.wb
+            wp_last = vmec_scalars.wp
+            w_vmec_last = vmec_scalars.w_vmec
             if track_history:
                 r00_history.append(r00_last)
                 z00_history.append(z00_last)
@@ -2229,17 +2204,16 @@ def solve_fixed_boundary_residual_iter(
                 wp_history.append(wp_last)
                 w_vmec_history.append(w_vmec_last)
 
-            if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
-                print(
-                    _format_residual_physical_status_message(
-                        iter_idx=int(it),
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        include_edge=bool(include_edge),
-                    ),
-                    flush=True,
-                )
+            _print_compact_physical_residual_status(
+                verbose=bool(verbose),
+                vmec2000_control=bool(vmec2000_control),
+                verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                iter_idx=int(it),
+                fsqr=fsqr_f,
+                fsqz=fsqz_f,
+                fsql=fsql_f,
+                include_edge=bool(include_edge),
+            )
             # Defer convergence exit until after preconditioned diagnostics are
             # computed for this iteration, so fsqr1/fsqz1/fsql1 histories and
             # VMEC-style tables remain length-aligned.
@@ -2948,34 +2922,41 @@ def solve_fixed_boundary_residual_iter(
                     pre_restart_reason="none",
                     time_step_value=time_step,
                 )
-                if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
-                    print(
-                        _format_residual_converged_message(
-                            fsqr=fsqr_f,
-                            fsqz=fsqz_f,
-                            fsql=fsql_f,
-                            target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
-                        ),
-                        flush=True,
-                    )
+                _print_compact_converged_status(
+                    verbose=bool(verbose),
+                    vmec2000_control=bool(vmec2000_control),
+                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
+                    target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
+                )
                 if timing_enabled and t_iteration_control_start is not None:
                     timing_stats["iteration_control"] += time.perf_counter() - float(t_iteration_control_start)
                     t_iteration_control_start = None
-                if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                    fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
-                    _print_vmec2000_iter_row(
-                        iter_idx=int(iter2),
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        fsqr1=fsqr1_f,
-                        fsqz1=fsqz1_f,
-                        fsql1=fsql1_f,
-                        delt0r=float(time_step),
-                        r00=float(r00_last),
-                        w_mhd=float(w_vmec_last),
-                        z00=float(z00_last),
-                    )
+                _print_residual_iteration_update_status(
+                    verbose=bool(verbose),
+                    vmec2000_control=bool(vmec2000_control),
+                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                    should_print_vmec2000=_should_print_vmec2000,
+                    print_vmec2000_iter_row=_print_vmec2000_iter_row,
+                    precond_diag_floats=_precond_diag_floats,
+                    iter_idx=int(iter2),
+                    max_iter=int(max_iter),
+                    compact_iter_idx=int(it),
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
+                    dt_eff=0.0,
+                    update_rms=0.0,
+                    time_step=float(time_step),
+                    r00=float(r00_last),
+                    z00=float(z00_last),
+                    w_mhd=float(w_vmec_last),
+                    step_status="converged",
+                    force_vmec2000_row=True,
+                    compact_status=False,
+                )
                 converged = True
                 break
 
@@ -3395,24 +3376,16 @@ def solve_fixed_boundary_residual_iter(
                     pre_restart_reason=pre_restart_reason,
                     time_step_value=time_step_iter,
                 )
-                if verbose:
-                    if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                        # VMEC does not print rejected restart steps.
-                        pass
-                    else:
-                        fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
-                        print(
-                            _format_residual_iteration_update_message(
-                                iter_idx=int(it),
-                                dt_eff=0.0,
-                                update_rms=0.0,
-                                fsqr1=fsqr1_f,
-                                fsqz1=fsqz1_f,
-                                fsql1=fsql1_f,
-                                step_status=step_status,
-                            ),
-                            flush=True,
-                        )
+                _print_compact_residual_iteration_update_status(
+                    verbose=bool(verbose),
+                    vmec2000_control=bool(vmec2000_control),
+                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                    precond_diag_floats=_precond_diag_floats,
+                    iter_idx=int(it),
+                    dt_eff=0.0,
+                    update_rms=0.0,
+                    step_status=step_status,
+                )
                 _maybe_dump_xc(
                     state=state_before_restart,
                     vRcc=vRcc_before,
@@ -4094,38 +4067,31 @@ def solve_fixed_boundary_residual_iter(
         if track_history:
             dt_eff_history.append(float(dt_eff))
             update_rms_history.append(update_rms_j if bool(strict_update) else float(update_rms))
-        if verbose:
-            if bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                if _should_print_vmec2000(int(iter2), int(max_iter)):
-                    fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
-                    _print_vmec2000_iter_row(
-                        iter_idx=int(iter2),
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        fsqr1=fsqr1_f,
-                        fsqz1=fsqz1_f,
-                        fsql1=fsql1_f,
-                        delt0r=float(time_step),
-                        r00=float(r00_last),
-                        w_mhd=float(w_vmec_last),
-                        z00=float(z00_last),
-                    )
-            else:
-                fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
-                update_rms_print = _update_rms_float() if bool(strict_update) else float(update_rms)
-                print(
-                    _format_residual_iteration_update_message(
-                        iter_idx=int(it),
-                        dt_eff=float(dt_eff),
-                        update_rms=update_rms_print,
-                        fsqr1=fsqr1_f,
-                        fsqz1=fsqz1_f,
-                        fsql1=fsql1_f,
-                        step_status=step_status,
-                    ),
-                    flush=True,
-                )
+        if bool(verbose):
+            update_rms_print = float(np.asarray(update_rms_j)) if bool(strict_update) else float(update_rms)
+        else:
+            update_rms_print = 0.0
+        _print_residual_iteration_update_status(
+            verbose=bool(verbose),
+            vmec2000_control=bool(vmec2000_control),
+            verbose_vmec2000_table=bool(verbose_vmec2000_table),
+            should_print_vmec2000=_should_print_vmec2000,
+            print_vmec2000_iter_row=_print_vmec2000_iter_row,
+            precond_diag_floats=_precond_diag_floats,
+            iter_idx=int(iter2),
+            max_iter=int(max_iter),
+            compact_iter_idx=int(it),
+            fsqr=fsqr_f,
+            fsqz=fsqz_f,
+            fsql=fsql_f,
+            dt_eff=float(dt_eff),
+            update_rms=update_rms_print,
+            time_step=float(time_step),
+            r00=float(r00_last),
+            z00=float(z00_last),
+            w_mhd=float(w_vmec_last),
+            step_status=step_status,
+        )
         if track_history:
             _append_residual_iter_terminal_history(
                 step_status=step_status,
