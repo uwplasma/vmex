@@ -4,16 +4,21 @@ import numpy as np
 import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.update import (
+    ResidualControllerState,
     ResidualVelocityBlocks,
     backtracking_momentum_search,
+    controller_state_from_resume_state,
+    controller_state_legacy_payload,
     direct_force_fallback_trial,
     force_update_rms,
     host_catastrophic_restart_update,
     host_force_update_rms,
     host_momentum_update_np,
     host_pre_restart_trigger_update,
+    initial_residual_controller_state,
     initial_residual_velocity_state,
     momentum_update_jax,
+    residual_evolve_coefficients,
     scale_velocity_blocks,
     strict_momentum_update_proposal,
     strict_trial_evaluation,
@@ -88,6 +93,120 @@ def test_velocity_blocks_resume_round_trip_preserves_named_channels() -> None:
         lss="resume-lss",
     )
     assert velocity_blocks_legacy_payload(blocks) == resume_state
+
+
+def test_controller_state_resume_round_trip_preserves_legacy_scalars() -> None:
+    checkpoint = object()
+    defaults = ResidualControllerState(
+        time_step=0.1,
+        inv_tau=[1.0, 2.0],
+        fsq_prev=3.0,
+        fsq0_prev=4.0,
+        flip_sign=1.0,
+        iter1=2,
+        ijacob=0,
+        bad_resets=0,
+        res0=-1.0,
+        res1=-1.0,
+        prev_rz_fsq=2.0,
+        bad_growth_streak=0,
+        huge_force_restart_count=0,
+        state_checkpoint="default-checkpoint",
+    )
+    resume_state = {
+        "time_step": "0.25",
+        "inv_tau": (0.3, 0.4),
+        "fsq_prev": "5.0",
+        "fsq0_prev": "6.0",
+        "flip_sign": "-1.0",
+        "iter1": "7",
+        "ijacob": "8",
+        "bad_resets": "9",
+        "res0": "0.5",
+        "res1": "0.25",
+        "prev_rz_fsq": "0.125",
+        "bad_growth_streak": "3",
+        "huge_force_restart_count": "4",
+        "state_checkpoint": checkpoint,
+    }
+
+    state = controller_state_from_resume_state(resume_state, defaults)
+
+    assert state.time_step == pytest.approx(0.25)
+    assert state.inv_tau == [0.3, 0.4]
+    assert state.fsq_prev == pytest.approx(5.0)
+    assert state.fsq0_prev == pytest.approx(6.0)
+    assert state.flip_sign == pytest.approx(-1.0)
+    assert state.iter1 == 7
+    assert state.ijacob == 8
+    assert state.bad_resets == 9
+    assert state.res0 == pytest.approx(0.5)
+    assert state.res1 == pytest.approx(0.25)
+    assert state.prev_rz_fsq == pytest.approx(0.125)
+    assert state.bad_growth_streak == 3
+    assert state.huge_force_restart_count == 4
+    assert state.state_checkpoint is checkpoint
+    assert controller_state_legacy_payload(state)["state_checkpoint"] is checkpoint
+
+
+def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
+    checkpoint = object()
+
+    state = initial_residual_controller_state(
+        step_size=0.25,
+        k_ndamp=4,
+        initial_flip_sign=-1.0,
+        state_checkpoint=checkpoint,
+    )
+
+    assert state.time_step == pytest.approx(0.25)
+    assert state.inv_tau == [0.6, 0.6, 0.6, 0.6]
+    assert state.fsq_prev == pytest.approx(1.0)
+    assert state.fsq0_prev == pytest.approx(1.0)
+    assert state.flip_sign == pytest.approx(-1.0)
+    assert state.iter1 == 1
+    assert state.ijacob == 0
+    assert state.bad_resets == 0
+    assert state.res0 == pytest.approx(-1.0)
+    assert state.res1 == pytest.approx(-1.0)
+    assert state.prev_rz_fsq == pytest.approx(2.0)
+    assert state.bad_growth_streak == 0
+    assert state.huge_force_restart_count == 0
+    assert state.state_checkpoint is checkpoint
+
+
+def test_residual_evolve_coefficients_match_vmec_damping_recurrence() -> None:
+    first = residual_evolve_coefficients(
+        iter2=4,
+        iter1=4,
+        inv_tau=[1.0, 2.0, 3.0],
+        time_step=0.5,
+        fsq1=2.0,
+        fsq_prev=4.0,
+        fsq0_curr=6.0,
+        k_ndamp=3,
+    )
+
+    assert first.inv_tau == [0.3, 0.3, 0.3]
+    assert first.fsq_prev == pytest.approx(2.0)
+    assert first.fsq0_prev == pytest.approx(6.0)
+    assert first.dtau == pytest.approx(0.075)
+    assert first.b1 == pytest.approx(0.925)
+    assert first.fac == pytest.approx(1.0 / 1.075)
+
+    later = residual_evolve_coefficients(
+        iter2=5,
+        iter1=4,
+        inv_tau=[0.1, 0.2, 0.3],
+        time_step=0.5,
+        fsq1=1.0,
+        fsq_prev=2.0,
+        fsq0_curr=3.0,
+        k_ndamp=3,
+    )
+
+    assert later.inv_tau == [0.2, 0.3, 0.3]
+    assert later.dtau == pytest.approx(0.5 * (0.2 + 0.3 + 0.3) / 3.0 / 2.0)
 
 
 def test_host_momentum_update_np_matches_strict_update_formula_and_rms() -> None:

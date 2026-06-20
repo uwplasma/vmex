@@ -25,6 +25,25 @@ class ResidualVelocityBlocks(NamedTuple):
     lss: Any
 
 
+class ResidualControllerState(NamedTuple):
+    """Host-loop scalar state that survives residual-solve restarts."""
+
+    time_step: float
+    inv_tau: list[float]
+    fsq_prev: float
+    fsq0_prev: float
+    flip_sign: float
+    iter1: int
+    ijacob: int
+    bad_resets: int
+    res0: float
+    res1: float
+    prev_rz_fsq: float
+    bad_growth_streak: int
+    huge_force_restart_count: int
+    state_checkpoint: Any
+
+
 VELOCITY_RESUME_KEYS = {
     "vRcc": "rcc",
     "vRss": "rss",
@@ -39,6 +58,84 @@ VELOCITY_RESUME_KEYS = {
     "vLcc": "lcc",
     "vLss": "lss",
 }
+
+
+CONTROLLER_RESUME_KEYS = (
+    "time_step",
+    "inv_tau",
+    "fsq_prev",
+    "fsq0_prev",
+    "flip_sign",
+    "iter1",
+    "ijacob",
+    "bad_resets",
+    "res0",
+    "res1",
+    "prev_rz_fsq",
+    "bad_growth_streak",
+    "huge_force_restart_count",
+    "state_checkpoint",
+)
+
+
+def initial_residual_controller_state(
+    *,
+    step_size: float,
+    k_ndamp: int,
+    initial_flip_sign: float,
+    state_checkpoint: Any,
+) -> ResidualControllerState:
+    """Create VMEC residual-loop controller scalars from input controls."""
+
+    time_step = float(step_size)
+    return ResidualControllerState(
+        time_step=time_step,
+        inv_tau=[0.15 / time_step] * int(k_ndamp),
+        fsq_prev=1.0,
+        fsq0_prev=1.0,
+        flip_sign=float(initial_flip_sign),
+        iter1=1,
+        ijacob=0,
+        bad_resets=0,
+        res0=-1.0,
+        res1=-1.0,
+        prev_rz_fsq=2.0,
+        bad_growth_streak=0,
+        huge_force_restart_count=0,
+        state_checkpoint=state_checkpoint,
+    )
+
+
+def controller_state_from_resume_state(
+    resume_state: dict[str, Any],
+    defaults: ResidualControllerState,
+) -> ResidualControllerState:
+    """Restore residual-loop controller scalars from a legacy resume payload."""
+
+    return ResidualControllerState(
+        time_step=float(resume_state.get("time_step", defaults.time_step)),
+        inv_tau=list(resume_state.get("inv_tau", defaults.inv_tau)),
+        fsq_prev=float(resume_state.get("fsq_prev", defaults.fsq_prev)),
+        fsq0_prev=float(resume_state.get("fsq0_prev", defaults.fsq0_prev)),
+        flip_sign=float(resume_state.get("flip_sign", defaults.flip_sign)),
+        iter1=int(resume_state.get("iter1", defaults.iter1)),
+        ijacob=int(resume_state.get("ijacob", defaults.ijacob)),
+        bad_resets=int(resume_state.get("bad_resets", defaults.bad_resets)),
+        res0=float(resume_state.get("res0", defaults.res0)),
+        res1=float(resume_state.get("res1", defaults.res1)),
+        prev_rz_fsq=float(resume_state.get("prev_rz_fsq", defaults.prev_rz_fsq)),
+        bad_growth_streak=int(resume_state.get("bad_growth_streak", defaults.bad_growth_streak)),
+        huge_force_restart_count=int(
+            resume_state.get("huge_force_restart_count", defaults.huge_force_restart_count)
+        ),
+        state_checkpoint=resume_state.get("state_checkpoint", defaults.state_checkpoint),
+    )
+
+
+def controller_state_legacy_payload(state: ResidualControllerState) -> dict[str, Any]:
+    """Return legacy controller keys for resume-state diagnostics."""
+
+    return {key: getattr(state, key) for key in CONTROLLER_RESUME_KEYS}
 
 
 def velocity_blocks_from_resume_state(
@@ -389,6 +486,54 @@ def host_force_update_rms(scale: float, *blocks) -> float:
     """Return the host scalar RMS coefficient update implied by scaled blocks."""
 
     return float(np.asarray(force_update_rms(scale, *blocks)))
+
+
+class ResidualEvolveCoefficients(NamedTuple):
+    """Damping coefficients for one residual-loop evolve step."""
+
+    inv_tau: list[float]
+    fsq_prev: float
+    fsq0_prev: float
+    otav: float
+    dtau: float
+    b1: float
+    fac: float
+
+
+def residual_evolve_coefficients(
+    *,
+    iter2: int,
+    iter1: int,
+    inv_tau: list[float],
+    time_step: float,
+    fsq1: float,
+    fsq_prev: float,
+    fsq0_curr: float,
+    k_ndamp: int,
+) -> ResidualEvolveCoefficients:
+    """Advance VMEC's damping-history recurrence for the next state update."""
+
+    dt = float(time_step)
+    if int(iter2) == int(iter1):
+        next_inv_tau = [0.15 / dt] * int(k_ndamp)
+    else:
+        invtau_num = 0.0 if float(fsq1) == 0.0 else min(abs(np.log(float(fsq1) / float(fsq_prev))), 0.15)
+        next_inv_tau = list(inv_tau)[1:] + [invtau_num / dt]
+    next_fsq_prev = float(fsq1)
+    next_fsq0_prev = float(fsq0_curr)
+    otav = float(np.sum(next_inv_tau)) / float(k_ndamp)
+    dtau = dt * otav / 2.0
+    b1 = 1.0 - dtau
+    fac = 1.0 / (1.0 + dtau)
+    return ResidualEvolveCoefficients(
+        inv_tau=next_inv_tau,
+        fsq_prev=next_fsq_prev,
+        fsq0_prev=next_fsq0_prev,
+        otav=float(otav),
+        dtau=float(dtau),
+        b1=float(b1),
+        fac=float(fac),
+    )
 
 
 def momentum_update_jax(

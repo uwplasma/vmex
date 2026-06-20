@@ -102,11 +102,14 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     backtracking_momentum_search as _backtracking_momentum_search,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
+    controller_state_from_resume_state as _controller_state_from_resume_state,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
+    initial_residual_controller_state as _initial_residual_controller_state,
     initial_residual_velocity_state as _initial_residual_velocity_state,
+    residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_resume_state as _velocity_blocks_from_resume_state,
@@ -1271,11 +1274,17 @@ def solve_fixed_boundary_residual_iter(
 
     # Conjugate-gradient-like time-stepping state.
     controller_constants = _default_vmec2000_controller_constants()
-    time_step = float(step_size)
     k_ndamp = controller_constants.ndamp
-    inv_tau = [0.15 / time_step] * k_ndamp
-    fsq_prev = 1.0
-    fsq0_prev = 1.0
+    controller_state = _initial_residual_controller_state(
+        step_size=float(step_size),
+        k_ndamp=int(k_ndamp),
+        initial_flip_sign=float(initial_flip_sign),
+        state_checkpoint=state,
+    )
+    (
+        time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
+        prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
+    ) = controller_state
     _initial_velocity = _initial_residual_velocity_state(
         state=state,
         mpol=mpol,
@@ -1284,12 +1293,8 @@ def solve_fixed_boundary_residual_iter(
         reference_mode=bool(reference_mode),
     )
     velocity_blocks = _initial_velocity.velocities
-    flip_sign = float(initial_flip_sign)
     max_coeff_delta_rms = _initial_velocity.max_coeff_delta_rms
     max_update_rms = _initial_velocity.max_update_rms
-    ijacob = 0
-    bad_resets = 0
-    iter1 = 1
     # VMEC runvmec/funct3d cadence starts free-boundary control at ivac=0.
     # Starting at -1 delays vacuum turn-on by one accepted iteration.
     # VMEC initializes ivac=-1 (reset_params.f), then promotes to 0/1/...
@@ -1317,22 +1322,13 @@ def solve_fixed_boundary_residual_iter(
         s=s,
     )
 
-    res0 = -1.0
     k_preconditioner_update_interval = controller_constants.preconditioner_update_interval
-    state_checkpoint = state
-    bad_growth_streak = 0
     # Restart trigger factors:
     # - bad_jacobian: time_step *= 0.9
     # - bad_progress: time_step /= 1.03
     restart_badjac_factor = controller_constants.restart_badjac_factor
     restart_badprog_factor = controller_constants.restart_badprog_factor
-    huge_force_restart_count = 0
-    res1 = -1.0
     vmec2000_fact = controller_constants.vmec2000_fact
-
-    # Edge-force gating uses the *previous* iteration's residual (the first
-    # iteration initializes forces to 1.0). Track that explicitly.
-    prev_rz_fsq = 2.0
 
     print_context = _resolve_vmec2000_print_context(
         cfg=cfg,
@@ -1369,19 +1365,11 @@ def solve_fixed_boundary_residual_iter(
 
     if resume_state is not None:
         iter_offset = int(resume_state.get("iter_offset", iter_offset))
-        time_step = float(resume_state.get("time_step", time_step))
-        inv_tau = list(resume_state.get("inv_tau", inv_tau))
-        fsq_prev = float(resume_state.get("fsq_prev", fsq_prev))
-        fsq0_prev = float(resume_state.get("fsq0_prev", fsq0_prev))
-        flip_sign = float(resume_state.get("flip_sign", flip_sign))
-        iter1 = int(resume_state.get("iter1", iter1))
-        ijacob = int(resume_state.get("ijacob", ijacob))
-        bad_resets = int(resume_state.get("bad_resets", bad_resets))
-        res0 = float(resume_state.get("res0", res0))
-        res1 = float(resume_state.get("res1", res1))
-        prev_rz_fsq = float(resume_state.get("prev_rz_fsq", prev_rz_fsq))
-        bad_growth_streak = int(resume_state.get("bad_growth_streak", bad_growth_streak))
-        huge_force_restart_count = int(resume_state.get("huge_force_restart_count", huge_force_restart_count))
+        controller_state = _controller_state_from_resume_state(resume_state, controller_state)
+        (
+            time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
+            prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
+        ) = controller_state
 
         if "vRcc" in resume_state:
             _as_velocity = np.asarray if bool(host_update_assembly) else jnp.asarray
@@ -1391,7 +1379,6 @@ def solve_fixed_boundary_residual_iter(
                 as_velocity=_as_velocity,
             )
 
-        state_checkpoint = resume_state.get("state_checkpoint", state)
         precond_cache.update_from_resume_state(resume_state)
         cache_constraint_rcon0 = resume_state.get("cache_constraint_rcon0", cache_constraint_rcon0)
         cache_constraint_zcon0 = resume_state.get("cache_constraint_zcon0", cache_constraint_zcon0)
@@ -3017,18 +3004,22 @@ def solve_fixed_boundary_residual_iter(
         if converged:
             break
         t_iteration_control_evolve_start = time.perf_counter() if timing_enabled else None
-        if iter2 == iter1:
-            inv_tau = [0.15 / time_step] * k_ndamp
-        else:
-            invtau_num = 0.0 if fsq1 == 0.0 else min(abs(np.log(fsq1 / fsq_prev)), 0.15)
-            inv_tau = inv_tau[1:] + [invtau_num / time_step]
-        fsq_prev = fsq1
-        fsq0_prev = fsq0_curr
-
-        otav = float(np.sum(inv_tau)) / float(k_ndamp)
-        dtau = time_step * otav / 2.0
-        b1 = 1.0 - dtau
-        fac = 1.0 / (1.0 + dtau)
+        evolve = _residual_evolve_coefficients(
+            iter2=int(iter2),
+            iter1=int(iter1),
+            inv_tau=inv_tau,
+            time_step=float(time_step),
+            fsq1=float(fsq1),
+            fsq_prev=float(fsq_prev),
+            fsq0_curr=float(fsq0_curr),
+            k_ndamp=int(k_ndamp),
+        )
+        inv_tau = evolve.inv_tau
+        fsq_prev = evolve.fsq_prev
+        fsq0_prev = evolve.fsq0_prev
+        dtau = evolve.dtau
+        b1 = evolve.b1
+        fac = evolve.fac
         _dump_residual_evolve_trace(
             dump_evolve_trace=_dump_evolve_trace,
             iter2=int(iter2),

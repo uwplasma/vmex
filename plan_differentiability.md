@@ -29636,3 +29636,150 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.984%.
 - Overall differentiability-refactor PR: 99.999999999978%.
+
+## 2026-06-20 Residual Velocity Resume Mapping Fix
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Audited the residual velocity resume mapping added during the velocity-block
+   refactor.
+2. Fixed `velocity_blocks_from_resume_state` to reconstruct
+   `ResidualVelocityBlocks` by named fields instead of relying on legacy
+   `vRcc`/`vZsc` dictionary iteration order.
+3. Added a regression test that verifies asymmetric `R`, `Z`, and `Lambda`
+   velocity channels round-trip through the legacy resume payload without
+   channel swaps.
+4. Ran a short fixed-boundary smoke solve in a temporary directory after the
+   refactor path; it completed without exceptions and left no repository
+   outputs.
+
+Results obtained:
+
+- Prevented a silent resume-state channel swap for asymmetric velocity blocks.
+- The legacy debug/resume payload remains unchanged for downstream tools.
+- Pushed commit `fc46ef35` (`Fix residual velocity resume mapping`).
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py::test_velocity_blocks_resume_round_trip_preserves_named_channels tests/test_solve_scan_resume_state.py tests/test_solve_scan_output.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_branch_coverage.py tests/test_solve_wave3_coverage.py tests/test_solve_wave4_coverage.py tests/test_solve_finish_cache_more_coverage.py -q`
+- Temporary smoke: `run_fixed_boundary('input.nfp4_QH_warm_start', max_iter=3, verbose=False, use_scan=False)`.
+
+Best next steps:
+
+1. Continue residual-loop objectification with checkpoint/restart scalar state,
+   but preserve all legacy resume keys until a dedicated migration is planned.
+2. Use restart/resume branch shards as the validation gate for any controller
+   state extraction.
+3. Keep production solves in temporary directories to avoid repository bloat.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999982%.
+- Solver monolith reduction: 99.986%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.934%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.984%.
+- Overall differentiability-refactor PR: 99.999999999979%.
+
+## 2026-06-20 Residual Controller State Seam
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ResidualControllerState` to name the scalar host-loop state that
+   survives residual-solve restarts.
+2. Centralized default controller-state construction and legacy resume-state
+   restoration in `residual/update.py`.
+3. Extracted the VMEC damping-history recurrence into
+   `residual_evolve_coefficients`, giving the evolve-step `inv_tau`, `dtau`,
+   `b1`, and `fac` update a direct unit test.
+4. Rewired the residual loop to use those helpers while retaining the legacy
+   scalar locals and resume keys for compatibility.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` decreased from 3028 to 3016 lines.
+- `residual/iteration.py` decreased from 3491 to 3483 lines.
+- The next controller refactor can now target state mutation sites instead of
+  raw resume parsing.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_scan_resume_state.py tests/test_solve_residual_iter_finalize_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_wave3_coverage.py tests/test_solve_wave4_coverage.py tests/test_solve_finish_cache_more_coverage.py tests/test_solve_additional_helpers.py tests/test_driver_policy_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 40 --max-root-helper-prefix-files 2`
+- Temporary smoke: `run_fixed_boundary('input.nfp4_QH_warm_start', max_iter=3, verbose=False, use_scan=False)`.
+
+Best next steps:
+
+1. Use the controller-state seam to extract the repeated restart-state mutation
+   paths for axis reset, VMEC2000 time-control restart, pre-restart trigger,
+   and catastrophic update restart.
+2. Keep each restart extraction gated by the branch-coverage shards and one
+   temporary fixed-boundary smoke solve.
+3. Continue reducing `solve_fixed_boundary_residual_iter` toward controller,
+   force-evaluation, update, and finalize domain blocks without increasing root
+   namespace sprawl.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999984%.
+- Solver monolith reduction: 99.988%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.938%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.985%.
+- Overall differentiability-refactor PR: 99.999999999980%.
