@@ -17,6 +17,8 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     scale_velocity_blocks,
     strict_momentum_update_proposal,
     strict_trial_evaluation,
+    velocity_blocks_from_resume_state,
+    velocity_blocks_legacy_payload,
     zero_velocity_blocks_like,
 )
 
@@ -46,6 +48,46 @@ def test_initial_residual_velocity_state_sets_caps_and_block_shapes() -> None:
         assert block.shape == (4, 5, 7)
         assert block.dtype == np.float64
         np.testing.assert_allclose(block, 0.0)
+
+
+def test_velocity_blocks_resume_round_trip_preserves_named_channels() -> None:
+    defaults = ResidualVelocityBlocks(*(f"default-{idx}" for idx in range(12)))
+    resume_state = {
+        "vRcc": "resume-rcc",
+        "vRss": "resume-rss",
+        "vZsc": "resume-zsc",
+        "vZcs": "resume-zcs",
+        "vLsc": "resume-lsc",
+        "vLcs": "resume-lcs",
+        "vRsc": "resume-rsc",
+        "vRcs": "resume-rcs",
+        "vZcc": "resume-zcc",
+        "vZss": "resume-zss",
+        "vLcc": "resume-lcc",
+        "vLss": "resume-lss",
+    }
+
+    blocks = velocity_blocks_from_resume_state(
+        resume_state,
+        defaults,
+        as_velocity=lambda value: value,
+    )
+
+    assert blocks == ResidualVelocityBlocks(
+        rcc="resume-rcc",
+        rss="resume-rss",
+        rsc="resume-rsc",
+        rcs="resume-rcs",
+        zsc="resume-zsc",
+        zcs="resume-zcs",
+        zcc="resume-zcc",
+        zss="resume-zss",
+        lsc="resume-lsc",
+        lcs="resume-lcs",
+        lcc="resume-lcc",
+        lss="resume-lss",
+    )
+    assert velocity_blocks_legacy_payload(blocks) == resume_state
 
 
 def test_host_momentum_update_np_matches_strict_update_formula_and_rms() -> None:
