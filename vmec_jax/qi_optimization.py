@@ -159,6 +159,32 @@ _CONTEXT_FIELDS = {
     "use_mode_continuation": "USE_MODE_CONTINUATION",
 }
 
+_QI_CLI_OVERRIDE_GROUPS = (
+    (int, (
+        ("VMEC_MPOL", "vmec_mpol"), ("VMEC_NTOR", "vmec_ntor"), ("MAX_NFEV", "max_nfev"),
+        ("CONTINUATION_NFEV", "continuation_nfev"), ("INNER_MAX_ITER", "inner_max_iter"),
+        ("TRIAL_MAX_ITER", "trial_max_iter"), ("STAGE_REPEATS", "stage_repeats"),
+        ("SCIPY_LSMR_MAXITER", "scipy_lsmr_maxiter"),
+    )),
+    (float, (
+        ("FTOL", "ftol"), ("GTOL", "gtol"), ("XTOL", "xtol"), ("INNER_FTOL", "inner_ftol"),
+        ("TRIAL_FTOL", "trial_ftol"), ("ALPHA", "ess_alpha"), ("TARGET_ASPECT", "target_aspect"),
+        ("TARGET_ABS_IOTA_MIN", "target_abs_iota_min"), ("MAX_MIRROR_RATIO", "max_mirror_ratio"),
+        ("MAX_ELONGATION", "max_elongation"), ("MIRROR_WEIGHT", "mirror_weight"),
+        ("ELONGATION_WEIGHT", "elongation_weight"), ("QI_GATE_SMOOTH_MAX", "qi_gate_smooth_max"),
+        ("QI_GATE_LEGACY_MAX", "qi_gate_legacy_max"), ("QI_CEILING_MAX", "qi_ceiling_max"),
+        ("QI_CEILING_SMOOTH_PENALTY", "qi_ceiling_smooth_penalty"),
+    )),
+    (None, (
+        ("METHOD", "method"), ("USE_ESS", "use_ess"), ("USE_MODE_CONTINUATION", "use_mode_continuation"),
+        ("USE_SIMPLE_SEED", "use_simple_seed"), ("USE_TARGET_HELICITY_SEED", "use_target_helicity_seed"),
+        ("USE_REFERENCE_FAMILY_SEED", "use_reference_family_seed"), ("REFERENCE_LAMBDAS", "reference_lambdas"),
+        ("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", "accept_boundary_reference_baseline"),
+        ("STAGE_MODE_POLICY", "stage_mode_policy"), ("SCALAR_COST_ONLY_TRIALS", "scalar_cost_only_trials"),
+        ("MAKE_PLOTS", "make_plots"), ("JIT_BOOZ", "jit_booz"),
+    )),
+)
+
 _DEFAULT_CONTEXT: QIOptimizationContext | None = None
 
 
@@ -387,50 +413,32 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
         if value is not None:
             namespace[name] = value
 
+    def set_arg(name: str, attr: str, cast=None) -> None:
+        value = getattr(args, attr)
+        if value is not None:
+            namespace[name] = cast(value) if cast is not None else value
+
     if args.input_file is not None:
         namespace["INPUT_FILE"] = args.input_file.expanduser()
     if args.output_dir is not None:
         namespace["OUTPUT_DIR"] = args.output_dir.expanduser()
-    set_if("MAX_MODE", None if args.max_mode is None else int(args.max_mode))
+    set_arg("MAX_MODE", "max_mode", int)
     namespace["MIN_VMEC_MODE"] = (
         int(args.min_vmec_mode)
         if args.min_vmec_mode is not None
         else max(6, int(namespace["MAX_MODE"]) + 3)
     )
-    set_if("VMEC_MPOL", None if args.vmec_mpol is None else int(args.vmec_mpol))
-    set_if("VMEC_NTOR", None if args.vmec_ntor is None else int(args.vmec_ntor))
-    set_if("MAX_NFEV", None if args.max_nfev is None else int(args.max_nfev))
-    set_if("CONTINUATION_NFEV", None if args.continuation_nfev is None else int(args.continuation_nfev))
-    set_if("METHOD", args.method)
-    set_if("FTOL", None if args.ftol is None else float(args.ftol))
-    set_if("GTOL", None if args.gtol is None else float(args.gtol))
-    set_if("XTOL", None if args.xtol is None else float(args.xtol))
-    set_if("INNER_MAX_ITER", None if args.inner_max_iter is None else int(args.inner_max_iter))
-    set_if("INNER_FTOL", None if args.inner_ftol is None else float(args.inner_ftol))
-    set_if("TRIAL_MAX_ITER", None if args.trial_max_iter is None else int(args.trial_max_iter))
-    set_if("TRIAL_FTOL", None if args.trial_ftol is None else float(args.trial_ftol))
     if args.solver_device is not None:
         namespace["SOLVER_DEVICE"] = None if args.solver_device in {"none", "default"} else str(args.solver_device)
-    set_if("ALPHA", None if args.ess_alpha is None else float(args.ess_alpha))
-    set_if("USE_ESS", args.use_ess)
-    set_if("USE_MODE_CONTINUATION", args.use_mode_continuation)
-    set_if("USE_SIMPLE_SEED", args.use_simple_seed)
-    set_if("USE_TARGET_HELICITY_SEED", args.use_target_helicity_seed)
     if args.reference_input is not None:
         namespace["REFERENCE_INPUT_FILE"] = args.reference_input.expanduser()
         if args.use_reference_family_seed is None:
             namespace["USE_REFERENCE_FAMILY_SEED"] = True
-    set_if("USE_REFERENCE_FAMILY_SEED", args.use_reference_family_seed)
-    set_if("REFERENCE_LAMBDAS", args.reference_lambdas)
-    set_if("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", args.accept_boundary_reference_baseline)
-    set_if("STAGE_REPEATS", None if args.stage_repeats is None else int(args.stage_repeats))
-    set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
     if args.stage_mode_limits_json is not None:
         namespace["STAGE_MODE_LIMITS"] = _json_stage_mode_limits(args.stage_mode_limits_json)
-    set_if("SCIPY_LSMR_MAXITER", None if args.scipy_lsmr_maxiter is None else int(args.scipy_lsmr_maxiter))
-    set_if("SCALAR_COST_ONLY_TRIALS", args.scalar_cost_only_trials)
-    set_if("MAKE_PLOTS", args.make_plots)
-    set_if("JIT_BOOZ", args.jit_booz)
+    for cast, pairs in _QI_CLI_OVERRIDE_GROUPS:
+        for name, attr in pairs:
+            set_arg(name, attr, cast)
     qi_resolution_updates = {
         "mboz": args.qi_mboz,
         "nboz": args.qi_nboz,
@@ -447,22 +455,9 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
                 audit_resolution[key] = int(value)
         namespace["OPT_QI_RESOLUTION"] = opt_resolution
         namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
-    set_if("TARGET_ASPECT", None if args.target_aspect is None else float(args.target_aspect))
-    set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
-    set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
-    set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
     if args.mirror_surface_index is not None:
         text = str(args.mirror_surface_index).strip().lower()
         namespace["MIRROR_SURFACE_INDEX"] = None if text in {"", "none", "null"} else int(text)
-    set_if("MIRROR_WEIGHT", None if args.mirror_weight is None else float(args.mirror_weight))
-    set_if("ELONGATION_WEIGHT", None if args.elongation_weight is None else float(args.elongation_weight))
-    set_if("QI_GATE_SMOOTH_MAX", None if args.qi_gate_smooth_max is None else float(args.qi_gate_smooth_max))
-    set_if("QI_GATE_LEGACY_MAX", None if args.qi_gate_legacy_max is None else float(args.qi_gate_legacy_max))
-    set_if("QI_CEILING_MAX", None if args.qi_ceiling_max is None else float(args.qi_ceiling_max))
-    set_if(
-        "QI_CEILING_SMOOTH_PENALTY",
-        None if args.qi_ceiling_smooth_penalty is None else float(args.qi_ceiling_smooth_penalty),
-    )
     audit_resolution_updates = {
         "mboz": args.audit_qi_mboz,
         "nboz": args.audit_qi_nboz,
