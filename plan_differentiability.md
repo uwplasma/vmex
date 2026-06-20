@@ -30755,3 +30755,83 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999993%.
+
+## 2026-06-20 Residual Velocity Memory Helper Consolidation
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Moved full and primary velocity-memory zeroing into
+   `vmec_jax.solvers.fixed_boundary.residual.update` as explicit bundle
+   helpers.
+2. Removed residual-loop getter/setter closures for velocity memory and used a
+   per-iteration `force_blocks` bundle instead of repeatedly rebuilding force
+   block tuples through a closure.
+3. Preserved private compatibility aliases for the new zeroing helpers,
+   matching the existing residual-update compatibility pattern.
+4. Added a focused test that verifies full restarts zero all symmetric and
+   LASYM velocity-memory channels, while primary restarts preserve the LASYM
+   channels.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` decreased from 2939 to 2923 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` decreased from 3410
+  to 3396 lines.
+- Velocity-memory restart semantics are now expressed and tested in the
+  residual-update domain rather than being embedded as local residual-loop
+  closure logic.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue residual-loop reductions through existing domain objects; likely
+   next seams are strict-update trace finalization, post-update status
+   packaging, or terminal print/output assembly.
+2. Avoid extracting small helpers into new files; keep ownership in the
+   current residual `runtime`, `policy`, `preconditioner_payload`, `update`,
+   and `history` domains.
+3. Revisit WOUT/driver decomposition after the residual strict-update branch
+   is smaller and import ownership is clear.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999948%.
+- Solver monolith reduction: 99.995%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.964%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.42%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.44%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999994%.

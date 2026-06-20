@@ -630,6 +630,26 @@ def zero_velocity_blocks_like(*blocks):
     return tuple(out)
 
 
+def zero_all_velocity_blocks_like(velocities: ResidualVelocityBlocks) -> ResidualVelocityBlocks:
+    """Return a velocity-memory bundle with every channel zeroed."""
+
+    return ResidualVelocityBlocks(*zero_velocity_blocks_like(*velocities))
+
+
+def zero_primary_velocity_blocks_like(velocities: ResidualVelocityBlocks) -> ResidualVelocityBlocks:
+    """Zero only VMEC's primary symmetric velocity-memory channels."""
+
+    rcc, rss, zsc, zcs, lsc, lcs = zero_velocity_blocks_like(
+        velocities.rcc,
+        velocities.rss,
+        velocities.zsc,
+        velocities.zcs,
+        velocities.lsc,
+        velocities.lcs,
+    )
+    return velocities._replace(rcc=rcc, rss=rss, zsc=zsc, zcs=zcs, lsc=lsc, lcs=lcs)
+
+
 def scale_velocity_blocks(scale: float, *blocks):
     """Scale velocity blocks uniformly while preserving JAX array semantics."""
 
@@ -1176,6 +1196,8 @@ _DirectForceFallbackTrial = DirectForceFallbackTrial
 _StrictMomentumProposal = StrictMomentumProposal
 _StrictTrialEvaluation = StrictTrialEvaluation
 _zero_velocity_blocks_like = zero_velocity_blocks_like
+_zero_all_velocity_blocks_like = zero_all_velocity_blocks_like
+_zero_primary_velocity_blocks_like = zero_primary_velocity_blocks_like
 _scale_velocity_blocks = scale_velocity_blocks
 _scale_primary_velocity_blocks = scale_primary_velocity_blocks
 _host_force_update_rms = host_force_update_rms

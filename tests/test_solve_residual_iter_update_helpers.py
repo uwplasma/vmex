@@ -30,6 +30,8 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     strict_trial_evaluation,
     velocity_blocks_from_resume_state,
     velocity_blocks_legacy_payload,
+    zero_all_velocity_blocks_like,
+    zero_primary_velocity_blocks_like,
     zero_velocity_blocks_like,
 )
 
@@ -534,6 +536,20 @@ def test_velocity_block_helpers_preserve_shape_dtype_and_scale() -> None:
     sa, sb = scale_velocity_blocks(0.5, a, b)
     np.testing.assert_allclose(np.asarray(sa), 0.5 * a)
     np.testing.assert_allclose(np.asarray(sb), 0.5 * b)
+
+
+def test_velocity_block_bundle_zero_helpers_preserve_restart_semantics() -> None:
+    blocks = _blocks(offset=1.0)
+
+    zero_all = zero_all_velocity_blocks_like(blocks)
+    for got, reference in zip(zero_all, blocks, strict=True):
+        np.testing.assert_allclose(got, np.zeros_like(reference))
+
+    zero_primary = zero_primary_velocity_blocks_like(blocks)
+    for name in ("rcc", "rss", "zsc", "zcs", "lsc", "lcs"):
+        np.testing.assert_allclose(getattr(zero_primary, name), 0.0)
+    for name in ("rsc", "rcs", "zcc", "zss", "lcc", "lss"):
+        np.testing.assert_allclose(getattr(zero_primary, name), getattr(blocks, name))
 
 
 def test_host_force_update_rms_matches_inline_force_formula() -> None:
