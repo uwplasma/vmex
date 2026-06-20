@@ -20,6 +20,7 @@ from vmec_jax.solve import (
     _scale_mode_slice,
     _zero_coeff_column,
 )
+from vmec_jax.solvers.fixed_boundary.residual.ptau import state_tau_minmax_from_vmec_state
 from vmec_jax.state import StateLayout, VMECState, zeros_state
 from vmec_jax.static import build_static
 from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid
@@ -319,6 +320,71 @@ def test_preconditioner_apply_payload_fused_can_return_ptau_control_payload():
     np.testing.assert_allclose(np.asarray(control[2]), np.asarray(expected_ptau[1]))
     assert pre[0].shape == shape
     assert upd[0].shape == shape
+
+
+def test_state_tau_minmax_from_vmec_state_uses_host_patch_path():
+    calls: list[str] = []
+
+    class PatchContext:
+        def __enter__(self):
+            calls.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            calls.append("exit")
+
+    def jacobian_from_state(**kwargs):
+        calls.append("jac")
+        assert kwargs["lconm1"] is True
+        return SimpleNamespace(tau=np.asarray([100.0, -2.0, 3.0]))
+
+    min_tau, max_tau = state_tau_minmax_from_vmec_state(
+        state=object(),
+        modes=object(),
+        trig=object(),
+        s=object(),
+        lconm1=True,
+        lthreed=True,
+        mask_even=None,
+        mask_odd=None,
+        host_update_assembly=True,
+        tree_has_tracer=lambda _value: False,
+        jacobian_from_state=jacobian_from_state,
+        device_get_floats=lambda *args: pytest.fail("host path should not device-get"),
+        jnp_module=np,
+        numpy_patch_context=PatchContext,
+    )
+
+    assert calls == ["enter", "jac", "exit"]
+    assert min_tau == pytest.approx(-2.0)
+    assert max_tau == pytest.approx(3.0)
+
+
+def test_state_tau_minmax_from_vmec_state_uses_device_get_path():
+    def jacobian_from_state(**_kwargs):
+        return SimpleNamespace(tau=np.asarray([100.0, -4.0, 5.0]))
+
+    def device_get_floats(*args):
+        return tuple(float(np.asarray(arg)) for arg in args)
+
+    min_tau, max_tau = state_tau_minmax_from_vmec_state(
+        state=object(),
+        modes=object(),
+        trig=object(),
+        s=object(),
+        lconm1=True,
+        lthreed=True,
+        mask_even=None,
+        mask_odd=None,
+        host_update_assembly=True,
+        tree_has_tracer=lambda _value: True,
+        jacobian_from_state=jacobian_from_state,
+        device_get_floats=device_get_floats,
+        jnp_module=np,
+        numpy_patch_context=lambda: pytest.fail("device path should not patch numpy"),
+    )
+
+    assert min_tau == pytest.approx(-4.0)
+    assert max_tau == pytest.approx(5.0)
 
 
 def test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu(monkeypatch):

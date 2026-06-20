@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Callable
+
+import numpy as np
 
 
 def ptau_minmax_from_k_host(
@@ -110,6 +113,65 @@ def accepted_control_ptau_host_from_payload(
     return float(fsq1), (float(ptau_min), float(ptau_max)), True
 
 
+def state_tau_minmax_from_vmec_state(
+    *,
+    state: Any,
+    modes: Any,
+    trig: Any,
+    s: Any,
+    lconm1: bool,
+    lthreed: bool,
+    mask_even: Any,
+    mask_odd: Any,
+    host_update_assembly: bool,
+    tree_has_tracer: Callable[[Any], bool],
+    jacobian_from_state: Callable[..., Any],
+    device_get_floats: Callable[..., tuple[float, ...]],
+    jnp_module: Any,
+    numpy_patch_context: Callable[[], Any] | None = None,
+) -> tuple[float, float]:
+    """Return min/max tau from a VMEC state-Jacobian diagnostic path."""
+
+    host_path = bool(host_update_assembly) and (not tree_has_tracer(state)) and (not tree_has_tracer(s))
+    if host_path:
+        context_factory = numpy_patch_context if numpy_patch_context is not None else nullcontext
+        with context_factory():
+            jac_state = jacobian_from_state(
+                state=state,
+                modes=modes,
+                trig=trig,
+                s=s,
+                lconm1=bool(lconm1),
+                lthreed=bool(lthreed),
+                mask_even=mask_even,
+                mask_odd=mask_odd,
+            )
+        tau = np.asarray(jac_state.tau)
+        if int(tau.size) <= 0:
+            return float("nan"), float("nan")
+        tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
+        return float(np.min(tau_use)), float(np.max(tau_use))
+
+    jac_state = jacobian_from_state(
+        state=state,
+        modes=modes,
+        trig=trig,
+        s=s,
+        lconm1=bool(lconm1),
+        lthreed=bool(lthreed),
+        mask_even=mask_even,
+        mask_odd=mask_odd,
+    )
+    tau = jnp_module.asarray(jac_state.tau)
+    if int(tau.size) <= 0:
+        return float("nan"), float("nan")
+    tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
+    tau_min = jnp_module.min(tau_use)
+    tau_max = jnp_module.max(tau_use)
+    tau_min_f, tau_max_f = device_get_floats(tau_min, tau_max)
+    return float(tau_min_f), float(tau_max_f)
+
+
 def maybe_dump_jacobian_terms(
     *,
     k: Any,
@@ -165,4 +227,5 @@ __all__ = [
     "ptau_minmax",
     "ptau_minmax_from_k_host",
     "ptau_minmax_from_k_jax",
+    "state_tau_minmax_from_vmec_state",
 ]

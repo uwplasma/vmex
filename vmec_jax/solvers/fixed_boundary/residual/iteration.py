@@ -127,6 +127,9 @@ from vmec_jax.solvers.fixed_boundary.diagnostics.io import (
     _format_checkpoint_log_row as _format_checkpoint_log_row,
     _format_evolve_trace_row as _format_evolve_trace_row,
     _format_freeb_control_trace_row as _format_freeb_control_trace_row,
+    _format_residual_converged_message,
+    _format_residual_iteration_update_message,
+    _format_residual_physical_status_message,
     _format_time_control_log_row as _format_time_control_log_row,
     _legacy_dump_record_path as _legacy_dump_record_path,
     _legacy_single_dump_iter_selected as _legacy_single_dump_iter_selected,
@@ -186,6 +189,7 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     ptau_minmax as _ptau_minmax_helper,
     ptau_minmax_from_k_host as _ptau_minmax_from_k_host_helper,
     ptau_minmax_from_k_jax as _ptau_minmax_from_k_jax_helper,
+    state_tau_minmax_from_vmec_state as _state_tau_minmax_from_vmec_state,
 )
 from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
     apply_vmec_lambda_axis_rules_to_state as _apply_vmec_lambda_axis_rules_to_state,
@@ -2226,8 +2230,13 @@ def solve_fixed_boundary_residual_iter(
 
             if verbose and (not (bool(vmec2000_control) and bool(verbose_vmec2000_table))):
                 print(
-                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} "
-                    f"fsql={fsql_f:.3e} include_edge={include_edge}",
+                    _format_residual_physical_status_message(
+                        iter_idx=int(it),
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        include_edge=bool(include_edge),
+                    ),
                     flush=True,
                 )
             # Defer convergence exit until after preconditioned diagnostics are
@@ -2875,6 +2884,36 @@ def solve_fixed_boundary_residual_iter(
                     precond_diag_host = _device_get_floats(fsqr1_safe, fsqz1_safe, fsql1_safe)
                 return precond_diag_host
 
+            def _append_current_zero_update_history(
+                *,
+                restart_path: str,
+                step_status: str,
+                restart_reason: str,
+                pre_restart_reason: str,
+                time_step_value: float,
+            ) -> bool:
+                return _append_zero_update_history_record(
+                    track_history=bool(track_history),
+                    restart_path=restart_path,
+                    step_status=step_status,
+                    restart_reason=restart_reason,
+                    pre_restart_reason=pre_restart_reason,
+                    time_step_value=time_step_value,
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
+                    res0=res0,
+                    res1=res1,
+                    fsq_prev=fsq_prev,
+                    bad_growth_streak=bad_growth_streak,
+                    iter1=iter1,
+                    iter2=iter2,
+                    free_boundary_enabled=bool(free_boundary_enabled),
+                    freeb_ivac=freeb_ivac,
+                    freeb_ivacskip=freeb_ivacskip,
+                    history_record_lists=_history_record_lists,
+                )
+
             _append_preconditioned_residual_history(
                 track_history=bool(track_history),
                 rz_norm=rz_norm,
@@ -2901,32 +2940,21 @@ def solve_fixed_boundary_residual_iter(
                 # Keep per-iteration history channels length-aligned with
                 # fsqr/fsqz/fsql when convergence happens before the update
                 # block. VMEC's table still reports DELT on this row.
-                _append_zero_update_history_record(
-                    track_history=bool(track_history),
+                _append_current_zero_update_history(
                     restart_path="converged",
                     step_status="converged",
                     restart_reason="none",
                     pre_restart_reason="none",
                     time_step_value=time_step,
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    res0=res0,
-                    res1=res1,
-                    fsq_prev=fsq_prev,
-                    bad_growth_streak=bad_growth_streak,
-                    iter1=iter1,
-                    iter2=iter2,
-                    free_boundary_enabled=bool(free_boundary_enabled),
-                    freeb_ivac=freeb_ivac,
-                    freeb_ivacskip=freeb_ivacskip,
-                    history_record_lists=_history_record_lists,
                 )
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(
-                        f"[solve_fixed_boundary_residual_iter] converged: "
-                        f"fsqr={fsqr_f:.3e} fsqz={fsqz_f:.3e} fsql={fsql_f:.3e} "
-                        f"target={float(fsq_total_target) if fsq_total_target is not None else float(ftol):.3e}",
+                        _format_residual_converged_message(
+                            fsqr=fsqr_f,
+                            fsqz=fsqz_f,
+                            fsql=fsql_f,
+                            target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
+                        ),
                         flush=True,
                     )
                 if timing_enabled and t_iteration_control_start is not None:
@@ -2990,48 +3018,24 @@ def solve_fixed_boundary_residual_iter(
                 )
                 if need_state_jac:
                     t_badjac_state_jacobian_start = time.perf_counter() if timing_enabled else None
-                    if host_update_assembly and (not _tree_has_tracer(state)) and (not _tree_has_tracer(s)):
-                        from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _hot_numpy_patch
+                    from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _hot_numpy_patch
 
-                        with _hot_numpy_patch():
-                            jac_state = vmec_half_mesh_jacobian_from_state(
-                                state=state,
-                                modes=static.modes,
-                                trig=trig,
-                                s=s,
-                                lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                                lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                                mask_even=getattr(static, "m_is_even", None),
-                                mask_odd=getattr(static, "m_is_odd", None),
-                            )
-                        tau = np.asarray(jac_state.tau)
-                        if int(tau.size) > 0:
-                            tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
-                            min_tau_state = float(np.min(tau_use))
-                            max_tau_state = float(np.max(tau_use))
-                        else:
-                            min_tau_state = float("nan")
-                            max_tau_state = float("nan")
-                    else:
-                        jac_state = vmec_half_mesh_jacobian_from_state(
-                            state=state,
-                            modes=static.modes,
-                            trig=trig,
-                            s=s,
-                            lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                            lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                            mask_even=getattr(static, "m_is_even", None),
-                            mask_odd=getattr(static, "m_is_odd", None),
-                        )
-                        tau = jnp.asarray(jac_state.tau)
-                        if int(tau.size) > 0:
-                            tau_use = tau[1:] if int(tau.shape[0]) > 1 else tau
-                            tau_min = jnp.min(tau_use)
-                            tau_max = jnp.max(tau_use)
-                            min_tau_state, max_tau_state = _device_get_floats(tau_min, tau_max)
-                        else:
-                            min_tau_state = float("nan")
-                            max_tau_state = float("nan")
+                    min_tau_state, max_tau_state = _state_tau_minmax_from_vmec_state(
+                        state=state,
+                        modes=static.modes,
+                        trig=trig,
+                        s=s,
+                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
+                        mask_even=getattr(static, "m_is_even", None),
+                        mask_odd=getattr(static, "m_is_odd", None),
+                        host_update_assembly=bool(host_update_assembly),
+                        tree_has_tracer=_tree_has_tracer,
+                        jacobian_from_state=vmec_half_mesh_jacobian_from_state,
+                        device_get_floats=_device_get_floats,
+                        jnp_module=jnp,
+                        numpy_patch_context=_hot_numpy_patch,
+                    )
                     if timing_enabled and t_badjac_state_jacobian_start is not None:
                         timing_stats["iteration_control_badjac_state_jacobian"] += time.perf_counter() - float(
                             t_badjac_state_jacobian_start
@@ -3268,26 +3272,12 @@ def solve_fixed_boundary_residual_iter(
                     inv_tau = [0.15 / time_step] * k_ndamp
                     _clear_preconditioner_cache_locals()
                     force_bcovar_update = True
-                    _append_zero_update_history_record(
-                        track_history=bool(track_history),
+                    _append_current_zero_update_history(
                         restart_path="vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control",
                         step_status=step_status,
                         restart_reason=restart_reason,
                         pre_restart_reason=pre_restart_reason,
                         time_step_value=time_step,
-                        fsqr=fsqr_f,
-                        fsqz=fsqz_f,
-                        fsql=fsql_f,
-                        res0=res0,
-                        res1=res1,
-                        fsq_prev=fsq_prev,
-                        bad_growth_streak=bad_growth_streak,
-                        iter1=iter1,
-                        iter2=iter2,
-                        free_boundary_enabled=bool(free_boundary_enabled),
-                        freeb_ivac=freeb_ivac,
-                        freeb_ivacskip=freeb_ivacskip,
-                        history_record_lists=_history_record_lists,
                     )
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
@@ -3392,26 +3382,12 @@ def solve_fixed_boundary_residual_iter(
                 _clear_preconditioner_cache_locals()
                 if bool(vmec2000_control):
                     force_bcovar_update = True
-                _append_zero_update_history_record(
-                    track_history=bool(track_history),
+                _append_current_zero_update_history(
                     restart_path="pre_restart_trigger",
                     step_status=step_status,
                     restart_reason=pre_restart_reason,
                     pre_restart_reason=pre_restart_reason,
                     time_step_value=time_step_iter,
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    res0=res0,
-                    res1=res1,
-                    fsq_prev=fsq_prev,
-                    bad_growth_streak=bad_growth_streak,
-                    iter1=iter1,
-                    iter2=iter2,
-                    free_boundary_enabled=bool(free_boundary_enabled),
-                    freeb_ivac=freeb_ivac,
-                    freeb_ivacskip=freeb_ivacskip,
-                    history_record_lists=_history_record_lists,
                 )
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
@@ -3420,10 +3396,15 @@ def solve_fixed_boundary_residual_iter(
                     else:
                         fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
                         print(
-                            f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
-                            f"dt_eff=0.000e+00 update_rms=0.000e+00 "
-                            f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
-                            f"step_status={step_status}",
+                            _format_residual_iteration_update_message(
+                                iter_idx=int(it),
+                                dt_eff=0.0,
+                                update_rms=0.0,
+                                fsqr1=fsqr1_f,
+                                fsqz1=fsqz1_f,
+                                fsql1=fsql1_f,
+                                step_status=step_status,
+                            ),
                             flush=True,
                         )
                 _maybe_dump_xc(
@@ -4128,10 +4109,15 @@ def solve_fixed_boundary_residual_iter(
                 fsqr1_f, fsqz1_f, fsql1_f = _precond_diag_floats()
                 update_rms_print = _update_rms_float() if bool(strict_update) else float(update_rms)
                 print(
-                    f"[solve_fixed_boundary_residual_iter] iter={it:03d} "
-                    f"dt_eff={dt_eff:.3e} update_rms={update_rms_print:.3e} "
-                    f"fsqr1={fsqr1_f:.3e} fsqz1={fsqz1_f:.3e} fsql1={fsql1_f:.3e} "
-                    f"step_status={step_status}",
+                    _format_residual_iteration_update_message(
+                        iter_idx=int(it),
+                        dt_eff=float(dt_eff),
+                        update_rms=update_rms_print,
+                        fsqr1=fsqr1_f,
+                        fsqz1=fsqz1_f,
+                        fsql1=fsql1_f,
+                        step_status=step_status,
+                    ),
                     flush=True,
                 )
         if track_history:

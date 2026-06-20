@@ -96,6 +96,59 @@ def _format_vmec2000_iter_row(
     )
 
 
+def _format_residual_physical_status_message(
+    *,
+    iter_idx: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    include_edge: bool,
+) -> str:
+    """Format the compact non-VMEC residual status line."""
+
+    return (
+        f"[solve_fixed_boundary_residual_iter] iter={int(iter_idx):03d} "
+        f"fsqr={float(fsqr):.3e} fsqz={float(fsqz):.3e} "
+        f"fsql={float(fsql):.3e} include_edge={bool(include_edge)}"
+    )
+
+
+def _format_residual_converged_message(
+    *,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    target: float,
+) -> str:
+    """Format the compact non-VMEC convergence message."""
+
+    return (
+        "[solve_fixed_boundary_residual_iter] converged: "
+        f"fsqr={float(fsqr):.3e} fsqz={float(fsqz):.3e} "
+        f"fsql={float(fsql):.3e} target={float(target):.3e}"
+    )
+
+
+def _format_residual_iteration_update_message(
+    *,
+    iter_idx: int,
+    dt_eff: float,
+    update_rms: float,
+    fsqr1: float,
+    fsqz1: float,
+    fsql1: float,
+    step_status: str,
+) -> str:
+    """Format the compact non-VMEC accepted/restarted iteration message."""
+
+    return (
+        f"[solve_fixed_boundary_residual_iter] iter={int(iter_idx):03d} "
+        f"dt_eff={float(dt_eff):.3e} update_rms={float(update_rms):.3e} "
+        f"fsqr1={float(fsqr1):.3e} fsqz1={float(fsqz1):.3e} "
+        f"fsql1={float(fsql1):.3e} step_status={step_status}"
+    )
+
+
 def _format_axis_coeff(val: float) -> str:
     text = f"{float(val):.16g}"
     if "e" in text:
