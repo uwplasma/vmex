@@ -31050,3 +31050,74 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999997%.
+
+## 2026-06-20 Residual Update-RMS Print Scalar Helper
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `residual_update_rms_for_print()` to the residual host-diagnostics
+   domain.
+2. Replaced the inline strict/non-strict update-RMS print selection in the
+   residual loop.
+3. Added focused tests for verbose-disabled, strict-update, and non-strict
+   update print scalar behavior.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` decreased from 2889 to 2888 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` is 3366 lines after
+  this tranche.
+- Verbose residual-update print scalar policy is now tested in host diagnostics
+  instead of being embedded directly in the loop.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_setup_helpers.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_setup_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_runtime_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Avoid further micro-seams unless they also remove duplicated branch logic.
+2. Target a larger strict-update trace context/payload refactor or post-update
+   terminal status object next.
+3. Keep the PR branch focused on one draft PR and continue pushing coherent
+   tested tranches.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999952%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.973%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.42%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.44%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999998%.

@@ -421,6 +421,20 @@ def print_compact_residual_iteration_update_status(
     return True
 
 
+def residual_update_rms_for_print(
+    *,
+    verbose: bool,
+    strict_update: bool,
+    update_rms_j: Any,
+    update_rms: Any,
+) -> float:
+    """Return the scalar update RMS shown in residual-iteration logs."""
+
+    if not bool(verbose):
+        return 0.0
+    return float(np.asarray(update_rms_j)) if bool(strict_update) else float(update_rms)
+
+
 def print_residual_iteration_update_status(
     *,
     verbose: bool,
@@ -496,6 +510,7 @@ __all__ = [
     "print_compact_physical_residual_status",
     "print_compact_residual_iteration_update_status",
     "print_residual_iteration_update_status",
+    "residual_update_rms_for_print",
     "resolve_vmec2000_print_context",
     "sample_vmec_iteration_scalars",
 ]

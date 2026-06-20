@@ -17,6 +17,7 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_compact_physical_residual_status,
     print_compact_residual_iteration_update_status,
     print_residual_iteration_update_status,
+    residual_update_rms_for_print,
     resolve_vmec2000_print_context,
     sample_vmec_iteration_scalars,
 )
@@ -393,6 +394,25 @@ def test_residual_status_helpers_route_compact_and_vmec2000_rows() -> None:
         print_func=lambda message, **_kwargs: messages.append(message),
     )
     assert "step_status=accepted" in messages[-1]
+
+    assert residual_update_rms_for_print(
+        verbose=False,
+        strict_update=True,
+        update_rms_j=np.asarray(12.0),
+        update_rms=34.0,
+    ) == 0.0
+    assert residual_update_rms_for_print(
+        verbose=True,
+        strict_update=True,
+        update_rms_j=np.asarray(12.0),
+        update_rms=34.0,
+    ) == 12.0
+    assert residual_update_rms_for_print(
+        verbose=True,
+        strict_update=False,
+        update_rms_j=np.asarray(12.0),
+        update_rms=34.0,
+    ) == 34.0
 
     vmec_rows = []
     assert not print_residual_iteration_update_status(
