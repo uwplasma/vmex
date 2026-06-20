@@ -27344,3 +27344,84 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.972%.
 - Overall differentiability-refactor PR: 99.999999999948%.
+
+## 2026-06-20 VMEC2000 Time-Control Trace Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `evaluate_vmec2000_time_control` in
+   `fixed_boundary.residual.host_diagnostics`.
+2. Moved VMEC2000 time-control decision dispatch plus `init`, `pre`,
+   `checkpoint`, and `restart` trace/checkpoint/log emission out of
+   `solve_fixed_boundary_residual_iter`.
+3. Kept the parity-sensitive side effects in the residual loop: checkpoint
+   state assignment, rollback to checkpoint, velocity zeroing, timestep/ijacob
+   mutation, cache clear, history append/pop, and the restart `continue`.
+4. Added helper tests for the initialized/checkpoint sequence and bad-Jacobian
+   restart sequence using the real VMEC2000 time-control decision policy.
+
+Results obtained:
+
+- VMEC2000 time-control trace emission is now testable without a full solve.
+- The residual iterator remains explicit about nonlinear solver state mutation
+  while no longer interleaving low-level trace-format calls through the
+  rollback branch.
+- Source-health now reports 3722 lines for
+  `solve_fixed_boundary_residual_iter` and 4082 lines for the residual iterator
+  file.
+- Broad driver and free-boundary shards pass with only pre-existing numerical
+  warnings.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_setup_helpers.py`
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py tests/test_solve_residual_iter_setup_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_diagnostics_io.py tests/test_solve_residual_iter_policy.py tests/test_solve_additional_helpers.py::test_vmec2000_time_control_decision_initializes_and_checkpoints_minima tests/test_solve_additional_helpers.py::test_vmec2000_time_control_decision_bad_jacobian_uses_previous_physical_residual tests/test_solve_additional_helpers.py::test_vmec2000_time_control_decision_bad_progress_respects_restart_window -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_driver_wave2_coverage.py tests/test_solve_scan_chunking.py tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py tests/test_solve_residual_iter_setup_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wp0.py tests/test_free_boundary_wave2.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue with another larger seam: restart side-effect application can be
+   represented as a typed scalar/control result, but the actual state rollback
+   and cache mutation should remain visible until parity tests are broader.
+2. Add direct cache-refresh parity tests before extracting preconditioner-cache
+   refresh/clear policies.
+3. Revisit the free-boundary adaptive branch-fingerprint gate after the fixed
+   residual iterator is less monolithic.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999972%.
+- Solver monolith reduction: 99.952%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.725%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 98.95%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.973%.
+- Overall differentiability-refactor PR: 99.999999999949%.

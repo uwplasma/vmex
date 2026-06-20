@@ -11,6 +11,7 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
     resolve_free_boundary_setup_policy,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    evaluate_vmec2000_time_control,
     print_compact_converged_status,
     print_compact_physical_residual_status,
     print_compact_residual_iteration_update_status,
@@ -25,6 +26,7 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     maybe_dump_ptau,
     ptau_minmax,
 )
+from vmec_jax.solvers.fixed_boundary.residual.policy import vmec2000_time_control_decision
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ScanConvergencePredicate,
     ScanDeviceRuntime,
@@ -438,6 +440,79 @@ def test_residual_status_helpers_route_compact_and_vmec2000_rows() -> None:
     )
     assert vmec_rows[-1]["fsqr1"] == 7.0
     assert vmec_rows[-1]["r00"] == 1.25
+
+
+def test_evaluate_vmec2000_time_control_emits_initial_checkpoint_sequence() -> None:
+    traces = []
+    checkpoints = []
+    restarts = []
+
+    decision = evaluate_vmec2000_time_control(
+        iter2=1,
+        iter1=1,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=0.75,
+        res0=-1.0,
+        res1=-1.0,
+        bad_jacobian=False,
+        vmec2000_fact=2.0,
+        time_step=0.9,
+        time_control_decision=vmec2000_time_control_decision,
+        dump_time_control_trace=lambda **kwargs: traces.append(kwargs),
+        maybe_dump_checkpoint=lambda **kwargs: checkpoints.append(kwargs),
+        maybe_dump_time_control=lambda **kwargs: restarts.append(kwargs),
+    )
+
+    assert decision.initialized
+    assert decision.store_checkpoint
+    assert not decision.restart
+    assert [row["stage"] for row in traces] == ["init", "pre", "checkpoint"]
+    assert len(checkpoints) == 2
+    assert not restarts
+    assert checkpoints[0]["fsq"] == 0.5
+    assert traces[-1]["irst"] == 1
+
+
+def test_evaluate_vmec2000_time_control_emits_restart_sequence() -> None:
+    traces = []
+    checkpoints = []
+    restarts = []
+
+    decision = evaluate_vmec2000_time_control(
+        iter2=5,
+        iter1=1,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=0.75,
+        res0=0.1,
+        res1=0.1,
+        bad_jacobian=True,
+        vmec2000_fact=2.0,
+        time_step=0.9,
+        time_control_decision=vmec2000_time_control_decision,
+        dump_time_control_trace=lambda **kwargs: traces.append(kwargs),
+        maybe_dump_checkpoint=lambda **kwargs: checkpoints.append(kwargs),
+        maybe_dump_time_control=lambda **kwargs: restarts.append(kwargs),
+    )
+
+    assert decision.restart
+    assert decision.irst == 2
+    assert decision.pre_restart_reason == "bad_jacobian"
+    assert [row["stage"] for row in traces] == ["pre", "restart"]
+    assert traces[-1]["irst"] == 2
+    assert traces[-1]["fsq0"] == 0.75
+    assert not checkpoints
+    assert restarts == [
+        {
+            "iter_idx": 5,
+            "fsq": 0.5,
+            "fsq0": 0.75,
+            "res0": 0.1,
+            "res1": 0.1,
+            "time_step": 0.9,
+        }
+    ]
 
 
 def test_scan_adapter_contexts_delegate_runtime_and_scan_contracts() -> None:

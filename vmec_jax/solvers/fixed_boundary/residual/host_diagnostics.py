@@ -135,6 +135,65 @@ def resolve_vmec2000_print_context(
     )
 
 
+def evaluate_vmec2000_time_control(
+    *,
+    iter2: int,
+    iter1: int,
+    fsq_prev: float,
+    fsq0_curr: float,
+    fsq0_prev: float,
+    res0: float,
+    res1: float,
+    bad_jacobian: bool,
+    vmec2000_fact: float,
+    time_step: float,
+    time_control_decision: Callable[..., Any],
+    dump_time_control_trace: Callable[..., None],
+    maybe_dump_checkpoint: Callable[..., None],
+    maybe_dump_time_control: Callable[..., None],
+) -> Any:
+    """Evaluate VMEC2000 time control and emit legacy-compatible traces."""
+
+    tc = time_control_decision(
+        iter2=int(iter2),
+        iter1=int(iter1),
+        fsq_prev=float(fsq_prev),
+        fsq0_curr=float(fsq0_curr),
+        fsq0_prev=float(fsq0_prev),
+        res0=float(res0),
+        res1=float(res1),
+        bad_jacobian=bool(bad_jacobian),
+        vmec2000_fact=float(vmec2000_fact),
+    )
+    trace_args = dict(
+        iter2=int(iter2),
+        iter1=int(iter1),
+        fsq=float(tc.fsq),
+        fsq0=float(tc.fsq0),
+        res0=float(tc.res0),
+        res1=float(tc.res1),
+        time_step=float(time_step),
+    )
+    checkpoint_args = dict(
+        iter_idx=int(iter2),
+        fsq=float(tc.fsq),
+        fsq0=float(tc.fsq0),
+        res0=float(tc.res0),
+        res1=float(tc.res1),
+    )
+    if bool(tc.initialized):
+        dump_time_control_trace(stage="init", irst=int(tc.trace_irst), **trace_args)
+        maybe_dump_checkpoint(**checkpoint_args)
+    dump_time_control_trace(stage="pre", irst=int(tc.trace_irst), **trace_args)
+    if bool(tc.store_checkpoint):
+        dump_time_control_trace(stage="checkpoint", irst=int(tc.trace_irst), **trace_args)
+        maybe_dump_checkpoint(**checkpoint_args)
+    if bool(tc.restart):
+        maybe_dump_time_control(time_step=float(time_step), **checkpoint_args)
+        dump_time_control_trace(stage="restart", irst=int(tc.irst), **trace_args)
+    return tc
+
+
 def sample_vmec_iteration_scalars(
     *,
     need_scalar: bool,
@@ -369,6 +428,7 @@ def print_residual_iteration_update_status(
 __all__ = [
     "Vmec2000PrintContext",
     "VmecIterationScalars",
+    "evaluate_vmec2000_time_control",
     "print_compact_converged_status",
     "print_compact_physical_residual_status",
     "print_compact_residual_iteration_update_status",
