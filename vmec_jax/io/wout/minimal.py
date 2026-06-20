@@ -1557,22 +1557,10 @@ def _build_nyquist_field_payload(
 ) -> WoutNyquistFieldPayload:
     """Package final Nyquist coefficients without obscuring the assembly path."""
 
-    (
-        gmnc,
-        gmns,
-        bsupumnc,
-        bsupumns,
-        bsupvmnc,
-        bsupvmns,
-        bsubumnc,
-        bsubumns,
-        bsubvmnc,
-        bsubvmns,
-        bsubsmns,
-        bsubsmnc,
-        bmnc,
-        bmns,
-    ) = nyq
+    nyq_fields = {
+        name: np.asarray(value)
+        for name, value in zip(WoutNyquistFieldPayload._fields[11:], nyq, strict=True)
+    }
     return WoutNyquistFieldPayload(
         bsupu_out=np.asarray(sources.bsupu_out),
         bsupv_out=np.asarray(sources.bsupv_out),
@@ -1585,20 +1573,7 @@ def _build_nyquist_field_payload(
         bsubu_phys=bsubu_phys,
         bsubv_phys=bsubv_phys,
         bsubs_full=np.asarray(sources.bsubs_full),
-        gmnc=np.asarray(gmnc),
-        gmns=np.asarray(gmns),
-        bsupumnc=np.asarray(bsupumnc),
-        bsupumns=np.asarray(bsupumns),
-        bsupvmnc=np.asarray(bsupvmnc),
-        bsupvmns=np.asarray(bsupvmns),
-        bsubumnc=np.asarray(bsubumnc),
-        bsubumns=np.asarray(bsubumns),
-        bsubvmnc=np.asarray(bsubvmnc),
-        bsubvmns=np.asarray(bsubvmns),
-        bsubsmns=np.asarray(bsubsmns),
-        bsubsmnc=np.asarray(bsubsmnc),
-        bmnc=np.asarray(bmnc),
-        bmns=np.asarray(bmns),
+        **nyq_fields,
     )
 
 
