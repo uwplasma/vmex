@@ -38,6 +38,90 @@ class PreconditionerRefreshRuntimeResult(NamedTuple):
     cache_prec_rz_jmax: Any
 
 
+class AcceptedControlPayloadMaterialization(NamedTuple):
+    """Host scalars needed by VMEC time-control after preconditioned fsq1."""
+
+    fsq1: float
+    accepted_control_ptau_host: tuple[float, float] | None
+    control_payload_used: bool
+
+
+def materialize_accepted_control_payload(
+    *,
+    accepted_control_ptau_payload: Any | None,
+    use_control_payload: bool,
+    fsq1_j: Any,
+    k: Any,
+    ptau_pshalf_jax: Any,
+    ptau_ohs_jax: Any,
+    timing_enabled: bool,
+    timing_stats: dict[str, Any],
+    perf_counter: Callable[[], float],
+    jax_module: Any,
+    device_get_floats: Callable[..., tuple[float, ...]],
+    accepted_control_ptau_host_from_payload: Callable[..., tuple[float, tuple[float, float] | None, bool]],
+    scan_math_kernel_arrays_from_k: Callable[[Any], tuple[Any, ...] | None],
+    accepted_control_payload_jit: Callable[[], Callable[..., Any] | None],
+) -> AcceptedControlPayloadMaterialization:
+    """Materialize accepted-controller scalars with optional fused payloads."""
+
+    accepted_control_ptau_host: tuple[float, float] | None = None
+    control_payload_used = False
+    if accepted_control_ptau_payload is not None:
+        t_payload_start = perf_counter() if timing_enabled else None
+        fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
+            accepted_control_ptau_host_from_payload(
+                accepted_control_ptau_payload,
+                device_get_floats=device_get_floats,
+            )
+        )
+        if control_payload_used:
+            fsq1 = float(fsq1_payload_host)
+        if timing_enabled and t_payload_start is not None:
+            timing_stats["iteration_control_fsq1_payload_get"] += perf_counter() - float(t_payload_start)
+    if (not control_payload_used) and use_control_payload:
+        ptau_arrays = scan_math_kernel_arrays_from_k(k)
+        payload_fn = accepted_control_payload_jit()
+        if ptau_arrays is not None and payload_fn is not None:
+            t_payload_start = perf_counter() if timing_enabled else None
+            try:
+                payload = payload_fn(
+                    fsq1_j,
+                    *ptau_arrays,
+                    ptau_pshalf_jax,
+                    ptau_ohs_jax,
+                )
+                fsq1_payload_host, accepted_control_ptau_host, control_payload_used = (
+                    accepted_control_ptau_host_from_payload(
+                        payload,
+                        device_get_floats=device_get_floats,
+                    )
+                )
+                if control_payload_used:
+                    fsq1 = float(fsq1_payload_host)
+            except Exception:
+                control_payload_used = False
+            finally:
+                if timing_enabled and t_payload_start is not None:
+                    timing_stats["iteration_control_fsq1_payload_get"] += perf_counter() - float(t_payload_start)
+    if control_payload_used:
+        return AcceptedControlPayloadMaterialization(
+            fsq1,
+            accepted_control_ptau_host,
+            True,
+        )
+
+    t_direct_start = perf_counter() if timing_enabled else None
+    fsq1 = float(jax_module.device_get(fsq1_j))
+    if timing_enabled and t_direct_start is not None:
+        timing_stats["iteration_control_fsq1_direct_get"] += perf_counter() - float(t_direct_start)
+    return AcceptedControlPayloadMaterialization(
+        fsq1,
+        accepted_control_ptau_host,
+        False,
+    )
+
+
 def _strict_update_step_jit(
     static,
     *,
