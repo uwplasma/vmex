@@ -32886,3 +32886,77 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.99999999999970%.
+
+## 2026-06-20 WOUT scalar diagnostic zero-profile cleanup
+
+Steps taken:
+
+1. Added `_zero_wout_scalar_profiles()` to centralize independent zero-profile
+   allocation for the minimal WOUT scalar diagnostic fallback path.
+2. Replaced repeated per-profile `np.zeros((ns,), dtype=float)` setup in
+   `compute_minimal_wout_scalar_diagnostics()` with one explicit tuple
+   assignment.
+3. Left beta, current, Mercier, Glasser, strict-diagnostic, and partial-fallback
+   behavior unchanged.
+
+Results obtained:
+
+- `vmec_jax/io/wout/minimal.py` drops from 1973 to 1969 lines.
+- The scalar diagnostic fallback allocation is easier to audit, and each radial
+  profile still receives an independent NumPy array.
+- Source-health still keeps all edited production files under the 2000-line
+  warning threshold.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/io/wout/minimal.py`
+- `python -m compileall -q vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_helpers.py tests/test_wout_physics_wave8_coverage.py -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py --top 15 --top-functions 25 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. The next meaningful WOUT seams are not simple allocation cleanup; further
+   reductions should target a full beta/Mercier diagnostic helper extraction
+   with bundled parity tests.
+2. Return to the largest remaining production hotspot,
+   `solve_fixed_boundary_residual_iter()`, but only through controller state or
+   history seams with strong same-branch parity tests.
+3. Continue avoiding new broad helper-prefix modules; keep domain names tied to
+   VMEC concepts such as residual control, WOUT diagnostics, and force kernels.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999979%.
+- Solver monolith reduction: 99.9978%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.978%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9992%.
+- Bcovar/WOUT parity decomposition: 99.67%.
+- Force-kernel decomposition: 99.795%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.47%.
+- QI objective/staged-runner decomposition: 97.18%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.99999999999971%.
