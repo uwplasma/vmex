@@ -232,6 +232,23 @@ class ResidualIterationHistories:
             ):
                 self.lists[key].append(float(value))
 
+    def freeb_source_history_lists(self) -> dict[str, list[Any]]:
+        return {
+            "source_reused_history": self.lists["freeb_nestor_source_reused_history"],
+            "provider_allows_source_reuse_history": self.lists["freeb_nestor_provider_allows_source_reuse_history"],
+            "bnormal_rms_history": self.lists["freeb_nestor_bnormal_rms_history"],
+            "gsource_rms_history": self.lists["freeb_nestor_gsource_rms_history"],
+            "bsqvac_rms_history": self.lists["freeb_nestor_bsqvac_rms_history"],
+        }
+
+    def freeb_trial_history_lists(self) -> dict[str, list[Any]]:
+        return {
+            "trial_reused_history": self.lists["freeb_nestor_trial_reused_history"],
+            "trial_solve_time_history": self.lists["freeb_nestor_trial_solve_time_history"],
+            "trial_sample_time_history": self.lists["freeb_nestor_trial_sample_time_history"],
+            "trial_failed_history": self.lists["freeb_nestor_trial_failed_history"],
+        }
+
     def append_preconditioned(
         self,
         *,

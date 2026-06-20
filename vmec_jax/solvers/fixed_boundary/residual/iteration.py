@@ -1185,27 +1185,6 @@ def solve_fixed_boundary_residual_iter(
 
     history_lists = _new_residual_iter_histories()
     fsqz2_history = history_lists["fsqz2_history"]
-    (
-        freeb_nestor_source_reused_history,
-        freeb_nestor_provider_allows_source_reuse_history,
-        freeb_nestor_bnormal_rms_history,
-        freeb_nestor_gsource_rms_history,
-        freeb_nestor_bsqvac_rms_history,
-        freeb_nestor_trial_reused_history,
-        freeb_nestor_trial_solve_time_history,
-        freeb_nestor_trial_sample_time_history,
-        freeb_nestor_trial_failed_history,
-    ) = history_lists.many(
-        "freeb_nestor_source_reused_history",
-        "freeb_nestor_provider_allows_source_reuse_history",
-        "freeb_nestor_bnormal_rms_history",
-        "freeb_nestor_gsource_rms_history",
-        "freeb_nestor_bsqvac_rms_history",
-        "freeb_nestor_trial_reused_history",
-        "freeb_nestor_trial_solve_time_history",
-        "freeb_nestor_trial_sample_time_history",
-        "freeb_nestor_trial_failed_history",
-    )
     adjoint_step_trace_history = history_lists["adjoint_step_trace_history"]
 
     r00_last = float("nan")
@@ -1643,11 +1622,7 @@ def solve_fixed_boundary_residual_iter(
                 env_freeb_raise=bool(_env_freeb_raise),
                 nestor_external_only_step_func=nestor_external_only_step,
                 edge_bsqvac_from_nestor_func=_edge_bsqvac_from_nestor,
-                source_reused_history=freeb_nestor_source_reused_history,
-                provider_allows_source_reuse_history=freeb_nestor_provider_allows_source_reuse_history,
-                bnormal_rms_history=freeb_nestor_bnormal_rms_history,
-                gsource_rms_history=freeb_nestor_gsource_rms_history,
-                bsqvac_rms_history=freeb_nestor_bsqvac_rms_history,
+                **history_lists.freeb_source_history_lists(),
             )
             freeb_bsqvac_half_current = freeb_coupling.bsqvac_half_current
             freeb_nestor_runtime = freeb_coupling.runtime
@@ -1677,10 +1652,7 @@ def solve_fixed_boundary_residual_iter(
                 env_freeb_raise=bool(_env_freeb_raise),
                 nestor_external_only_step_func=nestor_external_only_step,
                 edge_bsqvac_from_nestor_func=_edge_bsqvac_from_nestor,
-                trial_reused_history=freeb_nestor_trial_reused_history,
-                trial_solve_time_history=freeb_nestor_trial_solve_time_history,
-                trial_sample_time_history=freeb_nestor_trial_sample_time_history,
-                trial_failed_history=freeb_nestor_trial_failed_history,
+                **history_lists.freeb_trial_history_lists(),
             )
 
             def _trial_residual_total(
