@@ -7,8 +7,12 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState,
     ResidualVelocityBlocks,
     backtracking_momentum_search,
+    controller_state_after_catastrophic_restart_update,
+    controller_state_after_pre_restart_update,
+    controller_state_from_namespace,
     controller_state_from_resume_state,
     controller_state_legacy_payload,
+    controller_state_values,
     direct_force_fallback_trial,
     force_update_rms,
     host_catastrophic_restart_update,
@@ -175,6 +179,31 @@ def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
     assert state.state_checkpoint is checkpoint
 
 
+def test_controller_state_from_namespace_matches_legacy_local_order() -> None:
+    namespace = {
+        "time_step": 0.25,
+        "inv_tau": (0.6, 0.7),
+        "fsq_prev": 1.0,
+        "fsq0_prev": 2.0,
+        "flip_sign": -1.0,
+        "iter1": 3,
+        "ijacob": 4,
+        "bad_resets": 5,
+        "res0": 0.1,
+        "res1": 0.2,
+        "prev_rz_fsq": 0.3,
+        "bad_growth_streak": 6,
+        "huge_force_restart_count": 7,
+        "state_checkpoint": "checkpoint",
+    }
+
+    state = controller_state_from_namespace(namespace)
+
+    assert state.inv_tau == [0.6, 0.7]
+    assert controller_state_values(state) == tuple(state)
+    assert controller_state_legacy_payload(state)["iter1"] == 3
+
+
 def test_residual_evolve_coefficients_match_vmec_damping_recurrence() -> None:
     first = residual_evolve_coefficients(
         iter2=4,
@@ -207,6 +236,83 @@ def test_residual_evolve_coefficients_match_vmec_damping_recurrence() -> None:
 
     assert later.inv_tau == [0.2, 0.3, 0.3]
     assert later.dtau == pytest.approx(0.5 * (0.2 + 0.3 + 0.3) / 3.0 / 2.0)
+
+
+def test_controller_state_applies_restart_update_payloads() -> None:
+    state = ResidualControllerState(
+        time_step=0.5,
+        inv_tau=[1.0, 1.0],
+        fsq_prev=9.0,
+        fsq0_prev=8.0,
+        flip_sign=-1.0,
+        iter1=2,
+        ijacob=3,
+        bad_resets=4,
+        res0=0.3,
+        res1=0.2,
+        prev_rz_fsq=0.1,
+        bad_growth_streak=7,
+        huge_force_restart_count=8,
+        state_checkpoint="checkpoint",
+    )
+
+    pre_restart = host_pre_restart_trigger_update(
+        pre_restart_reason="bad_jacobian",
+        huge_initial_forces=True,
+        huge_force_restart_count=8,
+        time_step=state.time_step,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        stage_transition_scale=0.5,
+        step_size=0.1,
+        ijacob=state.ijacob,
+        bad_resets=state.bad_resets,
+        iter2=11,
+        fsq_prev_before=6.0,
+        fsq0_prev_before=5.0,
+        k_ndamp=2,
+    )
+    after_pre = controller_state_after_pre_restart_update(state, pre_restart)
+
+    assert after_pre.time_step == pytest.approx(pre_restart.time_step)
+    assert after_pre.inv_tau == pre_restart.inv_tau
+    assert after_pre.fsq_prev == pytest.approx(6.0)
+    assert after_pre.fsq0_prev == pytest.approx(5.0)
+    assert after_pre.iter1 == 11
+    assert after_pre.ijacob == 4
+    assert after_pre.bad_resets == 5
+    assert after_pre.bad_growth_streak == 0
+    assert after_pre.huge_force_restart_count == 9
+    assert after_pre.flip_sign == state.flip_sign
+    assert after_pre.state_checkpoint == "checkpoint"
+
+    catastrophic = host_catastrophic_restart_update(
+        probe_bad_jacobian=False,
+        w_try=4.0,
+        time_step=state.time_step,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        step_size=0.1,
+        ijacob=state.ijacob,
+        bad_resets=state.bad_resets,
+        iter2=12,
+        fsq_prev_before=4.0,
+        fsq0_prev_before=3.0,
+        k_ndamp=2,
+        max_coeff_delta_rms=1.0,
+        max_update_rms=1.0,
+    )
+    after_catastrophic = controller_state_after_catastrophic_restart_update(state, catastrophic)
+
+    assert after_catastrophic.time_step == pytest.approx(catastrophic.time_step)
+    assert after_catastrophic.inv_tau == catastrophic.inv_tau
+    assert after_catastrophic.fsq_prev == pytest.approx(4.0)
+    assert after_catastrophic.fsq0_prev == pytest.approx(3.0)
+    assert after_catastrophic.iter1 == 12
+    assert after_catastrophic.ijacob == state.ijacob
+    assert after_catastrophic.bad_resets == 5
+    assert after_catastrophic.bad_growth_streak == state.bad_growth_streak
+    assert after_catastrophic.huge_force_restart_count == state.huge_force_restart_count
 
 
 def test_host_momentum_update_np_matches_strict_update_formula_and_rms() -> None:

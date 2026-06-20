@@ -98,11 +98,16 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     make_residual_force_evaluator as _make_residual_force_evaluator,
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
+    ResidualControllerState as _ResidualControllerState,
     ResidualVelocityBlocks as _ResidualVelocityBlocks,
     backtracking_momentum_search as _backtracking_momentum_search,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
+    controller_state_after_catastrophic_restart_update as _controller_state_after_catastrophic_restart_update,
+    controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
+    controller_state_from_namespace as _controller_state_from_namespace,
     controller_state_from_resume_state as _controller_state_from_resume_state,
+    controller_state_values as _controller_state_values,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
@@ -1284,7 +1289,17 @@ def solve_fixed_boundary_residual_iter(
     (
         time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
         prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
-    ) = controller_state
+    ) = _controller_state_values(controller_state)
+
+    def _set_controller_state(next_state: _ResidualControllerState) -> None:
+        nonlocal controller_state, time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob
+        nonlocal bad_resets, res0, res1, prev_rz_fsq, bad_growth_streak, huge_force_restart_count
+        nonlocal state_checkpoint
+        controller_state = next_state
+        (
+            time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
+            prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
+        ) = _controller_state_values(controller_state)
     _initial_velocity = _initial_residual_velocity_state(
         state=state,
         mpol=mpol,
@@ -1365,11 +1380,7 @@ def solve_fixed_boundary_residual_iter(
 
     if resume_state is not None:
         iter_offset = int(resume_state.get("iter_offset", iter_offset))
-        controller_state = _controller_state_from_resume_state(resume_state, controller_state)
-        (
-            time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
-            prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
-        ) = controller_state
+        _set_controller_state(_controller_state_from_resume_state(resume_state, controller_state))
 
         if "vRcc" in resume_state:
             _as_velocity = np.asarray if bool(host_update_assembly) else jnp.asarray
@@ -2929,18 +2940,15 @@ def solve_fixed_boundary_residual_iter(
                     fsq0_prev_before=float(fsq0_prev_before),
                     k_ndamp=int(k_ndamp),
                 )
-                time_step = pre_restart_update.time_step
+                _set_controller_state(
+                    _controller_state_after_pre_restart_update(
+                        _controller_state_from_namespace(locals()),
+                        pre_restart_update,
+                    )
+                )
                 time_step_iter = pre_restart_update.time_step_iter
-                ijacob = pre_restart_update.ijacob
                 step_status = pre_restart_update.step_status
-                huge_force_restart_count = pre_restart_update.huge_force_restart_count
-                bad_resets = pre_restart_update.bad_resets
-                iter1 = pre_restart_update.iter1
                 freeb_controls_cached = None
-                bad_growth_streak = 0
-                fsq_prev = pre_restart_update.fsq_prev
-                fsq0_prev = pre_restart_update.fsq0_prev
-                inv_tau = pre_restart_update.inv_tau
                 _clear_preconditioner_cache_locals()
                 if bool(vmec2000_control):
                     force_bcovar_update = True
@@ -3288,19 +3296,18 @@ def solve_fixed_boundary_residual_iter(
                         max_coeff_delta_rms=float(max_coeff_delta_rms),
                         max_update_rms=float(max_update_rms),
                     )
-                    time_step = restart_update.time_step
-                    ijacob = restart_update.ijacob
+                    _set_controller_state(
+                        _controller_state_after_catastrophic_restart_update(
+                            _controller_state_from_namespace(locals()),
+                            restart_update,
+                        )
+                    )
                     restart_reason = restart_update.restart_reason
                     step_status = restart_update.step_status
                     restart_path = restart_update.restart_path
                     max_coeff_delta_rms = restart_update.max_coeff_delta_rms
                     max_update_rms = restart_update.max_update_rms
-                    bad_resets = restart_update.bad_resets
-                    iter1 = restart_update.iter1
                     freeb_controls_cached = None
-                    fsq_prev = restart_update.fsq_prev
-                    fsq0_prev = restart_update.fsq0_prev
-                    inv_tau = restart_update.inv_tau
                     update_rms = restart_update.update_rms
                     if bool(clear_cache_after_catastrophic):
                         _clear_preconditioner_cache_locals()

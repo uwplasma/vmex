@@ -132,6 +132,33 @@ def controller_state_from_resume_state(
     )
 
 
+def controller_state_from_namespace(namespace: dict[str, Any]) -> ResidualControllerState:
+    """Build controller state from residual-loop scalar locals."""
+
+    return ResidualControllerState(
+        time_step=float(namespace["time_step"]),
+        inv_tau=list(namespace["inv_tau"]),
+        fsq_prev=float(namespace["fsq_prev"]),
+        fsq0_prev=float(namespace["fsq0_prev"]),
+        flip_sign=float(namespace["flip_sign"]),
+        iter1=int(namespace["iter1"]),
+        ijacob=int(namespace["ijacob"]),
+        bad_resets=int(namespace["bad_resets"]),
+        res0=float(namespace["res0"]),
+        res1=float(namespace["res1"]),
+        prev_rz_fsq=float(namespace["prev_rz_fsq"]),
+        bad_growth_streak=int(namespace["bad_growth_streak"]),
+        huge_force_restart_count=int(namespace["huge_force_restart_count"]),
+        state_checkpoint=namespace["state_checkpoint"],
+    )
+
+
+def controller_state_values(state: ResidualControllerState) -> tuple[Any, ...]:
+    """Return controller fields in legacy scalar-local order."""
+
+    return tuple(state)
+
+
 def controller_state_legacy_payload(state: ResidualControllerState) -> dict[str, Any]:
     """Return legacy controller keys for resume-state diagnostics."""
 
@@ -208,6 +235,42 @@ class HostPreRestartTriggerUpdate(NamedTuple):
     fsq0_prev: float
     inv_tau: list[float]
     huge_force_restart_count: int
+
+
+def controller_state_after_pre_restart_update(
+    state: ResidualControllerState,
+    update: HostPreRestartTriggerUpdate,
+) -> ResidualControllerState:
+    """Apply pre-restart scalar updates to controller state."""
+
+    return state._replace(
+        time_step=float(update.time_step),
+        inv_tau=list(update.inv_tau),
+        fsq_prev=float(update.fsq_prev),
+        fsq0_prev=float(update.fsq0_prev),
+        iter1=int(update.iter1),
+        ijacob=int(update.ijacob),
+        bad_resets=int(update.bad_resets),
+        bad_growth_streak=0,
+        huge_force_restart_count=int(update.huge_force_restart_count),
+    )
+
+
+def controller_state_after_catastrophic_restart_update(
+    state: ResidualControllerState,
+    update: HostCatastrophicRestartUpdate,
+) -> ResidualControllerState:
+    """Apply catastrophic-restart scalar updates to controller state."""
+
+    return state._replace(
+        time_step=float(update.time_step),
+        inv_tau=list(update.inv_tau),
+        fsq_prev=float(update.fsq_prev),
+        fsq0_prev=float(update.fsq0_prev),
+        iter1=int(update.iter1),
+        ijacob=int(update.ijacob),
+        bad_resets=int(update.bad_resets),
+    )
 
 
 class BacktrackingMomentumSearchResult(NamedTuple):
