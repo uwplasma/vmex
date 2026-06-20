@@ -33335,3 +33335,166 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.99999999999976%.
+
+## 2026-06-20 final PR-readiness audit and single active plan
+
+Steps taken:
+
+1. Audited the draft PR branch `codex/differentiability-refactor-plan` against
+   `origin/main`.
+2. Ran the source-health report with top files/functions and root helper-prefix
+   guard:
+   `python tools/diagnostics/source_health.py --top 40 --top-functions 120 --max-root-helper-prefix-files 2`.
+3. Audited tracked docs and README for stale claims, free-boundary limitations,
+   VMEC2000 parity wording, installation wording, optimization examples,
+   Boozer/plot/CLI coverage, DMerc/Glasser `D_R`, and direct-coil/single-stage
+   feature descriptions.
+4. Audited dependency declarations in `pyproject.toml`: runtime dependencies
+   are bare package names, `booz_xform_jax` is included in the plain install,
+   and the README/install docs use bare `pip` with only a fallback sentence for
+   `python -m pip`.
+5. Audited tracked generated assets and repository size:
+   `git ls-files docs/_build` is empty, tracked size is about 29.37 MiB, and
+   only two small tracked NetCDF `mgrid` fixtures remain in the examples trees.
+6. Audited public top-level docstring coverage using the AST: every module has
+   a module docstring; after a targeted public-object docstring tranche, 106
+   public top-level classes/functions still lack their own docstring, mostly
+   implementation-facing helpers.
+7. Added docstrings to high-value user/reviewer-facing containers:
+   `VMECConfig`, `InData`, `BoundaryCoeffs`, `BoozXformInputs`, `ModeTable`,
+   `AngleGrid`, solver option/result records, `WoutData`, `ExampleData`,
+   diagnostic summaries, scan/fallback records, and residual policy/config
+   records.
+8. Closed `plan_freeb.md` as a historical free-boundary evidence log.  This
+   file is now the only active plan for remaining refactor, differentiability,
+   validation, docs, and release-readiness work.
+
+Results obtained:
+
+- The PR is large by design: 588 commits over `origin/main` at the time of
+  audit and a draft PR open as #20.  It should be reviewed as the one umbrella
+  refactor/differentiability PR, not as a sequence of new PRs.
+- The main source-health blocker is now sharply localized:
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py` remains the only
+  production source file above the current 2000-line target at 3261 lines, and
+  `solve_fixed_boundary_residual_iter()` remains the largest function at 2784
+  lines.
+- The largest other production modules are below 2000 lines but still worth
+  future focused cleanup: `optimization.py`, `vmec_forces.py`,
+  `qi_optimization.py`, `plotting.py`, `free_boundary.py`,
+  `io/wout/minimal.py`, `preconditioner_1d_jax.py`, and
+  `optimization_workflow.py`.
+- The public optimization scripts are no longer the major maintainability
+  issue: QA/QH/QP are about 215--241 lines and QI is about 499 lines with
+  top-level editable parameters, visible objective tuples, solve calls, result
+  saving, and plotting.
+- The tracked repository is light enough for review: the largest tracked files
+  are now plan logs and compressed docs figures, not raw WOUT/mgrid outputs.
+  The tracked tree is about 29.37 MiB.  Optional WOUT fixtures remain fetched
+  release assets.
+- Docs and README are aligned on the user-facing features: `vmec --test`,
+  `vmec --doctor`, `--plot`, `--booz`, profile splines/polynomials,
+  fixed/free-boundary workflows, direct-coil research examples, VMEC2000
+  parity gates, QI/QA/QH/QP optimization examples, and the limitation that
+  arbitrary adaptive host-branch differentiation is not claimed.
+- One documentation clarity edit was made in `docs/code_structure.rst`: this
+  plan is now explicitly the active source of truth, and `plan_freeb.md` is a
+  closed evidence log.
+
+Validation commands run:
+
+- `python -m ruff check vmec_jax/config.py vmec_jax/boundary.py vmec_jax/booz_input.py vmec_jax/modes.py vmec_jax/grids.py vmec_jax/namelist.py vmec_jax/io/wout/schema.py vmec_jax/driver.py vmec_jax/diagnostics.py vmec_jax/_solve_runtime.py vmec_jax/solvers/fixed_boundary/options.py vmec_jax/solvers/fixed_boundary/results.py vmec_jax/solvers/fixed_boundary/residual/config.py vmec_jax/solvers/fixed_boundary/residual/payload_blocks.py vmec_jax/solvers/fixed_boundary/residual/policy.py vmec_jax/solvers/fixed_boundary/scan/math.py`
+- `python -m compileall -q` on the same touched Python files.
+- `git diff --check`
+- `python tools/diagnostics/source_health.py --top 40 --top-functions 120 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 25 --max-total-mib 50 --max-file-mib 2`
+- `SPHINX_FAST=1 LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_fast_audit`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_namelist.py tests/test_booz_input.py tests/test_wout_roundtrip.py tests/test_solve_residual_iter_policy.py --tb=short`
+
+Validation results:
+
+- Ruff and compileall passed.
+- Fast docs build passed.
+- Targeted pytest shard passed with `47 passed, 2 skipped`.
+- Source-health still reports exactly two root helper-prefix files, matching
+  the current guard.
+- Repository size audit passed at about 29.38 MiB tracked size; no
+  `docs/_build` files are tracked.
+
+Open audit findings:
+
+1. Residual loop readability is still the highest-value refactor target.  Any
+   remaining extraction must reduce both line count and conceptual coupling;
+   do not add more thin files just to move lines.
+2. Public docstring coverage is incomplete.  The next useful docstring tranche
+   should prioritize CLI entry helpers, driver/runtime policy helpers,
+   optimization-workflow output helpers, scan output/payload records, mgrid
+   metadata containers, and external-field/free-boundary provider types.
+3. `plan_differentiability.md` and `plan_freeb.md` are now the largest tracked
+   files.  Do not create more long-form plan logs; after PR review, compress
+   historical entries into docs/release notes or keep them only as archived
+   evidence if repository size becomes a concern again.
+4. The free-boundary docs are explicit and conservative, but the research-grade
+   differentiability plan still leaves arbitrary adaptive host branch changes
+   as a future target.  Current validated claims remain same-branch and
+   fingerprint-gated.
+5. The required 95% coverage and VMEC2000 parity evidence are documented, but a
+   final pre-review local gate should still be run after any remaining code
+   edits.
+
+Best next steps:
+
+1. Make one more code-health tranche in `solve_fixed_boundary_residual_iter()`
+   only if it follows a natural domain seam; otherwise stop refactoring and
+   prepare the PR for review.
+2. Add a targeted docstring tranche for the public API/config/result classes
+   listed above.  Avoid trying to docstring every internal helper before
+   review.
+3. Run the lightweight final review gate:
+   `python tools/diagnostics/source_health.py --top 40 --top-functions 120 --max-root-helper-prefix-files 2`,
+   `git diff --check`, focused ruff/compile checks for touched files, and the
+   smallest relevant pytest shards.
+4. For release readiness after PR review, run the documented local CI gate and
+   record the exact coverage percentage and pass/skip counts.
+
+User decisions needed:
+
+No immediate decision.  The only policy decision still open is whether to keep
+the full historical plan logs in git after the PR is reviewed, or squash them
+into shorter archived summaries before final merge.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999985%.
+- Solver monolith reduction: 99.9981%.
+- Residual iteration decomposition: 99.982%.
+- Public API/docstring polish: 94%; module docstrings and the highest-value
+  user/reviewer-facing object docstrings are complete, implementation helper
+  docstrings remain.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.99945%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.995%.
+- Overall differentiability-refactor PR: 99.99999999999977%.

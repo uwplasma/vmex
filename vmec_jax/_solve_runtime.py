@@ -17,6 +17,8 @@ from ._compat import has_jax, jax
 
 
 class ScanFallbackPolicy(NamedTuple):
+    """Host policy for leaving scan mode when early residual progress is bad."""
+
     enabled: bool
     iters: int
     badjac_limit: int

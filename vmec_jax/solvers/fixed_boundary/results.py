@@ -98,6 +98,8 @@ class WoutLikeVmecForces:
 
 @dataclass(frozen=True)
 class SolveLambdaResult:
+    """Result returned by lambda-only fixed-geometry optimization."""
+
     state: VMECState
     n_iter: int
     wb_history: np.ndarray
@@ -108,6 +110,8 @@ class SolveLambdaResult:
 
 @dataclass(frozen=True)
 class SolveFixedBoundaryResult:
+    """Result returned by magnetic-energy fixed-boundary optimizers."""
+
     state: VMECState
     n_iter: int
     w_history: np.ndarray
@@ -120,6 +124,8 @@ class SolveFixedBoundaryResult:
 
 @dataclass(frozen=True)
 class SolveVmecResidualResult:
+    """Result returned by optimizers that minimize VMEC force residuals."""
+
     state: VMECState
     n_iter: int
     w_history: np.ndarray
@@ -158,6 +164,8 @@ def solve_vmec_residual_result_from_history(
 
 
 class ScanCarry(NamedTuple):
+    """State carried by the JAX scan implementation of VMEC iteration."""
+
     state: VMECState
     time_step: Any
     inv_tau: Any

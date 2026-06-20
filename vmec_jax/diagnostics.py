@@ -17,6 +17,8 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Summary:
+    """Basic shape, dtype, count, and quantile summary for one array."""
+
     name: str
     shape: Tuple[int, ...]
     dtype: str

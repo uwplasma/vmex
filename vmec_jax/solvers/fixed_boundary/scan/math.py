@@ -10,6 +10,8 @@ from ...._compat import jnp
 
 
 class ScanTauDecision(NamedTuple):
+    """Bad-Jacobian tau extrema computed inside the scan loop."""
+
     bad_jacobian: Any
     min_tau: Any
     max_tau: Any
@@ -30,6 +32,8 @@ class ScanBadJacobianDecision(NamedTuple):
 
 
 class ScanRestartUpdates(NamedTuple):
+    """State and velocity fields after applying a scan-mode restart."""
+
     state: Any
     time_step: Any
     inv_tau: Any

@@ -26,11 +26,15 @@ from .config import (
 
 
 class HostUpdateAssemblyPolicy(NamedTuple):
+    """Host-side selection for assembling update blocks outside JAX."""
+
     enabled: bool
     auto_enabled: bool
 
 
 class NumpyPreconditionerApplyPolicy(NamedTuple):
+    """Host-side selection for NumPy preconditioner application."""
+
     enabled: bool
     mode_count: int
     max_iter_cutoff: int
@@ -38,12 +42,16 @@ class NumpyPreconditionerApplyPolicy(NamedTuple):
 
 
 class RestartFlagPolicy(NamedTuple):
+    """Resolved restart/fallback feature toggles for VMEC-style iteration."""
+
     use_restart_triggers: bool
     use_direct_fallback: bool
     vmecpp_restart: bool
 
 
 class HostRestartDecision(NamedTuple):
+    """One host-loop restart decision and the scalar evidence behind it."""
+
     fsq: float
     fsq_res: float
     res0: float
@@ -56,6 +64,8 @@ class HostRestartDecision(NamedTuple):
 
 
 class Vmec2000TimeControlDecision(NamedTuple):
+    """VMEC2000-style timestep/restart control decision for one iteration."""
+
     fsq: float
     fsq0: float
     res0: float
@@ -69,6 +79,8 @@ class Vmec2000TimeControlDecision(NamedTuple):
 
 
 class BadJacobianTauDecision(NamedTuple):
+    """Bad-Jacobian decision from tau extrema and finite checks."""
+
     min_tau: float
     max_tau: float
     bad_jacobian: bool
@@ -76,12 +88,16 @@ class BadJacobianTauDecision(NamedTuple):
 
 
 class BadJacobianSelection(NamedTuple):
+    """Selected bad-Jacobian state/tau verdict after policy arbitration."""
+
     bad_jacobian: bool
     min_tau: float
     max_tau: float
 
 
 class ResidualIterHistoryRecord(NamedTuple):
+    """Host-loop residual iteration history row used for diagnostics and tests."""
+
     step: float
     dt_eff: float
     update_rms: Any

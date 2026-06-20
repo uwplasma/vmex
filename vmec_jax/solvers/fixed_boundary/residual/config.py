@@ -32,6 +32,8 @@ HEAVY_DUMP_ENVS = (
 
 
 class BadJacobianConfig(NamedTuple):
+    """Environment-derived policy for bad-Jacobian detection and probing."""
+
     mode: str
     use_state: bool
     dump_ptau_state: bool
@@ -42,6 +44,8 @@ class BadJacobianConfig(NamedTuple):
 
 
 class DumpHistoryConfig(NamedTuple):
+    """Environment-derived policy for optional debug dumps and history tracking."""
+
     dumps_enabled: bool
     dump_any: bool
     jit_forces: bool
@@ -51,23 +55,31 @@ class DumpHistoryConfig(NamedTuple):
 
 
 class ChunkedScanConfig(NamedTuple):
+    """Resolved scan chunking and fallback policy for residual iteration."""
+
     force_chunked_scan: bool
     scan_fallback_enabled: bool
     differentiating_scan: bool
 
 
 class HostResidualMetricConfig(NamedTuple):
+    """Policy for where residual scalar metrics are reduced."""
+
     fsq1_norms_on_accelerator: bool
     residual_metrics_on_accelerator: bool
 
 
 class AxisResetConfig(NamedTuple):
+    """Initial magnetic-axis reset thresholds and toggles."""
+
     force_axis_reset: bool
     axis_reset_always_3d: bool
     axis_reset_fsq_min: float
 
 
 class DebugPrintConfig(NamedTuple):
+    """Resolved VMEC iteration print mode for host and scan loops."""
+
     print_live: bool
     mode: str
     ordered: bool

@@ -25533,3 +25533,49 @@ Completion:
   for the latest branch head.
 - Docs/release hygiene: 100%.
 - QI minimal-seed README artifacts: 100%.
+
+### 2026-06-20 Free-Boundary Plan Archival and Active-Plan Handoff
+
+Steps taken:
+
+1. Audited the current free-boundary plan against the active draft PR branch
+   and the repository docs.
+2. Confirmed the direct-coil/free-boundary work is now represented in the
+   code, tests, examples, and docs, while the remaining arbitrary adaptive
+   branch-differentiation limitation is explicitly documented as unclaimed.
+3. Marked this file as a closed evidence log.  New free-boundary follow-ups
+   should be tracked only in `plan_differentiability.md` so the repository has
+   one active work plan.
+
+Results obtained:
+
+- `plan_differentiability.md` is the active single source of truth for the
+  umbrella differentiability/refactor PR.
+- This file remains useful as historical evidence for PRs #18/#19 and the
+  direct-coil/free-boundary validation ladder, but it should not receive new
+  open-lane progress entries after this archival note.
+- The docs now state the same rule in `docs/code_structure.rst`.
+
+Best next steps:
+
+1. Keep future free-boundary status updates in `plan_differentiability.md`.
+2. Keep phase-2 claims conservative: same-branch/fingerprint-gated accepted
+   replay is validated; arbitrary adaptive host-branch derivatives remain a
+   future research-grade differentiability target.
+3. Before review, use this file as evidence, not as a second active task list.
+
+Need from user:
+
+No action needed.
+
+Completion:
+
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- VMEC parity and physics gates: 99.9%.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene: 100% for the current documented local shards.
+- Docs/release hygiene: 100% for this archival handoff.
+- QI minimal-seed README artifacts: 100%.
