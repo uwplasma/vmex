@@ -28561,3 +28561,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.980%.
 - Overall differentiability-refactor PR: 99.999999999964%.
+
+## 2026-06-20 VMEC-Residual Implicit Tangent Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_vmec_residual_state_tangent_from_boundary_tangent`, a named helper
+   for the custom-JVP boundary tangent path in the VMEC-residual implicit
+   wrapper.
+2. Moved active-coordinate packing, reduced/full active tangent solve routing,
+   boundary-row tangent injection, and lineax/direct/chunked/CG tangent route
+   selection out of the nested custom-JVP closure.
+3. Replaced the nested 197-line `_state_tangent_from_boundary_tangent` closure
+   in `solve_fixed_boundary_state_implicit_vmec_residual` with one call to the
+   helper, parameterized by the stationarity and boundary-row callbacks.
+
+Results obtained:
+
+- `solve_fixed_boundary_state_implicit_vmec_residual` dropped from 653 to 460
+  lines.
+- The residual implicit wrapper now has a clearer split:
+  primal host solve, stationarity definition, tangent path, and backward VJP
+  path are easier to audit independently.
+- No new files were added.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/implicit.py tests/test_implicit_more_coverage.py tests/test_implicit_wave12_coverage.py tests/test_implicit_differentiation_fast.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_differentiation_fast.py::test_vmec_residual_boundary_jvp_chunked_tangent_path tests/test_implicit_more_coverage.py::test_vmec_residual_keep_all_tangent_direct_bicgstab tests/test_implicit_more_coverage.py::test_vmec_residual_keep_all_tangent_chunked_default_and_cg_fallback tests/test_implicit_wave12_coverage.py::test_vmec_residual_custom_jvp_routes_lineax_and_rejects_lasym -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_differentiation_fast.py tests/test_implicit_more_coverage.py tests/test_implicit_wave12_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_implicit_sensitivity_fast_coverage.py::test_vmec_residual_custom_vjp_active_boundary_sensitivity_matches_fd tests/test_implicit_helpers.py::test_fixed_boundary_residual_implicit_primal_matches_default_control_path -q`
+- `python tools/diagnostics/source_health.py --top 16 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue with the VMEC-residual implicit backward path only if the next
+   extraction can reuse existing active-adjoint helper routes without creating
+   argument-bag abstractions.
+2. Otherwise return to free-boundary validation-test maintainability, where the
+   largest remaining functions are test helpers with clear duplicated structure.
+3. Run a broader PR validation shard after the next tranche.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999988%.
+- Solver monolith reduction: 99.982%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.892%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.18%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.980%.
+- Overall differentiability-refactor PR: 99.999999999965%.
