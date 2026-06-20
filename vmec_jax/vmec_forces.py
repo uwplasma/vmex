@@ -935,6 +935,126 @@ def _odd_force_radial_updates(*, armn_o, azmn_o, brmn_o, bzmn_o, lu_o, pzu_0, pr
     )
 
 
+def _assemble_vmec_rz_radial_forces(
+    *,
+    s,
+    ohs,
+    dshalfds,
+    pshalf,
+    psqrts,
+    phips,
+    lu_e,
+    lv_e,
+    guu,
+    guv,
+    gvv,
+    jac,
+    pr1_0,
+    pr1_1,
+    pz1_1,
+    pru_0,
+    pru_1,
+    pzu_0,
+    pzu_1,
+    prv_0,
+    prv_1,
+    pzv_0,
+    pzv_1,
+    Lv1,
+    lthreed: bool,
+) -> tuple[Any, ...]:
+    """Apply VMEC radial staggering to R/Z force kernels."""
+
+    guus = guu * pshalf
+    guvs = guv * pshalf
+    gvvs = gvv * pshalf
+
+    armn_e = ohs * jac.zu12 * lu_e
+    azmn_e = -ohs * jac.ru12 * lu_e
+    brmn_e = jac.zs * lu_e
+    bzmn_e = -jac.rs * lu_e
+    bsqr = dshalfds * lu_e / jnp.where(pshalf != 0, pshalf, 1.0)
+
+    armn_o = armn_e * pshalf
+    azmn_o = azmn_e * pshalf
+    brmn_o = brmn_e * pshalf
+    bzmn_o = bzmn_e * pshalf
+
+    guu_i = _avg_forward_half_to_int(guu)
+    gvv_i = _avg_forward_half_to_int(gvv)
+    guus_i = _avg_forward_half_to_int(guus)
+    gvvs_i = _avg_forward_half_to_int(gvvs)
+    guv_i = _avg_forward_half_to_int(guv)
+    guvs_i = _avg_forward_half_to_int(guvs)
+    bsqr_s = _sum_forward_half(bsqr)
+
+    armn_e = _diff_forward_half(armn_e, lv_e)
+    azmn_e = _diff_forward_half_noavg(azmn_e)
+    brmn_e = _avg_forward_half(brmn_e)
+    bzmn_e = _avg_forward_half(bzmn_e)
+
+    armn_e = armn_e - (gvvs_i * pr1_1 + gvv_i * pr1_0)
+    brmn_e = brmn_e + bsqr_s * pz1_1 - (guus_i * pru_1 + guu_i * pru_0)
+    bzmn_e = bzmn_e - (bsqr_s * pr1_1 + guus_i * pzu_1 + guu_i * pzu_0)
+
+    lv_es = lv_e * pshalf
+    lu_o = dshalfds * lu_e
+    armn_o, azmn_o, brmn_o, bzmn_o, lu_o = _odd_force_radial_updates(
+        armn_o=armn_o,
+        azmn_o=azmn_o,
+        brmn_o=brmn_o,
+        bzmn_o=bzmn_o,
+        lu_o=lu_o,
+        pzu_0=pzu_0,
+        pru_0=pru_0,
+        bsqr_s=bsqr_s,
+        lv_es=lv_es,
+    )
+
+    ss = (psqrts * psqrts).astype(guu_i.dtype)
+    guu_s = guu_i * ss
+    gvv_s = gvv_i * ss
+    armn_o = armn_o - (pzu_1 * lu_o + gvv_s * pr1_1 + gvvs_i * pr1_0)
+    azmn_o = azmn_o + pru_1 * lu_o
+    brmn_o = brmn_o + pz1_1 * lu_o - (guu_s * pru_1 + guus_i * pru_0)
+    bzmn_o = bzmn_o - (pr1_1 * lu_o + guu_s * pzu_1 + guus_i * pzu_0)
+
+    if bool(lthreed):
+        brmn_e = brmn_e - (guv_i * prv_0 + guvs_i * prv_1)
+        bzmn_e = bzmn_e - (guv_i * pzv_0 + guvs_i * pzv_1)
+        crmn_e = guv_i * pru_0 + gvv_i * prv_0 + gvvs_i * prv_1 + guvs_i * pru_1
+        czmn_e = guv_i * pzu_0 + gvv_i * pzv_0 + gvvs_i * pzv_1 + guvs_i * pzu_1
+        guv_s = guv_i * ss
+        brmn_o = brmn_o - (guvs_i * prv_0 + guv_s * prv_1)
+        bzmn_o = bzmn_o - (guvs_i * pzv_0 + guv_s * pzv_1)
+        crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
+        czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
+    else:
+        lamscale = jnp.asarray(lamscale_from_phips(phips, s))
+        if lamscale.ndim == 0:
+            lamscale = jnp.full_like(s, lamscale)
+        lamscale = lamscale[:, None, None]
+        crmn_e = jnp.asarray(lv_es)
+        czmn_e = jnp.asarray(lu_e)
+        crmn_o = -lamscale * jnp.asarray(Lv1)
+        czmn_o = jnp.asarray(lu_o)
+
+    return (
+        armn_e,
+        armn_o,
+        brmn_e,
+        brmn_o,
+        crmn_e,
+        crmn_o,
+        azmn_e,
+        azmn_o,
+        bzmn_e,
+        bzmn_o,
+        czmn_e,
+        czmn_o,
+    )
+
+
 def vmec_forces_rz_from_wout(
     *,
     state,
@@ -1065,101 +1185,39 @@ def vmec_forces_rz_from_wout(
     guv = _with_axis_zero(bc.gij_b_uv)
     gvv = _with_axis_zero(bc.gij_b_vv)
 
-    # Jacobian-related half-mesh fields.
-    ru12 = bc.jac.ru12
-    zu12 = bc.jac.zu12
-    rs = bc.jac.rs
-    zs = bc.jac.zs
-
-    # Scratch arrays (VMEC names: guus, guvs, gvvs, bsqr).
-    guus = guu * pshalf
-    guvs = guv * pshalf
-    gvvs = gvv * pshalf
-
-    armn_e = ohs * zu12 * lu_e
-    azmn_e = -ohs * ru12 * lu_e
-    brmn_e = zs * lu_e
-    bzmn_e = -rs * lu_e
-    bsqr = dshalfds * lu_e / jnp.where(pshalf != 0, pshalf, 1.0)
-
-    armn_o = armn_e * pshalf
-    azmn_o = azmn_e * pshalf
-    brmn_o = brmn_e * pshalf
-    bzmn_o = bzmn_e * pshalf
-
     assembly_start = time.perf_counter()
-
-    # Forward-average half-mesh GIJ and shalf-weighted GIJ to integer mesh.
-    guu_i = _avg_forward_half_to_int(guu)
-    gvv_i = _avg_forward_half_to_int(gvv)
-    guus_i = _avg_forward_half_to_int(guus)
-    gvvs_i = _avg_forward_half_to_int(gvvs)
-    guv_i = _avg_forward_half_to_int(guv)
-    guvs_i = _avg_forward_half_to_int(guvs)
-
-    # bsqr is forward-summed (not averaged) in VMEC.
-    bsqr_s = _sum_forward_half(bsqr)
-
-    # Differences/averages to build even-parity kernels.
-    armn_e = _diff_forward_half(armn_e, lv_e)
-    azmn_e = _diff_forward_half_noavg(azmn_e)
-    brmn_e = _avg_forward_half(brmn_e)
-    bzmn_e = _avg_forward_half(bzmn_e)
-
-    armn_e = armn_e - (gvvs_i * pr1_1 + gvv_i * pr1_0)
-    brmn_e = brmn_e + bsqr_s * pz1_1 - (guus_i * pru_1 + guu_i * pru_0)
-    bzmn_e = bzmn_e - (bsqr_s * pr1_1 + guus_i * pzu_1 + guu_i * pzu_0)
-
-    lv_es = lv_e * pshalf
-    lu_o = dshalfds * lu_e
-
-    # Odd-parity kernels.
-    armn_o, azmn_o, brmn_o, bzmn_o, lu_o = _odd_force_radial_updates(
-        armn_o=armn_o,
-        azmn_o=azmn_o,
-        brmn_o=brmn_o,
-        bzmn_o=bzmn_o,
-        lu_o=lu_o,
-        pzu_0=pzu_0,
-        pru_0=pru_0,
-        bsqr_s=bsqr_s,
-        lv_es=lv_es,
-    )
-
-    # Scale GIJ for odd-kernel contributions by s (VMEC: sqrts^2).
-    ss = (psqrts * psqrts).astype(guu_i.dtype)
-    guu_s = guu_i * ss
-    gvv_s = gvv_i * ss
-
-    armn_o = armn_o - (pzu_1 * lu_o + gvv_s * pr1_1 + gvvs_i * pr1_0)
-    azmn_o = azmn_o + pru_1 * lu_o
-    brmn_o = brmn_o + pz1_1 * lu_o - (guu_s * pru_1 + guus_i * pru_0)
-    bzmn_o = bzmn_o - (pr1_1 * lu_o + guu_s * pzu_1 + guus_i * pzu_0)
-
-    # 3D kernels (C terms). For axisym, VMEC leaves crmn/czmn holding bsup/bphi.
     lthreed = bool(np.any(np.asarray(static.modes.n) != 0))
-    if lthreed:
-        brmn_e = brmn_e - (guv_i * prv_0 + guvs_i * prv_1)
-        bzmn_e = bzmn_e - (guv_i * pzv_0 + guvs_i * pzv_1)
-
-        crmn_e = guv_i * pru_0 + gvv_i * prv_0 + gvvs_i * prv_1 + guvs_i * pru_1
-        czmn_e = guv_i * pzu_0 + gvv_i * pzv_0 + gvvs_i * pzv_1 + guvs_i * pzu_1
-
-        guv_s = guv_i * ss
-        brmn_o = brmn_o - (guvs_i * prv_0 + guv_s * prv_1)
-        bzmn_o = bzmn_o - (guvs_i * pzv_0 + guv_s * pzv_1)
-
-        crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
-        czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
-    else:
-        lamscale = jnp.asarray(lamscale_from_phips(phips, s))
-        if lamscale.ndim == 0:
-            lamscale = jnp.full_like(s, lamscale)
-        lamscale = lamscale[:, None, None]
-        crmn_e = jnp.asarray(lv_es)
-        czmn_e = jnp.asarray(lu_e)
-        crmn_o = -lamscale * jnp.asarray(Lv1)
-        czmn_o = jnp.asarray(lu_o)
+    radial = _assemble_vmec_rz_radial_forces(
+        s=s,
+        ohs=ohs,
+        dshalfds=dshalfds,
+        pshalf=pshalf,
+        psqrts=psqrts,
+        phips=phips,
+        lu_e=lu_e,
+        lv_e=lv_e,
+        guu=guu,
+        guv=guv,
+        gvv=gvv,
+        jac=bc.jac,
+        pr1_0=pr1_0,
+        pr1_1=pr1_1,
+        pz1_1=pz1_1,
+        pru_0=pru_0,
+        pru_1=pru_1,
+        pzu_0=pzu_0,
+        pzu_1=pzu_1,
+        prv_0=prv_0,
+        prv_1=prv_1,
+        pzv_0=pzv_0,
+        pzv_1=pzv_1,
+        Lv1=Lv1,
+        lthreed=bool(lthreed),
+    )
+    (
+        armn_e, armn_o, brmn_e, brmn_o, crmn_e, crmn_o,
+        azmn_e, azmn_o, bzmn_e, bzmn_o, czmn_e, czmn_o,
+    ) = radial
 
     _vmec_force_profile_log("assembly_done", assembly_start)
 
@@ -1382,87 +1440,38 @@ def vmec_forces_rz_from_wout_reference_fields(
     pshalf = _pshalf_from_s(s)[:, None, None]
     psqrts = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
 
-    # Scratch arrays (VMEC names: guus, guvs, gvvs, bsqr).
-    guus = guu * pshalf
-    guvs = guv * pshalf
-    gvvs = gvv * pshalf
-
-    armn_e = ohs * jac.zu12 * lu_e
-    azmn_e = -ohs * jac.ru12 * lu_e
-    brmn_e = jac.zs * lu_e
-    bzmn_e = -jac.rs * lu_e
-    bsqr0 = dshalfds * lu_e / jnp.where(pshalf != 0, pshalf, 1.0)
-
-    armn_o = armn_e * pshalf
-    azmn_o = azmn_e * pshalf
-    brmn_o = brmn_e * pshalf
-    bzmn_o = bzmn_e * pshalf
-
-    # Forward-average half-mesh GIJ and shalf-weighted GIJ to integer mesh.
-    guu_i = _avg_forward_half_to_int(guu)
-    gvv_i = _avg_forward_half_to_int(gvv)
-    guus_i = _avg_forward_half_to_int(guus)
-    gvvs_i = _avg_forward_half_to_int(gvvs)
-    guv_i = _avg_forward_half_to_int(guv)
-    guvs_i = _avg_forward_half_to_int(guvs)
-
-    bsqr_s = _sum_forward_half(bsqr0)
-
-    # Even-parity kernels.
-    armn_e = _diff_forward_half(armn_e, lv_e)
-    azmn_e = _diff_forward_half_noavg(azmn_e)
-    brmn_e = _avg_forward_half(brmn_e)
-    bzmn_e = _avg_forward_half(bzmn_e)
-
-    armn_e = armn_e - (gvvs_i * pr1_1 + gvv_i * pr1_0)
-    brmn_e = brmn_e + bsqr_s * pz1_1 - (guus_i * pru_1 + guu_i * pru_0)
-    bzmn_e = bzmn_e - (bsqr_s * pr1_1 + guus_i * pzu_1 + guu_i * pzu_0)
-
-    lv_es = lv_e * pshalf
-    lu_o = dshalfds * lu_e
-
-    # Odd-parity kernels.
-    armn_o, azmn_o, brmn_o, bzmn_o, lu_o = _odd_force_radial_updates(
-        armn_o=armn_o,
-        azmn_o=azmn_o,
-        brmn_o=brmn_o,
-        bzmn_o=bzmn_o,
-        lu_o=lu_o,
-        pzu_0=pzu_0,
-        pru_0=pru_0,
-        bsqr_s=bsqr_s,
-        lv_es=lv_es,
-    )
-
-    ss = (psqrts * psqrts).astype(guu_i.dtype)
-    guu_s = guu_i * ss
-    gvv_s = gvv_i * ss
-
-    armn_o = armn_o - (pzu_1 * lu_o + gvv_s * pr1_1 + gvvs_i * pr1_0)
-    azmn_o = azmn_o + pru_1 * lu_o
-    brmn_o = brmn_o + pz1_1 * lu_o - (guu_s * pru_1 + guus_i * pru_0)
-    bzmn_o = bzmn_o - (pr1_1 * lu_o + guu_s * pzu_1 + guus_i * pzu_0)
-
     lthreed = bool(np.any(np.asarray(static.modes.n) != 0))
-    if lthreed:
-        brmn_e = brmn_e - (guv_i * prv_0 + guvs_i * prv_1)
-        bzmn_e = bzmn_e - (guv_i * pzv_0 + guvs_i * pzv_1)
-        crmn_e = guv_i * pru_0 + gvv_i * prv_0 + gvvs_i * prv_1 + guvs_i * pru_1
-        czmn_e = guv_i * pzu_0 + gvv_i * pzv_0 + gvvs_i * pzv_1 + guvs_i * pzu_1
-        guv_s = guv_i * ss
-        brmn_o = brmn_o - (guvs_i * prv_0 + guv_s * prv_1)
-        bzmn_o = bzmn_o - (guvs_i * pzv_0 + guv_s * pzv_1)
-        crmn_o = guvs_i * pru_0 + gvvs_i * prv_0 + gvv_s * prv_1 + guv_s * pru_1
-        czmn_o = guvs_i * pzu_0 + gvvs_i * pzv_0 + gvv_s * pzv_1 + guv_s * pzu_1
-    else:
-        lamscale = jnp.asarray(lamscale_from_phips(phips, s))
-        if lamscale.ndim == 0:
-            lamscale = jnp.full_like(s, lamscale)
-        lamscale = lamscale[:, None, None]
-        crmn_e = jnp.asarray(lv_es)
-        czmn_e = jnp.asarray(lu_e)
-        crmn_o = -lamscale * jnp.asarray(Lv1)
-        czmn_o = jnp.asarray(lu_o)
+    radial = _assemble_vmec_rz_radial_forces(
+        s=s,
+        ohs=ohs,
+        dshalfds=dshalfds,
+        pshalf=pshalf,
+        psqrts=psqrts,
+        phips=phips,
+        lu_e=lu_e,
+        lv_e=lv_e,
+        guu=guu,
+        guv=guv,
+        gvv=gvv,
+        jac=jac,
+        pr1_0=pr1_0,
+        pr1_1=pr1_1,
+        pz1_1=pz1_1,
+        pru_0=pru_0,
+        pru_1=pru_1,
+        pzu_0=pzu_0,
+        pzu_1=pzu_1,
+        prv_0=prv_0,
+        prv_1=prv_1,
+        pzv_0=pzv_0,
+        pzv_1=pzv_1,
+        Lv1=Lv1,
+        lthreed=bool(lthreed),
+    )
+    (
+        armn_e, armn_o, brmn_e, brmn_o, crmn_e, crmn_o,
+        azmn_e, azmn_o, bzmn_e, bzmn_o, czmn_e, czmn_o,
+    ) = radial
 
     # Build lambda-force kernels (blmn/clmn) using the VMEC formulas but with
     # reference-field inputs.
