@@ -59,6 +59,12 @@ VELOCITY_RESUME_KEYS = {
     "vLss": "lss",
 }
 
+STRICT_STEP_INPUT_ATTRS = "rcc rss zsc zcs lsc lcs rsc rcs zcc zss lcc lss".split()
+STRICT_STEP_OUTPUT_KEYS = (
+    "vRcc_after vRss_after vRsc_after vRcs_after vZsc_after vZcs_after "
+    "vZcc_after vZss_after vLsc_after vLcs_after vLcc_after vLss_after"
+).split()
+
 
 CONTROLLER_RESUME_KEYS = (
     "time_step",
@@ -396,7 +402,7 @@ class StrictMomentumProposal(NamedTuple):
 
     state: Any
     velocities: ResidualVelocityBlocks
-    update_deltas: tuple[Any, ...]
+    update_deltas: tuple[Any, ...] | None
     update_rms_j: Any
     update_rms: float | None
     update_rms_preclip: float | None
@@ -852,6 +858,45 @@ def strict_momentum_update_proposal(
         update_rms=update_rms,
         update_rms_preclip=update_rms_preclip,
         scale=float(scale),
+    )
+
+
+def jit_strict_momentum_update_proposal(
+    *,
+    state: Any, static: Any, velocities: ResidualVelocityBlocks, forces: ResidualVelocityBlocks,
+    dt_eff: float, b1: float, fac: float, force_scale: float, flip_sign: float,
+    max_update_rms: float, need_update_rms: bool, divide_by_scalxc_for_update: bool,
+    free_boundary_enabled: bool, strict_update_step_jit_func: Any,
+) -> StrictMomentumProposal:
+    """Build the strict momentum proposal using the compiled update kernel."""
+
+    step_fn = strict_update_step_jit_func(
+        static,
+        limit_update_rms=False,
+        need_update_rms=need_update_rms,
+        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+        enforce_edge=not bool(free_boundary_enabled),
+    )
+    step_out = step_fn(
+        state,
+        dt_eff,
+        b1,
+        fac,
+        force_scale,
+        flip_sign,
+        *(getattr(velocities, name) for name in STRICT_STEP_INPUT_ATTRS),
+        *(getattr(forces, name) for name in STRICT_STEP_INPUT_ATTRS),
+        max_update_rms,
+    )
+    updated_velocities = ResidualVelocityBlocks(*(step_out[key] for key in STRICT_STEP_OUTPUT_KEYS))
+    update_rms_j = (
+        step_out["update_rms_postclip"]
+        if need_update_rms
+        else jnp.asarray(0.0, dtype=jnp.asarray(updated_velocities.rcc).dtype)
+    )
+    return StrictMomentumProposal(
+        state=step_out["state_post"], velocities=updated_velocities, update_deltas=None,
+        update_rms_j=update_rms_j, update_rms=None, update_rms_preclip=None, scale=1.0,
     )
 
 

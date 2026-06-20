@@ -23,6 +23,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_vmec2000_time_control_restart_update,
     initial_residual_controller_state,
     initial_residual_velocity_state,
+    jit_strict_momentum_update_proposal,
     momentum_update_jax,
     residual_evolve_coefficients,
     scale_velocity_blocks,
@@ -496,6 +497,97 @@ def test_strict_momentum_update_proposal_builds_candidate_and_reports_rms() -> N
         np.testing.assert_allclose(block, 0.2)
     assert result.update_rms == pytest.approx(0.02)
     assert float(np.asarray(result.update_rms_j)) == pytest.approx(result.update_rms)
+
+
+def test_jit_strict_momentum_update_proposal_preserves_vmec_channel_order() -> None:
+    velocities = _blocks(offset=0.0)
+    forces = _blocks(offset=20.0)
+    captured = {}
+
+    def strict_update_step_jit_func(static, **kwargs):
+        captured["static"] = static
+        captured["kwargs"] = kwargs
+
+        def step_fn(*args):
+            captured["args"] = args
+            return {
+                "state_post": "updated-state",
+                "update_rms_postclip": np.asarray(0.125),
+                "vRcc_after": np.asarray([1.0]),
+                "vRss_after": np.asarray([2.0]),
+                "vRsc_after": np.asarray([3.0]),
+                "vRcs_after": np.asarray([4.0]),
+                "vZsc_after": np.asarray([5.0]),
+                "vZcs_after": np.asarray([6.0]),
+                "vZcc_after": np.asarray([7.0]),
+                "vZss_after": np.asarray([8.0]),
+                "vLsc_after": np.asarray([9.0]),
+                "vLcs_after": np.asarray([10.0]),
+                "vLcc_after": np.asarray([11.0]),
+                "vLss_after": np.asarray([12.0]),
+            }
+
+        return step_fn
+
+    result = jit_strict_momentum_update_proposal(
+        state="state",
+        static="static",
+        velocities=velocities,
+        forces=forces,
+        dt_eff=0.2,
+        b1=0.3,
+        fac=0.4,
+        force_scale=0.5,
+        flip_sign=-1.0,
+        max_update_rms=0.6,
+        need_update_rms=True,
+        divide_by_scalxc_for_update=True,
+        free_boundary_enabled=False,
+        strict_update_step_jit_func=strict_update_step_jit_func,
+    )
+
+    assert captured["static"] == "static"
+    assert captured["kwargs"] == {
+        "limit_update_rms": False,
+        "need_update_rms": True,
+        "divide_by_scalxc_for_update": True,
+        "enforce_edge": True,
+    }
+    expected_channels = (
+        velocities.rcc,
+        velocities.rss,
+        velocities.zsc,
+        velocities.zcs,
+        velocities.lsc,
+        velocities.lcs,
+        velocities.rsc,
+        velocities.rcs,
+        velocities.zcc,
+        velocities.zss,
+        velocities.lcc,
+        velocities.lss,
+        forces.rcc,
+        forces.rss,
+        forces.zsc,
+        forces.zcs,
+        forces.lsc,
+        forces.lcs,
+        forces.rsc,
+        forces.rcs,
+        forces.zcc,
+        forces.zss,
+        forces.lcc,
+        forces.lss,
+    )
+    assert captured["args"][:6] == ("state", 0.2, 0.3, 0.4, 0.5, -1.0)
+    for got, expected in zip(captured["args"][6:-1], expected_channels):
+        np.testing.assert_allclose(got, expected)
+    assert captured["args"][-1] == pytest.approx(0.6)
+    assert result.state == "updated-state"
+    assert result.update_deltas is None
+    assert result.update_rms is None
+    assert float(np.asarray(result.update_rms_j)) == pytest.approx(0.125)
+    np.testing.assert_allclose(result.velocities.lss, [12.0])
 
 
 def test_momentum_update_jax_matches_host_momentum_update_np() -> None:

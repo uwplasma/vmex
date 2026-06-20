@@ -117,6 +117,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
     initial_residual_controller_state as _initial_residual_controller_state,
     initial_residual_velocity_state as _initial_residual_velocity_state,
+    jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_trial_evaluation as _strict_trial_evaluation,
@@ -589,7 +590,6 @@ def solve_fixed_boundary_residual_iter(
     )
     max_iter = startup_policy.max_iter
     step_size = startup_policy.step_size
-    precompile_only = startup_policy.precompile_only
     host_update_assembly = startup_policy.host_update_assembly
     adjoint_trace = startup_policy.adjoint_trace
     adjoint_trace_mode = startup_policy.adjoint_trace_mode
@@ -780,7 +780,7 @@ def solve_fixed_boundary_residual_iter(
             jnp_module=jnp,
         )
     except Exception:
-        if bool(precompile_only):
+        if bool(startup_policy.precompile_only):
             return _precompile_only_residual_iter_result(result_type=SolveVmecResidualResult, state=state0)
         raise
     _record_setup_timing("setup_boundary_profiles", _t_setup_boundary_profiles)
@@ -1004,7 +1004,7 @@ def solve_fixed_boundary_residual_iter(
         initial_flip_sign=float(initial_flip_sign),
     )
 
-    if precompile_only:
+    if startup_policy.precompile_only:
         return _precompile_only_residual_iter_result(result_type=SolveVmecResidualResult, state=state0)
 
     _iter_idx_for_dump = partial(_residual_iter_dump_index, jit_forces=bool(jit_forces))
@@ -2878,69 +2878,22 @@ def solve_fixed_boundary_residual_iter(
                 and (not _tree_has_tracer(state))
             )
             if use_jit_strict_update_step:
-                step_fn = _strict_update_step_jit(
-                    static,
-                    limit_update_rms=False,
-                    need_update_rms=need_update_rms,
+                update_proposal = _jit_strict_momentum_update_proposal(
+                    state=state,
+                    static=static,
+                    velocities=velocity_blocks,
+                    forces=force_blocks,
+                    dt_eff=float(dt_eff),
+                    b1=float(b1),
+                    fac=float(fac),
+                    force_scale=float(force_scale),
+                    flip_sign=float(flip_sign),
+                    max_update_rms=float(max_update_rms),
+                    need_update_rms=bool(need_update_rms),
                     divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
-                    enforce_edge=not bool(free_boundary_enabled),
+                    free_boundary_enabled=bool(free_boundary_enabled),
+                    strict_update_step_jit_func=_strict_update_step_jit,
                 )
-                step_out = step_fn(
-                    state,
-                    dt_eff,
-                    b1,
-                    fac,
-                    force_scale,
-                    flip_sign,
-                    velocity_blocks.rcc,
-                    velocity_blocks.rss,
-                    velocity_blocks.zsc,
-                    velocity_blocks.zcs,
-                    velocity_blocks.lsc,
-                    velocity_blocks.lcs,
-                    velocity_blocks.rsc,
-                    velocity_blocks.rcs,
-                    velocity_blocks.zcc,
-                    velocity_blocks.zss,
-                    velocity_blocks.lcc,
-                    velocity_blocks.lss,
-                    frcc_u,
-                    frss_u,
-                    fzsc_u,
-                    fzcs_u,
-                    flsc_u,
-                    flcs_u,
-                    frsc_u,
-                    frcs_u,
-                    fzcc_u,
-                    fzss_u,
-                    flcc_u,
-                    flss_u,
-                    max_update_rms,
-                )
-                state_try = step_out["state_post"]
-                velocity_blocks = _ResidualVelocityBlocks(
-                    step_out["vRcc_after"],
-                    step_out["vRss_after"],
-                    step_out["vRsc_after"],
-                    step_out["vRcs_after"],
-                    step_out["vZsc_after"],
-                    step_out["vZcs_after"],
-                    step_out["vZcc_after"],
-                    step_out["vZss_after"],
-                    step_out["vLsc_after"],
-                    step_out["vLcs_after"],
-                    step_out["vLcc_after"],
-                    step_out["vLss_after"],
-                )
-                update_rms_j = (
-                    step_out["update_rms_postclip"]
-                    if need_update_rms
-                    else jnp.asarray(0.0, dtype=jnp.asarray(velocity_blocks.rcc).dtype)
-                )
-                update_rms = None
-                update_rms_preclip = None
-                scl = 1.0
             else:
                 update_proposal = _strict_momentum_update_proposal(
                     velocities=velocity_blocks,
@@ -2963,13 +2916,13 @@ def solve_fixed_boundary_residual_iter(
                     delta_tuple_from_blocks=_delta_tuple_from_blocks,
                     candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
                 )
-                velocity_blocks = update_proposal.velocities
-                update_rms_j = update_proposal.update_rms_j
-                update_rms = update_proposal.update_rms
-                update_rms_preclip = update_proposal.update_rms_preclip
-                scl = update_proposal.scale
-                update_deltas = update_proposal.update_deltas
-                state_try = update_proposal.state
+            velocity_blocks = update_proposal.velocities
+            update_rms_j = update_proposal.update_rms_j
+            update_rms = update_proposal.update_rms
+            update_rms_preclip = update_proposal.update_rms_preclip
+            scl = update_proposal.scale
+            update_deltas = update_proposal.update_deltas
+            state_try = update_proposal.state
             probe_bad_jacobian = False
             if need_trial_eval:
                 trial_eval = _strict_trial_evaluation(

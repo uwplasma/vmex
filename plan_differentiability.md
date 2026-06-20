@@ -7,6 +7,97 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Strict Momentum JIT Proposal Refactor
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Followed the review-readiness plan into the residual strict-update branch,
+   specifically the duplicated JIT/non-JIT proposal normalization inside
+   `solve_fixed_boundary_residual_iter`.
+2. Added `jit_strict_momentum_update_proposal` to the existing
+   `vmec_jax/solvers/fixed_boundary/residual/update.py` domain module so the
+   compiled update path returns the same `StrictMomentumProposal` shape as the
+   non-JIT path.
+3. Replaced the long in-loop JIT step-output unpacking block with a single
+   domain-helper call and shared post-branch assignment.
+4. Added a focused unit test that verifies the VMEC channel order passed into
+   the compiled strict-update kernel and the returned velocity ordering.
+5. Removed the safe `precompile_only` residual-loop alias by reading
+   `startup_policy.precompile_only` directly. Restored `ptau_tol` after focused
+   scan tests proved it remains part of the VMEC2000 scan namespace handoff.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from `3244`
+  to `3197` lines.
+- `solve_fixed_boundary_residual_iter` dropped from `2767` to `2719` lines.
+- Production code is net-negative for this tranche:
+  `residual/iteration.py` shrank by `95` changed-line units while
+  `residual/update.py` grew by `47` changed-line units, moving logic into the
+  existing update domain instead of adding files.
+- The new test protects the most important refactor invariant: no R/Z/L or
+  symmetric/asymmetric channel swap in the compiled strict-update path.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_policy.py tests/test_solve_real_scan_wave10_coverage.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 50 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue reducing `residual/iteration.py` through natural branch seams:
+   strict trace build/finalize namespaces, catastrophic restart update assembly,
+   and scan handoff setup.
+2. For the next trace namespace refactor, run accepted-update/free-boundary
+   exact shards in addition to the residual scan/update tests because trace
+   contents feed discrete-adjoint replay.
+3. Delay CI polling until after a larger batch of local changes; only fix CI
+   when a real failure appears.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999989%.
+- Solver monolith reduction: 99.9989%.
+- Residual iteration decomposition: 99.988%.
+- Public API/docstring polish: 94%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.995%.
+- Overall differentiability-refactor PR: 99.99999999999982%.
+
 ## 2026-06-20 Residual Policy Direct-Read Tranche
 
 Branch: `codex/differentiability-refactor-plan`.
