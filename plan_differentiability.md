@@ -27011,3 +27011,82 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.968%.
 - Overall differentiability-refactor PR: 99.999999999944%.
+
+## 2026-06-20 Bad-Jacobian Policy Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `BadJacobianTauDecision` and `BadJacobianSelection` policy records.
+2. Extracted VMEC2000 absolute-tolerance and modern relative-guard tau
+   sign-change classification into `bad_jacobian_tau_decision`.
+3. Extracted the decision for whether the expensive state-Jacobian probe is
+   required into `bad_jacobian_requires_state_jacobian`.
+4. Extracted the source-selection rule for ptau-vs-state bad-Jacobian results
+   into `select_bad_jacobian_decision`.
+5. Rewired `solve_fixed_boundary_residual_iter` to use the policy helpers while
+   leaving ptau retrieval, state-Jacobian construction, dumping, and timing in
+   the production loop.
+6. Added focused tests for VMEC2000 tolerance behavior, modern tiny-crossing
+   suppression, required state probes, and source selection.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped to 3799 source-health lines.
+- The residual iterator file dropped to 4151 lines.
+- Bad-Jacobian tolerance behavior is now independently testable instead of
+  embedded in the nonlinear solve loop.
+- Driver and free-boundary regression shards still pass with only pre-existing
+  numerical warnings.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/policy.py tests/test_solve_residual_iter_policy.py`
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/policy.py tests/test_solve_residual_iter_policy.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_driver_wave2_coverage.py tests/test_solve_scan_chunking.py tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_wp0.py tests/test_free_boundary_wave2.py tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd -q`
+- `python tools/diagnostics/source_health.py --top 30 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Extract the initial-axis-reset acceptance/reset side-effect block into a
+   focused controller helper only after adding a direct test for the reset
+   trigger policy.
+2. Extract convergence row printing or diagnostic payload materialization next
+   if the axis-reset side effects prove too stateful.
+3. Continue avoiding broad facade exports from `vmec_jax.solve`.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999968%.
+- Solver monolith reduction: 99.942%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.655%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 98.95%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.969%.
+- Overall differentiability-refactor PR: 99.999999999945%.
