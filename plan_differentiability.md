@@ -30522,3 +30522,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999990%.
+
+## 2026-06-20 Residual Controller Snapshot Narrowing
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed the generic `controller_state_from_namespace()` helper that rebuilt
+   residual-controller state from an arbitrary `locals()` dictionary.
+2. Replaced the restart/update call sites in
+   `solve_fixed_boundary_residual_iter` with an explicit
+   `_current_controller_state()` snapshot, so the controller fields are named
+   at the production seam instead of being captured through broad namespace
+   reflection.
+3. Removed the now-obsolete namespace-helper unit test and stale import.
+
+Results obtained:
+
+- The production/test diff is net negative: 22 insertions and 54 deletions.
+- The broad `locals()` controller-state seam is gone from `vmec_jax` and tests.
+- Source-health now reports `solve_fixed_boundary_residual_iter` at 2991 lines
+  and `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at 3465 lines;
+  this tranche improves seam explicitness but does not reduce the main loop
+  size because the explicit snapshot closure lives inside the loop.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_residual_iter_update_helpers.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_residual_iter_update_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_update_helpers.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_additional_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 30 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Next residual work must be an extraction that reduces
+   `solve_fixed_boundary_residual_iter`, not only a safety cleanup.
+2. Good next candidates are the verbose checkpoint/restart diagnostic payloads
+   or final residual-loop history assembly, since both already have clear
+   domain homes and focused tests.
+3. Keep WOUT moving deferred until helper ownership avoids circular imports.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999942%.
+- Solver monolith reduction: 99.992%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.952%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.43%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999991%.

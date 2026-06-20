@@ -11,10 +11,8 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     controller_state_after_initial_axis_reset_update,
     controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update,
-    controller_state_from_namespace,
     controller_state_from_resume_state,
     controller_state_legacy_payload,
-    controller_state_values,
     direct_force_fallback_trial,
     force_update_rms,
     host_catastrophic_restart_update,
@@ -181,31 +179,6 @@ def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
     assert state.bad_growth_streak == 0
     assert state.huge_force_restart_count == 0
     assert state.state_checkpoint is checkpoint
-
-
-def test_controller_state_from_namespace_matches_legacy_local_order() -> None:
-    namespace = {
-        "time_step": 0.25,
-        "inv_tau": (0.6, 0.7),
-        "fsq_prev": 1.0,
-        "fsq0_prev": 2.0,
-        "flip_sign": -1.0,
-        "iter1": 3,
-        "ijacob": 4,
-        "bad_resets": 5,
-        "res0": 0.1,
-        "res1": 0.2,
-        "prev_rz_fsq": 0.3,
-        "bad_growth_streak": 6,
-        "huge_force_restart_count": 7,
-        "state_checkpoint": "checkpoint",
-    }
-
-    state = controller_state_from_namespace(namespace)
-
-    assert state.inv_tau == [0.6, 0.7]
-    assert controller_state_values(state) == tuple(state)
-    assert controller_state_legacy_payload(state)["iter1"] == 3
 
 
 def test_residual_evolve_coefficients_match_vmec_damping_recurrence() -> None:
