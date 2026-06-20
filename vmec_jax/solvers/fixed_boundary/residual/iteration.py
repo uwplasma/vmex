@@ -195,8 +195,6 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ResidualScanPathHooks,
-    ScanConvergencePredicate,
-    ScanDeviceRuntime,
     dispatch_residual_scan_path,
 )
 from vmec_jax.solvers.fixed_boundary.residual import preconditioner_payload as _precond_payload_facade
@@ -1117,8 +1115,6 @@ def solve_fixed_boundary_residual_iter(
                 scan_fallback_decision=_scan_fallback_decision,
                 scan_fallback_message=_scan_fallback_message,
                 run_accelerated_scan=_run_accelerated_residual_scan,
-                scan_device_runtime_type=ScanDeviceRuntime,
-                scan_convergence_predicate_type=ScanConvergencePredicate,
                 converged_residuals_func=_runtime_converged_residuals_scan_fast,
                 scan_device_ready_recorder=_record_scan_device_ready,
                 get_or_build_scan_runner=_get_or_build_scan_runner,
