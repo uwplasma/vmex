@@ -8,6 +8,7 @@ import pytest
 from vmec_jax.solvers.fixed_boundary.options import validate_residual_iteration_options
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
     append_preconditioned_residual_history,
+    append_residual_iter_step_sample,
     append_zero_update_history_record,
     bad_jacobian_requires_state_jacobian,
     bad_jacobian_tau_decision,
@@ -83,6 +84,53 @@ def test_append_preconditioned_residual_history_keeps_channels_aligned():
         fsql1_history=histories["fsql"],
     )
     assert histories["rz"] == [1.0]
+
+
+def test_append_residual_iter_step_sample_keeps_update_channels_aligned():
+    histories = {
+        "step_history": [],
+        "dt_eff_history": [],
+        "update_rms_history": [],
+        "w_curr_history": [],
+        "w_try_history": [],
+        "w_try_ratio_history": [],
+        "restart_path_history": [],
+    }
+
+    appended = append_residual_iter_step_sample(
+        track_history=True,
+        step=0.125,
+        dt_eff=0.25,
+        update_rms=np.asarray(0.5),
+        w_curr=1.0,
+        w_try=0.75,
+        w_try_ratio=0.75,
+        restart_path="momentum_accept",
+        history_step_sample_lists=histories,
+    )
+
+    assert appended is True
+    assert histories["step_history"] == [0.125]
+    assert histories["dt_eff_history"] == [0.25]
+    assert histories["update_rms_history"][0] == pytest.approx(0.5)
+    assert histories["w_curr_history"] == [1.0]
+    assert histories["w_try_history"] == [0.75]
+    assert histories["w_try_ratio_history"] == [0.75]
+    assert histories["restart_path_history"] == ["momentum_accept"]
+
+    skipped = append_residual_iter_step_sample(
+        track_history=False,
+        step=9.0,
+        dt_eff=9.0,
+        update_rms=9.0,
+        w_curr=9.0,
+        w_try=9.0,
+        w_try_ratio=9.0,
+        restart_path="skip",
+        history_step_sample_lists=histories,
+    )
+    assert skipped is False
+    assert histories["step_history"] == [0.125]
 
 
 def test_append_zero_update_history_record_builds_aligned_converged_row():

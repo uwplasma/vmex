@@ -39,6 +39,7 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
     append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
+    append_residual_iter_step_sample as _append_residual_iter_step_sample,
     append_preconditioned_residual_history as _append_preconditioned_residual_history,
     append_zero_update_history_record as _append_zero_update_history_record,
     bad_jacobian_requires_state_jacobian as _bad_jacobian_requires_state_jacobian,
@@ -103,13 +104,11 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
-    force_update_rms as _force_update_rms,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
-    host_momentum_update_np as _host_momentum_update_np,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
     initial_residual_velocity_state as _initial_residual_velocity_state,
-    momentum_update_jax as _momentum_update_jax,
     scale_velocity_blocks as _scale_velocity_blocks,
+    strict_momentum_update_proposal as _strict_momentum_update_proposal,
     zero_velocity_blocks_like as _zero_velocity_blocks_like,
 )
 from vmec_jax.field import TWOPI
@@ -1318,6 +1317,7 @@ def solve_fixed_boundary_residual_iter(
     _terminal_history_lists = history_lists.terminal_lists(
         free_boundary_enabled=bool(free_boundary_enabled),
     )
+    _step_sample_history_lists = history_lists.step_sample_lists()
 
     r00_last = float("nan")
     z00_last = float("nan")
@@ -3509,100 +3509,34 @@ def solve_fixed_boundary_residual_iter(
                 update_rms_preclip = None
                 scl = 1.0
             else:
-                velocity_blocks = _current_velocity_blocks()
-                force_blocks = _current_force_blocks()
-                if host_update_assembly:
-                    update_result = _host_momentum_update_np(
-                        velocities=velocity_blocks,
-                        forces=force_blocks,
-                        b1=b1,
-                        fac=fac,
-                        force_scale=force_scale,
-                        flip_sign=flip_sign,
-                        dt_eff=dt_eff,
-                        compute_update_rms=need_update_rms,
-                    )
-                else:
-                    update_result = _momentum_update_jax(
-                        velocities=velocity_blocks,
-                        forces=force_blocks,
-                        b1=b1,
-                        fac=fac,
-                        force_scale=force_scale,
-                        flip_sign=flip_sign,
-                        dt_eff=dt_eff,
-                        compute_update_rms=need_update_rms,
-                    )
-                _set_velocity_blocks(update_result.velocities)
-                update_rms_j = (
-                    update_result.update_rms if need_update_rms else jnp.asarray(0.0, dtype=jnp.asarray(vRcc).dtype)
+                update_proposal = _strict_momentum_update_proposal(
+                    velocities=_current_velocity_blocks(),
+                    forces=_current_force_blocks(),
+                    host_update_assembly=bool(host_update_assembly),
+                    need_update_rms=bool(need_update_rms),
+                    materialize_update_rms=(
+                        bool(limit_update_rms)
+                        or bool(backtracking)
+                        or (bool(adjoint_trace) and adjoint_trace_mode == "full")
+                    ),
+                    limit_update_rms=bool(limit_update_rms),
+                    max_update_rms=float(max_update_rms),
+                    b1=float(b1),
+                    fac=float(fac),
+                    force_scale=float(force_scale),
+                    flip_sign=float(flip_sign),
+                    dt_eff=float(dt_eff),
+                    delta_transforms=_physical_delta_transforms,
+                    delta_tuple_from_blocks=_delta_tuple_from_blocks,
+                    candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
                 )
-
-            if not use_jit_strict_update_step:
-                update_rms_host: float | None = None
-
-                def _update_rms_float() -> float:
-                    nonlocal update_rms_host
-                    if update_rms_host is None:
-                        update_rms_host = float(np.asarray(update_rms_j))
-                    return update_rms_host
-
-                if (
-                    bool(limit_update_rms)
-                    or bool(backtracking)
-                    or (bool(adjoint_trace) and adjoint_trace_mode == "full")
-                ):
-                    update_rms = _update_rms_float()
-                else:
-                    update_rms = None
-                update_rms_preclip = update_rms
-                if bool(limit_update_rms) and np.isfinite(update_rms) and (update_rms > max_update_rms):
-                    scl = max_update_rms / max(update_rms, 1e-30)
-                    (vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss) = (
-                        _scale_velocity_blocks(scl, vRcc, vRss, vRsc, vRcs, vZsc, vZcs, vZcc, vZss, vLsc, vLcs, vLcc, vLss)
-                    )
-                    update_rms_j = _force_update_rms(
-                        dt_eff,
-                        vRcc,
-                        vRss,
-                        vRsc,
-                        vRcs,
-                        vZsc,
-                        vZcs,
-                        vZcc,
-                        vZss,
-                        vLsc,
-                        vLcs,
-                        vLcc,
-                        vLss,
-                    )
-                    update_rms_host = float(np.asarray(update_rms_j))
-                    update_rms = update_rms_host
-                else:
-                    scl = 1.0
-
-                update_deltas = _delta_tuple_from_blocks(
-                    dt_eff,
-                    _physical_delta_transforms,
-                    vRcc,
-                    vRss,
-                    vRsc,
-                    vRcs,
-                    vZsc,
-                    vZcs,
-                    vZcc,
-                    vZss,
-                    vLsc,
-                    vLcs,
-                    vLcc,
-                    vLss,
-                    use_numpy_lasym_zeros=bool(host_update_assembly),
-                )
-                state_try = _candidate_state_from_delta_tuple(
-                    update_deltas,
-                    use_numpy_arrays=bool(host_update_assembly),
-                    use_numpy_enforce=bool(host_update_assembly),
-                )
+                _set_velocity_blocks(update_proposal.velocities)
+                update_rms_j = update_proposal.update_rms_j
+                update_rms = update_proposal.update_rms
+                update_rms_preclip = update_proposal.update_rms_preclip
+                scl = update_proposal.scale
+                update_deltas = update_proposal.update_deltas
+                state_try = update_proposal.state
             probe_bad_jacobian = False
             if need_trial_eval:
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
@@ -3770,12 +3704,6 @@ def solve_fixed_boundary_residual_iter(
                     pass
                 timing_stats["update"] += time.perf_counter() - float(t_update_start)
             timing_stats["iterations"] += 1
-            if track_history:
-                step_history.append(float(dt_eff))
-                w_curr_history.append(float(w_curr))
-                w_try_history.append(float(w_try))
-                w_try_ratio_history.append(float(w_try_ratio))
-                restart_path_history.append(str(restart_path))
         else:
             w_curr = fsqr_f + fsqz_f + fsql_f
             non_strict_update = _backtracking_momentum_search(
@@ -3805,13 +3733,22 @@ def solve_fixed_boundary_residual_iter(
             update_rms = non_strict_update.update_rms
             step_status = non_strict_update.step_status
             timing_stats["iterations"] += 1
-            if track_history:
-                restart_reason = "none"
-                step_history.append(dt_eff)
-                w_curr_history.append(float(w_curr))
-                w_try_history.append(float("nan"))
-                w_try_ratio_history.append(float("nan"))
-                restart_path_history.append("non_strict")
+            restart_reason = "none"
+            w_try = float("nan")
+            w_try_ratio = float("nan")
+            restart_path = "non_strict"
+        update_rms_record = update_rms_j if bool(strict_update) else float(update_rms)
+        _append_residual_iter_step_sample(
+            track_history=bool(track_history),
+            step=float(dt_eff),
+            dt_eff=float(dt_eff),
+            update_rms=update_rms_record,
+            w_curr=float(w_curr),
+            w_try=float(w_try),
+            w_try_ratio=float(w_try_ratio),
+            restart_path=str(restart_path),
+            history_step_sample_lists=_step_sample_history_lists,
+        )
         t_iteration_post_update_start = time.perf_counter() if timing_enabled else None
         _dump_residual_evolve_trace(
             dump_evolve_trace=_dump_evolve_trace,
@@ -3845,9 +3782,6 @@ def solve_fixed_boundary_residual_iter(
             static=static,
             iter_idx=int(iter2),
         )
-        if track_history:
-            dt_eff_history.append(float(dt_eff))
-            update_rms_history.append(update_rms_j if bool(strict_update) else float(update_rms))
         if bool(verbose):
             update_rms_print = float(np.asarray(update_rms_j)) if bool(strict_update) else float(update_rms)
         else:

@@ -83,6 +83,18 @@ class DirectForceFallbackTrial(NamedTuple):
     residual: float
 
 
+class StrictMomentumProposal(NamedTuple):
+    """Non-JIT strict momentum proposal and its host bookkeeping scalars."""
+
+    state: Any
+    velocities: ResidualVelocityBlocks
+    update_deltas: tuple[Any, ...]
+    update_rms_j: Any
+    update_rms: float | None
+    update_rms_preclip: float | None
+    scale: float
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -373,6 +385,87 @@ def host_momentum_update_np(
     )
 
 
+def strict_momentum_update_proposal(
+    *,
+    velocities: ResidualVelocityBlocks,
+    forces: ResidualVelocityBlocks,
+    host_update_assembly: bool,
+    need_update_rms: bool,
+    materialize_update_rms: bool,
+    limit_update_rms: bool,
+    max_update_rms: float,
+    b1: float,
+    fac: float,
+    force_scale: float,
+    flip_sign: float,
+    dt_eff: float,
+    delta_transforms: tuple,
+    delta_tuple_from_blocks: Any,
+    candidate_state_from_delta_tuple: Any,
+) -> StrictMomentumProposal:
+    """Build the non-JIT strict momentum candidate state for one iteration."""
+
+    if host_update_assembly:
+        update_result = host_momentum_update_np(
+            velocities=velocities,
+            forces=forces,
+            b1=b1,
+            fac=fac,
+            force_scale=force_scale,
+            flip_sign=flip_sign,
+            dt_eff=dt_eff,
+            compute_update_rms=need_update_rms,
+        )
+    else:
+        update_result = momentum_update_jax(
+            velocities=velocities,
+            forces=forces,
+            b1=b1,
+            fac=fac,
+            force_scale=force_scale,
+            flip_sign=flip_sign,
+            dt_eff=dt_eff,
+            compute_update_rms=need_update_rms,
+        )
+
+    updated_velocities = update_result.velocities
+    update_rms_j = (
+        update_result.update_rms
+        if need_update_rms
+        else jnp.asarray(0.0, dtype=jnp.asarray(updated_velocities.rcc).dtype)
+    )
+    update_rms = float(np.asarray(update_rms_j)) if materialize_update_rms else None
+    update_rms_preclip = update_rms
+    scale = 1.0
+
+    if bool(limit_update_rms) and update_rms is not None and np.isfinite(update_rms) and update_rms > max_update_rms:
+        scale = float(max_update_rms) / max(update_rms, 1.0e-30)
+        updated_velocities = ResidualVelocityBlocks(*scale_velocity_blocks(scale, *updated_velocities))
+        update_rms_j = force_update_rms(dt_eff, *updated_velocities)
+        update_rms = float(np.asarray(update_rms_j))
+
+    update_deltas = delta_tuple_from_blocks(
+        dt_eff,
+        delta_transforms,
+        *updated_velocities,
+        use_numpy_lasym_zeros=bool(host_update_assembly),
+    )
+    state = candidate_state_from_delta_tuple(
+        update_deltas,
+        use_numpy_arrays=bool(host_update_assembly),
+        use_numpy_enforce=bool(host_update_assembly),
+    )
+    return StrictMomentumProposal(
+        state=state,
+        velocities=updated_velocities,
+        update_deltas=update_deltas,
+        update_rms_j=update_rms_j,
+        update_rms=update_rms,
+        update_rms_preclip=update_rms_preclip,
+        scale=float(scale),
+    )
+
+
 def host_catastrophic_restart_update(
     *,
     probe_bad_jacobian: bool,
@@ -606,11 +699,13 @@ _ResidualVelocityBlocks = ResidualVelocityBlocks
 _HostCatastrophicRestartUpdate = HostCatastrophicRestartUpdate
 _HostPreRestartTriggerUpdate = HostPreRestartTriggerUpdate
 _DirectForceFallbackTrial = DirectForceFallbackTrial
+_StrictMomentumProposal = StrictMomentumProposal
 _zero_velocity_blocks_like = zero_velocity_blocks_like
 _scale_velocity_blocks = scale_velocity_blocks
 _host_force_update_rms = host_force_update_rms
 _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
+_strict_momentum_update_proposal = strict_momentum_update_proposal
 _host_catastrophic_restart_update = host_catastrophic_restart_update
 _host_pre_restart_trigger_update = host_pre_restart_trigger_update
 _direct_force_fallback_trial = direct_force_fallback_trial

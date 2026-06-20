@@ -116,6 +116,10 @@ _RESIDUAL_ITER_HISTORY_RECORD_KEYS = (
 _RESIDUAL_ITER_TERMINAL_HISTORY_KEYS = _RESIDUAL_ITER_HISTORY_RECORD_KEYS[7:] + (
     "freeb_nestor_reused_history freeb_nestor_solve_time_history freeb_nestor_sample_time_history"
 ).split()
+_RESIDUAL_ITER_STEP_SAMPLE_HISTORY_KEYS = (
+    "step_history dt_eff_history update_rms_history w_curr_history w_try_history "
+    "w_try_ratio_history restart_path_history"
+).split()
 
 _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS = (
     "include_edge_history zero_m1_history bcovar_update_history "
@@ -258,6 +262,9 @@ class ResidualIterationHistories:
         terminal_lists["free_boundary_enabled"] = bool(free_boundary_enabled)
         return terminal_lists
 
+    def step_sample_lists(self) -> dict[str, Any]:
+        return {key: self.lists[key] for key in _RESIDUAL_ITER_STEP_SAMPLE_HISTORY_KEYS}
+
     def rollback_lists(self) -> tuple[list[Any], ...]:
         return tuple(self.lists[key] for key in _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS)
 
@@ -373,6 +380,32 @@ def append_zero_update_history_record(
         freeb_ivacskip=freeb_ivacskip,
     )
     append_residual_iter_history_record(rec, **history_record_lists)
+    return True
+
+
+def append_residual_iter_step_sample(
+    *,
+    track_history: bool,
+    step: float,
+    dt_eff: float,
+    update_rms: Any,
+    w_curr: float,
+    w_try: float,
+    w_try_ratio: float,
+    restart_path: str,
+    history_step_sample_lists: Mapping[str, Any],
+) -> bool:
+    """Append the residual-update proposal channels for one host iteration."""
+
+    if not bool(track_history):
+        return False
+    history_step_sample_lists["step_history"].append(float(step))
+    history_step_sample_lists["dt_eff_history"].append(float(dt_eff))
+    history_step_sample_lists["update_rms_history"].append(update_rms)
+    history_step_sample_lists["w_curr_history"].append(float(w_curr))
+    history_step_sample_lists["w_try_history"].append(float(w_try))
+    history_step_sample_lists["w_try_ratio_history"].append(float(w_try_ratio))
+    history_step_sample_lists["restart_path_history"].append(str(restart_path))
     return True
 
 

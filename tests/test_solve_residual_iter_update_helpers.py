@@ -15,6 +15,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     initial_residual_velocity_state,
     momentum_update_jax,
     scale_velocity_blocks,
+    strict_momentum_update_proposal,
     zero_velocity_blocks_like,
 )
 
@@ -100,6 +101,42 @@ def test_host_momentum_update_np_can_skip_rms_without_changing_blocks() -> None:
     for with_block, without_block in zip(with_rms.velocities, without_rms.velocities):
         np.testing.assert_allclose(without_block, with_block)
     assert without_rms.update_rms == pytest.approx(0.0)
+
+
+def test_strict_momentum_update_proposal_builds_candidate_and_reports_rms() -> None:
+    velocities = ResidualVelocityBlocks(*(np.zeros((2, 3)) for _ in range(12)))
+    forces = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+
+    def delta_tuple_from_blocks(dt, transforms, *blocks, **_kwargs):
+        return tuple(float(dt) * np.asarray(block) for block in blocks)
+
+    def candidate_state_from_delta_tuple(deltas, **_kwargs):
+        return float(np.mean(deltas[0]))
+
+    result = strict_momentum_update_proposal(
+        velocities=velocities,
+        forces=forces,
+        host_update_assembly=True,
+        need_update_rms=True,
+        materialize_update_rms=True,
+        limit_update_rms=False,
+        max_update_rms=1.0,
+        b1=0.0,
+        fac=1.0,
+        force_scale=0.2,
+        flip_sign=1.0,
+        dt_eff=0.1,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+    )
+
+    assert result.scale == pytest.approx(1.0)
+    assert result.state == pytest.approx(0.02)
+    for block in result.velocities:
+        np.testing.assert_allclose(block, 0.2)
+    assert result.update_rms == pytest.approx(0.02)
+    assert float(np.asarray(result.update_rms_j)) == pytest.approx(result.update_rms)
 
 
 def test_momentum_update_jax_matches_host_momentum_update_np() -> None:
