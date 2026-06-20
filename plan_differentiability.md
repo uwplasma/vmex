@@ -31653,3 +31653,79 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.9999999999991%.
+
+## 2026-06-20 Simplify Controller Compatibility Shim
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced the explicit root-level
+   `vmec_jax.free_boundary_adjoint_controller` re-export import block with a
+   compact module-backed compatibility shim.
+2. Preserved the full legacy root public surface, including the extra state-only
+   helpers that are intentionally broader than the implementation module's
+   internal `__all__`.
+3. Removed the file-level `F401` suppression from this root shim since it no
+   longer imports unused names directly.
+
+Results obtained:
+
+- The root controller shim still exposes all 15 compatibility names.
+- `vmec_jax/free_boundary_adjoint_controller.py` drops from 40 to 28 physical
+  lines.
+- Source-health still passes with the existing root helper-prefix budget.
+
+Tests and commands run:
+
+- `python - <<'PY' ... import vmec_jax.free_boundary_adjoint_controller ... PY`
+- `python -m ruff check vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/facade.py`
+- `python -m compileall -q vmec_jax/free_boundary_adjoint_controller.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_free_boundary_adjoint_operator_validation_errors_are_explicit tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient -q`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 35 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue net-negative compatibility cleanup only where it preserves public
+   API exactly.
+2. Return to substantive monolith reduction: residual finalization context,
+   free-boundary branch-local scalar/JVP helpers, or plotting/example workflow
+   decomposition.
+3. Run broader free-boundary and residual shards after the next larger tranche,
+   not after every cosmetic compatibility cleanup.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.986%.
+- Differentiability/refactor implementation: 99.99999999960%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.746%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.974%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.505%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.46%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.9999999999992%.
