@@ -121,6 +121,55 @@ def dump_xc_with_velocity_blocks(
     )
 
 
+def record_update_state_ready_timing(
+    *,
+    timing_enabled: bool,
+    timing_stats: dict[str, Any],
+    start: float | None,
+    state: Any,
+    perf_counter: Callable[[], float],
+    has_jax: Callable[[], bool],
+    jax_module: Any,
+) -> bool:
+    """Record state-update dispatch and device-ready timing when enabled."""
+
+    if not bool(timing_enabled) or start is None:
+        return False
+    dispatch_done = perf_counter()
+    try:
+        if has_jax():
+            jax_module.block_until_ready(state.Rcos)
+    except Exception:
+        pass
+    ready_done = perf_counter()
+    timing_stats["update_state_ready"] += ready_done - float(dispatch_done)
+    timing_stats["update_state"] += ready_done - float(start)
+    return True
+
+
+def record_update_total_timing(
+    *,
+    timing_enabled: bool,
+    timing_stats: dict[str, Any],
+    start: float | None,
+    state: Any,
+    perf_counter: Callable[[], float],
+    has_jax: Callable[[], bool],
+    jax_module: Any,
+) -> bool:
+    """Record total update timing after synchronizing the updated state."""
+
+    if not bool(timing_enabled) or start is None:
+        return False
+    try:
+        if has_jax():
+            jax_module.block_until_ready(state.Rcos)
+    except Exception:
+        pass
+    timing_stats["update"] += perf_counter() - float(start)
+    return True
+
+
 def resolve_residual_profile_window(
     *,
     profile_window_env: str,

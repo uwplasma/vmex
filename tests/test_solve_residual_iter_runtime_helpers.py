@@ -25,6 +25,8 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _setup_timer_start,
     _vmec_freeb_plascur_from_bcovar,
     dump_xc_with_velocity_blocks,
+    record_update_state_ready_timing,
+    record_update_total_timing,
     resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window,
 )
@@ -256,6 +258,56 @@ def test_dump_xc_with_velocity_blocks_forwards_legacy_velocity_names() -> None:
             "iter_idx": 17,
         }
     ]
+
+
+def test_update_timing_helpers_record_device_ready_and_total_update_time() -> None:
+    class State:
+        Rcos = "leaf"
+
+    class FakeJax:
+        calls = []
+
+        @classmethod
+        def block_until_ready(cls, value):
+            cls.calls.append(value)
+
+    times = iter([10.25, 10.75, 12.0])
+    stats = {"update_state_ready": 0.0, "update_state": 0.0, "update": 0.0}
+
+    assert record_update_state_ready_timing(
+        timing_enabled=True,
+        timing_stats=stats,
+        start=10.0,
+        state=State(),
+        perf_counter=lambda: next(times),
+        has_jax=lambda: True,
+        jax_module=FakeJax,
+    )
+    assert stats["update_state_ready"] == pytest.approx(0.5)
+    assert stats["update_state"] == pytest.approx(0.75)
+    assert FakeJax.calls == ["leaf"]
+
+    assert record_update_total_timing(
+        timing_enabled=True,
+        timing_stats=stats,
+        start=11.0,
+        state=State(),
+        perf_counter=lambda: next(times),
+        has_jax=lambda: True,
+        jax_module=FakeJax,
+    )
+    assert stats["update"] == pytest.approx(1.0)
+    assert FakeJax.calls == ["leaf", "leaf"]
+
+    assert not record_update_total_timing(
+        timing_enabled=False,
+        timing_stats=stats,
+        start=11.0,
+        state=State(),
+        perf_counter=lambda: pytest.fail("disabled timing should not sample the clock"),
+        has_jax=lambda: True,
+        jax_module=FakeJax,
+    )
 
 
 def test_ptau_dump_enabled_requires_env_and_directory():

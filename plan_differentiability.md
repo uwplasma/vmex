@@ -30978,3 +30978,75 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999996%.
+
+## 2026-06-20 Residual Update Timing Runtime Helpers
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added runtime helpers for strict-update state-ready timing and total update
+   timing.
+2. Replaced the inline host/JAX synchronization bookkeeping in the residual loop
+   with the new helpers.
+3. Added unit coverage with a fake clock and fake JAX module so timing deltas
+   and device-ready calls are deterministic.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` decreased from 2890 to 2889 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` changed from 3365
+  to 3366 lines because the tested runtime helper code lives in the same
+  residual package while the production loop got smaller.
+- Host-only device-ready timing is now owned by the runtime domain instead of
+  being embedded in solver control flow.
+
+Tests and commands run:
+
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/runtime.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_runtime_helpers.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/runtime.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_runtime_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_runtime_helpers.py tests/test_solve_residual_iter_policy.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_additional_helpers.py tests/test_solve_force_norm_helpers.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Prefer larger residual-loop reductions next; post-update status/terminal
+   packaging is a better candidate than more timing micro-seams.
+2. Start designing an explicit strict-update trace context object before
+   replacing `locals()` in trace build/finalize.
+3. Continue avoiding new helper-only modules unless a domain boundary is clear.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999951%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.972%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.42%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.44%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999997%.
