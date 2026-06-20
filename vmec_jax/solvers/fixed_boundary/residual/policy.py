@@ -182,37 +182,6 @@ _RESIDUAL_ITER_ALL_HISTORY_KEYS = tuple(
     )
 )
 
-_RESIDUAL_ITER_SOLVER_HISTORY_GROUPS = (
-    ("w_history", "fsqr2_history", "fsqz2_history", "fsql2_history"),
-    ("r00_history", "z00_history", "wb_history", "wp_history", "w_vmec_history"),
-    ("fsqr1_history", "fsqz1_history", "fsql1_history", "fsq1_history"),
-    ("rz_norm_history", "f_norm1_history", "gcr2_p_history", "gcz2_p_history", "gcl2_p_history"),
-    ("step_status_history", "restart_reason_history", "pre_restart_reason_history"),
-    ("time_step_history", "res0_history", "res1_history", "fsq_prev_history"),
-    ("bad_growth_streak_history", "iter1_history", "iter2_history"),
-    ("include_edge_history", "zero_m1_history"),
-    ("freeb_ivac_history", "freeb_ivacskip_history", "freeb_full_update_history"),
-    (
-        "freeb_nestor_reused_history",
-        "freeb_nestor_source_reused_history",
-        "freeb_nestor_provider_allows_source_reuse_history",
-        "freeb_nestor_bnormal_rms_history",
-        "freeb_nestor_gsource_rms_history",
-        "freeb_nestor_bsqvac_rms_history",
-        "freeb_nestor_solve_time_history",
-        "freeb_nestor_sample_time_history",
-        "freeb_nestor_trial_reused_history",
-        "freeb_nestor_trial_solve_time_history",
-        "freeb_nestor_trial_sample_time_history",
-        "freeb_nestor_trial_failed_history",
-    ),
-    ("dt_eff_history", "update_rms_history", "w_curr_history", "w_try_history", "w_try_ratio_history"),
-    ("restart_path_history", "adjoint_step_trace_history"),
-    ("min_tau_history", "max_tau_history", "bad_jacobian_history"),
-    ("grad_rms_history", "step_history"),
-)
-
-
 def _empty_residual_iter_history_lists() -> dict[str, list[Any]]:
     return {key: [] for key in _RESIDUAL_ITER_ALL_HISTORY_KEYS}
 
@@ -228,9 +197,6 @@ class ResidualIterationHistories:
 
     def many(self, *keys: str) -> tuple[list[Any], ...]:
         return tuple(self.lists[key] for key in keys)
-
-    def solver_alias_groups(self) -> tuple[tuple[list[Any], ...], ...]:
-        return tuple(self.many(*group) for group in _RESIDUAL_ITER_SOLVER_HISTORY_GROUPS)
 
     def record_lists(self, *, free_boundary_enabled: bool) -> dict[str, Any]:
         record_lists = {key: self.lists[key] for key in _RESIDUAL_ITER_HISTORY_RECORD_KEYS}

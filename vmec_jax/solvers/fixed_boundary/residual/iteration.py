@@ -1234,35 +1234,39 @@ def solve_fixed_boundary_residual_iter(
     )
 
     history_lists = _new_residual_iter_histories()
+    w_history, fsqr2_history, fsqz2_history, fsql2_history = history_lists.many(
+        "w_history", "fsqr2_history", "fsqz2_history", "fsql2_history"
+    )
+    r00_history, z00_history, wb_history, wp_history, w_vmec_history = history_lists.many(
+        "r00_history", "z00_history", "wb_history", "wp_history", "w_vmec_history"
+    )
+    include_edge_history, zero_m1_history = history_lists.many("include_edge_history", "zero_m1_history")
     (
-        (w_history, fsqr2_history, fsqz2_history, fsql2_history),
-        (r00_history, z00_history, wb_history, wp_history, w_vmec_history),
-        (fsqr1_history, fsqz1_history, fsql1_history, fsq1_history),
-        (rz_norm_history, f_norm1_history, gcr2_p_history, gcz2_p_history, gcl2_p_history),
-        (step_status_history, restart_reason_history, pre_restart_reason_history),
-        (time_step_history, res0_history, res1_history, fsq_prev_history),
-        (bad_growth_streak_history, iter1_history, iter2_history),
-        (include_edge_history, zero_m1_history),
-        (freeb_ivac_history, freeb_ivacskip_history, freeb_full_update_history),
-        (
-        freeb_nestor_reused_history,
         freeb_nestor_source_reused_history,
         freeb_nestor_provider_allows_source_reuse_history,
         freeb_nestor_bnormal_rms_history,
         freeb_nestor_gsource_rms_history,
         freeb_nestor_bsqvac_rms_history,
-        freeb_nestor_solve_time_history,
-        freeb_nestor_sample_time_history,
         freeb_nestor_trial_reused_history,
         freeb_nestor_trial_solve_time_history,
         freeb_nestor_trial_sample_time_history,
         freeb_nestor_trial_failed_history,
-        ),
-        (dt_eff_history, update_rms_history, w_curr_history, w_try_history, w_try_ratio_history),
-        (restart_path_history, adjoint_step_trace_history),
-        (min_tau_history, max_tau_history, bad_jacobian_history),
-        (grad_rms_history, step_history),
-    ) = history_lists.solver_alias_groups()
+    ) = history_lists.many(
+        "freeb_nestor_source_reused_history",
+        "freeb_nestor_provider_allows_source_reuse_history",
+        "freeb_nestor_bnormal_rms_history",
+        "freeb_nestor_gsource_rms_history",
+        "freeb_nestor_bsqvac_rms_history",
+        "freeb_nestor_trial_reused_history",
+        "freeb_nestor_trial_solve_time_history",
+        "freeb_nestor_trial_sample_time_history",
+        "freeb_nestor_trial_failed_history",
+    )
+    adjoint_step_trace_history = history_lists["adjoint_step_trace_history"]
+    min_tau_history, max_tau_history, bad_jacobian_history = history_lists.many(
+        "min_tau_history", "max_tau_history", "bad_jacobian_history"
+    )
+    grad_rms_history, step_history = history_lists.many("grad_rms_history", "step_history")
 
     def _append_badjac_history(min_tau_value: float, max_tau_value: float, bad_flag: bool) -> None:
         if track_history:
@@ -1387,9 +1391,6 @@ def solve_fixed_boundary_residual_iter(
     precond_cache = _PreconditionerCacheState()
     cache_constraint_rcon0 = None
     cache_constraint_zcon0 = None
-
-    def _clear_preconditioner_cache_locals() -> None:
-        precond_cache.clear()
 
     bcovar_update_history = history_lists["bcovar_update_history"]
     _rollback_history_lists = history_lists.rollback_lists()
@@ -1535,7 +1536,7 @@ def solve_fixed_boundary_residual_iter(
     res1 = float(axis_setup.res1)
     prev_rz_fsq = float(axis_setup.prev_rz_fsq)
     if axis_setup.reset_applied:
-        _clear_preconditioner_cache_locals()
+        precond_cache.clear()
         cache_constraint_rcon0 = None
         cache_constraint_zcon0 = None
 
@@ -2705,7 +2706,7 @@ def solve_fixed_boundary_residual_iter(
                     _zero_primary_velocity_blocks()
                     axis_reset_done = True
                     freeb_controls_cached = None
-                    _clear_preconditioner_cache_locals()
+                    precond_cache.clear()
                     _pop_iteration_histories()
                     # VMEC restarts the iteration after axis reset without
                     # advancing the iteration counter. Emulate that by
@@ -2774,7 +2775,7 @@ def solve_fixed_boundary_residual_iter(
                     step_status = restart_update.step_status
                     restart_reason = restart_update.restart_reason
                     freeb_controls_cached = None
-                    _clear_preconditioner_cache_locals()
+                    precond_cache.clear()
                     force_bcovar_update = True
                     _append_current_zero_update_history(
                         restart_path=restart_update.restart_path,
@@ -2859,7 +2860,7 @@ def solve_fixed_boundary_residual_iter(
                 time_step_iter = pre_restart_update.time_step_iter
                 step_status = pre_restart_update.step_status
                 freeb_controls_cached = None
-                _clear_preconditioner_cache_locals()
+                precond_cache.clear()
                 if bool(vmec2000_control):
                     force_bcovar_update = True
                 _append_current_zero_update_history(
@@ -3200,7 +3201,7 @@ def solve_fixed_boundary_residual_iter(
                     freeb_controls_cached = None
                     update_rms = restart_update.update_rms
                     if bool(clear_cache_after_catastrophic):
-                        _clear_preconditioner_cache_locals()
+                        precond_cache.clear()
             _record_update_state_ready_timing(
                 timing_enabled=bool(timing_enabled),
                 timing_stats=timing_stats,
@@ -3298,7 +3299,10 @@ def solve_fixed_boundary_residual_iter(
             iter_idx=int(iter2),
         )
         update_rms_print = _residual_update_rms_for_print(
-            verbose=bool(verbose), strict_update=bool(strict_update), update_rms_j=update_rms_j, update_rms=update_rms
+            verbose=bool(verbose),
+            strict_update=bool(strict_update),
+            update_rms_j=update_rms_j if bool(strict_update) else None,
+            update_rms=update_rms,
         )
         _print_residual_iteration_update_status(
             verbose=bool(verbose),
