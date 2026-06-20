@@ -214,6 +214,21 @@ class WoutNyquistFieldPayload(NamedTuple):
     bmns: np.ndarray
 
 
+class WoutNyquistSourcePayload(NamedTuple):
+    """Initial Bsub/Bsup sources and full-mesh Bsubs used for Nyquist output."""
+
+    bsupu_out: np.ndarray
+    bsupv_out: np.ndarray
+    bsubu_out: np.ndarray
+    bsubv_out: np.ndarray
+    bsubu_raw: np.ndarray
+    bsubv_raw: np.ndarray
+    bsubu_diag: np.ndarray
+    bsubv_diag: np.ndarray
+    bsubv_lasym_asym_source: np.ndarray | None
+    bsubs_full: np.ndarray
+
+
 def select_bsubuv_diagnostic_fields(
     *,
     bc: Any,
@@ -1425,6 +1440,158 @@ def compute_minimal_wout_derived_profiles(
     )
 
 
+def _prepare_nyquist_sources_and_bsubs(
+    *,
+    state: Any,
+    static: Any,
+    cfg: Any,
+    bc: Any,
+    k_force: Any | None,
+    use_force_bss: bool,
+    bsupu_bss: np.ndarray,
+    bsupv_bss: np.ndarray,
+    ru12_bss: np.ndarray | None,
+    zu12_bss: np.ndarray | None,
+    rs_bss: np.ndarray | None,
+    zs_bss: np.ndarray | None,
+    crmn_e_sym: np.ndarray | None,
+    czmn_e_sym: np.ndarray | None,
+    geom_bss: dict[str, Any],
+    field_options: WoutMinimalFieldOptions,
+    trig: Any,
+    s: np.ndarray,
+    ntor: int,
+    lasym: bool,
+    timing_enabled: bool,
+    timing: dict[str, float],
+    force_sym_func: Any,
+    apply_bsubv_equif_correction_func: Any,
+    compute_bsubs_half_mesh_func: Any,
+    bsubs_full_mesh_for_wrout_func: Any,
+    dump_bsub_sources_func: Any,
+) -> WoutNyquistSourcePayload:
+    """Select raw/diagnostic field sources and compute full-mesh Bsubs."""
+
+    bsupu_out = np.asarray(bc.bsupu)
+    bsupv_out = np.asarray(bc.bsupv)
+    if use_force_bss and (k_force is not None) and hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
+        bsupu_out = crmn_e_sym if crmn_e_sym is not None else force_sym_func(k_force.crmn_e, "crs")
+        bsupv_out = czmn_e_sym if czmn_e_sym is not None else force_sym_func(k_force.czmn_e, "czs")
+
+    bsubu_out = np.asarray(bc.bsubu).copy()
+    bsubv_out = np.asarray(bc.bsubv).copy()
+    bsubu_raw = bsubu_out.copy()
+    bsubv_raw = bsubv_out.copy()
+    bsubv_lasym_asym_source = None
+    if bool(lasym) and hasattr(bc, "bsubv_e"):
+        bsubv_lasym_asym_source = apply_bsubv_equif_correction_func(
+            bsubv=np.asarray(getattr(bc, "bsubv"), dtype=float),
+            bsubv_e=np.asarray(getattr(bc, "bsubv_e"), dtype=float),
+            trig=trig,
+        )
+    dump_bsub_sources_func(bc=bc)
+
+    bsubu_diag, bsubv_diag = select_bsubuv_diagnostic_fields(
+        bc=bc,
+        bsubu_out=bsubu_out,
+        bsubv_out=bsubv_out,
+        field_options=field_options,
+        trig=trig,
+        apply_bsubv_equif_correction_func=apply_bsubv_equif_correction_func,
+    )
+    t_bsubs = time.perf_counter() if timing_enabled else None
+    bsubs_half = compute_bsubs_half_mesh_func(
+        state=state,
+        geom_modes=static.modes,
+        s=np.asarray(s, dtype=float),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+        lthreed=bool(ntor > 0),
+        lasym=bool(lasym),
+        bsupu=bsupu_bss,
+        bsupv=bsupv_bss,
+        trig=trig,
+        geom=geom_bss,
+        jac_half=bc.jac,
+        force_rs=rs_bss,
+        force_zs=zs_bss,
+        force_ru12=ru12_bss,
+        force_zu12=zu12_bss,
+        apply_scalxc=field_options.apply_bss_scalxc,
+    )
+    if t_bsubs is not None:
+        timing["bsubs_half_s"] = time.perf_counter() - t_bsubs
+    return WoutNyquistSourcePayload(
+        bsupu_out=np.asarray(bsupu_out),
+        bsupv_out=np.asarray(bsupv_out),
+        bsubu_out=np.asarray(bsubu_out),
+        bsubv_out=np.asarray(bsubv_out),
+        bsubu_raw=np.asarray(bsubu_raw),
+        bsubv_raw=np.asarray(bsubv_raw),
+        bsubu_diag=np.asarray(bsubu_diag),
+        bsubv_diag=np.asarray(bsubv_diag),
+        bsubv_lasym_asym_source=bsubv_lasym_asym_source,
+        bsubs_full=np.asarray(bsubs_full_mesh_for_wrout_func(bsubs_half=bsubs_half)),
+    )
+
+
+def _build_nyquist_field_payload(
+    *,
+    sources: WoutNyquistSourcePayload,
+    bsubu_out: np.ndarray,
+    bsubv_out: np.ndarray,
+    bsubu_diag: np.ndarray,
+    bsubv_diag: np.ndarray,
+    bsubu_phys: np.ndarray | None,
+    bsubv_phys: np.ndarray | None,
+    nyq: tuple[Any, ...],
+) -> WoutNyquistFieldPayload:
+    """Package final Nyquist coefficients without obscuring the assembly path."""
+
+    (
+        gmnc,
+        gmns,
+        bsupumnc,
+        bsupumns,
+        bsupvmnc,
+        bsupvmns,
+        bsubumnc,
+        bsubumns,
+        bsubvmnc,
+        bsubvmns,
+        bsubsmns,
+        bsubsmnc,
+        bmnc,
+        bmns,
+    ) = nyq
+    return WoutNyquistFieldPayload(
+        bsupu_out=np.asarray(sources.bsupu_out),
+        bsupv_out=np.asarray(sources.bsupv_out),
+        bsubu_out=np.asarray(bsubu_out),
+        bsubv_out=np.asarray(bsubv_out),
+        bsubu_raw=np.asarray(sources.bsubu_raw),
+        bsubv_raw=np.asarray(sources.bsubv_raw),
+        bsubu_diag=np.asarray(bsubu_diag),
+        bsubv_diag=np.asarray(bsubv_diag),
+        bsubu_phys=bsubu_phys,
+        bsubv_phys=bsubv_phys,
+        bsubs_full=np.asarray(sources.bsubs_full),
+        gmnc=np.asarray(gmnc),
+        gmns=np.asarray(gmns),
+        bsupumnc=np.asarray(bsupumnc),
+        bsupumns=np.asarray(bsupumns),
+        bsupvmnc=np.asarray(bsupvmnc),
+        bsupvmns=np.asarray(bsupvmns),
+        bsubumnc=np.asarray(bsubumnc),
+        bsubumns=np.asarray(bsubumns),
+        bsubvmnc=np.asarray(bsubvmnc),
+        bsubvmns=np.asarray(bsubvmns),
+        bsubsmns=np.asarray(bsubsmns),
+        bsubsmnc=np.asarray(bsubsmnc),
+        bmnc=np.asarray(bmnc),
+        bmns=np.asarray(bmns),
+    )
+
+
 def prepare_minimal_wout_nyquist_fields(
     *,
     state: Any,
@@ -1476,61 +1643,43 @@ def prepare_minimal_wout_nyquist_fields(
     """Assemble WOUT Nyquist fields and selected Bsub diagnostics."""
 
     t0 = time.perf_counter() if timing_enabled else None
-    bsupu_out = np.asarray(bc.bsupu)
-    bsupv_out = np.asarray(bc.bsupv)
-    if use_force_bss and (k_force is not None):
-        if hasattr(k_force, "crmn_e") and hasattr(k_force, "czmn_e"):
-            if crmn_e_sym is None:
-                crmn_e_sym = force_sym_func(k_force.crmn_e, "crs")
-            if czmn_e_sym is None:
-                czmn_e_sym = force_sym_func(k_force.czmn_e, "czs")
-            bsupu_out = crmn_e_sym
-            bsupv_out = czmn_e_sym
-
-    bsubu_out = np.asarray(bc.bsubu).copy()
-    bsubv_out = np.asarray(bc.bsubv).copy()
-    bsubu_raw = bsubu_out.copy()
-    bsubv_raw = bsubv_out.copy()
-    bsubv_lasym_asym_source = None
-    bsubv_lasym_asym_filter_u = None
-    if bool(lasym) and hasattr(bc, "bsubv_e"):
-        bsubv_lasym_asym_source = apply_bsubv_equif_correction_func(
-            bsubv=np.asarray(getattr(bc, "bsubv"), dtype=float),
-            bsubv_e=np.asarray(getattr(bc, "bsubv_e"), dtype=float),
-            trig=trig,
-        )
-    dump_bsub_sources_func(bc=bc)
-
-    bsubu_diag, bsubv_diag = select_bsubuv_diagnostic_fields(
+    sources = _prepare_nyquist_sources_and_bsubs(
+        state=state,
+        static=static,
+        cfg=cfg,
         bc=bc,
-        bsubu_out=bsubu_out,
-        bsubv_out=bsubv_out,
+        k_force=k_force,
+        use_force_bss=use_force_bss,
+        bsupu_bss=bsupu_bss,
+        bsupv_bss=bsupv_bss,
+        ru12_bss=ru12_bss,
+        zu12_bss=zu12_bss,
+        rs_bss=rs_bss,
+        zs_bss=zs_bss,
+        crmn_e_sym=crmn_e_sym,
+        czmn_e_sym=czmn_e_sym,
+        geom_bss=geom_bss,
         field_options=field_options,
         trig=trig,
-        apply_bsubv_equif_correction_func=apply_bsubv_equif_correction_func,
-    )
-    t_bsubs = time.perf_counter() if timing_enabled else None
-    bsubs_half = compute_bsubs_half_mesh_func(
-        state=state,
-        geom_modes=static.modes,
-        s=np.asarray(s, dtype=float),
-        lconm1=bool(getattr(cfg, "lconm1", True)),
-        lthreed=bool(ntor > 0),
+        s=s,
+        ntor=int(ntor),
         lasym=bool(lasym),
-        bsupu=bsupu_bss,
-        bsupv=bsupv_bss,
-        trig=trig,
-        geom=geom_bss,
-        jac_half=bc.jac,
-        force_rs=rs_bss,
-        force_zs=zs_bss,
-        force_ru12=ru12_bss,
-        force_zu12=zu12_bss,
-        apply_scalxc=field_options.apply_bss_scalxc,
+        timing_enabled=bool(timing_enabled),
+        timing=timing,
+        force_sym_func=force_sym_func,
+        apply_bsubv_equif_correction_func=apply_bsubv_equif_correction_func,
+        compute_bsubs_half_mesh_func=compute_bsubs_half_mesh_func,
+        bsubs_full_mesh_for_wrout_func=bsubs_full_mesh_for_wrout_func,
+        dump_bsub_sources_func=dump_bsub_sources_func,
     )
-    if t_bsubs is not None:
-        timing["bsubs_half_s"] = time.perf_counter() - t_bsubs
-    bsubs_full = bsubs_full_mesh_for_wrout_func(bsubs_half=bsubs_half)
+    bsupu_out = np.asarray(sources.bsupu_out)
+    bsupv_out = np.asarray(sources.bsupv_out)
+    bsubu_out = np.asarray(sources.bsubu_out)
+    bsubv_out = np.asarray(sources.bsubv_out)
+    bsubu_diag = np.asarray(sources.bsubu_diag)
+    bsubv_diag = np.asarray(sources.bsubv_diag)
+    bsubv_lasym_asym_source = sources.bsubv_lasym_asym_source
+    bsubv_lasym_asym_filter_u = None
 
     skip_bsub_filter = field_options.skip_bsub_filter
     if bool(lasym):
@@ -1576,7 +1725,7 @@ def prepare_minimal_wout_nyquist_fields(
             bsubv=bsubv_out,
             bsupu=bsupu_out,
             bsupv=bsupv_out,
-            bsubs=bsubs_full,
+            bsubs=sources.bsubs_full,
         )
         nyq = lasym_nyquist_coefficients_func(
             bc=bc,
@@ -1584,7 +1733,7 @@ def prepare_minimal_wout_nyquist_fields(
             bsubv_out=np.asarray(bsubv_out, dtype=float),
             bsupu_out=np.asarray(bsupu_out, dtype=float),
             bsupv_out=np.asarray(bsupv_out, dtype=float),
-            bsubs_full=np.asarray(bsubs_full, dtype=float),
+            bsubs_full=np.asarray(sources.bsubs_full, dtype=float),
             bsubv_asym_source=bsubv_lasym_asym_source,
             pres=np.asarray(pres, dtype=float),
             ns=int(ns),
@@ -1599,29 +1748,13 @@ def prepare_minimal_wout_nyquist_fields(
             bc=bc,
             bsubu_out=np.asarray(bsubu_out, dtype=float),
             bsubv_out=np.asarray(bsubv_out, dtype=float),
-            bsubs_full=np.asarray(bsubs_full, dtype=float),
+            bsubs_full=np.asarray(sources.bsubs_full, dtype=float),
             pres=np.asarray(pres, dtype=float),
             ns=int(ns),
             modes=nyq_modes,
             trig=trig,
             use_loop=bool(field_options.symmetric_wrout_loop),
         )
-    (
-        gmnc,
-        gmns,
-        bsupumnc,
-        bsupumns,
-        bsupvmnc,
-        bsupvmns,
-        bsubumnc,
-        bsubumns,
-        bsubvmnc,
-        bsubvmns,
-        bsubsmns,
-        bsubsmnc,
-        bmnc,
-        bmns,
-    ) = nyq
     if t0 is not None:
         timing["nyquist_coeffs_s"] = time.perf_counter() - t0
 
@@ -1635,6 +1768,7 @@ def prepare_minimal_wout_nyquist_fields(
             lasym=bool(lasym),
         )
         basis_nyq = build_helical_basis_func(nyq_modes, grid_nyq, cache=True)
+        _, _, _, _, _, _, bsubumnc, bsubumns, bsubvmnc, bsubvmns, *_ = nyq
         bsubu_phys = np.asarray(eval_fourier_func(bsubumnc, bsubumns, basis_nyq))
         bsubv_phys = np.asarray(eval_fourier_func(bsubvmnc, bsubvmns, basis_nyq))
 
@@ -1661,38 +1795,25 @@ def prepare_minimal_wout_nyquist_fields(
     bsubv_out = np.asarray(bsubv_diag, dtype=float)
     t_bsub_coeffs = time.perf_counter() if timing_enabled else None
     if not bool(lasym):
+        nyq_list = list(nyq)
         bsubumnc = nyquist_cos_coeffs_func(f=bsubu_out, modes=nyq_modes, trig=trig)
         bsubvmnc = nyquist_cos_coeffs_func(f=bsubv_out, modes=nyq_modes, trig=trig)
         zero_first_surface_func(bsubumnc, bsubvmnc)
+        nyq_list[6] = bsubumnc
+        nyq_list[8] = bsubvmnc
+        nyq = tuple(nyq_list)
     if t_bsub_coeffs is not None:
         timing["bsub_coeffs_s"] = time.perf_counter() - t_bsub_coeffs
 
-    return WoutNyquistFieldPayload(
-        bsupu_out=np.asarray(bsupu_out),
-        bsupv_out=np.asarray(bsupv_out),
-        bsubu_out=np.asarray(bsubu_out),
-        bsubv_out=np.asarray(bsubv_out),
-        bsubu_raw=np.asarray(bsubu_raw),
-        bsubv_raw=np.asarray(bsubv_raw),
-        bsubu_diag=np.asarray(bsubu_diag),
-        bsubv_diag=np.asarray(bsubv_diag),
+    return _build_nyquist_field_payload(
+        sources=sources,
+        bsubu_out=bsubu_out,
+        bsubv_out=bsubv_out,
+        bsubu_diag=bsubu_diag,
+        bsubv_diag=bsubv_diag,
         bsubu_phys=bsubu_phys,
         bsubv_phys=bsubv_phys,
-        bsubs_full=np.asarray(bsubs_full),
-        gmnc=np.asarray(gmnc),
-        gmns=np.asarray(gmns),
-        bsupumnc=np.asarray(bsupumnc),
-        bsupumns=np.asarray(bsupumns),
-        bsupvmnc=np.asarray(bsupvmnc),
-        bsupvmns=np.asarray(bsupvmns),
-        bsubumnc=np.asarray(bsubumnc),
-        bsubumns=np.asarray(bsubumns),
-        bsubvmnc=np.asarray(bsubvmnc),
-        bsubvmns=np.asarray(bsubvmns),
-        bsubsmns=np.asarray(bsubsmns),
-        bsubsmnc=np.asarray(bsubsmnc),
-        bmnc=np.asarray(bmnc),
-        bmns=np.asarray(bmns),
+        nyq=nyq,
     )
 
 
