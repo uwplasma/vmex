@@ -445,7 +445,6 @@ figures under `docs/_static/figures` are expected to stay compressed below
 - `compare_omnigenity_qi_objective.py`: compare VMEC-JAX QI metrics with the legacy omnigenity implementation.
 - `compare_omnigenity_qs_mode1.py`: compare low-mode quasisymmetry optimization components.
 - `compare_qs_policy_matrix.py`: compare policy choices across direct/continuation and ESS/non-ESS lanes.
-- `target_iota_aspect_volume.py`, `target_iota_volume.py`, `explicit_target_iota_volume.py`, and `implicit_target_iota_volume.py`: compact historical examples for API comparison.
 
 ## Profiling And Test Checks
 

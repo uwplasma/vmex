@@ -1741,9 +1741,6 @@ Source files
        interval scans and residual-block timings.
    * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
-   * - ``examples/optimization/target_iota_aspect_volume.py``
-     - Simpler optimisation targeting iota, aspect, volume.
-
 Running the QH example
 -----------------------
 

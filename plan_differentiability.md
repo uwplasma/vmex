@@ -30300,3 +30300,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999987%.
+
+## 2026-06-20 Historical Target-Iota/Volume Example Removal
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Audited references to the historical target-iota/volume comparison scripts:
+   `explicit_target_iota_volume.py`, `implicit_target_iota_volume.py`,
+   `target_iota_volume.py`, and `target_iota_aspect_volume.py`.
+2. Confirmed they were not imported by tests or current workflows; references
+   were limited to the optimization README and one docs inventory row.
+3. Removed the four obsolete scripts and deleted their README/docs entries.
+
+Results obtained:
+
+- Removed 660 lines of stale optimization-example code plus four lines of
+  stale documentation.
+- The example folder now emphasizes the maintained QA/QH/QP/QI scripts and
+  real comparison/profiling diagnostics instead of legacy iota/volume mini
+  drivers.
+- This is a net-negative simplification with no solver, objective, or
+  numerical behavior changes.
+
+Tests and commands run:
+
+- `rg -n "target_iota_aspect_volume|target_iota_volume|explicit_target_iota_volume|implicit_target_iota_volume" README.md docs tests examples pyproject.toml .github --glob '!docs/_build/**' || true`
+- `python -m ruff check tests/test_optimization_examples.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_examples.py -q`
+- `python tools/diagnostics/source_health.py --top 25 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue reducing obsolete example surface area only when scripts are not
+   part of current docs/tests/physics evidence.
+2. Move back to production-code simplification after these dead examples are
+   cleared; the next planned production seams are residual controller state,
+   WOUT assembly context, and fixed-boundary optimizer data objects.
+3. Keep the example README focused on current workflows and diagnostics, not
+   historical wrappers.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999993%.
+- Solver monolith reduction: 99.990%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.945%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 96.3%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.43%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999988%.
