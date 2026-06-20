@@ -309,6 +309,152 @@ def _synthetic_physical_scalar_inputs(synthetic_report: dict, branch_metadata: d
     return physical_report, scalar_report
 
 
+def _assert_synthetic_physical_and_adaptive_gate_reports(
+    *,
+    physical_synthetic_report: dict,
+    physical_scalars_report: dict,
+    trace0: dict,
+    trace1: dict,
+) -> None:
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_adaptive_full_loop_same_branch_gate_report,
+        direct_coil_same_branch_physical_scalar_gate_report,
+    )
+
+    physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+    )
+    assert physical_gate["passed"], physical_gate
+    assert physical_gate["scalar_keys"] == ("aspect", "accepted_bnormal_rms")
+    assert physical_gate["controller_slot_summary"]["accepted_slots"] == 2
+    assert physical_gate["controller_slot_summary"]["rejected_slots"] == 0
+    assert physical_gate["differentiates_adaptive_controller"] is False
+    assert physical_gate["same_accepted_trace_branch"] is True
+    assert physical_gate["same_residual_branch"] is True
+
+    adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+    )
+    assert adaptive_gate["passed"], adaptive_gate
+    assert adaptive_gate["contract"] == "same-branch adaptive full-loop seam report"
+    assert adaptive_gate["ad_vs_fd_gate"] == "complete-loop central FD vs branch-local stacked replay custom VJP"
+    assert adaptive_gate["adaptive_loop_scope"] == "fingerprint-gated branch-local accepted/rejected replay slots"
+    assert adaptive_gate["differentiates_adaptive_controller"] is False
+    assert adaptive_gate["differentiates_run_free_boundary"] is False
+    assert adaptive_gate["same_stacked_step_policy_branch"] is True
+    assert adaptive_gate["used_stacked_step_controls"] is True
+    assert adaptive_gate["controller_slot_summary"]["accepted_slots"] == 2
+    assert adaptive_gate["controller_slot_summary"]["rejected_slots"] == 0
+    assert adaptive_gate["controller_slot_summary"]["fixed_rejected_controller_slot_present"] is False
+
+    missing_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+        require_fixed_rejected_controller_slot=True,
+    )
+    assert not missing_rejected_slot_gate["passed"]
+    _assert_errors_contain(missing_rejected_slot_gate, "fixed rejected controller slot", "accepted-only fast path")
+    missing_complete_loop_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+        require_complete_loop_rejected_controller_slot=True,
+    )
+    assert not missing_complete_loop_rejected_slot_gate["passed"]
+    assert missing_complete_loop_rejected_slot_gate["requires_complete_loop_rejected_controller_slot"] is True
+    assert missing_complete_loop_rejected_slot_gate["complete_loop_rejected_controller_slot_present"] is False
+    _assert_errors_contain(missing_complete_loop_rejected_slot_gate, "complete-loop branch fingerprints")
+    missing_status_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        physical_scalars_report,
+        require_status_derived_rejected_controller_slot=True,
+    )
+    assert not missing_status_rejected_slot_gate["passed"]
+    _assert_errors_contain(missing_status_rejected_slot_gate, "trace step_status")
+
+    unstacked_allowed_scalars_report = deepcopy(physical_scalars_report)
+    unstacked_allowed_scalars_report["replay_option_flags"] = {"use_stacked_step_controls": False}
+    unstacked_allowed_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        physical_synthetic_report,
+        unstacked_allowed_scalars_report,
+        require_stacked_step_controls=False,
+    )
+    assert unstacked_allowed_gate["passed"], unstacked_allowed_gate
+    assert unstacked_allowed_gate["requires_stacked_step_controls"] is False
+    assert unstacked_allowed_gate["used_stacked_step_controls"] is False
+    json.dumps(
+        direct_coil_adaptive_full_loop_same_branch_gate_report(
+            physical_synthetic_report,
+            physical_scalars_report,
+            json_safe=True,
+        ),
+        allow_nan=False,
+    )
+    json.dumps(
+        direct_coil_same_branch_physical_scalar_gate_report(
+            physical_synthetic_report,
+            physical_scalars_report,
+            json_safe=True,
+        ),
+        allow_nan=False,
+    )
+
+    bad_physical_scalars_report = deepcopy(physical_scalars_report)
+    bad_physical_scalars_report["same_branch"] = False
+    bad_physical_scalars_report["scalar_reports"]["aspect"]["passed"] = False
+    bad_physical_scalars_report["scalar_reports"]["aspect"]["exact_directional"] = np.nan
+    bad_physical_scalars_report["scalar_reports"]["missing_objective"] = {
+        "passed": True,
+        "same_branch": True,
+        "exact_directional": 1.0,
+        "abs_error": 0.0,
+        "rel_error": 0.0,
+        "base_abs_delta": 0.0,
+    }
+    bad_physical_report = deepcopy(physical_synthetic_report)
+    bad_physical_report["branch_compatibility"]["same_branch"] = False
+    bad_physical_report["branch_compatibility"]["same_accepted_trace_branch"] = False
+    bad_physical_report["branch_compatibility"]["same_residual_branch"] = False
+    bad_physical_report["objective_values"]["accepted_bnormal_rms"]["central_fd_directional"] = np.nan
+    changed_policy_trace = {**trace1, "include_edge_residual": True}
+    bad_physical_report["base"] = {"traces": ()}
+    bad_physical_report["plus"] = {"traces": (trace0, changed_policy_trace)}
+    bad_physical_report.pop("minus")
+    bad_physical_scalars_report["replay_option_flags"] = {"use_stacked_step_controls": False}
+    bad_physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+        bad_physical_report,
+        bad_physical_scalars_report,
+        scalar_keys=("aspect", "accepted_bnormal_rms", "missing", "missing_objective"),
+    )
+    assert not bad_physical_gate["passed"]
+    _assert_errors_contain(
+        bad_physical_gate,
+        "replay gate failed",
+        "not same-branch",
+        "accepted-trace branch fingerprint changed",
+        "residual-controller branch fingerprint changed",
+        "missing scalar report",
+        "missing complete-solve objective values",
+        "non-finite complete-solve FD",
+        "non-finite custom-VJP",
+    )
+    bad_adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
+        bad_physical_report,
+        bad_physical_scalars_report,
+        scalar_keys=("aspect", "accepted_bnormal_rms", "missing", "missing_objective"),
+    )
+    assert not bad_adaptive_gate["passed"]
+    _assert_errors_contain(
+        bad_adaptive_gate,
+        "stacked step-control replay was not used",
+        "stacked step-policy branch changed",
+        "base: no accepted step-policy segments",
+        "minus: missing complete-solve payload",
+        "physical scalar gate:",
+    )
+
+
 def _assert_direct_coil_trace_control_array_contracts(trace0: dict, trace1: dict, z: np.ndarray) -> None:
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_array_controls_jax,
@@ -620,10 +766,8 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_controller_custom_vjp_scalars_jax,
-        direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
         direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-        direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_controller_scalar_custom_vjp_report,
         direct_coil_same_branch_controller_scalars_custom_vjp_report,
         _accepted_step_policy_signature_for_complete_payload,
@@ -635,133 +779,11 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
     physical_synthetic_report, physical_scalars_report = _synthetic_physical_scalar_inputs(
         synthetic_report, branch_metadata, trace0, trace1
     )
-    physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
-        physical_synthetic_report,
-        physical_scalars_report,
-    )
-    assert physical_gate["passed"], physical_gate
-    assert physical_gate["scalar_keys"] == ("aspect", "accepted_bnormal_rms")
-    assert physical_gate["controller_slot_summary"]["accepted_slots"] == 2
-    assert physical_gate["controller_slot_summary"]["rejected_slots"] == 0
-    assert physical_gate["differentiates_adaptive_controller"] is False
-    assert physical_gate["same_accepted_trace_branch"] is True
-    assert physical_gate["same_residual_branch"] is True
-    adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        physical_synthetic_report,
-        physical_scalars_report,
-    )
-    assert adaptive_gate["passed"], adaptive_gate
-    assert adaptive_gate["contract"] == "same-branch adaptive full-loop seam report"
-    assert adaptive_gate["ad_vs_fd_gate"] == "complete-loop central FD vs branch-local stacked replay custom VJP"
-    assert adaptive_gate["adaptive_loop_scope"] == "fingerprint-gated branch-local accepted/rejected replay slots"
-    assert adaptive_gate["differentiates_adaptive_controller"] is False
-    assert adaptive_gate["differentiates_run_free_boundary"] is False
-    assert adaptive_gate["same_stacked_step_policy_branch"] is True
-    assert adaptive_gate["used_stacked_step_controls"] is True
-    assert adaptive_gate["controller_slot_summary"]["accepted_slots"] == 2
-    assert adaptive_gate["controller_slot_summary"]["rejected_slots"] == 0
-    assert adaptive_gate["controller_slot_summary"]["fixed_rejected_controller_slot_present"] is False
-    missing_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        physical_synthetic_report,
-        physical_scalars_report,
-        require_fixed_rejected_controller_slot=True,
-    )
-    assert not missing_rejected_slot_gate["passed"]
-    _assert_errors_contain(missing_rejected_slot_gate, "fixed rejected controller slot", "accepted-only fast path")
-    missing_complete_loop_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        physical_synthetic_report,
-        physical_scalars_report,
-        require_complete_loop_rejected_controller_slot=True,
-    )
-    assert not missing_complete_loop_rejected_slot_gate["passed"]
-    assert missing_complete_loop_rejected_slot_gate["requires_complete_loop_rejected_controller_slot"] is True
-    assert missing_complete_loop_rejected_slot_gate["complete_loop_rejected_controller_slot_present"] is False
-    _assert_errors_contain(missing_complete_loop_rejected_slot_gate, "complete-loop branch fingerprints")
-    missing_status_rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        physical_synthetic_report,
-        physical_scalars_report,
-        require_status_derived_rejected_controller_slot=True,
-    )
-    assert not missing_status_rejected_slot_gate["passed"]
-    _assert_errors_contain(missing_status_rejected_slot_gate, "trace step_status")
-    unstacked_allowed_scalars_report = deepcopy(physical_scalars_report)
-    unstacked_allowed_scalars_report["replay_option_flags"] = {"use_stacked_step_controls": False}
-    unstacked_allowed_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        physical_synthetic_report,
-        unstacked_allowed_scalars_report,
-        require_stacked_step_controls=False,
-    )
-    assert unstacked_allowed_gate["passed"], unstacked_allowed_gate
-    assert unstacked_allowed_gate["requires_stacked_step_controls"] is False
-    assert unstacked_allowed_gate["used_stacked_step_controls"] is False
-    json.dumps(
-        direct_coil_adaptive_full_loop_same_branch_gate_report(
-            physical_synthetic_report,
-            physical_scalars_report,
-            json_safe=True,
-        ),
-        allow_nan=False,
-    )
-    json.dumps(
-        direct_coil_same_branch_physical_scalar_gate_report(
-            physical_synthetic_report,
-            physical_scalars_report,
-            json_safe=True,
-        ),
-        allow_nan=False,
-    )
-    bad_physical_scalars_report = deepcopy(physical_scalars_report)
-    bad_physical_scalars_report["same_branch"] = False
-    bad_physical_scalars_report["scalar_reports"]["aspect"]["passed"] = False
-    bad_physical_scalars_report["scalar_reports"]["aspect"]["exact_directional"] = np.nan
-    bad_physical_scalars_report["scalar_reports"]["missing_objective"] = {
-        "passed": True,
-        "same_branch": True,
-        "exact_directional": 1.0,
-        "abs_error": 0.0,
-        "rel_error": 0.0,
-        "base_abs_delta": 0.0,
-    }
-    bad_physical_report = deepcopy(physical_synthetic_report)
-    bad_physical_report["branch_compatibility"]["same_branch"] = False
-    bad_physical_report["branch_compatibility"]["same_accepted_trace_branch"] = False
-    bad_physical_report["branch_compatibility"]["same_residual_branch"] = False
-    bad_physical_report["objective_values"]["accepted_bnormal_rms"]["central_fd_directional"] = np.nan
-    changed_policy_trace = {**trace1, "include_edge_residual": True}
-    bad_physical_report["base"] = {"traces": ()}
-    bad_physical_report["plus"] = {"traces": (trace0, changed_policy_trace)}
-    bad_physical_report.pop("minus")
-    bad_physical_scalars_report["replay_option_flags"] = {"use_stacked_step_controls": False}
-    bad_physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
-        bad_physical_report,
-        bad_physical_scalars_report,
-        scalar_keys=("aspect", "accepted_bnormal_rms", "missing", "missing_objective"),
-    )
-    assert not bad_physical_gate["passed"]
-    _assert_errors_contain(
-        bad_physical_gate,
-        "replay gate failed",
-        "not same-branch",
-        "accepted-trace branch fingerprint changed",
-        "residual-controller branch fingerprint changed",
-        "missing scalar report",
-        "missing complete-solve objective values",
-        "non-finite complete-solve FD",
-        "non-finite custom-VJP",
-    )
-    bad_adaptive_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
-        bad_physical_report,
-        bad_physical_scalars_report,
-        scalar_keys=("aspect", "accepted_bnormal_rms", "missing", "missing_objective"),
-    )
-    assert not bad_adaptive_gate["passed"]
-    _assert_errors_contain(
-        bad_adaptive_gate,
-        "stacked step-control replay was not used",
-        "stacked step-policy branch changed",
-        "base: no accepted step-policy segments",
-        "minus: missing complete-solve payload",
-        "physical scalar gate:",
+    _assert_synthetic_physical_and_adaptive_gate_reports(
+        physical_synthetic_report=physical_synthetic_report,
+        physical_scalars_report=physical_scalars_report,
+        trace0=trace0,
+        trace1=trace1,
     )
 
     def scalar_call(**kwargs):
