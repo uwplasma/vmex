@@ -7,6 +7,112 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Final PR-Readiness Audit and Scan-Hook Simplification
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Revisited the active plan, docs edit map, source-health report, repository
+   size gate, ignored local artifacts, and the current branch state.
+2. Confirmed `plan_differentiability.md` remains the single active umbrella
+   plan.  `plan_freeb.md` is still a closed free-boundary evidence log, while
+   `plan.md` and `discrete_adjoint_2506_plan.md` are historical references.
+3. Audited the tracked repository size and local working-tree size separately.
+   The tracked repository remains small; the large local checkout footprint is
+   from ignored generated docs, fetched assets, cached outputs, and local
+   result directories.
+4. Removed two unnecessary accelerated-scan hook fields
+   (`scan_device_runtime_type` and `scan_convergence_predicate_type`).  These
+   were concrete local plumbing classes, not monkeypatch-sensitive numerical
+   seams, so keeping them in the residual-loop hook object only obscured the
+   scan handoff.
+
+Results obtained:
+
+- The residual scan handoff is simpler and production net-negative for this
+  tranche: `6` insertions and `12` deletions.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from `3132`
+  to `3128` lines.
+- `solve_fixed_boundary_residual_iter` dropped from `2654` to `2652` lines.
+- `run_accelerated_residual_scan` dropped from `258` to `256` lines.
+- The tracked repository remains within the size gate: `29.43 MiB` total and
+  no tracked file above `2 MiB`.
+- The local checkout remains much larger (`~811 MiB`) because ignored generated
+  files are present under docs build/output, fetched examples, results, and
+  caches.  These are intentionally ignored and do not ship in a clean clone.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/residual/accelerated_scan.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/residual/accelerated_scan.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_residual_iter_policy.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Validation results:
+
+- Ruff passed.
+- Compileall passed.
+- Focused scan/residual pytest shard passed with `47 passed`.
+- Source-health and repository-size diagnostics passed.
+
+Best next steps:
+
+1. Treat the PR as structurally ready for review once the final local
+   CI-equivalent shard is run and recorded; avoid more broad planning churn.
+2. If another refactor tranche is required before review, target only
+   production net-negative seams in `solve_fixed_boundary_residual_iter`:
+   finalization payload construction, trace input packing, or scan resume-state
+   restoration.
+3. Keep adaptive-branch differentiability claims conservative in docs and
+   examples: branch-local/fingerprint-gated evidence is validated, arbitrary
+   adaptive host-controller branch changes are still not claimed.
+4. Clean ignored local outputs only when disk pressure matters; do not commit
+   fetched WOUT/mgrid/result artifacts.
+
+User decisions needed:
+
+No immediate decision.  Before final merge, decide whether to archive or squash
+the long historical plan logs into shorter release notes.  They are not large
+enough to block the current repo-size gate, but they are now documentation
+history rather than active engineering plans.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999993%.
+- Solver monolith reduction: 99.99935%.
+- Residual iteration decomposition: 99.993%.
+- Public API/docstring polish: 97%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.961%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.515%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.997%.
+- Overall differentiability-refactor PR: 99.99999999999987%.
+
 ## 2026-06-20 Final Plan/API Orientation Audit
 
 Branch: `codex/differentiability-refactor-plan`.

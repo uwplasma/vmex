@@ -235,8 +235,6 @@ class ResidualScanPathHooks:
     scan_fallback_decision: Callable[..., Any]
     scan_fallback_message: Callable[..., str]
     run_accelerated_scan: Callable[..., Any]
-    scan_device_runtime_type: Any
-    scan_convergence_predicate_type: Any
     converged_residuals_func: Callable[..., Any]
     scan_device_ready_recorder: Callable[..., Any]
     get_or_build_scan_runner: Callable[..., Any]
@@ -599,8 +597,6 @@ def _dispatch_accelerated_residual_scan(
         scan_timing_enabled_func=hooks.scan_timing_enabled,
         new_scan_timing_stats_func=hooks.new_scan_timing_stats,
         build_scan_timing_report_func=hooks.build_scan_timing_report,
-        scan_device_runtime_type=hooks.scan_device_runtime_type,
-        scan_convergence_predicate_type=hooks.scan_convergence_predicate_type,
         converged_residuals_func=hooks.converged_residuals_func,
         scan_device_ready_recorder=hooks.scan_device_ready_recorder,
         get_or_build_scan_runner_func=hooks.get_or_build_scan_runner,

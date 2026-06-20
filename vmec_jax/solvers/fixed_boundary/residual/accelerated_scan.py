@@ -8,6 +8,10 @@ from typing import Any
 import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.results import SolveVmecResidualResult
+from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
+    ScanConvergencePredicate,
+    ScanDeviceRuntime,
+)
 from vmec_jax.state import VMECState
 
 
@@ -247,8 +251,6 @@ def run_accelerated_residual_scan(
     scan_timing_enabled_func: Any,
     new_scan_timing_stats_func: Any,
     build_scan_timing_report_func: Any,
-    scan_device_runtime_type: Any,
-    scan_convergence_predicate_type: Any,
     converged_residuals_func: Any,
     scan_device_ready_recorder: Any,
     get_or_build_scan_runner_func: Any,
@@ -268,7 +270,7 @@ def run_accelerated_residual_scan(
     scan_timing_enabled = scan_timing_enabled_func(scan_timing_env)
     scan_timing_stats = new_scan_timing_stats_func()
     scan_total_start = perf_counter() if scan_timing_enabled else None
-    scan_device_runtime = scan_device_runtime_type(
+    scan_device_runtime = ScanDeviceRuntime(
         scan_timing_enabled=bool(scan_timing_enabled),
         stats=scan_timing_stats,
         perf_counter=perf_counter,
@@ -284,7 +286,7 @@ def run_accelerated_residual_scan(
     fsq_total_target_j = None
     if fsq_total_target is not None:
         fsq_total_target_j = jnp_module.asarray(float(fsq_total_target), dtype=dtype)
-    scan_converged = scan_convergence_predicate_type(
+    scan_converged = ScanConvergencePredicate(
         ftol=ftol_j,
         fsq_total_target=fsq_total_target_j,
         converged_func=converged_residuals_func,
