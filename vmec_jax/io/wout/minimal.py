@@ -359,6 +359,10 @@ class WoutScalarDiagnostics(NamedTuple):
     bdotgradv: np.ndarray
 
 
+def _zero_wout_scalar_profiles(ns: int, count: int) -> tuple[np.ndarray, ...]:
+    return tuple(np.zeros((int(ns),), dtype=float) for _ in range(int(count)))
+
+
 def env_enabled(value: str | None, *, false_values: tuple[str, ...] = ("", "0", "false", "no")) -> bool:
     """Return whether a VMEC-JAX environment toggle should be considered enabled."""
 
@@ -730,18 +734,10 @@ def compute_minimal_wout_scalar_diagnostics(
     betator = 0.0
     betaxis = 0.0
     ctor = 0.0
-    DMerc = np.zeros((ns,), dtype=float)
-    Dshear = np.zeros((ns,), dtype=float)
-    Dcurr = np.zeros((ns,), dtype=float)
-    Dwell = np.zeros((ns,), dtype=float)
-    Dgeod = np.zeros((ns,), dtype=float)
-    D_R = np.zeros((ns,), dtype=float)
-    H_glasser = np.zeros((ns,), dtype=float)
-    glasser_correction = np.zeros((ns,), dtype=float)
+    DMerc, Dshear, Dcurr, Dwell, Dgeod, D_R, H_glasser, glasser_correction, jdotb, bdotb, bdotgradv = (
+        _zero_wout_scalar_profiles(ns, 11)
+    )
     glasser_shear_valid = np.zeros((ns,), dtype=bool)
-    jdotb = np.zeros((ns,), dtype=float)
-    bdotb = np.zeros((ns,), dtype=float)
-    bdotgradv = np.zeros((ns,), dtype=float)
 
     if wout_light:
         return WoutScalarDiagnostics(
