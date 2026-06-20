@@ -132,27 +132,6 @@ def controller_state_from_resume_state(
     )
 
 
-def controller_state_from_namespace(namespace: dict[str, Any]) -> ResidualControllerState:
-    """Build controller state from residual-loop scalar locals."""
-
-    return ResidualControllerState(
-        time_step=float(namespace["time_step"]),
-        inv_tau=list(namespace["inv_tau"]),
-        fsq_prev=float(namespace["fsq_prev"]),
-        fsq0_prev=float(namespace["fsq0_prev"]),
-        flip_sign=float(namespace["flip_sign"]),
-        iter1=int(namespace["iter1"]),
-        ijacob=int(namespace["ijacob"]),
-        bad_resets=int(namespace["bad_resets"]),
-        res0=float(namespace["res0"]),
-        res1=float(namespace["res1"]),
-        prev_rz_fsq=float(namespace["prev_rz_fsq"]),
-        bad_growth_streak=int(namespace["bad_growth_streak"]),
-        huge_force_restart_count=int(namespace["huge_force_restart_count"]),
-        state_checkpoint=namespace["state_checkpoint"],
-    )
-
-
 def controller_state_values(state: ResidualControllerState) -> tuple[Any, ...]:
     """Return controller fields in legacy scalar-local order."""
 

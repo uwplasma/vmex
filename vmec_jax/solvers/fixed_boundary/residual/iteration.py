@@ -107,7 +107,6 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     controller_state_after_initial_axis_reset_update as _controller_after_axis_reset,
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
-    controller_state_from_namespace as _controller_state_from_namespace,
     controller_state_from_resume_state as _controller_state_from_resume_state,
     controller_state_values as _controller_state_values,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
@@ -1304,6 +1303,24 @@ def solve_fixed_boundary_residual_iter(
             time_step, inv_tau, fsq_prev, fsq0_prev, flip_sign, iter1, ijacob, bad_resets, res0, res1,
             prev_rz_fsq, bad_growth_streak, huge_force_restart_count, state_checkpoint,
         ) = _controller_state_values(controller_state)
+
+    def _current_controller_state() -> _ResidualControllerState:
+        return _ResidualControllerState(
+            time_step=float(time_step),
+            inv_tau=list(inv_tau),
+            fsq_prev=float(fsq_prev),
+            fsq0_prev=float(fsq0_prev),
+            flip_sign=float(flip_sign),
+            iter1=int(iter1),
+            ijacob=int(ijacob),
+            bad_resets=int(bad_resets),
+            res0=float(res0),
+            res1=float(res1),
+            prev_rz_fsq=float(prev_rz_fsq),
+            bad_growth_streak=int(bad_growth_streak),
+            huge_force_restart_count=int(huge_force_restart_count),
+            state_checkpoint=state_checkpoint,
+        )
     _initial_velocity = _initial_residual_velocity_state(
         state=state,
         mpol=mpol,
@@ -2750,8 +2767,7 @@ def solve_fixed_boundary_residual_iter(
                     axis_reset_update = _host_axis_reset_update(
                         state, float(time_step), int(iter2), float(prev_rz_fsq_before), int(k_ndamp)
                     )
-                    current_controller = _controller_state_from_namespace(locals())
-                    _set_controller_state(_controller_after_axis_reset(current_controller, axis_reset_update))
+                    _set_controller_state(_controller_after_axis_reset(_current_controller_state(), axis_reset_update))
                     _zero_primary_velocity_blocks()
                     axis_reset_done = True
                     freeb_controls_cached = None
@@ -2817,7 +2833,7 @@ def solve_fixed_boundary_residual_iter(
                     )
                     _set_controller_state(
                         _controller_state_after_vmec2000_time_control_restart_update(
-                            _controller_state_from_namespace(locals()),
+                            _current_controller_state(),
                             restart_update,
                         )
                     )
@@ -2902,7 +2918,7 @@ def solve_fixed_boundary_residual_iter(
                 )
                 _set_controller_state(
                     _controller_state_after_pre_restart_update(
-                        _controller_state_from_namespace(locals()),
+                        _current_controller_state(),
                         pre_restart_update,
                     )
                 )
@@ -3258,7 +3274,7 @@ def solve_fixed_boundary_residual_iter(
                     )
                     _set_controller_state(
                         _controller_state_after_catastrophic_restart_update(
-                            _controller_state_from_namespace(locals()),
+                            _current_controller_state(),
                             restart_update,
                         )
                     )
