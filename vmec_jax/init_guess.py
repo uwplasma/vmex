@@ -1053,6 +1053,187 @@ def _resolve_initial_guess_numerics(static: VMECStatic, dtype):
     return dtype, trig, mode_scale
 
 
+def _axis_scale_from_trig(cfg, trig, dtype):
+    n_arr = jnp.arange(cfg.ntor + 1, dtype=jnp.int32)
+    nscale_axis = jnp.asarray(trig.nscale, dtype=dtype)
+    return (1.0 / nscale_axis[n_arr]).astype(dtype)
+
+
+def _zero_axis_arrays(cfg, dtype):
+    zeros = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+    return zeros, zeros, zeros, zeros
+
+
+def _axis_arrays_have_nonzero(*arrays) -> bool:
+    return any(array is not None and np.any(np.asarray(array) != 0.0) for array in arrays)
+
+
+def _resolve_axis_inputs(
+    *,
+    indata: InData,
+    cfg,
+    trig,
+    dtype,
+    axis_override: dict[str, object] | None,
+):
+    """Resolve explicit axis coefficients before optional VMEC recompute."""
+
+    axis_scale = _axis_scale_from_trig(cfg, trig, dtype)
+    if axis_override is not None:
+        zeros = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+        arrays = (
+            jnp.asarray(axis_override.get("raxis_cc", zeros), dtype=dtype),
+            jnp.asarray(axis_override.get("raxis_cs", zeros), dtype=dtype),
+            jnp.asarray(axis_override.get("zaxis_cc", zeros), dtype=dtype),
+            jnp.asarray(axis_override.get("zaxis_cs", zeros), dtype=dtype),
+        )
+        return (*arrays, axis_scale, True, False)
+
+    ax = _read_axis_coeffs(indata)
+    arrays = [
+        _axis_array(ax.get("RAXIS_CC", None), cfg.ntor, dtype=dtype),
+        _axis_array(ax.get("RAXIS_CS", None), cfg.ntor, dtype=dtype),
+        _axis_array(ax.get("ZAXIS_CC", None), cfg.ntor, dtype=dtype),
+        _axis_array(ax.get("ZAXIS_CS", None), cfg.ntor, dtype=dtype),
+    ]
+    arrays = [None if array is None else array * axis_scale for array in arrays]
+    have_axis = _axis_arrays_have_nonzero(*arrays)
+    return (*arrays, axis_scale, bool(have_axis), bool(have_axis))
+
+
+def _axis_parity_masks(static: VMECStatic, dtype):
+    if getattr(static, "m_is_even", None) is not None:
+        return (
+            jnp.asarray(static.m_is_even, dtype=dtype),
+            jnp.asarray(static.m_is_m1, dtype=dtype),
+            jnp.asarray(static.m_is_odd_rest, dtype=dtype),
+        )
+    m_modes = np.asarray(static.modes.m, dtype=int)
+    return (
+        jnp.asarray((m_modes % 2) == 0, dtype=dtype),
+        jnp.asarray(m_modes == 1, dtype=dtype),
+        jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype),
+    )
+
+
+def _axis_parity_realspace_stack(
+    *,
+    static: VMECStatic,
+    trig,
+    s,
+    Rcos_phys,
+    Rsin_phys,
+    Zcos_phys,
+    Zsin_phys,
+    derivative: bool,
+):
+    mask_stack = jnp.stack(_axis_parity_masks(static, jnp.asarray(Rcos_phys).dtype), axis=0)
+    coeff_cos_stack = jnp.stack([Rcos_phys, Zcos_phys], axis=0)
+    coeff_sin_stack = jnp.stack([Rsin_phys, Zsin_phys], axis=0)
+    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
+    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
+    synth = vmec_realspace_synthesis_dtheta if derivative else vmec_realspace_synthesis
+    return synth(
+        coeff_cos=coeff_cos,
+        coeff_sin=coeff_sin,
+        modes=static.modes,
+        trig=trig,
+        coeffs_internal=True,
+        apply_scalxc=False,
+        s=s,
+    )
+
+
+def _infer_axis_from_scaled_state(
+    *,
+    static: VMECStatic,
+    Rcos,
+    Rsin,
+    Zcos,
+    Zsin,
+    s,
+    trig,
+    dtype,
+    axis_scale,
+):
+    """Run VMEC's guess-axis path from the current scaled initial state."""
+
+    cfg = static.cfg
+    Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+        Rcos=Rcos,
+        Zsin=Zsin,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        modes=static.modes,
+        lthreed=bool(cfg.ntor > 0),
+        lasym=bool(cfg.lasym),
+        lconm1=bool(getattr(cfg, "lconm1", True)),
+    )
+
+    stack = _axis_parity_realspace_stack(
+        static=static,
+        trig=trig,
+        s=s,
+        Rcos_phys=Rcos_phys,
+        Rsin_phys=Rsin_phys,
+        Zcos_phys=Zcos_phys,
+        Zsin_phys=Zsin_phys,
+        derivative=False,
+    )
+    stack_t = _axis_parity_realspace_stack(
+        static=static,
+        trig=trig,
+        s=s,
+        Rcos_phys=Rcos_phys,
+        Rsin_phys=Rsin_phys,
+        Zcos_phys=Zcos_phys,
+        Zsin_phys=Zsin_phys,
+        derivative=True,
+    )
+
+    pr1_even, pz1_even = stack[0]
+    pr1_m1, pz1_m1 = stack[1]
+    pr1_rest, pz1_rest = stack[2]
+    pru_even, pzu_even = stack_t[0]
+    pru_m1, pzu_m1 = stack_t[1]
+    pru_rest, pzu_rest = stack_t[2]
+
+    pr1_odd = internal_odd_from_physical_vmec_m1(odd_m1_phys=pr1_m1, odd_mge2_phys=pr1_rest, s=s)
+    pz1_odd = internal_odd_from_physical_vmec_m1(odd_m1_phys=pz1_m1, odd_mge2_phys=pz1_rest, s=s)
+    pru_odd = internal_odd_from_physical_vmec_m1(odd_m1_phys=pru_m1, odd_mge2_phys=pru_rest, s=s)
+    pzu_odd = internal_odd_from_physical_vmec_m1(odd_m1_phys=pzu_m1, odd_mge2_phys=pzu_rest, s=s)
+
+    recompute = _recompute_axis_from_state_vmec_jax if _any_value_is_traced(
+        pr1_even,
+        pr1_odd,
+        pz1_even,
+        pz1_odd,
+        pru_even,
+        pru_odd,
+        pzu_even,
+        pzu_odd,
+    ) else _recompute_axis_from_state_vmec
+    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = recompute(
+        static,
+        pr1_even=pr1_even,
+        pr1_odd=pr1_odd,
+        pz1_even=pz1_even,
+        pz1_odd=pz1_odd,
+        pru_even=pru_even,
+        pru_odd=pru_odd,
+        pzu_even=pzu_even,
+        pzu_odd=pzu_odd,
+        signgs=-1,
+        trig=trig,
+    )
+    return (
+        jnp.asarray(raxis_cc, dtype=dtype) * axis_scale,
+        jnp.asarray(raxis_cs, dtype=dtype) * axis_scale,
+        jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale,
+        jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale,
+    )
+
+
 def initial_guess_from_boundary(
     static: VMECStatic,
     boundary: BoundaryCoeffs,
@@ -1144,197 +1325,40 @@ def initial_guess_from_boundary(
     # If user supplied a non-trivial axis spec, blend m=0 coefficients between
     # axis and boundary (linear in s).
     if indata is not None:
-        ax = _read_axis_coeffs(indata)
-        raxis_cc = _axis_array(ax.get("RAXIS_CC", None), cfg.ntor, dtype=dtype)
-        raxis_cs = _axis_array(ax.get("RAXIS_CS", None), cfg.ntor, dtype=dtype)
-        zaxis_cc = _axis_array(ax.get("ZAXIS_CC", None), cfg.ntor, dtype=dtype)
-        zaxis_cs = _axis_array(ax.get("ZAXIS_CS", None), cfg.ntor, dtype=dtype)
-
-        # Convert axis coefficients to VMEC internal scaling (1/(mscale*nscale)).
-        n_arr = jnp.arange(cfg.ntor + 1, dtype=jnp.int32)
-        nscale_axis = jnp.asarray(trig.nscale, dtype=dtype)
-        axis_scale = (1.0 / nscale_axis[n_arr]).astype(dtype)
-        if raxis_cc is not None:
-            raxis_cc = raxis_cc * axis_scale
-        if raxis_cs is not None:
-            raxis_cs = raxis_cs * axis_scale
-        if zaxis_cc is not None:
-            zaxis_cc = zaxis_cc * axis_scale
-        if zaxis_cs is not None:
-            zaxis_cs = zaxis_cs * axis_scale
-
-        if axis_override is not None:
-            raxis_cc = jnp.asarray(axis_override.get("raxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
-            raxis_cs = jnp.asarray(axis_override.get("raxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
-            zaxis_cc = jnp.asarray(axis_override.get("zaxis_cc", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
-            zaxis_cs = jnp.asarray(axis_override.get("zaxis_cs", jnp.zeros((cfg.ntor + 1,), dtype=dtype)), dtype=dtype)
-            have_axis = True
-            axis_from_indata = False
-        else:
-            # If axis arrays are all zero or missing, fall back to boundary-based axis.
-            have_axis = False
-            if raxis_cc is not None and np.any(np.asarray(raxis_cc) != 0.0):
-                have_axis = True
-            if raxis_cs is not None and np.any(np.asarray(raxis_cs) != 0.0):
-                have_axis = True
-            if zaxis_cc is not None and np.any(np.asarray(zaxis_cc) != 0.0):
-                have_axis = True
-            if zaxis_cs is not None and np.any(np.asarray(zaxis_cs) != 0.0):
-                have_axis = True
-            axis_from_indata = bool(have_axis)
+        (
+            raxis_cc,
+            raxis_cs,
+            zaxis_cc,
+            zaxis_cs,
+            axis_scale,
+            have_axis,
+            axis_from_indata,
+        ) = _resolve_axis_inputs(
+            indata=indata,
+            cfg=cfg,
+            trig=trig,
+            dtype=dtype,
+            axis_override=axis_override,
+        )
 
         if not have_axis:
             if bool(infer_axis_if_missing):
-                # VMEC-style axis guess (guess_axis) from the current parity fields.
-                # Use the same VMEC trig tables and internal scaling as the solver.
-                # VMEC sets signgs = -1 in readin and flips the boundary if needed.
-                signgs_guess = -1
-
-                # Undo the m=1 internal constraint before real-space synthesis.
-                Rcos_phys, Zsin_phys, Rsin_phys, Zcos_phys = vmec_m1_internal_to_physical_signed(
+                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _infer_axis_from_scaled_state(
+                    static=static,
                     Rcos=Rcos,
-                    Zsin=Zsin,
                     Rsin=Rsin,
                     Zcos=Zcos,
-                    modes=static.modes,
-                    lthreed=bool(cfg.ntor > 0),
-                    lasym=bool(cfg.lasym),
-                    lconm1=bool(getattr(cfg, "lconm1", True)),
-                )
-
-                if getattr(static, "m_is_even", None) is not None:
-                    mask_even = jnp.asarray(static.m_is_even, dtype=dtype)
-                    mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
-                    mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
-                else:
-                    m_modes = np.asarray(static.modes.m, dtype=int)
-                    mask_even = jnp.asarray((m_modes % 2) == 0, dtype=dtype)
-                    mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
-                    mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
-
-                coeff_cos_stack = jnp.stack([Rcos_phys, Zcos_phys], axis=0)
-                coeff_sin_stack = jnp.stack([Rsin_phys, Zsin_phys], axis=0)
-                mask_stack = jnp.stack([mask_even, mask_m1, mask_odd_rest], axis=0)
-
-                def _eval_stack(mask_stack):
-                    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
-                    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-                    return vmec_realspace_synthesis(
-                        coeff_cos=coeff_cos,
-                        coeff_sin=coeff_sin,
-                        modes=static.modes,
-                        trig=trig,
-                        coeffs_internal=True,
-                        apply_scalxc=False,
-                        s=s,
-                    )
-
-                def _eval_stack_dtheta(mask_stack):
-                    coeff_cos = coeff_cos_stack[None, ...] * mask_stack[:, None, None, :]
-                    coeff_sin = coeff_sin_stack[None, ...] * mask_stack[:, None, None, :]
-                    return vmec_realspace_synthesis_dtheta(
-                        coeff_cos=coeff_cos,
-                        coeff_sin=coeff_sin,
-                        modes=static.modes,
-                        trig=trig,
-                        coeffs_internal=True,
-                        apply_scalxc=False,
-                        s=s,
-                    )
-
-                stack = _eval_stack(mask_stack)
-                stack_t = _eval_stack_dtheta(mask_stack)
-
-                pr1_even = stack[0][0]
-                pz1_even = stack[0][1]
-                pr1_m1 = stack[1][0]
-                pz1_m1 = stack[1][1]
-                pr1_rest = stack[2][0]
-                pz1_rest = stack[2][1]
-
-                pru_even = stack_t[0][0]
-                pzu_even = stack_t[0][1]
-                pru_m1 = stack_t[1][0]
-                pzu_m1 = stack_t[1][1]
-                pru_rest = stack_t[2][0]
-                pzu_rest = stack_t[2][1]
-
-                pr1_odd = internal_odd_from_physical_vmec_m1(
-                    odd_m1_phys=pr1_m1,
-                    odd_mge2_phys=pr1_rest,
+                    Zsin=Zsin,
                     s=s,
+                    trig=trig,
+                    dtype=dtype,
+                    axis_scale=axis_scale,
                 )
-                pz1_odd = internal_odd_from_physical_vmec_m1(
-                    odd_m1_phys=pz1_m1,
-                    odd_mge2_phys=pz1_rest,
-                    s=s,
-                )
-                pru_odd = internal_odd_from_physical_vmec_m1(
-                    odd_m1_phys=pru_m1,
-                    odd_mge2_phys=pru_rest,
-                    s=s,
-                )
-                pzu_odd = internal_odd_from_physical_vmec_m1(
-                    odd_m1_phys=pzu_m1,
-                    odd_mge2_phys=pzu_rest,
-                    s=s,
-                )
-
-                if _any_value_is_traced(
-                    pr1_even,
-                    pr1_odd,
-                    pz1_even,
-                    pz1_odd,
-                    pru_even,
-                    pru_odd,
-                    pzu_even,
-                    pzu_odd,
-                ):
-                    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec_jax(
-                        static,
-                        pr1_even=pr1_even,
-                        pr1_odd=pr1_odd,
-                        pz1_even=pz1_even,
-                        pz1_odd=pz1_odd,
-                        pru_even=pru_even,
-                        pru_odd=pru_odd,
-                        pzu_even=pzu_even,
-                        pzu_odd=pzu_odd,
-                        signgs=signgs_guess,
-                        trig=trig,
-                    )
-                    raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
-                    raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
-                    zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
-                    zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
-                    axis_from_indata = False
-                else:
-                    raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _recompute_axis_from_state_vmec(
-                        static,
-                        pr1_even=pr1_even,
-                        pr1_odd=pr1_odd,
-                        pz1_even=pz1_even,
-                        pz1_odd=pz1_odd,
-                        pru_even=pru_even,
-                        pru_odd=pru_odd,
-                        pzu_even=pzu_even,
-                        pzu_odd=pzu_odd,
-                        signgs=signgs_guess,
-                        trig=trig,
-                    )
-
-                    raxis_cc = jnp.asarray(raxis_cc, dtype=dtype) * axis_scale
-                    raxis_cs = jnp.asarray(raxis_cs, dtype=dtype) * axis_scale
-                    zaxis_cc = jnp.asarray(zaxis_cc, dtype=dtype) * axis_scale
-                    zaxis_cs = jnp.asarray(zaxis_cs, dtype=dtype) * axis_scale
-                    axis_from_indata = False
+                axis_from_indata = False
             else:
                 # VMEC parity path: keep the explicit zero axis and let
                 # `guess_axis`-style reset logic handle bad-Jacobian starts.
-                raxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                raxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cc = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
-                zaxis_cs = jnp.zeros((cfg.ntor + 1,), dtype=dtype)
+                raxis_cc, raxis_cs, zaxis_cc, zaxis_cs = _zero_axis_arrays(cfg, dtype)
                 axis_from_indata = True
             have_axis = True
 
