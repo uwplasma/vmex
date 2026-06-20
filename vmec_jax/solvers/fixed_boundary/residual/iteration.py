@@ -157,8 +157,6 @@ from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     ForceBlocks as _ForceBlocks,
-    preconditioner_output_blocks_jax as _preconditioner_output_blocks_jax,
-    preconditioner_output_blocks_np as _preconditioner_output_blocks_np,
     radial_preconditioner_output_blocks_jax as _radial_preconditioner_output_blocks_jax,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
@@ -297,23 +295,8 @@ _mn_sin_to_signed_physical_batch = _geometry_mn_sin_to_signed_physical_batch
 _rz_norm_np = _geometry_rz_norm_np
 
 _strict_update_step_jit = partial(_precond_payload_facade._strict_update_step_jit, has_jax_func=has_jax)
-_preconditioner_output_scaling_jit = partial(
-    _precond_payload_facade._preconditioner_output_scaling_jit,
-    has_jax_func=has_jax,
-)
-_preconditioner_output_payload_jit = partial(
-    _precond_payload_facade._preconditioner_output_payload_jit,
-    has_jax_func=has_jax,
-)
-_preconditioner_apply_payload_jit = partial(
-    _precond_payload_facade._preconditioner_apply_payload_jit,
-    has_jax_func=has_jax,
-)
 _accepted_control_payload_jit = partial(_precond_payload_facade._accepted_control_payload_jit, has_jax_func=has_jax)
-_preconditioner_apply_payload_fused = _precond_payload_facade._preconditioner_apply_payload_fused
 _cached_or_current_f_norm1_jax = _precond_payload_facade._cached_or_current_f_norm1_jax
-_split_preconditioner_apply_payload = _precond_payload_facade._split_preconditioner_apply_payload
-
 
 _ptau_compute_jit = _precond_payload_facade._ptau_compute_jit
 
@@ -2260,315 +2243,79 @@ def solve_fixed_boundary_residual_iter(
             preconditioner_outputs_scaled = False
             preconditioner_fsq1_ready = False
             use_fused_precond_output_scaling = (not bool(host_update_assembly)) and jax.default_backend() != "cpu"
-            if bool(vmec2000_control) and bool(cfg.lthreed):
-                lam_prec, mats, jmax, need_lam_prec, need_lamcal, preconditioner_cache_update_trace = (
-                    _refresh_preconditioner_cache(k, iter2=int(iter2))
+            if (bool(vmec2000_control) and bool(cfg.lthreed)) or (not bool(cfg.lthreed)):
+                precond_apply = _precond_payload_facade.apply_vmec2000_preconditioner_runtime(
+                    frzl=frzl,
+                    k=k,
+                    state=state,
+                    iter2=int(iter2),
+                    cfg=cfg,
+                    s=s,
+                    delta_s=delta_s,
+                    w_mode_mn=w_mode_mn,
+                    lambda_update_scale=float(lambda_update_scale),
+                    lambda_update_scale_j=lambda_update_scale_j,
+                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
+                    vmec2000_control=bool(vmec2000_control),
+                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    need_bcovar_update=bool(need_bcovar_update),
+                    cache_rz_norm=cache_rz_norm,
+                    cache_f_norm1=cache_f_norm1,
+                    host_update_assembly=bool(host_update_assembly),
+                    use_fused_precond_output_scaling=bool(use_fused_precond_output_scaling),
+                    scale_m1_rhs=bool(cfg.lthreed) or bool(getattr(cfg, "lasym", False)),
+                    adjoint_trace=bool(adjoint_trace),
+                    adjoint_trace_mode=adjoint_trace_mode,
+                    accepted_control_ptau_arrays=accepted_control_ptau_arrays,
+                    ptau_pshalf_jax=_ptau_context.pshalf_jax,
+                    ptau_ohs_jax=_ptau_context.ohs_jax,
+                    preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_policy,
+                    preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_policy,
+                    timing_detail_enabled=bool(timing_detail_enabled),
+                    timing_stats=timing_stats,
+                    perf_counter=time.perf_counter,
+                    block_until_ready=jax.block_until_ready if has_jax() else None,
+                    refresh_preconditioner_cache_func=_refresh_preconditioner_cache,
+                    scale_m1_precond_rhs_func=_apply_vmec_scale_m1_precond_rhs,
+                    rz_preconditioner_apply_func=_rz_preconditioner_apply_local,
+                    rz_norm_func=_rz_norm,
                 )
-                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                use_apply_payload_fusion = (
-                    bool(use_fused_precond_output_scaling)
-                    and need_lam_prec is False
-                    and need_lamcal is False
-                )
-                frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats)
-                _apply_rz_preconditioner_current = partial(
-                    _rz_preconditioner_apply_local,
-                    mats=mats,
-                    jmax=jmax,
-                    use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                    use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                )
-                if use_apply_payload_fusion:
-                    _, f_norm1 = _cached_or_current_f_norm1_jax(
-                        vmec2000_control=bool(vmec2000_control),
-                        vmec2000_cache_valid=bool(vmec2000_cache_valid),
-                        need_bcovar_update=bool(need_bcovar_update),
-                        cache_rz_norm=cache_rz_norm,
-                        cache_f_norm1=cache_f_norm1,
-                        state=state,
-                        rz_norm_func=_rz_norm,
-                    )
-                    _precond_payload = _preconditioner_apply_payload_fused(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
-                        lam_prec=lam_prec,
-                        w_mode_mn=w_mode_mn,
-                        lambda_update_scale_j=lambda_update_scale_j,
-                        f_norm1=f_norm1,
-                        delta_s=delta_s,
-                        s=s,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                        vmec2000_control=bool(vmec2000_control),
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                        include_control_ptau=accepted_control_ptau_arrays is not None,
-                        control_ptau_arrays=accepted_control_ptau_arrays,
-                        control_ptau_pshalf=_ptau_context.pshalf_jax,
-                        control_ptau_ohs=_ptau_context.ohs_jax,
-                    )
+                lam_prec = precond_apply.lam_prec
+                mats = precond_apply.mats
+                jmax = precond_apply.jmax
+                preconditioner_cache_update_trace = precond_apply.cache_update_trace
+                (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = precond_apply.blocks
+                frzl_rz = precond_apply.frzl_rz
+                frzl_lam_pre = precond_apply.frzl_lam_pre
+                accepted_control_ptau_payload = precond_apply.accepted_control_ptau_payload
+                preconditioner_outputs_scaled = precond_apply.outputs_scaled
+                preconditioner_fsq1_ready = precond_apply.fsq1_ready
+                if precond_apply.update_blocks is not None:
                     (
-                        _precond_pre_blocks,
-                        _precond_update_blocks,
-                        _precond_diag,
-                        accepted_control_ptau_payload,
-                    ) = _split_preconditioner_apply_payload(_precond_payload)
-                    (
-                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        (
-                            frcc_u,
-                            frss_u,
-                            fzsc_u,
-                            fzcs_u,
-                            flsc_u,
-                            flcs_u,
-                            frsc_u,
-                            frcs_u,
-                            fzcc_u,
-                            fzss_u,
-                            flcc_u,
-                            flss_u,
-                        ),
-                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe),
-                    ) = (_precond_pre_blocks, _precond_update_blocks, _precond_diag)
+                        frcc_u,
+                        frss_u,
+                        fzsc_u,
+                        fzcs_u,
+                        flsc_u,
+                        flcs_u,
+                        frsc_u,
+                        frcs_u,
+                        fzcc_u,
+                        fzss_u,
+                        flcc_u,
+                        flss_u,
+                    ) = precond_apply.update_blocks
+                if preconditioner_fsq1_ready:
+                    gcr2_p = precond_apply.gcr2_p
+                    gcz2_p = precond_apply.gcz2_p
+                    gcl2_p = precond_apply.gcl2_p
+                    fsqr1_safe = precond_apply.fsqr1_safe
+                    fsqz1_safe = precond_apply.fsqz1_safe
+                    fsql1_safe = precond_apply.fsql1_safe
+                    fsq1_safe = precond_apply.fsq1_safe
                     fsqr1 = fsqr1_safe
                     fsqz1 = fsqz1_safe
                     fsql1 = fsql1_safe
-                    preconditioner_outputs_scaled = True
-                    preconditioner_fsq1_ready = True
-                else:
-                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
-                    frzl_lam_pre = frzl_rz
-                if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
-                    # The fused GPU-oriented path returns only scaled update
-                    # payloads.  Full accepted-trace replay also needs the raw
-                    # R/Z-preconditioned force, so materialize it only for that
-                    # opt-in diagnostic/validation mode.
-                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
-                if (not use_apply_payload_fusion) and host_update_assembly:
-                    # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
-                    # Asymmetric (lasym) components default to None — the downstream
-                    # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
-                    # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
-                    (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
-                        _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
-                    )
-                elif (not use_apply_payload_fusion) and use_fused_precond_output_scaling:
-                    rz_norm, f_norm1 = _cached_or_current_f_norm1_jax(
-                        vmec2000_control=bool(vmec2000_control),
-                        vmec2000_cache_valid=bool(vmec2000_cache_valid),
-                        need_bcovar_update=bool(need_bcovar_update),
-                        cache_rz_norm=cache_rz_norm,
-                        cache_f_norm1=cache_f_norm1,
-                        state=state,
-                        rz_norm_func=_rz_norm,
-                    )
-                    payload_outputs = _preconditioner_output_payload_jit(
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                        vmec2000_control=bool(vmec2000_control),
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    )
-                    (
-                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        (
-                            frcc_u,
-                            frss_u,
-                            fzsc_u,
-                            fzcs_u,
-                            flsc_u,
-                            flcs_u,
-                            frsc_u,
-                            frcs_u,
-                            fzcc_u,
-                            fzss_u,
-                            flcc_u,
-                            flss_u,
-                        ),
-                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe),
-                    ) = payload_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j, f_norm1, delta_s, s)
-                    fsqr1 = fsqr1_safe
-                    fsqz1 = fsqz1_safe
-                    fsql1 = fsql1_safe
-                    preconditioner_outputs_scaled = True
-                    preconditioner_fsq1_ready = True
-                elif not use_apply_payload_fusion:
-                    (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
-                        _preconditioner_output_blocks_jax(frzl_rz=frzl_rz, lam_prec=lam_prec)
-                    )
-                if timing_detail_enabled and t_precond_apply_start is not None:
-                    try:
-                        if has_jax():
-                            jax.block_until_ready(flsc)
-                    except Exception:
-                        pass
-                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
-            elif not bool(cfg.lthreed):
-                lam_prec, mats, jmax, need_lam_prec, need_lamcal, preconditioner_cache_update_trace = (
-                    _refresh_preconditioner_cache(k, iter2=int(iter2))
-                )
-                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                use_apply_payload_fusion = (
-                    bool(use_fused_precond_output_scaling)
-                    and need_lam_prec is False
-                    and need_lamcal is False
-                )
-                frzl_rhs = _apply_vmec_scale_m1_precond_rhs(frzl, mats) if bool(getattr(cfg, "lasym", False)) else frzl
-                _apply_rz_preconditioner_current = partial(
-                    _rz_preconditioner_apply_local,
-                    mats=mats,
-                    jmax=jmax,
-                    use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                    use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                )
-                if use_apply_payload_fusion:
-                    _, f_norm1 = _cached_or_current_f_norm1_jax(
-                        vmec2000_control=bool(vmec2000_control),
-                        vmec2000_cache_valid=bool(vmec2000_cache_valid),
-                        need_bcovar_update=bool(need_bcovar_update),
-                        cache_rz_norm=cache_rz_norm,
-                        cache_f_norm1=cache_f_norm1,
-                        state=state,
-                        rz_norm_func=_rz_norm,
-                    )
-                    _precond_payload = _preconditioner_apply_payload_fused(
-                        frzl_in=frzl_rhs,
-                        mats=mats,
-                        jmax=jmax,
-                        cfg=cfg,
-                        lam_prec=lam_prec,
-                        w_mode_mn=w_mode_mn,
-                        lambda_update_scale_j=lambda_update_scale_j,
-                        f_norm1=f_norm1,
-                        delta_s=delta_s,
-                        s=s,
-                        use_precomputed=preconditioner_use_precomputed_tridi_policy,
-                        use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                        vmec2000_control=bool(vmec2000_control),
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                        include_control_ptau=accepted_control_ptau_arrays is not None,
-                        control_ptau_arrays=accepted_control_ptau_arrays,
-                        control_ptau_pshalf=_ptau_context.pshalf_jax,
-                        control_ptau_ohs=_ptau_context.ohs_jax,
-                    )
-                    (
-                        _precond_pre_blocks,
-                        _precond_update_blocks,
-                        _precond_diag,
-                        accepted_control_ptau_payload,
-                    ) = _split_preconditioner_apply_payload(_precond_payload)
-                    (
-                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        (
-                            frcc_u,
-                            frss_u,
-                            fzsc_u,
-                            fzcs_u,
-                            flsc_u,
-                            flcs_u,
-                            frsc_u,
-                            frcs_u,
-                            fzcc_u,
-                            fzss_u,
-                            flcc_u,
-                            flss_u,
-                        ),
-                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe),
-                    ) = (_precond_pre_blocks, _precond_update_blocks, _precond_diag)
-                    fsqr1 = fsqr1_safe
-                    fsqz1 = fsqz1_safe
-                    fsql1 = fsql1_safe
-                    preconditioner_outputs_scaled = True
-                    preconditioner_fsq1_ready = True
-                else:
-                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
-                    frzl_lam_pre = frzl_rz
-                if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
-                    # The fused GPU-oriented path returns only scaled update
-                    # payloads.  Full accepted-trace replay also needs the raw
-                    # R/Z-preconditioned force, so materialize it only for that
-                    # opt-in diagnostic/validation mode.
-                    frzl_rz = _apply_rz_preconditioner_current(frzl_in=frzl_rhs)
-                if (not use_apply_payload_fusion) and host_update_assembly:
-                    # NumPy path: avoids ~15 JAX dispatches (jnp.asarray, zeros_like, mul).
-                    # Asymmetric (lasym) components default to None — the downstream
-                    # mode-diag scaling uses _z (pre-allocated zeros) for None entries,
-                    # avoiding 6 np.zeros_like allocations per iteration (~0.5s saving).
-                    (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
-                        _preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
-                    )
-                elif (not use_apply_payload_fusion) and use_fused_precond_output_scaling:
-                    rz_norm, f_norm1 = _cached_or_current_f_norm1_jax(
-                        vmec2000_control=bool(vmec2000_control),
-                        vmec2000_cache_valid=bool(vmec2000_cache_valid),
-                        need_bcovar_update=bool(need_bcovar_update),
-                        cache_rz_norm=cache_rz_norm,
-                        cache_f_norm1=cache_f_norm1,
-                        state=state,
-                        rz_norm_func=_rz_norm,
-                    )
-                    payload_outputs = _preconditioner_output_payload_jit(
-                        apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                        vmec2000_control=bool(vmec2000_control),
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    )
-                    (
-                        (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        (
-                            frcc_u,
-                            frss_u,
-                            fzsc_u,
-                            fzcs_u,
-                            flsc_u,
-                            flcs_u,
-                            frsc_u,
-                            frcs_u,
-                            fzcc_u,
-                            fzss_u,
-                            flcc_u,
-                            flss_u,
-                        ),
-                        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe),
-                    ) = payload_outputs(frzl_rz, lam_prec, w_mode_mn, lambda_update_scale_j, f_norm1, delta_s, s)
-                    fsqr1 = fsqr1_safe
-                    fsqz1 = fsqz1_safe
-                    fsql1 = fsql1_safe
-                    preconditioner_outputs_scaled = True
-                    preconditioner_fsq1_ready = True
-                elif not use_apply_payload_fusion:
-                    frcc = jnp.asarray(frzl_rz.frcc)
-                    frss = frzl_rz.frss
-                    fzsc = jnp.asarray(frzl_rz.fzsc)
-                    fzcs = frzl_rz.fzcs
-                    flsc = jnp.asarray(frzl_rz.flsc) * jnp.asarray(lam_prec)
-                    flcs = None if frzl_rz.flcs is None else (jnp.asarray(frzl_rz.flcs) * jnp.asarray(lam_prec))
-                    frsc = jnp.zeros_like(frcc)
-                    frcs = jnp.zeros_like(frcc)
-                    fzcc = jnp.zeros_like(fzsc)
-                    fzss = jnp.zeros_like(fzsc)
-                    flcc = jnp.zeros_like(flsc)
-                    flss = jnp.zeros_like(flsc)
-                    if getattr(frzl_rz, "frsc", None) is not None:
-                        frsc = jnp.asarray(frzl_rz.frsc)
-                    if getattr(frzl_rz, "frcs", None) is not None:
-                        frcs = jnp.asarray(frzl_rz.frcs)
-                    if getattr(frzl_rz, "fzcc", None) is not None:
-                        fzcc = jnp.asarray(frzl_rz.fzcc)
-                    if getattr(frzl_rz, "fzss", None) is not None:
-                        fzss = jnp.asarray(frzl_rz.fzss)
-                    if getattr(frzl_rz, "flcc", None) is not None:
-                        flcc = jnp.asarray(frzl_rz.flcc) * jnp.asarray(lam_prec)
-                    if getattr(frzl_rz, "flss", None) is not None:
-                        flss = jnp.asarray(frzl_rz.flss) * jnp.asarray(lam_prec)
-                if timing_detail_enabled and t_precond_apply_start is not None:
-                    try:
-                        if has_jax():
-                            jax.block_until_ready(flsc)
-                    except Exception:
-                        pass
-                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
             else:
                 t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
                 (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (

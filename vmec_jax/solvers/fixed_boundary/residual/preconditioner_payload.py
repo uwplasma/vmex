@@ -6,6 +6,11 @@ from typing import Any, Callable, NamedTuple
 
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solvers.fixed_boundary.preconditioning import payload as _payload
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
+    ForceBlocks,
+    preconditioner_output_blocks_jax,
+    preconditioner_output_blocks_np,
+)
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 
 
@@ -58,6 +63,29 @@ class PreconditionedResidualScalarChannels(NamedTuple):
     fsqz1_safe: Any
     fsql1_safe: Any
     fsq1: Any
+
+
+class Vmec2000PreconditionerApplyResult(NamedTuple):
+    """VMEC2000-style preconditioner payloads for one residual iteration."""
+
+    lam_prec: Any
+    mats: dict[str, Any]
+    jmax: int
+    cache_update_trace: bool
+    blocks: ForceBlocks
+    update_blocks: ForceBlocks | None
+    gcr2_p: Any
+    gcz2_p: Any
+    gcl2_p: Any
+    fsqr1_safe: Any
+    fsqz1_safe: Any
+    fsql1_safe: Any
+    fsq1_safe: Any
+    frzl_rz: Any | None
+    frzl_lam_pre: Any | None
+    outputs_scaled: bool
+    fsq1_ready: bool
+    accepted_control_ptau_payload: Any | None
 
 
 def host_preconditioned_residual_scalar_channels(
@@ -454,6 +482,188 @@ def _cached_or_current_f_norm1_jax(
     return rz_norm, jnp.where(rz_norm != 0.0, 1.0 / rz_norm, jnp.asarray(float("inf"), dtype=rz_norm.dtype))
 
 
+def _force_blocks_from_sequence(blocks: tuple[Any, ...] | ForceBlocks) -> ForceBlocks:
+    """Normalize payload tuples to the named force-block convention."""
+
+    if isinstance(blocks, ForceBlocks):
+        return blocks
+    return ForceBlocks(*blocks)
+
+
+def apply_vmec2000_preconditioner_runtime(
+    *,
+    frzl: TomnspsRZL,
+    k: Any,
+    state: Any,
+    iter2: int,
+    cfg: Any,
+    s: Any,
+    delta_s: Any,
+    w_mode_mn: Any,
+    lambda_update_scale: float,
+    lambda_update_scale_j: Any,
+    lconm1: bool,
+    vmec2000_control: bool,
+    vmec2000_cache_valid: bool,
+    need_bcovar_update: bool,
+    cache_rz_norm: Any,
+    cache_f_norm1: Any,
+    host_update_assembly: bool,
+    use_fused_precond_output_scaling: bool,
+    scale_m1_rhs: bool,
+    adjoint_trace: bool,
+    adjoint_trace_mode: str,
+    accepted_control_ptau_arrays: tuple[Any, ...] | None,
+    ptau_pshalf_jax: Any,
+    ptau_ohs_jax: Any,
+    preconditioner_use_precomputed_tridi: bool | None,
+    preconditioner_use_lax_tridi: bool | None,
+    timing_detail_enabled: bool,
+    timing_stats: dict[str, Any],
+    perf_counter: Callable[[], float],
+    block_until_ready: Callable[[Any], Any] | None,
+    refresh_preconditioner_cache_func: Callable[..., tuple[Any, dict[str, Any], int, bool, bool, bool]],
+    scale_m1_precond_rhs_func: Callable[[TomnspsRZL, dict[str, Any]], TomnspsRZL],
+    rz_preconditioner_apply_func: Callable[..., TomnspsRZL],
+    rz_norm_func: Callable[[Any], Any],
+) -> Vmec2000PreconditionerApplyResult:
+    """Apply the VMEC2000-style R/Z/lambda preconditioner and payload scaling."""
+
+    lam_prec, mats, jmax, need_lam_prec, need_lamcal, cache_update_trace = refresh_preconditioner_cache_func(
+        k,
+        iter2=int(iter2),
+    )
+    t_precond_apply_start = perf_counter() if timing_detail_enabled else None
+    use_apply_payload_fusion = (
+        bool(use_fused_precond_output_scaling)
+        and need_lam_prec is False
+        and need_lamcal is False
+    )
+    frzl_rhs = scale_m1_precond_rhs_func(frzl, mats) if bool(scale_m1_rhs) else frzl
+    frzl_rz = None
+    frzl_lam_pre = None
+    update_blocks = None
+    gcr2_p = gcz2_p = gcl2_p = None
+    fsqr1_safe = fsqz1_safe = fsql1_safe = fsq1_safe = None
+    accepted_control_ptau_payload = None
+    blocks = None
+    precond_kwargs = {
+        "mats": mats,
+        "jmax": jmax,
+        "use_precomputed": preconditioner_use_precomputed_tridi,
+        "use_lax_tridi": preconditioner_use_lax_tridi,
+    }
+
+    if use_apply_payload_fusion:
+        _, f_norm1 = _cached_or_current_f_norm1_jax(
+            vmec2000_control=bool(vmec2000_control),
+            vmec2000_cache_valid=bool(vmec2000_cache_valid),
+            need_bcovar_update=bool(need_bcovar_update),
+            cache_rz_norm=cache_rz_norm,
+            cache_f_norm1=cache_f_norm1,
+            state=state,
+            rz_norm_func=rz_norm_func,
+        )
+        precond_payload = _preconditioner_apply_payload_fused(
+            frzl_in=frzl_rhs,
+            mats=mats,
+            jmax=jmax,
+            cfg=cfg,
+            lam_prec=lam_prec,
+            w_mode_mn=w_mode_mn,
+            lambda_update_scale_j=lambda_update_scale_j,
+            f_norm1=f_norm1,
+            delta_s=delta_s,
+            s=s,
+            use_precomputed=preconditioner_use_precomputed_tridi,
+            use_lax_tridi=preconditioner_use_lax_tridi,
+            apply_lambda_update_scale=(lambda_update_scale != 1.0),
+            vmec2000_control=bool(vmec2000_control),
+            lconm1=bool(lconm1),
+            include_control_ptau=accepted_control_ptau_arrays is not None,
+            control_ptau_arrays=accepted_control_ptau_arrays,
+            control_ptau_pshalf=ptau_pshalf_jax,
+            control_ptau_ohs=ptau_ohs_jax,
+        )
+        pre_blocks, update_blocks_raw, diag, accepted_control_ptau_payload = _split_preconditioner_apply_payload(
+            precond_payload
+        )
+        blocks = _force_blocks_from_sequence(pre_blocks)
+        update_blocks = _force_blocks_from_sequence(update_blocks_raw)
+        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe) = diag
+    else:
+        frzl_rz = rz_preconditioner_apply_func(frzl_in=frzl_rhs, **precond_kwargs)
+        frzl_lam_pre = frzl_rz
+
+    if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
+        # Fused payloads avoid materializing the raw R/Z-preconditioned force.
+        # Full accepted-trace replay needs it, so only the opt-in replay path
+        # pays this extra apply.
+        frzl_rz = rz_preconditioner_apply_func(frzl_in=frzl_rhs, **precond_kwargs)
+
+    if (not use_apply_payload_fusion) and bool(host_update_assembly):
+        blocks = preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
+    elif (not use_apply_payload_fusion) and bool(use_fused_precond_output_scaling):
+        _, f_norm1 = _cached_or_current_f_norm1_jax(
+            vmec2000_control=bool(vmec2000_control),
+            vmec2000_cache_valid=bool(vmec2000_cache_valid),
+            need_bcovar_update=bool(need_bcovar_update),
+            cache_rz_norm=cache_rz_norm,
+            cache_f_norm1=cache_f_norm1,
+            state=state,
+            rz_norm_func=rz_norm_func,
+        )
+        payload_outputs = _preconditioner_output_payload_jit(
+            apply_lambda_update_scale=(lambda_update_scale != 1.0),
+            vmec2000_control=bool(vmec2000_control),
+            lconm1=bool(lconm1),
+        )
+        pre_blocks, update_blocks_raw, diag = payload_outputs(
+            frzl_rz,
+            lam_prec,
+            w_mode_mn,
+            lambda_update_scale_j,
+            f_norm1,
+            delta_s,
+            s,
+        )
+        blocks = _force_blocks_from_sequence(pre_blocks)
+        update_blocks = _force_blocks_from_sequence(update_blocks_raw)
+        (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe) = diag
+    elif not use_apply_payload_fusion:
+        blocks = preconditioner_output_blocks_jax(frzl_rz=frzl_rz, lam_prec=lam_prec)
+
+    if timing_detail_enabled and t_precond_apply_start is not None:
+        try:
+            if block_until_ready is not None and blocks is not None:
+                block_until_ready(blocks.flsc)
+        except Exception:
+            pass
+        timing_stats["precond_apply"] += perf_counter() - float(t_precond_apply_start)
+
+    outputs_scaled = bool(use_apply_payload_fusion or update_blocks is not None)
+    return Vmec2000PreconditionerApplyResult(
+        lam_prec=lam_prec,
+        mats=mats,
+        jmax=jmax,
+        cache_update_trace=bool(cache_update_trace),
+        blocks=blocks,
+        update_blocks=update_blocks,
+        gcr2_p=gcr2_p,
+        gcz2_p=gcz2_p,
+        gcl2_p=gcl2_p,
+        fsqr1_safe=fsqr1_safe,
+        fsqz1_safe=fsqz1_safe,
+        fsql1_safe=fsql1_safe,
+        fsq1_safe=fsq1_safe,
+        frzl_rz=frzl_rz,
+        frzl_lam_pre=frzl_lam_pre,
+        outputs_scaled=outputs_scaled,
+        fsq1_ready=outputs_scaled,
+        accepted_control_ptau_payload=accepted_control_ptau_payload,
+    )
+
+
 def refresh_preconditioner_cache_runtime(
     *,
     k: Any,
@@ -590,6 +800,8 @@ __all__ = [
     "_preconditioner_output_scaling_jit",
     "_ptau_compute_jit",
     "_strict_update_step_jit",
+    "apply_vmec2000_preconditioner_runtime",
     "PreconditionerRefreshRuntimeResult",
+    "Vmec2000PreconditionerApplyResult",
     "refresh_preconditioner_cache_runtime",
 ]

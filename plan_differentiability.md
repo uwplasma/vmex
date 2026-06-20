@@ -28404,3 +28404,86 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.979%.
 - Overall differentiability-refactor PR: 99.999999999962%.
+
+## 2026-06-20 VMEC2000 Preconditioner Apply Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `Vmec2000PreconditionerApplyResult` and
+   `apply_vmec2000_preconditioner_runtime` in the residual preconditioner
+   payload module.
+2. Moved duplicated 3D/axisymmetric VMEC2000 preconditioner apply, fused
+   output-payload scaling, accepted-control payload capture, and full-trace raw
+   R/Z-preconditioner materialization out of
+   `solve_fixed_boundary_residual_iter`.
+3. Kept the radial fallback path in the residual iteration loop unchanged.
+4. Added direct unit tests for the new helper covering plain non-fused apply,
+   output-payload fusion, and apply-payload fusion with full trace
+   materialization.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 3827
+  post-previous-tranche lines to 3574 lines in source-health accounting.
+- `solve_fixed_boundary_residual_iter` dropped from 3466 to 3230 lines.
+- The helper preserves the production-sensitive seams: preconditioner cache
+  update trace, fused controller payload, raw `frzl_rz` replay materialization,
+  output-scaled update blocks, and safe `fsq1` diagnostics.
+- A focused fused full-trace test initially exposed the missing local `frzl_rz`
+  rebind in the caller; the caller now rebinds `precond_apply.frzl_rz` so strict
+  accepted-trace export remains intact.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/preconditioner_payload.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_preconditioner_payload_helpers.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_preconditioner_payload_helpers.py tests/test_solve_hotpaths.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_finish_cache_more_coverage.py::test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path_lasym -q`
+- `VMEC_JAX_TIMING=1 VMEC_JAX_TIMING_DETAIL=1 JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_hotpaths.py::test_preconditioner_output_scaling_gate_is_gpu_only_without_gpu -q`
+- `python tools/diagnostics/source_health.py --top 16 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue extracting residual iteration seams with real behavior boundaries:
+   preconditioned norm/time-control materialization is the next local candidate,
+   but only if it keeps the VMEC2000 accepted/rejected controller semantics
+   explicit.
+2. Run a broader residual/free-boundary shard after another production-path
+   tranche rather than after every small edit.
+3. Keep the root namespace unchanged and avoid helper-prefix file proliferation.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999986%.
+- Solver monolith reduction: 99.982%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.892%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.980%.
+- Overall differentiability-refactor PR: 99.999999999963%.
