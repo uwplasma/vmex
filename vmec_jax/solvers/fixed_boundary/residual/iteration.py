@@ -168,8 +168,10 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
 )
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
+    ResidualScanPathHooks,
     ScanConvergencePredicate,
     ScanDeviceRuntime,
+    dispatch_residual_scan_path,
 )
 from vmec_jax.solvers.fixed_boundary.residual import preconditioner_payload as _precond_payload_facade
 from vmec_jax.solvers.fixed_boundary.residual.ptau import (
@@ -1200,115 +1202,43 @@ def solve_fixed_boundary_residual_iter(
 
 
     if use_scan:
-        if vmec2000_control:
-            scan_result = run_vmec2000_scan(
-                Vmec2000ScanControllerContext.from_namespace(
-                    locals(),
-                    _SCAN_RUNNER_CACHE=_SCAN_RUNNER_CACHE,
-                    _runtime_env_enabled=_runtime_env_enabled,
-                    _scan_backend_name=_scan_backend_name,
-                    _scan_chunk_settings=_scan_chunk_settings,
-                    _tree_has_tracer=_tree_has_tracer,
-                ),
-                state,
-            )
-            if scan_fallback_enabled and (not bool(state_only)):
-                fallback_decision = _scan_fallback_decision(
-                    diagnostics=scan_result.diagnostics,
-                    fsqr_history=scan_result.fsqr2_history,
-                    fsqz_history=scan_result.fsqz2_history,
-                    fsql_history=scan_result.fsql2_history,
-                    max_iter=int(max_iter),
-                    fallback_iters=int(scan_fallback_iters),
-                    badjac_limit=int(scan_fallback_badjac_limit),
-                    fsq_abs=float(scan_fallback_fsq_abs),
-                    accept_frac=float(scan_fallback_accept_frac),
-                    fsq_factor=float(scan_fallback_fsq_factor),
-                )
-                if fallback_decision.fallback:
-                    if verbose:
-                        print(_scan_fallback_message(fallback_decision), flush=True)
-                    use_scan = False
-                    resume_state = None
-                    state = state0
-                else:
-                    return _attach_freeb_diag(scan_result)
-            else:
-                return _attach_freeb_diag(scan_result)
-
-        if use_scan:
-            if (
-                backtracking
-                or use_restart_triggers
-                or auto_flip_force
-                or limit_dt_from_force
-                or limit_update_rms
-                or strict_update
-                or use_direct_fallback
-                or reference_mode
-            ):
-                raise ValueError(
-                    "use_scan requires vmec2000_control=False, backtracking=False, "
-                    "use_restart_triggers=False, auto_flip_force=False, "
-                    "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
-                    "use_direct_fallback=False, reference_mode=False."
-                )
-
-            return _run_accelerated_residual_scan(
-                state=state,
-                state0=state0,
-                static=static,
-                cfg=cfg,
-                max_iter=int(max_iter),
-                step_size=float(step_size),
-                initial_flip_sign=float(initial_flip_sign),
-                lambda_update_scale=float(lambda_update_scale),
-                lambda_update_scale_j=lambda_update_scale_j,
-                ftol=float(ftol),
-                fsq_total_target=fsq_total_target,
-                precond_radial_alpha=float(precond_radial_alpha),
-                precond_lambda_alpha=float(precond_lambda_alpha),
-                apply_m1_constraints=bool(apply_m1_constraints),
-                jit_forces=bool(jit_forces),
-                free_boundary_enabled=bool(free_boundary_enabled),
-                static_key=static_key,
-                wout_key=wout_key,
-                edge_value_key=edge_value_key,
-                edge_Rcos=edge_Rcos,
-                edge_Rsin=edge_Rsin,
-                edge_Zcos=edge_Zcos,
-                edge_Zsin=edge_Zsin,
-                idx00=int(idx00),
-                w_mode_mn=w_mode_mn,
-                mode_context=_mode_context,
-                compute_forces=_compute_forces,
-                compute_forces_impl=_compute_forces_impl,
-                apply_radial_tridi_batched=_apply_radial_tridi_batched,
-                mn_cos_to_signed_physical=_mn_cos_to_signed_physical,
-                mn_sin_to_signed_physical=_mn_sin_to_signed_physical,
-                mn_cos_to_signed_physical_lambda=_mn_cos_to_signed_physical_lambda,
-                enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
-                apply_vmec_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
-                attach_freeb_diag=_attach_freeb_diag,
-                scan_timing_env=os.getenv("VMEC_JAX_TIMING", ""),
-                jax_module=jax,
-                jnp_module=jnp,
-                jit_func=jit,
-                scan_timing_enabled_func=_scan_timing_enabled,
-                new_scan_timing_stats_func=_new_scan_timing_stats,
-                build_scan_timing_report_func=_build_scan_timing_report,
+        scan_outcome = dispatch_residual_scan_path(
+            namespace=locals(),
+            state=state,
+            hooks=ResidualScanPathHooks(
+                run_vmec2000_scan=run_vmec2000_scan,
+                scan_context_type=Vmec2000ScanControllerContext,
+                scan_fallback_decision=_scan_fallback_decision,
+                scan_fallback_message=_scan_fallback_message,
+                run_accelerated_scan=_run_accelerated_residual_scan,
                 scan_device_runtime_type=ScanDeviceRuntime,
                 scan_convergence_predicate_type=ScanConvergencePredicate,
                 converged_residuals_func=_runtime_converged_residuals_scan_fast,
                 scan_device_ready_recorder=_record_scan_device_ready,
-                get_or_build_scan_runner_func=_get_or_build_scan_runner,
+                get_or_build_scan_runner=_get_or_build_scan_runner,
+                jit_cache_get=_jit_cache_get,
+                jit_cache_put=_jit_cache_put,
+                record_scan_runner_cache_miss_categories=_record_scan_runner_cache_miss_categories,
+                scan_timing_enabled=_scan_timing_enabled,
+                new_scan_timing_stats=_new_scan_timing_stats,
+                build_scan_timing_report=_build_scan_timing_report,
+                runtime_env_enabled=_runtime_env_enabled,
+                scan_backend_name=_scan_backend_name,
+                scan_chunk_settings=_scan_chunk_settings,
+                tree_has_tracer=_tree_has_tracer,
                 scan_runner_cache=_SCAN_RUNNER_CACHE,
-                jit_cache_get_func=_jit_cache_get,
-                jit_cache_put_func=_jit_cache_put,
-                record_scan_runner_cache_miss_categories_func=_record_scan_runner_cache_miss_categories,
+                enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
+                jax_module=jax,
+                jnp_module=jnp,
+                jit_func=jit,
                 perf_counter=time.perf_counter,
-                differentiating_scan=bool(differentiating_scan),
-            )
+            ),
+        )
+        if scan_outcome.handled:
+            return scan_outcome.result
+        use_scan = scan_outcome.use_scan
+        state = scan_outcome.state
+        resume_state = scan_outcome.resume_state
 
     profile_window = os.getenv("VMEC_JAX_PROFILE_WINDOW", "").strip().lower()
     profile_dir_env = os.getenv("VMEC_JAX_PROFILE_DIR", "").strip()

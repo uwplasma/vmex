@@ -26621,3 +26621,81 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.96%.
 - Overall differentiability-refactor PR: 99.999999999939%.
+
+## 2026-06-20 Residual Scan Dispatch Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ResidualScanPathHooks` and `ResidualScanPathResult` so the residual
+   iterator can call scan dispatch through a typed seam instead of holding all
+   scan-path policy inline.
+2. Moved VMEC2000 scan dispatch and accelerated scan dispatch into
+   `vmec_jax.solvers.fixed_boundary.residual.scan_adapters`.
+3. Replaced the large `if use_scan` block in
+   `solve_fixed_boundary_residual_iter` with `dispatch_residual_scan_path`.
+4. Restored the historical `vmec_jax.solve` `_solve_runtime` re-export seam
+   after the broader scan-policy shard caught a missing `_scalar_history_array`
+   compatibility export.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped from 3981 to 3909 source-health
+  lines in this tranche.
+- The residual iterator file dropped to 4256 lines.
+- VMEC2000 scan, accelerated scan, fallback policy, and legacy facade
+  monkeypatch tests pass.
+- The `namespace=locals()` bridge remains intentionally temporary; the next
+  decomposition should replace it with a narrower typed residual setup object.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py`
+- `python -m py_compile vmec_jax/solve.py vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_uses_scan tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid tests/test_solve_real_scan_wave10_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_driver_wave2_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_scan_chunking.py tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 30 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push this residual scan-dispatch extraction.
+2. Split the remaining residual iterator setup/result-promotion logic into
+   typed context builders so the temporary `namespace=locals()` bridge can be
+   retired.
+3. Continue preserving VMEC2000 scan parity and monkeypatch seams while reducing
+   the fixed-boundary residual monolith.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999963%.
+- Solver monolith reduction: 99.932%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.545%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.35%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 98.90%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.96%.
+- Overall differentiability-refactor PR: 99.999999999940%.

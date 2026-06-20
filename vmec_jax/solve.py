@@ -19,6 +19,7 @@ _COMPAT_MODULE_NAMES = (
     "vmec_jax.state",
     "vmec_jax.vmec_forces",
     "vmec_jax.vmec_residue",
+    "vmec_jax._solve_runtime",
     "vmec_jax.solvers.fixed_boundary.jit_cache",
     "vmec_jax.solvers.fixed_boundary.options",
     "vmec_jax.solvers.fixed_boundary.profiles",

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
+import os
 from typing import Any, Callable
 
 from vmec_jax.solvers.fixed_boundary.diagnostics.io import _should_print_vmec2000_row
@@ -223,6 +224,49 @@ class Vmec2000ScanRuntimeSetup:
         """Return the configured scan trace context manager for a label."""
 
         return self.trace_context_or_null(self.hooks, label)
+
+
+@dataclass(frozen=True)
+class ResidualScanPathHooks:
+    """Injected scan hooks that preserve residual-iteration monkeypatch seams."""
+
+    run_vmec2000_scan: Callable[..., Any]
+    scan_context_type: Any
+    scan_fallback_decision: Callable[..., Any]
+    scan_fallback_message: Callable[..., str]
+    run_accelerated_scan: Callable[..., Any]
+    scan_device_runtime_type: Any
+    scan_convergence_predicate_type: Any
+    converged_residuals_func: Callable[..., Any]
+    scan_device_ready_recorder: Callable[..., Any]
+    get_or_build_scan_runner: Callable[..., Any]
+    jit_cache_get: Callable[..., Any]
+    jit_cache_put: Callable[..., Any]
+    record_scan_runner_cache_miss_categories: Callable[..., Any]
+    scan_timing_enabled: Callable[..., Any]
+    new_scan_timing_stats: Callable[..., Any]
+    build_scan_timing_report: Callable[..., Any]
+    runtime_env_enabled: Callable[..., Any]
+    scan_backend_name: Callable[..., str]
+    scan_chunk_settings: Callable[..., Any]
+    tree_has_tracer: Callable[..., bool]
+    scan_runner_cache: Any
+    enforce_fixed_boundary_and_axis: Callable[..., Any]
+    jax_module: Any
+    jnp_module: Any
+    jit_func: Callable[..., Any]
+    perf_counter: Callable[[], float]
+
+
+@dataclass(frozen=True)
+class ResidualScanPathResult:
+    """Outcome of trying the scan path before falling back to host iteration."""
+
+    handled: bool
+    result: Any | None
+    use_scan: bool
+    state: Any
+    resume_state: dict[str, Any] | None
 
 
 def build_vmec2000_scan_runtime_setup(
@@ -448,4 +492,177 @@ def scan_m1_preconditioner_rhs(
         lconm1=getattr(cfg, "lconm1", True),
         mpol=int(cfg.mpol),
         host_update_assembly=False,
+    )
+
+
+def _dispatch_vmec2000_residual_scan(
+    *,
+    namespace: dict[str, Any],
+    state: Any,
+    hooks: ResidualScanPathHooks,
+) -> ResidualScanPathResult:
+    """Run the VMEC2000 residual scan and decide whether to fall back."""
+
+    scan_result = hooks.run_vmec2000_scan(
+        hooks.scan_context_type.from_namespace(
+            namespace,
+            _SCAN_RUNNER_CACHE=hooks.scan_runner_cache,
+            _runtime_env_enabled=hooks.runtime_env_enabled,
+            _scan_backend_name=hooks.scan_backend_name,
+            _scan_chunk_settings=hooks.scan_chunk_settings,
+            _tree_has_tracer=hooks.tree_has_tracer,
+        ),
+        state,
+    )
+    attach_freeb_diag = namespace["_attach_freeb_diag"]
+    if namespace["scan_fallback_enabled"] and (not bool(namespace["state_only"])):
+        fallback_decision = hooks.scan_fallback_decision(
+            diagnostics=scan_result.diagnostics,
+            fsqr_history=scan_result.fsqr2_history,
+            fsqz_history=scan_result.fsqz2_history,
+            fsql_history=scan_result.fsql2_history,
+            max_iter=int(namespace["max_iter"]),
+            fallback_iters=int(namespace["scan_fallback_iters"]),
+            badjac_limit=int(namespace["scan_fallback_badjac_limit"]),
+            fsq_abs=float(namespace["scan_fallback_fsq_abs"]),
+            accept_frac=float(namespace["scan_fallback_accept_frac"]),
+            fsq_factor=float(namespace["scan_fallback_fsq_factor"]),
+        )
+        if fallback_decision.fallback:
+            if namespace["verbose"]:
+                print(hooks.scan_fallback_message(fallback_decision), flush=True)
+            return ResidualScanPathResult(
+                handled=False,
+                result=None,
+                use_scan=False,
+                state=namespace["state0"],
+                resume_state=None,
+            )
+    return ResidualScanPathResult(
+        handled=True,
+        result=attach_freeb_diag(scan_result),
+        use_scan=True,
+        state=state,
+        resume_state=namespace["resume_state"],
+    )
+
+
+def _dispatch_accelerated_residual_scan(
+    *,
+    namespace: dict[str, Any],
+    state: Any,
+    hooks: ResidualScanPathHooks,
+) -> ResidualScanPathResult:
+    """Run the non-VMEC2000 accelerated residual scan."""
+
+    result = hooks.run_accelerated_scan(
+        state=state,
+        state0=namespace["state0"],
+        static=namespace["static"],
+        cfg=namespace["cfg"],
+        max_iter=int(namespace["max_iter"]),
+        step_size=float(namespace["step_size"]),
+        initial_flip_sign=float(namespace["initial_flip_sign"]),
+        lambda_update_scale=float(namespace["lambda_update_scale"]),
+        lambda_update_scale_j=namespace["lambda_update_scale_j"],
+        ftol=float(namespace["ftol"]),
+        fsq_total_target=namespace["fsq_total_target"],
+        precond_radial_alpha=float(namespace["precond_radial_alpha"]),
+        precond_lambda_alpha=float(namespace["precond_lambda_alpha"]),
+        apply_m1_constraints=bool(namespace["apply_m1_constraints"]),
+        jit_forces=bool(namespace["jit_forces"]),
+        free_boundary_enabled=bool(namespace["free_boundary_enabled"]),
+        static_key=namespace["static_key"],
+        wout_key=namespace["wout_key"],
+        edge_value_key=namespace["edge_value_key"],
+        edge_Rcos=namespace["edge_Rcos"],
+        edge_Rsin=namespace["edge_Rsin"],
+        edge_Zcos=namespace["edge_Zcos"],
+        edge_Zsin=namespace["edge_Zsin"],
+        idx00=int(namespace["idx00"]),
+        w_mode_mn=namespace["w_mode_mn"],
+        mode_context=namespace["_mode_context"],
+        compute_forces=namespace["_compute_forces"],
+        compute_forces_impl=namespace["_compute_forces_impl"],
+        apply_radial_tridi_batched=namespace["_apply_radial_tridi_batched"],
+        mn_cos_to_signed_physical=namespace["_mn_cos_to_signed_physical"],
+        mn_sin_to_signed_physical=namespace["_mn_sin_to_signed_physical"],
+        mn_cos_to_signed_physical_lambda=namespace["_mn_cos_to_signed_physical_lambda"],
+        enforce_fixed_boundary_and_axis=hooks.enforce_fixed_boundary_and_axis,
+        apply_vmec_lambda_axis_rules=namespace["_apply_vmec_lambda_axis_rules"],
+        attach_freeb_diag=namespace["_attach_freeb_diag"],
+        scan_timing_env=os.getenv("VMEC_JAX_TIMING", ""),
+        jax_module=hooks.jax_module,
+        jnp_module=hooks.jnp_module,
+        jit_func=hooks.jit_func,
+        scan_timing_enabled_func=hooks.scan_timing_enabled,
+        new_scan_timing_stats_func=hooks.new_scan_timing_stats,
+        build_scan_timing_report_func=hooks.build_scan_timing_report,
+        scan_device_runtime_type=hooks.scan_device_runtime_type,
+        scan_convergence_predicate_type=hooks.scan_convergence_predicate_type,
+        converged_residuals_func=hooks.converged_residuals_func,
+        scan_device_ready_recorder=hooks.scan_device_ready_recorder,
+        get_or_build_scan_runner_func=hooks.get_or_build_scan_runner,
+        scan_runner_cache=hooks.scan_runner_cache,
+        jit_cache_get_func=hooks.jit_cache_get,
+        jit_cache_put_func=hooks.jit_cache_put,
+        record_scan_runner_cache_miss_categories_func=hooks.record_scan_runner_cache_miss_categories,
+        perf_counter=hooks.perf_counter,
+        differentiating_scan=bool(namespace["differentiating_scan"]),
+    )
+    return ResidualScanPathResult(
+        handled=True,
+        result=result,
+        use_scan=True,
+        state=state,
+        resume_state=namespace["resume_state"],
+    )
+
+
+def dispatch_residual_scan_path(
+    *,
+    namespace: dict[str, Any],
+    state: Any,
+    hooks: ResidualScanPathHooks,
+) -> ResidualScanPathResult:
+    """Try the configured scan path before the host residual loop."""
+
+    if not bool(namespace["use_scan"]):
+        return ResidualScanPathResult(
+            handled=False,
+            result=None,
+            use_scan=False,
+            state=state,
+            resume_state=namespace["resume_state"],
+        )
+    if namespace["vmec2000_control"]:
+        scan_outcome = _dispatch_vmec2000_residual_scan(
+            namespace=namespace,
+            state=state,
+            hooks=hooks,
+        )
+        if scan_outcome.handled:
+            return scan_outcome
+        return scan_outcome
+
+    if (
+        namespace["backtracking"]
+        or namespace["use_restart_triggers"]
+        or namespace["auto_flip_force"]
+        or namespace["limit_dt_from_force"]
+        or namespace["limit_update_rms"]
+        or namespace["strict_update"]
+        or namespace["use_direct_fallback"]
+        or namespace["reference_mode"]
+    ):
+        raise ValueError(
+            "use_scan requires vmec2000_control=False, backtracking=False, "
+            "use_restart_triggers=False, auto_flip_force=False, "
+            "limit_dt_from_force=False, limit_update_rms=False, strict_update=False, "
+            "use_direct_fallback=False, reference_mode=False."
+        )
+    return _dispatch_accelerated_residual_scan(
+        namespace=namespace,
+        state=state,
+        hooks=hooks,
     )
