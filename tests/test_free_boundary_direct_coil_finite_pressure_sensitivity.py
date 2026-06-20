@@ -3526,7 +3526,6 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax.discrete_adjoint import (
         preconditioned_force_channels_from_rz_output,
         strict_update_one_step_from_trace,
-        strict_update_one_step_from_state,
     )
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
@@ -3711,18 +3710,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     # been computed. This protects accepted-output correctness separately from
     # the harder coil -> NESTOR -> force reconstruction path below.
     traced_rz_force = TomnspsRZL(
-        frcc=trace["frzl_rz_frcc"],
-        frss=trace["frzl_rz_frss"],
-        fzsc=trace["frzl_rz_fzsc"],
-        fzcs=trace["frzl_rz_fzcs"],
-        flsc=trace["frzl_rz_flsc"],
-        flcs=trace["frzl_rz_flcs"],
-        frsc=trace["frzl_rz_frsc"],
-        frcs=trace["frzl_rz_frcs"],
-        fzcc=trace["frzl_rz_fzcc"],
-        fzss=trace["frzl_rz_fzss"],
-        flcc=trace["frzl_rz_flcc"],
-        flss=trace["frzl_rz_flss"],
+        **{name: trace[f"frzl_rz_{name}"] for name in ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs", "frsc", "frcs", "fzcc", "fzss", "flcc", "flss")}
     )
     traced_force = preconditioned_force_channels_from_rz_output(
         frzl_rz=traced_rz_force,
@@ -3743,45 +3731,11 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     )
 
     def objective(params: CoilFieldParams):
-        out = strict_update_one_step_from_state(
+        out = strict_update_one_step_from_trace(
             effective_state_pre,
             init.static,
-            wout_like=trace["wout_like"],
-            trig=trace["trig"],
-            apply_lforbal=trace["apply_lforbal"],
-            include_edge_residual=trace["include_edge_residual"],
-            apply_m1_constraints=trace["apply_m1_constraints"],
-            zero_m1=trace["zero_m1"],
-            mats=trace["precond_mats"],
-            jmax=trace["precond_jmax"],
-            lam_prec=trace["lam_prec"],
-            w_mode_mn=trace["w_mode_mn"],
-            lambda_update_scale=trace["lambda_update_scale"],
-            dt_eff=trace["dt_eff"],
-            b1=trace["b1"],
-            fac=trace["fac"],
-            force_scale=trace["force_scale"],
-            flip_sign=trace["flip_sign"],
-            vRcc_before=trace["vRcc_before"],
-            vRss_before=trace["vRss_before"],
-            vZsc_before=trace["vZsc_before"],
-            vZcs_before=trace["vZcs_before"],
-            vLsc_before=trace["vLsc_before"],
-            vLcs_before=trace["vLcs_before"],
-            max_update_rms=trace["max_update_rms_pre"],
-            limit_update_rms=trace["limit_update_rms"],
-            divide_by_scalxc_for_update=trace["divide_by_scalxc_for_update"],
-            preconditioner_use_precomputed_tridi=trace["preconditioner_use_precomputed_tridi"],
-            preconditioner_use_lax_tridi=trace["preconditioner_use_lax_tridi"],
+            trace,
             freeb_bsqvac_half=bsqvac_from_coils(params),
-            freeb_pres_scale=trace["freeb_pres_scale"],
-            constraint_rcon0=trace.get("constraint_rcon0"),
-            constraint_zcon0=trace.get("constraint_zcon0"),
-            constraint_tcon0=trace.get("constraint_tcon0"),
-            constraint_precond_diag=trace.get("constraint_precond_diag"),
-            constraint_tcon=trace.get("constraint_tcon"),
-            constraint_precond_active=trace.get("constraint_precond_active"),
-            constraint_tcon_active=trace.get("constraint_tcon_active"),
             enforce_edge=False,
         )
         state_post = jnp.asarray(pack_state(out["step"]["state_post"]))
