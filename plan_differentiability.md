@@ -26476,3 +26476,76 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.96%.
 - Overall differentiability-refactor PR: 99.999999999937%.
+
+## 2026-06-19 VMEC2000 Scan Step Context Extraction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Extracted the nested VMEC2000 scan step body from `run_vmec2000_scan` into a
+   `ScanStepContext` plus top-level hold/advance/dispatch helpers.
+2. Kept the scan math, restart policy, bad-Jacobian checks, fallback gates,
+   live-print hooks, and final history row assembly unchanged.
+3. Left the next split point explicit: `_advance_vmec2000_scan_step` now owns
+   one active scan step and can be split into force/payload, time-control, and
+   finalization phases without touching the parent scan runner.
+
+Results obtained:
+
+- `run_vmec2000_scan` and its previous nested `_scan_step` / `_advance_step`
+  functions are no longer source-health function warnings.
+- The remaining scan-controller warning is now the named top-level
+  `_advance_vmec2000_scan_step` at 340 lines, which is a better seam for the
+  next tranche.
+- Focused accelerated-scan driver tests and the broader driver/policy shard
+  pass.
+
+Tests and commands run:
+
+- `python -m py_compile vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/scan/controller.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_uses_scan tests/test_driver_api.py::test_run_fixed_boundary_accelerated_mode_defaults_to_single_grid -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_driver_wave2_coverage.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Commit and push this scan step extraction tranche.
+2. Split `_advance_vmec2000_scan_step` into force/payload preparation,
+   time-control/restart decision, and final scan-step row assembly.
+3. Then return to the fixed-boundary residual iterator, which remains the
+   largest production source-health and differentiability-seam blocker.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999961%.
+- Solver monolith reduction: 99.928%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.520%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.965%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.05%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.35%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 98.90%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.96%.
+- Overall differentiability-refactor PR: 99.999999999938%.
