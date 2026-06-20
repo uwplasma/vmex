@@ -269,6 +269,99 @@ def new_residual_iter_histories() -> ResidualIterationHistories:
     return ResidualIterationHistories()
 
 
+def append_preconditioned_residual_history(
+    *,
+    track_history: bool,
+    rz_norm: Any,
+    f_norm1: Any,
+    gcr2_p: Any,
+    gcz2_p: Any,
+    gcl2_p: Any,
+    fsq1: Any,
+    fsqr1_safe: Any,
+    fsqz1_safe: Any,
+    fsql1_safe: Any,
+    rz_norm_history: list[Any],
+    f_norm1_history: list[Any],
+    gcr2_p_history: list[Any],
+    gcz2_p_history: list[Any],
+    gcl2_p_history: list[Any],
+    fsq1_history: list[Any],
+    fsqr1_history: list[Any],
+    fsqz1_history: list[Any],
+    fsql1_history: list[Any],
+) -> bool:
+    """Append preconditioned residual scalar channels when history is enabled."""
+
+    if not bool(track_history):
+        return False
+    rz_norm_history.append(rz_norm)
+    f_norm1_history.append(f_norm1)
+    gcr2_p_history.append(gcr2_p)
+    gcz2_p_history.append(gcz2_p)
+    gcl2_p_history.append(gcl2_p)
+    fsq1_history.append(fsq1)
+    fsqr1_history.append(fsqr1_safe)
+    fsqz1_history.append(fsqz1_safe)
+    fsql1_history.append(fsql1_safe)
+    return True
+
+
+def append_zero_update_history_record(
+    *,
+    track_history: bool,
+    restart_path: str,
+    step_status: str,
+    restart_reason: str,
+    pre_restart_reason: str,
+    time_step_value: float,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    res0: float,
+    res1: float,
+    fsq_prev: float,
+    bad_growth_streak: int,
+    iter1: int,
+    iter2: int,
+    free_boundary_enabled: bool,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    history_record_lists: Mapping[str, Any],
+) -> bool:
+    """Append a zero-update residual history row for early exits."""
+
+    if not bool(track_history):
+        return False
+    rec = residual_iter_history_record(
+        step=0.0,
+        dt_eff=0.0,
+        update_rms=0.0,
+        w_curr=float(fsqr) + float(fsqz) + float(fsql),
+        w_try=float("nan"),
+        w_try_ratio=float("nan"),
+        restart_path=restart_path,
+        step_status=step_status,
+        restart_reason=restart_reason,
+        pre_restart_reason=pre_restart_reason,
+        time_step=time_step_value,
+        res0=res0,
+        res1=res1,
+        fsq_prev=fsq_prev,
+        bad_growth_streak=bad_growth_streak,
+        iter1=iter1,
+        iter2=iter2,
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        free_boundary_enabled=free_boundary_enabled,
+        freeb_ivac=freeb_ivac,
+        freeb_ivacskip=freeb_ivacskip,
+    )
+    append_residual_iter_history_record(rec, **history_record_lists)
+    return True
+
+
 def residual_iter_history_diagnostics(namespace: Mapping[str, Any]) -> dict[str, Any]:
     """Materialize residual iteration history lists for the result diagnostics."""
 

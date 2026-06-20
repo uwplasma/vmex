@@ -39,14 +39,14 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
 )
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
-    append_residual_iter_history_record as _append_residual_iter_history_record,
     append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
+    append_preconditioned_residual_history as _append_preconditioned_residual_history,
+    append_zero_update_history_record as _append_zero_update_history_record,
     host_restart_decision as _host_restart_decision,
     new_residual_iter_histories as _new_residual_iter_histories,
     numpy_preconditioner_apply_policy as _numpy_preconditioner_apply_policy,
     pop_residual_iter_rollback_histories as _pop_residual_iter_rollback_histories,
     resolve_residual_iter_startup_policy as _resolve_residual_iter_startup_policy,
-    residual_iter_history_record as _residual_iter_history_record,
     scan_fallback_decision as _scan_fallback_decision,
     scan_fallback_message as _scan_fallback_message,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
@@ -2873,64 +2873,52 @@ def solve_fixed_boundary_residual_iter(
                     precond_diag_host = _device_get_floats(fsqr1_safe, fsqz1_safe, fsql1_safe)
                 return precond_diag_host
 
-            def _append_zero_update_history(
-                *,
-                restart_path: str,
-                step_status: str,
-                restart_reason: str,
-                pre_restart_reason: str,
-                time_step_value: float,
-            ) -> None:
-                if not track_history:
-                    return
-                rec = _residual_iter_history_record(
-                    step=0.0,
-                    dt_eff=0.0,
-                    update_rms=0.0,
-                    w_curr=fsqr_f + fsqz_f + fsql_f,
-                    w_try=float("nan"),
-                    w_try_ratio=float("nan"),
-                    restart_path=restart_path,
-                    step_status=step_status,
-                    restart_reason=restart_reason,
-                    pre_restart_reason=pre_restart_reason,
-                    time_step=time_step_value,
+            _append_preconditioned_residual_history(
+                track_history=bool(track_history),
+                rz_norm=rz_norm,
+                f_norm1=f_norm1,
+                gcr2_p=gcr2_p,
+                gcz2_p=gcz2_p,
+                gcl2_p=gcl2_p,
+                fsq1=fsq1,
+                fsqr1_safe=fsqr1_safe,
+                fsqz1_safe=fsqz1_safe,
+                fsql1_safe=fsql1_safe,
+                rz_norm_history=rz_norm_history,
+                f_norm1_history=f_norm1_history,
+                gcr2_p_history=gcr2_p_history,
+                gcz2_p_history=gcz2_p_history,
+                gcl2_p_history=gcl2_p_history,
+                fsq1_history=fsq1_history,
+                fsqr1_history=fsqr1_history,
+                fsqz1_history=fsqz1_history,
+                fsql1_history=fsql1_history,
+            )
+
+            if converged_physical:
+                # Keep per-iteration history channels length-aligned with
+                # fsqr/fsqz/fsql when convergence happens before the update
+                # block. VMEC's table still reports DELT on this row.
+                _append_zero_update_history_record(
+                    track_history=bool(track_history),
+                    restart_path="converged",
+                    step_status="converged",
+                    restart_reason="none",
+                    pre_restart_reason="none",
+                    time_step_value=time_step,
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
                     res0=res0,
                     res1=res1,
                     fsq_prev=fsq_prev,
                     bad_growth_streak=bad_growth_streak,
                     iter1=iter1,
                     iter2=iter2,
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    free_boundary_enabled=free_boundary_enabled,
+                    free_boundary_enabled=bool(free_boundary_enabled),
                     freeb_ivac=freeb_ivac,
                     freeb_ivacskip=freeb_ivacskip,
-                )
-                _append_residual_iter_history_record(rec, **_history_record_lists)
-
-            if track_history:
-                rz_norm_history.append(rz_norm)
-                f_norm1_history.append(f_norm1)
-                gcr2_p_history.append(gcr2_p)
-                gcz2_p_history.append(gcz2_p)
-                gcl2_p_history.append(gcl2_p)
-                fsq1_history.append(fsq1)
-                fsqr1_history.append(fsqr1_safe)
-                fsqz1_history.append(fsqz1_safe)
-                fsql1_history.append(fsql1_safe)
-
-            if converged_physical:
-                # Keep per-iteration history channels length-aligned with
-                # fsqr/fsqz/fsql when convergence happens before the update
-                # block. VMEC's table still reports DELT on this row.
-                _append_zero_update_history(
-                    restart_path="converged",
-                    step_status="converged",
-                    restart_reason="none",
-                    pre_restart_reason="none",
-                    time_step_value=time_step,
+                    history_record_lists=_history_record_lists,
                 )
                 if verbose and not (bool(vmec2000_control) and bool(verbose_vmec2000_table)):
                     print(

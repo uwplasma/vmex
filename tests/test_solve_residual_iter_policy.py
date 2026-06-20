@@ -7,6 +7,8 @@ import pytest
 
 from vmec_jax.solvers.fixed_boundary.options import validate_residual_iteration_options
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
+    append_preconditioned_residual_history,
+    append_zero_update_history_record,
     host_restart_decision,
     host_update_assembly_policy,
     numpy_preconditioner_apply_policy,
@@ -17,6 +19,123 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     scan_fallback_message,
     stage_transition_restart_reason,
 )
+
+
+def test_append_preconditioned_residual_history_keeps_channels_aligned():
+    histories = {name: [] for name in "rz f gcr gcz gcl fsq fsqr fsqz fsql".split()}
+
+    appended = append_preconditioned_residual_history(
+        track_history=True,
+        rz_norm=1.0,
+        f_norm1=2.0,
+        gcr2_p=3.0,
+        gcz2_p=4.0,
+        gcl2_p=5.0,
+        fsq1=6.0,
+        fsqr1_safe=7.0,
+        fsqz1_safe=8.0,
+        fsql1_safe=9.0,
+        rz_norm_history=histories["rz"],
+        f_norm1_history=histories["f"],
+        gcr2_p_history=histories["gcr"],
+        gcz2_p_history=histories["gcz"],
+        gcl2_p_history=histories["gcl"],
+        fsq1_history=histories["fsq"],
+        fsqr1_history=histories["fsqr"],
+        fsqz1_history=histories["fsqz"],
+        fsql1_history=histories["fsql"],
+    )
+
+    assert appended is True
+    assert histories == {
+        "rz": [1.0],
+        "f": [2.0],
+        "gcr": [3.0],
+        "gcz": [4.0],
+        "gcl": [5.0],
+        "fsq": [6.0],
+        "fsqr": [7.0],
+        "fsqz": [8.0],
+        "fsql": [9.0],
+    }
+    assert not append_preconditioned_residual_history(
+        track_history=False,
+        rz_norm=0.0,
+        f_norm1=0.0,
+        gcr2_p=0.0,
+        gcz2_p=0.0,
+        gcl2_p=0.0,
+        fsq1=0.0,
+        fsqr1_safe=0.0,
+        fsqz1_safe=0.0,
+        fsql1_safe=0.0,
+        rz_norm_history=histories["rz"],
+        f_norm1_history=histories["f"],
+        gcr2_p_history=histories["gcr"],
+        gcz2_p_history=histories["gcz"],
+        gcl2_p_history=histories["gcl"],
+        fsq1_history=histories["fsq"],
+        fsqr1_history=histories["fsqr"],
+        fsqz1_history=histories["fsqz"],
+        fsql1_history=histories["fsql"],
+    )
+    assert histories["rz"] == [1.0]
+
+
+def test_append_zero_update_history_record_builds_aligned_converged_row():
+    record_lists = {
+        "step_history": [],
+        "dt_eff_history": [],
+        "update_rms_history": [],
+        "w_curr_history": [],
+        "w_try_history": [],
+        "w_try_ratio_history": [],
+        "restart_path_history": [],
+        "step_status_history": [],
+        "restart_reason_history": [],
+        "pre_restart_reason_history": [],
+        "time_step_history": [],
+        "res0_history": [],
+        "res1_history": [],
+        "fsq_prev_history": [],
+        "bad_growth_streak_history": [],
+        "iter1_history": [],
+        "iter2_history": [],
+        "grad_rms_history": [],
+        "freeb_ivac_history": [],
+        "freeb_ivacskip_history": [],
+        "freeb_full_update_history": [],
+        "free_boundary_enabled": True,
+    }
+
+    appended = append_zero_update_history_record(
+        track_history=True,
+        restart_path="converged",
+        step_status="converged",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step_value=0.9,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        res0=4.0,
+        res1=5.0,
+        fsq_prev=6.0,
+        bad_growth_streak=7,
+        iter1=8,
+        iter2=9,
+        free_boundary_enabled=True,
+        freeb_ivac=1,
+        freeb_ivacskip=0,
+        history_record_lists=record_lists,
+    )
+
+    assert appended is True
+    assert record_lists["step_history"] == [0.0]
+    assert record_lists["w_curr_history"] == [6.0]
+    assert record_lists["step_status_history"] == ["converged"]
+    assert record_lists["iter2_history"] == [9]
+    assert record_lists["freeb_ivac_history"] == [1]
 
 
 def test_host_update_assembly_policy_matches_cpu_non_scan_defaults():

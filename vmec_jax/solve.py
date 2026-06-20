@@ -74,6 +74,10 @@ _MODULE_BY_NAME.update(
 
 _LEGACY_ALIASES = {
     "_dump_array": ("vmec_jax.solvers.fixed_boundary.diagnostics.force", "dump_array"),
+    "_append_residual_iter_history_record": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "append_residual_iter_history_record",
+    ),
     "_enforce_field_rows": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_field_rows"),
     "_enforce_field_rows_np": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_field_rows_np"),
     "_enforce_lambda_gauge": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_lambda_gauge"),
@@ -89,6 +93,10 @@ _LEGACY_ALIASES = {
     "_parse_bad_jacobian_config": ("vmec_jax.solvers.fixed_boundary.residual.config", "parse_bad_jacobian_config"),
     "_replace_mode_slice": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "replace_mode_slice"),
     "_replace_mode_slice_np": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "replace_mode_slice_np"),
+    "_residual_iter_history_record": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "residual_iter_history_record",
+    ),
     "_resolve_chunked_scan_config": ("vmec_jax.solvers.fixed_boundary.residual.config", "resolve_chunked_scan_config"),
     "_resolve_lbfgs_curvature_tol": ("vmec_jax.solvers.fixed_boundary.optimization.quasi_newton", "lbfgs_curvature_tolerance"),
     "_scale_mode_slice": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "scale_mode_slice"),
