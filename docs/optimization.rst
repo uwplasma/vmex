@@ -1741,6 +1741,7 @@ Source files
        interval scans and residual-block timings.
    * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
+
 Running the QH example
 -----------------------
 

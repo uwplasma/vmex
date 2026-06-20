@@ -11,6 +11,11 @@ is the authoritative API documentation for those internal layers.
 Submodules
 ----------
 
+.. toctree::
+   :hidden:
+
+   generated/vmec_jax.solvers.free_boundary.validation
+
 .. autosummary::
    :toctree: generated
    :recursive:
