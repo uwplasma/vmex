@@ -1151,6 +1151,27 @@ def _trace_scalar_value(value: object) -> float:
     return float(np.asarray(value).reshape(-1)[0])
 
 
+_STRICT_ACCEPTED_STEP_TRACE_KEYS = (
+    "dt_eff", "b1", "fac", "force_scale", "flip_sign",
+    "vRcc_before", "vRss_before", "vZsc_before", "vZcs_before", "vLsc_before", "vLcs_before",
+    "frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u",
+    "limit_update_rms", "divide_by_scalxc_for_update",
+)
+
+
+def _strict_accepted_step_from_trace(trace_payload, static, *, state_pre=None):
+    from vmec_jax.discrete_adjoint import strict_update_accepted_step
+
+    kwargs = {key: trace_payload[key] for key in _STRICT_ACCEPTED_STEP_TRACE_KEYS}
+    kwargs["max_update_rms"] = trace_payload["max_update_rms_pre"]
+    return strict_update_accepted_step(
+        trace_payload["state_pre"] if state_pre is None else state_pre,
+        static,
+        **kwargs,
+        enforce_edge=False,
+    )
+
+
 def _lcfs_boundary_moment_from_state(state, static):
     from vmec_jax._compat import jnp
     from vmec_jax.free_boundary_adjoint import free_boundary_boundary_geometry_jax
@@ -3667,7 +3688,6 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax._compat import jax, jnp
     from vmec_jax.discrete_adjoint import (
         preconditioned_force_channels_from_rz_output,
-        strict_update_accepted_step,
         strict_update_one_step_from_trace,
         strict_update_one_step_from_state,
     )
@@ -3694,16 +3714,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax.vmec_tomnsp import TomnspsRZL
 
     enable_x64(True)
-    for key, value in {
-        "VMEC_JAX_FREEB_NESTOR_MODE": "dense",
-        "VMEC_JAX_FREEB_DENSE_SOLVE_MODE": "mode",
-        "VMEC_JAX_FREEB_USE_GREENF_SOURCE": "1",
-        "VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX": "1",
-        "VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC": "1",
-        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR": "1",
-        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR": "0",
-    }.items():
-        monkeypatch.setenv(key, value)
+    _set_same_branch_custom_vjp_env(monkeypatch)
 
     input_path = _write_tiny_direct_freeb_input(
         tmp_path / "input.direct_accepted_update_ad_fd",
@@ -3885,35 +3896,8 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     for key in ("frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u"):
         np.testing.assert_allclose(np.asarray(traced_force[key]), np.asarray(trace[key]), rtol=0.0, atol=0.0)
 
-    def accepted_step_from_trace(trace_payload, *, state_pre=None):
-        return strict_update_accepted_step(
-            trace_payload["state_pre"] if state_pre is None else state_pre,
-            init.static,
-            dt_eff=trace_payload["dt_eff"],
-            b1=trace_payload["b1"],
-            fac=trace_payload["fac"],
-            force_scale=trace_payload["force_scale"],
-            flip_sign=trace_payload["flip_sign"],
-            vRcc_before=trace_payload["vRcc_before"],
-            vRss_before=trace_payload["vRss_before"],
-            vZsc_before=trace_payload["vZsc_before"],
-            vZcs_before=trace_payload["vZcs_before"],
-            vLsc_before=trace_payload["vLsc_before"],
-            vLcs_before=trace_payload["vLcs_before"],
-            frcc_u=trace_payload["frcc_u"],
-            frss_u=trace_payload["frss_u"],
-            fzsc_u=trace_payload["fzsc_u"],
-            fzcs_u=trace_payload["fzcs_u"],
-            flsc_u=trace_payload["flsc_u"],
-            flcs_u=trace_payload["flcs_u"],
-            max_update_rms=trace_payload["max_update_rms_pre"],
-            limit_update_rms=trace_payload["limit_update_rms"],
-            divide_by_scalxc_for_update=trace_payload["divide_by_scalxc_for_update"],
-            enforce_edge=False,
-        )
-
     effective_state_pre = accepted_trace_effective_state_pre(trace)
-    exact_step = accepted_step_from_trace(trace, state_pre=effective_state_pre)
+    exact_step = _strict_accepted_step_from_trace(trace, init.static, state_pre=effective_state_pre)
     np.testing.assert_allclose(
         np.asarray(pack_state(exact_step["state_post"])),
         np.asarray(pack_state(trace["state_post"])),
@@ -3999,15 +3983,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     eps_state = 1.0e-4
     candidate_indices = np.unique(
         np.asarray(
-            [
-                0,
-                flat0.size // 7,
-                flat0.size // 5,
-                flat0.size // 3,
-                flat0.size // 2,
-                (2 * flat0.size) // 3,
-                flat0.size - 1,
-            ],
+            [0, flat0.size // 7, flat0.size // 5, flat0.size // 3, flat0.size // 2, (2 * flat0.size) // 3, flat0.size - 1],
             dtype=int,
         )
     )
@@ -4042,7 +4018,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     assert not truncated_branch["compatible"]
     assert "n_steps" in truncated_branch["changed_fields"]
 
-    first_step = accepted_step_from_trace(trace0, state_pre=accepted_trace_effective_state_pre(trace0))
+    first_step = _strict_accepted_step_from_trace(trace0, init.static, state_pre=accepted_trace_effective_state_pre(trace0))
     replayed_state1 = first_step["state_post"]
     np.testing.assert_allclose(
         np.asarray(pack_state(replayed_state1)),
@@ -4172,11 +4148,10 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         np.asarray(controller_replay["controls"]["step_scalars"]["dt_eff"]),
         np.asarray([_trace_scalar_value(trace0["dt_eff"]), _trace_scalar_value(trace1["dt_eff"])]),
     )
-    assert "flip_sign" in controller_replay["controls"]["step_scalars"]
-    assert "limit_update_rms" in controller_replay["controls"]["step_scalars"]
-    assert "divide_by_scalxc_for_update" in controller_replay["controls"]["step_scalars"]
-    assert "preconditioner_use_lax_tridi" not in controller_replay["controls"]["step_scalars"]
-    assert "preconditioner_use_precomputed_tridi" not in controller_replay["controls"]["step_scalars"]
+    for key in ("flip_sign", "limit_update_rms", "divide_by_scalxc_for_update"):
+        assert key in controller_replay["controls"]["step_scalars"]
+    for key in ("preconditioner_use_lax_tridi", "preconditioner_use_precomputed_tridi"):
+        assert key not in controller_replay["controls"]["step_scalars"]
     np.testing.assert_allclose(
         np.asarray(controller_replay["scalar_controls"]["fac"]),
         np.asarray([_trace_scalar_value(trace0["fac"]), _trace_scalar_value(trace1["fac"])]),
