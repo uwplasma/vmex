@@ -31517,6 +31517,8 @@ Steps taken:
    branch-local vector scalar/Jacobian report into a dedicated helper.
 3. Made the helper return a typed `_CurrentOnlyDirectionalJVPConfig` instead of
    a loosely keyed dictionary, clarifying the fast-path contract.
+4. Extracted branch-local trace replay diagnostics assembly into a shared
+   helper used by both scalar-gradient and vector-Jacobian reports.
 
 Results obtained:
 
@@ -31524,16 +31526,15 @@ Results obtained:
   geometry cache selection, and current-only base/tangent setup.
 - The current-only JVP fast path still supports cached coil geometry and
   reports whether geometry was built or reused.
-- Source-health no longer lists
-  `direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax`
-  as a top-20 long-function hotspot.
+- The vector branch-local report dropped from roughly 302 lines before the
+  facade refactor to 276 lines after current-only and diagnostics extraction.
 
 Tests and commands run:
 
 - `python -m ruff check vmec_jax/solvers/free_boundary/adjoint/facade.py`
 - `python -m compileall -q vmec_jax/solvers/free_boundary/adjoint/facade.py`
-- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_vector_jacobian -q`
-- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_vector_jacobian tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_scalar_gradient -q`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 35 --max-root-helper-prefix-files 2`
 
 Best next steps:
 
@@ -31556,7 +31557,7 @@ Completion:
 - Package consolidation implementation: 99.985%.
 - Differentiability/refactor implementation: 99.99999999958%.
 - Solver monolith reduction: 99.997%.
-- Free-boundary adjoint monolith reduction: 99.735%.
+- Free-boundary adjoint monolith reduction: 99.74%.
 - Driver workflow decomposition: 99.985%.
 - Residual iteration decomposition: 99.974%.
 - Residual policy simplification: 99.986%.
@@ -31569,7 +31570,7 @@ Completion:
 - Optimizer workflow decomposition: 99.93%.
 - Fixed-boundary optimizer decomposition: 98.35%.
 - Plotting/WOUT visualization decomposition: 98.32%.
-- Free-boundary facade/domain decomposition: 99.48%.
+- Free-boundary facade/domain decomposition: 99.49%.
 - Sweep/example workflow decomposition: 96.4%.
 - Implicit residual-adjoint decomposition: 96.45%.
 - Discrete-adjoint replay decomposition: 99.30%.
