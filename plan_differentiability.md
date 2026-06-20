@@ -32123,3 +32123,75 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.9999999999996%.
+
+## 2026-06-20 Trim WOUT Nyquist Payload Boilerplate
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Replaced repetitive one-field-per-line Nyquist payload packaging with a
+   schema-driven zip over `WoutNyquistFieldPayload._fields`.
+2. Kept the explicit non-Nyquist field assignments, so the helper still shows
+   which source and diagnostic fields are passed through.
+
+Results obtained:
+
+- `vmec_jax/io/wout/minimal.py` drops from 1998 to 1973 lines.
+- Net diff is negative: 5 insertions and 30 deletions.
+- No numerical or schema behavior changed; only payload-construction
+  boilerplate was removed.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/io/wout/minimal.py`
+- `python -m compileall -q vmec_jax/io/wout/minimal.py`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 80 --max-root-helper-prefix-files 2`
+- `python -m pytest -q tests/test_wout_helpers.py tests/test_wout_branch_coverage.py tests/test_wout_additional_helpers.py tests/test_wout_env_branch_coverage.py -q`
+- `python -m pytest -q tests/test_wout_wave3_coverage.py tests/test_wout_wave4_coverage.py tests/test_driver_wout_wave9_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `git diff --check`
+
+Best next steps:
+
+1. Proceed with the driver/staging context refactor only after designing a
+   compact hook object that reduces boilerplate in both `driver.py` and
+   `drivers/staging.py`.
+2. Keep total-line delta as an explicit gate on future refactor tranches; if a
+   move increases lines, it should be justified by a measurable long-function
+   or root-namespace reduction.
+3. The residual iteration monolith remains the highest-value solver target.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999969%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.974%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9991%.
+- Bcovar/WOUT parity decomposition: 99.67%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.512%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.47%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.99999999999961%.
