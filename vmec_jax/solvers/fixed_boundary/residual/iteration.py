@@ -3268,12 +3268,26 @@ def solve_fixed_boundary_residual_iter(
                     inv_tau = [0.15 / time_step] * k_ndamp
                     _clear_preconditioner_cache_locals()
                     force_bcovar_update = True
-                    _append_zero_update_history(
+                    _append_zero_update_history_record(
+                        track_history=bool(track_history),
                         restart_path="vmec2000_bad_jacobian" if irst_tc == 2 else "vmec2000_time_control",
                         step_status=step_status,
                         restart_reason=restart_reason,
                         pre_restart_reason=pre_restart_reason,
                         time_step_value=time_step,
+                        fsqr=fsqr_f,
+                        fsqz=fsqz_f,
+                        fsql=fsql_f,
+                        res0=res0,
+                        res1=res1,
+                        fsq_prev=fsq_prev,
+                        bad_growth_streak=bad_growth_streak,
+                        iter1=iter1,
+                        iter2=iter2,
+                        free_boundary_enabled=bool(free_boundary_enabled),
+                        freeb_ivac=freeb_ivac,
+                        freeb_ivacskip=freeb_ivacskip,
+                        history_record_lists=_history_record_lists,
                     )
                     _pop_iteration_histories()
                     prev_rz_fsq = prev_rz_fsq_before
@@ -3378,12 +3392,26 @@ def solve_fixed_boundary_residual_iter(
                 _clear_preconditioner_cache_locals()
                 if bool(vmec2000_control):
                     force_bcovar_update = True
-                _append_zero_update_history(
+                _append_zero_update_history_record(
+                    track_history=bool(track_history),
                     restart_path="pre_restart_trigger",
                     step_status=step_status,
                     restart_reason=pre_restart_reason,
                     pre_restart_reason=pre_restart_reason,
                     time_step_value=time_step_iter,
+                    fsqr=fsqr_f,
+                    fsqz=fsqz_f,
+                    fsql=fsql_f,
+                    res0=res0,
+                    res1=res1,
+                    fsq_prev=fsq_prev,
+                    bad_growth_streak=bad_growth_streak,
+                    iter1=iter1,
+                    iter2=iter2,
+                    free_boundary_enabled=bool(free_boundary_enabled),
+                    freeb_ivac=freeb_ivac,
+                    freeb_ivacskip=freeb_ivacskip,
+                    history_record_lists=_history_record_lists,
                 )
                 if verbose:
                     if bool(vmec2000_control) and bool(verbose_vmec2000_table):
