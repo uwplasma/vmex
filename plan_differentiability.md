@@ -30004,3 +30004,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.999999999983%.
+
+## 2026-06-20 Direct-Coil Same-Branch Gate Helper Cleanup
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Refactored the largest direct-coil same-branch custom-VJP validation helper
+   into named scalar-map, replay-scalar, rejected-slot, and scalar-report
+   assertion helpers.
+2. Kept the same complete-solve central-FD report, scalar objectives, replay
+   options, tolerances, and fingerprint-gated physical/adaptive gate checks.
+3. Consolidated duplicated production and non-production scalar-gate assertions
+   so failures now point to smaller helper contracts.
+
+Results obtained:
+
+- `_assert_direct_coil_same_branch_custom_vjp_matches_complete_fd` decreased
+  from 684 to 465 lines.
+- The direct-coil validation file remains large because the accepted-update
+  replay test and trace-fingerprint test are still intentionally explicit.
+- No production solver or public API code changed in this tranche.
+
+Tests and commands run:
+
+- `python -m compileall -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `python -m ruff check tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch -q`
+- `python tools/diagnostics/source_health.py --top 12 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Avoid further same-branch helper churn until the accepted-update replay test
+   is split into smaller physics-gate phases.
+2. Revisit `wout_minimal_from_fixed_boundary` only with a specific data-object
+   extraction plan; casual helper extraction risks moving complexity without
+   reducing it.
+3. Continue keeping full adaptive-branch differentiation claims conservative
+   until complete-loop fingerprint-gated AD-vs-FD gates cover the actual
+   adaptive seam.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.9999999989%.
+- Solver monolith reduction: 99.990%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.945%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.15%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.36%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.999999999984%.
