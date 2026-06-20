@@ -296,6 +296,33 @@ class ScanDebugSelection:
     iter_index: int
 
 
+@dataclass(frozen=True)
+class ScanStepContext:
+    """Closed-over constants for one VMEC2000 scan step function."""
+
+    ctx: Vmec2000ScanControllerContext
+    scan_runtime: Any
+    scan_options: Any
+    controller_constants: Any
+    fallback_controls: ScanFallbackControlArrays
+    scan_debug: ScanDebugSelection
+    dtype: Any
+    compute_forces_scan: Any
+    scan_converged: Any
+    scale_m1_precond_rhs: Any
+    jmax0: int
+    max_iter: int
+    nstep_screen: int
+    scan_fallback_enabled_run: bool
+    state_only_scan: bool
+    scan_minimal: bool
+    scan_light: bool
+    print_in_scan: bool
+    scan_print_mode: Any
+    scan_timecontrol_dumper: Any
+    flip_sign0: Any
+
+
 def _build_vmec2000_scan_runtime(ctx: Vmec2000ScanControllerContext, state_init: VMECState) -> Any:
     """Resolve runtime/JIT/print settings for the VMEC2000-style scan."""
 
@@ -377,6 +404,375 @@ def _scan_fallback_control_arrays(*, ctx: Vmec2000ScanControllerContext, dtype: 
         fsq_factor=jnp.asarray(float(ctx.scan_fallback_fsq_factor), dtype=dtype),
         fsq_abs=jnp.asarray(float(ctx.scan_fallback_fsq_abs), dtype=dtype),
         improve=jnp.asarray(float(startup_policy.scan_fallback_improve), dtype=dtype),
+    )
+
+
+def _hold_vmec2000_scan_step(step_ctx: ScanStepContext, carry_hold: _ScanCarry) -> Any:
+    """Emit a passive scan row after convergence/abort/max-iteration."""
+
+    return _scan_math_hold_step(
+        carry_hold,
+        dtype=step_ctx.dtype,
+        state_only_scan=step_ctx.state_only_scan,
+        scan_minimal=step_ctx.scan_minimal,
+        scan_light=step_ctx.scan_light,
+        scan_hist_min=vmec2000_scan_minimal_history_row,
+        scan_hist_light=vmec2000_scan_light_history_row,
+    )
+
+
+def _advance_vmec2000_scan_step(step_ctx: ScanStepContext, carry_adv: _ScanCarry, it: Any) -> Any:
+    """Advance one active VMEC2000 scan step."""
+
+    ctx = step_ctx.ctx
+    cfg = ctx.cfg
+    dtype = step_ctx.dtype
+    scan_runtime = step_ctx.scan_runtime
+    scan_options = step_ctx.scan_options
+    constants = step_ctx.controller_constants
+    fallback_controls = step_ctx.fallback_controls
+    force_eval = _evaluate_scan_step_force(
+        carry_adv=carry_adv,
+        it=it,
+        dtype=dtype,
+        k_preconditioner_update_interval=constants.preconditioner_update_interval,
+        zero_precond_diag=ctx.zero_precond_diag,
+        zero_tcon=ctx.zero_tcon,
+        compute_forces_scan=step_ctx.compute_forces_scan,
+        scan_converged=step_ctx.scan_converged,
+        tree_select=_scan_tree_select,
+        cond=jax.lax.cond,
+        trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces"),
+        scan_debug_force_enabled=bool(step_ctx.scan_debug.force_enabled),
+        scan_debug_iter=int(step_ctx.scan_debug.iter_index),
+        debug_force_first_iter=_maybe_debug_scan_force_first_iter,
+        debug_state_iter=_maybe_debug_scan_state_iter,
+        debug_print=scan_runtime.jax_debug_print,
+    )
+    iter2 = force_eval.iter2
+    fsq_prev_before = force_eval.fsq_prev_before
+    fsq0_prev_before = force_eval.fsq0_prev_before
+    skip_timecontrol = force_eval.skip_timecontrol
+    time_step_report = force_eval.time_step_report
+    zero_m1 = force_eval.zero_m1
+    include_edge = force_eval.include_edge
+    need_bcovar_update = force_eval.need_bcovar_update
+    k = force_eval.kernels
+    frzl = force_eval.frzl
+    rz_scale = force_eval.rz_scale
+    l_scale = force_eval.l_scale
+    norms_current = force_eval.norms_current
+    norms_used = force_eval.norms_used
+    fsqr = force_eval.fsqr
+    fsqz = force_eval.fsqz
+    fsql = force_eval.fsql
+    conv_now = force_eval.conv_now
+    sample_vmec, r00_j, z00_j, w_mhd = _sample_vmec2000_scan_scalars(
+        carry_adv=carry_adv,
+        iter2=iter2,
+        max_iter=int(step_ctx.max_iter),
+        nstep_screen=int(step_ctx.nstep_screen),
+        scan_collect_scalars=bool(scan_options.scan_collect_scalars),
+        force_sample=conv_now,
+        kernels=k,
+        norms_current=norms_current,
+        gamma=float(ctx.gamma),
+        twopi=float(TWOPI),
+        lasym=bool(cfg.lasym),
+        cond=jax.lax.cond,
+    )
+
+    current_payload_pre = _build_current_preconditioned_scan_payload(
+        need_bcovar_update=need_bcovar_update,
+        carry_adv=carry_adv,
+        k=k,
+        frzl=frzl,
+        norms_used=norms_used,
+        rz_scale=rz_scale,
+        l_scale=l_scale,
+        constraint_tcon0=ctx.constraint_tcon0,
+        zero_precond_diag=ctx.zero_precond_diag,
+        zero_tcon=ctx.zero_tcon,
+        trig=ctx.trig,
+        s=ctx.s,
+        cfg=cfg,
+        dtype=dtype,
+        scan_use_precomputed=bool(scan_options.scan_use_precomputed),
+        scan_use_lax_tridi=bool(scan_options.scan_use_lax_tridi),
+        lambda_preconditioner_func=ctx._lambda_preconditioner,
+        rz_norm_func=ctx._rz_norm,
+        scale_m1_precond_rhs_func=step_ctx.scale_m1_precond_rhs,
+        w_mode_mn=ctx.w_mode_mn,
+        lambda_update_scale_j=ctx.lambda_update_scale_j,
+        apply_lambda_update_scale=(ctx.lambda_update_scale != 1.0),
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        delta_s=ctx.delta_s,
+        jmax0=step_ctx.jmax0,
+        cond=jax.lax.cond,
+    )
+    fsqr1 = current_payload_pre.fsqr1
+    fsqz1 = current_payload_pre.fsqz1
+    fsql1 = current_payload_pre.fsql1
+    fsq1 = fsqr1 + fsqz1 + fsql1
+
+    fsq0 = fsqr + fsqz + fsql
+    use_state_jac = ctx._runtime_env_enabled(os.getenv("VMEC_JAX_SCAN_JAC_FROM_STATE", "0"))
+    use_apply_payload_fusion = False
+    ptau_min, ptau_max = ctx._ptau_minmax(k) if bool(ctx.vmec2000_control) else (None, None)
+    tau_decision = _scan_bad_jacobian_decision_from_step(
+        carry_adv=carry_adv,
+        kernels=k,
+        iter2=iter2,
+        static=ctx.static,
+        trig=ctx.trig,
+        s=ctx.s,
+        vmec2000_control=bool(ctx.vmec2000_control),
+        use_apply_payload_fusion=bool(use_apply_payload_fusion),
+        badjac_use_state=bool(ctx.badjac_use_state),
+        dump_ptau_state=bool(ctx.dump_ptau_state),
+        badjac_state_probe=bool(ctx.badjac_state_probe),
+        badjac_initial_state_probe_iters=int(ctx.badjac_initial_state_probe_iters),
+        ptau_min=ptau_min,
+        ptau_max=ptau_max,
+        ptau_tol=ctx.ptau_tol,
+        dtype=dtype,
+        use_state_jac=bool(use_state_jac),
+        ignore_badjac=(os.getenv("VMEC_JAX_SCAN_IGNORE_BADJAC", "") not in ("", "0")),
+        vmec_half_mesh_jacobian_from_state_func=ctx.vmec_half_mesh_jacobian_from_state,
+        cond=jax.lax.cond,
+    )
+    bad_jacobian = tau_decision.bad_jacobian
+    min_tau = tau_decision.min_tau
+    max_tau = tau_decision.max_tau
+    min_tau_ptau = tau_decision.min_tau_ptau
+    max_tau_ptau = tau_decision.max_tau_ptau
+    min_tau_state = tau_decision.min_tau_state
+    max_tau_state = tau_decision.max_tau_state
+    badjac_ptau = tau_decision.badjac_ptau
+    badjac_state = tau_decision.badjac_state
+
+    time_restart = evaluate_scan_time_control_restart(
+        carry_adv=carry_adv,
+        iter2=iter2,
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        fsqr1=fsqr1,
+        fsqz1=fsqz1,
+        fsql1=fsql1,
+        fsq0=fsq0,
+        fsq1=fsq1,
+        fsq_prev_before=fsq_prev_before,
+        fsq0_prev_before=fsq0_prev_before,
+        bad_jacobian=bad_jacobian,
+        skip_timecontrol=skip_timecontrol,
+        vmec2000_control=bool(ctx.vmec2000_control),
+        reference_mode=bool(ctx.reference_mode),
+        use_apply_payload_fusion=bool(use_apply_payload_fusion),
+        dump_timecontrol_scan=bool(step_ctx.scan_runtime.dump_timecontrol_scan),
+        scan_timecontrol_dumper=step_ctx.scan_timecontrol_dumper,
+        vmec2000_fact=constants.vmec2000_fact,
+        use_restart_triggers=bool(ctx.use_restart_triggers),
+        vmecpp_restart=bool(ctx.vmecpp_restart),
+        k_preconditioner_update_interval=constants.preconditioner_update_interval,
+        stage_prev_fsq=ctx.stage_prev_fsq_j,
+        stage_transition_factor=ctx.stage_transition_factor,
+        restart_badjac_factor=constants.restart_badjac_factor,
+        restart_badprog_factor=constants.restart_badprog_factor,
+        stage_transition_scale=ctx.stage_transition_scale,
+        step_size=ctx.step_size,
+        k_ndamp=constants.ndamp,
+        dtype=dtype,
+        restart_updates_func=_scan_math_restart_updates,
+        no_restart_updates_func=_scan_math_no_restart_updates,
+        scan_restart_transition_func=scan_restart_transition,
+        cond_func=jax.lax.cond,
+    )
+    fsq_phys = time_restart.fsq_phys
+    res0 = time_restart.res0
+    res1 = time_restart.res1
+    checkpoint_update = time_restart.checkpoint_update
+    restart_decision = time_restart.restart_decision
+    do_restart = restart_decision.do_restart
+    restart_update = time_restart.restart_update
+    state_post = restart_update.state
+    time_step_post = restart_update.time_step
+    inv_tau_post = restart_update.inv_tau
+    fsq_prev_post = restart_update.fsq_prev
+    (
+        vRcc_post,
+        vRss_post,
+        vZsc_post,
+        vZcs_post,
+        vLsc_post,
+        vLcs_post,
+        vRsc_post,
+        vRcs_post,
+        vZcc_post,
+        vZss_post,
+        vLcc_post,
+        vLss_post,
+    ) = restart_update.velocity_blocks
+    iter_offset_post = restart_update.iter_offset
+    iter1_post = restart_update.iter1
+    ijacob_post = restart_update.ijacob
+    bad_resets_post = restart_update.bad_resets
+    bad_growth_post = restart_update.bad_growth
+    force_bcovar_post = restart_update.force_bcovar_update
+
+    payload_step = _select_payload_and_build_step_fields(
+        do_restart=do_restart,
+        use_restart_payload=bool(scan_options.scan_use_restart_payload),
+        current_payload=current_payload_pre,
+        state_post=state_post,
+        compute_forces_scan_func=step_ctx.compute_forces_scan,
+        restart_trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces:restart"),
+        zero_m1=zero_m1,
+        zero_precond_diag=ctx.zero_precond_diag,
+        zero_tcon=ctx.zero_tcon,
+        constraint_active_false=ctx.constraint_active_false,
+        constraint_tcon0=ctx.constraint_tcon0,
+        trig=ctx.trig,
+        s=ctx.s,
+        cfg=cfg,
+        dtype=dtype,
+        scan_use_precomputed=bool(scan_options.scan_use_precomputed),
+        scan_use_lax_tridi=bool(scan_options.scan_use_lax_tridi),
+        lambda_preconditioner_func=ctx._lambda_preconditioner,
+        rz_norm_func=ctx._rz_norm,
+        scale_m1_precond_rhs_func=step_ctx.scale_m1_precond_rhs,
+        w_mode_mn=ctx.w_mode_mn,
+        lambda_update_scale_j=ctx.lambda_update_scale_j,
+        apply_lambda_update_scale=(ctx.lambda_update_scale != 1.0),
+        delta_s=ctx.delta_s,
+        jmax0=step_ctx.jmax0,
+        velocity_blocks_post=(
+            vRcc_post,
+            vRss_post,
+            vZsc_post,
+            vZcs_post,
+            vLsc_post,
+            vLcs_post,
+            vRsc_post,
+            vRcs_post,
+            vZcc_post,
+            vZss_post,
+            vLcc_post,
+            vLss_post,
+        ),
+        inv_tau_post=inv_tau_post,
+        fsq_prev_post=fsq_prev_post,
+        time_step_post=time_step_post,
+        iter2=iter2,
+        iter1_post=iter1_post,
+        k_ndamp=constants.ndamp,
+        flip_sign=step_ctx.flip_sign0,
+        lasym=bool(cfg.lasym),
+        static=ctx.static,
+        edge_Rcos=carry_adv.edge_Rcos,
+        edge_Rsin=carry_adv.edge_Rsin,
+        edge_Zcos=carry_adv.edge_Zcos,
+        edge_Zsin=carry_adv.edge_Zsin,
+        free_boundary_enabled=bool(ctx.free_boundary_enabled),
+        idx00=ctx.idx00,
+        mn_cos_to_signed_physical=ctx._mn_cos_to_signed_physical,
+        mn_sin_to_signed_physical=ctx._mn_sin_to_signed_physical,
+        mn_sin_to_signed_physical_lambda=ctx._mn_sin_to_signed_physical_lambda,
+        mn_cos_to_signed_physical_lambda=ctx._mn_cos_to_signed_physical_lambda,
+        enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
+        apply_vmec_lambda_axis_rules=ctx._apply_vmec_lambda_axis_rules,
+        vmec2000_control=bool(ctx.vmec2000_control),
+        cond=jax.lax.cond,
+    )
+    payload_use = payload_step.payload
+    step_fields = payload_step.step_fields
+    fsqr = payload_use.fsqr
+    fsqz = payload_use.fsqz
+    fsql = payload_use.fsql
+    fsq1 = payload_step.fsq1
+    time_step_report = time_step_post
+    _ = _emit_live_scan_vmec2000_row(
+        enabled=step_ctx.print_in_scan,
+        sample_vmec=sample_vmec,
+        iter_idx=iter2,
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        delt0r=time_step_report,
+        r00=r00_j,
+        w_mhd=w_mhd,
+        scan_print_mode=step_ctx.scan_print_mode,
+        scan_print_ordered=bool(scan_options.scan_print_ordered),
+        jax_debug=scan_runtime.jax_debug,
+        io_callback=scan_runtime.io_callback,
+        cond=jax.lax.cond,
+        print_row=_print_scan_vmec2000_row,
+    )
+    step_result = finalize_vmec2000_scan_step(
+        carry_adv=carry_adv,
+        step_fields=step_fields,
+        current_payload=current_payload_pre,
+        selected_payload=payload_use,
+        checkpoint_update=checkpoint_update,
+        scan_fallback_enabled_run=step_ctx.scan_fallback_enabled_run,
+        scan_core=bool(scan_options.scan_core),
+        fsq_phys=fsq_phys,
+        fsq1=fsq1,
+        bad_jacobian=bad_jacobian,
+        abort_scan_on_badjac=scan_options.abort_scan_on_badjac,
+        scan_fallback_iters=fallback_controls.iters,
+        scan_fallback_badjac_limit=fallback_controls.badjac_limit,
+        scan_fallback_accept_frac=fallback_controls.accept_frac,
+        scan_fallback_fsq_factor=fallback_controls.fsq_factor,
+        scan_fallback_fsq_abs=fallback_controls.fsq_abs,
+        scan_fallback_improve=fallback_controls.improve,
+        dtype=dtype,
+        vmec2000_control=bool(ctx.vmec2000_control),
+        do_restart=do_restart,
+        state_only_scan=bool(step_ctx.state_only_scan),
+        scan_minimal=bool(step_ctx.scan_minimal),
+        scan_light=bool(step_ctx.scan_light),
+        fsq0_prev_post=time_restart.fsq0_prev_post,
+        force_bcovar_post=force_bcovar_post,
+        flip_sign=step_ctx.flip_sign0,
+        iter_offset_post=iter_offset_post,
+        iter1_post=iter1_post,
+        res0=res0,
+        res1=res1,
+        ijacob_post=ijacob_post,
+        bad_resets_post=bad_resets_post,
+        bad_growth_post=bad_growth_post,
+        r00=r00_j,
+        z00=z00_j,
+        w_mhd=w_mhd,
+        conv_now=conv_now,
+        time_step_report=time_step_report,
+        zero_m1=zero_m1,
+        include_edge=include_edge,
+        min_tau=min_tau,
+        max_tau=max_tau,
+        min_tau_ptau=min_tau_ptau,
+        max_tau_ptau=max_tau_ptau,
+        min_tau_state=min_tau_state,
+        max_tau_state=max_tau_state,
+        badjac_ptau=badjac_ptau,
+        badjac_state=badjac_state,
+    )
+    return step_result.carry, step_result.history_row
+
+
+def _vmec2000_scan_step(step_ctx: ScanStepContext, carry: _ScanCarry, it: Any) -> Any:
+    """Dispatch one scan iteration to hold or active advancement."""
+
+    iter2_hold = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
+    hold_cond = carry.converged | carry.abort_scan | (iter2_hold > jnp.asarray(int(step_ctx.max_iter), dtype=jnp.int32))
+    return jax.lax.cond(
+        hold_cond,
+        lambda c: _hold_vmec2000_scan_step(step_ctx, c),
+        lambda c: _advance_vmec2000_scan_step(step_ctx, c, it),
+        operand=carry,
     )
 
 
@@ -825,372 +1221,30 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     scan_fallback_controls = _scan_fallback_control_arrays(ctx=ctx, dtype=dtype)
     scan_debug = _scan_debug_selection_from_env()
 
-    def _scan_step(carry: _ScanCarry, it):
-        def _hold_step(carry_hold: _ScanCarry):
-            return _scan_math_hold_step(
-                carry_hold,
-                dtype=dtype,
-                state_only_scan=state_only_scan,
-                scan_minimal=scan_minimal,
-                scan_light=scan_light,
-                scan_hist_min=vmec2000_scan_minimal_history_row,
-                scan_hist_light=vmec2000_scan_light_history_row,
-            )
-
-        def _advance_step(carry_adv: _ScanCarry):
-            force_eval = _evaluate_scan_step_force(
-                carry_adv=carry_adv,
-                it=it,
-                dtype=dtype,
-                k_preconditioner_update_interval=k_preconditioner_update_interval,
-                zero_precond_diag=zero_precond_diag,
-                zero_tcon=zero_tcon,
-                compute_forces_scan=_compute_forces_scan,
-                scan_converged=scan_converged,
-                tree_select=_scan_tree_select,
-                cond=jax.lax.cond,
-                trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces"),
-                scan_debug_force_enabled=bool(scan_debug.force_enabled),
-                scan_debug_iter=int(scan_debug.iter_index),
-                debug_force_first_iter=_maybe_debug_scan_force_first_iter,
-                debug_state_iter=_maybe_debug_scan_state_iter,
-                debug_print=scan_runtime.jax_debug_print,
-            )
-            iter2 = force_eval.iter2
-            fsq_prev_before = force_eval.fsq_prev_before
-            fsq0_prev_before = force_eval.fsq0_prev_before
-            skip_timecontrol = force_eval.skip_timecontrol
-            time_step_report = force_eval.time_step_report
-            zero_m1 = force_eval.zero_m1
-            include_edge = force_eval.include_edge
-            need_bcovar_update = force_eval.need_bcovar_update
-            k = force_eval.kernels
-            frzl = force_eval.frzl
-            rz_scale = force_eval.rz_scale
-            l_scale = force_eval.l_scale
-            norms_current = force_eval.norms_current
-            norms_used = force_eval.norms_used
-            fsqr = force_eval.fsqr
-            fsqz = force_eval.fsqz
-            fsql = force_eval.fsql
-            conv_now = force_eval.conv_now
-            sample_vmec, r00_j, z00_j, w_mhd = _sample_vmec2000_scan_scalars(
-                carry_adv=carry_adv,
-                iter2=iter2,
-                max_iter=int(max_iter),
-                nstep_screen=int(nstep_screen),
-                scan_collect_scalars=bool(scan_collect_scalars),
-                force_sample=conv_now,
-                kernels=k,
-                norms_current=norms_current,
-                gamma=float(ctx.gamma),
-                twopi=float(TWOPI),
-                lasym=bool(cfg.lasym),
-                cond=jax.lax.cond,
-            )
-
-            current_payload_pre = _build_current_preconditioned_scan_payload(
-                need_bcovar_update=need_bcovar_update,
-                carry_adv=carry_adv,
-                k=k,
-                frzl=frzl,
-                norms_used=norms_used,
-                rz_scale=rz_scale,
-                l_scale=l_scale,
-                constraint_tcon0=constraint_tcon0,
-                zero_precond_diag=zero_precond_diag,
-                zero_tcon=zero_tcon,
-                trig=trig,
-                s=s,
-                cfg=cfg,
-                dtype=dtype,
-                scan_use_precomputed=bool(scan_use_precomputed),
-                scan_use_lax_tridi=bool(scan_use_lax_tridi),
-                lambda_preconditioner_func=_lambda_preconditioner,
-                rz_norm_func=_rz_norm,
-                scale_m1_precond_rhs_func=scale_m1_precond_rhs,
-                w_mode_mn=w_mode_mn,
-                lambda_update_scale_j=lambda_update_scale_j,
-                apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                fsqr=fsqr,
-                fsqz=fsqz,
-                fsql=fsql,
-                delta_s=delta_s,
-                jmax0=jmax0,
-                cond=jax.lax.cond,
-            )
-            (
-                frcc_u,
-                frss_u,
-                fzsc_u,
-                fzcs_u,
-                flsc_u,
-                flcs_u,
-                frsc_u,
-                frcs_u,
-                fzcc_u,
-                fzss_u,
-                flcc_u,
-                flss_u,
-            ) = current_payload_pre.blocks
-            fsqr1 = current_payload_pre.fsqr1
-            fsqz1 = current_payload_pre.fsqz1
-            fsql1 = current_payload_pre.fsql1
-            fsq1 = fsqr1 + fsqz1 + fsql1
-
-            fsq0 = fsqr + fsqz + fsql
-            use_state_jac = _runtime_env_enabled(os.getenv("VMEC_JAX_SCAN_JAC_FROM_STATE", "0"))
-            use_apply_payload_fusion = False
-            ptau_min, ptau_max = ctx._ptau_minmax(k) if bool(vmec2000_control) else (None, None)
-            tau_decision = _scan_bad_jacobian_decision_from_step(
-                carry_adv=carry_adv,
-                kernels=k,
-                iter2=iter2,
-                static=static,
-                trig=trig,
-                s=s,
-                vmec2000_control=bool(vmec2000_control),
-                use_apply_payload_fusion=bool(use_apply_payload_fusion),
-                badjac_use_state=bool(badjac_use_state),
-                dump_ptau_state=bool(ctx.dump_ptau_state),
-                badjac_state_probe=bool(badjac_state_probe),
-                badjac_initial_state_probe_iters=int(badjac_initial_state_probe_iters),
-                ptau_min=ptau_min,
-                ptau_max=ptau_max,
-                ptau_tol=ptau_tol,
-                dtype=dtype,
-                use_state_jac=bool(use_state_jac),
-                ignore_badjac=(os.getenv("VMEC_JAX_SCAN_IGNORE_BADJAC", "") not in ("", "0")),
-                vmec_half_mesh_jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
-                cond=jax.lax.cond,
-            )
-            bad_jacobian = tau_decision.bad_jacobian
-            min_tau = tau_decision.min_tau
-            max_tau = tau_decision.max_tau
-            min_tau_ptau = tau_decision.min_tau_ptau
-            max_tau_ptau = tau_decision.max_tau_ptau
-            min_tau_state = tau_decision.min_tau_state
-            max_tau_state = tau_decision.max_tau_state
-            badjac_ptau = tau_decision.badjac_ptau
-            badjac_state = tau_decision.badjac_state
-            # Axis reset handled before entering the scan loop.
-
-            time_restart = evaluate_scan_time_control_restart(
-                carry_adv=carry_adv,
-                iter2=iter2,
-                fsqr=fsqr,
-                fsqz=fsqz,
-                fsql=fsql,
-                fsqr1=fsqr1,
-                fsqz1=fsqz1,
-                fsql1=fsql1,
-                fsq0=fsq0,
-                fsq1=fsq1,
-                fsq_prev_before=fsq_prev_before,
-                fsq0_prev_before=fsq0_prev_before,
-                bad_jacobian=bad_jacobian,
-                skip_timecontrol=skip_timecontrol,
-                vmec2000_control=bool(vmec2000_control),
-                reference_mode=bool(reference_mode),
-                use_apply_payload_fusion=bool(use_apply_payload_fusion),
-                dump_timecontrol_scan=bool(dump_timecontrol_scan),
-                scan_timecontrol_dumper=scan_timecontrol_dumper,
-                vmec2000_fact=vmec2000_fact,
-                use_restart_triggers=bool(use_restart_triggers),
-                vmecpp_restart=bool(vmecpp_restart),
-                k_preconditioner_update_interval=k_preconditioner_update_interval,
-                stage_prev_fsq=ctx.stage_prev_fsq_j,
-                stage_transition_factor=stage_transition_factor,
-                restart_badjac_factor=restart_badjac_factor,
-                restart_badprog_factor=restart_badprog_factor,
-                stage_transition_scale=stage_transition_scale,
-                step_size=step_size,
-                k_ndamp=k_ndamp,
-                dtype=dtype,
-                restart_updates_func=_scan_math_restart_updates,
-                no_restart_updates_func=_scan_math_no_restart_updates,
-                scan_restart_transition_func=scan_restart_transition,
-                cond_func=jax.lax.cond,
-            )
-            fsq_phys = time_restart.fsq_phys
-            res0 = time_restart.res0
-            res1 = time_restart.res1
-            checkpoint_update = time_restart.checkpoint_update
-            restart_decision = time_restart.restart_decision
-            do_restart = restart_decision.do_restart
-            restart_update = time_restart.restart_update
-            state_post = restart_update.state
-            time_step_post = restart_update.time_step
-            inv_tau_post = restart_update.inv_tau
-            fsq_prev_post = restart_update.fsq_prev
-            (
-                vRcc_post,
-                vRss_post,
-                vZsc_post,
-                vZcs_post,
-                vLsc_post,
-                vLcs_post,
-                vRsc_post,
-                vRcs_post,
-                vZcc_post,
-                vZss_post,
-                vLcc_post,
-                vLss_post,
-            ) = restart_update.velocity_blocks
-            iter_offset_post = restart_update.iter_offset
-            iter1_post = restart_update.iter1
-            ijacob_post = restart_update.ijacob
-            bad_resets_post = restart_update.bad_resets
-            bad_growth_post = restart_update.bad_growth
-            force_bcovar_post = restart_update.force_bcovar_update
-
-            fsq0_prev_post = time_restart.fsq0_prev_post
-
-            payload_step = _select_payload_and_build_step_fields(
-                do_restart=do_restart,
-                use_restart_payload=bool(scan_use_restart_payload),
-                current_payload=current_payload_pre,
-                state_post=state_post,
-                compute_forces_scan_func=_compute_forces_scan,
-                restart_trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces:restart"),
-                zero_m1=zero_m1,
-                zero_precond_diag=zero_precond_diag,
-                zero_tcon=zero_tcon,
-                constraint_active_false=constraint_active_false,
-                constraint_tcon0=constraint_tcon0,
-                trig=trig,
-                s=s,
-                cfg=cfg,
-                dtype=dtype,
-                scan_use_precomputed=bool(scan_use_precomputed),
-                scan_use_lax_tridi=bool(scan_use_lax_tridi),
-                lambda_preconditioner_func=_lambda_preconditioner,
-                rz_norm_func=_rz_norm,
-                scale_m1_precond_rhs_func=scale_m1_precond_rhs,
-                w_mode_mn=w_mode_mn,
-                lambda_update_scale_j=lambda_update_scale_j,
-                apply_lambda_update_scale=(lambda_update_scale != 1.0),
-                delta_s=delta_s,
-                jmax0=jmax0,
-                velocity_blocks_post=(
-                    vRcc_post,
-                    vRss_post,
-                    vZsc_post,
-                    vZcs_post,
-                    vLsc_post,
-                    vLcs_post,
-                    vRsc_post,
-                    vRcs_post,
-                    vZcc_post,
-                    vZss_post,
-                    vLcc_post,
-                    vLss_post,
-                ),
-                inv_tau_post=inv_tau_post,
-                fsq_prev_post=fsq_prev_post,
-                time_step_post=time_step_post,
-                iter2=iter2,
-                iter1_post=iter1_post,
-                k_ndamp=k_ndamp,
-                flip_sign=flip_sign0,
-                lasym=bool(cfg.lasym),
-                static=static,
-                edge_Rcos=carry.edge_Rcos,
-                edge_Rsin=carry.edge_Rsin,
-                edge_Zcos=carry.edge_Zcos,
-                edge_Zsin=carry.edge_Zsin,
-                free_boundary_enabled=bool(free_boundary_enabled),
-                idx00=ctx.idx00,
-                mn_cos_to_signed_physical=ctx._mn_cos_to_signed_physical,
-                mn_sin_to_signed_physical=ctx._mn_sin_to_signed_physical,
-                mn_sin_to_signed_physical_lambda=ctx._mn_sin_to_signed_physical_lambda,
-                mn_cos_to_signed_physical_lambda=ctx._mn_cos_to_signed_physical_lambda,
-                enforce_fixed_boundary_and_axis=_enforce_fixed_boundary_and_axis,
-                apply_vmec_lambda_axis_rules=ctx._apply_vmec_lambda_axis_rules,
-                vmec2000_control=bool(vmec2000_control),
-                cond=jax.lax.cond,
-            )
-            payload_use = payload_step.payload
-            step_fields = payload_step.step_fields
-            fsqr = payload_use.fsqr
-            fsqz = payload_use.fsqz
-            fsql = payload_use.fsql
-            fsq1 = payload_step.fsq1
-            # VMEC prints the updated time-step (post TimeStepControl/restart),
-            # so report the post-update value on this iteration.
-            time_step_report = time_step_post
-            _ = _emit_live_scan_vmec2000_row(
-                enabled=print_in_scan,
-                sample_vmec=sample_vmec,
-                iter_idx=iter2,
-                fsqr=fsqr,
-                fsqz=fsqz,
-                fsql=fsql,
-                delt0r=time_step_report,
-                r00=r00_j,
-                w_mhd=w_mhd,
-                scan_print_mode=scan_print_mode,
-                scan_print_ordered=bool(scan_print_ordered),
-                jax_debug=scan_runtime.jax_debug,
-                io_callback=scan_runtime.io_callback,
-                cond=jax.lax.cond,
-                print_row=_print_scan_vmec2000_row,
-            )
-            step_result = finalize_vmec2000_scan_step(
-                carry_adv=carry_adv,
-                step_fields=step_fields,
-                current_payload=current_payload_pre,
-                selected_payload=payload_use,
-                checkpoint_update=checkpoint_update,
-                scan_fallback_enabled_run=scan_fallback_enabled_run,
-                scan_core=bool(scan_core),
-                fsq_phys=fsq_phys,
-                fsq1=fsq1,
-                bad_jacobian=bad_jacobian,
-                abort_scan_on_badjac=abort_scan_on_badjac,
-                scan_fallback_iters=scan_fallback_controls.iters,
-                scan_fallback_badjac_limit=scan_fallback_controls.badjac_limit,
-                scan_fallback_accept_frac=scan_fallback_controls.accept_frac,
-                scan_fallback_fsq_factor=scan_fallback_controls.fsq_factor,
-                scan_fallback_fsq_abs=scan_fallback_controls.fsq_abs,
-                scan_fallback_improve=scan_fallback_controls.improve,
-                dtype=dtype,
-                vmec2000_control=bool(vmec2000_control),
-                do_restart=do_restart,
-                state_only_scan=bool(state_only_scan),
-                scan_minimal=bool(scan_minimal),
-                scan_light=bool(scan_light),
-                fsq0_prev_post=fsq0_prev_post,
-                force_bcovar_post=force_bcovar_post,
-                flip_sign=flip_sign0,
-                iter_offset_post=iter_offset_post,
-                iter1_post=iter1_post,
-                res0=res0,
-                res1=res1,
-                ijacob_post=ijacob_post,
-                bad_resets_post=bad_resets_post,
-                bad_growth_post=bad_growth_post,
-                r00=r00_j,
-                z00=z00_j,
-                w_mhd=w_mhd,
-                conv_now=conv_now,
-                time_step_report=time_step_report,
-                zero_m1=zero_m1,
-                include_edge=include_edge,
-                min_tau=min_tau,
-                max_tau=max_tau,
-                min_tau_ptau=min_tau_ptau,
-                max_tau_ptau=max_tau_ptau,
-                min_tau_state=min_tau_state,
-                max_tau_state=max_tau_state,
-                badjac_ptau=badjac_ptau,
-                badjac_state=badjac_state,
-            )
-            return step_result.carry, step_result.history_row
-
-        iter2_hold = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
-        hold_cond = carry.converged | carry.abort_scan | (iter2_hold > jnp.asarray(int(max_iter), dtype=jnp.int32))
-        return jax.lax.cond(hold_cond, _hold_step, _advance_step, operand=carry)
+    step_context = ScanStepContext(
+        ctx=ctx,
+        scan_runtime=scan_runtime,
+        scan_options=scan_options,
+        controller_constants=controller_constants,
+        fallback_controls=scan_fallback_controls,
+        scan_debug=scan_debug,
+        dtype=dtype,
+        compute_forces_scan=_compute_forces_scan,
+        scan_converged=scan_converged,
+        scale_m1_precond_rhs=scale_m1_precond_rhs,
+        jmax0=jmax0,
+        max_iter=int(max_iter),
+        nstep_screen=int(nstep_screen),
+        scan_fallback_enabled_run=bool(scan_fallback_enabled_run),
+        state_only_scan=bool(state_only_scan),
+        scan_minimal=bool(scan_minimal),
+        scan_light=bool(scan_light),
+        print_in_scan=bool(print_in_scan),
+        scan_print_mode=scan_print_mode,
+        scan_timecontrol_dumper=scan_timecontrol_dumper,
+        flip_sign0=flip_sign0,
+    )
+    scan_step = partial(_vmec2000_scan_step, step_context)
 
     carry0 = _build_initial_scan_carry(
         state_init=state_init,
@@ -1254,7 +1308,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             ctx=ctx,
             state_init=state_init,
             carry0=carry0,
-            scan_step=_scan_step,
+            scan_step=scan_step,
             scan_runtime_plan=scan_runtime_plan,
             scan_timing_enabled=bool(scan_timing_enabled),
             scan_timing_stats=scan_timing_stats,
