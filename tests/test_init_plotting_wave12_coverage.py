@@ -24,7 +24,6 @@ from vmec_jax.plotting import (
     bmag_from_state_physical,
     plot_bmag_contours,
     plot_objective_history,
-    plot_qh_optimization,
     plot_wout,
     surface_rz_from_state,
 )
@@ -226,15 +225,6 @@ def test_plotting_contours_history_wrappers_and_error_branches(monkeypatch, tmp_
     )
     out_history = plot_objective_history(history_path, outdir=tmp_path / "hist")
     assert out_history.exists()
-
-    calls = []
-    import vmec_jax.plotting as plotting
-
-    monkeypatch.setattr(plotting, "plot_3d_boundary_comparison", lambda *_args, **kwargs: calls.append(kwargs["outdir"] / "a.png") or calls[-1])
-    monkeypatch.setattr(plotting, "plot_bmag_contours", lambda *_args, **kwargs: calls.append(kwargs["outdir"] / "b.png") or calls[-1])
-    monkeypatch.setattr(plotting, "plot_objective_history", lambda *_args, **kwargs: calls.append(kwargs["outdir"] / "c.png") or calls[-1])
-    result = plot_qh_optimization("wout_i.nc", "wout_f.nc", history_path, outdir=None)
-    assert result["boundary_comparison"].parent == history_path.parent
 
     static = build_static(_cfg(ntor=0, lthreed=False, nzeta=1))
     state = _state(static)

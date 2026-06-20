@@ -31191,3 +31191,78 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.988%.
 - Overall differentiability-refactor PR: 99.9999999999985%.
+
+## 2026-06-20 QH-Specific Optimization Plot Wrapper Removal
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Removed the public `plot_qh_optimization()` compatibility wrapper from
+   `vmec_jax.plotting`.
+2. Removed the wrapper from the root lazy import table and public `__all__`.
+3. Deleted wrapper-specific tests while keeping the guard that optimization
+   examples should call explicit plotting helpers instead of the old wrapper.
+
+Results obtained:
+
+- Plotting examples now consistently teach the explicit workflow:
+  `plot_3d_boundary_comparison`, Boozer/VMEC `|B|` contour plotting, and
+  `plot_objective_history`.
+- `vmec_jax/plotting.py` decreased to 1968 lines, below the current
+  source-health warning threshold.
+- `rg` shows no production/docs/example references to `plot_qh_optimization`.
+
+Tests and commands run:
+
+- `rg -n "plot_qh_optimization" vmec_jax tests examples docs README.md`
+- `python -m compileall -q vmec_jax/plotting.py vmec_jax/__init__.py tests/test_plotting_unit.py tests/test_init_plotting_wave12_coverage.py`
+- `python -m ruff check vmec_jax/plotting.py vmec_jax/__init__.py tests/test_plotting_unit.py tests/test_init_plotting_wave12_coverage.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_plotting_unit.py tests/test_plotting_fast_helpers.py tests/test_init_plotting_wave12_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_examples.py -q`
+- `python tools/diagnostics/source_health.py --top 35 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue net-negative public-API cleanup only where explicit replacement
+   workflows already exist in examples and docs.
+2. Move next to a larger residual strict-update trace context or terminal
+   status object, not another single-wrapper cleanup.
+3. Keep `plotting.py` below the warning threshold while moving reusable
+   Boozer/optimization plotting internals into domain modules only if that
+   reduces total complexity.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.99999999954%.
+- Solver monolith reduction: 99.997%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.973%.
+- Residual policy simplification: 99.982%.
+- WOUT diagnostic/profile decomposition: 99.994%.
+- Bcovar/WOUT parity decomposition: 99.39%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.93%.
+- Fixed-boundary optimizer decomposition: 98.35%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.42%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.44%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.988%.
+- Overall differentiability-refactor PR: 99.9999999999986%.

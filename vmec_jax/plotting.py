@@ -1822,30 +1822,6 @@ def plot_objective_history(
     return _plot_objective_history(history_path, outdir)
 
 
-def plot_qh_optimization(
-    wout_initial_path,
-    wout_final_path,
-    history_path,
-    *,
-    outdir=None,
-    show: bool = False,
-) -> dict:
-    """Compatibility wrapper that writes the standard optimization plots."""
-    history_path = Path(history_path)
-    outdir = _ensure_plot_outdir(outdir, default=history_path.parent)
-    plots = {
-        "boundary_comparison": plot_3d_boundary_comparison(wout_initial_path, wout_final_path, outdir=outdir),
-        "bmag_surface": plot_bmag_contours(wout_initial_path, wout_final_path, outdir=outdir),
-        "objective_history": plot_objective_history(history_path, outdir=outdir),
-    }
-    for p in plots.values():
-        print(f"  Saved {p}")
-    if show:
-        prepare_matplotlib_3d()
-        import matplotlib.pyplot as plt
-        plt.show()
-    return plots
-
 def plot_wout(
     wout_path: str | Path,
     outdir: str | Path | None = None,
