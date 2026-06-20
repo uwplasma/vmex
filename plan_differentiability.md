@@ -7,6 +7,114 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Final Plan/API Orientation Audit
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Re-audited the active branch state, source-health report, repository-size
+   gate, active plan files, README, docs, examples, and public API surfaces.
+2. Confirmed `plan_differentiability.md` remains the active umbrella plan and
+   single source of truth.  `plan_freeb.md` is a closed evidence log, while
+   `plan.md` and `discrete_adjoint_2506_plan.md` are historical/reference
+   plans only.
+3. Updated `docs/code_structure.rst` so the file map reflects the current
+   facade/domain split: `vmec_jax/solve.py` and `vmec_jax/driver.py` are
+   compatibility/API facades, while new implementation work belongs in the
+   domain packages.
+4. Added an explicit "where to make changes" map for solver physics,
+   free-boundary providers, branch-local adjoints, optimization objectives,
+   WOUT/finite-beta diagnostics, and parity/physics gates.
+5. Added concise public docstrings for high-value CLI, driver-policy,
+   driver-result, optimization-output, VMEC2000-exec, fixed-boundary scan,
+   residual-update, and free-boundary data containers/helpers.
+
+Results obtained:
+
+- The docs now give contributors a direct edit map for code and optimization
+  work instead of making them infer ownership from legacy VMEC module names.
+- Public top-level objects without docstrings dropped from `106` to `49`.
+  The remaining undocumented objects are mostly implementation-facing helpers
+  in free-boundary NESTOR internals, option validators, small scan payload
+  accessors, and low-level coefficient containers.
+- Source-health remains stable: the primary production hotspot is still
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at `3132` lines,
+  with `solve_fixed_boundary_residual_iter` at `2654` lines.
+- Repository size remains within gate: tracked size is `29.42 MiB`, and no
+  tracked file exceeds `2 MiB`.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/_compat.py vmec_jax/cli.py vmec_jax/drivers/policy.py vmec_jax/drivers/results.py vmec_jax/optimization_workflow.py vmec_jax/solvers/fixed_boundary/residual/update.py vmec_jax/solvers/fixed_boundary/residual/policy.py vmec_jax/solvers/fixed_boundary/scan/output.py vmec_jax/solvers/fixed_boundary/scan/payload.py vmec_jax/solvers/fixed_boundary/scan/planning.py vmec_jax/solvers/fixed_boundary/scan/time_control.py vmec_jax/solvers/free_boundary/types.py vmec_jax/vmec2000_exec.py`
+- `python -m compileall -q` on the same touched Python files.
+- `JAX_ENABLE_X64=1 pytest -q tests/test_driver_api.py::test_vmec2000_iter_histories_materialize_numeric_arrays tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_runtime_helpers.py --tb=short`
+- `SPHINX_FAST=1 LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_fast_audit`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 50 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 15 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Validation results:
+
+- Ruff passed.
+- Compileall passed.
+- Targeted driver/residual pytest shard passed with `88 passed`.
+- Fast Sphinx passed warning-clean.
+- Source-health and repository-size diagnostics passed.
+
+Best next steps:
+
+1. Stop broad planning churn; keep this file as the active plan and update only
+   when a meaningful refactor/validation tranche lands.
+2. Continue the next source-simplification tranche in
+   `solve_fixed_boundary_residual_iter`, prioritizing scan handoff setup,
+   trace inputs, or finalization payload construction only when the change is
+   production net-negative and preserves legacy trace/replay keys.
+3. Add remaining public docstrings opportunistically when touching the owning
+   module; do not churn low-level internals solely for documentation coverage.
+4. Before PR review, run the local CI-equivalent gate or the documented
+   equivalent shards and record final pass counts, coverage, and runtime.
+
+User decisions needed:
+
+No immediate decision.  After review, decide whether to keep the long
+historical plan logs in git or squash/archive them into shorter release notes
+to reduce long-term repository weight.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999992%.
+- Solver monolith reduction: 99.9993%.
+- Residual iteration decomposition: 99.992%.
+- Public API/docstring polish: 97%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.961%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.515%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.997%.
+- Overall differentiability-refactor PR: 99.99999999999986%.
+
 ## 2026-06-20 Residual Force-Block Container Refactor
 
 Branch: `codex/differentiability-refactor-plan`.

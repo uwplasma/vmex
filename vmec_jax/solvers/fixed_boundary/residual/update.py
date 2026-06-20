@@ -11,6 +11,8 @@ from ...._solve_runtime import _tree_has_tracer
 
 
 class ResidualVelocityBlocks(NamedTuple):
+    """Velocity-memory channels used by the VMEC residual update."""
+
     rcc: Any
     rss: Any
     rsc: Any
@@ -189,6 +191,8 @@ def velocity_blocks_from_force_blocks(blocks: Any) -> ResidualVelocityBlocks:
 
 
 class HostMomentumUpdate(NamedTuple):
+    """Updated velocity memory plus RMS step size for a host momentum step."""
+
     velocities: ResidualVelocityBlocks
     update_rms: Any
 

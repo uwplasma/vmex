@@ -55,6 +55,8 @@ STAGE_CHUNK_DIAG_KEYS = (
 
 
 def copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> SolveVmecResidualResult:
+    """Copy the private final-force payload across result wrappers."""
+
     payload = getattr(source_i, "_final_force_payload", None)
     if payload is not None:
         try:
@@ -65,6 +67,8 @@ def copy_final_force_payload(result_i: SolveVmecResidualResult, source_i) -> Sol
 
 
 def result_with_diag(result_i: SolveVmecResidualResult, **updates) -> SolveVmecResidualResult:
+    """Return a solver result with updated diagnostics and preserved payload."""
+
     diag = dict(result_i.diagnostics)
     diag.update(updates)
     out = SolveVmecResidualResult(
@@ -167,6 +171,8 @@ def merge_stage_chunk_results(
     *,
     mode_i: str,
 ) -> SolveVmecResidualResult:
+    """Merge chunked stage results into one VMEC stage result."""
+
     if len(results_i) == 1:
         return result_with_diag(
             results_i[0],
@@ -320,6 +326,8 @@ def stage_switch_reason_from_progress(
     chunk_iters: int,
     remaining_budget: int,
 ) -> str | None:
+    """Return why the current stage should stop early, if any."""
+
     if remaining_budget <= 0:
         return None
     if (not np.isfinite(best_total_fsq)) or (not np.isfinite(start_total_fsq)):
@@ -344,6 +352,8 @@ def stage_switch_reason_from_progress(
 
 
 def vmec_history_relerr(lhs_hist, rhs_hist) -> float:
+    """Return max relative error between two VMEC history arrays."""
+
     lhs_hist = np.asarray(lhs_hist)
     rhs_hist = np.asarray(rhs_hist)
     if lhs_hist.shape != rhs_hist.shape:
@@ -354,6 +364,8 @@ def vmec_history_relerr(lhs_hist, rhs_hist) -> float:
 
 
 def vmec_histories_match(lhs, rhs, *, rtol: float, atol: float) -> bool:
+    """Return whether the core VMEC residual histories match tolerances."""
+
     keys = ("w_history", "fsqr2_history", "fsqz2_history", "fsql2_history")
     for key in keys:
         lhs_hist = np.asarray(getattr(lhs, key))

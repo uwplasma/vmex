@@ -312,6 +312,8 @@ except Exception:
 
 
 def has_jax() -> bool:
+    """Return whether the active backend is real JAX rather than NumPy fallback."""
+
     if getattr(_numpy_mode_local, "active", False):
         return False
     return jax is not None
@@ -334,6 +336,8 @@ def enable_x64(enable: bool = True) -> None:
 
 
 def x64_enabled() -> bool:
+    """Return the effective JAX x64 setting, defaulting to true without JAX."""
+
     if jax is None:
         return True
     try:

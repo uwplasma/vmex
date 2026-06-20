@@ -14,6 +14,8 @@ from .time_control import scan_fallback_probe_update
 
 @dataclass(frozen=True)
 class Vmec2000ScanHistories:
+    """Raw device histories returned by the VMEC2000-style scan loop."""
+
     fsqr: Any
     fsqz: Any
     fsql: Any
@@ -43,6 +45,8 @@ class Vmec2000ScanHistories:
 
 @dataclass(frozen=True)
 class Vmec2000ScanPostprocessResult:
+    """Host-materialized scan histories, convergence flags, and diagnostics."""
+
     fsqr_full: np.ndarray
     fsqz_full: np.ndarray
     fsql_full: np.ndarray

@@ -11,6 +11,8 @@ from ....vmec_tomnsp import TomnspsRZL
 
 
 class ScanForceBlocks(NamedTuple):
+    """VMEC force channels carried by one scan step."""
+
     frcc: Any
     frss: Any
     fzsc: Any
@@ -26,6 +28,8 @@ class ScanForceBlocks(NamedTuple):
 
 
 class ScanForcePayload(NamedTuple):
+    """Force blocks, residual scalars, and preconditioner cache fields."""
+
     blocks: ScanForceBlocks
     fsqr: Any
     fsqz: Any
@@ -89,6 +93,8 @@ class ScanStepForceEvaluation(NamedTuple):
 
 
 class ScanStepFields(NamedTuple):
+    """State, velocity memory, and residual controller scalars for a scan step."""
+
     state: Any
     vRcc: Any
     vRss: Any

@@ -19,6 +19,8 @@ def _restart_code(value: int) -> Any:
 
 
 class ScanTimeControlScalars(NamedTuple):
+    """Residual-ratio scalars used by the scan time-control logic."""
+
     res0: Any
     res1: Any
     checkpoint_mask: Any
@@ -43,6 +45,8 @@ class ScanCheckpointUpdate(NamedTuple):
 
 
 class ScanRestartDecision(NamedTuple):
+    """Restart decision flags and VMEC-style restart reason code."""
+
     restart_time: Any
     vmecpp_bad_progress: Any
     stage_spike: Any
@@ -52,6 +56,8 @@ class ScanRestartDecision(NamedTuple):
 
 
 class ScanRestartTransition(NamedTuple):
+    """Controller state after applying a scan restart transition."""
+
     time_step: Any
     damping_time_step: Any
     iter_offset: Any
@@ -63,11 +69,15 @@ class ScanRestartTransition(NamedTuple):
 
 
 class ScanStageSpikePostScalars(NamedTuple):
+    """Scalar time-step update after a first-step stage-spike check."""
+
     time_step: Any
     apply_stage_reset: Any
 
 
 class ScanStageSpikePostUpdate(NamedTuple):
+    """Velocity and controller update after a stage-spike reset."""
+
     time_step: Any
     inv_tau: Any
     velocity_blocks: tuple[Any, ...]
@@ -104,6 +114,8 @@ class ScanTimeRestartEvaluation(NamedTuple):
 
 
 class ScanFallbackProbeUpdate(NamedTuple):
+    """Counters and residual extrema from the scan fallback probe window."""
+
     probe_count: Any
     probe_bad_jac: Any
     probe_accept: Any

@@ -113,9 +113,12 @@ Top-level package layout (selected):
   residual-iteration force-payload mask-pack selection, edge masking, Z-force
   square-sum diagnostics, NaN preservation, and VMEC scalar force-norm
   assembly seams
-- ``vmec_jax/solve.py``: fixed-boundary solvers + VMEC2000 iteration loop
-- ``vmec_jax/driver.py``: CLI-facing fixed/free-boundary drivers, output
-  policies, staged solve dispatch, and wout writing
+- ``vmec_jax/solve.py``: compatibility facade for historical fixed-boundary
+  solver imports and monkeypatch seams.  New implementation work should go in
+  the domain modules under ``vmec_jax/solvers/fixed_boundary/``.
+- ``vmec_jax/driver.py``: CLI/API facade for fixed/free-boundary runs, output
+  policies, staged solve dispatch, and wout writing.  New driver policy,
+  runtime, output, and staging logic should go in ``vmec_jax/drivers/``.
 - ``vmec_jax/drivers/``: driver policy, runtime setup, optional debug dumps,
   CLI fixed-boundary finish handling, result merging, fixed-boundary solve
   entry, current-driven flux reconciliation, example I/O, and VMEC-style output
@@ -158,6 +161,38 @@ For most scripts, prefer ``import vmec_jax as vj`` or ``import vmec_jax.api as
 vj``.  Import lower-level modules directly only when developing kernels,
 validation tools, or tests that need implementation-specific behavior.
 
+Where to make changes
+---------------------
+
+Use this map before adding files or changing public behavior:
+
+- User-facing solve, plotting, and example workflows: change the public facade
+  only when the stable API changes.  Put implementation details in the domain
+  modules and re-export through ``vmec_jax/api.py`` or ``vmec_jax/__init__.py``
+  only after the workflow is documented and tested.
+- Fixed-boundary VMEC iteration semantics: edit
+  ``vmec_jax/solvers/fixed_boundary/residual/`` for the VMEC2000-style
+  residual controller, ``scan/`` for the JAX-visible VMEC2000 scan path, and
+  ``preconditioning/`` or ``optimization/`` only for their named numerical
+  domains.  Keep ``vmec_jax/solve.py`` as a compatibility facade.
+- Free-boundary and direct-coil work: edit ``vmec_jax/external_fields/`` for
+  coil or ``mgrid`` providers, ``vmec_jax/solvers/free_boundary/`` for NESTOR
+  and provider plumbing, and ``vmec_jax/solvers/free_boundary/adjoint/`` for
+  branch-local replay/JVP validation.  Do not claim differentiation through
+  arbitrary adaptive host-controller branch changes unless a fingerprint-gated
+  complete-solve AD-vs-FD test promotes that exact scope.
+- Optimization science terms: add differentiable objectives in
+  ``vmec_jax/optimization_workflow.py`` or the focused modules under
+  ``vmec_jax/optimizers/fixed_boundary/``.  Keep example scripts
+  SIMSOPT-like: editable top-level parameters, visible objective tuples, then
+  a solve call and explicit result inspection/plotting.
+- WOUT, Mercier, JXB, and profile diagnostics: use ``vmec_jax/io/wout/`` and
+  ``vmec_jax/finite_beta.py``.  Preserve VMEC2000 storage conventions unless a
+  documented diagnostic intentionally exposes a smoother differentiable proxy.
+- Parity and physics gates: put cheap required tests under ``tests/`` with no
+  local executable dependency; use ``tools/diagnostics/`` and optional markers
+  for VMEC2000, SIMSOPT, GPU, or large fetched-asset validation.
+
 Refactoring direction
 ---------------------
 
@@ -174,6 +209,7 @@ starting a large extraction, run:
 
    python tools/diagnostics/source_health.py --top 30
 
-The diagnostic is report-only by default.  A future refactor PR can ratchet it
-with ``--fail-lines`` once a target module has been split and the compatibility
-tests are green.
+The diagnostic is report-only by default on this draft PR so it can guide
+large tranches without creating a brittle gate.  Ratchet it with
+``--fail-lines`` only after a target module has been split and compatibility,
+physics, and parity tests are green.

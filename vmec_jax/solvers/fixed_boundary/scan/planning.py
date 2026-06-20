@@ -42,17 +42,23 @@ SCAN_TIMING_COUNT_KEYS: tuple[str, ...] = (
 
 
 class ScanRunFlags(NamedTuple):
+    """Boolean flags that select the scan execution variant."""
+
     state_only_scan: bool
     scan_fallback_enabled_run: bool
     force_chunked_scan_run: bool
 
 
 class ScanPreflightPlan(NamedTuple):
+    """Preflight iteration budget before a chunked scan run."""
+
     preflight_iters: int
     preflight_default: str
 
 
 class ScanIterationPlan(NamedTuple):
+    """Iteration counts for the preflight, scan body, and tail phases."""
+
     extra_iters: int
     extra_iters_default: str
     max_iter_scan: int

@@ -146,6 +146,8 @@ def resolve_fixed_boundary_solver_device_name(
 
 
 def normalize_solver_mode(*, solver_mode: str | None, performance_mode: bool) -> str:
+    """Normalize public solver-mode aliases to a supported policy name."""
+
     if solver_mode is None:
         return "default" if bool(performance_mode) else "parity"
     mode = str(solver_mode).strip().lower()
@@ -529,6 +531,8 @@ def resolve_driver_step_size(*, step_size, step_size_sentinel, solver_lower: str
 
 
 def requested_final_ftol(*, indata, ftol_list_input) -> float:
+    """Return the final requested residual tolerance for a staged run."""
+
     ftol_list = as_float_list(ftol_list_input)
     if ftol_list:
         return max(0.0, float(ftol_list[-1]))
@@ -536,6 +540,8 @@ def requested_final_ftol(*, indata, ftol_list_input) -> float:
 
 
 def as_float_list(value) -> list[float] | None:
+    """Best-effort conversion of a scalar/list-like value to floats."""
+
     if value is None:
         return None
     try:
@@ -545,6 +551,8 @@ def as_float_list(value) -> list[float] | None:
 
 
 def as_list_like(value):
+    """Best-effort conversion of VMEC namelist values to a Python list."""
+
     if value is None:
         return None
     if isinstance(value, list):
@@ -565,6 +573,8 @@ def as_list_like(value):
 
 
 def default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tuple[str, bool]:
+    """Choose default fixed-boundary solver mode and performance flag."""
+
     if bool(indata.get_bool("LFREEB", False)):
         return "default", True
     ns_array = as_list_like(indata.get("NS_ARRAY", None))
@@ -619,6 +629,8 @@ def default_use_scan_for_backend(indata, backend: str, solver_mode: str | None) 
 
 
 def resolve_jit_forces_auto_policy(flag: bool | str, static_i, niter_i: int) -> bool:
+    """Resolve ``jit_forces='auto'`` for one stage from workload size."""
+
     if isinstance(flag, str):
         if flag.strip().lower() != "auto":
             return True
@@ -796,6 +808,8 @@ def default_preconditioner_use_lax_tridi(
 
 
 def result_final_residuals(result) -> tuple[float, float, float] | None:
+    """Extract final ``FSQR/FSQZ/FSQL`` residuals from a solver result."""
+
     if result is None:
         return None
     diag = getattr(result, "diagnostics", {}) or {}
@@ -837,6 +851,8 @@ def result_final_residuals(result) -> tuple[float, float, float] | None:
 
 
 def result_final_fsq(result) -> float:
+    """Return the final total residual used by staged-driver decisions."""
+
     if result is None:
         return float("inf")
     try:
@@ -852,6 +868,8 @@ def result_final_fsq(result) -> float:
 
 
 def result_meets_requested_ftol(result, *, ftol: float) -> bool:
+    """Return whether a solver result satisfies the requested tolerance."""
+
     if result is None:
         return False
     diag = getattr(result, "diagnostics", {}) or {}
@@ -868,12 +886,16 @@ def result_meets_requested_ftol(result, *, ftol: float) -> bool:
 
 
 def result_hits_total_target(result, *, fsq_total_target: float | None) -> bool:
+    """Return whether a solver result reached an optional total-FSQ target."""
+
     if result is None or fsq_total_target is None:
         return False
     return bool(result_final_fsq(result) <= max(0.0, float(fsq_total_target)))
 
 
 def allocate_integer_budget(*, total: int, weights: list[int]) -> list[int]:
+    """Allocate an integer iteration budget in proportion to integer weights."""
+
     total = max(0, int(total))
     if total <= 0:
         return [0] * len(weights)
@@ -927,6 +949,8 @@ def accelerated_cli_budgeted_stage_iters(*, total_budget: int, ns_stages: list[i
 
 
 def distribute_stage_iters(*, iters: int, nstep: int) -> list[int]:
+    """Split an iteration budget across equal-sized stage chunks."""
+
     iters = int(iters)
     nstep = int(nstep)
     if iters <= 0:
@@ -940,6 +964,8 @@ def distribute_stage_iters(*, iters: int, nstep: int) -> list[int]:
 
 
 def sanitize_resume_state_for_grid_change(resume_state, *, step_size: float):
+    """Keep only resume-state fields that remain valid after a grid change."""
+
     if resume_state is None:
         return None
     time_step = resume_state.get("time_step", None)
@@ -962,6 +988,8 @@ def sanitize_resume_state_for_grid_change(resume_state, *, step_size: float):
 
 
 def sanitize_resume_state_for_same_grid(resume_state, *, step_size: float):
+    """Normalize resume-state fields before continuing on the same grid."""
+
     if resume_state is None:
         return None
     time_step = resume_state.get("time_step", None)
@@ -983,6 +1011,8 @@ def sanitize_resume_state_for_same_grid(resume_state, *, step_size: float):
 
 
 def sanitize_minimal_resume_state_for_finish(resume_state):
+    """Reduce a resume payload to the fields needed by final finish passes."""
+
     if not isinstance(resume_state, dict):
         return resume_state
     time_step = resume_state.get("time_step", None)
@@ -1018,6 +1048,8 @@ def resolve_vmec2000_stage_controls(
     accelerated_single_grid_default: bool,
     indata,
 ) -> tuple[list[int], list[float], list[int] | None, list[float] | None]:
+    """Resolve VMEC2000-style per-stage iteration and tolerance budgets."""
+
     nstep = int(nstep)
     niter_stages_input = [int(v) for v in niter_list] if niter_list and len(niter_list) == nstep else None
     ftol_stages_input = [float(v) for v in ftol_list] if ftol_list and len(ftol_list) == nstep else None

@@ -1559,6 +1559,8 @@ def print_qs_problem_summary(
     optimizer,
     params0,
 ) -> None:
+    """Print the assembled fixed-boundary least-squares problem summary."""
+
     return _workflow_outputs.print_qs_problem_summary(
         method=method,
         max_nfev=max_nfev,
@@ -1579,6 +1581,8 @@ def print_qs_final_summary(
     target_iota: float | None = None,
     iota_abs_min: float | None = None,
 ) -> None:
+    """Print final fixed-boundary optimization diagnostics."""
+
     return _workflow_outputs.print_qs_final_summary(
         result,
         target_iota=target_iota,
@@ -1597,6 +1601,8 @@ def save_qs_stage_artifacts(
     save_wouts: bool = False,
     save_rerun_wouts: bool = False,
 ) -> None:
+    """Save input/WOUT artifacts for one continuation optimization stage."""
+
     return _workflow_outputs.save_qs_stage_artifacts(
         stage_dir=stage_dir,
         optimizer=optimizer,
@@ -1716,6 +1722,8 @@ def write_qi_workflow_stage_checkpoint(
     completed_stage_modes,
     requested_stage_modes,
 ) -> Path:
+    """Write a QI stage checkpoint that survives timeouts and restarts."""
+
     return _workflow_outputs.write_qi_workflow_stage_checkpoint(
         output_dir=output_dir,
         stage_dir=stage_dir,
@@ -1742,6 +1750,8 @@ def save_qs_final_outputs(
     iota_abs_min: float | None = None,
     save_rerun_wouts: bool = False,
 ) -> None:
+    """Save final fixed-boundary optimization inputs, WOUTs, and history."""
+
     return _workflow_outputs.save_qs_final_outputs(
         output_dir=output_dir,
         stage_records=stage_records,
@@ -1766,6 +1776,8 @@ def annotate_qs_final_history(
     target_iota: float | None = None,
     iota_abs_min: float | None = None,
 ) -> None:
+    """Attach final target metadata to an optimization history dictionary."""
+
     return _workflow_outputs.annotate_qs_final_history(
         final_result,
         label=label,
@@ -1784,6 +1796,8 @@ def combine_qs_stage_histories(
     stage_modes,
     stage_records,
 ) -> dict | None:
+    """Concatenate accepted objective histories across continuation stages."""
+
     return _workflow_outputs.combine_qs_stage_histories(
         label=label,
         max_mode=max_mode,

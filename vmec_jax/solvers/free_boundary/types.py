@@ -29,6 +29,8 @@ class FreeBoundaryRuntimeState:
 
 @dataclass(frozen=True)
 class MGridMetadata:
+    """Header fields from a VMEC magnetic-grid file."""
+
     path: str
     ir: int
     jz: int
@@ -46,6 +48,8 @@ class MGridMetadata:
 
 @dataclass(frozen=True)
 class MGridData:
+    """Magnetic-grid metadata plus cylindrical field arrays."""
+
     metadata: MGridMetadata
     br: np.ndarray
     bp: np.ndarray
@@ -113,6 +117,8 @@ class ExternalBoundarySample:
 
 @dataclass(frozen=True)
 class FreeBoundarySampleSetup:
+    """Static angular-grid data used while sampling boundary fields."""
+
     trig: Any
     second_facs: np.ndarray
     phi_grid: np.ndarray

@@ -102,6 +102,8 @@ def _parse_jit_forces(value: str):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser for the ``vmec`` executable."""
+
     p = argparse.ArgumentParser(
         prog="vmec",
         description=(
@@ -372,6 +374,8 @@ def _run_bundled_test(args: argparse.Namespace, parser: argparse.ArgumentParser)
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the ``vmec`` command-line entry point."""
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

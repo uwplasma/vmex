@@ -656,6 +656,8 @@ def residual_iter_history_diagnostics(namespace: Mapping[str, Any]) -> dict[str,
 
 
 class ScanFallbackDecision(NamedTuple):
+    """Decision and diagnostics for leaving the VMEC2000 scan path early."""
+
     fallback: bool
     reasons: tuple[str, ...]
     reason_text: str
@@ -946,6 +948,8 @@ def resolve_residual_iter_startup_policy(
 
 @dataclass(frozen=True)
 class Vmec2000ScanOptions:
+    """Resolved host/debug options for the VMEC2000-style scan path."""
+
     scan_print_env: str
     scan_print_mode: str
     scan_print_ordered: bool
