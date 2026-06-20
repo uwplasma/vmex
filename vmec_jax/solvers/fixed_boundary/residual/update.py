@@ -49,9 +49,23 @@ def velocity_blocks_from_resume_state(
 ) -> ResidualVelocityBlocks:
     """Restore residual-loop velocity memory from legacy resume-state keys."""
 
+    values = {
+        attr_name: as_velocity(resume_state.get(resume_key, getattr(defaults, attr_name)))
+        for resume_key, attr_name in VELOCITY_RESUME_KEYS.items()
+    }
     return ResidualVelocityBlocks(
-        *(as_velocity(resume_state.get(resume_key, getattr(defaults, attr_name)))
-          for resume_key, attr_name in VELOCITY_RESUME_KEYS.items())
+        rcc=values["rcc"],
+        rss=values["rss"],
+        rsc=values["rsc"],
+        rcs=values["rcs"],
+        zsc=values["zsc"],
+        zcs=values["zcs"],
+        zcc=values["zcc"],
+        zss=values["zss"],
+        lsc=values["lsc"],
+        lcs=values["lcs"],
+        lcc=values["lcc"],
+        lss=values["lss"],
     )
 
 
