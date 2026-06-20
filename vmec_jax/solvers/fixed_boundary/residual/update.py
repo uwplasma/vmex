@@ -178,6 +178,16 @@ def velocity_blocks_legacy_payload(blocks: ResidualVelocityBlocks) -> dict[str, 
     return {resume_key: getattr(blocks, attr_name) for resume_key, attr_name in VELOCITY_RESUME_KEYS.items()}
 
 
+def velocity_blocks_from_force_blocks(blocks: Any) -> ResidualVelocityBlocks:
+    """Map VMEC force-block channel order to residual update channel order."""
+
+    return ResidualVelocityBlocks(
+        blocks.frcc, blocks.frss, blocks.frsc, blocks.frcs,
+        blocks.fzsc, blocks.fzcs, blocks.fzcc, blocks.fzss,
+        blocks.flsc, blocks.flcs, blocks.flcc, blocks.flss,
+    )
+
+
 class HostMomentumUpdate(NamedTuple):
     velocities: ResidualVelocityBlocks
     update_rms: Any
@@ -1239,6 +1249,7 @@ _zero_all_velocity_blocks_like = zero_all_velocity_blocks_like
 _zero_primary_velocity_blocks_like = zero_primary_velocity_blocks_like
 _scale_velocity_blocks = scale_velocity_blocks
 _scale_primary_velocity_blocks = scale_primary_velocity_blocks
+_velocity_blocks_from_force_blocks = velocity_blocks_from_force_blocks
 _host_force_update_rms = host_force_update_rms
 _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np

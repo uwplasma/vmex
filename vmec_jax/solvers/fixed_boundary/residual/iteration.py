@@ -101,7 +101,6 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState as _ResidualControllerState,
-    ResidualVelocityBlocks as _ResidualVelocityBlocks,
     backtracking_momentum_search as _backtracking_momentum_search,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
@@ -122,6 +121,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_trial_evaluation as _strict_trial_evaluation,
+    velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
     velocity_blocks_from_resume_state as _velocity_blocks_from_resume_state,
     zero_all_velocity_blocks_like as _zero_all_velocity_blocks_like,
     zero_primary_velocity_blocks_like as _zero_primary_velocity_blocks_like,
@@ -172,7 +172,6 @@ from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
     build_mode_transform_context as _build_mode_transform_context,
 )
 from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
-    ForceBlocks as _ForceBlocks,
     radial_preconditioner_output_blocks_jax as _radial_preconditioner_output_blocks_jax,
 )
 from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
@@ -1164,7 +1163,6 @@ def solve_fixed_boundary_residual_iter(
         timing_stats,
         perf_counter=time.perf_counter,
     )
-
     _record_compute_force_timing = partial(
         _runtime_record_compute_force_timing,
         timing_enabled=bool(timing_enabled),
@@ -2025,27 +2023,14 @@ def solve_fixed_boundary_residual_iter(
                 mats = precond_apply.mats
                 jmax = precond_apply.jmax
                 preconditioner_cache_update_trace = precond_apply.cache_update_trace
-                (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = precond_apply.blocks
+                preconditioned_blocks = precond_apply.blocks
                 frzl_rz = precond_apply.frzl_rz
                 frzl_lam_pre = precond_apply.frzl_lam_pre
                 accepted_control_ptau_payload = precond_apply.accepted_control_ptau_payload
                 preconditioner_outputs_scaled = precond_apply.outputs_scaled
                 preconditioner_fsq1_ready = precond_apply.fsq1_ready
                 if precond_apply.update_blocks is not None:
-                    (
-                        frcc_u,
-                        frss_u,
-                        fzsc_u,
-                        fzcs_u,
-                        flsc_u,
-                        flcs_u,
-                        frsc_u,
-                        frcs_u,
-                        fzcc_u,
-                        fzss_u,
-                        flcc_u,
-                        flss_u,
-                    ) = precond_apply.update_blocks
+                    update_force_blocks = precond_apply.update_blocks
                 if preconditioner_fsq1_ready:
                     gcr2_p = precond_apply.gcr2_p
                     gcz2_p = precond_apply.gcz2_p
@@ -2059,38 +2044,23 @@ def solve_fixed_boundary_residual_iter(
                     fsql1 = fsql1_safe
             else:
                 t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                (frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss) = (
-                    _radial_preconditioner_output_blocks_jax(
-                        frzl=frzl,
-                        rz_scale=rz_scale,
-                        l_scale=l_scale,
-                        precond_radial_alpha=precond_radial_alpha,
-                        precond_lambda_alpha=precond_lambda_alpha,
-                        apply_radial_tridi_func=_apply_radial_tridi,
-                    )
+                preconditioned_blocks = _radial_preconditioner_output_blocks_jax(
+                    frzl=frzl,
+                    rz_scale=rz_scale,
+                    l_scale=l_scale,
+                    precond_radial_alpha=precond_radial_alpha,
+                    precond_lambda_alpha=precond_lambda_alpha,
+                    apply_radial_tridi_func=_apply_radial_tridi,
                 )
                 if timing_detail_enabled and t_precond_apply_start is not None:
                     try:
                         if has_jax():
-                            jax.block_until_ready(flsc)
+                            jax.block_until_ready(preconditioned_blocks.flsc)
                     except Exception:
                         pass
-                    timing_stats["precond_apply"] += time.perf_counter() - float(t_precond_apply_start)
+                    _record_timing("precond_apply", t_precond_apply_start)
 
-            frzl_pre = TomnspsRZL(
-                frcc=frcc,
-                frss=frss,
-                fzsc=fzsc,
-                fzcs=fzcs,
-                flsc=flsc,
-                flcs=flcs,
-                frsc=frsc,
-                frcs=frcs,
-                fzcc=fzcc,
-                fzss=fzss,
-                flcc=flcc,
-                flss=flss,
-            )
+            frzl_pre = TomnspsRZL(**preconditioned_blocks._asdict())
             if frzl_lam_pre is not None:
                 _maybe_dump_lam_gcl(
                     frzl_pre=frzl_lam_pre,
@@ -2108,34 +2078,30 @@ def solve_fixed_boundary_residual_iter(
             elif host_update_assembly:
                 # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
                 # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
-                (frcc_u, frss_u, fzsc_u, fzcs_u, flsc_u, flcs_u, frsc_u, frcs_u, fzcc_u, fzss_u, flcc_u, flss_u) = (
-                    _mode_weight_force_blocks_np(
-                        _ForceBlocks(frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        w_mode_mn=w_mode_mn_np,
-                        zeros_coeff=_zeros_coeff_np,
-                    )
+                update_force_blocks = _mode_weight_force_blocks_np(
+                    preconditioned_blocks,
+                    w_mode_mn=w_mode_mn_np,
+                    zeros_coeff=_zeros_coeff_np,
                 )
             else:
-                (frcc_u, frss_u, fzsc_u, fzcs_u, flsc_u, flcs_u, frsc_u, frcs_u, fzcc_u, fzss_u, flcc_u, flss_u) = (
-                    _mode_weight_force_blocks_jax(
-                        _ForceBlocks(frcc, frss, fzsc, fzcs, flsc, flcs, frsc, frcs, fzcc, fzss, flcc, flss),
-                        w_mode_mn=w_mode_mn,
-                    )
+                update_force_blocks = _mode_weight_force_blocks_jax(
+                    preconditioned_blocks,
+                    w_mode_mn=w_mode_mn,
                 )
             if timing_detail_enabled and t_precond_mode_start is not None:
                 try:
                     if has_jax():
-                        jax.block_until_ready(flsc_u)
+                        jax.block_until_ready(update_force_blocks.flsc)
                 except Exception:
                     pass
-                timing_stats["precond_mode_scale"] += time.perf_counter() - float(t_precond_mode_start)
+                _record_timing("precond_mode_scale", t_precond_mode_start)
             if timing_enabled:
                 try:
                     if has_jax() and not timing_detail_enabled:
-                        jax.block_until_ready(flsc_u)
+                        jax.block_until_ready(update_force_blocks.flsc)
                 except Exception:
                     pass
-                timing_stats["preconditioner"] += time.perf_counter() - float(t_precond_start)
+                _record_timing("preconditioner", t_precond_start)
             t_iteration_control_start = time.perf_counter() if timing_enabled else None
             t_iteration_control_fsq1_start = time.perf_counter() if timing_enabled else None
 
@@ -2144,10 +2110,12 @@ def solve_fixed_boundary_residual_iter(
             # to apply a constant scale to the lambda residual channel before mapping
             # it into coefficient updates.
             if (lambda_update_scale != 1.0) and (not preconditioner_outputs_scaled):
-                flsc_u = flsc_u * lambda_update_scale_j
-                flcs_u = flcs_u * lambda_update_scale_j
-                flcc_u = flcc_u * lambda_update_scale_j
-                flss_u = flss_u * lambda_update_scale_j
+                update_force_blocks = update_force_blocks._replace(
+                    flsc=update_force_blocks.flsc * lambda_update_scale_j,
+                    flcs=update_force_blocks.flcs * lambda_update_scale_j,
+                    flcc=update_force_blocks.flcc * lambda_update_scale_j,
+                    flss=update_force_blocks.flss * lambda_update_scale_j,
+                )
 
             if startup_policy.auto_flip_force and it == 0:
                 # Choose force direction by a tiny trial step on the VMEC residual
@@ -2157,13 +2125,13 @@ def solve_fixed_boundary_residual_iter(
                 # Use a probe step that is large enough to be numerically decisive,
                 # but still small relative to typical pseudo-time updates.
                 dt_probe = min(1e-2, 0.1 * float(time_step))
-                dR_dir = dt_probe * _mn_cos_to_signed_physical(frcc_u, frss_u)
-                dZ_dir = dt_probe * _mn_sin_to_signed_physical(fzsc_u, fzcs_u)
-                dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(flsc_u, flcs_u)
+                dR_dir = dt_probe * _mn_cos_to_signed_physical(update_force_blocks.frcc, update_force_blocks.frss)
+                dZ_dir = dt_probe * _mn_sin_to_signed_physical(update_force_blocks.fzsc, update_force_blocks.fzcs)
+                dL_dir = dt_probe * _mn_sin_to_signed_physical_lambda(update_force_blocks.flsc, update_force_blocks.flcs)
                 if bool(cfg.lasym):
-                    dR_sin_dir = dt_probe * _mn_sin_to_signed_physical(frsc_u, frcs_u)
-                    dZ_cos_dir = dt_probe * _mn_cos_to_signed_physical(fzcc_u, fzss_u)
-                    dL_cos_dir = dt_probe * _mn_cos_to_signed_physical_lambda(flcc_u, flss_u)
+                    dR_sin_dir = dt_probe * _mn_sin_to_signed_physical(update_force_blocks.frsc, update_force_blocks.frcs)
+                    dZ_cos_dir = dt_probe * _mn_cos_to_signed_physical(update_force_blocks.fzcc, update_force_blocks.fzss)
+                    dL_cos_dir = dt_probe * _mn_cos_to_signed_physical_lambda(update_force_blocks.flcc, update_force_blocks.flss)
                 else:
                     dR_sin_dir = jnp.zeros_like(dR_dir)
                     dZ_cos_dir = jnp.zeros_like(dR_dir)
@@ -2782,9 +2750,7 @@ def solve_fixed_boundary_residual_iter(
         dtau = evolve.dtau
         b1 = evolve.b1
         fac = evolve.fac
-        force_blocks = _ResidualVelocityBlocks(
-            frcc_u, frss_u, frsc_u, frcs_u, fzsc_u, fzcs_u, fzcc_u, fzss_u, flsc_u, flcs_u, flcc_u, flss_u
-        )
+        force_blocks = _velocity_blocks_from_force_blocks(update_force_blocks)
         _dump_residual_evolve_trace(
             dump_evolve_trace=_dump_evolve_trace,
             iter2=int(iter2),

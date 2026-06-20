@@ -29,12 +29,14 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     scale_velocity_blocks,
     strict_momentum_update_proposal,
     strict_trial_evaluation,
+    velocity_blocks_from_force_blocks,
     velocity_blocks_from_resume_state,
     velocity_blocks_legacy_payload,
     zero_all_velocity_blocks_like,
     zero_primary_velocity_blocks_like,
     zero_velocity_blocks_like,
 )
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import ForceBlocks
 
 
 def _blocks(*, offset: float, scale: float = 1.0) -> ResidualVelocityBlocks:
@@ -102,6 +104,27 @@ def test_velocity_blocks_resume_round_trip_preserves_named_channels() -> None:
         lss="resume-lss",
     )
     assert velocity_blocks_legacy_payload(blocks) == resume_state
+
+
+def test_velocity_blocks_from_force_blocks_preserves_vmec_channel_mapping() -> None:
+    blocks = ForceBlocks(*(f"force-{name}" for name in ForceBlocks._fields))
+
+    got = velocity_blocks_from_force_blocks(blocks)
+
+    assert got == ResidualVelocityBlocks(
+        rcc="force-frcc",
+        rss="force-frss",
+        rsc="force-frsc",
+        rcs="force-frcs",
+        zsc="force-fzsc",
+        zcs="force-fzcs",
+        zcc="force-fzcc",
+        zss="force-fzss",
+        lsc="force-flsc",
+        lcs="force-flcs",
+        lcc="force-flcc",
+        lss="force-flss",
+    )
 
 
 def test_controller_state_resume_round_trip_preserves_legacy_scalars() -> None:

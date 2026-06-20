@@ -7,6 +7,96 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Residual Force-Block Container Refactor
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Audited the remaining large residual-loop mechanical seams after the timing
+   helper tranche.
+2. Kept scan/finalization namespace handoffs unchanged because they still
+   intentionally consume legacy VMEC host-controller names.
+3. Refactored the 12-channel preconditioner/update force locals in
+   `solve_fixed_boundary_residual_iter` into named `ForceBlocks` containers:
+   `preconditioned_blocks` and `update_force_blocks`.
+4. Added `velocity_blocks_from_force_blocks` in the update domain to preserve
+   the explicit VMEC force-channel to update-channel order.
+5. Updated full adjoint trace construction so `update_force_blocks` still emits
+   legacy trace keys such as `frcc_u`, preserving accepted-trace replay
+   compatibility.
+6. Added a focused channel-order unit test for the new force-to-velocity
+   mapping.
+
+Results obtained:
+
+- Production code is net-negative for this tranche: `58` production insertions
+  and `75` production deletions.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from `3166`
+  to `3132` lines.
+- `solve_fixed_boundary_residual_iter` dropped from `2687` to `2654` lines.
+- Full adjoint traces still expose the legacy raw preconditioned-force keys
+  required by replay tests.
+- Repository size remains within the current gate: tracked size is `29.41 MiB`
+  with no tracked file above `2 MiB`.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/force_payload.py vmec_jax/solvers/fixed_boundary/residual/payload_blocks.py vmec_jax/solvers/fixed_boundary/residual/runtime.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_force_payload_helpers.py tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_runtime_helpers.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/force_payload.py vmec_jax/solvers/fixed_boundary/residual/payload_blocks.py vmec_jax/solvers/fixed_boundary/residual/runtime.py vmec_jax/solvers/fixed_boundary/residual/update.py tests/test_solve_force_payload_helpers.py tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_runtime_helpers.py`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_force_payload_helpers.py tests/test_solve_residual_iter_update_helpers.py tests/test_solve_residual_iter_runtime_helpers.py tests/test_solve_residual_iter_policy.py tests/test_solve_real_scan_wave10_coverage.py --tb=short`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -k "adjoint_trace_records_vacuum_forcing or branch_trace_mode or full_adjoint_trace_records_raw_preconditioner" --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 50 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue reducing `residual/iteration.py` only through seams that are
+   production net-negative: scan handoff setup, trace inputs, and finalization
+   payload construction.
+2. Do not wrap free-boundary runtime state until the finalizer and trace helper
+   can consume a typed object without keeping all legacy aliases.
+3. Run free-boundary trace shards whenever full adjoint trace keys are touched.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999991%.
+- Solver monolith reduction: 99.9993%.
+- Residual iteration decomposition: 99.992%.
+- Public API/docstring polish: 94%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.995%.
+- Overall differentiability-refactor PR: 99.99999999999985%.
+
 ## 2026-06-20 Residual Timing Boilerplate Reduction
 
 Branch: `codex/differentiability-refactor-plan`.

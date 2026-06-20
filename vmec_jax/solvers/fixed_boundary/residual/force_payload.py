@@ -36,6 +36,7 @@ __all__ = [
 
 _TRACE_VELOCITY_NAMES = ("Rcc", "Rss", "Zsc", "Zcs", "Lsc", "Lcs", "Rsc", "Rcs", "Zcc", "Zss", "Lcc", "Lss")
 _TRACE_TOMNSP_NAMES = ("frcc", "frss", "fzsc", "fzcs", "flsc", "flcs", "frsc", "frcs", "fzcc", "fzss", "flcc", "flss")
+_TRACE_UPDATE_FORCE_NAMES = tuple(f"{name}_u" for name in _TRACE_TOMNSP_NAMES)
 
 
 class ResidualForceMetricPayload(NamedTuple):
@@ -100,6 +101,13 @@ def _trace_velocity_arrays(ns: dict[str, Any], suffix: str) -> dict[str, Any]:
     return {f"v{name}{suffix}": np.asarray(value) for name, value in _trace_velocity_values(ns).items()}
 
 
+def _trace_update_force_values(ns: dict[str, Any]) -> dict[str, Any]:
+    blocks = ns.get("update_force_blocks")
+    if blocks is not None:
+        return {key: getattr(blocks, name) for key, name in zip(_TRACE_UPDATE_FORCE_NAMES, _TRACE_TOMNSP_NAMES)}
+    return {key: ns[key] for key in _TRACE_UPDATE_FORCE_NAMES}
+
+
 def build_strict_update_adjoint_trace_entry(
     ns: dict[str, Any],
     *,
@@ -156,9 +164,7 @@ def build_strict_update_adjoint_trace_entry(
     if adjoint_trace_mode == "full":
         trace_entry.update(_trace_named_arrays("frzl_", ((name, getattr(ns["frzl"], name, None)) for name in _TRACE_TOMNSP_NAMES)))
         trace_entry.update(_trace_named_arrays("frzl_rz_", ((name, getattr(ns["frzl_rz"], name, None)) for name in _TRACE_TOMNSP_NAMES)))
-        trace_entry.update(_trace_named_arrays("", ((name, ns[name]) for name in (
-            "frcc_u", "frss_u", "fzsc_u", "fzcs_u", "flsc_u", "flcs_u", "frsc_u", "frcs_u", "fzcc_u", "fzss_u", "flcc_u", "flss_u"
-        ))))
+        trace_entry.update(_trace_named_arrays("", _trace_update_force_values(ns).items()))
     return trace_entry
 
 
