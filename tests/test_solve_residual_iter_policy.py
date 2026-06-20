@@ -14,6 +14,7 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     bad_jacobian_tau_decision,
     host_restart_decision,
     host_update_assembly_policy,
+    new_residual_iter_histories,
     numpy_preconditioner_apply_policy,
     resolve_light_history,
     resolve_residual_iter_startup_policy,
@@ -187,6 +188,86 @@ def test_append_zero_update_history_record_builds_aligned_converged_row():
     assert record_lists["step_status_history"] == ["converged"]
     assert record_lists["iter2_history"] == [9]
     assert record_lists["freeb_ivac_history"] == [1]
+
+
+def test_residual_iteration_histories_methods_append_aligned_channels():
+    histories = new_residual_iter_histories()
+
+    assert histories.append_preconditioned(
+        track_history=True,
+        rz_norm=1.0,
+        f_norm1=2.0,
+        gcr2_p=3.0,
+        gcz2_p=4.0,
+        gcl2_p=5.0,
+        fsq1=6.0,
+        fsqr1_safe=7.0,
+        fsqz1_safe=8.0,
+        fsql1_safe=9.0,
+    )
+    assert histories["rz_norm_history"] == [1.0]
+    assert histories["fsq1_history"] == [6.0]
+
+    assert histories.append_zero_update(
+        track_history=True,
+        restart_path="converged",
+        step_status="converged",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step_value=0.9,
+        fsqr=1.0,
+        fsqz=2.0,
+        fsql=3.0,
+        res0=4.0,
+        res1=5.0,
+        fsq_prev=6.0,
+        bad_growth_streak=7,
+        iter1=8,
+        iter2=9,
+        free_boundary_enabled=True,
+        freeb_ivac=1,
+        freeb_ivacskip=0,
+    )
+    assert histories["step_status_history"] == ["converged"]
+    assert histories["freeb_full_update_history"] == [1]
+
+    assert histories.append_step_sample(
+        track_history=True,
+        step=0.1,
+        dt_eff=0.2,
+        update_rms=0.3,
+        w_curr=0.4,
+        w_try=0.5,
+        w_try_ratio=0.6,
+        restart_path="accepted",
+    )
+    assert histories["dt_eff_history"][-1] == pytest.approx(0.2)
+    assert histories["restart_path_history"][-1] == "accepted"
+
+    assert histories.append_terminal(
+        track_history=True,
+        step_status="accepted",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step=0.7,
+        res0=0.8,
+        res1=0.9,
+        fsq_prev=1.0,
+        bad_growth_streak=0,
+        iter1=2,
+        iter2=3,
+        fsqr=0.01,
+        fsqz=0.02,
+        fsql=0.03,
+        free_boundary_enabled=False,
+        freeb_ivac=0,
+        freeb_ivacskip=0,
+        freeb_reused=False,
+        freeb_solve_time=0.0,
+        freeb_sample_time=0.0,
+    )
+    assert histories["iter2_history"][-1] == 3
+    assert len(histories["freeb_ivac_history"]) == 1
 
 
 def test_bad_jacobian_tau_decision_preserves_vmec2000_absolute_tolerance():

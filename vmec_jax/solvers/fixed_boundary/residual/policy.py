@@ -268,6 +268,167 @@ class ResidualIterationHistories:
     def rollback_lists(self) -> tuple[list[Any], ...]:
         return tuple(self.lists[key] for key in _RESIDUAL_ITER_ROLLBACK_HISTORY_KEYS)
 
+    def append_preconditioned(
+        self,
+        *,
+        track_history: bool,
+        rz_norm: Any,
+        f_norm1: Any,
+        gcr2_p: Any,
+        gcz2_p: Any,
+        gcl2_p: Any,
+        fsq1: Any,
+        fsqr1_safe: Any,
+        fsqz1_safe: Any,
+        fsql1_safe: Any,
+    ) -> bool:
+        """Append preconditioned residual channels to this history bundle."""
+
+        return append_preconditioned_residual_history(
+            track_history=bool(track_history),
+            rz_norm=rz_norm,
+            f_norm1=f_norm1,
+            gcr2_p=gcr2_p,
+            gcz2_p=gcz2_p,
+            gcl2_p=gcl2_p,
+            fsq1=fsq1,
+            fsqr1_safe=fsqr1_safe,
+            fsqz1_safe=fsqz1_safe,
+            fsql1_safe=fsql1_safe,
+            rz_norm_history=self.lists["rz_norm_history"],
+            f_norm1_history=self.lists["f_norm1_history"],
+            gcr2_p_history=self.lists["gcr2_p_history"],
+            gcz2_p_history=self.lists["gcz2_p_history"],
+            gcl2_p_history=self.lists["gcl2_p_history"],
+            fsq1_history=self.lists["fsq1_history"],
+            fsqr1_history=self.lists["fsqr1_history"],
+            fsqz1_history=self.lists["fsqz1_history"],
+            fsql1_history=self.lists["fsql1_history"],
+        )
+
+    def append_zero_update(
+        self,
+        *,
+        track_history: bool,
+        restart_path: str,
+        step_status: str,
+        restart_reason: str,
+        pre_restart_reason: str,
+        time_step_value: float,
+        fsqr: float,
+        fsqz: float,
+        fsql: float,
+        res0: float,
+        res1: float,
+        fsq_prev: float,
+        bad_growth_streak: int,
+        iter1: int,
+        iter2: int,
+        free_boundary_enabled: bool,
+        freeb_ivac: int,
+        freeb_ivacskip: int,
+    ) -> bool:
+        """Append a zero-update row to this history bundle."""
+
+        return append_zero_update_history_record(
+            track_history=bool(track_history),
+            restart_path=restart_path,
+            step_status=step_status,
+            restart_reason=restart_reason,
+            pre_restart_reason=pre_restart_reason,
+            time_step_value=time_step_value,
+            fsqr=fsqr,
+            fsqz=fsqz,
+            fsql=fsql,
+            res0=res0,
+            res1=res1,
+            fsq_prev=fsq_prev,
+            bad_growth_streak=bad_growth_streak,
+            iter1=iter1,
+            iter2=iter2,
+            free_boundary_enabled=bool(free_boundary_enabled),
+            freeb_ivac=freeb_ivac,
+            freeb_ivacskip=freeb_ivacskip,
+            history_record_lists=self.record_lists(free_boundary_enabled=bool(free_boundary_enabled)),
+        )
+
+    def append_step_sample(
+        self,
+        *,
+        track_history: bool,
+        step: float,
+        dt_eff: float,
+        update_rms: Any,
+        w_curr: float,
+        w_try: float,
+        w_try_ratio: float,
+        restart_path: str,
+    ) -> bool:
+        """Append compact accepted-step sample channels to this history bundle."""
+
+        return append_residual_iter_step_sample(
+            track_history=bool(track_history),
+            step=step,
+            dt_eff=dt_eff,
+            update_rms=update_rms,
+            w_curr=w_curr,
+            w_try=w_try,
+            w_try_ratio=w_try_ratio,
+            restart_path=restart_path,
+            history_step_sample_lists=self.step_sample_lists(),
+        )
+
+    def append_terminal(
+        self,
+        *,
+        track_history: bool,
+        step_status: str,
+        restart_reason: str,
+        pre_restart_reason: str,
+        time_step: float,
+        res0: float,
+        res1: float,
+        fsq_prev: float,
+        bad_growth_streak: int,
+        iter1: int,
+        iter2: int,
+        fsqr: float,
+        fsqz: float,
+        fsql: float,
+        free_boundary_enabled: bool,
+        freeb_ivac: int,
+        freeb_ivacskip: int,
+        freeb_reused: bool,
+        freeb_solve_time: float,
+        freeb_sample_time: float,
+    ) -> bool:
+        """Append terminal per-iteration channels to this history bundle."""
+
+        if not bool(track_history):
+            return False
+        append_residual_iter_terminal_history(
+            step_status=step_status,
+            restart_reason=restart_reason,
+            pre_restart_reason=pre_restart_reason,
+            time_step=float(time_step),
+            res0=float(res0),
+            res1=float(res1),
+            fsq_prev=float(fsq_prev),
+            bad_growth_streak=int(bad_growth_streak),
+            iter1=int(iter1),
+            iter2=int(iter2),
+            fsqr=fsqr,
+            fsqz=fsqz,
+            fsql=fsql,
+            freeb_ivac=freeb_ivac,
+            freeb_ivacskip=freeb_ivacskip,
+            freeb_reused=freeb_reused,
+            freeb_solve_time=freeb_solve_time,
+            freeb_sample_time=freeb_sample_time,
+            **self.terminal_lists(free_boundary_enabled=bool(free_boundary_enabled)),
+        )
+        return True
+
     def diagnostics(self) -> dict[str, Any]:
         diag: dict[str, Any] = {"adjoint_step_trace": self.lists["adjoint_step_trace_history"]}
         diag.update(

@@ -38,10 +38,6 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
 )
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
-    append_residual_iter_terminal_history as _append_residual_iter_terminal_history,
-    append_residual_iter_step_sample as _append_residual_iter_step_sample,
-    append_preconditioned_residual_history as _append_preconditioned_residual_history,
-    append_zero_update_history_record as _append_zero_update_history_record,
     bad_jacobian_requires_state_jacobian as _bad_jacobian_requires_state_jacobian,
     bad_jacobian_tau_decision as _bad_jacobian_tau_decision,
     host_restart_decision as _host_restart_decision,
@@ -1267,14 +1263,6 @@ def solve_fixed_boundary_residual_iter(
             max_tau_history.append(float(max_tau_value))
             bad_jacobian_history.append(int(bool(bad_flag)))
 
-    _history_record_lists = history_lists.record_lists(
-        free_boundary_enabled=bool(free_boundary_enabled),
-    )
-    _terminal_history_lists = history_lists.terminal_lists(
-        free_boundary_enabled=bool(free_boundary_enabled),
-    )
-    _step_sample_history_lists = history_lists.step_sample_lists()
-
     r00_last = float("nan")
     z00_last = float("nan")
     wb_last = float("nan")
@@ -2494,7 +2482,7 @@ def solve_fixed_boundary_residual_iter(
                 pre_restart_reason: str,
                 time_step_value: float,
             ) -> bool:
-                return _append_zero_update_history_record(
+                return history_lists.append_zero_update(
                     track_history=bool(track_history),
                     restart_path=restart_path,
                     step_status=step_status,
@@ -2513,10 +2501,9 @@ def solve_fixed_boundary_residual_iter(
                     free_boundary_enabled=bool(free_boundary_enabled),
                     freeb_ivac=freeb_ivac,
                     freeb_ivacskip=freeb_ivacskip,
-                    history_record_lists=_history_record_lists,
                 )
 
-            _append_preconditioned_residual_history(
+            history_lists.append_preconditioned(
                 track_history=bool(track_history),
                 rz_norm=rz_norm,
                 f_norm1=f_norm1,
@@ -2527,15 +2514,6 @@ def solve_fixed_boundary_residual_iter(
                 fsqr1_safe=fsqr1_safe,
                 fsqz1_safe=fsqz1_safe,
                 fsql1_safe=fsql1_safe,
-                rz_norm_history=rz_norm_history,
-                f_norm1_history=f_norm1_history,
-                gcr2_p_history=gcr2_p_history,
-                gcz2_p_history=gcz2_p_history,
-                gcl2_p_history=gcl2_p_history,
-                fsq1_history=fsq1_history,
-                fsqr1_history=fsqr1_history,
-                fsqz1_history=fsqz1_history,
-                fsql1_history=fsql1_history,
             )
 
             if converged_physical:
@@ -3319,7 +3297,7 @@ def solve_fixed_boundary_residual_iter(
             w_try_ratio = float("nan")
             restart_path = "non_strict"
         update_rms_record = update_rms_j if bool(strict_update) else float(update_rms)
-        _append_residual_iter_step_sample(
+        history_lists.append_step_sample(
             track_history=bool(track_history),
             step=float(dt_eff),
             dt_eff=float(dt_eff),
@@ -3328,7 +3306,6 @@ def solve_fixed_boundary_residual_iter(
             w_try=float(w_try),
             w_try_ratio=float(w_try_ratio),
             restart_path=str(restart_path),
-            history_step_sample_lists=_step_sample_history_lists,
         )
         t_iteration_post_update_start = time.perf_counter() if timing_enabled else None
         _dump_residual_evolve_trace(
@@ -3388,28 +3365,28 @@ def solve_fixed_boundary_residual_iter(
             w_mhd=float(w_vmec_last),
             step_status=step_status,
         )
-        if track_history:
-            _append_residual_iter_terminal_history(
-                step_status=step_status,
-                restart_reason=restart_reason,
-                pre_restart_reason=pre_restart_reason,
-                time_step=float(time_step),
-                res0=float(res0),
-                res1=float(res1),
-                fsq_prev=float(fsq_prev),
-                bad_growth_streak=int(bad_growth_streak),
-                iter1=int(iter1),
-                iter2=int(iter2),
-                fsqr=fsqr_f,
-                fsqz=fsqz_f,
-                fsql=fsql_f,
-                freeb_ivac=freeb_ivac,
-                freeb_ivacskip=freeb_ivacskip,
-                freeb_reused=freeb_reused,
-                freeb_solve_time=freeb_solve_time,
-                freeb_sample_time=freeb_sample_time,
-                **_terminal_history_lists,
-            )
+        history_lists.append_terminal(
+            track_history=bool(track_history),
+            step_status=step_status,
+            restart_reason=restart_reason,
+            pre_restart_reason=pre_restart_reason,
+            time_step=float(time_step),
+            res0=float(res0),
+            res1=float(res1),
+            fsq_prev=float(fsq_prev),
+            bad_growth_streak=int(bad_growth_streak),
+            iter1=int(iter1),
+            iter2=int(iter2),
+            fsqr=fsqr_f,
+            fsqz=fsqz_f,
+            fsql=fsql_f,
+            free_boundary_enabled=bool(free_boundary_enabled),
+            freeb_ivac=freeb_ivac,
+            freeb_ivacskip=freeb_ivacskip,
+            freeb_reused=freeb_reused,
+            freeb_solve_time=freeb_solve_time,
+            freeb_sample_time=freeb_sample_time,
+        )
         # VMEC eqsolve behavior: when `ivac==1`, print turn-on and promote to
         # `ivac=2` for subsequent iterations.
         if free_boundary_enabled and int(freeb_ivac) == 1:

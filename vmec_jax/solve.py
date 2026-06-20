@@ -74,9 +74,25 @@ _MODULE_BY_NAME.update(
 
 _LEGACY_ALIASES = {
     "_dump_array": ("vmec_jax.solvers.fixed_boundary.diagnostics.force", "dump_array"),
+    "_append_preconditioned_residual_history": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "append_preconditioned_residual_history",
+    ),
     "_append_residual_iter_history_record": (
         "vmec_jax.solvers.fixed_boundary.residual.policy",
         "append_residual_iter_history_record",
+    ),
+    "_append_residual_iter_step_sample": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "append_residual_iter_step_sample",
+    ),
+    "_append_residual_iter_terminal_history": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "append_residual_iter_terminal_history",
+    ),
+    "_append_zero_update_history_record": (
+        "vmec_jax.solvers.fixed_boundary.residual.policy",
+        "append_zero_update_history_record",
     ),
     "_enforce_field_rows": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_field_rows"),
     "_enforce_field_rows_np": ("vmec_jax.solvers.fixed_boundary.optimization.constraints", "enforce_field_rows_np"),
