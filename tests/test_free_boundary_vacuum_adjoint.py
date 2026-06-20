@@ -723,6 +723,7 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
 def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp, tree_util
+    from vmec_jax.free_boundary_adjoint_controller import _pytree_vdot_jax
 
     enable_x64(True)
     controls = {
@@ -819,70 +820,34 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         unroll_accepted_only_segments_below=2,
     )
 
-    tree_util.tree_map(
-        lambda actual, expected: np.testing.assert_allclose(
-            np.asarray(actual),
-            np.asarray(expected),
-            rtol=1.0e-14,
-            atol=1.0e-14,
-        ),
-        segmented["state"],
-        monolithic["state"],
-    )
-    tree_util.tree_map(
-        lambda actual, expected: np.testing.assert_allclose(
-            np.asarray(actual),
-            np.asarray(expected),
-            rtol=1.0e-14,
-            atol=1.0e-14,
-        ),
-        fast_segmented["state"],
-        monolithic["state"],
-    )
-    tree_util.tree_map(
-        lambda actual, expected: np.testing.assert_allclose(
-            np.asarray(actual),
-            np.asarray(expected),
-            rtol=1.0e-14,
-            atol=1.0e-14,
-        ),
-        unrolled_fast_segmented["state"],
-        monolithic["state"],
-    )
-    assert bool(segmented["done"]) == bool(monolithic["done"])
-    assert bool(fast_segmented["done"]) == bool(monolithic["done"])
-    assert bool(unrolled_fast_segmented["done"]) == bool(monolithic["done"])
-    assert segmented["n_segments"] == 2
-    assert fast_segmented["n_segments"] == 4
-    assert unrolled_fast_segmented["n_segments"] == 4
-    for key in ("active", "accepted", "rejected", "done"):
-        np.testing.assert_array_equal(np.asarray(segmented["history"][key]), np.asarray(monolithic["history"][key]))
-        np.testing.assert_array_equal(
-            np.asarray(fast_segmented["history"][key]),
-            np.asarray(monolithic["history"][key]),
+    def assert_segmented_run_matches(run, *, expected_segments: int) -> None:
+        tree_util.tree_map(
+            lambda actual, expected: np.testing.assert_allclose(
+                np.asarray(actual),
+                np.asarray(expected),
+                rtol=1.0e-14,
+                atol=1.0e-14,
+            ),
+            run["state"],
+            monolithic["state"],
         )
-        np.testing.assert_array_equal(
-            np.asarray(unrolled_fast_segmented["history"][key]),
-            np.asarray(monolithic["history"][key]),
+        assert bool(run["done"]) == bool(monolithic["done"])
+        assert run["n_segments"] == expected_segments
+        for key in ("active", "accepted", "rejected", "done"):
+            np.testing.assert_array_equal(np.asarray(run["history"][key]), np.asarray(monolithic["history"][key]))
+        np.testing.assert_allclose(
+            run["history"]["drive_norm"],
+            monolithic["history"]["drive_norm"],
+            rtol=1.0e-14,
+            atol=1.0e-14,
         )
-    np.testing.assert_allclose(
-        segmented["history"]["drive_norm"],
-        monolithic["history"]["drive_norm"],
-        rtol=1.0e-14,
-        atol=1.0e-14,
-    )
-    np.testing.assert_allclose(
-        fast_segmented["history"]["drive_norm"],
-        monolithic["history"]["drive_norm"],
-        rtol=1.0e-14,
-        atol=1.0e-14,
-    )
-    np.testing.assert_allclose(
-        unrolled_fast_segmented["history"]["drive_norm"],
-        monolithic["history"]["drive_norm"],
-        rtol=1.0e-14,
-        atol=1.0e-14,
-    )
+
+    for run, expected_segments in (
+        (segmented, 2),
+        (fast_segmented, 4),
+        (unrolled_fast_segmented, 4),
+    ):
+        assert_segmented_run_matches(run, expected_segments=expected_segments)
 
     state_only_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
         step,
@@ -1018,39 +983,11 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     fast_segmented_grad = jax.grad(fast_segmented_objective)(params)
     state_only_segmented_grad = jax.grad(state_only_segmented_objective)(params)
     state_only_fast_segmented_grad = jax.grad(state_only_fast_segmented_objective)(params)
-    monolithic_dir = tree_util.tree_reduce(
-        lambda acc, leaf: acc + leaf,
-        tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), monolithic_grad, direction),
-        0.0,
-    )
-    segmented_dir = tree_util.tree_reduce(
-        lambda acc, leaf: acc + leaf,
-        tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), segmented_grad, direction),
-        0.0,
-    )
-    fast_segmented_dir = tree_util.tree_reduce(
-        lambda acc, leaf: acc + leaf,
-        tree_util.tree_map(lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf), fast_segmented_grad, direction),
-        0.0,
-    )
-    state_only_segmented_dir = tree_util.tree_reduce(
-        lambda acc, leaf: acc + leaf,
-        tree_util.tree_map(
-            lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf),
-            state_only_segmented_grad,
-            direction,
-        ),
-        0.0,
-    )
-    state_only_fast_segmented_dir = tree_util.tree_reduce(
-        lambda acc, leaf: acc + leaf,
-        tree_util.tree_map(
-            lambda grad_leaf, dir_leaf: jnp.vdot(grad_leaf, dir_leaf),
-            state_only_fast_segmented_grad,
-            direction,
-        ),
-        0.0,
-    )
+    monolithic_dir = _pytree_vdot_jax(monolithic_grad, direction)
+    segmented_dir = _pytree_vdot_jax(segmented_grad, direction)
+    fast_segmented_dir = _pytree_vdot_jax(fast_segmented_grad, direction)
+    state_only_segmented_dir = _pytree_vdot_jax(state_only_segmented_grad, direction)
+    state_only_fast_segmented_dir = _pytree_vdot_jax(state_only_fast_segmented_grad, direction)
     np.testing.assert_allclose(segmented_objective(params), monolithic_objective(params), rtol=1.0e-14, atol=1.0e-14)
     np.testing.assert_allclose(
         fast_segmented_objective(params),

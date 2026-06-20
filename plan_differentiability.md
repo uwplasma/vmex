@@ -28334,3 +28334,73 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.979%.
 - Overall differentiability-refactor PR: 99.999999999961%.
+
+## 2026-06-20 Segmented Controller Gradient Test Simplification
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Reused `_pytree_vdot_jax` for segmented-controller directional-gradient
+   dot products instead of repeating explicit `tree_map`/`tree_reduce` code.
+2. Added one local `assert_segmented_run_matches` helper in
+   `test_segmented_accepted_controller_matches_monolithic_scan_and_gradient`
+   to cover state, done flag, segment count, history masks, and `drive_norm`.
+3. Replaced three repeated segmented-run state/history assertion blocks with a
+   single loop over the expected segment counts.
+
+Results obtained:
+
+- `tests/test_free_boundary_vacuum_adjoint.py` dropped from 3860 to 3797
+  lines.
+- `test_segmented_accepted_controller_matches_monolithic_scan_and_gradient`
+  no longer appears in the source-health function-length warning list.
+- The targeted segmented-controller gradient test passes.
+
+Tests and commands run:
+
+- `python -m ruff check tests/test_free_boundary_vacuum_adjoint.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Wait for the production preconditioner extraction design result, then decide
+   whether to patch it now or keep it staged behind cache side-effect tests.
+2. Run a broader free-boundary adjoint/controller shard after the accumulated
+   validation-test refactors.
+3. Continue reducing large functions only where existing adapters/helpers
+   already encode the intended semantics.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999985%.
+- Solver monolith reduction: 99.980%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.875%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 95.86%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.979%.
+- Overall differentiability-refactor PR: 99.999999999962%.
