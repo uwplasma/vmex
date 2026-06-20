@@ -88,6 +88,131 @@ class Vmec2000PreconditionerApplyResult(NamedTuple):
     accepted_control_ptau_payload: Any | None
 
 
+class ResidualPreconditionerOperators(NamedTuple):
+    """Callable preconditioner operators bound to one residual-iteration setup."""
+
+    apply_radial_tridi: Callable[[Any, float], Any]
+    apply_radial_tridi_batched: Callable[[Any, float], tuple[Any, ...]]
+    lambda_preconditioner: Callable[..., Any]
+    rz_preconditioner_matrices: Callable[..., Any]
+    rz_preconditioner_apply: Callable[..., Any]
+    rz_preconditioner: Callable[..., Any]
+
+
+def residual_preconditioner_operators(
+    *,
+    trig: Any,
+    s: Any,
+    cfg: Any,
+    use_numpy_preconditioner_apply: bool,
+    tree_has_tracer_func: Callable[[Any], bool],
+    radial_tridi_smooth_dirichlet_func: Callable[..., Any],
+    jnp_module: Any,
+) -> ResidualPreconditionerOperators:
+    """Bind the preconditioner operator set used by one residual solve.
+
+    The residual iteration needs the same small collection of operators in
+    several update and cache-refresh paths. Keeping the bindings together makes
+    the main loop read as policy orchestration instead of local function
+    construction.
+    """
+
+    def apply_radial_tridi(a, alpha: float):
+        return radial_tridi_smooth_dirichlet_func(a, alpha=alpha, skip_nonpositive=True)
+
+    def apply_radial_tridi_batched(arrs, alpha: float):
+        if alpha <= 0.0:
+            return tuple(arrs)
+        stack = jnp_module.stack(arrs, axis=1)
+        smooth = radial_tridi_smooth_dirichlet_func(stack, alpha=alpha)
+        return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
+
+    def lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
+        lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
+        from vmec_jax.preconditioner_1d_jax import lambda_preconditioner_cached
+
+        return lambda_preconditioner_cached(
+            bc=bc,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+            return_faclam=return_faclam,
+            return_debug=return_debug,
+            r0scale=lam_r0scale,
+        )
+
+    def rz_preconditioner_matrices(
+        *,
+        bc,
+        k,
+        jmax_override: int | None = None,
+        use_precomputed: bool | None = None,
+        use_lax_tridi: bool | None = None,
+    ):
+        from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices as build_rz_matrices
+
+        return build_rz_matrices(
+            bc=bc,
+            k=k,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+            jmax_override=jmax_override,
+            use_precomputed=use_precomputed,
+            use_lax_tridi=use_lax_tridi,
+        )
+
+    def rz_preconditioner_apply(
+        *,
+        frzl_in,
+        mats,
+        jmax,
+        use_precomputed: bool | None = None,
+        use_lax_tridi: bool | None = None,
+    ):
+        if bool(use_numpy_preconditioner_apply) and not tree_has_tracer_func(frzl_in):
+            from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_numpy
+
+            return rz_preconditioner_apply_numpy(
+                frzl_in=frzl_in,
+                mats=mats,
+                jmax=jmax,
+                cfg=cfg,
+                use_precomputed=use_precomputed,
+            )
+        from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_jit
+
+        return rz_preconditioner_apply_jit(
+            frzl_in=frzl_in,
+            mats=mats,
+            jmax=jmax,
+            cfg=cfg,
+            use_precomputed=use_precomputed,
+            use_lax_tridi=use_lax_tridi,
+        )
+
+    def rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
+        from vmec_jax.preconditioner_1d_jax import rz_preconditioner as apply_rz_preconditioner
+
+        return apply_rz_preconditioner(
+            frzl_in=frzl_in,
+            bc=bc,
+            k=k,
+            trig=trig,
+            s=s,
+            cfg=cfg,
+        )
+
+    return ResidualPreconditionerOperators(
+        apply_radial_tridi,
+        apply_radial_tridi_batched,
+        lambda_preconditioner,
+        rz_preconditioner_matrices,
+        rz_preconditioner_apply,
+        rz_preconditioner,
+    )
+
+
 def host_preconditioned_residual_scalar_channels(
     *,
     gcr2_p: Any,

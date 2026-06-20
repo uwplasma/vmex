@@ -750,17 +750,6 @@ def solve_fixed_boundary_residual_iter(
     edge_value_key = cache_keys.edge_value_key
     _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
-    def _apply_radial_tridi(a, alpha: float):
-        return _radial_tridi_smooth_dirichlet(a, alpha=alpha, skip_nonpositive=True)
-
-    def _apply_radial_tridi_batched(arrs, alpha: float):
-        if alpha <= 0.0:
-            return tuple(arrs)
-        # Stack directly into (ns, B, ...) to avoid swapaxes.
-        stack = jnp.stack(arrs, axis=1)
-        smooth = _radial_tridi_smooth_dirichlet(stack, alpha=alpha)
-        return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
-
     _t_setup_ptau_constants = _setup_timer_start()
     _ptau_context = _build_ptau_minmax_context(
         s,
@@ -807,41 +796,6 @@ def solve_fixed_boundary_residual_iter(
         dump_func=_runtime_maybe_dump_ptau,
     )
 
-    def _lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
-        lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
-        from vmec_jax.preconditioner_1d_jax import lambda_preconditioner_cached
-
-        return lambda_preconditioner_cached(
-            bc=bc,
-            trig=trig,
-            s=s,
-            cfg=cfg,
-            return_faclam=return_faclam,
-            return_debug=return_debug,
-            r0scale=lam_r0scale,
-        )
-
-    def _rz_preconditioner_matrices_local(
-        *,
-        bc,
-        k,
-        jmax_override: int | None = None,
-        use_precomputed: bool | None = None,
-        use_lax_tridi: bool | None = None,
-    ):
-        from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices
-
-        return rz_preconditioner_matrices(
-            bc=bc,
-            k=k,
-            trig=trig,
-            s=s,
-            cfg=cfg,
-            jmax_override=jmax_override,
-            use_precomputed=use_precomputed,
-            use_lax_tridi=use_lax_tridi,
-        )
-
     _numpy_precond_policy = _numpy_preconditioner_apply_policy(
         host_update_assembly=bool(host_update_assembly),
         max_iter=int(max_iter),
@@ -851,47 +805,21 @@ def solve_fixed_boundary_residual_iter(
         min_mode_count_env=os.getenv("VMEC_JAX_NUMPY_PRECOND_MIN_MODES", "16"),
     )
     _use_numpy_preconditioner_apply = bool(_numpy_precond_policy.enabled)
-
-    def _rz_preconditioner_apply_local(
-        *,
-        frzl_in,
-        mats,
-        jmax,
-        use_precomputed: bool | None = None,
-        use_lax_tridi: bool | None = None,
-    ):
-        if bool(_use_numpy_preconditioner_apply) and not _tree_has_tracer(frzl_in):
-            from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_numpy
-
-            return rz_preconditioner_apply_numpy(
-                frzl_in=frzl_in,
-                mats=mats,
-                jmax=jmax,
-                cfg=cfg,
-                use_precomputed=use_precomputed,
-            )
-        from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_jit
-
-        return rz_preconditioner_apply_jit(
-            frzl_in=frzl_in,
-            mats=mats,
-            jmax=jmax,
-            cfg=cfg,
-            use_precomputed=use_precomputed,
-            use_lax_tridi=use_lax_tridi,
-        )
-
-    def _rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
-        from vmec_jax.preconditioner_1d_jax import rz_preconditioner
-
-        return rz_preconditioner(
-            frzl_in=frzl_in,
-            bc=bc,
-            k=k,
-            trig=trig,
-            s=s,
-            cfg=cfg,
-        )
+    preconditioner_ops = _precond_payload_facade.residual_preconditioner_operators(
+        trig=trig,
+        s=s,
+        cfg=cfg,
+        use_numpy_preconditioner_apply=bool(_use_numpy_preconditioner_apply),
+        tree_has_tracer_func=_tree_has_tracer,
+        radial_tridi_smooth_dirichlet_func=_radial_tridi_smooth_dirichlet,
+        jnp_module=jnp,
+    )
+    _apply_radial_tridi = preconditioner_ops.apply_radial_tridi
+    _apply_radial_tridi_batched = preconditioner_ops.apply_radial_tridi_batched
+    _lambda_preconditioner = preconditioner_ops.lambda_preconditioner
+    _rz_preconditioner_matrices_local = preconditioner_ops.rz_preconditioner_matrices
+    _rz_preconditioner_apply_local = preconditioner_ops.rz_preconditioner_apply
+    _rz_preconditioner = preconditioner_ops.rz_preconditioner
 
     _compute_forces = _make_residual_force_evaluator(
         static=static,

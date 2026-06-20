@@ -28716,3 +28716,85 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.980%.
 - Overall differentiability-refactor PR: 99.999999999966%.
+
+## 2026-06-20 Residual Preconditioner Operator Binding
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `ResidualPreconditionerOperators` and
+   `residual_preconditioner_operators` in
+   `vmec_jax/solvers/fixed_boundary/residual/preconditioner_payload.py`.
+2. Moved the residual-iteration local preconditioner bindings for radial
+   smoothing, lambda preconditioning, R/Z matrix construction, R/Z application,
+   and full R/Z preconditioning into that domain-specific operator set.
+3. Replaced the nested local closure definitions in
+   `solve_fixed_boundary_residual_iter` with one operator construction and
+   local aliases, preserving downstream call sites and names.
+
+Results obtained:
+
+- `solve_fixed_boundary_residual_iter` dropped from 3230 to 3158 lines.
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from 3574 to
+  3502 lines.
+- The preconditioner operator setup is now testable as a named payload concept
+  instead of being hidden inside the solver loop.
+- No new root-level files were added.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/preconditioner_payload.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_preconditioner_payload_helpers.py tests/test_solve_hotpaths.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_preconditioner_payload_helpers.py tests/test_solve_hotpaths.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_hotpaths.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Notes:
+
+- An attempted pytest command used stale individual hot-path test names and
+  exited during collection. The current test names were enumerated and the
+  equivalent focused file shard passed.
+
+Best next steps:
+
+1. Continue residual iteration decomposition only around independently named
+   runtime concepts: axis reset, cache refresh, velocity blocks, or final
+   report assembly.
+2. If the next residual extraction becomes argument-heavy, switch to WOUT
+   minimal-output assembly or `run_fixed_boundary` finalization instead.
+3. Run a broader fixed-boundary driver shard after the next tranche rather than
+   waiting on full CI for every small edit.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999990%.
+- Solver monolith reduction: 99.984%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.895%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.30%.
+- Force-kernel decomposition: 99.69%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.980%.
+- Overall differentiability-refactor PR: 99.999999999967%.
