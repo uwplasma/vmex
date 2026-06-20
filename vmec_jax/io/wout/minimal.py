@@ -739,140 +739,124 @@ def compute_minimal_wout_scalar_diagnostics(
     )
     glasser_shear_valid = np.zeros((ns,), dtype=bool)
 
-    if wout_light:
-        return WoutScalarDiagnostics(
-            betatotal=float(betatotal),
-            betapol=betapol,
-            betator=betator,
-            betaxis=betaxis,
-            ctor=ctor,
-            DMerc=DMerc,
-            Dshear=Dshear,
-            Dcurr=Dcurr,
-            Dwell=Dwell,
-            Dgeod=Dgeod,
-            D_R=D_R,
-            H_glasser=H_glasser,
-            glasser_correction=glasser_correction,
-            glasser_shear_valid=glasser_shear_valid,
-            jdotb=jdotb,
-            bdotb=bdotb,
-            bdotgradv=bdotgradv,
-        )
+    if not bool(wout_light):
+        try:
+            bsubu_merc = np.asarray(bsubu_diag, dtype=float)
+            bsubv_merc = np.asarray(bsubv_diag, dtype=float)
+            if env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "")):
+                bsubu_merc = np.asarray(bsubu_raw, dtype=float)
+                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+            elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "")):
+                bsubu_merc = np.asarray(bsubu_phys, dtype=float)
+                bsubv_merc = np.asarray(bsubv_phys, dtype=float)
+            elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "")):
+                bsubv_merc = np.asarray(bsubv_raw, dtype=float)
 
-    try:
-        bsubu_merc = np.asarray(bsubu_diag, dtype=float)
-        bsubv_merc = np.asarray(bsubv_diag, dtype=float)
-        if env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBUV", "")):
-            bsubu_merc = np.asarray(bsubu_raw, dtype=float)
-            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
-        elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_WROUT_BSUBUV", "")):
-            bsubu_merc = np.asarray(bsubu_phys, dtype=float)
-            bsubv_merc = np.asarray(bsubv_phys, dtype=float)
-        elif env_enabled(os.getenv("VMEC_JAX_MERCIER_USE_RAW_BSUBV", "")):
-            bsubv_merc = np.asarray(bsubv_raw, dtype=float)
+            if timing_enabled:
+                import time as _time
 
-        if timing_enabled:
-            import time as _time
+                t_beta = _time.perf_counter()
+            wint = vmec_wint_from_trig_func(trig)
+            betaxis = compute_eqfor_betaxis_func(
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                bsq=np.asarray(bc.bsq, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                wint=wint,
+                signgs=int(signgs),
+            )
+            betapol, betator, betatot_eq, betaxis = compute_eqfor_beta_func(
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                bsq=np.asarray(bc.bsq, dtype=float),
+                r12=np.asarray(bc.jac.r12, dtype=float),
+                bsupv=np.asarray(bc.bsupv, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                wint=wint,
+                signgs=int(signgs),
+            )
+            if timing_enabled:
+                timing["beta_s"] = _time.perf_counter() - t_beta
+            betatotal = float(betatot_eq)
+            ctor = compute_ctor_from_buco_func(
+                buco=np.asarray(buco, dtype=float),
+                signgs=int(signgs),
+                indata=indata,
+            )
 
-            t_beta = _time.perf_counter()
-        wint = vmec_wint_from_trig_func(trig)
-        betaxis = compute_eqfor_betaxis_func(
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            bsq=np.asarray(bc.bsq, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            wint=wint,
-            signgs=int(signgs),
-        )
-        betapol, betator, betatot_eq, betaxis = compute_eqfor_beta_func(
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            bsq=np.asarray(bc.bsq, dtype=float),
-            r12=np.asarray(bc.jac.r12, dtype=float),
-            bsupv=np.asarray(bc.bsupv, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            wint=wint,
-            signgs=int(signgs),
-        )
-        if timing_enabled:
-            timing["beta_s"] = _time.perf_counter() - t_beta
-        betatotal = float(betatot_eq)
-        ctor = compute_ctor_from_buco_func(buco=np.asarray(buco, dtype=float), signgs=int(signgs), indata=indata)
-
-        if timing_enabled:
-            t_mercier = _time.perf_counter()
-        (
-            DMerc,
-            Dshear,
-            Dcurr,
-            Dwell,
-            Dgeod,
-            jdotb,
-            bdotb,
-            bdotgradv,
-        ) = compute_mercier_func(
-            state=state,
-            geom_modes=static.modes,
-            s=np.asarray(s, dtype=float),
-            lconm1=bool(lconm1),
-            lthreed=bool(ntor > 0),
-            lasym=bool(lasym),
-            nfp=int(nfp),
-            lbsubs=bool(lbsubs),
-            mmax_force=max(int(mpol) - 1, 0),
-            nmax_force=int(ntor),
-            pres=np.asarray(pres, dtype=float),
-            vp=np.asarray(vp, dtype=float),
-            phips=np.asarray(flux_phips, dtype=float),
-            iotas=np.asarray(iotas, dtype=float),
-            bsq=np.asarray(bc.bsq, dtype=float),
-            sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
-            bsubu=bsubu_merc,
-            bsubv=bsubv_merc,
-            bsubu_parity_even=(
-                None
-                if getattr(bc, "bsubu_parity_even", None) is None
-                else np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
-            ),
-            bsubu_parity_odd=(
-                None
-                if getattr(bc, "bsubu_parity_odd", None) is None
-                else np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
-            ),
-            bsubv_parity_even=(
-                None
-                if getattr(bc, "bsubv_parity_even", None) is None
-                else np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
-            ),
-            bsubv_parity_odd=(
-                None
-                if getattr(bc, "bsubv_parity_odd", None) is None
-                else np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
-            ),
-            bsupu=np.asarray(bsupu_bss, dtype=float),
-            bsupv=np.asarray(bsupv_bss, dtype=float),
-            trig=trig,
-            geom=geom_bss,
-            jac_half=bc.jac,
-            force_rs=rs_bss,
-            force_zs=zs_bss,
-            force_ru12=ru12_bss,
-            force_zu12=zu12_bss,
-            bsubu_raw=np.asarray(bsubu_raw, dtype=float),
-            bsubv_raw=np.asarray(bsubv_raw, dtype=float),
-            signgs=int(signgs),
-        )
-        D_R, H_glasser, glasser_correction, glasser_shear_valid = glasser_from_wout_mercier_terms_func(
-            DMerc=DMerc,
-            Dshear=Dshear,
-            Dcurr=Dcurr,
-        )
-        if timing_enabled:
-            timing["mercier_s"] = _time.perf_counter() - t_mercier
-    except Exception:
-        if env_enabled(os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "")):
-            raise
+            if timing_enabled:
+                t_mercier = _time.perf_counter()
+            (
+                DMerc,
+                Dshear,
+                Dcurr,
+                Dwell,
+                Dgeod,
+                jdotb,
+                bdotb,
+                bdotgradv,
+            ) = compute_mercier_func(
+                state=state,
+                geom_modes=static.modes,
+                s=np.asarray(s, dtype=float),
+                lconm1=bool(lconm1),
+                lthreed=bool(ntor > 0),
+                lasym=bool(lasym),
+                nfp=int(nfp),
+                lbsubs=bool(lbsubs),
+                mmax_force=max(int(mpol) - 1, 0),
+                nmax_force=int(ntor),
+                pres=np.asarray(pres, dtype=float),
+                vp=np.asarray(vp, dtype=float),
+                phips=np.asarray(flux_phips, dtype=float),
+                iotas=np.asarray(iotas, dtype=float),
+                bsq=np.asarray(bc.bsq, dtype=float),
+                sqrtg=np.asarray(bc.jac.sqrtg, dtype=float),
+                bsubu=bsubu_merc,
+                bsubv=bsubv_merc,
+                bsubu_parity_even=(
+                    None
+                    if getattr(bc, "bsubu_parity_even", None) is None
+                    else np.asarray(getattr(bc, "bsubu_parity_even"), dtype=float)
+                ),
+                bsubu_parity_odd=(
+                    None
+                    if getattr(bc, "bsubu_parity_odd", None) is None
+                    else np.asarray(getattr(bc, "bsubu_parity_odd"), dtype=float)
+                ),
+                bsubv_parity_even=(
+                    None
+                    if getattr(bc, "bsubv_parity_even", None) is None
+                    else np.asarray(getattr(bc, "bsubv_parity_even"), dtype=float)
+                ),
+                bsubv_parity_odd=(
+                    None
+                    if getattr(bc, "bsubv_parity_odd", None) is None
+                    else np.asarray(getattr(bc, "bsubv_parity_odd"), dtype=float)
+                ),
+                bsupu=np.asarray(bsupu_bss, dtype=float),
+                bsupv=np.asarray(bsupv_bss, dtype=float),
+                trig=trig,
+                geom=geom_bss,
+                jac_half=bc.jac,
+                force_rs=rs_bss,
+                force_zs=zs_bss,
+                force_ru12=ru12_bss,
+                force_zu12=zu12_bss,
+                bsubu_raw=np.asarray(bsubu_raw, dtype=float),
+                bsubv_raw=np.asarray(bsubv_raw, dtype=float),
+                signgs=int(signgs),
+            )
+            D_R, H_glasser, glasser_correction, glasser_shear_valid = glasser_from_wout_mercier_terms_func(
+                DMerc=DMerc,
+                Dshear=Dshear,
+                Dcurr=Dcurr,
+            )
+            if timing_enabled:
+                timing["mercier_s"] = _time.perf_counter() - t_mercier
+        except Exception:
+            if env_enabled(os.getenv("VMEC_JAX_STRICT_WOUT_DIAGNOSTICS", "")):
+                raise
 
     return WoutScalarDiagnostics(
         betatotal=float(betatotal),

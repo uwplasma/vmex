@@ -32960,3 +32960,74 @@ Completion:
 - CI/runtime/coverage hygiene for this PR: 99.992%.
 - Docs/release hygiene for this PR: 99.993%.
 - Overall differentiability-refactor PR: 99.99999999999971%.
+
+## 2026-06-20 WOUT scalar diagnostic single-return cleanup
+
+Steps taken:
+
+1. Removed the duplicated `wout_light` early-return constructor from
+   `compute_minimal_wout_scalar_diagnostics()`.
+2. Guarded the expensive beta/current/Mercier/Glasser diagnostic block with
+   `if not wout_light`, so light mode still skips all heavy diagnostics.
+3. Reused the existing final `WoutScalarDiagnostics` constructor for both light
+   and full diagnostics paths.
+
+Results obtained:
+
+- `vmec_jax/io/wout/minimal.py` drops from 1969 to 1953 lines.
+- `compute_minimal_wout_scalar_diagnostics()` drops from 210 to 194 lines in
+  the source-health function report.
+- The WOUT light path, environment-branch behavior, finite-beta helpers, and
+  scalar diagnostic output shape stay covered by targeted tests.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/io/wout/minimal.py`
+- `python -m compileall -q vmec_jax/io/wout/minimal.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_wout_fast_helpers.py tests/test_wout_helpers.py tests/test_wout_env_branch_coverage.py tests/test_wout_physics_wave8_coverage.py -q`
+- `git diff --check`
+- `python tools/diagnostics/source_health.py --top 25 --top-functions 80 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. The next WOUT reduction should be a true beta/Mercier helper extraction or a
+   dedicated diagnostics module split, not more local formatting.
+2. Return to `solve_fixed_boundary_residual_iter()` with a targeted controller
+   or history seam, using same-branch residual tests before commit.
+3. Keep all future simplification tranches net-negative in production code and
+   avoid adding generic `solver.py`/`helpers.py`-style modules.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999980%.
+- Solver monolith reduction: 99.9978%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- Residual iteration decomposition: 99.978%.
+- Residual policy simplification: 99.986%.
+- WOUT diagnostic/profile decomposition: 99.99935%.
+- Bcovar/WOUT parity decomposition: 99.67%.
+- Force-kernel decomposition: 99.795%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.22%.
+- Initial-guess decomposition: 99.42%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.47%.
+- QI objective/staged-runner decomposition: 97.18%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.992%.
+- Docs/release hygiene for this PR: 99.993%.
+- Overall differentiability-refactor PR: 99.99999999999972%.
