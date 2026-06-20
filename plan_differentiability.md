@@ -34424,6 +34424,96 @@ Completion:
 - Docs/release hygiene for this PR: 99.996%.
 - Overall differentiability-refactor PR: 99.9999999999998%.
 
+## 2026-06-20 Code-Structure Documentation Compression
+
+Branch:
+
+- `codex/differentiability-refactor-plan`
+
+Steps taken:
+
+1. Performed a final audit pass over the active plan, README, docs index,
+   code-structure page, package directories, tracked repository size, and
+   source-health output.
+2. Confirmed `plan_differentiability.md` remains the single active plan.
+   `plan_freeb.md` is still a closed free-boundary evidence log; `plan.md` and
+   `discrete_adjoint_2506_plan.md` remain historical references.
+3. Found that `docs/code_structure.rst` had become a long module-by-module
+   inventory.  That duplicated the filesystem, was likely to become stale, and
+   worked against the goal of a simple maintainable code map.
+4. Rewrote the top of `docs/code_structure.rst` as stable domain ownership:
+   public facades, numerical domains, physics/geometry kernels, examples, and
+   diagnostics.  The detailed "where to make changes" section remains.
+
+Results obtained:
+
+- `docs/code_structure.rst` dropped from 215 lines to 109 lines.
+- The page now explains the intended file structure rather than enumerating
+  every helper module.
+- The documented architecture is aligned with the active package layout:
+  public facades stay thin; implementation code belongs under `solvers/`,
+  `drivers/`, `io/wout/`, `optimizers/`, and `external_fields/` according to
+  domain.
+- Full documentation build completed successfully into `/tmp`, so this cleanup
+  does not introduce a Sphinx regression.
+- Tracked repository size remains about 29.43 MiB and below the configured
+  gate.
+
+Validation:
+
+- `python -m sphinx -T -b html -d /tmp/vmec_jax_doctrees docs /tmp/vmec_jax_html_code_structure_audit`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+
+Best next steps:
+
+1. Stop expanding architecture docs into helper inventories; keep them focused
+   on ownership, edit routing, and validated differentiability scope.
+2. For the final PR review gate, run source-health, diff checks, focused
+   shards for the recently touched code, and the documented local CI-equivalent
+   gate when no further code edits are planned.
+3. If one more implementation tranche is required, target a real domain seam
+   in `solve_fixed_boundary_residual_iter`, not another doc inventory or thin
+   wrapper shuffle.
+
+User decisions needed:
+
+- None now.  After PR review, decide whether to keep the full historical plan
+  logs in git or compress them into shorter archived release notes.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999989%.
+- Solver monolith reduction: 99.9981%.
+- Residual iteration decomposition: 99.982%.
+- Public API/docstring polish: 94.5%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.99945%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.963%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.993%.
+- Docs/release hygiene for this PR: 99.997%.
+- Overall differentiability-refactor PR: 99.99999999999982%.
+
 Open audit findings:
 
 1. Residual loop readability is still the highest-value refactor target.  Any

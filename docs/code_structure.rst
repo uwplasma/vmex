@@ -1,151 +1,45 @@
 Code structure
 ==============
 
-Top-level package layout (selected):
+The package is organized by domain rather than by the original VMEC2000
+subroutine names.  The goal is to keep the public surface small, preserve
+VMEC2000-compatible numerics, and put differentiable implementation details
+behind focused modules that are easy to test.
 
-- ``vmec_jax/api.py``: stable public import surface for solve, I/O, plotting,
-  diagnostics, and documented optimization workflow objects
-- ``vmec_jax/namelist.py``: minimal Fortran namelist reader (``&INDATA``)
-- ``vmec_jax/config.py``: run discretization config extracted from inputs
-- ``vmec_jax/static.py``: static grids + Fourier basis tensors (PyTrees)
-- ``vmec_jax/state.py``: coefficient containers (PyTrees)
-- ``vmec_jax/boundary.py``: boundary coefficient parsing + VMEC m=1 constraint
-- ``vmec_jax/init_guess.py``: profil3d-style initial guess (axis + boundary)
-- ``vmec_jax/coords.py`` / ``vmec_jax/geom.py``: geometry and metric kernels
-- ``vmec_jax/field.py`` / ``vmec_jax/energy.py``: B-field and energy diagnostics
-- ``vmec_jax/vmec_tomnsp.py``: VMEC ``fixaray`` tables + DFT tomnsps kernels
-- ``vmec_jax/vmec_bcovar.py``: bcovar/metric assembly and half-mesh pipeline
-- ``vmec_jax/preconditioner_1d.py``: VMEC-style preconditioner operators
-- ``vmec_jax/solvers/fixed_boundary/residual/force_norms.py``: force-block weighting, lambda
-  residual norms, VMEC residual ``FSQ`` scalar assembly, and stability-guard
-  timestep helpers extracted from the residual iteration hot path
-- ``vmec_jax/solvers/fixed_boundary/residual/payload_blocks.py``: residual-force payload
-  containers, edge masking, staged VMEC ``m=1``/zero/scalxc transforms, and
-  preconditioner-output block assembly
-- ``vmec_jax/solvers/fixed_boundary/optimization/tolerances.py``: dtype-aware gradient, conjugate
-  gradient, and Levenberg-Marquardt tolerance policies
-- ``vmec_jax/solvers/fixed_boundary/optimization/constraints.py``: fixed-boundary edge constraints,
-  magnetic-axis regularity, lambda-gauge projection, and related NumPy/JAX
-  coefficient-slice helpers
-- ``vmec_jax/solvers/fixed_boundary/optimization/gradient.py``: state gradient-descent updates and
-  feasible-gradient projections for fixed-boundary/axis/lambda constraints
-- ``vmec_jax/solvers/fixed_boundary/preconditioning/operators.py``:
-  fixed-boundary mode-diagonal
-  and radial Dirichlet smoothing preconditioner kernels, tridiagonal policy
-  resolution, metric preconditioner scales and bcovar wrapper helpers, radial
-  mesh scale factors, and VMEC ``m=1`` preconditioner scaling helpers
-- ``vmec_jax/solvers/fixed_boundary/jit_cache.py``:
-  environment-controlled JIT-cache limits, structural cache keys, LRU helpers,
-  and scan-cache miss diagnostics
-- ``vmec_jax/solvers/fixed_boundary/preconditioning/payload.py``:
-  cached strict-update,
-  preconditioner-output, fused preconditioner-apply, accepted-control, and
-  ``ptau`` JIT payload helpers used by the residual-iteration hot path
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/first_step.py``: first-step VMEC residual,
-  preconditioner, force-channel, and update diagnostic assembly used by the
-  public ``solve.first_step_diagnostics`` wrapper
-- ``vmec_jax/solvers/fixed_boundary/optimization/lambda_gd.py``: lambda-only fixed-geometry magnetic
-  energy optimizer used by the public ``solve.solve_lambda_gd`` wrapper while
-  preserving historical solve-module monkeypatch hooks
-- ``vmec_jax/solvers/fixed_boundary/optimization/energy.py``: shared fixed-boundary
-  magnetic-energy context/evaluator setup for GD and L-BFGS optimizers, with
-  solve-module dependency injection for historical monkeypatch compatibility
-- ``vmec_jax/solvers/fixed_boundary/optimization/gd.py``: fixed-boundary
-  gradient-descent optimizer loop used by the public
-  ``solve.solve_fixed_boundary_gd`` wrapper
-- ``vmec_jax/solvers/fixed_boundary/optimization/lbfgs.py``: fixed-boundary
-  L-BFGS optimizer loop used by the public
-  ``solve.solve_fixed_boundary_lbfgs`` wrapper
-- ``vmec_jax/solvers/fixed_boundary/optimization/residual_context.py``: shared VMEC flux/profile,
-  force-kernel ``wout``-like context, trig-table, and fixed-edge setup used by
-  residual-objective L-BFGS and Gauss-Newton optimizers
-- ``vmec_jax/solvers/fixed_boundary/optimization/residual_lbfgs.py``:
-  fixed-boundary VMEC-style force-residual L-BFGS optimizer loop used by the
-  public ``solve.solve_fixed_boundary_lbfgs_vmec_residual`` wrapper
-- ``vmec_jax/solvers/fixed_boundary/optimization/residual_gn.py``:
-  fixed-boundary VMEC-style force-residual Gauss-Newton/CG optimizer loop used
-  by the public ``solve.solve_fixed_boundary_gn_vmec_residual`` wrapper
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/hlo.py``: optional JAX HLO lowering dump
-  helpers for solver-kernel diagnostics
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/axis_reset.py``: initial magnetic-axis reset
-  control decisions, axis-state merging, and optional axis coefficient dumps
-- ``vmec_jax/solvers/fixed_boundary/residual/update.py``:
-  residual-iteration
-  velocity-block containers, host momentum update, and generic velocity
-  zeroing/scaling helpers
-- ``vmec_jax/solvers/free_boundary/control.py``: free-boundary cadence,
-  turn-on, and constraint-baseline control helpers
-- ``vmec_jax/solvers/free_boundary/diagnostics.py``: solve-facing
-  free-boundary external-field diagnostic adapters
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/force.py``: optional force-channel,
-  TOMNSP, scalar residual, and force-kernel debug dump helpers
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/bsub.py``: optional covariant-field debug
-  dumps for scaled full-mesh, half-mesh, and radial ``B_s`` diagnostics
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/lambda_debug.py``: optional lambda residual,
-  lambda-preconditioner, lambda-derivative, and radial-preconditioner debug
-  dump helpers
-- ``vmec_jax/solvers/fixed_boundary/diagnostics/metric.py``: optional metric,
-  preconditioner-input, and VMEC internal state-vector debug dump helpers
-- ``vmec_jax/solvers/fixed_boundary/results.py``: solver result dataclasses,
-  scan carry containers, and ``wout``-like force-kernel PyTree containers
-  shared by solve, driver, implicit differentiation, and tests
-- ``vmec_jax/solvers/fixed_boundary/scan/resume.py``: VMEC2000-style scan
-  resume-state initialization and carry-field restoration
-- ``vmec_jax/solvers/fixed_boundary/residual/runtime.py``:
-  residual-iteration
-  runtime seams for scan readiness, optional debug printing, timing reports,
-  resume-state summaries, and free-boundary external-field diagnostic
-  attachment
-- ``vmec_jax/solvers/fixed_boundary/residual/mode_transform.py``: host DGEMM
-  projection matrices, NumPy ``scalxc`` setup, and mode-diagonal weights used
-  by the residual-iteration host update path
-- ``vmec_jax/solvers/fixed_boundary/residual/setup.py``:
-  VMEC-grid reuse checks,
-  free-boundary provider policy, scan-disablement, and CPU/GPU strict-update
-  setup decisions for residual iteration
-- ``vmec_jax/solvers/fixed_boundary/residual/finalize.py``: final timing
-  diagnostics, resume-state payload packing, and residual-iteration result
-  assembly
-- ``vmec_jax/solvers/fixed_boundary/residual/force_cache.py``: structural force
-  JIT cache keys and callable selection while preserving solver-owned cache
-  objects
-- ``vmec_jax/solvers/fixed_boundary/residual/force_payload.py``:
-  residual-iteration force-payload mask-pack selection, edge masking, Z-force
-  square-sum diagnostics, NaN preservation, and VMEC scalar force-norm
-  assembly seams
-- ``vmec_jax/solve.py``: compatibility facade for historical fixed-boundary
-  solver imports and monkeypatch seams.  New implementation work should go in
-  the domain modules under ``vmec_jax/solvers/fixed_boundary/``.
-- ``vmec_jax/driver.py``: CLI/API facade for fixed/free-boundary runs, output
-  policies, staged solve dispatch, and wout writing.  New driver policy,
-  runtime, output, and staging logic should go in ``vmec_jax/drivers/``.
-- ``vmec_jax/drivers/``: driver policy, runtime setup, optional debug dumps,
-  CLI fixed-boundary finish handling, result merging, fixed-boundary solve
-  entry, current-driven flux reconciliation, example I/O, and VMEC-style output
-  construction helpers used by the CLI-facing ``driver.py`` facade
-- ``vmec_jax/free_boundary.py``: mgrid loading, NESTOR-like vacuum coupling,
-  and free-boundary runtime state helpers
-- ``vmec_jax/solvers/free_boundary/adjoint/``: accepted-trace replay plans,
-  branch fingerprints, controller-mask metadata, runtime helpers, reusable
-  controller AD-vs-FD checks, custom-VJP wrappers, branch-gate reports, and
-  pytree utilities used by branch-local free-boundary adjoint validation
-  reports
-- ``vmec_jax/optimization.py``: exact fixed-boundary optimizer, boundary DOF
-  maps, accepted-point replay, and discrete-adjoint Jacobian plumbing
-- ``vmec_jax/optimization_workflow.py``: user-facing optimization problem
-  objects, objective tuples, continuation stages, and example workflow helpers
-- ``vmec_jax/qi_diagnostics.py``: smooth and legacy QI diagnostics, seed
-  ranking metadata, mirror/elongation gates, and acceptance annotations
-- ``vmec_jax/plotting.py``: VMEC-style geometry, ``|B|`` contour, Boozer-grid,
-  objective-history, and publication-panel plotting helpers
-- ``vmec_jax/wout.py``: minimal ``wout_*.nc`` reader/writer and VMEC-style
-  output synthesis compatibility surface
-- ``vmec_jax/io/wout/``: persisted-WOUT schema, netCDF, flux-convention,
-  half-mesh ``B_s`` construction, VMEC ``wrout``/``jxbforce`` Nyquist
-  transform helpers, JXBFORCE Bsub filter kernels, Mercier/JXBFORCE reducer
-  kernels, parity, and diagnostic helpers, including the fallback
-  ``DMerc``/Glasser ``D_R`` algebra used when older ``wout`` files do not
-  contain the newer stability fields
+Core public surfaces:
+
+- ``vmec_jax/api.py`` and ``vmec_jax/__init__.py`` expose the stable user API.
+- ``vmec_jax/cli.py`` implements the ``vmec`` command-line entry point.
+- ``vmec_jax/solve.py``, ``vmec_jax/driver.py``, ``vmec_jax/free_boundary.py``,
+  and ``vmec_jax/wout.py`` are compatibility facades.  Keep them thin; new
+  implementation logic should live in the domain packages below.
+
+Numerical domains:
+
+- ``vmec_jax/solvers/fixed_boundary/`` contains fixed-boundary VMEC iteration,
+  scan, preconditioning, optimization, diagnostics, and result containers.
+- ``vmec_jax/solvers/free_boundary/`` contains free-boundary provider plumbing,
+  NESTOR/vacuum-coupling helpers, direct-coil validation seams, and
+  branch-local adjoint/replay evidence.
+- ``vmec_jax/external_fields/`` contains differentiable coil and ``mgrid``
+  field providers.
+- ``vmec_jax/io/wout/`` contains persisted-WOUT schema, netCDF I/O, flux
+  conventions, JXBFORCE/Mercier reducers, ``DMerc``/Glasser ``D_R``
+  diagnostics, and compatibility helpers.
+- ``vmec_jax/optimizers/fixed_boundary/`` contains objective terms, exact
+  replay, matrix-free/scalar-gradient paths, SciPy adapters, and workflow
+  output helpers used by example-style optimizations.
+
+Physics and geometry kernels:
+
+- Root modules such as ``config.py``, ``static.py``, ``state.py``,
+  ``boundary.py``, ``init_guess.py``, ``coords.py``, ``geom.py``,
+  ``field.py``, ``energy.py``, ``vmec_tomnsp.py``, ``vmec_bcovar.py``, and
+  ``preconditioner_1d.py`` hold reusable VMEC data structures and kernels.
+- Objective/diagnostic modules such as ``quasisymmetry.py``,
+  ``quasi_isodynamic.py``, ``qi_diagnostics.py``, ``finite_beta.py``, and
+  ``plotting.py`` expose higher-level physics quantities used by examples,
+  tests, and docs.
 
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:
