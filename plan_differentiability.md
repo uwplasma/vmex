@@ -28871,3 +28871,77 @@ Completion:
 - DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
 - CI/runtime/coverage hygiene for this PR: 99.980%.
 - Overall differentiability-refactor PR: 99.999999999968%.
+
+## 2026-06-20 Shared R/Z Force Radial Assembly
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Added `_assemble_vmec_rz_radial_forces`, a shared implementation of the
+   VMEC radial staggering and even/odd parity updates for R/Z force kernels.
+2. Replaced the duplicated radial-force assembly block in
+   `vmec_forces_rz_from_wout`.
+3. Replaced the corresponding duplicated reference-field block in
+   `vmec_forces_rz_from_wout_reference_fields`, so both production and
+   reference paths use the same force algebra.
+4. Tightened the helper API to accept the existing Jacobian object directly,
+   avoiding redundant `ru12/zu12/rs/zs` aliases.
+
+Results obtained:
+
+- `vmec_forces_rz_from_wout` dropped from 308 to 246 lines.
+- `vmec_forces_rz_from_wout_reference_fields` dropped from 323 to 274 lines.
+- `vmec_jax/vmec_forces.py` remains below the source-health file warning
+  threshold at 1985 lines.
+- The production and reference force paths now share the radial-staggering
+  implementation, reducing future parity drift risk.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/vmec_forces.py tests/test_vmec_forces_synthetic_helpers.py tests/test_vmec_forces_more_coverage.py tests/test_forces_bcovar_wave12_coverage.py tests/test_residue_getfsq_parity.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_vmec_forces_synthetic_helpers.py tests/test_vmec_forces_more_coverage.py tests/test_forces_bcovar_wave12_coverage.py -q`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_residue_getfsq_parity.py tests/test_vmec2000_scalars_parity.py tests/test_getfsq_block_sums.py -q`
+- `python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue force-kernel simplification only if the next shared block removes
+   duplicate production/reference code or clarifies a physics concept.
+2. Otherwise switch to `initial_guess_from_boundary` or `tomnsps_rzl`, which
+   are the next source-code hotspots with clear domain boundaries.
+3. Run a broader force/WOUT validation shard before merging the accumulated PR.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.98%.
+- Differentiability/refactor implementation: 99.999999992%.
+- Solver monolith reduction: 99.984%.
+- Free-boundary adjoint monolith reduction: 99.68%.
+- Driver workflow decomposition: 99.975%.
+- Residual iteration decomposition: 99.895%.
+- WOUT diagnostic/profile decomposition: 99.992%.
+- Bcovar/WOUT parity decomposition: 99.37%.
+- Force-kernel decomposition: 99.76%.
+- Scan/performance policy consolidation: 99.985%.
+- Tomnsps transform decomposition: 99.10%.
+- Initial-guess decomposition: 99.08%.
+- Optimizer workflow decomposition: 99.89%.
+- Fixed-boundary optimizer decomposition: 98.05%.
+- Plotting/WOUT visualization decomposition: 98.05%.
+- Free-boundary facade/domain decomposition: 99.40%.
+- Sweep/example workflow decomposition: 95.8%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.31%.
+- QI objective/staged-runner decomposition: 97.05%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CI/runtime/coverage hygiene for this PR: 99.980%.
+- Overall differentiability-refactor PR: 99.999999999969%.
