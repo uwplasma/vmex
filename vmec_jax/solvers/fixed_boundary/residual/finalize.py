@@ -291,6 +291,11 @@ def finalize_residual_iter_from_namespace(
         ftol=ns["ftol"],
         fsq_total_target=ns["fsq_total_target"],
     )
+    startup_policy = ns.get("startup_policy")
+
+    def _policy_attr(name: str) -> Any:
+        return getattr(startup_policy, name) if startup_policy is not None else ns[name]
+
     t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
     diag: dict[str, Any] = {
         "ftol": ns["ftol"],
@@ -301,7 +306,7 @@ def finalize_residual_iter_from_namespace(
         "precond_lambda_alpha": float(ns["precond_lambda_alpha"]),
         "strict_update": bool(ns["strict_update"]),
         "reference_mode": bool(ns["reference_mode"]),
-        "use_restart_triggers": bool(ns["use_restart_triggers"]),
+        "use_restart_triggers": bool(_policy_attr("use_restart_triggers")),
         "use_direct_fallback": bool(ns["use_direct_fallback"]),
         "max_update_rms": float(ns["max_update_rms"]),
         "converged": bool(ns["converged"]),
@@ -315,10 +320,10 @@ def finalize_residual_iter_from_namespace(
         "pre_update_final_fsql": float(ns["fsql_f"]),
         "final_residual_recomputed_on_accepted_state": bool(final_freeb["final_residual_recomputed"]),
         "badjac_use_state": bool(ns["badjac_use_state"]),
-        "badjac_mode": ns["badjac_mode"],
-        "badjac_state_probe": bool(ns["badjac_state_probe"]),
-        "badjac_initial_state_probe_iters": int(ns["badjac_initial_state_probe_iters"]),
-        "light_history": bool(ns["light_history"]),
+        "badjac_mode": _policy_attr("badjac_mode"),
+        "badjac_state_probe": bool(_policy_attr("badjac_state_probe")),
+        "badjac_initial_state_probe_iters": int(_policy_attr("badjac_initial_state_probe_iters")),
+        "light_history": bool(_policy_attr("light_history")),
         "resume_state_mode": str(ns["resume_state_mode"]),
         "fsq_total_target": ns["fsq_total_target"],
         "ijacob": int(ns["ijacob"]),

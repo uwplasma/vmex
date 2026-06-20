@@ -601,34 +601,19 @@ def solve_fixed_boundary_residual_iter(
     lambda_update_scale = startup_policy.lambda_update_scale
     enforce_vmec_lambda_axis = startup_policy.enforce_vmec_lambda_axis
     vmec2000_control = startup_policy.vmec2000_control
-    badjac_mode = startup_policy.badjac_mode
     badjac_use_state = startup_policy.badjac_use_state
-    dump_ptau_state = startup_policy.dump_ptau_state
-    light_history = startup_policy.light_history
     resume_state_mode = startup_policy.resume_state_mode
-    badjac_state_probe = startup_policy.badjac_state_probe
-    badjac_initial_state_probe_iters = startup_policy.badjac_initial_state_probe_iters
     ptau_tol = startup_policy.ptau_tol
-    ptau_tol_rel = startup_policy.ptau_tol_rel
     reference_mode = startup_policy.reference_mode
     jit_precompile = startup_policy.jit_precompile
-    use_restart_triggers = startup_policy.use_restart_triggers
     use_direct_fallback = startup_policy.use_direct_fallback
     vmecpp_restart = startup_policy.vmecpp_restart
     verbose_vmec2000_table = startup_policy.verbose_vmec2000_table
-    scan_fallback_enabled = startup_policy.scan_fallback_enabled
-    scan_fallback_iters = startup_policy.scan_fallback_iters
-    scan_fallback_badjac_limit = startup_policy.scan_fallback_badjac_limit
-    scan_fallback_fsq_abs = startup_policy.scan_fallback_fsq_abs
-    scan_fallback_accept_frac = startup_policy.scan_fallback_accept_frac
-    scan_fallback_fsq_factor = startup_policy.scan_fallback_fsq_factor
     stage_transition_factor = startup_policy.stage_transition_factor
     stage_transition_scale = startup_policy.stage_transition_scale
     stage_prev_fsq = startup_policy.stage_prev_fsq
-    auto_flip_force = startup_policy.auto_flip_force
     jit_forces = startup_policy.jit_forces
     use_scan = startup_policy.use_scan
-    differentiating_scan = startup_policy.differentiating_scan
     limit_dt_from_force = startup_policy.limit_dt_from_force
     limit_update_rms = startup_policy.limit_update_rms
     backtracking = startup_policy.backtracking
@@ -977,7 +962,7 @@ def solve_fixed_boundary_residual_iter(
 
         _compute_forces = _select_compute_forces_callable(
             _compute_forces_nodump,
-            differentiating_scan=bool(differentiating_scan),
+            differentiating_scan=bool(startup_policy.differentiating_scan),
             cache=_COMPUTE_FORCES_CACHE,
             cache_key=compute_cache_key,
             jit_func=jit,
@@ -1976,7 +1961,7 @@ def solve_fixed_boundary_residual_iter(
                 and (bool(reference_mode) or bool(vmec2000_control))
                 and (not bool(host_update_assembly))
                 and (not bool(badjac_use_state))
-                and (not bool(dump_ptau_state))
+                and (not bool(startup_policy.dump_ptau_state))
                 and os.getenv("VMEC_JAX_DUMP_PTAU", "") in ("", "0")
                 and jax.default_backend() != "cpu"
             )
@@ -2160,7 +2145,7 @@ def solve_fixed_boundary_residual_iter(
                 flcc_u = flcc_u * lambda_update_scale_j
                 flss_u = flss_u * lambda_update_scale_j
 
-            if auto_flip_force and it == 0:
+            if startup_policy.auto_flip_force and it == 0:
                 # Choose force direction by a tiny trial step on the VMEC residual
                 # (fsqr+fsqz+fsql), not magnetic energy. Energy monotonicity is not a
                 # reliable proxy for VMEC's preconditioned convergence metrics.
@@ -2334,7 +2319,7 @@ def solve_fixed_boundary_residual_iter(
                     (not bool(converged_physical))
                     and (bool(reference_mode) or bool(vmec2000_control))
                     and (not bool(badjac_use_state))
-                    and (not bool(dump_ptau_state))
+                    and (not bool(startup_policy.dump_ptau_state))
                     and os.getenv("VMEC_JAX_DUMP_PTAU", "") in ("", "0")
                     and jax.default_backend() != "cpu"
                 )
@@ -2486,13 +2471,13 @@ def solve_fixed_boundary_residual_iter(
                     bad_jacobian_ptau = bool(ptau_decision.bad_jacobian)
 
                 state_probe = _should_probe_bad_jacobian_state(
-                    state_probe=bool(badjac_state_probe),
-                    initial_state_probe_iters=int(badjac_initial_state_probe_iters),
+                    state_probe=bool(startup_policy.badjac_state_probe),
+                    initial_state_probe_iters=int(startup_policy.badjac_initial_state_probe_iters),
                     iter_idx=int(iter2),
                 )
                 need_state_jac = _bad_jacobian_requires_state_jacobian(
                     badjac_use_state=bool(badjac_use_state),
-                    dump_ptau_state=bool(dump_ptau_state),
+                    dump_ptau_state=bool(startup_policy.dump_ptau_state),
                     state_probe=bool(state_probe),
                     ptau_decision=ptau_decision,
                 )
@@ -2556,7 +2541,7 @@ def solve_fixed_boundary_residual_iter(
                     badjac_ptau=bad_jacobian_ptau,
                     badjac_state=bad_jacobian_state,
                     badjac_used=bool(bad_jacobian),
-                    mode=badjac_mode,
+                    mode=startup_policy.badjac_mode,
                     label="iter",
                 )
 
@@ -2731,7 +2716,7 @@ def solve_fixed_boundary_residual_iter(
             if restart_decision.store_checkpoint:
                 state_checkpoint = state
 
-            if use_restart_triggers and pre_restart_reason != "none":
+            if startup_policy.use_restart_triggers and pre_restart_reason != "none":
                 state_before_restart = state
                 velocity_blocks_before = velocity_blocks
                 state = state_checkpoint

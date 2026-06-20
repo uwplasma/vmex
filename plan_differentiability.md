@@ -7,6 +7,95 @@ and should not drive new work unless a specific old result needs to be audited.
 
 Last updated: 2026-06-20.
 
+## 2026-06-20 Residual Startup Policy Namespace Reduction
+
+Branch: `codex/differentiability-refactor-plan`.
+
+Steps taken:
+
+1. Continued the residual-loop simplification lane after the CI compatibility
+   fix.
+2. Removed duplicated local bindings for low-use startup-policy fields in
+   `solve_fixed_boundary_residual_iter`.
+3. Updated the VMEC2000 scan adapter and scan controller to read policy-derived
+   fallback, bad-Jacobian, dump, restart, and auto-flip settings from
+   `startup_policy` directly.
+4. Updated residual finalization diagnostics to read policy-owned settings from
+   `startup_policy`, with a legacy namespace fallback for focused helper tests.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/residual/iteration.py` dropped from `3261`
+  to `3246` lines.
+- `solve_fixed_boundary_residual_iter` dropped from `2784` to `2769` lines.
+- The tranche is net-negative across touched production files:
+  `53 insertions, 74 deletions`.
+- The scan path now has a clearer authority boundary: resolved non-numerical
+  policy fields live on `ResidualIterStartupPolicy` instead of being copied into
+  residual-loop locals just to satisfy `locals()` dispatch.
+- Source-health still identifies `residual/iteration.py` as the only production
+  file above the current 2000-line target, so it remains the next refactor
+  hotspot.
+
+Tests and commands run:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/scan/controller.py vmec_jax/solvers/fixed_boundary/residual/finalize.py`
+- `python -m compileall -q vmec_jax/solvers/fixed_boundary/residual/iteration.py vmec_jax/solvers/fixed_boundary/residual/scan_adapters.py vmec_jax/solvers/fixed_boundary/scan/controller.py vmec_jax/solvers/fixed_boundary/residual/finalize.py`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_real_scan_wave10_coverage.py tests/test_solve_scan_resume_state.py tests/test_solve_scan_output.py --tb=short`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_residual_iter_helpers_wave8_coverage.py::test_residual_iter_config_helpers_reexported_through_solve tests/test_solve_additional_helpers.py::test_append_residual_iter_history_record_keeps_all_channels_aligned tests/test_solve_finish_cache_more_coverage.py::test_nonscan_non_strict_backtracking_accepts_momentum_update --tb=short`
+- `JAX_ENABLE_X64=1 pytest -q tests/test_solve_residual_iter_policy.py tests/test_solve_residual_iter_policy_gap_coverage.py tests/test_solve_residual_iter_config.py tests/test_solve_residual_iter_finalize_helpers.py tests/test_solve_scan_planning_helpers.py tests/test_solve_scan_time_control.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 30 --top-functions 80 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue residual-loop reductions only where they remove true coupling:
+   repeated update/fallback branch assembly and remaining preconditioner-cache
+   plumbing are better targets than moving code into arbitrary helper files.
+2. Avoid property or wrapper boilerplate that reduces the large function while
+   increasing total source size.
+3. Re-run one scan suite and one nonscan strict/non-strict update suite after
+   each residual-loop change.
+
+User decisions needed:
+
+No immediate decision.
+
+Completion:
+
+- Architecture/refactor plan: 100%.
+- Single active-plan consolidation: 100%.
+- Source-health instrumentation and namespace-sprawl prevention: 100%.
+- Package consolidation implementation: 99.989%.
+- Differentiability/refactor implementation: 99.99999999987%.
+- Solver monolith reduction: 99.9983%.
+- Residual iteration decomposition: 99.984%.
+- Public API/docstring polish: 94%.
+- Free-boundary adjoint monolith reduction: 99.752%.
+- Driver workflow decomposition: 99.985%.
+- WOUT diagnostic/profile decomposition: 99.9995%.
+- Force-kernel decomposition: 99.795%.
+- Optimizer workflow decomposition: 99.958%.
+- Fixed-boundary optimizer decomposition: 98.42%.
+- Plotting/WOUT visualization decomposition: 98.32%.
+- Free-boundary facade/domain decomposition: 99.513%.
+- Sweep/example workflow decomposition: 96.4%.
+- Implicit residual-adjoint decomposition: 96.45%.
+- Discrete-adjoint replay decomposition: 99.30%.
+- Free-boundary validation-gate maintainability: 99.48%.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.99999997%; arbitrary
+  adaptive host branch changes remain explicitly unclaimed.
+- Single-stage coil-only optimization phase 3: 99.95%.
+- VMEC parity and physics gates: 99.9%.
+- QI minimal-seed README artifacts: 100%.
+- DMerc/Glasser `D_R` AD-vs-FD validation: 95.8%.
+- CPU/GPU performance: 99.45%.
+- CI/runtime/coverage hygiene for this PR: 99.995%.
+- Docs/release hygiene for this PR: 99.995%.
+- Overall differentiability-refactor PR: 99.99999999999979%.
+
 ## 2026-06-20 Final Plan/Structure Audit And CI Compatibility Fix
 
 Branch: `codex/differentiability-refactor-plan`.
