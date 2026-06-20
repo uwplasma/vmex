@@ -46,6 +46,151 @@ class AcceptedControlPayloadMaterialization(NamedTuple):
     control_payload_used: bool
 
 
+class PreconditionedResidualScalarChannels(NamedTuple):
+    """Preconditioned residual scalar channels used by VMEC time-control."""
+
+    rz_norm: Any
+    f_norm1: Any
+    fsqr1: Any
+    fsqz1: Any
+    fsql1: Any
+    fsqr1_safe: Any
+    fsqz1_safe: Any
+    fsql1_safe: Any
+    fsq1: Any
+
+
+def host_preconditioned_residual_scalar_channels(
+    *,
+    gcr2_p: Any,
+    gcz2_p: Any,
+    gcl2_p: Any,
+    frzl_pre: Any,
+    frzl_pre_host: Any,
+    vmec2000_control: bool,
+    vmec2000_cache_valid: bool,
+    need_bcovar_update: bool,
+    cache_rz_norm: Any,
+    cache_f_norm1: Any,
+    state: Any,
+    delta_s: float,
+    numpy_module: Any,
+    rz_norm_np: Callable[[Any], float],
+    lambda_preconditioned_full_norm: Callable[..., Any],
+    finite_float_or_zero: Callable[[Any], float],
+) -> PreconditionedResidualScalarChannels:
+    """Build preconditioned fsq1 channels on the NumPy/host path."""
+
+    if (
+        bool(vmec2000_control)
+        and bool(vmec2000_cache_valid)
+        and (not bool(need_bcovar_update))
+        and (cache_rz_norm is not None)
+        and (cache_f_norm1 is not None)
+    ):
+        f_norm1_np = float(cache_f_norm1)
+        rz_norm = cache_rz_norm
+    else:
+        rz_norm = rz_norm_np(state)
+        f_norm1_np = (1.0 / rz_norm) if rz_norm != 0.0 else float("inf")
+    f_norm1 = f_norm1_np
+    finite = numpy_module.isfinite(f_norm1_np)
+    fsqr1 = float(gcr2_p) * f_norm1_np if finite else 0.0
+    fsqz1 = float(gcz2_p) * f_norm1_np if finite else 0.0
+    if bool(vmec2000_control):
+        frzl_for_gcl2_full = frzl_pre if frzl_pre_host is None else frzl_pre_host
+        fsql1 = lambda_preconditioned_full_norm(frzl_for_gcl2_full, use_jax=False) * delta_s
+    else:
+        fsql1 = float(gcl2_p) * delta_s
+    fsqr1_safe = finite_float_or_zero(fsqr1)
+    fsqz1_safe = finite_float_or_zero(fsqz1)
+    fsql1_safe = finite_float_or_zero(fsql1)
+    fsq1 = fsqr1_safe + fsqz1_safe + fsql1_safe
+    return PreconditionedResidualScalarChannels(
+        rz_norm,
+        f_norm1,
+        fsqr1_safe,
+        fsqz1_safe,
+        fsql1_safe,
+        fsqr1_safe,
+        fsqz1_safe,
+        fsql1_safe,
+        fsq1,
+    )
+
+
+def jax_preconditioned_residual_scalar_channels(
+    *,
+    gcr2_p: Any,
+    gcz2_p: Any,
+    gcl2_p: Any,
+    frzl_pre: Any,
+    vmec2000_control: bool,
+    vmec2000_cache_valid: bool,
+    need_bcovar_update: bool,
+    cache_rz_norm: Any,
+    cache_f_norm1: Any,
+    state: Any,
+    delta_s: Any,
+    jnp_module: Any,
+    cached_or_current_f_norm1_jax: Callable[..., tuple[Any, Any]],
+    rz_norm_func: Callable[[Any], Any],
+    lambda_preconditioned_full_norm: Callable[..., Any],
+) -> PreconditionedResidualScalarChannels:
+    """Build preconditioned fsq1 channels on the JAX/device path."""
+
+    rz_norm, f_norm1 = cached_or_current_f_norm1_jax(
+        vmec2000_control=bool(vmec2000_control),
+        vmec2000_cache_valid=bool(vmec2000_cache_valid),
+        need_bcovar_update=bool(need_bcovar_update),
+        cache_rz_norm=cache_rz_norm,
+        cache_f_norm1=cache_f_norm1,
+        state=state,
+        rz_norm_func=rz_norm_func,
+    )
+    finite_fnorm1 = jnp_module.isfinite(f_norm1)
+    fsqr1 = jnp_module.where(
+        finite_fnorm1,
+        gcr2_p * f_norm1,
+        jnp_module.asarray(0.0, dtype=jnp_module.asarray(gcr2_p).dtype),
+    )
+    fsqz1 = jnp_module.where(
+        finite_fnorm1,
+        gcz2_p * f_norm1,
+        jnp_module.asarray(0.0, dtype=jnp_module.asarray(gcz2_p).dtype),
+    )
+    if bool(vmec2000_control):
+        fsql1 = lambda_preconditioned_full_norm(frzl_pre, use_jax=True) * delta_s
+    else:
+        fsql1 = gcl2_p * delta_s
+    fsqr1_safe = jnp_module.where(
+        jnp_module.isfinite(fsqr1),
+        fsqr1,
+        jnp_module.asarray(0.0, dtype=jnp_module.asarray(fsqr1).dtype),
+    )
+    fsqz1_safe = jnp_module.where(
+        jnp_module.isfinite(fsqz1),
+        fsqz1,
+        jnp_module.asarray(0.0, dtype=jnp_module.asarray(fsqz1).dtype),
+    )
+    fsql1_safe = jnp_module.where(
+        jnp_module.isfinite(fsql1),
+        fsql1,
+        jnp_module.asarray(0.0, dtype=jnp_module.asarray(fsql1).dtype),
+    )
+    return PreconditionedResidualScalarChannels(
+        rz_norm,
+        f_norm1,
+        fsqr1,
+        fsqz1,
+        fsql1,
+        fsqr1_safe,
+        fsqz1_safe,
+        fsql1_safe,
+        fsqr1_safe + fsqz1_safe + fsql1_safe,
+    )
+
+
 def materialize_accepted_control_payload(
     *,
     accepted_control_ptau_payload: Any | None,

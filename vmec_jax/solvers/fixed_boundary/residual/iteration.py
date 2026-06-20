@@ -2745,66 +2745,64 @@ def solve_fixed_boundary_residual_iter(
                     s=s,
                 )
             if host_update_assembly or use_host_fsq1_norms:
-                # Fast NumPy path: use cached Python-float fnorm1 directly — no JAX dispatch.
-                if (
-                    bool(vmec2000_control)
-                    and bool(vmec2000_cache_valid)
-                    and (not bool(need_bcovar_update))
-                    and (cache_rz_norm is not None)
-                    and (cache_f_norm1 is not None)
-                ):
-                    _f_norm1_np = float(cache_f_norm1)
-                    rz_norm = cache_rz_norm  # Python float (for history list)
-                else:
-                    _rz_norm_val = _rz_norm_np(state)
-                    _f_norm1_np = (1.0 / _rz_norm_val) if _rz_norm_val != 0.0 else float("inf")
-                    rz_norm = _rz_norm_val
-                f_norm1 = _f_norm1_np  # alias for history list (Python float)
-                _finite = np.isfinite(_f_norm1_np)
-                fsqr1 = float(gcr2_p) * _f_norm1_np if _finite else 0.0
-                fsqz1 = float(gcz2_p) * _f_norm1_np if _finite else 0.0
-                if bool(vmec2000_control):
-                    # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-                    frzl_for_gcl2_full = frzl_pre if frzl_pre_host is None else frzl_pre_host
-                    _gcl2_full = _lambda_preconditioned_full_norm(
-                        frzl_for_gcl2_full,
-                        use_jax=False,
-                    )
-                    fsql1 = _gcl2_full * delta_s
-                else:
-                    fsql1 = float(gcl2_p) * delta_s
-                # Safe values: NaN/Inf → 0 (same semantics as jnp.where below).
-                fsqr1_safe = _finite_float_or_zero(fsqr1)
-                fsqz1_safe = _finite_float_or_zero(fsqz1)
-                fsql1_safe = _finite_float_or_zero(fsql1)
-                fsq1 = fsqr1_safe + fsqz1_safe + fsql1_safe
-                # host_update_assembly: keep as Python floats — downstream code (history
-                # lists, _precond_diag_floats) handles both float and JAX scalar.
-                fsqr1 = fsqr1_safe
-                fsqz1 = fsqz1_safe
-                fsql1 = fsql1_safe
-            else:
-                # JAX path: set rz_norm and f_norm1 from cache or recompute.
-                rz_norm, f_norm1 = _cached_or_current_f_norm1_jax(
+                host_channels = _precond_payload_facade.host_preconditioned_residual_scalar_channels(
+                    gcr2_p=gcr2_p,
+                    gcz2_p=gcz2_p,
+                    gcl2_p=gcl2_p,
+                    frzl_pre=frzl_pre,
+                    frzl_pre_host=frzl_pre_host,
                     vmec2000_control=bool(vmec2000_control),
                     vmec2000_cache_valid=bool(vmec2000_cache_valid),
                     need_bcovar_update=bool(need_bcovar_update),
                     cache_rz_norm=cache_rz_norm,
                     cache_f_norm1=cache_f_norm1,
                     state=state,
-                    rz_norm_func=_rz_norm,
+                    delta_s=float(delta_s),
+                    numpy_module=np,
+                    rz_norm_np=_rz_norm_np,
+                    lambda_preconditioned_full_norm=_lambda_preconditioned_full_norm,
+                    finite_float_or_zero=_finite_float_or_zero,
                 )
-                # Avoid inf*0 -> NaN in late-converged iterations when rz_norm=0 and
-                # gcx2 terms are exactly zero. VMEC treats these channels as zero.
-                finite_fnorm1 = jnp.isfinite(f_norm1)
-                fsqr1 = jnp.where(finite_fnorm1, gcr2_p * f_norm1, jnp.asarray(0.0, dtype=jnp.asarray(gcr2_p).dtype))
-                fsqz1 = jnp.where(finite_fnorm1, gcz2_p * f_norm1, jnp.asarray(0.0, dtype=jnp.asarray(gcz2_p).dtype))
-                if bool(vmec2000_control):
-                    # VMEC2000 `residue.f90`: fsql1 = hs * SUM( (faclam*gcl)**2 ) over all js.
-                    gcl2_full = _lambda_preconditioned_full_norm(frzl_pre, use_jax=True)
-                    fsql1 = gcl2_full * delta_s
-                else:
-                    fsql1 = gcl2_p * delta_s
+                (
+                    rz_norm,
+                    f_norm1,
+                    fsqr1,
+                    fsqz1,
+                    fsql1,
+                    fsqr1_safe,
+                    fsqz1_safe,
+                    fsql1_safe,
+                    fsq1,
+                ) = host_channels
+            elif not preconditioner_fsq1_ready:
+                jax_channels = _precond_payload_facade.jax_preconditioned_residual_scalar_channels(
+                    gcr2_p=gcr2_p,
+                    gcz2_p=gcz2_p,
+                    gcl2_p=gcl2_p,
+                    frzl_pre=frzl_pre,
+                    vmec2000_control=bool(vmec2000_control),
+                    vmec2000_cache_valid=bool(vmec2000_cache_valid),
+                    need_bcovar_update=bool(need_bcovar_update),
+                    cache_rz_norm=cache_rz_norm,
+                    cache_f_norm1=cache_f_norm1,
+                    state=state,
+                    delta_s=delta_s,
+                    jnp_module=jnp,
+                    cached_or_current_f_norm1_jax=_cached_or_current_f_norm1_jax,
+                    rz_norm_func=_rz_norm,
+                    lambda_preconditioned_full_norm=_lambda_preconditioned_full_norm,
+                )
+                (
+                    rz_norm,
+                    f_norm1,
+                    fsqr1,
+                    fsqz1,
+                    fsql1,
+                    fsqr1_safe,
+                    fsqz1_safe,
+                    fsql1_safe,
+                    fsq1,
+                ) = jax_channels
             if timing_enabled and t_fsq1_precond_norm_start is not None:
                 timing_stats["iteration_control_fsq1_precond_norm"] += time.perf_counter() - float(
                     t_fsq1_precond_norm_start
@@ -2830,26 +2828,10 @@ def solve_fixed_boundary_residual_iter(
                 # Extremely small late-iteration channels can occasionally surface
                 # as NaN/Inf through mixed 0*Inf paths in XLA. VMEC treats these
                 # as effectively zero for the preconditioned residual diagnostics.
-                if not preconditioner_fsq1_ready:
-                    fsqr1_safe = jnp.where(
-                        jnp.isfinite(fsqr1),
-                        fsqr1,
-                        jnp.asarray(0.0, dtype=jnp.asarray(fsqr1).dtype),
-                    )
-                    fsqz1_safe = jnp.where(
-                        jnp.isfinite(fsqz1),
-                        fsqz1,
-                        jnp.asarray(0.0, dtype=jnp.asarray(fsqz1).dtype),
-                    )
-                    fsql1_safe = jnp.where(
-                        jnp.isfinite(fsql1),
-                        fsql1,
-                        jnp.asarray(0.0, dtype=jnp.asarray(fsql1).dtype),
-                    )
                 if preconditioner_fsq1_ready:
                     fsq1_j = fsq1_safe
                 else:
-                    fsq1_j = fsqr1_safe + fsqz1_safe + fsql1_safe
+                    fsq1_j = fsq1
                 if timing_enabled and t_fsq1_scalar_build_start is not None:
                     timing_stats["iteration_control_fsq1_scalar_build"] += time.perf_counter() - float(
                         t_fsq1_scalar_build_start
