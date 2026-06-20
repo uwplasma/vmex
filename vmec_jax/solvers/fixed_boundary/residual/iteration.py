@@ -188,6 +188,7 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_compact_physical_residual_status as _print_compact_physical_residual_status,
     print_compact_residual_iteration_update_status as _print_compact_residual_iteration_update_status,
     print_residual_iteration_update_status as _print_residual_iteration_update_status,
+    residual_update_rms_for_print as _residual_update_rms_for_print,
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
     sample_vmec_iteration_scalars as _sample_vmec_iteration_scalars,
 )
@@ -3296,10 +3297,9 @@ def solve_fixed_boundary_residual_iter(
             static=static,
             iter_idx=int(iter2),
         )
-        if bool(verbose):
-            update_rms_print = float(np.asarray(update_rms_j)) if bool(strict_update) else float(update_rms)
-        else:
-            update_rms_print = 0.0
+        update_rms_print = _residual_update_rms_for_print(
+            verbose=bool(verbose), strict_update=bool(strict_update), update_rms_j=update_rms_j, update_rms=update_rms
+        )
         _print_residual_iteration_update_status(
             verbose=bool(verbose),
             vmec2000_control=bool(vmec2000_control),
