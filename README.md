@@ -14,30 +14,6 @@ workflows, with free-boundary support, VMEC2000-compatible `mgrid` workflows,
 and direct-coil research paths. Full adaptive free-boundary solve adjoints
 remain in development.
 
-## Runtime Snapshot
-
-![Bundled single-grid runtime comparison](docs/_static/figures/readme_runtime_compare.png)
-
-This single-grid benchmark compares the bundled historical fixed-boundary
-matrix, including `solovev`, `ITERModel`, `nfp4_QH_warm_start`,
-`LandremanPaul2021_QA_lowres`, QH reactor-scale, tokamak, and asymmetric
-examples. VMEC2000 remains faster for most one-off executable solves;
-`vmec_jax` reports both cold first-call time (Python/JAX/XLA setup included)
-and warm same-process time, which is the relevant comparison inside
-differentiable optimization loops. VMEC++ is plotted only on rows where the
-local VMEC++ executable supports the input and converges cleanly; unavailable
-rows are documented in the performance guide rather than treated as failures.
-Reproduce the panel after a fixed-boundary runtime sweep with:
-
-```bash
-python tools/diagnostics/readme_runtime_compare.py \
-  --cpu-summary outputs/pr20_full_matrix_current_cpu/summary.json \
-  --figure-kind fixed --plot-mode runtime_memory \
-  --figure-out docs/_static/figures/readme_runtime_compare.png \
-  --csv-out docs/_static/figures/readme_runtime_compare.csv \
-  --json-out docs/_static/figures/readme_runtime_compare.json
-```
-
 ## Differentiation Evidence
 
 ![AD vs central finite differences](docs/_static/figures/readme_ad_fd_evidence.png)
