@@ -803,3 +803,55 @@ Best next steps:
 2. Commit and push if those gates remain clean.
 3. Avoid broad solver-loop edits unless a clear net-negative residual seam is
    identified.
+
+### 2026-06-20 QI Optimization Export Derivation
+
+Steps taken:
+
+1. Audited `vmec_jax/qi_optimization.py`, which still carried a 29-name manual
+   `__all__` near the top of the module.
+2. Verified a derived export list from local public functions/classes plus the
+   two `TARGET_HELICITY_*` constants exactly matched the existing public
+   surface.
+3. Replaced the manual list with a bottom-of-file derived export list so
+   helpers remain available after all definitions are loaded.
+
+Results obtained:
+
+- `vmec_jax.qi_optimization.__all__` still exports exactly 29 names:
+  zero missing and zero extra compared with the previous public surface.
+- `vmec_jax/qi_optimization.py` dropped from `1965` to `1943` lines.
+- The internal `QI_ENGINEERING_ASPECT_MAX` constant remains intentionally
+  outside `__all__`.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/qi_optimization.py`
+- Exact `qi_optimization.__all__` parity script.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_optimization_more_coverage.py tests/test_qi_seed_robustness_plan.py tests/test_qi_staged_runner.py --tb=short`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Optimization workflow API ownership: 100%.
+- QI optimization helper API ownership: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Run aggregate local source-health, repo-size, docs, and focused optimization
+   gates.
+2. Commit and push the export-ownership cleanup.
+3. Reassess remaining manual export lists only if exact parity can be proven
+   mechanically.

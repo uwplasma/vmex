@@ -50,39 +50,6 @@ def _load_basin_prefilter_tools():
     return SurveyTargets, generate_basin_candidates, rank_candidate_records, write_csv, build_diagnostic_stage
 
 
-__all__ = [
-    "TARGET_HELICITY_SEED_AMPLITUDE",
-    "TARGET_HELICITY_SEED_MODE_TERMS",
-    "QIOptimizationContext",
-    "apply_qi_example_cli_overrides",
-    "basin_prefilter_score",
-    "boundary_reference_preconditioner_score",
-    "boundary_reference_record_is_qi_safe",
-    "configure",
-    "diagnostic_float",
-    "engineering_promotion_score",
-    "jsonable",
-    "make_basin_prefilter_options",
-    "make_qi_optimization_context",
-    "materialize_qi_stage_inputs",
-    "promotion_score",
-    "qi_mirror_objective_for_stage",
-    "qi_engineering_constraint_tuples",
-    "qi_diagnostics_for_result",
-    "qi_diagnostics_for_run",
-    "qi_stage_modes",
-    "run_basin_prefilter",
-    "run_boundary_reference_preconditioner",
-    "run_qi_stage_policy",
-    "run_target_helicity_seed_preconditioner",
-    "save_raw_seed_initial_artifacts",
-    "stage_modes_for",
-    "stage_promotes_candidate",
-    "target_helicity_seed_terms",
-    "write_qi_stage_checkpoint",
-]
-
-
 @dataclass(frozen=True)
 class QIOptimizationContext:
     """Explicit staged-QI controls shared by helper routines.
@@ -1963,3 +1930,14 @@ def run_qi_stage_policy(
             )
             active_input_file = stage_final_input or stage_output_dir / "input.final"
     return (accepted_result if accepted_result is not None else best_result), promotion_log
+
+
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if (
+        getattr(value, "__module__", None) == __name__
+        and not name.startswith("_")
+    )
+    or name.startswith("TARGET_HELICITY_")
+)
