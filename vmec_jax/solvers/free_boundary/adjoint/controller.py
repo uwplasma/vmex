@@ -12,6 +12,10 @@ from vmec_jax.solvers.free_boundary.adjoint.controller_checks import (
 )
 
 _pytree_vdot_jax = pytree_vdot_jax
+_EXPORTED_EXTRA_OBJECTS = {
+    "_pytree_vdot_jax": _pytree_vdot_jax,
+    "pytree_directional_derivative_check_jax": pytree_directional_derivative_check_jax,
+}
 
 
 def _normalize_step_output(out: Any) -> tuple[Any, Any]:
@@ -585,15 +589,9 @@ def jax_visible_accepted_nonlinear_controller_directional_check_jax(
     return _controller_directional_check_jax(run_controller, objective_from_run, params, direction, eps=eps)
 
 
-__all__ = [
-    "jax_visible_accepted_only_nonlinear_controller_jax",
-    "jax_visible_unrolled_accepted_only_nonlinear_controller_jax",
-    "jax_visible_accepted_nonlinear_controller_directional_check_jax",
-    "jax_visible_accepted_nonlinear_controller_jax",
-    "jax_visible_masked_nonlinear_controller_directional_check_jax",
-    "jax_visible_masked_nonlinear_controller_jax",
-    "jax_visible_nonlinear_controller_directional_check_jax",
-    "jax_visible_nonlinear_controller_jax",
-    "jax_visible_segmented_accepted_nonlinear_controller_jax",
-    "pytree_directional_derivative_check_jax",
-]
+__all__ = sorted(
+    name
+    for name in globals()
+    if name.startswith("jax_visible_")
+    or name in _EXPORTED_EXTRA_OBJECTS
+)

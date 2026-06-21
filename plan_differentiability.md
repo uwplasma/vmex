@@ -675,3 +675,74 @@ User decisions needed:
 No immediate decision.  Before merge, decide whether the historical plan logs in
 git history are sufficient for auditability; current tracked files no longer
 carry the full append-only transcript.
+
+### 2026-06-20 Final Source-Map and Facade Audit
+
+Steps taken:
+
+1. Re-audited the branch status, active plan ownership, source-health, tracked
+   repository size, and stale README/docs/source references.
+2. Confirmed this file remains the single active plan. `plan_freeb.md`,
+   `plan.md`, and `discrete_adjoint_2506_plan.md` remain compact historical
+   pointers only.
+3. Found one concrete public-surface drift: the root
+   `vmec_jax.free_boundary_adjoint_controller` facade exported five
+   JAX-visible controller helpers that the implementation module did not list
+   in its own `__all__`.
+4. Made `vmec_jax/solvers/free_boundary/adjoint/controller.py` the single owner
+   of the controller helper export list and changed the root compatibility
+   facade to mirror that implementation export list.
+
+Results obtained:
+
+- Controller helper exports now have one owner and one compatibility facade.
+- The root facade dropped from 28 lines to 12 lines without changing the public
+  15-name export surface.
+- Export parity was checked against the pre-change facade list: zero missing,
+  zero extra, and root exports are identical objects from the implementation.
+- The tracked repository remains light: `871` tracked files, `26.45 MiB`
+  total, no tracked file above `2 MiB`.
+- Source-health still identifies the same finite hotspots: the fixed-boundary
+  residual iteration monolith, several large validation tests, and a small set
+  of long solver/optimization functions. These are review-known debt, not new
+  blockers for this PR.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller.py`
+- Controller facade export parity script.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_plain_step_outputs_and_segment_validation tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient --tb=short`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Stop broad refactor churn and prepare the draft PR for review.
+2. Only touch the fixed-boundary residual monolith if the next tranche is
+   demonstrably net-negative and keeps VMEC2000 parity gates green.
+3. Keep adaptive free-boundary differentiation claims conservative until a true
+   fingerprint-gated full adaptive AD-vs-FD gate exists.
+
+User decisions needed:
+
+No immediate decision. The PR is now in a review-oriented state; the remaining
+large solver hotspot should be handled only if another focused, net-negative
+seam is identified.
