@@ -694,33 +694,10 @@ def run_fixed_boundary(
     stage_results: list[SolveVmecResidualResult] = []
     stage_statics: list[VMECStatic] = []
 
-    def _run_cli_explicit_staged_followup(
-        *,
-        ns_stage_list: list[int],
-        niter_stage_list: list[int],
-        ftol_stage_list: list[float],
-        start_stage_index: int = 0,
-        restart_state=None,
-        restart_static_prev=None,
-        restart_resume_state=None,
-        stage_mode_override: str | None = None,
-        use_scan_override: bool | None = None,
-        performance_mode_override: bool | None = None,
-        policy_name: str = "input_multigrid",
-    ) -> FixedBoundaryRun:
+    def _run_cli_explicit_staged_followup(**kwargs) -> FixedBoundaryRun:
         return _driver_staging_helpers.run_cli_explicit_staged_followup(
             _stage_runner_context(),
-            ns_stage_list=ns_stage_list,
-            niter_stage_list=niter_stage_list,
-            ftol_stage_list=ftol_stage_list,
-            start_stage_index=int(start_stage_index),
-            restart_state=restart_state,
-            restart_static_prev=restart_static_prev,
-            restart_resume_state=restart_resume_state,
-            stage_mode_override=stage_mode_override,
-            use_scan_override=use_scan_override,
-            performance_mode_override=performance_mode_override,
-            policy_name=str(policy_name),
+            **kwargs,
         )
 
     def _stage_runner_context() -> _driver_staging_helpers.FixedBoundaryStageRunnerContext:
