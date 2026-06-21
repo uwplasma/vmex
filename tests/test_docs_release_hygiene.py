@@ -160,3 +160,27 @@ def test_generated_docs_and_bulky_sweep_artifacts_are_not_tracked() -> None:
     )
 
     assert generated == []
+
+
+def test_repo_size_audit_can_report_ignored_local_artifacts() -> None:
+    result = subprocess.run(
+        [
+            "python",
+            "tools/diagnostics/repo_size_audit.py",
+            "--top",
+            "1",
+            "--include-ignored",
+            "--max-total-mib",
+            "50",
+            "--max-file-mib",
+            "2",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+
+    assert "Tracked files:" in result.stdout
+    assert "Ignored local artifact report:" in result.stdout
+    assert "Ignored files:" in result.stdout

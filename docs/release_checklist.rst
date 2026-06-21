@@ -97,11 +97,15 @@ Before tagging, keep the repository free of transient outputs:
    git status --short
    rm -rf build dist vmec_jax.egg-info
    python tools/diagnostics/repo_size_audit.py --top 40 --max-total-mib 50 --max-file-mib 2
+   python tools/diagnostics/repo_size_audit.py --top 40 --include-ignored
    git check-ignore -v docs/_build/html/index.html docs/api/generated/vmec_jax.solve.rst .DS_Store
 
 Do not commit optimization result trees, rerun ``wout`` files, profiler traces,
 or generated PDFs unless a small artifact is explicitly referenced by README or
 docs and has a documented validation purpose.
+The ``--include-ignored`` report is informational: it quantifies local ignored
+Sphinx builds, generated WOUT/BOOZ/mgrid files, fetched assets, and result
+trees without changing the tracked-size release gate.
 
 For one-case optimization showcase smoke checks, use the bounded renderer
 instead of refreshing the full production matrix:
