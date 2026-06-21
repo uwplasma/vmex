@@ -674,19 +674,12 @@ def bootstrap_current_fixed_point(
     )
 
 
-__all__ = [
-    "BootstrapCurrentIteration",
-    "BootstrapCurrentOptions",
-    "BootstrapCurrentResult",
-    "CurrentUpdatePolicy",
-    "apply_current_profile_to_indata",
-    "bootstrap_current_fixed_point",
-    "bootstrap_current_update_to_indata",
-    "damp_current_profile",
-    "dpsi_ds_from_vmec_phiedge",
-    "integrate_current_derivative",
-    "redl_current_derivative_update",
-    "redl_current_integrating_factor_update",
-    "redl_current_rhs",
-    "vmec_current_profile_from_bootstrap_update",
-]
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if (
+        getattr(value, "__module__", None) == __name__
+        and not name.startswith("_")
+    )
+    or name == "CurrentUpdatePolicy"
+)

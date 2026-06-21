@@ -11,6 +11,9 @@ Core public surfaces:
 - ``vmec_jax/api.py`` and ``vmec_jax/__init__.py`` expose the stable user API.
   Their ``__all__`` values are derived from documented public globals plus lazy
   compatibility exports; do not reintroduce large hand-maintained export lists.
+- Public helper modules should own their exports at the implementation module
+  that defines the functions.  Derived ``__all__`` lists are acceptable only
+  when an exact parity check proves that the exported names do not drift.
 - ``vmec_jax/cli.py`` implements the ``vmec`` command-line entry point.
 - ``vmec_jax/solve.py``, ``vmec_jax/driver.py``, ``vmec_jax/free_boundary.py``,
   and ``vmec_jax/wout.py`` are compatibility facades.  Keep them thin; new
@@ -45,9 +48,12 @@ Physics and geometry kernels:
   ``field.py``, ``energy.py``, ``vmec_tomnsp.py``, ``vmec_bcovar.py``, and
   ``preconditioner_1d.py`` hold reusable VMEC data structures and kernels.
 - Objective/diagnostic modules such as ``quasisymmetry.py``,
-  ``quasi_isodynamic.py``, ``qi_diagnostics.py``, ``finite_beta.py``, and
-  ``plotting.py`` expose higher-level physics quantities used by examples,
-  tests, and docs.
+  ``quasi_isodynamic.py``, ``qi_diagnostics.py``, ``bootstrap_current.py``,
+  ``finite_beta.py``, and ``plotting.py`` expose higher-level physics
+  quantities used by examples, tests, and docs.  Keep these modules
+  pedagogical: public functions should have docstrings, implementation helpers
+  should stay private, and compatibility exports should be mechanically
+  checked when refactored.
 
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:

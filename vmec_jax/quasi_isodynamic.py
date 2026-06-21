@@ -27,20 +27,6 @@ import numpy as np
 
 from ._compat import jax, jnp
 
-__all__ = [
-    "boundary_max_elongation_from_rz",
-    "lgradb_from_state",
-    "lgradb_penalty_from_state",
-    "max_elongation_penalty_from_state",
-    "boozer_output_from_state",
-    "mirror_ratio_penalty_from_boozer_modes",
-    "mirror_ratio_penalty_from_boozer_output",
-    "mirror_ratio_penalty_from_state",
-    "quasi_isodynamic_residual_from_boozer_modes",
-    "quasi_isodynamic_residual_from_boozer_output",
-    "quasi_isodynamic_residual_from_state",
-]
-
 
 def _require_jax():
     if jnp is None:
@@ -1423,3 +1409,12 @@ def mirror_ratio_penalty_from_state(
         "surfaces": field["surfaces"],
         "surface_indices": field["surface_indices"],
     }
+
+
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if getattr(value, "__module__", None) == __name__
+    and not name.startswith("_")
+    and name != "jax_sigmoid"
+)
