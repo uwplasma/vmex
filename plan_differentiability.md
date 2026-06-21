@@ -77,11 +77,11 @@ Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
 - Recent pushed commits:
+  - `949d9129 Report ignored local repository artifacts`.
+  - `4df8de95 Record final plan source-map audit`.
   - `bbe8b657 Trim fixed-boundary staged followup wrapper`.
   - `5c881525 Deduplicate fixed-boundary API dependencies`.
   - `3c86df09 Record final plan and fixture audit`.
-  - `485a29df Compact historical plan pointers`.
-  - `90714d32 Compact free-boundary evidence log`.
 - The working tree should be checked with `git status --short --branch` before
   each tranche; avoid relying on stale plan text for branch state.
 
@@ -102,6 +102,10 @@ Latest source-health snapshot:
   `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at `3120` lines.
 - Largest production function:
   `solve_fixed_boundary_residual_iter` at `2645` lines.
+- Root package facade:
+  `vmec_jax/__init__.py` derives its 343 public exports from eager public
+  globals plus the lazy compatibility map instead of maintaining a large
+  manual list.
 - Tracked repository size after plan compaction: `26.45 MiB`, no tracked file
   above `2 MiB`.
 - The only tracked generated-looking example data assets are the two
@@ -227,6 +231,66 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Root Facade Export Audit and Simplification
+
+Steps taken:
+
+1. Audited the public package facade after the source-map review.
+2. Proved the old manual `__all__` list and a computed export list had the same
+   `343` names before changing behavior.
+3. Replaced the 343-name hand-maintained export list in `vmec_jax/__init__.py`
+   with a derived list built from documented public globals plus lazy
+   compatibility exports.
+4. Added a narrow file-level `F401` Ruff exemption because re-exporting public
+   names is the purpose of the root facade.
+5. Updated `docs/code_structure.rst` so future public API changes do not
+   reintroduce the manual list.
+6. Re-audited README, installation, quickstart, code-structure, CI workflow,
+   repository-size, tracked artifacts, and ignored local artifacts.
+
+Results obtained:
+
+- Root export parity was exact: old `__all__ = 343`, new `__all__ = 343`, with
+  zero missing/extra names and zero unresolved old exports.
+- `vmec_jax/__init__.py` dropped from `781` lines to `456` lines.
+- The root facade is now easier to maintain and less likely to drift from the
+  actual public imports.
+- The repository still has one active plan and no new root implementation
+  modules.
+- Tracked repository size remains `26.45 MiB`; ignored local artifacts remain
+  informational and outside git.
+
+Tests and commands:
+
+- Root export parity script comparing current exports with `git show
+  HEAD:vmec_jax/__init__.py`.
+- `python -m ruff check vmec_jax/__init__.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py
+  tests/test_qi_optimization_public_helpers.py tests/test_packaging_metadata.py
+  --tb=short` (`92 passed`, `1 skipped`)
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py
+  --tb=short` (`8 passed`)
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_full_refactor_audit`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24
+  --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2 --include-ignored`
+- `git diff --check`
+
+Best next steps:
+
+1. Prepare this draft PR for review unless a final residual-loop extraction is
+   clearly net-negative and testable.
+2. Do not add more files or broad abstractions; remaining work should either
+   reduce the residual monolith or split oversized validation tests without
+   weakening their physics gates.
+3. Keep generated/fetched WOUT, BOOZ, mgrid, docs-build, and optimization
+   outputs ignored unless deliberately publishing a compressed figure or tiny
+   fixture.
 
 ### 2026-06-20 Final Plan and Source-Map Audit
 
