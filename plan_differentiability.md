@@ -77,6 +77,8 @@ Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
 - Recent pushed commits:
+  - `485a29df Compact historical plan pointers`.
+  - `90714d32 Compact free-boundary evidence log`.
   - `2d300c5e Compact differentiability plan for review`.
   - `427f315b Reduce fixed-boundary root helper sprawl`.
 - The working tree should be checked with `git status --short --branch` before
@@ -99,8 +101,13 @@ Latest source-health snapshot:
   `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at `3120` lines.
 - Largest production function:
   `solve_fixed_boundary_residual_iter` at `2645` lines.
-- Tracked repository size before this compaction: `29.45 MiB`, no tracked file
+- Tracked repository size after plan compaction: `26.45 MiB`, no tracked file
   above `2 MiB`.
+- The only tracked generated-looking example data assets are the two
+  intentionally tiny `mgrid_cth_like_lasym_small.nc` fixtures (`48 KiB` each)
+  used by quickstart and finite-positive free-boundary tests. Larger WOUT,
+  BOOZ, mgrid, optimization-output, and profile artifacts are ignored or
+  fetched assets.
 
 ## Open Lanes
 
@@ -196,6 +203,9 @@ Performance work should be evidence-driven:
 
 - No generated WOUTs, BOOZ files, mgrid dumps, optimization output directories,
   or solver traces in git.
+- Exception: keep only explicitly documented tiny fixtures that are required
+  for default quickstart or CI physics gates, currently
+  `mgrid_cth_like_lasym_small.nc`.
 - Tracked size target: below `50 MiB`.
 - Individual tracked-file target: below `2 MiB` unless explicitly justified.
 - Figures in docs must be compressed and current.
@@ -216,6 +226,64 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Final Plan and Structure Audit
+
+Steps taken:
+
+1. Re-audited the active plan, code-structure documentation, source tree,
+   source-health report, tracked repository size, generated-file patterns, and
+   current branch history.
+2. Confirmed `plan_differentiability.md` is the only active plan; `plan_freeb.md`,
+   `plan.md`, and `discrete_adjoint_2506_plan.md` are compact historical or
+   evidence pointers.
+3. Verified the domain source map still matches the current file layout:
+   public facades in the root, implementation under `drivers/`, `solvers/`,
+   `optimizers/`, `io/`, `external_fields/`, and validation tools under
+   `tools/`.
+4. Checked generated-file patterns and confirmed the clone-size gate is not
+   affected by ignored local outputs. The only tracked generated-looking data
+   are two intentionally small `mgrid_cth_like_lasym_small.nc` fixtures needed
+   by quickstart/tests.
+5. Rechecked that docs and plan wording keep adaptive full-loop branch
+   differentiation conservative and do not overclaim arbitrary adaptive
+   branch AD.
+
+Results obtained:
+
+- The active plan is current with the latest pushed compaction commits and
+  current repository size.
+- The repository remains lightweight: `26.45 MiB` tracked, no tracked file
+  above `2 MiB`.
+- Source-health remains within the current PR guardrails: `67` root Python
+  files and `2` root helper-prefix compatibility files.
+- Remaining refactor work is finite and review-scoped: only net-negative
+  residual/driver seams or reusable validation-fixture splits should continue.
+
+Tests and commands:
+
+- `git status --short --branch`
+- `git log --oneline -8`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`
+- `rg` audits over README, docs, source, tests, and examples for plan,
+  adaptive-branch, VMEC2000, `DMerc`, and `D_R` references.
+- Generated-file audit with `find`, `git status --ignored`, `git check-ignore`,
+  and `git ls-files`.
+
+Best next steps:
+
+1. Prepare the PR for review unless a clearly net-negative residual/driver
+   cleanup is identified.
+2. Keep future implementation updates in this plan only.
+3. Do not add new root implementation modules or broad refactor waves without
+   first proving they remove more code than they add.
+
+User decisions needed:
+
+No immediate decision. If disk usage matters locally, ignored fetched assets
+and solver outputs can be deleted and re-fetched later, but they are not part
+of the git clone size.
 
 ### 2026-06-20 Historical Plan Pointer Compaction
 

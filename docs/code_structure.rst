@@ -92,6 +92,11 @@ Use this map before adding files or changing public behavior:
 - Parity and physics gates: put cheap required tests under ``tests/`` with no
   local executable dependency; use ``tools/diagnostics/`` and optional markers
   for VMEC2000, SIMSOPT, GPU, or large fetched-asset validation.
+- Small tracked validation assets: keep only explicitly justified fixtures
+  needed by the default quickstart or CI physics gates.  The current exception
+  is the tiny ``mgrid_cth_like_lasym_small.nc`` fixture.  Larger WOUT, BOOZ,
+  mgrid, optimization-output, and solver-trace assets should remain ignored,
+  fetched, or release-hosted.
 
 Refactoring direction
 ---------------------
