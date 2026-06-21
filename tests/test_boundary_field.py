@@ -188,12 +188,20 @@ def test_exact_optimizer_b_cartesian_tangents_and_scalar_cotangent_match_dense_j
 
 
 @pytest.mark.py311_coverage_only
-def test_exact_optimizer_jacobian_matches_finite_difference_residual():
+def test_exact_optimizer_initial_jacobian_matches_finite_difference_residual():
+    """Check FD parity for the exact optimizer's differentiable setup map.
+
+    Nonzero VMEC iterations use a branch-local checkpoint replay. Those tangent
+    columns are validated against the dense/JVP replay paths above; comparing
+    them to a fresh finite-difference solve would also differentiate host-side
+    branch rebuilding, which is not this tape contract.
+    """
     pytest.importorskip("jax")
 
-    from vmec_jax._compat import jnp
+    from vmec_jax._compat import jax, jnp
     from vmec_jax.boundary import boundary_from_indata
     from vmec_jax.optimization import FixedBoundaryExactOptimizer, boundary_param_specs
+    from vmec_jax.state import unpack_state
 
     enable_x64(True)
 
@@ -232,15 +240,50 @@ def test_exact_optimizer_jacobian_matches_finite_difference_residual():
         trial_max_iter=2,
         trial_ftol=1.0e-5,
     )
-    jacobian = exact_opt.jacobian_fun(params)
+    axis_override = None
+    if exact_opt._initial_axis_override is not None:
+        axis_override = {
+            key: jnp.asarray(value, dtype=jnp.float64)
+            for key, value in exact_opt._initial_axis_override.items()
+        }
+    if axis_override is None:
+        state0 = exact_opt._initial_state_from_params(
+            params,
+            profile_name="initial_fd_base",
+        )
+        from vmec_jax.init_guess import extract_axis_override_from_state
+
+        axis_override = extract_axis_override_from_state(state0, static)
+
+    params_j = jnp.asarray(params, dtype=jnp.float64)
+    packed = exact_opt._solver_initial_state_packed_from_params(params_j, axis_override)
+    initial_tangents = exact_opt._initial_tangent_columns(
+        params_j,
+        axis_override,
+        profile_prefix="initial_fd",
+    )
+
+    def initial_residuals_from_packed(packed_state):
+        return residuals_fn(unpack_state(packed_state, exact_opt._layout))
+
+    _, residual_linear = jax.linearize(initial_residuals_from_packed, packed)
+    jacobian = np.asarray(jax.vmap(residual_linear)(initial_tangents).T)
 
     eps = 1.0e-5
     fd_columns = []
     for col in range(len(specs)):
         step = np.zeros_like(params)
         step[col] = eps
-        plus = exact_opt.residual_fun(params + step)
-        minus = exact_opt.residual_fun(params - step)
+        plus_packed = exact_opt._solver_initial_state_packed_from_params(
+            jnp.asarray(params + step, dtype=jnp.float64),
+            axis_override,
+        )
+        minus_packed = exact_opt._solver_initial_state_packed_from_params(
+            jnp.asarray(params - step, dtype=jnp.float64),
+            axis_override,
+        )
+        plus = initial_residuals_from_packed(plus_packed)
+        minus = initial_residuals_from_packed(minus_packed)
         fd_columns.append((plus - minus) / (2.0 * eps))
     fd_jacobian = np.stack(fd_columns, axis=1)
 
@@ -249,4 +292,3 @@ def test_exact_optimizer_jacobian_matches_finite_difference_residual():
     max_abs = float(np.max(np.abs(diff)))
     assert rel_norm < 2.0e-3
     assert max_abs < 1.2e-2
-

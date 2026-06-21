@@ -1260,3 +1260,60 @@ Lane update:
 
 - Full benchmark rerun and main-branch regression check: `5%`.
 - Performance profiling and fix lane: `12%`.
+
+#### PR #20 readiness gates and CI follow-up
+
+Steps taken:
+
+- Regenerated the full historical single-grid runtime/memory matrix for the PR
+  branch and a clean `origin/main` worktree.
+- Rendered the public combined runtime+memory README artifact and retired the
+  reduced two-case public benchmark.
+- Generated the AD-vs-central-FD evidence panel for fixed-boundary scalars,
+  `DMerc`, `D_R`, and branch-local free-boundary direct-coil scalar
+  derivatives.
+- Ran converged WOUT parity for `nfp4_QH_warm_start`, `solovev`,
+  `ITERModel`, and `LandremanPaul2021_QA_lowres`.
+- Fixed the remaining CI failure in `tests/test_boundary_field.py` by making
+  the FD comparison match the exact optimizer setup-map contract. Nonzero
+  accepted VMEC updates remain validated by same-branch replay/JVP gates rather
+  than fresh finite-difference solves through host branch rebuilding.
+
+Results obtained:
+
+- Full benchmark artifacts live in
+  `docs/_static/figures/readme_runtime_compare.{png,csv,json}` with
+  current-vs-main provenance in
+  `docs/_static/figures/readme_runtime_compare_current_vs_main.{csv,json}`.
+- VMEC++ is documented as an optional per-row column and appears only where it
+  converges/supports the input.
+- AD-vs-FD evidence artifacts live in
+  `docs/_static/figures/readme_ad_fd_evidence.{png,csv,json}`.
+- WOUT parity provenance lives in
+  `docs/_static/figures/pr20_wout_parity_summary.json`.
+- Local post-fix gates passed:
+  `JAX_ENABLE_X64=1 pytest -q tests/test_boundary_field.py --tb=short`,
+  `python -m ruff check tests/test_boundary_field.py`, and `git diff --check`.
+
+Best next steps:
+
+1. Push the CI fix and wait for the failed exact-coverage shard to rerun.
+2. If all checks pass, mark PR #20 ready for review.
+3. If another CI-only failure appears, fix only the narrow failing gate and keep
+   the branch-local/free-boundary derivative claims conservative.
+
+User needs:
+
+- None at this point; PR readiness is gated only on CI passing after the fix.
+
+Lane update:
+
+- README full benchmark restoration: `100%`.
+- Full benchmark rerun and main-branch regression check: `100%`.
+- WOUT parity on benchmark rows: `100%`.
+- Differentiation AD-vs-FD evidence panel: `100%`.
+- `DMerc`/`D_R` derivative validation: `100%`.
+- Performance profiling and fix lane: `95%` for PR readiness.
+- Differentiation architecture planning: `95%`.
+- Docs/README consistency: `100%`.
+- PR review readiness: `90%`, pending green CI and marking PR #20 ready.
