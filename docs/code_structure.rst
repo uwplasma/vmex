@@ -9,9 +9,8 @@ behind focused modules that are easy to test.
 Core public surfaces:
 
 - ``vmec_jax/api.py`` and ``vmec_jax/__init__.py`` expose the stable user API.
-  The package ``__all__`` is derived from documented public globals plus lazy
-  compatibility exports; do not reintroduce a large hand-maintained export
-  list.
+  Their ``__all__`` values are derived from documented public globals plus lazy
+  compatibility exports; do not reintroduce large hand-maintained export lists.
 - ``vmec_jax/cli.py`` implements the ``vmec`` command-line entry point.
 - ``vmec_jax/solve.py``, ``vmec_jax/driver.py``, ``vmec_jax/free_boundary.py``,
   and ``vmec_jax/wout.py`` are compatibility facades.  Keep them thin; new

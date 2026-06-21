@@ -77,11 +77,10 @@ Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
 - Recent pushed commits:
+  - `3e447feb Derive root package exports`.
   - `949d9129 Report ignored local repository artifacts`.
   - `4df8de95 Record final plan source-map audit`.
   - `bbe8b657 Trim fixed-boundary staged followup wrapper`.
-  - `5c881525 Deduplicate fixed-boundary API dependencies`.
-  - `3c86df09 Record final plan and fixture audit`.
 - The working tree should be checked with `git status --short --branch` before
   each tranche; avoid relying on stale plan text for branch state.
 
@@ -106,6 +105,9 @@ Latest source-health snapshot:
   `vmec_jax/__init__.py` derives its 343 public exports from eager public
   globals plus the lazy compatibility map instead of maintaining a large
   manual list.
+- Public API facade:
+  `vmec_jax/api.py` derives its 148 stable exports from the documented facade
+  imports instead of maintaining a second duplicate list.
 - Tracked repository size after plan compaction: `26.45 MiB`, no tracked file
   above `2 MiB`.
 - The only tracked generated-looking example data assets are the two
@@ -231,6 +233,56 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Public API Facade Export Simplification
+
+Steps taken:
+
+1. Audited `vmec_jax/api.py` after the root facade cleanup.
+2. Verified a computed export list from public facade imports exactly matched
+   the previous manual `__all__` set.
+3. Replaced the 148-name hand-maintained `api.py` export list with a derived
+   list from public globals, excluding the `annotations` future-import marker.
+4. Added a narrow file-level `F401` Ruff exemption because `api.py` exists to
+   re-export the documented user API.
+5. Updated `docs/code_structure.rst` so both public facades follow the same
+   derived-export policy.
+
+Results obtained:
+
+- API export parity was exact: old `__all__ = 148`, new `__all__ = 148`, with
+  zero missing/extra names and all previous exports resolving.
+- `vmec_jax/api.py` dropped from `332` lines to about `180` lines.
+- The public API remains explicit through imports but no longer duplicates the
+  same names in a second long list.
+- Tracked repository size decreased slightly to `26.44 MiB`.
+
+Tests and commands:
+
+- API export parity script comparing current exports with `git show
+  HEAD:vmec_jax/api.py`.
+- `python -m ruff check vmec_jax/api.py vmec_jax/__init__.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py
+  tests/test_qi_optimization_public_helpers.py tests/test_packaging_metadata.py
+  --tb=short` (`92 passed`, `1 skipped`)
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py
+  --tb=short` (`8 passed`)
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_full_api_facade_audit`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24
+  --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Treat public-facade export duplication as closed.
+2. Continue only with net-negative changes in the remaining finite seams:
+   residual-loop trace/finalization, scan-resume restoration, or oversized
+   validation-test fixture extraction.
+3. Avoid touching adaptive free-boundary derivative claims unless adding a
+   validated fingerprint-gated AD-vs-FD gate.
 
 ### 2026-06-20 Root Facade Export Audit and Simplification
 
