@@ -1145,3 +1145,48 @@ User decisions needed:
   converges cleanly.
 - Decide whether the README should show one combined runtime+memory panel or
   keep runtime in README and detailed memory tables in docs.
+
+#### First reduced current-vs-main QH runtime probe
+
+Scope:
+
+- This is **not** the full README matrix and does **not** close the benchmark
+  lane.
+- It checks one low-mode row (`input.nfp4_QH_warm_start`) with the existing
+  reduced benchmark harness, `ns_override=13`, input-deck iteration/tolerance
+  budgets, VMEC2000 enabled, production `jit_forces=True`, and the same command
+  on this PR branch and a clean `origin/main` worktree.
+
+Results:
+
+- Current branch warm: `vmec_jax 0.878 s`, VMEC2000 `0.211 s`, final
+  `fsq_total=1.135e-13`.
+- `origin/main` warm: `vmec_jax 0.844 s`, VMEC2000 `0.237 s`, final
+  `fsq_total=1.135e-13`.
+- Current branch cold/no-warmup: `vmec_jax 2.220 s`, VMEC2000 `0.246 s`.
+- `origin/main` cold/no-warmup: `vmec_jax 2.203 s`, VMEC2000 `0.256 s`.
+- A diagnostic no-JIT-force current run took `10.77 s`, confirming no-JIT and
+  no-force-JIT paths are diagnostic only and should not be used as production
+  benchmark claims.
+
+Interpretation:
+
+- No material PR regression is visible in this reduced QH probe; the current
+  branch is about `4%` slower warm and about `1%` slower cold than `origin/main`
+  with matching residuals.
+- The larger gap versus VMEC2000 is still real for one-off solves and must be
+  profiled in the full benchmark lane. The next performance check must use the
+  historical full single-grid benchmark settings and include WOUT parity.
+
+Commands:
+
+- Current branch warm:
+  `python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py --cases nfp4_QH_warm_start --iters 450 --run-vmec2000 --vmec2000-exec ~/bin/xvmec2000 --jax-use-input-niter --vmec2000-use-input-niter --outdir outputs/pr20_current_vs_main_current_qh_jit`
+- Main warm:
+  `PYTHONPATH=$PWD python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py --cases nfp4_QH_warm_start --iters 450 --run-vmec2000 --vmec2000-exec ~/bin/xvmec2000 --jax-use-input-niter --vmec2000-use-input-niter --outdir outputs/pr20_current_vs_main_main_qh_jit`
+- Current/main cold variants used the same commands with `--no-warmup`.
+
+Lane update:
+
+- Full benchmark rerun and main-branch regression check: `5%`.
+- Performance profiling and fix lane: `12%`.
