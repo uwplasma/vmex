@@ -77,10 +77,10 @@ Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
 - Recent pushed commits:
+  - `3c86df09 Record final plan and fixture audit`.
   - `485a29df Compact historical plan pointers`.
   - `90714d32 Compact free-boundary evidence log`.
   - `2d300c5e Compact differentiability plan for review`.
-  - `427f315b Reduce fixed-boundary root helper sprawl`.
 - The working tree should be checked with `git status --short --branch` before
   each tranche; avoid relying on stale plan text for branch state.
 
@@ -226,6 +226,52 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Fixed-Boundary API Wrapper Deduplication
+
+Steps taken:
+
+1. Audited the remaining large production files/functions and the finite
+   residual seams listed above.
+2. Left the residual finalization namespace seam unchanged because replacing it
+   with an explicit payload would add a large key list and increase coupling
+   for little review benefit.
+3. Simplified `vmec_jax/solvers/fixed_boundary/api.py` by factoring repeated
+   implementation-hook keyword plumbing into three local helpers:
+   `_energy_optimizer_deps`, `_lbfgs_deps`, and `_residual_optimizer_deps`.
+4. Preserved every public solver signature and the existing implementation
+   dependency injection seams used by tests and monkeypatch/debug workflows.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/api.py` decreased from `502` to `488`
+  lines.
+- Public wrapper bodies are shorter while still showing user-facing arguments
+  explicitly.
+- Source-health guardrails remain unchanged: `67` root Python files and `2`
+  root helper-prefix compatibility files.
+- No numerical, parity, or differentiability behavior changed.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/api.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_wave3_coverage.py tests/test_solve_optimizer_helpers.py --tb=short`
+  (`71 passed`)
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue only with net-negative simplifications that preserve explicit user
+   APIs and monkeypatch seams.
+2. If more code work is needed, inspect `run_fixed_boundary` and residual
+   trace assembly for duplicate plumbing; do not replace namespace seams with
+   larger explicit payloads.
+
+User decisions needed:
+
+No immediate decision.
 
 ### 2026-06-20 Final Plan and Structure Audit
 

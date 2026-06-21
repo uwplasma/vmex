@@ -76,6 +76,62 @@ from vmec_jax.solvers.fixed_boundary.results import WoutLikeVmecForces as _WoutL
 from vmec_jax.state import VMECState, pack_state, unpack_state
 
 
+def _energy_optimizer_deps(validate_options_func) -> dict[str, Any]:
+    """Common implementation hooks for fixed-boundary energy optimizers."""
+    return {
+        "has_jax_func": has_jax,
+        "validate_options_func": validate_options_func,
+        "prepare_energy_context_func": _fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        "enforce_fixed_boundary_and_axis_func": _enforce_fixed_boundary_and_axis,
+        "mask_grad_for_constraints_func": _mask_grad_for_constraints,
+        "apply_preconditioner_func": _apply_preconditioner,
+        "grad_rms_state_func": _grad_rms_state,
+        "resolve_grad_tol_func": _resolve_grad_tol,
+        "mode00_index_func": _mode00_index,
+        "eval_geom_func": eval_geom,
+        "bsup_from_geom_func": bsup_from_geom,
+        "b2_from_bsup_func": b2_from_bsup,
+        "angle_steps_func": angle_steps,
+        "validate_pressure_shape_func": validate_pressure_shape,
+        "jnp_module": jnp,
+        "jit_func": jit,
+    }
+
+
+def _lbfgs_deps() -> dict[str, Any]:
+    """Common implementation hooks for dependency-free L-BFGS wrappers."""
+    return {
+        "lbfgs_two_loop_direction_func": _lbfgs_two_loop_direction,
+        "ensure_descent_direction_func": _ensure_descent_direction,
+        "resolve_lbfgs_curvature_tol_func": _resolve_lbfgs_curvature_tol,
+        "pack_state_func": pack_state,
+        "unpack_state_func": unpack_state,
+    }
+
+
+def _residual_optimizer_deps(validate_options_func) -> dict[str, Any]:
+    """Common implementation hooks for VMEC residual objective optimizers."""
+    return {
+        "has_jax_func": has_jax,
+        "validate_options_func": validate_options_func,
+        "prepare_residual_force_context_func": _residual_force_context_helpers.prepare_residual_force_context,
+        "mode00_index_func": _mode00_index,
+        "half_mesh_from_full_mesh_func": _half_mesh_from_full_mesh,
+        "mass_half_mesh_from_indata_func": _mass_half_mesh_from_indata,
+        "pressure_half_mesh_from_indata_func": _pressure_half_mesh_from_indata,
+        "icurv_full_mesh_from_indata_func": _icurv_full_mesh_from_indata,
+        "vmec_force_flux_profiles_func": _vmec_force_flux_profiles,
+        "wout_like_cls": _WoutLikeVmecForces,
+        "assemble_residual_objective_terms_func": _assemble_residual_objective_terms,
+        "enforce_fixed_boundary_and_axis_func": _enforce_fixed_boundary_and_axis,
+        "mask_grad_for_constraints_func": _mask_grad_for_constraints,
+        "grad_rms_state_func": _grad_rms_state,
+        "jax_module": jax,
+        "jnp_module": jnp,
+        "jit_func": jit,
+    }
+
+
 def solve_lambda_gd(
     state0: VMECState,
     static,
@@ -192,24 +248,9 @@ def solve_fixed_boundary_gd(
         differentiable=differentiable,
         stop_grad_in_update=stop_grad_in_update,
         verbose=verbose,
-        has_jax_func=has_jax,
-        validate_options_func=validate_fixed_boundary_gd_options,
-        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
-        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_mask_grad_for_constraints,
-        apply_preconditioner_func=_apply_preconditioner,
         update_state_gd_func=_update_state_gd,
-        grad_rms_state_func=_grad_rms_state,
-        resolve_grad_tol_func=_resolve_grad_tol,
-        mode00_index_func=_mode00_index,
-        eval_geom_func=eval_geom,
-        bsup_from_geom_func=bsup_from_geom,
-        b2_from_bsup_func=b2_from_bsup,
-        angle_steps_func=angle_steps,
-        validate_pressure_shape_func=validate_pressure_shape,
         jax_module=jax,
-        jnp_module=jnp,
-        jit_func=jit,
+        **_energy_optimizer_deps(validate_fixed_boundary_gd_options),
     )
 
 
@@ -265,27 +306,8 @@ def solve_fixed_boundary_lbfgs(
         precond_exponent=precond_exponent,
         precond_radial_alpha=precond_radial_alpha,
         verbose=verbose,
-        has_jax_func=has_jax,
-        validate_options_func=validate_fixed_boundary_lbfgs_options,
-        prepare_energy_context_func=_fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
-        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_mask_grad_for_constraints,
-        apply_preconditioner_func=_apply_preconditioner,
-        grad_rms_state_func=_grad_rms_state,
-        resolve_grad_tol_func=_resolve_grad_tol,
-        lbfgs_two_loop_direction_func=_lbfgs_two_loop_direction,
-        ensure_descent_direction_func=_ensure_descent_direction,
-        resolve_lbfgs_curvature_tol_func=_resolve_lbfgs_curvature_tol,
-        pack_state_func=pack_state,
-        unpack_state_func=unpack_state,
-        mode00_index_func=_mode00_index,
-        eval_geom_func=eval_geom,
-        bsup_from_geom_func=bsup_from_geom,
-        b2_from_bsup_func=b2_from_bsup,
-        angle_steps_func=angle_steps,
-        validate_pressure_shape_func=validate_pressure_shape,
-        jnp_module=jnp,
-        jit_func=jit,
+        **_energy_optimizer_deps(validate_fixed_boundary_lbfgs_options),
+        **_lbfgs_deps(),
     )
 
 
@@ -339,30 +361,10 @@ def solve_fixed_boundary_lbfgs_vmec_residual(
         precond_exponent=precond_exponent,
         precond_radial_alpha=precond_radial_alpha,
         verbose=verbose,
-        has_jax_func=has_jax,
-        validate_options_func=validate_residual_lbfgs_options,
-        prepare_residual_force_context_func=_residual_force_context_helpers.prepare_residual_force_context,
-        mode00_index_func=_mode00_index,
-        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
-        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
-        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
-        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
-        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
-        wout_like_cls=_WoutLikeVmecForces,
-        assemble_residual_objective_terms_func=_assemble_residual_objective_terms,
-        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_mask_grad_for_constraints,
         apply_preconditioner_func=_apply_preconditioner,
-        grad_rms_state_func=_grad_rms_state,
         resolve_grad_tol_func=_resolve_grad_tol,
-        lbfgs_two_loop_direction_func=_lbfgs_two_loop_direction,
-        ensure_descent_direction_func=_ensure_descent_direction,
-        resolve_lbfgs_curvature_tol_func=_resolve_lbfgs_curvature_tol,
-        pack_state_func=pack_state,
-        unpack_state_func=unpack_state,
-        jax_module=jax,
-        jnp_module=jnp,
-        jit_func=jit,
+        **_residual_optimizer_deps(validate_residual_lbfgs_options),
+        **_lbfgs_deps(),
     )
 
 
@@ -420,29 +422,13 @@ def solve_fixed_boundary_gn_vmec_residual(
         bt_factor=bt_factor,
         jit_kernels=jit_kernels,
         verbose=verbose,
-        has_jax_func=has_jax,
-        validate_options_func=validate_residual_gn_options,
-        prepare_residual_force_context_func=_residual_force_context_helpers.prepare_residual_force_context,
-        mode00_index_func=_mode00_index,
-        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
-        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
-        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
-        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
-        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
-        wout_like_cls=_WoutLikeVmecForces,
-        assemble_residual_objective_terms_func=_assemble_residual_objective_terms,
         residual_objective_vector_func=_residual_objective_vector,
-        enforce_fixed_boundary_and_axis_func=_enforce_fixed_boundary_and_axis,
-        mask_grad_for_constraints_func=_mask_grad_for_constraints,
-        grad_rms_state_func=_grad_rms_state,
         resolve_cg_tol_func=_resolve_cg_tol,
         resolve_lm_damping_func=_resolve_lm_damping,
         dtype_tiny_func=_dtype_tiny,
         pack_state_func=pack_state,
         unpack_state_func=unpack_state,
-        jax_module=jax,
-        jnp_module=jnp,
-        jit_func=jit,
+        **_residual_optimizer_deps(validate_residual_gn_options),
     )
 
 
