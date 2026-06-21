@@ -77,6 +77,7 @@ Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
 - Recent pushed commits:
+  - `bbe8b657 Trim fixed-boundary staged followup wrapper`.
   - `5c881525 Deduplicate fixed-boundary API dependencies`.
   - `3c86df09 Record final plan and fixture audit`.
   - `485a29df Compact historical plan pointers`.
@@ -86,11 +87,11 @@ Latest local branch state:
 
 Latest local gates run:
 
-- `python -m ruff check` on changed residual/performance files.
-- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_performance_wave13_coverage.py tests/test_refactorable_seams_coverage.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_residual_iter_policy.py tests/test_solve_diagnostics_io.py --tb=short`
-  (`67 passed`).
-- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`.
-- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`.
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/finish.py vmec_jax/drivers/staging.py`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_solve_driver_control_fast.py --tb=short`
+  (`156 passed`, `1 skipped`).
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24 --max-root-helper-prefix-files 2`.
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`.
 - `git diff --check`.
 
 Latest source-health snapshot:
@@ -226,6 +227,47 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Final Plan and Source-Map Audit
+
+Steps taken:
+
+1. Rechecked branch state, active plan text, source-health output, and
+   repository-size gates after the driver cleanup.
+2. Audited `README.md`, `docs/code_structure.rst`, `docs/installation.rst`,
+   `docs/quickstart.rst`, `docs/validation.rst`, and
+   `docs/free_boundary_coil_optimization.rst` for the current public claims.
+3. Rechecked the residual strict-update trace seam in
+   `solvers/fixed_boundary/residual/iteration.py` and
+   `residual/force_payload.py`.
+4. Audited ignored local build/output artifacts separately from tracked
+   repository size.
+
+Results obtained:
+
+- The project still has one active plan: this file.
+- README and docs consistently describe the canonical `vmec` CLI,
+  `vmec --test`, Boozer defaults, unpinned install dependencies, VMEC2000
+  parity gates, and conservative free-boundary differentiability claims.
+- The strict-update trace payload is already factored into `force_payload.py`.
+  The remaining residual-loop code is the timing/build/finalize integration
+  point; extracting it now would add indirection without reducing behavior or
+  line count, so no solver edit was made.
+- Tracked repository size remains `26.45 MiB`; the largest tracked files are
+  compressed documentation figures below `2 MiB`.
+- Local ignored bloat exists from previous runs (`docs/_build`, generated
+  WOUT/BOOZ/mgrid files, and optimization result trees), but `.gitignore` and
+  the tracked-size gate keep those artifacts out of the repository.
+
+Best next steps:
+
+1. Do not force additional residual-loop refactors unless they are net-negative
+   and covered by focused parity/differentiability tests.
+2. Before release tagging, either keep ignored local outputs for inspection or
+   remove them deliberately after confirming no analysis artifact is needed.
+3. Use `tools/diagnostics/source_health.py` and
+   `tools/diagnostics/repo_size_audit.py` as the review gates for code
+   simplification and repository-size hygiene.
 
 ### 2026-06-20 Driver Staged-Followup Wrapper Cleanup
 
