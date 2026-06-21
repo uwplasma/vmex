@@ -100,7 +100,7 @@ The current code intentionally preserves VMEC2000 semantics, but several
 translation-era modules are now too large for long-term research development.
 Use ``plan_differentiability.md`` as the active single source of truth for the
 staged differentiability/refactor plan.  ``plan_freeb.md`` is now a closed
-free-boundary evidence log, not a parallel work plan; new free-boundary
+free-boundary evidence summary, not a parallel work plan; new free-boundary
 follow-ups should be summarized in ``plan_differentiability.md``. ``plan.md``
 and ``discrete_adjoint_2506_plan.md`` are historical/reference plans.  Before
 starting a large extraction, run:

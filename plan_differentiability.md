@@ -4,9 +4,9 @@ Status: active umbrella plan and single source of truth for PR #20.
 
 This file is intentionally concise.  It records the current target architecture,
 promotion gates, open lanes, and recent review evidence.  Detailed historical
-logs remain available in git history.  `plan_freeb.md` remains the detailed
-free-boundary evidence log; `plan.md` and `discrete_adjoint_2506_plan.md` are
-historical references only.
+logs remain available in git history.  `plan_freeb.md` is a closed
+free-boundary evidence summary; `plan.md` and
+`discrete_adjoint_2506_plan.md` are historical references only.
 
 Last updated: 2026-06-20.
 
@@ -76,8 +76,11 @@ Build and review a simpler, research-grade `vmec_jax` implementation that:
 Latest local branch state:
 
 - Branch: `codex/differentiability-refactor-plan`.
-- Latest pushed commit: `427f315b Reduce fixed-boundary root helper sprawl`.
-- Working tree after that commit was clean and aligned with origin.
+- Recent pushed commits:
+  - `2d300c5e Compact differentiability plan for review`.
+  - `427f315b Reduce fixed-boundary root helper sprawl`.
+- The working tree should be checked with `git status --short --branch` before
+  each tranche; avoid relying on stale plan text for branch state.
 
 Latest local gates run:
 
@@ -213,6 +216,36 @@ The PR is review-ready when all of the following are true:
    documented compatibility facade.
 
 ## Recent Log
+
+### 2026-06-20 Free-Boundary Evidence Log Compaction
+
+Steps taken:
+
+1. Re-audited `plan_freeb.md` after the active plan compaction.
+2. Confirmed it was explicitly closed and should not receive new progress
+   entries, but still contained `25,581` lines of historical append-only logs.
+3. Replaced it with a concise free-boundary evidence summary, current claim
+   policy, implemented source areas, validation tests, representative gates,
+   and review guardrails.
+
+Results obtained:
+
+- The repository now has one active plan: this file.
+- `plan_freeb.md` is now an evidence pointer instead of a parallel historical
+  work log.
+- The full historical free-boundary transcript remains recoverable from git
+  history.
+
+Tests and commands:
+
+- `sed`/`rg` audits over `plan_freeb.md`, `plan_differentiability.md`, and
+  `docs/code_structure.rst`.
+- `wc -l plan_differentiability.md plan_freeb.md plan.md discrete_adjoint_2506_plan.md`.
+
+Best next steps:
+
+1. Re-run repo-size and source-health gates after this compaction.
+2. Keep all new free-boundary status updates in this active plan only.
 
 ### 2026-06-20 Plan Compaction and Final Audit
 
