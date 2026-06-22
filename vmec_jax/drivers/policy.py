@@ -15,6 +15,7 @@ import numpy as np
 
 
 VALID_SOLVER_MODES = frozenset(("default", "parity", "accelerated"))
+VALID_FIXED_BOUNDARY_FINISH_POLICIES = frozenset(("auto", "none", "converge"))
 FSQ_COMPONENT_NAMES = ("fsqr", "fsqz", "fsql")
 
 
@@ -162,6 +163,42 @@ def normalize_solver_mode(*, solver_mode: str | None, performance_mode: bool) ->
         valid = ", ".join(sorted(VALID_SOLVER_MODES))
         raise ValueError(f"Unknown solver_mode {solver_mode!r}. Expected one of: {valid}.")
     return mode
+
+
+def normalize_fixed_boundary_finish_policy(finish_policy: str | None) -> str:
+    """Normalize fixed-boundary post-solve finish policy aliases.
+
+    ``"auto"`` preserves the historical CLI/API behavior. ``"none"`` runs only
+    the requested iteration budget, which is useful for profiling, benchmarking,
+    and exact finite-step parity checks. ``"converge"`` explicitly enables the
+    existing VMEC-style finish stage for fixed-boundary ``vmec2000_iter`` runs.
+    """
+
+    if finish_policy is None:
+        return "auto"
+    policy = str(finish_policy).strip().lower().replace("_", "-")
+    aliases = {
+        "": "auto",
+        "default": "auto",
+        "bounded": "none",
+        "budgeted": "none",
+        "exact-budget": "none",
+        "no-finish": "none",
+        "off": "none",
+        "false": "none",
+        "0": "none",
+        "finish": "converge",
+        "finished": "converge",
+        "converged": "converge",
+        "on": "converge",
+        "true": "converge",
+        "1": "converge",
+    }
+    policy = aliases.get(policy, policy)
+    if policy not in VALID_FIXED_BOUNDARY_FINISH_POLICIES:
+        valid = ", ".join(sorted(VALID_FIXED_BOUNDARY_FINISH_POLICIES))
+        raise ValueError(f"Unknown finish_policy {finish_policy!r}. Expected one of: {valid}.")
+    return policy
 
 
 def requested_solver_device_name(solver_device: str | None) -> str:

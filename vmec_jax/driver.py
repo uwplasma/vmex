@@ -54,6 +54,7 @@ _default_use_scan_for_backend = _driver_policy_helpers.default_use_scan_for_back
 _distribute_stage_iters = _driver_policy_helpers.distribute_stage_iters
 _dynamic_scan_probe_settings_for_backend = _driver_policy_helpers.dynamic_scan_probe_settings
 _host_update_assembly_driver_default = _driver_policy_helpers.host_update_assembly_driver_default
+_normalize_fixed_boundary_finish_policy = _driver_policy_helpers.normalize_fixed_boundary_finish_policy
 _normalize_solver_mode = _driver_policy_helpers.normalize_solver_mode
 _policy_backend_for_requested_device = _driver_policy_helpers.policy_backend_for_requested_device
 _requested_solver_device_name = _driver_policy_helpers.requested_solver_device_name
@@ -398,6 +399,7 @@ def _resolve_fixed_boundary_startup_context(
     restart_wout_path,
     restart_solver_state,
     cli_fixed_boundary_mode,
+    finish_policy,
     solver_device,
     auto_cli_fixed_boundary_mode,
     solver_device_context_active,
@@ -504,6 +506,7 @@ def _resolve_fixed_boundary_startup_context(
             "restart_wout_path": restart_wout_path,
             "restart_solver_state": restart_solver_state_eff,
             "cli_fixed_boundary_mode": cli_fixed_boundary_mode_eff,
+            "finish_policy": finish_policy,
             "_auto_cli_fixed_boundary_mode": bool(auto_cli_fixed_boundary_mode),
         },
         run_fixed_boundary_func=run_fixed_boundary_func,
@@ -568,6 +571,7 @@ def run_fixed_boundary(
     restart_wout_path: str | Path | None = None,
     restart_solver_state: dict | None = None,
     cli_fixed_boundary_mode: bool = False,
+    finish_policy: str | None = None,
     solver_device: str | None = None,
     external_field_provider_kind: str | None = None,
     external_field_provider_static: Any = None,
@@ -623,6 +627,7 @@ def run_fixed_boundary(
         restart_wout_path=restart_wout_path,
         restart_solver_state=restart_solver_state,
         cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
+        finish_policy=finish_policy,
         solver_device=solver_device,
         auto_cli_fixed_boundary_mode=bool(_auto_cli_fixed_boundary_mode),
         solver_device_context_active=bool(_solver_device_context_active),
@@ -672,6 +677,11 @@ def run_fixed_boundary(
     ftol_list_input = stage_policy.ftol_list_input
     cli_budgeted_multigrid_requested = bool(stage_policy.cli_budgeted_multigrid_requested)
     cli_fixed_boundary_finish_enabled = bool(stage_policy.cli_fixed_boundary_finish_enabled)
+    finish_policy_eff = _normalize_fixed_boundary_finish_policy(finish_policy)
+    if finish_policy_eff == "none":
+        cli_fixed_boundary_finish_enabled = False
+    elif finish_policy_eff == "converge":
+        cli_fixed_boundary_finish_enabled = bool(solver_lower == "vmec2000_iter") and (not bool(cfg.lfreeb))
     multigrid = bool(stage_policy.multigrid)
     multigrid_user_provided = bool(stage_policy.multigrid_user_provided)
     accelerated_single_grid_default = bool(stage_policy.accelerated_single_grid_default)
@@ -1050,6 +1060,15 @@ def run_fixed_boundary(
         profiles=prof,
         signgs=signgs,
     )
+    if run_out.result is not None:
+        run_out = replace(
+            run_out,
+            result=_result_with_diag(
+                run_out.result,
+                fixed_boundary_finish_policy=str(finish_policy_eff),
+                cli_fixed_boundary_finish_enabled=bool(cli_fixed_boundary_finish_enabled),
+            ),
+        )
     cli_initial_policy = "multigrid" if bool(multigrid) and (len(ns_stages) > 1) else "single_grid"
     return _maybe_finish_cli_fixed_boundary_run(
         run_out,

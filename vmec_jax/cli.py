@@ -194,6 +194,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--step-size", type=float, default=None, help="Time step (DELT). Defaults to input DELT.")
     p.add_argument("--history-size", type=int, default=10, help="History size (LBFGS-style solvers).")
+    p.add_argument(
+        "--finish-policy",
+        type=str,
+        default="auto",
+        choices=("auto", "none", "bounded", "converge"),
+        help=(
+            "Fixed-boundary post-solve policy: auto preserves default converged CLI behavior; "
+            "none/bounded runs only the requested budget; converge forces the VMEC-style finish stage."
+        ),
+    )
+    p.add_argument(
+        "--no-finish",
+        dest="finish_policy",
+        action="store_const",
+        const="none",
+        help="Alias for --finish-policy none; useful for exact-budget profiling and quick bounded runs.",
+    )
     p.add_argument("--multigrid", action="store_true", help="Enable multigrid staging.")
     p.add_argument("--no-multigrid", dest="multigrid", action="store_false", help="Disable multigrid staging.")
     p.set_defaults(multigrid=None)
@@ -526,6 +543,7 @@ def main(argv: list[str] | None = None) -> int:
             performance_mode=bool(performance_mode),
             vmecpp_restart=bool(vmecpp_restart),
             cli_fixed_boundary_mode=True,
+            finish_policy=str(args.finish_policy),
         )
         if default_policy:
             if default_policy_backend is None:

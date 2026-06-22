@@ -63,6 +63,30 @@ def test_normalize_solver_mode_reports_valid_modes():
         driver._normalize_solver_mode(solver_mode="not-a-mode", performance_mode=False)
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "auto"),
+        ("auto", "auto"),
+        ("default", "auto"),
+        ("none", "none"),
+        ("bounded", "none"),
+        ("exact_budget", "none"),
+        ("no-finish", "none"),
+        ("converge", "converge"),
+        ("finish", "converge"),
+        ("true", "converge"),
+    ],
+)
+def test_normalize_fixed_boundary_finish_policy_handles_public_aliases(value, expected):
+    assert driver._normalize_fixed_boundary_finish_policy(value) == expected
+
+
+def test_normalize_fixed_boundary_finish_policy_reports_valid_modes():
+    with pytest.raises(ValueError, match="Expected one of: auto, converge, none"):
+        driver._normalize_fixed_boundary_finish_policy("not-a-policy")
+
+
 def test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics():
     fast = resolve_fixed_boundary_solver_dispatch(
         solver_lower="vmec2000_iter",

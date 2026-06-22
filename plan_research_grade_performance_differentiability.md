@@ -522,3 +522,52 @@ Best next steps:
 3. Inspect the preconditioner cold compile path, since the raw cold run is now
    dominated by `seed_preconditioner_cache_from_bcovar_update` and
    `rz_preconditioner_matrices`.
+
+### 2026-06-21: Public fixed-boundary finish policy
+
+Steps taken:
+
+- Added a normalized public `finish_policy` option to `run_fixed_boundary`.
+- Added CLI flags `--finish-policy {auto,none,bounded,converge}` and
+  `--no-finish`.
+- Routed profiler/decomposition tools through the public option while keeping
+  the legacy `--no-auto-cli-policy` diagnostic alias.
+- Added focused unit coverage for policy aliases, CLI propagation, and the
+  bounded path suppressing additional finish attempts.
+
+Results obtained:
+
+- Default behavior remains unchanged: `finish_policy="auto"` preserves the
+  current converged CLI behavior.
+- `finish_policy="none"` / `"bounded"` gives an explicit finite-budget path
+  for profiling, benchmark rows, and exact finite-step parity checks.
+- Result diagnostics now record `fixed_boundary_finish_policy` and
+  `cli_fixed_boundary_finish_enabled`, so benchmark provenance can distinguish
+  converged production runs from bounded diagnostic runs.
+- Short QH warm-start smoke profiles with `--iters 2 --solver-mode auto
+  --no-use-scan --solver-device cpu`:
+  - `--finish-policy none`: `1.303 s`, finish disabled, no finish budgets.
+  - `--finish-policy auto`: `5.044 s`, finish enabled, budgets `[2, 2]`.
+  - `--finish-policy converge`: `5.044 s`, finish enabled, budgets `[2, 2]`.
+
+Best next steps:
+
+1. Continue cold-path decomposition inside the bounded path: input/config load,
+   static setup, preconditioner trace/compile, and first device-ready solve.
+2. Decide whether the README quick-start should mention `--no-finish` only in
+   performance/developer notes or also as a general “run exactly N iterations”
+   option.
+3. Prototype a cheaper bounded finish policy that can use a small existing
+   compiled stage instead of recompiling full finish attempts.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 78%.
+- Fixed-boundary production differentiability: 82%.
+- Free-boundary production differentiability: 78%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 70%.
+- Refactor/API/examples: 41%.
+- VMEC2000/VMEC++ parity and physics gates: 90%.
+- Docs/release hygiene: 89%.
+- Overall: 72%.

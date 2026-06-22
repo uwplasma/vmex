@@ -91,6 +91,15 @@ def _parse_args() -> argparse.Namespace:
         default="auto",
         help="JAX solver device override passed to run_fixed_boundary (default: auto).",
     )
+    p.add_argument(
+        "--finish-policy",
+        choices=("auto", "none", "bounded", "converge"),
+        default=None,
+        help=(
+            "Public fixed-boundary post-solve finish policy. If omitted, the legacy "
+            "--auto-cli-policy/--no-auto-cli-policy switch selects auto/none."
+        ),
+    )
     p.set_defaults(auto_cli_policy=True)
     p.add_argument(
         "--auto-cli-policy",
@@ -195,6 +204,8 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "solver_mode",
         "accelerated_mode",
         "cli_fixed_boundary_mode",
+        "fixed_boundary_finish_policy",
+        "cli_fixed_boundary_finish_enabled",
         "cli_fixed_boundary_initial_policy",
         "cli_accelerated_fixed_policy",
         "cli_staged_followup_policy",
@@ -298,6 +309,7 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
             "jit_forces": bool(effective_jit_forces),
             "no_jit_forces": bool(args.no_jit_forces),
             "auto_cli_policy": bool(args.auto_cli_policy),
+            "finish_policy": str(args.effective_finish_policy),
             "dynamic_scan": bool(args.dynamic_scan),
         },
         "result": {
@@ -345,6 +357,8 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
     for key in (
         "solver_mode",
         "cli_fixed_boundary_mode",
+        "fixed_boundary_finish_policy",
+        "cli_fixed_boundary_finish_enabled",
         "cli_fixed_boundary_initial_policy",
         "multigrid_ns_stages",
         "multigrid_niter_stages",
@@ -568,6 +582,8 @@ def main() -> int:
     args.phase_timing = phase_timing
     solver_device = None if str(args.solver_device) == "auto" else str(args.solver_device)
     solver_mode = None if str(args.solver_mode) == "auto" else str(args.solver_mode)
+    finish_policy = args.finish_policy if args.finish_policy is not None else ("auto" if args.auto_cli_policy else "none")
+    args.effective_finish_policy = str(finish_policy)
 
     def _run_profile_once():
         run_kwargs = dict(
@@ -579,7 +595,7 @@ def main() -> int:
             jit_forces=bool(jit_forces),
             use_scan=args.use_scan,
             solver_device=solver_device,
-            _auto_cli_fixed_boundary_mode=bool(args.auto_cli_policy),
+            finish_policy=str(finish_policy),
         )
         if not bool(args.use_input_niter):
             run_kwargs["max_iter"] = int(args.iters)

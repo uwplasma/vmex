@@ -757,7 +757,7 @@ Raw fixed-boundary throughput:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --no-use-scan \
      --solver-device cpu \
@@ -768,7 +768,7 @@ Raw fixed-boundary throughput:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device gpu \
      --json-out /tmp/vmec_jax_qh20_raw_gpu.json
@@ -985,7 +985,7 @@ with ``--vmec-timing``:
      --simple-profile \
      --no-warmup \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device cpu \
      --vmec-timing \
@@ -998,7 +998,7 @@ with ``--vmec-timing``:
      --simple-profile \
      --no-warmup \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device gpu \
      --vmec-timing \
@@ -1120,7 +1120,7 @@ policy, so malformed values fall back to the backend/input auto heuristic.
 
 Use ``--trace-outdir`` for TensorBoard/XProf traces and
 ``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
-or launch overhead is the bottleneck.  Use ``--no-auto-cli-policy`` only when
+or launch overhead is the bottleneck.  Use ``--finish-policy none`` only when
 you want raw solver throughput; omit it when measuring the public
 ``run_fixed_boundary`` policy that users see through the CLI/API.
 
@@ -1899,7 +1899,7 @@ accelerated scan path explicitly, use:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --use-scan \
      --solver-device gpu \

@@ -1214,6 +1214,43 @@ def test_cli_passes_cli_fixed_boundary_mode(monkeypatch, tmp_path):
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
     assert captured["cli_fixed_boundary_mode"] is True
+    assert captured["finish_policy"] == "auto"
+
+
+def test_cli_passes_public_finish_policy(monkeypatch, tmp_path):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
+    captured = {}
+
+    def _fake_run_fixed_boundary(input_path_arg, **kwargs):
+        captured["input_path"] = str(input_path_arg)
+        captured.update(kwargs)
+
+        class _Run:
+            state = type("S", (), {"Rcos": np.asarray([0.0])})()
+            result = None
+
+        return _Run()
+
+    monkeypatch.setattr(cli_module, "run_fixed_boundary", _fake_run_fixed_boundary)
+    monkeypatch.setattr(cli_module, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    rc = cli_module.main(
+        [
+            str(input_path),
+            "--output",
+            str(tmp_path / "wout_test.nc"),
+            "--quiet",
+            "--finish-policy",
+            "bounded",
+        ]
+    )
+    assert rc == 0
+    assert captured["finish_policy"] == "bounded"
+
+    captured.clear()
+    rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test2.nc"), "--quiet", "--no-finish"])
+    assert rc == 0
+    assert captured["finish_policy"] == "none"
 
 
 def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_path):

@@ -171,6 +171,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--solver-mode", default="auto", choices=("auto", "default", "parity", "accelerated"))
     parser.add_argument("--solver-device", default="auto", choices=("auto", "default", "cpu", "gpu"))
     parser.add_argument("--use-input-niter", action="store_true", help="Use NITER from the input deck.")
+    parser.add_argument(
+        "--finish-policy",
+        choices=("auto", "none", "bounded", "converge"),
+        default=None,
+        help=(
+            "Public vmec_jax finish policy. If omitted, --auto-cli-policy/--no-auto-cli-policy "
+            "selects auto/none for backward-compatible diagnostics."
+        ),
+    )
     parser.set_defaults(auto_cli_policy=True)
     parser.add_argument(
         "--auto-cli-policy",
@@ -239,7 +248,9 @@ def _run_child_profile(
         cmd.append("--no-warmup")
     if args.use_input_niter:
         cmd.append("--use-input-niter")
-    if not bool(args.auto_cli_policy):
+    finish_policy = args.finish_policy if args.finish_policy is not None else ("auto" if args.auto_cli_policy else "none")
+    cmd.extend(["--finish-policy", str(finish_policy)])
+    if args.finish_policy is None and not bool(args.auto_cli_policy):
         cmd.append("--no-auto-cli-policy")
     if args.cprofile:
         cmd.extend(
