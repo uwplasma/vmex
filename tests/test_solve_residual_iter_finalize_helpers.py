@@ -261,6 +261,10 @@ def test_finalize_residual_iter_from_namespace_builds_diagnostics_and_result() -
         "fsq_total_target": None,
         "ijacob": 0,
         "bad_resets": 0,
+        "setup_axis_reset_applied": True,
+        "axis_reset_done": True,
+        "setup_axis_force_probe": object(),
+        "setup_axis_force_probe_reused": True,
         "iter1": 1,
         "res0": 0.0,
         "freeb_nvacskip": 1,
@@ -295,6 +299,10 @@ def test_finalize_residual_iter_from_namespace_builds_diagnostics_and_result() -
     assert result.diagnostics["attached"] is True
     assert result.diagnostics["history_marker"] == 2
     assert result.diagnostics["converged_strict"] is True
+    assert result.diagnostics["setup_axis_reset_applied"] is True
+    assert result.diagnostics["setup_axis_reset_done"] is True
+    assert result.diagnostics["setup_axis_force_probe_available"] is True
+    assert result.diagnostics["setup_axis_force_probe_reused"] is True
     assert result.diagnostics["free_boundary"]["enabled"] is False
     assert result.diagnostics["resume_state"] is None
     assert getattr(result, "_final_force_payload") is payload

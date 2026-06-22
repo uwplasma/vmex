@@ -1432,7 +1432,10 @@ def solve_fixed_boundary_residual_iter(
     res0 = float(axis_setup.res0)
     res1 = float(axis_setup.res1)
     prev_rz_fsq = float(axis_setup.prev_rz_fsq)
-    if axis_setup.reset_applied:
+    setup_axis_reset_applied = bool(axis_setup.reset_applied)
+    setup_axis_force_probe = axis_setup.force_probe
+    setup_axis_force_probe_reused = False
+    if setup_axis_reset_applied:
         precond_cache.clear()
         cache_constraint_rcon0 = None
         cache_constraint_zcon0 = None
@@ -1730,21 +1733,44 @@ def solve_fixed_boundary_residual_iter(
 
             _record_timing("iteration_prepare", t_iteration_prepare_start)
             t_compute_start = time.perf_counter() if timing_enabled else None
-            k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
-                state,
-                include_edge=bool(include_edge),
-                include_edge_residual=bool(include_edge_residual),
-                zero_m1=zero_m1,
-                freeb_bsqvac_half=freeb_bsqvac_half_current,
-                constraint_rcon0=constraint_rcon0_current,
-                constraint_zcon0=constraint_zcon0_current,
-                constraint_precond_diag=constraint_precond_diag,
-                constraint_tcon=constraint_tcon_override,
-                constraint_precond_active=constraint_precond_active,
-                constraint_tcon_active=constraint_tcon_active,
-                iter_idx=_iter_idx_for_dump(iter2),
-                iter2=iter2,
+            iter_dump_idx = _iter_idx_for_dump(iter2)
+            reuse_setup_axis_force = (
+                int(iter2) == 1
+                and setup_axis_force_probe is not None
+                and not bool(setup_axis_reset_applied)
+                and not bool(free_boundary_enabled)
+                and not bool(include_edge)
+                and not bool(include_edge_residual)
+                and freeb_bsqvac_half_current is None
+                and constraint_rcon0_current is None
+                and constraint_zcon0_current is None
+                and not bool(use_cached_precond)
+                and float(zero_m1_val) > 0.5
+                and iter_dump_idx is None
             )
+            if reuse_setup_axis_force:
+                k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = setup_axis_force_probe
+                setup_axis_force_probe_reused = True
+                if timing_enabled:
+                    timing_stats["compute_forces_main_reuse_count"] = (
+                        int(timing_stats.get("compute_forces_main_reuse_count", 0)) + 1
+                    )
+            else:
+                k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
+                    state,
+                    include_edge=bool(include_edge),
+                    include_edge_residual=bool(include_edge_residual),
+                    zero_m1=zero_m1,
+                    freeb_bsqvac_half=freeb_bsqvac_half_current,
+                    constraint_rcon0=constraint_rcon0_current,
+                    constraint_zcon0=constraint_zcon0_current,
+                    constraint_precond_diag=constraint_precond_diag,
+                    constraint_tcon=constraint_tcon_override,
+                    constraint_precond_active=constraint_precond_active,
+                    constraint_tcon_active=constraint_tcon_active,
+                    iter_idx=iter_dump_idx,
+                    iter2=iter2,
+                )
             if bool(free_boundary_enabled):
                 freeb_plascur = _vmec_freeb_plascur_from_bcovar(k.bc, freeb_plascur)
                 try:
@@ -1763,7 +1789,7 @@ def solve_fixed_boundary_residual_iter(
                         # Initialize persistent VMEC-style constraint baseline.
                         cache_constraint_rcon0 = jnp.asarray(k.constraint_rcon0)
                         cache_constraint_zcon0 = jnp.asarray(k.constraint_zcon0)
-            if timing_enabled:
+            if timing_enabled and not reuse_setup_axis_force:
                 _record_compute_force_timing("main", t_compute_start, gcr2)
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
             norms_used = (

@@ -784,6 +784,7 @@ def test_residual_iter_timing_report_and_message():
         "compute_forces_first": 3.0,
         "compute_forces_rest": 5.0,
         "compute_forces_calls": 9,
+        "compute_forces_main_reuse_count": 2,
         "iteration_residual_metrics": 2.0,
         "preconditioner": 3.0,
         "precond_refresh": 1.5,
@@ -808,6 +809,7 @@ def test_residual_iter_timing_report_and_message():
     assert report["setup_axis_reset_unattributed_s"] == 2.0
     assert report["iteration_loop_unattributed_s"] == 1.0
     assert report["compute_forces_per_iter_s"] == 2.0
+    assert report["compute_forces_main_reuse_count"] == 2
     assert report["precond_apply_per_iter_s"] == 0.3125
 
     msg = _format_residual_iter_timing_message(report, timing_detail_enabled=True)

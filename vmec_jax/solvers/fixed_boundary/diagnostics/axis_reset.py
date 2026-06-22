@@ -50,6 +50,7 @@ class InitialAxisResetSetupResult(NamedTuple):
     res1: float
     prev_rz_fsq: float
     reset_applied: bool
+    force_probe: tuple[Any, ...] | None
 
 
 def initial_force_physical_fsq(*, norms: Any, gcr2: Any, gcz2: Any, gcl2: Any) -> float | None:
@@ -296,6 +297,7 @@ def run_initial_axis_reset_setup(
     """Run the setup-time VMEC magnetic-axis reset with host-loop semantics."""
 
     reset_applied = False
+    force_probe = None
     t_setup_axis_reset_start = perf_counter_func() if timing_enabled else None
     if bool(vmec2000_control) and (not bool(axis_reset_done)) and bool(lmove_axis):
         try:
@@ -313,6 +315,7 @@ def run_initial_axis_reset_setup(
                     iter2=1,
                 )
             )
+            force_probe = (k0, _frzl0, gcr2_0, gcz2_0, gcl2_0, _rz_scale0, _l_scale0, norms0)
             if timing_enabled and t_setup_axis_force_start is not None:
                 try:
                     if has_jax_func() and block_until_ready_func is not None:
@@ -373,6 +376,7 @@ def run_initial_axis_reset_setup(
                 res1 = -1.0
                 prev_rz_fsq = 2.0
                 reset_applied = True
+                force_probe = None
         except Exception:
             pass
     if timing_enabled and t_setup_axis_reset_start is not None:
@@ -387,6 +391,7 @@ def run_initial_axis_reset_setup(
         res1=float(res1),
         prev_rz_fsq=float(prev_rz_fsq),
         reset_applied=bool(reset_applied),
+        force_probe=force_probe,
     )
 
 

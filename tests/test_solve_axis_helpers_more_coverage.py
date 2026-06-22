@@ -5,13 +5,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax._compat import has_jax
+from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
     bad_jacobian_from_tau_range,
     bad_jacobian_ptau_from_minmax,
     initial_force_physical_fsq,
     initial_axis_reset_runtime_decision,
     reset_axis_from_boundary,
+    run_initial_axis_reset_setup,
 )
 from vmec_jax.solve import (
     _apply_vmec_lambda_axis_rules_to_state,
@@ -204,6 +205,67 @@ def test_reset_axis_from_boundary_fallback_coefficients_preserve_non_axis_modes(
 def test_initial_axis_reset_decision_branch_matrix(kwargs, expected):
     decision = _initial_axis_reset_decision(**kwargs)
     assert (decision.bad_jacobian, decision.force_reset, decision.reset) == expected
+
+
+def test_initial_axis_reset_setup_keeps_force_probe_when_no_reset():
+    state = _state_from_base(np.ones((2, 2)))
+    force_payload = (
+        SimpleNamespace(),
+        SimpleNamespace(),
+        0.25,
+        0.125,
+        0.0625,
+        np.asarray([1.0]),
+        np.asarray([2.0]),
+        SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+    )
+
+    result = run_initial_axis_reset_setup(
+        state=state,
+        axis_reset_done=False,
+        ijacob=0,
+        state_checkpoint=state,
+        velocities=(1, 2, 3, 4, 5, 6),
+        res0=0.0,
+        res1=0.0,
+        prev_rz_fsq=1.0,
+        vmec2000_control=True,
+        lmove_axis=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        timing_enabled=False,
+        timing_stats={},
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        axis_reset_fsq_min=1.0,
+        badjac_use_state=False,
+        static=SimpleNamespace(cfg=SimpleNamespace(lthreed=False, lconm1=True), modes=SimpleNamespace(m=np.asarray([0, 1]))),
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        zero_precond_diag=(np.zeros(2), np.zeros(2)),
+        zero_tcon=np.zeros(2),
+        compute_forces_iter_func=lambda *args, **kwargs: force_payload,
+        reset_axis_from_boundary_func=lambda *args, **kwargs: pytest.fail("reset should not run"),
+        zero_velocity_blocks_like_func=lambda *values: values,
+        ptau_minmax_from_k_host_func=lambda _k: (1.0, 2.0),
+        vmec_half_mesh_jacobian_from_state_func=lambda *args, **kwargs: pytest.fail("state probe unused"),
+        print_axis_guess_func=lambda *args, **kwargs: None,
+        axis_reset_coeffs_func=lambda: None,
+        env_enabled_func=lambda _value: False,
+        getenv_func=lambda _name, default="": default,
+        perf_counter_func=lambda: 0.0,
+        has_jax_func=lambda: False,
+        block_until_ready_func=None,
+        jnp_module=jnp,
+    )
+
+    assert result.reset_applied is False
+    assert result.axis_reset_done is False
+    assert result.force_probe is not None
+    assert result.force_probe[0] is force_payload[0]
+    assert result.force_probe[1] is force_payload[1]
+    assert result.force_probe[2:5] == force_payload[2:5]
+    assert result.force_probe[7] is force_payload[7]
 
 
 @pytest.mark.parametrize(
