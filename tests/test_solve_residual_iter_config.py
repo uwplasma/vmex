@@ -5,6 +5,7 @@ import pytest
 from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS,
     bad_jacobian_tau_tolerance,
+    indata_has_profile_setup_work,
     legacy_dump_enabled,
     parse_bad_jacobian_config,
     resolve_axis_reset_config,
@@ -166,9 +167,47 @@ def test_host_residual_metric_policy_auto_and_explicit_flags():
 
 def test_host_profile_setup_policy_auto_and_explicit_flags():
     assert resolve_host_profile_setup(backend_name="cpu", profile_setup_env="auto") is False
+    assert (
+        resolve_host_profile_setup(
+            backend_name="cpu",
+            profile_setup_env="auto",
+            profile_setup_has_work=True,
+        )
+        is True
+    )
     assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env="auto") is True
     assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env=" off ") is False
     assert resolve_host_profile_setup(backend_name="cpu", profile_setup_env=" on ") is True
+
+
+class _ProfileDeck:
+    def __init__(self, values):
+        self.values = dict(values)
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def get_bool(self, key, default=False):
+        return bool(self.values.get(key, default))
+
+    def get_float(self, key, default=0.0):
+        return float(self.values.get(key, default))
+
+    def get_int(self, key, default=0):
+        return int(self.values.get(key, default))
+
+
+def test_indata_profile_setup_work_detects_only_real_profile_work():
+    assert indata_has_profile_setup_work(None) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 1.0, "NCURR": 1, "CURTOR": 0.0})) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 1.0, "AM": [0.0, 2.0]})) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 0.0, "AM": [0.0, 2.0]})) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"AI": [0.0, 0.4]})) is True
+    assert indata_has_profile_setup_work(
+        _ProfileDeck({"NCURR": 1, "CURTOR": -2.0, "AC": [0.0, 3.0]})
+    ) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"APHI": [1.0, 0.1]})) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"LRFP": True})) is True
 
 
 def test_axis_reset_config_preserves_legacy_env_policy():

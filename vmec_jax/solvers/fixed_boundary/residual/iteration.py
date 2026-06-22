@@ -32,6 +32,7 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     resolve_axis_reset_config as _resolve_axis_reset_config,
     resolve_debug_print_config as _resolve_debug_print_config,
     resolve_host_profile_setup as _resolve_host_profile_setup,
+    indata_has_profile_setup_work as _indata_has_profile_setup_work,
     resolve_nstep_screen as _resolve_nstep_screen,
     resolve_setup_host_enforce as _resolve_setup_host_enforce,
     should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
@@ -756,6 +757,7 @@ def solve_fixed_boundary_residual_iter(
     host_profile_setup = _resolve_host_profile_setup(
         backend_name=_scan_backend_name(),
         profile_setup_env=os.getenv("VMEC_JAX_HOST_PROFILE_SETUP", "auto"),
+        profile_setup_has_work=_indata_has_profile_setup_work(indata),
     )
     try:
         wout_like, trig = _build_residual_profile_setup(

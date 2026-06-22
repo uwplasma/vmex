@@ -100,6 +100,78 @@ def env_flag_enabled_with_off(value: str | None) -> bool:
     return str("" if value is None else value).strip().lower() not in (*FALSE_TOKENS, "off")
 
 
+def _as_float_values(value) -> tuple[float, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple)):
+        raw = value
+    else:
+        raw = (value,)
+    try:
+        return tuple(float(v) for v in raw)
+    except Exception:
+        return (float("nan"),)
+
+
+def _has_nonzero_values(value, *, default: tuple[float, ...] = ()) -> bool:
+    values = _as_float_values(value)
+    if not values:
+        values = default
+    for item in values:
+        try:
+            if item != 0.0:
+                return True
+        except Exception:
+            return True
+    return False
+
+
+def indata_has_profile_setup_work(indata) -> bool:
+    """Return whether an input deck has enough profile work to prefer NumPy setup.
+
+    The common vacuum/default-APHI path is already cheap on CPU.  Finite-beta,
+    current-driven, explicit-iota, RFP, or non-default toroidal-flux profiles
+    otherwise spend cold setup time compiling small JAX profile operations that
+    do not need to be differentiable for concrete CLI solves.
+    """
+
+    if indata is None:
+        return False
+    try:
+        if bool(indata.get_bool("LRFP", False)):
+            return True
+    except Exception:
+        return True
+
+    try:
+        aphi = _as_float_values(indata.get("APHI", []))
+        if aphi and (len(aphi) != 1 or float(aphi[0]) != 1.0):
+            return True
+    except Exception:
+        return True
+
+    try:
+        pres_scale = float(indata.get_float("PRES_SCALE", 1.0))
+    except Exception:
+        pres_scale = 1.0
+    if pres_scale != 0.0 and (
+        _has_nonzero_values(indata.get("AM", [])) or _has_nonzero_values(indata.get("AM_AUX_F", []))
+    ):
+        return True
+
+    if _has_nonzero_values(indata.get("AI", [])) or _has_nonzero_values(indata.get("AI_AUX_F", [])):
+        return True
+
+    try:
+        current_driven = int(indata.get_int("NCURR", 0)) == 1 and float(indata.get_float("CURTOR", 0.0)) != 0.0
+    except Exception:
+        current_driven = False
+    return bool(
+        current_driven
+        and (_has_nonzero_values(indata.get("AC", [])) or _has_nonzero_values(indata.get("AC_AUX_F", [])))
+    )
+
+
 def legacy_dump_enabled(value: str | None) -> bool:
     """Match solve.py's legacy dump enablement exactly: no stripping or lowercasing."""
     value_s = "" if value is None else str(value)
@@ -235,12 +307,17 @@ def resolve_host_residual_metric_config(
     )
 
 
-def resolve_host_profile_setup(*, backend_name: str, profile_setup_env: str | None) -> bool:
+def resolve_host_profile_setup(
+    *,
+    backend_name: str,
+    profile_setup_env: str | None,
+    profile_setup_has_work: bool = False,
+) -> bool:
     """Resolve host-side flux-profile setup policy for residual solves."""
 
     value = str("auto" if profile_setup_env is None else profile_setup_env).strip().lower()
     if value == "auto":
-        return str(backend_name).strip().lower() != "cpu"
+        return str(backend_name).strip().lower() != "cpu" or bool(profile_setup_has_work)
     return env_flag_enabled_with_off(value)
 
 
