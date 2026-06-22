@@ -2270,6 +2270,22 @@ but rerunning those rows classified them as timing/process-memory noise:
 ``LandremanSengupta2019_section5.4_B2_A80`` reran at cold ``1.038x``, warm
 ``1.022x``, memory ``1.028x``.
 
+The next 2026-06-22 host follow-up removed an avoidable first-call JIT pTau
+helper from concrete CPU host bad-Jacobian checks while leaving traced,
+autodiff, scan, and accelerator paths on the existing JAX-capable helper.  It
+also skips initial-axis pTau/state diagnostics when the residual is already
+below the VMEC-style reset floor and no explicit reset was requested.  On the
+bounded three-iteration cold probes, ``nfp4_QH_warm_start`` solve-body time
+dropped from about ``0.106 s`` to ``0.060 s`` and ``solovev`` dropped from
+about ``0.113 s`` to ``0.069 s``.  The iteration-controller bad-Jacobian bucket
+fell from about ``45 ms`` to about ``0.3 ms``.  A compact 16-row bundled
+single-grid matrix after this host pTau change had no row-level regressions
+against either previous host baseline; compared with the NumPy R/Z baseline,
+median cold runtime was about ``0.949x``, median warm runtime ``0.939x``, and
+median peak memory ``0.980x``.  The remaining exposed cold host setup cost is
+``setup_boundary_profiles_unattributed_s``, which is mostly boundary/profile
+setup wrapper work and should be treated as the next focused tranche.
+
 A broader 2026-05-24 internal policy matrix compared the default fixed-boundary
 policy against the explicit ``accelerated`` policy on all 35 bundled
 fixed-boundary input decks.  On the local CPU host, 34 rows completed within the

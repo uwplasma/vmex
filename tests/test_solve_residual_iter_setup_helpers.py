@@ -6,6 +6,7 @@ import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.residual.setup import (
     build_residual_cache_keys,
+    build_residual_ptau_bindings,
     build_residual_profile_setup,
     free_boundary_pressure_edge_scale,
     grid_matches_vmec_static_grid,
@@ -237,6 +238,72 @@ def test_ptau_wrapper_dispatches_and_preserves_call_time_dump_arguments() -> Non
     assert ptau_dump["dump_ptau_env"] == "1"
     assert ptau_dump["dump_dir"] == "/tmp/dump"
     assert ptau_dump["label"] == "probe"
+
+
+def test_residual_ptau_bindings_disable_jit_for_concrete_host_assembly() -> None:
+    host_calls = []
+    jax_calls = []
+
+    _, minmax_host, minmax, _ = build_residual_ptau_bindings(
+        s=np.asarray([0.0, 0.5, 1.0]),
+        has_jax_value=True,
+        s_has_tracer=False,
+        pshalf_from_s_np_func=lambda _s: np.asarray([0.25, 0.75]),
+        pshalf_from_s_jax_func=lambda *_args, **_kwargs: "pshalf_jax",
+        build_context_func=lambda s, **kwargs: SimpleNamespace(
+            s=s,
+            pshalf_np=kwargs["pshalf_from_s_np"](s),
+            ohs_scalar=2.0,
+            pshalf_jax="pshalf_jax",
+            ohs_jax="ohs_jax",
+        ),
+        compute_jit_func="jit",
+        ptau_minmax_host_helper=lambda *args, **kwargs: host_calls.append((args, kwargs)) or (-1.0, 1.0),
+        ptau_minmax_helper=ptau_minmax,
+        scan_ptau_minmax_host_func=lambda *args, **kwargs: (-2.0, 2.0),
+        scan_ptau_minmax_jax_func=lambda *args, **kwargs: jax_calls.append((args, kwargs)) or (-3.0, 3.0),
+        accepted_control_ptau_arrays_helper=accepted_control_ptau_arrays,
+        scan_kernel_arrays_from_k_func=lambda _k: None,
+        has_jax_func=lambda: False,
+        host_update_assembly=True,
+    )
+
+    assert minmax_host("k") == (-1.0, 1.0)
+    assert host_calls[-1][1]["compute_jit"] is None
+
+    assert minmax("k") == (-2.0, 2.0)
+    assert not jax_calls
+
+
+def test_residual_ptau_bindings_keep_jit_for_traced_assembly() -> None:
+    host_calls = []
+
+    _, minmax_host, _minmax, _ = build_residual_ptau_bindings(
+        s=np.asarray([0.0, 0.5, 1.0]),
+        has_jax_value=True,
+        s_has_tracer=True,
+        pshalf_from_s_np_func=lambda _s: np.asarray([0.25, 0.75]),
+        pshalf_from_s_jax_func=lambda *_args, **_kwargs: "pshalf_jax",
+        build_context_func=lambda s, **_kwargs: SimpleNamespace(
+            s=s,
+            pshalf_np=None,
+            ohs_scalar=None,
+            pshalf_jax="pshalf_jax",
+            ohs_jax="ohs_jax",
+        ),
+        compute_jit_func="jit",
+        ptau_minmax_host_helper=lambda *args, **kwargs: host_calls.append((args, kwargs)) or (-1.0, 1.0),
+        ptau_minmax_helper=ptau_minmax,
+        scan_ptau_minmax_host_func=lambda *args, **kwargs: (-2.0, 2.0),
+        scan_ptau_minmax_jax_func=lambda *args, **kwargs: (-3.0, 3.0),
+        accepted_control_ptau_arrays_helper=accepted_control_ptau_arrays,
+        scan_kernel_arrays_from_k_func=lambda _k: None,
+        has_jax_func=lambda: False,
+        host_update_assembly=True,
+    )
+
+    assert minmax_host("k") == (-1.0, 1.0)
+    assert host_calls[-1][1]["compute_jit"] == "jit"
 
 
 def test_resolve_vmec2000_print_context_forwards_rows_and_cadence() -> None:

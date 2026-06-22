@@ -2694,3 +2694,76 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97.4%.
 - Docs/release hygiene: 98.1%.
 - Overall: 95.3%.
+
+### 2026-06-22: Remove concrete-host pTau JIT from fixed-boundary bad-Jacobian checks
+
+Steps taken:
+
+- Promoted a concrete-host pTau binding policy for the non-scan fixed-boundary
+  residual loop.  Concrete CPU host-update runs now use the existing NumPy pTau
+  min/max helper for bad-Jacobian checks instead of constructing a first-call
+  JIT pTau helper.  Traced/autodiff, scan, and accelerator paths keep the JAX
+  helper.
+- Added an initial-axis residual-floor early exit so pTau/state axis-reset
+  diagnostics are skipped when the current physical residual is already below
+  the reset floor and no explicit or VMEC2000-style forced reset was requested.
+- Added focused tests for both branches: host pTau binding disables JIT only for
+  concrete host assembly, traced assembly keeps JIT, low-residual axis setup
+  skips diagnostics, and explicit forced reset still evaluates pTau diagnostics.
+- Reran bounded cold probes and the compact 16-row bundled single-grid matrix.
+
+Results obtained:
+
+- Focused setup/axis/runtime tests passed:
+  ``tests/test_solve_residual_iter_setup_helpers.py``,
+  ``tests/test_solve_axis_helpers_more_coverage.py``,
+  ``tests/test_solve_additional_helpers.py`` (`114 passed`) and
+  ``tests/test_solve_performance_instrumentation.py`` plus
+  ``tests/test_solve_residual_iter_runtime_helpers.py`` (`36 passed`).
+- Ruff passed on the changed solver and test files.
+- Bounded three-iteration cold probes:
+  - `input.nfp4_QH_warm_start`: solve-body time dropped from about ``0.106 s``
+    after the NumPy R/Z seed change to ``0.060 s``; iteration-control
+    bad-Jacobian time dropped from about ``45 ms`` to about ``0.3 ms``.
+  - `input.solovev`: solve-body time dropped from about ``0.113 s`` to
+    ``0.069 s``.
+  - Explicit forced-reset smoke still took the axis-reset path and preserved the
+    same short-trace residual, confirming the early exit does not bypass user or
+    VMEC-style forced recovery.
+- A compact 16-row bundled single-grid matrix completed successfully after the
+  host pTau change.  Against the NumPy R/Z baseline, there were zero row-level
+  regressions; median cold runtime was ``0.949x``, median warm runtime
+  ``0.939x``, and median peak memory ``0.980x``.  Against the NumPy-lambda
+  baseline there were also zero regressions.
+- Independent audit identified the next cold CPU hotspot as
+  ``setup_boundary_profiles_unattributed_s`` in boundary/profile setup, not
+  pTau or preconditioner seed construction.
+- Differentiability/parity audit confirmed checked-in AD-vs-FD evidence passes
+  at ``1e-9`` for fixed-boundary public scalars, including `DMerc` and `D_R`,
+  and that direct-coil free-boundary evidence remains branch-local and
+  fingerprint-gated rather than arbitrary adaptive-branch differentiation.
+
+Best next steps:
+
+1. Target ``setup_boundary_profiles_unattributed_s`` by auditing duplicate
+   boundary/profile construction and wrapper work around
+   ``build_residual_profile_setup`` and ``build_wout_like_profiles_from_indata``.
+2. Refresh validation/free-boundary docs so the promoted branch-local report path
+   and accepted/rejected slot gate provenance are not stale.
+3. Keep VMEC++ wording optional: VMEC2000 has selected WOUT parity; VMEC++ is an
+   availability/comparison backend, not a strict parity gate.
+4. Keep arbitrary adaptive branch differentiation deferred to the research-grade
+   differentiability plan until a true fingerprint-gated adaptive AD-vs-FD gate
+   exists.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92.5%.
+- Free-boundary production differentiability: 91.7%.
+- Single-stage coil optimization: 88%.
+- CPU/GPU runtime and memory footprint: 96.8%.
+- Refactor/API/examples: 54.7%.
+- VMEC2000/VMEC++ parity and physics gates: 97.5%.
+- Docs/release hygiene: 98.2%.
+- Overall: 95.6%.

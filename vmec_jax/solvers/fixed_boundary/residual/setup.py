@@ -187,6 +187,7 @@ def build_residual_ptau_bindings(
     accepted_control_ptau_arrays_helper: Any,
     scan_kernel_arrays_from_k_func: Any,
     has_jax_func: Any,
+    host_update_assembly: bool = False,
 ) -> tuple[Any, Any, Any, Any]:
     """Bind ptau min/max helpers once during residual-solve setup."""
 
@@ -197,17 +198,18 @@ def build_residual_ptau_bindings(
         pshalf_from_s_np=pshalf_from_s_np_func,
         pshalf_from_s_jax=pshalf_from_s_jax_func,
     )
+    host_ptau_compute_jit = None if bool(host_update_assembly) and not bool(s_has_tracer) else compute_jit_func
     minmax_from_k_host = partial(
         ptau_minmax_host_helper,
         ptau_context=context,
-        compute_jit=compute_jit_func,
+        compute_jit=host_ptau_compute_jit,
         ptau_minmax_host_func=scan_ptau_minmax_host_func,
     )
     minmax = partial(
         ptau_minmax_helper,
         ptau_context=context,
         has_jax_func=has_jax_func,
-        compute_jit=compute_jit_func,
+        compute_jit=host_ptau_compute_jit,
         pshalf_from_s_jax=pshalf_from_s_jax_func,
         ptau_minmax_host_func=scan_ptau_minmax_host_func,
         ptau_minmax_jax_func=scan_ptau_minmax_jax_func,

@@ -9,6 +9,7 @@ from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
     bad_jacobian_from_tau_range,
     bad_jacobian_ptau_from_minmax,
+    evaluate_initial_axis_reset,
     initial_force_physical_fsq,
     initial_axis_reset_runtime_decision,
     reset_axis_from_boundary,
@@ -205,6 +206,102 @@ def test_reset_axis_from_boundary_fallback_coefficients_preserve_non_axis_modes(
 def test_initial_axis_reset_decision_branch_matrix(kwargs, expected):
     decision = _initial_axis_reset_decision(**kwargs)
     assert (decision.bad_jacobian, decision.force_reset, decision.reset) == expected
+
+
+def test_initial_axis_reset_evaluation_skips_diagnostics_below_residual_floor():
+    calls = {"ptau": 0, "state": 0}
+    state = _state_from_base(np.ones((2, 2)))
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(lthreed=True, lconm1=True),
+        modes=SimpleNamespace(m=np.asarray([0, 1])),
+    )
+
+    result = evaluate_initial_axis_reset(
+        axis_reset_enabled=True,
+        norms=SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+        gcr2=0.1,
+        gcz2=0.2,
+        gcl2=0.3,
+        k=object(),
+        state=state,
+        static=static,
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        badjac_use_state=True,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        vmec2000_control=True,
+        lmove_axis=True,
+        debug_enabled=False,
+        state_check_on_missing_ptau=True,
+        ptau_minmax_from_k_host=lambda _k: calls.__setitem__("ptau", calls["ptau"] + 1) or (-1.0, 1.0),
+        vmec_half_mesh_jacobian_from_state_func=lambda **_kwargs: calls.__setitem__(
+            "state", calls["state"] + 1
+        ),
+    )
+
+    assert (result.decision.bad_jacobian, result.decision.force_reset, result.decision.reset) == (
+        False,
+        False,
+        False,
+    )
+    assert result.fsq_phys == pytest.approx(0.6)
+    assert result.bad_jacobian_ptau is None
+    assert result.bad_jacobian_state is False
+    assert calls == {"ptau": 0, "state": 0}
+
+
+def test_initial_axis_reset_evaluation_forced_reset_keeps_diagnostics_below_residual_floor():
+    calls = {"ptau": 0, "state": 0}
+    state = _state_from_base(np.ones((2, 2)))
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(lthreed=True, lconm1=True),
+        modes=SimpleNamespace(m=np.asarray([0, 1])),
+    )
+
+    def ptau_minmax(_k):
+        calls["ptau"] += 1
+        return -1.0, 1.0
+
+    result = evaluate_initial_axis_reset(
+        axis_reset_enabled=True,
+        norms=SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+        gcr2=0.1,
+        gcz2=0.2,
+        gcl2=0.3,
+        k=object(),
+        state=state,
+        static=static,
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        badjac_use_state=False,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=True,
+        axis_reset_always_3d=False,
+        vmec2000_control=True,
+        lmove_axis=True,
+        debug_enabled=False,
+        state_check_on_missing_ptau=True,
+        ptau_minmax_from_k_host=ptau_minmax,
+        vmec_half_mesh_jacobian_from_state_func=lambda **_kwargs: calls.__setitem__(
+            "state", calls["state"] + 1
+        ),
+    )
+
+    assert (result.decision.bad_jacobian, result.decision.force_reset, result.decision.reset) == (
+        False,
+        True,
+        True,
+    )
+    assert result.fsq_phys == pytest.approx(0.6)
+    assert result.bad_jacobian_ptau is True
+    assert result.bad_jacobian_state is False
+    assert calls == {"ptau": 1, "state": 0}
 
 
 def test_initial_axis_reset_setup_keeps_force_probe_when_no_reset():
