@@ -157,6 +157,9 @@ def normalize_solver_mode(*, solver_mode: str | None, performance_mode: bool) ->
         "fast": "default",
         "safe": "parity",
         "reference": "parity",
+        "memory": "parity",
+        "low-memory": "parity",
+        "low_memory": "parity",
         "perf": "accelerated",
     }
     mode = aliases.get(mode, mode)

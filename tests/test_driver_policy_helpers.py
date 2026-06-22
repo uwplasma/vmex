@@ -50,6 +50,8 @@ class _Input:
         ("Fast", False, "default"),
         ("SAFE", True, "parity"),
         (" reference ", True, "parity"),
+        ("memory", True, "parity"),
+        ("low-memory", True, "parity"),
         (" PERF ", False, "accelerated"),
         ("accelerated", True, "accelerated"),
     ],

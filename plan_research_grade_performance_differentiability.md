@@ -96,7 +96,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 93.8%.
+- CPU/GPU runtime and memory footprint: 94.2%.
   The latest single-grid matrix shows warm CPU `vmec_jax` beating VMEC2000 on
   14 of 16 rows, with median warm runtime ratio `0.83x` VMEC2000 and median
   peak-memory ratio `3.04x` VMEC2000. Cold process runtime remains slower
@@ -104,7 +104,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   remains materially higher than VMEC2000, especially for LASYM finite-beta
   rows. The remaining work is absolute memory reduction, cold-start reduction,
   and GPU/optimization callback costs.
-- Refactor/API/examples: 52%.
+- Refactor/API/examples: 52.5%.
   Public examples are better, but core source files and tests are still too
   large and too entangled. The fixed-boundary residual timing/setup seam is now
   slightly cleaner, but the main residual loop still needs a larger split.
@@ -112,11 +112,11 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   The PR #20 four-row executable WOUT parity gate passed, and the single-grid
   runtime matrix records VMEC++ availability per row. More bounded
   free-boundary external parity remains future work.
-- Docs/release hygiene: 97.5%.
+- Docs/release hygiene: 97.6%.
   README is concise, runtime/memory detail lives in docs, and benchmark plus
   AD-FD provenance are refreshed. Remaining work is Sphinx gating and pruning
   historical performance prose after review.
-- Overall completion: 93.5%.
+- Overall completion: 93.8%.
   PR #20 readiness gates for benchmark, current-vs-main regression,
   differentiation evidence, and selected WOUT parity are now substantially
   complete; the long-term research-grade performance/refactor work remains
@@ -2418,3 +2418,42 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97%.
 - Docs/release hygiene: 97.5%.
 - Overall: 93.5%.
+
+### 2026-06-22: Add explicit low-memory fixed-boundary solver mode
+
+Steps taken:
+
+- Added `solver_mode="memory"` plus `low-memory`/`low_memory` aliases that map
+  to the existing parity path.
+- Updated CLI help and README CLI reference so beginners can choose the
+  low-peak-memory path without needing to know that it is implemented by the
+  VMEC2000-style parity loop.
+- Added policy-helper coverage for the new aliases.
+
+Results obtained:
+
+- This does not change the default runtime-optimized policy or the public
+  benchmark results.
+- It exposes the measured LASYM tradeoff as an explicit user choice:
+  lower peak memory with VMEC2000-like parity runtime, rather than a silent
+  default-policy regression.
+
+Best next steps:
+
+1. Run focused policy/CLI tests and Sphinx docs build.
+2. Consider a future automatic memory-budget selector only after users have a
+   stable explicit control and after more rows are profiled.
+3. Continue deeper runtime work on cold-start setup and GPU/optimization
+   callback costs separately from this memory-mode knob.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92%.
+- Free-boundary production differentiability: 91%.
+- Single-stage coil optimization: 87.5%.
+- CPU/GPU runtime and memory footprint: 94.2%.
+- Refactor/API/examples: 52.5%.
+- VMEC2000/VMEC++ parity and physics gates: 97%.
+- Docs/release hygiene: 97.6%.
+- Overall: 93.8%.

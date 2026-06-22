@@ -191,5 +191,6 @@ vmec --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
 vmec --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
 vmec --plot boozmn.nc  generate Boozer contour and spectrum plots
 vmec --parity input.*  force the conservative VMEC2000-style loop
+vmec --solver-mode memory input.*  choose the lower-peak-memory parity path
 vmec --help            show the full option list
 ```

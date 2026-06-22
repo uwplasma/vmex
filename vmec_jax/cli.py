@@ -184,7 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--solver-mode",
         type=str,
         default=None,
-        help="Solver policy: default|parity|accelerated (default: current default path).",
+        help=(
+            "Solver policy: default|parity|accelerated|memory "
+            "(memory is a low-peak-memory alias for parity; default uses current production policy)."
+        ),
     )
     p.add_argument(
         "--solver-device",

@@ -2224,6 +2224,9 @@ measured about ``15.5 s`` warmed runtime and ``0.59 GiB`` peak memory on the
 same row.  VMEC2000 takes about ``14.7 s`` on that input.  Therefore the next
 memory lane is a deliberate memory-aware policy selector or user-facing mode,
 not silently changing the default runtime-optimized policy.
+Use ``run_fixed_boundary(..., solver_mode="memory")`` or
+``vmec input.name --solver-mode memory`` to request this low-memory parity path
+without remembering VMEC-internal policy names.
 
 The first fixed-boundary cold-path hotspot isolated in this pass was first-call
 3D preconditioner seed construction.  A bounded QH no-scan profile with detailed
