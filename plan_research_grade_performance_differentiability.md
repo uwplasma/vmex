@@ -96,7 +96,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 93.4%.
+- CPU/GPU runtime and memory footprint: 93.8%.
   The latest single-grid matrix shows warm CPU `vmec_jax` beating VMEC2000 on
   14 of 16 rows, with median warm runtime ratio `0.83x` VMEC2000 and median
   peak-memory ratio `3.04x` VMEC2000. Cold process runtime remains slower
@@ -112,11 +112,11 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   The PR #20 four-row executable WOUT parity gate passed, and the single-grid
   runtime matrix records VMEC++ availability per row. More bounded
   free-boundary external parity remains future work.
-- Docs/release hygiene: 97.3%.
+- Docs/release hygiene: 97.5%.
   README is concise, runtime/memory detail lives in docs, and benchmark plus
   AD-FD provenance are refreshed. Remaining work is Sphinx gating and pruning
   historical performance prose after review.
-- Overall completion: 93.2%.
+- Overall completion: 93.5%.
   PR #20 readiness gates for benchmark, current-vs-main regression,
   differentiation evidence, and selected WOUT parity are now substantially
   complete; the long-term research-grade performance/refactor work remains
@@ -2365,3 +2365,56 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97%.
 - Docs/release hygiene: 97.3%.
 - Overall: 93.2%.
+
+### 2026-06-22: Classify LASYM peak-memory policy tradeoff
+
+Steps taken:
+
+- Ran focused one-row probes for `basic_non_stellsym_pressure`, the largest
+  peak-memory outlier in the single-grid matrix.
+- Compared default production policy, explicit `VMEC_JAX_SCAN_MINIMAL=1`,
+  explicit `solver_mode=accelerated`, and explicit `solver_mode=parity`.
+- Ran bounded profilers on `basic_non_stellsym_pressure` and
+  `LandremanSengupta2019_section5.4_B2_A80` to classify whether the remaining
+  gap was scan-history retention, policy selection, or force/preconditioner
+  arithmetic.
+
+Results obtained:
+
+- `VMEC_JAX_SCAN_MINIMAL=1` did not reduce peak memory for
+  `basic_non_stellsym_pressure`; it measured roughly the same warm runtime and
+  slightly higher peak memory than the default. This rules out full scan
+  history as the main memory culprit on that row.
+- Explicit accelerated mode measured about `5.79 s` warm runtime and
+  `1.66 GiB` peak process memory.
+- Explicit parity mode measured about `15.48 s` warm runtime and
+  `0.64 GiB` peak process memory. VMEC2000 is about `14.72 s` on this row.
+- The next memory win is therefore a deliberate memory-aware policy selector or
+  user-facing mode. Silently switching the default would sacrifice the main
+  runtime gain and should not be done without an explicit user preference or
+  documented memory budget.
+- The bounded `A80` cold probe showed that automatic finish-policy micro-probes
+  and preconditioner R/Z apply dominate the short parity diagnostic; this is a
+  cold/tiny-row overhead target, not a large-row force-kernel target.
+
+Best next steps:
+
+1. Add a documented memory-aware fixed-boundary policy (`solver_mode` value or
+   explicit option) that selects parity/host-loop paths for LASYM/high-memory
+   rows when users prioritize peak memory over warm runtime.
+2. Keep the runtime-optimized default for the public benchmark unless a memory
+   mode is explicitly requested.
+3. Profile cold/tiny-row setup separately from long-run force kernels so future
+   optimizations do not trade away the 14/16 warm-runtime wins.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92%.
+- Free-boundary production differentiability: 91%.
+- Single-stage coil optimization: 87.5%.
+- CPU/GPU runtime and memory footprint: 93.8%.
+- Refactor/API/examples: 52%.
+- VMEC2000/VMEC++ parity and physics gates: 97%.
+- Docs/release hygiene: 97.5%.
+- Overall: 93.5%.

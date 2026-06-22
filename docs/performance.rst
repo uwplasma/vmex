@@ -2215,6 +2215,16 @@ per-row threshold hits, mostly near-threshold runtime noise or external-load
 effects; the aggregate warm runtime and memory metrics are materially better
 than both ``origin/main`` and the previous current-branch matrix.
 
+A focused follow-up on the worst peak-memory row
+(``basic_non_stellsym_pressure``) showed that the gap is now a policy tradeoff,
+not scan-history retention.  Explicit ``VMEC_JAX_SCAN_MINIMAL=1`` did not reduce
+peak memory.  The accelerated policy measured about ``5.8 s`` warmed runtime
+and ``1.55 GiB`` peak process memory, while explicit ``solver_mode="parity"``
+measured about ``15.5 s`` warmed runtime and ``0.59 GiB`` peak memory on the
+same row.  VMEC2000 takes about ``14.7 s`` on that input.  Therefore the next
+memory lane is a deliberate memory-aware policy selector or user-facing mode,
+not silently changing the default runtime-optimized policy.
+
 The first fixed-boundary cold-path hotspot isolated in this pass was first-call
 3D preconditioner seed construction.  A bounded QH no-scan profile with detailed
 VMEC timing reported ``0.922 s`` in preconditioner seed setup, split into
