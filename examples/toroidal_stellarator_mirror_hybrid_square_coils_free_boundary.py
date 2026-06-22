@@ -1,26 +1,23 @@
-"""Reduced free-boundary beta scan for a square-coil stellarator mirror hybrid.
+"""Free-boundary square-coil stellarator-mirror hybrid beta scan.
 
-This example builds a closed square array of mirror-like coil stacks.  Each
-side of the square has ``N`` circular coils on a straight line; by default
-``N=4``, giving 16 coils.  The coil planes are perpendicular to the local side
-axis, so each straight side behaves like a short mirror segment and the four
-segments close through corner regions.
+Edit the parameters in the first block below, then run this file directly:
 
-The workflow is a reduced free-boundary planning fixture.  It samples the
-vacuum field from the coils, applies a local pressure-balance-inspired LCFS
-response, and scans the boundary from beta=0 to beta=10%.  It is intended for
-geometry, coil-layout, plotting, and residual-vector development before the
-full toroidal free-boundary solve/adjoint path is promoted.
+    python examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
+
+The script builds a square array of circular/elliptical coils, writes one
+free-boundary VMEC input per beta value, runs ``vmec_jax.run_free_boundary``
+with the direct-coil external-field provider, writes WOUT files, and plots the
+solved LCFS and solved-equilibrium field-line traces.
 """
 
 from __future__ import annotations
 
-import argparse
 import csv
 from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 import numpy as np
@@ -29,390 +26,528 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from vmec_jax._compat import jnp
-from vmec_jax.external_fields import CoilFieldParams, build_coil_field_geometry, sample_coil_field_xyz_from_geometry
+from vmec_jax._compat import enable_x64
+from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
+from vmec_jax.external_fields import build_coil_field_geometry, ellipse_coil_field_params
+from vmec_jax.field import b2_from_bsup, bsup_from_geom, lamscale_from_phips
+from vmec_jax.fieldlines import FieldLine, trace_fieldline_on_surface
+from vmec_jax.geom import eval_geom
+from vmec_jax.namelist import InData, write_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d
+from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
+from vmec_jax.toroidal_hybrid import square_axis_stellarator_mirror_hybrid_indata
+from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
-SCHEMA = "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_beta_scan"
-SCHEMA_VERSION = "0.1"
-MU0 = 4.0e-7 * np.pi
+# ---------------------------------------------------------------------------
+# Input parameters.  Keep this block as the user-facing control surface.
+# ---------------------------------------------------------------------------
+
+OUTDIR = ROOT / "results" / "toroidal_stellarator_mirror_hybrid_square_coils"
+BETAS_PERCENT = (0.0, 1.0, 3.0, 10.0)
+
+N_COILS_PER_SIDE = 4
+COIL_SQUARE_SIDE_LENGTH = 3.0
+COIL_MAJOR_RADIUS = 0.50
+COIL_MINOR_RADIUS = 0.50
+COIL_CURRENT = 8.0e5
+COIL_SEGMENTS = 96
+
+PLASMA_AXIS_HALF_WIDTH = 0.5 * COIL_SQUARE_SIDE_LENGTH
+PLASMA_AXIS_SQUARE_POWER = 3.0
+PLASMA_MINOR_RADIUS = 0.03
+SIDE_ELONGATION = 0.08
+SIDE_MINOR_MODULATION = 0.08
+CORNER_ELLIPTICITY = 0.04
+CORNER_AMPLITUDE = 0.004
+CORNER_ROTATION = 0.30
+CORNER_HELICITY = 1
+
+NFP = 1
+MPOL = 5
+NTOR = 12
+NS = 9
+NZETA = 32
+MAX_ITER = 1000
+FTOL = 1.0e-8
+PHIEDGE = 0.04
+TOROIDAL_CURRENT = 3.0e3
+DELT: float | None = None
+FREE_BOUNDARY_ACTIVATE_FSQ: float | None = 1.0e-2
+LIMIT_UPDATE_RMS = False
+BETA_CONTINUATION_RESTART = True
+JIT_FORCES: bool | str = "auto"
+
+FIELD_LINE_COUNT = 3
+FIELD_LINE_STEPS = 900
+FIELD_LINE_TURNS = 1.25
+
+
+SCHEMA = "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
+SCHEMA_VERSION = "0.2"
 
 
 @dataclass(frozen=True)
-class SquareCoilArray:
-    """Square array of circular coils and its direct-coil field parameters."""
+class ExampleConfig:
+    outdir: Path = OUTDIR
+    betas_percent: tuple[float, ...] = BETAS_PERCENT
+    n_coils_per_side: int = N_COILS_PER_SIDE
+    coil_square_side_length: float = COIL_SQUARE_SIDE_LENGTH
+    coil_major_radius: float = COIL_MAJOR_RADIUS
+    coil_minor_radius: float = COIL_MINOR_RADIUS
+    coil_current: float = COIL_CURRENT
+    coil_segments: int = COIL_SEGMENTS
+    plasma_axis_half_width: float = PLASMA_AXIS_HALF_WIDTH
+    plasma_axis_square_power: float = PLASMA_AXIS_SQUARE_POWER
+    plasma_minor_radius: float = PLASMA_MINOR_RADIUS
+    side_elongation: float = SIDE_ELONGATION
+    side_minor_modulation: float = SIDE_MINOR_MODULATION
+    corner_ellipticity: float = CORNER_ELLIPTICITY
+    corner_amplitude: float = CORNER_AMPLITUDE
+    corner_rotation: float = CORNER_ROTATION
+    corner_helicity: int = CORNER_HELICITY
+    nfp: int = NFP
+    mpol: int = MPOL
+    ntor: int = NTOR
+    ns: int = NS
+    nzeta: int = NZETA
+    max_iter: int = MAX_ITER
+    ftol: float = FTOL
+    phiedge: float = PHIEDGE
+    toroidal_current: float = TOROIDAL_CURRENT
+    delt: float | None = DELT
+    free_boundary_activate_fsq: float | None = FREE_BOUNDARY_ACTIVATE_FSQ
+    limit_update_rms: bool = LIMIT_UPDATE_RMS
+    beta_continuation_restart: bool = BETA_CONTINUATION_RESTART
+    jit_forces: bool | str = JIT_FORCES
+    field_line_count: int = FIELD_LINE_COUNT
+    field_line_steps: int = FIELD_LINE_STEPS
+    field_line_turns: float = FIELD_LINE_TURNS
+    write_plots: bool = True
 
-    params: CoilFieldParams
+
+@dataclass(frozen=True)
+class SquareCoilSet:
+    params: Any
     centers: np.ndarray
-    tangents: np.ndarray
-    inward_normals: np.ndarray
+    normals: np.ndarray
+    major_axes: np.ndarray
     currents: np.ndarray
     side_index: np.ndarray
     side_coordinate: np.ndarray
 
 
 @dataclass(frozen=True)
-class HybridBoundarySurface:
-    """Sampled square-torus LCFS for one beta value."""
-
+class SolvedBetaCase:
     beta_percent: float
+    input_path: Path
+    wout_path: Path
+    run: Any
+    wall_s: float
     theta: np.ndarray
-    alpha: np.ndarray
-    axis: np.ndarray
-    xyz: np.ndarray
-    radial_semiaxis: np.ndarray
-    vertical_semiaxis: np.ndarray
-    scale: np.ndarray
-    response: np.ndarray
+    zeta: np.ndarray
+    R: np.ndarray
+    Z: np.ndarray
+    Bmag: np.ndarray
+    bsupu: np.ndarray
+    bsupv: np.ndarray
+    field_lines: tuple[FieldLine, ...]
+    row: dict[str, Any]
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--outdir", type=Path, default=Path("results/toroidal_stellarator_mirror_hybrid_square_coils"))
-    parser.add_argument("--n-per-side", type=int, default=4)
-    parser.add_argument("--betas", type=str, default="0,1,3,10", help="Comma-separated nominal beta percentages.")
-    parser.add_argument("--side-length", type=float, default=3.0)
-    parser.add_argument("--axis-half-width", type=float, default=1.0)
-    parser.add_argument("--axis-square-power", type=float, default=5.0)
-    parser.add_argument("--coil-radius", type=float, default=0.36)
-    parser.add_argument("--coil-current", type=float, default=8.0e5)
-    parser.add_argument("--n-segments", type=int, default=96)
-    parser.add_argument("--minor-radius", type=float, default=0.16)
-    parser.add_argument("--side-elongation", type=float, default=0.30)
-    parser.add_argument("--side-minor-modulation", type=float, default=0.08)
-    parser.add_argument("--corner-ellipticity", type=float, default=0.18)
-    parser.add_argument("--corner-amplitude", type=float, default=0.025)
-    parser.add_argument("--corner-rotation", type=float, default=0.35)
-    parser.add_argument("--corner-helicity", type=int, default=1)
-    parser.add_argument("--beta-expansion", type=float, default=0.18)
-    parser.add_argument("--response-min", type=float, default=0.35)
-    parser.add_argument("--response-max", type=float, default=2.5)
-    parser.add_argument("--ntheta", type=int, default=48)
-    parser.add_argument("--nalpha", type=int, default=96)
-    parser.add_argument("--chunk-size", type=int, default=512)
-    parser.add_argument("--field-line-count", type=int, default=8)
-    parser.add_argument("--field-line-steps", type=int, default=120)
-    parser.add_argument("--field-line-step-size", type=float, default=0.025)
-    parser.add_argument("--no-plots", action="store_true")
-    return parser
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    return str(value)
 
 
-def _parse_float_list(value: str) -> tuple[float, ...]:
-    items = [item.strip() for item in str(value).replace(",", " ").split() if item.strip()]
-    if not items:
-        raise ValueError("betas must contain at least one value")
-    betas = tuple(float(item) for item in items)
-    if any(beta < 0.0 for beta in betas):
-        raise ValueError("betas must be nonnegative percentages")
-    return betas
+def _finite_history(values: Any) -> np.ndarray:
+    try:
+        arr = np.asarray(values, dtype=float).reshape(-1)
+    except Exception:
+        return np.zeros((0,), dtype=float)
+    return arr[np.isfinite(arr)]
 
 
-def _unit(vector: np.ndarray) -> np.ndarray:
-    vector = np.asarray(vector, dtype=float)
-    norm = float(np.linalg.norm(vector))
-    if norm <= 0.0:
-        raise ValueError("zero vector cannot be normalized")
-    return vector / norm
+def _history_stats(values: Any) -> dict[str, float | int | None]:
+    arr = _finite_history(values)
+    if not arr.size:
+        return {"count": 0, "first": None, "final": None, "min": None, "max": None}
+    return {
+        "count": int(arr.size),
+        "first": float(arr[0]),
+        "final": float(arr[-1]),
+        "min": float(np.min(arr)),
+        "max": float(np.max(arr)),
+    }
 
 
-def build_square_mirror_coils(
-    *,
-    n_per_side: int = 4,
-    side_length: float = 3.0,
-    coil_radius: float = 0.36,
-    current: float = 8.0e5,
-    n_segments: int = 96,
-    chunk_size: int | None = 512,
-) -> SquareCoilArray:
-    """Return 4*N circular coils centered on a square in the ``z=0`` plane."""
+def _classify_stall(row: dict[str, Any]) -> str:
+    if bool(row.get("converged")):
+        return "converged"
+    if row.get("n_iter") is None:
+        return "no_iteration_result"
+    bad_resets = int(row.get("bad_resets") or 0)
+    ijacob = int(row.get("ijacob") or 0)
+    if bad_resets > 0 or ijacob != 0:
+        return "bad_jacobian_or_restart_limited"
+    bmin = row.get("free_boundary_bnormal_history_min")
+    bfinal = row.get("free_boundary_bnormal_history_final")
+    if bmin not in (None, 0.0) and bfinal is not None and float(bfinal) > 2.0 * float(bmin):
+        return "free_boundary_bnormal_cycling"
+    return "max_iter_residual_floor"
 
-    n_per_side = int(n_per_side)
-    if n_per_side < 1:
-        raise ValueError("n_per_side must be positive")
-    if side_length <= 0.0:
-        raise ValueError("side_length must be positive")
-    if coil_radius <= 0.0:
-        raise ValueError("coil_radius must be positive")
-    if n_segments < 16:
-        raise ValueError("n_segments must be at least 16")
 
-    half = 0.5 * float(side_length)
-    coordinates = np.linspace(-half, half, n_per_side + 2, dtype=float)[1:-1]
+def build_square_coils(config: ExampleConfig) -> SquareCoilSet:
+    """Create ``4*N`` elliptical coils on a square centered at the origin."""
+
+    n = int(config.n_coils_per_side)
+    if n < 1:
+        raise ValueError("n_coils_per_side must be positive")
+    half = 0.5 * float(config.coil_square_side_length)
+    q_values = np.linspace(-half, half, n + 2, dtype=float)[1:-1]
     vertical = np.asarray([0.0, 0.0, 1.0])
     side_specs = (
-        # center coordinate builder, tangent along the side, inward normal.
-        (lambda q: np.asarray([q, half, 0.0]), np.asarray([1.0, 0.0, 0.0]), np.asarray([0.0, -1.0, 0.0])),
-        (lambda q: np.asarray([half, -q, 0.0]), np.asarray([0.0, -1.0, 0.0]), np.asarray([-1.0, 0.0, 0.0])),
-        (lambda q: np.asarray([-q, -half, 0.0]), np.asarray([-1.0, 0.0, 0.0]), np.asarray([0.0, 1.0, 0.0])),
-        (lambda q: np.asarray([-half, q, 0.0]), np.asarray([0.0, 1.0, 0.0]), np.asarray([1.0, 0.0, 0.0])),
+        (lambda q: np.asarray([q, half, 0.0]), np.asarray([1.0, 0.0, 0.0])),
+        (lambda q: np.asarray([half, -q, 0.0]), np.asarray([0.0, -1.0, 0.0])),
+        (lambda q: np.asarray([-q, -half, 0.0]), np.asarray([-1.0, 0.0, 0.0])),
+        (lambda q: np.asarray([-half, q, 0.0]), np.asarray([0.0, 1.0, 0.0])),
     )
-
     centers: list[np.ndarray] = []
-    tangents: list[np.ndarray] = []
-    inward_normals: list[np.ndarray] = []
+    normals: list[np.ndarray] = []
+    major_axes: list[np.ndarray] = []
     side_index: list[int] = []
     side_coordinate: list[float] = []
-    dofs = np.zeros((4 * n_per_side, 3, 3), dtype=float)
-    coil_index = 0
-    for sidx, (center_for, tangent, inward) in enumerate(side_specs):
-        tangent = _unit(tangent)
-        inward = _unit(inward)
-        for q in coordinates:
-            center = np.asarray(center_for(float(q)), dtype=float)
-            centers.append(center)
-            tangents.append(tangent)
-            inward_normals.append(inward)
-            side_index.append(sidx)
+    for idx, (center_for, side_tangent) in enumerate(side_specs):
+        tangent = side_tangent / np.linalg.norm(side_tangent)
+        for q in q_values:
+            centers.append(np.asarray(center_for(float(q)), dtype=float))
+            normals.append(tangent)
+            major_axes.append(vertical)
+            side_index.append(idx)
             side_coordinate.append(float(q))
-            dofs[coil_index, :, 0] = center
-            # gamma = center + coil_radius * (sin(t) * inward + cos(t) * z).
-            # The oriented area normal is z x inward, matching the side tangent.
-            dofs[coil_index, :, 1] = float(coil_radius) * inward
-            dofs[coil_index, :, 2] = float(coil_radius) * vertical
-            coil_index += 1
-
-    currents = np.full(4 * n_per_side, float(current), dtype=float)
-    params = CoilFieldParams(
-        base_curve_dofs=jnp.asarray(dofs),
-        base_currents=jnp.asarray(currents),
-        n_segments=int(n_segments),
+    centers_arr = np.asarray(centers, dtype=float)
+    normals_arr = np.asarray(normals, dtype=float)
+    major_axes_arr = np.asarray(major_axes, dtype=float)
+    currents = np.full((centers_arr.shape[0],), float(config.coil_current), dtype=float)
+    params = ellipse_coil_field_params(
+        centers=centers_arr,
+        normals=normals_arr,
+        major_axes=major_axes_arr,
+        major_radius=float(config.coil_major_radius),
+        minor_radius=float(config.coil_minor_radius),
+        currents=currents,
+        n_segments=int(config.coil_segments),
         nfp=1,
         stellsym=False,
-        current_scale=1.0,
-        regularization_epsilon=1.0e-6 * float(coil_radius),
-        chunk_size=None if chunk_size is None else int(chunk_size),
+        regularization_epsilon=1.0e-6 * min(config.coil_major_radius, config.coil_minor_radius),
+        chunk_size=512,
     )
-    return SquareCoilArray(
+    return SquareCoilSet(
         params=params,
-        centers=np.asarray(centers, dtype=float),
-        tangents=np.asarray(tangents, dtype=float),
-        inward_normals=np.asarray(inward_normals, dtype=float),
+        centers=centers_arr,
+        normals=normals_arr,
+        major_axes=major_axes_arr,
         currents=currents,
         side_index=np.asarray(side_index, dtype=int),
         side_coordinate=np.asarray(side_coordinate, dtype=float),
     )
 
 
-def _superellipse_axis(alpha: np.ndarray, *, half_width: float, power: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return a smooth square-like centerline and radial outward frame."""
-
-    c = np.cos(alpha)
-    s = np.sin(alpha)
-    exponent = 2.0 / float(power)
-    x = float(half_width) * np.sign(c) * np.abs(c) ** exponent
-    y = float(half_width) * np.sign(s) * np.abs(s) ** exponent
-    axis = np.stack([x, y, np.zeros_like(x)], axis=-1)
-    radial = np.stack([x, y, np.zeros_like(x)], axis=-1)
-    radial_norm = np.linalg.norm(radial, axis=1)
-    radial = radial / np.maximum(radial_norm[:, None], np.finfo(float).tiny)
-    tangent = np.gradient(axis, alpha, axis=0, edge_order=2)
-    tangent = tangent / np.maximum(np.linalg.norm(tangent, axis=1)[:, None], np.finfo(float).tiny)
-    return axis, radial, tangent
+def _case_label(beta_percent: float) -> str:
+    return f"beta_{float(beta_percent):06.3f}".replace(".", "p").replace("-", "m")
 
 
-def _surface_from_scale(
+def _pressure_terms(beta_percent: float) -> tuple[list[float], float]:
+    if float(beta_percent) == 0.0:
+        return [0.0], 0.0
+    profiles = standard_finite_beta_profiles(float(beta_percent))
+    am, pres_scale = pressure_profile_to_vmec_am(profiles.pressure_pa, pres_scale=1.0)
+    return [float(x) for x in am], float(pres_scale)
+
+
+def make_free_boundary_indata(config: ExampleConfig, *, beta_percent: float) -> InData:
+    """Return the free-boundary input deck for one beta case."""
+
+    indata = square_axis_stellarator_mirror_hybrid_indata(
+        nfp=int(config.nfp),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ntheta_fit=max(64, 4 * int(config.mpol)),
+        nzeta_fit=max(128, 8 * int(config.ntor)),
+        ns_array=int(config.ns),
+        niter_array=int(config.max_iter),
+        ftol_array=float(config.ftol),
+        phiedge=float(config.phiedge),
+        axis_half_width=float(config.plasma_axis_half_width),
+        axis_square_power=float(config.plasma_axis_square_power),
+        minor_radius=float(config.plasma_minor_radius),
+        side_elongation=float(config.side_elongation),
+        side_minor_modulation=float(config.side_minor_modulation),
+        corner_ellipticity=float(config.corner_ellipticity),
+        corner_amplitude=float(config.corner_amplitude),
+        corner_rotation=float(config.corner_rotation),
+        corner_helicity=int(config.corner_helicity),
+    )
+    am, pres_scale = _pressure_terms(float(beta_percent))
+    indata.scalars.update(
+        {
+            "LFREEB": True,
+            "MGRID_FILE": "DIRECT_COILS",
+            "EXTCUR": [1.0],
+            "NS_ARRAY": [int(config.ns)],
+            "NITER_ARRAY": [int(config.max_iter)],
+            "FTOL_ARRAY": [float(config.ftol)],
+            "NITER": int(config.max_iter),
+            "FTOL": float(config.ftol),
+            "NZETA": int(config.nzeta),
+            "NTHETA": 0,
+            "NVACSKIP": max(1, int(config.nzeta)),
+            "PMASS_TYPE": "power_series",
+            "AM": am,
+            "PRES_SCALE": pres_scale,
+            "NCURR": 1,
+            "CURTOR": float(config.toroidal_current),
+            "PCURR_TYPE": "power_series_i",
+            "AC": [float(config.toroidal_current)],
+            "PIOTA_TYPE": "power_series",
+            "AI": [0.0],
+        }
+    )
+    if config.delt is not None:
+        indata.scalars["DELT"] = float(config.delt)
+    return indata
+
+
+def _solved_surface_and_field(run: Any, config: ExampleConfig) -> tuple[np.ndarray, ...]:
+    """Sample the solved boundary and contravariant field on the VMEC grid."""
+
+    geom = eval_geom(run.state, run.static)
+    lamscale = lamscale_from_phips(run.flux.phips, run.static.s)
+    bsupu, bsupv = bsup_from_geom(
+        geom,
+        phipf=run.flux.phipf,
+        chipf=run.flux.chipf,
+        nfp=int(config.nfp),
+        signgs=int(run.signgs),
+        lamscale=lamscale,
+        flux_is_internal=True,
+    )
+    bmag = np.sqrt(np.asarray(b2_from_bsup(geom, bsupu, bsupv), dtype=float))
+    theta = np.asarray(run.static.grid.theta, dtype=float)
+    zeta = np.asarray(run.static.grid.zeta, dtype=float)
+    return (
+        theta,
+        zeta,
+        np.asarray(geom.R[-1], dtype=float),
+        np.asarray(geom.Z[-1], dtype=float),
+        bmag[-1],
+        np.asarray(bsupu[-1], dtype=float),
+        np.asarray(bsupv[-1], dtype=float),
+    )
+
+
+def _trace_solved_field_lines(
     *,
-    theta: np.ndarray,
-    alpha: np.ndarray,
-    axis: np.ndarray,
-    radial_out: np.ndarray,
-    scale: np.ndarray,
-    minor_radius: float,
-    side_elongation: float,
-    side_minor_modulation: float,
-    corner_ellipticity: float,
-    corner_amplitude: float,
-    corner_rotation: float,
-    corner_helicity: int,
+    R: np.ndarray,
+    Z: np.ndarray,
+    bsupu: np.ndarray,
+    bsupv: np.ndarray,
+    Bmag: np.ndarray,
+    config: ExampleConfig,
+) -> tuple[FieldLine, ...]:
+    lines = []
+    dphi = 2.0 * np.pi * float(config.field_line_turns) / max(2, int(config.field_line_steps) - 1)
+    for idx in range(int(config.field_line_count)):
+        theta0 = 2.0 * np.pi * (idx + 0.5) / max(1, int(config.field_line_count))
+        lines.append(
+            trace_fieldline_on_surface(
+                R=R,
+                Z=Z,
+                bsupu=bsupu,
+                bsupv=bsupv,
+                Bmag=Bmag,
+                nfp=int(config.nfp),
+                theta0=theta0,
+                phi0=0.0,
+                n_steps=int(config.field_line_steps),
+                dphi=dphi,
+            )
+        )
+    return tuple(lines)
+
+
+def _run_one_beta(
+    config: ExampleConfig,
+    coils: SquareCoilSet,
+    *,
     beta_percent: float,
-    response: np.ndarray,
-) -> HybridBoundarySurface:
-    theta2, alpha2 = np.meshgrid(theta, alpha, indexing="ij")
-    side_weight = np.abs(np.cos(2.0 * alpha)) ** 1.5
-    corner_weight = np.abs(np.sin(2.0 * alpha)) ** 1.5
-    minor = float(minor_radius) * (1.0 + float(side_minor_modulation) * side_weight)
-    radial_semiaxis = minor * (1.0 + float(corner_ellipticity) * corner_weight)
-    vertical_semiaxis = minor * (1.0 + float(side_elongation) * side_weight) * (
-        1.0 - 0.5 * float(corner_ellipticity) * corner_weight
-    )
-    phase = 2.0 * theta2 - float(int(corner_helicity)) * alpha2
-    r_local = radial_semiaxis[None, :] * np.cos(theta2)
-    z_local = vertical_semiaxis[None, :] * np.sin(theta2)
-    r_local = r_local + float(corner_amplitude) * corner_weight[None, :] * np.cos(phase)
-    z_local = z_local + float(corner_amplitude) * corner_weight[None, :] * np.sin(phase)
-    r_local = scale * r_local
-    z_local = scale * z_local
+    restart_state: Any | None = None,
+) -> SolvedBetaCase:
+    label = _case_label(beta_percent)
+    case_dir = Path(config.outdir) / label
+    case_dir.mkdir(parents=True, exist_ok=True)
+    input_path = case_dir / f"input.square_coil_hybrid_{label}"
+    wout_path = case_dir / f"wout_square_coil_hybrid_{label}.nc"
+    indata = make_free_boundary_indata(config, beta_percent=float(beta_percent))
+    write_indata(input_path, indata)
 
-    tilt = float(corner_rotation) * corner_weight * np.sin(float(int(corner_helicity)) * alpha)
-    radial_component = r_local * np.cos(tilt)[None, :] - z_local * np.sin(tilt)[None, :]
-    vertical_component = r_local * np.sin(tilt)[None, :] + z_local * np.cos(tilt)[None, :]
-    vertical = np.asarray([0.0, 0.0, 1.0])
-    xyz = (
-        axis[None, :, :]
-        + radial_component[:, :, None] * radial_out[None, :, :]
-        + vertical_component[:, :, None] * vertical[None, None, :]
+    t0 = time.perf_counter()
+    run = run_free_boundary(
+        input_path,
+        max_iter=int(config.max_iter),
+        multigrid=False,
+        verbose=False,
+        jit_forces=config.jit_forces,
+        free_boundary_activate_fsq=(
+            None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
+        ),
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=coils.params,
+        limit_update_rms=bool(config.limit_update_rms),
+        restart_state=restart_state,
+        use_initial_guess=False,
     )
-    return HybridBoundarySurface(
+    wall_s = time.perf_counter() - t0
+    write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
+    theta, zeta, R, Z, Bmag, bsupu, bsupv = _solved_surface_and_field(run, config)
+    field_lines = _trace_solved_field_lines(R=R, Z=Z, bsupu=bsupu, bsupv=bsupv, Bmag=Bmag, config=config)
+
+    diag = run.result.diagnostics if run.result is not None else {}
+    freeb = diag.get("free_boundary", {}) if isinstance(diag, dict) else {}
+    nestor = freeb.get("last_nestor_diagnostics", {}) if isinstance(freeb, dict) else {}
+    w_stats = _history_stats([] if run.result is None else getattr(run.result, "w_history", []))
+    bnormal_stats = _history_stats(diag.get("freeb_nestor_bnormal_rms_history", []) if isinstance(diag, dict) else [])
+    try:
+        aspect = float(equilibrium_aspect_ratio_from_state(state=run.state, static=run.static))
+    except Exception:
+        aspect = None
+    try:
+        _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
+            state=run.state,
+            static=run.static,
+            indata=run.indata,
+            signgs=int(run.signgs),
+        )
+        mean_iota = float(np.nanmean(np.asarray(iotas, dtype=float)))
+    except Exception:
+        mean_iota = None
+    row = {
+        "beta_percent": float(beta_percent),
+        "input": str(input_path),
+        "wout": str(wout_path),
+        "wall_s": float(wall_s),
+        "n_iter": None if run.result is None else int(getattr(run.result, "n_iter", -1)),
+        "converged": None
+        if run.result is None
+        else bool(diag.get("converged", getattr(run.result, "converged", False))),
+        "converged_strict": None if run.result is None else diag.get("converged_strict"),
+        "requested_ftol": diag.get("requested_ftol") if isinstance(diag, dict) else None,
+        "final_fsq": diag.get("final_fsq") if isinstance(diag, dict) else None,
+        "final_fsqr": diag.get("final_fsqr") if isinstance(diag, dict) else None,
+        "final_fsqz": diag.get("final_fsqz") if isinstance(diag, dict) else None,
+        "final_fsql": diag.get("final_fsql") if isinstance(diag, dict) else None,
+        "free_boundary_bnormal_rms": nestor.get("bnormal_rms") if isinstance(nestor, dict) else None,
+        "free_boundary_bsqvac_rms": nestor.get("bsqvac_rms") if isinstance(nestor, dict) else None,
+        "free_boundary_gsource_rms": nestor.get("gsource_rms") if isinstance(nestor, dict) else None,
+        "history_w_count": w_stats["count"],
+        "history_w_first": w_stats["first"],
+        "history_w_final": w_stats["final"],
+        "history_w_min": w_stats["min"],
+        "history_w_max": w_stats["max"],
+        "free_boundary_bnormal_history_count": bnormal_stats["count"],
+        "free_boundary_bnormal_history_first": bnormal_stats["first"],
+        "free_boundary_bnormal_history_final": bnormal_stats["final"],
+        "free_boundary_bnormal_history_min": bnormal_stats["min"],
+        "free_boundary_bnormal_history_max": bnormal_stats["max"],
+        "bad_resets": diag.get("bad_resets") if isinstance(diag, dict) else None,
+        "ijacob": diag.get("ijacob") if isinstance(diag, dict) else None,
+        "final_residual_recomputed_on_accepted_state": (
+            diag.get("final_residual_recomputed_on_accepted_state") if isinstance(diag, dict) else None
+        ),
+        "bmag_min": float(np.nanmin(Bmag)),
+        "bmag_mean": float(np.nanmean(Bmag)),
+        "bmag_max": float(np.nanmax(Bmag)),
+        "aspect": aspect,
+        "mean_iota": mean_iota,
+    }
+    components = [row["final_fsqr"], row["final_fsqz"], row["final_fsql"]]
+    finite_components = [float(value) for value in components if value is not None and np.isfinite(float(value))]
+    row["final_fsq_component_sum"] = float(sum(finite_components)) if finite_components else None
+    if row["final_fsq_component_sum"] is not None and row["history_w_min"] not in (None, 0.0):
+        row["final_fsq_component_sum_over_history_w_min"] = float(row["final_fsq_component_sum"]) / float(
+            row["history_w_min"]
+        )
+    else:
+        row["final_fsq_component_sum_over_history_w_min"] = None
+    row["stall_classification"] = _classify_stall(row)
+    return SolvedBetaCase(
         beta_percent=float(beta_percent),
+        input_path=input_path,
+        wout_path=wout_path,
+        run=run,
+        wall_s=wall_s,
         theta=theta,
-        alpha=alpha,
-        axis=axis,
-        xyz=np.asarray(xyz, dtype=float),
-        radial_semiaxis=radial_semiaxis,
-        vertical_semiaxis=vertical_semiaxis,
-        scale=scale,
-        response=response,
+        zeta=zeta,
+        R=R,
+        Z=Z,
+        Bmag=Bmag,
+        bsupu=bsupu,
+        bsupv=bsupv,
+        field_lines=field_lines,
+        row=row,
     )
 
 
-def _sample_bfield(surface: HybridBoundarySurface, geometry, *, regularization_epsilon: float, chunk_size: int | None):
-    points = jnp.asarray(surface.xyz.reshape((-1, 3)))
-    field = sample_coil_field_xyz_from_geometry(
-        geometry,
-        points,
-        regularization_epsilon=regularization_epsilon,
-        chunk_size=chunk_size,
-    )
-    field = np.asarray(field).reshape(surface.xyz.shape)
-    bmag = np.linalg.norm(field, axis=-1)
-    return field, bmag
-
-
-def _surface_normals(surface: HybridBoundarySurface) -> np.ndarray:
-    dtheta = np.gradient(surface.xyz, surface.theta, axis=0, edge_order=2)
-    dalpha = np.gradient(surface.xyz, surface.alpha, axis=1, edge_order=2)
-    normal = np.cross(dalpha, dtheta)
-    norm = np.linalg.norm(normal, axis=-1)
-    return normal / np.maximum(norm[..., None], np.finfo(float).tiny)
-
-
-def make_beta_scan(
-    *,
-    coil_array: SquareCoilArray,
-    betas: tuple[float, ...],
-    axis_half_width: float,
-    axis_square_power: float,
-    minor_radius: float,
-    side_elongation: float,
-    side_minor_modulation: float,
-    corner_ellipticity: float,
-    corner_amplitude: float,
-    corner_rotation: float,
-    corner_helicity: int,
-    beta_expansion: float,
-    response_min: float,
-    response_max: float,
-    ntheta: int,
-    nalpha: int,
-    chunk_size: int | None,
-) -> tuple[list[dict[str, Any]], list[HybridBoundarySurface], dict[str, np.ndarray]]:
-    """Build beta-dependent surfaces and compact diagnostics."""
-
-    if int(ntheta) < 8 or int(nalpha) < 16:
-        raise ValueError("ntheta must be >= 8 and nalpha must be >= 16")
-    if not (0.0 < float(response_min) < float(response_max)):
-        raise ValueError("response_min and response_max must satisfy 0 < response_min < response_max")
-    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False)
-    alpha = np.linspace(0.0, 2.0 * np.pi, int(nalpha), endpoint=False)
-    axis, radial_out, tangent = _superellipse_axis(alpha, half_width=axis_half_width, power=axis_square_power)
-    unit_scale = np.ones((theta.size, alpha.size), dtype=float)
-    unit_response = np.ones_like(unit_scale)
-    base = _surface_from_scale(
-        theta=theta,
-        alpha=alpha,
-        axis=axis,
-        radial_out=radial_out,
-        scale=unit_scale,
-        minor_radius=minor_radius,
-        side_elongation=side_elongation,
-        side_minor_modulation=side_minor_modulation,
-        corner_ellipticity=corner_ellipticity,
-        corner_amplitude=corner_amplitude,
-        corner_rotation=corner_rotation,
-        corner_helicity=corner_helicity,
-        beta_percent=0.0,
-        response=unit_response,
-    )
-    geometry = build_coil_field_geometry(coil_array.params)
-    base_field, base_bmag = _sample_bfield(
-        base,
-        geometry,
-        regularization_epsilon=coil_array.params.regularization_epsilon,
-        chunk_size=chunk_size,
-    )
-    base_b2 = np.maximum(base_bmag**2, np.finfo(float).tiny)
-    response = np.mean(base_b2) / base_b2
-    response = np.clip(response, float(response_min), float(response_max))
-    response = response / np.mean(response)
-    response = np.clip(response, float(response_min), float(response_max))
-    response = response / np.mean(response)
-    b2_pressure_floor = float(max(np.percentile(base_b2, 5.0), np.finfo(float).tiny))
-    max_beta = max(max(float(beta) for beta in betas), 1.0)
-
-    rows: list[dict[str, Any]] = []
-    surfaces: list[HybridBoundarySurface] = []
-    fields = {"base_bmag": base_bmag, "base_field": base_field, "response": response}
-    for beta in betas:
-        beta_fraction = float(beta) / max_beta
-        scale = 1.0 + float(beta_expansion) * beta_fraction * response
-        surface = _surface_from_scale(
-            theta=theta,
-            alpha=alpha,
-            axis=axis,
-            radial_out=radial_out,
-            scale=scale,
-            minor_radius=minor_radius,
-            side_elongation=side_elongation,
-            side_minor_modulation=side_minor_modulation,
-            corner_ellipticity=corner_ellipticity,
-            corner_amplitude=corner_amplitude,
-            corner_rotation=corner_rotation,
-            corner_helicity=corner_helicity,
-            beta_percent=float(beta),
-            response=response,
-        )
-        field, bmag = _sample_bfield(
-            surface,
-            geometry,
-            regularization_epsilon=coil_array.params.regularization_epsilon,
-            chunk_size=chunk_size,
-        )
-        normals = _surface_normals(surface)
-        bnormal = np.sum(field * normals, axis=-1)
-        ds = np.linalg.norm(np.gradient(axis, alpha, axis=0, edge_order=2), axis=1)
-        area = np.pi * surface.radial_semiaxis * surface.vertical_semiaxis * np.mean(scale**2, axis=0)
-        volume_proxy = float(np.trapezoid(area * ds, alpha))
-        pressure = (float(beta) / 100.0) * float(np.mean(base_b2)) / (2.0 * MU0)
-        magnetic_pressure = np.maximum(bmag**2, b2_pressure_floor) / (2.0 * MU0)
-        pressure_balance_proxy = pressure / magnetic_pressure
-        rows.append(
-            {
-                "beta_percent": float(beta),
-                "beta_fraction_of_scan_max": beta_fraction,
-                "response_min": float(np.min(response)),
-                "response_mean": float(np.mean(response)),
-                "response_max": float(np.max(response)),
-                "boundary_scale_min": float(np.min(scale)),
-                "boundary_scale_mean": float(np.mean(scale)),
-                "boundary_scale_max": float(np.max(scale)),
-                "relative_volume_proxy": volume_proxy,
-                "bmag_min": float(np.min(bmag)),
-                "bmag_mean": float(np.mean(bmag)),
-                "bmag_max": float(np.max(bmag)),
-                "external_bnormal_rms": float(np.sqrt(np.mean(bnormal**2))),
-                "pressure_balance_proxy_rms": float(np.sqrt(np.mean(pressure_balance_proxy**2))),
-                "pressure_balance_proxy_max": float(np.max(pressure_balance_proxy)),
-            }
-        )
-        surfaces.append(surface)
-        fields[f"bmag_beta_{float(beta):g}"] = bmag
-        fields[f"bnormal_beta_{float(beta):g}"] = bnormal
-    if rows:
-        base_volume = rows[0]["relative_volume_proxy"]
+def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
+    keys = [
+        "beta_percent",
+        "input",
+        "wout",
+        "wall_s",
+        "n_iter",
+        "converged",
+        "converged_strict",
+        "requested_ftol",
+        "final_fsq",
+        "final_fsqr",
+        "final_fsqz",
+        "final_fsql",
+        "final_fsq_component_sum",
+        "free_boundary_bnormal_rms",
+        "free_boundary_bsqvac_rms",
+        "free_boundary_gsource_rms",
+        "history_w_count",
+        "history_w_first",
+        "history_w_final",
+        "history_w_min",
+        "history_w_max",
+        "free_boundary_bnormal_history_count",
+        "free_boundary_bnormal_history_first",
+        "free_boundary_bnormal_history_final",
+        "free_boundary_bnormal_history_min",
+        "free_boundary_bnormal_history_max",
+        "bad_resets",
+        "ijacob",
+        "final_residual_recomputed_on_accepted_state",
+        "bmag_min",
+        "bmag_mean",
+        "bmag_max",
+        "aspect",
+        "mean_iota",
+        "final_fsq_component_sum_over_history_w_min",
+        "stall_classification",
+    ]
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=keys)
+        writer.writeheader()
         for row in rows:
-            row["relative_volume_proxy"] = float(row["relative_volume_proxy"] / base_volume)
-    return rows, surfaces, fields
+            writer.writerow({key: row.get(key) for key in keys})
+    return path
 
 
 def _import_matplotlib():
@@ -427,382 +562,280 @@ def _import_matplotlib():
     return plt, Normalize, ScalarMappable
 
 
-def _closed_curve(values: np.ndarray) -> np.ndarray:
+def _xyz_from_rz(R: np.ndarray, Z: np.ndarray, zeta: np.ndarray, *, nfp: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    phi = np.asarray(zeta, dtype=float) / float(max(1, int(nfp)))
+    return R * np.cos(phi)[None, :], R * np.sin(phi)[None, :], Z
+
+
+def _closed(values: np.ndarray) -> np.ndarray:
     return np.r_[values, values[:1]]
 
 
-def _write_coils_json(path: Path, coil_array: SquareCoilArray) -> Path:
-    data = {
-        "format": "vmec_jax_square_mirror_hybrid_circular_fourier_coils",
-        "coil_count": int(coil_array.centers.shape[0]),
-        "centers": coil_array.centers.tolist(),
-        "tangents": coil_array.tangents.tolist(),
-        "inward_normals": coil_array.inward_normals.tolist(),
-        "currents": coil_array.currents.tolist(),
-        "side_index": coil_array.side_index.tolist(),
-        "side_coordinate": coil_array.side_coordinate.tolist(),
-        "base_curve_dofs": np.asarray(coil_array.params.base_curve_dofs).tolist(),
-        "n_segments": int(coil_array.params.n_segments),
-        "nfp": int(coil_array.params.nfp),
-        "stellsym": bool(coil_array.params.stellsym),
+def _write_coils_json(path: Path, coils: SquareCoilSet, config: ExampleConfig) -> Path:
+    payload = {
+        "format": "vmec_jax_square_axis_ellipse_coils",
+        "coil_count": int(coils.centers.shape[0]),
+        "n_coils_per_side": int(config.n_coils_per_side),
+        "centers": coils.centers,
+        "normals": coils.normals,
+        "major_axes": coils.major_axes,
+        "currents": coils.currents,
+        "side_index": coils.side_index,
+        "side_coordinate": coils.side_coordinate,
+        "base_curve_dofs": np.asarray(coils.params.base_curve_dofs),
+        "n_segments": int(coils.params.n_segments),
     }
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    path.write_text(json.dumps(payload, indent=2, default=_json_default) + "\n")
     return path
 
 
-def _write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
-    fieldnames = [
-        "beta_percent",
-        "response_min",
-        "response_mean",
-        "response_max",
-        "boundary_scale_min",
-        "boundary_scale_mean",
-        "boundary_scale_max",
-        "relative_volume_proxy",
-        "bmag_min",
-        "bmag_mean",
-        "bmag_max",
-        "external_bnormal_rms",
-        "pressure_balance_proxy_rms",
-        "pressure_balance_proxy_max",
-    ]
-    with path.open("w", newline="") as file_obj:
-        writer = csv.DictWriter(file_obj, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({name: row[name] for name in fieldnames})
-    return path
-
-
-def _trace_vacuum_field_lines(
-    coil_array: SquareCoilArray,
-    surface: HybridBoundarySurface,
-    *,
-    n_lines: int = 8,
-    n_steps: int = 120,
-    step_size: float = 0.025,
-    chunk_size: int | None = 512,
-) -> np.ndarray:
-    """Trace short vacuum-field lines for a visual pitch/orientation check."""
-
-    geometry = build_coil_field_geometry(coil_array.params)
-    alpha_indices = np.linspace(0, surface.alpha.size, int(n_lines), endpoint=False, dtype=int)
-    theta_index = surface.theta.size // 4
-    points = np.asarray(surface.xyz[theta_index, alpha_indices, :], dtype=float)
-    lines = np.empty((int(n_steps) + 1, points.shape[0], 3), dtype=float)
-    lines[0] = points
-    for step in range(1, int(n_steps) + 1):
-        field = sample_coil_field_xyz_from_geometry(
-            geometry,
-            jnp.asarray(points),
-            regularization_epsilon=coil_array.params.regularization_epsilon,
-            chunk_size=chunk_size,
-        )
-        field = np.asarray(field, dtype=float)
-        direction = field / np.maximum(np.linalg.norm(field, axis=1)[:, None], np.finfo(float).tiny)
-        points = points + float(step_size) * direction
-        lines[step] = points
-    return lines
-
-
-def _write_geometry_plot(
-    outdir: Path,
-    coil_array: SquareCoilArray,
-    surfaces: list[HybridBoundarySurface],
-    *,
-    field_line_count: int,
-    field_line_steps: int,
-    field_line_step_size: float,
-) -> Path:
+def _write_geometry_plot(outdir: Path, coils: SquareCoilSet, cases: list[SolvedBetaCase], config: ExampleConfig) -> Path:
     plt, Normalize, ScalarMappable = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
-    geometry = build_coil_field_geometry(coil_array.params)
-    gamma = np.asarray(geometry[0])
-    fig = plt.figure(figsize=(7.2, 6.0))
+    cmap = plt.get_cmap("viridis")
+    norm = Normalize(vmin=min(case.beta_percent for case in cases), vmax=max(case.beta_percent for case in cases))
+    gamma = np.asarray(build_coil_field_geometry(coils.params)[0])
+    fig = plt.figure(figsize=(7.4, 6.2))
     ax = fig.add_subplot(111, projection="3d")
     for coil in gamma:
         closed = np.vstack([coil, coil[:1]])
-        ax.plot(closed[:, 0], closed[:, 1], closed[:, 2], color="tab:orange", linewidth=1.0)
-    cmap = plt.get_cmap("viridis")
-    norm = Normalize(vmin=min(surface.beta_percent for surface in surfaces), vmax=max(surface.beta_percent for surface in surfaces))
-    for surface in (surfaces[0], surfaces[-1]):
-        color = cmap(norm(surface.beta_percent))
-        ax.plot_surface(
-            surface.xyz[:, :, 0],
-            surface.xyz[:, :, 1],
-            surface.xyz[:, :, 2],
-            color=color,
-            alpha=0.42 if surface is surfaces[0] else 0.58,
-            linewidth=0,
-            shade=False,
-        )
-    field_lines = _trace_vacuum_field_lines(
-        coil_array,
-        surfaces[0],
-        n_lines=field_line_count,
-        n_steps=field_line_steps,
-        step_size=field_line_step_size,
-    )
-    for line in np.moveaxis(field_lines, 0, 1):
-        ax.plot(line[:, 0], line[:, 1], line[:, 2], color="tab:blue", linewidth=0.9, alpha=0.75)
-    ax.set_title("square-coil hybrid LCFS, coils, and field lines")
+        ax.plot(closed[:, 0], closed[:, 1], closed[:, 2], color="tab:orange", linewidth=0.85, alpha=0.85)
+    for case in cases:
+        X, Y, Z = _xyz_from_rz(case.R, case.Z, case.zeta, nfp=config.nfp)
+        color = cmap(norm(case.beta_percent))
+        ax.plot_surface(X, Y, Z, color=color, linewidth=0, alpha=0.18, shade=False)
+        for line in case.field_lines:
+            ax.plot(line.x, line.y, line.z, color="black", linewidth=1.35, alpha=0.82)
+    ax.set_title("solved free-boundary LCFS, coils, and field lines")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("z")
     fix_matplotlib_3d(ax)
-    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=0.7, pad=0.08, label="beta [%]")
-    path = outdir / "square_coil_hybrid_geometry_3d.png"
+    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=0.72, pad=0.08, label="beta [%]")
+    path = outdir / "square_coil_hybrid_solved_geometry_3d.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def _write_top_view_plot(outdir: Path, coil_array: SquareCoilArray, surfaces: list[HybridBoundarySurface]) -> Path:
+def _write_top_view_plot(outdir: Path, coils: SquareCoilSet, cases: list[SolvedBetaCase], config: ExampleConfig) -> Path:
     plt, Normalize, ScalarMappable = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
-    geometry = build_coil_field_geometry(coil_array.params)
-    gamma = np.asarray(geometry[0])
-    fig, ax = plt.subplots(figsize=(6.4, 6.2), constrained_layout=True)
+    cmap = plt.get_cmap("viridis")
+    norm = Normalize(vmin=min(case.beta_percent for case in cases), vmax=max(case.beta_percent for case in cases))
+    gamma = np.asarray(build_coil_field_geometry(coils.params)[0])
+    fig, ax = plt.subplots(figsize=(6.6, 6.1), constrained_layout=True)
     for coil in gamma:
         closed = np.vstack([coil, coil[:1]])
-        ax.plot(closed[:, 0], closed[:, 1], color="tab:orange", linewidth=0.9, alpha=0.75)
-    ax.plot(coil_array.centers[:, 0], coil_array.centers[:, 1], "o", color="tab:orange", markersize=4.0, label="coil centers")
-    cmap = plt.get_cmap("viridis")
-    norm = Normalize(vmin=min(surface.beta_percent for surface in surfaces), vmax=max(surface.beta_percent for surface in surfaces))
-    for surface in surfaces:
-        outer = surface.xyz[0]
+        ax.plot(closed[:, 0], closed[:, 1], color="tab:orange", linewidth=0.8, alpha=0.65)
+    ax.plot(coils.centers[:, 0], coils.centers[:, 1], "o", color="tab:orange", markersize=4.0, label="coil centers")
+    for case in cases:
+        X, Y, _Z = _xyz_from_rz(case.R, case.Z, case.zeta, nfp=config.nfp)
         ax.plot(
-            _closed_curve(outer[:, 0]),
-            _closed_curve(outer[:, 1]),
+            _closed(X[0]),
+            _closed(Y[0]),
+            color=cmap(norm(case.beta_percent)),
             linewidth=1.4,
-            color=cmap(norm(surface.beta_percent)),
-            label=f"beta={surface.beta_percent:g}%",
+            label=f"beta={case.beta_percent:g}%",
         )
     ax.set_aspect("equal", "box")
     ax.set_xlabel("x")
     ax.set_ylabel("y")
-    ax.set_title("top view boundary response")
+    ax.set_title("solved LCFS top view")
     ax.legend(fontsize="x-small", ncols=2)
     fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), ax=ax, shrink=0.78, pad=0.02, label="beta [%]")
-    path = outdir / "square_coil_hybrid_top_view_beta_scan.png"
+    path = outdir / "square_coil_hybrid_solved_top_view.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def _write_cross_section_plot(outdir: Path, surfaces: list[HybridBoundarySurface]) -> Path:
+def _write_cross_sections_plot(outdir: Path, cases: list[SolvedBetaCase]) -> Path:
     plt, _Normalize, _ScalarMappable = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
-    alpha = surfaces[0].alpha
-    side_index = int(np.argmin(np.abs(np.mod(alpha, 2.0 * np.pi) - 0.0)))
-    corner_index = int(np.argmin(np.abs(np.mod(alpha, 2.0 * np.pi) - 0.25 * np.pi)))
-    fig, axes = plt.subplots(1, 2, figsize=(8.4, 3.8), constrained_layout=True)
-    for ax, idx, title in zip(axes, (side_index, corner_index), ("side section", "corner section")):
-        center = surfaces[0].axis[idx]
-        for surface in surfaces:
-            section = surface.xyz[:, idx, :] - center[None, :]
-            horizontal = np.linalg.norm(section[:, :2], axis=1) * np.sign(np.sum(section[:, :2] * center[:2], axis=1))
-            ax.plot(_closed_curve(horizontal), _closed_curve(section[:, 2]), label=f"{surface.beta_percent:g}%")
+    fig, axes = plt.subplots(1, 2, figsize=(8.8, 3.8), constrained_layout=True)
+    targets = (0.0, 0.25 * np.pi)
+    titles = ("side section", "corner section")
+    for ax, target, title in zip(axes, targets, titles):
+        for case in cases:
+            idx = int(np.argmin(np.abs(np.mod(case.zeta, 2.0 * np.pi) - target)))
+            ax.plot(
+                _closed(case.R[:, idx] - np.mean(case.R[:, idx])),
+                _closed(case.Z[:, idx]),
+                label=f"{case.beta_percent:g}%",
+            )
         ax.set_aspect("equal", "box")
-        ax.set_xlabel("radial displacement")
-        ax.set_ylabel("z")
+        ax.set_xlabel("R - <R>")
+        ax.set_ylabel("Z")
         ax.set_title(title)
     axes[0].legend(fontsize="small")
-    path = outdir / "square_coil_hybrid_cross_sections_beta_scan.png"
+    path = outdir / "square_coil_hybrid_solved_cross_sections.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def _write_bmag_plot(outdir: Path, surfaces: list[HybridBoundarySurface], fields: dict[str, np.ndarray]) -> Path:
+def _write_bmag_plot(outdir: Path, cases: list[SolvedBetaCase]) -> Path:
     plt, _Normalize, _ScalarMappable = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
-    fig, axes = plt.subplots(1, 2, figsize=(9.0, 3.8), constrained_layout=True, sharey=True)
-    plotted_bmag = [fields[f"bmag_beta_{surface.beta_percent:g}"] for surface in (surfaces[0], surfaces[-1])]
-    vmin = float(min(np.min(bmag) for bmag in plotted_bmag))
-    vmax = float(max(np.max(bmag) for bmag in plotted_bmag))
+    selected = (cases[0], cases[-1])
+    vmin = float(min(np.nanmin(case.Bmag) for case in selected))
+    vmax = float(max(np.nanmax(case.Bmag) for case in selected))
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 3.8), constrained_layout=True, sharey=True)
     mesh = None
-    for ax, surface in zip(axes, (surfaces[0], surfaces[-1])):
-        bmag = fields[f"bmag_beta_{surface.beta_percent:g}"]
-        mesh = ax.pcolormesh(surface.alpha, surface.theta, bmag, shading="auto", vmin=vmin, vmax=vmax)
-        ax.set_title(f"beta={surface.beta_percent:g}%")
-        ax.set_xlabel("square angle")
+    for ax, case in zip(axes, selected):
+        mesh = ax.pcolormesh(case.zeta, case.theta, case.Bmag, shading="auto", vmin=vmin, vmax=vmax)
+        ax.set_title(f"solved beta={case.beta_percent:g}%")
+        ax.set_xlabel("zeta")
     axes[0].set_ylabel("theta")
     fig.colorbar(mesh, ax=axes, label="|B|")
-    path = outdir / "square_coil_hybrid_boundary_bmag_beta_scan.png"
+    path = outdir / "square_coil_hybrid_solved_boundary_bmag.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def _write_summary_plot(outdir: Path, rows: list[dict[str, Any]]) -> Path:
+def _write_convergence_plot(outdir: Path, cases: list[SolvedBetaCase]) -> Path:
     plt, _Normalize, _ScalarMappable = _import_matplotlib()
     outdir.mkdir(parents=True, exist_ok=True)
-    beta = np.asarray([row["beta_percent"] for row in rows], dtype=float)
-    fig, axes = plt.subplots(3, 1, figsize=(6.8, 7.2), sharex=True, constrained_layout=True)
-    axes[0].plot(beta, [row["boundary_scale_mean"] for row in rows], "o-", label="mean")
-    axes[0].plot(beta, [row["boundary_scale_max"] for row in rows], "s--", label="max")
-    axes[0].set_ylabel("LCFS scale")
-    axes[0].legend(fontsize="small")
-    axes[1].plot(beta, [row["relative_volume_proxy"] for row in rows], "o-", color="tab:green")
-    axes[1].set_ylabel("relative volume")
-    axes[2].plot(beta, [row["pressure_balance_proxy_rms"] for row in rows], "o-", color="tab:red", label="pressure")
-    axes[2].plot(beta, [row["external_bnormal_rms"] for row in rows], "s--", color="tab:blue", label="B.n")
-    axes[2].set_ylabel("proxy RMS")
+    fig, axes = plt.subplots(3, 1, figsize=(7.0, 7.4), constrained_layout=True)
+
+    def _history(diag: dict[str, Any], *names: str) -> np.ndarray:
+        for name in names:
+            value = diag.get(name)
+            if value is None:
+                continue
+            arr = np.asarray(value, dtype=float).reshape(-1)
+            arr = arr[np.isfinite(arr)]
+            if arr.size:
+                return arr
+        return np.zeros((0,), dtype=float)
+
+    for case in cases:
+        diag = case.run.result.diagnostics if case.run.result is not None else {}
+        diag = diag if isinstance(diag, dict) else {}
+        total = np.zeros((0,), dtype=float)
+        if case.run.result is not None:
+            total = np.asarray(getattr(case.run.result, "w_history", []), dtype=float).reshape(-1)
+            total = total[np.isfinite(total)]
+        if not total.size:
+            total = _history(diag, "fsq1_history", "w_history")
+        if not total.size:
+            parts = [_history(diag, key) for key in ("fsqr1_history", "fsqz1_history", "fsql1_history")]
+            min_size = min((part.size for part in parts if part.size), default=0)
+            if min_size:
+                total = sum(part[:min_size] for part in parts if part.size)
+        if not total.size:
+            final = case.row.get("final_fsq") or case.row.get("final_fsq_component_sum")
+            if final is not None and np.isfinite(float(final)):
+                total = np.asarray([float(final)])
+        if total.size:
+            x = np.arange(total.size)
+            marker = None
+            if total.size == 1:
+                x = np.asarray([case.row.get("n_iter") or 0], dtype=float)
+                marker = "o"
+            axes[0].semilogy(x, total, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+
+        bnormal = _history(diag, "freeb_nestor_bnormal_rms_history")
+        if not bnormal.size:
+            final_bnormal = case.row.get("free_boundary_bnormal_rms")
+            if final_bnormal is not None and np.isfinite(float(final_bnormal)):
+                bnormal = np.asarray([float(final_bnormal)])
+        if bnormal.size:
+            x = np.arange(bnormal.size)
+            marker = None
+            if bnormal.size == 1:
+                x = np.asarray([case.row.get("n_iter") or 0], dtype=float)
+                marker = "o"
+            axes[1].semilogy(x, bnormal, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+
+    beta = np.asarray([case.beta_percent for case in cases], dtype=float)
+    axes[2].plot(beta, [case.row.get("mean_iota") for case in cases], "o-", label="mean iota")
+    axes[0].set_xlabel("iteration")
+    axes[1].set_xlabel("iteration")
     axes[2].set_xlabel("beta [%]")
-    axes[2].legend(fontsize="small")
-    fig.suptitle("square-coil free-boundary beta response")
-    path = outdir / "square_coil_hybrid_beta_scan_summary.png"
+    axes[0].set_ylabel("fsq")
+    axes[1].set_ylabel("B.n RMS")
+    axes[2].set_ylabel("mean iota")
+    axes[0].set_title("free-boundary solve diagnostics")
+    if axes[0].lines:
+        axes[0].legend(fontsize="small", ncols=2)
+    if axes[1].lines:
+        axes[1].legend(fontsize="small", ncols=2)
+    path = outdir / "square_coil_hybrid_solved_convergence_iota.png"
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def run_case(
-    outdir: Path,
-    *,
-    n_per_side: int = 4,
-    betas: tuple[float, ...] = (0.0, 1.0, 3.0, 10.0),
-    side_length: float = 3.0,
-    axis_half_width: float = 1.0,
-    axis_square_power: float = 5.0,
-    coil_radius: float = 0.36,
-    coil_current: float = 8.0e5,
-    n_segments: int = 96,
-    minor_radius: float = 0.16,
-    side_elongation: float = 0.30,
-    side_minor_modulation: float = 0.08,
-    corner_ellipticity: float = 0.18,
-    corner_amplitude: float = 0.025,
-    corner_rotation: float = 0.35,
-    corner_helicity: int = 1,
-    beta_expansion: float = 0.18,
-    response_min: float = 0.35,
-    response_max: float = 2.5,
-    ntheta: int = 48,
-    nalpha: int = 96,
-    chunk_size: int | None = 512,
-    field_line_count: int = 8,
-    field_line_steps: int = 120,
-    field_line_step_size: float = 0.025,
-    write_plots: bool = True,
-) -> Path:
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-    coil_array = build_square_mirror_coils(
-        n_per_side=n_per_side,
-        side_length=side_length,
-        coil_radius=coil_radius,
-        current=coil_current,
-        n_segments=n_segments,
-        chunk_size=chunk_size,
-    )
-    rows, surfaces, fields = make_beta_scan(
-        coil_array=coil_array,
-        betas=tuple(float(beta) for beta in betas),
-        axis_half_width=axis_half_width,
-        axis_square_power=axis_square_power,
-        minor_radius=minor_radius,
-        side_elongation=side_elongation,
-        side_minor_modulation=side_minor_modulation,
-        corner_ellipticity=corner_ellipticity,
-        corner_amplitude=corner_amplitude,
-        corner_rotation=corner_rotation,
-        corner_helicity=corner_helicity,
-        beta_expansion=beta_expansion,
-        response_min=response_min,
-        response_max=response_max,
-        ntheta=ntheta,
-        nalpha=nalpha,
-        chunk_size=chunk_size,
-    )
-    coils_json = _write_coils_json(outdir / "square_mirror_hybrid_coils.json", coil_array)
-    summary_csv = _write_summary_csv(outdir / "square_coil_hybrid_beta_scan_summary.csv", rows)
-    figures: dict[str, str] = {}
-    if write_plots:
-        figure_dir = outdir / "figures"
-        figures["geometry_3d"] = str(
-            _write_geometry_plot(
-                figure_dir,
-                coil_array,
-                surfaces,
-                field_line_count=field_line_count,
-                field_line_steps=field_line_steps,
-                field_line_step_size=field_line_step_size,
-            )
-        )
-        figures["top_view"] = str(_write_top_view_plot(figure_dir, coil_array, surfaces))
-        figures["cross_sections"] = str(_write_cross_section_plot(figure_dir, surfaces))
-        figures["boundary_bmag"] = str(_write_bmag_plot(figure_dir, surfaces, fields))
-        figures["beta_scan_summary"] = str(_write_summary_plot(figure_dir, rows))
+def _write_plots(outdir: Path, coils: SquareCoilSet, cases: list[SolvedBetaCase], config: ExampleConfig) -> dict[str, str]:
+    figure_dir = outdir / "figures"
+    return {
+        "geometry_3d": str(_write_geometry_plot(figure_dir, coils, cases, config)),
+        "top_view": str(_write_top_view_plot(figure_dir, coils, cases, config)),
+        "cross_sections": str(_write_cross_sections_plot(figure_dir, cases)),
+        "boundary_bmag": str(_write_bmag_plot(figure_dir, cases)),
+        "convergence_iota": str(_write_convergence_plot(figure_dir, cases)),
+    }
 
+
+def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
+    enable_x64(True)
+    outdir = Path(config.outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    coils = build_square_coils(config)
+    coils_json = _write_coils_json(outdir / "square_mirror_hybrid_coils.json", coils, config)
+    cases = []
+    restart_state = None
+    for beta in config.betas_percent:
+        case = _run_one_beta(
+            config,
+            coils,
+            beta_percent=float(beta),
+            restart_state=restart_state if bool(config.beta_continuation_restart) else None,
+        )
+        cases.append(case)
+        if bool(config.beta_continuation_restart):
+            restart_state = case.run.state
+    rows = [case.row for case in cases]
+    summary_csv = _write_csv(outdir / "square_coil_hybrid_free_boundary_solve_summary.csv", rows)
+    figures = _write_plots(outdir, coils, cases, config) if bool(config.write_plots) else {}
+    all_converged = all(bool(row.get("converged")) for row in rows)
     metrics = {
         "metrics_schema": SCHEMA,
         "metrics_schema_version": SCHEMA_VERSION,
-        "workflow_status": "reduced_free_boundary_beta_scan",
-        "free_boundary_solve_status": "reduced_pressure_balance_proxy_not_vmec_solve",
-        "hybrid_fixture_kind": "toroidal_stellarator_mirror_hybrid_square_coils",
+        "workflow_status": "actual_vmec_jax_free_boundary_beta_scan",
+        "free_boundary_solve_status": "converged" if all_converged else "not_converged_or_max_iter",
+        "hybrid_fixture_kind": "square_axis_toroidal_stellarator_mirror_hybrid",
+        "actual_free_boundary_solve": True,
         "production_free_boundary_claim": False,
-        "coil_count": int(coil_array.centers.shape[0]),
-        "n_per_side": int(n_per_side),
-        "side_length": float(side_length),
-        "coil_radius": float(coil_radius),
-        "coil_current": float(coil_current),
-        "n_segments": int(n_segments),
-        "axis_half_width": float(axis_half_width),
-        "axis_square_power": float(axis_square_power),
-        "minor_radius": float(minor_radius),
-        "beta_expansion": float(beta_expansion),
-        "response_min": float(response_min),
-        "response_max": float(response_max),
-        "field_line_count": int(field_line_count),
-        "field_line_steps": int(field_line_steps),
-        "field_line_step_size": float(field_line_step_size),
-        "betas_percent": [float(beta) for beta in betas],
-        "rows": rows,
+        "betas_percent": [float(beta) for beta in config.betas_percent],
+        "coil_count": int(coils.centers.shape[0]),
+        "n_coils_per_side": int(config.n_coils_per_side),
+        "plasma_axis_half_width": float(config.plasma_axis_half_width),
+        "coil_square_side_length": float(config.coil_square_side_length),
+        "toroidal_current": float(config.toroidal_current),
+        "delt": None if config.delt is None else float(config.delt),
+        "ns": int(config.ns),
+        "mpol": int(config.mpol),
+        "ntor": int(config.ntor),
+        "max_iter": int(config.max_iter),
+        "ftol": float(config.ftol),
+        "free_boundary_activate_fsq": (
+            None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
+        ),
+        "limit_update_rms": bool(config.limit_update_rms),
+        "beta_continuation_restart": bool(config.beta_continuation_restart),
         "coils_json": str(coils_json),
         "summary_csv": str(summary_csv),
+        "rows": rows,
         "figures": figures,
     }
-    metrics_path = outdir / "square_coil_hybrid_free_boundary_beta_scan_metrics.json"
-    metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")
+    metrics_path = outdir / "square_coil_hybrid_free_boundary_solve_metrics.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2, default=_json_default) + "\n")
     return metrics_path
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    metrics = run_case(
-        args.outdir,
-        n_per_side=args.n_per_side,
-        betas=_parse_float_list(args.betas),
-        side_length=args.side_length,
-        axis_half_width=args.axis_half_width,
-        axis_square_power=args.axis_square_power,
-        coil_radius=args.coil_radius,
-        coil_current=args.coil_current,
-        n_segments=args.n_segments,
-        minor_radius=args.minor_radius,
-        side_elongation=args.side_elongation,
-        side_minor_modulation=args.side_minor_modulation,
-        corner_ellipticity=args.corner_ellipticity,
-        corner_amplitude=args.corner_amplitude,
-        corner_rotation=args.corner_rotation,
-        corner_helicity=args.corner_helicity,
-        beta_expansion=args.beta_expansion,
-        response_min=args.response_min,
-        response_max=args.response_max,
-        ntheta=args.ntheta,
-        nalpha=args.nalpha,
-        chunk_size=args.chunk_size,
-        field_line_count=args.field_line_count,
-        field_line_steps=args.field_line_steps,
-        field_line_step_size=args.field_line_step_size,
-        write_plots=not args.no_plots,
-    )
-    print(metrics)
-    return 0
-
-
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    print(run_example())

@@ -20,6 +20,8 @@ from vmec_jax.external_fields import (
     compute_gamma_dash,
     compute_gamma_dashdash,
     curvature_penalty,
+    ellipse_coil_field_params,
+    ellipse_coil_fourier_dofs,
     fourier_curves_to_gamma,
     length_penalty,
     sample_coil_field_cylindrical,
@@ -59,6 +61,38 @@ def test_fourier_circle_geometry_and_derivatives():
     np.testing.assert_allclose(gamma[0, 2], [0.0, 1.5, 0.0], atol=1.0e-14)
     np.testing.assert_allclose(gamma_dash[0, 0], [0.0, 2.0 * np.pi * 1.5, 0.0], atol=1.0e-14)
     np.testing.assert_allclose(gamma_dashdash[0, 0], [-(2.0 * np.pi) ** 2 * 1.5, 0.0, 0.0], atol=1.0e-13)
+
+
+def test_ellipse_coil_helpers_build_oriented_fourier_coils():
+    enable_x64(True)
+    dofs = np.asarray(
+        ellipse_coil_fourier_dofs(
+            center=[1.0, 2.0, 3.0],
+            normal=[1.0, 0.0, 0.0],
+            major_axis=[0.0, 0.0, 1.0],
+            major_radius=0.5,
+            minor_radius=0.25,
+        )
+    )
+    np.testing.assert_allclose(dofs[:, 0], [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(dofs[:, 1], [0.0, -0.25, 0.0])
+    np.testing.assert_allclose(dofs[:, 2], [0.0, 0.0, 0.5])
+
+    params = ellipse_coil_field_params(
+        centers=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        normals=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        major_axes=[0.0, 0.0, 1.0],
+        major_radius=0.5,
+        minor_radius=[0.25, 0.3],
+        currents=2.0,
+        n_segments=16,
+    )
+    assert isinstance(params, CoilFieldParams)
+    assert np.asarray(params.base_curve_dofs).shape == (2, 3, 3)
+    np.testing.assert_allclose(np.asarray(params.base_currents), [2.0, 2.0])
+    gamma = np.asarray(fourier_curves_to_gamma(params.base_curve_dofs, params.n_segments))
+    assert gamma.shape == (2, 16, 3)
+    np.testing.assert_allclose(gamma[0, 0], [1.0, 0.0, 0.5], atol=1.0e-14)
 
 
 def test_coil_params_are_pytree_leaves_and_order_zero_geometry_is_static():

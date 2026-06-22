@@ -119,6 +119,87 @@ def sample_toroidal_stellarator_mirror_hybrid_boundary(
     )
 
 
+def sample_square_axis_stellarator_mirror_hybrid_boundary(
+    *,
+    ntheta: int = 64,
+    nzeta: int = 128,
+    axis_half_width: float = 1.5,
+    axis_square_power: float = 5.0,
+    minor_radius: float = 0.10,
+    side_minor_modulation: float = 0.08,
+    side_elongation: float = 0.25,
+    corner_amplitude: float = 0.020,
+    corner_helicity: int = 1,
+    corner_ellipticity: float = 0.16,
+    corner_rotation: float = 0.30,
+    side_power: float = 1.4,
+    corner_power: float = 1.4,
+) -> ToroidalHybridBoundarySamples:
+    """Sample a toroidal stellarator-mirror LCFS around a square-like axis.
+
+    The magnetic axis is represented by a smooth polar superellipse.  It has
+    nearly straight mirror-like side arcs and rounded corner arcs that carry
+    localized rotating-ellipse shaping.  The surface is still stored in normal
+    VMEC cylindrical coordinates, so the final equilibrium can use the ordinary
+    toroidal fixed/free-boundary solver path.
+    """
+
+    ntheta = int(ntheta)
+    nzeta = int(nzeta)
+    if ntheta < 8 or nzeta < 16:
+        raise ValueError("ntheta must be >= 8 and nzeta must be >= 16")
+    if axis_half_width <= 0.0:
+        raise ValueError("axis_half_width must be positive")
+    if axis_square_power <= 2.0:
+        raise ValueError("axis_square_power must exceed 2 for a square-like axis")
+    if minor_radius <= 0.0:
+        raise ValueError("minor_radius must be positive")
+    if int(corner_helicity) < 0:
+        raise ValueError("corner_helicity must be nonnegative")
+
+    theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    zeta = np.linspace(0.0, 2.0 * np.pi, nzeta, endpoint=False)
+    theta2, zeta2 = np.meshgrid(theta, zeta, indexing="ij")
+
+    c = np.cos(zeta)
+    s = np.sin(zeta)
+    axis_r = float(axis_half_width) / np.maximum(
+        np.abs(c) ** float(axis_square_power) + np.abs(s) ** float(axis_square_power),
+        np.finfo(float).tiny,
+    ) ** (1.0 / float(axis_square_power))
+
+    side_seed = 0.5 * (1.0 + np.cos(4.0 * zeta))
+    side_weight_1d = np.clip(side_seed, 0.0, 1.0) ** float(side_power)
+    corner_weight_1d = np.clip(1.0 - side_seed, 0.0, 1.0) ** float(corner_power)
+    side_weight = np.broadcast_to(side_weight_1d[None, :], (ntheta, nzeta))
+    corner_weight = np.broadcast_to(corner_weight_1d[None, :], (ntheta, nzeta))
+
+    minor = float(minor_radius) * (1.0 + float(side_minor_modulation) * side_weight_1d)
+    radial_semiaxis = minor * (1.0 + float(corner_ellipticity) * corner_weight_1d)
+    vertical_semiaxis = minor * (1.0 + float(side_elongation) * side_weight_1d) * (
+        1.0 - 0.5 * float(corner_ellipticity) * corner_weight_1d
+    )
+    tilt = float(corner_rotation) * corner_weight_1d * np.sin(float(int(corner_helicity)) * zeta)
+    phase = 2.0 * theta2 - float(int(corner_helicity)) * zeta2
+    local_r = radial_semiaxis[None, :] * np.cos(theta2)
+    local_z = vertical_semiaxis[None, :] * np.sin(theta2)
+    local_r = local_r + float(corner_amplitude) * corner_weight_1d[None, :] * np.cos(phase)
+    local_z = local_z + float(corner_amplitude) * corner_weight_1d[None, :] * np.sin(phase)
+    R = axis_r[None, :] + local_r * np.cos(tilt)[None, :] - local_z * np.sin(tilt)[None, :]
+    Z = local_r * np.sin(tilt)[None, :] + local_z * np.cos(tilt)[None, :]
+    if float(np.min(R)) <= 0.0:
+        raise ValueError("boundary has nonpositive cylindrical R; reduce minor_radius or increase axis_half_width")
+
+    return ToroidalHybridBoundarySamples(
+        theta=theta,
+        zeta=zeta,
+        R=np.asarray(R, dtype=float),
+        Z=np.asarray(Z, dtype=float),
+        side_weight=np.asarray(side_weight, dtype=float),
+        corner_weight=np.asarray(corner_weight, dtype=float),
+    )
+
+
 def _coeff_map_from_modes(
     values: np.ndarray, modes, *, coeff_tol: float, keep_00: bool = False
 ) -> dict[tuple[int, int], float]:
@@ -132,42 +213,18 @@ def _coeff_map_from_modes(
     return out
 
 
-def toroidal_stellarator_mirror_hybrid_indata(
+def _indata_from_boundary_samples(
     *,
-    nfp: int = 2,
-    mpol: int = 5,
-    ntor: int = 4,
-    ntheta_fit: int = 64,
-    nzeta_fit: int = 64,
-    ns_array: int | list[int] = 15,
-    niter_array: int | list[int] = 80,
-    ftol_array: float | list[float] = 1.0e-9,
-    phiedge: float = 0.05,
-    coeff_tol: float = 1.0e-12,
-    **sample_kwargs: Any,
+    samples: ToroidalHybridBoundarySamples,
+    nfp: int,
+    mpol: int,
+    ntor: int,
+    ns_array: int | list[int],
+    niter_array: int | list[int],
+    ftol_array: float | list[float],
+    phiedge: float,
+    coeff_tol: float,
 ) -> InData:
-    """Return VMEC ``InData`` for the toroidal hybrid boundary.
-
-    The boundary is sampled on a uniform tensor grid and projected onto the
-    standard VMEC helical modes.  Defaults keep only low-order modes so the
-    input remains small and useful for low-resolution solver smoke tests.
-    """
-    nfp = int(nfp)
-    mpol = int(mpol)
-    ntor = int(ntor)
-    if nfp <= 0:
-        raise ValueError("nfp must be positive")
-    if mpol < 3:
-        raise ValueError("mpol must be at least 3 so the corner m=2 shaping fits")
-    corner_helicity = int(sample_kwargs.get("corner_helicity", 1))
-    if ntor < corner_helicity + 2:
-        raise ValueError("ntor must be at least corner_helicity + 2 to fit the localized corner shaping")
-
-    samples = sample_toroidal_stellarator_mirror_hybrid_boundary(
-        ntheta=int(ntheta_fit),
-        nzeta=int(nzeta_fit),
-        **sample_kwargs,
-    )
     modes = vmec_mode_table(mpol=mpol, ntor=ntor)
     grid = AngleGrid(theta=samples.theta, zeta=samples.zeta, nfp=nfp)
     basis = build_helical_basis(modes, grid)
@@ -209,6 +266,98 @@ def toroidal_stellarator_mirror_hybrid_indata(
         "ZBS": _coeff_map_from_modes(z_sin, modes, coeff_tol=coeff_tol),
     }
     return indata
+
+
+def toroidal_stellarator_mirror_hybrid_indata(
+    *,
+    nfp: int = 2,
+    mpol: int = 5,
+    ntor: int = 4,
+    ntheta_fit: int = 64,
+    nzeta_fit: int = 64,
+    ns_array: int | list[int] = 15,
+    niter_array: int | list[int] = 80,
+    ftol_array: float | list[float] = 1.0e-9,
+    phiedge: float = 0.05,
+    coeff_tol: float = 1.0e-12,
+    **sample_kwargs: Any,
+) -> InData:
+    """Return VMEC ``InData`` for the toroidal hybrid boundary.
+
+    The boundary is sampled on a uniform tensor grid and projected onto the
+    standard VMEC helical modes.  Defaults keep only low-order modes so the
+    input remains small and useful for low-resolution solver smoke tests.
+    """
+    nfp = int(nfp)
+    mpol = int(mpol)
+    ntor = int(ntor)
+    if nfp <= 0:
+        raise ValueError("nfp must be positive")
+    if mpol < 3:
+        raise ValueError("mpol must be at least 3 so the corner m=2 shaping fits")
+    corner_helicity = int(sample_kwargs.get("corner_helicity", 1))
+    if ntor < corner_helicity + 2:
+        raise ValueError("ntor must be at least corner_helicity + 2 to fit the localized corner shaping")
+
+    samples = sample_toroidal_stellarator_mirror_hybrid_boundary(
+        ntheta=int(ntheta_fit),
+        nzeta=int(nzeta_fit),
+        **sample_kwargs,
+    )
+    return _indata_from_boundary_samples(
+        samples=samples,
+        nfp=nfp,
+        mpol=mpol,
+        ntor=ntor,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        phiedge=phiedge,
+        coeff_tol=coeff_tol,
+    )
+
+
+def square_axis_stellarator_mirror_hybrid_indata(
+    *,
+    nfp: int = 1,
+    mpol: int = 5,
+    ntor: int = 12,
+    ntheta_fit: int = 64,
+    nzeta_fit: int = 128,
+    ns_array: int | list[int] = 9,
+    niter_array: int | list[int] = 40,
+    ftol_array: float | list[float] = 1.0e-8,
+    phiedge: float = 0.04,
+    coeff_tol: float = 1.0e-12,
+    **sample_kwargs: Any,
+) -> InData:
+    """Return VMEC ``InData`` for the square-axis toroidal hybrid boundary."""
+
+    nfp = int(nfp)
+    mpol = int(mpol)
+    ntor = int(ntor)
+    if nfp <= 0:
+        raise ValueError("nfp must be positive")
+    if mpol < 3:
+        raise ValueError("mpol must be at least 3 so the corner m=2 shaping fits")
+    if ntor < 4:
+        raise ValueError("ntor must be at least 4 to fit the square-like axis")
+    samples = sample_square_axis_stellarator_mirror_hybrid_boundary(
+        ntheta=int(ntheta_fit),
+        nzeta=int(nzeta_fit),
+        **sample_kwargs,
+    )
+    return _indata_from_boundary_samples(
+        samples=samples,
+        nfp=nfp,
+        mpol=mpol,
+        ntor=ntor,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        phiedge=phiedge,
+        coeff_tol=coeff_tol,
+    )
 
 
 def toroidal_stellarator_mirror_hybrid_metrics(samples: ToroidalHybridBoundarySamples) -> dict[str, float]:

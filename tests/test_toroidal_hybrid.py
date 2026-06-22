@@ -15,7 +15,9 @@ import vmec_jax.toroidal_hybrid as toroidal_hybrid
 from vmec_jax.toroidal_hybrid import (
     ToroidalHybridBoundarySamples,
     evaluate_toroidal_hybrid_indata_boundary,
+    sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
+    square_axis_stellarator_mirror_hybrid_indata,
     toroidal_hybrid_cross_section_anisotropy,
     toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
@@ -64,6 +66,30 @@ def test_toroidal_hybrid_boundary_is_stellarator_symmetric_and_corner_localized(
     assert vj.toroidal_hybrid_cross_section_orientation is toroidal_hybrid_cross_section_orientation
     assert public_api.toroidal_hybrid_cross_section_anisotropy is toroidal_hybrid_cross_section_anisotropy
     assert public_api.toroidal_hybrid_cross_section_orientation is toroidal_hybrid_cross_section_orientation
+
+
+def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
+    import vmec_jax as vj
+    import vmec_jax.api as public_api
+
+    samples = sample_square_axis_stellarator_mirror_hybrid_boundary(ntheta=32, nzeta=64)
+    metrics = toroidal_stellarator_mirror_hybrid_metrics(samples)
+    assert metrics["min_R"] > 0.0
+    assert metrics["stellsym_R_error"] < 1.0e-13
+    assert metrics["stellsym_Z_error"] < 1.0e-13
+    assert metrics["side_weight_max"] == pytest.approx(1.0)
+    assert metrics["corner_weight_max"] == pytest.approx(1.0)
+    assert np.ptp(np.mean(samples.R, axis=0)) > 0.3
+
+    indata = square_axis_stellarator_mirror_hybrid_indata(mpol=4, ntor=8, ntheta_fit=32, nzeta_fit=64)
+    assert indata.get_int("NFP") == 1
+    assert indata.get_int("MPOL") == 4
+    assert indata.get_int("NTOR") == 8
+    assert "RBS" not in indata.indexed
+    assert "ZBC" not in indata.indexed
+    assert vj.sample_square_axis_stellarator_mirror_hybrid_boundary is sample_square_axis_stellarator_mirror_hybrid_boundary
+    assert vj.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
+    assert public_api.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
 
 
 def test_toroidal_hybrid_localization_powers_sharpen_side_and_corner_regions():
@@ -287,93 +313,86 @@ def test_toroidal_hybrid_example_writes_nonblank_plots(tmp_path: Path):
 
 
 def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: Path):
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py",
-            "--outdir",
-            str(tmp_path / "square_coils"),
-            "--n-per-side",
-            "2",
-            "--betas",
-            "0,5,10",
-            "--ntheta",
-            "16",
-            "--nalpha",
-            "24",
-            "--n-segments",
-            "32",
-            "--no-plots",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
+    metrics_path = module.run_example(
+        module.ExampleConfig(
+            outdir=tmp_path / "square_coils",
+            betas_percent=(0.0,),
+            n_coils_per_side=1,
+            coil_segments=24,
+            mpol=3,
+            ntor=4,
+            ns=5,
+            nzeta=8,
+            max_iter=2,
+            ftol=1.0e-6,
+            field_line_count=1,
+            field_line_steps=20,
+            field_line_turns=0.2,
+            write_plots=False,
+            jit_forces=False,
+        )
     )
 
-    metrics_path = Path(completed.stdout.strip())
     metrics = json.loads(metrics_path.read_text())
     rows = metrics["rows"]
-    assert metrics["metrics_schema"] == "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_beta_scan"
-    assert metrics["workflow_status"] == "reduced_free_boundary_beta_scan"
-    assert metrics["free_boundary_solve_status"] == "reduced_pressure_balance_proxy_not_vmec_solve"
+    assert metrics["metrics_schema"] == "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
+    assert metrics["workflow_status"] == "actual_vmec_jax_free_boundary_beta_scan"
+    assert metrics["actual_free_boundary_solve"] is True
     assert metrics["production_free_boundary_claim"] is False
-    assert metrics["hybrid_fixture_kind"] == "toroidal_stellarator_mirror_hybrid_square_coils"
-    assert metrics["coil_count"] == 8
-    assert metrics["n_per_side"] == 2
-    assert metrics["betas_percent"] == [0.0, 5.0, 10.0]
+    assert metrics["hybrid_fixture_kind"] == "square_axis_toroidal_stellarator_mirror_hybrid"
+    assert metrics["coil_count"] == 4
+    assert metrics["n_coils_per_side"] == 1
+    assert metrics["betas_percent"] == [0.0]
     assert metrics["figures"] == {}
     assert Path(metrics["coils_json"]).exists()
     assert Path(metrics["summary_csv"]).exists()
-    assert len(rows) == 3
-    assert [row["beta_percent"] for row in rows] == [0.0, 5.0, 10.0]
-    assert rows[0]["boundary_scale_mean"] == pytest.approx(1.0)
-    assert rows[-1]["boundary_scale_mean"] > rows[0]["boundary_scale_mean"]
-    assert rows[-1]["boundary_scale_max"] < 1.6
-    assert all(0.0 < row["response_min"] <= row["response_mean"] <= row["response_max"] for row in rows)
+    assert len(rows) == 1
+    assert Path(rows[0]["input"]).exists()
+    assert Path(rows[0]["wout"]).exists()
+    assert np.isfinite(float(rows[0]["final_fsqr"]))
+    assert np.isfinite(float(rows[0]["final_fsqz"]))
+    assert np.isfinite(float(rows[0]["final_fsql"]))
+    assert rows[0]["free_boundary_bnormal_rms"] is not None
+    assert rows[0]["mean_iota"] is not None
     with Path(metrics["summary_csv"]).open(newline="") as file_obj:
         csv_rows = list(csv.DictReader(file_obj))
     assert len(csv_rows) == len(rows)
-    assert csv_rows[-1]["beta_percent"] == "10.0"
+    assert csv_rows[0]["beta_percent"] == "0.0"
 
 
 def test_square_coil_hybrid_free_boundary_example_writes_nonblank_plots(tmp_path: Path):
     image = pytest.importorskip("matplotlib.image")
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py",
-            "--outdir",
-            str(tmp_path / "square_coils_plots"),
-            "--n-per-side",
-            "2",
-            "--betas",
-            "0,10",
-            "--ntheta",
-            "16",
-            "--nalpha",
-            "24",
-            "--n-segments",
-            "32",
-            "--field-line-count",
-            "4",
-            "--field-line-steps",
-            "24",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
+    metrics_path = module.run_example(
+        module.ExampleConfig(
+            outdir=tmp_path / "square_coils_plots",
+            betas_percent=(0.0, 10.0),
+            n_coils_per_side=1,
+            coil_segments=24,
+            mpol=3,
+            ntor=4,
+            ns=5,
+            nzeta=8,
+            max_iter=1,
+            ftol=1.0e-6,
+            field_line_count=1,
+            field_line_steps=24,
+            field_line_turns=0.25,
+            write_plots=True,
+            jit_forces=False,
+        )
     )
 
-    metrics = json.loads(Path(completed.stdout.strip()).read_text())
+    metrics = json.loads(metrics_path.read_text())
     assert set(metrics["figures"]) == {
         "geometry_3d",
         "top_view",
         "cross_sections",
         "boundary_bmag",
-        "beta_scan_summary",
+        "convergence_iota",
     }
-    assert metrics["field_line_count"] == 4
-    assert metrics["field_line_steps"] == 24
+    assert len(metrics["rows"]) == 2
     for path in metrics["figures"].values():
         _assert_nonblank_image(path, image)
 

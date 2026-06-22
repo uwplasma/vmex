@@ -22,7 +22,7 @@ python examples/mirror_implicit_sensitivity.py --outdir results/mirror/implicit_
 python examples/mirror_implicit_solve_benchmark.py --outdir results/mirror/implicit_solve_benchmark
 python examples/toroidal_stellarator_mirror_hybrid.py --outdir results/toroidal_stellarator_mirror_hybrid
 python examples/toroidal_stellarator_mirror_hybrid_convergence.py --outdir results/toroidal_stellarator_mirror_hybrid_convergence
-python examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py --outdir results/toroidal_stellarator_mirror_hybrid_square_coils
+python examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
 python examples/mirror_solver_comparison.py --outdir results/mirror/solver_comparison
 python examples/mirror_residual_newton_convergence_grid.py --outdir results/mirror/residual_newton_convergence_grid
 ```
@@ -146,15 +146,21 @@ VMEC/JAX or VMEC2000.
 
 The root-level
 ``examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py``
-script builds a closed square array with ``N`` circular coils per side
-(``N=4`` by default, so 16 total coils), samples the direct Biot-Savart vacuum
-field on a square-torus hybrid boundary, and scans beta from 0% to 10% by
-applying a bounded pressure-balance-inspired LCFS response. It writes the coil
-geometry JSON, beta-scan CSV, compact metrics JSON, and plots for 3-D coils,
-LCFS, and vacuum field lines, top-view boundary response, side/corner cross
-sections, boundary ``|B|``, and beta-scan summary metrics. This is a reduced
-free-boundary planning fixture for the toroidal stellarator-mirror lane; it is
-not yet a promoted full VMEC free-boundary equilibrium solve.
+script keeps all user inputs in a top-of-file parameter block. It builds a
+closed square array with ``N`` circular or elliptical coils per side (``N=4`` by
+default, so 16 total coils), writes one direct-coil free-boundary VMEC input per
+beta value, runs ``vmec_jax.run_free_boundary`` with nonzero toroidal current
+and a 1000-iteration default cap, and writes one ``wout_*.nc`` per beta. The
+plots use the solved VMEC states: 3-D coils plus solved LCFS and field-line
+traces, top-view solved boundaries, side/corner cross sections,
+solved-boundary ``|B|``, and residual/iota diagnostics. The metrics JSON records
+convergence status, force components, free-boundary ``B.n`` diagnostics, WOUT
+paths, beta scan rows, solver objective-history extrema, bad-Jacobian/reset
+counts, and a stall classification. Current direct-coil square-hybrid runs are
+therefore treated as explicit convergence diagnostics: if the final recomputed
+force components miss the requested ``FTOL``, the run is labelled as
+``not_converged_or_max_iter`` rather than being presented as a production
+equilibrium.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

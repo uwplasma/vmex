@@ -19,6 +19,8 @@ from dataclasses import dataclass, replace
 from math import pi as _PI
 from typing import Any
 
+import numpy as _np
+
 from vmec_jax._compat import jax, jnp, tree_util
 
 
@@ -99,6 +101,140 @@ class CoilFieldParams:
             base_curve_dofs=self.base_curve_dofs if base_curve_dofs is None else base_curve_dofs,
             base_currents=self.base_currents if base_currents is None else base_currents,
         )
+
+
+def ellipse_coil_fourier_dofs(
+    *,
+    center: Any,
+    normal: Any,
+    major_radius: float,
+    minor_radius: float | None = None,
+    major_axis: Any | None = None,
+) -> Any:
+    """Return first-order Fourier dofs for one planar elliptical coil.
+
+    The curve convention is
+    ``gamma(t) = center + major_radius * major_axis * cos(2*pi*t)
+    + minor_radius * minor_axis * sin(2*pi*t)``.  The supplied ``normal`` fixes
+    the oriented coil plane through ``major_axis x minor_axis = normal``.  If no
+    ``major_axis`` is supplied, a stable axis perpendicular to ``normal`` is
+    chosen automatically.
+    """
+
+    center_np = _np.asarray(center, dtype=float)
+    normal_np = _np.asarray(normal, dtype=float)
+    if center_np.shape != (3,) or normal_np.shape != (3,):
+        raise ValueError("center and normal must be length-3 vectors")
+    normal_norm = float(_np.linalg.norm(normal_np))
+    if normal_norm <= 0.0:
+        raise ValueError("normal must be nonzero")
+    normal_unit = normal_np / normal_norm
+
+    if major_axis is None:
+        trial = _np.asarray([0.0, 0.0, 1.0], dtype=float)
+        if abs(float(_np.dot(trial, normal_unit))) > 0.85:
+            trial = _np.asarray([1.0, 0.0, 0.0], dtype=float)
+    else:
+        trial = _np.asarray(major_axis, dtype=float)
+        if trial.shape != (3,):
+            raise ValueError("major_axis must be a length-3 vector")
+    major_unit = trial - float(_np.dot(trial, normal_unit)) * normal_unit
+    major_norm = float(_np.linalg.norm(major_unit))
+    if major_norm <= 0.0:
+        raise ValueError("major_axis must not be parallel to normal")
+    major_unit = major_unit / major_norm
+    minor_unit = _np.cross(normal_unit, major_unit)
+
+    minor_radius_eff = float(major_radius if minor_radius is None else minor_radius)
+    if float(major_radius) <= 0.0 or minor_radius_eff <= 0.0:
+        raise ValueError("major_radius and minor_radius must be positive")
+
+    dofs = _np.zeros((3, 3), dtype=float)
+    dofs[:, 0] = center_np
+    dofs[:, 1] = minor_radius_eff * minor_unit
+    dofs[:, 2] = float(major_radius) * major_unit
+    return jnp.asarray(dofs)
+
+
+def ellipse_coil_field_params(
+    *,
+    centers: Any,
+    normals: Any,
+    currents: Any,
+    major_radius: float | Any,
+    minor_radius: float | Any | None = None,
+    major_axes: Any | None = None,
+    n_segments: int = 96,
+    nfp: int = 1,
+    stellsym: bool = False,
+    current_scale: float = 1.0,
+    regularization_epsilon: float = 0.0,
+    chunk_size: int | None = None,
+) -> CoilFieldParams:
+    """Build direct-coil parameters from planar elliptical coils.
+
+    This is a small SIMSOPT-style convenience layer over the Fourier-coil
+    backend: each coil is specified by center, oriented normal, current, and
+    semi-axis radii.  Scalar radii are broadcast to every coil.
+    """
+
+    centers_np = _np.asarray(centers, dtype=float)
+    normals_np = _np.asarray(normals, dtype=float)
+    if centers_np.ndim != 2 or centers_np.shape[1] != 3:
+        raise ValueError("centers must have shape (n_coils, 3)")
+    if normals_np.shape != centers_np.shape:
+        raise ValueError("normals must have the same shape as centers")
+    n_coils = int(centers_np.shape[0])
+    currents_np = _np.asarray(currents, dtype=float)
+    if currents_np.ndim == 0:
+        currents_np = _np.full((n_coils,), float(currents_np), dtype=float)
+    if currents_np.shape != (n_coils,):
+        raise ValueError("currents must be scalar or have shape (n_coils,)")
+
+    major_np = _np.asarray(major_radius, dtype=float)
+    if major_np.ndim == 0:
+        major_np = _np.full((n_coils,), float(major_np), dtype=float)
+    if major_np.shape != (n_coils,):
+        raise ValueError("major_radius must be scalar or have shape (n_coils,)")
+    if minor_radius is None:
+        minor_np = major_np
+    else:
+        minor_np = _np.asarray(minor_radius, dtype=float)
+        if minor_np.ndim == 0:
+            minor_np = _np.full((n_coils,), float(minor_np), dtype=float)
+        if minor_np.shape != (n_coils,):
+            raise ValueError("minor_radius must be scalar or have shape (n_coils,)")
+
+    if major_axes is None:
+        axes_iter = [None] * n_coils
+    else:
+        axes_np = _np.asarray(major_axes, dtype=float)
+        if axes_np.shape == (3,):
+            axes_np = _np.broadcast_to(axes_np, centers_np.shape)
+        if axes_np.shape != centers_np.shape:
+            raise ValueError("major_axes must be a length-3 vector or have shape (n_coils, 3)")
+        axes_iter = list(axes_np)
+
+    dofs = [
+        ellipse_coil_fourier_dofs(
+            center=centers_np[idx],
+            normal=normals_np[idx],
+            major_radius=float(major_np[idx]),
+            minor_radius=float(minor_np[idx]),
+            major_axis=axes_iter[idx],
+        )
+        for idx in range(n_coils)
+    ]
+    return CoilFieldParams(
+        base_curve_dofs=jnp.asarray(dofs),
+        base_currents=jnp.asarray(currents_np),
+        n_segments=int(n_segments),
+        nfp=int(nfp),
+        stellsym=bool(stellsym),
+        current_scale=float(current_scale),
+        regularization_epsilon=float(regularization_epsilon),
+        chunk_size=None if chunk_size is None else int(chunk_size),
+    )
 
 
 def _fourier_basis(n_segments: int, order: int) -> tuple[Any, Any, Any]:
