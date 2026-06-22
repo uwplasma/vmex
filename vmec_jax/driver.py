@@ -1590,6 +1590,7 @@ def run_fixed_boundary(
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
     free_boundary_activate_fsq: float | None = None,
+    backtracking: bool | None = None,
     limit_update_rms: bool | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
     _solver_device_context_active: bool = False,
@@ -3458,6 +3459,8 @@ def run_fixed_boundary(
                 direct_external_provider=bool(direct_external_provider),
             )
             stage_limit_update_rms = False if limit_update_rms is None else bool(limit_update_rms)
+            stage_backtracking = False if backtracking is None else bool(backtracking)
+            stage_use_direct_fallback = False if use_direct_fallback is None else bool(use_direct_fallback)
             solve_kwargs = dict(
                 indata=indata,
                 signgs=signgs,
@@ -3475,12 +3478,12 @@ def run_fixed_boundary(
                 enforce_vmec_lambda_axis=True,
                 vmec2000_control=vmec2000_ctrl,
                 strict_update=True,
-                backtracking=False,
+                backtracking=stage_backtracking,
                 limit_update_rms=stage_limit_update_rms,
                 reference_mode=False,
                 use_restart_triggers=True if use_restart_triggers is None else bool(use_restart_triggers),
                 vmecpp_restart=bool(vmecpp_restart),
-                use_direct_fallback=False,
+                use_direct_fallback=stage_use_direct_fallback,
                 stage_prev_fsq=stage_prev_fsq,
                 stage_transition_factor=float(stage_transition_factor),
                 stage_transition_scale=float(stage_transition_scale),

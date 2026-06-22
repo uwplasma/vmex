@@ -5740,6 +5740,15 @@ def solve_fixed_boundary_residual_iter(
         use_scan = False
     freeb_sample_env = os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1").strip().lower()
     freeb_sample_external = freeb_sample_env not in ("", "0", "false", "no")
+    freeb_current_norms_env = os.getenv("VMEC_JAX_FREEB_CURRENT_RESIDUAL_NORMS", "1").strip().lower()
+    freeb_current_residual_norms = bool(free_boundary_enabled) and (
+        freeb_current_norms_env not in ("", "0", "false", "no", "off")
+    )
+    return_best_scored_env = os.getenv("VMEC_JAX_RETURN_BEST_SCORED_STATE", "auto").strip().lower()
+    if return_best_scored_env == "auto":
+        return_best_scored_state = bool(free_boundary_enabled)
+    else:
+        return_best_scored_state = return_best_scored_env not in ("", "0", "false", "no", "off")
     jit_strict_update_env = os.getenv("VMEC_JAX_JIT_STRICT_UPDATE", "auto").strip().lower()
     jit_strict_update_enabled = jit_strict_update_env not in ("", "0", "false", "no", "off")
     if jit_strict_update_env == "auto":
@@ -10776,6 +10785,33 @@ def solve_fixed_boundary_residual_iter(
             freeb_nvskip0 = max(1, int(resume_state.get("freeb_nvskip0", freeb_nvskip0)))
             freeb_last_model = str(resume_state.get("freeb_model", freeb_last_model))
 
+    best_scored_state: VMECState | None = None
+    best_scored_fsq = float("inf")
+    best_scored_fsqr = float("nan")
+    best_scored_fsqz = float("nan")
+    best_scored_fsql = float("nan")
+    best_scored_iter = -1
+    best_scored_plascur = float(freeb_plascur)
+    best_scored_full_boundary_count = 0
+    best_scored_fresh_boundary_count = 0
+    freeb_convergence_blocked_count = 0
+    returned_best_scored_state = False
+
+    def _snapshot_best_scored_state(state_current: VMECState) -> VMECState:
+        """Keep a stable copy of a scored state without retaining old buffers."""
+
+        if host_update_assembly:
+            return VMECState(
+                layout=state_current.layout,
+                Rcos=np.array(state_current.Rcos, copy=True),
+                Rsin=np.array(state_current.Rsin, copy=True),
+                Zcos=np.array(state_current.Zcos, copy=True),
+                Zsin=np.array(state_current.Zsin, copy=True),
+                Lcos=np.array(state_current.Lcos, copy=True),
+                Lsin=np.array(state_current.Lsin, copy=True),
+            )
+        return state_current
+
     def _print_axis_guess(raxis_cc, zaxis_cs) -> None:
         _print_scan_axis_guess(raxis_cc, zaxis_cs)
 
@@ -11537,11 +11573,13 @@ def solve_fixed_boundary_residual_iter(
             if timing_enabled:
                 _record_compute_force_timing("main", t_compute_start, gcr2)
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
-            norms_used = (
-                cache_norms
-                if (bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)))
-                else norms_current
+            use_cached_residual_norms = (
+                bool(vmec2000_control)
+                and bool(vmec2000_cache_valid)
+                and (not bool(need_bcovar_update))
+                and (not bool(freeb_current_residual_norms))
             )
+            norms_used = cache_norms if use_cached_residual_norms else norms_current
             use_host_residual_metrics = (
                 bool(host_residual_metrics_on_accelerator)
                 and (not bool(host_update_assembly))
@@ -11595,7 +11633,7 @@ def solve_fixed_boundary_residual_iter(
                 norms_used=norms_used,
                 print_fn=print,
             )
-            if bool(vmec2000_control) and bool(vmec2000_cache_valid) and (not bool(need_bcovar_update)):
+            if bool(use_cached_residual_norms):
                 rz_scale = cache_rz_scale
                 l_scale = cache_l_scale
             preconditioner_cache_update_trace = False
@@ -11717,6 +11755,31 @@ def solve_fixed_boundary_residual_iter(
             fsqr2_history.append(fsqr_f)
             fsqz2_history.append(fsqz_f)
             fsql2_history.append(fsql_f)
+            scored_full_boundary = (not bool(free_boundary_enabled)) or (
+                bool(include_edge_residual)
+                and int(freeb_ivac_effective) >= 1
+                and freeb_bsqvac_half_current is not None
+            )
+            if bool(scored_full_boundary):
+                best_scored_full_boundary_count += 1
+            scored_fresh_boundary = (not bool(free_boundary_enabled)) or (
+                bool(scored_full_boundary) and not bool(freeb_reused)
+            )
+            if bool(scored_fresh_boundary):
+                best_scored_fresh_boundary_count += 1
+            if (
+                bool(return_best_scored_state)
+                and bool(scored_fresh_boundary)
+                and np.isfinite(fsq0_curr)
+                and (float(fsq0_curr) < float(best_scored_fsq))
+            ):
+                best_scored_state = _snapshot_best_scored_state(state)
+                best_scored_fsq = float(fsq0_curr)
+                best_scored_fsqr = float(fsqr_f)
+                best_scored_fsqz = float(fsqz_f)
+                best_scored_fsql = float(fsql_f)
+                best_scored_iter = int(iter2)
+                best_scored_plascur = float(freeb_plascur)
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
             # For parity diagnostics, sample these scalars on VMEC's screen cadence.
@@ -11789,7 +11852,15 @@ def solve_fixed_boundary_residual_iter(
             # Defer convergence exit until after preconditioned diagnostics are
             # computed for this iteration, so fsqr1/fsqz1/fsql1 histories and
             # VMEC-style tables remain length-aligned.
-            converged_physical = _converged_residuals_host(fsqr=fsqr_f, fsqz=fsqz_f, fsql=fsql_f)
+            residual_converged_physical = _converged_residuals_host(fsqr=fsqr_f, fsqz=fsqz_f, fsql=fsql_f)
+            freeb_convergence_ready = (not bool(free_boundary_enabled and freeb_couple_edge)) or (
+                bool(include_edge_residual)
+                and int(freeb_ivac_effective) >= 1
+                and freeb_bsqvac_half_current is not None
+            )
+            if bool(residual_converged_physical) and not bool(freeb_convergence_ready):
+                freeb_convergence_blocked_count += 1
+            converged_physical = bool(residual_converged_physical) and bool(freeb_convergence_ready)
             accepted_control_ptau_payload: tuple[Any, Any, Any] | None = None
             fuse_accepted_control_ptau = (
                 bool(free_boundary_enabled)
@@ -14771,7 +14842,28 @@ def solve_fixed_boundary_residual_iter(
     final_nestor_recompute_failed = False
     final_nestor_sample_time_s = 0.0
     final_nestor_solve_time_s = 0.0
-    if bool(free_boundary_enabled and freeb_couple_edge) and not final_vacuum_stub:
+    final_iter2_for_recompute = int(last_iter2)
+    if (
+        bool(return_best_scored_state)
+        and (not bool(converged))
+        and (best_scored_state is not None)
+        and np.isfinite(best_scored_fsq)
+    ):
+        state = best_scored_state
+        freeb_plascur = float(best_scored_plascur)
+        final_fsqr_report = float(best_scored_fsqr)
+        final_fsqz_report = float(best_scored_fsqz)
+        final_fsql_report = float(best_scored_fsql)
+        final_pre_update_fsqr = float(best_scored_fsqr)
+        final_pre_update_fsqz = float(best_scored_fsqz)
+        final_pre_update_fsql = float(best_scored_fsql)
+        final_iter2_for_recompute = int(best_scored_iter)
+        final_bsqvac_half_current = None
+        returned_best_scored_state = True
+    final_nestor_recompute_required = bool(free_boundary_enabled and freeb_couple_edge) and (
+        (not bool(final_vacuum_stub)) or bool(direct_free_boundary_provider)
+    )
+    if final_nestor_recompute_required:
         final_nestor_recompute_attempted = True
         t_finalize_nestor_recompute_start = time.perf_counter() if timing_enabled else None
         try:
@@ -14824,7 +14916,7 @@ def solve_fixed_boundary_residual_iter(
                 constraint_tcon=constraint_tcon_override,
                 constraint_precond_active=constraint_precond_active,
                 constraint_tcon_active=constraint_tcon_active,
-                iter2=last_iter2,
+                iter2=final_iter2_for_recompute,
             )
             fsqr_final, fsqz_final, fsql_final = _fsq_from_norms(
                 norms_final,
@@ -14872,6 +14964,18 @@ def solve_fixed_boundary_residual_iter(
         "use_restart_triggers": bool(use_restart_triggers),
         "use_direct_fallback": bool(use_direct_fallback),
         "max_update_rms": float(max_update_rms),
+        "free_boundary_current_residual_norms": bool(freeb_current_residual_norms),
+        "return_best_scored_state": bool(return_best_scored_state),
+        "returned_best_scored_state": bool(returned_best_scored_state),
+        "best_scored_iter": int(best_scored_iter),
+        "best_scored_fsq": float(best_scored_fsq),
+        "best_scored_fsqr": float(best_scored_fsqr),
+        "best_scored_fsqz": float(best_scored_fsqz),
+        "best_scored_fsql": float(best_scored_fsql),
+        "best_scored_full_boundary_count": int(best_scored_full_boundary_count),
+        "best_scored_fresh_boundary_count": int(best_scored_fresh_boundary_count),
+        "free_boundary_convergence_blocked_count": int(freeb_convergence_blocked_count),
+        "final_iter2_for_recompute": int(final_iter2_for_recompute),
         "converged": bool(converged),
         "converged_strict": bool(converged_strict_final),
         "converged_by_total_fsq": bool(converged_total_final),

@@ -73,8 +73,10 @@ FTOL = 1.0e-8
 PHIEDGE = 0.04
 TOROIDAL_CURRENT = 3.0e3
 DELT: float | None = None
-FREE_BOUNDARY_ACTIVATE_FSQ: float | None = 1.0e-2
+FREE_BOUNDARY_ACTIVATE_FSQ: float | None = 1.0e-8
 LIMIT_UPDATE_RMS = False
+BACKTRACKING = False
+USE_DIRECT_FALLBACK = False
 BETA_CONTINUATION_RESTART = True
 JIT_FORCES: bool | str = "auto"
 
@@ -118,6 +120,8 @@ class ExampleConfig:
     delt: float | None = DELT
     free_boundary_activate_fsq: float | None = FREE_BOUNDARY_ACTIVATE_FSQ
     limit_update_rms: bool = LIMIT_UPDATE_RMS
+    backtracking: bool = BACKTRACKING
+    use_direct_fallback: bool = USE_DIRECT_FALLBACK
     beta_continuation_restart: bool = BETA_CONTINUATION_RESTART
     jit_forces: bool | str = JIT_FORCES
     field_line_count: int = FIELD_LINE_COUNT
@@ -184,6 +188,16 @@ def _history_stats(values: Any) -> dict[str, float | int | None]:
         "min": float(np.min(arr)),
         "max": float(np.max(arr)),
     }
+
+
+def _finite_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except Exception:
+        return None
+    return result if np.isfinite(result) else None
 
 
 def _classify_stall(row: dict[str, Any]) -> str:
@@ -409,6 +423,8 @@ def _run_one_beta(
         external_field_provider_kind="direct_coils",
         external_field_provider_params=coils.params,
         limit_update_rms=bool(config.limit_update_rms),
+        backtracking=bool(config.backtracking),
+        use_direct_fallback=bool(config.use_direct_fallback),
         restart_state=restart_state,
         use_initial_guess=False,
     )
@@ -451,6 +467,26 @@ def _run_one_beta(
         "final_fsqr": diag.get("final_fsqr") if isinstance(diag, dict) else None,
         "final_fsqz": diag.get("final_fsqz") if isinstance(diag, dict) else None,
         "final_fsql": diag.get("final_fsql") if isinstance(diag, dict) else None,
+        "return_best_scored_state": diag.get("return_best_scored_state") if isinstance(diag, dict) else None,
+        "returned_best_scored_state": diag.get("returned_best_scored_state") if isinstance(diag, dict) else None,
+        "best_scored_iter": diag.get("best_scored_iter") if isinstance(diag, dict) else None,
+        "best_scored_fsq": _finite_float_or_none(diag.get("best_scored_fsq") if isinstance(diag, dict) else None),
+        "best_scored_fsqr": _finite_float_or_none(diag.get("best_scored_fsqr") if isinstance(diag, dict) else None),
+        "best_scored_fsqz": _finite_float_or_none(diag.get("best_scored_fsqz") if isinstance(diag, dict) else None),
+        "best_scored_fsql": _finite_float_or_none(diag.get("best_scored_fsql") if isinstance(diag, dict) else None),
+        "best_scored_full_boundary_count": (
+            diag.get("best_scored_full_boundary_count") if isinstance(diag, dict) else None
+        ),
+        "best_scored_fresh_boundary_count": (
+            diag.get("best_scored_fresh_boundary_count") if isinstance(diag, dict) else None
+        ),
+        "free_boundary_convergence_blocked_count": (
+            diag.get("free_boundary_convergence_blocked_count") if isinstance(diag, dict) else None
+        ),
+        "final_iter2_for_recompute": diag.get("final_iter2_for_recompute") if isinstance(diag, dict) else None,
+        "free_boundary_current_residual_norms": (
+            diag.get("free_boundary_current_residual_norms") if isinstance(diag, dict) else None
+        ),
         "free_boundary_bnormal_rms": nestor.get("bnormal_rms") if isinstance(nestor, dict) else None,
         "free_boundary_bsqvac_rms": nestor.get("bsqvac_rms") if isinstance(nestor, dict) else None,
         "free_boundary_gsource_rms": nestor.get("gsource_rms") if isinstance(nestor, dict) else None,
@@ -518,6 +554,18 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "final_fsqz",
         "final_fsql",
         "final_fsq_component_sum",
+        "return_best_scored_state",
+        "returned_best_scored_state",
+        "best_scored_iter",
+        "best_scored_fsq",
+        "best_scored_fsqr",
+        "best_scored_fsqz",
+        "best_scored_fsql",
+        "best_scored_full_boundary_count",
+        "best_scored_fresh_boundary_count",
+        "free_boundary_convergence_blocked_count",
+        "final_iter2_for_recompute",
+        "free_boundary_current_residual_norms",
         "free_boundary_bnormal_rms",
         "free_boundary_bsqvac_rms",
         "free_boundary_gsource_rms",
@@ -735,7 +783,19 @@ def _write_convergence_plot(outdir: Path, cases: list[SolvedBetaCase]) -> Path:
             if total.size == 1:
                 x = np.asarray([case.row.get("n_iter") or 0], dtype=float)
                 marker = "o"
-            axes[0].semilogy(x, total, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+            (line,) = axes[0].semilogy(x, total, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+            final_fsq = case.row.get("final_fsq_component_sum") or case.row.get("final_fsq")
+            final_iter = case.row.get("final_iter2_for_recompute") or case.row.get("n_iter") or x[-1]
+            if final_fsq is not None and np.isfinite(float(final_fsq)):
+                axes[0].semilogy(
+                    [float(final_iter)],
+                    [float(final_fsq)],
+                    marker="x",
+                    linestyle="None",
+                    color=line.get_color(),
+                    markersize=6,
+                    label=f"{case.beta_percent:g}% final",
+                )
 
         bnormal = _history(diag, "freeb_nestor_bnormal_rms_history")
         if not bnormal.size:
@@ -748,7 +808,19 @@ def _write_convergence_plot(outdir: Path, cases: list[SolvedBetaCase]) -> Path:
             if bnormal.size == 1:
                 x = np.asarray([case.row.get("n_iter") or 0], dtype=float)
                 marker = "o"
-            axes[1].semilogy(x, bnormal, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+            (line,) = axes[1].semilogy(x, bnormal, marker=marker, linewidth=1.2, label=f"{case.beta_percent:g}%")
+            final_bnormal = case.row.get("free_boundary_bnormal_rms")
+            final_iter = case.row.get("final_iter2_for_recompute") or case.row.get("n_iter") or x[-1]
+            if final_bnormal is not None and np.isfinite(float(final_bnormal)):
+                axes[1].semilogy(
+                    [float(final_iter)],
+                    [float(final_bnormal)],
+                    marker="x",
+                    linestyle="None",
+                    color=line.get_color(),
+                    markersize=6,
+                    label=f"{case.beta_percent:g}% final",
+                )
 
     beta = np.asarray([case.beta_percent for case in cases], dtype=float)
     axes[2].plot(beta, [case.row.get("mean_iota") for case in cases], "o-", label="mean iota")
@@ -826,6 +898,8 @@ def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
             None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
         ),
         "limit_update_rms": bool(config.limit_update_rms),
+        "backtracking": bool(config.backtracking),
+        "use_direct_fallback": bool(config.use_direct_fallback),
         "beta_continuation_restart": bool(config.beta_continuation_restart),
         "coils_json": str(coils_json),
         "summary_csv": str(summary_csv),

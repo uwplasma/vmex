@@ -156,11 +156,25 @@ traces, top-view solved boundaries, side/corner cross sections,
 solved-boundary ``|B|``, and residual/iota diagnostics. The metrics JSON records
 convergence status, force components, free-boundary ``B.n`` diagnostics, WOUT
 paths, beta scan rows, solver objective-history extrema, bad-Jacobian/reset
-counts, and a stall classification. Current direct-coil square-hybrid runs are
-therefore treated as explicit convergence diagnostics: if the final recomputed
-force components miss the requested ``FTOL``, the run is labelled as
-``not_converged_or_max_iter`` rather than being presented as a production
-equilibrium.
+counts, best fresh free-boundary residuals, and a stall classification. Current
+direct-coil square-hybrid runs are therefore treated as explicit convergence
+diagnostics: if the final recomputed force components miss the requested
+``FTOL``, the run is labelled as ``not_converged_or_max_iter`` rather than being
+presented as a production equilibrium. For finite-beta cases, coil-only
+``B.n`` is not the physical free-boundary target because the plasma field also
+contributes at the interface. Use the final VMEC force residuals, total-pressure
+balance, and eventually a virtual-casing plasma-field diagnostic for promotion
+claims; coil-only ``B.n`` is a vacuum check.
+
+The default activation threshold is intentionally tight
+(``FREE_BOUNDARY_ACTIVATE_FSQ = 1e-8``), and the solver now blocks
+``LFREEB`` convergence until the free-boundary vacuum/edge coupling has
+actually turned on. With the current coarse review resolution
+(``NS=9, MPOL=5, NTOR=12``), beta ``0%``, ``1%``, and ``3%`` reach strict
+``FTOL=1e-8`` active free-boundary convergence in the default scan. The
+``10%`` case is retained in the scan as a high-beta diagnostic: it reaches an
+active coupled residual floor of order ``1e-7`` to ``1e-8`` at this resolution
+but is not promoted as strict ``1e-8`` converged yet.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

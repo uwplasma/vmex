@@ -175,5 +175,11 @@ Later phases finish production differentiable optimization APIs, production
 free-boundary LCFS solves, and broader toroidal stellarator-mirror hybrid
 convergence studies.
 The current ESSOS-compatible circular-coil beta scan remains diagnostic/pilot
-evidence, and the toroidal hybrid target lane is a validated prototype with
-total-``fsq`` convergence evidence at the documented target ladder.
+evidence. The toroidal square-coil stellarator-mirror hybrid lane now runs real
+direct-coil VMEC free-boundary solves and plots solved states, but remains a
+convergence-diagnostic path until fresh final force residuals meet the requested
+``FTOL``. Finite-beta promotion should be based on VMEC force residuals,
+total-pressure balance, and plasma-field/virtual-casing diagnostics rather than
+coil-only ``B.n``. The current coarse square-coil scan has strict active
+free-boundary convergence evidence through beta ``3%``; beta ``10%`` remains a
+documented high-beta convergence target.
