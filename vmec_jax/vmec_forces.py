@@ -1228,6 +1228,7 @@ def vmec_forces_rz_from_wout(
             trig=trig,
             return_parity_aux=True,
             state_physical_signed=(Rcos_int, Zsin_int, Rsin_int, Zcos_int),
+            compact_force_payload=not bool(use_wout_bsup),
         )
         bcovar_result = vmec_bcovar_half_mesh_from_wout(**bcovar_kwargs)
         if _looks_like_force_kernel_payload(bcovar_result) or not _bcovar_matches_radial_grid(bcovar_result, s):

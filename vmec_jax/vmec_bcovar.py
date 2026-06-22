@@ -179,6 +179,75 @@ class VmecHalfMeshBcovar:
         return cls(*children)
 
 
+@tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class VmecForceBcovarPayload:
+    """Compact bcovar payload for the force/residual hot path.
+
+    Public diagnostics still use :class:`VmecHalfMeshBcovar`.  This internal
+    payload keeps the fields consumed by force norms, R/Z forces, constraints,
+    and lambda residual transforms while omitting parity/debug intermediates.
+    """
+
+    jac: VmecHalfMeshJacobian
+    guu: Any
+    guv: Any
+    gvv: Any
+    bsupu: Any
+    bsupv: Any
+    bsubu: Any
+    bsubv: Any
+    bsubu_e: Any
+    bsubv_e: Any
+    bsubu_e_scaled: Any
+    bsubv_e_scaled: Any
+    clmn_even: Any
+    clmn_odd: Any
+    blmn_even: Any
+    blmn_odd: Any
+    lu0_force: Any
+    bsq: Any
+    gij_b_uu: Any
+    gij_b_uv: Any
+    gij_b_vv: Any
+    lu_e: Any
+    lv_e: Any
+    lamscale: Any
+
+    def tree_flatten(self):
+        children = (
+            self.jac,
+            self.guu,
+            self.guv,
+            self.gvv,
+            self.bsupu,
+            self.bsupv,
+            self.bsubu,
+            self.bsubv,
+            self.bsubu_e,
+            self.bsubv_e,
+            self.bsubu_e_scaled,
+            self.bsubv_e_scaled,
+            self.clmn_even,
+            self.clmn_odd,
+            self.blmn_even,
+            self.blmn_odd,
+            self.lu0_force,
+            self.bsq,
+            self.gij_b_uu,
+            self.gij_b_uv,
+            self.gij_b_vv,
+            self.lu_e,
+            self.lv_e,
+            self.lamscale,
+        )
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
+
+
 def _pshalf_from_s(s: Any) -> Any:
     s = jnp.asarray(s)
     if s.shape[0] < 2:
@@ -1008,7 +1077,8 @@ def vmec_bcovar_half_mesh_from_wout(
     trig: VmecTrigTables | None = None,
     return_parity_aux: bool = False,
     state_physical_signed: tuple[Any, Any, Any, Any] | None = None,
-) -> VmecHalfMeshBcovar:
+    compact_force_payload: bool = False,
+) -> VmecHalfMeshBcovar | VmecForceBcovarPayload:
     """Compute VMEC-style half-mesh metric and B components for parity tests.
 
     Parameters
@@ -1046,6 +1116,11 @@ def vmec_bcovar_half_mesh_from_wout(
     trig:
         Optional precomputed VMEC trig tables. If omitted and
         ``use_vmec_synthesis=True``, they are built internally.
+    compact_force_payload:
+        Internal force-path option. If True, return a compact payload with the
+        fields needed by force norms, constraints, and residual transforms but
+        without parity/debug intermediates. Public callers should keep the
+        default full payload.
     """
     bcovar_start = time.perf_counter()
     resolved = _resolve_bcovar_state_and_trig(
@@ -1167,31 +1242,34 @@ def vmec_bcovar_half_mesh_from_wout(
 
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
-    s_half = pshalf * pshalf
-    bsubu_parity_even = (
-        guu_eh * bsupu_even
-        + s_half * guu_oh * bsupu_odd
-        + guv_eh * bsupv_even
-        + s_half * guv_oh * bsupv_odd
-    )
-    bsubu_parity_odd = (
-        guu_eh * bsupu_odd
-        + guu_oh * bsupu_even
-        + guv_eh * bsupv_odd
-        + guv_oh * bsupv_even
-    )
-    bsubv_parity_even = (
-        guv_eh * bsupu_even
-        + s_half * guv_oh * bsupu_odd
-        + gvv_eh * bsupv_even
-        + s_half * gvv_oh * bsupv_odd
-    )
-    bsubv_parity_odd = (
-        guv_eh * bsupu_odd
-        + guv_oh * bsupu_even
-        + gvv_eh * bsupv_odd
-        + gvv_oh * bsupv_even
-    )
+    if bool(compact_force_payload):
+        bsubu_parity_even = bsubu_parity_odd = bsubv_parity_even = bsubv_parity_odd = None
+    else:
+        s_half = pshalf * pshalf
+        bsubu_parity_even = (
+            guu_eh * bsupu_even
+            + s_half * guu_oh * bsupu_odd
+            + guv_eh * bsupv_even
+            + s_half * guv_oh * bsupv_odd
+        )
+        bsubu_parity_odd = (
+            guu_eh * bsupu_odd
+            + guu_oh * bsupu_even
+            + guv_eh * bsupv_odd
+            + guv_oh * bsupv_even
+        )
+        bsubv_parity_even = (
+            guv_eh * bsupu_even
+            + s_half * guv_oh * bsupu_odd
+            + gvv_eh * bsupv_even
+            + s_half * gvv_oh * bsupv_odd
+        )
+        bsubv_parity_odd = (
+            guv_eh * bsupu_odd
+            + guv_oh * bsupu_even
+            + gvv_eh * bsupv_odd
+            + gvv_oh * bsupv_even
+        )
 
     # Optional reference parity path for lambda-force kernels.
     bsubu_lambda = bsubu
@@ -1253,7 +1331,35 @@ def vmec_bcovar_half_mesh_from_wout(
     phip_internal = lambda_assembly.phip_internal
     lu0_force = lambda_assembly.lu0_force
 
-    result = VmecHalfMeshBcovar(
+    if bool(compact_force_payload):
+        result = VmecForceBcovarPayload(
+            jac=jac,
+            guu=guu,
+            guv=guv,
+            gvv=gvv,
+            bsupu=bsupu,
+            bsupv=bsupv,
+            bsubu=bsubu,
+            bsubv=bsubv,
+            bsubu_e=bsubu_e,
+            bsubv_e=bsubv_e,
+            bsubu_e_scaled=bsubu_e_scaled,
+            bsubv_e_scaled=bsubv_e_scaled,
+            clmn_even=clmn_even,
+            clmn_odd=clmn_odd,
+            blmn_even=blmn_even,
+            blmn_odd=blmn_odd,
+            lu0_force=lu0_force,
+            bsq=bsq,
+            gij_b_uu=gij_b_uu,
+            gij_b_uv=gij_b_uv,
+            gij_b_vv=gij_b_vv,
+            lu_e=lu_e,
+            lv_e=lv_e,
+            lamscale=lamscale,
+        )
+    else:
+        result = VmecHalfMeshBcovar(
         jac=jac,
         guu=guu,
         guv=guv,
@@ -1295,7 +1401,7 @@ def vmec_bcovar_half_mesh_from_wout(
         clmn_odd=clmn_odd,
         blmn_even=blmn_even,
         blmn_odd=blmn_odd,
-    )
+        )
     _vmec_bcovar_profile_log("bcovar_done", bcovar_start)
     if bool(return_parity_aux):
         aux = SimpleNamespace(
