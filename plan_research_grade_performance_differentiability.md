@@ -1301,6 +1301,51 @@ Updated lane percentages:
 - Docs/release hygiene: 96%.
 - Overall: 90%.
 
+### 2026-06-22: Add benchmark execution-policy provenance
+
+Steps taken:
+
+- Extended `tools/diagnostics/example_runtime_memory_matrix.py` so each
+  vmec_jax row records `execution_policy_cold` and final/warm
+  `execution_policy`, including host-update, NumPy-force, NumPy-preconditioner,
+  strict-update JIT, and scan policy fields.
+- Ran a one-case finite-beta QH benchmark slice with and without
+  `--solver-mode default` to separate the public Python API default from the
+  CLI-style production policy.
+
+Results obtained:
+
+- Bare `run_fixed_boundary(...)` benchmark slice:
+  cold `20.46 s`, warm `9.55 s`, policy `host_update_assembly=False`.
+- CLI-style/default-mode benchmark slice:
+  cold `12.27 s`, warm `8.06 s`, policy `host_update_assembly=True`,
+  `numpy_preconditioner_apply=True`, `numpy_force_fast_path=False`.
+- The README benchmark matrix should use the CLI-style production path when it
+  is meant to explain `vmec` command-line performance; Python API comparisons
+  should be labeled separately.
+
+Best next steps:
+
+1. Regenerate the full README benchmark matrix with explicit
+   `--solver-mode default` for the CLI-style performance claim.
+2. Decide whether bare `run_fixed_boundary(...)` should adopt the production
+   default mode, or stay conservative and require `solver_mode="default"` for
+   CLI-parity performance.
+3. Add the execution-policy fields to the detailed docs benchmark table, not to
+   the compact README figure.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 99%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 89%.
+- Refactor/API/examples: 47%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 90%.
+
 ### 2026-06-22: Classify finite-beta CPU update policy and raise host-update cutoff
 
 Steps taken:
