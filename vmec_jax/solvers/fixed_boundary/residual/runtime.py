@@ -656,6 +656,11 @@ _RESIDUAL_ITER_TIMING_DEFAULTS: dict[str, float | int] = {
     "compute_forces_backtracking_calls": 0,
     "preconditioner": 0.0,
     "precond_apply": 0.0,
+    "precond_apply_scale_m1_rhs": 0.0,
+    "precond_apply_rz": 0.0,
+    "precond_apply_fused_payload": 0.0,
+    "precond_apply_output_blocks": 0.0,
+    "precond_apply_sync": 0.0,
     "precond_mode_scale": 0.0,
     "precond_refresh_seed": 0.0,
     "precond_refresh_seed_lambda": 0.0,
@@ -933,11 +938,21 @@ def _build_residual_iter_timing_report(
                 ),
                 "force_eval_extra_s": all_force - main_force,
                 "precond_apply_s": float(timing_stats["precond_apply"]),
+                "precond_apply_scale_m1_rhs_s": float(timing_stats.get("precond_apply_scale_m1_rhs", 0.0)),
+                "precond_apply_rz_s": float(timing_stats.get("precond_apply_rz", 0.0)),
+                "precond_apply_fused_payload_s": float(timing_stats.get("precond_apply_fused_payload", 0.0)),
+                "precond_apply_output_blocks_s": float(timing_stats.get("precond_apply_output_blocks", 0.0)),
+                "precond_apply_sync_s": float(timing_stats.get("precond_apply_sync", 0.0)),
                 "precond_mode_scale_s": float(timing_stats["precond_mode_scale"]),
                 "compute_forces_main_per_iter_s": main_force / iters,
                 "force_eval_all_per_iter_s": all_force / iters,
                 "force_eval_extra_per_iter_s": (all_force - main_force) / iters,
                 "precond_apply_per_iter_s": float(timing_stats["precond_apply"]) / iters,
+                "precond_apply_rz_per_iter_s": float(timing_stats.get("precond_apply_rz", 0.0)) / iters,
+                "precond_apply_fused_payload_per_iter_s": float(
+                    timing_stats.get("precond_apply_fused_payload", 0.0)
+                )
+                / iters,
                 "precond_mode_scale_per_iter_s": float(timing_stats["precond_mode_scale"]) / iters,
                 "precond_refresh_seed_per_iter_s": float(timing_stats.get("precond_refresh_seed", 0.0)) / iters,
                 "precond_refresh_seed_lambda_per_iter_s": float(timing_stats.get("precond_refresh_seed_lambda", 0.0))

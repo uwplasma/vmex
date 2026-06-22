@@ -95,7 +95,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 86%.
+- CPU/GPU runtime and memory footprint: 87%.
   The single-grid matrix shows no PR regression against `origin/main`, and warm
   CPU `vmec_jax` beats VMEC2000 on 7 of 16 rows. The 3D preconditioner R/Z
   matrix hotspot has been reduced by the default full-JIT builder, and ordinary
@@ -106,10 +106,14 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   about `0.001 s` on the promoted QH finite-beta probe. Fixed-boundary
   iteration can now reuse the setup-time axis force probe on strict no-reset
   iteration-1 branches, reducing the promoted bounded finite-beta wall time
-  from `6.36 s` to `5.78 s` without changing residual scalars. Memory remains
-  materially higher than VMEC2000, with LASYM finite-beta layouts and
-  preconditioner apply/seed costs still the main targets.
-- Refactor/API/examples: 44%.
+  from `6.36 s` to `5.78 s` without changing residual scalars. Preconditioner
+  apply timing now exposes m=1 RHS scaling, R/Z apply, fused payload, output
+  block, and sync sub-buckets; the m=1 RHS scaling path now uses a compiled
+  channel scaler, reducing the promoted finite-beta preconditioner apply from
+  about `0.36 s` to `0.27 s`. Memory remains materially higher than VMEC2000,
+  with LASYM finite-beta layouts and preconditioner apply/seed costs still the
+  main targets.
+- Refactor/API/examples: 45%.
   Public examples are better, but core source files and tests are still too
   large and too entangled. The fixed-boundary residual timing/setup seam is now
   slightly cleaner, but the main residual loop still needs a larger split.
@@ -1242,6 +1246,64 @@ Updated lane percentages:
 - Single-stage coil optimization: 86%.
 - CPU/GPU runtime and memory footprint: 86%.
 - Refactor/API/examples: 44%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 89%.
+
+### 2026-06-22: Split preconditioner apply timing and compile m=1 RHS scaling
+
+Steps taken:
+
+- Split the VMEC2000 preconditioner apply bucket into:
+  `precond_apply_scale_m1_rhs_s`, `precond_apply_rz_s`,
+  `precond_apply_fused_payload_s`, `precond_apply_output_blocks_s`, and
+  `precond_apply_sync_s`.
+- Added these sub-buckets to the fixed-boundary profiler output and timing
+  report tests.
+- Added a small JIT-compiled channel scaler for the VMEC m=1 R/Z preconditioner
+  RHS path, replacing the eager JAX slice-scaling calls in concrete JAX
+  preconditioner applies. The NumPy host path is unchanged.
+- Tested existing tridiagonal policy toggles on the promoted bounded QH
+  finite-beta row before changing defaults.
+
+Results obtained:
+
+- Focused validation passed:
+  `python -m ruff check vmec_jax/solvers/fixed_boundary/preconditioning/operators.py vmec_jax/solvers/fixed_boundary/residual/preconditioner_payload.py vmec_jax/solvers/fixed_boundary/residual/runtime.py tools/diagnostics/profile_fixed_boundary.py tests/test_solve_performance_instrumentation.py tests/test_solve_preconditioner_payload_helpers.py tests/test_solve_preconditioner_metric_helpers.py`;
+  `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_preconditioner_payload_helpers.py tests/test_solve_preconditioner_metric_helpers.py tests/test_solve_performance_instrumentation.py -q`.
+- Bounded QH finite-beta profile before the compiled m=1 scaler:
+  `precond_apply_s=0.3593`,
+  `precond_apply_scale_m1_rhs_s=0.1972`, and
+  `precond_apply_rz_s=0.1379`.
+- With the compiled m=1 scaler, the same row reports
+  `precond_apply_s=0.2740`,
+  `precond_apply_scale_m1_rhs_s=0.1127`, and
+  `precond_apply_rz_s=0.1374`, with unchanged residual scalars.
+- `VMEC_JAX_TRIDI_SOLVE=1` reduced `precond_apply_rz_s` to about `0.0766`,
+  but increased setup/axis-reset costs and total wall time; it is not a default
+  win for this row.
+- `VMEC_JAX_TRIDI_PRECOMPUTE=1` also worsened total wall time for this bounded
+  finite-beta row, so preconditioner tridiagonal defaults remain unchanged.
+
+Best next steps:
+
+1. Continue M3 by attacking `precond_refresh_seed_rz_matrices_s` and
+   `update_state_s`, since R/Z apply policy toggles did not improve total wall
+   for this row.
+2. Promote the preconditioner sub-buckets into the performance decomposition
+   table after one full-matrix rerun confirms they are stable.
+3. Continue M7 by moving the preconditioner apply/reuse predicates into a
+   smaller domain seam, keeping the residual controller focused on VMEC branch
+   policy rather than payload mechanics.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 98%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 87%.
+- Refactor/API/examples: 45%.
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 96%.
 - Overall: 89%.
