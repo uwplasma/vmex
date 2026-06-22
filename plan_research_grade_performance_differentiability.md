@@ -1301,6 +1301,59 @@ Updated lane percentages:
 - Docs/release hygiene: 96%.
 - Overall: 90%.
 
+### 2026-06-22: Run current-branch historical README CPU matrix
+
+Steps taken:
+
+- Re-ran the 16 historical fixed-boundary README benchmark rows from
+  `docs/_static/figures/readme_runtime_compare.csv` on the current PR branch.
+- Used the CLI-style production policy explicitly:
+  `tools/diagnostics/example_runtime_memory_matrix.py --backend both
+  --solver-mode default --warm-runs 1 --jax-platforms cpu`.
+- Ran VMEC++ on the same 16 rows with the local `vmecpp` CLI to identify which
+  rows are supported and converged.
+
+Results obtained:
+
+- Current branch CPU matrix summary:
+  `outputs/pr20_readme_matrix_current_cpu/summary.json`.
+- Warm vmec_jax is now close to VMEC2000 for several bundled rows:
+  `nfp4_QH_warm_start` `0.45 s` vs VMEC2000 `0.33 s`,
+  `basic_non_stellsym_pressure` `1.34 s` vs `1.06 s`,
+  `ITERModel` `0.98 s` vs `0.81 s`, and `cth_like_fixed_bdy`
+  `0.29 s` vs `0.41 s` (vmec_jax faster).
+- Harder 3D rows remain slower but within a smaller factor than earlier:
+  Landreman-Paul QA/QH rows are roughly `1.45x` to `2.09x` VMEC2000 in warm
+  runtime.
+- Memory remains a clear open lane: vmec_jax CPU peak process memory is
+  roughly `1.9x` to `6.3x` VMEC2000 on this matrix.
+- VMEC++ is available locally and succeeds on 7/16 rows in this environment:
+  `ITERModel`, `circular_tokamak`, `circular_tokamak_aspect_100`,
+  `nfp4_QH_warm_start`, `purely_toroidal_field`,
+  `shaped_tokamak_pressure`, and `solovev`. Other rows are unsupported or do
+  not converge cleanly and should be shown as unavailable, not as failures.
+
+Best next steps:
+
+1. Run the same 16-row matrix against clean `origin/main` and compare cold,
+   warm, memory, and convergence row-by-row.
+2. Profile remaining runtime gaps on the Landreman-Paul 3D rows and memory
+   gaps on `basic_non_stellsym_pressure`/large axisymmetric rows.
+3. Refresh README/docs benchmark artifacts only after the current-vs-main
+   comparison is complete and the README memory-plot policy is finalized.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 99%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 90%.
+- Refactor/API/examples: 47%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 90%.
+
 ### 2026-06-22: Add benchmark execution-policy provenance
 
 Steps taken:
