@@ -930,10 +930,24 @@ def solve_fixed_boundary_residual_iter(
 
     _compute_forces_impl = _compute_forces
 
+    numpy_force_env = os.getenv("VMEC_JAX_NUMPY_FORCE_FAST_PATH", "auto").strip().lower()
+    try:
+        numpy_force_max_iter = max(0, int(os.getenv("VMEC_JAX_NUMPY_FORCE_MAX_ITER", "600")))
+    except Exception:
+        numpy_force_max_iter = 600
+    if numpy_force_env in ("1", "true", "yes", "on"):
+        use_numpy_force_fast_path = bool(host_update_assembly)
+    elif numpy_force_env in ("0", "false", "no", "off"):
+        use_numpy_force_fast_path = False
+    else:
+        short_stage_for_numpy_force = int(max_iter) <= int(numpy_force_max_iter)
+        use_numpy_force_fast_path = bool(host_update_assembly) and bool(short_stage_for_numpy_force)
+
     # NumPy hot-path: wrap _compute_forces_impl with pure-NumPy module patching.
-    # Used when host_update_assembly=True to eliminate all JAX dispatch overhead.
+    # Used for short host-update CPU stages to eliminate JAX dispatch overhead.
     numpy_force = _prepare_numpy_force_fast_path(
         host_update_assembly=bool(host_update_assembly),
+        use_numpy_force_fast_path=bool(use_numpy_force_fast_path),
         has_jax_func=has_jax,
         compute_forces_impl=_compute_forces_impl,
         state0=state0,

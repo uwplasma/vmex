@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -428,8 +429,9 @@ def test_host_update_assembly_matches_jax_update_path_lasym():
 def test_host_update_assembly_driver_default_env_override(monkeypatch):
     root = Path(__file__).resolve().parents[1]
     cfg, _indata = load_config(str(root / "examples/data/input.nfp4_QH_warm_start"))
-    cfg_high_work, _indata_high_work = load_config(str(root / "examples/data/input.nfp4_QH_finite_beta"))
+    cfg_finite_beta, _indata_finite_beta = load_config(str(root / "examples/data/input.nfp4_QH_finite_beta"))
     cfg_lasym, _indata_lasym = load_config(str(root / "examples/data/input.basic_non_stellsym_pressure"))
+    cfg_large_work = SimpleNamespace(ns=128, mpol=12, ntor=8, lasym=False)
 
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", raising=False)
@@ -457,8 +459,14 @@ def test_host_update_assembly_driver_default_env_override(monkeypatch):
         backend="cpu",
         use_scan=False,
     )
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg_finite_beta,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
     assert not driver_module._host_update_assembly_driver_default(
-        cfg=cfg_high_work,
+        cfg=cfg_large_work,
         performance_mode=True,
         backend="cpu",
         use_scan=False,
@@ -474,7 +482,7 @@ def test_host_update_assembly_driver_default_env_override(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
     monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "999999")
     assert driver_module._host_update_assembly_driver_default(
-        cfg=cfg_high_work,
+        cfg=cfg_large_work,
         performance_mode=True,
         backend="cpu",
         use_scan=False,

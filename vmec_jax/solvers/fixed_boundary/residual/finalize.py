@@ -297,6 +297,8 @@ def finalize_residual_iter_from_namespace(
         return getattr(startup_policy, name) if startup_policy is not None else ns[name]
 
     t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
+    freeb_policy = ns.get("_freeb_policy")
+    numpy_precond_policy = ns.get("_numpy_precond_policy")
     diag: dict[str, Any] = {
         "ftol": ns["ftol"],
         "requested_ftol": float(ns["ftol"]),
@@ -305,6 +307,35 @@ def finalize_residual_iter_from_namespace(
         "precond_radial_alpha": float(ns["precond_radial_alpha"]),
         "precond_lambda_alpha": float(ns["precond_lambda_alpha"]),
         "strict_update": bool(ns["strict_update"]),
+        "host_update_assembly": bool(_policy_attr("host_update_assembly")),
+        "host_fsq1_norms_on_accelerator": bool(_policy_attr("host_fsq1_norms_on_accelerator")),
+        "host_residual_metrics_on_accelerator": bool(_policy_attr("host_residual_metrics_on_accelerator")),
+        "jit_strict_update_enabled": (
+            bool(getattr(freeb_policy, "jit_strict_update_enabled"))
+            if freeb_policy is not None
+            else bool(ns.get("jit_strict_update_enabled", False))
+        ),
+        "jit_strict_update_work": (
+            int(getattr(freeb_policy, "update_work")) if freeb_policy is not None else int(ns.get("update_work", 0))
+        ),
+        "jit_strict_update_cpu_work_limit": (
+            int(getattr(freeb_policy, "cpu_work_limit"))
+            if freeb_policy is not None
+            else int(ns.get("cpu_work_limit", 0))
+        ),
+        "numpy_preconditioner_apply": bool(ns.get("_use_numpy_preconditioner_apply", False)),
+        "numpy_preconditioner_apply_mode_count": (
+            int(getattr(numpy_precond_policy, "mode_count")) if numpy_precond_policy is not None else 0
+        ),
+        "numpy_preconditioner_apply_max_iter_cutoff": (
+            int(getattr(numpy_precond_policy, "max_iter_cutoff")) if numpy_precond_policy is not None else 0
+        ),
+        "numpy_preconditioner_apply_min_mode_count": (
+            int(getattr(numpy_precond_policy, "min_mode_count")) if numpy_precond_policy is not None else 0
+        ),
+        "numpy_force_fast_path": bool(ns.get("use_numpy_force_fast_path", False)),
+        "numpy_force_fast_path_active": ns.get("_compute_forces_np") is not None,
+        "numpy_force_fast_path_max_iter": int(ns.get("numpy_force_max_iter", 0)),
         "reference_mode": bool(ns["reference_mode"]),
         "use_restart_triggers": bool(_policy_attr("use_restart_triggers")),
         "use_direct_fallback": bool(ns["use_direct_fallback"]),

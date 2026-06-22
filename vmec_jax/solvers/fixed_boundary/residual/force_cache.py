@@ -85,6 +85,7 @@ def select_compute_forces_callable(
 def prepare_numpy_force_fast_path(
     *,
     host_update_assembly: bool,
+    use_numpy_force_fast_path: bool | None = None,
     has_jax_func: Callable[[], bool],
     compute_forces_impl: Callable[..., Any],
     state0: Any,
@@ -101,7 +102,8 @@ def prepare_numpy_force_fast_path(
     """
 
     compute_forces_np = None
-    if bool(host_update_assembly) and has_jax_func():
+    use_numpy_force = bool(host_update_assembly) if use_numpy_force_fast_path is None else bool(use_numpy_force_fast_path)
+    if bool(use_numpy_force) and has_jax_func():
         try:
             from vmec_jax.vmec_numpy_forces import compute_forces_numpy as _cfn_helper
 

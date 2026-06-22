@@ -1250,6 +1250,124 @@ Updated lane percentages:
 - Docs/release hygiene: 96%.
 - Overall: 89%.
 
+### 2026-06-22: Decouple NumPy force evaluation from CPU host-update assembly
+
+Steps taken:
+
+- Added `VMEC_JAX_NUMPY_FORCE_FAST_PATH` and
+  `VMEC_JAX_NUMPY_FORCE_MAX_ITER` policy controls so CPU host-update assembly
+  no longer forces NumPy force evaluation on long stages.
+- Kept the default conservative for first-run CPU performance: host update
+  remains enabled for moderate grids, NumPy force evaluation is used only for
+  short stages (`max_iter <= 600`), and long stages use compiled JAX force
+  kernels with host update/preconditioner assembly.
+- Exposed `numpy_force_fast_path`, `numpy_force_fast_path_active`, and
+  `numpy_force_fast_path_max_iter` in residual diagnostics and profiler JSON.
+- Reprofiled the finite-beta QH row in three modes:
+  host+NumPy force, JIT update, and host update + JAX force.
+
+Results obtained:
+
+- Full warmed finite-beta final-stage solve times:
+  host+NumPy force `11.47 s`, JIT-update route `9.53 s`, new auto hybrid
+  route `7.19 s`.
+- Actual cold CLI-style finite-beta solve with new auto policy reports
+  `10.00 s` total computational time, compared with ~`23.7 s` from the
+  earlier JIT route and `14.92 s` from host+NumPy force.
+- The printed convergence trace and final residual for
+  `input.nfp4_QH_finite_beta` remain unchanged to displayed precision.
+
+Best next steps:
+
+1. Run the full single-grid benchmark matrix to confirm this hybrid policy
+   improves or preserves other rows beyond finite-beta QH.
+2. Attack the remaining long-stage hotspots: JAX force kernels
+   (`compute_forces_s ~= 3.9 s`) and preconditioner apply
+   (`precond_apply_s ~= 2.0 s`), using VMEC2000 `funct3d/bcovar/forces` and
+   vmec++ `fourier_geometry/fourier_forces` as the locality reference.
+3. Add a compact benchmark provenance table that records
+   `host_update_assembly`, `numpy_force_fast_path_active`, and
+   `numpy_preconditioner_apply` for each row.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 98%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 89%.
+- Refactor/API/examples: 47%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 90%.
+
+### 2026-06-22: Classify finite-beta CPU update policy and raise host-update cutoff
+
+Steps taken:
+
+- Added residual-iteration diagnostics for the resolved update/preconditioner
+  execution policy: `host_update_assembly`, `jit_strict_update_enabled`, JIT
+  work size, and NumPy preconditioner apply policy.
+- Updated `tools/diagnostics/profile_fixed_boundary.py` so compact JSON
+  summaries retain those policy fields.
+- Profiled `examples/data/input.nfp4_QH_finite_beta` on CPU using the
+  non-scan VMEC2000-style residual loop with detailed timing.
+- Raised the public CPU host-update default cutoff from 1000 to 4096 work
+  units so the bundled finite-beta QH final stage uses VMEC2000-like host
+  update/preconditioner assembly on first-run CPU solves.
+- Updated the driver policy tests to assert that the finite-beta row uses host
+  update by default, while a much larger synthetic grid still routes to the
+  strict-update JIT unless the user overrides the cutoff.
+
+Results obtained:
+
+- Short/cold diagnostic before the policy change: final-stage solve
+  `5.13 s`, `host_update_assembly=False`, `numpy_preconditioner_apply=False`,
+  `precond_apply_s=0.283`, `update_state_s=0.114`.
+- Short/cold diagnostic after the policy change: final-stage solve `0.36 s`,
+  `host_update_assembly=True`, `numpy_preconditioner_apply=True`,
+  `precond_apply_s=0.00138`, `update_state_s=0.00031`.
+- Full CLI-style finite-beta solve with the new default completed in
+  `14.92 s` on this machine, improving the previously observed ~`23.7 s`
+  first-run CPU behavior while preserving the convergence trace and final
+  residual.
+- A warmed full-profile comparison shows the opposite steady-state tradeoff:
+  forcing the JIT-update route gives final-stage `solve_total_s=9.53`, whereas
+  the host route gives `11.47`. This confirms the next performance target is a
+  budget/cache-aware policy, not a single global cutoff.
+- Targeted validation passed:
+  `python -m ruff check vmec_jax/drivers/policy.py
+  vmec_jax/solvers/fixed_boundary/residual/finalize.py
+  tools/diagnostics/profile_fixed_boundary.py tests/test_driver_api.py` and
+  `JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path
+  tests/test_driver_api.py::test_host_update_assembly_matches_jax_update_path_lasym
+  tests/test_driver_api.py::test_host_update_assembly_driver_default_env_override
+  -q`.
+
+Best next steps:
+
+1. Implement a budget-aware CPU update policy seam that chooses host assembly
+   for cold/short stages and JIT update for long warmed stages, with explicit
+   provenance in benchmark JSON.
+2. Continue profiling the remaining finite-beta full-run buckets:
+   `compute_forces_s` (~8 s host route, ~3.9 s warmed JIT route),
+   `precond_apply_s`, and host-control reductions.
+3. Compare the full single-grid benchmark matrix with and without the raised
+   cutoff before promoting PR #20 from draft.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 98%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 88%.
+- Refactor/API/examples: 47%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 89%.
+
 ### 2026-06-22: Split preconditioner apply timing and compile m=1 RHS scaling
 
 Steps taken:

@@ -84,18 +84,19 @@ def host_update_assembly_driver_default(
     """Resolve the public driver default for CPU host-update assembly."""
 
     backend_name = str(backend).strip().lower()
-    # Host NumPy update assembly is fastest for low-mode CPU solves because it
-    # avoids per-step JAX dispatch. On larger spectral/radial grids the repeated
-    # host state assembly dominates; let solve.py's fused strict-update JIT take
-    # those cases instead.
+    # Host NumPy update assembly is fastest for low/moderate CPU solves because
+    # it avoids per-step JAX dispatch. On large spectral/radial grids repeated
+    # host state assembly can dominate; let the fused strict-update JIT take
+    # those cases instead. The default covers the bundled finite-beta QH row
+    # (ns=51, mpol=5, ntor=5) where profiling shows the host path is much faster.
     nrange = int(getattr(cfg, "ntor", 0)) + 1
     if bool(getattr(cfg, "lasym", False)):
         nrange = 2 * int(getattr(cfg, "ntor", 0)) + 1
     update_work = int(getattr(cfg, "ns", 0)) * int(getattr(cfg, "mpol", 0)) * int(nrange)
     try:
-        work_limit = int(os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "1000"))
+        work_limit = int(os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "4096"))
     except Exception:
-        work_limit = 1000
+        work_limit = 4096
     use_host_update_default = update_work < work_limit
     default = bool(performance_mode) and (backend_name == "cpu") and (not bool(use_scan)) and use_host_update_default
     env = os.getenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", "").strip().lower()
