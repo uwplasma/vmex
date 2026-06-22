@@ -114,8 +114,23 @@ def build_residual_profile_setup(
     vmec_trig_tables_func: Any,
     tree_has_tracer_func: Any,
     jnp_module: Any,
+    setup_phase_timings: dict[str, float] | None = None,
+    timing_enabled: bool = False,
+    perf_counter_func: Any = None,
 ) -> tuple[Any, Any]:
     """Build profile data and VMEC-grid trig tables for the residual loop."""
+
+    def _timer_start() -> float | None:
+        if not bool(timing_enabled) or perf_counter_func is None:
+            return None
+        return float(perf_counter_func())
+
+    def _record_timing(key: str, start: float | None) -> None:
+        if start is None or setup_phase_timings is None or perf_counter_func is None:
+            return
+        setup_phase_timings[key] = float(setup_phase_timings.get(key, 0.0)) + (
+            float(perf_counter_func()) - float(start)
+        )
 
     profile_numpy_patch = None
     if bool(host_update_assembly) or bool(host_profile_setup):
@@ -127,6 +142,7 @@ def build_residual_profile_setup(
         profile_numpy_patch = None
 
     with profile_numpy_patch() if profile_numpy_patch is not None else nullcontext():
+        _t_profile_data = _timer_start()
         s_profile = s
         if profile_numpy_patch is not None:
             from vmec_jax.vmec_numpy_forces import _wrap as _np_wrap
@@ -141,7 +157,9 @@ def build_residual_profile_setup(
             prefer_host_default_profiles=not bool(state0_has_tracer),
             s_profile_has_tracer=tree_has_tracer_func(s_profile),
         )
+        _record_timing("setup_profile_data", _t_profile_data)
 
+    _t_trig_tables = _timer_start()
     trig = resolve_residual_trig_func(
         state0=state0,
         static=static,
@@ -149,6 +167,7 @@ def build_residual_profile_setup(
         vmec_trig_tables_func=vmec_trig_tables_func,
         jnp_module=jnp_module,
     )
+    _record_timing("setup_trig_tables", _t_trig_tables)
     return profile_setup.wout_like, trig
 
 

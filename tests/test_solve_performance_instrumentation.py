@@ -14,6 +14,8 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "setup_static_grid_rebuild": 0.01,
         "setup_freeb_policy": 0.02,
         "setup_boundary_profiles": 0.03,
+        "setup_profile_data": 0.011,
+        "setup_trig_tables": 0.013,
         "setup_cache_key_hash": 0.04,
         "setup_ptau_constants": 0.005,
         "setup_index_constants": 0.006,
@@ -88,6 +90,9 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["force_eval_all_s"] == pytest.approx(0.55)
     assert report["force_eval_all_calls"] == 7
     assert report["setup_cache_key_hash_s"] == pytest.approx(0.04)
+    assert report["setup_profile_data_s"] == pytest.approx(0.011)
+    assert report["setup_trig_tables_s"] == pytest.approx(0.013)
+    assert report["setup_boundary_profiles_unattributed_s"] == pytest.approx(0.006)
     assert report["setup_update_constants_s"] == pytest.approx(0.009)
     assert report["setup_unattributed_s"] == pytest.approx(0.08)
     assert report["iteration_control_fsq1_payload_get_s"] == pytest.approx(0.04)

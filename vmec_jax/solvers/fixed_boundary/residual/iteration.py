@@ -773,6 +773,9 @@ def solve_fixed_boundary_residual_iter(
             vmec_trig_tables_func=vmec_trig_tables,
             tree_has_tracer_func=_tree_has_tracer,
             jnp_module=jnp,
+            setup_phase_timings=_setup_phase_timings,
+            timing_enabled=bool(timing_enabled),
+            perf_counter_func=time.perf_counter,
         )
     except Exception:
         if bool(startup_policy.precompile_only):

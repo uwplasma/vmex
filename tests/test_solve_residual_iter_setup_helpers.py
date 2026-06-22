@@ -6,6 +6,7 @@ import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.residual.setup import (
     build_residual_cache_keys,
+    build_residual_profile_setup,
     free_boundary_pressure_edge_scale,
     grid_matches_vmec_static_grid,
     resolve_free_boundary_setup_policy,
@@ -82,6 +83,49 @@ def _small_static_state():
         Lsin=base + 6.0,
     )
     return static, state
+
+
+def test_build_residual_profile_setup_records_profile_and_trig_subtimings() -> None:
+    static, state0 = _small_static_state()
+    timings = {"setup_profile_data": 0.0, "setup_trig_tables": 0.0}
+    clock_values = iter([10.0, 12.5, 20.0, 23.0])
+    calls = []
+
+    def build_profiles(**kwargs):
+        calls.append(("profiles", kwargs))
+        assert kwargs["prefer_host_default_profiles"] is True
+        return SimpleNamespace(wout_like="wout-like")
+
+    def resolve_trig(**kwargs):
+        calls.append(("trig", kwargs))
+        assert kwargs["wout_like"] == "wout-like"
+        return "trig-tables"
+
+    wout_like, trig = build_residual_profile_setup(
+        indata=SimpleNamespace(),
+        static=static,
+        s=np.linspace(0.0, 1.0, int(static.cfg.ns)),
+        signgs=1,
+        idx00=0,
+        state0=state0,
+        state0_has_tracer=False,
+        host_update_assembly=False,
+        host_profile_setup=False,
+        build_wout_like_profiles_func=build_profiles,
+        resolve_residual_trig_func=resolve_trig,
+        vmec_trig_tables_func=lambda **_kwargs: "unused",
+        tree_has_tracer_func=lambda _value: False,
+        jnp_module=np,
+        setup_phase_timings=timings,
+        timing_enabled=True,
+        perf_counter_func=lambda: next(clock_values),
+    )
+
+    assert wout_like == "wout-like"
+    assert trig == "trig-tables"
+    assert [kind for kind, _ in calls] == ["profiles", "trig"]
+    assert np.isclose(timings["setup_profile_data"], 2.5)
+    assert np.isclose(timings["setup_trig_tables"], 3.0)
 
 
 def test_build_residual_state_setup_host_path_caches_constants_and_enforces_edge() -> None:

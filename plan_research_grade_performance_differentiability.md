@@ -95,16 +95,19 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 83%.
+- CPU/GPU runtime and memory footprint: 84%.
   The single-grid matrix shows no PR regression against `origin/main`, and warm
   CPU `vmec_jax` beats VMEC2000 on 7 of 16 rows. The 3D preconditioner R/Z
   matrix hotspot has been reduced by the default full-JIT builder, and ordinary
-  host iota smoothing no longer pays JAX scatter/update startup cost. Memory
-  remains materially higher than VMEC2000, with LASYM finite-beta layouts and
-  cold setup still the main targets.
-- Refactor/API/examples: 42%.
+  host iota smoothing no longer pays JAX scatter/update startup cost. Finite
+  beta setup profiling now splits profile-data construction from trig-table
+  setup, showing profile-data construction and axis-reset setup are the next
+  CPU targets. Memory remains materially higher than VMEC2000, with LASYM
+  finite-beta layouts and cold setup still the main targets.
+- Refactor/API/examples: 43%.
   Public examples are better, but core source files and tests are still too
-  large and too entangled.
+  large and too entangled. The fixed-boundary residual timing/setup seam is now
+  slightly cleaner, but the main residual loop still needs a larger split.
 - VMEC2000/VMEC++ parity and physics gates: 96%.
   The PR #20 four-row executable WOUT parity gate passed, and the single-grid
   runtime matrix records VMEC++ availability per row. More bounded
@@ -208,7 +211,7 @@ Gates:
 - Each material regression is assigned to startup, compile, steady solve,
   output, branch controller, or optimizer callback.
 
-Status: 35%.
+Status: 38%.
 
 ### M3: Fast Fixed-Boundary Solve Path
 
@@ -232,7 +235,7 @@ Gates:
 - No WOUT parity regression.
 - No AD-vs-FD regression.
 
-Status: 15%.
+Status: 16%.
 
 ### M4: Operator-Level Differentiability
 
@@ -344,7 +347,7 @@ Gates:
 - Source-health no longer reports a >2000-line production file.
 - Public imports continue to work.
 
-Status: 10%.
+Status: 11%.
 
 ### M8: CI, Coverage, and Physics Gates
 
@@ -1069,6 +1072,60 @@ Updated lane percentages:
 - Single-stage coil optimization: 86%.
 - CPU/GPU runtime and memory footprint: 83%.
 - Refactor/API/examples: 42%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 87%.
+
+### 2026-06-22: Split fixed-boundary profile/trig setup timing
+
+Steps taken:
+
+- Kept PR #20 in draft after user direction while continuing the active
+  performance/refactor plan.
+- Added profile-data and trig-table sub-buckets under the existing
+  `setup_boundary_profiles` timing bucket:
+  `setup_profile_data_s`, `setup_trig_tables_s`, and
+  `setup_boundary_profiles_unattributed_s`.
+- Wired the residual-loop timing accumulator through
+  `build_residual_profile_setup` without changing default behavior when timing
+  is disabled.
+- Updated the compact fixed-boundary profiler output so these new setup costs
+  are visible in terminal output and JSON provenance.
+- Added focused helper/report tests for the new timing seam.
+
+Results obtained:
+
+- Focused validation passed:
+  `python -m ruff check tools/diagnostics/profile_fixed_boundary.py vmec_jax/solvers/fixed_boundary/residual/runtime.py vmec_jax/solvers/fixed_boundary/residual/setup.py vmec_jax/solvers/fixed_boundary/residual/iteration.py tests/test_solve_residual_iter_runtime_helpers.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_performance_instrumentation.py`;
+  `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_residual_iter_runtime_helpers.py tests/test_solve_residual_iter_setup_helpers.py tests/test_solve_performance_instrumentation.py -q`;
+  `JAX_ENABLE_X64=1 python -m pytest -q tests/test_gpu_cpu_performance_profile.py -q`.
+- Bounded finite-beta profile command:
+  `JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu python tools/diagnostics/profile_fixed_boundary.py --input examples/data/input.nfp4_QH_finite_beta --iters 2 --solver-mode default --solver-device cpu --finish-policy none --no-use-scan --require-no-scan --no-warmup --simple-profile --vmec-timing --vmec-timing-detail --outdir outputs/profile_setup_split_finite_beta_trace2 --json-out outputs/profile_setup_split_finite_beta2.json`.
+- The final finite-beta stage reported `setup_boundary_profiles_s=0.408988`,
+  `setup_profile_data_s=0.391885`, `setup_trig_tables_s=5.4e-06`, and
+  `setup_boundary_profiles_unattributed_s=0.0171`.
+- This narrows the next M3 target: profile-data construction dominates the
+  boundary/profile setup bucket; trig-table construction is not a meaningful
+  cold-path bottleneck for this row.
+
+Best next steps:
+
+1. Split profile-data construction further into pressure/current profile
+   evaluation, lambda/iota smoothing, and WOUT-like object construction.
+2. Attack `setup_axis_reset_s` next for finite-beta rows, since it remains
+   about `0.94 s` in the bounded profile and includes a force evaluation.
+3. Continue the larger M7 fixed-boundary residual split by moving setup
+   orchestration into a dedicated module once the remaining setup sub-buckets
+   are stable.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 98%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 84%.
+- Refactor/API/examples: 43%.
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 96%.
 - Overall: 87%.
