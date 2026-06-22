@@ -849,6 +849,7 @@ def solve_fixed_boundary_residual_iter(
         accepted_control_ptau_arrays_helper=_accepted_control_ptau_arrays_helper,
         scan_kernel_arrays_from_k_func=_scan_math_kernel_arrays_from_k,
         has_jax_func=has_jax,
+        host_update_assembly=bool(host_update_assembly),
     )
     _ptau_context, _ptau_minmax_from_k_host, _ptau_minmax, _accepted_control_ptau_arrays = _ptau_bindings
     _record_setup_timing("setup_ptau_constants", _t_setup_ptau_constants)

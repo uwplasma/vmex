@@ -89,7 +89,7 @@ Regenerate the panel from a same-branch direct-coil report with:
 
    JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py \
      --smoke --provider circle \
-     --outdir outputs/pr20_ad_fd/qs_same_branch \
+     --outdir outputs/pr20_rejected_slot_proposal_full \
      --write-same-branch-report \
      --same-branch-report-mode vector \
      --same-branch-report-ad-mode direct \
@@ -100,7 +100,7 @@ Regenerate the panel from a same-branch direct-coil report with:
      --max-evals 1 --max-iter 1 --vmec-max-iter 2
 
    JAX_ENABLE_X64=1 python tools/diagnostics/readme_ad_fd_evidence.py \
-     --branch-local-report outputs/pr20_ad_fd/qs_same_branch/same_branch_complete_solve_report.json \
+     --branch-local-report outputs/pr20_rejected_slot_proposal_full/same_branch_complete_solve_report.json \
      --figure-out docs/_static/figures/readme_ad_fd_evidence.png \
      --csv-out docs/_static/figures/readme_ad_fd_evidence.csv \
      --json-out docs/_static/figures/readme_ad_fd_evidence.json

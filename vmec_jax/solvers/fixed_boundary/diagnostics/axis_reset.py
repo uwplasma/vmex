@@ -196,6 +196,28 @@ def evaluate_initial_axis_reset(
     """Evaluate VMEC-style initial magnetic-axis reset diagnostics."""
 
     fsq_phys = initial_force_physical_fsq(norms=norms, gcr2=gcr2, gcz2=gcz2, gcl2=gcl2)
+    fsq_floor = max(0.0, float(axis_reset_fsq_min))
+    force_reset = bool(force_axis_reset) or (
+        bool(vmec2000_control)
+        and bool(lmove_axis)
+        and bool(getattr(static.cfg, "lthreed", True))
+        and bool(axis_reset_always_3d)
+    )
+    if (
+        bool(axis_reset_enabled)
+        and (not bool(debug_enabled))
+        and (not force_reset)
+        and fsq_floor > 0.0
+        and fsq_phys is not None
+    ):
+        fsq_val = float(fsq_phys)
+        if np.isfinite(fsq_val) and fsq_val < fsq_floor:
+            return InitialAxisResetEvaluation(
+                InitialAxisResetDecision(False, False, False),
+                fsq_phys,
+                None,
+                False,
+            )
     bad_jacobian_ptau = None
     bad_jacobian_state = False
     if bool(axis_reset_enabled):
