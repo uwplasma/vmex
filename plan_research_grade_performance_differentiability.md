@@ -1301,6 +1301,51 @@ Updated lane percentages:
 - Docs/release hygiene: 96%.
 - Overall: 90%.
 
+### 2026-06-22: Compare current README matrix against origin/main
+
+Steps taken:
+
+- Ran the same 16-row historical README CPU matrix in a clean
+  `/Users/rogeriojorge/local/tests/vmec_jax_main_perf` worktree pinned to
+  `origin/main`.
+- Compared current PR branch versus `origin/main` using
+  `tools/diagnostics/compare_runtime_memory_matrix.py`.
+
+Results obtained:
+
+- Baseline matrix:
+  `/Users/rogeriojorge/local/tests/vmec_jax_main_perf/outputs/pr20_readme_matrix_main_cpu/summary.json`.
+- Current-vs-main comparison:
+  `outputs/pr20_readme_matrix_current_vs_main.json` and
+  `outputs/pr20_readme_matrix_current_vs_main.csv`.
+- The comparison reported `rows=32 regressions=0`; no row crossed the current
+  runtime/memory regression thresholds.
+- The PR branch is therefore not regressing the historical CPU matrix. The
+  remaining performance lane is absolute runtime and memory versus VMEC2000,
+  especially 3D force kernels and peak process memory.
+
+Best next steps:
+
+1. Keep PR #20 benchmark readiness focused on absolute VMEC2000 gaps and
+   provenance/README presentation, not regression repair.
+2. Profile `LandremanPaul2021_QA_lowres` and
+   `LandremanPaul2021_QH_reactorScale_lowres` with detailed timing to isolate
+   the remaining 3D kernel gap.
+3. Profile `basic_non_stellsym_pressure` peak memory and LASYM array
+   allocations to reduce the largest memory ratio.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 90%.
+- Refactor/API/examples: 47%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 90%.
+
 ### 2026-06-22: Run current-branch historical README CPU matrix
 
 Steps taken:
