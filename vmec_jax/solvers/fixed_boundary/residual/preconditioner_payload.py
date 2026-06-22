@@ -826,7 +826,10 @@ def apply_vmec2000_preconditioner_runtime(
         and need_lam_prec is False
         and need_lamcal is False
     )
+    t_scale_m1_start = perf_counter() if timing_detail_enabled else None
     frzl_rhs = scale_m1_precond_rhs_func(frzl, mats) if bool(scale_m1_rhs) else frzl
+    if timing_detail_enabled and t_scale_m1_start is not None:
+        timing_stats["precond_apply_scale_m1_rhs"] += perf_counter() - float(t_scale_m1_start)
     frzl_rz = None
     frzl_lam_pre = None
     update_blocks = None
@@ -851,6 +854,7 @@ def apply_vmec2000_preconditioner_runtime(
             state=state,
             rz_norm_func=rz_norm_func,
         )
+        t_fused_start = perf_counter() if timing_detail_enabled else None
         precond_payload = _preconditioner_apply_payload_fused(
             frzl_in=frzl_rhs,
             mats=mats,
@@ -872,6 +876,8 @@ def apply_vmec2000_preconditioner_runtime(
             control_ptau_pshalf=ptau_pshalf_jax,
             control_ptau_ohs=ptau_ohs_jax,
         )
+        if timing_detail_enabled and t_fused_start is not None:
+            timing_stats["precond_apply_fused_payload"] += perf_counter() - float(t_fused_start)
         pre_blocks, update_blocks_raw, diag, accepted_control_ptau_payload = _split_preconditioner_apply_payload(
             precond_payload
         )
@@ -879,15 +885,22 @@ def apply_vmec2000_preconditioner_runtime(
         update_blocks = _force_blocks_from_sequence(update_blocks_raw)
         (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe) = diag
     else:
+        t_rz_start = perf_counter() if timing_detail_enabled else None
         frzl_rz = rz_preconditioner_apply_func(frzl_in=frzl_rhs, **precond_kwargs)
+        if timing_detail_enabled and t_rz_start is not None:
+            timing_stats["precond_apply_rz"] += perf_counter() - float(t_rz_start)
         frzl_lam_pre = frzl_rz
 
     if use_apply_payload_fusion and adjoint_trace and adjoint_trace_mode == "full":
         # Fused payloads avoid materializing the raw R/Z-preconditioned force.
         # Full accepted-trace replay needs it, so only the opt-in replay path
         # pays this extra apply.
+        t_rz_start = perf_counter() if timing_detail_enabled else None
         frzl_rz = rz_preconditioner_apply_func(frzl_in=frzl_rhs, **precond_kwargs)
+        if timing_detail_enabled and t_rz_start is not None:
+            timing_stats["precond_apply_rz"] += perf_counter() - float(t_rz_start)
 
+    t_output_start = perf_counter() if timing_detail_enabled else None
     if (not use_apply_payload_fusion) and bool(host_update_assembly):
         blocks = preconditioner_output_blocks_np(frzl_rz=frzl_rz, lam_prec=lam_prec)
     elif (not use_apply_payload_fusion) and bool(use_fused_precond_output_scaling):
@@ -919,13 +932,17 @@ def apply_vmec2000_preconditioner_runtime(
         (gcr2_p, gcz2_p, gcl2_p, fsqr1_safe, fsqz1_safe, fsql1_safe, fsq1_safe) = diag
     elif not use_apply_payload_fusion:
         blocks = preconditioner_output_blocks_jax(frzl_rz=frzl_rz, lam_prec=lam_prec)
+    if timing_detail_enabled and t_output_start is not None:
+        timing_stats["precond_apply_output_blocks"] += perf_counter() - float(t_output_start)
 
     if timing_detail_enabled and t_precond_apply_start is not None:
+        t_sync_start = perf_counter()
         try:
             if block_until_ready is not None and blocks is not None:
                 block_until_ready(blocks.flsc)
         except Exception:
             pass
+        timing_stats["precond_apply_sync"] += perf_counter() - float(t_sync_start)
         timing_stats["precond_apply"] += perf_counter() - float(t_precond_apply_start)
 
     outputs_scaled = bool(use_apply_payload_fusion or update_blocks is not None)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 import os
 from typing import Any, Callable, Mapping, NamedTuple
 
@@ -11,7 +12,37 @@ import numpy as np
 from ...._compat import jax, jnp
 from ....state import VMECState
 from ....vmec_tomnsp import TomnspsRZL
-from ..optimization.constraints import scale_mode_slice, scale_mode_slice_np
+from ..optimization.constraints import scale_mode_slice_np
+
+
+@partial(jax.jit, static_argnames=("has_frss", "has_fzcs", "has_frsc", "has_fzcc"))
+def _scale_m1_preconditioner_channels_jit(
+    frss,
+    fzcs,
+    frsc,
+    fzcc,
+    fac_r,
+    fac_z,
+    *,
+    has_frss: bool,
+    has_fzcs: bool,
+    has_frsc: bool,
+    has_fzcc: bool,
+):
+    """Scale VMEC m=1 R/Z RHS channels in one compiled operation."""
+
+    fac_r = jnp.asarray(fac_r)
+    fac_z = jnp.asarray(fac_z)
+
+    def _scale(arr, fac):
+        return jnp.asarray(arr).at[:, 1, :].multiply(jnp.asarray(fac, dtype=jnp.asarray(arr).dtype)[:, None])
+
+    return (
+        _scale(frss, fac_r) if bool(has_frss) else None,
+        _scale(fzcs, fac_z) if bool(has_fzcs) else None,
+        _scale(frsc, fac_r) if bool(has_frsc) else None,
+        _scale(fzcc, fac_z) if bool(has_fzcc) else None,
+    )
 
 
 def resolve_preconditioner_tridi_policies(
@@ -731,10 +762,20 @@ def scale_m1_precond_rhs_from_mats(
         ones_z = jnp.ones((max(ns_full - nsolve, 0),), dtype=jnp.asarray(frzl_in.fzsc).dtype)
         fac_r_full = fac_r[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_r[:nsolve], ones_r], axis=0)
         fac_z_full = fac_z[:nsolve] if nsolve == ns_full else jnp.concatenate([fac_z[:nsolve], ones_z], axis=0)
-        frss = scale_mode_slice(frzl_in.frss, mode_idx=1, scale=fac_r_full)
-        fzcs = scale_mode_slice(frzl_in.fzcs, mode_idx=1, scale=fac_z_full)
-        frsc = scale_mode_slice(getattr(frzl_in, "frsc", None), mode_idx=1, scale=fac_r_full)
-        fzcc = scale_mode_slice(getattr(frzl_in, "fzcc", None), mode_idx=1, scale=fac_z_full)
+        frsc_in = getattr(frzl_in, "frsc", None)
+        fzcc_in = getattr(frzl_in, "fzcc", None)
+        frss, fzcs, frsc, fzcc = _scale_m1_preconditioner_channels_jit(
+            frzl_in.frss,
+            frzl_in.fzcs,
+            frsc_in,
+            fzcc_in,
+            fac_r_full,
+            fac_z_full,
+            has_frss=frzl_in.frss is not None,
+            has_fzcs=frzl_in.fzcs is not None,
+            has_frsc=frsc_in is not None,
+            has_fzcc=fzcc_in is not None,
+        )
 
     return TomnspsRZL(
         frcc=frzl_in.frcc,
