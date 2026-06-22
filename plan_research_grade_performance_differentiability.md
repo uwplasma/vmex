@@ -2127,3 +2127,67 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96.3%.
 - Docs/release hygiene: 96.8%.
 - Overall: 91.6%.
+
+### 2026-06-22: Add compact bcovar payload for the force hot path
+
+Steps taken:
+
+- Added internal `VmecForceBcovarPayload` for production force/residual calls.
+  The public `VmecHalfMeshBcovar` payload remains unchanged for diagnostics,
+  parity helpers, and direct `bcovar` callers.
+- Routed only `vmec_forces_rz_from_wout` production calls to
+  `compact_force_payload=True`; `use_wout_bsup` reference/parity mode still
+  returns the full bcovar payload.
+- The compact payload keeps downstream force/residual fields (`jac`, metric
+  tensors, `bsup*`, `bsub*`, `clmn/blmn`, `bsq`, `gij_b_*`, `lu_e/lv_e`,
+  `lamscale`) and omits parity/debug-only intermediates such as
+  `bsubu_parity_even`.
+- Added a focused test asserting the production force path actually returns the
+  compact payload and still exposes required downstream fields.
+
+Results obtained:
+
+- Focused validation passed:
+  `python -m ruff check vmec_jax/vmec_bcovar.py vmec_jax/vmec_forces.py
+  tests/test_forces_bcovar_wave12_coverage.py
+  tests/test_vmec_forces_synthetic_helpers.py
+  tests/test_force_norms_dynamic_parity.py`.
+- Extended force/bcovar parity subset passed:
+  `PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  -p no:cacheprovider tests/test_bcovar_lambda_axis_closure.py
+  tests/test_wout_bcovar_forces_extra_coverage.py
+  tests/test_force_norms_dynamic_parity.py
+  tests/test_forces_bcovar_wave12_coverage.py
+  tests/test_vmec_forces_synthetic_helpers.py -q`.
+- Short QH smoke improved from the previous local diagnostic
+  `solve_total_s=0.185 s`, `compute_forces_s=0.0125 s` to
+  `solve_total_s=0.172 s`, `compute_forces_s=0.0112 s`.
+- LP-QA profile improved from
+  `solve_total_s=11.454 s`, `compute_forces_s=4.111 s`,
+  `peak_rss=1770 MiB` to
+  `solve_total_s=10.537 s`, `compute_forces_s=3.838 s`,
+  `peak_rss=1723 MiB`.
+- Bcovar subphase mean dropped from `bcovar_done=0.0353 s/call` to
+  `0.0299 s/call` on the LP-QA profile.
+
+Best next steps:
+
+1. Deeper `bcovar` tranche: add a compact metric assembly mode that avoids
+   computing half-even/odd metric parity channels and lambda derivative arrays
+   when the force path cannot consume them.
+2. Re-run the full README single-grid matrix after one more performance
+   tranche, then compare against `origin/main` and VMEC2000/VMEC++ rows.
+3. Keep WOUT/parity gates on the full payload and production force gates on the
+   compact payload so performance changes do not silently reduce diagnostics.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 91.5%.
+- Free-boundary production differentiability: 89%.
+- Single-stage coil optimization: 86.5%.
+- CPU/GPU runtime and memory footprint: 92.6%.
+- Refactor/API/examples: 50.8%.
+- VMEC2000/VMEC++ parity and physics gates: 96.5%.
+- Docs/release hygiene: 96.8%.
+- Overall: 92.0%.
