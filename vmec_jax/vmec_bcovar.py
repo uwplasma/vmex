@@ -728,6 +728,7 @@ def _compute_bcovar_metric_assembly(
     channels: BcovarParityChannels,
     s: Any,
     ns: int,
+    compact_force_payload: bool = False,
 ) -> BcovarMetricAssembly:
     """Build half-mesh Jacobian, metric tensors, and lambda derivatives."""
 
@@ -783,11 +784,15 @@ def _compute_bcovar_metric_assembly(
             jnp.concatenate([o_body[:1], o_body], axis=0),
         )
 
-    guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
-    guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
-    gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
-    lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
-    lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
+    if bool(compact_force_payload):
+        guu_eh = guu_oh = guv_eh = guv_oh = gvv_eh = gvv_oh = None
+        lam_u = lam_v = None
+    else:
+        guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
+        guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
+        gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
+        lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
+        lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
     _vmec_bcovar_profile_log("metric_done", metric_start)
     return BcovarMetricAssembly(
         jac=jac,
@@ -1159,6 +1164,7 @@ def vmec_bcovar_half_mesh_from_wout(
         channels=parity_channels,
         s=s,
         ns=int(ns),
+        compact_force_payload=bool(compact_force_payload),
     )
     jac = metric.jac
     guu = metric.guu

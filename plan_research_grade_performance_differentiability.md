@@ -2191,3 +2191,53 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96.5%.
 - Docs/release hygiene: 96.8%.
 - Overall: 92.0%.
+
+### 2026-06-22: Compact bcovar metric intermediates in force mode
+
+Steps taken:
+
+- Extended the compact force-payload path so `bcovar` skips construction of
+  half-even/odd metric parity channels and lambda derivative arrays when those
+  fields cannot be consumed by the compact force payload.
+- Kept full metric/parity intermediates in the public `VmecHalfMeshBcovar`
+  path and in `use_wout_bsup` reference/parity mode.
+
+Results obtained:
+
+- The extended force/bcovar parity subset still passed:
+  `PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  -p no:cacheprovider tests/test_bcovar_lambda_axis_closure.py
+  tests/test_wout_bcovar_forces_extra_coverage.py
+  tests/test_force_norms_dynamic_parity.py
+  tests/test_forces_bcovar_wave12_coverage.py
+  tests/test_vmec_forces_synthetic_helpers.py -q`.
+- LP-QA memory improved slightly further (`peak_rss=1714 MiB` versus
+  `1723 MiB` after the first compact-payload tranche and `1770 MiB` before
+  compact payloads).
+- Runtime evidence is mixed: QH short smoke remains faster than the original
+  local baseline (`solve_total_s=0.179 s` versus `0.185 s`), but the LP-QA
+  solve in this run was slower than the first compact-payload run
+  (`10.93 s` versus `10.54 s`). Treat this as a memory/graph-footprint cleanup,
+  not a promoted runtime win.
+
+Best next steps:
+
+1. Do not add more `bcovar` structural branches until the full benchmark matrix
+   shows whether the compact-metric memory win is worth the neutral/mixed
+   runtime behavior.
+2. Re-run the current-branch single-grid matrix and compare against the last
+   saved matrix before making further default performance changes.
+3. If runtime still regresses relative to VMEC2000, target preconditioner
+   assembly/apply next rather than adding more `bcovar` branches.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 91.5%.
+- Free-boundary production differentiability: 89%.
+- Single-stage coil optimization: 86.5%.
+- CPU/GPU runtime and memory footprint: 92.8%.
+- Refactor/API/examples: 51%.
+- VMEC2000/VMEC++ parity and physics gates: 96.5%.
+- Docs/release hygiene: 96.8%.
+- Overall: 92.1%.
