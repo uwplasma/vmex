@@ -794,3 +794,56 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 95%.
 - Overall: 83%.
+
+### 2026-06-21: Promote full-JIT R/Z preconditioner matrix seed path
+
+Steps taken:
+
+- Added a guarded full-JIT R/Z coefficient-and-assembly builder in
+  `vmec_jax/preconditioner_1d_jax.py`, preserving the previous assembly-only
+  JIT as a fallback.
+- Benchmarked the QH warm-start bounded no-scan cold profile in fresh CPU
+  processes with `VMEC_JAX_RZ_MATRIX_FULL_JIT=0` and
+  `VMEC_JAX_RZ_MATRIX_FULL_JIT=1`.
+- Promoted the full-JIT builder to the default, with
+  `VMEC_JAX_RZ_MATRIX_FULL_JIT=0` retained as a diagnostics opt-out.
+- Added unit coverage for the new environment flag and updated performance
+  documentation.
+
+Results obtained:
+
+- Default/eager coefficient path: `1.250 s` wall, `1.022 s` solver total,
+  `0.936 s` preconditioner seed, and `0.861 s` R/Z matrix construction.
+- Full-JIT coefficient-plus-assembly path: `0.583 s` wall, `0.320 s` solver
+  total, `0.232 s` preconditioner seed, and `0.155 s` R/Z matrix construction.
+- Short-trace residual parity was unchanged for the diagnostic row
+  (`final_w=0.021577021484175438` in both profiles).
+- A fresh default run without an explicit full-JIT flag confirmed the promoted
+  path is active for normal users: `0.585 s` wall, `0.313 s` solver total,
+  `0.227 s` preconditioner seed, and `0.150 s` R/Z matrix construction.
+- Validation passed:
+  `python -m ruff check vmec_jax/preconditioner_1d_jax.py tests/test_preconditioner_1d_jax_fast_helpers.py tools/diagnostics/profile_fixed_boundary.py docs/conf.py`;
+  `JAX_ENABLE_X64=1 python -m pytest -q tests/test_preconditioner_1d_jax_fast_helpers.py tests/test_solve_finish_cache_more_coverage.py::test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh tests/test_solve_performance_instrumentation.py -q`;
+  `python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2`;
+  `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_pr20_performance`.
+
+Best next steps:
+
+1. Re-run the historical single-grid current-branch matrix only if reviewers
+   want the docs-facing performance figure to include this newest speedup;
+   otherwise leave PR-readiness benchmark evidence intact and documented.
+2. Continue runtime work on the next bottleneck after the R/Z matrix seed:
+   setup axis reset/boundary-profile setup for cold solves, and steady
+   preconditioner/update dispatch for longer warm solves.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 97%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 86%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 80%.
+- Refactor/API/examples: 41%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 95%.
+- Overall: 85%.

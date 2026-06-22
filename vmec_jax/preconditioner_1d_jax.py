@@ -24,6 +24,7 @@ _LAMBDA_PRECOND_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 _ENV_USE_PRECOMPUTED: bool | None = None
 _ENV_USE_LAX_TRIDI: bool | None = None
 _ENV_RZ_MATRIX_ASSEMBLY_JIT: bool | None = None
+_ENV_RZ_MATRIX_FULL_JIT: bool | None = None
 
 
 def _get_env_tridi_flags() -> tuple[bool, bool]:
@@ -58,6 +59,21 @@ def _rz_matrix_assembly_jit_enabled() -> bool:
             "off",
         )
     return _ENV_RZ_MATRIX_ASSEMBLY_JIT
+
+
+def _rz_matrix_full_jit_enabled() -> bool:
+    """Return whether to JIT the full R/Z coefficient-and-assembly builder."""
+
+    global _ENV_RZ_MATRIX_FULL_JIT
+    if _ENV_RZ_MATRIX_FULL_JIT is None:
+        _ENV_RZ_MATRIX_FULL_JIT = os.getenv("VMEC_JAX_RZ_MATRIX_FULL_JIT", "1").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+    return _ENV_RZ_MATRIX_FULL_JIT
 
 
 def _cache_allowed() -> bool:
@@ -836,6 +852,12 @@ def _rz_preconditioner_matrices_impl(
     )
 
 
+_rz_preconditioner_matrices_impl_full_jit = partial(
+    jit,
+    static_argnames=("cfg", "jmax_override", "use_precomputed", "use_lax_tridi"),
+)(_rz_preconditioner_matrices_impl)
+
+
 def rz_preconditioner_matrices(
     *,
     bc,
@@ -849,7 +871,15 @@ def rz_preconditioner_matrices(
 ) -> tuple[dict[str, Any], Any, int]:
     """Return VMEC R/Z radial preconditioner matrices (JAX, fixed-boundary)."""
     del trig
-    return _rz_preconditioner_matrices_impl(
+    build = _rz_preconditioner_matrices_impl
+    if _rz_matrix_full_jit_enabled() and _jit_array_pytree_supported((bc, k, s)):
+        try:
+            hash(cfg)
+        except TypeError:
+            build = _rz_preconditioner_matrices_impl
+        else:
+            build = _rz_preconditioner_matrices_impl_full_jit
+    return build(
         bc=bc,
         k=k,
         s=s,
