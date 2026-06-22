@@ -1899,3 +1899,50 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 96.5%.
 - Overall: 90.8%.
+
+### 2026-06-22: Remove redundant TOMNSP theta stack materialization
+
+Steps taken:
+
+- Audited `tomnsps_rzl` after the force-phase split. The symmetric transform
+  built `stack_all` before choosing the FFT/DFT path, and the FFT fused path
+  rebuilt the same concatenation inside its branch.
+- Moved the `stack_all` construction into the branches that actually need it:
+  once in the FFT fused branch and once in the CPU-default DFT branch.
+- Kept the CPU DFT/GEMM default unchanged because the previous
+  `VMEC_JAX_TOMNSPS_FFT=1` experiment regressed the LP-QA final stage.
+
+Results obtained:
+
+- TOMNSP-focused validation passed:
+  `python -m ruff check vmec_jax/vmec_tomnsp.py
+  tests/test_vmec_tomnsp_branch_coverage.py tests/test_vmec_tomnsp_tables.py`;
+  `JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_vmec_tomnsp_branch_coverage.py tests/test_vmec_tomnsp_tables.py -q`.
+- A short QH single-grid profile smoke after the cleanup measured
+  `solve_total_s=0.185 s`, `compute_forces_s=0.0125 s`, and the same
+  `final_w=7.30e-6` for the 20-iteration under-converged diagnostic.
+- This is a small materialization cleanup. It mainly reduces redundant FFT-path
+  graph work and is not by itself sufficient to close the CPU/VMEC2000 gap.
+
+Best next steps:
+
+1. Use the new force phase labels to profile a long high-mode row and decide
+   whether the dominant cost is TOMNSP, `bcovar`, or update/preconditioner.
+2. Prototype a larger separable TOMNSP workspace only behind an opt-in flag;
+   require TOMNSP parity tests, WOUT parity rows, and AD-vs-FD evidence before
+   changing defaults.
+3. Keep comparing current branch against `origin/main` on the full matrix after
+   any default-path performance change.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 91.7%.
+- Refactor/API/examples: 49.8%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96.5%.
+- Overall: 90.9%.

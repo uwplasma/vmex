@@ -1007,7 +1007,6 @@ def tomnsps_rzl(
 
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
-    stack_all = jnp.concatenate([stack_cosmui, stack_sinmumi], axis=0)
 
     use_fft = _get_tomnsps_fft() and (not bool(lasym)) and has_jax()
     use_fft_fused = True
@@ -1041,6 +1040,7 @@ def tomnsps_rzl(
     else:
         # DFT path: use a single cos/sin basis transform for both stacks,
         # then apply m-derivative scaling for the sinmumi/cosmumi blocks.
+        stack_all = jnp.concatenate([stack_cosmui, stack_sinmumi], axis=0)
         use_theta_fused = bool(_TOMNSPS_THETA_FUSED)
         if use_theta_fused:
             basis_theta = getattr(trig, "basis_theta_cs_nt2", None)
