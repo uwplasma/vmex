@@ -32,10 +32,10 @@ Set ``VMEC_JAX_COMPILATION_CACHE=1`` to opt in for CPU runs, or
 
 VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
 effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
-against VMEC2000 runtime.  The public README benchmark is the full bundled
-fixed-boundary matrix in ``readme_runtime_compare.png`` below; the older
-two-case VMEC++ sanity plot has been retired from the public docs so it is not
-confused with the release benchmark.
+against VMEC2000 runtime.  The docs-facing benchmark is the full bundled
+single-grid fixed-boundary matrix in ``readme_runtime_compare.png`` below; the
+README intentionally keeps only concise differentiation evidence and sends
+detailed performance provenance here.
 
 2026-05-25 rerun snapshot
 -------------------------
@@ -2174,7 +2174,7 @@ axis-gauge cotangent cleanup, while QH ``J.Tv`` matches to near roundoff.
 Current performance (representative benchmarks)
 -----------------------------------------------
 
-The README-facing fixed-boundary CPU matrix is generated from
+The docs-facing fixed-boundary CPU matrix is generated from
 ``docs/_static/figures/readme_runtime_compare.csv`` and visualized in:
 
 .. image:: _static/figures/readme_runtime_compare.png
@@ -2186,20 +2186,21 @@ The current PR #20 readiness matrix should be read as a performance reality
 check, not as a broad single-solve speedup claim.  It was regenerated on the
 local CPU host from 16 historical bundled fixed-boundary rows using
 ``example_runtime_memory_matrix.py --backend all --warm-runs 1``.  VMEC2000 and
-``vmec_jax`` converged on all 16 rows.  VMEC++ converged on 7 rows
-(``ITERModel``, ``circular_tokamak``, ``circular_tokamak_aspect_100``,
-``nfp4_QH_warm_start``, ``purely_toroidal_field``,
-``shaped_tokamak_pressure``, and ``solovev``) and is omitted on the other 9
-unsupported or non-converged rows.
+``vmec_jax`` converged on all 16 rows.  VMEC++ converged on 9 rows
+(``ITERModel``, ``LandremanPaul2021_QA_lowres``,
+``LandremanPaul2021_QA_lowres1``, ``circular_tokamak``,
+``circular_tokamak_aspect_100``, ``nfp4_QH_warm_start``,
+``purely_toroidal_field``, ``shaped_tokamak_pressure``, and ``solovev``) and is
+omitted on the other 7 unsupported or non-converged rows.
 
-On this run, warm ``vmec_jax`` did not beat VMEC2000 on any row.  The median
-warm single-solve row is ``4.31x`` slower than VMEC2000, and the median cold
-row is ``8.82x`` slower because cold time includes Python/JAX/XLA setup.  The
-current-vs-``origin/main`` comparison recorded no repeatable vmec_jax runtime
-regression.  The full matrix initially flagged one peak-memory outlier on
-``LandremanPaul2021_QA_lowres`` (``1.28x`` current/main), but a focused same-row
-rerun reduced that to ``1.03x`` peak memory and ``0.93x`` warm runtime, so it is
-classified as non-repeatable run noise rather than a PR-blocking regression.
+On this run, warm ``vmec_jax`` beat VMEC2000 on 7 of 16 rows and cold
+``vmec_jax`` beat VMEC2000 on 2 of 16 rows.  The median warm single-solve row
+is ``1.51x`` slower than VMEC2000, and the median cold row is ``3.76x`` slower
+because cold time includes Python/JAX/XLA setup.  Peak process memory remains
+higher than VMEC2000, with a median ``4.90x`` ratio and the largest ratio on
+the non-stellarator-symmetric finite-beta row.  The
+current-vs-``origin/main`` comparison recorded zero material regressions under
+the configured ``1.10x`` runtime and ``1.15x`` peak-memory thresholds.
 
 A broader 2026-05-24 internal policy matrix compared the default fixed-boundary
 policy against the explicit ``accelerated`` policy on all 35 bundled
@@ -2434,12 +2435,44 @@ provenance are available as:
 - :download:`readme_runtime_compare_lpqa_rerun.csv <_static/figures/readme_runtime_compare_lpqa_rerun.csv>`
 - :download:`readme_runtime_compare_lpqa_rerun.json <_static/figures/readme_runtime_compare_lpqa_rerun.json>`
 
-Regenerate the current fixed-boundary plot after a runtime sweep with:
+Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 
 .. code-block:: bash
 
+   PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
+     --inputs-dir examples_single_grid/data \
+     --kind fixed \
+     --backend all \
+     --warm-runs 1 \
+     --jax-platforms cpu \
+     --runner-label current-cpu \
+     --vmec-exec ~/bin/xvmec2000 \
+     --timeout-s 1800 \
+     --vmec-timeout-s 1800 \
+     --outdir outputs/pr20_full_matrix_current_cpu_sg
+
+   cd /path/to/a/clean/origin-main/worktree
+   PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
+     --inputs-dir examples_single_grid/data \
+     --kind fixed \
+     --backend all \
+     --warm-runs 1 \
+     --jax-platforms cpu \
+     --runner-label main-cpu \
+     --vmec-exec ~/bin/xvmec2000 \
+     --timeout-s 1800 \
+     --vmec-timeout-s 1800 \
+     --outdir outputs/pr20_full_matrix_main_cpu_sg
+
+   cd /path/to/the/pr/worktree
+   python tools/diagnostics/compare_runtime_memory_matrix.py \
+     --current outputs/pr20_full_matrix_current_cpu_sg/summary.json \
+     --baseline /path/to/a/clean/origin-main/worktree/outputs/pr20_full_matrix_main_cpu_sg/summary.json \
+     --csv-out docs/_static/figures/readme_runtime_compare_current_vs_main.csv \
+     --json-out docs/_static/figures/readme_runtime_compare_current_vs_main.json
+
    python tools/diagnostics/readme_runtime_compare.py \
-     --cpu-summary outputs/pr20_full_matrix_current_cpu/summary.json \
+     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg/summary.json \
      --figure-kind fixed --plot-mode runtime_memory \
      --figure-out docs/_static/figures/readme_runtime_compare.png \
      --csv-out docs/_static/figures/readme_runtime_compare.csv \
@@ -2688,7 +2721,7 @@ Latest serial bundled fixed-boundary reassessment (April 2026)
 
 Historical note: this April 2026 accelerated-branch snapshot is retained to
 explain why the optimized controller exists, but it is not the current public
-VMEC2000 comparison.  Use the README-facing CSV/JSON in the previous section
+VMEC2000 comparison.  Use the docs-facing CSV/JSON in the previous section
 for current release claims.  This snapshot used NS=151 single-grid inputs
 (``examples_single_grid/data/``) and compared
 ``solver_mode="accelerated"`` warm runtimes against VMEC2000.
@@ -2854,7 +2887,7 @@ also guide downstream integration work for ``booz_xform_jax`` and ``neo_jax``.
   ``38.56s`` optimized), ``LandremanPaul2021_QH_reactorScale_lowres``
   (``60.10s`` vs ``46.33s``), ``ITERModel`` (``12.73s`` vs ``5.00s``), and
   ``cth_like_fixed_bdy`` (``4.71s`` vs ``0.97s``),
-- the README-facing VMEC2000 comparison was then rerun separately on the same
+- the docs-facing VMEC2000 comparison was then rerun separately on the same
   host in
   ``outputs/readme_fixed_runtime_vmec2000_accel_cpu_20260312/summary.json``:
   all 13 bundled ``lasym=False`` fixed-boundary cases converged, but the
@@ -3024,7 +3057,7 @@ benchmark story:
 - the optimized fixed-boundary CLI path is a mixed but useful warmed CPU result:
   faster on 13 of 16 rows versus the prior/default branch path, roughly neutral
   on 1, and slower on 2,
-- relative to VMEC2000, the current README-facing CPU matrix still wins on only
+- relative to VMEC2000, the current docs-facing CPU matrix still wins on only
   1 of 16 bundled fixed-boundary rows,
 - the GPU path is functional and convergent on the same bundled matrix, but is
   faster only on selected heavier 3D rows; do not claim uniform GPU superiority.

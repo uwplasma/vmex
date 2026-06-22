@@ -76,38 +76,44 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
 
 ## Open Lanes and Current Completion
 
-- Performance benchmark and profiling harness: 76%.
-  Full README benchmark data exists, but the next gate is deeper decomposition
-  into import/startup, XLA trace, XLA compile, steady solve, WOUT write, and
-  optimizer callback costs.
-- Fixed-boundary production differentiability: 82%.
-  AD-vs-central-FD evidence exists for many scalars. Remaining work is
-  operator-level implicit/JVP/VJP productionization and tighter `1e-9` evidence
-  where finite-difference noise allows it.
-- Free-boundary production differentiability: 78%.
+- Performance benchmark and profiling harness: 95%.
+  The PR #20 single-grid matrix, current-vs-main comparator, VMEC2000 rows, and
+  VMEC++ optional rows are regenerated with CSV/JSON provenance. Remaining work
+  is deeper kernel-level decomposition and long-term dashboard automation.
+- Fixed-boundary production differentiability: 90%.
+  AD-vs-central-FD evidence now passes `1e-9` for fixed-boundary geometry,
+  profiles, QS/QI diagnostics, `DMerc`, and `D_R`. Remaining work is
+  operator-level implicit/JVP/VJP productionization.
+- Free-boundary production differentiability: 86%.
   Direct coil fields, JAX mgrid interpolation, accepted-branch replay, and
-  fingerprint-gated branch-local gates exist. Arbitrary adaptive branch
-  differentiation remains unclaimed.
+  fingerprint-gated branch-local gates pass `1e-9` evidence for selected
+  physical scalars. Arbitrary adaptive branch differentiation remains
+  unclaimed.
 - Single-stage coil optimization: 86%.
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 68%.
-  Warm replay improved, but cold exact tape/forward-force cost and GPU-native
-  derivative paths still dominate.
+- CPU/GPU runtime and memory footprint: 74%.
+  The single-grid matrix shows no PR regression against `origin/main`, and warm
+  CPU `vmec_jax` beats VMEC2000 on 7 of 16 rows. Memory remains materially
+  higher than VMEC2000, and 3D preconditioner seed construction is the next
+  CPU hotspot.
 - Refactor/API/examples: 40%.
   Public examples are better, but core source files and tests are still too
   large and too entangled.
-- VMEC2000/VMEC++ parity and physics gates: 90%.
-  Existing gates are strong for selected cases. More bounded fixed/free-boundary
-  rows and performance-regression parity gates are still needed.
-- Docs/release hygiene: 88%.
-  Docs are broad but still mirror historical work too much. They need a clearer
-  "what is differentiable now" table and performance caveats separated from the
-  README.
-- Overall completion: 71%.
-  PR #20 can be reviewed as a major milestone, but this plan defines the next
-  phase before claiming final research-grade status.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+  The PR #20 four-row executable WOUT parity gate passed, and the single-grid
+  runtime matrix records VMEC++ availability per row. More bounded
+  free-boundary external parity remains future work.
+- Docs/release hygiene: 95%.
+  README is concise, runtime/memory detail lives in docs, and benchmark plus
+  AD-FD provenance are refreshed. Remaining work is Sphinx gating and pruning
+  historical performance prose after review.
+- Overall completion: 82%.
+  PR #20 readiness gates for benchmark, current-vs-main regression,
+  differentiation evidence, and selected WOUT parity are now substantially
+  complete; the long-term research-grade performance/refactor work remains
+  active.
 
 ## Definition of Done
 
@@ -676,3 +682,68 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 91%.
 - Docs/release hygiene: 90%.
 - Overall: 75%.
+
+### 2026-06-21: PR #20 single-grid benchmark and WOUT parity gate
+
+Steps taken:
+
+- Stopped an accidentally launched 36-row `examples/data` benchmark after it
+  reached long timeouts; that was not the historical README single-grid matrix
+  required by the PR #20 readiness gate.
+- Ran the intended current-branch matrix:
+  `PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py --inputs-dir examples_single_grid/data --kind fixed --backend all --warm-runs 1 --jax-platforms cpu --runner-label current-cpu --vmec-exec ~/bin/xvmec2000 --timeout-s 1800 --vmec-timeout-s 1800 --outdir outputs/pr20_full_matrix_current_cpu_sg`.
+- Ran the matching clean `origin/main` matrix in
+  `/Users/rogeriojorge/local/tests/vmec_jax_main_perf` with the same command
+  and `--outdir outputs/pr20_full_matrix_main_cpu_sg`.
+- Compared the two matrices:
+  `python tools/diagnostics/compare_runtime_memory_matrix.py --current outputs/pr20_full_matrix_current_cpu_sg/summary.json --baseline /Users/rogeriojorge/local/tests/vmec_jax_main_perf/outputs/pr20_full_matrix_main_cpu_sg/summary.json --csv-out docs/_static/figures/readme_runtime_compare_current_vs_main.csv --json-out docs/_static/figures/readme_runtime_compare_current_vs_main.json`.
+- Regenerated the docs benchmark artifact:
+  `python tools/diagnostics/readme_runtime_compare.py --cpu-summary outputs/pr20_full_matrix_current_cpu_sg/summary.json --figure-kind fixed --plot-mode runtime_memory --figure-out docs/_static/figures/readme_runtime_compare.png --csv-out docs/_static/figures/readme_runtime_compare.csv --json-out docs/_static/figures/readme_runtime_compare.json --table-out outputs/readme_runtime_table_pr20.md`.
+- Ran the executable-backed WOUT parity benchmark:
+  `PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/converged_wout_parity_benchmark.py --nightly --vmec-exec ~/bin/xvmec2000 --case nfp4_QH_warm_start --case solovev --case ITERModel --case LandremanPaul2021_QA_lowres --output-dir outputs/pr20_wout_parity`.
+- Copied the compact parity summary to
+  `docs/_static/figures/pr20_wout_parity_summary.json`.
+- Updated docs wording so the runtime/memory plot is docs-facing, not a
+  README headline artifact.
+
+Results obtained:
+
+- Current branch single-grid matrix: 16/16 `vmec_jax` and VMEC2000 rows
+  succeeded.
+- VMEC++ succeeded on 9/16 rows and is recorded as unavailable/non-converged on
+  the other 7 rows.
+- Warm `vmec_jax` beat VMEC2000 on 7/16 rows; cold `vmec_jax` beat VMEC2000 on
+  2/16 rows.
+- Median current-branch warm runtime ratio vs VMEC2000: `1.51x` slower.
+- Median current-branch cold runtime ratio vs VMEC2000: `3.76x` slower.
+- Median current-branch peak-memory ratio vs VMEC2000: `4.90x` higher.
+- Current-vs-`origin/main` comparator: 48 backend/case rows, 0 regressions
+  under the configured `1.10x` runtime and `1.15x` peak-memory thresholds.
+- WOUT parity: all four promoted rows passed. Worst reported relative RMS
+  channel was `bsubvmnc` on `solovev` at `4.37e-5`; LPQA and QH warm-start
+  residual RSS values matched VMEC2000 to the reported precision.
+
+Best next steps:
+
+1. Run local docs and size gates on the updated docs/artifacts.
+2. Keep PR #20 in draft until any reviewer-requested benchmark presentation
+   changes are handled, but the core benchmark/regression/parity evidence gate
+   is now complete.
+3. Resume performance work on first-call 3D preconditioner seed construction:
+   add seed sub-buckets, then test a fused/cached R/Z coefficient-plus-assembly
+   path while preserving the current JAX path for differentiability.
+4. Continue the refactor plan after PR readiness: split the large
+   fixed-boundary residual iteration module into setup, step, controller, and
+   history/output seams.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 95%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 86%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 74%.
+- Refactor/API/examples: 41%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 95%.
+- Overall: 82%.
