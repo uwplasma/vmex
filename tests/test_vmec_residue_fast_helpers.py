@@ -5,6 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax._compat import jax, jnp
+from vmec_jax.solvers.fixed_boundary.preconditioning.operators import metric_surface_precond_from_bcovar_jax
 from vmec_jax.vmec_residue import (
     VmecForceNormsDynamic,
     VmecForceNorms,
@@ -17,6 +19,7 @@ from vmec_jax.vmec_residue import (
     vmec_apply_m1_constraints,
     vmec_apply_scalxc_to_tomnsps,
     vmec_force_norms_from_bcovar_dynamic,
+    vmec_force_norms_scales_from_bcovar_dynamic,
     vmec_fsq_from_tomnsps,
     vmec_fsq_from_tomnsps_dynamic,
     vmec_fsq_sums_from_tomnsps,
@@ -193,6 +196,42 @@ def test_dynamic_force_norm_guards_and_tree_roundtrip():
     assert np.isfinite(float(norms.fnorm))
     assert np.isfinite(float(norms.fnormL))
     assert float(norms.volume) > 0.0
+
+
+def test_dynamic_force_norms_scales_fused_matches_separate_helpers():
+    trig = vmec_trig_tables(ntheta=8, nzeta=3, nfp=1, mmax=2, nmax=1, lasym=False, cache=False)
+    shape = (3, int(trig.ntheta3), 3)
+    bc = SimpleNamespace(
+        jac=SimpleNamespace(
+            sqrtg=jnp.ones(shape),
+            r12=jnp.linspace(1.0, 1.2, np.prod(shape)).reshape(shape),
+        ),
+        bsupu=jnp.full(shape, 0.4),
+        bsupv=jnp.full(shape, 0.6),
+        bsubu=jnp.linspace(0.5, 0.8, np.prod(shape)).reshape(shape),
+        bsubv=jnp.full(shape, 0.25),
+        bsq=jnp.full(shape, 2.0),
+        guu=jnp.linspace(1.2, 1.7, np.prod(shape)).reshape(shape),
+        lamscale=2.0,
+    )
+    s = np.linspace(0.0, 1.0, 3)
+
+    fused = vmec_force_norms_scales_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=1)
+    norms = vmec_force_norms_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=1)
+    rz_scale, l_scale = metric_surface_precond_from_bcovar_jax(bc=bc, trig=trig)
+
+    np.testing.assert_allclose(np.asarray(fused.norms.fnorm), np.asarray(norms.fnorm), rtol=1e-13)
+    np.testing.assert_allclose(np.asarray(fused.norms.fnormL), np.asarray(norms.fnormL), rtol=1e-13)
+    np.testing.assert_allclose(np.asarray(fused.rz_scale), np.asarray(rz_scale), rtol=1e-13)
+    np.testing.assert_allclose(np.asarray(fused.l_scale), np.asarray(l_scale), rtol=1e-13)
+
+    def scalar(scale):
+        scaled_bc = SimpleNamespace(**{**bc.__dict__, "guu": scale * bc.guu})
+        out = vmec_force_norms_scales_from_bcovar_dynamic(bc=scaled_bc, trig=trig, s=s, signgs=1)
+        return jnp.sum(out.rz_scale) + out.norms.fnorm
+
+    grad = jax.grad(scalar)(jnp.asarray(1.0))
+    assert np.isfinite(float(grad))
 
 
 def test_rz_decompose_signed_and_norm_options(load_case_circular_tokamak):

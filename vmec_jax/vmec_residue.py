@@ -95,6 +95,24 @@ class VmecForceNormsDynamic:
         return cls(*children)
 
 
+@tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class VmecForceNormsScalesDynamic:
+    """VMEC force norms and first-step metric scales from one bcovar sweep."""
+
+    norms: VmecForceNormsDynamic
+    rz_scale: Any
+    l_scale: Any
+
+    def tree_flatten(self):
+        children = (self.norms, self.rz_scale, self.l_scale)
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
+
+
 @dataclass(frozen=True)
 class VmecFsqScalars:
     fsqr: float
@@ -495,14 +513,14 @@ def vmec_force_norms_from_bcovar(*, bc, trig: VmecTrigTables, wout, s) -> VmecFo
     return VmecForceNorms(fnorm=float(fnorm), fnormL=float(fnormL), r1=float(r1))
 
 
-def vmec_force_norms_from_bcovar_dynamic(
+def vmec_force_norms_scales_from_bcovar_dynamic(
     *,
     bc,
     trig: VmecTrigTables,
     s: Any,
     signgs: int,
-) -> VmecForceNormsDynamic:
-    """Compute (fnorm, fnormL) using VMEC's bcovar normalization formulas *without* `wout`.
+) -> VmecForceNormsScalesDynamic:
+    """Compute VMEC force norms and metric preconditioner scales in one pass.
 
     This routine reconstructs the normalization scalars directly from bcovar's
     real-space fields, mirroring how the corresponding `wout` scalars are built:
@@ -518,14 +536,17 @@ def vmec_force_norms_from_bcovar_dynamic(
     - ``fnorm  = 1 / (sum(guu*r12^2*wint) * r2^2)``
     - ``fnormL = 1 / (sum((bsubu^2+bsubv^2)*wint) * lamscale^2)``
 
-    Returns JAX scalars/arrays suitable for use inside jitted solver objectives.
+    The residual hot path also needs the first-step metric preconditioner
+    scales, which are based on the same angular reductions. Returning both here
+    avoids a second sweep over the large ``bcovar`` real-space arrays.
     """
     signgs = int(signgs)
     s = jnp.asarray(s)
     ns = int(s.shape[0])
     if ns < 2:
         z = jnp.asarray(float("nan"))
-        return VmecForceNormsDynamic(fnorm=z, fnormL=z, r1=z, r2=z, volume=z, wb=z, wp=z, vp=jnp.zeros((ns,)))
+        norms = VmecForceNormsDynamic(fnorm=z, fnormL=z, r1=z, r2=z, volume=z, wb=z, wp=z, vp=jnp.zeros((ns,)))
+        return VmecForceNormsScalesDynamic(norms=norms, rz_scale=jnp.zeros((ns,)), l_scale=jnp.zeros((ns,)))
 
     hs = jnp.asarray(s[1] - s[0], dtype=jnp.asarray(s).dtype)
 
@@ -565,26 +586,60 @@ def vmec_force_norms_from_bcovar_dynamic(
 
     r2 = jnp.where(volume != 0.0, jnp.maximum(wb, wp) / volume, jnp.asarray(float("inf"), dtype=wb.dtype))
 
-    # Force norms.
+    # Force norms and first-step metric preconditioner scales.  The norm uses
+    # VMEC's axis-masked `pwint`; the scale is per-surface and includes the
+    # axis, matching `metric_surface_precond_scales_jax`.
     r12 = jnp.asarray(bc.jac.r12)
     guu = jnp.asarray(bc.guu).astype(jnp.float64)
     guu_r12sq = (guu * (r12 * r12)).astype(jnp.float64)
 
     pwint = (w_ang[None, :, :] * mask_js).astype(jnp.float64)
-    denom_f = jnp.sum(guu_r12sq * pwint)
+    w3 = jnp.asarray(w_ang, dtype=guu_r12sq.dtype)[None, :, :]
+    rz_denom_surface = jnp.sum(guu_r12sq * w3, axis=(1, 2))
+    mask_1d = (jnp.arange(ns, dtype=jnp.int32) > 0).astype(rz_denom_surface.dtype)
+    denom_f = jnp.sum(rz_denom_surface * mask_1d)
     fnorm = jnp.where(denom_f != 0.0, 1.0 / (denom_f * (r2 * r2)), jnp.asarray(float("inf"), dtype=denom_f.dtype))
 
-    denom_L = jnp.sum((((bsubu * bsubu) + (bsubv * bsubv)) * pwint).astype(jnp.float64))
+    bsub_sq = ((bsubu * bsubu) + (bsubv * bsubv)).astype(jnp.float64)
+    l_denom_surface = jnp.sum(bsub_sq * w3, axis=(1, 2))
+    denom_L = jnp.sum(l_denom_surface * mask_1d)
     lamscale = jnp.asarray(bc.lamscale, dtype=denom_L.dtype)
     fnormL = jnp.where(
         denom_L != 0.0,
         1.0 / (denom_L * (lamscale * lamscale)),
         jnp.asarray(float("inf"), dtype=denom_L.dtype),
     )
+    rz_scale = jnp.where(
+        rz_denom_surface > 0.0,
+        1.0 / jnp.sqrt(jnp.maximum(rz_denom_surface, 1e-300)),
+        1.0,
+    )
+    l_scale = jnp.where(
+        l_denom_surface > 0.0,
+        1.0 / jnp.sqrt(jnp.maximum(l_denom_surface, 1e-300)),
+        1.0,
+    )
 
     r0scale = jnp.asarray(float(trig.r0scale), dtype=denom_f.dtype)
     r1 = 1.0 / (2.0 * r0scale) ** 2
-    return VmecForceNormsDynamic(fnorm=fnorm, fnormL=fnormL, r1=r1, r2=r2, volume=volume, wb=wb, wp=wp, vp=vp)
+    norms = VmecForceNormsDynamic(fnorm=fnorm, fnormL=fnormL, r1=r1, r2=r2, volume=volume, wb=wb, wp=wp, vp=vp)
+    return VmecForceNormsScalesDynamic(
+        norms=norms,
+        rz_scale=jnp.clip(rz_scale, 1e-4, 1e2),
+        l_scale=jnp.clip(l_scale, 1e-4, 1e2),
+    )
+
+
+def vmec_force_norms_from_bcovar_dynamic(
+    *,
+    bc,
+    trig: VmecTrigTables,
+    s: Any,
+    signgs: int,
+) -> VmecForceNormsDynamic:
+    """Compute VMEC force norms using bcovar fields without requiring a WOUT."""
+
+    return vmec_force_norms_scales_from_bcovar_dynamic(bc=bc, trig=trig, s=s, signgs=signgs).norms
 
 
 def vmec_scalxc_from_s(*, s: Any, mpol: int, cache: bool = True) -> jnp.ndarray:

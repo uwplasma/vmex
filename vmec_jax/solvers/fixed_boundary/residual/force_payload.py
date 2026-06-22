@@ -519,6 +519,7 @@ def evaluate_residual_force_from_state(
     dump_hooks: Mapping[str, Callable[..., None]] | None = None,
     kernels_func: Callable[..., Any] | None = None,
     force_payload_func: Callable[..., ResidualForcePayloadResult] = residual_force_payload_from_kernels,
+    norms_scales_func: Callable[..., Any] | None = None,
     norms_func: Callable[..., Any] | None = None,
     scale_func: Callable[..., tuple[Any, Any]] | None = None,
 ) -> ResidualForceEvaluationResult:
@@ -533,10 +534,14 @@ def evaluate_residual_force_from_state(
     if kernels_func is None:
         from ....vmec_forces import vmec_forces_rz_from_wout as kernels_func
 
-    if norms_func is None:
+    use_combined_norms_scales = norms_func is None and scale_func is None
+    if norms_scales_func is None and use_combined_norms_scales:
+        from ....vmec_residue import vmec_force_norms_scales_from_bcovar_dynamic as norms_scales_func
+
+    if norms_func is None and not use_combined_norms_scales:
         from ....vmec_residue import vmec_force_norms_from_bcovar_dynamic as norms_func
 
-    if scale_func is None:
+    if scale_func is None and not use_combined_norms_scales:
         from ..preconditioning.operators import metric_surface_precond_from_bcovar_jax as scale_func
 
     hooks = {} if dump_hooks is None else dict(dump_hooks)
@@ -624,10 +629,15 @@ def evaluate_residual_force_from_state(
             include_edge=bool(include_edge),
             ns=int(static.cfg.ns),
         )
-    norms = norms_func(bc=kernels.bc, trig=trig, s=s, signgs=signgs)
+    if use_combined_norms_scales:
+        combined = norms_scales_func(bc=kernels.bc, trig=trig, s=s, signgs=signgs)
+        norms = combined.norms
+        rz_scale, l_scale = combined.rz_scale, combined.l_scale
+    else:
+        norms = norms_func(bc=kernels.bc, trig=trig, s=s, signgs=signgs)
+        rz_scale, l_scale = scale_func(bc=kernels.bc, trig=trig)
     if iter_idx is not None and "scalars" in hooks:
         hooks["scalars"](norms=norms, iter_idx=int(iter_idx), ns=int(static.cfg.ns))
-    rz_scale, l_scale = scale_func(bc=kernels.bc, trig=trig)
     return ResidualForceEvaluationResult(
         kernels=kernels,
         frzl_full=frzl_full,

@@ -1707,3 +1707,78 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 96%.
 - Overall: 90%.
+
+### 2026-06-22: Fuse bcovar norm and metric-scale reductions
+
+Steps taken:
+
+- Reran the historical fixed-boundary README CPU matrix after the preconditioner
+  policy change and compared it against the previous current-branch matrix.
+- Spawned two read-only explorers to audit the force-loop architecture:
+  one inspected VMEC2000/vmec++ force, Fourier, preconditioner, buffer, and
+  profiling structure; the other inspected vmec_jax force-payload hotspots.
+- Added `vmec_force_norms_scales_from_bcovar_dynamic`, a JAX-traceable helper
+  that returns VMEC force norms plus R/Z and lambda metric preconditioner scales
+  from one angular sweep over `bcovar`.
+- Wired the default residual force-payload path to use the fused helper while
+  retaining the previous separate `norms_func`/`scale_func` injection path for
+  diagnostics and tests.
+- Added a focused fused-vs-separate unit test, including an autodiff gradient
+  sanity check through the fused helper.
+
+Results obtained:
+
+- Full current CPU matrix after the preconditioner policy change had no
+  regressions versus the previous current matrix. Warm 3D row improvements:
+  LP-QA lowres `9.08 s -> 7.20 s` (-20.8%),
+  LP-QA lowres1 `8.86 s -> 7.17 s` (-19.1%),
+  LP-QA reactor scale `13.16 s -> 10.66 s` (-19.0%), and
+  LP-QH reactor scale `15.29 s -> 12.91 s` (-15.6%).
+- The post-policy README matrix now shows the large 3D rows at about
+  `1.18x--1.21x` VMEC2000 for the reactor-scale rows. Tiny rows remain
+  startup/setup dominated, and LASYM/memory-heavy rows remain separate open
+  targets.
+- Focused validation passed:
+  `python -m ruff check vmec_jax/vmec_residue.py
+  vmec_jax/solvers/fixed_boundary/residual/force_payload.py
+  tests/test_vmec_residue_fast_helpers.py`;
+  `JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_vmec_residue_fast_helpers.py::test_dynamic_force_norm_guards_and_tree_roundtrip
+  tests/test_vmec_residue_fast_helpers.py::test_dynamic_force_norms_scales_fused_matches_separate_helpers
+  tests/test_solve_preconditioner_metric_helpers.py::test_metric_surface_precond_from_bcovar_jax_matches_scale_kernel
+  tests/test_solve_residual_iter_force_payload_helpers.py -q`.
+- LP-QA lowres controlled profile after the fused helper:
+  final-stage `solve_total_s=4.1061`, `compute_forces_s=2.9979`,
+  `preconditioner_s=0.3593`, final residual unchanged at
+  `4.64e-13`. This is a smaller but real improvement over the post-policy
+  profile (`solve_total_s=4.1482`, `compute_forces_s=3.0413`).
+- Explorer conclusions reinforce the next larger tranche:
+  VMEC2000 and vmec++ use separable Fourier transforms, long-lived work arrays,
+  radial streaming/scan structure, periodic preconditioner updates, and
+  phase-level timers. vmec_jax should move toward a staged JIT force pipeline
+  with domain-named seams rather than one all-array force function returning
+  every debug intermediate.
+
+Best next steps:
+
+1. Commit the fused `bcovar` reduction tranche, then run a small current-matrix
+   smoke if needed to verify no row-level behavior changed.
+2. Start the larger force-kernel refactor with the lowest-risk seam:
+   split default hot-path force aux from full debug/parity kernels so compiled
+   solves do not carry full diagnostic payloads unless a dump/parity hook asks
+   for them.
+3. Plan the next architectural tranche around separable TOMNSP/Fourier kernels
+   and shape-stable workspaces, with validation against VMEC2000 WOUT parity
+   and AD-vs-FD gates before changing default math paths.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 87%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 91.5%.
+- Refactor/API/examples: 48%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 96%.
+- Overall: 90.5%.
