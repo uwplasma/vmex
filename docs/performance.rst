@@ -2248,13 +2248,27 @@ reduced `solovev` solve-body time from about ``0.189 s`` to ``0.112 s`` and
 the short-trace residuals were unchanged.  The remaining seed target on those
 probes is R/Z matrix construction, not lambda preconditioning.
 
-A compact 16-row bundled single-grid ``vmec_jax`` refresh after this change
-showed aggregate improvement against the previous current-branch compact
-matrix: median cold runtime ``0.899x``, median warm runtime ``0.864x``, and
-median peak memory ``0.993x``.  One LASYM axisymmetric row had a small
-``1.104x`` warm-runtime outlier while its cold runtime still improved, so this
-was classified as row-level timing noise rather than a correctness or policy
-regression.
+The next host follow-up added a NumPy mirror of the JAX 3D R/Z matrix seed for
+concrete non-traced CPU host solves.  It is intentionally not used for traced
+autodiff, scan, accelerator, LASYM, or diagnostic precomputed/lax-tridiagonal
+paths.  On the same bounded QH cold probe, solve-body time dropped from about
+``0.274 s`` to ``0.106 s`` and R/Z matrix seed time dropped from about
+``0.168 s`` to ``0.012 s``.  The `solovev` axisymmetric probe was effectively
+unchanged at about ``0.113 s`` solve-body time because its R/Z seed was already
+near ``0.013 s``.
+
+A compact 16-row bundled single-grid ``vmec_jax`` refresh after the NumPy
+lambda seed showed aggregate improvement against the previous current-branch
+compact matrix: median cold runtime ``0.899x``, median warm runtime ``0.864x``,
+and median peak memory ``0.993x``.  A second compact refresh after the NumPy
+3D R/Z seed remained neutral-to-slightly-better against that NumPy-lambda
+baseline: median cold runtime ``0.996x``, median warm runtime ``0.985x``, and
+median peak memory ``1.003x``.  The first pass had two row-level threshold hits,
+but rerunning those rows classified them as timing/process-memory noise:
+``LandremanPaul2021_QA_reactorScale_lowres`` reran at cold ``1.058x``, warm
+``1.059x``, memory ``0.958x`` and
+``LandremanSengupta2019_section5.4_B2_A80`` reran at cold ``1.038x``, warm
+``1.022x``, memory ``1.028x``.
 
 A broader 2026-05-24 internal policy matrix compared the default fixed-boundary
 policy against the explicit ``accelerated`` policy on all 35 bundled

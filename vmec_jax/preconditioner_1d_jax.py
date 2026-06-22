@@ -14,6 +14,8 @@ import functools
 from functools import partial
 from types import SimpleNamespace
 
+import numpy as np
+
 from ._compat import jax, jnp, jit, has_jax
 from .vmec_tomnsp import TomnspsRZL
 
@@ -887,6 +889,259 @@ def rz_preconditioner_matrices(
         jmax_override=jmax_override,
         use_precomputed=use_precomputed,
         use_lax_tridi=use_lax_tridi,
+    )
+
+
+def _assemble_rz_preconditioner_matrices_numpy_host(
+    *,
+    arm,
+    ard,
+    brm,
+    brd,
+    azm,
+    azd,
+    bzm,
+    bzd,
+    cxd,
+    delta_s,
+    cfg,
+    jmax_override: int | None = None,
+) -> tuple[dict[str, np.ndarray], np.ndarray, int]:
+    """Assemble the JAX R/Z matrix payload using NumPy host arrays.
+
+    This mirrors ``_assemble_rz_preconditioner_matrices_impl_unjitted`` for
+    concrete CPU host solves.  It intentionally omits precomputed/lax
+    tridiagonal variants; callers fall back to the JAX helper for those
+    diagnostic modes.
+    """
+
+    ard = np.asarray(ard)
+    ns = int(ard.shape[0])
+    ns_f_default = max(ns - 1, 1)
+    ns_f = ns_f_default if jmax_override is None else int(max(1, min(int(jmax_override), ns)))
+    dtype = ard.dtype
+
+    arm = np.asarray(arm, dtype=dtype)
+    brm = np.asarray(brm, dtype=dtype)
+    azm = np.asarray(azm, dtype=dtype)
+    bzm = np.asarray(bzm, dtype=dtype)
+    brd = np.asarray(brd, dtype=dtype)
+    azd = np.asarray(azd, dtype=dtype)
+    bzd = np.asarray(bzd, dtype=dtype)
+    cxd = np.asarray(cxd, dtype=dtype)
+    delta_s = np.asarray(delta_s, dtype=dtype)
+
+    mpol = int(cfg.mpol)
+    nrange = int(cfg.ntor) + 1
+    nfp = float(cfg.nfp)
+    m = np.arange(mpol, dtype=dtype)
+    n = np.arange(nrange, dtype=dtype)
+    m2 = (m * m)[None, :, None]
+    n2 = ((n * nfp) ** 2)[None, None, :]
+    m_par = (np.arange(mpol) % 2).astype(np.int32)
+
+    ns_half = int(arm.shape[0])
+    pad_rows = max(ns_f - ns_half, 0)
+    if pad_rows > 0:
+        z_arm = np.zeros((pad_rows, arm.shape[1]), dtype=dtype)
+        z_azm = np.zeros((pad_rows, azm.shape[1]), dtype=dtype)
+        arm_f = np.concatenate([arm, z_arm], axis=0)
+        brm_f = np.concatenate([brm, z_arm], axis=0)
+        azm_f = np.concatenate([azm, z_azm], axis=0)
+        bzm_f = np.concatenate([bzm, z_azm], axis=0)
+    else:
+        arm_f = arm[:ns_f]
+        brm_f = brm[:ns_f]
+        azm_f = azm[:ns_f]
+        bzm_f = bzm[:ns_f]
+    ard_f = ard[:ns_f]
+    brd_f = brd[:ns_f]
+    azd_f = azd[:ns_f]
+    bzd_f = bzd[:ns_f]
+    cxd_f = cxd[:ns_f]
+
+    arm_m = arm_f[:, m_par]
+    brm_m = brm_f[:, m_par]
+    ard_m = ard_f[:, m_par]
+    brd_m = brd_f[:, m_par]
+    azm_m = azm_f[:, m_par]
+    bzm_m = bzm_f[:, m_par]
+    azd_m = azd_f[:, m_par]
+    bzd_m = bzd_f[:, m_par]
+
+    ar = -(arm_m[:, :, None] + brm_m[:, :, None] * m2)
+    az = -(azm_m[:, :, None] + bzm_m[:, :, None] * m2)
+    dr = -(ard_m[:, :, None] + brd_m[:, :, None] * m2 + cxd_f[:, None, None] * n2)
+    dz = -(azd_m[:, :, None] + bzd_m[:, :, None] * m2 + cxd_f[:, None, None] * n2)
+
+    br = np.zeros_like(ar)
+    bz = np.zeros_like(az)
+    if ns_f > 1:
+        br[1:] = -(arm_m[:-1, :, None] + brm_m[:-1, :, None] * m2)
+        bz[1:] = -(azm_m[:-1, :, None] + bzm_m[:-1, :, None] * m2)
+
+    if ns_f > 0 and mpol > 1:
+        ar[0, 1:, :] = 0.0
+        az[0, 1:, :] = 0.0
+        dr[0, 1:, :] = 0.0
+        dz[0, 1:, :] = 0.0
+
+    if ns_f > 1 and mpol > 1:
+        dr[1, 1, :] += br[1, 1, :]
+        dz[1, 1, :] += bz[1, 1, :]
+
+    if ns_f >= ns and ns > 0:
+        edge_pedestal = np.asarray(0.05, dtype=dtype)
+        fac = np.asarray(0.25, dtype=dtype)
+        hs = np.asarray(delta_s, dtype=dtype)
+        mult_fac = np.minimum(fac, fac * hs * np.asarray(15.0, dtype=dtype))
+        edge_idx = ns - 1
+        if mpol > 0:
+            dr[edge_idx, 0:1, :] *= 1.0 + edge_pedestal
+            dz[edge_idx, 0:1, :] *= 1.0 + edge_pedestal
+        if mpol > 1:
+            dr[edge_idx, 1:2, :] *= 1.0 + edge_pedestal
+            dz[edge_idx, 1:2, :] *= 1.0 + edge_pedestal
+        if mpol > 2:
+            dr[edge_idx, 2:, :] *= 1.0 + 2.0 * edge_pedestal
+            dz[edge_idx, 2:, :] *= 1.0 + 2.0 * edge_pedestal
+        if mpol > 0 and nrange > 0:
+            dz[edge_idx, 0, 0] *= (1.0 - mult_fac) / (1.0 + edge_pedestal)
+
+    jmin_m = np.where(np.arange(mpol) > 0, 1, 0).astype(np.int32)
+    jmin = jmin_m[:, None] * np.ones((mpol, nrange), dtype=np.int32)
+
+    mats = {
+        "ar": ar,
+        "br": br,
+        "dr": dr,
+        "az": az,
+        "bz": bz,
+        "dz": dz,
+        "arm_parity": arm,
+        "ard_parity": ard,
+        "brm_parity": brm,
+        "brd_parity": brd,
+        "azm_parity": azm,
+        "azd_parity": azd,
+        "bzm_parity": bzm,
+        "bzd_parity": bzd,
+        "cxd_full": cxd,
+        "delta_s": delta_s,
+    }
+    return mats, jmin, int(ns_f)
+
+
+def rz_preconditioner_matrices_numpy_host(
+    *,
+    bc,
+    k,
+    trig,
+    s,
+    cfg,
+    jmax_override: int | None = None,
+    use_precomputed: bool | None = None,
+    use_lax_tridi: bool | None = None,
+) -> tuple[dict[str, Any], Any, int]:
+    """Return R/Z matrices with NumPy for concrete CPU host solves.
+
+    The helper is only a performance mirror of the promoted JAX implementation.
+    It is not used for traced/autodiff or accelerator paths.
+    """
+
+    del trig
+    use_precomputed, use_lax_tridi = _resolve_tridi_flags(
+        use_precomputed=use_precomputed,
+        use_lax_tridi=use_lax_tridi,
+    )
+    if use_precomputed or use_lax_tridi:
+        return rz_preconditioner_matrices(
+            bc=bc,
+            k=k,
+            trig=None,
+            s=s,
+            cfg=cfg,
+            jmax_override=jmax_override,
+            use_precomputed=use_precomputed,
+            use_lax_tridi=use_lax_tridi,
+        )
+
+    from vmec_jax.preconditioner_1d import (
+        _compute_preconditioning_matrix as _compute_preconditioning_matrix_np,
+        _sm_sp_from_profiles as _sm_sp_from_profiles_np,
+        _sqrt_profiles_from_ns as _sqrt_profiles_from_ns_np,
+        wint_from_config as _wint_from_config_np,
+    )
+
+    s_arr = np.asarray(s)
+    ns = int(s_arr.shape[0])
+    dtype = np.asarray(bc.guu).dtype
+    if not np.issubdtype(dtype, np.floating):
+        dtype = np.float64
+    w_int = np.asarray(_wint_from_config_np(cfg=cfg), dtype=dtype)
+
+    r12 = np.asarray(bc.jac.r12, dtype=dtype)[1:]
+    tau = np.asarray(bc.jac.tau, dtype=dtype)[1:]
+    total_pressure = np.asarray(bc.bsq, dtype=dtype)[1:]
+    bsupv = np.asarray(bc.bsupv, dtype=dtype)[1:]
+    sqrtg = np.asarray(bc.jac.sqrtg, dtype=dtype)[1:]
+
+    sqrt_sf, sqrt_sh = _sqrt_profiles_from_ns_np(ns)
+    sqrt_sh = np.asarray(sqrt_sh, dtype=dtype)
+    sm, sp = _sm_sp_from_profiles_np(np.asarray(sqrt_sf, dtype=dtype), sqrt_sh)
+    sm = np.asarray(sm, dtype=dtype)
+    sp = np.asarray(sp, dtype=dtype)
+    delta_s = np.asarray(s_arr[1] - s_arr[0] if ns >= 2 else 1.0, dtype=dtype)
+
+    arm, ard, brm, brd, cxd = _compute_preconditioning_matrix_np(
+        xs=np.asarray(bc.jac.zs, dtype=dtype)[1:],
+        xu12=np.asarray(bc.jac.zu12, dtype=dtype)[1:],
+        xu_e=np.asarray(k.pzu_even, dtype=dtype),
+        xu_o=np.asarray(k.pzu_odd, dtype=dtype),
+        x1_o=np.asarray(k.pz1_odd, dtype=dtype),
+        r12=r12,
+        total_pressure=total_pressure,
+        tau=tau,
+        bsupv=bsupv,
+        sqrtg=sqrtg,
+        w_int=w_int,
+        sqrt_sh=sqrt_sh,
+        sm=sm,
+        sp=sp,
+        delta_s=delta_s,
+        ns_full=ns,
+    )
+    azm, azd, bzm, bzd, _cxd_z = _compute_preconditioning_matrix_np(
+        xs=np.asarray(bc.jac.rs, dtype=dtype)[1:],
+        xu12=np.asarray(bc.jac.ru12, dtype=dtype)[1:],
+        xu_e=np.asarray(k.pru_even, dtype=dtype),
+        xu_o=np.asarray(k.pru_odd, dtype=dtype),
+        x1_o=np.asarray(k.pr1_odd, dtype=dtype),
+        r12=r12,
+        total_pressure=total_pressure,
+        tau=tau,
+        bsupv=bsupv,
+        sqrtg=sqrtg,
+        w_int=w_int,
+        sqrt_sh=sqrt_sh,
+        sm=sm,
+        sp=sp,
+        delta_s=delta_s,
+        ns_full=ns,
+    )
+    return _assemble_rz_preconditioner_matrices_numpy_host(
+        arm=arm,
+        ard=ard,
+        brm=brm,
+        brd=brd,
+        azm=azm,
+        azd=azd,
+        bzm=bzm,
+        bzd=bzd,
+        cxd=cxd,
+        delta_s=delta_s,
+        cfg=cfg,
+        jmax_override=jmax_override,
     )
 
 

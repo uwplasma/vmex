@@ -194,6 +194,80 @@ def test_residual_preconditioner_operators_use_numpy_lambda_for_host_path(monkey
     assert calls[0]["return_debug"] is True
 
 
+def test_residual_preconditioner_operators_use_numpy_rz_seed_for_3d_host_path(monkeypatch) -> None:
+    calls = []
+
+    def fake_numpy_host(**kwargs):
+        calls.append(("numpy-host", kwargs))
+        return "numpy-rz", "numpy-jmin", 4
+
+    def fake_jax(**kwargs):
+        calls.append(("jax", kwargs))
+        return "jax-rz", "jax-jmin", 4
+
+    import vmec_jax.preconditioner_1d_jax as p1d_jax
+
+    monkeypatch.setattr(p1d_jax, "rz_preconditioner_matrices_numpy_host", fake_numpy_host)
+    monkeypatch.setattr(p1d_jax, "rz_preconditioner_matrices", fake_jax)
+
+    ops = payload_mod.residual_preconditioner_operators(
+        trig="trig",
+        s=np.linspace(0.0, 1.0, 3),
+        cfg=SimpleNamespace(mpol=3, ntor=1, ntheta=6, nzeta=4, nfp=2, lasym=False, lthreed=True),
+        use_numpy_preconditioner_apply=True,
+        tree_has_tracer_func=lambda _value: False,
+        radial_tridi_smooth_dirichlet_func=lambda a, **_kwargs: a,
+        jnp_module=np,
+    )
+
+    got = ops.rz_preconditioner_matrices(
+        bc="bc",
+        k="k",
+        jmax_override=3,
+        use_precomputed=False,
+        use_lax_tridi=False,
+    )
+
+    assert got == ("numpy-rz", "numpy-jmin", 4)
+    assert calls[0][0] == "numpy-host"
+    assert calls[0][1]["bc"] == "bc"
+    assert calls[0][1]["k"] == "k"
+    assert calls[0][1]["use_precomputed"] is False
+    assert calls[0][1]["use_lax_tridi"] is False
+
+
+def test_residual_preconditioner_operators_keep_jax_rz_seed_for_traced_path(monkeypatch) -> None:
+    calls = []
+
+    def fake_numpy_host(**kwargs):
+        calls.append(("numpy-host", kwargs))
+        return "numpy-rz", "numpy-jmin", 4
+
+    def fake_jax(**kwargs):
+        calls.append(("jax", kwargs))
+        return "jax-rz", "jax-jmin", 4
+
+    import vmec_jax.preconditioner_1d_jax as p1d_jax
+
+    monkeypatch.setattr(p1d_jax, "rz_preconditioner_matrices_numpy_host", fake_numpy_host)
+    monkeypatch.setattr(p1d_jax, "rz_preconditioner_matrices", fake_jax)
+
+    ops = payload_mod.residual_preconditioner_operators(
+        trig="trig",
+        s=np.linspace(0.0, 1.0, 3),
+        cfg=SimpleNamespace(mpol=3, ntor=1, ntheta=6, nzeta=4, nfp=2, lasym=False, lthreed=True),
+        use_numpy_preconditioner_apply=True,
+        tree_has_tracer_func=lambda _value: True,
+        radial_tridi_smooth_dirichlet_func=lambda a, **_kwargs: a,
+        jnp_module=np,
+    )
+
+    got = ops.rz_preconditioner_matrices(bc="bc", k="k")
+
+    assert got == ("jax-rz", "jax-jmin", 4)
+    assert calls[0][0] == "jax"
+
+
 def test_seed_preconditioner_cache_from_bcovar_update_builds_vmec2000_seed() -> None:
     stats = {
         "precond_refresh_seed": 0.0,

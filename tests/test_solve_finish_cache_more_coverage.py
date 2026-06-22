@@ -220,7 +220,16 @@ def _install_scan_fakes(monkeypatch) -> None:
         dtype = jnp.asarray(state.Rcos).dtype
         one = jnp.ones((3, 1, 1), dtype=dtype)
         jac = SimpleNamespace(sqrtg=one, r12=one, ru12=one, zu12=one, tau=one)
-        bc = SimpleNamespace(guu=one, bsubu=one, bsubv=one, bsq=one, jac=jac)
+        bc = SimpleNamespace(
+            guu=one,
+            bsupu=one,
+            bsupv=one,
+            bsubu=one,
+            bsubv=one,
+            bsq=one,
+            jac=jac,
+            lamscale=1.0,
+        )
         return SimpleNamespace(state=state, bc=bc, tcon=jnp.zeros(3, dtype=dtype))
 
     def fake_residual(k, **_kwargs):
@@ -293,6 +302,7 @@ def test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh(monkeypatch
     _install_scan_fakes(monkeypatch)
 
     import vmec_jax.preconditioner_1d_jax as precond_mod
+    import vmec_jax.preconditioner_1d as precond_np_mod
 
     calls = {"lambda": 0, "mats": 0}
 
@@ -309,7 +319,9 @@ def test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh(monkeypatch
         return mats, 0, 2
 
     monkeypatch.setattr(precond_mod, "lambda_preconditioner_cached", fake_lambda_preconditioner_cached)
+    monkeypatch.setattr(precond_np_mod, "lambda_preconditioner", fake_lambda_preconditioner_cached)
     monkeypatch.setattr(precond_mod, "rz_preconditioner_matrices", fake_rz_preconditioner_matrices)
+    monkeypatch.setattr(precond_mod, "rz_preconditioner_matrices_numpy_host", fake_rz_preconditioner_matrices)
     monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_jit", lambda **kwargs: kwargs["frzl_in"])
     monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_numpy", lambda **kwargs: kwargs["frzl_in"])
     monkeypatch.setattr(solve, "_scan_math_ptau_minmax_from_k_host", lambda _k, **_kwargs: (0.1, 0.2))

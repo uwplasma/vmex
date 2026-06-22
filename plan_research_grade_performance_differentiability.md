@@ -2630,3 +2630,67 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97.2%.
 - Docs/release hygiene: 98%.
 - Overall: 94.9%.
+
+### 2026-06-22: Promote CPU host NumPy 3D R/Z preconditioner seed
+
+Steps taken:
+
+- Added a concrete-host NumPy mirror for the 3D stellsym R/Z preconditioner
+  matrix seed.  The mirror returns the same matrix and cached parity-coefficient
+  keys as the JAX builder, so cache reassembly keeps the same payload contract.
+- Kept traced/autodiff, scan, accelerator, LASYM, and diagnostic
+  precomputed/lax-tridiagonal paths on the existing JAX implementation.
+- Routed only concrete non-traced CPU host-update 3D stellsym refreshes through
+  the new host mirror.
+- Added parity coverage comparing the new host mirror against the JAX R/Z
+  matrix builder for both ``jmax=ns-1`` and active-edge ``jmax=ns`` cases.
+- Added dispatch-policy tests showing the 3D concrete host path selects the
+  NumPy mirror and traced paths still select JAX.
+
+Results obtained:
+
+- Focused preconditioner suite passed:
+  ``tests/test_preconditioner_1d_jax_fast_helpers.py``,
+  ``tests/test_tcon_precondn_diag.py``,
+  ``tests/test_solve_preconditioner_payload_helpers.py``, and the non-scan
+  cache-reuse finish test (`32 passed`).
+- Fast physics/parity gates passed:
+  ``tests/test_vmec_parity_physics_fast_gates.py``,
+  ``tests/test_wout_physics_gates.py``, and
+  ``tests/test_vmec2000_fixed_boundary_physics_gates.py``.
+- Bounded three-iteration cold probes:
+  - `input.nfp4_QH_warm_start`: solve-body time dropped from about ``0.274 s``
+    after the NumPy-lambda change to ``0.106 s``; R/Z matrix seed time dropped
+    from about ``0.168 s`` to ``0.012 s``.
+  - `input.solovev`: solve-body time stayed neutral, about ``0.112 s`` to
+    ``0.113 s``, because its R/Z seed was already about ``0.013 s``.
+- A compact 16-row bundled single-grid matrix completed successfully after the
+  R/Z host mirror.  Against the previous NumPy-lambda compact matrix, median
+  cold runtime was ``0.996x``, median warm runtime was ``0.985x``, and median
+  peak memory was ``1.003x``.
+- Two initial row-level threshold hits were rerun and classified as
+  timing/process-memory noise:
+  - `LandremanPaul2021_QA_reactorScale_lowres`: rerun ratios cold ``1.058x``,
+    warm ``1.059x``, memory ``0.958x``.
+  - `LandremanSengupta2019_section5.4_B2_A80`: rerun ratios cold ``1.038x``,
+    warm ``1.022x``, memory ``1.028x``.
+
+Best next steps:
+
+1. Continue performance work on remaining cold setup costs:
+   axis reset/boundary-profile unattributed setup and R/Z apply for short host
+   solves.
+2. Keep optional-channel memory reduction and arbitrary adaptive-branch
+   differentiation as separate structural refactors under this plan.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92%.
+- Free-boundary production differentiability: 91.5%.
+- Single-stage coil optimization: 88%.
+- CPU/GPU runtime and memory footprint: 96.2%.
+- Refactor/API/examples: 54.5%.
+- VMEC2000/VMEC++ parity and physics gates: 97.4%.
+- Docs/release hygiene: 98.1%.
+- Overall: 95.3%.
