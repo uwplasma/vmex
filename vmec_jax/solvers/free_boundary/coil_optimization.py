@@ -23,6 +23,9 @@ from vmec_jax.quasisymmetry import (
     quasisymmetry_ratio_residual_from_state,
 )
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+from vmec_jax.solvers.free_boundary.adjoint.trace_metadata import (
+    direct_coil_accepted_trace_controller_slot_fingerprint,
+)
 
 __all__ = [
     "DEFAULT_SAME_BRANCH_VECTOR_KEYS", "STATE_ONLY_SAME_BRANCH_KEYS", "SUPPORTED_SAME_BRANCH_VECTOR_KEYS",
@@ -948,7 +951,33 @@ def same_branch_rejected_slot_gate_from_vector_replay(
     rejected_summary = summarize_vector_result(rejected_vector, vector_keys)
     rejected_metadata = rejected_summary.get("replay_branch_metadata", {})
     rejected_controller_slot_summary = rejected_summary.get("controller_slot_summary", {})
+    controller_slot_fingerprint = (
+        direct_coil_accepted_trace_controller_slot_fingerprint(rejected_metadata)
+        if isinstance(rejected_metadata, dict)
+        else {}
+    )
+    status_masks = rejected_metadata.get("status_masks", {}) if isinstance(rejected_metadata, dict) else {}
+    status_acceptance_source = (
+        rejected_metadata.get("status_acceptance_source")
+        if isinstance(rejected_metadata, dict)
+        else None
+    )
+    if status_acceptance_source is None and isinstance(status_masks, dict):
+        status_acceptance_source = status_masks.get("status_acceptance_source")
+    accepted_mask = np.asarray(rejected_metadata.get("accepted_mask", []), dtype=bool)
     rejected_mask = np.asarray(rejected_metadata.get("rejected_mask", []), dtype=bool)
+    status_accept_mask = (
+        np.asarray(status_masks.get("accept_mask", []), dtype=bool)
+        if isinstance(status_masks, dict)
+        else np.asarray([], dtype=bool)
+    )
+    if status_accept_mask.size == 0 and accepted_mask.size:
+        status_accept_mask = accepted_mask
+    status_derived_rejected_slot = bool(
+        status_acceptance_source == "trace_step_status"
+        and status_accept_mask.size
+        and np.any(np.logical_not(status_accept_mask))
+    )
     passed = bool(
         same_branch
         and rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
@@ -977,6 +1006,9 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         "scalar_keys": list(vector_keys),
         "fixed_rejected_controller_slot_present": bool(np.any(rejected_mask)),
         "fixed_rejected_controller_slots": int(np.count_nonzero(rejected_mask)),
+        "status_derived_rejected_controller_slot_present": status_derived_rejected_slot,
+        "status_acceptance_source": status_acceptance_source,
+        "controller_slot_fingerprint": controller_slot_fingerprint,
         "directional_jvp_fast_path": str(rejected_summary.get("directional_jvp_fast_path", "none")),
         "directional_uses_fixed_coil_geometry": bool(
             rejected_summary.get("directional_uses_fixed_coil_geometry", False)

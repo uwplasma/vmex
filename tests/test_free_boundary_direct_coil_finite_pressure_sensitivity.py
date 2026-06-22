@@ -619,6 +619,7 @@ def _assert_trace_fingerprint_status_and_replay_gate_contracts(trace0: dict, tra
     from vmec_jax.free_boundary_adjoint import (
         direct_coil_accepted_trace_branch_metadata,
         direct_coil_accepted_trace_controller_replay_plan,
+        direct_coil_accepted_trace_controller_slot_fingerprint,
         direct_coil_accepted_trace_controller_slot_summary,
         direct_coil_accepted_trace_controller_controls_jax,
         direct_coil_accepted_trace_status_masks,
@@ -651,6 +652,7 @@ def _assert_trace_fingerprint_status_and_replay_gate_contracts(trace0: dict, tra
     assert np.array_equal(np.asarray(status_controls["accept"]), np.asarray([True, False]))
     status_metadata = direct_coil_accepted_trace_branch_metadata([trace0, status_rejected_trace])
     status_slot_summary = direct_coil_accepted_trace_controller_slot_summary(status_metadata)
+    status_slot_fingerprint = direct_coil_accepted_trace_controller_slot_fingerprint(status_metadata)
     assert status_metadata["step_status"] == ("accepted", "rejected")
     for key, expected in (("accepted_mask", [True, False]), ("rejected_mask", [False, True])):
         assert np.array_equal(np.asarray(status_metadata[key]), np.asarray(expected))
@@ -658,6 +660,11 @@ def _assert_trace_fingerprint_status_and_replay_gate_contracts(trace0: dict, tra
     assert status_slot_summary["accepted_slots"] == 1
     assert status_slot_summary["rejected_slots"] == 1
     assert status_slot_summary["fixed_rejected_controller_slot_present"] is True
+    assert status_slot_fingerprint["accepted_mask"] == [True, False]
+    assert status_slot_fingerprint["rejected_mask"] == [False, True]
+    assert status_slot_fingerprint["step_status"] == ["accepted", "rejected"]
+    assert status_slot_fingerprint["status_acceptance_source"] == "trace_step_status"
+    assert status_slot_fingerprint["summary"]["rejected_slots"] == 1
     override_status_metadata = direct_coil_accepted_trace_branch_metadata(
         [trace0, status_rejected_trace],
         accept_mask=np.asarray([True, True]),
@@ -2378,6 +2385,9 @@ def _assert_fixed_rejected_slot_gate(
     assert rejected_slot_gate["controller_slot_summary"]["accepted_slots"] >= 1
     assert rejected_slot_gate["controller_slot_summary"]["rejected_slots"] == 1
     assert rejected_slot_gate["controller_slot_summary"]["fixed_rejected_controller_slot_present"] is True
+    assert rejected_slot_gate["controller_slot_fingerprint"]["rejected_mask"][-1] is True
+    assert rejected_slot_gate["controller_slot_fingerprint"]["status_acceptance_source"] == "trace_step_status"
+    assert rejected_slot_gate["controller_slot_fingerprint"]["summary"]["rejected_slots"] == 1
     assert rejected_slot_gate["used_stacked_step_controls"] is True
     assert rejected_slot_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False
     json.dumps(

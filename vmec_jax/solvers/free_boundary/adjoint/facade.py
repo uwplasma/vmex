@@ -60,6 +60,7 @@ from vmec_jax.solvers.free_boundary.adjoint.trace_metadata import (
     _fingerprint_has_rejected_controller_slot,  # noqa: F401 - compatibility alias for tests/internal users.
     _json_safe_fingerprint_value,  # noqa: F401 - compatibility alias for tests/internal users.
     _unique_shape_list,  # noqa: F401 - compatibility alias for tests/internal users.
+    direct_coil_accepted_trace_controller_slot_fingerprint,
     direct_coil_accepted_trace_controller_slot_summary,
 )
 from vmec_jax.solvers.free_boundary.adjoint.gate_reports import (
@@ -208,6 +209,7 @@ direct_coil_accepted_trace_array_controls_jax
 direct_coil_accepted_trace_branch_metadata
 direct_coil_accepted_trace_controller_custom_vjp_scalars_jax
 direct_coil_accepted_trace_controller_replay_plan
+direct_coil_accepted_trace_controller_slot_fingerprint
 direct_coil_accepted_trace_controller_slot_summary
 direct_coil_accepted_trace_fingerprint direct_coil_accepted_trace_fingerprint_delta
 direct_coil_accepted_trace_fingerprint_delta_summary

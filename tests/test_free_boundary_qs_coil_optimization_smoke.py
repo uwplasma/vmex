@@ -1986,6 +1986,15 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert rejected_gate["same_stacked_step_policy_branch"] is True
     assert rejected_gate["fixed_rejected_controller_slot_present"] is True
     assert rejected_gate["fixed_rejected_controller_slots"] == 1
+    assert rejected_gate["status_derived_rejected_controller_slot_present"] is True
+    assert rejected_gate["status_acceptance_source"] == "trace_step_status"
+    slot_fingerprint = rejected_gate["controller_slot_fingerprint"]
+    assert slot_fingerprint["n_steps"] == 2
+    assert slot_fingerprint["accepted_mask"] == [True, False]
+    assert slot_fingerprint["rejected_mask"] == [False, True]
+    assert slot_fingerprint["step_status"] == ["accepted", "rejected"]
+    assert slot_fingerprint["status_acceptance_source"] == "trace_step_status"
+    assert slot_fingerprint["summary"]["rejected_slots"] == 1
     assert rejected_gate["directional_jvp_fast_path"] == "current_only"
     assert rejected_gate["directional_uses_fixed_coil_geometry"] is True
     assert rejected_gate["controller_slot_summary"]["accepted_slots"] == 1

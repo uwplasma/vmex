@@ -20,6 +20,7 @@ from .replay_plan import (
 from .trace_metadata import (
     _fingerprint_has_rejected_controller_slot,
     _json_safe_fingerprint_value,
+    direct_coil_accepted_trace_controller_slot_fingerprint,
     direct_coil_accepted_trace_controller_slot_summary,
 )
 
@@ -150,6 +151,11 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         if isinstance(replay_branch_metadata, Mapping)
         else {}
     )
+    controller_slot_fingerprint = (
+        direct_coil_accepted_trace_controller_slot_fingerprint(replay_branch_metadata)
+        if isinstance(replay_branch_metadata, Mapping)
+        else {}
+    )
     same_accepted_trace_branch = bool(branch.get("same_accepted_trace_branch", branch.get("same_branch", False)))
     same_residual_branch = bool(branch.get("same_residual_branch", branch.get("same_branch", False)))
     if not same_accepted_trace_branch:
@@ -195,6 +201,7 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         "differentiates_adaptive_controller": False,
         "scalar_keys": scalar_keys,
         "controller_slot_summary": controller_slot_summary,
+        "controller_slot_fingerprint": controller_slot_fingerprint,
         "replay_gate": replay_gate,
         "errors": tuple(errors),
         "scalars": scalar_summaries,
@@ -249,6 +256,11 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
     replay_branch_metadata = scalars_report.get("replay_branch_metadata", {})
     controller_slot_summary = (
         direct_coil_accepted_trace_controller_slot_summary(replay_branch_metadata)
+        if isinstance(replay_branch_metadata, Mapping)
+        else {}
+    )
+    controller_slot_fingerprint = (
+        direct_coil_accepted_trace_controller_slot_fingerprint(replay_branch_metadata)
         if isinstance(replay_branch_metadata, Mapping)
         else {}
     )
@@ -336,6 +348,7 @@ def direct_coil_adaptive_full_loop_same_branch_gate_report(
         "status_derived_rejected_controller_slot_present": bool(status_derived_rejected_controller_slot_present),
         "status_acceptance_source": status_acceptance_source,
         "controller_slot_summary": controller_slot_summary,
+        "controller_slot_fingerprint": controller_slot_fingerprint,
         "replay_option_flags": replay_option_flags,
         "replay_branch_metadata": replay_branch_metadata,
         "scalar_keys": physical_gate.get("scalar_keys", ()),

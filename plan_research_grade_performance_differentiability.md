@@ -2071,3 +2071,59 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96.2%.
 - Docs/release hygiene: 96.7%.
 - Overall: 91.3%.
+
+### 2026-06-22: Promote accepted/rejected controller-slot fingerprint artifacts
+
+Steps taken:
+
+- Added a shared JSON-safe
+  `direct_coil_accepted_trace_controller_slot_fingerprint` helper next to the
+  existing controller-slot summary helper.
+- Exposed the fingerprint in the same-branch adaptive full-loop seam report
+  and in the single-stage coil optimization `accepted_rejected_controller_slot`
+  artifact.
+- Extended the mocked single-stage report test and the direct-coil trace
+  fingerprint test to assert the accepted/rejected masks, trace-derived status
+  source, and rejected-slot summary.
+
+Results obtained:
+
+- Focused validation passed:
+  `python -m ruff check
+  vmec_jax/solvers/free_boundary/adjoint/trace_metadata.py
+  vmec_jax/solvers/free_boundary/adjoint/gate_reports.py
+  vmec_jax/solvers/free_boundary/adjoint/facade.py
+  vmec_jax/solvers/free_boundary/coil_optimization.py
+  tests/test_free_boundary_qs_coil_optimization_smoke.py
+  tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py`.
+- The exact same-branch smoke subset passed:
+  `PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  -p no:cacheprovider tests/test_free_boundary_qs_coil_optimization_smoke.py
+  -k same_branch -q`.
+- Targeted trace-fingerprint validation passed with the new helper included:
+  `tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_trace_fingerprint_detects_control_branch_changes`.
+
+Best next steps:
+
+1. Use the fingerprinted accepted/rejected slot artifact in the small
+   coil-only QS derivative-proposal run so complete solves remain the
+   acceptance authority but reviewers can inspect the exact branch-local replay
+   slot layout.
+2. Start the low-risk `bcovar` compact force-payload tranche identified by the
+   performance audit, preserving the full public `VmecHalfMeshBcovar` return
+   for diagnostics and WOUT/parity helpers.
+3. Keep arbitrary adaptive branch differentiation deferred to the research
+   differentiability plan until a true JAX-visible adaptive branch-selection
+   loop exists and passes AD-vs-FD.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 91.5%.
+- Free-boundary production differentiability: 89%.
+- Single-stage coil optimization: 86.5%.
+- CPU/GPU runtime and memory footprint: 91.8%.
+- Refactor/API/examples: 50.3%.
+- VMEC2000/VMEC++ parity and physics gates: 96.3%.
+- Docs/release hygiene: 96.8%.
+- Overall: 91.6%.
