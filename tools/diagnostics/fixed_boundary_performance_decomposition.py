@@ -430,6 +430,9 @@ def _vmec_jax_phase_breakdown(run: dict[str, Any]) -> dict[str, float | None]:
     iteration_loop_s = _float_or_none(timing.get("iteration_loop_s"))
     compute_forces_s = _float_or_none(timing.get("compute_forces_s"))
     preconditioner_s = _float_or_none(timing.get("preconditioner_s"))
+    precond_refresh_s = _float_or_none(timing.get("precond_refresh_s"))
+    precond_refresh_seed_s = _float_or_none(timing.get("precond_refresh_seed_s"))
+    precond_apply_s = _float_or_none(timing.get("precond_apply_s"))
     update_s = _float_or_none(timing.get("update_s"))
 
     run_minus_solve_s = None
@@ -451,10 +454,19 @@ def _vmec_jax_phase_breakdown(run: dict[str, Any]) -> dict[str, float | None]:
         "warmup_wall_s": warmup_wall_s,
         "profiled_run_wall_s": run_wall_s,
         "solver_setup_total_s": setup_total_s,
+        "solver_setup_static_grid_rebuild_s": _float_or_none(timing.get("setup_static_grid_rebuild_s")),
+        "solver_setup_boundary_profiles_s": _float_or_none(timing.get("setup_boundary_profiles_s")),
+        "solver_setup_axis_reset_s": _float_or_none(timing.get("setup_axis_reset_s")),
+        "solver_setup_cache_key_hash_s": _float_or_none(timing.get("setup_cache_key_hash_s")),
+        "solver_setup_ptau_constants_s": _float_or_none(timing.get("setup_ptau_constants_s")),
+        "solver_setup_index_constants_s": _float_or_none(timing.get("setup_index_constants_s")),
         "solver_iteration_loop_s": iteration_loop_s,
         "solver_solve_total_s": solve_total_s,
         "solver_compute_forces_s": compute_forces_s,
         "solver_preconditioner_s": preconditioner_s,
+        "solver_precond_refresh_s": precond_refresh_s,
+        "solver_precond_refresh_seed_s": precond_refresh_seed_s,
+        "solver_precond_apply_s": precond_apply_s,
         "solver_update_s": update_s,
         "profiled_run_minus_solver_s": run_minus_solve_s,
         "child_elapsed_minus_profiled_run_s": child_minus_run_s,
@@ -558,9 +570,18 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
             ("profiled_run_wall_s", "Profiled run wall"),
             ("solver_solve_total_s", "Solver total"),
             ("solver_setup_total_s", "Solver setup"),
+            ("solver_setup_static_grid_rebuild_s", "Setup: static-grid rebuild"),
+            ("solver_setup_boundary_profiles_s", "Setup: boundary/profiles/trig"),
+            ("solver_setup_axis_reset_s", "Setup: axis reset"),
+            ("solver_setup_cache_key_hash_s", "Setup: cache-key hashing"),
+            ("solver_setup_ptau_constants_s", "Setup: p/tau constants"),
+            ("solver_setup_index_constants_s", "Setup: index/mode constants"),
             ("solver_iteration_loop_s", "Solver iteration loop"),
             ("solver_compute_forces_s", "Force evaluation"),
             ("solver_preconditioner_s", "Preconditioner"),
+            ("solver_precond_refresh_s", "Preconditioner refresh"),
+            ("solver_precond_refresh_seed_s", "Preconditioner seed"),
+            ("solver_precond_apply_s", "Preconditioner apply"),
             ("solver_update_s", "State update"),
             ("profiled_run_minus_solver_s", "Profiled run minus solver"),
             ("child_elapsed_minus_profiled_run_s", "Child elapsed minus profiled run"),

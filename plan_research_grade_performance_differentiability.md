@@ -571,3 +571,59 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 90%.
 - Docs/release hygiene: 89%.
 - Overall: 72%.
+
+### 2026-06-21: Bounded cold-path preconditioner decomposition
+
+Steps taken:
+
+- Extended `profile_fixed_boundary.py` and
+  `fixed_boundary_performance_decomposition.py` to expose setup sub-buckets and
+  preconditioner refresh/seed/apply buckets.
+- Tested a safe NumPy R/Z matrix-builder shortcut for host-controller updates.
+  The shortcut is valid only for axisymmetric/stellsym (`lthreed=False`,
+  `lasym=False`) updates; a synthetic 3D check showed the legacy NumPy
+  representation is not output-equivalent to the current JAX independent
+  toroidal-block path.
+- Added a diagnostic `VMEC_JAX_RZ_MATRIX_ASSEMBLY_JIT=0` opt-out for the small
+  R/Z matrix assembly JIT, then profiled it in a fresh child process.
+
+Results obtained:
+
+- `input.nfp4_QH_warm_start`, bounded two-iteration CPU run with
+  `--finish-policy none --no-use-scan`:
+  - default compiled R/Z matrix assembly: `1.282 s` wall,
+    `1.047 s` solver total, `0.957 s` preconditioner seed.
+  - unjitted R/Z matrix assembly opt-out: `1.897 s` wall,
+    `1.674 s` solver total, `1.584 s` preconditioner seed.
+- The fresh-process result disproves the earlier warm in-process experiment:
+  the small matrix assembly JIT should remain enabled by default for 3D QH.
+- Axisymmetric `input.solovev`, same bounded two-iteration CPU profile:
+  `0.178 s` wall, `0.169 s` solver total, `0.077 s` preconditioner seed.
+- The current cold 3D bottleneck is therefore not force evaluation or WOUT I/O;
+  it is specifically first-call 3D preconditioner seed construction, dominated
+  by R/Z preconditioner matrix compilation/build and lambda preconditioner
+  setup.
+
+Best next steps:
+
+1. Target the 3D JAX preconditioner seed path directly: reduce graph size in
+   `_compute_preconditioning_matrix`, precompute invariant radial/mode factors,
+   and share the matrix assembly executable across equivalent `mpol/ntor/ns`
+   rows.
+2. Add a preconditioner microbenchmark that times matrix coefficient assembly,
+   R/Z matrix assembly, lambda preconditioner, and R/Z apply separately on QH
+   and one LASYM case.
+3. Re-run the full README single-grid matrix only after the 3D preconditioner
+   path has a measured improvement or is explicitly deferred.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 81%.
+- Fixed-boundary production differentiability: 82%.
+- Free-boundary production differentiability: 78%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 72%.
+- Refactor/API/examples: 41%.
+- VMEC2000/VMEC++ parity and physics gates: 90%.
+- Docs/release hygiene: 89%.
+- Overall: 73%.

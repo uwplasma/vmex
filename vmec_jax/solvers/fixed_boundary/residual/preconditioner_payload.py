@@ -159,6 +159,25 @@ def residual_preconditioner_operators(
         use_precomputed: bool | None = None,
         use_lax_tridi: bool | None = None,
     ):
+        if (
+            bool(use_numpy_preconditioner_apply)
+            and (not bool(getattr(cfg, "lasym", False)))
+            and (not bool(getattr(cfg, "lthreed", False)))
+            and (not tree_has_tracer_func((bc, k)))
+        ):
+            # The NumPy R/Z matrix representation is output-equivalent to the
+            # JAX path for axisymmetric host updates, but not for the 3D
+            # independent-toroidal-block representation.
+            from vmec_jax.preconditioner_1d import rz_preconditioner_matrices as build_rz_matrices_np
+
+            return build_rz_matrices_np(
+                bc=bc,
+                k=k,
+                trig=trig,
+                s=s,
+                cfg=cfg,
+                jmax_override=jmax_override,
+            )
         from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices as build_rz_matrices
 
         return build_rz_matrices(

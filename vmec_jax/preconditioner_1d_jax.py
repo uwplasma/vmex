@@ -23,6 +23,7 @@ _LAMBDA_PRECOND_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 # os.getenv() + .strip().lower() was being called 7000+ times per solve.
 _ENV_USE_PRECOMPUTED: bool | None = None
 _ENV_USE_LAX_TRIDI: bool | None = None
+_ENV_RZ_MATRIX_ASSEMBLY_JIT: bool | None = None
 
 
 def _get_env_tridi_flags() -> tuple[bool, bool]:
@@ -37,6 +38,26 @@ def _get_env_tridi_flags() -> tuple[bool, bool]:
             "1", "true", "yes", "lax", "force",
         )
     return _ENV_USE_PRECOMPUTED, _ENV_USE_LAX_TRIDI
+
+
+def _rz_matrix_assembly_jit_enabled() -> bool:
+    """Return whether to JIT only the small R/Z matrix assembly helper.
+
+    The default stays on because fresh-process profiling shows the compiled
+    helper is faster even for cold low-iteration 3D cases. Set
+    ``VMEC_JAX_RZ_MATRIX_ASSEMBLY_JIT=0`` only for diagnostics.
+    """
+
+    global _ENV_RZ_MATRIX_ASSEMBLY_JIT
+    if _ENV_RZ_MATRIX_ASSEMBLY_JIT is None:
+        _ENV_RZ_MATRIX_ASSEMBLY_JIT = os.getenv("VMEC_JAX_RZ_MATRIX_ASSEMBLY_JIT", "1").strip().lower() not in (
+            "",
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+    return _ENV_RZ_MATRIX_ASSEMBLY_JIT
 
 
 def _cache_allowed() -> bool:
@@ -708,12 +729,15 @@ def _assemble_rz_preconditioner_matrices_impl(
     use_lax_tridi: bool | None = None,
 ) -> tuple[dict[str, Any], Any, int]:
     """Assemble R/Z preconditioner matrices, JITing only hashable configs."""
-    try:
-        hash(cfg)
-    except TypeError:
+    if not _rz_matrix_assembly_jit_enabled():
         assemble = _assemble_rz_preconditioner_matrices_impl_unjitted
     else:
-        assemble = _assemble_rz_preconditioner_matrices_impl_jit
+        try:
+            hash(cfg)
+        except TypeError:
+            assemble = _assemble_rz_preconditioner_matrices_impl_unjitted
+        else:
+            assemble = _assemble_rz_preconditioner_matrices_impl_jit
     return assemble(
         arm=arm,
         ard=ard,
