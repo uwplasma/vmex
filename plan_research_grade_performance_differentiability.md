@@ -76,7 +76,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
 
 ## Open Lanes and Current Completion
 
-- Performance benchmark and profiling harness: 65%.
+- Performance benchmark and profiling harness: 70%.
   Full README benchmark data exists, but the next gate is deeper decomposition
   into import/startup, XLA trace, XLA compile, steady solve, WOUT write, and
   optimizer callback costs.
@@ -92,7 +92,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 62%.
+- CPU/GPU runtime and memory footprint: 64%.
   Warm replay improved, but cold exact tape/forward-force cost and GPU-native
   derivative paths still dominate.
 - Refactor/API/examples: 40%.
@@ -105,7 +105,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Docs are broad but still mirror historical work too much. They need a clearer
   "what is differentiable now" table and performance caveats separated from the
   README.
-- Overall completion: 67%.
+- Overall completion: 68%.
   PR #20 can be reviewed as a major milestone, but this plan defines the next
   phase before claiming final research-grade status.
 
@@ -179,7 +179,7 @@ Gates:
 - WOUT parity remains within existing tolerances for rows used in performance
   claims.
 
-Status: 15%.
+Status: 22%.
 
 ### M2: `vmec_jax` Profiling Decomposition
 
@@ -198,7 +198,7 @@ Gates:
 - Each material regression is assigned to startup, compile, steady solve,
   output, branch controller, or optimizer callback.
 
-Status: 20%.
+Status: 28%.
 
 ### M3: Fast Fixed-Boundary Solve Path
 
@@ -400,3 +400,44 @@ Status: 70%.
 - Whether VMEC++ parity should be a release gate or a documented optional
   comparison. Recommendation: optional per-row comparison, because VMEC++ input
   support/convergence coverage is not identical to VMEC2000.
+
+## Progress Log
+
+### 2026-06-21: M1/M2 profiling decomposition scaffold
+
+Steps taken:
+
+- Removed the README runtime/peak-memory figure while keeping detailed
+  benchmark artifacts available in docs/provenance.
+- Added `tools/diagnostics/fixed_boundary_performance_decomposition.py`.
+- Extended `tools/diagnostics/profile_fixed_boundary.py` so profiler JSON
+  includes process peak RSS in MiB.
+- Ran a map-only report:
+  `python tools/diagnostics/fixed_boundary_performance_decomposition.py --skip-runs --outdir outputs/performance_decomposition_map_only`.
+- Ran a bounded 3-iteration QH warm-start probe with VMEC2000:
+  `JAX_ENABLE_X64=1 python tools/diagnostics/fixed_boundary_performance_decomposition.py --input examples/data/input.nfp4_QH_warm_start --iters 3 --outdir outputs/performance_decomposition_qh_smoke_vmec2000 --vmec2000-exec ~/bin/xvmec2000`.
+
+Results obtained:
+
+- Report artifacts were written under
+  `outputs/performance_decomposition_qh_smoke_vmec2000/`.
+- VMEC2000 wall time for the 3-iteration fixed-budget probe: `0.312 s`.
+- `vmec_jax` cold timed run wall: `5.215 s`.
+- `vmec_jax` warm same-process timed run wall: `0.130 s`.
+- `vmec_jax` process peak RSS in the profiler child processes:
+  about `584-597 MiB`.
+- The measured solver body for this tiny probe is about `0.05 s`; the cold
+  gap is dominated by process/import/backend/trace/compile setup rather than
+  the three residual iterations.
+
+Best next steps:
+
+1. Run the decomposition on the full historical single-grid matrix and compare
+   current branch against `origin/main`.
+2. Add VMEC++ CLI discovery to the decomposition report, recording unsupported
+   rows as unavailable.
+3. Split cold startup into Python import, JAX import/backend init, config/input
+   load, static setup, JAX trace, XLA compile, and first device-ready solve.
+4. Start the first refactor tranche by separating the giant fixed-boundary
+   iteration function into setup, residual step, controller policy, and output
+   collection seams.

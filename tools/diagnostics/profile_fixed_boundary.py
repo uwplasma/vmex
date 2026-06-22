@@ -12,6 +12,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import resource
 import sys
 from typing import Any
 import time
@@ -158,6 +159,17 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _peak_rss_mib() -> float | None:
+    """Return process peak RSS in MiB using platform-specific ru_maxrss units."""
+    try:
+        rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:
+        return None
+    if sys.platform == "darwin":
+        return rss / (1024.0 * 1024.0)
+    return rss / 1024.0
+
+
 def _effective_jit_forces(args: argparse.Namespace) -> bool:
     """Return the production default unless the profiler flag overrides it."""
     if bool(getattr(args, "jit_forces", False)) and bool(getattr(args, "no_jit_forces", False)):
@@ -267,6 +279,7 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
         "jax_version": getattr(jax_module, "__version__", "unknown"),
         "jax_default_backend": backend,
         "jax_devices": devices,
+        "process_peak_rss_mib": _peak_rss_mib(),
         "args": {
             "solver_mode": str(args.solver_mode),
             "solver_device": str(args.solver_device),

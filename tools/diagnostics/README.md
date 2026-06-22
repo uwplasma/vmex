@@ -26,6 +26,12 @@ Common parity/validation scripts (moved from `examples/validation/`):
 
 Performance profiling:
 
+- `fixed_boundary_performance_decomposition.py --input examples/data/input.nfp4_QH_warm_start`
+  writes a cold/warm fixed-boundary profiling report plus a source-level map
+  from VMEC2000/VMEC++ algorithm buckets to vmec_jax modules and profiler keys.
+  This is the main M1/M2 performance-roadmap entrypoint for separating
+  import/backend setup, JAX trace/compile, steady solve, VMEC2000 baseline, and
+  process peak RSS.
 - `profile_exact_optimizer.py --callback jacobian --perturb-scale ...`
   measures accepted-point optimizer callback phases for QA/QH/QP fixed-boundary
   quasisymmetry objectives, optimizer/global cache growth, RSS growth, and JSON
