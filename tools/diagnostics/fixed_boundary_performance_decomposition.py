@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -173,7 +174,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-runs", action="store_true", help="Only write the static algorithm map.")
     parser.add_argument("--skip-vmec2000", action="store_true", help="Do not run VMEC2000.")
     parser.add_argument("--vmec2000-exec", default=None, help="Optional xvmec2000 executable.")
-    parser.add_argument("--timeout-s", type=float, default=120.0, help="VMEC2000 timeout.")
+    parser.add_argument("--skip-vmecpp", action="store_true", help="Do not run VMEC++.")
+    parser.add_argument("--vmecpp-exec", default=None, help="Optional VMEC++ CLI executable.")
+    parser.add_argument("--timeout-s", type=float, default=120.0, help="External executable timeout.")
     return parser.parse_args()
 
 
@@ -296,6 +299,55 @@ def _run_vmec2000(
     }
 
 
+def _run_vmecpp(
+    *,
+    args: argparse.Namespace,
+    input_path: Path,
+    outdir: Path,
+) -> dict[str, Any]:
+    exec_path = Path(args.vmecpp_exec).expanduser() if args.vmecpp_exec else None
+    if exec_path is None:
+        discovered = shutil.which("vmecpp")
+        if discovered is None:
+            return {"kind": "vmecpp", "status": "unavailable", "reason": "vmecpp executable not found"}
+        exec_path = Path(discovered)
+    workdir = outdir / "vmecpp_work"
+    workdir.mkdir(parents=True, exist_ok=True)
+    cmd = [str(exec_path), "-q", str(input_path)]
+    started = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=workdir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=float(args.timeout_s),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "kind": "vmecpp",
+            "status": "timeout",
+            "exec_path": str(exec_path),
+            "timeout_s": float(args.timeout_s),
+            "stdout_tail": (exc.stdout if isinstance(exc.stdout, str) else "")[-4000:],
+        }
+    runtime_s = time.perf_counter() - started
+    wouts = sorted(workdir.glob("wout_*.nc"))
+    status = "success" if proc.returncode == 0 and wouts else "failed"
+    return {
+        "kind": "vmecpp",
+        "status": status,
+        "returncode": int(proc.returncode),
+        "exec_path": str(exec_path),
+        "runtime_s": float(runtime_s),
+        "workdir": str(workdir),
+        "wout_count": len(wouts),
+        "stdout_tail": proc.stdout[-4000:],
+    }
+
+
 def _profile_value(run: dict[str, Any], key: str) -> Any:
     profile = run.get("profile")
     if not isinstance(profile, dict):
@@ -342,6 +394,12 @@ def _write_markdown(report: dict[str, Any], path: Path) -> None:
         "| vmec2000 | "
         + f"{vmec2000.get('status')} | {vmec2000.get('runtime_s', '')} |  | "
         + f"{vmec2000.get('final_fsq_total', '')} |"
+    )
+    vmecpp = runs.get("vmecpp", {})
+    lines.append(
+        "| vmecpp | "
+        + f"{vmecpp.get('status')} | {vmecpp.get('runtime_s', '')} |  | "
+        + f"wouts={vmecpp.get('wout_count', '')} |"
     )
     lines += [
         "",
@@ -406,6 +464,8 @@ def main() -> int:
         )
         if not args.skip_vmec2000:
             runs["vmec2000"] = _run_vmec2000(args=args, input_path=input_path, outdir=outdir)
+        if not args.skip_vmecpp:
+            runs["vmecpp"] = _run_vmecpp(args=args, input_path=input_path, outdir=outdir)
 
     report = {
         "input": str(input_path),

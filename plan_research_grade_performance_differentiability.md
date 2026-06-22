@@ -76,7 +76,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
 
 ## Open Lanes and Current Completion
 
-- Performance benchmark and profiling harness: 70%.
+- Performance benchmark and profiling harness: 72%.
   Full README benchmark data exists, but the next gate is deeper decomposition
   into import/startup, XLA trace, XLA compile, steady solve, WOUT write, and
   optimizer callback costs.
@@ -105,7 +105,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   Docs are broad but still mirror historical work too much. They need a clearer
   "what is differentiable now" table and performance caveats separated from the
   README.
-- Overall completion: 68%.
+- Overall completion: 69%.
   PR #20 can be reviewed as a major milestone, but this plan defines the next
   phase before claiming final research-grade status.
 
@@ -179,7 +179,7 @@ Gates:
 - WOUT parity remains within existing tolerances for rows used in performance
   claims.
 
-Status: 22%.
+Status: 26%.
 
 ### M2: `vmec_jax` Profiling Decomposition
 
@@ -416,6 +416,8 @@ Steps taken:
   `python tools/diagnostics/fixed_boundary_performance_decomposition.py --skip-runs --outdir outputs/performance_decomposition_map_only`.
 - Ran a bounded 3-iteration QH warm-start probe with VMEC2000:
   `JAX_ENABLE_X64=1 python tools/diagnostics/fixed_boundary_performance_decomposition.py --input examples/data/input.nfp4_QH_warm_start --iters 3 --outdir outputs/performance_decomposition_qh_smoke_vmec2000 --vmec2000-exec ~/bin/xvmec2000`.
+- Added optional VMEC++ CLI discovery to the same decomposition tool and ran:
+  `JAX_ENABLE_X64=1 python tools/diagnostics/fixed_boundary_performance_decomposition.py --input examples/data/input.nfp4_QH_warm_start --iters 3 --outdir outputs/performance_decomposition_qh_smoke_all --vmec2000-exec ~/bin/xvmec2000`.
 
 Results obtained:
 
@@ -426,6 +428,9 @@ Results obtained:
 - `vmec_jax` warm same-process timed run wall: `0.130 s`.
 - `vmec_jax` process peak RSS in the profiler child processes:
   about `584-597 MiB`.
+- With all backends enabled on the same row, VMEC++ was discovered at
+  `/Users/rogeriojorge/Library/Python/3.11/bin/vmecpp`, ran successfully,
+  wrote one WOUT, and took `1.215 s` for this tiny fixed-budget probe.
 - The measured solver body for this tiny probe is about `0.05 s`; the cold
   gap is dominated by process/import/backend/trace/compile setup rather than
   the three residual iterations.
@@ -434,10 +439,8 @@ Best next steps:
 
 1. Run the decomposition on the full historical single-grid matrix and compare
    current branch against `origin/main`.
-2. Add VMEC++ CLI discovery to the decomposition report, recording unsupported
-   rows as unavailable.
-3. Split cold startup into Python import, JAX import/backend init, config/input
+2. Split cold startup into Python import, JAX import/backend init, config/input
    load, static setup, JAX trace, XLA compile, and first device-ready solve.
-4. Start the first refactor tranche by separating the giant fixed-boundary
+3. Start the first refactor tranche by separating the giant fixed-boundary
    iteration function into setup, residual step, controller policy, and output
    collection seams.
