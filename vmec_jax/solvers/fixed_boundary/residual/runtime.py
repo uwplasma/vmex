@@ -607,11 +607,16 @@ _SETUP_PHASE_KEYS = (
     "setup_update_constants",
 )
 
+_SETUP_PHASE_DETAIL_KEYS = (
+    "setup_profile_data",
+    "setup_trig_tables",
+)
+
 
 def _initial_setup_phase_timings() -> dict[str, float]:
     """Return zeroed setup-phase timing buckets used by the residual loop."""
 
-    return {key: 0.0 for key in _SETUP_PHASE_KEYS}
+    return {key: 0.0 for key in (*_SETUP_PHASE_KEYS, *_SETUP_PHASE_DETAIL_KEYS)}
 
 
 _RESIDUAL_ITER_TIMING_DEFAULTS: dict[str, float | int] = {
@@ -680,6 +685,8 @@ def _new_residual_iter_timing_stats(
     stats = dict(_RESIDUAL_ITER_TIMING_DEFAULTS)
     phase_timings = _initial_setup_phase_timings() if setup_phase_timings is None else setup_phase_timings
     for key in _SETUP_PHASE_KEYS:
+        stats[key] = float(phase_timings.get(key, 0.0))
+    for key in _SETUP_PHASE_DETAIL_KEYS:
         stats[key] = float(phase_timings.get(key, 0.0))
     return stats
 
@@ -778,6 +785,12 @@ def _build_residual_iter_timing_report(
     finalize_residual_recompute = float(timing_stats.get("finalize_residual_recompute", 0.0))
     finalize_residual_device_get = float(timing_stats.get("finalize_residual_device_get", 0.0))
     finalize_diag_build = float(timing_stats.get("finalize_diag_build", 0.0))
+    setup_profile_data = float(timing_stats.get("setup_profile_data", 0.0))
+    setup_trig_tables = float(timing_stats.get("setup_trig_tables", 0.0))
+    setup_boundary_profiles_unattributed = max(
+        0.0,
+        float(timing_stats.get("setup_boundary_profiles", 0.0)) - setup_profile_data - setup_trig_tables,
+    )
     finalize_unattributed = max(
         0.0,
         float(timing_stats["finalize"])
@@ -792,6 +805,9 @@ def _build_residual_iter_timing_report(
         "setup_static_grid_rebuild_s": float(timing_stats.get("setup_static_grid_rebuild", 0.0)),
         "setup_freeb_policy_s": float(timing_stats.get("setup_freeb_policy", 0.0)),
         "setup_boundary_profiles_s": float(timing_stats.get("setup_boundary_profiles", 0.0)),
+        "setup_profile_data_s": setup_profile_data,
+        "setup_trig_tables_s": setup_trig_tables,
+        "setup_boundary_profiles_unattributed_s": setup_boundary_profiles_unattributed,
         "setup_cache_key_hash_s": float(timing_stats.get("setup_cache_key_hash", 0.0)),
         "setup_ptau_constants_s": float(timing_stats.get("setup_ptau_constants", 0.0)),
         "setup_index_constants_s": float(timing_stats.get("setup_index_constants", 0.0)),

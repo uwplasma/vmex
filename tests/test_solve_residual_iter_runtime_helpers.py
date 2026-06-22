@@ -79,6 +79,8 @@ def test_setup_timing_helpers_initialize_and_accumulate():
         "setup_static_grid_rebuild",
         "setup_freeb_policy",
         "setup_boundary_profiles",
+        "setup_profile_data",
+        "setup_trig_tables",
         "setup_cache_key_hash",
         "setup_ptau_constants",
         "setup_index_constants",
@@ -108,11 +110,15 @@ def test_record_elapsed_timing_accumulates_named_bucket_without_touching_disable
 def test_new_residual_iter_timing_stats_preserves_setup_phase_values():
     setup = _initial_setup_phase_timings()
     setup["setup_freeb_policy"] = 1.25
+    setup["setup_profile_data"] = 0.25
+    setup["setup_trig_tables"] = 0.125
     setup["setup_update_constants"] = 0.5
 
     stats = _new_residual_iter_timing_stats(setup)
 
     assert stats["setup_freeb_policy"] == pytest.approx(1.25)
+    assert stats["setup_profile_data"] == pytest.approx(0.25)
+    assert stats["setup_trig_tables"] == pytest.approx(0.125)
     assert stats["setup_update_constants"] == pytest.approx(0.5)
     assert stats["setup_total"] == pytest.approx(0.0)
     assert stats["iterations"] == 0
