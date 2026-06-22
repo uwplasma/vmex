@@ -100,15 +100,20 @@ def test_env_profiles_lambda_preconditioner_and_cache_helpers(monkeypatch):
 
     monkeypatch.setattr(p1d, "_ENV_USE_PRECOMPUTED", None)
     monkeypatch.setattr(p1d, "_ENV_USE_LAX_TRIDI", None)
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_FULL_JIT", None)
     monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "yes")
     monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "force")
     assert p1d._get_env_tridi_flags() == (True, True)
+    assert p1d._rz_matrix_full_jit_enabled() is True
 
     monkeypatch.setattr(p1d, "_ENV_USE_PRECOMPUTED", None)
     monkeypatch.setattr(p1d, "_ENV_USE_LAX_TRIDI", None)
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_FULL_JIT", None)
     monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
     monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "no")
+    monkeypatch.setenv("VMEC_JAX_RZ_MATRIX_FULL_JIT", "0")
     assert p1d._get_env_tridi_flags() == (False, False)
+    assert p1d._rz_matrix_full_jit_enabled() is False
 
     monkeypatch.setenv("VMEC_JAX_PRECOND_CACHE_LIMIT", "bad")
     assert p1d._lambda_precond_cache_limit() == 16
