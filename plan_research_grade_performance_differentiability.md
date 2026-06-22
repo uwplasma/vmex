@@ -847,3 +847,55 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 96%.
 - Docs/release hygiene: 95%.
 - Overall: 85%.
+
+### 2026-06-21: Refresh current-branch matrix after R/Z full-JIT promotion
+
+Steps taken:
+
+- Re-ran the historical 16-row bundled single-grid fixed-boundary matrix on the
+  current branch after the full-JIT R/Z seed promotion:
+  `PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py --inputs-dir examples_single_grid/data --kind fixed --backend all --warm-runs 1 --jax-platforms cpu --runner-label current-cpu --vmec-exec ~/bin/xvmec2000 --timeout-s 1800 --vmec-timeout-s 1800 --outdir outputs/pr20_full_matrix_current_cpu_sg_fulljit`.
+- Reused the clean `origin/main` summary in
+  `/Users/rogeriojorge/local/tests/vmec_jax_main_perf/outputs/pr20_full_matrix_main_cpu_sg/summary.json`
+  for current-vs-main regression comparison.
+- Regenerated:
+  `docs/_static/figures/readme_runtime_compare.png`,
+  `docs/_static/figures/readme_runtime_compare.csv`,
+  `docs/_static/figures/readme_runtime_compare.json`,
+  `docs/_static/figures/readme_runtime_compare_current_vs_main.csv`,
+  and `docs/_static/figures/readme_runtime_compare_current_vs_main.json`.
+
+Results obtained:
+
+- Matrix completion: 16/16 `vmec_jax` rows and 16/16 VMEC2000 rows succeeded;
+  VMEC++ was available on 9/16 rows.
+- Current-vs-`origin/main`: 48 backend/case rows, 0 material regressions under
+  the configured `1.10x` runtime and `1.15x` memory thresholds.
+- Warm `vmec_jax` beat VMEC2000 on 7/16 rows; cold `vmec_jax` beat VMEC2000 on
+  2/16 rows.
+- Median warm runtime ratio vs VMEC2000 improved to `1.41x` slower.
+- Median cold runtime ratio vs VMEC2000 improved to `2.93x` slower.
+- Median peak process-memory ratio vs VMEC2000 improved to `4.44x` higher.
+- Notable remaining blockers: low-latency axisymmetric rows are still dominated
+  by startup/setup overhead, and the LASYM finite-beta row remains the largest
+  memory ratio.
+
+Best next steps:
+
+1. Run docs/size/lint gates again after the regenerated benchmark artifacts.
+2. Continue performance work on cold setup (`setup_axis_reset_s`,
+   `setup_boundary_profiles_s`) and LASYM memory layout.
+3. Keep the README without the runtime/memory plot; the regenerated matrix is
+   now docs-facing evidence only.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 98%.
+- Fixed-boundary production differentiability: 90%.
+- Free-boundary production differentiability: 86%.
+- Single-stage coil optimization: 86%.
+- CPU/GPU runtime and memory footprint: 82%.
+- Refactor/API/examples: 41%.
+- VMEC2000/VMEC++ parity and physics gates: 96%.
+- Docs/release hygiene: 95%.
+- Overall: 86%.
