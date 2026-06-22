@@ -127,11 +127,70 @@ def _make_torflux_jit(aphi_tuple: tuple, lrfp: bool, indata_id: int):
 _indata_registry: dict = {}
 
 
+def _is_traced_array(value: Any) -> bool:
+    """Return True when ``value`` must stay in JAX for autodiff/tracing."""
+
+    try:
+        if jax is not None and isinstance(value, jax.core.Tracer):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _iotaf_from_iotas_numpy(iotas, *, lrfp: bool) -> np.ndarray:
+    """Host NumPy implementation of VMEC ``add_fluxes`` iota smoothing."""
+
+    iotas = np.asarray(iotas)
+    ns = int(iotas.shape[0])
+    if ns <= 1:
+        return iotas
+    if ns == 2:
+        return np.asarray([iotas[1], iotas[1]], dtype=iotas.dtype)
+
+    out = np.zeros((ns,), dtype=iotas.dtype)
+    if bool(lrfp):
+        eps = np.asarray(1e-30, dtype=iotas.dtype)
+
+        def _safe_inv(x):
+            return np.divide(1.0, x, out=np.zeros_like(x, dtype=iotas.dtype), where=np.abs(x) > eps)
+
+        def _safe_recip(x):
+            return np.divide(1.0, x, out=np.zeros_like(x, dtype=iotas.dtype), where=np.abs(x) > eps)
+
+        inv2 = _safe_inv(iotas[1])
+        inv3 = _safe_inv(iotas[2])
+        denom0 = 1.5 * inv2 - 0.5 * inv3
+        out[0] = _safe_recip(denom0)
+
+        invn = _safe_inv(iotas[-1])
+        invn1 = _safe_inv(iotas[-2])
+        denom_n = 1.5 * invn - 0.5 * invn1
+        out[-1] = _safe_recip(denom_n)
+
+        inv_a = _safe_inv(iotas[1:-1])
+        inv_b = _safe_inv(iotas[2:])
+        out[1:-1] = np.divide(
+            2.0,
+            inv_a + inv_b,
+            out=np.zeros_like(inv_a, dtype=iotas.dtype),
+            where=np.abs(inv_a + inv_b) > eps,
+        )
+    else:
+        out[0] = 1.5 * iotas[1] - 0.5 * iotas[2]
+        out[1:-1] = 0.5 * (iotas[1:-1] + iotas[2:])
+        out[-1] = 1.5 * iotas[-1] - 0.5 * iotas[-2]
+    return out
+
+
 def _iotaf_from_iotas(iotas, *, lrfp: bool) -> Any:
     """VMEC `add_fluxes` smoothing: build full-mesh `iotaf` from half-mesh `iotas`.
 
     See `VMEC2000/Sources/General/add_fluxes.f90` (non-RFP and RFP branches).
     """
+    if not _is_traced_array(iotas):
+        return _iotaf_from_iotas_numpy(iotas, lrfp=lrfp)
+
     iotas = jnp.asarray(iotas)
     ns = int(iotas.shape[0])
     if ns <= 1:

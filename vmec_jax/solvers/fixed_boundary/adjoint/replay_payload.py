@@ -436,15 +436,38 @@ def _dynamic_preconditioner_cache_current(refreshed, trace, lam_prec_before, mat
     precond_cache_update = _dynamic_replay_value(trace, {}, "precond_cache_update", constraint_cache_update)
     update_cache = jnp.asarray(precond_cache_update, dtype=bool)
     lam_prec = jnp.where(update_cache, jnp.asarray(refreshed["lam_prec"]), jnp.asarray(lam_prec_before))
-    mats = jax.tree_util.tree_map(
-        lambda refreshed_leaf, cached_leaf: jnp.where(
+
+    def _merge_mats(refreshed_value, cached_value):
+        if isinstance(refreshed_value, dict):
+            cached_dict = cached_value if isinstance(cached_value, dict) else {}
+            keys = tuple(sorted(set(refreshed_value) | set(cached_dict)))
+            merged = {}
+            for key in keys:
+                if key in refreshed_value:
+                    refreshed_leaf = refreshed_value[key]
+                else:
+                    refreshed_leaf = cached_dict[key]
+                if key in cached_dict:
+                    cached_leaf = cached_dict[key]
+                else:
+                    cached_leaf = refreshed_value[key]
+                merged[key] = _merge_mats(refreshed_leaf, cached_leaf)
+            return merged
+        if isinstance(cached_value, dict):
+            return {
+                key: _merge_mats(
+                    refreshed_value,
+                    cached_leaf,
+                )
+                for key, cached_leaf in sorted(cached_value.items())
+            }
+        return jnp.where(
             update_cache,
-            jnp.asarray(refreshed_leaf),
-            jnp.asarray(cached_leaf),
-        ),
-        refreshed["mats"],
-        mats_before,
-    )
+            jnp.asarray(refreshed_value),
+            jnp.asarray(cached_value),
+        )
+
+    mats = _merge_mats(refreshed["mats"], mats_before)
     return {
         "lam_prec": lam_prec,
         "mats": mats,

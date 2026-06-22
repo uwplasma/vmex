@@ -581,6 +581,38 @@ def _carry_cotangents_with_zero_aux(final_cotangent, carry0):
     return (jnp.asarray(final_cotangent, dtype=jnp.asarray(carry0[0]).dtype), *(zero_cotangent(value) for value in carry0[1:]))
 
 
+def _cotangent_like_output(cotangent, output):
+    """Pad auxiliary cotangent dictionaries to match replay output structure."""
+
+    if isinstance(output, tuple):
+        cotangent_tuple = cotangent if isinstance(cotangent, tuple) else ()
+        return tuple(
+            _cotangent_like_output(cotangent_tuple[idx], output_value)
+            if idx < len(cotangent_tuple)
+            else jax.tree_util.tree_map(lambda leaf: jnp.zeros_like(jnp.asarray(leaf)), output_value)
+            for idx, output_value in enumerate(output)
+        )
+    if isinstance(output, list):
+        cotangent_list = cotangent if isinstance(cotangent, list) else []
+        return [
+            _cotangent_like_output(cotangent_list[idx], output_value)
+            if idx < len(cotangent_list)
+            else jax.tree_util.tree_map(lambda leaf: jnp.zeros_like(jnp.asarray(leaf)), output_value)
+            for idx, output_value in enumerate(output)
+        ]
+    if isinstance(output, dict):
+        cotangent_dict = cotangent if isinstance(cotangent, dict) else {}
+        return {
+            key: _cotangent_like_output(cotangent_dict[key], output_value)
+            if key in cotangent_dict
+            else jax.tree_util.tree_map(lambda leaf: jnp.zeros_like(jnp.asarray(leaf)), output_value)
+            for key, output_value in output.items()
+        }
+    if isinstance(cotangent, dict):
+        return jax.tree_util.tree_map(lambda leaf: jnp.zeros_like(jnp.asarray(leaf)), output)
+    return jnp.asarray(cotangent, dtype=jnp.asarray(output).dtype)
+
+
 def checkpoint_tape_state_vjp(
     *,
     tape: ResidualCheckpointTape,
@@ -1273,8 +1305,8 @@ def _checkpoint_tape_dynamic_basepoint_vjp_scan_runner(*, static, stacked, stack
             )
 
         def _advance(cotangents_in):
-            _, vjp_fun = jax.vjp(_step, carry_base)
-            return vjp_fun(cotangents_in)[0]
+            out_base, vjp_fun = jax.vjp(_step, carry_base)
+            return vjp_fun(_cotangent_like_output(cotangents_in, out_base))[0]
 
         carry_cotangents = jax.lax.cond(
             active,
