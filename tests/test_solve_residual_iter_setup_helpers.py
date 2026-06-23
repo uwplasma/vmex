@@ -243,6 +243,7 @@ def test_ptau_wrapper_dispatches_and_preserves_call_time_dump_arguments() -> Non
 def test_residual_ptau_bindings_disable_jit_for_concrete_host_assembly() -> None:
     host_calls = []
     jax_calls = []
+    context_has_jax = []
 
     _, minmax_host, minmax, _ = build_residual_ptau_bindings(
         s=np.asarray([0.0, 0.5, 1.0]),
@@ -250,12 +251,15 @@ def test_residual_ptau_bindings_disable_jit_for_concrete_host_assembly() -> None
         s_has_tracer=False,
         pshalf_from_s_np_func=lambda _s: np.asarray([0.25, 0.75]),
         pshalf_from_s_jax_func=lambda *_args, **_kwargs: "pshalf_jax",
-        build_context_func=lambda s, **kwargs: SimpleNamespace(
-            s=s,
-            pshalf_np=kwargs["pshalf_from_s_np"](s),
-            ohs_scalar=2.0,
-            pshalf_jax="pshalf_jax",
-            ohs_jax="ohs_jax",
+        build_context_func=lambda s, **kwargs: (
+            context_has_jax.append(bool(kwargs["has_jax"]))
+            or SimpleNamespace(
+                s=s,
+                pshalf_np=kwargs["pshalf_from_s_np"](s),
+                ohs_scalar=2.0,
+                pshalf_jax="pshalf_jax" if kwargs["has_jax"] else None,
+                ohs_jax="ohs_jax" if kwargs["has_jax"] else None,
+            )
         ),
         compute_jit_func="jit",
         ptau_minmax_host_helper=lambda *args, **kwargs: host_calls.append((args, kwargs)) or (-1.0, 1.0),
@@ -268,6 +272,7 @@ def test_residual_ptau_bindings_disable_jit_for_concrete_host_assembly() -> None
         host_update_assembly=True,
     )
 
+    assert context_has_jax == [False]
     assert minmax_host("k") == (-1.0, 1.0)
     assert host_calls[-1][1]["compute_jit"] is None
 

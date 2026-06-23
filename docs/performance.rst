@@ -2286,6 +2286,17 @@ median peak memory ``0.980x``.  The remaining exposed cold host setup cost is
 ``setup_boundary_profiles_unattributed_s``, which is mostly boundary/profile
 setup wrapper work and should be treated as the next focused tranche.
 
+That tranche now keeps setup-only radial arrays, zero constraint payloads, and
+pTau constants on NumPy for concrete non-scan CPU host solves.  Traced,
+autodiff, scan, and accelerator paths still use JAX-compatible arrays.  The
+bounded three-iteration probes measured ``nfp4_QH_warm_start`` solve-body time
+near ``0.042 s`` and ``solovev`` near ``0.050 s``.  The boundary-profile
+unattributed setup bucket fell from about ``34-36 ms`` to about ``0.1 ms``,
+while pTau-constant setup fell to about ``10 us``.  A compact 16-row matrix
+after the host-NumPy setup change again completed with no regressions against
+the NumPy R/Z baseline; the single threshold hit against the immediately prior
+host-pTau run was a ``0.12 s`` LASYM warm row and disappeared on rerun.
+
 A broader 2026-05-24 internal policy matrix compared the default fixed-boundary
 policy against the explicit ``accelerated`` policy on all 35 bundled
 fixed-boundary input decks.  On the local CPU host, 34 rows completed within the

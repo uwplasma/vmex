@@ -2767,3 +2767,67 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97.5%.
 - Docs/release hygiene: 98.2%.
 - Overall: 95.6%.
+
+### 2026-06-22: Keep concrete-host fixed-boundary setup arrays on NumPy
+
+Steps taken:
+
+- Continued the cold CPU host setup tranche after the pTau fix.  Profiling
+  showed that the remaining ``setup_boundary_profiles_unattributed_s`` bucket
+  was not duplicate boundary conversion; it came from setup-only JAX array
+  construction and pTau constants on concrete host solves.
+- Made non-scan, non-traced CPU host setup keep the radial mesh, zero
+  preconditioner payloads, zero ``TCON`` payload, and false constraint flags as
+  NumPy arrays.  Traced/autodiff, scan, and accelerator paths still use JAX
+  arrays.
+- Kept VMEC-style axis-reset boundary coefficients lazy: ordinary no-reset
+  solves do not build the duplicate ``apply_m1_constraint=True`` boundary, but
+  forced reset still builds the same coefficients at reset time.
+- Tightened pTau binding setup so concrete host pTau checks do not build
+  JAX-side pTau constants; traced paths still keep the JAX constants and JIT
+  helper.
+
+Results obtained:
+
+- Focused solver/setup/performance tests passed after the change
+  (``150 passed``), and Ruff passed on the modified setup/iteration files.
+- Bounded three-iteration cold probes:
+  - `input.nfp4_QH_warm_start`: solve-body time dropped from about ``0.060 s``
+    after the host pTau fix to about ``0.042 s``.
+  - `input.solovev`: solve-body time dropped from about ``0.069 s`` to about
+    ``0.050 s``.
+  - ``setup_boundary_profiles_unattributed_s`` fell from about ``34-36 ms`` to
+    about ``0.1 ms``.
+  - ``setup_ptau_constants_s`` fell from about ``12 ms`` to about ``10 us``.
+  - Explicit forced-reset smoke still used the forced axis-reset path and
+    preserved the same short-trace residual.
+- A compact 16-row bundled single-grid matrix completed successfully.  Against
+  the previous NumPy R/Z baseline, there were zero row-level regressions.
+  Against the immediately prior host-pTau matrix, aggregate medians improved
+  slightly: cold runtime ``0.996x``, warm runtime ``0.987x``, and peak memory
+  ``0.978x``.  The only threshold hit was a ``0.12 s`` LASYM warm row; rerun
+  ratios were cold ``0.998x``, warm ``1.006x``, and memory ``1.000x``, so it was
+  classified as timing noise.
+
+Best next steps:
+
+1. Re-run a slightly larger fixed-boundary performance matrix only after the
+   next structural change; current compact evidence is sufficient for this
+   tranche.
+2. Move back to differentiability/phase-2/phase-3 closure: refresh the promoted
+   branch-local free-boundary report path if needed, keep adaptive branch claims
+   conservative, and identify the next production differentiability gate.
+3. Keep memory work separate: optional LASYM channel allocation and memory-aware
+   policy selection are structural refactors, not part of this cold setup fix.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92.5%.
+- Free-boundary production differentiability: 91.7%.
+- Single-stage coil optimization: 88%.
+- CPU/GPU runtime and memory footprint: 97.2%.
+- Refactor/API/examples: 55%.
+- VMEC2000/VMEC++ parity and physics gates: 97.5%.
+- Docs/release hygiene: 98.3%.
+- Overall: 95.9%.

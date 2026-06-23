@@ -681,24 +681,26 @@ def solve_fixed_boundary_residual_iter(
 
     _t_setup_boundary_profiles = _setup_timer_start()
     idx00 = _mode00_index(static.modes)
-    s = jnp.asarray(static.s)
+    concrete_host_setup = bool(host_update_assembly) and not bool(state0_has_tracer) and not bool(use_scan)
+    s = np.asarray(static.s) if concrete_host_setup else jnp.asarray(static.s)
     freeb_pres_scale = _free_boundary_pressure_edge_scale(
         free_boundary_enabled=bool(free_boundary_enabled),
         indata=indata,
         s=s,
     )
-    dtype_state = jnp.asarray(state0.Rcos).dtype
+    dtype_state = np.asarray(state0.Rcos).dtype if concrete_host_setup else jnp.asarray(state0.Rcos).dtype
+    zeros_like_radial = np.zeros if concrete_host_setup else jnp.zeros
     zero_precond_diag = (
-        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
-        jnp.zeros((int(s.shape[0]),), dtype=dtype_state),
+        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
+        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
     )
-    zero_tcon = jnp.zeros((int(s.shape[0]),), dtype=dtype_state)
-    constraint_active_false = jnp.asarray(False)
+    zero_tcon = zeros_like_radial((int(s.shape[0]),), dtype=dtype_state)
+    constraint_active_false = np.asarray(False) if concrete_host_setup else jnp.asarray(False)
 
-    # Boundary + axis recompute helpers (for VMEC-style bad-Jacobian reset).
-    boundary_for_axis = (
-        boundary_from_indata(indata, static.modes, apply_m1_constraint=True) if indata is not None else None
-    )
+    # Boundary coefficients for VMEC-style bad-Jacobian reset are needed only
+    # when a reset is actually applied.  Build them lazily so ordinary cold
+    # solves do not pay a duplicate boundary conversion during setup.
+    boundary_for_axis = None
     axis_reset_done = bool(resume_state is not None)
     lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
     axis_reset_config = _resolve_axis_reset_config(
@@ -728,7 +730,9 @@ def solve_fixed_boundary_residual_iter(
         full_reset: bool = False,
         refine_axis_guess: bool = True,
     ) -> VMECState:
-        nonlocal axis_reset_coeffs
+        nonlocal axis_reset_coeffs, boundary_for_axis
+        if boundary_for_axis is None and indata is not None:
+            boundary_for_axis = boundary_from_indata(indata, static.modes, apply_m1_constraint=True)
         st_out, coeffs = _reset_axis_from_boundary_impl(
             st,
             boundary_for_axis=boundary_for_axis,
