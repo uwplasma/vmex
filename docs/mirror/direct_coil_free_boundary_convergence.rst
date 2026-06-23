@@ -91,10 +91,12 @@ The remaining work is deliberately narrow:
 3. Run a higher-resolution closure attempt for ``10%`` beta starting from
    ``NS=17, MPOL=7, NTOR=16, NZETA=48`` and compare LCFS, near-axis field,
    mirror ratio, mean iota, and residual histories against the ``NS=13`` ladder.
-4. Add an optional virtual-casing postsolve diagnostic that accepts a solved
-   VMEC state, total surface field, and direct-coil field, then reports
-   finite-beta normal-field and magnetic-pressure jump residuals. The helper
-   should be optional at import time and skipped when ``virtual_casing_jax`` is
+4. Attach the optional virtual-casing postsolve diagnostic
+   ``vmec_jax.free_boundary_validation.virtual_casing_finite_beta_boundary_diagnostics``
+   to the square-coil example outputs. The helper accepts a solved surface,
+   total surface field, and direct-coil field, then reports the required
+   external-field normal mismatch and finite-beta magnetic-pressure jump. It is
+   optional at import time and should be skipped when ``virtual_casing_jax`` is
    not installed.
 5. Promote only rows that pass the force-residual and postsolve boundary
    diagnostics. Keep unconverged rows in the example output as explicit stall

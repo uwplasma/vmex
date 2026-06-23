@@ -354,11 +354,15 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert np.isfinite(float(rows[0]["final_fsqz"]))
     assert np.isfinite(float(rows[0]["final_fsql"]))
     assert rows[0]["free_boundary_bnormal_rms"] is not None
+    assert rows[0]["virtual_casing_status"] == "computed" or rows[0]["virtual_casing_status"].startswith(
+        ("skipped_", "failed:")
+    )
     assert rows[0]["mean_iota"] is not None
     with Path(metrics["summary_csv"]).open(newline="") as file_obj:
         csv_rows = list(csv.DictReader(file_obj))
     assert len(csv_rows) == len(rows)
     assert csv_rows[0]["beta_percent"] == "0.0"
+    assert "virtual_casing_status" in csv_rows[0]
 
 
 def test_square_coil_hybrid_free_boundary_example_writes_nonblank_plots(tmp_path: Path):

@@ -9,6 +9,7 @@ import pytest
 import vmec_jax.free_boundary_validation as validation
 from vmec_jax.free_boundary_validation import (
     free_boundary_response_metrics,
+    virtual_casing_finite_beta_boundary_diagnostics,
     wout_beta_percent,
     wout_fsq_total,
     wout_mean_iota,
@@ -148,3 +149,136 @@ def test_free_boundary_response_scalar_helpers_and_nfp_guard_without_assets() ->
 
     with pytest.raises(ValueError, match="nfp mismatch"):
         free_boundary_response_metrics(reference, wrong_period, ntheta=8, nphi=4)
+
+
+@pytest.mark.py311_coverage_only
+def test_virtual_casing_boundary_diagnostics_with_fake_functional_module() -> None:
+    """Cover finite-beta postsolve metrics without importing virtual_casing_jax."""
+
+    class FakeVirtualCasingFunctional:
+        @staticmethod
+        def prepare_functional_setup(
+            _x,
+            *,
+            digits,
+            nfp,
+            half_period,
+            surf_nt,
+            surf_np,
+            src_nt,
+            src_np,
+            trg_nt,
+            trg_np,
+            quad_nt,
+            quad_np,
+            patch_dim0,
+        ):
+            return SimpleNamespace(
+                nfp=nfp,
+                half_period=half_period,
+                surf_nt=surf_nt,
+                surf_np=surf_np,
+                src_nt=src_nt,
+                src_np=src_np,
+                trg_nt=trg_nt,
+                trg_np=trg_np,
+                quad_nt=quad_nt,
+                quad_np=quad_np,
+                patch_dim0=3 if patch_dim0 is None else patch_dim0,
+                patch_idx=np.asarray([0]),
+                orient=1.0,
+            )
+
+        @staticmethod
+        def compute_external_B_functional(x, b_total, **_kwargs):
+            del x
+            required = np.asarray(b_total, dtype=float).copy()
+            required[0] -= 0.25
+            return required
+
+        @staticmethod
+        def target_surface_normal(x, **_kwargs):
+            normal = np.zeros_like(np.asarray(x, dtype=float))
+            normal[0] = 1.0
+            return normal
+
+    theta = np.linspace(0.0, 2.0 * np.pi, 4, endpoint=False)
+    phi = np.linspace(0.0, np.pi, 3, endpoint=False)
+    surface = np.zeros((3, theta.size, phi.size))
+    surface[0] = 1.0 + 0.1 * np.cos(theta)[:, None]
+    surface[1] = 0.1 * np.sin(theta)[:, None]
+    surface[2] = phi[None, :]
+    total_b = np.zeros_like(surface)
+    total_b[0] = 2.0
+    target_external = total_b.copy()
+    target_external[0] -= 0.15
+
+    diagnostics = virtual_casing_finite_beta_boundary_diagnostics(
+        surface,
+        total_b,
+        target_external_b=target_external,
+        pressure=0.02,
+        mu0=1.0,
+        nfp=2,
+        digits=4,
+        quad_nt=8,
+        quad_np=6,
+        vc_module=FakeVirtualCasingFunctional,
+    )
+
+    assert diagnostics.external_bnormal_residual_rms == pytest.approx(0.10)
+    assert diagnostics.external_bnormal_residual_max == pytest.approx(0.10)
+    expected_pressure_balance = 0.02 + (2.0**2 - 1.85**2) / 2.0
+    assert diagnostics.pressure_balance_rms == pytest.approx(expected_pressure_balance)
+    assert diagnostics.pressure_balance_max == pytest.approx(expected_pressure_balance)
+    assert diagnostics.to_dict() == {
+        "external_bnormal_residual_rms": pytest.approx(0.10),
+        "external_bnormal_residual_max": pytest.approx(0.10),
+        "pressure_balance_rms": pytest.approx(expected_pressure_balance),
+        "pressure_balance_max": pytest.approx(expected_pressure_balance),
+    }
+
+
+@pytest.mark.py311_coverage_only
+def test_virtual_casing_boundary_diagnostics_validates_inputs() -> None:
+    class MinimalVirtualCasingFunctional:
+        @staticmethod
+        def prepare_functional_setup(*_args, **_kwargs):  # pragma: no cover - validation exits first
+            raise AssertionError("unexpected virtual-casing call")
+
+    surface = np.zeros((3, 2, 2))
+    total_b = np.ones_like(surface)
+
+    with pytest.raises(ValueError, match="shape"):
+        virtual_casing_finite_beta_boundary_diagnostics(
+            np.zeros((2, 2)),
+            total_b,
+            vc_module=MinimalVirtualCasingFunctional,
+        )
+    with pytest.raises(ValueError, match="does not match"):
+        virtual_casing_finite_beta_boundary_diagnostics(
+            surface,
+            total_b[:, :, :1],
+            vc_module=MinimalVirtualCasingFunctional,
+        )
+    with pytest.raises(ValueError, match="pressure"):
+        virtual_casing_finite_beta_boundary_diagnostics(
+            surface,
+            total_b,
+            pressure=np.zeros((3, 3)),
+            vc_module=MinimalVirtualCasingFunctional,
+        )
+    with pytest.raises(ValueError, match="mu0"):
+        virtual_casing_finite_beta_boundary_diagnostics(
+            surface,
+            total_b,
+            mu0=0.0,
+            vc_module=MinimalVirtualCasingFunctional,
+        )
+    with pytest.raises(ValueError, match="quad_nt"):
+        virtual_casing_finite_beta_boundary_diagnostics(
+            surface,
+            total_b,
+            quad_nt=1,
+            vc_module=MinimalVirtualCasingFunctional,
+        )

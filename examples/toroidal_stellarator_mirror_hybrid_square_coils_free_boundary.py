@@ -28,9 +28,14 @@ if str(ROOT) not in sys.path:
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
-from vmec_jax.external_fields import build_coil_field_geometry, ellipse_coil_field_params
-from vmec_jax.field import b2_from_bsup, bsup_from_geom, lamscale_from_phips
+from vmec_jax.external_fields import (
+    build_coil_field_geometry,
+    ellipse_coil_field_params,
+    sample_coil_field_xyz_from_geometry,
+)
+from vmec_jax.field import b2_from_bsup, b_cartesian_from_bsup, bsup_from_geom, lamscale_from_phips
 from vmec_jax.fieldlines import FieldLine, trace_fieldline_on_surface
+from vmec_jax.free_boundary_validation import virtual_casing_finite_beta_boundary_diagnostics
 from vmec_jax.geom import eval_geom
 from vmec_jax.namelist import InData, write_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d
@@ -156,6 +161,7 @@ class SolvedBetaCase:
     Z: np.ndarray
     Bmag: np.ndarray
     Bmag_near_axis: np.ndarray
+    Bxyz: np.ndarray
     bsupu: np.ndarray
     bsupv: np.ndarray
     field_lines: tuple[FieldLine, ...]
@@ -363,6 +369,10 @@ def _solved_surface_and_field(run: Any, config: ExampleConfig) -> tuple[np.ndarr
         flux_is_internal=True,
     )
     bmag = np.sqrt(np.asarray(b2_from_bsup(geom, bsupu, bsupv), dtype=float))
+    bxyz = np.asarray(
+        b_cartesian_from_bsup(geom, bsupu, bsupv, zeta=run.static.grid.zeta, nfp=int(config.nfp)),
+        dtype=float,
+    )
     near_axis_idx = 1 if int(bmag.shape[0]) > 1 else 0
     theta = np.asarray(run.static.grid.theta, dtype=float)
     zeta = np.asarray(run.static.grid.zeta, dtype=float)
@@ -373,6 +383,7 @@ def _solved_surface_and_field(run: Any, config: ExampleConfig) -> tuple[np.ndarr
         np.asarray(geom.Z[-1], dtype=float),
         bmag[-1],
         bmag[near_axis_idx],
+        np.moveaxis(bxyz[-1], -1, 0),
         np.asarray(bsupu[-1], dtype=float),
         np.asarray(bsupv[-1], dtype=float),
     )
@@ -406,6 +417,81 @@ def _trace_solved_field_lines(
             )
         )
     return tuple(lines)
+
+
+def _surface_xyz_from_rz(R: np.ndarray, Z: np.ndarray, zeta: np.ndarray, *, nfp: int) -> np.ndarray:
+    phi = np.asarray(zeta, dtype=float) / float(max(1, int(nfp)))
+    return np.stack((R * np.cos(phi)[None, :], R * np.sin(phi)[None, :], Z), axis=0)
+
+
+def _edge_pressure_from_run(run: Any) -> float:
+    scalars = getattr(getattr(run, "indata", None), "scalars", {})
+    am = np.asarray(scalars.get("AM", [0.0]), dtype=float).reshape(-1)
+    pres_scale = float(scalars.get("PRES_SCALE", 1.0) or 0.0)
+    if not am.size:
+        return 0.0
+    # VMEC power-series pressure is evaluated at s=1 on the LCFS.
+    return float(pres_scale * np.sum(am))
+
+
+def _virtual_casing_row_metrics(
+    *,
+    run: Any,
+    coils: SquareCoilSet,
+    config: ExampleConfig,
+    R: np.ndarray,
+    Z: np.ndarray,
+    zeta: np.ndarray,
+    Bxyz: np.ndarray,
+) -> dict[str, Any]:
+    surface_xyz = _surface_xyz_from_rz(R, Z, zeta, nfp=int(config.nfp))
+    points_xyz = np.moveaxis(surface_xyz, 0, -1)
+    try:
+        __import__("virtual_casing_jax.functional")
+    except ImportError:
+        return {
+            "virtual_casing_status": "skipped_missing_virtual_casing_jax",
+            "virtual_casing_external_bnormal_residual_rms": None,
+            "virtual_casing_external_bnormal_residual_max": None,
+            "virtual_casing_pressure_balance_rms": None,
+            "virtual_casing_pressure_balance_max": None,
+        }
+    try:
+        coil_xyz = np.asarray(
+            sample_coil_field_xyz_from_geometry(
+                build_coil_field_geometry(coils.params),
+                points_xyz,
+                regularization_epsilon=float(getattr(coils.params, "regularization_epsilon", 0.0)),
+                chunk_size=getattr(coils.params, "chunk_size", None),
+            ),
+            dtype=float,
+        )
+        target_external_b = np.moveaxis(coil_xyz, -1, 0)
+        diagnostics = virtual_casing_finite_beta_boundary_diagnostics(
+            surface_xyz,
+            Bxyz,
+            target_external_b=target_external_b,
+            pressure=_edge_pressure_from_run(run),
+            nfp=int(config.nfp),
+            digits=6,
+            quad_nt=max(2 * int(surface_xyz.shape[1]), int(surface_xyz.shape[1])),
+            quad_np=max(2 * int(surface_xyz.shape[2]), int(surface_xyz.shape[2])),
+        )
+    except Exception as exc:
+        return {
+            "virtual_casing_status": f"failed:{type(exc).__name__}",
+            "virtual_casing_external_bnormal_residual_rms": None,
+            "virtual_casing_external_bnormal_residual_max": None,
+            "virtual_casing_pressure_balance_rms": None,
+            "virtual_casing_pressure_balance_max": None,
+        }
+    return {
+        "virtual_casing_status": "computed",
+        "virtual_casing_external_bnormal_residual_rms": diagnostics.external_bnormal_residual_rms,
+        "virtual_casing_external_bnormal_residual_max": diagnostics.external_bnormal_residual_max,
+        "virtual_casing_pressure_balance_rms": diagnostics.pressure_balance_rms,
+        "virtual_casing_pressure_balance_max": diagnostics.pressure_balance_max,
+    }
 
 
 def _run_one_beta(
@@ -443,7 +529,7 @@ def _run_one_beta(
     )
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
-    theta, zeta, R, Z, Bmag, Bmag_near_axis, bsupu, bsupv = _solved_surface_and_field(run, config)
+    theta, zeta, R, Z, Bmag, Bmag_near_axis, Bxyz, bsupu, bsupv = _solved_surface_and_field(run, config)
     field_lines = _trace_solved_field_lines(R=R, Z=Z, bsupu=bsupu, bsupv=bsupv, Bmag=Bmag, config=config)
 
     diag = run.result.diagnostics if run.result is not None else {}
@@ -541,6 +627,7 @@ def _run_one_beta(
         "aspect": aspect,
         "mean_iota": mean_iota,
     }
+    row.update(_virtual_casing_row_metrics(run=run, coils=coils, config=config, R=R, Z=Z, zeta=zeta, Bxyz=Bxyz))
     components = [row["final_fsqr"], row["final_fsqz"], row["final_fsql"]]
     finite_components = [float(value) for value in components if value is not None and np.isfinite(float(value))]
     row["final_fsq_component_sum"] = float(sum(finite_components)) if finite_components else None
@@ -563,6 +650,7 @@ def _run_one_beta(
         Z=Z,
         Bmag=Bmag,
         Bmag_near_axis=Bmag_near_axis,
+        Bxyz=Bxyz,
         bsupu=bsupu,
         bsupv=bsupv,
         field_lines=field_lines,
@@ -604,6 +692,11 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_bnormal_rms",
         "free_boundary_bsqvac_rms",
         "free_boundary_gsource_rms",
+        "virtual_casing_status",
+        "virtual_casing_external_bnormal_residual_rms",
+        "virtual_casing_external_bnormal_residual_max",
+        "virtual_casing_pressure_balance_rms",
+        "virtual_casing_pressure_balance_max",
         "history_w_count",
         "history_w_first",
         "history_w_final",
