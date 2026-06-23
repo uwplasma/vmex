@@ -20,4 +20,5 @@ Mirror Geometries
    overview
    outputs
    differentiability
+   direct_coil_free_boundary_convergence
    readiness

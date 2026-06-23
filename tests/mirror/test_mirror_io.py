@@ -159,3 +159,14 @@ def test_mirror_output_detector_uses_schema_for_nonstandard_name(tmp_path):
     path = write_mirror_output(tmp_path / "case.nc", result)
     assert is_mirror_output(path)
     assert not is_mirror_output(tmp_path / "not_netcdf.txt")
+
+
+def test_mirror_output_detector_rejects_non_mirror_netcdf(tmp_path):
+    netcdf4 = pytest.importorskip("netCDF4")
+    path = tmp_path / "plain.nc"
+    with netcdf4.Dataset(path, mode="w", format="NETCDF3_CLASSIC") as ds:
+        ds.createDimension("x", 1)
+        var = ds.createVariable("x", "f8", ("x",))
+        var[:] = np.array([1.0])
+
+    assert not is_mirror_output(path)

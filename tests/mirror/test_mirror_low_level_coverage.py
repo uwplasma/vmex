@@ -38,6 +38,10 @@ from vmec_jax.mirror.kernels.geometry import evaluate_axisym_geometry
 from vmec_jax.mirror.kernels.residuals import field_diagnostics
 from vmec_jax.mirror.plotting.export import _plot_name
 from vmec_jax.mirror.solvers.fixed_boundary.continuation import pressure_stage_profiles
+from vmec_jax.mirror.solvers.fixed_boundary.nonlinear import (
+    solve_3d_fixed_boundary_stage,
+    solve_axisym_fixed_boundary_stage,
+)
 from vmec_jax.mirror.solvers.fixed_boundary.optimizers import (
     OptimizerOptions,
     _residual_linear_maxiter_policy_key,
@@ -138,6 +142,33 @@ def test_boundary_grid_profile_and_state_guards():
         MirrorBoundary.cosine_modulated_radius(r0=0.3, epsilon=0.1, theta_mode=0)
     with pytest.raises(ValueError):
         MirrorBoundary(kind="unknown").radius(grid.xi)
+
+    hybrid = MirrorBoundary.rotating_ellipse_mirror_hybrid(
+        r0=0.32,
+        a2=0.04,
+        epsilon=0.08,
+        rotation_angle=np.pi / 2.0,
+        stellarator_fraction=0.7,
+    )
+    hybrid_radius = hybrid.radius_on_grid_3d(grid)
+    assert not hybrid.is_axisymmetric
+    assert hybrid_radius.shape == (grid.ntheta, grid.nxi)
+    assert np.all(hybrid_radius > 0.0)
+    axial_radius = 0.32 * (1.0 + 0.04 * grid.xi**2)
+    assert np.allclose(hybrid_radius[:, 0], axial_radius[0])
+    assert np.allclose(hybrid_radius[:, -1], axial_radius[-1])
+    with pytest.raises(ValueError):
+        MirrorBoundary.rotating_ellipse_mirror_hybrid(r0=0.0)
+    with pytest.raises(ValueError):
+        MirrorBoundary.rotating_ellipse_mirror_hybrid(r0=0.3, epsilon=1.0)
+    with pytest.raises(ValueError):
+        MirrorBoundary.rotating_ellipse_mirror_hybrid(r0=0.3, stellarator_fraction=0.0)
+    with pytest.raises(ValueError):
+        MirrorBoundary.rotating_ellipse_mirror_hybrid(r0=0.3, rotation_angle=float("inf"))
+    with pytest.raises(ValueError):
+        hybrid.radius(grid.xi)
+    with pytest.raises(ValueError):
+        hybrid.radius_on_grid(grid)
 
     with pytest.raises(ValueError):
         PsiPrimeProfile.polynomial([])
@@ -264,6 +295,85 @@ def test_reduced_state_sources_and_continuation_guards():
     assert len(stages) == 1
     with pytest.raises(ValueError):
         pressure_stage_profiles(PressureProfile.zero(), ())
+
+
+def test_fixed_boundary_stage_routing_and_3d_gradient_descent_smoke():
+    grid = make_mirror_grid(ns=5, ntheta=5, nxi=7, mpol=2)
+    axis_boundary = MirrorBoundary.constant_radius(0.3)
+    axis_state = MirrorStateAxisym.from_boundary(grid, axis_boundary)
+    nonaxis_boundary = MirrorBoundary.cosine_modulated_radius(r0=0.3, epsilon=0.04, theta_mode=2)
+    nonaxis_state = MirrorState3D.from_boundary(grid, nonaxis_boundary)
+    options = OptimizerOptions(
+        optimizer="gd",
+        maxiter=1,
+        step_size=1.0e-5,
+        tolerance=1.0e-14,
+        line_search_steps=2,
+        mu0=1.0,
+    )
+
+    axis_result = solve_axisym_fixed_boundary_stage(
+        axis_state,
+        grid,
+        axis_boundary,
+        psi_prime=PsiPrimeProfile.constant(0.01),
+        i_prime=IPrimeProfile.zero(),
+        pressure=PressureProfile.zero(),
+        options=options,
+        stage_index=2,
+        pressure_scale=0.5,
+    )
+    assert axis_result.trace
+    assert axis_result.optimizer_summary is not None
+    assert axis_result.optimizer_summary.optimizer == "gd"
+
+    result_3d = solve_3d_fixed_boundary_stage(
+        nonaxis_state,
+        grid,
+        nonaxis_boundary,
+        psi_prime=PsiPrimeProfile.constant(0.01),
+        i_prime=IPrimeProfile.zero(),
+        pressure=PressureProfile.zero(),
+        options=options,
+        stage_index=3,
+        pressure_scale=1.0,
+    )
+    assert result_3d.trace
+    assert result_3d.optimizer_summary is not None
+    assert result_3d.optimizer_summary.optimizer == "gd"
+    assert np.allclose(result_3d.state.a[-1], nonaxis_boundary.radius_on_grid_3d(grid))
+
+    with pytest.raises(ValueError, match="axisymmetric mirror states only"):
+        solve_3d_fixed_boundary_stage(
+            nonaxis_state,
+            grid,
+            nonaxis_boundary,
+            psi_prime=PsiPrimeProfile.constant(0.01),
+            i_prime=IPrimeProfile.zero(),
+            pressure=PressureProfile.zero(),
+            options=OptimizerOptions(optimizer="residual_newton"),
+            stage_index=0,
+            pressure_scale=1.0,
+        )
+    with pytest.raises(ValueError, match="unsupported"):
+        solve_axisym_fixed_boundary_stage(
+            axis_state,
+            grid,
+            axis_boundary,
+            psi_prime=PsiPrimeProfile.constant(0.01),
+            i_prime=IPrimeProfile.zero(),
+            pressure=PressureProfile.zero(),
+            options=OptimizerOptions(optimizer="not-a-solver"),
+            stage_index=0,
+            pressure_scale=1.0,
+        )
+    with pytest.raises(ValueError):
+        run_mirror_fixed_boundary(
+            MirrorConfig(MirrorResolution(ns=5, ntheta=5, nxi=7, mpol=2)),
+            nonaxis_boundary,
+            initial_state=axis_state,
+            options=MirrorSolveOptions(maxiter=0),
+        )
 
 
 def test_coil_validation_guards_and_boundary_builder():

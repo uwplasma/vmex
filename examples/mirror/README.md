@@ -169,6 +169,13 @@ summary CSV and metrics JSON after each beta by default, so a later
 high-beta stall or interrupted SSH session still leaves the completed lower-beta
 evidence on disk.
 
+The active convergence plan and promotion gates for this lane are kept in
+``docs/mirror/direct_coil_free_boundary_convergence.rst``. In short, a
+finite-beta direct-coil row is a production candidate only when the live final
+state has fresh active free-boundary coupling, every final force component
+meets the requested ``FTOL``, the LCFS changes with beta, and a total-field
+pressure-balance diagnostic agrees. Coil-only ``B.n`` remains a vacuum check.
+
 The default activation threshold is intentionally tight
 (``FREE_BOUNDARY_ACTIVATE_FSQ = 1e-8``), and the solver now blocks
 ``LFREEB`` convergence until the free-boundary vacuum/edge coupling has
