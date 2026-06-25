@@ -379,6 +379,7 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
     abs_error = abs(exact - complete_fd)
     rel_error = abs_error / max(1.0, abs(complete_fd))
     base_abs_delta = abs(value - complete_base)
+    base_rel_delta = base_abs_delta / max(1.0, abs(value), abs(complete_base))
     passed = bool(
         replay_gate["passed"]
         and np.isfinite(exact)
@@ -401,6 +402,7 @@ def direct_coil_same_branch_controller_scalar_custom_vjp_report(
         "base_value": value,
         "complete_base_value": complete_base,
         "base_abs_delta": base_abs_delta,
+        "base_rel_delta": base_rel_delta,
         "complete_values": complete_values,
     }
 
@@ -519,6 +521,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
         abs_error = abs(exact - complete_fd)
         rel_error = abs_error / max(1.0, abs(complete_fd))
         base_abs_delta = abs(value - complete_base)
+        base_rel_delta = base_abs_delta / max(1.0, abs(value), abs(complete_base))
         key_passed = bool(
             replay_gate["passed"]
             and np.isfinite(exact)
@@ -541,6 +544,7 @@ def direct_coil_same_branch_controller_scalars_custom_vjp_report(
             "base_value": value,
             "complete_base_value": complete_base,
             "base_abs_delta": base_abs_delta,
+            "base_rel_delta": base_rel_delta,
             "complete_values": complete_values,
         }
     return {
@@ -699,6 +703,12 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         timings=timings,
     )
     timings["total_wall_s"] = float(time.perf_counter() - total_start)
+    base_abs_delta = abs(float(np.asarray(replay_value, dtype=float)) - float(values[key]))
+    base_rel_delta = base_abs_delta / max(
+        1.0,
+        abs(float(values[key])),
+        abs(float(np.asarray(replay_value, dtype=float))),
+    )
     return {
         "contract": "production-forward branch-local run_free_boundary scalar value/gradient",
         "uses_production_forward": True,
@@ -712,7 +722,8 @@ def direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
         "production_values_source": production_values_source,
         "replay_payload_source": replay_payload_source,
         "replay_value": replay_value,
-        "base_abs_delta": abs(float(np.asarray(replay_value, dtype=float)) - float(values[key])),
+        "base_abs_delta": base_abs_delta,
+        "base_rel_delta": base_rel_delta,
         "grad": grad,
         "payload": payload if bool(include_payload) else None,
         "includes_payload": bool(include_payload),
@@ -1234,6 +1245,15 @@ def _branch_local_scalar_report(
         key: abs(float(np.asarray(replay_values[index], dtype=float)) - float(values[key]))
         for index, key in enumerate(keys)
     }
+    base_rel_delta = {
+        key: base_abs_delta[key]
+        / max(
+            1.0,
+            abs(float(values[key])),
+            abs(float(np.asarray(replay_values[index], dtype=float))),
+        )
+        for index, key in enumerate(keys)
+    }
     directional_derivatives = (
         None
         if derivative_result.directional_values is None
@@ -1261,7 +1281,9 @@ def _branch_local_scalar_report(
         "replay_values": replay_values,
         "replay_value_map": replay_value_map,
         "base_abs_delta": base_abs_delta,
+        "base_rel_delta": base_rel_delta,
         "max_base_abs_delta": max(base_abs_delta.values()) if base_abs_delta else 0.0,
+        "max_base_rel_delta": max(base_rel_delta.values()) if base_rel_delta else 0.0,
         "jacobian": derivative_result.jacobian,
         "grads": derivative_result.gradients,
         "directional_derivatives": directional_derivatives,

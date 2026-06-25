@@ -808,21 +808,25 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
                 "scalar_keys": ["aspect", "qs_total", "mean_iota"],
             },
             "max_base_abs_delta": 0.0,
+            "max_base_rel_delta": 0.0,
             "scalars": {
                 "qs_total": {
                     "value": 0.2,
                     "exact_directional": 3.0,
                     "base_abs_delta": 0.0,
+                    "base_rel_delta": 0.0,
                 },
                 "aspect": {
                     "value": 5.5,
                     "exact_directional": -4.0,
                     "base_abs_delta": 0.0,
+                    "base_rel_delta": 0.0,
                 },
                 "mean_iota": {
                     "value": 0.35,
                     "exact_directional": -1.0,
                     "base_abs_delta": 0.0,
+                    "base_rel_delta": 0.0,
                 },
             },
         },
@@ -864,6 +868,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["differentiates_fixed_accepted_branch"] is True
     assert proposal["complete_solve_acceptance_authority"] is True
     assert proposal["max_base_abs_delta"] == pytest.approx(0.0)
+    assert proposal["max_base_rel_delta"] == pytest.approx(0.0)
     assert proposal["max_base_abs_delta_allowed"] == pytest.approx(2.0e-3)
     assert "complete solve decides acceptance" in proposal["scope"]
     assert proposal["directional_derivative"] == pytest.approx(9.0)
@@ -872,6 +877,9 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["contributions"]["mean_iota"]["contribution"] == pytest.approx(1.0)
     assert proposal["contributions"]["mean_iota"]["target"] == pytest.approx(0.4)
     assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
+    assert proposal["gate_evidence"]["branch_local_vector_max_base_abs_delta"] == pytest.approx(0.0)
+    assert proposal["gate_evidence"]["branch_local_vector_max_base_rel_delta"] == pytest.approx(0.0)
+    assert proposal["gate_evidence"]["branch_local_scalar_base_rel_delta"]["qs_total"] == pytest.approx(0.0)
     assert proposal["gate_evidence"]["directional_jvp_fast_path"] == "current_only"
     assert proposal["gate_evidence"]["directional_uses_fixed_coil_geometry"] is True
     assert proposal["gate_evidence"]["current_only_coil_geometry_cache_available"] is True
@@ -1780,6 +1788,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["controller_slot_summary"]["accepted_slots"] == 1
     assert vector["controller_slot_summary"]["rejected_slots"] == 0
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
+    assert vector["max_base_rel_delta"] == pytest.approx(0.0)
     expected_directionals = {
         "aspect": 0.1,
         "qs_total": 0.4,
@@ -1794,6 +1803,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert scalar_evidence["complete_fd_directional"] == pytest.approx(expected_directional)
         assert scalar_evidence["abs_error"] == pytest.approx(0.0)
         assert scalar_evidence["base_abs_delta"] == pytest.approx(0.0)
+        assert scalar_evidence["base_rel_delta"] == pytest.approx(0.0)
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
     assert report["timings"]["branch_local_vector_wall_s"] >= 0.0
     assert vector["timings"]["replay_jvp_wall_s"] == pytest.approx(0.02)

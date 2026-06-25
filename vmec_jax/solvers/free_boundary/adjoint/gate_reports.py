@@ -179,6 +179,7 @@ def direct_coil_same_branch_physical_scalar_gate_report(
         complete_fd = float(objective_values[key]["central_fd_directional"])
         exact = float(np.asarray(scalar_report.get("exact_directional"), dtype=float))
         base_abs_delta = float(scalar_report.get("base_abs_delta", np.nan))
+        base_rel_delta = float(scalar_report.get("base_rel_delta", np.nan))
         if not np.isfinite(complete_fd):
             errors.append(f"{key}: non-finite complete-solve FD slope")
         if not np.isfinite(exact):
@@ -190,6 +191,7 @@ def direct_coil_same_branch_physical_scalar_gate_report(
             "abs_error": float(scalar_report.get("abs_error", np.nan)),
             "rel_error": float(scalar_report.get("rel_error", np.nan)),
             "base_abs_delta": base_abs_delta,
+            "base_rel_delta": base_rel_delta,
         }
 
     result = {
@@ -393,6 +395,7 @@ def direct_coil_branch_local_scalars_report_from_complete_fd(
     replay_values = branch_local_scalars.get("replay_value_map", {})
     directionals = branch_local_scalars.get("directional_derivatives", {})
     base_abs_deltas = branch_local_scalars.get("base_abs_delta", {})
+    base_rel_deltas = branch_local_scalars.get("base_rel_delta", {})
     scalar_reports: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     passed_values: list[bool] = []
@@ -434,6 +437,13 @@ def direct_coil_branch_local_scalars_report_from_complete_fd(
             base_abs_delta = abs(float(np.asarray(replay_values[key], dtype=float)) - value)
         else:
             base_abs_delta = abs(value - complete_base)
+        if isinstance(base_rel_deltas, Mapping) and key in base_rel_deltas:
+            base_rel_delta = float(base_rel_deltas[key])
+        elif isinstance(replay_values, Mapping) and key in replay_values:
+            replay_value = float(np.asarray(replay_values[key], dtype=float))
+            base_rel_delta = base_abs_delta / max(1.0, abs(value), abs(replay_value), abs(complete_base))
+        else:
+            base_rel_delta = base_abs_delta / max(1.0, abs(value), abs(complete_base))
         abs_error = abs(exact - complete_fd)
         rel_error = abs_error / max(1.0, abs(complete_fd))
         key_passed = bool(
@@ -460,6 +470,7 @@ def direct_coil_branch_local_scalars_report_from_complete_fd(
             "base_value": value,
             "complete_base_value": complete_base,
             "base_abs_delta": base_abs_delta,
+            "base_rel_delta": base_rel_delta,
             "complete_values": complete_values,
         }
 

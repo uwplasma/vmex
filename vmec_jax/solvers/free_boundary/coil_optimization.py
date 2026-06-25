@@ -727,6 +727,17 @@ def same_branch_scalar_result_summary(
         "value": float(scalar["value"]),
         "replay_value": float(np.asarray(scalar["replay_value"], dtype=float)),
         "base_abs_delta": float(scalar["base_abs_delta"]),
+        "base_rel_delta": float(
+            scalar.get(
+                "base_rel_delta",
+                float(scalar["base_abs_delta"])
+                / max(
+                    1.0,
+                    abs(float(scalar["value"])),
+                    abs(float(np.asarray(scalar["replay_value"], dtype=float))),
+                ),
+            )
+        ),
         "exact_directional": float(exact_directional),
         "complete_fd_directional": complete_fd_directional,
         "abs_error": float(abs(exact_directional - complete_fd_directional)),
@@ -761,11 +772,23 @@ def same_branch_vector_result_summary(
         "directional_jvp_fast_path": str(replay_flags.get("directional_jvp_fast_path", "none")),
         "directional_uses_fixed_coil_geometry": bool(replay_flags.get("directional_uses_fixed_coil_geometry", False)),
         "max_base_abs_delta": float(vector["max_base_abs_delta"]),
+        "max_base_rel_delta": float(vector.get("max_base_rel_delta", 0.0)),
         "scalars": {
             key: {
                 "value": float(vector["values"][key]),
                 "replay_value": float(np.asarray(vector["replay_value_map"][key], dtype=float)),
                 "base_abs_delta": float(vector["base_abs_delta"][key]),
+                "base_rel_delta": float(
+                    vector.get("base_rel_delta", {}).get(
+                        key,
+                        float(vector["base_abs_delta"][key])
+                        / max(
+                            1.0,
+                            abs(float(vector["values"][key])),
+                            abs(float(np.asarray(vector["replay_value_map"][key], dtype=float))),
+                        ),
+                    )
+                ),
                 "exact_directional": float(directionals[index]),
                 "complete_fd_directional": float(report["objective_values"][key]["central_fd_directional"]),
                 "abs_error": float(abs(directionals[index] - report["objective_values"][key]["central_fd_directional"])),
@@ -1345,6 +1368,12 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         probe_cache_info = {}
     vector_gate = report.get("branch_local_vector_gate", {})
     physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
+    scalar_evidence = vector.get("scalars", {}) if isinstance(vector, dict) else {}
+    scalar_base_rel_delta = {
+        str(key): float(value.get("base_rel_delta", np.nan))
+        for key, value in scalar_evidence.items()
+        if isinstance(value, dict) and "base_rel_delta" in value
+    }
     rejected_slot_gate = report.get("accepted_rejected_controller_slot_gate", {})
     rejected_slot_requested = isinstance(rejected_slot_gate, dict) and bool(rejected_slot_gate.get("requested", False))
     return {
@@ -1394,6 +1423,13 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         "branch_local_vector_gate_passed": bool(
             isinstance(vector_gate, dict) and vector_gate.get("passed", False)
         ),
+        "branch_local_vector_max_base_abs_delta": float(
+            vector.get("max_base_abs_delta", np.nan) if isinstance(vector, dict) else np.nan
+        ),
+        "branch_local_vector_max_base_rel_delta": float(
+            vector.get("max_base_rel_delta", np.nan) if isinstance(vector, dict) else np.nan
+        ),
+        "branch_local_scalar_base_rel_delta": scalar_base_rel_delta,
         "physical_scalar_gate_passed": bool(
             isinstance(physical_gate, dict) and physical_gate.get("passed", False)
         ),
@@ -1506,6 +1542,7 @@ def _same_branch_derivative_vector_evidence(
         "replay_ad_mode": replay_ad_mode,
         "derivative_mode": derivative_mode,
         "report_base_delta": report_base_delta,
+        "report_base_rel_delta": float(vector.get("max_base_rel_delta", np.nan)),
     }, None
 
 
@@ -1531,6 +1568,7 @@ def _validated_branch_local_scalar(
     value = float(scalar.get("value", np.nan))
     deriv = float(scalar.get("exact_directional", np.nan))
     base_delta = float(scalar.get("base_abs_delta", 0.0))
+    base_rel_delta = float(scalar.get("base_rel_delta", np.nan))
     if not (np.isfinite(value) and np.isfinite(deriv) and np.isfinite(base_delta)):
         raise ValueError(f"non-finite branch-local scalar evidence for {key}")
     if base_delta > float(max_base_abs_delta):
@@ -1538,7 +1576,12 @@ def _validated_branch_local_scalar(
             f"branch-local scalar {key} base delta {base_delta:.3e} exceeds proposal cap "
             f"{float(max_base_abs_delta):.3e}"
         )
-    return {"value": value, "exact_directional": deriv, "base_abs_delta": base_delta}
+    return {
+        "value": value,
+        "exact_directional": deriv,
+        "base_abs_delta": base_delta,
+        "base_rel_delta": base_rel_delta,
+    }
 
 
 def _same_branch_proposal_directional_terms(
@@ -1594,6 +1637,7 @@ def _same_branch_proposal_directional_terms(
         contributions["qs_total"] = {
             "exact_directional": deriv,
             "base_abs_delta": float(qs_scalar["base_abs_delta"]),
+            "base_rel_delta": float(qs_scalar["base_rel_delta"]),
             "contribution": contribution,
         }
         directional += contribution
@@ -1608,6 +1652,7 @@ def _same_branch_proposal_directional_terms(
             "target": target,
             "exact_directional": deriv,
             "base_abs_delta": float(aspect_scalar["base_abs_delta"]),
+            "base_rel_delta": float(aspect_scalar["base_rel_delta"]),
             "contribution": contribution,
         }
         directional += contribution
@@ -1622,6 +1667,7 @@ def _same_branch_proposal_directional_terms(
             "target": target,
             "exact_directional": deriv,
             "base_abs_delta": float(iota_scalar["base_abs_delta"]),
+            "base_rel_delta": float(iota_scalar["base_rel_delta"]),
             "contribution": contribution,
         }
         directional += contribution
@@ -1706,6 +1752,7 @@ def same_branch_derivative_proposals_from_report(
                 "differentiates_fixed_accepted_branch": True,
                 "complete_solve_acceptance_authority": True,
                 "max_base_abs_delta": evidence["report_base_delta"],
+                "max_base_rel_delta": evidence["report_base_rel_delta"],
                 "max_base_abs_delta_allowed": float(max_base_abs_delta),
                 "directional_derivative": float(directional),
                 "contributions": contributions,
