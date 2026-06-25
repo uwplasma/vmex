@@ -3147,6 +3147,10 @@ Steps taken:
 - Propagated that signature into the JSON-ready coil-optimization same-branch
   vector summary and added smoke-test assertions for the current-only
   derivative-proposal path.
+- Added the same signature to derivative-proposal ``gate_evidence`` so accepted
+  or rejected proposal artifacts are self-contained: they now carry both the
+  validation gate result and the static replay/JVP workload used to propose the
+  step.
 - Updated the free-boundary optimization and performance docs so reviewers know
   the signature is provenance only, not an executable cache or a new derivative
   claim.

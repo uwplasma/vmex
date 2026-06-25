@@ -1481,7 +1481,10 @@ The proposal block records ``objective_terms_used`` and
 ``objective_terms_omitted``.  For example, the VMEC residual proxy is normally
 omitted from the branch-local JVP proposal because the residual term is still
 validated by the complete free-boundary solve that evaluates the proposed
-point.  After the trial solve, the same block records
+point.  The proposal's ``gate_evidence`` also carries the
+``directional_jvp_signature`` and a ``directional_jvp_cache_candidate`` flag so
+the accepted/rejected proposal artifact is self-contained.  After the trial
+solve, the same block records
 ``acceptance_decision_source = 'complete_solve_objective'`` together with
 ``accepted_by_complete_solve`` and ``rejected_by_complete_solve`` so the JSON
 artifact makes clear that branch-local derivatives only propose a step.
