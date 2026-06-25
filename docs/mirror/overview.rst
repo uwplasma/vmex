@@ -183,7 +183,7 @@ convergence-diagnostic path until fresh final force residuals meet the requested
 negative ``PHIEDGE`` for the default positive-current square-coil orientation.
 Sign-corrected generated-``mgrid`` profiling shows VMEC2000 is currently the
 more robust backend, but the present square-coil setup still remains well above
-``1e-12`` after 1000-5000 iterations. Initial-boundary provider parity is good
+``1e-12`` after 1000-10000 iterations. Initial-boundary provider parity is good
 on the widened deck: generated mgrid and exact direct Biot-Savart sampling
 agree to about ``3.2e-4`` RMS relative field-vector error and ``1.5e-3`` RMS
 relative coil-only ``B.n`` error, so the direct-coil blocker is nonlinear solve

@@ -91,11 +91,14 @@ moderate damping around ``DELT=0.02`` as the productive continuation path.
 The exact widened-mgrid, ``DELT=0.02``, ``NS=9`` comparison shows that
 ``vmec_jax`` and VMEC2000 now agree on the robust mgrid deck: after 5000
 iterations, ``vmec_jax`` generated-mgrid recomputes to total residual about
-``1.40e-6`` and VMEC2000 reaches about ``1.50e-6`` on the same mgrid. The older
-``~7e-8`` VMEC2000 result used the narrower ``DELT=0.05`` mgrid deck; it is
-useful as an optimistic low-resolution reference, but it is not the right
-target for radial-resolution studies because the corresponding ``NS=17`` run
-can move outside the vacuum grid. The profiler now also records an
+``1.40e-6`` and VMEC2000 reaches about ``1.50e-6`` on the same mgrid. Extending
+the same VMEC2000 run to 10000 iterations continues improving to about
+``1.11e-7`` with no vacuum-grid warnings, but still misses the requested
+``FTOL=1e-12`` by several orders of magnitude. The older ``~7e-8`` VMEC2000
+result used the narrower ``DELT=0.05`` mgrid deck; it is useful as an
+optimistic low-resolution reference, but it is not the right target for
+radial-resolution studies because the corresponding ``NS=17`` run can move
+outside the vacuum grid. The profiler now also records an
 initial-boundary provider-parity block before running any force iterations.
 On the widened ``48 x 40 x 32`` square-coil deck, generated-mgrid sampling and
 the exact direct Biot-Savart provider agree on the initial boundary to about
