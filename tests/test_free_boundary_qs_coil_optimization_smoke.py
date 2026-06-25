@@ -284,6 +284,33 @@ def test_same_branch_vector_key_parser_defaults_to_promoted_state_scalars():
     assert keys == ("aspect", "qs_total", "mean_iota", "lcfs_boundary_moment")
 
 
+def test_same_branch_vector_key_defaults_are_narrowed_for_derivative_proposals():
+    module = _load_example_module()
+
+    ordinary = module.same_branch_report_vector_keys_from_args(
+        SimpleNamespace(
+            same_branch_derivative_proposal=False,
+            same_branch_report_vector_keys=None,
+        )
+    )
+    proposal = module.same_branch_report_vector_keys_from_args(
+        SimpleNamespace(
+            same_branch_derivative_proposal=True,
+            same_branch_report_vector_keys=None,
+        )
+    )
+    explicit = module.same_branch_report_vector_keys_from_args(
+        SimpleNamespace(
+            same_branch_derivative_proposal=True,
+            same_branch_report_vector_keys="aspect,lcfs_boundary_moment",
+        )
+    )
+
+    assert ordinary == ("aspect", "qs_total", "mean_iota", "lcfs_boundary_moment")
+    assert proposal == ("aspect", "qs_total", "mean_iota")
+    assert explicit == ("aspect", "lcfs_boundary_moment")
+
+
 def test_branch_local_scalar_report_adapter_records_gate_evidence():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp

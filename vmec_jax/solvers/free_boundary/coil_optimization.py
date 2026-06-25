@@ -28,6 +28,7 @@ from vmec_jax.solvers.free_boundary.adjoint.trace_metadata import (
 )
 
 __all__ = [
+    "DEFAULT_DERIVATIVE_PROPOSAL_VECTOR_KEYS",
     "DEFAULT_SAME_BRANCH_VECTOR_KEYS", "STATE_ONLY_SAME_BRANCH_KEYS", "SUPPORTED_SAME_BRANCH_VECTOR_KEYS",
     "SINGLE_STAGE_LIMITATIONS",
     "direct_coil_optimization_workflow_metadata",
@@ -47,6 +48,7 @@ __all__ = [
     "same_branch_replay_mode_count_guard",
     "same_branch_replay_options_from_args",
     "same_branch_report_direction_policy",
+    "same_branch_report_vector_keys_from_args",
     "same_branch_report_runtime_configs",
     "same_branch_report_mode_count",
     "same_branch_scalar_result_summary",
@@ -56,6 +58,7 @@ __all__ = [
 
 
 DEFAULT_SAME_BRANCH_VECTOR_KEYS = ("aspect", "qs_total", "mean_iota", "lcfs_boundary_moment")
+DEFAULT_DERIVATIVE_PROPOSAL_VECTOR_KEYS = ("aspect", "qs_total", "mean_iota")
 SUPPORTED_SAME_BRANCH_VECTOR_KEYS = DEFAULT_SAME_BRANCH_VECTOR_KEYS + (
     "state_norm",
     "boozer_qs_total",
@@ -187,6 +190,23 @@ def parse_same_branch_vector_keys(value: str | Sequence[str] | None) -> tuple[st
     return keys
 
 
+def same_branch_report_vector_keys_from_args(args: Any) -> tuple[str, ...]:
+    """Return vector-report keys with a cheaper default for proposal-only runs.
+
+    Ordinary validation reports keep the promoted multi-scalar default.  A
+    derivative proposal only consumes the objective terms currently supported by
+    ``same_branch_derivative_proposals_from_report``: aspect, QS, and mean-iota.
+    When the user does not explicitly request vector keys, use that narrower
+    set to avoid compiling/replaying an unused LCFS moment scalar.  Any explicit
+    ``--same-branch-report-vector-keys`` value is honored unchanged.
+    """
+
+    requested = getattr(args, "same_branch_report_vector_keys", None)
+    if requested is None and bool(getattr(args, "same_branch_derivative_proposal", False)):
+        return DEFAULT_DERIVATIVE_PROPOSAL_VECTOR_KEYS
+    return parse_same_branch_vector_keys(requested)
+
+
 def parse_float_list(text: str) -> list[float]:
     """Parse comma/space-separated floats from a small CLI option."""
     values = [float(part) for part in str(text).replace(",", " ").split() if part]
@@ -231,7 +251,7 @@ def same_branch_report_runtime_configs(
         "enabled": bool(getattr(args, "write_same_branch_report", False)),
         "mode": str(getattr(args, "same_branch_report_mode", "vector")),
         "ad_mode": str(getattr(args, "same_branch_report_ad_mode", "direct")),
-        "vector_keys": list(parse_same_branch_vector_keys(getattr(args, "same_branch_report_vector_keys", None))),
+        "vector_keys": list(same_branch_report_vector_keys_from_args(args)),
         "default_derivative_detail": "direct vector JVP for several physical scalars"
         if str(getattr(args, "same_branch_report_mode", "vector")) == "vector"
         and str(getattr(args, "same_branch_report_ad_mode", "direct")) == "direct"
