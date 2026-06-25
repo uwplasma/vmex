@@ -497,6 +497,20 @@ def controller_state_after_vmec2000_time_control_restart_update(
     )
 
 
+def controller_state_after_vmec2000_time_control_sample(
+    state: ResidualControllerState,
+    decision: Any,
+    *,
+    state_checkpoint: Any,
+) -> ResidualControllerState:
+    """Apply non-restart VMEC2000 time-control scalar samples."""
+
+    next_state = state._replace(res0=float(decision.res0), res1=float(decision.res1))
+    if bool(decision.initialized) or bool(decision.store_checkpoint):
+        next_state = next_state._replace(state_checkpoint=state_checkpoint)
+    return next_state
+
+
 def host_vmec2000_time_control_restart_branch_result(
     *,
     state_checkpoint: Any,
@@ -539,6 +553,23 @@ def controller_state_after_pre_restart_update(
         bad_growth_streak=0,
         huge_force_restart_count=int(update.huge_force_restart_count),
     )
+
+
+def controller_state_after_host_restart_decision_sample(
+    state: ResidualControllerState,
+    decision: Any,
+    *,
+    state_checkpoint: Any,
+) -> ResidualControllerState:
+    """Apply non-restart host restart-decision tracker scalars."""
+
+    next_state = state._replace(
+        res0=float(decision.res0),
+        bad_growth_streak=int(decision.bad_growth_streak),
+    )
+    if bool(decision.store_checkpoint):
+        next_state = next_state._replace(state_checkpoint=state_checkpoint)
+    return next_state
 
 
 def host_pre_restart_trigger_branch_result(

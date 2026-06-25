@@ -113,8 +113,10 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
     controller_state_after_catastrophic_restart_update as _controller_state_after_catastrophic_restart_update,
     controller_state_after_free_boundary_turnon_restart_update as _controller_state_after_free_boundary_turnon_restart_update,
+    controller_state_after_host_restart_decision_sample as _controller_state_after_host_restart_decision_sample,
     controller_state_after_initial_axis_reset_update as _controller_after_axis_reset,
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
+    controller_state_after_vmec2000_time_control_sample as _controller_state_after_vmec2000_time_control_sample,
     controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_runtime_scalars as _controller_state_from_runtime_scalars,
     controller_state_from_resume_state as _controller_state_from_resume_state,
@@ -1142,6 +1144,9 @@ def solve_fixed_boundary_residual_iter(
 
     def _apply_controller_update(update_func, update) -> None:
         _set_controller_state(_apply_controller_state_update(_current_controller_state(), update_func, update))
+
+    def _apply_controller_sample(sample_func, decision) -> None:
+        _set_controller_state(sample_func(_current_controller_state(), decision, state_checkpoint=state))
 
     _initial_velocity = _initial_residual_velocity_state(
         state=state,
@@ -2588,10 +2593,7 @@ def solve_fixed_boundary_residual_iter(
                 )
                 fsq = tc.fsq
                 fsq0 = tc.fsq0
-                res0 = tc.res0
-                res1 = tc.res1
-                if tc.initialized or tc.store_checkpoint:
-                    state_checkpoint = state
+                _apply_controller_sample(_controller_state_after_vmec2000_time_control_sample, tc)
                 if tc.restart:
                     pre_restart_reason = tc.pre_restart_reason
                     restart_update = _host_vmec2000_time_control_restart_update(
@@ -2644,15 +2646,9 @@ def solve_fixed_boundary_residual_iter(
                 k_preconditioner_update_interval=k_preconditioner_update_interval,
             )
             fsq = restart_decision.fsq
-            res0 = restart_decision.res0
-            bad_growth_streak = restart_decision.bad_growth_streak
+            _apply_controller_sample(_controller_state_after_host_restart_decision_sample, restart_decision)
             pre_restart_reason = restart_decision.pre_restart_reason
             huge_initial_forces = restart_decision.huge_initial_forces
-
-            # Store a "good" checkpoint once residual has improved for many
-            # iterations since the last restart marker.
-            if restart_decision.store_checkpoint:
-                state_checkpoint = state
 
             if startup_policy.use_restart_triggers and pre_restart_reason != "none":
                 state_before_restart = state

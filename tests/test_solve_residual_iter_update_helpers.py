@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -10,8 +12,10 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     backtracking_momentum_search,
     controller_state_after_catastrophic_restart_update,
     controller_state_after_free_boundary_turnon_restart_update,
+    controller_state_after_host_restart_decision_sample,
     controller_state_after_initial_axis_reset_update,
     controller_state_after_pre_restart_update,
+    controller_state_after_vmec2000_time_control_sample,
     controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_resume_state,
     controller_state_from_runtime_scalars,
@@ -1021,6 +1025,67 @@ def test_controller_state_applies_vmec2000_time_control_restart_update() -> None
     assert got.res0 == pytest.approx(0.1)
     assert got.res1 == pytest.approx(0.2)
     assert got.prev_rz_fsq == pytest.approx(0.3)
+
+
+def test_controller_state_applies_vmec2000_time_control_samples() -> None:
+    state = initial_residual_controller_state(
+        step_size=0.2,
+        k_ndamp=2,
+        initial_flip_sign=-1.0,
+        state_checkpoint="old-checkpoint",
+    )._replace(res0=0.1, res1=0.2)
+
+    sample = controller_state_after_vmec2000_time_control_sample(
+        state,
+        SimpleNamespace(res0=1.5, res1=2.5, initialized=False, store_checkpoint=False),
+        state_checkpoint="new-checkpoint",
+    )
+
+    assert sample.res0 == pytest.approx(1.5)
+    assert sample.res1 == pytest.approx(2.5)
+    assert sample.state_checkpoint == "old-checkpoint"
+    assert sample.time_step == pytest.approx(state.time_step)
+    assert sample.inv_tau == state.inv_tau
+
+    checkpointed = controller_state_after_vmec2000_time_control_sample(
+        sample,
+        SimpleNamespace(res0=3.5, res1=4.5, initialized=True, store_checkpoint=False),
+        state_checkpoint="new-checkpoint",
+    )
+
+    assert checkpointed.res0 == pytest.approx(3.5)
+    assert checkpointed.res1 == pytest.approx(4.5)
+    assert checkpointed.state_checkpoint == "new-checkpoint"
+
+
+def test_controller_state_applies_host_restart_decision_samples() -> None:
+    state = initial_residual_controller_state(
+        step_size=0.2,
+        k_ndamp=2,
+        initial_flip_sign=-1.0,
+        state_checkpoint="old-checkpoint",
+    )._replace(res0=0.1, bad_growth_streak=2)
+
+    sample = controller_state_after_host_restart_decision_sample(
+        state,
+        SimpleNamespace(res0=0.25, bad_growth_streak=3, store_checkpoint=False),
+        state_checkpoint="new-checkpoint",
+    )
+
+    assert sample.res0 == pytest.approx(0.25)
+    assert sample.bad_growth_streak == 3
+    assert sample.state_checkpoint == "old-checkpoint"
+    assert sample.res1 == pytest.approx(state.res1)
+
+    checkpointed = controller_state_after_host_restart_decision_sample(
+        sample,
+        SimpleNamespace(res0=0.5, bad_growth_streak=0, store_checkpoint=True),
+        state_checkpoint="new-checkpoint",
+    )
+
+    assert checkpointed.res0 == pytest.approx(0.5)
+    assert checkpointed.bad_growth_streak == 0
+    assert checkpointed.state_checkpoint == "new-checkpoint"
 
 
 def test_vmec2000_time_control_restart_branch_result_packages_side_effects() -> None:

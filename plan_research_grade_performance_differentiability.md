@@ -5739,3 +5739,62 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.0%.
 - Docs/release hygiene: 100%.
 - Overall: 99.3%.
+
+### 2026-06-25: Move non-restart controller samples into pure controller-state helpers
+
+Steps taken:
+
+- Added pure controller-state helpers for two non-restart host-control updates:
+  VMEC2000 time-control residual samples and generic host restart-decision
+  tracker samples.
+- Rewired ``solve_fixed_boundary_residual_iter`` to apply these samples through
+  a small ``_apply_controller_sample`` bridge instead of directly mutating
+  ``res0``, ``res1``, ``bad_growth_streak``, and ``state_checkpoint`` scalar
+  locals at each call site.
+- Added focused unit tests for both helpers to prove checkpoint preservation,
+  checkpoint replacement, and preservation of unrelated controller slots.
+
+Results obtained:
+
+- ``python -m ruff check`` passed for the changed residual update/iteration
+  modules and focused tests.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_force_payload_helpers.py
+  tests/test_discrete_adjoint_qh.py -q`` passed with expected skips.
+- Public docs/release artifact gates and the ``vmec --test`` CLI helper smoke
+  passed.
+- ``source_health.py`` and ``repo_size_audit.py`` passed.  The residual
+  iteration module decreased further from 3119 to 3115 lines and the main
+  residual loop from 2743 to 2737 lines.  The remaining high-value reduction is
+  a broader controller-state object, not more ad hoc scalar movement.
+
+Best next steps:
+
+1. Commit and push the non-restart controller-sample seam if final local gates
+   remain clean.
+2. Let the current GitHub Actions run complete before pushing further changes
+   unless a concrete failure appears.
+3. Next implementation tranche: promote the residual-loop controller-state
+   object so the loop reads/writes a structured controller runtime instead of
+   many scalar locals.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 95.7%.
+- Free-boundary production differentiability: 96.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 66.8%.
+- VMEC2000/VMEC++ parity and physics gates: 99.0%.
+- Docs/release hygiene: 100%.
+- Overall: 99.4%.
