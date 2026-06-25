@@ -210,9 +210,10 @@ the ``NTOR=12`` floor.
 The latest completed VMEC2000 reference shows the better near-term deck:
 ``MPOL=6, NTOR=23, NZETA=64`` with the spline square-axis projection and a
 staged ``NS=9 -> 13 -> 17`` run reaches best sampled summed residual about
-``2.28e-11`` and final summed residual about ``3.17e-11`` with no vacuum-grid
-overflow. The final components remain around ``1e-11`` for radial/vertical and
-``3e-12`` for lambda, so this is not yet a per-component ``1e-12`` production
+``1.86e-11`` and final summed residual about ``2.19e-11`` after a 24000-iteration
+final-stage budget, with no vacuum-grid overflow. The final strict-component
+gate still fails because the largest final physical component is about
+``1.04e-11``, so this is not yet a per-component ``1e-12`` production
 promotion. It does show that VMEC2000 generated-``mgrid`` is the fastest
 robustness reference and that high-mode spline projection plus staged radial
 resolution is more effective than extending the lower-mode decks.
@@ -232,7 +233,10 @@ profiler now record ``boundary_projection`` truncation errors for the selected
 ``MPOL``/``NTOR`` grid, so mode changes can be separated from nonlinear
 free-boundary convergence. On the current square-coil shape, the spline envelope
 cuts max component projection error from about ``3.2e-4`` to ``1.3e-4`` at
-``MPOL=5, NTOR=12`` and to about ``1.4e-5`` at ``MPOL=6, NTOR=23``.
+``MPOL=5, NTOR=12`` and to about ``1.4e-5`` at ``MPOL=6, NTOR=23``. The root
+square-coil example now rejects projection errors above ``5e-5`` by default, so
+low-mode edits fail before spending a long ``FTOL=1e-12`` solve on an underfit
+Fourier deck.
 Direct-coil convergence
 candidates are gated by a fresh residual recompute using the current
 plasma-current normalization, and the square-coil example records near-axis
