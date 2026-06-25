@@ -241,14 +241,24 @@ def test_current_only_jvp_executable_cache_is_opt_in_and_closure_bound() -> None
     def factory():
         nonlocal factory_calls
         factory_calls += 1
-        return object()
+        return object(), {"executable_kind": "test", "compiled": True, "compile_s": 0.0}
 
-    first, first_hit = facade_helpers._get_current_only_directional_jvp_executable(enabled_key, factory)
-    second, second_hit = facade_helpers._get_current_only_directional_jvp_executable(enabled_key, factory)
+    first, first_hit, first_metadata = facade_helpers._get_current_only_directional_jvp_executable(
+        enabled_key,
+        factory,
+    )
+    second, second_hit, second_metadata = facade_helpers._get_current_only_directional_jvp_executable(
+        enabled_key,
+        factory,
+    )
 
     assert first is second
     assert first_hit is False
     assert second_hit is True
+    assert first_metadata["executable_kind"] == "test"
+    assert first_metadata["compiled"] is True
+    assert first_metadata["compiled_on_this_call"] is True
+    assert second_metadata["compiled_on_this_call"] is False
     assert factory_calls == 1
 
     facade_helpers._CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE.clear()
