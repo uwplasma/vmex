@@ -126,6 +126,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_free_boundary_turnon_restart_update as _host_free_boundary_turnon_restart_update,
     host_initial_axis_reset_update as _host_axis_reset_update,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
+    host_vmec2000_time_control_restart_branch_result as _host_vmec2000_time_control_restart_branch_result,
     host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
     initial_residual_controller_state as _initial_residual_controller_state,
     initial_residual_velocity_state as _initial_residual_velocity_state,
@@ -2533,8 +2534,6 @@ def solve_fixed_boundary_residual_iter(
                     state_checkpoint = state
                 if tc.restart:
                     pre_restart_reason = tc.pre_restart_reason
-                    state = state_checkpoint
-                    _zero_all_velocity_blocks()
                     restart_update = _host_vmec2000_time_control_restart_update(
                         irst=int(tc.irst),
                         time_step=float(time_step),
@@ -2547,24 +2546,36 @@ def solve_fixed_boundary_residual_iter(
                         fsq0_prev_before=float(fsq0_prev_before),
                         k_ndamp=int(k_ndamp),
                     )
-                    _apply_controller_update(
-                        _controller_state_after_vmec2000_time_control_restart_update, restart_update
+                    restart_branch = _host_vmec2000_time_control_restart_branch_result(
+                        state_checkpoint=state_checkpoint,
+                        restart_update=restart_update,
+                        pre_restart_reason=pre_restart_reason,
+                        prev_rz_fsq_before=prev_rz_fsq_before,
                     )
-                    step_status = restart_update.step_status
-                    restart_reason = restart_update.restart_reason
-                    freeb_controls_cached = None
-                    precond_cache.clear()
-                    force_bcovar_update = True
+                    state = restart_branch.state
+                    _zero_all_velocity_blocks()
+                    _apply_controller_update(
+                        _controller_state_after_vmec2000_time_control_restart_update,
+                        restart_branch.update,
+                    )
+                    step_status = restart_branch.step_status
+                    restart_reason = restart_branch.restart_reason
+                    if restart_branch.clear_freeb_controls:
+                        freeb_controls_cached = None
+                    if restart_branch.clear_preconditioner_cache:
+                        precond_cache.clear()
+                    force_bcovar_update = bool(restart_branch.force_bcovar_update)
                     _append_current_zero_update_history(
-                        restart_path=restart_update.restart_path,
+                        restart_path=restart_branch.restart_path,
                         step_status=step_status,
                         restart_reason=restart_reason,
-                        pre_restart_reason=pre_restart_reason,
+                        pre_restart_reason=restart_branch.pre_restart_reason,
                         time_step_value=time_step,
                     )
-                    _pop_iteration_histories()
-                    prev_rz_fsq = prev_rz_fsq_before
-                    skip_time_control = True
+                    if restart_branch.pop_iteration_history:
+                        _pop_iteration_histories()
+                    prev_rz_fsq = restart_branch.prev_rz_fsq
+                    skip_time_control = restart_branch.skip_time_control
                     _record_timing("iteration_control_vmec_time", t_iteration_control_vmec_time_start)
                     continue
             _record_timing("iteration_control_vmec_time", t_iteration_control_vmec_time_start)

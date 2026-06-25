@@ -298,6 +298,23 @@ class HostVmec2000TimeControlRestartUpdate(NamedTuple):
     inv_tau: list[float]
 
 
+class HostVmec2000TimeControlRestartBranchResult(NamedTuple):
+    """Loop-side effects for a VMEC2000 time-control restart branch."""
+
+    state: Any
+    update: HostVmec2000TimeControlRestartUpdate
+    step_status: str
+    restart_reason: str
+    restart_path: str
+    pre_restart_reason: str
+    prev_rz_fsq: float
+    clear_freeb_controls: bool
+    clear_preconditioner_cache: bool
+    force_bcovar_update: bool
+    pop_iteration_history: bool
+    skip_time_control: bool
+
+
 class HostInitialAxisResetUpdate(NamedTuple):
     """Controller scalars after VMEC's first-iteration axis reset."""
 
@@ -459,6 +476,31 @@ def controller_state_after_vmec2000_time_control_restart_update(
         ijacob=int(update.ijacob),
         bad_resets=int(update.bad_resets),
         bad_growth_streak=0,
+    )
+
+
+def host_vmec2000_time_control_restart_branch_result(
+    *,
+    state_checkpoint: Any,
+    restart_update: HostVmec2000TimeControlRestartUpdate,
+    pre_restart_reason: str,
+    prev_rz_fsq_before: float,
+) -> HostVmec2000TimeControlRestartBranchResult:
+    """Package VMEC2000 restart-loop side effects into one explicit contract."""
+
+    return HostVmec2000TimeControlRestartBranchResult(
+        state=state_checkpoint,
+        update=restart_update,
+        step_status=str(restart_update.step_status),
+        restart_reason=str(restart_update.restart_reason),
+        restart_path=str(restart_update.restart_path),
+        pre_restart_reason=str(pre_restart_reason),
+        prev_rz_fsq=float(prev_rz_fsq_before),
+        clear_freeb_controls=True,
+        clear_preconditioner_cache=True,
+        force_bcovar_update=True,
+        pop_iteration_history=True,
+        skip_time_control=True,
     )
 
 

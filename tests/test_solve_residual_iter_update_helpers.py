@@ -26,6 +26,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_initial_axis_reset_update,
     host_momentum_update_np,
     host_pre_restart_trigger_update,
+    host_vmec2000_time_control_restart_branch_result,
     host_vmec2000_time_control_restart_update,
     initial_residual_controller_state,
     initial_residual_velocity_state,
@@ -860,6 +861,41 @@ def test_controller_state_applies_vmec2000_time_control_restart_update() -> None
     assert got.res0 == pytest.approx(0.1)
     assert got.res1 == pytest.approx(0.2)
     assert got.prev_rz_fsq == pytest.approx(0.3)
+
+
+def test_vmec2000_time_control_restart_branch_result_packages_side_effects() -> None:
+    update = host_vmec2000_time_control_restart_update(
+        irst=2,
+        time_step=0.2,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        ijacob=3,
+        bad_resets=4,
+        iter2=5,
+        fsq_prev_before=6.0,
+        fsq0_prev_before=7.0,
+        k_ndamp=2,
+    )
+
+    got = host_vmec2000_time_control_restart_branch_result(
+        state_checkpoint="checkpoint-state",
+        restart_update=update,
+        pre_restart_reason="bad_jacobian",
+        prev_rz_fsq_before=0.125,
+    )
+
+    assert got.state == "checkpoint-state"
+    assert got.update is update
+    assert got.step_status == "restart_bad_jacobian"
+    assert got.restart_reason == "bad_jacobian"
+    assert got.restart_path == "vmec2000_bad_jacobian"
+    assert got.pre_restart_reason == "bad_jacobian"
+    assert got.prev_rz_fsq == pytest.approx(0.125)
+    assert got.clear_freeb_controls is True
+    assert got.clear_preconditioner_cache is True
+    assert got.force_bcovar_update is True
+    assert got.pop_iteration_history is True
+    assert got.skip_time_control is True
 
 
 def test_host_momentum_update_np_matches_strict_update_formula_and_rms() -> None:
