@@ -7,12 +7,15 @@ import pytest
 
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
+    InitialAxisResetRuntimeCallbacks,
     bad_jacobian_from_tau_range,
     bad_jacobian_ptau_from_minmax,
     evaluate_initial_axis_reset,
     initial_force_physical_fsq,
     initial_axis_reset_runtime_decision,
+    initial_axis_reset_runtime_update,
     reset_axis_from_boundary,
+    run_initial_axis_reset_runtime,
     run_initial_axis_reset_setup,
 )
 from vmec_jax.solve import (
@@ -423,6 +426,145 @@ def test_initial_axis_reset_runtime_decision_preserves_in_loop_gate(kwargs, expe
         decision.force_reset,
         decision.reset,
     ) == expected
+
+
+def test_initial_axis_reset_runtime_update_skips_outside_first_vmec2000_step():
+    state = _state_from_base(np.zeros((2, 2)))
+    result = initial_axis_reset_runtime_update(
+        state=state,
+        k=SimpleNamespace(),
+        iter_idx=2,
+        bad_jacobian=True,
+        fsq_phys=2.0,
+        axis_reset_done=False,
+        lmove_axis=True,
+        vmec2000_control=True,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+        time_step=0.5,
+        prev_rz_fsq_before=0.25,
+        k_ndamp=3,
+        reset_axis_from_boundary_func=lambda *_args, **_kwargs: pytest.fail("reset should not run"),
+        host_axis_reset_update_func=lambda *_args, **_kwargs: pytest.fail("update should not run"),
+    )
+
+    assert result.state is state
+    assert result.axis_reset_update is None
+    assert not result.repeat_iteration
+    assert not result.decision.reset
+
+
+def test_initial_axis_reset_runtime_update_returns_reset_state_and_controller_payload():
+    state = _state_from_base(np.zeros((2, 2)))
+    reset_state = _state_from_base(np.ones((2, 2)))
+    calls: dict[str, int] = {"reset": 0, "update": 0}
+
+    def reset_axis(st, **kwargs):
+        calls["reset"] += 1
+        assert st is state
+        assert kwargs["k_guess"].marker == "k"
+        assert kwargs["full_reset"] is False
+        assert kwargs["refine_axis_guess"] is False
+        return reset_state
+
+    def host_update(st, time_step, iter_idx, prev_rz_fsq_before, k_ndamp):
+        calls["update"] += 1
+        assert st is reset_state
+        assert time_step == pytest.approx(0.5)
+        assert iter_idx == 1
+        assert prev_rz_fsq_before == pytest.approx(0.25)
+        assert k_ndamp == 3
+        return SimpleNamespace(marker="update")
+
+    result = initial_axis_reset_runtime_update(
+        state=state,
+        k=SimpleNamespace(marker="k"),
+        iter_idx=1,
+        bad_jacobian=True,
+        fsq_phys=2.0,
+        axis_reset_done=False,
+        lmove_axis=True,
+        vmec2000_control=True,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+        time_step=0.5,
+        prev_rz_fsq_before=0.25,
+        k_ndamp=3,
+        reset_axis_from_boundary_func=reset_axis,
+        host_axis_reset_update_func=host_update,
+    )
+
+    assert result.state is reset_state
+    assert result.axis_reset_update.marker == "update"
+    assert result.repeat_iteration
+    assert result.decision.reset
+    assert calls == {"reset": 1, "update": 1}
+
+
+def test_run_initial_axis_reset_runtime_applies_callbacks_and_prints_axis_guess():
+    state = _state_from_base(np.zeros((2, 2)))
+    reset_state = _state_from_base(np.ones((2, 2)))
+    calls: dict[str, int] = {"reset": 0, "host_update": 0, "apply": 0, "zero": 0, "guess": 0}
+    messages: list[str] = []
+
+    def reset_axis(_state, **_kwargs):
+        calls["reset"] += 1
+        return reset_state
+
+    def host_update(_state, *_args):
+        calls["host_update"] += 1
+        return SimpleNamespace(marker="axis-update")
+
+    def apply_controller(callback, payload):
+        calls["apply"] += 1
+        assert callback == "controller"
+        assert payload.marker == "axis-update"
+
+    def print_guess(raxis_cc, zaxis_cs):
+        calls["guess"] += 1
+        np.testing.assert_allclose(raxis_cc, [1.0])
+        np.testing.assert_allclose(zaxis_cs, [0.0])
+
+    result = run_initial_axis_reset_runtime(
+        state=state,
+        k=SimpleNamespace(),
+        iter_idx=1,
+        bad_jacobian=True,
+        fsq_phys=2.0,
+        axis_reset_done=False,
+        lmove_axis=True,
+        vmec2000_control=True,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        lthreed=True,
+        time_step=0.5,
+        prev_rz_fsq_before=0.25,
+        k_ndamp=3,
+        verbose=True,
+        verbose_vmec2000_table=True,
+        callbacks=InitialAxisResetRuntimeCallbacks(
+            reset_axis,
+            host_update,
+            apply_controller,
+            "controller",
+            lambda: calls.__setitem__("zero", calls["zero"] + 1),
+            lambda: (np.array([1.0]), np.array([0.0]), np.array([0.0]), np.array([0.0])),
+            print_guess,
+        ),
+        print_func=lambda message, **_kwargs: messages.append(message),
+    )
+
+    assert result.state is reset_state
+    assert result.bad_jacobian
+    assert result.reset
+    assert result.repeat_iteration
+    assert calls == {"reset": 1, "host_update": 1, "apply": 1, "zero": 1, "guess": 1}
+    assert messages == [" INITIAL JACOBIAN CHANGED SIGN!", " TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS"]
 
 
 def test_initial_axis_reset_shared_bad_jacobian_helpers():

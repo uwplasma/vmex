@@ -6374,3 +6374,69 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.1%.
 - Docs/release hygiene: 100%.
 - Overall: 99.5%.
+
+### 2026-06-25: Package first-step axis-reset runtime seam
+
+Steps taken:
+
+- Added ``InitialAxisResetRuntimeUpdate``,
+  ``InitialAxisResetRuntimeCallbacks``, and
+  ``run_initial_axis_reset_runtime`` to
+  ``solvers/fixed_boundary/diagnostics/axis_reset.py``.
+- Moved VMEC2000 first-step magnetic-axis retry state construction,
+  controller-update payload creation, VMEC-style print callbacks, and primary
+  velocity zeroing out of ``solve_fixed_boundary_residual_iter``.
+- Kept residual-loop-owned side effects in the caller: cache invalidation,
+  free-boundary-control invalidation, history rollback, timing closure, and
+  iteration-repeat control.
+- Added direct tests for skipped runtime-reset branches, reset-state/update
+  payload construction, and the combined callback path including printed axis
+  guess output.
+
+Results obtained:
+
+- ``python -m ruff check
+  vmec_jax/solvers/fixed_boundary/diagnostics/axis_reset.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tests/test_solve_axis_helpers_more_coverage.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_axis_helpers_more_coverage.py
+  tests/test_solve_additional_helpers.py tests/test_solve_branch_coverage.py``
+  passed with ``121 passed``.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_axis_helpers_more_coverage.py tests/test_residual_ptau.py
+  tests/test_residual_iteration_preconditioner.py
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_additional_helpers.py tests/test_driver_api.py
+  tests/test_free_boundary_wp0.py`` passed with ``257 passed, 2 skipped``.
+- ``git diff --check`` and ``repo_size_audit.py`` passed; tracked size is
+  ``28.38 MiB`` with no tracked file above ``2 MiB``.
+- Source-health reports the residual module at ``2917`` lines and
+  ``solve_fixed_boundary_residual_iter`` at ``2526`` lines.  This keeps module
+  size flat relative to the prior tranche and reduces the main solver function
+  by one line while moving the branch into a tested domain helper.
+
+Best next steps:
+
+1. Extract the VMEC2000 time-control/restart branch next; it is larger than the
+   axis-reset seam and should produce a clearer source-health reduction.
+2. After that extraction, run the x64 free-boundary derivative subset again to
+   keep branch-local replay evidence current.
+3. Keep full benchmark/parity artifact regeneration reserved for math-path or
+   performance-path changes; this tranche is controller refactoring only.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 96.8%.
+- Free-boundary production differentiability: 97.1%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 72.3%.
+- VMEC2000/VMEC++ parity and physics gates: 99.1%.
+- Docs/release hygiene: 100%.
+- Overall: 99.5%.

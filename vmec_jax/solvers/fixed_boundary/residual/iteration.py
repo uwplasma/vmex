@@ -260,8 +260,9 @@ from vmec_jax.solvers.fixed_boundary.results import (
     SolveVmecResidualResult,
 )
 from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
-    initial_axis_reset_runtime_decision as _initial_axis_reset_runtime_decision,
+    InitialAxisResetRuntimeCallbacks as _InitialAxisResetRuntimeCallbacks,
     reset_axis_from_boundary as _reset_axis_from_boundary_impl,
+    run_initial_axis_reset_runtime as _run_initial_axis_reset_runtime,
     run_initial_axis_reset_setup as _run_initial_axis_reset_setup,
 )
 from vmec_jax.solvers.free_boundary.control import (
@@ -1305,6 +1306,11 @@ def solve_fixed_boundary_residual_iter(
         nonlocal velocity_blocks
         velocity_blocks = _zero_primary_velocity_blocks_like(velocity_blocks)
 
+    axis_reset_runtime_callbacks = _InitialAxisResetRuntimeCallbacks(
+        _reset_axis_from_boundary, _host_axis_reset_update, _apply_controller_update, _controller_after_axis_reset,
+        _zero_primary_velocity_blocks, lambda: axis_reset_coeffs, _print_scan_axis_guess,
+    )
+
     def _apply_strict_step_branch(branch_result, *, after_catastrophic_restart: bool = False):
         nonlocal state, step_status, restart_reason, huge_force_restart_count, restart_path, update_rms
         nonlocal max_coeff_delta_rms, max_update_rms, freeb_controls_cached
@@ -2330,35 +2336,29 @@ def solve_fixed_boundary_residual_iter(
             # VMEC eqsolve: after the first evolve step, if the Jacobian is bad
             # and ijacob==0, retry with an improved axis guess.
             if bool(vmec2000_control) and (not axis_reset_done) and bool(lmove_axis) and (iter2 == 1):
-                fsq_curr = fsqr_f + fsqz_f + fsql_f
-                axis_runtime_decision = _initial_axis_reset_runtime_decision(
+                axis_runtime_result = _run_initial_axis_reset_runtime(
+                    state=state,
+                    k=k,
+                    iter_idx=int(iter2),
                     bad_jacobian=bool(bad_jacobian),
-                    fsq_phys=fsq_curr,
+                    fsq_phys=fsqr_f + fsqz_f + fsql_f,
+                    axis_reset_done=bool(axis_reset_done),
+                    lmove_axis=bool(lmove_axis),
+                    vmec2000_control=bool(vmec2000_control),
                     axis_reset_fsq_min=float(axis_reset_fsq_min),
                     force_axis_reset=bool(force_axis_reset),
                     axis_reset_always_3d=bool(axis_reset_always_3d),
                     lthreed=bool(getattr(cfg, "lthreed", True)),
-                    vmec2000_control=bool(vmec2000_control),
-                    lmove_axis=bool(lmove_axis),
+                    time_step=float(time_step),
+                    prev_rz_fsq_before=float(prev_rz_fsq_before),
+                    k_ndamp=int(k_ndamp),
+                    verbose=bool(verbose),
+                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                    callbacks=axis_reset_runtime_callbacks,
                 )
-                bad_jacobian = bool(axis_runtime_decision.bad_jacobian)
-                huge_initial_forces = bool(axis_runtime_decision.huge_initial_forces)
-                force_axis_reset_init = bool(axis_runtime_decision.force_reset)
-                if axis_runtime_decision.reset:
-                    if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                        if bad_jacobian or force_axis_reset_init:
-                            print(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
-                        print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
-                    state = _reset_axis_from_boundary(state, k_guess=k, full_reset=False, refine_axis_guess=False)
-                    if verbose and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-                        if axis_reset_coeffs is not None:
-                            raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = axis_reset_coeffs
-                            _print_scan_axis_guess(raxis_cc, zaxis_cs)
-                    axis_reset_update = _host_axis_reset_update(
-                        state, float(time_step), int(iter2), float(prev_rz_fsq_before), int(k_ndamp)
-                    )
-                    _apply_controller_update(_controller_after_axis_reset, axis_reset_update)
-                    _zero_primary_velocity_blocks()
+                bad_jacobian = bool(axis_runtime_result.bad_jacobian)
+                if axis_runtime_result.reset:
+                    state = axis_runtime_result.state
                     axis_reset_done = True
                     freeb_controls_cached = None
                     precond_cache.clear()
@@ -2366,7 +2366,7 @@ def solve_fixed_boundary_residual_iter(
                     # VMEC restarts the iteration after axis reset without
                     # advancing the iteration counter. Emulate that by
                     # repeating iter2==1 on the next loop pass.
-                    if iter2 == 1:
+                    if axis_runtime_result.repeat_iteration:
                         iter_offset -= 1
                     _record_timing("iteration_control_badjac", t_iteration_control_badjac_start)
                     continue

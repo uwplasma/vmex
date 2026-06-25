@@ -29,6 +29,36 @@ class InitialAxisResetRuntimeDecision(NamedTuple):
     reset: bool
 
 
+class InitialAxisResetRuntimeUpdate(NamedTuple):
+    """State/update payload for the VMEC2000 first-step axis retry."""
+
+    decision: InitialAxisResetRuntimeDecision
+    state: VMECState
+    axis_reset_update: Any | None
+    repeat_iteration: bool
+
+
+class InitialAxisResetRuntimeResult(NamedTuple):
+    """Applied first-step axis retry result returned to the residual loop."""
+
+    state: VMECState
+    bad_jacobian: bool
+    reset: bool
+    repeat_iteration: bool
+
+
+class InitialAxisResetRuntimeCallbacks(NamedTuple):
+    """Callbacks needed by the first-step axis retry branch."""
+
+    reset_axis_from_boundary: Callable[..., VMECState]
+    host_axis_reset_update: Callable[..., Any]
+    apply_controller_update: Callable[..., Any]
+    controller_after_axis_reset: Callable[..., Any]
+    zero_primary_velocity_blocks: Callable[[], Any]
+    axis_reset_coeffs: Callable[[], tuple[Any, Any, Any, Any] | None]
+    print_axis_guess: Callable[[Any, Any], None]
+
+
 class InitialAxisResetEvaluation(NamedTuple):
     """Initial force/Jacobian diagnostics and reset decision."""
 
@@ -179,6 +209,153 @@ def initial_axis_reset_runtime_decision(
         bool(huge_initial_forces),
         bool(force_reset),
         bool(reset),
+    )
+
+
+def initial_axis_reset_runtime_update(
+    *,
+    state: VMECState,
+    k: Any,
+    iter_idx: int,
+    bad_jacobian: bool,
+    fsq_phys: float,
+    axis_reset_done: bool,
+    lmove_axis: bool,
+    vmec2000_control: bool,
+    axis_reset_fsq_min: float,
+    force_axis_reset: bool,
+    axis_reset_always_3d: bool,
+    lthreed: bool,
+    time_step: float,
+    prev_rz_fsq_before: float,
+    k_ndamp: int,
+    reset_axis_from_boundary_func: Callable[..., VMECState],
+    host_axis_reset_update_func: Callable[..., Any],
+) -> InitialAxisResetRuntimeUpdate:
+    """Return the optional in-loop axis-reset state/update payload.
+
+    VMEC2000 retries the first residual iteration after detecting a bad initial
+    Jacobian or very large initial forces.  This helper keeps that branch's
+    state mutation and controller-update payload together while leaving
+    printing, history rollback, and cache invalidation in the caller.
+    """
+
+    if not (bool(vmec2000_control) and (not bool(axis_reset_done)) and bool(lmove_axis) and int(iter_idx) == 1):
+        return InitialAxisResetRuntimeUpdate(
+            decision=InitialAxisResetRuntimeDecision(bool(bad_jacobian), False, False, False),
+            state=state,
+            axis_reset_update=None,
+            repeat_iteration=False,
+        )
+
+    decision = initial_axis_reset_runtime_decision(
+        bad_jacobian=bool(bad_jacobian),
+        fsq_phys=float(fsq_phys),
+        axis_reset_fsq_min=float(axis_reset_fsq_min),
+        force_axis_reset=bool(force_axis_reset),
+        axis_reset_always_3d=bool(axis_reset_always_3d),
+        lthreed=bool(lthreed),
+        vmec2000_control=bool(vmec2000_control),
+        lmove_axis=bool(lmove_axis),
+    )
+    if not decision.reset:
+        return InitialAxisResetRuntimeUpdate(
+            decision=decision,
+            state=state,
+            axis_reset_update=None,
+            repeat_iteration=False,
+        )
+
+    reset_state = reset_axis_from_boundary_func(
+        state,
+        k_guess=k,
+        full_reset=False,
+        refine_axis_guess=False,
+    )
+    axis_reset_update = host_axis_reset_update_func(
+        reset_state,
+        float(time_step),
+        int(iter_idx),
+        float(prev_rz_fsq_before),
+        int(k_ndamp),
+    )
+    return InitialAxisResetRuntimeUpdate(
+        decision=decision,
+        state=reset_state,
+        axis_reset_update=axis_reset_update,
+        repeat_iteration=int(iter_idx) == 1,
+    )
+
+
+def run_initial_axis_reset_runtime(
+    *,
+    state: VMECState,
+    k: Any,
+    iter_idx: int,
+    bad_jacobian: bool,
+    fsq_phys: float,
+    axis_reset_done: bool,
+    lmove_axis: bool,
+    vmec2000_control: bool,
+    axis_reset_fsq_min: float,
+    force_axis_reset: bool,
+    axis_reset_always_3d: bool,
+    lthreed: bool,
+    time_step: float,
+    prev_rz_fsq_before: float,
+    k_ndamp: int,
+    verbose: bool,
+    verbose_vmec2000_table: bool,
+    callbacks: InitialAxisResetRuntimeCallbacks,
+    print_func: Callable[..., None] = print,
+) -> InitialAxisResetRuntimeResult:
+    """Apply VMEC2000's optional first-step magnetic-axis retry."""
+
+    update = initial_axis_reset_runtime_update(
+        state=state,
+        k=k,
+        iter_idx=int(iter_idx),
+        bad_jacobian=bool(bad_jacobian),
+        fsq_phys=float(fsq_phys),
+        axis_reset_done=bool(axis_reset_done),
+        lmove_axis=bool(lmove_axis),
+        vmec2000_control=bool(vmec2000_control),
+        axis_reset_fsq_min=float(axis_reset_fsq_min),
+        force_axis_reset=bool(force_axis_reset),
+        axis_reset_always_3d=bool(axis_reset_always_3d),
+        lthreed=bool(lthreed),
+        time_step=float(time_step),
+        prev_rz_fsq_before=float(prev_rz_fsq_before),
+        k_ndamp=int(k_ndamp),
+        reset_axis_from_boundary_func=callbacks.reset_axis_from_boundary,
+        host_axis_reset_update_func=callbacks.host_axis_reset_update,
+    )
+    decision = update.decision
+    if not decision.reset:
+        return InitialAxisResetRuntimeResult(
+            state=state,
+            bad_jacobian=bool(decision.bad_jacobian),
+            reset=False,
+            repeat_iteration=False,
+        )
+
+    if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
+        if bool(decision.bad_jacobian) or bool(decision.force_reset):
+            print_func(" INITIAL JACOBIAN CHANGED SIGN!", flush=True)
+        print_func(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
+
+    coeffs = callbacks.axis_reset_coeffs()
+    if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table) and coeffs is not None:
+        raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = coeffs
+        callbacks.print_axis_guess(raxis_cc, zaxis_cs)
+
+    callbacks.apply_controller_update(callbacks.controller_after_axis_reset, update.axis_reset_update)
+    callbacks.zero_primary_velocity_blocks()
+    return InitialAxisResetRuntimeResult(
+        state=update.state,
+        bad_jacobian=bool(decision.bad_jacobian),
+        reset=True,
+        repeat_iteration=bool(update.repeat_iteration),
     )
 
 
