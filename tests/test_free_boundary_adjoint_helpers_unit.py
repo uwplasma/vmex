@@ -10,6 +10,7 @@ from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
 from vmec_jax.solvers.free_boundary.adjoint import branch_local as branch_local_helpers
 from vmec_jax.solvers.free_boundary.adjoint import direct_coil_replay as direct_coil_replay_helpers
+from vmec_jax.solvers.free_boundary.adjoint import facade as facade_helpers
 from vmec_jax.solvers.free_boundary.adjoint import pytrees as pytree_helpers
 from vmec_jax.solvers.free_boundary.adjoint import replay_plan as replay_plan_helpers
 from vmec_jax.solvers.free_boundary.adjoint import runtime as runtime_helpers
@@ -17,6 +18,45 @@ from vmec_jax.solvers.free_boundary.adjoint import trace_controls
 from vmec_jax.solvers.free_boundary.adjoint import trace_fingerprint
 from vmec_jax.solvers.free_boundary.adjoint import trace_metadata
 from vmec_jax.solvers.free_boundary.adjoint import trace_stack
+
+
+def test_current_only_coil_geometry_helper_expands_currents_without_resampling_curves() -> None:
+    pytest.importorskip("jax")
+    from vmec_jax.external_fields import (
+        CoilFieldParams,
+        apply_stellarator_symmetry_to_currents,
+        build_coil_field_geometry,
+    )
+
+    dofs = jnp.zeros((1, 3, 3), dtype=float)
+    dofs = dofs.at[0, 0, 2].set(1.3)
+    dofs = dofs.at[0, 1, 1].set(1.3)
+    params = CoilFieldParams(
+        base_curve_dofs=dofs,
+        base_currents=jnp.asarray([2.0]),
+        n_segments=12,
+        nfp=2,
+        stellsym=True,
+        current_scale=3.0,
+    )
+    fixed_gamma, fixed_gamma_dash, _old_currents = build_coil_field_geometry(params)
+    trial_currents = jnp.asarray([5.0])
+
+    gamma, gamma_dash, expanded_currents = facade_helpers._current_only_coil_geometry_for_base_currents(
+        params,
+        fixed_gamma=fixed_gamma,
+        fixed_gamma_dash=fixed_gamma_dash,
+        base_currents=trial_currents,
+    )
+
+    np.testing.assert_allclose(np.asarray(gamma), np.asarray(fixed_gamma))
+    np.testing.assert_allclose(np.asarray(gamma_dash), np.asarray(fixed_gamma_dash))
+    expected = params.current_scale * apply_stellarator_symmetry_to_currents(
+        trial_currents,
+        nfp=params.nfp,
+        stellsym=params.stellsym,
+    )
+    np.testing.assert_allclose(np.asarray(expanded_currents), np.asarray(expected))
 
 
 def test_free_boundary_adjoint_runtime_helpers_sync_and_scope_fallbacks() -> None:

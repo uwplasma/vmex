@@ -830,6 +830,53 @@ def _branch_local_directional_jvp_signature(
     return signature
 
 
+def _current_only_coil_geometry_for_base_currents(
+    params: Any,
+    *,
+    fixed_gamma: Any,
+    fixed_gamma_dash: Any,
+    base_currents: Any,
+) -> tuple[Any, Any, Any]:
+    """Return fixed-curve coil geometry with differentiated base currents."""
+
+    from vmec_jax.external_fields.coils_jax import apply_stellarator_symmetry_to_currents
+
+    expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
+        base_currents,
+        nfp=params.nfp,
+        stellsym=params.stellsym,
+    )
+    return fixed_gamma, fixed_gamma_dash, expanded_currents
+
+
+def _current_only_branch_local_replay_scalars(
+    base_currents: Any,
+    *,
+    params: Any,
+    fixed_gamma: Any,
+    fixed_gamma_dash: Any,
+    initial_state: Any,
+    replay_plan: Mapping[str, Any] | None,
+    replay_options: Mapping[str, Any],
+    scalar_fn_seq: tuple[Any, ...],
+) -> Any:
+    """Replay scalar vector for the current-only branch-local JVP path."""
+
+    replay = direct_coil_accepted_trace_controller_replay_objective_jax(
+        params.with_arrays(base_currents=base_currents),
+        initial_state,
+        replay_plan=replay_plan,
+        coil_geometry=_current_only_coil_geometry_for_base_currents(
+            params,
+            fixed_gamma=fixed_gamma,
+            fixed_gamma_dash=fixed_gamma_dash,
+            base_currents=base_currents,
+        ),
+        **replay_options,
+    )
+    return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
+
+
 def _branch_local_scalar_derivatives(
     *,
     params: Any,
@@ -867,25 +914,18 @@ def _branch_local_scalar_derivatives(
             directional_fast_path = "current_only"
             directional_uses_fixed_coil_geometry = True
             current_only_geometry_source = str(current_jvp.geometry_source)
-            from vmec_jax.external_fields.coils_jax import apply_stellarator_symmetry_to_currents
-
-            def _fixed_geometry_for_currents(base_currents):
-                expanded_currents = params.current_scale * apply_stellarator_symmetry_to_currents(
-                    base_currents,
-                    nfp=params.nfp,
-                    stellsym=params.stellsym,
-                )
-                return current_jvp.fixed_gamma, current_jvp.fixed_gamma_dash, expanded_currents
 
             def _replay_scalars_current_only(base_currents):
-                replay = direct_coil_accepted_trace_controller_replay_objective_jax(
-                    params.with_arrays(base_currents=base_currents),
-                    replay_traces[0]["state_pre"],
+                return _current_only_branch_local_replay_scalars(
+                    base_currents,
+                    params=params,
+                    fixed_gamma=current_jvp.fixed_gamma,
+                    fixed_gamma_dash=current_jvp.fixed_gamma_dash,
+                    initial_state=replay_traces[0]["state_pre"],
                     replay_plan=replay_plan,
-                    coil_geometry=_fixed_geometry_for_currents(base_currents),
-                    **replay_options,
+                    replay_options=replay_options,
+                    scalar_fn_seq=scalar_fn_seq,
                 )
-                return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
 
             jvp_primal = (current_jvp.base_leaf,)
             jvp_tangent = (current_jvp.direction_leaf,)
