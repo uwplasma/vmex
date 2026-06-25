@@ -64,6 +64,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _setup_timer_start as _runtime_setup_timer_start,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
     dump_xc_with_velocity_blocks as _dump_xc_with_velocity_blocks,
+    edge_bsqvac_from_nestor as _edge_bsqvac_from_nestor,
     record_elapsed_timing as _record_elapsed_timing,
     record_update_state_ready_timing as _record_update_state_ready_timing,
     record_update_total_timing as _record_update_total_timing,
@@ -336,13 +337,6 @@ _edge_signature_key = _solve_runtime._edge_signature_key
 _edge_value_key = _solve_runtime._edge_value_key
 _scan_fallback_policy = _solve_runtime._scan_fallback_policy
 _residual_convergence_flags = _solve_runtime._residual_convergence_flags
-
-
-def _edge_bsqvac_from_nestor(nestor_result, static) -> np.ndarray:
-    bsqvac_edge = np.asarray(nestor_result.vac_total.bsqvac, dtype=float)
-    if bsqvac_edge.ndim == 2 and int(bsqvac_edge.shape[1]) == 1 and int(getattr(static.cfg, "nzeta", 1)) > 1:
-        bsqvac_edge = np.repeat(bsqvac_edge, int(static.cfg.nzeta), axis=1)
-    return bsqvac_edge
 
 
 def _scan_chunk_settings(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 import vmec_jax._solve_runtime as runtime
+from vmec_jax.solvers.fixed_boundary.residual import runtime as residual_runtime
 
 
 def test_scan_chunk_settings_invalid_env_uses_screen_floor(monkeypatch):
@@ -76,6 +79,29 @@ def test_scan_chunk_settings_accelerator_quiet_uses_full_budget(monkeypatch):
 
     assert chunk_size == 12
     assert cap_to_remaining is True
+
+
+def test_edge_bsqvac_from_nestor_broadcasts_single_zeta_plane():
+    nestor = SimpleNamespace(
+        vac_total=SimpleNamespace(bsqvac=np.array([[1.0], [2.0]], dtype=float))
+    )
+    static = SimpleNamespace(cfg=SimpleNamespace(nzeta=3))
+
+    out = residual_runtime.edge_bsqvac_from_nestor(nestor, static)
+
+    assert out.shape == (2, 3)
+    np.testing.assert_allclose(out, np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]))
+
+
+def test_edge_bsqvac_from_nestor_keeps_full_zeta_grid():
+    edge = np.array([[1.0, 1.5], [2.0, 2.5]], dtype=float)
+    nestor = SimpleNamespace(vac_total=SimpleNamespace(bsqvac=edge))
+    static = SimpleNamespace(cfg=SimpleNamespace(nzeta=3))
+
+    out = residual_runtime.edge_bsqvac_from_nestor(nestor, static)
+
+    assert out.shape == (2, 2)
+    np.testing.assert_allclose(out, edge)
 
 
 @pytest.mark.parametrize(

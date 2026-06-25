@@ -423,6 +423,24 @@ def _vmec_freeb_plascur_from_bcovar(
     return float(fallback)
 
 
+def edge_bsqvac_from_nestor(nestor_result: Any, static: Any) -> np.ndarray:
+    """Return VMEC half-|B|^2 edge data with VMEC's full nzeta plane count.
+
+    JAX/ESSOS direct-coil paths may return a single toroidal plane when the
+    vacuum solve is toroidally constant. The residual loop expects the VMEC
+    half-mesh edge array to have one column per configured zeta point.
+    """
+
+    bsqvac_edge = np.asarray(nestor_result.vac_total.bsqvac, dtype=float)
+    if (
+        bsqvac_edge.ndim == 2
+        and int(bsqvac_edge.shape[1]) == 1
+        and int(getattr(static.cfg, "nzeta", 1)) > 1
+    ):
+        bsqvac_edge = np.repeat(bsqvac_edge, int(static.cfg.nzeta), axis=1)
+    return bsqvac_edge
+
+
 def _freeb_trial_bsqvac_half(
     candidate_state: Any,
     *,
