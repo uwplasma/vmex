@@ -2539,11 +2539,11 @@ Regenerate the current fixed-boundary plot and current-vs-main comparison with:
      --backend all \
      --warm-runs 1 \
      --jax-platforms cpu \
-     --runner-label current-cpu-compact \
+     --runner-label current-cpu-fulljit \
      --vmec-exec ~/bin/xvmec2000 \
      --timeout-s 1800 \
      --vmec-timeout-s 1800 \
-     --outdir outputs/pr20_full_matrix_current_cpu_sg_compact
+     --outdir outputs/pr20_full_matrix_current_cpu_sg_fulljit
 
    cd /path/to/a/clean/origin-main/worktree
    PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
@@ -2560,13 +2560,13 @@ Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 
    cd /path/to/the/pr/worktree
    python tools/diagnostics/compare_runtime_memory_matrix.py \
-     --current outputs/pr20_full_matrix_current_cpu_sg/summary.json \
+     --current outputs/pr20_full_matrix_current_cpu_sg_fulljit/summary.json \
      --baseline /path/to/a/clean/origin-main/worktree/outputs/pr20_full_matrix_main_cpu_sg/summary.json \
      --csv-out docs/_static/figures/readme_runtime_compare_current_vs_main.csv \
      --json-out docs/_static/figures/readme_runtime_compare_current_vs_main.json
 
    python tools/diagnostics/readme_runtime_compare.py \
-     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg/summary.json \
+     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg_fulljit/summary.json \
      --figure-kind fixed --plot-mode runtime_memory \
      --figure-out docs/_static/figures/readme_runtime_compare.png \
      --csv-out docs/_static/figures/readme_runtime_compare.csv \

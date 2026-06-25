@@ -4503,3 +4503,43 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.6%.
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
+
+### 2026-06-25: Align performance-doc regeneration commands with refreshed artifacts
+
+Steps taken:
+
+- Updated the performance documentation regeneration commands to use the same
+  ``outputs/pr20_full_matrix_current_cpu_sg_fulljit`` current-summary path that
+  produced the refreshed docs-facing benchmark artifacts.
+- Rebuilt the docs with warnings as errors after the command-path correction.
+
+Results obtained:
+
+- The performance page no longer mixes ``current_cpu_sg_compact`` or stale
+  ``current_cpu_sg`` paths with the refreshed full-JIT artifact path.
+- ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_pr_readiness`` passed after rebuilding the changed pages.
+
+Best next steps:
+
+1. Commit and push the docs command-path correction.
+2. Check the latest CI status; only intervene if the current run reports a
+   concrete failure.
+3. If CI remains green, use PR review to decide whether to stop this tranche or
+   proceed to the broader controller-state refactor in a separate review scope.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 61.4%.
+- VMEC2000/VMEC++ parity and physics gates: 98.6%.
+- Docs/release hygiene: 100%.
+- Overall: 99.0%.
