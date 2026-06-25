@@ -4504,6 +4504,61 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
 
+### 2026-06-25: Package pre-restart trigger branch side effects
+
+Steps taken:
+
+- Added a typed ``HostPreRestartTriggerBranchResult`` in the fixed-boundary
+  residual update helpers.
+- Rewired the pre-restart trigger branch in ``solve_fixed_boundary_residual_iter``
+  to consume that result for rollback state, restart labels, time-step reporting,
+  cache-clear policy, VMEC2000-specific ``force_bcovar_update`` behavior,
+  history-pop policy, and ``prev_rz_fsq`` restoration.
+- Added a focused unit test that locks both VMEC2000 and non-VMEC2000 branch
+  side-effect contracts.
+
+Results obtained:
+
+- ``python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tests/test_solve_residual_iter_update_helpers.py`` passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed with 79 residual-helper tests.
+- ``python tools/diagnostics/source_health.py --top 20 --top-functions 50
+  --max-root-helper-prefix-files 2`` passed the configured source-health gate.
+- ``python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50
+  --max-file-mib 2`` passed with 28.25 MiB tracked.
+- ``git diff --check`` passed.
+
+Best next steps:
+
+1. Commit and push this pre-restart branch-result refactor.
+2. Check the latest GitHub Actions run after the push; inspect logs only if it
+   reports a concrete failure.
+3. If continuing implementation, stop adding one-off branch wrappers and move to
+   the next larger residual-controller API refactor tranche with a narrow test
+   matrix, because the remaining low-risk restart branches are now explicitly
+   packaged.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 94.9%.
+- Free-boundary production differentiability: 96.2%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 64.7%.
+- VMEC2000/VMEC++ parity and physics gates: 98.8%.
+- Docs/release hygiene: 100%.
+- Overall: 99.2%.
+
 ### 2026-06-25: Package VMEC2000 time-control restart branch side effects
 
 Steps taken:

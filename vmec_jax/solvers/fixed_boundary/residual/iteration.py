@@ -125,6 +125,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_free_boundary_turnon_restart_update as _host_free_boundary_turnon_restart_update,
     host_initial_axis_reset_update as _host_axis_reset_update,
+    host_pre_restart_trigger_branch_result as _host_pre_restart_trigger_branch_result,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
     host_vmec2000_time_control_restart_branch_result as _host_vmec2000_time_control_restart_branch_result,
     host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
@@ -2616,8 +2617,6 @@ def solve_fixed_boundary_residual_iter(
             if startup_policy.use_restart_triggers and pre_restart_reason != "none":
                 state_before_restart = state
                 velocity_blocks_before = velocity_blocks
-                state = state_checkpoint
-                _zero_all_velocity_blocks()
                 pre_restart_update = _host_pre_restart_trigger_update(
                     pre_restart_reason=pre_restart_reason,
                     huge_initial_forces=bool(huge_initial_forces),
@@ -2634,18 +2633,32 @@ def solve_fixed_boundary_residual_iter(
                     fsq0_prev_before=float(fsq0_prev_before),
                     k_ndamp=int(k_ndamp),
                 )
-                _apply_controller_update(_controller_state_after_pre_restart_update, pre_restart_update)
-                time_step_iter = pre_restart_update.time_step_iter
-                step_status = pre_restart_update.step_status
-                freeb_controls_cached = None
-                precond_cache.clear()
-                if bool(vmec2000_control):
+                pre_restart_branch = _host_pre_restart_trigger_branch_result(
+                    state_checkpoint=state_checkpoint,
+                    pre_restart_update=pre_restart_update,
+                    pre_restart_reason=pre_restart_reason,
+                    prev_rz_fsq_before=prev_rz_fsq_before,
+                    vmec2000_control=bool(vmec2000_control),
+                )
+                state = pre_restart_branch.state
+                _zero_all_velocity_blocks()
+                _apply_controller_update(
+                    _controller_state_after_pre_restart_update,
+                    pre_restart_branch.update,
+                )
+                time_step_iter = pre_restart_branch.time_step_iter
+                step_status = pre_restart_branch.step_status
+                if pre_restart_branch.clear_freeb_controls:
+                    freeb_controls_cached = None
+                if pre_restart_branch.clear_preconditioner_cache:
+                    precond_cache.clear()
+                if pre_restart_branch.force_bcovar_update:
                     force_bcovar_update = True
                 _append_current_zero_update_history(
-                    restart_path="pre_restart_trigger",
+                    restart_path=pre_restart_branch.restart_path,
                     step_status=step_status,
-                    restart_reason=pre_restart_reason,
-                    pre_restart_reason=pre_restart_reason,
+                    restart_reason=pre_restart_branch.restart_reason,
+                    pre_restart_reason=pre_restart_branch.pre_restart_reason,
                     time_step_value=time_step_iter,
                 )
                 _print_compact_residual_iteration_update_status(
@@ -2665,9 +2678,10 @@ def solve_fixed_boundary_residual_iter(
                     static=static,
                     iter_idx=int(iter2),
                 )
-                _pop_iteration_histories()
-                prev_rz_fsq = prev_rz_fsq_before
-                skip_time_control = True
+                if pre_restart_branch.pop_iteration_history:
+                    _pop_iteration_histories()
+                prev_rz_fsq = pre_restart_branch.prev_rz_fsq
+                skip_time_control = pre_restart_branch.skip_time_control
                 _record_timing("iteration_control_restart", t_iteration_control_restart_start)
                 continue
 
