@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 
@@ -84,6 +85,47 @@ def test_optional_validation_lasym_freeb_example_matches_manifest_case() -> None
     assert float(case["activate_fsq"]) == 1.0e99
     assert set(case["runtime_thresholds_s_by_iter"]) == {"80", "100"}
     assert set(case["metric_thresholds_rel_scaled_by_iter"]) == {"80", "100"}
+
+
+def test_public_wout_parity_summary_keeps_promoted_rows_and_tolerances() -> None:
+    summary_path = ROOT / "docs" / "_static" / "figures" / "pr20_wout_parity_summary.json"
+    summary = json.loads(summary_path.read_text())
+    cases = {case["case"]: case for case in summary["cases"]}
+
+    assert set(cases) == {
+        "LandremanPaul2021_QA_lowres",
+        "nfp4_QH_warm_start",
+        "solovev",
+        "ITERModel",
+    }
+    assert summary["failed_cases"] == 0
+    assert summary["skip_vmec_jax"] is False
+    assert summary["executables"]
+
+    required_rel_rms = {
+        "rmnc",
+        "zmns",
+        "lmns",
+        "phipf",
+        "chipf",
+        "iotas",
+        "iotaf",
+        "pres",
+        "presf",
+        "gmnc",
+        "bmnc",
+        "bsupumnc",
+        "bsupvmnc",
+        "bsubumnc",
+        "bsubvmnc",
+    }
+    for case in cases.values():
+        assert case["lfreeb"] is False
+        assert case["vmec_jax"]["fsq_rss"] < 1.0e-8
+        assert case["vmec2000"]["fsq_rss"] < 1.0e-8
+        assert abs(case["vmec_jax"]["aspect"] - case["vmec2000"]["aspect"]) < 1.0e-10
+        assert required_rel_rms <= set(case["rel_rms"])
+        assert max(float(value) for value in case["rel_rms"].values()) < 5.0e-5
 
 
 def test_qi_case_specific_artifacts_are_not_documented_as_aspect5_promotions() -> None:
