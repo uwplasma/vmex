@@ -51,6 +51,8 @@ __all__ = [
     "same_branch_report_vector_keys_from_args",
     "same_branch_report_runtime_configs",
     "same_branch_report_mode_count",
+    "run_same_branch_scalar_report_section",
+    "run_same_branch_vector_report_section",
     "same_branch_scalar_result_summary",
     "same_branch_scalar_function_registry",
     "same_branch_vector_result_summary",
@@ -753,6 +755,171 @@ def same_branch_vector_result_summary(
             for index, key in enumerate(scalar_keys)
         },
     }
+
+
+def run_same_branch_scalar_report_section(
+    *,
+    enabled: bool,
+    scalar_key: str,
+    scalar_uses_state_only_replay: bool,
+    base_params: Any,
+    report: dict[str, Any],
+    report_base_values: dict[str, float],
+    replay_payload: dict[str, Any] | None,
+    replay_kwargs: dict[str, Any],
+    ad_mode: str,
+    scalar_value_fns: dict[str, Any],
+    scalar_replay_fns: dict[str, Any],
+    direction_params: Any,
+    compact_report: dict[str, Any],
+    timings: dict[str, float],
+    initial_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Run the optional scalar same-branch replay report."""
+
+    if not enabled:
+        return initial_summary
+
+    from vmec_jax.free_boundary_adjoint import direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax
+
+    scalar_replay_plan, scalar_plan_cache, scalar_plan_wall_s = same_branch_replay_plan_cache(
+        report,
+        replay_kwargs,
+        timing_key="branch_local_scalar_replay_plan_build_wall_s",
+        scope="scalar replay with unchanged accepted traces and controller policy",
+    )
+    compact_report["branch_local_scalar_replay_plan_cache"] = scalar_plan_cache
+    if scalar_plan_wall_s is not None:
+        timings["branch_local_scalar_replay_plan_build_wall_s"] = scalar_plan_wall_s
+    t0 = time.perf_counter()
+    scalar = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
+        params=base_params,
+        complete_payload=report["base"],
+        scalar_key=scalar_key,
+        production_values={scalar_key: report_base_values[scalar_key]},
+        replay_payload=replay_payload,
+        replay_plan=scalar_replay_plan,
+        scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
+        replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
+        replay_kwargs={**replay_kwargs, "state_only_replay": scalar_uses_state_only_replay},
+        replay_ad_mode=ad_mode,
+        include_trace_replay_diagnostics=False,
+        include_payload=False,
+        include_replay_graph_metadata=False,
+    )
+    timings["branch_local_scalar_wall_s"] = float(time.perf_counter() - t0)
+    scalar_timings = {str(key): float(value) for key, value in scalar.get("timings", {}).items()}
+    for key, value in scalar_timings.items():
+        timings[f"branch_local_scalar_{key}"] = value
+    branch_local_scalar = same_branch_scalar_result_summary(
+        scalar,
+        scalar_key,
+        report=report,
+        direction_params=direction_params,
+        state_only_replay=scalar_uses_state_only_replay,
+    )
+    branch_local_scalar["mode"] = "scalar"
+    return branch_local_scalar
+
+
+def run_same_branch_vector_report_section(
+    *,
+    enabled: bool,
+    vector_keys: tuple[str, ...],
+    vector_uses_state_only_replay: bool,
+    base_params: Any,
+    direction_params: Any,
+    report: dict[str, Any],
+    replay_kwargs: dict[str, Any],
+    run_branch_local_vector: Any,
+    compact_report: dict[str, Any],
+    timings: dict[str, float],
+    json_safe_payload_fn: Any,
+    initial_vector_summary: dict[str, Any],
+    initial_gate_summary: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+    """Run the optional vector/JVP same-branch replay report."""
+
+    if not enabled:
+        return initial_vector_summary, initial_gate_summary, None, None
+
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_branch_local_scalars_report_from_complete_fd,
+        direct_coil_same_branch_physical_scalar_gate_report,
+    )
+
+    current_only_coil_geometry, current_only_geometry_cache, current_only_geometry_wall_s = (
+        same_branch_current_only_coil_geometry_cache(base_params, direction_params)
+    )
+    run_branch_local_vector.current_only_coil_geometry = current_only_coil_geometry
+    compact_report["current_only_coil_geometry_cache"] = current_only_geometry_cache
+    if current_only_geometry_wall_s is not None:
+        timings["branch_local_current_only_coil_geometry_build_wall_s"] = current_only_geometry_wall_s
+    main_vector_replay_plan, vector_plan_cache, vector_plan_wall_s = same_branch_replay_plan_cache(
+        report,
+        replay_kwargs,
+        timing_key="branch_local_vector_replay_plan_build_wall_s",
+        scope="base vector/profile replays with unchanged accepted traces and controller policy",
+    )
+    compact_report["branch_local_vector_replay_plan_cache"] = vector_plan_cache
+    if vector_plan_wall_s is not None:
+        timings["branch_local_vector_replay_plan_build_wall_s"] = vector_plan_wall_s
+    t0 = time.perf_counter()
+    vector = run_branch_local_vector(
+        vector_keys,
+        {**replay_kwargs, "state_only_replay": vector_uses_state_only_replay},
+        replay_plan_for_call=main_vector_replay_plan,
+    )
+    timings["branch_local_vector_wall_s"] = float(time.perf_counter() - t0)
+    vector_timings = {str(key): float(value) for key, value in vector.get("timings", {}).items()}
+    for key, value in vector_timings.items():
+        timings[f"branch_local_vector_{key}"] = value
+    branch_local_vector = same_branch_vector_result_summary(
+        vector,
+        vector_keys,
+        report=report,
+        direction_params=direction_params,
+        state_only_keys=STATE_ONLY_SAME_BRANCH_KEYS,
+    )
+
+    production_rtol = {
+        key: 2.0e-2 if key == "qs_total" else 1.0e-2 if key == "accepted_bnormal_rms" else 5.0e-3
+        for key in vector_keys
+    }
+    try:
+        scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+            report,
+            vector,
+            scalar_keys=vector_keys,
+            rtol=production_rtol,
+            atol={key: 5.0e-8 for key in vector_keys},
+            base_value_atol={key: 2.0e-3 for key in vector_keys},
+        )
+        physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
+            report,
+            scalars_report,
+            scalar_keys=vector_keys,
+        )
+        branch_local_vector_gate = {
+            "available": True,
+            "passed": bool(physical_gate.get("passed", False)),
+            "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": bool(
+                scalars_report.get("differentiates_fixed_accepted_branch", False)
+            ),
+            "scalar_report": json_safe_payload_fn(scalars_report),
+            "physical_scalar_gate": json_safe_payload_fn(physical_gate),
+        }
+    except Exception as exc:  # pragma: no cover - report artifacts should not abort the example.
+        branch_local_vector_gate = {
+            "available": False,
+            "passed": False,
+            "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+    return branch_local_vector, branch_local_vector_gate, branch_local_vector, main_vector_replay_plan
 
 
 def nestor_profile_policy_from_results(
