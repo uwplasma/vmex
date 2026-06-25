@@ -341,7 +341,11 @@ The remaining work is deliberately narrow:
    ``1e-7`` and the improved ``NTOR=16`` deck slows near ``1e-8`` by 12000
    direct-coil iterations, do not spend more local CPU on longer single-stage
    runs at either same deck before changing resolution, schedule, or geometry
-   representation.
+   representation. For pure direct-provider GPU profiling, use
+   ``--jit-forces --coil-chunk-size 0 --skip-mgrid --skip-provider-parity`` so
+   the run does not spend memory generating an unused mgrid. When a backend
+   comparison still needs a generated mgrid, keep the mgrid write chunked even
+   if the direct sampler is using the full-geometry JIT path.
 2. Re-run the square-coil beta ladder with per-beta checkpointing and the
    best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at
    ``1e-12``. Keep ``DELT=0.02``, ``NVACSKIP=1``,
