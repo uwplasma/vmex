@@ -213,6 +213,14 @@ reduces the max component projection error from about ``3.2e-4`` to
 ``1.3e-4`` at ``MPOL=5, NTOR=12`` and from about ``7.1e-5`` to ``1.4e-5`` at
 ``MPOL=6, NTOR=23``. This supports using the spline envelope for the hybrid
 square axis, while still requiring ``MPOL``/``NTOR``/``NZETA`` convergence.
+A higher-mode projection spot check on the same spline shape gives max
+component boundary errors of about ``1.27e-4`` for ``MPOL=5, NTOR=12``,
+``4.77e-5`` for ``5,16``, ``1.44e-5`` for ``6,23``, ``8.96e-6`` for
+``7,28``, and ``6.12e-6`` for ``8,32``. If the current ``6,23`` strict solves
+plateau above ``1e-12``, the next finite resolution ladder should therefore be
+``7,28`` and ``8,32`` with ``NZETA`` at least the corresponding
+``recommended_square_axis_nzeta`` value, rather than a blind iteration-budget
+extension of the same Fourier deck.
 
 Physics And Algorithm Findings
 ------------------------------
