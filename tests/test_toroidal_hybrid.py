@@ -19,6 +19,7 @@ from vmec_jax.toroidal_hybrid import (
     sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
     square_axis_stellarator_mirror_hybrid_indata,
+    square_axis_stellarator_mirror_hybrid_projection_error,
     toroidal_hybrid_cross_section_anisotropy,
     toroidal_hybrid_cross_section_orientation,
     toroidal_stellarator_mirror_hybrid_indata,
@@ -90,7 +91,15 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
     assert "ZBC" not in indata.indexed
     assert vj.sample_square_axis_stellarator_mirror_hybrid_boundary is sample_square_axis_stellarator_mirror_hybrid_boundary
     assert vj.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
+    assert (
+        vj.square_axis_stellarator_mirror_hybrid_projection_error
+        is square_axis_stellarator_mirror_hybrid_projection_error
+    )
     assert public_api.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
+    assert (
+        public_api.square_axis_stellarator_mirror_hybrid_projection_error
+        is square_axis_stellarator_mirror_hybrid_projection_error
+    )
     assert public_api.recommended_square_axis_nzeta is recommended_square_axis_nzeta
 
 
@@ -155,6 +164,15 @@ def test_square_axis_spline_option_reduces_low_mode_projection_error():
             float(np.max(np.abs(reconstructed.R - samples.R))),
             float(np.max(np.abs(reconstructed.Z - samples.Z))),
         )
+        helper_error = square_axis_stellarator_mirror_hybrid_projection_error(
+            mpol=6,
+            ntor=12,
+            ntheta_fit=64,
+            nzeta_fit=128,
+            axis_kind=axis_kind,
+            **{key: value for key, value in kwargs.items() if key not in {"ntheta", "nzeta"}},
+        )
+        assert helper_error["max_abs_component_error"] == pytest.approx(errors[axis_kind])
 
     assert errors["spline"] < errors["superellipse"]
     assert errors["spline"] < 2.0e-4
@@ -416,6 +434,9 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert metrics["hybrid_fixture_kind"] == "square_axis_toroidal_stellarator_mirror_hybrid"
     assert metrics["coil_count"] == 4
     assert metrics["n_coils_per_side"] == 1
+    assert metrics["boundary_projection"]["mpol"] == 3
+    assert metrics["boundary_projection"]["ntor"] == 4
+    assert np.isfinite(float(metrics["boundary_projection"]["max_abs_error"]))
     assert metrics["betas_percent"] == [0.0]
     assert metrics["figures"] == {}
     assert Path(metrics["coils_json"]).exists()

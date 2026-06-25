@@ -31,7 +31,11 @@ from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_ru
 from vmec_jax.external_fields import build_coil_field_geometry, write_mgrid_from_coils
 from vmec_jax.free_boundary import _sample_external_boundary_arrays
 from vmec_jax.namelist import write_indata
-from vmec_jax.toroidal_hybrid import evaluate_toroidal_hybrid_indata_boundary, recommended_square_axis_nzeta
+from vmec_jax.toroidal_hybrid import (
+    evaluate_toroidal_hybrid_indata_boundary,
+    recommended_square_axis_nzeta,
+    square_axis_stellarator_mirror_hybrid_projection_error,
+)
 from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1, find_vmec2000_exec, run_xvmec2000
 
 
@@ -700,6 +704,33 @@ def _provider_parity_payload(
         }
 
 
+def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return the Fourier truncation error for the profile boundary deck."""
+
+    return square_axis_stellarator_mirror_hybrid_projection_error(
+        nfp=int(config.nfp),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ntheta_fit=max(64, 4 * int(config.mpol)),
+        nzeta_fit=max(128, 8 * int(config.ntor)),
+        ns_array=[int(value) for value in config.ns_array],
+        niter_array=[int(value) for value in config.niter_array],
+        ftol_array=[float(value) for value in config.ftol_array],
+        phiedge=float(config.phiedge),
+        axis_half_width=float(config.plasma_axis_half_width),
+        axis_kind=str(config.plasma_axis_kind),
+        axis_square_power=float(config.plasma_axis_square_power),
+        axis_spline_corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
+        minor_radius=float(config.plasma_minor_radius),
+        side_elongation=float(config.side_elongation),
+        side_minor_modulation=float(config.side_minor_modulation),
+        corner_ellipticity=float(config.corner_ellipticity),
+        corner_amplitude=float(config.corner_amplitude),
+        corner_rotation=float(config.corner_rotation),
+        corner_helicity=int(config.corner_helicity),
+    )
+
+
 def _vmec2000_row_payload(row: Any) -> dict[str, Any]:
     total = float(row.fsqr) + float(row.fsqz) + float(row.fsql)
     return {
@@ -833,6 +864,7 @@ def main(argv: list[str] | None = None) -> int:
             "nphi": int(mgrid_nphi),
             **bounds,
         },
+        "boundary_projection": _boundary_projection_payload(config),
         "provider_parity": None,
         "backends": {},
     }

@@ -204,7 +204,10 @@ through beta ``5%`` at ``FTOL=1e-8``; beta ``7%`` is the first high-beta stall
 for that coarse configuration. The square-coil lane now also has a native
 direct-coil-to-``mgrid`` writer, a direct/mgrid/VMEC2000 backend profiler, and a
 low-bandwidth rounded ``axis_kind="spline"`` square-axis option to reduce
-``NTOR`` sensitivity before VMEC Fourier projection. Direct-coil convergence
+``NTOR`` sensitivity before VMEC Fourier projection. The source helper and
+profiler now record ``boundary_projection`` truncation errors for the selected
+``MPOL``/``NTOR`` grid, so mode changes can be separated from nonlinear
+free-boundary convergence. Direct-coil convergence
 candidates are gated by a fresh residual recompute using the current
 plasma-current normalization, and the square-coil example records near-axis
 ``|B|`` and mirror-ratio response plots for comparison with the expected

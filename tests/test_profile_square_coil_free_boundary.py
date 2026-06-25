@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -189,3 +190,35 @@ def test_square_coil_profile_rejects_mgrid_nphi_not_multiple_of_nzeta(tmp_path: 
                 "--skip-provider-parity",
             ]
         )
+
+
+def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(profile, "write_mgrid_from_coils", lambda *args, **kwargs: None)
+
+    outdir = tmp_path / "profile"
+    profile.main(
+        [
+            "--outdir",
+            str(outdir),
+            "--mpol",
+            "3",
+            "--ntor",
+            "4",
+            "--ns",
+            "5",
+            "--nzeta",
+            "16",
+            "--max-iter",
+            "2",
+            "--skip-direct",
+            "--skip-mgrid",
+            "--skip-provider-parity",
+        ]
+    )
+
+    report = outdir / "square_coil_free_boundary_backend_profile.json"
+    data = json.loads(report.read_text())
+    projection = data["boundary_projection"]
+    assert projection["mpol"] == 3
+    assert projection["ntor"] == 4
+    assert np.isfinite(float(projection["max_abs_error"]))

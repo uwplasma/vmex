@@ -41,7 +41,11 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.namelist import InData, write_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d
 from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
-from vmec_jax.toroidal_hybrid import recommended_square_axis_nzeta, square_axis_stellarator_mirror_hybrid_indata
+from vmec_jax.toroidal_hybrid import (
+    recommended_square_axis_nzeta,
+    square_axis_stellarator_mirror_hybrid_indata,
+    square_axis_stellarator_mirror_hybrid_projection_error,
+)
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
@@ -417,6 +421,34 @@ def make_free_boundary_indata(config: ExampleConfig, *, beta_percent: float) -> 
     if config.delt is not None:
         indata.scalars["DELT"] = float(config.delt)
     return indata
+
+
+def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return the Fourier truncation error for the configured input boundary."""
+
+    ns_values, niter_values, ftol_values = _stage_values(config)
+    return square_axis_stellarator_mirror_hybrid_projection_error(
+        nfp=int(config.nfp),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ntheta_fit=max(64, 4 * int(config.mpol)),
+        nzeta_fit=max(128, 8 * int(config.ntor)),
+        ns_array=ns_values,
+        niter_array=niter_values,
+        ftol_array=ftol_values,
+        phiedge=float(config.phiedge),
+        axis_half_width=float(config.plasma_axis_half_width),
+        axis_kind=str(config.plasma_axis_kind),
+        axis_square_power=float(config.plasma_axis_square_power),
+        axis_spline_corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
+        minor_radius=float(config.plasma_minor_radius),
+        side_elongation=float(config.side_elongation),
+        side_minor_modulation=float(config.side_minor_modulation),
+        corner_ellipticity=float(config.corner_ellipticity),
+        corner_amplitude=float(config.corner_amplitude),
+        corner_rotation=float(config.corner_rotation),
+        corner_helicity=int(config.corner_helicity),
+    )
 
 
 def _solved_surface_and_field(run: Any, config: ExampleConfig) -> tuple[np.ndarray, ...]:
@@ -1144,6 +1176,7 @@ def _metrics_payload(
         "plasma_axis_spline_corner_radius_factor": float(config.plasma_axis_spline_corner_radius_factor),
         "coil_square_side_length": float(config.coil_square_side_length),
         "toroidal_current": float(config.toroidal_current),
+        "boundary_projection": _boundary_projection_payload(config),
         "delt": None if config.delt is None else float(config.delt),
         "ns": int(config.ns),
         "ns_array": [int(value) for value in config.ns_array],

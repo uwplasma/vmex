@@ -402,6 +402,89 @@ def square_axis_stellarator_mirror_hybrid_indata(
     )
 
 
+def square_axis_stellarator_mirror_hybrid_projection_error(
+    *,
+    nfp: int = 1,
+    mpol: int = 5,
+    ntor: int = 12,
+    ntheta_fit: int = 64,
+    nzeta_fit: int = 128,
+    ntheta_eval: int | None = None,
+    nzeta_eval: int | None = None,
+    ns_array: int | list[int] = 9,
+    niter_array: int | list[int] = 40,
+    ftol_array: float | list[float] = 1.0e-8,
+    phiedge: float = 0.04,
+    coeff_tol: float = 1.0e-12,
+    **sample_kwargs: Any,
+) -> dict[str, float | int]:
+    """Measure Fourier projection error for a square-axis hybrid boundary.
+
+    The square-axis helper samples a smooth real-space boundary and then stores
+    it as ordinary VMEC Fourier boundary coefficients.  This diagnostic reports
+    how much the selected ``MPOL``/``NTOR`` truncation changes that sampled
+    boundary before any equilibrium solve is attempted.
+    """
+
+    ntheta_eval = int(ntheta_fit if ntheta_eval is None else ntheta_eval)
+    nzeta_eval = int(nzeta_fit if nzeta_eval is None else nzeta_eval)
+    target = sample_square_axis_stellarator_mirror_hybrid_boundary(
+        ntheta=ntheta_eval,
+        nzeta=nzeta_eval,
+        **sample_kwargs,
+    )
+    indata = square_axis_stellarator_mirror_hybrid_indata(
+        nfp=nfp,
+        mpol=mpol,
+        ntor=ntor,
+        ntheta_fit=ntheta_fit,
+        nzeta_fit=nzeta_fit,
+        ns_array=ns_array,
+        niter_array=niter_array,
+        ftol_array=ftol_array,
+        phiedge=phiedge,
+        coeff_tol=coeff_tol,
+        **sample_kwargs,
+    )
+    reconstructed = evaluate_toroidal_hybrid_indata_boundary(
+        indata,
+        ntheta=ntheta_eval,
+        nzeta=nzeta_eval,
+    )
+    dR = np.asarray(reconstructed.R, dtype=float) - np.asarray(target.R, dtype=float)
+    dZ = np.asarray(reconstructed.Z, dtype=float) - np.asarray(target.Z, dtype=float)
+    err = np.sqrt(dR * dR + dZ * dZ)
+    target_scale = max(
+        float(np.ptp(np.asarray(target.R, dtype=float))),
+        float(np.ptp(np.asarray(target.Z, dtype=float))),
+        np.finfo(float).tiny,
+    )
+    rms = float(np.sqrt(np.mean(err * err)))
+    max_abs = float(np.max(err))
+    max_abs_R = float(np.max(np.abs(dR)))
+    max_abs_Z = float(np.max(np.abs(dZ)))
+    max_abs_component = max(max_abs_R, max_abs_Z)
+    return {
+        "nfp": int(nfp),
+        "mpol": int(mpol),
+        "ntor": int(ntor),
+        "ntheta_fit": int(ntheta_fit),
+        "nzeta_fit": int(nzeta_fit),
+        "ntheta_eval": int(ntheta_eval),
+        "nzeta_eval": int(nzeta_eval),
+        "max_abs_R_error": max_abs_R,
+        "max_abs_Z_error": max_abs_Z,
+        "max_abs_component_error": max_abs_component,
+        "rms_R_error": float(np.sqrt(np.mean(dR * dR))),
+        "rms_Z_error": float(np.sqrt(np.mean(dZ * dZ))),
+        "max_abs_error": max_abs,
+        "rms_error": rms,
+        "max_abs_error_rel": float(max_abs / target_scale),
+        "max_abs_component_error_rel": float(max_abs_component / target_scale),
+        "rms_error_rel": float(rms / target_scale),
+    }
+
+
 def toroidal_stellarator_mirror_hybrid_metrics(samples: ToroidalHybridBoundarySamples) -> dict[str, float]:
     """Return lightweight geometry checks for a sampled hybrid boundary."""
     theta_reflect = (-np.arange(samples.theta.size)) % samples.theta.size
