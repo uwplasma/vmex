@@ -283,6 +283,24 @@ class HostPreRestartTriggerUpdate(NamedTuple):
     huge_force_restart_count: int
 
 
+class HostPreRestartTriggerBranchResult(NamedTuple):
+    """Loop-side effects for a host pre-restart trigger branch."""
+
+    state: Any
+    update: HostPreRestartTriggerUpdate
+    step_status: str
+    restart_path: str
+    restart_reason: str
+    pre_restart_reason: str
+    time_step_iter: float
+    prev_rz_fsq: float
+    clear_freeb_controls: bool
+    clear_preconditioner_cache: bool
+    force_bcovar_update: bool
+    pop_iteration_history: bool
+    skip_time_control: bool
+
+
 class HostVmec2000TimeControlRestartUpdate(NamedTuple):
     """Scalar state after a VMEC2000 time-control restart."""
 
@@ -520,6 +538,34 @@ def controller_state_after_pre_restart_update(
         bad_resets=int(update.bad_resets),
         bad_growth_streak=0,
         huge_force_restart_count=int(update.huge_force_restart_count),
+    )
+
+
+def host_pre_restart_trigger_branch_result(
+    *,
+    state_checkpoint: Any,
+    pre_restart_update: HostPreRestartTriggerUpdate,
+    pre_restart_reason: str,
+    prev_rz_fsq_before: float,
+    vmec2000_control: bool,
+) -> HostPreRestartTriggerBranchResult:
+    """Package pre-restart trigger side effects into one explicit contract."""
+
+    reason = str(pre_restart_reason)
+    return HostPreRestartTriggerBranchResult(
+        state=state_checkpoint,
+        update=pre_restart_update,
+        step_status=str(pre_restart_update.step_status),
+        restart_path="pre_restart_trigger",
+        restart_reason=reason,
+        pre_restart_reason=reason,
+        time_step_iter=float(pre_restart_update.time_step_iter),
+        prev_rz_fsq=float(prev_rz_fsq_before),
+        clear_freeb_controls=True,
+        clear_preconditioner_cache=True,
+        force_bcovar_update=bool(vmec2000_control),
+        pop_iteration_history=True,
+        skip_time_control=True,
     )
 
 

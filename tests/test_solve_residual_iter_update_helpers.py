@@ -25,6 +25,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_force_update_rms,
     host_initial_axis_reset_update,
     host_momentum_update_np,
+    host_pre_restart_trigger_branch_result,
     host_pre_restart_trigger_update,
     host_vmec2000_time_control_restart_branch_result,
     host_vmec2000_time_control_restart_update,
@@ -1449,3 +1450,53 @@ def test_host_pre_restart_trigger_update_applies_vmec_milestone_scale() -> None:
     assert update.step_status == "restart_bad_jacobian"
     np.testing.assert_allclose(update.time_step, 0.98 * 0.05)
     np.testing.assert_allclose(update.inv_tau, [0.15 / (0.98 * 0.05)])
+
+
+def test_host_pre_restart_trigger_branch_result_packages_side_effects() -> None:
+    update = host_pre_restart_trigger_update(
+        pre_restart_reason="bad_progress",
+        huge_initial_forces=False,
+        huge_force_restart_count=0,
+        time_step=0.103,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        stage_transition_scale=0.5,
+        step_size=0.1,
+        ijacob=3,
+        bad_resets=4,
+        iter2=12,
+        fsq_prev_before=1.25,
+        fsq0_prev_before=2.5,
+        k_ndamp=2,
+    )
+
+    got = host_pre_restart_trigger_branch_result(
+        state_checkpoint="checkpoint-state",
+        pre_restart_update=update,
+        pre_restart_reason="bad_progress",
+        prev_rz_fsq_before=0.375,
+        vmec2000_control=True,
+    )
+
+    assert got.state == "checkpoint-state"
+    assert got.update is update
+    assert got.step_status == "restart_bad_progress"
+    assert got.restart_path == "pre_restart_trigger"
+    assert got.restart_reason == "bad_progress"
+    assert got.pre_restart_reason == "bad_progress"
+    assert got.time_step_iter == pytest.approx(update.time_step_iter)
+    assert got.prev_rz_fsq == pytest.approx(0.375)
+    assert got.clear_freeb_controls is True
+    assert got.clear_preconditioner_cache is True
+    assert got.force_bcovar_update is True
+    assert got.pop_iteration_history is True
+    assert got.skip_time_control is True
+
+    no_vmec2000 = host_pre_restart_trigger_branch_result(
+        state_checkpoint="checkpoint-state",
+        pre_restart_update=update,
+        pre_restart_reason="bad_progress",
+        prev_rz_fsq_before=0.375,
+        vmec2000_control=False,
+    )
+    assert no_vmec2000.force_bcovar_update is False
