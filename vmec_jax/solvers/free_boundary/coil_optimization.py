@@ -1218,6 +1218,12 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         metadata = {
             "n_steps": len(statuses),
             "n_free_boundary_replay_steps": int(np.count_nonzero(accepted_mask)),
+            "masks": {
+                "accepted": accepted_mask,
+                "rejected": rejected_mask,
+                "has_active_freeb_replay": accepted_mask,
+                "active_free_boundary": accepted_mask,
+            },
             "status_masks": {
                 "step_status": statuses,
                 "accept_mask": accepted_mask,
@@ -1226,6 +1232,8 @@ def same_branch_rejected_slot_gate_from_vector_replay(
             "status_acceptance_source": "trace_step_status",
             "accepted_mask": accepted_mask,
             "rejected_mask": rejected_mask,
+            "has_active_freeb_replay": accepted_mask,
+            "active_free_boundary_mask": accepted_mask,
         }
         controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(metadata)
         status_derived_rejected_slot = bool(

@@ -2252,6 +2252,10 @@ def test_rejected_slot_fingerprint_gate_does_not_replay():
     assert gate["controller_slot_fingerprint"]["step_status"] == ["accepted", "rejected"]
     assert gate["controller_slot_summary"]["accepted_slots"] == 1
     assert gate["controller_slot_summary"]["rejected_slots"] == 1
+    assert gate["controller_slot_summary"]["active_free_boundary_slots"] == 1
+    assert gate["controller_slot_summary"]["accepted_free_boundary_slots"] == 1
+    assert gate["controller_slot_fingerprint"]["active_free_boundary_mask"] == [True, False]
+    assert gate["controller_slot_fingerprint"]["has_active_freeb_replay"] == [True, False]
     assert gate["replay_option_flags"]["fingerprint_only"] is True
     assert wall_s is not None and wall_s >= 0.0
 
