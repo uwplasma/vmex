@@ -3184,6 +3184,56 @@ Updated lane percentages:
 - Docs/release hygiene: 99.1%.
 - Overall: 97.0%.
 
+### 2026-06-25: Move same-branch report sections into reusable helpers
+
+Steps taken:
+
+- Extracted the scalar replay section, vector/JVP replay section, and
+  derivative-proposal summary attachment from
+  ``examples/optimization/free_boundary_QS_coil_optimization.py``.
+- Moved the scalar/vector report-section helpers into
+  ``vmec_jax.solvers.free_boundary.coil_optimization`` so the pedagogic example
+  imports reusable source helpers instead of carrying another large internal
+  implementation block.
+- Kept the example's JSON-safe conversion behavior by passing the existing
+  ``json_safe_payload`` callable into the source helper.
+
+Results obtained:
+
+- ``tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed with
+  ``33 passed, 1 xfailed``.
+- Ruff passed on the modified example and source helper module.
+- Source-health still passes.  The example file dropped back below the
+  2000-line warning threshold, and neither ``optimize_coils`` nor
+  ``write_same_branch_validation_report`` appears in the top function-length
+  warning list.
+- This is a refactor/API/examples tranche.  It does not change the same-branch
+  derivative contract, proposal acceptance authority, benchmark artifacts, or
+  parity evidence.
+
+Best next steps:
+
+1. Start the performance design for reusable/top-level branch-local
+   current-only replay/JVP kernels; the measured hot path remains
+   ``branch_local_vector_replay_jvp_dispatch_s``.
+2. Continue source simplification on larger numerical modules only in focused
+   tranches with parity/AD gates nearby, starting with fixed-boundary residual
+   iteration seams or WOUT diagnostic builders.
+3. Keep CI/runtime gates green and avoid regenerating benchmark figures unless
+   code changes affect the underlying benchmark data.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.0%.
+- Free-boundary production differentiability: 93.3%.
+- Single-stage coil optimization: 90.0%.
+- CPU/GPU runtime and memory footprint: 97.7%.
+- Refactor/API/examples: 57.2%.
+- VMEC2000/VMEC++ parity and physics gates: 97.8%.
+- Docs/release hygiene: 99.1%.
+- Overall: 97.1%.
+
 ### 2026-06-25: Measure narrowed derivative-proposal smoke timing
 
 Steps taken:

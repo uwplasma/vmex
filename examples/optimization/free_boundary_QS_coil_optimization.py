@@ -85,7 +85,8 @@ from vmec_jax.solvers.free_boundary.coil_optimization import (
     parse_float_list,
     parse_profile_matrix_free_solvers,  # noqa: F401 - compatibility export for tests/users.
     parse_same_branch_vector_keys,  # noqa: F401 - compatibility export for tests/users.
-    same_branch_current_only_coil_geometry_cache,
+    run_same_branch_scalar_report_section,
+    run_same_branch_vector_report_section,
     same_branch_complete_fd_report_metadata,
     same_branch_derivative_gate_evidence as same_branch_derivative_gate_evidence,
     same_branch_derivative_proposal_from_report as same_branch_derivative_proposal_from_report,
@@ -93,13 +94,11 @@ from vmec_jax.solvers.free_boundary.coil_optimization import (
     same_branch_rejected_slot_gate_from_vector_replay,
     same_branch_replay_mode_count_guard,
     same_branch_replay_options_from_args,
-    same_branch_replay_plan_cache,
     same_branch_nestor_profile_from_vector_replay,
     same_branch_report_direction_policy,
     same_branch_report_mode_count,
     same_branch_report_runtime_configs,
     same_branch_report_vector_keys_from_args,
-    same_branch_scalar_result_summary,
     same_branch_scalar_function_registry,
     same_branch_vector_result_summary,
 )
@@ -832,9 +831,6 @@ def write_same_branch_validation_report(
 ) -> Path:
     """Write an optional same-branch complete-solve FD report for this example."""
     from vmec_jax.free_boundary_adjoint import (
-        direct_coil_branch_local_scalars_report_from_complete_fd,
-        direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
-        direct_coil_same_branch_physical_scalar_gate_report,
         direct_coil_same_branch_complete_solve_fd_report,
     )
 
@@ -977,115 +973,59 @@ def write_same_branch_validation_report(
     if mode in {"scalar", "vector"} and replay_mode_count_guard_triggered:
         branch_local_scalar["reason"] = replay_mode_count_guard_reason
         branch_local_vector["reason"] = replay_mode_count_guard_reason
-    if (
+    run_scalar_report = (
         same_branch
         and not replay_mode_count_guard_triggered
         and mode == "scalar"
         and "base" in report
         and scalar_key in report["objective_values"]
-    ):
-        scalar_replay_plan, scalar_plan_cache, scalar_plan_wall_s = same_branch_replay_plan_cache(
-            report,
-            replay_kwargs,
-            timing_key="branch_local_scalar_replay_plan_build_wall_s",
-            scope="scalar replay with unchanged accepted traces and controller policy",
-        )
-        compact_report["branch_local_scalar_replay_plan_cache"] = scalar_plan_cache
-        if scalar_plan_wall_s is not None:
-            timings["branch_local_scalar_replay_plan_build_wall_s"] = scalar_plan_wall_s
-        t0 = time.perf_counter()
-        scalar = direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax(
-            params=base_params,
-            complete_payload=report["base"],
-            scalar_key=scalar_key,
-            production_values={scalar_key: report_base_values[scalar_key]},
-            replay_payload=replay_payload,
-            replay_plan=scalar_replay_plan,
-            scalar_fn=lambda payload: {scalar_key: scalar_value_fns[scalar_key](payload)},
-            replay_scalar_fn=lambda replay, payload: scalar_replay_fns[scalar_key](replay, payload),
-            replay_kwargs={**replay_kwargs, "state_only_replay": scalar_uses_state_only_replay},
-            replay_ad_mode=ad_mode,
-            include_trace_replay_diagnostics=False,
-            include_payload=False,
-            include_replay_graph_metadata=False,
-        )
-        timings["branch_local_scalar_wall_s"] = float(time.perf_counter() - t0)
-        scalar_timings = {str(key): float(value) for key, value in scalar.get("timings", {}).items()}
-        for key, value in scalar_timings.items():
-            timings[f"branch_local_scalar_{key}"] = value
-        branch_local_scalar = same_branch_scalar_result_summary(
-            scalar,
-            scalar_key,
-            report=report,
-            direction_params=direction_params,
-            state_only_replay=scalar_uses_state_only_replay,
-        )
-        branch_local_scalar["mode"] = mode
+    )
+    branch_local_scalar = run_same_branch_scalar_report_section(
+        enabled=run_scalar_report,
+        scalar_key=scalar_key,
+        scalar_uses_state_only_replay=scalar_uses_state_only_replay,
+        base_params=base_params,
+        report=report,
+        report_base_values=report_base_values,
+        replay_payload=replay_payload,
+        replay_kwargs=replay_kwargs,
+        ad_mode=ad_mode,
+        scalar_value_fns=scalar_value_fns,
+        scalar_replay_fns=scalar_replay_fns,
+        direction_params=direction_params,
+        compact_report=compact_report,
+        timings=timings,
+        initial_summary=branch_local_scalar,
+    )
     missing_vector_keys = tuple(key for key in vector_keys if key not in report["objective_values"])
     if mode == "vector" and missing_vector_keys:
         branch_local_vector["reason"] = f"missing complete-solve objective value(s): {missing_vector_keys}"
     main_vector_summary: dict[str, Any] | None = None
     main_vector_replay_plan: dict[str, Any] | None = None
-    if same_branch and not replay_mode_count_guard_triggered and mode == "vector" and "base" in report and not missing_vector_keys:
-        scalar_keys = vector_keys
-        current_only_coil_geometry, current_only_geometry_cache, current_only_geometry_wall_s = (
-            same_branch_current_only_coil_geometry_cache(base_params, direction_params)
+    run_vector_report = (
+        same_branch
+        and not replay_mode_count_guard_triggered
+        and mode == "vector"
+        and "base" in report
+        and not missing_vector_keys
+    )
+    branch_local_vector, branch_local_vector_gate, main_vector_summary, main_vector_replay_plan = (
+        run_same_branch_vector_report_section(
+            enabled=run_vector_report,
+            vector_keys=vector_keys,
+            vector_uses_state_only_replay=vector_uses_state_only_replay,
+            base_params=base_params,
+            direction_params=direction_params,
+            report=report,
+            replay_kwargs=replay_kwargs,
+            run_branch_local_vector=run_branch_local_vector,
+            compact_report=compact_report,
+            timings=timings,
+            json_safe_payload_fn=json_safe_payload,
+            initial_vector_summary=branch_local_vector,
+            initial_gate_summary=branch_local_vector_gate,
         )
-        run_branch_local_vector.current_only_coil_geometry = current_only_coil_geometry
-        compact_report["current_only_coil_geometry_cache"] = current_only_geometry_cache
-        if current_only_geometry_wall_s is not None:
-            timings["branch_local_current_only_coil_geometry_build_wall_s"] = current_only_geometry_wall_s
-        main_vector_replay_plan, vector_plan_cache, vector_plan_wall_s = same_branch_replay_plan_cache(
-            report,
-            replay_kwargs,
-            timing_key="branch_local_vector_replay_plan_build_wall_s",
-            scope="base vector/profile replays with unchanged accepted traces and controller policy",
-        )
-        compact_report["branch_local_vector_replay_plan_cache"] = vector_plan_cache
-        if vector_plan_wall_s is not None:
-            timings["branch_local_vector_replay_plan_build_wall_s"] = vector_plan_wall_s
-        t0 = time.perf_counter()
-        vector = run_branch_local_vector(
-            scalar_keys,
-            {**replay_kwargs, "state_only_replay": vector_uses_state_only_replay},
-            replay_plan_for_call=main_vector_replay_plan,
-        )
-        timings["branch_local_vector_wall_s"] = float(time.perf_counter() - t0)
-        vector_timings = {str(key): float(value) for key, value in vector.get("timings", {}).items()}
-        for key, value in vector_timings.items():
-            timings[f"branch_local_vector_{key}"] = value
-        branch_local_vector = summarize_vector_result(vector, scalar_keys)
-        main_vector_summary = branch_local_vector
-        production_rtol = {key: 2.0e-2 if key == "qs_total" else 1.0e-2 if key == "accepted_bnormal_rms" else 5.0e-3
-                           for key in scalar_keys}
-        try:
-            scalars_report = direct_coil_branch_local_scalars_report_from_complete_fd(
-                report,
-                vector,
-                scalar_keys=scalar_keys,
-                rtol=production_rtol,
-                atol={key: 5.0e-8 for key in scalar_keys},
-                base_value_atol={key: 2.0e-3 for key in scalar_keys},
-            )
-            physical_gate = direct_coil_same_branch_physical_scalar_gate_report(
-                report,
-                scalars_report,
-                scalar_keys=scalar_keys,
-            )
-            branch_local_vector_gate = {"available": True, "passed": bool(physical_gate.get("passed", False)),
-                                        "scope": "same-branch production-forward vector/JVP physical-scalar gate",
-                                        "differentiates_adaptive_controller": False,
-                                        "differentiates_run_free_boundary": False,
-                                        "differentiates_fixed_accepted_branch": bool(scalars_report.get("differentiates_fixed_accepted_branch", False)),
-                                        "scalar_report": json_safe_payload(scalars_report),
-                                        "physical_scalar_gate": json_safe_payload(physical_gate)}
-        except Exception as exc:  # pragma: no cover - report artifacts should not abort the example.
-            branch_local_vector_gate = {
-                "available": False,
-                "passed": False,
-                "scope": "same-branch production-forward vector/JVP physical-scalar gate",
-                "reason": f"{type(exc).__name__}: {exc}",
-            }
+    )
     rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
         requested=bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
         same_branch=same_branch,
@@ -1130,6 +1070,150 @@ def write_same_branch_validation_report(
     path = outdir / "same_branch_complete_solve_report.json"
     write_json(path, compact_report)
     return path
+
+
+def attach_same_branch_report_and_proposals(
+    summary: dict[str, Any],
+    *,
+    input_path: Path,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+    outdir: Path,
+    objective_model: dict[str, Any],
+    evaluate: Any,
+    get_best: Any,
+    history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach optional same-branch derivative reports and proposal trials."""
+
+    if bool(args.write_same_branch_report):
+        report_best_before_derivative_proposal = get_best()
+        report_params, report_anchor = same_branch_report_anchor_params(
+            base_params,
+            report_best_before_derivative_proposal,
+            variables,
+            args,
+        )
+        report_path = write_same_branch_validation_report(
+            input_path=input_path,
+            base_params=report_params,
+            variables=variables,
+            args=args,
+            outdir=outdir,
+            report_anchor=report_anchor,
+        )
+        summary["same_branch_complete_solve_report"] = report_path
+        summary["same_branch_complete_solve_report_anchor"] = report_anchor
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": bool(args.same_branch_derivative_proposal),
+            "final_best_changed_after_report": False,
+            "report_matches_final_best": True,
+        }
+        if bool(args.same_branch_derivative_proposal):
+            attach_same_branch_derivative_proposal_summary(
+                summary,
+                report_path=report_path,
+                report_best_before_derivative_proposal=report_best_before_derivative_proposal,
+                objective_model=objective_model,
+                args=args,
+                evaluate=evaluate,
+                get_best=get_best,
+                history=history,
+            )
+        else:
+            summary["same_branch_derivative_proposal"] = {
+                "available": False,
+                "reason": "not requested",
+            }
+            summary["same_branch_derivative_proposals"] = []
+    elif bool(args.same_branch_derivative_proposal):
+        summary["same_branch_derivative_proposal"] = {
+            "available": False,
+            "reason": "--same-branch-derivative-proposal requires --write-same-branch-report",
+        }
+        summary["same_branch_derivative_proposals"] = []
+    return summary
+
+
+def attach_same_branch_derivative_proposal_summary(
+    summary: dict[str, Any],
+    *,
+    report_path: Path,
+    report_best_before_derivative_proposal: dict[str, Any] | None,
+    objective_model: dict[str, Any],
+    args: argparse.Namespace,
+    evaluate: Any,
+    get_best: Any,
+    history: list[dict[str, Any]],
+) -> None:
+    """Evaluate same-branch derivative proposals with complete-solve authority."""
+
+    report_data = json.loads(report_path.read_text())
+    proposal_steps = (
+        parse_float_list(str(args.same_branch_proposal_steps))
+        if str(args.same_branch_proposal_steps).strip()
+        else [float(args.same_branch_proposal_step)]
+    )
+    proposals = same_branch_derivative_proposals_from_report(
+        report_data,
+        objective_model,
+        get_best(),
+        step_sizes=proposal_steps,
+        max_base_abs_delta=float(args.same_branch_proposal_max_base_delta),
+        max_trials=int(args.same_branch_proposal_max_trials),
+    )
+    evaluated_proposals: list[dict[str, Any]] = []
+    final_best_changed_after_report = False
+    accepted_proposal_index: int | None = None
+    for proposal in proposals:
+        if not proposal.get("available"):
+            evaluated_proposals.append(proposal)
+            break
+        previous_best = get_best()
+        previous_best_objective = None if previous_best is None else float(previous_best["summary"]["objective"])
+        trial_objective = evaluate(np.asarray(proposal["trial_x"], dtype=float))
+        trial_entry = history[-1]
+        accepted_by_complete_solve = bool(get_best() is trial_entry)
+        proposal["trial_eval"] = int(trial_entry["eval"])
+        proposal["trial_objective"] = float(trial_objective)
+        proposal["previous_best_objective"] = previous_best_objective
+        proposal["accepted_by_complete_solve"] = accepted_by_complete_solve
+        proposal["rejected_by_complete_solve"] = not accepted_by_complete_solve
+        proposal["acceptance_decision_source"] = "complete_solve_objective"
+        proposal["best_eval_before_trial"] = None if previous_best is None else int(previous_best.get("eval", -1))
+        proposal["best_eval_after_trial"] = None if get_best() is None else int(get_best().get("eval", -1))
+        evaluated_proposals.append(proposal)
+        if accepted_by_complete_solve:
+            final_best_changed_after_report = True
+            accepted_proposal_index = int(proposal.get("trial_index", len(evaluated_proposals) - 1))
+            break
+
+    proposal = evaluated_proposals[-1] if evaluated_proposals else {
+        "available": False,
+        "reason": "no same-branch derivative proposal was generated",
+    }
+    if evaluated_proposals and any(item.get("available") for item in evaluated_proposals):
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": True,
+            "final_best_changed_after_report": final_best_changed_after_report,
+            "report_matches_final_best": not final_best_changed_after_report,
+            "accepted_proposal_index": accepted_proposal_index,
+            "note": (
+                "The same-branch report is the derivative evidence used to form the trial. "
+                "If the normal complete solve accepts that trial, rerun the report at the "
+                "new best point for final-point derivative evidence."
+            ),
+        }
+    elif report_best_before_derivative_proposal is not get_best():
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": True,
+            "final_best_changed_after_report": True,
+            "report_matches_final_best": False,
+            "note": "The final best point changed after the report was written.",
+        }
+    summary["same_branch_derivative_proposal"] = proposal
+    summary["same_branch_derivative_proposals"] = evaluated_proposals
 
 
 def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
@@ -1329,106 +1413,18 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         },
         "best": best,
     }
-    if bool(args.write_same_branch_report):
-        report_best_before_derivative_proposal = best
-        report_params, report_anchor = same_branch_report_anchor_params(
-            base_params,
-            best,
-            variables,
-            args,
-        )
-        report_path = write_same_branch_validation_report(
-            input_path=input_path,
-            base_params=report_params,
-            variables=variables,
-            args=args,
-            outdir=outdir,
-            report_anchor=report_anchor,
-        )
-        summary["same_branch_complete_solve_report"] = report_path
-        summary["same_branch_complete_solve_report_anchor"] = report_anchor
-        summary["same_branch_complete_solve_report_final_best_status"] = {
-            "report_generated_before_derivative_proposal": bool(args.same_branch_derivative_proposal),
-            "final_best_changed_after_report": False,
-            "report_matches_final_best": True,
-        }
-        if bool(args.same_branch_derivative_proposal):
-            report_data = json.loads(report_path.read_text())
-            proposal_steps = parse_float_list(str(args.same_branch_proposal_steps)) if str(
-                args.same_branch_proposal_steps
-            ).strip() else [float(args.same_branch_proposal_step)]
-            proposals = same_branch_derivative_proposals_from_report(
-                report_data,
-                objective_model,
-                best,
-                step_sizes=proposal_steps,
-                max_base_abs_delta=float(args.same_branch_proposal_max_base_delta),
-                max_trials=int(args.same_branch_proposal_max_trials),
-            )
-            evaluated_proposals: list[dict[str, Any]] = []
-            final_best_changed_after_report = False
-            accepted_proposal_index: int | None = None
-            for proposal in proposals:
-                if not proposal.get("available"):
-                    evaluated_proposals.append(proposal)
-                    break
-                previous_best = best
-                previous_best_objective = None if previous_best is None else float(previous_best["summary"]["objective"])
-                trial_objective = evaluate(np.asarray(proposal["trial_x"], dtype=float))
-                trial_entry = history[-1]
-                accepted_by_complete_solve = bool(best is trial_entry)
-                proposal["trial_eval"] = int(trial_entry["eval"])
-                proposal["trial_objective"] = float(trial_objective)
-                proposal["previous_best_objective"] = previous_best_objective
-                proposal["accepted_by_complete_solve"] = accepted_by_complete_solve
-                proposal["rejected_by_complete_solve"] = not accepted_by_complete_solve
-                proposal["acceptance_decision_source"] = "complete_solve_objective"
-                proposal["best_eval_before_trial"] = (
-                    None if previous_best is None else int(previous_best.get("eval", -1))
-                )
-                proposal["best_eval_after_trial"] = None if best is None else int(best.get("eval", -1))
-                evaluated_proposals.append(proposal)
-                if accepted_by_complete_solve:
-                    final_best_changed_after_report = True
-                    accepted_proposal_index = int(proposal.get("trial_index", len(evaluated_proposals) - 1))
-                    break
-            proposal = evaluated_proposals[-1] if evaluated_proposals else {
-                "available": False,
-                "reason": "no same-branch derivative proposal was generated",
-            }
-            if evaluated_proposals and any(item.get("available") for item in evaluated_proposals):
-                summary["same_branch_complete_solve_report_final_best_status"] = {
-                    "report_generated_before_derivative_proposal": True,
-                    "final_best_changed_after_report": final_best_changed_after_report,
-                    "report_matches_final_best": not final_best_changed_after_report,
-                    "accepted_proposal_index": accepted_proposal_index,
-                    "note": (
-                        "The same-branch report is the derivative evidence used to form the trial. "
-                        "If the normal complete solve accepts that trial, rerun the report at the "
-                        "new best point for final-point derivative evidence."
-                    ),
-                }
-            elif report_best_before_derivative_proposal is not best:
-                summary["same_branch_complete_solve_report_final_best_status"] = {
-                    "report_generated_before_derivative_proposal": True,
-                    "final_best_changed_after_report": True,
-                    "report_matches_final_best": False,
-                    "note": "The final best point changed after the report was written.",
-                }
-            summary["same_branch_derivative_proposal"] = proposal
-            summary["same_branch_derivative_proposals"] = evaluated_proposals
-        else:
-            summary["same_branch_derivative_proposal"] = {
-                "available": False,
-                "reason": "not requested",
-            }
-            summary["same_branch_derivative_proposals"] = []
-    elif bool(args.same_branch_derivative_proposal):
-        summary["same_branch_derivative_proposal"] = {
-            "available": False,
-            "reason": "--same-branch-derivative-proposal requires --write-same-branch-report",
-        }
-        summary["same_branch_derivative_proposals"] = []
+    attach_same_branch_report_and_proposals(
+        summary,
+        input_path=input_path,
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=outdir,
+        objective_model=objective_model,
+        evaluate=evaluate,
+        get_best=lambda: best,
+        history=history,
+    )
     summary["best"] = best
     write_json(outdir / "summary.json", summary)
     print("Flow: single-stage direct-coil/no-mgrid optimization; every trial used a complete free-boundary solve.")
