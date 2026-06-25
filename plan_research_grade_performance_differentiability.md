@@ -4398,3 +4398,53 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.4%.
 - Docs/release hygiene: 99.9%.
 - Overall: 98.9%.
+
+### 2026-06-25: Move free-boundary edge-vacuum normalization into residual runtime
+
+Steps taken:
+
+- Moved the NESTOR ``bsqvac`` edge normalization helper from the main residual
+  iteration module into ``solvers/fixed_boundary/residual/runtime.py`` next to
+  the free-boundary trial ``bsqvac`` runtime path that consumes it.
+- Kept the private alias in ``iteration.py`` through the runtime import so
+  existing call sites and helper seams remain unchanged.
+- Added direct tests for the single-zeta-plane broadcast case and the
+  already-full-zeta-grid no-broadcast case.
+
+Results obtained:
+
+- ``iteration.py`` now reports ``3057`` lines in ``source_health.py``.
+- Focused lint passed for the touched runtime, iteration, and test files.
+- Focused runtime/helper tests passed:
+  ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_runtime.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py
+  tests/test_solve_wave4_coverage.py -q`` reported ``57`` passing tests.
+- ``repo_size_audit.py`` passed; tracked size remains ``28.21 MiB`` and no
+  tracked file exceeds the current size gate.
+- ``git diff --check`` passed.
+
+Best next steps:
+
+1. Commit and push this behavior-preserving refactor.
+2. Re-check CI for this and the previous residual-refactor tranche.
+3. If another low-risk tranche is needed before review, target a cohesive
+   existing domain seam; avoid extracting closure-heavy nested residual-loop
+   helpers until the controller-state API exists.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 61.4%.
+- VMEC2000/VMEC++ parity and physics gates: 98.4%.
+- Docs/release hygiene: 99.9%.
+- Overall: 99.0%.
