@@ -68,6 +68,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     record_elapsed_timing as _record_elapsed_timing,
     record_update_state_ready_timing as _record_update_state_ready_timing,
     record_update_total_timing as _record_update_total_timing,
+    resolve_free_boundary_coupling_runtime as _runtime_resolve_free_boundary_coupling_runtime,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window as _resolve_residual_profile_window,
 )
@@ -1516,13 +1517,8 @@ def solve_fixed_boundary_residual_iter(
 
             # Free-boundary WP2 scaffold: run/update the NESTOR-like external
             # vacuum solve and couple bsqvac on the edge slice into bcovar.
-            freeb_bsqvac_half_current = None
-            freeb_nestor_trace_current = None
-            freeb_reused = False
-            freeb_solve_time = 0.0
-            freeb_sample_time = 0.0
             freeb_plascur_for_bsqvac = float(freeb_plascur)
-            freeb_coupling = _free_boundary_nestor_iteration_coupling(
+            freeb_coupling = _runtime_resolve_free_boundary_coupling_runtime(
                 free_boundary_enabled=bool(free_boundary_enabled),
                 freeb_couple_edge=bool(freeb_couple_edge),
                 state=state,
@@ -1545,10 +1541,13 @@ def solve_fixed_boundary_residual_iter(
                 env_freeb_raise=bool(_env_freeb_raise),
                 nestor_external_only_step_func=nestor_external_only_step,
                 edge_bsqvac_from_nestor_func=_edge_bsqvac_from_nestor,
-                **history_lists.freeb_source_history_lists(),
+                nestor_iteration_coupling_func=_free_boundary_nestor_iteration_coupling,
+                trial_bsqvac_half_func=_runtime_freeb_trial_bsqvac_half,
+                source_history_lists=history_lists.freeb_source_history_lists(),
+                trial_history_lists=history_lists.freeb_trial_history_lists(),
             )
             freeb_bsqvac_half_current = freeb_coupling.bsqvac_half_current
-            freeb_nestor_runtime = freeb_coupling.runtime
+            freeb_nestor_runtime = freeb_coupling.nestor_runtime
             freeb_nestor_trace_current = freeb_coupling.trace_arrays
             freeb_reused = freeb_coupling.reused
             freeb_solve_time = freeb_coupling.solve_time
@@ -1558,25 +1557,7 @@ def solve_fixed_boundary_residual_iter(
             freeb_ivac = freeb_coupling.ivac
             freeb_ivac_effective = freeb_coupling.ivac_effective
             freeb_controls_cached = freeb_coupling.controls_cached
-
-            _freeb_bsqvac_half_for_trial_state = partial(
-                _runtime_freeb_trial_bsqvac_half,
-                free_boundary_enabled=bool(free_boundary_enabled),
-                freeb_couple_edge=bool(freeb_couple_edge),
-                freeb_bsqvac_half_current=freeb_bsqvac_half_current,
-                external_field_provider_kind=external_field_provider_kind,
-                external_field_provider_static=external_field_provider_static,
-                external_field_provider_params=external_field_provider_params,
-                freeb_ivac_effective=int(freeb_ivac_effective),
-                freeb_nestor_runtime=freeb_nestor_runtime,
-                static=static,
-                iter2=int(iter2),
-                freeb_plascur=float(freeb_plascur),
-                env_freeb_raise=bool(_env_freeb_raise),
-                nestor_external_only_step_func=nestor_external_only_step,
-                edge_bsqvac_from_nestor_func=_edge_bsqvac_from_nestor,
-                **history_lists.freeb_trial_history_lists(),
-            )
+            _freeb_bsqvac_half_for_trial_state = freeb_coupling.trial_bsqvac_half_for_state
 
             def _trial_residual_total(
                 candidate_state: VMECState,

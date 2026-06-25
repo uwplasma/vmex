@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
@@ -28,6 +29,23 @@ class FreeBoundaryIterationControls(NamedTuple):
     controls_cached: tuple[int, int, int] | None
     turnon_iter: bool
     ivac_effective: int
+
+
+class FreeBoundaryCouplingRuntime(NamedTuple):
+    """Resolved external-vacuum state and trial scorer for one iteration."""
+
+    bsqvac_half_current: Any
+    nestor_runtime: Any
+    trace_arrays: Any
+    reused: bool
+    solve_time: float
+    sample_time: float
+    last_model: str
+    last_diagnostics: dict[str, Any]
+    ivac: int
+    ivac_effective: int
+    controls_cached: tuple[int, int, int] | None
+    trial_bsqvac_half_for_state: Callable[..., Any]
 
 
 def resolve_free_boundary_iteration_controls(
@@ -89,6 +107,96 @@ def resolve_free_boundary_iteration_controls(
         controls_cached,
         bool(turnon_iter),
         1 if turnon_iter else int(ivac),
+    )
+
+
+def resolve_free_boundary_coupling_runtime(
+    *,
+    free_boundary_enabled: bool,
+    freeb_couple_edge: bool,
+    state: Any,
+    static: Any,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    iter2: int,
+    freeb_nestor_runtime: Any,
+    freeb_plascur: float,
+    external_field_provider_kind: str | None,
+    external_field_provider_static: Any,
+    external_field_provider_params: Any,
+    collect_trace_arrays: bool,
+    freeb_turnon_iter: bool,
+    freeb_ivac_effective: int,
+    freeb_nvacskip: int,
+    controls_cached: tuple[int, int, int] | None,
+    last_model: str,
+    last_diagnostics: dict[str, Any],
+    env_freeb_raise: bool,
+    nestor_external_only_step_func: Callable[..., Any],
+    edge_bsqvac_from_nestor_func: Callable[..., Any],
+    nestor_iteration_coupling_func: Callable[..., Any],
+    trial_bsqvac_half_func: Callable[..., Any],
+    source_history_lists: dict[str, list[Any]],
+    trial_history_lists: dict[str, list[Any]],
+) -> FreeBoundaryCouplingRuntime:
+    """Run accepted free-boundary coupling and prepare trial-state resampling."""
+
+    coupling = nestor_iteration_coupling_func(
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_couple_edge=bool(freeb_couple_edge),
+        state=state,
+        static=static,
+        freeb_ivac=int(freeb_ivac),
+        freeb_ivacskip=int(freeb_ivacskip),
+        iter2=int(iter2),
+        freeb_nestor_runtime=freeb_nestor_runtime,
+        freeb_plascur=float(freeb_plascur),
+        external_field_provider_kind=external_field_provider_kind,
+        external_field_provider_static=external_field_provider_static,
+        external_field_provider_params=external_field_provider_params,
+        collect_trace_arrays=bool(collect_trace_arrays),
+        freeb_turnon_iter=bool(freeb_turnon_iter),
+        freeb_ivac_effective=int(freeb_ivac_effective),
+        freeb_nvacskip=int(freeb_nvacskip),
+        controls_cached=controls_cached,
+        last_model=last_model,
+        last_diagnostics=last_diagnostics,
+        env_freeb_raise=bool(env_freeb_raise),
+        nestor_external_only_step_func=nestor_external_only_step_func,
+        edge_bsqvac_from_nestor_func=edge_bsqvac_from_nestor_func,
+        **source_history_lists,
+    )
+    trial_bsqvac_half_for_state = partial(
+        trial_bsqvac_half_func,
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_couple_edge=bool(freeb_couple_edge),
+        freeb_bsqvac_half_current=coupling.bsqvac_half_current,
+        external_field_provider_kind=external_field_provider_kind,
+        external_field_provider_static=external_field_provider_static,
+        external_field_provider_params=external_field_provider_params,
+        freeb_ivac_effective=int(coupling.ivac_effective),
+        freeb_nestor_runtime=coupling.runtime,
+        static=static,
+        iter2=int(iter2),
+        freeb_plascur=float(freeb_plascur),
+        env_freeb_raise=bool(env_freeb_raise),
+        nestor_external_only_step_func=nestor_external_only_step_func,
+        edge_bsqvac_from_nestor_func=edge_bsqvac_from_nestor_func,
+        **trial_history_lists,
+    )
+    return FreeBoundaryCouplingRuntime(
+        bsqvac_half_current=coupling.bsqvac_half_current,
+        nestor_runtime=coupling.runtime,
+        trace_arrays=coupling.trace_arrays,
+        reused=bool(coupling.reused),
+        solve_time=float(coupling.solve_time),
+        sample_time=float(coupling.sample_time),
+        last_model=str(coupling.last_model),
+        last_diagnostics=dict(coupling.last_diagnostics),
+        ivac=int(coupling.ivac),
+        ivac_effective=int(coupling.ivac_effective),
+        controls_cached=coupling.controls_cached,
+        trial_bsqvac_half_for_state=trial_bsqvac_half_for_state,
     )
 
 

@@ -6114,3 +6114,70 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.1%.
 - Docs/release hygiene: 100%.
 - Overall: 99.5%.
+
+### 2026-06-25: Package free-boundary coupling runtime seam
+
+Steps taken:
+
+- Added ``resolve_free_boundary_coupling_runtime`` in
+  ``residual/runtime.py`` to package accepted NESTOR coupling state together
+  with the trial-state ``bsqvac`` resampler used by the residual update
+  scorer.
+- Rewired ``solve_fixed_boundary_residual_iter`` to consume that packaged
+  runtime object instead of carrying accepted-coupling and trial-resampling
+  plumbing inline.
+- Added a focused free-boundary unit test with fake accepted coupling and fake
+  trial resampling to verify history forwarding, accepted runtime propagation,
+  effective ``ivac`` binding, diagnostics preservation, and trial callable
+  binding.
+
+Results obtained:
+
+- ``python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  vmec_jax/solvers/fixed_boundary/residual/runtime.py
+  tests/test_free_boundary_wp0.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_free_boundary_wp0.py -q`` passed.
+- Broader fixed-boundary smoke passed:
+  ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_additional_helpers.py tests/test_driver_api.py -q``.
+- Free-boundary derivative smoke passed:
+  ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_free_boundary_vacuum_adjoint.py
+  tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q``.
+- ``git diff --check`` passed.
+- Repo-size gate passed with tracked size ``28.32 MiB`` and no tracked file
+  above ``2 MiB``.
+- Source-health improved the residual loop from 2692 to 2672 lines and the
+  module from 3079 to 3060 lines.  The loop remains the largest production
+  source-health item, but the accepted/free-boundary trial seam is now
+  separately testable.
+
+Best next steps:
+
+1. Extract the preconditioner-application block next. It is the largest
+   remaining central loop sub-block with clear inputs/outputs, but it must keep
+   VMEC2000 cache refresh and accepted-control ``ptau`` payload semantics
+   unchanged.
+2. After one more production-loop extraction, factor the largest
+   free-boundary validation tests into reusable assertion helpers to improve
+   source-health without weakening gates.
+3. Keep adaptive full-loop differentiation claims conservative; current
+   coverage remains branch-local/fingerprint-gated.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 96.3%.
+- Free-boundary production differentiability: 96.7%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 69.8%.
+- VMEC2000/VMEC++ parity and physics gates: 99.1%.
+- Docs/release hygiene: 100%.
+- Overall: 99.5%.
