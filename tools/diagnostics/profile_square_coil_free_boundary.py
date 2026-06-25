@@ -61,6 +61,10 @@ def _json_ready(value: Any) -> Any:
     return str(value)
 
 
+def _log_step(message: str) -> None:
+    print(f"[square-coil-profile] {message}", flush=True)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
@@ -818,6 +822,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     solver_mode = None if str(args.solver_mode).strip().lower() == "auto" else str(args.solver_mode)
     ns_values, niter_values, ftol_values = _stage_values(config)
+    _log_step(
+        "building square-coil configuration "
+        f"beta={float(args.beta_percent):g}%, mpol={int(args.mpol)}, ntor={int(args.ntor)}, "
+        f"ns={ns_values}, nzeta={int(args.nzeta)}"
+    )
     coils = build_square_coils(config)
     label = _case_label(float(args.beta_percent))
     direct_input = outdir / f"input.square_{label}_direct"
@@ -831,12 +840,14 @@ def main(argv: list[str] | None = None) -> int:
 
     base_indata = make_free_boundary_indata(config, beta_percent=float(args.beta_percent))
     write_indata(direct_input, base_indata)
+    _log_step(f"wrote direct input {direct_input}")
     bounds = _mgrid_bounds(
         base_indata,
         padding_fraction=float(args.mgrid_padding_fraction),
         min_padding=float(args.mgrid_min_padding),
     )
     if need_mgrid:
+        _log_step(f"writing generated mgrid {mgrid_path}")
         mgrid_write_chunk_size = 512 if args.coil_chunk_size is None else args.coil_chunk_size
         write_mgrid_from_coils(
             mgrid_path,
@@ -854,6 +865,9 @@ def main(argv: list[str] | None = None) -> int:
         mgrid_indata = deepcopy(base_indata)
         mgrid_indata.scalars["MGRID_FILE"] = mgrid_path.name
         write_indata(mgrid_input, mgrid_indata)
+        _log_step(f"wrote mgrid input {mgrid_input}")
+    else:
+        _log_step("skipping generated mgrid path")
 
     payload: dict[str, Any] = {
         "schema": "square_coil_free_boundary_backend_profile",
@@ -897,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
         "backends": {},
     }
     if not bool(args.skip_provider_parity):
+        _log_step("running provider-parity diagnostic")
         payload["provider_parity"] = _provider_parity_payload(
             mgrid_input=mgrid_input,
             coil_params=coils.params,
@@ -905,6 +920,7 @@ def main(argv: list[str] | None = None) -> int:
             mgrid_nphi=mgrid_nphi,
         )
     if not args.skip_direct:
+        _log_step("running vmec_jax direct-coil backend")
         payload["backends"]["vmec_jax_direct"] = _run_jax_backend(
             input_path=direct_input,
             wout_path=direct_wout,
@@ -914,6 +930,7 @@ def main(argv: list[str] | None = None) -> int:
             return_best_scored_state=bool(args.return_best_scored_state),
         )
     if not args.skip_mgrid:
+        _log_step("running vmec_jax generated-mgrid backend")
         payload["backends"]["vmec_jax_mgrid"] = _run_jax_backend(
             input_path=mgrid_input,
             wout_path=mgrid_wout,
@@ -925,8 +942,10 @@ def main(argv: list[str] | None = None) -> int:
     if bool(args.run_vmec2000):
         exe = args.vmec2000_exec or find_vmec2000_exec()
         if exe is None:
+            _log_step("skipping VMEC2000 backend because xvmec2000 was not found")
             payload["backends"]["vmec2000_mgrid"] = {"status": "skipped_missing_xvmec2000"}
         else:
+            _log_step(f"running VMEC2000 backend with {exe}")
             t0 = time.perf_counter()
             try:
                 run = run_xvmec2000(
@@ -966,6 +985,7 @@ def main(argv: list[str] | None = None) -> int:
                 }
 
     report = outdir / "square_coil_free_boundary_backend_profile.json"
+    _log_step(f"writing profile report {report}")
     report.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True, allow_nan=False) + "\n")
     print(report)
     return 0
