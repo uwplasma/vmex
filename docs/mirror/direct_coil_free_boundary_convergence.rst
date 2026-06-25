@@ -326,6 +326,13 @@ summarizer exposes this as ``boundary_proj_max`` and ``boundary_proj_rel``.
 These metrics should be reviewed whenever changing ``MPOL``, ``NTOR``, or
 ``NZETA``: they diagnose input-boundary underfitting before the free-boundary
 nonlinear solve is interpreted.
+The root square-coil example now enforces
+``MAX_BOUNDARY_PROJECTION_ERROR = 5e-5`` by default. This keeps the current
+``MPOL=6, NTOR=23, NZETA=64`` production-style deck enabled, while rejecting
+the older ``MPOL=5, NTOR=12`` low-mode deck unless the user explicitly sets the
+threshold to ``None`` for diagnostic profiling. This guard keeps Fourier
+boundary underfitting separate from nonlinear-solver or direct-coil provider
+failures.
 
 Promotion Gates
 ---------------

@@ -163,8 +163,14 @@ VMEC Fourier projection, which is less sensitive to ``NTOR`` than the sharper
 polar superellipse. The default ``NZETA`` follows
 ``recommended_square_axis_nzeta``; underresolved production-style example runs
 raise before solving because ``NTOR=12, NZETA=16`` was observed to fail while
-``NZETA=32`` completed the same VMEC2000 generated-``mgrid`` case. The plots use
-the solved VMEC states: 3-D coils plus solved LCFS
+``NZETA=32`` completed the same VMEC2000 generated-``mgrid`` case. The top-level
+``MAX_BOUNDARY_PROJECTION_ERROR`` gate also rejects low-mode decks whose
+Fourier-projected square-axis boundary is too far from the sampled spline
+target. The default ``MPOL=6, NTOR=23, NZETA=64`` deck passes this gate; an
+``MPOL=5, NTOR=12`` diagnostic deck does not. Set
+``MAX_BOUNDARY_PROJECTION_ERROR = None`` only when deliberately profiling an
+underfit diagnostic input. The plots use the solved VMEC states: 3-D coils plus
+solved LCFS
 and field-line traces, top-view solved boundaries, side/corner cross sections,
 solved-boundary ``|B|``, and residual/iota diagnostics. The metrics JSON records
 convergence status, force components, free-boundary ``B.n`` diagnostics, WOUT
@@ -196,11 +202,13 @@ on. Direct-coil free-boundary convergence candidates are also rechecked with a
 fresh external-field sample and the current plasma-current normalization before
 the solve is allowed to exit; rejected candidates are reported through the
 ``free_boundary_fresh_convergence_*`` metrics. Older coarse review evidence at
-(``NS=9, MPOL=5, NTOR=12``), beta ``0%``, ``1%``, ``3%``, and ``5%`` reach
-strict ``FTOL=1e-8`` active free-boundary convergence in the default scan. A
-5000-iteration office run with the fresh direct-coil gate makes beta ``7%`` the
-first high-beta stall in this configuration: its final fresh ``fsqr`` remains
-just above tolerance, while beta ``8%`` through ``10%`` have larger
+(``NS=9, MPOL=5, NTOR=12``), beta ``0%``, ``1%``, ``3%``, and ``5%`` reached
+strict ``FTOL=1e-8`` active free-boundary convergence, but those low-mode rows
+are now treated only as diagnostics. The production target for this lane is
+per-component ``FTOL=1e-12`` on a projection-gated, higher-mode deck. A
+5000-iteration office run with the fresh direct-coil gate made beta ``7%`` the
+first high-beta stall in that older configuration: its final fresh ``fsqr``
+remained just above tolerance, while beta ``8%`` through ``10%`` had larger
 restart-limited ``fsqr`` floors. These rows remain diagnostics rather than
 strict production equilibria. The plot bundle includes
 near-axis ``|B|`` and mirror-ratio trends so finite-beta scans can be compared

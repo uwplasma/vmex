@@ -127,9 +127,21 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     assert module.ExampleConfig().delt == pytest.approx(0.02)
     assert module.ExampleConfig().niter_array == (4000, 8000, 12000)
     assert module.ExampleConfig().coil_chunk_size == 512
+    assert module.ExampleConfig().max_boundary_projection_error == pytest.approx(5.0e-5)
     assert module.build_square_coils(module.ExampleConfig()).params.chunk_size == 512
     assert module.build_square_coils(module.ExampleConfig(coil_chunk_size=None)).params.chunk_size is None
     assert module.make_free_boundary_indata(module.ExampleConfig(), beta_percent=0.0).get_int("NVACSKIP") == 1
+    with pytest.raises(ValueError, match="boundary projection error is too large"):
+        module.run_example(
+            module.ExampleConfig(
+                outdir=tmp_path / "low_modes",
+                betas_percent=(),
+                mpol=5,
+                ntor=12,
+                nzeta=32,
+                write_plots=False,
+            )
+        )
     with pytest.raises(ValueError, match="solver_mode must be one of"):
         module.run_example(
             module.ExampleConfig(

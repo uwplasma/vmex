@@ -86,6 +86,7 @@ NITER_ARRAY = (4000, 8000, 12000)
 FTOL_ARRAY = (1.0e-8, 1.0e-10, 1.0e-12)
 USE_MULTIGRID_SCHEDULE = True
 ENFORCE_RECOMMENDED_NZETA = True
+MAX_BOUNDARY_PROJECTION_ERROR: float | None = 5.0e-5
 NVACSKIP = 1
 MAX_ITER = NITER_ARRAY[-1]
 FTOL = 1.0e-12
@@ -145,6 +146,7 @@ class ExampleConfig:
     ftol_array: tuple[float, ...] = FTOL_ARRAY
     use_multigrid_schedule: bool = USE_MULTIGRID_SCHEDULE
     enforce_recommended_nzeta: bool = ENFORCE_RECOMMENDED_NZETA
+    max_boundary_projection_error: float | None = MAX_BOUNDARY_PROJECTION_ERROR
     nvacskip: int = NVACSKIP
     phiedge: float = PHIEDGE
     toroidal_current: float = TOROIDAL_CURRENT
@@ -357,6 +359,12 @@ def _run_budget(config: ExampleConfig, *, restart_state: Any | None) -> int:
 
 
 def _validate_example_config(config: ExampleConfig) -> None:
+    if int(config.mpol) < 3:
+        raise ValueError("mpol must be at least 3 so the square-hybrid corner shaping fits")
+    if int(config.ntor) < 4:
+        raise ValueError("ntor must be at least 4 so the square-like axis fits")
+    if int(config.nzeta) < 8:
+        raise ValueError("nzeta must be at least 8")
     if config.solver_mode is not None:
         solver_mode = str(config.solver_mode).strip().lower()
         if solver_mode not in {"default", "parity", "accelerated"}:
@@ -369,6 +377,20 @@ def _validate_example_config(config: ExampleConfig) -> None:
             raise ValueError(
                 f"NZETA={int(config.nzeta)} is underresolved for NTOR={int(config.ntor)}; "
                 f"use at least {recommended} or set enforce_recommended_nzeta=False for a diagnostic-only run"
+            )
+    if config.max_boundary_projection_error is not None:
+        limit = float(config.max_boundary_projection_error)
+        if not np.isfinite(limit) or limit <= 0.0:
+            raise ValueError("max_boundary_projection_error must be positive, finite, or None")
+        projection = _boundary_projection_payload(config)
+        observed = float(projection["max_abs_component_error"])
+        if observed > limit:
+            raise ValueError(
+                "square-hybrid boundary projection error is too large for a production solve: "
+                f"max_abs_component_error={observed:.3e} exceeds {limit:.3e} "
+                f"for MPOL={int(config.mpol)}, NTOR={int(config.ntor)}, NZETA={int(config.nzeta)}. "
+                "Increase MPOL/NTOR/NZETA, keep plasma_axis_kind='spline', or set "
+                "max_boundary_projection_error=None for a diagnostic-only run."
             )
 
 
@@ -1195,6 +1217,9 @@ def _metrics_payload(
         "ftol_array": [float(value) for value in config.ftol_array],
         "use_multigrid_schedule": bool(config.use_multigrid_schedule),
         "enforce_recommended_nzeta": bool(config.enforce_recommended_nzeta),
+        "max_boundary_projection_error": (
+            None if config.max_boundary_projection_error is None else float(config.max_boundary_projection_error)
+        ),
         "nvacskip": int(config.nvacskip),
         "return_best_scored_state": bool(config.return_best_scored_state),
         "free_boundary_activate_fsq": (
