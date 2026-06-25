@@ -292,9 +292,21 @@ def finalize_residual_iter_from_namespace(
         fsq_total_target=ns["fsq_total_target"],
     )
     startup_policy = ns.get("startup_policy")
+    policy_defaults = {
+        "host_update_assembly": False,
+        "host_fsq1_norms_on_accelerator": False,
+        "host_residual_metrics_on_accelerator": False,
+        "use_restart_triggers": True,
+        "badjac_mode": "ptau",
+        "badjac_state_probe": False,
+        "badjac_initial_state_probe_iters": 0,
+        "light_history": False,
+    }
 
     def _policy_attr(name: str) -> Any:
-        return getattr(startup_policy, name) if startup_policy is not None else ns[name]
+        if startup_policy is not None:
+            return getattr(startup_policy, name)
+        return ns.get(name, policy_defaults[name])
 
     t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
     freeb_policy = ns.get("_freeb_policy")

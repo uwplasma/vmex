@@ -171,10 +171,10 @@ Run individual editable examples with `python examples/optimization/QA_optimizat
 `QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The public
 simple QI examples are `QI_optimization_nfp1.py` through
 `QI_optimization_nfp4.py`; each file exposes the seed, objective tuples, QP
-stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is
-retained as a diagnostic stress case, not a README promotion row.
-Full provenance and artifact-promotion rules live in `docs/optimization.rst`
-and `docs/optimization_sweep_results.rst`.
+stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is retained as a diagnostic stress
+case, not a README promotion row.
+Full provenance and artifact-promotion rules live in the docs:
+`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
