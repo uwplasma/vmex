@@ -146,6 +146,53 @@ def controller_state_legacy_payload(state: ResidualControllerState) -> dict[str,
     return {key: getattr(state, key) for key in CONTROLLER_RESUME_KEYS}
 
 
+def controller_state_from_runtime_scalars(
+    *,
+    time_step: float,
+    inv_tau: list[float],
+    fsq_prev: float,
+    fsq0_prev: float,
+    flip_sign: float,
+    iter1: int,
+    ijacob: int,
+    bad_resets: int,
+    res0: float,
+    res1: float,
+    prev_rz_fsq: float,
+    bad_growth_streak: int,
+    huge_force_restart_count: int,
+    state_checkpoint: Any,
+) -> ResidualControllerState:
+    """Snapshot the residual loop's legacy scalar slots into controller state."""
+
+    return ResidualControllerState(
+        time_step=float(time_step),
+        inv_tau=list(inv_tau),
+        fsq_prev=float(fsq_prev),
+        fsq0_prev=float(fsq0_prev),
+        flip_sign=float(flip_sign),
+        iter1=int(iter1),
+        ijacob=int(ijacob),
+        bad_resets=int(bad_resets),
+        res0=float(res0),
+        res1=float(res1),
+        prev_rz_fsq=float(prev_rz_fsq),
+        bad_growth_streak=int(bad_growth_streak),
+        huge_force_restart_count=int(huge_force_restart_count),
+        state_checkpoint=state_checkpoint,
+    )
+
+
+def apply_controller_state_update(
+    state: ResidualControllerState,
+    update_func,
+    update,
+) -> ResidualControllerState:
+    """Apply one pure controller update to a controller-state snapshot."""
+
+    return update_func(state, update)
+
+
 def velocity_blocks_from_resume_state(
     resume_state: dict[str, Any],
     defaults: ResidualVelocityBlocks,

@@ -107,6 +107,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState as _ResidualControllerState,
+    apply_controller_state_update as _apply_controller_state_update,
     backtracking_momentum_search as _backtracking_momentum_search,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
@@ -114,6 +115,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     controller_state_after_initial_axis_reset_update as _controller_after_axis_reset,
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
+    controller_state_from_runtime_scalars as _controller_state_from_runtime_scalars,
     controller_state_from_resume_state as _controller_state_from_resume_state,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
@@ -1110,7 +1112,7 @@ def solve_fixed_boundary_residual_iter(
         ) = tuple(controller_state)
 
     def _current_controller_state() -> _ResidualControllerState:
-        return _ResidualControllerState(
+        return _controller_state_from_runtime_scalars(
             time_step=float(time_step),
             inv_tau=list(inv_tau),
             fsq_prev=float(fsq_prev),
@@ -1128,7 +1130,7 @@ def solve_fixed_boundary_residual_iter(
         )
 
     def _apply_controller_update(update_func, update) -> None:
-        _set_controller_state(update_func(_current_controller_state(), update))
+        _set_controller_state(_apply_controller_state_update(_current_controller_state(), update_func, update))
 
     _initial_velocity = _initial_residual_velocity_state(
         state=state,

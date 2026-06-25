@@ -4504,6 +4504,59 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
 
+### 2026-06-25: Add residual controller-state snapshot seam
+
+Steps taken:
+
+- Added a small tested controller-state API in
+  ``vmec_jax/solvers/fixed_boundary/residual/update.py`` for converting the
+  residual loop's legacy scalar slots into ``ResidualControllerState`` and for
+  applying pure controller updates through one explicit seam.
+- Rewired ``solve_fixed_boundary_residual_iter`` to use that seam for its
+  local controller-state snapshot and update dispatch.
+- Added focused unit tests covering runtime scalar normalization and pure
+  update delegation.
+
+Results obtained:
+
+- ``python -m ruff check`` passed for the changed residual update/iteration
+  modules and focused tests.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed with ``66`` tests.
+- ``source_health.py`` and ``repo_size_audit.py`` passed; tracked size is
+  ``28.22 MiB``.
+- The tranche deliberately avoids changing controller math or VMEC parity
+  semantics.  It creates the next stable API seam needed before the broader
+  controller-state refactor can remove more of the large residual-loop body.
+
+Best next steps:
+
+1. Commit and push the controller-state seam.
+2. Continue the larger residual-loop refactor by grouping restart, accepted
+   step, and free-boundary controller state into explicit state objects, with
+   tests before moving closure-heavy code.
+3. Keep production adaptive-branch differentiability claims conservative until
+   the full controller-state refactor has a fingerprint-gated AD-vs-FD gate.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.3%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 61.8%.
+- VMEC2000/VMEC++ parity and physics gates: 98.6%.
+- Docs/release hygiene: 100%.
+- Overall: 99.0%.
+
 ### 2026-06-25: Confirm final CI after readiness artifact refresh
 
 Steps taken:

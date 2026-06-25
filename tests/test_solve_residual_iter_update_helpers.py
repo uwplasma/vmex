@@ -6,12 +6,14 @@ import pytest
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState,
     ResidualVelocityBlocks,
+    apply_controller_state_update,
     backtracking_momentum_search,
     controller_state_after_catastrophic_restart_update,
     controller_state_after_initial_axis_reset_update,
     controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update,
     controller_state_from_resume_state,
+    controller_state_from_runtime_scalars,
     controller_state_legacy_payload,
     direct_force_fallback_trial,
     force_update_rms,
@@ -179,6 +181,65 @@ def test_controller_state_resume_round_trip_preserves_legacy_scalars() -> None:
     assert state.huge_force_restart_count == 4
     assert state.state_checkpoint is checkpoint
     assert controller_state_legacy_payload(state)["state_checkpoint"] is checkpoint
+
+
+def test_controller_state_from_runtime_scalars_normalizes_legacy_slots() -> None:
+    checkpoint = object()
+
+    state = controller_state_from_runtime_scalars(
+        time_step="0.125",
+        inv_tau=(1.0, 2.0, 3.0),
+        fsq_prev="4.0",
+        fsq0_prev=np.asarray(5.0),
+        flip_sign="-1.0",
+        iter1="6",
+        ijacob=np.asarray(7),
+        bad_resets="8",
+        res0=np.asarray(0.25),
+        res1="0.125",
+        prev_rz_fsq="0.0625",
+        bad_growth_streak=np.asarray(9),
+        huge_force_restart_count="10",
+        state_checkpoint=checkpoint,
+    )
+
+    assert state.time_step == pytest.approx(0.125)
+    assert state.inv_tau == [1.0, 2.0, 3.0]
+    assert state.fsq_prev == pytest.approx(4.0)
+    assert state.fsq0_prev == pytest.approx(5.0)
+    assert state.flip_sign == pytest.approx(-1.0)
+    assert state.iter1 == 6
+    assert state.ijacob == 7
+    assert state.bad_resets == 8
+    assert state.res0 == pytest.approx(0.25)
+    assert state.res1 == pytest.approx(0.125)
+    assert state.prev_rz_fsq == pytest.approx(0.0625)
+    assert state.bad_growth_streak == 9
+    assert state.huge_force_restart_count == 10
+    assert state.state_checkpoint is checkpoint
+
+
+def test_apply_controller_state_update_delegates_to_pure_update() -> None:
+    state = initial_residual_controller_state(
+        step_size=0.2,
+        k_ndamp=2,
+        initial_flip_sign=-1.0,
+        state_checkpoint="checkpoint",
+    )
+    update = host_initial_axis_reset_update(
+        state_checkpoint="new-checkpoint",
+        time_step=state.time_step,
+        iter2=3,
+        prev_rz_fsq_before=0.5,
+        k_ndamp=2,
+    )
+
+    got = apply_controller_state_update(state, controller_state_after_initial_axis_reset_update, update)
+
+    assert got.iter1 == 3
+    assert got.ijacob == 1
+    assert got.prev_rz_fsq == pytest.approx(0.5)
+    assert got.state_checkpoint == "new-checkpoint"
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
