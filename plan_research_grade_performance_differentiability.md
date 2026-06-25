@@ -4164,6 +4164,48 @@ Updated lane percentages:
 - Docs/release hygiene: 99.9%.
 - Overall: 98.7%.
 
+### 2026-06-25: Expose current-JVP precompile toggle
+
+Steps taken:
+
+- Added ``--same-branch-report-disable-current-jvp-precompile`` to the
+  direct-coil QS optimization example.
+- Routed the flag through ``same_branch_replay_options_from_args`` as
+  ``compile_current_only_jvp_cache``.
+- Added smoke-test assertions for the default precompiled cache behavior and
+  the lazy ``jax.jit`` opt-out mode.
+- Documented when to use the default compile-separated timing path versus the
+  lazy-JIT backend-comparison path.
+
+Results obtained:
+
+- This is an ergonomics/profiling-control change only.  It does not alter
+  solver math, same-branch fingerprint gates, or complete-solve acceptance
+  authority.
+
+Best next steps:
+
+1. Run focused lint, smoke tests, Sphinx, and whitespace checks for the touched
+   files.
+2. Commit and push if those gates pass.
+3. Check CI for the preceding compile-attribution commit and this follow-up.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 60.0%.
+- VMEC2000/VMEC++ parity and physics gates: 98.3%.
+- Docs/release hygiene: 99.9%.
+- Overall: 98.8%.
+
 ### 2026-06-25: Split current-only branch-local JVP compile and execution timing
 
 Steps taken:

@@ -978,6 +978,11 @@ when they reuse the same accepted replay payload, replay plan, and scalar
 registry inside one Python process.  The facade therefore reuses stable replay
 scalar wrappers for identical ``(scalar key, payload, scalar function)``
 triples instead of rebuilding per-call lambdas.
+By default, a cache miss explicitly lowers and compiles the current-only JVP
+callable so the reported timing separates compile cost from replay execution
+cost.  Use ``--same-branch-report-disable-current-jvp-precompile`` with the
+cache flag to keep the cache entry as a lazy ``jax.jit`` callable when comparing
+backend behavior or debugging compile placement.
 Use ``--same-branch-report-current-jvp-cache-probe`` with the cache flag to
 rerun the vector replay once and record miss-vs-hit timing in
 ``branch_local_vector_current_jvp_cache_probe``.

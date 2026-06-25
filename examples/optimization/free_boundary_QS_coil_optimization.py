@@ -1736,6 +1736,16 @@ def add_same_branch_replay_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--same-branch-report-disable-current-jvp-precompile",
+        action="store_true",
+        help=(
+            "When the current-JVP cache is enabled, keep the cached executable as "
+            "a lazy jax.jit callable instead of explicitly lowering/compiling on "
+            "cache miss. This is useful for backend comparisons; the default "
+            "precompiles to separate compile time from replay execution time."
+        ),
+    )
+    parser.add_argument(
         "--same-branch-report-current-jvp-cache-probe",
         action="store_true",
         help=(

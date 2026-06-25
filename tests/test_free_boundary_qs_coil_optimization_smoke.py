@@ -753,9 +753,19 @@ def test_same_branch_replay_options_include_current_jvp_cache_flag():
     enabled = module.same_branch_replay_options_from_args(
         SimpleNamespace(same_branch_report_enable_current_jvp_cache=True)
     )
+    lazy = module.same_branch_replay_options_from_args(
+        SimpleNamespace(
+            same_branch_report_enable_current_jvp_cache=True,
+            same_branch_report_disable_current_jvp_precompile=True,
+        )
+    )
 
     assert disabled["enable_current_only_jvp_cache"] is False
+    assert disabled["compile_current_only_jvp_cache"] is True
     assert enabled["enable_current_only_jvp_cache"] is True
+    assert enabled["compile_current_only_jvp_cache"] is True
+    assert lazy["enable_current_only_jvp_cache"] is True
+    assert lazy["compile_current_only_jvp_cache"] is False
 
 
 def test_same_branch_derivative_proposal_uses_gated_directional_report():

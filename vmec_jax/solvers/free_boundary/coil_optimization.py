@@ -368,6 +368,9 @@ def same_branch_replay_options_from_args(args: Any) -> dict[str, Any]:
             "enable_current_only_jvp_cache": bool(
                 getattr(args, "same_branch_report_enable_current_jvp_cache", False)
             ),
+            "compile_current_only_jvp_cache": not bool(
+                getattr(args, "same_branch_report_disable_current_jvp_precompile", False)
+            ),
             "freeze_vacuum_field": bool(getattr(args, "same_branch_report_freeze_vacuum_field", False)),
             "freeze_freeb_bsqvac": bool(getattr(args, "same_branch_report_freeze_bsqvac", False))}
 
