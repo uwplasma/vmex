@@ -568,6 +568,18 @@ class StrictStepBranchResult(NamedTuple):
     max_update_rms: float | None = None
 
 
+class StrictStepBranchFingerprint(NamedTuple):
+    """Array-free strict-step branch identity for same-branch validation gates."""
+
+    path: str
+    accepted: bool
+    catastrophic_restart: bool
+    clear_cache_after_catastrophic: bool
+    restart_reason: str
+    step_status: str
+    has_direct_fallback: bool
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -1367,6 +1379,20 @@ def strict_step_branch_result_after_catastrophic_restart(
     )
 
 
+def strict_step_branch_fingerprint(branch: StrictStepBranchResult) -> StrictStepBranchFingerprint:
+    """Return the array-free identity of a strict-step branch decision."""
+
+    return StrictStepBranchFingerprint(
+        path=str(branch.restart_path),
+        accepted=bool(branch.accepted),
+        catastrophic_restart=bool(branch.catastrophic_restart),
+        clear_cache_after_catastrophic=bool(branch.clear_cache_after_catastrophic),
+        restart_reason=str(branch.restart_reason),
+        step_status=str(branch.step_status),
+        has_direct_fallback=branch.fallback_direct_dt is not None,
+    )
+
+
 def backtracking_momentum_search(
     *,
     state: Any,
@@ -1513,6 +1539,7 @@ _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
 _strict_momentum_update_proposal = strict_momentum_update_proposal
 _strict_trial_evaluation = strict_trial_evaluation
+_strict_step_branch_fingerprint = strict_step_branch_fingerprint
 _strict_step_branch_result_after_catastrophic_restart = strict_step_branch_result_after_catastrophic_restart
 _strict_step_branch_result_after_direct_fallback = strict_step_branch_result_after_direct_fallback
 _host_catastrophic_restart_update = host_catastrophic_restart_update

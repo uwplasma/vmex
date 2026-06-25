@@ -33,6 +33,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     residual_evolve_coefficients,
     scale_velocity_blocks,
     DirectForceFallbackTrial,
+    strict_step_branch_fingerprint,
     strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback,
@@ -490,6 +491,85 @@ def test_strict_step_branch_result_after_catastrophic_restart_carries_policy_out
     assert result.update_rms == pytest.approx(restart.update_rms)
     assert result.max_coeff_delta_rms == pytest.approx(restart.max_coeff_delta_rms)
     assert result.max_update_rms == pytest.approx(restart.max_update_rms)
+
+
+def test_strict_step_branch_fingerprint_is_array_free_and_path_specific() -> None:
+    accepted = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=0.5, w_curr=1.0, backtracking=True),
+        state_try=np.asarray([1.0]),
+        state_backup=np.asarray([0.0]),
+        update_rms=0.25,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    rejected = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True),
+        state_try=np.asarray([1.0]),
+        state_backup=np.asarray([0.0]),
+        update_rms=None,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    fallback = strict_step_branch_result_after_direct_fallback(
+        branch=rejected,
+        fallback_trial=DirectForceFallbackTrial(
+            state=np.asarray([2.0]),
+            dt_eff=0.01,
+            update_rms=0.1,
+            residual=1.0,
+        ),
+        acceptance=direct_force_fallback_acceptance_decision(residual=1.0, current_residual=1.0),
+        clear_cache_after_rejected=True,
+    )
+    restart = host_catastrophic_restart_update(
+        probe_bad_jacobian=True,
+        w_try=np.inf,
+        time_step=0.2,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        step_size=0.1,
+        ijacob=4,
+        bad_resets=5,
+        iter2=9,
+        fsq_prev_before=1.25,
+        fsq0_prev_before=2.5,
+        k_ndamp=2,
+        max_coeff_delta_rms=1.0e-5,
+        max_update_rms=5.0e-3,
+    )
+    catastrophic = strict_step_branch_result_after_catastrophic_restart(
+        branch=rejected,
+        restart_update=restart,
+        state_backup=np.asarray([0.0]),
+    )
+
+    assert strict_step_branch_fingerprint(accepted) == (
+        "momentum_accept",
+        True,
+        False,
+        False,
+        "none",
+        "momentum",
+        False,
+    )
+    assert strict_step_branch_fingerprint(fallback) == (
+        "fallback_direct",
+        True,
+        False,
+        False,
+        "none",
+        "fallback_direct",
+        True,
+    )
+    assert strict_step_branch_fingerprint(catastrophic) == (
+        restart.restart_path,
+        False,
+        True,
+        True,
+        restart.restart_reason,
+        restart.step_status,
+        False,
+    )
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
