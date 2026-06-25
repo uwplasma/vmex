@@ -183,6 +183,13 @@ _FINGERPRINT_TRACE_KEYS = (
     "precond_jmax",
     "preconditioner_use_precomputed_tridi",
     "preconditioner_use_lax_tridi",
+    "strict_branch_path",
+    "strict_branch_accepted",
+    "strict_branch_catastrophic_restart",
+    "strict_branch_clear_cache_after_catastrophic",
+    "strict_branch_restart_reason",
+    "strict_branch_step_status",
+    "strict_branch_has_direct_fallback",
 )
 
 _FINGERPRINT_DIAGNOSTIC_KEYS = (

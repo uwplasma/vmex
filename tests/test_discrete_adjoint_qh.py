@@ -99,6 +99,13 @@ def test_residual_branch_fingerprint_tracks_control_not_residual_values():
                 "precond_jmax": 3,
                 "freeb_plascur": 1.25,
                 "freeb_bsqvac_half": np.asarray([100.0, 200.0], dtype=float),
+                "strict_branch_path": "momentum_accept",
+                "strict_branch_accepted": True,
+                "strict_branch_catastrophic_restart": False,
+                "strict_branch_clear_cache_after_catastrophic": False,
+                "strict_branch_restart_reason": "none",
+                "strict_branch_step_status": "momentum",
+                "strict_branch_has_direct_fallback": False,
             }
         ],
     }
@@ -118,6 +125,17 @@ def test_residual_branch_fingerprint_tracks_control_not_residual_values():
     changed_branch = dict(base)
     changed_branch["freeb_full_update_history"] = np.asarray([1, 1], dtype=int)
     assert residual_branch_fingerprint(base) != residual_branch_fingerprint(changed_branch)
+
+    changed_strict_branch = dict(base)
+    changed_strict_branch["adjoint_step_trace"] = [
+        dict(
+            base["adjoint_step_trace"][0],
+            strict_branch_path="fallback_direct",
+            strict_branch_step_status="fallback_direct",
+            strict_branch_has_direct_fallback=True,
+        )
+    ]
+    assert residual_branch_fingerprint(base) != residual_branch_fingerprint(changed_strict_branch)
 
 
 def test_qh_warm_start_fixture_loads_expected_case(load_case_qh_warm_start):

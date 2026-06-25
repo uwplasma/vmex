@@ -4504,6 +4504,59 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
 
+### 2026-06-25: Wire strict-step fingerprints into residual trace fingerprints
+
+Steps taken:
+
+- Added strict-step branch identity fields to finalized residual adjoint trace
+  entries: accepted/rejected path, catastrophic-restart flag, cache-clear
+  intent, restart reason, step status, and direct-fallback presence.
+- Extended ``residual_branch_fingerprint`` to include those strict-step fields
+  so fixed-boundary same-branch AD-vs-FD gates can prove the strict host update
+  branch stayed fixed.
+- Added source-level coverage for trace finalization and residual fingerprint
+  coverage proving numeric payload changes do not affect the branch fingerprint
+  but strict-branch path changes do.
+
+Results obtained:
+
+- ``python -m ruff check`` passed on the changed discrete-adjoint,
+  force-payload, and focused test files.
+- Focused tests passed for residual branch fingerprinting, trace finalization,
+  and strict-step branch fingerprint construction.
+- ``tests/test_solve_residual_iter_force_payload_helpers.py`` passed with
+  ``18`` tests.
+- ``tests/test_discrete_adjoint_qh.py`` passed locally with the expected
+  slow-test skips.
+- ``repo_size_audit.py`` passed; tracked repository size remained
+  ``28.23 MiB``.
+- ``source_health.py`` passed with the known large-file warnings.
+- ``git diff --check`` passed.
+
+Best next steps:
+
+1. Commit and push the fixed-boundary trace-fingerprint integration.
+2. Check the new CI run once after push; only intervene on concrete failures.
+3. If continuing beyond PR-readiness cleanup, the next substantive tranche is
+   a broader residual-loop controller-state API refactor, not another isolated
+   helper extraction.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 94.4%.
+- Free-boundary production differentiability: 96.2%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 63.8%.
+- VMEC2000/VMEC++ parity and physics gates: 98.8%.
+- Docs/release hygiene: 100%.
+- Overall: 99.2%.
+
 ### 2026-06-25: Add strict-step branch fingerprint helper
 
 Steps taken:

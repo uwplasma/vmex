@@ -12,7 +12,7 @@ from .payload_blocks import (
     residual_force_payload_m1_scalxc_stages,
     zero_edge_rz_force_blocks,
 )
-from .update import velocity_blocks_legacy_payload
+from .update import strict_step_branch_fingerprint, velocity_blocks_legacy_payload
 from ....vmec_residue import vmec_gcx2_from_tomnsps
 from ....vmec_tomnsp import TomnspsRZL
 
@@ -338,6 +338,18 @@ def finalize_strict_update_adjoint_trace_entry(
         "flip_sign": float(ns["flip_sign"]),
         "limit_update_rms": bool(ns["limit_update_rms"]),
     })
+    branch_result = ns.get("branch_result")
+    if branch_result is not None:
+        branch_fingerprint = strict_step_branch_fingerprint(branch_result)
+        trace_entry.update({
+            "strict_branch_path": branch_fingerprint.path,
+            "strict_branch_accepted": branch_fingerprint.accepted,
+            "strict_branch_catastrophic_restart": branch_fingerprint.catastrophic_restart,
+            "strict_branch_clear_cache_after_catastrophic": branch_fingerprint.clear_cache_after_catastrophic,
+            "strict_branch_restart_reason": branch_fingerprint.restart_reason,
+            "strict_branch_step_status": branch_fingerprint.step_status,
+            "strict_branch_has_direct_fallback": branch_fingerprint.has_direct_fallback,
+        })
     if adjoint_trace_mode in {"full", "branch"}:
         trace_entry.update({
             "dt_eff": float(ns["dt_eff"]),

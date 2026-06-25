@@ -9,6 +9,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     ResidualForcePayloadResult,
     ResidualForceEvaluationResult,
     ResidualForceKernelAux,
+    finalize_strict_update_adjoint_trace_entry,
     force_z_channel_square_sums,
     make_residual_force_evaluator,
     maybe_debug_force_z_channel_square_sums,
@@ -20,6 +21,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     residual_force_z_nan_guard,
     resolve_residual_force_mask_pack,
 )
+from vmec_jax.solvers.fixed_boundary.residual.update import strict_step_acceptance_decision, strict_step_branch_result
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 
 
@@ -76,9 +78,48 @@ def test_residual_force_kernel_aux_keeps_only_production_fields() -> None:
 
     assert isinstance(got, ResidualForceKernelAux)
     assert got.bc is kernels.bc
+    assert not hasattr(got, "armn_e")
     np.testing.assert_allclose(got.pru_even, kernels.pru_even)
     np.testing.assert_allclose(got.constraint_zcon0, kernels.constraint_zcon0)
-    assert not hasattr(got, "armn_e")
+
+
+def test_finalize_strict_update_trace_records_array_free_branch_identity() -> None:
+    branch = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=0.5, w_curr=1.0, backtracking=True),
+        state_try="accepted-state",
+        state_backup="backup-state",
+        update_rms=0.25,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    trace_entry: dict[str, object] = {}
+
+    finalize_strict_update_adjoint_trace_entry(
+        trace_entry,
+        {
+            "branch_result": branch,
+            "step_status": "momentum",
+            "restart_reason": "none",
+            "restart_path": "momentum_accept",
+            "time_step": 0.1,
+            "flip_sign": 1.0,
+            "limit_update_rms": False,
+            "dt_eff": 0.1,
+            "b1": 0.2,
+            "fac": 0.3,
+            "force_scale": 0.4,
+            "state": "accepted-state",
+        },
+        adjoint_trace_mode="branch",
+    )
+
+    assert trace_entry["strict_branch_path"] == "momentum_accept"
+    assert trace_entry["strict_branch_accepted"] is True
+    assert trace_entry["strict_branch_catastrophic_restart"] is False
+    assert trace_entry["strict_branch_clear_cache_after_catastrophic"] is False
+    assert trace_entry["strict_branch_restart_reason"] == "none"
+    assert trace_entry["strict_branch_step_status"] == "momentum"
+    assert trace_entry["strict_branch_has_direct_fallback"] is False
 
 
 def test_force_z_channel_square_sums_handles_asymmetric_and_symmetric_only_payloads() -> None:
