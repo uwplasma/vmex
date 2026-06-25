@@ -1288,6 +1288,37 @@ def solve_fixed_boundary_residual_iter(
         nonlocal velocity_blocks
         velocity_blocks = _zero_primary_velocity_blocks_like(velocity_blocks)
 
+    def _apply_strict_step_branch(branch_result, *, after_catastrophic_restart: bool = False):
+        nonlocal state, step_status, restart_reason, huge_force_restart_count, restart_path, update_rms
+        nonlocal max_coeff_delta_rms, max_update_rms, freeb_controls_cached
+
+        branch_application = _strict_step_branch_application(
+            branch_result,
+            max_coeff_delta_rms=float(max_coeff_delta_rms),
+            max_update_rms=float(max_update_rms),
+            after_catastrophic_restart=bool(after_catastrophic_restart),
+        )
+        branch_runtime = branch_application.runtime
+        state = branch_runtime.state
+        step_status = branch_runtime.step_status
+        restart_reason = branch_runtime.restart_reason
+        huge_force_restart_count = branch_runtime.huge_force_restart_count
+        restart_path = branch_runtime.restart_path
+        update_rms = branch_runtime.update_rms
+        max_coeff_delta_rms = branch_runtime.max_coeff_delta_rms
+        max_update_rms = branch_runtime.max_update_rms
+
+        side_effects = branch_application.side_effects
+        if side_effects.zero_all_velocity_blocks:
+            _zero_all_velocity_blocks()
+        if side_effects.zero_primary_velocity_blocks:
+            _zero_primary_velocity_blocks()
+        if side_effects.clear_freeb_controls_cached:
+            freeb_controls_cached = None
+        if side_effects.clear_precond_cache:
+            precond_cache.clear()
+        return branch_application
+
     # VMEC `eqsolve`: if the initial Jacobian changes sign, improve the axis
     # guess *before* the first iteration (no extra iter1). This aligns the
     # zero_m1 gating and time-control history with VMEC2000.
@@ -2892,32 +2923,10 @@ def solve_fixed_boundary_residual_iter(
                     )
                     if adjoint_trace and branch_result.fallback_direct_dt is not None:
                         trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
-                    branch_application = _strict_step_branch_application(
-                        branch_result,
-                        max_coeff_delta_rms=float(max_coeff_delta_rms),
-                        max_update_rms=float(max_update_rms),
-                    )
-                    if branch_application.side_effects.zero_all_velocity_blocks:
-                        _zero_all_velocity_blocks()
-            branch_application = _strict_step_branch_application(
-                branch_result,
-                max_coeff_delta_rms=float(max_coeff_delta_rms),
-                max_update_rms=float(max_update_rms),
-            )
-            branch_runtime = branch_application.runtime
-            state = branch_runtime.state
-            step_status = branch_runtime.step_status
-            restart_reason = branch_runtime.restart_reason
-            huge_force_restart_count = branch_runtime.huge_force_restart_count
-            restart_path = branch_runtime.restart_path
-            update_rms = branch_runtime.update_rms
+            branch_application = _apply_strict_step_branch(branch_result)
             if not branch_result.accepted:
                 catastrophic_restart = branch_result.catastrophic_restart
                 if catastrophic_restart:
-                    # Roll back state and zero velocity.
-                    state = state_backup
-                    if branch_application.side_effects.zero_primary_velocity_blocks:
-                        _zero_primary_velocity_blocks()
                     restart_update = _host_catastrophic_restart_update(
                         probe_bad_jacobian=bool(probe_bad_jacobian),
                         w_try=float(w_try),
@@ -2940,24 +2949,10 @@ def solve_fixed_boundary_residual_iter(
                         restart_update=restart_update,
                         state_backup=state_backup,
                     )
-                    branch_application = _strict_step_branch_application(
+                    branch_application = _apply_strict_step_branch(
                         branch_result,
-                        max_coeff_delta_rms=float(max_coeff_delta_rms),
-                        max_update_rms=float(max_update_rms),
                         after_catastrophic_restart=True,
                     )
-                    branch_runtime = branch_application.runtime
-                    state = branch_runtime.state
-                    restart_reason = branch_runtime.restart_reason
-                    step_status = branch_runtime.step_status
-                    restart_path = branch_runtime.restart_path
-                    max_coeff_delta_rms = branch_runtime.max_coeff_delta_rms
-                    max_update_rms = branch_runtime.max_update_rms
-                    if branch_application.side_effects.clear_freeb_controls_cached:
-                        freeb_controls_cached = None
-                    update_rms = branch_runtime.update_rms
-                    if branch_application.side_effects.clear_precond_cache:
-                        precond_cache.clear()
             _record_update_state_ready_timing(
                 timing_enabled=bool(timing_enabled),
                 timing_stats=timing_stats,

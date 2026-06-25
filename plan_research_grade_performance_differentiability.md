@@ -5673,3 +5673,69 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.6%.
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
+
+### 2026-06-25: Consolidate strict-step branch application in the residual loop
+
+Steps taken:
+
+- Added a local ``_apply_strict_step_branch`` seam in
+  ``solve_fixed_boundary_residual_iter`` that applies
+  ``StrictStepBranchApplication`` runtime fields and side effects from one
+  auditable point.
+- Rewired strict momentum acceptance, direct-force fallback acceptance, and
+  catastrophic-restart cleanup to use the shared application seam instead of
+  duplicating state/status/cache/velocity assignments inline.
+- Kept the existing strict-step branch result, fingerprint, and pure update
+  helper APIs unchanged, so branch-local AD-vs-FD evidence continues to reason
+  about the same branch identity fields.
+
+Results obtained:
+
+- ``python -m ruff check
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py`` passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_force_payload_helpers.py
+  tests/test_discrete_adjoint_qh.py -q`` passed with expected skips.
+- Public docs/release artifact gates passed:
+  ``python -m pytest -q tests/test_docs_release_hygiene.py
+  tests/test_readme_ad_fd_evidence.py -q``.
+- ``source_health.py`` and ``repo_size_audit.py`` passed.  The residual
+  iteration module decreased from 3124 to 3119 lines and the main residual loop
+  from 2748 to 2743 lines.  This is still not the endpoint; the remaining
+  reduction requires a broader controller-state object rather than small helper
+  extraction.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_cli_helpers.py::test_cli_test_mode_copies_packaged_input_solves_and_plots
+  -q`` passed.
+
+Best next steps:
+
+1. Commit and push the strict-step application seam if final local gates remain
+   clean.
+2. Start the broader residual-loop controller-state object as the next
+   deliberate refactor tranche.  The goal is to move more mutable controller
+   state out of scalar locals while preserving VMEC2000 parity and the
+   fingerprint-gated AD-vs-FD contract.
+3. Keep public artifacts unchanged unless a benchmark/parity/evidence rerun
+   materially changes their records.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 95.5%.
+- Free-boundary production differentiability: 96.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 66.1%.
+- VMEC2000/VMEC++ parity and physics gates: 99.0%.
+- Docs/release hygiene: 100%.
+- Overall: 99.3%.
