@@ -36,6 +36,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     residual_evolve_coefficients,
     scale_velocity_blocks,
     DirectForceFallbackTrial,
+    strict_step_branch_side_effects,
     strict_step_branch_fingerprint,
     strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart,
@@ -687,6 +688,46 @@ def test_strict_step_runtime_fields_use_catastrophic_branch_caps() -> None:
     assert fields.update_rms == pytest.approx(restart.update_rms)
     assert fields.max_coeff_delta_rms == pytest.approx(restart.max_coeff_delta_rms)
     assert fields.max_update_rms == pytest.approx(restart.max_update_rms)
+
+
+def test_strict_step_branch_side_effects_capture_velocity_and_cache_policy() -> None:
+    accepted = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=0.5, w_curr=1.0, backtracking=True),
+        state_try=np.asarray([1.0]),
+        state_backup=np.asarray([0.0]),
+        update_rms=0.25,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    rejected = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True),
+        state_try=np.asarray([1.0]),
+        state_backup=np.asarray([0.0]),
+        update_rms=None,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    fallback = strict_step_branch_result_after_direct_fallback(
+        branch=rejected,
+        fallback_trial=DirectForceFallbackTrial(
+            state=np.asarray([2.0]),
+            dt_eff=0.01,
+            update_rms=0.1,
+            residual=1.0,
+        ),
+        acceptance=direct_force_fallback_acceptance_decision(residual=1.0, current_residual=1.0),
+        clear_cache_after_rejected=True,
+    )
+
+    assert strict_step_branch_side_effects(accepted) == (False, False, False, False)
+    assert strict_step_branch_side_effects(fallback) == (True, False, False, False)
+    assert strict_step_branch_side_effects(rejected) == (False, True, False, False)
+    assert strict_step_branch_side_effects(rejected, after_catastrophic_restart=True) == (
+        False,
+        False,
+        True,
+        True,
+    )
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
