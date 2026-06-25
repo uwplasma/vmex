@@ -226,6 +226,20 @@ generic fixed-boundary edge rows. VMEC documentation and the SIMSOPT VMEC
 interface also make clear that strict production runs usually need large
 final-grid iteration budgets, often thousands of iterations.
 
+VMEC++ source review gives three concrete follow-up candidates for the
+``vmec_jax`` direct-coil path if the high-mode staged profiles still plateau
+above ``1e-12``. First, VMEC++ has an Anderson(1) accelerator for the
+free-boundary vacuum-pressure coupling; that is the most directly relevant
+nonlinear-cycling fix to prototype behind an opt-in flag. Second, its NESTOR
+singular-integral code includes a Miller-recurrence numerical-stability update
+for high ``MPOL``/``NTOR`` runs; the matching ``vmec_jax`` dense-NESTOR replay
+path should be audited before pushing beyond ``NTOR=23``. Third, VMEC++ uses
+sqrt-weighted interpolation for multigrid transitions, which is relevant if
+the ``NS=13 -> 17`` or later ``NS=17 -> 25`` transitions create residual bumps.
+These are solver-control and numerical-kernel changes, not geometry changes;
+they should be tested against the existing VMEC2000 generated-mgrid reports
+before being trusted for direct-coil production claims.
+
 DESC separates the postsolve finite-beta boundary condition from the VMEC-style
 iterative solve. Its finite-beta ``BoundaryError`` objective uses the virtual
 casing principle to compute the plasma contribution to the exterior magnetic
