@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "branch_local_report": "outputs/pr20_rejected_slot_proposal_full/same_branch_complete_solve_report.json",
+    "branch_local_report": "outputs/pr20_rejected_slot_proposal_one_slot_scalar/same_branch_complete_solve_report.json",
     "contract": "AD-vs-central-FD evidence; free-boundary rows are same-branch/fingerprint-gated only"
   },
   "records": [

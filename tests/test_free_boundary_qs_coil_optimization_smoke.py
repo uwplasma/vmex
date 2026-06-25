@@ -1845,8 +1845,10 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
 
     def fake_branch_local_vector(*_args, **kwargs):
         replay_kwargs = dict(kwargs["replay_kwargs"])
+        scalar_keys = kwargs.get("scalar_keys", _args[0] if _args else ())
         calls.append(
             {
+                "_scalar_keys": tuple(scalar_keys),
                 **replay_kwargs,
                 "_replay_plan": kwargs.get("replay_plan"),
                 "_current_only_coil_geometry": kwargs.get("current_only_coil_geometry"),
@@ -1968,6 +1970,7 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert calls[1]["use_accepted_only_fast_path"] is False
     assert calls[1]["_replay_plan"] is replay_plan_sentinel
     assert calls[1]["_current_only_coil_geometry"] is not None
+    assert calls[1]["_scalar_keys"] == ("aspect",)
     assert "accept_mask" not in calls[1]
     assert [item.get("step_status", "accepted") for item in calls[1]["traces"]] == ["accepted", "rejected"]
     assert calls[2]["_replay_plan"] is replay_plan_sentinel
@@ -1984,6 +1987,8 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert rejected_gate["differentiates_adaptive_controller"] is False
     assert rejected_gate["differentiates_run_free_boundary"] is False
     assert rejected_gate["same_stacked_step_policy_branch"] is True
+    assert rejected_gate["scalar_keys"] == ["aspect"]
+    assert rejected_gate["full_report_scalar_keys"] == ["aspect", "qs_total"]
     assert rejected_gate["fixed_rejected_controller_slot_present"] is True
     assert rejected_gate["fixed_rejected_controller_slots"] == 1
     assert rejected_gate["status_derived_rejected_controller_slot_present"] is True

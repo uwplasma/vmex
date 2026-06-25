@@ -900,7 +900,6 @@ def same_branch_rejected_slot_gate_from_vector_replay(
     missing_vector_keys: tuple[str, ...],
     vector_keys: tuple[str, ...],
     replay_kwargs: dict[str, Any],
-    vector_uses_state_only_replay: bool,
     run_branch_local_vector: Any,
     summarize_vector_result: Any,
     main_vector_replay_plan: dict[str, Any] | None = None,
@@ -934,6 +933,10 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         gate["reason"] = "base complete-solve payload has no traces"
         return gate, None
 
+    slot_vector_keys = tuple(key for key in ("aspect", "mean_iota", "lcfs_boundary_moment") if key in vector_keys)[:1]
+    if not slot_vector_keys:
+        slot_vector_keys = tuple(vector_keys[:1])
+    slot_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in slot_vector_keys)
     rejected_trace = deepcopy(base_traces[-1])
     rejected_trace["step_status"] = "rejected"
     padded_traces = base_traces + (rejected_trace,)
@@ -966,10 +969,10 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         # precomputation metadata.
         rejected_replay_plan = None
     rejected_vector = run_branch_local_vector(
-        vector_keys,
+        slot_vector_keys,
         {
             **replay_kwargs,
-            "state_only_replay": vector_uses_state_only_replay,
+            "state_only_replay": slot_uses_state_only_replay,
             "traces": padded_traces,
             "use_accepted_only_fast_path": False,
         },
@@ -977,7 +980,7 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         replay_plan_for_call=rejected_replay_plan,
     )
     wall_s = float(time.perf_counter() - t0)
-    rejected_summary = summarize_vector_result(rejected_vector, vector_keys)
+    rejected_summary = summarize_vector_result(rejected_vector, slot_vector_keys)
     rejected_metadata = rejected_summary.get("replay_branch_metadata", {})
     rejected_controller_slot_summary = rejected_summary.get("controller_slot_summary", {})
     controller_slot_fingerprint = (
@@ -1032,7 +1035,8 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         "same_stacked_step_policy_branch": bool(
             rejected_summary["replay_option_flags"].get("use_stacked_step_controls", False)
         ),
-        "scalar_keys": list(vector_keys),
+        "scalar_keys": list(slot_vector_keys),
+        "full_report_scalar_keys": list(vector_keys),
         "fixed_rejected_controller_slot_present": bool(np.any(rejected_mask)),
         "fixed_rejected_controller_slots": int(np.count_nonzero(rejected_mask)),
         "status_derived_rejected_controller_slot_present": status_derived_rejected_slot,

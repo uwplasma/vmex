@@ -1095,7 +1095,6 @@ def write_same_branch_validation_report(
         missing_vector_keys=missing_vector_keys,
         vector_keys=vector_keys,
         replay_kwargs=replay_kwargs,
-        vector_uses_state_only_replay=vector_uses_state_only_replay,
         run_branch_local_vector=run_branch_local_vector,
         summarize_vector_result=summarize_vector_result,
         main_vector_replay_plan=main_vector_replay_plan,

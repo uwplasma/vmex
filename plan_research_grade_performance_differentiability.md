@@ -2960,3 +2960,120 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97.5%.
 - Docs/release hygiene: 98.5%.
 - Overall: 96.3%.
+
+### 2026-06-25: Reduce accepted/rejected slot replay payload
+
+Steps taken:
+
+- Kept the promoted branch-local vector report as the authority for the full
+  requested physical scalar set, but narrowed the synthetic
+  accepted/rejected-controller-slot gate to replay only the cheapest available
+  structural scalar, usually ``aspect``.
+- Added explicit ``scalar_keys`` and ``full_report_scalar_keys`` provenance so
+  reviewers can see that the rejected-slot gate is a narrow controller-slot
+  fingerprint/JVP gate, not a replacement for the full vector derivative report.
+- Preserved the main replay-plan static boundary contexts in the rejected-slot
+  plan and kept complete solves as the only proposal acceptance authority.
+- Updated the free-boundary optimization and performance docs with the new
+  provenance fields and measured timing.
+
+Results obtained:
+
+- The real tiny direct-coil smoke report stayed same-branch and passed the
+  accepted/rejected controller-slot gate with ``scalar_keys=['aspect']`` and
+  ``full_report_scalar_keys=['aspect', 'qs_total', 'mean_iota',
+  'lcfs_boundary_moment']``.
+- Rejected-slot replay wall time improved from about ``8.06 s`` before context
+  reuse to ``7.34 s`` after context reuse, then to ``6.74 s`` with the
+  one-scalar slot payload.
+- Focused tests and Ruff passed on the modified code paths; the broader focused
+  helper/smoke suite remains the next validation before committing.
+
+Best next steps:
+
+1. Run the full focused free-boundary helper/smoke test set, Ruff, diff-check,
+   docs, repo-size, and AD/FD artifact regeneration before committing this
+   tranche.
+2. Target the main branch-local vector/JVP graph construction cost next; the
+   rejected-slot gate is no longer the dominant overhead.
+3. Keep adaptive free-boundary claims conservative until a true
+   fingerprint-gated adaptive full-loop AD-vs-central-FD gate exists.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 92.5%.
+- Free-boundary production differentiability: 92.8%.
+- Single-stage coil optimization: 89.0%.
+- CPU/GPU runtime and memory footprint: 97.5%.
+- Refactor/API/examples: 55.5%.
+- VMEC2000/VMEC++ parity and physics gates: 97.5%.
+- Docs/release hygiene: 98.6%.
+- Overall: 96.5%.
+
+### 2026-06-25: Final PR-readiness low-hanging tranche
+
+Steps taken:
+
+- Reproduced and fixed the two red py3.11 core CI buckets from the last pushed
+  PR run.
+- Hardened ``finalize_residual_iter_from_namespace`` so legacy/synthetic
+  namespace finalization tests get policy-default diagnostics for newly added
+  non-numerical policy fields without requiring every test fixture to duplicate
+  the full startup policy object.
+- Restored the README QI diagnostic wording expected by the docs/release hygiene
+  gate: seed-3127 remains a diagnostic stress case, not a README promotion row,
+  and artifact-promotion rules live in the docs.
+- Regenerated the AD-vs-central-FD evidence artifact from the current
+  one-scalar rejected-slot branch-local report and normalized the JSON
+  provenance to a portable relative output path.
+- Regenerated the single-grid fixed-boundary runtime figure from the existing
+  compact PR #20 current-branch summary using the runtime-only README/docs plot.
+- Ran the quick converged-WOUT VMEC2000 parity benchmark for
+  ``circular_tokamak`` with the local VMEC2000 executable.
+- Ran focused docs, repo-size, source-health, runtime-renderer, QI artifact,
+  AD/FD, parity, free-boundary helper/smoke, and the two previously failing
+  CI bucket gates.
+
+Results obtained:
+
+- ``driver-solve-discrete`` CI bucket now passes locally:
+  ``1094 passed, 30 skipped``.
+- ``rest`` CI bucket now passes locally: ``663 passed, 2 skipped``.
+- Free-boundary helper/smoke tests pass: ``41 passed, 1 xfailed``.
+- Runtime/QI artifact tests pass: ``51 passed``.
+- AD/FD and parity artifact tests pass: ``13 passed, 6 skipped``.
+- Sphinx full docs build passes with ``-W``.
+- Repo size audit passes: tracked size ``27.06 MiB`` and no tracked file over
+  the ``2 MiB`` gate.
+- Source-health gate passes with the known large-file warnings still reported
+  as refactor work, not as a blocking error.
+- Quick VMEC2000/WOUT parity passes for ``circular_tokamak``.  The summary shows
+  VMEC2000 and vmec_jax aspect agreement to roundoff and representative WOUT
+  relative-RMS channels near machine precision, with the known ``bsubvmnc``
+  circular-axis convention channel at about ``3.3e-5``.
+- The checked-in runtime matrix still has 16 historical single-grid rows and
+  VMEC++ results for 9 supported/converged rows.  The CSV rows are unchanged;
+  only the runtime-only PNG and generation timestamp changed.
+
+Best next steps:
+
+1. Commit and push this final tranche, then check the fresh PR CI after it has
+   had time to run instead of polling it continuously.
+2. If CI is green, convert PR #20 from draft to ready for review.
+3. Leave remaining non-blocking work as follow-up lanes: main branch-local
+   vector/JVP graph construction cost, arbitrary adaptive branch differentiation
+   research, larger bounded VMEC2000/VMEC++ parity matrices, and the broader
+   source-file simplification refactor.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.0%.
+- Free-boundary production differentiability: 93.2%.
+- Single-stage coil optimization: 89.5%.
+- CPU/GPU runtime and memory footprint: 97.6%.
+- Refactor/API/examples: 56.0%.
+- VMEC2000/VMEC++ parity and physics gates: 97.8%.
+- Docs/release hygiene: 99.0%.
+- Overall: 96.8%.

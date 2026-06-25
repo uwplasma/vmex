@@ -1427,7 +1427,13 @@ The rejected-slot gate builds a separate padded trace plan because the
 controller branch is intentionally different from the all-accepted replay, but
 it reuses any static boundary replay contexts from the main vector report; the
 JSON field ``accepted_rejected_controller_slot_gate.reused_boundary_replay_contexts``
-records whether that reuse occurred.
+records whether that reuse occurred.  The slot gate intentionally replays only
+the cheapest available physical scalar, usually ``aspect``, because its job is
+to prove that the accepted/rejected controller-slot fingerprint and directional
+JVP path are still valid.  The main vector report remains the authority for the
+full requested scalar set.  For review, the slot gate writes both
+``scalar_keys`` and ``full_report_scalar_keys`` so the narrow replay payload is
+explicit rather than hidden.
 
 An additional opt-in bridge toward derivative-assisted coil optimization is
 available with ``--same-branch-derivative-proposal``.  This mode still does

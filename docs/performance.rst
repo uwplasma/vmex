@@ -3957,12 +3957,14 @@ controller slot, but it can still reuse the main vector report's static
 boundary contexts.  The report records this as
 ``accepted_rejected_controller_slot_gate.reused_boundary_replay_contexts``.
 
-In the tiny direct-coil smoke report used for PR #20 validation, this reduced
-the rejected-slot replay wall time from about ``8.06 s`` to about ``7.34 s``
-while keeping the same current-only JVP fast path and complete-solve
-acceptance authority.  The main branch-local vector JVP remains the dominant
-cost at about ``9.2 s`` and is the next target for replay graph construction
-work.
+In the tiny direct-coil smoke report used for PR #20 validation, context reuse
+reduced the rejected-slot replay wall time from about ``8.06 s`` to about
+``7.34 s``.  Narrowing that synthetic slot gate to a single cheap physical
+scalar, while keeping the main vector report authoritative for all requested
+scalars, reduced it again to about ``6.74 s``.  The same current-only JVP fast
+path and complete-solve acceptance authority are preserved.  The main
+branch-local vector JVP remains the dominant cost at about ``9.1--9.2 s`` and
+is the next target for replay graph construction work.
 
 Implementation map (performance-critical paths)
 ------------------------------------------------
