@@ -855,6 +855,7 @@ def run_same_branch_vector_report_section(
     json_safe_payload_fn: Any,
     initial_vector_summary: dict[str, Any],
     initial_gate_summary: dict[str, Any],
+    cache_probe: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
     """Run the optional vector/JVP same-branch replay report."""
 
@@ -936,6 +937,31 @@ def run_same_branch_vector_report_section(
             "passed": False,
             "scope": "same-branch production-forward vector/JVP physical-scalar gate",
             "reason": f"{type(exc).__name__}: {exc}",
+        }
+    if bool(cache_probe):
+        t0 = time.perf_counter()
+        probe = run_branch_local_vector(
+            vector_keys,
+            {**replay_kwargs, "state_only_replay": vector_uses_state_only_replay},
+            replay_plan_for_call=main_vector_replay_plan,
+        )
+        probe_wall_s = float(time.perf_counter() - t0)
+        probe_timings = {str(key): float(value) for key, value in probe.get("timings", {}).items()}
+        for key, value in probe_timings.items():
+            timings[f"branch_local_vector_cache_probe_{key}"] = value
+        timings["branch_local_vector_cache_probe_wall_s"] = probe_wall_s
+        cache_info = probe.get("directional_jvp_cache_info", {})
+        signature = probe.get("directional_jvp_signature", {})
+        compact_report["branch_local_vector_current_jvp_cache_probe"] = {
+            "available": True,
+            "scope": "repeat same-payload current-only branch-local vector/JVP cache probe",
+            "wall_s": probe_wall_s,
+            "cache_hit": bool(cache_info.get("hit", False)) if isinstance(cache_info, dict) else False,
+            "directional_jvp_cache_info": json_safe_payload_fn(cache_info),
+            "cache_key_digest": str(signature.get("cache_key_digest", ""))
+            if isinstance(signature, dict)
+            else "",
+            "timings": probe_timings,
         }
     return branch_local_vector, branch_local_vector_gate, branch_local_vector, main_vector_replay_plan
 
