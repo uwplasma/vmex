@@ -3819,3 +3819,68 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.0%.
 - Docs/release hygiene: 99.7%.
 - Overall: 98.2%.
+
+### 2026-06-25: Exercise non-smoke coil proposal/cache gate
+
+Steps taken:
+
+- Ran a bounded non-smoke synthetic-circle direct-coil QS baseline with one
+  current variable, ``max_evals=2``, ``vmec_max_iter=3``, and no same-branch
+  proposal path.
+- Ran the same bounded non-smoke case with
+  ``--same-branch-derivative-proposal``, current-only vector/JVP replay,
+  matrix-free NESTOR/source replay, rejected-slot gate, and the opt-in
+  current-JVP cache probe.
+- The first non-smoke proposal artifact showed that the vector physical-scalar
+  gate failed for ``qs_total`` and ``mean_iota``, but the unavailable proposal
+  reason was dominated by the large absolute replay base delta and did not
+  preserve gate/cache evidence.
+- Reordered proposal validation so failed vector/physical-scalar gates are
+  reported before stale base-delta caps, and changed unavailable proposal
+  payloads to preserve compact ``gate_evidence``.
+- Documented that unavailable proposals retain gate evidence.
+
+Results obtained:
+
+- Baseline complete-solve run finished two objective evaluations in the
+  validation-scale non-smoke setup.  It did not produce derivative evidence.
+- Proposal/cache run finished the same complete-solve setup and then correctly
+  refused to form a derivative-assisted trial because the branch-local vector
+  physical-scalar gate failed.
+- The post-fix unavailable proposal now reports
+  ``reason='branch-local vector gate did not pass'`` and keeps:
+  ``branch_local_vector_gate_passed=False``,
+  ``physical_scalar_gate_passed=False``,
+  ``directional_jvp_cache_enabled=True``,
+  ``directional_jvp_cache_hit=False`` for the first replay,
+  ``current_jvp_cache_probe_available=True``,
+  ``current_jvp_cache_probe_hit=True``, and
+  ``accepted_rejected_controller_slot_gate_passed=True``.
+- The repeated same-payload cache probe took about ``9 ms`` in this non-smoke
+  run, confirming the cache-hit path beyond the earlier smoke-only evidence.
+- The failure is scientifically expected for this crude synthetic-circle
+  validation setup: the VMEC-state ``qs_total`` is enormous and the
+  branch-local scalar gate rejects the derivative evidence instead of letting a
+  stale/ill-conditioned derivative drive the complete-solve optimizer.
+
+Best next steps:
+
+1. Add a stable, physically better-conditioned direct-coil fixture where the
+   branch-local ``qs_total`` and ``mean_iota`` gates pass, then let a
+   derivative proposal reach complete-solve accept/reject authority.
+2. Continue cold first-call replay/JVP graph-construction reduction; this
+   tranche strengthens failure provenance and repeat-call cache evidence.
+3. Keep branch-local proposal artifacts conservative: a failed scalar gate must
+   block proposals, not silently downweight failed terms.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 95.1%.
+- Single-stage coil optimization: 91.3%.
+- CPU/GPU runtime and memory footprint: 98.9%.
+- Refactor/API/examples: 59.4%.
+- VMEC2000/VMEC++ parity and physics gates: 98.1%.
+- Docs/release hygiene: 99.7%.
+- Overall: 98.3%.

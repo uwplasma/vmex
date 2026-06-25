@@ -1430,6 +1430,18 @@ def _unavailable_derivative_proposal(reason: str) -> list[dict[str, Any]]:
     return [{"available": False, "reason": str(reason)}]
 
 
+def _unavailable_derivative_proposal_from_report(reason: str, report: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return an unavailable proposal while preserving report provenance."""
+
+    return [
+        {
+            "available": False,
+            "reason": str(reason),
+            "gate_evidence": same_branch_derivative_gate_evidence(report),
+        }
+    ]
+
+
 def _same_branch_derivative_vector_evidence(
     report: dict[str, Any],
     *,
@@ -1457,6 +1469,14 @@ def _same_branch_derivative_vector_evidence(
     derivative_mode = str(vector.get("derivative_mode", "")).strip().lower()
     if derivative_mode != "directional_jvp":
         return None, "branch-local proposal requires directional_jvp derivative_mode"
+    vector_gate = report.get("branch_local_vector_gate")
+    if isinstance(vector_gate, dict) and bool(vector_gate.get("available", False)):
+        if not bool(vector_gate.get("passed", False)):
+            return None, "branch-local vector gate did not pass"
+        physical_gate = vector_gate.get("physical_scalar_gate", {})
+        if isinstance(physical_gate, dict) and not bool(physical_gate.get("passed", False)):
+            return None, "branch-local physical-scalar gate did not pass"
+
     report_base_delta = float(vector.get("max_base_abs_delta", np.inf))
     if not np.isfinite(report_base_delta):
         return None, "branch-local vector report has non-finite replay base delta"
@@ -1468,14 +1488,6 @@ def _same_branch_derivative_vector_evidence(
                 f"{float(max_base_abs_delta):.3e}"
             ),
         )
-
-    vector_gate = report.get("branch_local_vector_gate")
-    if isinstance(vector_gate, dict) and bool(vector_gate.get("available", False)):
-        if not bool(vector_gate.get("passed", False)):
-            return None, "branch-local vector gate did not pass"
-        physical_gate = vector_gate.get("physical_scalar_gate", {})
-        if isinstance(physical_gate, dict) and not bool(physical_gate.get("passed", False)):
-            return None, "branch-local physical-scalar gate did not pass"
 
     rejected_slot_gate = report.get("accepted_rejected_controller_slot_gate")
     if isinstance(rejected_slot_gate, dict) and bool(rejected_slot_gate.get("requested", False)):
@@ -1657,14 +1669,14 @@ def same_branch_derivative_proposals_from_report(
         max_base_abs_delta=float(max_base_abs_delta),
     )
     if evidence is None:
-        return _unavailable_derivative_proposal(str(reason))
+        return _unavailable_derivative_proposal_from_report(str(reason), report)
     direction_terms, reason = _same_branch_proposal_directional_terms(
         evidence["vector"],
         objective_model,
         max_base_abs_delta=float(max_base_abs_delta),
     )
     if direction_terms is None:
-        return _unavailable_derivative_proposal(str(reason))
+        return _unavailable_derivative_proposal_from_report(str(reason), report)
 
     direction_x = np.asarray(report.get("direction_x", []), dtype=float)
     x_best = np.asarray(best["x"], dtype=float)

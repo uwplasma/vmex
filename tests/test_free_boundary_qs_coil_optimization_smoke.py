@@ -979,6 +979,9 @@ def test_same_branch_derivative_proposal_rejects_failed_vector_gate():
 
     assert proposal["available"] is False
     assert "vector gate" in proposal["reason"]
+    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
+    assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is False
+    assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is False
 
 
 def test_same_branch_derivative_proposal_rejects_failed_rejected_slot_gate():
@@ -1012,6 +1015,8 @@ def test_same_branch_derivative_proposal_rejects_failed_rejected_slot_gate():
 
     assert proposal["available"] is False
     assert "accepted/rejected controller-slot gate" in proposal["reason"]
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_passed"] is False
 
 
 def test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay():
@@ -1061,6 +1066,7 @@ def test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay():
     )
     assert proposal["available"] is False
     assert "exceeds proposal cap" in proposal["reason"]
+    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is False
 
     changed_branch_report = json.loads(json.dumps(base_report))
     changed_branch_report["branch_compatibility"]["same_branch"] = False

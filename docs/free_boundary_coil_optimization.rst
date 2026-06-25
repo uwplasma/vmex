@@ -936,6 +936,9 @@ self-contained: a reviewer can tell whether the suggested step came from a
 fresh branch-local vector replay, a cache-eligible report, or a repeated
 same-payload cache hit, while the complete solve still remains the only
 acceptance authority.
+Unavailable proposals keep the same compact ``gate_evidence`` payload, so a
+failed vector gate, stale replay base point, or failed accepted/rejected slot
+gate can be diagnosed without reopening the full report.
 The report also writes ``same_branch_report_config`` in ``summary.json`` so the
 artifact remains self-describing.  Its derivative contract is fixed
 recorded-branch replay only; it does not differentiate changes in adaptive host
