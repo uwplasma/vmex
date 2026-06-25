@@ -3965,6 +3965,12 @@ scalars, reduced it again to about ``6.74 s``.  The same current-only JVP fast
 path and complete-solve acceptance authority are preserved.  The main
 branch-local vector JVP remains the dominant cost at about ``9.1--9.2 s`` and
 is the next target for replay graph construction work.
+Directional-JVP reports now include ``directional_jvp_signature`` so timing
+artifacts can be grouped by the static replay workload before proposing a
+compiled-kernel cache.  The signature records scalar keys, replay options,
+NESTOR policy, current-only geometry shapes, and replay-plan availability.  It
+does not reuse an executable yet; it prevents mixing different JAX programs
+when profiling the next cache tranche.
 
 Implementation map (performance-critical paths)
 ------------------------------------------------
@@ -4232,6 +4238,10 @@ report now defaults to ``aspect,qs_total,mean_iota`` instead of the broader
 validation set.  This avoids cold branch-local JVP graph construction for the
 unused LCFS moment scalar while preserving the complete-solve acceptance
 authority and the option to request the broader report explicitly.
+Use the report's ``directional_jvp_signature`` when comparing proposal timings:
+same scalar list, same current-only fast-path shapes, same replay options, and
+same replay-plan class are required before repeat timings can be attributed to
+cache reuse rather than to a different branch-local JVP program.
 
 Historical free-boundary cache note
 -----------------------------------

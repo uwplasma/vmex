@@ -1532,6 +1532,50 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "directional_jvp_fast_path": "current_only",
                 "directional_uses_fixed_coil_geometry": True,
                 "current_only_coil_geometry_source": "cached",
+                "directional_jvp_signature": {
+                    "available": True,
+                    "ad_mode": "direct",
+                    "derivative_mode": "directional_jvp",
+                    "scalar_keys": [
+                        "aspect",
+                        "qs_total",
+                        "boozer_qs_total",
+                        "mean_iota",
+                        "lcfs_boundary_moment",
+                        "betatotal",
+                    ],
+                    "n_scalars": 6,
+                    "fast_path": "current_only",
+                    "current_only": True,
+                    "state_only_replay": True,
+                    "use_stacked_step_controls": True,
+                    "nestor_solve_mode": "matrix_free",
+                    "nestor_operator_solver": "bicgstab",
+                    "jit_cache_candidate": True,
+                    "current_only_coil_geometry_source": "cached",
+                },
+            },
+            "directional_jvp_signature": {
+                "available": True,
+                "ad_mode": "direct",
+                "derivative_mode": "directional_jvp",
+                "scalar_keys": [
+                    "aspect",
+                    "qs_total",
+                    "boozer_qs_total",
+                    "mean_iota",
+                    "lcfs_boundary_moment",
+                    "betatotal",
+                ],
+                "n_scalars": 6,
+                "fast_path": "current_only",
+                "current_only": True,
+                "state_only_replay": True,
+                "use_stacked_step_controls": True,
+                "nestor_solve_mode": "matrix_free",
+                "nestor_operator_solver": "bicgstab",
+                "jit_cache_candidate": True,
+                "current_only_coil_geometry_source": "cached",
             },
             "replay_graph_metadata": {
                 "omitted": True,
@@ -1635,6 +1679,10 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["replay_option_flags"]["nestor_operator_solver"] == "bicgstab"
     assert vector["replay_option_flags"]["nestor_operator_maxiter"] == 17
     assert vector["replay_option_flags"]["current_only_coil_geometry_source"] == "cached"
+    assert vector["directional_jvp_signature"]["available"] is True
+    assert vector["directional_jvp_signature"]["fast_path"] == "current_only"
+    assert vector["directional_jvp_signature"]["jit_cache_candidate"] is True
+    assert vector["directional_jvp_signature"]["scalar_keys"] == vector["scalar_keys"]
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True

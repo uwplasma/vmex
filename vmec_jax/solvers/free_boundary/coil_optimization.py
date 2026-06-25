@@ -669,7 +669,7 @@ def _pytree_directional_vdot(gradient: Any, direction: Any) -> float:
 
 
 def _branch_replay_common_summary(result: dict[str, Any], *, state_only_replay: bool) -> dict[str, Any]:
-    return {
+    summary = {
         "available": True,
         "scope": "fixed accepted branch only; does not differentiate adaptive host branch selection",
         "uses_production_forward": bool(result["uses_production_forward"]),
@@ -688,6 +688,14 @@ def _branch_replay_common_summary(result: dict[str, Any], *, state_only_replay: 
         "controller_slot_summary": _controller_slot_summary_from_result(result),
         "timings": {str(key): float(value) for key, value in result.get("timings", {}).items()},
     }
+    signature = result.get("directional_jvp_signature")
+    if isinstance(signature, dict):
+        summary["directional_jvp_signature"] = signature
+    elif isinstance(summary["replay_option_flags"], dict) and isinstance(
+        summary["replay_option_flags"].get("directional_jvp_signature"), dict
+    ):
+        summary["directional_jvp_signature"] = summary["replay_option_flags"]["directional_jvp_signature"]
+    return summary
 
 
 def same_branch_scalar_result_summary(

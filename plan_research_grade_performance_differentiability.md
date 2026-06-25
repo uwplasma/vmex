@@ -3135,6 +3135,62 @@ Updated lane percentages:
 - Docs/release hygiene: 99.1%.
 - Overall: 96.9%.
 
+### 2026-06-25: Add branch-local directional-JVP cache signature provenance
+
+Steps taken:
+
+- Added ``directional_jvp_signature`` to the direct-coil branch-local replay
+  report.  The signature records the static workload for a directional JVP:
+  scalar keys, replay options, NESTOR policy, current-only fast-path status,
+  current/geometry shapes, replay-plan availability, and whether the report is
+  a candidate for a future compiled current-only replay/JVP cache.
+- Propagated that signature into the JSON-ready coil-optimization same-branch
+  vector summary and added smoke-test assertions for the current-only
+  derivative-proposal path.
+- Updated the free-boundary optimization and performance docs so reviewers know
+  the signature is provenance only, not an executable cache or a new derivative
+  claim.
+
+Results obtained:
+
+- Focused Ruff passed on the modified adjoint facade, coil-optimization helper,
+  and smoke test.
+- Focused same-branch tests passed:
+  ``tests/test_free_boundary_qs_coil_optimization_smoke.py::test_same_branch_report_writer_records_branch_local_vector_jacobian``
+  plus ``tests/test_free_boundary_adjoint_helpers_unit.py``.
+- A real tiny direct-coil derivative-proposal smoke artifact in
+  ``outputs/final_tranche_same_branch_signature`` stayed same-branch, passed
+  the branch-local vector gate, and wrote
+  ``directional_jvp_signature`` with ``fast_path=current_only``,
+  ``jit_cache_candidate=True``, and ``scalar_keys=['aspect', 'qs_total',
+  'mean_iota']``.  Its measured ``replay_jvp_dispatch_s`` was about
+  ``8.58 s``, confirming that the remaining cost is still cold JVP graph
+  construction.
+- The change is metadata-only: no VMEC solve path, replay scalar, complete-solve
+  acceptance rule, README benchmark data, or AD-vs-FD slope value changed.
+
+Best next steps:
+
+1. Use ``directional_jvp_signature`` as the cache key for the next real
+   performance tranche: factor a top-level current-only replay/JVP kernel whose
+   static arguments match the signature exactly.
+2. Keep the branch-local derivative proposal conservative until repeat timings
+   show the compiled-kernel cache reduces ``replay_jvp_dispatch_s``.
+3. Continue final PR readiness with green CI, docs, source-health, repo-size,
+   and unchanged benchmark/AD evidence artifacts.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.0%.
+- Free-boundary production differentiability: 93.6%.
+- Single-stage coil optimization: 90.0%.
+- CPU/GPU runtime and memory footprint: 97.8%.
+- Refactor/API/examples: 57.4%.
+- VMEC2000/VMEC++ parity and physics gates: 97.8%.
+- Docs/release hygiene: 99.2%.
+- Overall: 97.2%.
+
 ### 2026-06-25: Extract derivative-proposal evidence helpers
 
 Steps taken:

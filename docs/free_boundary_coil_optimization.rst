@@ -909,6 +909,12 @@ output.  When scalar or vector detail is requested, the corresponding
 synchronize JAX arrays before recording device-ready timings, so they are
 suitable for distinguishing Python dispatch, XLA compilation, and CPU/GPU
 execution costs in local profiling.
+Directional-JVP vector reports also include ``directional_jvp_signature``.
+That block is a static provenance key for future compiled-kernel reuse: scalar
+keys, replay options, NESTOR solve policy, current-only fast-path status, array
+shapes, and replay-plan availability.  It is not an executable cache by itself;
+it records the conditions that must remain unchanged before a branch-local JVP
+cache can be reused safely.
 The report also writes ``same_branch_report_config`` in ``summary.json`` so the
 artifact remains self-describing.  Its derivative contract is fixed
 recorded-branch replay only; it does not differentiate changes in adaptive host
@@ -1467,6 +1473,10 @@ production-versus-replay base scalar agreement below
 ``--same-branch-proposal-max-base-delta``.  Reports generated in
 ``custom_vjp`` mode remain validation artifacts, but are not used to form the
 one-step proposal.
+The vector report's ``directional_jvp_signature`` should be checked before
+comparing timings across runs; different scalar keys, replay options, or
+current-only geometry shapes are different JAX programs and should not be
+treated as the same cached replay workload.
 The proposal block records ``objective_terms_used`` and
 ``objective_terms_omitted``.  For example, the VMEC residual proxy is normally
 omitted from the branch-local JVP proposal because the residual term is still

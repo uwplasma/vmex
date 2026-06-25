@@ -198,6 +198,7 @@ class _BranchLocalScalarDerivativeResult(NamedTuple):
     directional_fast_path: str
     directional_uses_fixed_coil_geometry: bool
     current_only_geometry_source: str
+    directional_jvp_signature: dict[str, Any]
 
 
 __all__ = """
@@ -767,6 +768,68 @@ def _branch_local_trace_replay_diagnostics(
     return diagnostics
 
 
+def _branch_local_directional_jvp_signature(
+    *,
+    keys: tuple[str, ...],
+    derivative_mode: str,
+    directional_fast_path: str,
+    current_jvp: _CurrentOnlyDirectionalJVPConfig | None,
+    replay_options: Mapping[str, Any],
+    replay_plan: Mapping[str, Any] | None,
+    ad_mode: str,
+) -> dict[str, Any]:
+    """Return a shape/static signature for branch-local directional JVP reports.
+
+    This is provenance, not an executable cache.  It identifies the static
+    inputs that must remain unchanged before a future compiled replay/JVP kernel
+    can be reused safely.
+    """
+
+    if derivative_mode != "directional_jvp":
+        return {"available": False, "reason": "not a directional JVP report"}
+    current_only = current_jvp is not None and bool(current_jvp.active)
+    signature: dict[str, Any] = {
+        "available": True,
+        "contract": "static replay/JVP cache signature; no executable cache is reused here",
+        "ad_mode": str(ad_mode),
+        "derivative_mode": str(derivative_mode),
+        "scalar_keys": list(keys),
+        "n_scalars": int(len(keys)),
+        "fast_path": str(directional_fast_path),
+        "current_only": bool(current_only),
+        "state_only_replay": bool(replay_options.get("state_only_replay", False)),
+        "use_stacked_step_controls": bool(replay_options.get("use_stacked_step_controls", False)),
+        "use_accepted_only_fast_path": bool(replay_options.get("use_accepted_only_fast_path", False)),
+        "include_mode_diagnostics": bool(replay_options.get("include_mode_diagnostics", True)),
+        "nestor_solve_mode": str(replay_options.get("nestor_solve_mode", "dense")),
+        "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "")),
+        "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
+        "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
+        "has_replay_plan": replay_plan is not None,
+        "jit_cache_candidate": bool(current_only and ad_mode == "direct" and replay_plan is not None),
+    }
+    if current_only and current_jvp is not None:
+        signature.update(
+            {
+                "current_leaf_shape": tuple(int(axis) for axis in np.shape(current_jvp.base_leaf)),
+                "direction_leaf_shape": tuple(int(axis) for axis in np.shape(current_jvp.direction_leaf)),
+                "fixed_gamma_shape": tuple(int(axis) for axis in np.shape(current_jvp.fixed_gamma)),
+                "fixed_gamma_dash_shape": tuple(int(axis) for axis in np.shape(current_jvp.fixed_gamma_dash)),
+                "current_only_coil_geometry_source": str(current_jvp.geometry_source),
+            }
+        )
+    if replay_plan is not None:
+        signature["replay_plan_type"] = type(replay_plan).__name__
+        if isinstance(replay_plan, Mapping):
+            for key in ("n_steps", "n_free_boundary_replay_steps"):
+                if key in replay_plan:
+                    try:
+                        signature[key] = int(replay_plan[key])
+                    except Exception:
+                        signature[key] = str(replay_plan[key])
+    return signature
+
+
 def _branch_local_scalar_derivatives(
     *,
     params: Any,
@@ -790,6 +853,7 @@ def _branch_local_scalar_derivatives(
     directional_fast_path = "none"
     directional_uses_fixed_coil_geometry = False
     current_only_geometry_source = "none"
+    directional_jvp_signature = {"available": False, "reason": "not a directional JVP report"}
 
     if direction_params is not None:
         derivative_mode = "directional_jvp"
@@ -830,6 +894,15 @@ def _branch_local_scalar_derivatives(
             jvp_primal = (params,)
             jvp_tangent = (direction_params,)
             jvp_fn = replay_scalars_fn
+        directional_jvp_signature = _branch_local_directional_jvp_signature(
+            keys=keys,
+            derivative_mode=derivative_mode,
+            directional_fast_path=directional_fast_path,
+            current_jvp=current_jvp,
+            replay_options=replay_options,
+            replay_plan=replay_plan,
+            ad_mode=ad_mode,
+        )
 
         t0 = time.perf_counter()
         replay_values, directional_values = jax.jvp(jvp_fn, jvp_primal, jvp_tangent)
@@ -875,6 +948,7 @@ def _branch_local_scalar_derivatives(
         directional_fast_path=directional_fast_path,
         directional_uses_fixed_coil_geometry=directional_uses_fixed_coil_geometry,
         current_only_geometry_source=current_only_geometry_source,
+        directional_jvp_signature=directional_jvp_signature,
     )
 
 
@@ -947,6 +1021,7 @@ def _branch_local_scalar_report(
         "replay_graph_metadata": graph_metadata,
         "replay_branch_metadata": replay_branch_metadata,
         "controller_slot_summary": controller_slot_summary,
+        "directional_jvp_signature": derivative_result.directional_jvp_signature,
         "replay_option_flags": _branch_local_replay_option_flags(
             replay_options,
             replay_plan=replay_plan,
@@ -955,6 +1030,7 @@ def _branch_local_scalar_report(
                 "directional_jvp_fast_path": derivative_result.directional_fast_path,
                 "directional_uses_fixed_coil_geometry": derivative_result.directional_uses_fixed_coil_geometry,
                 "current_only_coil_geometry_source": derivative_result.current_only_geometry_source,
+                "directional_jvp_signature": derivative_result.directional_jvp_signature,
             },
         ),
     }
