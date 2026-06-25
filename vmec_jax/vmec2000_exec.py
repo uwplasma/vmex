@@ -104,7 +104,7 @@ def _split_vmec2000_numeric_fields(line: str) -> list[str]:
 
 def _parse_vmec2000_threed1(path: Path) -> list[Vmec2000Threed1Stage]:
     """Parse VMEC2000 `threed1.*` stage headers + per-iteration tables."""
-    text = path.read_text()
+    text = path.read_text(errors="replace")
     stages: list[Vmec2000Threed1Stage] = []
     current: Vmec2000Threed1Stage | None = None
     rows: list[Vmec2000Threed1Row] = []

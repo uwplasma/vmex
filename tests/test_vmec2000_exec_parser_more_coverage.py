@@ -83,6 +83,21 @@ def test_parse_vmec2000_threed1_returns_empty_for_missing_stages(tmp_path: Path)
     assert threed1_fsq_total([]).shape == (0,)
 
 
+def test_parse_vmec2000_threed1_tolerates_non_utf8_preamble(tmp_path: Path) -> None:
+    threed1 = tmp_path / "threed1.nonutf8"
+    threed1.write_bytes(
+        b"EXTERNAL CURRENTS\n  \x94\xe6\x06\x15\n"
+        b"  NS =  5 NO. FOURIER MODES =  3 FTOLV =  1.0E-08 NITER =  3\n"
+        b" ITER FSQR FSQZ FSQL fsqr1 fsqz1 fsql1 DELT0R\n"
+        b"  1 1.0E-1 2.0E-1 3.0E-1 4.0E-1 5.0E-1 6.0E-1 7.0E-1\n"
+    )
+
+    rows = flatten_threed1(_parse_vmec2000_threed1(threed1))
+
+    assert len(rows) == 1
+    assert threed1_fsq_total(rows)[0] == pytest.approx(0.6)
+
+
 def test_parse_vmec2000_threed1_splits_packed_beta_and_avg_m_fields(tmp_path: Path) -> None:
     threed1 = tmp_path / "threed1.packed"
     threed1.write_text(
