@@ -216,6 +216,58 @@ def test_same_branch_direction_selects_current_and_fourier_variables():
     assert float(np.asarray(tangent.base_curve_dofs)[0, 1, 1]) == pytest.approx(0.0)
 
 
+def test_same_branch_report_direction_policy_prefers_current_only_for_proposals():
+    module = _load_example_module()
+    variables = [
+        ("current", (0,)),
+        ("fourier_dof", (0, 0, 2)),
+    ]
+
+    requested, effective, reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="auto", same_branch_derivative_proposal=False),
+        variables,
+    )
+    assert requested == "auto"
+    assert effective == "all"
+    assert "ordinary" in reason
+    np.testing.assert_array_equal(
+        module.same_branch_direction_from_variables(variables, policy=effective),
+        np.asarray([1.0, 1.0]),
+    )
+
+    requested, effective, reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="auto", same_branch_derivative_proposal=True),
+        variables,
+    )
+    assert requested == "auto"
+    assert effective == "current-only"
+    assert "derivative-proposal" in reason
+    np.testing.assert_array_equal(
+        module.same_branch_direction_from_variables(variables, policy=effective),
+        np.asarray([1.0, 0.0]),
+    )
+
+    requested, effective, _reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="all", same_branch_derivative_proposal=True),
+        variables,
+    )
+    assert requested == "all"
+    assert effective == "all"
+
+    requested, effective, _reason = module.same_branch_report_direction_policy(
+        SimpleNamespace(same_branch_report_direction="current-only", same_branch_derivative_proposal=False),
+        variables,
+    )
+    assert requested == "current-only"
+    assert effective == "current-only"
+
+    with pytest.raises(ValueError, match="requires at least one selected current"):
+        module.same_branch_report_direction_policy(
+            SimpleNamespace(same_branch_report_direction="current-only", same_branch_derivative_proposal=False),
+            [("fourier_dof", (0, 0, 2))],
+        )
+
+
 def test_same_branch_vector_key_parser_accepts_bnormal_alias():
     module = _load_example_module()
 
@@ -672,6 +724,21 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     report = {
         "branch_compatibility": {"same_branch": True},
         "direction_x": [1.0, 0.0, -1.0],
+        "current_only_coil_geometry_cache": {"available": True},
+        "branch_local_vector_gate": {
+            "available": True,
+            "passed": True,
+            "physical_scalar_gate": {"passed": True},
+        },
+        "accepted_rejected_controller_slot_gate": {
+            "requested": True,
+            "available": True,
+            "passed": True,
+            "scope": "fixed accepted/rejected controller-slot replay",
+            "same_stacked_step_policy_branch": True,
+            "fixed_rejected_controller_slots": 1,
+            "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+        },
         "branch_local_vector_jacobian": {
             "available": True,
             "uses_production_forward": True,
@@ -680,6 +747,13 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
             "derivative_mode": "directional_jvp",
+            "directional_jvp_fast_path": "current_only",
+            "directional_uses_fixed_coil_geometry": True,
+            "replay_option_flags": {
+                "directional_jvp_fast_path": "current_only",
+                "directional_uses_fixed_coil_geometry": True,
+                "current_only_coil_geometry_source": "cached",
+            },
             "max_base_abs_delta": 0.0,
             "scalars": {
                 "qs_total": {
@@ -733,6 +807,18 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["contributions"]["aspect"]["contribution"] == pytest.approx(2.0)
     assert proposal["contributions"]["mean_iota"]["contribution"] == pytest.approx(1.0)
     assert proposal["contributions"]["mean_iota"]["target"] == pytest.approx(0.4)
+    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
+    assert proposal["gate_evidence"]["directional_jvp_fast_path"] == "current_only"
+    assert proposal["gate_evidence"]["directional_uses_fixed_coil_geometry"] is True
+    assert proposal["gate_evidence"]["current_only_coil_geometry_cache_available"] is True
+    assert proposal["gate_evidence"]["current_only_coil_geometry_source"] == "cached"
+    assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is True
+    assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_passed"] is True
+    assert proposal["gate_evidence"]["same_stacked_step_policy_branch"] is True
+    assert proposal["gate_evidence"]["fixed_rejected_controller_slots"] == 1
+    assert proposal["gate_evidence"]["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["objective_terms_used"] == ["aspect", "mean_iota", "qs_total"]
     assert proposal["objective_terms_omitted"]["residual_proxy"]["weight"] == pytest.approx(0.75)
     assert "complete free-boundary solve" in proposal["objective_terms_omitted"]["residual_proxy"]["reason"]
@@ -944,6 +1030,7 @@ def test_nestor_profile_policy_requires_size_and_speedup_thresholds():
     )
     assert slow_matrix_free["promote_matrix_free"] is False
     assert "speedup" in slow_matrix_free["reason"]
+    assert slow_matrix_free["recommended_report_options"]["same_branch_report_nestor_solve_mode"] == "dense"
 
     promoted = module.nestor_profile_policy_from_results(
         [
@@ -961,6 +1048,11 @@ def test_nestor_profile_policy_requires_size_and_speedup_thresholds():
     )
     assert promoted["promote_matrix_free"] is True
     assert promoted["matrix_free_best_solver"] == "gmres"
+    assert promoted["recommended_report_options"] == {
+        "same_branch_report_nestor_solve_mode": "matrix_free",
+        "same_branch_report_nestor_operator_solver": "gmres",
+        "reason": "use promoted matrix-free replay settings",
+    }
 
     assert module.parse_profile_matrix_free_solvers("gmres,bicgstab") == ("gmres", "bicgstab")
     with pytest.raises(ValueError, match="unsupported"):
@@ -1072,6 +1164,11 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
     assert calls[0]["minus_current"] < float(np.asarray(base_params.base_currents)[0])
     report = json.loads(path.read_text())
     assert report["branch_compatibility"]["same_branch"] is True
+    assert report["direction_policy"] == {
+        "requested": "auto",
+        "effective": "all",
+        "reason": "auto selected mixed direction for ordinary same-branch validation",
+    }
     assert report["values"]["central_fd_directional"] == pytest.approx(1000.0)
     assert set(report["objective_values"]) == {"objective", "qs_total", "aspect"}
     assert report["primary_objective"] == "objective"
@@ -1118,11 +1215,13 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         jit_forces=False,
         activate_fsq=1.0e99,
     )
+    init = SimpleNamespace(static=SimpleNamespace(modes=SimpleNamespace(m=np.arange(4))))
+    replay_plan_sentinel = {"cached_scalar_plan": True}
 
     def fake_report(*_args, **_kwargs):
         gate = _same_branch_replay_gate_stub()
         return {
-            "base": {"traces": ("synthetic-trace",)},
+            "base": {"traces": ("synthetic-trace",), "init": init},
             "branch_compatibility": {
                 **gate["branch"],
                 "same_branch": True,
@@ -1166,6 +1265,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
         assert kwargs["replay_kwargs"]["nestor_operator_restart"] is None
         assert kwargs["replay_kwargs"]["freeze_vacuum_field"] is False
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is False
+        assert kwargs["replay_plan"] is replay_plan_sentinel
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -1209,6 +1309,11 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
         freeb_adj,
+        "direct_coil_accepted_trace_controller_replay_plan",
+        lambda *_args, **_kwargs: replay_plan_sentinel,
+    )
+    monkeypatch.setattr(
+        freeb_adj,
         "direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax",
         fake_branch_local_scalar,
     )
@@ -1223,7 +1328,9 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
 
     report = json.loads(path.read_text())
     scalar = report["branch_local_scalar_gradient"]
-    expected_directional = module._pytree_directional_vdot(grad, direction_params)
+    from vmec_jax.solvers.free_boundary.coil_optimization import _pytree_directional_vdot
+
+    expected_directional = _pytree_directional_vdot(grad, direction_params)
     assert scalar["available"] is True
     assert "fixed accepted branch only" in scalar["scope"]
     assert scalar["mode"] == "scalar"
@@ -1247,7 +1354,9 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
     assert scalar["complete_fd_directional"] == pytest.approx(0.7)
     assert scalar["abs_error"] == pytest.approx(abs(float(expected_directional) - 0.7))
     assert report["branch_local_vector_jacobian"]["available"] is False
+    assert report["branch_local_scalar_replay_plan_cache"]["available"] is True
     assert report["timings"]["complete_solve_fd_wall_s"] >= 0.0
+    assert report["timings"]["branch_local_scalar_replay_plan_build_wall_s"] >= 0.0
     assert report["timings"]["branch_local_scalar_wall_s"] >= 0.0
     assert scalar["timings"]["replay_value_and_grad_wall_s"] == pytest.approx(0.05)
     assert report["timings"]["branch_local_scalar_replay_value_and_grad_wall_s"] == pytest.approx(0.05)
@@ -1263,7 +1372,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     _x0, variables = module.select_coil_variables(
         base_params,
         max_current_vars=1,
-        max_fourier_vars=1,
+        max_fourier_vars=0,
     )
     args = SimpleNamespace(
         current_step=0.02,
@@ -1281,7 +1390,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         iota_weight=1.0,
         same_branch_report_eps=1.0e-4,
         same_branch_report_mode="vector",
-        same_branch_report_vector_keys="aspect,qs_total,boozer_qs_total,mean_iota,lcfs_boundary_moment",
+        same_branch_report_vector_keys="aspect,qs_total,boozer_qs_total,mean_iota,lcfs_boundary_moment,betatotal",
         same_branch_report_max_iter=3,
         same_branch_report_disable_analytic=True,
         same_branch_report_freeze_vacuum_field=True,
@@ -1322,6 +1431,12 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                     "minus": 0.19,
                     "central_fd_directional": 0.2,
                 },
+                "betatotal": {
+                    "base": 0.025,
+                    "plus": 0.026,
+                    "minus": 0.024,
+                    "central_fd_directional": 0.01,
+                },
                 "accepted_bnormal_rms": {
                     "base": 0.3,
                     "plus": 0.31,
@@ -1345,6 +1460,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["include_trace_replay_diagnostics"] is False
         assert kwargs["include_payload"] is False
         assert kwargs["include_replay_graph_metadata"] is False
+        assert kwargs["current_only_coil_geometry"] is not None
         assert kwargs["replay_kwargs"]["state_only_replay"] is True
         assert kwargs["replay_kwargs"]["include_analytic"] is False
         assert kwargs["replay_kwargs"]["include_mode_diagnostics"] is False
@@ -1358,7 +1474,14 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is True
         assert kwargs["direction_params"] is not None
         assert kwargs["direction_params"].n_segments == direction_params.n_segments
-        assert kwargs["scalar_keys"] == ("aspect", "qs_total", "boozer_qs_total", "mean_iota", "lcfs_boundary_moment")
+        assert kwargs["scalar_keys"] == (
+            "aspect",
+            "qs_total",
+            "boozer_qs_total",
+            "mean_iota",
+            "lcfs_boundary_moment",
+            "betatotal",
+        )
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -1366,7 +1489,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
             "derivative_mode": "directional_jvp",
-            "scalar_keys": ("aspect", "qs_total", "boozer_qs_total", "mean_iota", "lcfs_boundary_moment"),
+            "scalar_keys": ("aspect", "qs_total", "boozer_qs_total", "mean_iota", "lcfs_boundary_moment", "betatotal"),
             "includes_payload": False,
             "includes_replay_graph_metadata": False,
             "replay_option_flags": {
@@ -1381,6 +1504,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "nestor_operator_restart": 5,
                 "directional_jvp_fast_path": "current_only",
                 "directional_uses_fixed_coil_geometry": True,
+                "current_only_coil_geometry_source": "cached",
             },
             "replay_graph_metadata": {
                 "omitted": True,
@@ -1401,6 +1525,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "boozer_qs_total": 0.5,
                 "mean_iota": 0.4,
                 "lcfs_boundary_moment": 0.2,
+                "betatotal": 0.025,
             },
             "replay_value_map": {
                 "aspect": jnp.asarray(6.0),
@@ -1408,6 +1533,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "boozer_qs_total": jnp.asarray(0.5),
                 "mean_iota": jnp.asarray(0.4),
                 "lcfs_boundary_moment": jnp.asarray(0.2),
+                "betatotal": jnp.asarray(0.025),
             },
             "base_abs_delta": {
                 "aspect": 0.0,
@@ -1415,6 +1541,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "boozer_qs_total": 0.0,
                 "mean_iota": 0.0,
                 "lcfs_boundary_moment": 0.0,
+                "betatotal": 0.0,
             },
             "jacobian": None,
             "directional_derivatives": {
@@ -1423,6 +1550,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "boozer_qs_total": jnp.asarray(0.6),
                 "mean_iota": jnp.asarray(0.2),
                 "lcfs_boundary_moment": jnp.asarray(0.2),
+                "betatotal": jnp.asarray(0.01),
             },
             "timings": {
                 "production_scalar_eval_wall_s": 0.01,
@@ -1453,6 +1581,8 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
 
     report = json.loads(path.read_text())
     vector = report["branch_local_vector_jacobian"]
+    assert report["current_only_coil_geometry_cache"]["available"] is True
+    assert report["timings"]["branch_local_current_only_coil_geometry_build_wall_s"] >= 0.0
     assert vector["available"] is True
     assert "fixed accepted branch only" in vector["scope"]
     assert vector["uses_production_forward"] is True
@@ -1463,13 +1593,21 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["derivative_mode"] == "directional_jvp"
     assert vector["directional_jvp_fast_path"] == "current_only"
     assert vector["directional_uses_fixed_coil_geometry"] is True
-    assert vector["scalar_keys"] == ["aspect", "qs_total", "boozer_qs_total", "mean_iota", "lcfs_boundary_moment"]
+    assert vector["scalar_keys"] == [
+        "aspect",
+        "qs_total",
+        "boozer_qs_total",
+        "mean_iota",
+        "lcfs_boundary_moment",
+        "betatotal",
+    ]
     assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["replay_option_flags"]["state_only_replay"] is True
     assert vector["replay_option_flags"]["nestor_solve_mode"] == "matrix_free"
     assert vector["replay_option_flags"]["nestor_operator_solver"] == "bicgstab"
     assert vector["replay_option_flags"]["nestor_operator_maxiter"] == 17
+    assert vector["replay_option_flags"]["current_only_coil_geometry_source"] == "cached"
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True
@@ -1482,6 +1620,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         "boozer_qs_total": 0.6,
         "mean_iota": 0.2,
         "lcfs_boundary_moment": 0.2,
+        "betatotal": 0.01,
     }
     for key, expected_directional in expected_directionals.items():
         scalar_evidence = vector["scalars"][key]
@@ -1506,6 +1645,127 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector_gate["physical_scalar_gate"]["same_branch"] is True
 
 
+def test_same_branch_report_writer_adds_requested_registry_scalars_to_complete_fd(tmp_path, monkeypatch):
+    module = _load_example_module()
+    base_params, _metadata = module.make_circle_provider(current_scale=1.0)
+    _x0, variables = module.select_coil_variables(
+        base_params,
+        max_current_vars=1,
+        max_fourier_vars=1,
+    )
+    args = SimpleNamespace(
+        current_step=0.02,
+        dof_step=1.0e-3,
+        target_aspect=6.0,
+        target_iota=0.4,
+        helicity_m=1,
+        helicity_n=0,
+        qs_surfaces="0.25,0.5",
+        qs_ntheta=15,
+        qs_nphi=16,
+        residual_weight=1.0,
+        qs_weight=2.0,
+        aspect_weight=1.0e-2,
+        iota_weight=1.0,
+        same_branch_report_eps=1.0e-4,
+        same_branch_report_mode="vector",
+        same_branch_report_vector_keys="aspect,betatotal",
+        same_branch_report_scalar_key="qs_total",
+        same_branch_report_ad_mode="direct",
+        same_branch_report_max_iter=3,
+        same_branch_report_disable_analytic=True,
+        same_branch_report_freeze_vacuum_field=True,
+        same_branch_report_freeze_bsqvac=True,
+        same_branch_report_nestor_solve_mode="dense",
+        same_branch_report_nestor_operator_solver="gmres",
+        same_branch_report_nestor_operator_tol=1.0e-11,
+        same_branch_report_nestor_operator_atol=1.0e-13,
+        same_branch_report_nestor_operator_maxiter=None,
+        same_branch_report_nestor_operator_restart=None,
+        same_branch_report_replay_max_mode_count=220,
+        same_branch_report_profile_nestor="none",
+        same_branch_report_profile_matrix_free_solvers="gmres,bicgstab",
+        same_branch_report_profile_min_mode_count=96,
+        same_branch_report_profile_min_speedup=1.15,
+        same_branch_report_profile_max_mode_count=220,
+        same_branch_report_rejected_slot_gate=False,
+        vmec_max_iter=2,
+        ftol=1.0e-8,
+        jit_forces=False,
+        activate_fsq=1.0e99,
+    )
+
+    def fake_registry(**_kwargs):
+        return (
+            {
+                "state_norm": lambda _payload: 1.0,
+                "lcfs_boundary_moment": lambda _payload: 0.2,
+                "accepted_bnormal_rms": lambda _payload: 0.3,
+                "betatotal": lambda _payload: 0.025,
+            },
+            {},
+        )
+
+    monkeypatch.setattr(module, "same_branch_scalar_function_registry", fake_registry)
+    monkeypatch.setattr(
+        module,
+        "summarize_run",
+        lambda *_args, **_kwargs: {
+            "residual_proxy": 0.1,
+            "qs_total": 0.4,
+            "aspect": 6.0,
+            "target_aspect": 6.0,
+            "mean_iota": 0.4,
+            "target_iota": 0.4,
+            "free_boundary_bnormal_rms": 0.3,
+            "qs_helicity_m": 1,
+            "qs_helicity_n": 0,
+            "qs_surfaces": [0.25, 0.5],
+        },
+    )
+
+    def fake_report(_input_path, _base_params, *, objective_fn, **_kwargs):
+        payload = {
+            "result": SimpleNamespace(state=object()),
+            "init": SimpleNamespace(static=object(), indata=object(), signgs=1),
+            "params": base_params,
+            "traces": (),
+        }
+        values = objective_fn(payload)
+        assert values["betatotal"] == pytest.approx(0.025)
+        return {
+            "base": {"traces": ()},
+            "branch_compatibility": {
+                "same_branch": False,
+                "plus": {"changed_fields": ("trace",), "max_abs_scalar_delta": 1.0, "max_rel_scalar_delta": 1.0},
+                "minus": {"changed_fields": ("trace",), "max_abs_scalar_delta": 1.0, "max_rel_scalar_delta": 1.0},
+            },
+            "trace_replay_diagnostics": {},
+            "values": {"base": values["objective"], "plus": values["objective"], "minus": values["objective"]},
+            "objective_values": {
+                key: {"base": value, "plus": value, "minus": value, "central_fd_directional": 0.0}
+                for key, value in values.items()
+            },
+            "primary_objective": "objective",
+        }
+
+    import vmec_jax.free_boundary_adjoint as freeb_adj
+
+    monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
+
+    path = module.write_same_branch_validation_report(
+        input_path=tmp_path / "input.direct",
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=tmp_path,
+    )
+
+    report = json.loads(path.read_text())
+    assert report["objective_values"]["betatotal"]["base"] == pytest.approx(0.025)
+    assert report["branch_local_vector_jacobian"]["reason"] == "branch fingerprint is not same-branch compatible"
+
+
 def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypatch):
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
@@ -1515,7 +1775,7 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     _x0, variables = module.select_coil_variables(
         base_params,
         max_current_vars=1,
-        max_fourier_vars=1,
+        max_fourier_vars=0,
     )
     args = SimpleNamespace(
         current_step=0.02,
@@ -1581,10 +1841,20 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
         }
 
     calls: list[dict[str, object]] = []
+    replay_plan_sentinel = {"cached_plan": True}
 
     def fake_branch_local_vector(*_args, **kwargs):
         replay_kwargs = dict(kwargs["replay_kwargs"])
-        calls.append(replay_kwargs)
+        scalar_keys = kwargs.get("scalar_keys", _args[0] if _args else ())
+        calls.append(
+            {
+                "_scalar_keys": tuple(scalar_keys),
+                **replay_kwargs,
+                "_replay_plan": kwargs.get("replay_plan"),
+                "_current_only_coil_geometry": kwargs.get("current_only_coil_geometry"),
+            }
+        )
+        assert kwargs["current_only_coil_geometry"] is not None
         accept_mask = replay_kwargs.get("accept_mask")
         traces = tuple(replay_kwargs.get("traces", (trace,)))
         if accept_mask is None:
@@ -1624,6 +1894,7 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
                 "nestor_operator_restart": replay_kwargs["nestor_operator_restart"],
                 "directional_jvp_fast_path": "current_only",
                 "directional_uses_fixed_coil_geometry": True,
+                "current_only_coil_geometry_source": "cached",
             },
             "replay_graph_metadata": {"omitted": not bool(kwargs["include_replay_graph_metadata"])},
             "replay_branch_metadata": {
@@ -1671,6 +1942,11 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
         freeb_adj,
+        "direct_coil_accepted_trace_controller_replay_plan",
+        lambda *_args, **_kwargs: replay_plan_sentinel,
+    )
+    monkeypatch.setattr(
+        freeb_adj,
         "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
         fake_branch_local_vector,
     )
@@ -1685,11 +1961,22 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
 
     report = json.loads(path.read_text())
     assert report["mode_count"] == 144
+    assert report["current_only_coil_geometry_cache"]["available"] is True
+    assert report["branch_local_vector_replay_plan_cache"]["available"] is True
     assert len(calls) == 4
     assert calls[0]["nestor_solve_mode"] == "dense"
+    assert calls[0]["_replay_plan"] is replay_plan_sentinel
+    assert calls[0]["_current_only_coil_geometry"] is not None
     assert calls[1]["use_accepted_only_fast_path"] is False
+    assert calls[1]["_replay_plan"] is replay_plan_sentinel
+    assert calls[1]["_current_only_coil_geometry"] is not None
+    assert calls[1]["_scalar_keys"] == ("aspect",)
     assert "accept_mask" not in calls[1]
     assert [item.get("step_status", "accepted") for item in calls[1]["traces"]] == ["accepted", "rejected"]
+    assert calls[2]["_replay_plan"] is replay_plan_sentinel
+    assert calls[3]["_replay_plan"] is replay_plan_sentinel
+    assert calls[2]["_current_only_coil_geometry"] is not None
+    assert calls[3]["_current_only_coil_geometry"] is not None
     profiled = {(call["nestor_solve_mode"], call["nestor_operator_solver"]) for call in calls[2:]}
     assert profiled == {("matrix_free", "gmres"), ("matrix_free", "bicgstab")}
 
@@ -1700,13 +1987,26 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert rejected_gate["differentiates_adaptive_controller"] is False
     assert rejected_gate["differentiates_run_free_boundary"] is False
     assert rejected_gate["same_stacked_step_policy_branch"] is True
+    assert rejected_gate["scalar_keys"] == ["aspect"]
+    assert rejected_gate["full_report_scalar_keys"] == ["aspect", "qs_total"]
     assert rejected_gate["fixed_rejected_controller_slot_present"] is True
     assert rejected_gate["fixed_rejected_controller_slots"] == 1
+    assert rejected_gate["status_derived_rejected_controller_slot_present"] is True
+    assert rejected_gate["status_acceptance_source"] == "trace_step_status"
+    slot_fingerprint = rejected_gate["controller_slot_fingerprint"]
+    assert slot_fingerprint["n_steps"] == 2
+    assert slot_fingerprint["accepted_mask"] == [True, False]
+    assert slot_fingerprint["rejected_mask"] == [False, True]
+    assert slot_fingerprint["step_status"] == ["accepted", "rejected"]
+    assert slot_fingerprint["status_acceptance_source"] == "trace_step_status"
+    assert slot_fingerprint["summary"]["rejected_slots"] == 1
     assert rejected_gate["directional_jvp_fast_path"] == "current_only"
     assert rejected_gate["directional_uses_fixed_coil_geometry"] is True
+    assert rejected_gate["reused_boundary_replay_contexts"] is False
     assert rejected_gate["controller_slot_summary"]["accepted_slots"] == 1
     assert rejected_gate["controller_slot_summary"]["rejected_slots"] == 1
     assert rejected_gate["replay_option_flags"]["use_accepted_only_fast_path"] is False
+    assert rejected_gate["replay_option_flags"]["current_only_coil_geometry_source"] == "cached"
     assert rejected_gate["replay_branch_metadata"]["status_acceptance_source"] == "trace_step_status"
     assert rejected_gate["replay_branch_metadata"]["status_masks"]["step_status"] == ["accepted", "rejected"]
 
@@ -1864,6 +2164,8 @@ def test_same_branch_report_profile_skips_above_mode_count_cap(tmp_path, monkeyp
     report = json.loads(path.read_text())
     profile = report["nestor_replay_profile"]
     assert len(calls) == 0
+    assert report["current_only_coil_geometry_cache"]["available"] is False
+    assert report["current_only_coil_geometry_cache"]["reason"] == "not requested"
     assert report["same_branch_replay_mode_count_guard"]["triggered"] is True
     assert report["branch_local_vector_jacobian"]["available"] is False
     assert profile["enabled"] is True
@@ -1948,6 +2250,11 @@ def test_circle_dry_run_writes_configuration_without_solves(tmp_path, monkeypatc
     assert summary["same_branch_report_config"]["enabled"] is False
     assert summary["same_branch_report_config"]["mode"] == "vector"
     assert summary["same_branch_report_config"]["ad_mode"] == "direct"
+    assert summary["same_branch_report_config"]["direction_policy"] == {
+        "requested": "auto",
+        "effective": "all",
+        "reason": "auto selected mixed direction for ordinary same-branch validation",
+    }
     assert summary["same_branch_report_config"]["vector_keys"] == [
         "aspect",
         "qs_total",
@@ -2276,7 +2583,22 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "current_only_coil_geometry_cache": {"available": True, "reason": ""},
                     "branch_compatibility": {"same_branch": True},
+                    "branch_local_vector_gate": {
+                        "available": True,
+                        "passed": True,
+                        "physical_scalar_gate": {"passed": True},
+                    },
+                    "accepted_rejected_controller_slot_gate": {
+                        "requested": True,
+                        "available": True,
+                        "passed": True,
+                        "scope": "fixed accepted/rejected controller-slot replay",
+                        "same_stacked_step_policy_branch": True,
+                        "fixed_rejected_controller_slots": 1,
+                        "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+                    },
                     "branch_local_vector_jacobian": {
                         "available": True,
                         "uses_production_forward": True,
@@ -2285,6 +2607,13 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
                         "differentiates_fixed_accepted_branch": True,
                         "replay_ad_mode": "direct",
                         "derivative_mode": "directional_jvp",
+                        "directional_jvp_fast_path": "current_only",
+                        "directional_uses_fixed_coil_geometry": True,
+                        "replay_option_flags": {
+                            "directional_jvp_fast_path": "current_only",
+                            "directional_uses_fixed_coil_geometry": True,
+                            "current_only_coil_geometry_source": "cached",
+                        },
                         "max_base_abs_delta": 0.0,
                         "scalars": {
                             "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
@@ -2314,7 +2643,6 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
             "1",
             "--qs-weight",
             "4.0",
-            "--write-same-branch-report",
             "--same-branch-derivative-proposal",
             "--same-branch-proposal-step",
             "1.0",
@@ -2329,11 +2657,26 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
     assert calls[1]["current"] == pytest.approx(1.96)
 
     summary = json.loads((tmp_path / "summary.json").read_text())
+    assert summary["same_branch_report_config"]["enabled"] is True
+    assert summary["same_branch_derivative_proposal_config"]["enabled"] is True
     proposal = summary["same_branch_derivative_proposal"]
     assert proposal["available"] is True
     assert proposal["accepted_by_complete_solve"] is True
     assert proposal["rejected_by_complete_solve"] is False
     assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["complete_solve_acceptance_authority"] is True
+    assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_run_free_boundary"] is False
+    assert proposal["differentiates_fixed_accepted_branch"] is True
+    gate_evidence = proposal["gate_evidence"]
+    assert gate_evidence["directional_jvp_fast_path"] == "current_only"
+    assert gate_evidence["directional_uses_fixed_coil_geometry"] is True
+    assert gate_evidence["current_only_coil_geometry_cache_available"] is True
+    assert gate_evidence["current_only_coil_geometry_source"] == "cached"
+    assert gate_evidence["accepted_rejected_controller_slot_gate_requested"] is True
+    assert gate_evidence["accepted_rejected_controller_slot_gate_passed"] is True
+    assert gate_evidence["fixed_rejected_controller_slots"] == 1
+    assert gate_evidence["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["best_eval_before_trial"] == 0
     assert proposal["best_eval_after_trial"] == 1
     assert proposal["trial_objective"] < proposal["previous_best_objective"]
@@ -2342,6 +2685,7 @@ def test_derivative_proposal_summary_marks_report_stale_when_trial_is_accepted(t
     assert report_status["report_generated_before_derivative_proposal"] is True
     assert report_status["final_best_changed_after_report"] is True
     assert report_status["report_matches_final_best"] is False
+    assert report_status["accepted_proposal_index"] == 0
 
 
 def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_rejection(tmp_path, monkeypatch):
@@ -2410,7 +2754,22 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
             json.dumps(
                 {
                     "direction_x": [1.0, 0.0],
+                    "current_only_coil_geometry_cache": {"available": True, "reason": ""},
                     "branch_compatibility": {"same_branch": True},
+                    "branch_local_vector_gate": {
+                        "available": True,
+                        "passed": True,
+                        "physical_scalar_gate": {"passed": True},
+                    },
+                    "accepted_rejected_controller_slot_gate": {
+                        "requested": True,
+                        "available": True,
+                        "passed": True,
+                        "scope": "fixed accepted/rejected controller-slot replay",
+                        "same_stacked_step_policy_branch": True,
+                        "fixed_rejected_controller_slots": 1,
+                        "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+                    },
                     "branch_local_vector_jacobian": {
                         "available": True,
                         "uses_production_forward": True,
@@ -2419,6 +2778,13 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
                         "differentiates_fixed_accepted_branch": True,
                         "replay_ad_mode": "direct",
                         "derivative_mode": "directional_jvp",
+                        "directional_jvp_fast_path": "current_only",
+                        "directional_uses_fixed_coil_geometry": True,
+                        "replay_option_flags": {
+                            "directional_jvp_fast_path": "current_only",
+                            "directional_uses_fixed_coil_geometry": True,
+                            "current_only_coil_geometry_source": "cached",
+                        },
                         "max_base_abs_delta": 0.0,
                         "scalars": {
                             "qs_total": {"value": 0.25, "exact_directional": 1.0, "base_abs_delta": 0.0},
@@ -2469,6 +2835,19 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
     assert proposal["accepted_by_complete_solve"] is False
     assert proposal["rejected_by_complete_solve"] is True
     assert proposal["acceptance_decision_source"] == "complete_solve_objective"
+    assert proposal["complete_solve_acceptance_authority"] is True
+    assert proposal["differentiates_adaptive_controller"] is False
+    assert proposal["differentiates_run_free_boundary"] is False
+    assert proposal["differentiates_fixed_accepted_branch"] is True
+    gate_evidence = proposal["gate_evidence"]
+    assert gate_evidence["directional_jvp_fast_path"] == "current_only"
+    assert gate_evidence["directional_uses_fixed_coil_geometry"] is True
+    assert gate_evidence["current_only_coil_geometry_cache_available"] is True
+    assert gate_evidence["current_only_coil_geometry_source"] == "cached"
+    assert gate_evidence["accepted_rejected_controller_slot_gate_requested"] is True
+    assert gate_evidence["accepted_rejected_controller_slot_gate_passed"] is True
+    assert gate_evidence["fixed_rejected_controller_slots"] == 1
+    assert gate_evidence["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}
     assert proposal["trial_objective"] > proposal["previous_best_objective"]
     assert proposal["best_eval_before_trial"] == 0
     assert proposal["best_eval_after_trial"] == 0
@@ -2476,6 +2855,8 @@ def test_derivative_proposal_summary_records_rejected_trial_as_complete_solve_re
     assert len(proposals) == 2
     assert [item["step_size"] for item in proposals] == [pytest.approx(0.1), pytest.approx(1.0)]
     assert [item["accepted_by_complete_solve"] for item in proposals] == [False, False]
+    assert all(item["complete_solve_acceptance_authority"] is True for item in proposals)
+    assert all(item["gate_evidence"]["directional_jvp_fast_path"] == "current_only" for item in proposals)
     assert [item["trial_eval"] for item in proposals] == [1, 2]
     assert summary["best"]["eval"] == 0
     report_status = summary["same_branch_complete_solve_report_final_best_status"]

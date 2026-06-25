@@ -844,12 +844,20 @@ def test_fixed_boundary_profiler_compacts_timing_diagnostics():
                 "preconditioner_s": 0.5,
                 "update_s": 0.125,
             },
+            "setup_axis_reset_applied": True,
+            "setup_axis_reset_done": True,
+            "setup_axis_force_probe_available": True,
+            "setup_axis_force_probe_reused": True,
             "ignored": "large-history",
         }
     )
 
     assert compact == {
         "solver_mode": "accelerated",
+        "setup_axis_reset_applied": True,
+        "setup_axis_reset_done": True,
+        "setup_axis_force_probe_available": True,
+        "setup_axis_force_probe_reused": True,
         "timing": {
             "iterations": 4,
             "compute_forces_s": 1.25,

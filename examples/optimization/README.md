@@ -22,13 +22,13 @@ controls only.  Scientific targets stay in the explicit objective tuple list
 or, for QI field terms, in the shared `QuasiIsodynamicOptions` and objective
 objects.
 
-The QI example follows the same pattern but has more visible physics objects:
-`QuasiIsodynamicOptions`, `QuasiIsodynamicResidual`, `MirrorRatio`,
-`VMECMirrorRatio`, `MaxElongation`, and optional seed-preparation helpers are all
-configured as ordinary top-level variables before the objective tuple list is
-built.  Use `VMECMirrorRatio` when you only need a fast mirror-ratio soft wall;
-use `MirrorRatio` when you want the value evaluated from a Boozer transform or
-shared with a QI Boozer field.
+The simple QI NFP examples follow the same pattern with one extra visible
+handoff: they first run a QP objective from the circular/minimal seed, save that
+result, then instantiate a second VMEC object from the QP final input and
+replace the field objective with `QuasiIsodynamicResidual`.  The only seed
+preparation is `prepare_simple_omnigenity_seed_input(...)`; there is no
+reference-family scan, global optimizer, or subprocess wrapper in these public
+scripts.
 
 ## Objective Tuple Pattern
 
@@ -86,11 +86,11 @@ zero-transform basin in direct high-mode starts from the common minimal seed,
 so `QP_optimization.py` keeps the same `SIMPLE_SEED_PERTURBATION = 1e-5` as
 QA/QH but repeats intermediate continuation modes before the final high-mode
 cleanup.
-The lower-level QI staged policy also
-has a mode-1 target-helicity preconditioner with the deterministic hint set
-`RBC(1,0)`, `ZBS(1,0)`, `RBC(-1,1)`, `ZBS(-1,1)`, `RBC(1,1)`, and `ZBS(1,1)`
-in VMEC input-index convention.  The minimal-seed showcase uses a `1e-3`
-target-helicity hint by default; the raw seed files remain exactly minimal.
+The lower-level staged QI policy still exists for stress tests, but the public
+per-NFP QI scripts below intentionally avoid target-helicity and reference-family
+preconditioners.  They use only the deterministic `1e-5` active-mode
+perturbations written by `prepare_simple_omnigenity_seed_input(...)`; the raw
+seed files remain exactly minimal.
 The QA and QP common-minimal rows also use an explicit optimization-time
 reference-family preseed: QA blends active low-order RBC/ZBS terms 25% toward
 `input.nfp2_QA_omnigenity`, and QP blends 10% toward `input.nfp2_QI`.  This is
@@ -120,8 +120,8 @@ PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_s
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
 ```
 
-Run QI rows separately with their reviewed policy modes (`qi_nfp1:3`,
-`qi_nfp2:5`, `qi_nfp3:4`, `qi_nfp4:3`) or use the per-NFP scripts below.
+Run QI rows separately with the direct QP-to-QI per-NFP scripts below.  Their
+default reviewed direct modes are NFP1:3, NFP2:5, NFP3:4, and NFP4:3.
 
 For a bounded smoke render after one case or partial timeout, keep roots explicit
 and filter to the attempted case:
@@ -158,9 +158,9 @@ python examples/optimization/QI_optimization_nfp3.py
 python examples/optimization/QI_optimization_nfp4.py
 ```
 
-Those scripts only define seed/reference/policy variables and then delegate to
-`QI_optimization.py`, where the objective tuples, optimizer call, output saving,
-and plotting workflow remain visible.
+Those scripts are self-contained: the QP objective tuples, QI objective tuples,
+two optimizer calls, result saving, and raw-seed-to-final plots are all visible
+in the file being run.
 
 ## Result Object Pattern
 
@@ -445,8 +445,6 @@ figures under `docs/_static/figures` are expected to stay compressed below
 - `compare_omnigenity_qi_objective.py`: compare VMEC-JAX QI metrics with the legacy omnigenity implementation.
 - `compare_omnigenity_qs_mode1.py`: compare low-mode quasisymmetry optimization components.
 - `compare_qs_policy_matrix.py`: compare policy choices across direct/continuation and ESS/non-ESS lanes.
-- `target_iota_aspect_volume.py`, `target_iota_volume.py`, `explicit_target_iota_volume.py`, and `implicit_target_iota_volume.py`: compact historical examples for API comparison.
-- `qh_fixed_resolution_exact.py`: exact fixed-resolution diagnostic retained for regression and method comparisons.
 
 ## Profiling And Test Checks
 

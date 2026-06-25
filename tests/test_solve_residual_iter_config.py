@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from vmec_jax.solve_residual_iter_config import (
+from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS,
     bad_jacobian_tau_tolerance,
+    indata_has_profile_setup_work,
     legacy_dump_enabled,
     parse_bad_jacobian_config,
+    resolve_axis_reset_config,
     resolve_chunked_scan_config,
     resolve_debug_print_config,
     resolve_dump_history_config,
+    resolve_host_profile_setup,
+    resolve_host_residual_metric_config,
     resolve_nstep_screen,
+    resolve_setup_host_enforce,
     should_probe_bad_jacobian_state,
 )
 
@@ -132,6 +137,176 @@ def test_chunked_scan_disabled_when_not_using_scan_but_fallback_preserved():
     assert cfg.differentiating_scan is False
     assert cfg.force_chunked_scan is False
     assert cfg.scan_fallback_enabled is True
+
+
+def test_host_residual_metric_policy_auto_and_explicit_flags():
+    cpu_auto = resolve_host_residual_metric_config(
+        backend_name="cpu",
+        fsq1_norms_env="auto",
+        residual_metrics_env="auto",
+    )
+    assert cpu_auto.fsq1_norms_on_accelerator is False
+    assert cpu_auto.residual_metrics_on_accelerator is False
+
+    gpu_auto = resolve_host_residual_metric_config(
+        backend_name="gpu",
+        fsq1_norms_env="auto",
+        residual_metrics_env="auto",
+    )
+    assert gpu_auto.fsq1_norms_on_accelerator is True
+    assert gpu_auto.residual_metrics_on_accelerator is False
+
+    explicit = resolve_host_residual_metric_config(
+        backend_name="gpu",
+        fsq1_norms_env=" off ",
+        residual_metrics_env=" yes ",
+    )
+    assert explicit.fsq1_norms_on_accelerator is False
+    assert explicit.residual_metrics_on_accelerator is True
+
+
+def test_host_profile_setup_policy_auto_and_explicit_flags():
+    assert resolve_host_profile_setup(backend_name="cpu", profile_setup_env="auto") is False
+    assert (
+        resolve_host_profile_setup(
+            backend_name="cpu",
+            profile_setup_env="auto",
+            profile_setup_has_work=True,
+        )
+        is True
+    )
+    assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env="auto") is True
+    assert resolve_host_profile_setup(backend_name="gpu", profile_setup_env=" off ") is False
+    assert resolve_host_profile_setup(backend_name="cpu", profile_setup_env=" on ") is True
+
+
+class _ProfileDeck:
+    def __init__(self, values):
+        self.values = dict(values)
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def get_bool(self, key, default=False):
+        return bool(self.values.get(key, default))
+
+    def get_float(self, key, default=0.0):
+        return float(self.values.get(key, default))
+
+    def get_int(self, key, default=0):
+        return int(self.values.get(key, default))
+
+
+def test_indata_profile_setup_work_detects_only_real_profile_work():
+    assert indata_has_profile_setup_work(None) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 1.0, "NCURR": 1, "CURTOR": 0.0})) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 1.0, "AM": [0.0, 2.0]})) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"PRES_SCALE": 0.0, "AM": [0.0, 2.0]})) is False
+    assert indata_has_profile_setup_work(_ProfileDeck({"AI": [0.0, 0.4]})) is True
+    assert indata_has_profile_setup_work(
+        _ProfileDeck({"NCURR": 1, "CURTOR": -2.0, "AC": [0.0, 3.0]})
+    ) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"APHI": [1.0, 0.1]})) is True
+    assert indata_has_profile_setup_work(_ProfileDeck({"LRFP": True})) is True
+
+
+def test_axis_reset_config_preserves_legacy_env_policy():
+    default = resolve_axis_reset_config(
+        force_axis_reset_env=None,
+        axis_reset_always_3d_env=None,
+        axis_reset_fsq_min_env=None,
+    )
+    assert default.force_axis_reset is False
+    assert default.axis_reset_always_3d is False
+    assert default.axis_reset_fsq_min == pytest.approx(1.0)
+
+    explicit = resolve_axis_reset_config(
+        force_axis_reset_env=" yes ",
+        axis_reset_always_3d_env="off",
+        axis_reset_fsq_min_env="2.5",
+    )
+    assert explicit.force_axis_reset is True
+    assert explicit.axis_reset_always_3d is True
+    assert explicit.axis_reset_fsq_min == pytest.approx(2.5)
+
+    invalid = resolve_axis_reset_config(
+        force_axis_reset_env="0",
+        axis_reset_always_3d_env="false",
+        axis_reset_fsq_min_env="not-a-float",
+    )
+    assert invalid.force_axis_reset is False
+    assert invalid.axis_reset_always_3d is False
+    assert invalid.axis_reset_fsq_min == 0.0
+
+    negative = resolve_axis_reset_config(
+        force_axis_reset_env="",
+        axis_reset_always_3d_env="",
+        axis_reset_fsq_min_env="-2.0",
+    )
+    assert negative.axis_reset_fsq_min == 0.0
+
+
+def test_setup_host_enforce_policy_preserves_tracing_and_backend_rules():
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="0",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="force",
+            host_update_assembly=True,
+            use_scan=True,
+            state_has_tracer=False,
+            backend_name="cpu",
+        )
+        is True
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="1",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=True,
+            backend_name="gpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is True
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=False,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="cpu",
+        )
+        is False
+    )
+    assert (
+        resolve_setup_host_enforce(
+            setup_host_enforce_env="auto",
+            host_update_assembly=True,
+            use_scan=False,
+            state_has_tracer=False,
+            backend_name="gpu",
+        )
+        is False
+    )
 
 
 def test_nstep_override_parsing_and_clamping():

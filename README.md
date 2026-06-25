@@ -14,9 +14,18 @@ workflows, with free-boundary support, VMEC2000-compatible `mgrid` workflows,
 and direct-coil research paths. Full adaptive free-boundary solve adjoints
 remain in development.
 
-## Install
+## Differentiation Evidence
 
-From PyPI:
+![AD vs central finite differences](docs/_static/figures/readme_ad_fd_evidence.png)
+
+The current differentiable diagnostics agree with central finite differences
+for fixed-boundary geometry/profile scalars, QS/QI residuals, `DMerc`, `D_R`,
+and branch-local direct-coil free-boundary scalars. The free-boundary rows are
+same-branch/fingerprint-gated evidence only; arbitrary adaptive branch changes
+are still an explicit research lane. Detailed commands and tolerances are in
+the validation guide.
+
+## Install
 
 ```bash
 pip install vmec-jax
@@ -93,54 +102,20 @@ boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
 vj.plot_boozmn(boozmn, outdir="figures/")
 ```
 
-VMEC pressure, iota, and current profiles can be polynomial coefficients or
-tabulated splines. The bundled spline deck uses `PMASS_TYPE`/`PIOTA_TYPE =
-"cubic_spline"` with `*_AUX_S/F`; finite-beta decks use `PCURR_TYPE =
-"cubic_spline_ip"` with `AC_AUX_S/F`. The same syntax supports `akima_spline`
-and `line_segment`:
-
-```bash
-python examples/profile_input_examples.py
-vmec examples/data/input.profile_splines --plot
-vmec examples/data/input.nfp4_QH_finite_beta
-```
-
-`examples/profile_input_examples.py` writes editable polynomial and spline decks
-under `examples/outputs/profile_inputs/` and prints the matching `vmec` commands.
-
-For the bundled small free-boundary example, download both the input deck and
-its magnetic grid into the same folder:
-
-```bash
-curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/input.cth_like_free_bdy_lasym_small
-curl -L -O https://raw.githubusercontent.com/uwplasma/vmec_jax/main/examples/data/mgrid_cth_like_lasym_small.nc
-vmec input.cth_like_free_bdy_lasym_small
-```
+Profile-polynomial, spline, finite-beta, and free-boundary examples are in
+`examples/` and documented in the performance, validation, and free-boundary
+guides.
 
 ### Direct-Coil Free-Boundary Research Lane
 
 The direct-coil free-boundary lane samples differentiable Biot-Savart coils
 directly while keeping the existing `mgrid` path for VMEC2000 compatibility.
-The finalized single-stage optimization lane recomputes a complete direct-coil
-free-boundary solve for each accepted objective point. Current coil-only
-examples validate cheap VMEC-state QS/aspect/iota proxies and same-branch,
-fingerprint-gated branch-local derivatives; complete solves remain the
-acceptance authority. They do not claim production differentiation through
-adaptive accepted/rejected host-controller branch changes or full
-coil-to-Boozer adjoints.
-
-```bash
-python examples/free_boundary_direct_coils_forward.py \
-  --max-iter 4 \
-  --outdir results/free_boundary_direct_coils_forward
-```
+Current coil-only examples validate complete-solve acceptance plus
+same-branch, fingerprint-gated branch-local derivatives; arbitrary adaptive
+host-controller branch differentiation remains a research lane.
 
 ESSOS direct-coil, generated-mgrid, finite-beta scan, and coil-only QS
 optimization commands are documented in `docs/free_boundary_coil_optimization.rst`.
-
-![DIII-D finite-beta mgrid free-boundary scan](docs/_static/figures/freeb_diiid_mgrid_beta_ns101_panel.png)
-
-![LP-QA direct-coil finite-beta free-boundary scan](docs/_static/figures/freeb_lpqa_direct_coil_beta_ns101_panel.png)
 
 ## Backend Selection
 
@@ -166,13 +141,14 @@ Editable optimization examples live in `examples/optimization/`. Start with
 `examples/optimization/README.md`, then use `docs/optimization.rst`,
 `docs/optimization_sweep_results.rst`, and `docs/piecewise_omnigenous_plan.rst`.
 
-The compact panels show QA/QH/QP common-minimal-seed runs and the QI NFP1/2/3/4
-minimal-seed policy. For QI, the raw input is always a circular-torus-like
-`input.minimal_seed_nfp*` deck; optimization-time helicity hints and same-NFP
-reference-family stages are recorded as artifacts, not hidden seed edits. Full
-numeric tables, caveats, LASYM panels, artifact-promotion rules live in the docs,
-with historical `readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
-`readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png` archived there.
+The compact panels show QA/QH/QP common-minimal-seed runs and QI NFP1/2/3/4
+minimal-seed examples. For QI, the public per-NFP scripts start from the same
+circular-torus-like `input.minimal_seed_nfp*` decks, first build a QP basin, and
+then switch the objective to QI. Full numeric tables, caveats, LASYM panels, and
+artifact-promotion rules live in the docs, with historical
+`readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
+`readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png`
+archived there.
 
 ![Common minimal-seed QA/QH/QP states](docs/_static/figures/minimal_seed_showcase_state_panel.png)
 
@@ -193,12 +169,12 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
 `QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The public
-QI presets are `QI_optimization_nfp1.py` through `QI_optimization_nfp4.py`;
-they start from `input.minimal_seed_nfp*` and use policy modes rather than
-forcing every QI row to `max_mode=5`. The NFP=2 row uses
-`minimal_nfp2_qi_balanced_mirror035`. The seed-3127 preset is retained as a diagnostic stress case, not a README promotion row.
-Full provenance and artifact-promotion rules live in `docs/optimization.rst`
-and `docs/optimization_sweep_results.rst`.
+simple QI examples are `QI_optimization_nfp1.py` through
+`QI_optimization_nfp4.py`; each file exposes the seed, objective tuples, QP
+stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is retained as a diagnostic stress
+case, not a README promotion row.
+Full provenance and artifact-promotion rules live in the docs:
+`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
 ## Performance, Validation, Release
 
@@ -215,5 +191,6 @@ vmec --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
 vmec --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
 vmec --plot boozmn.nc  generate Boozer contour and spectrum plots
 vmec --parity input.*  force the conservative VMEC2000-style loop
+vmec --solver-mode memory input.*  choose the lower-peak-memory parity path
 vmec --help            show the full option list
 ```

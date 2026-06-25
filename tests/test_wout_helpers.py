@@ -39,6 +39,7 @@ from vmec_jax.wout import (
     _vmec_jxbforce_cos_coeffs,
     _vmec_jxbforce_sin_coeffs,
     _jxbforce_nyquist_limits,
+    _glasser_from_wout_mercier_terms,
     _nc_scalar,
     _pshalf_from_s,
     _safe_divide,
@@ -56,7 +57,17 @@ from vmec_jax.wout import (
     _vmec_wrout_nyquist_sin_coeffs_loop,
     _vmec_wrout_nyquist_synthesis,
     assert_main_modes_match_wout,
+    _glasser_profiles_from_wout_data,
+    _wout_current_profile_metadata_from_indata,
 )
+from vmec_jax.mercier import glasser_resistive_interchange_from_mercier_terms
+from vmec_jax.io.wout import flux as wout_flux_helpers
+from vmec_jax.io.wout.diagnostics import (
+    glasser_from_wout_mercier_terms,
+    glasser_profiles_from_wout_data,
+    glasser_profiles_from_wout_variables,
+)
+from vmec_jax.io.wout.flux import wout_current_profile_metadata_from_indata
 from vmec_jax.vmec_tomnsp import vmec_trig_tables
 
 
@@ -145,6 +156,138 @@ def test_mesh_weight_and_safe_divide_helpers():
         )
 
 
+def test_wout_glasser_fallback_matches_current_term_reconstruction_and_private_alias():
+    dmerc = np.asarray([0.0, 0.12, -0.03, 0.07, 0.0], dtype=float)
+    dshear = np.asarray([0.0, 0.04, 0.00, 0.09, 0.0], dtype=float)
+    dcurr = np.asarray([0.0, -0.05, 0.20, 0.03, 0.0], dtype=float)
+
+    d_r, h_term, correction, valid = glasser_from_wout_mercier_terms(
+        DMerc=dmerc,
+        Dshear=dshear,
+        Dcurr=dcurr,
+    )
+    alias = _glasser_from_wout_mercier_terms(DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+
+    shear2 = np.maximum(4.0 * dshear, 0.0)
+    expected_h = -dcurr
+    expected_valid = shear2 > 0.0
+    expected_correction = np.zeros_like(dmerc)
+    expected_correction[expected_valid] = (
+        (expected_h[expected_valid] - 0.5 * shear2[expected_valid]) ** 2 / shear2[expected_valid]
+    )
+    expected_d_r = np.zeros_like(dmerc)
+    expected_d_r[expected_valid] = -dmerc[expected_valid] + expected_correction[expected_valid]
+
+    np.testing.assert_allclose(d_r, expected_d_r, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(h_term, expected_h, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(correction, expected_correction, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_array_equal(valid, expected_valid)
+    for actual, expected in zip(alias, (d_r, h_term, correction, valid), strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+    public_terms = glasser_resistive_interchange_from_mercier_terms(
+        DMerc=dmerc,
+        shear=np.sqrt(shear2),
+        H=expected_h,
+    )
+    np.testing.assert_allclose(np.asarray(public_terms["D_R"]), d_r, rtol=1.0e-13, atol=1.0e-13)
+    np.testing.assert_allclose(np.asarray(public_terms["H"]), h_term, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        np.asarray(public_terms["glasser_correction"]),
+        correction,
+        rtol=1.0e-13,
+        atol=1.0e-13,
+    )
+    np.testing.assert_array_equal(np.asarray(public_terms["glasser_shear_valid"]), valid)
+
+
+def test_wout_glasser_profile_reader_uses_persisted_or_fallback_variables():
+    dmerc = np.asarray([0.0, 0.12, -0.03, 0.07, 0.0], dtype=float)
+    dshear = np.asarray([0.0, 0.04, 0.00, 0.09, 0.0], dtype=float)
+    dcurr = np.asarray([0.0, -0.05, 0.20, 0.03, 0.0], dtype=float)
+    fallback = glasser_from_wout_mercier_terms(DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+
+    missing = glasser_profiles_from_wout_variables({}, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(missing.D_R, fallback[0])
+    np.testing.assert_allclose(missing.H, fallback[1])
+    np.testing.assert_allclose(missing.correction, fallback[2])
+    np.testing.assert_array_equal(missing.shear_valid, fallback[3])
+
+    variables = {
+        "D_R": np.asarray([1, 2, 3, 4, 5], dtype=float),
+        "HGlasser": np.asarray([2, 3, 4, 5, 6], dtype=float),
+        "GlasserCorrection": np.asarray([3, 4, 5, 6, 7], dtype=float),
+        "GlasserShearValid": np.asarray([1, 0, 1, 0, 1], dtype=float),
+    }
+    persisted = glasser_profiles_from_wout_variables(variables, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(persisted.D_R, variables["D_R"])
+    np.testing.assert_allclose(persisted.H, variables["HGlasser"])
+    np.testing.assert_allclose(persisted.correction, variables["GlasserCorrection"])
+    np.testing.assert_array_equal(persisted.shear_valid, np.asarray([True, False, True, False, True]))
+
+    legacy_h = glasser_profiles_from_wout_variables({"H": np.arange(5.0)}, DMerc=dmerc, Dshear=dshear, Dcurr=dcurr)
+    np.testing.assert_allclose(legacy_h.H, np.arange(5.0))
+
+
+def test_wout_glasser_profile_writer_bundle_uses_data_or_zero_defaults():
+    wout = SimpleNamespace(
+        D_R=np.asarray([0.0, 1.0, 2.0]),
+        H=np.asarray([3.0, 4.0, 5.0]),
+        glasser_correction=np.asarray([6.0, 7.0, 8.0]),
+        glasser_shear_valid=np.asarray([True, False, True]),
+    )
+    profiles = glasser_profiles_from_wout_data(wout, 3)
+    alias = _glasser_profiles_from_wout_data(wout, 3)
+
+    np.testing.assert_allclose(profiles.D_R, [0.0, 1.0, 2.0])
+    np.testing.assert_allclose(profiles.H, [3.0, 4.0, 5.0])
+    np.testing.assert_allclose(profiles.correction, [6.0, 7.0, 8.0])
+    np.testing.assert_array_equal(profiles.shear_valid, [True, False, True])
+    for actual, expected in zip(alias, profiles, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+    defaults = glasser_profiles_from_wout_data(SimpleNamespace(), 4)
+    np.testing.assert_allclose(defaults.D_R, np.zeros(4))
+    np.testing.assert_allclose(defaults.H, np.zeros(4))
+    np.testing.assert_allclose(defaults.correction, np.zeros(4))
+    np.testing.assert_array_equal(defaults.shear_valid, np.zeros(4, dtype=bool))
+
+
+def test_wout_current_profile_metadata_from_indata_preserves_vmecplot_defaults():
+    defaults = wout_current_profile_metadata_from_indata(InData(scalars={}, indexed={}))
+    np.testing.assert_allclose(defaults.ac, np.zeros(21))
+    np.testing.assert_allclose(defaults.ac_aux_s, -np.ones(101))
+    np.testing.assert_allclose(defaults.ac_aux_f, np.zeros(101))
+    assert defaults.pcurr_type == "power_series"
+    assert defaults.piota_type == "power_series"
+
+    scalar_ac = wout_current_profile_metadata_from_indata(InData(scalars={"AC": 2.5}, indexed={}))
+    assert scalar_ac.ac.shape == (21,)
+    assert scalar_ac.ac[0] == pytest.approx(2.5)
+    np.testing.assert_allclose(scalar_ac.ac[1:], 0.0)
+
+    long_ac_values = [float(i) for i in range(25)]
+    custom = InData(
+        scalars={
+            "AC": long_ac_values,
+            "PCURR_TYPE": "cubic_spline_i",
+            "PIOTA_TYPE": "akima_spline",
+        },
+        indexed={},
+    )
+    metadata = wout_current_profile_metadata_from_indata(custom, ndfmax=5)
+    alias = _wout_current_profile_metadata_from_indata(custom, ndfmax=5)
+
+    assert metadata.ac.shape == (25,)
+    np.testing.assert_allclose(metadata.ac, long_ac_values)
+    np.testing.assert_allclose(metadata.ac_aux_s, -np.ones(5))
+    np.testing.assert_allclose(metadata.ac_aux_f, np.zeros(5))
+    assert metadata.pcurr_type == "cubic_spline_i"
+    assert metadata.piota_type == "akima_spline"
+    for actual, expected in zip(alias, metadata, strict=True):
+        np.testing.assert_array_equal(actual, expected)
+
+
 def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
     s = np.linspace(0.0, 1.0, 5)
     m_modes = np.asarray([0, 1, 2, 3], dtype=int)
@@ -168,6 +311,16 @@ def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
         phipf_internal=phipf_internal,
         lamscale=lamscale,
     )
+    np.testing.assert_allclose(
+        wout_flux_helpers.lambda_wout_from_full_mesh(
+            lam_full=lam_full,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=lamscale,
+        ),
+        lam_wout,
+    )
 
     assert lam_wout.shape == lam_full.shape
     np.testing.assert_allclose(lam_wout[0], 0.0)
@@ -177,6 +330,16 @@ def test_lambda_wout_half_mesh_roundtrip_covers_m_parity_branches():
         s=s,
         phipf_internal=phipf_internal,
         lamscale=lamscale,
+    )
+    np.testing.assert_allclose(
+        wout_flux_helpers.lambda_full_from_wout_half_mesh(
+            lam_wout=lam_wout,
+            m_modes=m_modes,
+            s=s,
+            phipf_internal=phipf_internal,
+            lamscale=lamscale,
+        ),
+        recovered,
     )
 
     # Modes m>1 have no recoverable axis lambda after VMEC's half-mesh write

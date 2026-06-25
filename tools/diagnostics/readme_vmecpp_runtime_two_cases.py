@@ -1,43 +1,47 @@
-"""Generate a small 3-way runtime comparison (VMEC2000 vs vmec_jax vs VMEC++) for README cases.
+"""Render the README single-grid runtime/memory comparison.
 
-This script targets the same two fixed-boundary cases featured in the README
-fsq_total trace figure:
+This communication benchmark compares two small, converged single-grid examples:
 
-- ITERModel
-- LandremanPaul2021_QA_lowres
+- ``input.circular_tokamak``
+- ``input.nfp4_QH_warm_start``
 
-Runtimes are measured using the user-facing CLIs:
-
-- VMEC2000: xvmec2000
-- vmec_jax: vmec_jax <inputfile> (no flags)
-- VMEC++: vmec_standalone <input.json>
-
-Note: VMEC++'s C++ standalone executable consumes VMEC++ JSON input. We convert
-VMEC2000 INDATA -> JSON using the Fortran `indata2json` tool shipped with VMEC++.
-The reported VMEC++ runtime is solver-only (conversion time is reported separately).
+It measures VMEC2000, VMEC++, and vmec_jax.  For vmec_jax it records cold and
+warm timings in the same Python process for both JIT-enabled and no-JIT runs.
+The warm time is the mean of the solves after the first solve.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import os
 import platform
+import re
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec, run_xvmec2000
+from vmec_jax.vmec2000_exec import _patch_indata, find_vmec2000_exec
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DARWIN_MEM_RE = re.compile(r"^\s*([0-9]+)\s+(peak memory footprint|maximum resident set size)\s*$", re.MULTILINE)
+LINUX_MEM_RE = re.compile(r"^\s*Maximum resident set size \(kbytes\):\s*([0-9]+)\s*$", re.MULTILINE)
+
+
+def _time_prefix() -> list[str]:
+    time_bin = Path("/usr/bin/time")
+    if not time_bin.exists():
+        return []
+    return [str(time_bin), "-l"] if platform.system().lower() == "darwin" else [str(time_bin), "-v"]
 
 
 def _pyplot():
-    """Import matplotlib only when the runtime figure is rendered."""
-
     import matplotlib
 
     matplotlib.use("Agg")
@@ -46,301 +50,336 @@ def _pyplot():
     return plt
 
 
-def _find_vmecpp_tools(vmecpp_root: Path | None) -> tuple[Path, Path]:
-    # Prefer explicit root, then common local layout: ../external/vmecpp (next to vmec_jax repo).
-    roots: list[Path] = []
-    if vmecpp_root is not None:
-        roots.append(vmecpp_root.expanduser().resolve())
-    roots.append(REPO_ROOT.parent / "external" / "vmecpp")
-    roots.append(REPO_ROOT / "external" / "vmecpp")
-
-    for root in roots:
-        standalone = root / "build" / "vmec_standalone"
-        i2j = root / "build" / "_deps" / "indata2json-build" / "indata2json"
-        if standalone.exists() and i2j.exists():
-            return standalone, i2j
-
-    raise FileNotFoundError(
-        "VMEC++ tools not found. Provide --vmecpp-root pointing at a vmecpp checkout with a built `build/vmec_standalone`."
-    )
+def _parse_mem(stderr: str) -> dict[str, int | None]:
+    out: dict[str, int | None] = {"peak_footprint_bytes": None, "max_rss_bytes": None}
+    for value_s, label in DARWIN_MEM_RE.findall(stderr):
+        key = "peak_footprint_bytes" if label == "peak memory footprint" else "max_rss_bytes"
+        out[key] = int(value_s)
+    if out["max_rss_bytes"] is None:
+        match = LINUX_MEM_RE.search(stderr)
+        if match:
+            out["max_rss_bytes"] = int(match.group(1)) * 1024
+            out["peak_footprint_bytes"] = out["max_rss_bytes"]
+    return out
 
 
-def _patched_input_text(input_path: Path, updates: dict[str, str]) -> str:
+def _best_mem_bytes(record: dict[str, Any]) -> int | None:
+    for key in ("peak_footprint_bytes", "max_rss_bytes"):
+        value = record.get(key)
+        if isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def _run(cmd: list[str], *, cwd: Path, timeout_s: float, env: dict[str, str] | None = None) -> dict[str, Any]:
+    t0 = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            [*_time_prefix(), *cmd],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=float(timeout_s),
+            env=env,
+            check=False,
+        )
+        elapsed = time.perf_counter() - t0
+        return {
+            "returncode": proc.returncode,
+            "time_real_s": elapsed,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "timed_out": False,
+            **_parse_mem(proc.stderr),
+        }
+    except subprocess.TimeoutExpired as exc:
+        stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+        return {
+            "returncode": 124,
+            "time_real_s": time.perf_counter() - t0,
+            "stdout": exc.stdout if isinstance(exc.stdout, str) else "",
+            "stderr": stderr,
+            "timed_out": True,
+            **_parse_mem(stderr),
+        }
+
+
+def _json_tail(stdout: str) -> dict[str, Any]:
+    for line in reversed([line.strip() for line in stdout.splitlines() if line.strip()]):
+        if line.startswith("{") and line.endswith("}"):
+            return json.loads(line)
+    return {}
+
+
+def _write_input(input_path: Path, workdir: Path, updates: dict[str, str]) -> Path:
+    workdir.mkdir(parents=True, exist_ok=True)
+    dst = workdir / input_path.name
     text = input_path.read_text()
-    if not updates:
-        return text
-    return _patch_indata(text, updates=updates)
+    dst.write_text(text if not updates else _patch_indata(text, updates=updates))
+    return dst
 
 
-def _write_local_input(input_path: Path, *, workdir: Path, updates: dict[str, str]) -> Path:
-    workdir.mkdir(parents=True, exist_ok=True)
-    local_input = workdir / input_path.name
-    local_input.write_text(_patched_input_text(input_path, updates))
-    return local_input
+def _updates(args: argparse.Namespace) -> dict[str, str]:
+    return _runtime_updates(ns=args.ns, niter=args.niter, ftol=args.ftol, nstep=args.nstep)
 
 
-def _runtime_updates(*, ns: int | None, niter: int | None, ftol: float | None, nstep: int | None) -> dict[str, str]:
-    updates: dict[str, str] = {}
-    if nstep is not None:
-        updates["NSTEP"] = str(int(nstep))
+def _runtime_updates(
+    *,
+    ns: int | None,
+    niter: int | None,
+    ftol: float | None,
+    nstep: int | None,
+) -> dict[str, str]:
+    out: dict[str, str] = {}
     if ns is not None:
-        updates["NS_ARRAY"] = str(int(ns))
+        out["NS_ARRAY"] = str(ns)
     if niter is not None:
-        updates["NITER_ARRAY"] = str(int(niter))
+        out["NITER_ARRAY"] = str(niter)
     if ftol is not None:
-        updates["FTOL_ARRAY"] = f"{float(ftol):.3e}"
-    return updates
+        out["FTOL_ARRAY"] = f"{float(ftol):.3e}"
+    if nstep is not None:
+        out["NSTEP"] = str(nstep)
+    return out
 
 
-def _run_vmec_jax_cli(input_path: Path, *, workdir: Path, timeout_s: float, updates: dict[str, str]) -> float:
-    workdir.mkdir(parents=True, exist_ok=True)
-    local_input = _write_local_input(input_path, workdir=workdir, updates=updates)
-    t0 = time.perf_counter()
-    proc = subprocess.run(
-        ["vmec_jax", str(local_input)],
-        cwd=str(workdir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=float(timeout_s),
-    )
-    dt = time.perf_counter() - t0
-    if proc.returncode != 0:
-        raise RuntimeError(f"vmec_jax failed for {input_path}:\n{proc.stderr}")
-    return float(dt)
-
-
-def _run_vmecpp_standalone(
+def _external_record(
     *,
-    indata_path: Path,
-    vmecpp_standalone: Path,
-    indata2json: Path,
+    case: str,
+    backend: str,
+    cmd: list[str],
+    input_path: Path,
     workdir: Path,
-    timeout_s: float,
     updates: dict[str, str],
-) -> tuple[float, float, Path]:
-    """Return (conversion_s, runtime_s, json_path)."""
-    workdir.mkdir(parents=True, exist_ok=True)
-    local_input = _write_local_input(indata_path, workdir=workdir, updates=updates)
-
-    # indata2json writes <case>.json in cwd, where case is derived from input.<case>.
-    t0 = time.perf_counter()
-    subprocess.run([str(indata2json), local_input.name], cwd=str(workdir), check=True, stdout=subprocess.DEVNULL)
-    conv_s = time.perf_counter() - t0
-
-    case = indata_path.name[len("input.") :] if indata_path.name.startswith("input.") else indata_path.stem
-    json_path = workdir / f"{case}.json"
-    if not json_path.exists():
-        raise FileNotFoundError(f"indata2json did not produce expected {json_path}")
-
-    t1 = time.perf_counter()
-    subprocess.run([str(vmecpp_standalone), str(json_path)], cwd=str(workdir), check=True, stdout=subprocess.DEVNULL, timeout=float(timeout_s))
-    rt_s = time.perf_counter() - t1
-    return float(conv_s), float(rt_s), json_path
+    timeout_s: float,
+) -> dict[str, Any]:
+    local_input = _write_input(input_path, workdir, updates)
+    actual_cmd = [part if part != "{input}" else local_input.name for part in cmd]
+    run = _run(actual_cmd, cwd=workdir, timeout_s=timeout_s)
+    return {
+        "case": case,
+        "backend": backend,
+        "policy": "",
+        "runtime_cold_s": run["time_real_s"],
+        "runtime_warm_s": None,
+        "ok": run["returncode"] == 0,
+        "error": None if run["returncode"] == 0 else run["stderr"][-2000:],
+        **run,
+    }
 
 
-def _run_vmecpp_legacy_cli(
+def _vmec_jax_record(
     *,
-    indata_path: Path,
-    vmecpp_cli: Path,
+    case: str,
+    input_path: Path,
     workdir: Path,
-    timeout_s: float,
     updates: dict[str, str],
-) -> tuple[float, float, Path]:
-    """Return (conversion_s, runtime_s, input_path) for `vmecpp --legacy`."""
-    local_input = _write_local_input(indata_path, workdir=workdir, updates=updates)
+    timeout_s: float,
+    policy: str,
+    warm_repeats: int,
+) -> dict[str, Any]:
+    local_input = _write_input(input_path, workdir, updates)
+    code = r"""
+import json
+import sys
+import time
+from pathlib import Path
+import jax
+from vmec_jax.api import run_fixed_boundary
+
+path = Path(sys.argv[1])
+policy = sys.argv[2]
+warm_repeats = int(sys.argv[3])
+jit_forces = policy == "jit"
+times = []
+iters = []
+converged = []
+for _ in range(1 + max(0, warm_repeats)):
     t0 = time.perf_counter()
-    proc = subprocess.run(
-        [str(vmecpp_cli), "--legacy", str(local_input)],
-        cwd=str(workdir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=float(timeout_s),
+    run = run_fixed_boundary(
+        path,
+        solver="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        verbose=False,
+        jit_forces=jit_forces,
     )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr.strip() or f"vmecpp --legacy failed with code {proc.returncode}")
-    return 0.0, float(time.perf_counter() - t0), local_input
+    times.append(time.perf_counter() - t0)
+    result = getattr(run, "result", None)
+    diagnostics = {} if result is None else dict(getattr(result, "diagnostics", {}) or {})
+    iters.append(None if result is None else int(getattr(result, "n_iter", -1)))
+    converged.append(bool(diagnostics.get("converged", False)))
+print(json.dumps({
+    "runtime_cold_s": float(times[0]),
+    "runtime_warm_s": None if len(times) == 1 else float(sum(times[1:]) / (len(times) - 1)),
+    "runtime_all_s": [float(x) for x in times],
+    "n_iter": iters,
+    "converged": converged,
+    "jax_disable_jit": bool(jax.config.jax_disable_jit),
+    "jax_backend": str(jax.default_backend()),
+    "device_kind": str(jax.devices()[0].device_kind) if jax.devices() else "unknown",
+}))
+"""
+    env = dict(os.environ)
+    env.update({"PYTHONUNBUFFERED": "1", "VMEC_JAX_SCAN_PRINT": "0", "VMEC_JAX_SCAN_MINIMAL": "1"})
+    if policy == "nojit":
+        env["JAX_DISABLE_JIT"] = "1"
+        env["VMEC_JAX_VMEC2000_FORCE_NOJIT"] = "1"
+    else:
+        env.pop("JAX_DISABLE_JIT", None)
+        env["VMEC_JAX_VMEC2000_FORCE_JIT"] = "1"
+    run = _run([sys.executable, "-c", code, str(local_input), policy, str(warm_repeats)], cwd=workdir, timeout_s=timeout_s, env=env)
+    payload = _json_tail(run["stdout"])
+    return {
+        "case": case,
+        "backend": "vmec_jax",
+        "policy": policy,
+        "ok": run["returncode"] == 0 and bool(payload),
+        "error": None if run["returncode"] == 0 else run["stderr"][-2000:],
+        **payload,
+        **run,
+    }
+
+
+def _write_csv(records: list[dict[str, Any]], outpath: Path) -> None:
+    fields = ["case", "backend", "policy", "runtime_cold_s", "runtime_warm_s", "peak_memory_gib", "ok"]
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    with outpath.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        for rec in records:
+            mem = _best_mem_bytes(rec)
+            writer.writerow(
+                {
+                    "case": rec["case"],
+                    "backend": rec["backend"],
+                    "policy": rec.get("policy", ""),
+                    "runtime_cold_s": rec.get("runtime_cold_s"),
+                    "runtime_warm_s": rec.get("runtime_warm_s"),
+                    "peak_memory_gib": None if mem is None else mem / (1024**3),
+                    "ok": bool(rec.get("ok", False)),
+                }
+            )
+
+
+def _plot(records: list[dict[str, Any]], outpath: Path, *, updates: dict[str, str]) -> None:
+    import numpy as np
+
+    cases = sorted({rec["case"] for rec in records})
+    by_key = {(rec["case"], rec["backend"], rec.get("policy", "")): rec for rec in records}
+    runtime_series = [
+        ("VMEC2000", "#1f77b4", ("vmec2000", ""), "runtime_cold_s"),
+        ("VMEC++", "#2ca02c", ("vmecpp", ""), "runtime_cold_s"),
+        ("vmec_jax JIT cold", "#ff7f0e", ("vmec_jax", "jit"), "runtime_cold_s"),
+        ("vmec_jax JIT warm", "#f2a65a", ("vmec_jax", "jit"), "runtime_warm_s"),
+        ("vmec_jax no-JIT cold", "#d62728", ("vmec_jax", "nojit"), "runtime_cold_s"),
+        ("vmec_jax no-JIT warm", "#ff9896", ("vmec_jax", "nojit"), "runtime_warm_s"),
+    ]
+    memory_series = [
+        ("VMEC2000", "#1f77b4", ("vmec2000", "")),
+        ("VMEC++", "#2ca02c", ("vmecpp", "")),
+        ("vmec_jax JIT process", "#ff7f0e", ("vmec_jax", "jit")),
+        ("vmec_jax no-JIT process", "#d62728", ("vmec_jax", "nojit")),
+    ]
+
+    plt = _pyplot()
+    fig, axes = plt.subplots(2, 1, figsize=(12.8, 8.0), sharex=True)
+    x = np.arange(len(cases), dtype=float)
+    for axis, series, width, ylabel in (
+        (axes[0], runtime_series, 0.12, "runtime (s, log)"),
+        (axes[1], memory_series, 0.17, "peak process memory (GiB)"),
+    ):
+        offsets = np.linspace(-width * (len(series) - 1) / 2, width * (len(series) - 1) / 2, len(series))
+        for item, off in zip(series, offsets):
+            label, color, key = item[:3]
+            metric = item[3] if len(item) > 3 else None
+            values = []
+            for case in cases:
+                rec = by_key.get((case, *key), {})
+                raw = (rec.get(metric) if metric else _best_mem_bytes(rec)) if rec.get("ok") else None
+                values.append(None if raw is None else (raw if metric else raw / (1024**3)))
+            axis.bar(x + off, values, width=width, color=color, label=label)
+        if ylabel.startswith("runtime"):
+            axis.set_yscale("log")
+        axis.set_ylabel(ylabel)
+        axis.grid(axis="y", which="both", alpha=0.2)
+        axis.legend(frameon=False, ncol=3 if ylabel.startswith("runtime") else 2, fontsize=8)
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(cases)
+    settings = "input-deck budgets" if not updates else ", ".join(f"{k}={v}" for k, v in updates.items())
+    fig.suptitle(f"Single-grid fixed-boundary runtime and memory ({settings})", y=0.985)
+    fig.tight_layout(rect=(0, 0, 1, 0.955))
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outpath, dpi=180)
+    plt.close(fig)
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--inputs-dir",
-        type=Path,
-        default=REPO_ROOT / "examples_single_grid" / "data",
-        help="Directory containing input.* files.",
-    )
-    p.add_argument(
-        "--outdir",
-        type=Path,
-        default=REPO_ROOT / "docs" / "_static" / "figures",
-        help="Where to write the PNG figure.",
-    )
-    p.add_argument(
-        "--workdir",
-        type=Path,
-        default=REPO_ROOT / "outputs" / "readme_vmecpp_runtime_two_cases_work",
-        help="Scratch directory for run artifacts (ignored by git).",
-    )
-    p.add_argument(
-        "--reuse-workdir",
-        action="store_true",
-        help="Reuse existing results.json under --workdir (skip rerunning solvers).",
-    )
-    p.add_argument("--timeout-s", type=float, default=3600.0)
-    p.add_argument("--vmecpp-root", type=Path, default=None, help="Path to a vmecpp checkout (with build/).")
-    p.add_argument("--ns", type=int, default=None, help="Optional NS_ARRAY override for bounded local checks.")
-    p.add_argument("--niter", type=int, default=None, help="Optional NITER_ARRAY override for bounded local checks.")
-    p.add_argument("--ftol", type=float, default=None, help="Optional FTOL_ARRAY override for bounded local checks.")
-    p.add_argument("--nstep", type=int, default=None, help="Optional NSTEP override for bounded local checks.")
-    args = p.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--inputs-dir", type=Path, default=REPO_ROOT / "examples" / "data")
+    parser.add_argument("--outdir", type=Path, default=REPO_ROOT / "docs" / "_static" / "figures")
+    parser.add_argument("--workdir", type=Path, default=REPO_ROOT / "outputs" / "readme_runtime_memory_single_grid_work")
+    parser.add_argument("--reuse-workdir", action="store_true")
+    parser.add_argument("--timeout-s", type=float, default=1800.0)
+    parser.add_argument("--vmec2000-exec", type=Path, default=None)
+    parser.add_argument("--warm-repeats", type=int, default=1)
+    parser.add_argument("--ns", type=int, default=None)
+    parser.add_argument("--niter", type=int, default=None)
+    parser.add_argument("--ftol", type=float, default=None)
+    parser.add_argument("--nstep", type=int, default=None)
+    parser.add_argument("--cases", nargs="+", default=["circular_tokamak", "nfp4_QH_warm_start"])
+    args = parser.parse_args()
 
-    vmec_exec = find_vmec2000_exec(root=REPO_ROOT.parent)
-    if vmec_exec is None:
-        raise SystemExit("VMEC2000 executable not found. Set VMEC2000_EXEC or ensure STELLOPT/VMEC2000 is available.")
-
-    vmecpp_standalone: Path | None
-    indata2json: Path | None
-    vmecpp_cli: Path | None = None
-    try:
-        vmecpp_standalone, indata2json = _find_vmecpp_tools(args.vmecpp_root)
-    except FileNotFoundError:
-        cli = shutil.which("vmecpp")
-        if cli is None:
-            raise
-        vmecpp_standalone = None
-        indata2json = None
-        vmecpp_cli = Path(cli)
-
-    inputs_dir = args.inputs_dir.expanduser().resolve()
-    outdir = args.outdir.expanduser().resolve()
     workdir = args.workdir.expanduser().resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
-    workdir.mkdir(parents=True, exist_ok=True)
-
-    cases = {
-        "ITERModel": inputs_dir / "input.ITERModel",
-        "LandremanPaul2021_QA_lowres": inputs_dir / "input.LandremanPaul2021_QA_lowres",
-    }
-    for name, path in cases.items():
-        if not path.exists():
-            raise FileNotFoundError(f"missing input for {name}: {path}")
-
     results_path = workdir / "results.json"
     if bool(args.reuse_workdir) and results_path.exists():
-        results = json.loads(results_path.read_text())
+        payload = json.loads(results_path.read_text())
+        records = payload["records"]
     else:
-        updates = _runtime_updates(ns=args.ns, niter=args.niter, ftol=args.ftol, nstep=args.nstep)
-        results: dict[str, dict[str, Any]] = {}
-        for name, input_path in cases.items():
-            case_work = workdir / name
+        updates = _updates(args)
+        vmec2000 = args.vmec2000_exec.expanduser().resolve() if args.vmec2000_exec else find_vmec2000_exec(root=REPO_ROOT.parent)
+        vmecpp = shutil.which("vmecpp")
+        if vmec2000 is None:
+            raise SystemExit("Missing VMEC2000 executable; pass --vmec2000-exec.")
+        if vmecpp is None:
+            raise SystemExit("Missing vmecpp executable on PATH.")
+        records: list[dict[str, Any]] = []
+        for case in args.cases:
+            input_path = args.inputs_dir.expanduser().resolve() / f"input.{case}"
+            if not input_path.exists():
+                raise FileNotFoundError(input_path)
+            case_work = workdir / case
             shutil.rmtree(case_work, ignore_errors=True)
-            case_work.mkdir(parents=True, exist_ok=True)
-
-            # VMEC2000 runtime
-            vmec = run_xvmec2000(
-                input_path,
-                exec_path=Path(vmec_exec),
-                workdir=case_work / "vmec2000",
-                timeout_s=float(args.timeout_s),
-                indata_updates=updates,
-            )
-            vmec_rt = float(vmec.runtime_s)
-
-            # vmec_jax runtime (CLI; no flags)
-            jax_rt = _run_vmec_jax_cli(
-                input_path,
-                workdir=case_work / "vmec_jax",
-                timeout_s=float(args.timeout_s),
-                updates=updates,
-            )
-
-            conv_s: float | None
-            vmecpp_rt: float | None
-            vmecpp_error: str | None = None
-            try:
-                if vmecpp_standalone is not None and indata2json is not None:
-                    # VMEC++ runtime (C++ standalone + converter).
-                    conv_s, vmecpp_rt, _ = _run_vmecpp_standalone(
-                        indata_path=input_path,
-                        vmecpp_standalone=vmecpp_standalone,
-                        indata2json=indata2json,
-                        workdir=case_work / "vmecpp",
-                        timeout_s=float(args.timeout_s),
-                        updates=updates,
-                    )
-                else:
-                    assert vmecpp_cli is not None
-                    conv_s, vmecpp_rt, _ = _run_vmecpp_legacy_cli(
-                        indata_path=input_path,
-                        vmecpp_cli=vmecpp_cli,
-                        workdir=case_work / "vmecpp",
-                        timeout_s=float(args.timeout_s),
-                        updates=updates,
-                    )
-            except Exception as exc:
-                conv_s = None
-                vmecpp_rt = None
-                vmecpp_error = str(exc)
-
-            results[name] = {
-                "vmec2000_runtime_s": vmec_rt,
-                "vmec_jax_runtime_s": jax_rt,
-                "vmecpp_runtime_s": vmecpp_rt,
-                "vmecpp_conversion_s": conv_s,
-                "vmecpp_ok": vmecpp_error is None,
-                "vmecpp_error": vmecpp_error,
-            }
-
-        results["_metadata"] = {
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "host": platform.node(),
-            "platform": platform.platform(),
-            "inputs_dir": str(inputs_dir),
-            "timeout_s": float(args.timeout_s),
-            "updates": updates,
-            "vmec2000_exec": str(vmec_exec),
-            "vmecpp_mode": "standalone_json" if vmecpp_standalone is not None else "legacy_cli",
-            "vmecpp_standalone": None if vmecpp_standalone is None else str(vmecpp_standalone),
-            "vmecpp_cli": None if vmecpp_cli is None else str(vmecpp_cli),
-            "indata2json": None if indata2json is None else str(indata2json),
+            print(f"[readme-runtime] {case}: VMEC2000", flush=True)
+            records.append(_external_record(case=case, backend="vmec2000", cmd=[str(vmec2000), "{input}"], input_path=input_path, workdir=case_work / "vmec2000", updates=updates, timeout_s=float(args.timeout_s)))
+            print(f"[readme-runtime] {case}: VMEC++", flush=True)
+            records.append(_external_record(case=case, backend="vmecpp", cmd=[str(vmecpp), "--legacy", "{input}"], input_path=input_path, workdir=case_work / "vmecpp", updates=updates, timeout_s=float(args.timeout_s)))
+            for policy in ("jit", "nojit"):
+                print(f"[readme-runtime] {case}: vmec_jax {policy}", flush=True)
+                records.append(_vmec_jax_record(case=case, input_path=input_path, workdir=case_work / f"vmec_jax_{policy}", updates=updates, timeout_s=float(args.timeout_s), policy=policy, warm_repeats=int(args.warm_repeats)))
+        payload = {
+            "metadata": {
+                "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+                "host": platform.node(),
+                "platform": platform.platform(),
+                "python": platform.python_version(),
+                "updates": updates,
+                "warm_repeats": int(args.warm_repeats),
+                "vmec2000_exec": str(vmec2000),
+                "vmecpp_exec": str(vmecpp),
+            },
+            "records": records,
         }
+        workdir.mkdir(parents=True, exist_ok=True)
+        results_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
-        # Write results JSON for reproducibility (under outputs/, ignored).
-        results_path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
-
-    # Plot.
-    labels = list(cases.keys())
-    vmec2000 = [results[k]["vmec2000_runtime_s"] for k in labels]
-    vmec_jax = [results[k]["vmec_jax_runtime_s"] for k in labels]
-    vmecpp = [results[k]["vmecpp_runtime_s"] if results[k].get("vmecpp_runtime_s") is not None else float("nan") for k in labels]
-
-    plt = _pyplot()
-    x = list(range(len(labels)))
-    w = 0.25
-    fig, ax = plt.subplots(1, 1, figsize=(10.5, 3.8))
-    ax.bar([v - w for v in x], vmec2000, width=w, label="VMEC2000", color="#1f77b4")
-    ax.bar(x, vmec_jax, width=w, label="vmec_jax", color="#ff7f0e")
-    ax.bar([v + w for v in x], vmecpp, width=w, label="VMEC++ (solver only)", color="#2ca02c")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=0)
-    ax.set_yscale("log")
-    ax.set_ylabel("runtime (s, log scale)")
-    ax.set_title("")
-    ax.grid(axis="y", alpha=0.25)
-    fig.suptitle(
-        "Single-grid fixed-boundary runtime\n(NS_ARRAY=151, NITER_ARRAY=5000, FTOL_ARRAY=1e-14, NSTEP=500)",
-        fontsize=14,
-        y=0.99,
-    )
-    handles, labels_ = ax.get_legend_handles_labels()
-    fig.legend(handles, labels_, frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 0.90))
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.84))
-    out_png = outdir / "readme_runtime_two_cases_vmecpp.png"
-    fig.savefig(out_png, dpi=220)
-    plt.close(fig)
-    print(f"Wrote {out_png}")
+    figure = args.outdir.expanduser().resolve() / "readme_runtime_memory_single_grid.png"
+    csv_path = args.outdir.expanduser().resolve() / "readme_runtime_memory_single_grid.csv"
+    json_path = args.outdir.expanduser().resolve() / "readme_runtime_memory_single_grid.json"
+    _plot(records, figure, updates=payload["metadata"].get("updates", {}))
+    _write_csv(records, csv_path)
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    print(f"Wrote {figure}")
+    print(f"Wrote {csv_path}")
+    print(f"Wrote {json_path}")
     return 0
 
 

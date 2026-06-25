@@ -132,6 +132,33 @@ def _preconditioner_k(*, ns=3, ntheta=3, nzeta=2):
     )
 
 
+def test_production_force_path_uses_compact_bcovar_payload():
+    static, state, wout = _circular_axisymmetric_case(ns=4)
+
+    kernels = vf.vmec_forces_rz_from_wout(state=state, static=static, wout=wout)
+
+    assert isinstance(kernels.bc, vb.VmecForceBcovarPayload)
+    for attr in (
+        "jac",
+        "guu",
+        "bsupu",
+        "bsupv",
+        "bsubu",
+        "bsubv",
+        "clmn_even",
+        "blmn_even",
+        "bsq",
+        "gij_b_uu",
+        "gij_b_uv",
+        "gij_b_vv",
+        "lu_e",
+        "lv_e",
+        "lamscale",
+    ):
+        assert hasattr(kernels.bc, attr)
+    assert not hasattr(kernels.bc, "bsubu_parity_even")
+
+
 def test_force_scope_fallbacks_and_kernel_pytree_roundtrip(monkeypatch):
     class RaisingContext:
         def __enter__(self):

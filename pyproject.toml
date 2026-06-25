@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vmec-jax"
 version = "0.0.15"
-description = "End-to-end differentiable JAX implementation of VMEC2000 for fixed and free-boundary equilibria."
+description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "vmec_jax contributors"}]
@@ -51,7 +51,17 @@ docs = [
   "sphinx",
   "furo",
 ]
-dev = ["pytest", "pytest-cov", "ruff", "mypy", "types-setuptools"]
+dev = [
+  "build",
+  "furo",
+  "mypy",
+  "pytest",
+  "pytest-cov",
+  "pytest-xdist",
+  "ruff",
+  "sphinx",
+  "types-setuptools",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

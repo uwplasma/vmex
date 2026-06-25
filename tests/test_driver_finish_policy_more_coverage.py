@@ -256,6 +256,54 @@ def test_cli_single_grid_finish_attempt_promotes_strict_accelerated_result(
     assert diag["converged_strict"] is True
 
 
+def test_finish_policy_none_suppresses_cli_finish_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict] = []
+
+    def fake_solver(state, static, **kwargs):
+        calls.append(
+            {
+                "max_iter": int(kwargs["max_iter"]),
+                "use_scan": bool(kwargs["use_scan"]),
+                "resume_state_mode": kwargs.get("resume_state_mode"),
+            }
+        )
+        return _result(
+            _state(static.cfg.ns, "bounded"),
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-3,
+            converged=False,
+            use_scan=bool(kwargs["use_scan"]),
+        )
+
+    _install_light_driver(monkeypatch, cfg=_cfg(ns=5), indata=_indata(NITER=4, FTOL=1.0e-8), solver=fake_solver)
+
+    run = driver.run_fixed_boundary(
+        tmp_path / "input.finish_none",
+        solver="vmec2000_iter",
+        solver_mode="accelerated",
+        max_iter=4,
+        verbose=False,
+        multigrid=False,
+        use_scan=False,
+        jit_forces=False,
+        grid=object(),
+        cli_fixed_boundary_mode=True,
+        finish_policy="none",
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls == [{"max_iter": 4, "use_scan": False, "resume_state_mode": "minimal"}]
+    assert run.state.label == "bounded"
+    diag = run.result.diagnostics
+    assert diag["fixed_boundary_finish_policy"] == "none"
+    assert diag["cli_fixed_boundary_finish_enabled"] is False
+    assert "cli_fixed_boundary_finish_budgets" not in diag
+    assert diag["converged"] is False
+
+
 def test_scan_parity_guard_keeps_scan_when_probe_histories_match(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

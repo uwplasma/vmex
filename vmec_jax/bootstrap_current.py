@@ -573,7 +573,6 @@ def bootstrap_current_fixed_point(
                 dpds=update_samples["dpds"],
             )
             proposed_derivative = update["current_derivative"]
-            proposed_current = update["current"]
         else:
             previous_current = diag.get("previous_current")
             if previous_current is None:
@@ -590,7 +589,6 @@ def bootstrap_current_fixed_point(
                 previous_current=previous_current,
                 policy=options.policy,
             )
-            proposed_current = integrate_current_derivative(s, proposed_derivative)
 
         old_derivative = _current_derivative_from_indata(current_indata, s, options.pcurr_type)
         effective_damping = float(options.damping)
@@ -676,19 +674,12 @@ def bootstrap_current_fixed_point(
     )
 
 
-__all__ = [
-    "BootstrapCurrentIteration",
-    "BootstrapCurrentOptions",
-    "BootstrapCurrentResult",
-    "CurrentUpdatePolicy",
-    "apply_current_profile_to_indata",
-    "bootstrap_current_fixed_point",
-    "bootstrap_current_update_to_indata",
-    "damp_current_profile",
-    "dpsi_ds_from_vmec_phiedge",
-    "integrate_current_derivative",
-    "redl_current_derivative_update",
-    "redl_current_integrating_factor_update",
-    "redl_current_rhs",
-    "vmec_current_profile_from_bootstrap_update",
-]
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if (
+        getattr(value, "__module__", None) == __name__
+        and not name.startswith("_")
+    )
+    or name == "CurrentUpdatePolicy"
+)

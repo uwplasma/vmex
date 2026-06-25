@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.solve as solve
+from vmec_jax.solvers.fixed_boundary.profiles import build_wout_like_profiles_from_indata
 
 
 class _InData:
@@ -339,3 +340,31 @@ def test_residual_iter_vmec2000_scan_state_only(load_case_circular_tokamak, monk
     assert result.diagnostics["state_only"] is True
     assert result.diagnostics["history_none"] is True
     assert result.diagnostics["vmec2000_scan"] is True
+
+
+def test_wout_like_profile_setup_uses_real_input_profiles(load_case_circular_tokamak):
+    _cfg, indata, static, _boundary, _state0 = load_case_circular_tokamak
+    modes_m = np.asarray(static.modes.m, dtype=int)
+    modes_n = np.asarray(static.modes.n, dtype=int)
+    idx_candidates = np.nonzero((modes_m == 0) & (modes_n == 0))[0]
+    idx00 = int(idx_candidates[0]) if idx_candidates.size else 0
+
+    setup = build_wout_like_profiles_from_indata(
+        indata=indata,
+        static=static,
+        s_profile=static.s,
+        signgs=1,
+        idx00=idx00,
+        prefer_host_default_profiles=True,
+        s_profile_has_tracer=False,
+    )
+
+    assert setup.wout_like.nfp == int(static.cfg.nfp)
+    assert setup.wout_like.mpol == int(static.cfg.mpol)
+    assert setup.wout_like.ntor == int(static.cfg.ntor)
+    assert setup.wout_like.lasym is bool(static.cfg.lasym)
+    assert setup.ncurr == int(indata.get_int("NCURR", 0))
+    assert np.asarray(setup.phips).shape == np.asarray(static.s).shape
+    assert float(np.asarray(setup.phips)[0]) == pytest.approx(0.0)
+    assert np.asarray(setup.wout_like.mass).shape == np.asarray(static.s).shape
+    assert np.asarray(setup.wout_like.chips_eff).shape == np.asarray(static.s).shape

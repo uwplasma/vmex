@@ -19,6 +19,13 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ModeTable:
+    """VMEC Fourier mode ordering for arrays indexed by ``(m, n)``.
+
+    ``m`` and ``n`` are integer arrays with the same length.  The toroidal
+    number is stored before multiplying by ``nfp`` so the same table can be
+    reused for input parsing, geometry evaluation, and VMEC ``xm/xn`` output.
+    """
+
     m: np.ndarray  # (K,)
     n: np.ndarray  # (K,)  integer toroidal mode number (before *nfp)
 
@@ -81,6 +88,8 @@ def _nyquist_mode_table_cached(mpol: int, ntor: int) -> ModeTable:
 
 
 def nyquist_mode_table(mpol: int, ntor: int) -> ModeTable:
+    """Create a cached VMEC-style Nyquist mode table from spectral limits."""
+
     return _nyquist_mode_table_cached(int(abs(mpol)), int(abs(ntor)))
 
 

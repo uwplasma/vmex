@@ -1,0 +1,488 @@
+"""Public fixed-boundary solver entry points.
+
+This module owns the user-facing fixed-boundary solver wrappers.  The large
+VMEC residual-iteration engine lives in ``residual.iteration``; keeping these
+wrappers separate makes the residual engine closer to a single-purpose domain
+module while preserving the historical ``vmec_jax.solve`` API.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+from vmec_jax._compat import has_jax, jax, jnp, jit
+from vmec_jax.field import b2_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda
+from vmec_jax.fourier import eval_fourier_dtheta, eval_fourier_dzeta_phys
+from vmec_jax.geom import eval_geom
+from vmec_jax.grids import angle_steps
+from vmec_jax.solvers.fixed_boundary.diagnostics import first_step as _first_step_diagnostics_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import energy as _fixed_boundary_energy_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import gd as _fixed_boundary_gd_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import lambda_gd as _lambda_optimizer_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import lbfgs as _fixed_boundary_lbfgs_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_context as _residual_force_context_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_gn as _residual_gn_helpers
+from vmec_jax.solvers.fixed_boundary.optimization import residual_lbfgs as _residual_lbfgs_helpers
+from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
+    enforce_fixed_boundary_and_axis as _enforce_fixed_boundary_and_axis,
+    enforce_lambda_gauge as _enforce_lambda_gauge,
+    grad_rms_state as _grad_rms_state,
+    mode00_index as _mode00_index,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.gradient import (
+    mask_grad_for_constraints as _mask_grad_for_constraints,
+    update_state_gd as _update_state_gd,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.quasi_newton import (
+    ensure_descent_direction as _ensure_descent_direction,
+    lbfgs_curvature_tolerance as _resolve_lbfgs_curvature_tol,
+    lbfgs_two_loop_direction as _lbfgs_two_loop_direction,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
+    assemble_residual_objective_terms as _assemble_residual_objective_terms,
+    residual_objective_vector as _residual_objective_vector,
+)
+from vmec_jax.solvers.fixed_boundary.optimization.tolerances import (
+    dtype_tiny as _dtype_tiny,
+    resolve_cg_tol as _resolve_cg_tol,
+    resolve_grad_tol as _resolve_grad_tol,
+    resolve_lm_damping as _resolve_lm_damping,
+)
+from vmec_jax.solvers.fixed_boundary.options import (
+    validate_fixed_boundary_gd_options,
+    validate_fixed_boundary_lbfgs_options,
+    validate_lambda_gd_options,
+    validate_pressure_shape,
+    validate_residual_gn_options,
+    validate_residual_lbfgs_options,
+)
+from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
+    apply_preconditioner as _apply_preconditioner,
+    metric_surface_precond_scales_np as _metric_surface_precond_scales_np,
+    radial_tridi_smooth_dirichlet as _radial_tridi_smooth_dirichlet,
+)
+from vmec_jax.solvers.fixed_boundary.profiles import (
+    _half_mesh_from_full_mesh,
+    _icurv_full_mesh_from_indata,
+    _mass_half_mesh_from_indata,
+    _pressure_half_mesh_from_indata,
+    _vmec_force_flux_profiles,
+)
+from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
+    zero_edge_rz_force_blocks as _zero_edge_rz_force_blocks,
+)
+from vmec_jax.solvers.fixed_boundary.results import SolveFixedBoundaryResult, SolveLambdaResult, SolveVmecResidualResult
+from vmec_jax.solvers.fixed_boundary.results import WoutLikeVmecForces as _WoutLikeVmecForces
+from vmec_jax.state import VMECState, pack_state, unpack_state
+
+
+def _energy_optimizer_deps(validate_options_func) -> dict[str, Any]:
+    """Common implementation hooks for fixed-boundary energy optimizers."""
+    return {
+        "has_jax_func": has_jax,
+        "validate_options_func": validate_options_func,
+        "prepare_energy_context_func": _fixed_boundary_energy_helpers.prepare_fixed_boundary_energy_context,
+        "enforce_fixed_boundary_and_axis_func": _enforce_fixed_boundary_and_axis,
+        "mask_grad_for_constraints_func": _mask_grad_for_constraints,
+        "apply_preconditioner_func": _apply_preconditioner,
+        "grad_rms_state_func": _grad_rms_state,
+        "resolve_grad_tol_func": _resolve_grad_tol,
+        "mode00_index_func": _mode00_index,
+        "eval_geom_func": eval_geom,
+        "bsup_from_geom_func": bsup_from_geom,
+        "b2_from_bsup_func": b2_from_bsup,
+        "angle_steps_func": angle_steps,
+        "validate_pressure_shape_func": validate_pressure_shape,
+        "jnp_module": jnp,
+        "jit_func": jit,
+    }
+
+
+def _lbfgs_deps() -> dict[str, Any]:
+    """Common implementation hooks for dependency-free L-BFGS wrappers."""
+    return {
+        "lbfgs_two_loop_direction_func": _lbfgs_two_loop_direction,
+        "ensure_descent_direction_func": _ensure_descent_direction,
+        "resolve_lbfgs_curvature_tol_func": _resolve_lbfgs_curvature_tol,
+        "pack_state_func": pack_state,
+        "unpack_state_func": unpack_state,
+    }
+
+
+def _residual_optimizer_deps(validate_options_func) -> dict[str, Any]:
+    """Common implementation hooks for VMEC residual objective optimizers."""
+    return {
+        "has_jax_func": has_jax,
+        "validate_options_func": validate_options_func,
+        "prepare_residual_force_context_func": _residual_force_context_helpers.prepare_residual_force_context,
+        "mode00_index_func": _mode00_index,
+        "half_mesh_from_full_mesh_func": _half_mesh_from_full_mesh,
+        "mass_half_mesh_from_indata_func": _mass_half_mesh_from_indata,
+        "pressure_half_mesh_from_indata_func": _pressure_half_mesh_from_indata,
+        "icurv_full_mesh_from_indata_func": _icurv_full_mesh_from_indata,
+        "vmec_force_flux_profiles_func": _vmec_force_flux_profiles,
+        "wout_like_cls": _WoutLikeVmecForces,
+        "assemble_residual_objective_terms_func": _assemble_residual_objective_terms,
+        "enforce_fixed_boundary_and_axis_func": _enforce_fixed_boundary_and_axis,
+        "mask_grad_for_constraints_func": _mask_grad_for_constraints,
+        "grad_rms_state_func": _grad_rms_state,
+        "jax_module": jax,
+        "jnp_module": jnp,
+        "jit_func": jit,
+    }
+
+
+def solve_lambda_gd(
+    state0: VMECState,
+    static,
+    *,
+    phipf,
+    chipf,
+    signgs: int,
+    lamscale,
+    sqrtg: Any | None = None,
+    max_iter: int = 50,
+    step_size: float = 0.05,
+    grad_tol: float | None = None,
+    max_backtracks: int = 16,
+    bt_factor: float = 0.5,
+    jit_grad: bool = False,
+    preconditioner: str = "none",
+    precond_exponent: float = 1.0,
+    precond_radial_alpha: float = 0.0,
+    verbose: bool = True,
+) -> SolveLambdaResult:
+    """Solve VMEC lambda coefficients with fixed R/Z geometry."""
+
+    return _lambda_optimizer_helpers.solve_lambda_gd_impl(
+        state0,
+        static,
+        phipf=phipf,
+        chipf=chipf,
+        signgs=signgs,
+        lamscale=lamscale,
+        sqrtg=sqrtg,
+        max_iter=max_iter,
+        step_size=step_size,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        verbose=verbose,
+        has_jax_func=has_jax,
+        validate_options_func=validate_lambda_gd_options,
+        mode00_index_func=_mode00_index,
+        eval_geom_func=eval_geom,
+        eval_fourier_dtheta_func=eval_fourier_dtheta,
+        eval_fourier_dzeta_phys_func=eval_fourier_dzeta_phys,
+        bsup_from_sqrtg_lambda_func=bsup_from_sqrtg_lambda,
+        angle_steps_func=angle_steps,
+        enforce_lambda_gauge_func=_enforce_lambda_gauge,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        jax_module=jax,
+        jnp_module=jnp,
+        jit_func=jit,
+    )
+
+
+def solve_fixed_boundary_gd(
+    state0: VMECState,
+    static,
+    *,
+    phipf,
+    chipf,
+    signgs: int,
+    lamscale,
+    edge_Rcos: Any | None = None,
+    edge_Rsin: Any | None = None,
+    edge_Zcos: Any | None = None,
+    edge_Zsin: Any | None = None,
+    pressure: Any | None = None,
+    gamma: float = 0.0,
+    jacobian_penalty: float = 1e3,
+    max_iter: int = 25,
+    step_size: float = 5e-3,
+    scale_rz: float = 1.0,
+    scale_l: float = 1.0,
+    grad_tol: float | None = None,
+    max_backtracks: int = 16,
+    bt_factor: float = 0.5,
+    jit_grad: bool = False,
+    preconditioner: str = "none",
+    precond_exponent: float = 1.0,
+    precond_radial_alpha: float = 0.0,
+    differentiable: bool = False,
+    stop_grad_in_update: bool = False,
+    verbose: bool = True,
+) -> SolveFixedBoundaryResult:
+    """Minimize a VMEC-style energy objective over fixed-boundary coefficients."""
+
+    return _fixed_boundary_gd_helpers.solve_fixed_boundary_gd_impl(
+        state0,
+        static,
+        phipf=phipf,
+        chipf=chipf,
+        signgs=signgs,
+        lamscale=lamscale,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        pressure=pressure,
+        gamma=gamma,
+        jacobian_penalty=jacobian_penalty,
+        max_iter=max_iter,
+        step_size=step_size,
+        scale_rz=scale_rz,
+        scale_l=scale_l,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        differentiable=differentiable,
+        stop_grad_in_update=stop_grad_in_update,
+        verbose=verbose,
+        update_state_gd_func=_update_state_gd,
+        jax_module=jax,
+        **_energy_optimizer_deps(validate_fixed_boundary_gd_options),
+    )
+
+
+def solve_fixed_boundary_lbfgs(
+    state0: VMECState,
+    static,
+    *,
+    phipf,
+    chipf,
+    signgs: int,
+    lamscale,
+    edge_Rcos: Any | None = None,
+    edge_Rsin: Any | None = None,
+    edge_Zcos: Any | None = None,
+    edge_Zsin: Any | None = None,
+    pressure: Any | None = None,
+    gamma: float = 0.0,
+    history_size: int = 10,
+    max_iter: int = 40,
+    step_size: float = 1.0,
+    grad_tol: float | None = None,
+    max_backtracks: int = 12,
+    bt_factor: float = 0.5,
+    jit_grad: bool = False,
+    preconditioner: str = "none",
+    precond_exponent: float = 1.0,
+    precond_radial_alpha: float = 0.0,
+    verbose: bool = True,
+) -> SolveFixedBoundaryResult:
+    """Fixed-boundary energy solve using a dependency-free L-BFGS update."""
+
+    return _fixed_boundary_lbfgs_helpers.solve_fixed_boundary_lbfgs_impl(
+        state0,
+        static,
+        phipf=phipf,
+        chipf=chipf,
+        signgs=signgs,
+        lamscale=lamscale,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        pressure=pressure,
+        gamma=gamma,
+        history_size=history_size,
+        max_iter=max_iter,
+        step_size=step_size,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        verbose=verbose,
+        **_energy_optimizer_deps(validate_fixed_boundary_lbfgs_options),
+        **_lbfgs_deps(),
+    )
+
+
+def solve_fixed_boundary_lbfgs_vmec_residual(
+    state0: VMECState,
+    static,
+    *,
+    indata,
+    signgs: int,
+    w_rz: float = 1.0,
+    w_l: float = 1.0,
+    include_constraint_force: bool = True,
+    objective_scale: float | None = None,
+    apply_m1_constraints: bool = True,
+    history_size: int = 10,
+    max_iter: int = 40,
+    step_size: float = 1.0,
+    scale_rz: float = 1.0,
+    scale_l: float = 1.0,
+    grad_tol: float | None = None,
+    max_backtracks: int = 12,
+    bt_factor: float = 0.5,
+    jit_grad: bool = False,
+    preconditioner: str = "none",
+    precond_exponent: float = 1.0,
+    precond_radial_alpha: float = 0.0,
+    verbose: bool = True,
+) -> SolveVmecResidualResult:
+    """Fixed-boundary solve by minimizing the VMEC force-residual objective."""
+
+    return _residual_lbfgs_helpers.solve_fixed_boundary_lbfgs_vmec_residual_impl(
+        state0,
+        static,
+        indata=indata,
+        signgs=signgs,
+        w_rz=w_rz,
+        w_l=w_l,
+        include_constraint_force=include_constraint_force,
+        objective_scale=objective_scale,
+        apply_m1_constraints=apply_m1_constraints,
+        history_size=history_size,
+        max_iter=max_iter,
+        step_size=step_size,
+        scale_rz=scale_rz,
+        scale_l=scale_l,
+        grad_tol=grad_tol,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        jit_grad=jit_grad,
+        preconditioner=preconditioner,
+        precond_exponent=precond_exponent,
+        precond_radial_alpha=precond_radial_alpha,
+        verbose=verbose,
+        apply_preconditioner_func=_apply_preconditioner,
+        resolve_grad_tol_func=_resolve_grad_tol,
+        **_residual_optimizer_deps(validate_residual_lbfgs_options),
+        **_lbfgs_deps(),
+    )
+
+
+def solve_fixed_boundary_gn_vmec_residual(
+    state0: VMECState,
+    static,
+    *,
+    indata,
+    signgs: int,
+    w_rz: float = 1.0,
+    w_l: float = 1.0,
+    include_constraint_force: bool = True,
+    apply_m1_constraints: bool = True,
+    objective_scale: float | None = None,
+    damping: float | None = None,
+    damping_increase: float = 10.0,
+    damping_decrease: float = 0.5,
+    max_damping: float | None = None,
+    max_retries: int = 6,
+    zero_m1_iters: int | None = None,
+    zero_m1_fsqz_thresh: float | None = None,
+    max_iter: int = 20,
+    cg_tol: float | None = None,
+    cg_maxiter: int = 80,
+    step_size: float = 1.0,
+    max_backtracks: int = 12,
+    bt_factor: float = 0.5,
+    jit_kernels: bool = True,
+    verbose: bool = True,
+) -> SolveVmecResidualResult:
+    """Fixed-boundary solve using Gauss-Newton on VMEC residual blocks."""
+
+    return _residual_gn_helpers.solve_fixed_boundary_gn_vmec_residual_impl(
+        state0,
+        static,
+        indata=indata,
+        signgs=signgs,
+        w_rz=w_rz,
+        w_l=w_l,
+        include_constraint_force=include_constraint_force,
+        apply_m1_constraints=apply_m1_constraints,
+        objective_scale=objective_scale,
+        damping=damping,
+        damping_increase=damping_increase,
+        damping_decrease=damping_decrease,
+        max_damping=max_damping,
+        max_retries=max_retries,
+        zero_m1_iters=zero_m1_iters,
+        zero_m1_fsqz_thresh=zero_m1_fsqz_thresh,
+        max_iter=max_iter,
+        cg_tol=cg_tol,
+        cg_maxiter=cg_maxiter,
+        step_size=step_size,
+        max_backtracks=max_backtracks,
+        bt_factor=bt_factor,
+        jit_kernels=jit_kernels,
+        verbose=verbose,
+        residual_objective_vector_func=_residual_objective_vector,
+        resolve_cg_tol_func=_resolve_cg_tol,
+        resolve_lm_damping_func=_resolve_lm_damping,
+        dtype_tiny_func=_dtype_tiny,
+        pack_state_func=pack_state,
+        unpack_state_func=unpack_state,
+        **_residual_optimizer_deps(validate_residual_gn_options),
+    )
+
+
+def first_step_diagnostics(
+    state0: VMECState,
+    static,
+    *,
+    indata,
+    signgs: int,
+    step_size: float | None = None,
+    include_constraint_force: bool = True,
+    apply_m1_constraints: bool = True,
+    precond_radial_alpha: float = 0.5,
+    precond_lambda_alpha: float = 0.5,
+    mode_diag_exponent: float = 1.0,
+    include_edge: bool = True,
+    zero_m1: bool = True,
+    use_axisymmetric_preconditioner: bool = False,
+) -> Dict[str, Any]:
+    """Return a one-step force/precondition/update diagnostic bundle."""
+
+    return _first_step_diagnostics_helpers.first_step_diagnostics_impl(
+        state0,
+        static,
+        indata=indata,
+        signgs=signgs,
+        step_size=step_size,
+        include_constraint_force=include_constraint_force,
+        apply_m1_constraints=apply_m1_constraints,
+        precond_radial_alpha=precond_radial_alpha,
+        precond_lambda_alpha=precond_lambda_alpha,
+        mode_diag_exponent=mode_diag_exponent,
+        include_edge=include_edge,
+        zero_m1=zero_m1,
+        use_axisymmetric_preconditioner=use_axisymmetric_preconditioner,
+        has_jax_func=has_jax,
+        mode00_index_func=_mode00_index,
+        half_mesh_from_full_mesh_func=_half_mesh_from_full_mesh,
+        mass_half_mesh_from_indata_func=_mass_half_mesh_from_indata,
+        pressure_half_mesh_from_indata_func=_pressure_half_mesh_from_indata,
+        icurv_full_mesh_from_indata_func=_icurv_full_mesh_from_indata,
+        vmec_force_flux_profiles_func=_vmec_force_flux_profiles,
+        zero_edge_rz_force_blocks_func=_zero_edge_rz_force_blocks,
+        radial_tridi_smooth_dirichlet_func=_radial_tridi_smooth_dirichlet,
+        metric_surface_precond_scales_np_func=_metric_surface_precond_scales_np,
+        wout_like_vmec_forces_cls=_WoutLikeVmecForces,
+    )
+
+
+__all__ = (
+    "first_step_diagnostics",
+    "solve_fixed_boundary_gd",
+    "solve_fixed_boundary_gn_vmec_residual",
+    "solve_fixed_boundary_lbfgs",
+    "solve_fixed_boundary_lbfgs_vmec_residual",
+    "solve_lambda_gd",
+)

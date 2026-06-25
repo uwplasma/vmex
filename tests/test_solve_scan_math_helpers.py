@@ -6,13 +6,16 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_scan_math_helpers import (
+from vmec_jax.solvers.fixed_boundary.scan.math import (
     _hold_step,
     _no_restart_updates,
+    _ptau_minmax_from_context_host,
     _ptau_minmax_from_k_host,
     _ptau_minmax_from_k_jax,
     _restart_updates,
     _state_jacobian,
+    build_ptau_minmax_context,
+    scan_bad_jacobian_decision,
 )
 
 
@@ -20,6 +23,12 @@ def _pshalf_from_s_jax(s_arr, dtype):
     s_arr = jnp.asarray(s_arr, dtype=dtype)
     sh = 0.5 * (s_arr[1:] + s_arr[:-1])
     return jnp.sqrt(jnp.maximum(jnp.concatenate([sh[:1], sh], axis=0), jnp.asarray(0.0, dtype=dtype)))
+
+
+def _pshalf_from_s_np(s_arr):
+    s_arr = np.asarray(s_arr, dtype=float)
+    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
+    return np.sqrt(np.maximum(np.concatenate([sh[:1], sh], axis=0), 0.0))
 
 
 def _kernel(ns: int = 3, *, nan: bool = False) -> SimpleNamespace:
@@ -49,6 +58,29 @@ def test_ptau_minmax_host_computes_normal_missing_short_and_nan_paths():
     ptau_min, ptau_max = _ptau_minmax_from_k_host(_kernel(nan=True), pshalf=pshalf, ohs=2.0)
     assert np.isnan(ptau_min)
     assert np.isnan(ptau_max)
+
+
+def test_ptau_minmax_context_host_matches_legacy_and_bypasses_jit_on_host_update():
+    context = build_ptau_minmax_context(
+        np.asarray([0.0, 0.5, 1.0]),
+        has_jax=True,
+        s_has_tracer=False,
+        pshalf_from_s_np=_pshalf_from_s_np,
+        pshalf_from_s_jax=_pshalf_from_s_jax,
+    )
+
+    def unexpected_jit(*_args, **_kwargs):
+        raise AssertionError("host update path should bypass ptau JIT callback")
+
+    result = _ptau_minmax_from_context_host(
+        _kernel(),
+        context=context,
+        host_update_assembly=True,
+        tree_has_tracer=lambda _value: False,
+        compute_jit=unexpected_jit,
+    )
+
+    assert result == pytest.approx((4.0, 8.0))
 
 
 def test_ptau_minmax_jax_matches_host_and_returns_nan_for_missing_or_short_kernel():
@@ -82,6 +114,98 @@ def test_state_jacobian_ignores_axis_point_and_handles_vmec2000_relative_and_nan
     empty = _state_jacobian(np.asarray([]), vmec2000_control=False, ptau_tol=0.0)
     assert not bool(np.asarray(empty.bad_jacobian))
     assert np.isnan(float(np.asarray(empty.min_tau)))
+
+
+def _fake_cond(pred, true_fun, false_fun, operand):
+    return true_fun(operand) if bool(np.asarray(pred)) else false_fun(operand)
+
+
+def test_scan_bad_jacobian_decision_vmec_ptau_only_and_state_override():
+    ptau_only = scan_bad_jacobian_decision(
+        vmec2000_control=True,
+        use_apply_payload_fusion=False,
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        badjac_state_probe=False,
+        badjac_initial_state_probe_iters=0,
+        iter2=jnp.asarray(2),
+        ptau_min=-1.0,
+        ptau_max=2.0,
+        state_tau_fn=lambda: (jnp.asarray(False), jnp.asarray(-0.1), jnp.asarray(0.2)),
+        nonvmec_tau_fn=lambda: pytest.fail("vmec path should not call nonvmec tau"),
+        ptau_tol=1.0e-6,
+        dtype=jnp.float64,
+        cond=_fake_cond,
+    )
+    assert bool(np.asarray(ptau_only.bad_jacobian))
+    assert bool(np.asarray(ptau_only.badjac_ptau))
+    assert not bool(np.asarray(ptau_only.badjac_state))
+    assert float(np.asarray(ptau_only.min_tau)) == pytest.approx(-1.0)
+    assert float(np.asarray(ptau_only.min_tau_state)) == pytest.approx(-0.1)
+
+    state_override = scan_bad_jacobian_decision(
+        vmec2000_control=True,
+        use_apply_payload_fusion=False,
+        badjac_use_state=True,
+        dump_ptau_state=False,
+        badjac_state_probe=False,
+        badjac_initial_state_probe_iters=0,
+        iter2=jnp.asarray(2),
+        ptau_min=-1.0,
+        ptau_max=2.0,
+        state_tau_fn=lambda: (jnp.asarray(False), jnp.asarray(-0.1), jnp.asarray(0.2)),
+        nonvmec_tau_fn=lambda: pytest.fail("vmec path should not call nonvmec tau"),
+        ptau_tol=1.0e-6,
+        dtype=jnp.float64,
+        cond=_fake_cond,
+    )
+    assert not bool(np.asarray(state_override.bad_jacobian))
+    assert bool(np.asarray(state_override.badjac_ptau))
+    assert not bool(np.asarray(state_override.badjac_state))
+    assert float(np.asarray(state_override.min_tau)) == pytest.approx(-0.1)
+
+
+def test_scan_bad_jacobian_decision_state_fallback_and_nonvmec_paths():
+    fallback = scan_bad_jacobian_decision(
+        vmec2000_control=True,
+        use_apply_payload_fusion=False,
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        badjac_state_probe=False,
+        badjac_initial_state_probe_iters=0,
+        iter2=jnp.asarray(2),
+        ptau_min=None,
+        ptau_max=None,
+        state_tau_fn=lambda: (jnp.asarray(True), jnp.asarray(-2.0), jnp.asarray(3.0)),
+        nonvmec_tau_fn=lambda: pytest.fail("vmec path should not call nonvmec tau"),
+        ptau_tol=1.0e-6,
+        dtype=jnp.float64,
+        cond=_fake_cond,
+    )
+    assert not bool(np.asarray(fallback.bad_jacobian))
+    assert bool(np.asarray(fallback.badjac_state))
+    assert np.isnan(float(np.asarray(fallback.min_tau)))
+
+    nonvmec = scan_bad_jacobian_decision(
+        vmec2000_control=False,
+        use_apply_payload_fusion=False,
+        badjac_use_state=False,
+        dump_ptau_state=False,
+        badjac_state_probe=False,
+        badjac_initial_state_probe_iters=0,
+        iter2=jnp.asarray(2),
+        ptau_min=None,
+        ptau_max=None,
+        state_tau_fn=lambda: pytest.fail("nonvmec direct tau path should not call state callback"),
+        nonvmec_tau_fn=lambda: np.asarray([99.0, -1.0, 2.0]),
+        ptau_tol=1.0e-6,
+        dtype=jnp.float64,
+        cond=_fake_cond,
+    )
+    assert bool(np.asarray(nonvmec.bad_jacobian))
+    assert bool(np.asarray(nonvmec.badjac_state))
+    assert not bool(np.asarray(nonvmec.badjac_ptau))
+    assert float(np.asarray(nonvmec.min_tau_state)) == pytest.approx(-1.0)
 
 
 def _carry() -> SimpleNamespace:

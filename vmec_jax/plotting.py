@@ -174,6 +174,56 @@ def _basis_from_wout(wout, theta: np.ndarray, zeta: np.ndarray, *, nyq: bool, ph
     return basis
 
 
+def _wout_coeff_pair(
+    wout,
+    primary: str,
+    secondary: str,
+    *,
+    zero_secondary_if_sym: bool = False,
+    dtype=None,
+):
+    first = np.asarray(getattr(wout, primary), dtype=dtype)
+    second = np.asarray(getattr(wout, secondary, np.zeros_like(first)), dtype=dtype)
+    if zero_secondary_if_sym and not bool(getattr(wout, "lasym", False)):
+        second = np.zeros_like(first)
+    return first, second
+
+
+def _wout_coeff_pair_at(
+    wout,
+    primary: str,
+    secondary: str,
+    s_index: int,
+    *,
+    zero_secondary_if_sym: bool = False,
+    dtype=float,
+):
+    first, second = _wout_coeff_pair(
+        wout,
+        primary,
+        secondary,
+        zero_secondary_if_sym=zero_secondary_if_sym,
+        dtype=dtype,
+    )
+    return first[int(s_index)], second[int(s_index)]
+
+
+def _surface_rz_from_wout_grid(wout, *, theta, toroidal, s_index: int, nyq: bool, physical: bool):
+    basis = _basis_from_wout(wout, theta, toroidal, nyq=nyq, physical=physical)
+    rmnc, rmns = _wout_coeff_pair(wout, "rmnc", "rmns", zero_secondary_if_sym=True)
+    zmns, zmnc = _wout_coeff_pair(wout, "zmns", "zmnc", zero_secondary_if_sym=True)
+    return (
+        np.asarray(eval_fourier(rmnc[s_index], rmns[s_index], basis)),
+        np.asarray(eval_fourier(zmnc[s_index], zmns[s_index], basis)),
+    )
+
+
+def _bmag_from_wout_grid(wout, *, theta, toroidal, s_index: int, physical: bool):
+    basis = _basis_from_wout(wout, theta, toroidal, nyq=True, physical=physical)
+    bmnc, bmns = _wout_coeff_pair(wout, "bmnc", "bmns", zero_secondary_if_sym=True)
+    return np.asarray(eval_fourier(bmnc[s_index], bmns[s_index], basis))
+
+
 def bsup_from_wout(
     wout,
     *,
@@ -183,13 +233,8 @@ def bsup_from_wout(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return contravariant components (bsupu, bsupv) on a surface from wout Nyquist data."""
     basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
-    bsupumnc = np.asarray(wout.bsupumnc)
-    bsupumns = np.asarray(getattr(wout, "bsupumns", np.zeros_like(bsupumnc)))
-    bsupvmnc = np.asarray(wout.bsupvmnc)
-    bsupvmns = np.asarray(getattr(wout, "bsupvmns", np.zeros_like(bsupvmnc)))
-    if not bool(getattr(wout, "lasym", False)):
-        bsupumns = np.zeros_like(bsupumnc)
-        bsupvmns = np.zeros_like(bsupvmnc)
+    bsupumnc, bsupumns = _wout_coeff_pair(wout, "bsupumnc", "bsupumns", zero_secondary_if_sym=True)
+    bsupvmnc, bsupvmns = _wout_coeff_pair(wout, "bsupvmnc", "bsupvmns", zero_secondary_if_sym=True)
     bsupu = np.asarray(eval_fourier(bsupumnc[s_index], bsupumns[s_index], basis))
     bsupv = np.asarray(eval_fourier(bsupvmnc[s_index], bsupvmns[s_index], basis))
     return bsupu, bsupv
@@ -204,13 +249,8 @@ def bsub_from_wout(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return covariant components (bsubu, bsubv) on a surface from wout Nyquist data."""
     basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
-    bsubumnc = np.asarray(wout.bsubumnc)
-    bsubumns = np.asarray(getattr(wout, "bsubumns", np.zeros_like(bsubumnc)))
-    bsubvmnc = np.asarray(wout.bsubvmnc)
-    bsubvmns = np.asarray(getattr(wout, "bsubvmns", np.zeros_like(bsubvmnc)))
-    if not bool(getattr(wout, "lasym", False)):
-        bsubumns = np.zeros_like(bsubumnc)
-        bsubvmns = np.zeros_like(bsubvmnc)
+    bsubumnc, bsubumns = _wout_coeff_pair(wout, "bsubumnc", "bsubumns", zero_secondary_if_sym=True)
+    bsubvmnc, bsubvmns = _wout_coeff_pair(wout, "bsubvmnc", "bsubvmns", zero_secondary_if_sym=True)
     bsubu = np.asarray(eval_fourier(bsubumnc[s_index], bsubumns[s_index], basis))
     bsubv = np.asarray(eval_fourier(bsubvmnc[s_index], bsubvmns[s_index], basis))
     return bsubu, bsubv
@@ -225,18 +265,7 @@ def surface_rz_from_wout(
     nyq: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return R,Z on a surface from wout Fourier coefficients."""
-    basis = _basis_from_wout(wout, theta, zeta, nyq=nyq, physical=False)
-    rmnc = np.asarray(wout.rmnc)
-    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(rmnc)))
-    zmns = np.asarray(wout.zmns)
-    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(zmns)))
-    if not bool(getattr(wout, "lasym", False)):
-        rmns = np.zeros_like(rmnc)
-        zmnc = np.zeros_like(zmns)
-
-    R = np.asarray(eval_fourier(rmnc[s_index], rmns[s_index], basis))
-    Z = np.asarray(eval_fourier(zmnc[s_index], zmns[s_index], basis))
-    return R, Z
+    return _surface_rz_from_wout_grid(wout, theta=theta, toroidal=zeta, s_index=s_index, nyq=nyq, physical=False)
 
 
 def surface_rz_from_wout_physical(
@@ -252,18 +281,7 @@ def surface_rz_from_wout_physical(
     This matches vmecPlot2's convention: phase = m*theta - xn*phi, where
     `xn` already includes the nfp factor.
     """
-    basis = _basis_from_wout(wout, theta, phi, nyq=nyq, physical=True)
-    rmnc = np.asarray(wout.rmnc)
-    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(rmnc)))
-    zmns = np.asarray(wout.zmns)
-    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(zmns)))
-    if not bool(getattr(wout, "lasym", False)):
-        rmns = np.zeros_like(rmnc)
-        zmnc = np.zeros_like(zmns)
-
-    R = np.asarray(eval_fourier(rmnc[s_index], rmns[s_index], basis))
-    Z = np.asarray(eval_fourier(zmnc[s_index], zmns[s_index], basis))
-    return R, Z
+    return _surface_rz_from_wout_grid(wout, theta=theta, toroidal=phi, s_index=s_index, nyq=nyq, physical=True)
 
 
 def surface_rz_from_state(
@@ -554,13 +572,7 @@ def bmag_from_wout(
     s_index: int,
 ) -> np.ndarray:
     """Return B magnitude on a surface from wout Nyquist Fourier coefficients."""
-    basis = _basis_from_wout(wout, theta, zeta, nyq=True, physical=False)
-    bmnc = np.asarray(wout.bmnc)
-    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(bmnc)))
-    if not bool(getattr(wout, "lasym", False)):
-        bmns = np.zeros_like(bmnc)
-    B = np.asarray(eval_fourier(bmnc[s_index], bmns[s_index], basis))
-    return B
+    return _bmag_from_wout_grid(wout, theta=theta, toroidal=zeta, s_index=s_index, physical=False)
 
 
 def bmag_from_wout_physical(
@@ -571,13 +583,7 @@ def bmag_from_wout_physical(
     s_index: int,
 ) -> np.ndarray:
     """Return B magnitude on a surface using physical toroidal angle phi."""
-    basis = _basis_from_wout(wout, theta, phi, nyq=True, physical=True)
-    bmnc = np.asarray(wout.bmnc)
-    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(bmnc)))
-    if not bool(getattr(wout, "lasym", False)):
-        bmns = np.zeros_like(bmnc)
-    B = np.asarray(eval_fourier(bmnc[s_index], bmns[s_index], basis))
-    return B
+    return _bmag_from_wout_grid(wout, theta=theta, toroidal=phi, s_index=s_index, physical=True)
 
 
 def vmecplot2_bmag_grid(
@@ -603,10 +609,7 @@ def vmecplot2_bmag_grid(
     zeta2d, theta2d = np.meshgrid(zeta, theta)
     xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
     xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
-    bmnc = np.asarray(wout.bmnc, dtype=float)[int(s_index)]
-    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(wout.bmnc)), dtype=float)[int(s_index)]
-    if not bool(getattr(wout, "lasym", False)):
-        bmns = np.zeros_like(bmns)
+    bmnc, bmns = _wout_coeff_pair_at(wout, "bmnc", "bmns", s_index, zero_secondary_if_sym=True)
     angle = xm_nyq[:, None, None] * theta2d[None, :, :] - xn_nyq[:, None, None] * zeta2d[None, :, :]
     B = np.tensordot(bmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(bmns, np.sin(angle), axes=(0, 0))
     return theta, zeta, np.asarray(B)
@@ -625,10 +628,8 @@ def vmecplot2_surface_grid(
     zeta2d, theta2d = np.meshgrid(zeta, theta)
     xm = np.asarray(wout.xm, dtype=float)
     xn = np.asarray(wout.xn, dtype=float)
-    rmnc = np.asarray(wout.rmnc, dtype=float)[int(s_index)]
-    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(wout.rmnc)), dtype=float)[int(s_index)]
-    zmns = np.asarray(wout.zmns, dtype=float)[int(s_index)]
-    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(wout.zmns)), dtype=float)[int(s_index)]
+    rmnc, rmns = _wout_coeff_pair_at(wout, "rmnc", "rmns", s_index, zero_secondary_if_sym=True)
+    zmns, zmnc = _wout_coeff_pair_at(wout, "zmns", "zmnc", s_index, zero_secondary_if_sym=True)
     angle = xm[:, None, None] * theta2d[None, :, :] - xn[:, None, None] * zeta2d[None, :, :]
     R = np.tensordot(rmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(rmns, np.sin(angle), axes=(0, 0))
     Z = np.tensordot(zmns, np.sin(angle), axes=(0, 0)) + np.tensordot(zmnc, np.cos(angle), axes=(0, 0))
@@ -652,14 +653,9 @@ def vmecplot2_lcfs_3d_grid(
     xn = np.asarray(wout.xn, dtype=float)
     xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
     xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
-    rmnc = np.asarray(wout.rmnc, dtype=float)[int(s_index)]
-    rmns = np.asarray(getattr(wout, "rmns", np.zeros_like(wout.rmnc)), dtype=float)[int(s_index)]
-    zmns = np.asarray(wout.zmns, dtype=float)[int(s_index)]
-    zmnc = np.asarray(getattr(wout, "zmnc", np.zeros_like(wout.zmns)), dtype=float)[int(s_index)]
-    bmnc = np.asarray(wout.bmnc, dtype=float)[int(s_index)]
-    bmns = np.asarray(getattr(wout, "bmns", np.zeros_like(wout.bmnc)), dtype=float)[int(s_index)]
-    if not bool(getattr(wout, "lasym", False)):
-        bmns = np.zeros_like(bmns)
+    rmnc, rmns = _wout_coeff_pair_at(wout, "rmnc", "rmns", s_index, zero_secondary_if_sym=True)
+    zmns, zmnc = _wout_coeff_pair_at(wout, "zmns", "zmnc", s_index, zero_secondary_if_sym=True)
+    bmnc, bmns = _wout_coeff_pair_at(wout, "bmnc", "bmns", s_index, zero_secondary_if_sym=True)
 
     angle = xm[:, None, None] * theta2d[None, :, :] - xn[:, None, None] * phi2d[None, :, :]
     R = np.tensordot(rmnc, np.cos(angle), axes=(0, 0)) + np.tensordot(rmns, np.sin(angle), axes=(0, 0))
@@ -670,16 +666,15 @@ def vmecplot2_lcfs_3d_grid(
     return theta, phi, np.asarray(R), np.asarray(Z), np.asarray(B)
 
 
-def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Axis curve from wout Fourier coefficients."""
-    zeta = np.asarray(zeta)
+def _axis_rz_from_wout_angle(wout, angle_grid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    angle_grid = np.asarray(angle_grid)
     if not hasattr(wout, "raxis_cc") or not hasattr(wout, "zaxis_cs"):
         # Fallback: use the m=0,n=0 mode from rmnc for a constant axis estimate.
         r0 = float(np.asarray(wout.rmnc)[0, 0]) if np.asarray(wout.rmnc).size else 0.0
-        return np.full_like(zeta, r0, dtype=float), np.zeros_like(zeta, dtype=float)
+        return np.full_like(angle_grid, r0, dtype=float), np.zeros_like(angle_grid, dtype=float)
 
     n = np.arange(len(wout.raxis_cc), dtype=float)
-    angle = (-n[:, None] * float(wout.nfp)) * zeta[None, :]
+    angle = (-n[:, None] * float(wout.nfp)) * angle_grid[None, :]
     raxis_cc = np.asarray(wout.raxis_cc, dtype=float)[:, None]
     raxis_cs = np.asarray(getattr(wout, "raxis_cs", np.zeros_like(wout.raxis_cc)), dtype=float)[:, None]
     zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)[:, None]
@@ -688,25 +683,16 @@ def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray
     R = np.sum(raxis_cc * np.cos(angle) + raxis_cs * np.sin(angle), axis=0)
     Z = np.sum(zaxis_cs * np.sin(angle) + zaxis_cc * np.cos(angle), axis=0)
     return R, Z
+
+
+def axis_rz_from_wout(wout, *, zeta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Axis curve from wout Fourier coefficients."""
+    return _axis_rz_from_wout_angle(wout, zeta)
 
 
 def axis_rz_from_wout_physical(wout, *, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Axis curve using physical toroidal angle phi (vmecPlot2 convention)."""
-    if not hasattr(wout, "raxis_cc") or not hasattr(wout, "zaxis_cs"):
-        r0 = float(np.asarray(wout.rmnc)[0, 0]) if np.asarray(wout.rmnc).size else 0.0
-        return np.full_like(phi, r0, dtype=float), np.zeros_like(phi, dtype=float)
-
-    phi = np.asarray(phi)
-    n = np.arange(len(wout.raxis_cc), dtype=float)
-    angle = (-n[:, None] * float(wout.nfp)) * phi[None, :]
-    raxis_cc = np.asarray(wout.raxis_cc, dtype=float)[:, None]
-    raxis_cs = np.asarray(getattr(wout, "raxis_cs", np.zeros_like(wout.raxis_cc)), dtype=float)[:, None]
-    zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)[:, None]
-    zaxis_cc = np.asarray(getattr(wout, "zaxis_cc", np.zeros_like(wout.zaxis_cs)), dtype=float)[:, None]
-
-    R = np.sum(raxis_cc * np.cos(angle) + raxis_cs * np.sin(angle), axis=0)
-    Z = np.sum(zaxis_cs * np.sin(angle) + zaxis_cc * np.cos(angle), axis=0)
-    return R, Z
+    return _axis_rz_from_wout_angle(wout, phi)
 
 
 def profiles_from_wout(wout) -> dict[str, np.ndarray]:
@@ -817,6 +803,12 @@ def _default_example_outdir(subdir: str, case: str, outdir: str | Path | None) -
     return root / "examples" / "outputs" / subdir / case
 
 
+def _ensure_plot_outdir(outdir: str | Path | None, *, default: str | Path) -> Path:
+    path = Path(default if outdir is None else outdir)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _extent_from_grids(theta: np.ndarray, zeta: np.ndarray) -> tuple[float, float, float, float]:
     z0 = float(np.min(zeta))
     z1 = float(np.max(zeta))
@@ -843,6 +835,47 @@ def _line_contour_levels(values: np.ndarray, *, count: int = 25) -> np.ndarray:
         vmin -= pad
         vmax += pad
     return np.linspace(vmin, vmax, int(count))
+
+
+def _parity_plot_context(input_path: str | Path, wout_path: str | Path, s_index: int | None):
+    cfg, indata = load_config(str(input_path))
+    wout = read_wout(wout_path)
+    static = build_static(cfg)
+    state = state_from_wout(wout)
+    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
+    theta = np.asarray(static.grid.theta)
+    zeta = np.asarray(static.grid.zeta)
+    return cfg, indata, wout, static, state, s_idx, theta, zeta, _case_from_input_path(input_path)
+
+
+def _state_bsup_components_from_wout_flux(wout, state, static):
+    geom = eval_geom(state, static)
+    lamscale = float(np.asarray(lamscale_from_phips(np.asarray(wout.phips), np.asarray(static.s))))
+    bsupu, bsupv = bsup_from_geom(
+        geom,
+        phipf=np.asarray(wout.phipf),
+        chipf=np.asarray(wout.chipf),
+        nfp=int(static.cfg.nfp),
+        signgs=int(getattr(wout, "signgs", 1)),
+        lamscale=lamscale,
+        flux_is_internal=False,
+    )
+    return geom, bsupu, bsupv
+
+
+def _write_vector_parity_grid(plt, *, components, family: str, case: str, outdir: Path, extent) -> Path:
+    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
+    for row, (ref, jax_data, label) in enumerate(components):
+        for col, (data, title) in enumerate([(ref, "wout"), (jax_data, "vmec_jax"), (jax_data - ref, "diff")]):
+            ax = axes[row, col]
+            im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
+            ax.set_title(f"{label} {title}")
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.suptitle(f"{family} parity ({case})")
+    outpath = outdir / f"{family}_parity.png"
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    return outpath
 
 
 _BOOZER_PHI_LABEL = r"Boozer toroidal angle $\phi_{B}$ (rad)"
@@ -910,13 +943,9 @@ def write_bmag_parity_figures(
 ) -> Path:
     """Write magnetic-field-magnitude parity figures for wout vs vmec_jax."""
     plt = _import_matplotlib()
-    cfg, indata = load_config(str(input_path))
-    wout = read_wout(wout_path)
-    static = build_static(cfg)
-    state = state_from_wout(wout)
-    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
-    theta = np.asarray(static.grid.theta)
-    zeta = np.asarray(static.grid.zeta)
+    _cfg, indata, wout, static, state, s_idx, theta, zeta, case = _parity_plot_context(
+        input_path, wout_path, s_index
+    )
 
     B_ref = bmag_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
     phi = zeta / float(max(1, int(static.cfg.nfp)))
@@ -941,7 +970,6 @@ def write_bmag_parity_figures(
         ax.set_title(title)
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    case = _case_from_input_path(input_path)
     fig.suptitle(f"|B| parity ({case})")
 
     outdir = _default_example_outdir("bmag_parity", case, outdir)
@@ -961,51 +989,25 @@ def write_bsup_parity_figures(
 ) -> Path:
     """Write (bsupu, bsupv) parity figures comparing wout vs vmec_jax geometry."""
     plt = _import_matplotlib()
-    cfg, _indata = load_config(str(input_path))
-    wout = read_wout(wout_path)
-    static = build_static(cfg)
-    state = state_from_wout(wout)
-    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
-    theta = np.asarray(static.grid.theta)
-    zeta = np.asarray(static.grid.zeta)
+    _cfg, _indata, wout, static, state, s_idx, theta, zeta, case = _parity_plot_context(
+        input_path, wout_path, s_index
+    )
 
     bsupu_ref, bsupv_ref = bsup_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
-
-    geom = eval_geom(state, static)
-    lamscale = float(np.asarray(lamscale_from_phips(np.asarray(wout.phips), np.asarray(static.s))))
-    bsupu_full, bsupv_full = bsup_from_geom(
-        geom,
-        phipf=np.asarray(wout.phipf),
-        chipf=np.asarray(wout.chipf),
-        nfp=int(static.cfg.nfp),
-        signgs=int(getattr(wout, "signgs", 1)),
-        lamscale=lamscale,
-        flux_is_internal=False,
-    )
+    _geom, bsupu_full, bsupv_full = _state_bsup_components_from_wout_flux(wout, state, static)
     bsupu_jax = np.asarray(bsupu_full)[s_idx]
     bsupv_jax = np.asarray(bsupv_full)[s_idx]
 
-    case = _case_from_input_path(input_path)
     outdir = _default_example_outdir("bsup_parity", case, outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-
-    extent = _extent_from_grids(theta, zeta)
-    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
-    for row, (ref, jax, label) in enumerate(
-        [(bsupu_ref, bsupu_jax, "bsupu"), (bsupv_ref, bsupv_jax, "bsupv")]
-    ):
-        diff = jax - ref
-        for col, (data, title) in enumerate([(ref, "wout"), (jax, "vmec_jax"), (diff, "diff")]):
-            ax = axes[row, col]
-            im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
-            ax.set_title(f"{label} {title}")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    fig.suptitle(f"bsup parity ({case})")
-    outpath = outdir / "bsup_parity.png"
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
-    return outpath
+    return _write_vector_parity_grid(
+        plt,
+        components=[(bsupu_ref, bsupu_jax, "bsupu"), (bsupv_ref, bsupv_jax, "bsupv")],
+        family="bsup",
+        case=case,
+        outdir=outdir,
+        extent=_extent_from_grids(theta, zeta),
+    )
 
 
 def write_bsub_parity_figures(
@@ -1017,52 +1019,26 @@ def write_bsub_parity_figures(
 ) -> Path:
     """Write (bsubu, bsubv) parity figures comparing wout vs vmec_jax geometry."""
     plt = _import_matplotlib()
-    cfg, _indata = load_config(str(input_path))
-    wout = read_wout(wout_path)
-    static = build_static(cfg)
-    state = state_from_wout(wout)
-    s_idx = int(wout.ns) - 1 if s_index is None else int(s_index)
-    theta = np.asarray(static.grid.theta)
-    zeta = np.asarray(static.grid.zeta)
+    _cfg, _indata, wout, static, state, s_idx, theta, zeta, case = _parity_plot_context(
+        input_path, wout_path, s_index
+    )
 
     bsubu_ref, bsubv_ref = bsub_from_wout(wout, theta=theta, zeta=zeta, s_index=s_idx)
-
-    geom = eval_geom(state, static)
-    lamscale = float(np.asarray(lamscale_from_phips(np.asarray(wout.phips), np.asarray(static.s))))
-    bsupu_full, bsupv_full = bsup_from_geom(
-        geom,
-        phipf=np.asarray(wout.phipf),
-        chipf=np.asarray(wout.chipf),
-        nfp=int(static.cfg.nfp),
-        signgs=int(getattr(wout, "signgs", 1)),
-        lamscale=lamscale,
-        flux_is_internal=False,
-    )
+    geom, bsupu_full, bsupv_full = _state_bsup_components_from_wout_flux(wout, state, static)
     bsubu_full, bsubv_full = bsub_from_bsup(geom, bsupu_full, bsupv_full)
     bsubu_jax = np.asarray(bsubu_full)[s_idx]
     bsubv_jax = np.asarray(bsubv_full)[s_idx]
 
-    case = _case_from_input_path(input_path)
     outdir = _default_example_outdir("bsub_parity", case, outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-
-    extent = _extent_from_grids(theta, zeta)
-    fig, axes = plt.subplots(2, 3, figsize=(12, 7), constrained_layout=True)
-    for row, (ref, jax, label) in enumerate(
-        [(bsubu_ref, bsubu_jax, "bsubu"), (bsubv_ref, bsubv_jax, "bsubv")]
-    ):
-        diff = jax - ref
-        for col, (data, title) in enumerate([(ref, "wout"), (jax, "vmec_jax"), (diff, "diff")]):
-            ax = axes[row, col]
-            im = ax.imshow(data, origin="lower", aspect="auto", extent=extent)
-            ax.set_title(f"{label} {title}")
-            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-
-    fig.suptitle(f"bsub parity ({case})")
-    outpath = outdir / "bsub_parity.png"
-    fig.savefig(outpath, dpi=150)
-    plt.close(fig)
-    return outpath
+    return _write_vector_parity_grid(
+        plt,
+        components=[(bsubu_ref, bsubu_jax, "bsubu"), (bsubv_ref, bsubv_jax, "bsubv")],
+        family="bsub",
+        case=case,
+        outdir=outdir,
+        extent=_extent_from_grids(theta, zeta),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1078,10 +1054,7 @@ def _lcfs_xyz(R: np.ndarray, Z: np.ndarray, phi: np.ndarray):
 
 def _plot_3d_boundary_comparison(wout_init, wout_final, outdir: Path) -> Path:
     """3-D LCFS plots coloured by |B|, initial (left) vs optimised (right)."""
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
@@ -1149,10 +1122,7 @@ def plot_3d_boundary_comparison(
 
     wout_init = _load_wout_if_path(wout_initial)
     wout_final_obj = _load_wout_if_path(wout_final)
-    if outdir is None:
-        outdir = Path(".")
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     return _plot_3d_boundary_comparison(wout_init, wout_final_obj, outdir)
 
 
@@ -1176,10 +1146,7 @@ def _plot_bmag_contours(wout_init, wout_final, outdir: Path) -> Path:
     visually obvious.  The toroidal axis covers exactly **one field period**:
     ζ ∈ [0, 2π/nfp].  Poloidal axis: θ ∈ [0, 2π].
     """
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     ns_init = int(np.asarray(wout_init.ns))
     ns_final = int(np.asarray(wout_final.ns))
@@ -1247,10 +1214,7 @@ def plot_bmag_contours(
 
     wout_init = _load_wout_if_path(wout_initial)
     wout_final_obj = _load_wout_if_path(wout_final)
-    if outdir is None:
-        outdir = Path(".")
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     return _plot_bmag_contours(wout_init, wout_final_obj, outdir)
 
 
@@ -1359,11 +1323,7 @@ def plot_boozer_bmag_contours_from_state(
 ):
     """Write a Boozer-coordinate line-contour plot of ``|B|`` for QI review."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     theta, phi, bmag, _booz = boozer_bmag_grid_from_state(
         state,
@@ -1378,21 +1338,17 @@ def plot_boozer_bmag_contours_from_state(
         nphi=nphi,
         phimin=phimin,
     )
-    phi2d, theta2d = np.meshgrid(phi, theta)
-    levels = _line_contour_levels(bmag, count=25)
-
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=".")
     fig, ax = plt.subplots(1, 1, figsize=(8, 4.5))
-    cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
-    fig.colorbar(cs, ax=ax, label="|B| (T)")
     surface_label = _selected_boozer_surface_label(surfaces, surface_index)
-    ax.set_title(title if title is not None else f"Boozer |B| contours: {surface_label}")
-    ax.set_xlabel(_BOOZER_PHI_LABEL)
-    ax.set_ylabel(_BOOZER_THETA_LABEL)
-    ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-    ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-    ax.set_ylim(0, 2.0 * np.pi)
+    _plot_boozer_bmag_axis(
+        fig,
+        ax,
+        theta=theta,
+        phi=phi,
+        bmag=bmag,
+        title=title if title is not None else f"Boozer |B| contours: {surface_label}",
+    )
     fig.tight_layout()
     out = outdir / filename
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -1461,6 +1417,26 @@ def _booz_surface_label(bx, js: int, *, outer: bool = False) -> str:
     return "mid radius"
 
 
+def _plot_boozer_bmag_axis(fig, ax, *, theta, phi, bmag, title: str, levels: int = 25):
+    phi2d, theta2d = np.meshgrid(phi, theta)
+    cs = ax.contour(
+        phi2d,
+        theta2d,
+        bmag,
+        levels=_line_contour_levels(bmag, count=levels),
+        cmap="viridis",
+        linewidths=1.0,
+    )
+    fig.colorbar(cs, ax=ax, label="|B| (T)")
+    ax.set_title(title)
+    ax.set_xlabel(_BOOZER_PHI_LABEL)
+    ax.set_ylabel(_BOOZER_THETA_LABEL)
+    ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
+    ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
+    ax.set_ylim(0, 2.0 * np.pi)
+    return cs
+
+
 def plot_boozmn_bmag_contours(
     boozmn,
     *,
@@ -1471,11 +1447,7 @@ def plot_boozmn_bmag_contours(
 ) -> Path:
     """Plot mid-radius and outermost Boozer ``|B|`` line contours from ``boozmn``."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     ns_b = int(np.asarray(bx.bmnc_b).shape[1])
@@ -1487,23 +1459,21 @@ def plot_boozmn_bmag_contours(
 
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_BoozerB_contours.png"
 
     fig, axes = plt.subplots(1, len(selected), figsize=(7.5 * len(selected), 4.6), squeeze=False)
     for ax, (is_outer, js) in zip(axes[0], selected):
         theta, phi, bmag = _booz_bmag_grid(bx, js=js, ntheta=ntheta, nphi=nphi)
-        phi2d, theta2d = np.meshgrid(phi, theta)
-        levels = _line_contour_levels(bmag, count=24)
-        cs = ax.contour(phi2d, theta2d, bmag, levels=levels, cmap="viridis", linewidths=1.0)
-        fig.colorbar(cs, ax=ax, label="|B| (T)")
-        ax.set_title(_booz_surface_label(bx, js, outer=is_outer))
-        ax.set_xlabel(_BOOZER_PHI_LABEL)
-        ax.set_ylabel(_BOOZER_THETA_LABEL)
-        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-        ax.set_ylim(0, 2.0 * np.pi)
+        _plot_boozer_bmag_axis(
+            fig,
+            ax,
+            theta=theta,
+            phi=phi,
+            bmag=bmag,
+            title=_booz_surface_label(bx, js, outer=is_outer),
+            levels=24,
+        )
     fig.suptitle("Boozer-coordinate |B| contours", fontsize=13)
     fig.tight_layout()
     fig.savefig(out, dpi=180, bbox_inches="tight")
@@ -1532,18 +1502,11 @@ def plot_boozer_lcfs_bmag_comparison(
     in Boozer coordinates.
     """
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     initial_path = Path(wout_initial)
     final_path = Path(wout_final)
-    if outdir is None:
-        outdir = final_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=final_path.parent)
 
     booz_initial = run_booz_xform(
         initial_path,
@@ -1574,22 +1537,14 @@ def plot_boozer_lcfs_bmag_comparison(
         if ns_b < 1:
             raise ValueError(f"Boozer output contains no computed surfaces: {boozmn}")
         theta, phi, bmag = _booz_bmag_grid(bx, js=ns_b - 1, ntheta=ntheta, nphi=nphi)
-        phi2d, theta2d = np.meshgrid(phi, theta)
-        cs = ax.contour(
-            phi2d,
-            theta2d,
-            bmag,
-            levels=_line_contour_levels(bmag, count=25),
-            cmap="viridis",
-            linewidths=1.0,
+        _plot_boozer_bmag_axis(
+            fig,
+            ax,
+            theta=theta,
+            phi=phi,
+            bmag=bmag,
+            title=f"{title} in Boozer coordinates",
         )
-        fig.colorbar(cs, ax=ax, label="|B| (T)")
-        ax.set_title(f"{title} in Boozer coordinates")
-        ax.set_xlabel(_BOOZER_PHI_LABEL)
-        ax.set_ylabel(_BOOZER_THETA_LABEL)
-        ax.set_yticks([0, np.pi / 2, np.pi, 3 * np.pi / 2, 2 * np.pi])
-        ax.set_yticklabels(["0", "π/2", "π", "3π/2", "2π"])
-        ax.set_ylim(0, 2.0 * np.pi)
 
     fig.suptitle("Initial vs final LCFS |B| line contours in Boozer coordinates", fontsize=13)
     fig.tight_layout()
@@ -1608,11 +1563,7 @@ def plot_boozmn_mode_families(
 ) -> Path:
     """Plot radial Boozer ``|B|`` mode amplitudes grouped by symmetry family."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
@@ -1625,8 +1576,7 @@ def plot_boozmn_mode_families(
     order = np.argsort(-outer_amp)[: max(1, min(int(max_modes), amp.shape[0]))]
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_Boozer_mode_families.png"
 
     fig, ax = plt.subplots(1, 1, figsize=(8.5, 5.2))
@@ -1666,11 +1616,7 @@ def plot_boozmn_spectrum(
 ) -> Path:
     """Plot the largest Boozer ``|B|`` Fourier amplitudes on one surface."""
 
-    prepare_matplotlib_3d()
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     bx = _load_booz_if_path(boozmn)
     amp, _bmnc, xm, xn = _boozer_mode_amplitudes(bx)
@@ -1687,8 +1633,7 @@ def plot_boozmn_spectrum(
 
     path = Path(boozmn) if isinstance(boozmn, (str, Path)) else Path("boozmn")
     label = name or path.stem
-    outdir = Path(outdir) if outdir is not None else path.parent
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=path.parent)
     out = outdir / f"{label}_Boozer_lcfs_spectrum.png"
 
     fig, ax = plt.subplots(1, 1, figsize=(max(8.0, 0.24 * len(order)), 5.0))
@@ -1723,10 +1668,7 @@ def plot_boozmn(
     """Generate polished Boozer-coordinate diagnostic plots from ``boozmn``."""
 
     boozmn_path = Path(boozmn_path)
-    if outdir is None:
-        outdir = boozmn_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=boozmn_path.parent)
     paths = {
         "bmag_contours": plot_boozmn_bmag_contours(boozmn_path, outdir=outdir, name=name),
         "mode_families": plot_boozmn_mode_families(boozmn_path, outdir=outdir, name=name),
@@ -1747,6 +1689,29 @@ def _objective_iota_series(hist: list[dict]) -> list[float] | None:
     return [h.get("iota", np.nan) for h in hist]
 
 
+def _stage_segments(
+    values: Iterable[float],
+    stage_boundaries: Iterable[int],
+    *,
+    best_so_far: bool,
+    floor: float = 1e-16,
+) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Split objective values by stage, optionally applying best-so-far filtering."""
+    vals = [float(v) for v in values]
+    segments: list[tuple[np.ndarray, np.ndarray]] = []
+    start = 0
+    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
+    for stop in stops + [len(vals)]:
+        if stop <= start:
+            continue
+        x_segment = np.arange(start, stop, dtype=int)
+        y_raw = np.asarray(vals[start:stop], dtype=float)
+        y_segment = np.minimum.accumulate(np.maximum(y_raw, floor)) if best_so_far else y_raw
+        segments.append((x_segment, y_segment))
+        start = stop
+    return segments
+
+
 def _best_so_far_stage_segments(
     values: Iterable[float],
     stage_boundaries: Iterable[int],
@@ -1754,76 +1719,39 @@ def _best_so_far_stage_segments(
     floor: float = 1e-16,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Split objective values by stage and return best-so-far traces per stage."""
-    vals = [float(v) for v in values]
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
-    start = 0
-    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
-    for stop in stops + [len(vals)]:
-        if stop <= start:
-            continue
-        x_segment = np.arange(start, stop, dtype=int)
-        y_segment = np.minimum.accumulate([max(v, floor) for v in vals[start:stop]])
-        segments.append((x_segment, y_segment))
-        start = stop
-    return segments
-
-
-def _raw_stage_segments(
-    values: Iterable[float],
-    stage_boundaries: Iterable[int],
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Split raw objective values by stage without monotone filtering."""
-    vals = [float(v) for v in values]
-    segments: list[tuple[np.ndarray, np.ndarray]] = []
-    start = 0
-    stops = [int(b) + 1 for b in stage_boundaries if int(b) + 1 < len(vals)]
-    for stop in stops + [len(vals)]:
-        if stop <= start:
-            continue
-        x_segment = np.arange(start, stop, dtype=int)
-        y_segment = np.asarray(vals[start:stop], dtype=float)
-        segments.append((x_segment, y_segment))
-        start = stop
-    return segments
+    return _stage_segments(values, stage_boundaries, best_so_far=True, floor=floor)
 
 
 def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     """Objective value, aspect ratio, and (optionally) iota vs Jacobian evaluation."""
     import json
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    plt = _import_matplotlib()
 
     with open(history_path) as f:
         data = json.load(f)
 
     hist = data["history"]
-    # Use qs_objective (QS residuals only) if available, else fall back to total objective
     qs_vals = [h.get("qs_objective", h["objective"]) for h in hist]
     aspects = [h["aspect"] for h in hist]
-    # Iota trajectory: present when iota_fn was passed to optimizer
     iotas = _objective_iota_series(hist)
-    target_iota = data.get("target_iota", None)
-    iota_abs_min = data.get("iota_abs_min", None)
-    # Also show iota panel when target_iota is specified even if trajectory is missing
+    target_iota, iota_abs_min = data.get("target_iota", None), data.get("iota_abs_min", None)
     show_iota = iotas is not None
     iters = list(range(len(hist)))
-    total_time = data.get("total_wall_time_s", 0.0)
-    nfev = data.get("nfev", len(hist))
+    total_time, nfev = data.get("total_wall_time_s", 0.0), data.get("nfev", len(hist))
 
     n_panels = 3 if show_iota else 2
     fig, axes = plt.subplots(n_panels, 1, figsize=(7, 3 * n_panels), sharex=True)
     ax1, ax2 = axes[0], axes[1]
     ax3 = axes[2] if n_panels == 3 else None
 
-    # --- panel 1: QS residuals ---
     # Stage-preseeded optimizations can switch objective definitions (for
     # example QP preseed -> QI preseed -> full constrained QI). Split by stage
     # but plot the raw accepted-callback history so users can see whether the
     # optimizer is actually moving. A thin dashed best-so-far overlay preserves
     # the monotone diagnostic without hiding rejected/rebounded steps.
-    for i, (x_segment, y_segment) in enumerate(_raw_stage_segments(qs_vals, data.get("stage_boundaries", []))):
+    for i, (x_segment, y_segment) in enumerate(
+        _stage_segments(qs_vals, data.get("stage_boundaries", []), best_so_far=False)
+    ):
         ax1.semilogy(
             x_segment,
             np.maximum(y_segment, 1e-16),
@@ -1846,21 +1774,15 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
     qs_pos = [max(v, 1e-16) for v in qs_vals]  # avoid log(0)
     ax1.set_ylabel("QS residuals ∑r²", fontsize=11)
     opt_label = data.get("label", "Optimisation")
-    ax1.set_title(
-        f"{opt_label}  ({nfev} evals, {total_time:.0f} s)",
-        fontsize=11,
-    )
-    ax1.axhline(qs_pos[-1], color="steelblue", linestyle=":", alpha=0.4,
-                label=f"Final: {qs_vals[-1]:.2e}")
+    ax1.set_title(f"{opt_label}  ({nfev} evals, {total_time:.0f} s)", fontsize=11)
+    ax1.axhline(qs_pos[-1], color="steelblue", linestyle=":", alpha=0.4, label=f"Final: {qs_vals[-1]:.2e}")
     ax1.legend(fontsize=9)
     ax1.grid(True, alpha=0.3)
 
-    # --- panel 2: aspect ratio ---
     ax2.plot(iters, aspects, "s-", color="darkorange", linewidth=2, markersize=6)
     target_aspect = data.get("target_aspect", None)
     if target_aspect is not None:
-        ax2.axhline(target_aspect, color="k", linestyle=":", alpha=0.5,
-                    label=f"Target A={target_aspect:.4g}")
+        ax2.axhline(target_aspect, color="k", linestyle=":", alpha=0.5, label=f"Target A={target_aspect:.4g}")
     ax2.set_ylabel("Aspect ratio", fontsize=11)
     if ax3 is None:
         ax2.set_xlabel("Jacobian evaluation index", fontsize=11)
@@ -1868,15 +1790,12 @@ def _plot_objective_history(history_path: Path, outdir: Path) -> Path:
         ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
 
-    # --- panel 3: mean iota ---
     if ax3 is not None and iotas is not None:
         ax3.plot(iters, iotas, "^-", color="forestgreen", linewidth=2, markersize=6)
         if target_iota is not None:
-            ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5,
-                        label=f"Target ι={target_iota:.4g}")
+            ax3.axhline(target_iota, color="k", linestyle=":", alpha=0.5, label=f"Target ι={target_iota:.4g}")
         if iota_abs_min is not None:
-            ax3.axhline(iota_abs_min, color="k", linestyle=":", alpha=0.45,
-                        label=f"Min |ι|={iota_abs_min:.4g}")
+            ax3.axhline(iota_abs_min, color="k", linestyle=":", alpha=0.45, label=f"Min |ι|={iota_abs_min:.4g}")
             ax3.axhline(-float(iota_abs_min), color="k", linestyle=":", alpha=0.45)
         ax3.set_ylabel("Mean iota ι", fontsize=11)
         ax3.set_xlabel("Jacobian evaluation index", fontsize=11)
@@ -1899,83 +1818,9 @@ def plot_objective_history(
     """Plot objective, aspect-ratio, and optional iota history from JSON."""
 
     history_path = Path(history_path)
-    if outdir is None:
-        outdir = history_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    outdir = _ensure_plot_outdir(outdir, default=history_path.parent)
     return _plot_objective_history(history_path, outdir)
 
-
-def plot_qh_optimization(
-    wout_initial_path,
-    wout_final_path,
-    history_path,
-    *,
-    outdir=None,
-    show: bool = False,
-) -> dict:
-    """Generate optimization result plots and return their paths.
-
-    This compatibility wrapper calls :func:`plot_3d_boundary_comparison`,
-    :func:`plot_bmag_contours`, and :func:`plot_objective_history`.  New
-    examples call those functions directly so users can choose which plots to
-    create for QA/QH/QP/QI or custom objectives.
-
-    Produces three figures:
-
-    * ``boundary_comparison.png``  — 3-D LCFS coloured by |B| (before/after)
-    * ``bmag_surface.png``         — |B| contour lines on LCFS unrolled to (θ, φ)
-    * ``objective_history.png``    — Objective and aspect ratio vs iteration
-
-    Parameters
-    ----------
-    wout_initial_path, wout_final_path:
-        Paths to the initial and final ``wout_*.nc`` files.
-    history_path:
-        Path to the ``history.json`` file produced by
-        :meth:`~vmec_jax.FixedBoundaryExactOptimizer.save_history`.
-    outdir:
-        Directory for saved figures.  Defaults to the directory of *history_path*.
-    show:
-        If ``True``, call ``plt.show()`` after saving.
-
-    Returns
-    -------
-    dict
-        Mapping ``{"boundary_comparison", "bmag_surface", "objective_history"}``
-        to their saved :class:`~pathlib.Path` objects.
-    """
-    wout_initial_path = Path(wout_initial_path)
-    wout_final_path = Path(wout_final_path)
-    history_path = Path(history_path)
-
-    if outdir is None:
-        outdir = history_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    p1 = plot_3d_boundary_comparison(wout_initial_path, wout_final_path, outdir=outdir)
-    p2 = plot_bmag_contours(wout_initial_path, wout_final_path, outdir=outdir)
-    p3 = plot_objective_history(history_path, outdir=outdir)
-
-    for p in (p1, p2, p3):
-        print(f"  Saved {p}")
-
-    if show:
-        prepare_matplotlib_3d()
-        import matplotlib.pyplot as plt
-        plt.show()
-
-    return {
-        "boundary_comparison": p1,
-        "bmag_surface": p2,
-        "objective_history": p3,
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# plot_wout — standalone wout diagnostic viewer (replicates vmecPlot2.py)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def plot_wout(
     wout_path: str | Path,
@@ -1985,124 +1830,27 @@ def plot_wout(
     s_plot_ignore: float = 0.2,
     show: bool = False,
 ) -> dict:
-    """Generate diagnostic plots from a VMEC ``wout_*.nc`` file.
-
-    Replicates the output of the standalone ``vmecPlot2.py`` script in a
-    vectorised, vmec_jax-native form.  Four figures are written:
-
-    * ``<name>_VMECparams.pdf``  — 9-panel profile + ``|B|`` overview
-    * ``<name>_poloidal_plot.png`` — LCFS cross-sections at multiple toroidal angles
-    * ``<name>_VMECsurfaces.pdf``  — nested flux-surface cross-sections (8 panels)
-    * ``<name>_VMEC_3Dplot.png``   — 3-D LCFS surface coloured by ``|B|``
-
-    Parameters
-    ----------
-    wout_path:
-        Path to the ``wout_*.nc`` file.
-    outdir:
-        Directory to save figures.  Defaults to the directory containing
-        *wout_path*.
-    name:
-        Base name for output files.  Defaults to the wout stem with the
-        leading ``wout_`` stripped (e.g. ``wout_nfp4_QH.nc`` → ``nfp4_QH``).
-    s_plot_ignore:
-        Fraction of flux surfaces near the axis to ignore when plotting DMerc.
-    show:
-        If ``True``, call ``plt.show()`` after saving all figures.
-
-    Returns
-    -------
-    dict
-        ``{"vmec_params", "poloidal_plot", "vmec_surfaces", "3d_plot"}``
-        mapping to saved :class:`~pathlib.Path` objects.
-    """
-    prepare_matplotlib_3d()
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    """Generate VMEC profile, cross-section, surface, and 3-D LCFS plots."""
+    plt = _import_matplotlib()
     from matplotlib import cm
     from matplotlib.colors import Normalize
-
     from .wout import read_wout as _read_wout
-
     wout_path = Path(wout_path)
-    if outdir is None:
-        outdir = wout_path.parent
-    outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
+    outdir = _ensure_plot_outdir(outdir, default=wout_path.parent)
     if name is None:
         stem = wout_path.stem  # e.g. "wout_nfp4_QH"
         name = stem[5:] if stem.startswith("wout_") else stem
-
     wout = _read_wout(str(wout_path))
-
-    ns = int(wout.ns)
-    nfp = int(wout.nfp)
-    ntor = int(wout.ntor)
-    lasym = bool(wout.lasym)
-
-    xm = np.asarray(wout.xm, dtype=float)
-    xn = np.asarray(wout.xn, dtype=float)
-    xm_nyq = np.asarray(wout.xm_nyq, dtype=float)
-    xn_nyq = np.asarray(wout.xn_nyq, dtype=float)
-    rmnc = np.asarray(wout.rmnc, dtype=float)
-    zmns = np.asarray(wout.zmns, dtype=float)
-    bmnc = np.asarray(wout.bmnc, dtype=float)
-    rmns = np.asarray(wout.rmns, dtype=float) if lasym else np.zeros_like(rmnc)
-    zmnc = np.asarray(wout.zmnc, dtype=float) if lasym else np.zeros_like(rmnc)
-    bmns = np.asarray(wout.bmns, dtype=float) if lasym else np.zeros_like(bmnc)
-
-    raxis_cc = np.asarray(wout.raxis_cc, dtype=float)
-    raxis_cs = np.asarray(wout.raxis_cs, dtype=float)
-    zaxis_cs = np.asarray(wout.zaxis_cs, dtype=float)
-    zaxis_cc = np.asarray(wout.zaxis_cc, dtype=float)
-
-    phi = np.asarray(wout.phi, dtype=float)
-    iotaf = np.asarray(wout.iotaf, dtype=float)
-    presf = np.asarray(wout.presf, dtype=float)
-    iotas = np.asarray(wout.iotas, dtype=float)
-    pres = np.asarray(wout.pres, dtype=float)
-    buco = np.asarray(wout.buco, dtype=float)
-    bvco = np.asarray(wout.bvco, dtype=float)
-    jcuru = np.asarray(wout.jcuru, dtype=float)
-    jcurv = np.asarray(wout.jcurv, dtype=float)
-    DMerc = np.asarray(wout.DMerc, dtype=float)
-
+    ns, nfp = int(wout.ns), int(wout.nfp)
+    iotaf, presf, pres, buco, bvco, jcuru, jcurv, DMerc = (
+        np.asarray(getattr(wout, key), dtype=float)
+        for key in ("iotaf", "presf", "pres", "buco", "bvco", "jcuru", "jcurv", "DMerc")
+    )
     s = np.linspace(0.0, 1.0, ns)
     s_half = [(i - 0.5) / (ns - 1) for i in range(1, ns)]
     xLabel = r"$s = \psi/\psi_b$"
-
-    # ── Helper: evaluate Fourier series on a (ntheta, nzeta) grid ──────────────
-    def _eval_rz(isurf: int, theta: np.ndarray, zeta: np.ndarray):
-        """(ntheta, nzeta) R and Z arrays for surface isurf."""
-        zeta2d, theta2d = np.meshgrid(zeta, theta)
-        angles = (xm[:, None, None] * theta2d[None] - xn[:, None, None] * zeta2d[None])
-        R = np.tensordot(rmnc[isurf] + rmns[isurf], np.zeros_like(angles[0]), axes=0)
-        Z = np.zeros_like(R)
-        R = (np.tensordot(rmnc[isurf], np.cos(angles), axes=([0], [0]))
-             + np.tensordot(rmns[isurf], np.sin(angles), axes=([0], [0])))
-        Z = (np.tensordot(zmns[isurf], np.sin(angles), axes=([0], [0]))
-             + np.tensordot(zmnc[isurf], np.cos(angles), axes=([0], [0])))
-        return R, Z
-
-    def _eval_bmag(isurf: int, theta: np.ndarray, zeta: np.ndarray):
-        """(ntheta, nzeta) |B| array for surface isurf (Nyquist)."""
-        zeta2d, theta2d = np.meshgrid(zeta, theta)
-        angles = (xm_nyq[:, None, None] * theta2d[None] - xn_nyq[:, None, None] * zeta2d[None])
-        B = (np.tensordot(bmnc[isurf], np.cos(angles), axes=([0], [0]))
-             + np.tensordot(bmns[isurf], np.sin(angles), axes=([0], [0])))
-        return B
-
-    # ── Plot 1: VMECparams — 9-panel diagnostics ────────────────────────────────
-    ntheta_b = 30
-    nzeta_b = 65
-    theta_b = np.linspace(0.0, 2.0 * np.pi, ntheta_b)
-    zeta_b = np.linspace(0.0, 2.0 * np.pi, nzeta_b)
-
     fig1, axes1 = plt.subplots(3, 3, figsize=(14, 7))
     fig1.patch.set_facecolor("white")
-
     ax = axes1[0, 0]
     ax.plot(s, iotaf, ".-")
     ax.set_xlabel(xLabel)
@@ -2114,37 +1862,22 @@ def plot_wout(
     ax.legend(fontsize="x-small")
     ax.set_xlabel(xLabel)
     ax.set_title("pressure")
-
-    ax = axes1[0, 2]
-    ax.plot(s_half, buco[1:], ".-")
-    ax.set_title("buco")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 0]
-    ax.plot(s_half, bvco[1:], ".-")
-    ax.set_title("bvco")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 1]
-    ax.plot(s, jcuru, ".-")
-    ax.set_title("jcuru")
-    ax.set_xlabel(xLabel)
-
-    ax = axes1[1, 2]
-    ax.plot(s, jcurv, ".-")
-    ax.set_title("jcurv")
-    ax.set_xlabel(xLabel)
-
+    for ax, x_vals, y_vals, title in (
+        (axes1[0, 2], s_half, buco[1:], "buco"),
+        (axes1[1, 0], s_half, bvco[1:], "bvco"),
+        (axes1[1, 1], s, jcuru, "jcuru"),
+        (axes1[1, 2], s, jcurv, "jcurv"),
+    ):
+        ax.plot(x_vals, y_vals, ".-")
+        ax.set_title(title)
+        ax.set_xlabel(xLabel)
     ax = axes1[2, 0]
     ign = int(s_plot_ignore * len(s))
     ax.plot(s[ign:-2], DMerc[ign:-2], ".-")
     ax.set_title("DMerc")
     ax.set_xlabel(xLabel)
-
-    _titles_b = ["Mid radius |B|", "Plasma boundary |B|"]
-    _iradii_b = [int(np.argmin(np.abs(s - 0.5))), ns - 1]
-    for _col, (_irad, _ttl) in enumerate(zip(_iradii_b, _titles_b)):
-        B_b = _eval_bmag(_irad, theta_b, zeta_b)
+    for _col, (_irad, _ttl) in enumerate(((int(np.argmin(np.abs(s - 0.5))), "Mid radius |B|"), (ns - 1, "Plasma boundary |B|"))):
+        theta_b, zeta_b, B_b = vmecplot2_bmag_grid(wout, s_index=int(_irad), ntheta=30, nzeta=65)
         zeta2d_b, theta2d_b = np.meshgrid(zeta_b, theta_b)
         ax = axes1[2, 1 + _col]
         cf = ax.contour(zeta2d_b, theta2d_b, B_b, 20, cmap="viridis", linewidths=0.8)
@@ -2153,131 +1886,77 @@ def plot_wout(
         ax.set_ylabel(r"$\theta$")
         fig1.colorbar(cf, ax=ax)
         iota_val = float(iotaf[_irad])
-        if iota_val > 0:
-            ax.plot([0, zeta_b.max()], [0, zeta_b.max() * iota_val], "k")
-        else:
-            ax.plot([0, zeta_b.max()], [-zeta_b.max() * iota_val, 0], "k")
+        ax.plot([0, zeta_b.max()], [0, zeta_b.max() * iota_val] if iota_val > 0 else [-zeta_b.max() * iota_val, 0], "k")
         ax.set_xlim([0, 2 * np.pi])
         ax.set_ylim([0, 2 * np.pi])
-
     fig1.tight_layout()
     fig1.text(0.5, 0.995, str(wout_path.resolve()), ha="center", va="top", fontsize=6)
     out_params = outdir / f"{name}_VMECparams.pdf"
     fig1.savefig(out_params, bbox_inches="tight", pad_inches=0)
     plt.close(fig1)
-
-    # ── Plot 2: Poloidal cross-sections at LCFS ──────────────────────────────────
-    ntheta_p = 200
-    nzeta_p = 8
-    theta_p = np.linspace(0.0, 2.0 * np.pi, ntheta_p)
-    zeta_p = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_p, endpoint=False)
-    R_lcfs, Z_lcfs = _eval_rz(ns - 1, theta_p, zeta_p)
-
-    # Axis positions
-    nzeta_ax = nzeta_p
-    zeta_ax = zeta_p
-    n_arr = np.arange(ntor + 1)
-    angles_ax = -n_arr[:, None] * nfp * zeta_ax[None, :]  # (ntor+1, nzeta)
-    Raxis = (raxis_cc[:ntor + 1, None] * np.cos(angles_ax)
-             + raxis_cs[:ntor + 1, None] * np.sin(angles_ax)).sum(axis=0)
-    Zaxis = (zaxis_cs[:ntor + 1, None] * np.sin(angles_ax)
-             + zaxis_cc[:ntor + 1, None] * np.cos(angles_ax)).sum(axis=0)
-
+    _theta_p, zeta_p, R_lcfs, Z_lcfs = vmecplot2_surface_grid(wout, s_index=ns - 1, ntheta=200, nzeta=8)
+    Raxis, Zaxis = axis_rz_from_wout(wout, zeta=zeta_p)
     fig2, ax2 = plt.subplots(1, 1, figsize=(6, 6))
     fig2.patch.set_facecolor("white")
-    _zeta_lbls = [
-        (0, r"$\phi=0$"),
-        (2, r"$\phi=\pi/2$"),
-        (4, r"$\phi=\pi$"),
-        (6, r"$\phi=3\pi/2$"),
-    ]
-    for _iz, _lbl in _zeta_lbls:
-        if _iz < nzeta_p:
+    for _iz, _lbl in ((0, r"$\phi=0$"), (2, r"$\phi=\pi/2$"), (4, r"$\phi=\pi$"), (6, r"$\phi=3\pi/2$")):
+        if _iz < len(zeta_p):
             ax2.plot(R_lcfs[:, _iz], Z_lcfs[:, _iz], "-", label=_lbl)
     ax2.set_aspect("equal", adjustable="box")
     ax2.legend(fontsize=18)
     ax2.set_xlabel("R", fontsize=22)
     ax2.set_ylabel("Z", fontsize=22)
-    ax2.tick_params(axis="x", labelsize=16)
-    ax2.tick_params(axis="y", labelsize=16)
+    ax2.tick_params(axis="both", labelsize=16)
     fig2.tight_layout()
     out_poloidal = outdir / f"{name}_poloidal_plot.png"
     fig2.savefig(out_poloidal)
     plt.close(fig2)
-
-    # ── Plot 3: VMECsurfaces — 8 nested cross-section panels ─────────────────────
-    ntheta_s = 200
-    nzeta_s = 8
-    nradius_s = 8
+    ntheta_s, nzeta_s, nradius_s = 200, 8, 8
     theta_s = np.linspace(0.0, 2.0 * np.pi, ntheta_s)
     zeta_s = np.linspace(0.0, 2.0 * np.pi / nfp, nzeta_s, endpoint=False)
+    Raxis_s, Zaxis_s = axis_rz_from_wout(wout, zeta=zeta_s)
     iradii_s = np.round(np.linspace(0, ns - 1, nradius_s)).astype(int)
-
     fig3, axes3 = plt.subplots(2, 4, figsize=(14, 7))
     fig3.patch.set_facecolor("white")
     axes3_flat = axes3.ravel()
-
     for _iz in range(nzeta_s):
         ax = axes3_flat[_iz]
-        for _ir, _irad in enumerate(iradii_s):
-            R_s, Z_s = _eval_rz(_irad, theta_s, zeta_s)
+        for _irad in iradii_s:
+            R_s, Z_s = surface_rz_from_wout(wout, s_index=int(_irad), theta=theta_s, zeta=zeta_s)
             ax.plot(R_s[:, _iz], Z_s[:, _iz], "-")
-        ax.plot(Raxis[_iz], Zaxis[_iz], "xr")
+        ax.plot(Raxis_s[_iz], Zaxis_s[_iz], "xr")
         ax.set_aspect("equal", adjustable="box")
         ax.set_xlabel("R", fontsize=10)
         ax.set_ylabel("Z", fontsize=10)
         ax.set_title(rf"$\phi$ = {round(float(zeta_s[_iz]), 2)}")
-
     fig3.tight_layout()
     out_surfaces = outdir / f"{name}_VMECsurfaces.pdf"
     fig3.savefig(out_surfaces, bbox_inches="tight", pad_inches=0)
     plt.close(fig3)
-
-    # ── Plot 4: 3-D LCFS surface coloured by |B| ─────────────────────────────────
     ntheta_3d = 80
     nzeta_3d = max(500, int(150 * nfp))
-    theta_3d = np.linspace(0.0, 2.0 * np.pi, ntheta_3d)
-    zeta_3d = np.linspace(0.0, 2.0 * np.pi, nzeta_3d)
-
-    R_3d, Z_3d = _eval_rz(ns - 1, theta_3d, zeta_3d)
-    B_3d = _eval_bmag(ns - 1, theta_3d, zeta_3d)
-
+    theta_3d, zeta_3d, R_3d, Z_3d, B_3d = vmecplot2_lcfs_3d_grid(wout, s_index=ns - 1, ntheta=ntheta_3d, nzeta=nzeta_3d)
     zeta2d_3d, _ = np.meshgrid(zeta_3d, theta_3d)
     X_3d = R_3d * np.cos(zeta2d_3d)
     Y_3d = R_3d * np.sin(zeta2d_3d)
-
     B_rescaled = (B_3d - B_3d.min()) / (B_3d.max() - B_3d.min() + 1e-30)
-
     fig4 = plt.figure(figsize=(5, 4), frameon=False)
     ax4 = fig4.add_subplot(111, projection="3d")
-    ax4.plot_surface(
-        X_3d, Y_3d, Z_3d,
-        facecolors=cm.jet(B_rescaled),
-        rstride=1, cstride=1, antialiased=False,
-    )
+    ax4.plot_surface(X_3d, Y_3d, Z_3d, facecolors=cm.jet(B_rescaled), rstride=1, cstride=1, antialiased=False)
     scale = 0.7 * max(abs(X_3d).max(), abs(Y_3d).max())
-    ax4.auto_scale_xyz(
-        [-scale, scale],
-        [-scale, scale],
-        [-scale, scale],
-    )
+    ax4.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
     ax4.set_box_aspect([1, 1, 1])
     ax4.axis("off")
-
     cax4 = fig4.add_axes([0.21, 0.80, 0.60, 0.03])
     norm4 = Normalize(vmin=float(B_3d.min()), vmax=float(B_3d.max()))
     sm4 = cm.ScalarMappable(cmap=cm.jet, norm=norm4)
     sm4.set_array([])
     cbar4 = plt.colorbar(sm4, orientation="horizontal", cax=cax4)
     cbar4.set_label("|B| [T]")
-
     out_3d = outdir / f"{name}_VMEC_3Dplot.png"
     fig4.savefig(out_3d, bbox_inches="tight", pad_inches=0, dpi=400)
     plt.close(fig4)
-
     if show:
         plt.show()
-
     results = {
         "vmec_params": out_params,
         "poloidal_plot": out_poloidal,

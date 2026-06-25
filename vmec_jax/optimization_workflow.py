@@ -9,9 +9,7 @@ live here instead of being repeated in every example.
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
-import json
 import math
 from pathlib import Path
 import sys
@@ -24,39 +22,44 @@ from .boundary import boundary_from_indata, boundary_input_from_indata
 from .config import config_from_indata
 from .driver import run_fixed_boundary, write_wout_from_fixed_boundary_run
 from .energy import flux_profiles_from_indata
-from .field import b_cartesian_from_state, signgs_from_sqrtg
-from .finite_beta import (
-    finite_beta_scalars_from_state,
-    magnetic_well_from_vp,
-    mercier_terms_from_state,
-    redl_bootstrap_mismatch_from_state,
-)
+from .field import signgs_from_sqrtg
 from .geom import eval_geom
 from .init_guess import initial_guess_from_boundary
 from .optimization import (
-    BoundaryParamSpec,
     FixedBoundaryExactOptimizer,
-    boundary_param_names,
     boundary_param_specs,
     create_x_scale,
     extend_boundary_for_max_mode,
-    rebuild_indata_with_resolution,
     smooth_min_abs_iota_residual,
     truncate_indata_boundary_modes,
 )
+from .optimizers.fixed_boundary import (
+    finite_beta_objectives as _finite_beta_objectives,
+    objective_terms as _objective_terms,
+    qi_objectives as _qi_objectives,
+    seed_inputs as _seed_inputs,
+    stage_policy as _stage_policy,
+    workflow_artifacts as _workflow_artifacts,
+)
+from .optimizers.fixed_boundary.objective_terms import (
+    FixedBoundaryObjectiveStage, ObjectiveTerm, QIObjectiveTerm, StageContext,
+    as_vector, attach_packed_state_autodiff_hooks as _attach_packed_state_autodiff_hooks,
+    residuals_from_objectives,
+)
+from .optimizers.fixed_boundary.qi_objectives import QuasiIsodynamicOptions
+from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
+from .optimizers.fixed_boundary.seed_inputs import simple_omnigenity_seed_indata
+from .optimizers.fixed_boundary.stage_policy import (
+    describe_boundary_mode_limits, normalize_boundary_mode_limits, qs_stage_budget,
+)
+from .optimizers.fixed_boundary.workflow_artifacts import FixedBoundaryOptimizationResult
+from .optimizers.fixed_boundary import workflow_outputs as _workflow_outputs
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
 from .quasi_isodynamic import (
     _nearest_half_mesh_indices,
-    _smooth_reduce_max,
-    _smooth_reduce_min,
-    lgradb_penalty_from_state,
-    max_elongation_penalty_from_state,
-    mirror_ratio_penalty_from_boozer_output,
-    mirror_ratio_penalty_from_state,
     quasi_isodynamic_residual_from_state,
 )
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
-from .mercier import glasser_resistive_interchange_from_mercier_terms
 from .static import build_static
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
@@ -65,6 +68,7 @@ enable_x64(True)
 
 
 _LINE_BUFFERING_ENABLED = False
+_as_vector = as_vector
 
 
 def _enable_line_buffered_output() -> None:
@@ -82,264 +86,6 @@ def _enable_line_buffered_output() -> None:
         except (TypeError, ValueError):
             pass
     _LINE_BUFFERING_ENABLED = True
-
-
-@dataclass(frozen=True)
-class StageContext:
-    """Objects needed by objective callbacks for one mode-continuation stage."""
-
-    static: object
-    indata: object
-    boundary_input: object
-    specs: Sequence[BoundaryParamSpec]
-    signgs: int
-    flux: object
-    pressure: object
-
-
-@dataclass(frozen=True)
-class ObjectiveTerm:
-    """One weighted least-squares objective block.
-
-    The callback receives ``(ctx, state)`` and returns a scalar or vector.  The
-    residual minimized by the optimizer is ``weight * (value - target)``.
-    ``weight`` is the internal residual multiplier; public objective tuples use
-    SIMSOPT semantics and are converted to ``sqrt(tuple_weight)`` by
-    :meth:`LeastSquaresProblem.from_tuples`.
-    """
-
-    name: str
-    evaluate: Callable[[StageContext, object], object]
-    target: float | np.ndarray = 0.0
-    weight: float = 1.0
-    total: Callable[[StageContext, object], object] | None = None
-    track_iota: bool = False
-    metadata: dict[str, object] = field(default_factory=dict)
-    prepare: Callable[[StageContext], "ObjectiveTerm"] | None = None
-
-    def residual(self, ctx: StageContext, state) -> object:
-        value = _as_vector(self.evaluate(ctx, state))
-        target = jnp.asarray(self.target, dtype=jnp.float64)
-        if int(target.ndim) == 0:
-            target = jnp.full_like(value, target)
-        else:
-            target = jnp.ravel(target)
-        return float(self.weight) * (value - target)
-
-    def bind(self, ctx: StageContext) -> "ObjectiveTerm":
-        """Return a stage-specialized term when the objective has static setup."""
-
-        return self if self.prepare is None else self.prepare(ctx)
-
-
-@dataclass(frozen=True)
-class FixedBoundaryObjectiveStage:
-    """Prepared optimizer and metadata for one active boundary-mode stage."""
-
-    mode: int
-    ctx: StageContext
-    optimizer: FixedBoundaryExactOptimizer
-    specs: Sequence[BoundaryParamSpec]
-    boundary_input: object
-
-
-@dataclass(frozen=True)
-class BoundaryModeLimits:
-    """Boundary-parameter mode limits for one optimization stage.
-
-    ``mode`` controls VMEC spectral-resolution extension and continuation
-    bookkeeping.  ``max_m`` and ``max_n`` optionally restrict the free boundary
-    coefficients independently, enabling schedules such as toroidal-first
-    stages with ``max_m=1`` and ``max_n=4`` before a full ``max_m=max_n=4``
-    cleanup.
-    """
-
-    mode: int
-    max_m: int | None = None
-    max_n: int | None = None
-    label: str | None = None
-
-
-@dataclass(frozen=True)
-class FixedBoundaryOptimizationResult:
-    """Result returned by :func:`run_fixed_boundary_objective_optimization`."""
-
-    stage_records: list[tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]]
-    final_optimizer: FixedBoundaryExactOptimizer
-    final_result: dict
-    stage_modes: list[int]
-
-    @property
-    def initial_stage(self) -> tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]:
-        """First mode-continuation stage record.
-
-        The tuple is ``(mode, optimizer, params0, result)``.  Examples keep this
-        explicit so users can choose which stage to save or inspect.
-        """
-
-        return self.stage_records[0]
-
-    @property
-    def final_stage(self) -> tuple[int, FixedBoundaryExactOptimizer, np.ndarray, dict]:
-        """Last mode-continuation stage record."""
-
-        return self.stage_records[-1]
-
-    @property
-    def initial_optimizer(self) -> FixedBoundaryExactOptimizer:
-        """Optimizer object for the first stage."""
-
-        return self.initial_stage[1]
-
-    @property
-    def initial_params(self) -> np.ndarray:
-        """Initial boundary parameter vector for the first stage."""
-
-        return np.asarray(self.initial_stage[2], dtype=float)
-
-    @property
-    def initial_result(self) -> dict:
-        """Raw optimizer result dictionary for the first stage."""
-
-        return self.initial_stage[3]
-
-    @property
-    def initial_state(self):
-        """Initial VMEC state if the optimizer stored one."""
-
-        return self.initial_result.get("_state_initial")
-
-    @property
-    def history(self) -> dict:
-        """Final optimizer history dictionary written by ``save_history``."""
-
-        return self.final_result.get("_history_dump", {})
-
-    @property
-    def history_entries(self) -> tuple[dict, ...]:
-        """Per-callback objective samples from the full solve."""
-
-        return tuple(self.history.get("history", ()))
-
-    @property
-    def stage_histories(self) -> tuple[dict, ...]:
-        """Per-stage history dictionaries in mode-continuation order."""
-
-        return tuple(
-            result.get("_history_dump", {})
-            for _mode, _optimizer, _params0, result in self.stage_records
-        )
-
-    @property
-    def stage_results(self) -> tuple[dict, ...]:
-        """Raw optimizer result dictionaries in mode-continuation order."""
-
-        return tuple(result for _mode, _optimizer, _params0, result in self.stage_records)
-
-    @property
-    def stage_optimizers(self) -> tuple[FixedBoundaryExactOptimizer, ...]:
-        """Optimizer objects for each mode-continuation stage."""
-
-        return tuple(optimizer for _mode, optimizer, _params0, _result in self.stage_records)
-
-    @property
-    def stage_initial_params(self) -> tuple[np.ndarray, ...]:
-        """Initial boundary-parameter vectors for each stage."""
-
-        return tuple(
-            np.asarray(params0, dtype=float)
-            for _mode, _optimizer, params0, _result in self.stage_records
-        )
-
-    @property
-    def objective_history(self) -> np.ndarray:
-        """Objective values over full-solve callbacks as a NumPy array."""
-
-        return np.asarray(
-            [entry.get("objective", np.nan) for entry in self.history_entries],
-            dtype=float,
-        )
-
-    @property
-    def final_params(self) -> np.ndarray:
-        """Optimized boundary parameter vector for the final stage."""
-
-        return np.asarray(self.final_result["x"], dtype=float)
-
-    @property
-    def final_state(self):
-        """Final VMEC state if the optimizer stored one."""
-
-        return self.final_result.get("_state_final")
-
-    @property
-    def stage_timing_summaries(self) -> tuple[dict[str, object], ...]:
-        """Small timing/iteration summaries for each stage."""
-
-        summaries = []
-        for mode, _optimizer, _params0, result in self.stage_records:
-            summary = _result_timing_summary(result)
-            summary["mode"] = int(mode)
-            summaries.append(summary)
-        return tuple(summaries)
-
-    @property
-    def timing_summary(self) -> dict[str, object]:
-        """Small timing/iteration summary for reports and examples."""
-
-        summary = _result_timing_summary(self.final_result, history=self.history)
-        summary["stages"] = self.stage_timing_summaries
-        return summary
-
-    @property
-    def summary(self) -> dict[str, object]:
-        """Compact result summary for example reports and notebooks."""
-
-        history = self.history
-        return {
-            "stage_modes": tuple(int(mode) for mode in self.stage_modes),
-            "objective_initial": history.get("objective_initial"),
-            "objective_final": history.get("objective_final"),
-            "aspect_final": history.get("aspect_final"),
-            "iota_final": history.get("iota_final"),
-            "field_objective_final": history.get("qs_final"),
-            "timing": self.timing_summary,
-        }
-
-
-@dataclass(frozen=True)
-class OptimizationOutputPaths:
-    """Canonical files written by fixed-boundary optimization examples."""
-
-    initial_input: Path
-    final_input: Path
-    initial_wout: Path
-    final_wout: Path
-    history: Path
-
-    def as_dict(self) -> dict[str, Path]:
-        """Return path names in the same order used by the example reports."""
-
-        return {
-            "initial_input": self.initial_input,
-            "final_input": self.final_input,
-            "initial_wout": self.initial_wout,
-            "final_wout": self.final_wout,
-            "history": self.history,
-        }
-
-
-@dataclass(frozen=True)
-class QIObjectiveTerm:
-    """One field-quality objective that shares a Boozer/QI field evaluation."""
-
-    name: str
-    evaluate: Callable[[StageContext, object, dict], tuple[object, object]]
-    qi_options: "QuasiIsodynamicOptions | None" = None
-
-    def residual_and_total(self, ctx: StageContext, state, field: dict) -> tuple[object, object]:
-        residuals, total = self.evaluate(ctx, state, field)
-        return _as_vector(residuals), total
 
 
 @dataclass(frozen=True)
@@ -423,35 +169,6 @@ class FixedBoundaryVMEC:
             include=tuple(include),
             fix=tuple(fix),
         )
-
-
-@dataclass(frozen=True)
-class QuasiIsodynamicOptions:
-    """Boozer/QI sampling options shared by QI objective terms."""
-
-    surfaces: object
-    mboz: int = 18
-    nboz: int = 18
-    nphi: int = 151
-    nalpha: int = 31
-    n_bounce: int = 51
-    include_bounce_endpoints: bool = False
-    softness: float = 2.0e-2
-    width_weight: float = 1.0
-    branch_width_weight: float = 0.5
-    branch_width_softness: float = 2.0e-2
-    profile_weight: float = 0.1
-    shuffle_profile_weight: float = 1.0
-    shuffle_profile_softness: float = 2.0e-2
-    shuffle_profile_nphi_out: int | None = None
-    weighted_shuffle_profile_weight: float = 0.0
-    weighted_shuffle_profile_softness: float = 2.0e-2
-    aligned_profile_weight: float = 0.0
-    aligned_profile_softness: float = 2.0e-2
-    aligned_profile_trap_level: float = 0.65
-    aligned_profile_trap_softness: float = 5.0e-2
-    phimin: float = 0.0
-    jit_booz: bool = True
 
 
 @dataclass
@@ -868,995 +585,6 @@ class QuasisymmetryRatioResidual:
         )
 
 
-class QuasiIsodynamicResidual:
-    """Smooth QI residual object using a shared Boozer field evaluation."""
-
-    name = "qi"
-    requires_qi_field = True
-
-    def __init__(self, options: QuasiIsodynamicOptions):
-        self.options = options
-
-    def J(self, _ctx: StageContext, _state):
-        raise RuntimeError("QuasiIsodynamicResidual must be evaluated inside a QI solve.")
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return quasi_isodynamic_field_objective(weight=residual_weight, qi_options=self.options)
-
-
-class QuasiIsodynamicResidualCeiling:
-    """Soft upper-bound objective for preserving a low-QI basin during cleanup."""
-
-    name = "qi_ceiling"
-    requires_qi_field = True
-
-    def __init__(
-        self,
-        *,
-        maximum: float,
-        smooth_penalty: float = 0.0,
-        qi_options: QuasiIsodynamicOptions | None = None,
-    ):
-        self.maximum = float(maximum)
-        self.smooth_penalty = float(smooth_penalty)
-        self.qi_options = qi_options
-
-    def J(self, _ctx: StageContext, _state):
-        raise RuntimeError("QuasiIsodynamicResidualCeiling must be evaluated inside a QI solve.")
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return qi_residual_ceiling_objective(
-            maximum=self.maximum,
-            weight=residual_weight,
-            smooth_penalty=self.smooth_penalty,
-            qi_options=self.qi_options,
-        )
-
-
-class MirrorRatio:
-    """Maximum mirror-ratio penalty object for solved VMEC states."""
-
-    name = "mirror_ratio"
-
-    def __init__(
-        self,
-        *,
-        threshold: float,
-        surfaces=(1.0,),
-        mboz: int = 18,
-        nboz: int = 18,
-        ntheta: int = 96,
-        nphi: int = 96,
-        surface_index: int | None = None,
-        phimin: float = 0.0,
-        smooth_extrema: float = 0.0,
-        smooth_penalty: float = 0.0,
-        normalize_surfaces: bool = True,
-        jit_booz: bool = True,
-        qi_options: QuasiIsodynamicOptions | None = None,
-    ):
-        self.threshold = float(threshold)
-        self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
-        self.mboz = int(mboz)
-        self.nboz = int(nboz)
-        self.ntheta = int(ntheta)
-        self.nphi = int(nphi)
-        self.surface_index = None if surface_index is None else int(surface_index)
-        self.phimin = float(phimin)
-        self.smooth_extrema = float(smooth_extrema)
-        self.smooth_penalty = float(smooth_penalty)
-        self.normalize_surfaces = bool(normalize_surfaces)
-        self.jit_booz = bool(jit_booz)
-        self.qi_options = qi_options
-
-    @property
-    def requires_qi_field(self) -> bool:
-        """Reuse a shared QI Boozer field only when explicitly requested."""
-
-        return self.qi_options is not None
-
-    def _selected_surfaces_and_weights(self) -> tuple[tuple[float, ...], list[float] | None]:
-        surfaces = self.surfaces
-        if not surfaces:
-            raise ValueError("MirrorRatio surfaces must contain at least one surface.")
-        if self.surface_index is not None:
-            idx = int(self.surface_index)
-            if idx < 0:
-                idx += len(surfaces)
-            if idx < 0 or idx >= len(surfaces):
-                raise IndexError(
-                    f"surface_index {self.surface_index} is outside MirrorRatio surface range 0..{len(surfaces) - 1}"
-                )
-            return (surfaces[idx],), None
-        if bool(self.normalize_surfaces):
-            return surfaces, [1.0 / float(max(len(surfaces), 1))] * len(surfaces)
-        return surfaces, None
-
-    def _prepare_boozer_constants(self, ctx: StageContext):
-        try:
-            from booz_xform_jax import prepare_booz_xform_constants
-        except Exception as exc:  # pragma: no cover - optional dependency import
-            raise ImportError(
-                "MirrorRatio requires booz_xform_jax. Install it with `pip install booz_xform_jax`."
-            ) from exc
-
-        cfg = ctx.static.cfg
-        main_modes = vmec_mode_table(int(cfg.mpol), int(cfg.ntor))
-        nyq_modes = nyquist_mode_table_from_grid(
-            mpol=int(cfg.mpol),
-            ntor=int(cfg.ntor),
-            ntheta=int(cfg.ntheta),
-            nzeta=int(cfg.nzeta),
-        )
-        return prepare_booz_xform_constants(
-            nfp=int(cfg.nfp),
-            mboz=self.mboz,
-            nboz=self.nboz,
-            asym=bool(cfg.lasym),
-            xm=np.asarray(main_modes.m, dtype=np.int32),
-            xn=np.asarray(main_modes.n * int(cfg.nfp), dtype=np.int32),
-            xm_nyq=np.asarray(nyq_modes.m, dtype=np.int32),
-            xn_nyq=np.asarray(nyq_modes.n * int(cfg.nfp), dtype=np.int32),
-        )
-
-    def _evaluate_state(self, ctx: StageContext, state, *, booz_constants=None, booz_grids=None):
-        surfaces, weights = self._selected_surfaces_and_weights()
-        return mirror_ratio_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            surfaces=surfaces,
-            weights=weights,
-            mboz=self.mboz,
-            nboz=self.nboz,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            phimin=self.phimin,
-            smooth_extrema=self.smooth_extrema,
-            smooth_penalty=self.smooth_penalty,
-            flux_local=ctx.flux,
-            prof_local={"pressure": ctx.pressure},
-            pressure_local=ctx.pressure,
-            jit_booz=self.jit_booz,
-            booz_constants=booz_constants,
-            booz_grids=booz_grids,
-        )
-
-    def J(self, ctx: StageContext, state):
-        if self.qi_options is not None:
-            raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
-        return self._evaluate_state(ctx, state)["residuals1d"]
-
-    def total(self, ctx: StageContext, state):
-        if self.qi_options is not None:
-            raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
-        return self._evaluate_state(ctx, state)["total"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("MirrorRatio is an upper-bound penalty and requires target=0.")
-
-        def _prepare(ctx: StageContext):
-            booz_constants, booz_grids = self._prepare_boozer_constants(ctx)
-
-            def _evaluate(ctx_p: StageContext, state):
-                return self._evaluate_state(
-                    ctx_p,
-                    state,
-                    booz_constants=booz_constants,
-                    booz_grids=booz_grids,
-                )["residuals1d"]
-
-            def _total(ctx_p: StageContext, state):
-                return self._evaluate_state(
-                    ctx_p,
-                    state,
-                    booz_constants=booz_constants,
-                    booz_grids=booz_grids,
-                )["total"]
-
-            return ObjectiveTerm(
-                self.name,
-                _evaluate,
-                target=0.0,
-                weight=residual_weight,
-                total=lambda ctx_p, state: float(residual_weight) ** 2 * _total(ctx_p, state),
-            )
-
-        return ObjectiveTerm(
-            self.name,
-            self.J,
-            target=0.0,
-            weight=residual_weight,
-            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
-            prepare=_prepare,
-        )
-
-    def to_constraint_term(self) -> ObjectiveTerm:
-        def _evaluate(ctx: StageContext, state, *, booz_constants=None, booz_grids=None):
-            surfaces, weights = self._selected_surfaces_and_weights()
-            mirror = mirror_ratio_penalty_from_state(
-                state=state,
-                static=ctx.static,
-                indata=ctx.indata,
-                signgs=ctx.signgs,
-                surfaces=surfaces,
-                weights=weights,
-                mboz=self.mboz,
-                nboz=self.nboz,
-                ntheta=self.ntheta,
-                nphi=self.nphi,
-                phimin=self.phimin,
-                smooth_extrema=self.smooth_extrema,
-                smooth_penalty=0.0,
-                flux_local=ctx.flux,
-                prof_local={"pressure": ctx.pressure},
-                pressure_local=ctx.pressure,
-                jit_booz=self.jit_booz,
-                booz_constants=booz_constants,
-                booz_grids=booz_grids,
-            )
-            residuals = jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64) - float(self.threshold)
-            if weights is not None:
-                residuals = residuals * jnp.sqrt(jnp.asarray(weights, dtype=jnp.float64))
-            return residuals
-
-        def _prepare(ctx: StageContext):
-            booz_constants, booz_grids = self._prepare_boozer_constants(ctx)
-
-            def _evaluate_prepared(ctx_p: StageContext, state):
-                return _evaluate(
-                    ctx_p,
-                    state,
-                    booz_constants=booz_constants,
-                    booz_grids=booz_grids,
-                )
-
-            return ObjectiveTerm(f"{self.name}_constraint", _evaluate_prepared, target=0.0, weight=1.0)
-
-        return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0, prepare=_prepare)
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return qi_mirror_ratio_objective(
-            threshold=self.threshold,
-            weight=residual_weight,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            surface_index=self.surface_index,
-            phimin=self.phimin,
-            smooth_extrema=self.smooth_extrema,
-            smooth_penalty=self.smooth_penalty,
-            normalize_surfaces=self.normalize_surfaces,
-            qi_options=self.qi_options,
-        )
-
-    def to_constraint_qi_term(self) -> QIObjectiveTerm:
-        return qi_mirror_ratio_constraint(
-            threshold=self.threshold,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            surface_index=self.surface_index,
-            phimin=self.phimin,
-            smooth_extrema=self.smooth_extrema,
-            normalize_surfaces=self.normalize_surfaces,
-            qi_options=self.qi_options,
-        )
-
-
-class VMECMirrorRatio:
-    """Fast mirror-ratio penalty evaluated directly from VMEC ``|B|``.
-
-    The scalar mirror ratio ``(Bmax - Bmin) / (Bmax + Bmin)`` does not require
-    Boozer coordinates.  This objective samples the VMEC/JAX real-space field
-    on the solver grid and avoids the ``booz_xform_jax`` transform used by
-    :class:`MirrorRatio`.  It is intended as a lightweight optimization term;
-    final quasisymmetry/omnigenity review should still use Boozer-coordinate
-    contour and spectral diagnostics.
-    """
-
-    name = "mirror_ratio"
-
-    def __init__(
-        self,
-        *,
-        threshold: float,
-        surfaces=(1.0,),
-        surface_index: int | None = None,
-        ntheta: int | None = None,
-        nphi: int | None = None,
-        nzeta: int | None = None,
-        smooth_extrema: float = 0.0,
-        smooth_penalty: float = 0.0,
-        normalize_surfaces: bool = True,
-        bmag_floor: float = 1.0e-300,
-    ):
-        self.threshold = float(threshold)
-        self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
-        self.surface_index = None if surface_index is None else int(surface_index)
-        self.smooth_extrema = float(smooth_extrema)
-        self.smooth_penalty = float(smooth_penalty)
-        self.normalize_surfaces = bool(normalize_surfaces)
-        self.bmag_floor = float(bmag_floor)
-        # Mirror ratio is evaluated directly on the solved VMEC angular grid.
-        # Accept the Boozer-style sampling keywords used by older optimization
-        # scripts so mirror/elongation objectives can be swapped without
-        # requiring Boozer options.  The actual resolution is controlled by the
-        # VMEC input deck (`ntheta`/`nzeta`) used for the solve.
-        self.requested_ntheta = None if ntheta is None else int(ntheta)
-        if nphi is not None and nzeta is not None and int(nphi) != int(nzeta):
-            raise ValueError("VMECMirrorRatio accepts either nphi or nzeta, not conflicting values.")
-        requested_nzeta = nzeta if nzeta is not None else nphi
-        self.requested_nzeta = None if requested_nzeta is None else int(requested_nzeta)
-
-    @property
-    def requires_qi_field(self) -> bool:
-        return False
-
-    def _selected_surface_indices_and_weights(self, ctx: StageContext) -> tuple[list[int], jnp.ndarray]:
-        surfaces = self.surfaces
-        if not surfaces:
-            raise ValueError("VMECMirrorRatio surfaces must contain at least one surface.")
-        if self.surface_index is not None:
-            idx = int(self.surface_index)
-            if idx < 0:
-                idx += len(surfaces)
-            if idx < 0 or idx >= len(surfaces):
-                raise IndexError(
-                    f"surface_index {self.surface_index} is outside VMECMirrorRatio surface range 0..{len(surfaces) - 1}"
-                )
-            surfaces = (surfaces[idx],)
-        s_grid = np.asarray(ctx.static.s, dtype=float)
-        indices = [int(np.argmin(np.abs(s_grid - float(surface)))) for surface in surfaces]
-        if bool(self.normalize_surfaces):
-            weights = jnp.full((len(indices),), 1.0 / float(max(len(indices), 1)), dtype=jnp.float64)
-        else:
-            weights = jnp.ones((len(indices),), dtype=jnp.float64)
-        return indices, weights
-
-    def _evaluate_state(self, ctx: StageContext, state):
-        indices, weights = self._selected_surface_indices_and_weights(ctx)
-        ratios = []
-        bmax_values = []
-        bmin_values = []
-        tiny = jnp.asarray(jnp.finfo(jnp.float64).tiny, dtype=jnp.float64)
-        for s_index in indices:
-            bcart = b_cartesian_from_state(
-                state,
-                ctx.static,
-                indata=ctx.indata,
-                signgs=ctx.signgs,
-                s_index=int(s_index),
-            )
-            bcart = jnp.asarray(bcart, dtype=jnp.float64)
-            bmag = jnp.sqrt(
-                jnp.maximum(
-                    jnp.sum(bcart * bcart, axis=-1),
-                    jnp.asarray(self.bmag_floor, dtype=jnp.float64),
-                )
-            )
-            bmax = _smooth_reduce_max(bmag, axis=(0, 1), softness=float(self.smooth_extrema))
-            bmin = _smooth_reduce_min(bmag, axis=(0, 1), softness=float(self.smooth_extrema))
-            bmin_positive = jnp.maximum(bmin, tiny)
-            denom = jnp.maximum(bmax + bmin_positive, tiny)
-            ratios.append((bmax - bmin_positive) / denom)
-            bmax_values.append(bmax)
-            bmin_values.append(bmin)
-        mirror_ratio = jnp.asarray(ratios, dtype=jnp.float64)
-        penalty = _smooth_positive_part(mirror_ratio - float(self.threshold), softness=float(self.smooth_penalty))
-        residuals1d = penalty * jnp.sqrt(weights)
-        total = jnp.sum(residuals1d * residuals1d)
-        return {
-            "residuals1d": residuals1d,
-            "total": total,
-            "penalty": penalty,
-            "mirror_ratio": mirror_ratio,
-            "bmax": jnp.asarray(bmax_values, dtype=jnp.float64),
-            "bmin": jnp.asarray(bmin_values, dtype=jnp.float64),
-            "threshold": jnp.asarray(float(self.threshold), dtype=jnp.float64),
-        }
-
-    def J(self, ctx: StageContext, state):
-        return self._evaluate_state(ctx, state)["residuals1d"]
-
-    def total(self, ctx: StageContext, state):
-        return self._evaluate_state(ctx, state)["total"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("VMECMirrorRatio is an upper-bound penalty and requires target=0.")
-        return ObjectiveTerm(
-            self.name,
-            self.J,
-            target=0.0,
-            weight=residual_weight,
-            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
-        )
-
-
-class BoozerBTarget:
-    """Boozer ``|B|`` spectrum-matching objective for QI steering.
-
-    This term is intended as a differentiable homotopy/steering objective, not
-    as a final QI diagnostic.  It compares the current Boozer ``|B|`` spectrum
-    against a reference spectrum on the same Boozer mode grid.  By default each
-    surface is normalized by its ``(m,n)=(0,0)`` coefficient so the term matches
-    field shape rather than absolute field strength.
-    """
-
-    name = "boozer_b_target"
-    requires_qi_field = True
-
-    def __init__(
-        self,
-        *,
-        target_bmnc,
-        target_bmns=None,
-        normalize: bool = True,
-        include_b00: bool = False,
-        qi_options: QuasiIsodynamicOptions | None = None,
-    ):
-        self.target_bmnc = np.asarray(target_bmnc, dtype=float)
-        self.target_bmns = None if target_bmns is None else np.asarray(target_bmns, dtype=float)
-        self.normalize = bool(normalize)
-        self.include_b00 = bool(include_b00)
-        self.qi_options = qi_options
-
-    def J(self, _ctx: StageContext, _state):
-        raise RuntimeError("BoozerBTarget must be evaluated inside a QI solve.")
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return qi_boozer_b_target_objective(
-            target_bmnc=self.target_bmnc,
-            target_bmns=self.target_bmns,
-            weight=residual_weight,
-            normalize=self.normalize,
-            include_b00=self.include_b00,
-            qi_options=self.qi_options,
-        )
-
-
-class MaxElongation:
-    """Maximum LCFS elongation penalty object for solved VMEC states."""
-
-    name = "max_elongation"
-
-    def __init__(
-        self,
-        *,
-        threshold: float,
-        ntheta: int = 48,
-        nphi: int = 16,
-        smooth_extrema: float = 0.0,
-        smooth_penalty: float = 0.0,
-        qi_options: QuasiIsodynamicOptions | None = None,
-    ):
-        self.threshold = float(threshold)
-        self.ntheta = int(ntheta)
-        self.nphi = int(nphi)
-        self.smooth_extrema = float(smooth_extrema)
-        self.smooth_penalty = float(smooth_penalty)
-        self.qi_options = qi_options
-
-    @property
-    def requires_qi_field(self) -> bool:
-        # Elongation is a VMEC-boundary property, so it never needs the shared
-        # QI Boozer field.  ``qi_options`` is accepted only for source
-        # compatibility with older examples.
-        return False
-
-    def _evaluate_state(self, ctx: StageContext, state, *, smooth_penalty: float | None = None):
-        return max_elongation_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            threshold=self.threshold,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            smooth_extrema=self.smooth_extrema,
-            smooth_penalty=self.smooth_penalty if smooth_penalty is None else float(smooth_penalty),
-        )
-
-    def J(self, ctx: StageContext, state):
-        return self._evaluate_state(ctx, state)["residuals1d"]
-
-    def total(self, ctx: StageContext, state):
-        return self._evaluate_state(ctx, state)["total"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("MaxElongation is an upper-bound penalty and requires target=0.")
-        return ObjectiveTerm(
-            self.name,
-            self.J,
-            target=0.0,
-            weight=residual_weight,
-            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
-        )
-
-    def to_constraint_term(self) -> ObjectiveTerm:
-        def _evaluate(ctx: StageContext, state):
-            elongation = self._evaluate_state(ctx, state, smooth_penalty=0.0)
-            return jnp.asarray([elongation["max_elongation"] - float(self.threshold)], dtype=jnp.float64)
-
-        return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0)
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return qi_max_elongation_objective(
-            threshold=self.threshold,
-            weight=residual_weight,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            smooth_extrema=self.smooth_extrema,
-            smooth_penalty=self.smooth_penalty,
-            qi_options=self.qi_options,
-        )
-
-    def to_constraint_qi_term(self) -> QIObjectiveTerm:
-        return qi_max_elongation_constraint(
-            threshold=self.threshold,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            smooth_extrema=self.smooth_extrema,
-            qi_options=self.qi_options,
-        )
-
-
-class MagneticWell:
-    """Smooth lower-bound objective for the vacuum magnetic-well proxy.
-
-    The well follows the SIMSOPT/VMEC convention
-    ``(dV/ds(0) - dV/ds(1)) / dV/ds(0)`` using the differentiable half-mesh
-    volume derivative reconstructed from the VMEC state.  Positive values are
-    favorable; this objective returns a smooth penalty when the well falls
-    below ``minimum``.
-    """
-
-    name = "magnetic_well"
-
-    def __init__(self, *, minimum: float = 0.0, softness: float = 1.0e-3):
-        self.minimum = float(minimum)
-        self.softness = float(softness)
-
-    def well(self, ctx: StageContext, state):
-        scalars = finite_beta_scalars_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-        )
-        return magnetic_well_from_vp(scalars["vp"])
-
-    def J(self, ctx: StageContext, state):
-        deficit = float(self.minimum) - self.well(ctx, state)
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("MagneticWell is a lower-bound penalty and requires target=0.")
-        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
-
-
-class VolavgB:
-    """Volume-averaged magnetic-field objective for finite-beta studies."""
-
-    name = "volavgB"
-
-    def J(self, ctx: StageContext, state):
-        return finite_beta_scalars_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-        )["volavgB"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
-
-
-class BetaTotal:
-    """Total-beta objective for finite-beta studies."""
-
-    name = "betatotal"
-
-    def J(self, ctx: StageContext, state):
-        return finite_beta_scalars_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-        )["betatotal"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
-
-
-class DMerc:
-    """Smooth lower-bound objective for VMEC Mercier stability.
-
-    The residual is a per-surface smooth penalty for ``DMerc < minimum`` on
-    interior radial surfaces.  It uses the differentiable state-level Mercier
-    path for both stellarator-symmetric and LASYM equilibria.
-    """
-
-    name = "DMerc"
-
-    def __init__(
-        self,
-        *,
-        minimum: float = 0.0,
-        softness: float = 1.0e-3,
-        mmax_force: int | None = None,
-        nmax_force: int | None = None,
-    ):
-        self.minimum = float(minimum)
-        self.softness = float(softness)
-        self.mmax_force = None if mmax_force is None else int(mmax_force)
-        self.nmax_force = None if nmax_force is None else int(nmax_force)
-
-    def terms(self, ctx: StageContext, state):
-        return mercier_terms_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            mmax_force=self.mmax_force,
-            nmax_force=self.nmax_force,
-        )
-
-    def J(self, ctx: StageContext, state):
-        dmerc = jnp.asarray(self.terms(ctx, state)["DMerc"], dtype=jnp.float64)
-        active = dmerc[1:-1] if int(dmerc.shape[0]) > 2 else jnp.zeros((0,), dtype=dmerc.dtype)
-        deficit = float(self.minimum) - active
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), deficit / softness)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("DMerc is a lower-bound penalty and requires target=0.")
-        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
-
-
-class GlasserResistiveInterchange:
-    """Smooth upper-bound objective for the Glasser resistive criterion.
-
-    The Glasser-Greene-Johnson necessary condition for resistive interchange
-    stability is ``D_R <= 0``.  This objective returns one smooth penalty per
-    interior radial surface for ``D_R > maximum``.  The optional
-    ``shear_epsilon`` regularizes the ``1 / shear**2`` factor for optimization;
-    keep it small and inspect ``glasser_shear_valid`` diagnostics for
-    near-zero-shear surfaces.
-    """
-
-    name = "D_R"
-
-    def __init__(
-        self,
-        *,
-        maximum: float = 0.0,
-        softness: float = 1.0e-3,
-        shear_epsilon: float = 0.0,
-        mmax_force: int | None = None,
-        nmax_force: int | None = None,
-    ):
-        self.maximum = float(maximum)
-        self.softness = float(softness)
-        self.shear_epsilon = float(shear_epsilon)
-        self.mmax_force = None if mmax_force is None else int(mmax_force)
-        self.nmax_force = None if nmax_force is None else int(nmax_force)
-
-    def terms(self, ctx: StageContext, state):
-        terms = mercier_terms_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            mmax_force=self.mmax_force,
-            nmax_force=self.nmax_force,
-        )
-        if self.shear_epsilon == 0.0:
-            return terms
-        return {
-            **terms,
-            **glasser_resistive_interchange_from_mercier_terms(
-                DMerc=terms["DMerc"],
-                shear=terms["shear"],
-                H=terms["H"],
-                shear_epsilon=self.shear_epsilon,
-            ),
-        }
-
-    def J(self, ctx: StageContext, state):
-        d_r = jnp.asarray(self.terms(ctx, state)["D_R"], dtype=jnp.float64)
-        active = d_r[1:-1] if int(d_r.shape[0]) > 2 else jnp.zeros((0,), dtype=d_r.dtype)
-        excess = active - float(self.maximum)
-        softness = jnp.asarray(float(self.softness), dtype=jnp.float64)
-        return softness * jnp.logaddexp(jnp.asarray(0.0, dtype=jnp.float64), excess / softness)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("GlasserResistiveInterchange is an upper-bound penalty and requires target=0.")
-        return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
-
-
-class _MercierProfileObjective:
-    """Base object for differentiable VMEC JXBFORCE profile objectives."""
-
-    name = "mercier_profile"
-    profile_key = ""
-
-    def __init__(
-        self,
-        *,
-        surfaces: Sequence[float] | None = None,
-        normalize: float = 1.0,
-        mmax_force: int | None = None,
-        nmax_force: int | None = None,
-    ):
-        self.surfaces = None if surfaces is None else tuple(float(s) for s in surfaces)
-        self.normalize = float(normalize)
-        self.mmax_force = None if mmax_force is None else int(mmax_force)
-        self.nmax_force = None if nmax_force is None else int(nmax_force)
-
-    def terms(self, ctx: StageContext, state):
-        return mercier_terms_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            mmax_force=self.mmax_force,
-            nmax_force=self.nmax_force,
-        )
-
-    def _select_profile(self, ctx: StageContext, profile):
-        profile = jnp.asarray(profile, dtype=jnp.float64)
-        if self.surfaces is None:
-            return profile[1:-1] if int(profile.shape[0]) > 2 else jnp.zeros((0,), dtype=profile.dtype)
-        s = np.asarray(getattr(ctx.static, "s"), dtype=float)
-        indices = [int(np.argmin(np.abs(s - float(surface)))) for surface in self.surfaces]
-        return profile[jnp.asarray(indices, dtype=jnp.int32)]
-
-    def J(self, ctx: StageContext, state):
-        profile = self.terms(ctx, state)[self.profile_key]
-        values = self._select_profile(ctx, profile)
-        return values / float(self.normalize)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
-
-
-class JDotB(_MercierProfileObjective):
-    """VMEC ``jdotb`` profile objective from the differentiable JXBFORCE path."""
-
-    name = "jdotb"
-    profile_key = "jdotb"
-
-
-class BDotB(_MercierProfileObjective):
-    """VMEC ``bdotb`` profile objective from the differentiable JXBFORCE path."""
-
-    name = "bdotb"
-    profile_key = "bdotb"
-
-
-class BDotGradV(_MercierProfileObjective):
-    """VMEC ``bdotgradv`` profile objective from the differentiable JXBFORCE path."""
-
-    name = "bdotgradv"
-    profile_key = "bdotgradv"
-
-
-class BVector:
-    """Cartesian magnetic-field vector objective on one radial surface.
-
-    The residual vector is ``(Bx, By, Bz)`` flattened over ``(theta, zeta)`` on
-    ``ctx.static.grid``.  ``s_index=-1`` targets the boundary surface.
-    """
-
-    name = "B_vector"
-
-    def __init__(self, *, s_index: int = -1, normalize: float = 1.0):
-        self.s_index = int(s_index)
-        self.normalize = float(normalize)
-
-    def J(self, ctx: StageContext, state):
-        field = b_cartesian_from_state(
-            state,
-            ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            s_index=self.s_index,
-        )
-        return jnp.ravel(jnp.asarray(field, dtype=jnp.float64)) / float(self.normalize)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
-
-
-class JVector(_MercierProfileObjective):
-    """Flux-coordinate current-density vector objective from JXBFORCE channels.
-
-    The returned vector contains ``(J^theta, J^zeta) = (itheta/sqrtg,
-    izeta/sqrtg)`` flattened over the selected full-mesh surfaces and angular
-    grid.  It is a VMEC-coordinate current-density diagnostic, not a Cartesian
-    vector.
-    """
-
-    name = "J_vector"
-
-    def J(self, ctx: StageContext, state):
-        terms = mercier_terms_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            mmax_force=self.mmax_force,
-            nmax_force=self.nmax_force,
-            include_channels=True,
-        )
-        sqrtg = jnp.asarray(terms["sqrtg"], dtype=jnp.float64)
-        sqrtg_safe = jnp.where(sqrtg != 0.0, sqrtg, jnp.asarray(1.0, dtype=sqrtg.dtype))
-        jtheta = jnp.where(sqrtg != 0.0, jnp.asarray(terms["itheta"], dtype=jnp.float64) / sqrtg_safe, 0.0)
-        jzeta = jnp.where(sqrtg != 0.0, jnp.asarray(terms["izeta"], dtype=jnp.float64) / sqrtg_safe, 0.0)
-        vector = jnp.stack([jtheta, jzeta], axis=-1)
-        values = self._select_profile(ctx, vector)
-        return jnp.ravel(values) / float(self.normalize)
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
-
-
-class ToroidalCurrent(_MercierProfileObjective):
-    """Integrated toroidal-current profile from VMEC's Mercier path.
-
-    The profile key is ``torcur`` and follows VMEC's Mercier normalization:
-    ``signgs * 2*pi * <B_u>`` on the full radial mesh.  This is a
-    state-derived current profile, not just the prescribed input ``ICURV``.
-    """
-
-    name = "torcur"
-    profile_key = "torcur"
-
-
-class ToroidalCurrentGradient(_MercierProfileObjective):
-    """Radial derivative of ``ToroidalCurrent`` used by VMEC Mercier terms."""
-
-    name = "torcur_prime"
-    profile_key = "ip"
-
-
-class RedlBootstrapMismatch(_MercierProfileObjective):
-    """Redl bootstrap-current mismatch objective for finite-beta studies.
-
-    Polynomial profile coefficients follow SIMSOPT ``ProfilePolynomial``
-    ordering.  ``ne_coeffs`` are in ``m^-3`` and ``Te_coeffs``/``Ti_coeffs`` in
-    eV.  The residual block is normalized as in SIMSOPT's
-    ``VmecRedlBootstrapMismatch`` objective.
-    """
-
-    name = "redl_bootstrap_mismatch"
-
-    def __init__(
-        self,
-        *,
-        helicity_n: int,
-        ne_coeffs,
-        Te_coeffs,
-        Ti_coeffs=None,
-        Zeff_coeffs=1.0,
-        surfaces: Sequence[float] | None = None,
-        n_lambda: int = 32,
-        mmax_force: int | None = None,
-        nmax_force: int | None = None,
-    ):
-        super().__init__(surfaces=surfaces, normalize=1.0, mmax_force=mmax_force, nmax_force=nmax_force)
-        self.helicity_n = int(helicity_n)
-        self.ne_coeffs = tuple(float(x) for x in np.ravel(np.asarray(ne_coeffs, dtype=float)))
-        self.Te_coeffs = tuple(float(x) for x in np.ravel(np.asarray(Te_coeffs, dtype=float)))
-        if Ti_coeffs is None:
-            self.Ti_coeffs = None
-        else:
-            self.Ti_coeffs = tuple(float(x) for x in np.ravel(np.asarray(Ti_coeffs, dtype=float)))
-        self.Zeff_coeffs = tuple(float(x) for x in np.ravel(np.atleast_1d(np.asarray(Zeff_coeffs, dtype=float))))
-        self.n_lambda = int(n_lambda)
-
-    def _evaluate(self, ctx: StageContext, state):
-        return redl_bootstrap_mismatch_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            helicity_n=self.helicity_n,
-            ne_coeffs=self.ne_coeffs,
-            Te_coeffs=self.Te_coeffs,
-            Ti_coeffs=self.Ti_coeffs,
-            Zeff_coeffs=self.Zeff_coeffs,
-            surfaces=self.surfaces,
-            n_lambda=self.n_lambda,
-            mmax_force=self.mmax_force,
-            nmax_force=self.nmax_force,
-        )
-
-    def J(self, ctx: StageContext, state):
-        return self._evaluate(ctx, state)["residuals1d"]
-
-    def total(self, ctx: StageContext, state):
-        return self._evaluate(ctx, state)["total"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("RedlBootstrapMismatch is already normalized and requires target=0.")
-        return ObjectiveTerm(
-            self.name,
-            self.J,
-            target=0.0,
-            weight=residual_weight,
-            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
-        )
-
-
-class LgradB:
-    """Minimum-``L_grad_B`` penalty object usable in QS or QI examples."""
-
-    name = "LgradB"
-
-    def __init__(
-        self,
-        *,
-        threshold: float,
-        s_index: int = -1,
-        ntheta: int = 9,
-        nphi: int = 7,
-        smooth_penalty: float = 0.0,
-    ):
-        self.threshold = float(threshold)
-        self.s_index = int(s_index)
-        self.ntheta = int(ntheta)
-        self.nphi = int(nphi)
-        self.smooth_penalty = float(smooth_penalty)
-
-    def _evaluate(self, ctx: StageContext, state):
-        return lgradb_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            flux_local=ctx.flux,
-            threshold=self.threshold,
-            s_index=self.s_index,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            smooth_penalty=self.smooth_penalty,
-        )
-
-    def J(self, ctx: StageContext, state):
-        return self._evaluate(ctx, state)["residuals1d"]
-
-    def total(self, ctx: StageContext, state):
-        return self._evaluate(ctx, state)["total"]
-
-    def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
-        if not _target_is_zero(target):
-            raise ValueError("LgradB penalty objectives require target=0.")
-        return ObjectiveTerm(
-            self.name,
-            self.J,
-            target=0.0,
-            weight=residual_weight,
-            total=lambda ctx, state: float(residual_weight) ** 2 * self.total(ctx, state),
-        )
-
-    def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
-        return qi_lgradb_objective(
-            threshold=self.threshold,
-            weight=residual_weight,
-            s_index=self.s_index,
-            ntheta=self.ntheta,
-            nphi=self.nphi,
-            smooth_penalty=self.smooth_penalty,
-        )
-
-
 def aspect_objective(target: float, weight: float = 1.0) -> ObjectiveTerm:
     """Aspect-ratio least-squares objective."""
 
@@ -1964,303 +692,12 @@ def quasisymmetry_objective(
     )
 
 
-def lgradb_objective(
-    *,
-    threshold: float,
-    weight: float = 1.0,
-    s_index: int = -1,
-    ntheta: int = 9,
-    nphi: int = 7,
-    smooth_penalty: float = 0.0,
-) -> ObjectiveTerm:
-    """Differentiable minimum-``L_grad_B`` penalty objective."""
-
-    def _lgradb(ctx: StageContext, state):
-        return lgradb_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            flux_local=ctx.flux,
-            threshold=float(threshold),
-            s_index=int(s_index),
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            smooth_penalty=float(smooth_penalty),
-        )
-
-    return ObjectiveTerm(
-        "LgradB",
-        lambda ctx, state: _lgradb(ctx, state)["residuals1d"],
-        target=0.0,
-        weight=weight,
-        total=lambda ctx, state: float(weight) ** 2 * _lgradb(ctx, state)["total"],
-    )
-
-
-def quasi_isodynamic_field_objective(
-    weight: float = 1.0,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Smooth QI residual term from ``quasi_isodynamic_residual_from_state``."""
-
-    def _evaluate(_ctx: StageContext, _state, field: dict):
-        return (
-            jnp.asarray(field["residuals1d"], dtype=jnp.float64) * float(weight),
-            float(weight) ** 2 * field["total"],
-        )
-
-    return QIObjectiveTerm("qi", _evaluate, qi_options=qi_options)
-
-
 def _smooth_positive_part(value, *, softness: float):
     value = jnp.asarray(value, dtype=jnp.float64)
     softness = float(softness)
     if softness <= 0.0:
         return jnp.maximum(value, 0.0)
     return softness * jnp.logaddexp(value / softness, 0.0)
-
-
-def qi_residual_ceiling_objective(
-    *,
-    maximum: float,
-    weight: float = 1.0,
-    smooth_penalty: float = 0.0,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Soft-wall objective that penalizes QI residuals above ``maximum``."""
-
-    def _evaluate(_ctx: StageContext, _state, field: dict):
-        qi_total = jnp.asarray(field["total"], dtype=jnp.float64)
-        excess = _smooth_positive_part(qi_total - float(maximum), softness=float(smooth_penalty))
-        residual = jnp.ravel(excess) * float(weight)
-        return residual, jnp.sum(residual * residual)
-
-    return QIObjectiveTerm("qi_ceiling", _evaluate, qi_options=qi_options)
-
-
-def qi_mirror_ratio_objective(
-    *,
-    threshold: float,
-    weight: float = 1.0,
-    ntheta: int = 96,
-    nphi: int = 96,
-    surface_index: int | None = None,
-    phimin: float = 0.0,
-    smooth_extrema: float = 0.0,
-    smooth_penalty: float = 0.0,
-    normalize_surfaces: bool = True,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Mirror-ratio upper-bound objective evaluated from Boozer ``|B|`` modes."""
-
-    def _evaluate(ctx: StageContext, _state, field: dict):
-        mirror_booz = field["booz"] if surface_index is None else _slice_boozer_surfaces(field["booz"], int(surface_index))
-        weights = None
-        if bool(normalize_surfaces) and surface_index is None:
-            nsurf = int(jnp.asarray(mirror_booz["bmnc_b"]).shape[0])
-            weights = [1.0 / float(max(nsurf, 1))] * nsurf
-        mirror = mirror_ratio_penalty_from_boozer_output(
-            mirror_booz,
-            nfp=int(ctx.static.cfg.nfp),
-            threshold=float(threshold),
-            weights=weights,
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            phimin=float(phimin),
-            smooth_extrema=float(smooth_extrema),
-            smooth_penalty=float(smooth_penalty),
-        )
-        return (
-            jnp.asarray(mirror["residuals1d"], dtype=jnp.float64) * float(weight),
-            float(weight) ** 2 * mirror["total"],
-        )
-
-    return QIObjectiveTerm("mirror_ratio", _evaluate, qi_options=qi_options)
-
-
-def qi_mirror_ratio_constraint(
-    *,
-    threshold: float,
-    ntheta: int = 96,
-    nphi: int = 96,
-    surface_index: int | None = None,
-    phimin: float = 0.0,
-    smooth_extrema: float = 0.0,
-    normalize_surfaces: bool = True,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Signed mirror-ratio constraint ``mirror_ratio - threshold <= 0``."""
-
-    def _evaluate(ctx: StageContext, _state, field: dict):
-        mirror_booz = field["booz"] if surface_index is None else _slice_boozer_surfaces(field["booz"], int(surface_index))
-        weights = None
-        if bool(normalize_surfaces) and surface_index is None:
-            nsurf = int(jnp.asarray(mirror_booz["bmnc_b"]).shape[0])
-            weights = [1.0 / float(max(nsurf, 1))] * nsurf
-        mirror = mirror_ratio_penalty_from_boozer_output(
-            mirror_booz,
-            nfp=int(ctx.static.cfg.nfp),
-            threshold=float(threshold),
-            weights=weights,
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            phimin=float(phimin),
-            smooth_extrema=float(smooth_extrema),
-            smooth_penalty=0.0,
-        )
-        weights_arr = jnp.ones_like(jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64))
-        if weights is not None:
-            weights_arr = jnp.asarray(weights, dtype=jnp.float64)
-        residuals = (jnp.asarray(mirror["mirror_ratio"], dtype=jnp.float64) - float(threshold)) * jnp.sqrt(
-            weights_arr
-        )
-        return residuals, jnp.sum(jnp.maximum(residuals, 0.0) ** 2)
-
-    return QIObjectiveTerm("mirror_ratio_constraint", _evaluate, qi_options=qi_options)
-
-
-def qi_boozer_b_target_objective(
-    *,
-    target_bmnc,
-    target_bmns=None,
-    weight: float = 1.0,
-    normalize: bool = True,
-    include_b00: bool = False,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Boozer ``|B|`` spectrum target evaluated on the shared QI field."""
-
-    target_bmnc_arr = np.asarray(target_bmnc, dtype=float)
-    target_bmns_arr = None if target_bmns is None else np.asarray(target_bmns, dtype=float)
-
-    def _evaluate(_ctx: StageContext, _state, field: dict):
-        booz = field["booz"]
-        bmnc = jnp.asarray(booz["bmnc_b"], dtype=jnp.float64)
-        target_c = jnp.asarray(target_bmnc_arr, dtype=jnp.float64)
-        if bmnc.shape != target_c.shape:
-            raise ValueError(
-                "BoozerBTarget target_bmnc must have the same shape as the current Boozer bmnc_b "
-                f"({target_c.shape} != {bmnc.shape})."
-            )
-
-        bmns_raw = booz.get("bmns_b")
-        bmns = jnp.zeros_like(bmnc) if bmns_raw is None else jnp.asarray(bmns_raw, dtype=jnp.float64)
-        target_s = jnp.zeros_like(target_c) if target_bmns_arr is None else jnp.asarray(target_bmns_arr, dtype=jnp.float64)
-        if target_s.shape != bmnc.shape:
-            raise ValueError(
-                "BoozerBTarget target_bmns must have the same shape as the current Boozer bmnc_b "
-                f"({target_s.shape} != {bmnc.shape})."
-            )
-
-        if bool(normalize):
-            tiny = jnp.asarray(jnp.finfo(bmnc.dtype).tiny, dtype=bmnc.dtype)
-            scale = jnp.maximum(jnp.abs(bmnc[:, :1]), tiny)
-            target_scale = jnp.maximum(jnp.abs(target_c[:, :1]), tiny)
-            bmnc = bmnc / scale
-            bmns = bmns / scale
-            target_c = target_c / target_scale
-            target_s = target_s / target_scale
-
-        diff_c = bmnc - target_c
-        diff_s = bmns - target_s
-        if not bool(include_b00):
-            diff_c = diff_c.at[:, 0].set(0.0)
-            diff_s = diff_s.at[:, 0].set(0.0)
-        residuals = jnp.concatenate([jnp.ravel(diff_c), jnp.ravel(diff_s)])
-        residuals = residuals * float(weight) / jnp.sqrt(jnp.asarray(max(int(residuals.size), 1), dtype=jnp.float64))
-        return residuals, jnp.sum(residuals * residuals)
-
-    return QIObjectiveTerm("boozer_b_target", _evaluate, qi_options=qi_options)
-
-
-def qi_max_elongation_objective(
-    *,
-    threshold: float,
-    weight: float = 1.0,
-    ntheta: int = 48,
-    nphi: int = 16,
-    smooth_extrema: float = 0.0,
-    smooth_penalty: float = 0.0,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Boundary elongation upper-bound objective."""
-
-    def _evaluate(ctx: StageContext, state, _field: dict):
-        elongation = max_elongation_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            threshold=float(threshold),
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            smooth_extrema=float(smooth_extrema),
-            smooth_penalty=float(smooth_penalty),
-        )
-        return (
-            jnp.asarray(elongation["residuals1d"], dtype=jnp.float64) * float(weight),
-            float(weight) ** 2 * elongation["total"],
-        )
-
-    return QIObjectiveTerm("max_elongation", _evaluate, qi_options=qi_options)
-
-
-def qi_max_elongation_constraint(
-    *,
-    threshold: float,
-    ntheta: int = 48,
-    nphi: int = 16,
-    smooth_extrema: float = 0.0,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """Signed LCFS elongation constraint ``max_elongation - threshold <= 0``."""
-
-    def _evaluate(ctx: StageContext, state, _field: dict):
-        elongation = max_elongation_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            threshold=float(threshold),
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            smooth_extrema=float(smooth_extrema),
-            smooth_penalty=0.0,
-        )
-        residuals = jnp.asarray([elongation["max_elongation"] - float(threshold)], dtype=jnp.float64)
-        return residuals, jnp.sum(jnp.maximum(residuals, 0.0) ** 2)
-
-    return QIObjectiveTerm("max_elongation_constraint", _evaluate, qi_options=qi_options)
-
-
-def qi_lgradb_objective(
-    *,
-    threshold: float,
-    weight: float = 1.0,
-    s_index: int = -1,
-    ntheta: int = 9,
-    nphi: int = 7,
-    smooth_penalty: float = 0.0,
-    qi_options: QuasiIsodynamicOptions | None = None,
-) -> QIObjectiveTerm:
-    """QI field-quality term penalizing small local ``L_grad_B``."""
-
-    def _evaluate(ctx: StageContext, state, _field: dict):
-        lgradb = lgradb_penalty_from_state(
-            state=state,
-            static=ctx.static,
-            indata=ctx.indata,
-            signgs=ctx.signgs,
-            flux_local=ctx.flux,
-            threshold=float(threshold),
-            s_index=int(s_index),
-            ntheta=int(ntheta),
-            nphi=int(nphi),
-            smooth_penalty=float(smooth_penalty),
-        )
-        return (
-            jnp.asarray(lgradb["residuals1d"], dtype=jnp.float64) * float(weight),
-            float(weight) ** 2 * lgradb["total"],
-        )
-
-    return QIObjectiveTerm("LgradB", _evaluate, qi_options=qi_options)
 
 
 def mean_iota(ctx: StageContext, state):
@@ -2282,158 +719,6 @@ def objectives_track_iota(objectives: Sequence[ObjectiveTerm], target_iota: floa
     return target_iota is not None or any(term.track_iota for term in objectives)
 
 
-def qs_stage_modes(
-    *,
-    max_mode: int,
-    use_mode_continuation: bool,
-    continuation_nfev: int,
-) -> list[int]:
-    """Repeated mode-continuation sequence used by the example scripts."""
-
-    if bool(use_mode_continuation) and int(max_mode) > 1 and int(continuation_nfev) > 0:
-        modes: list[int] = []
-        for mode in range(1, int(max_mode) + 1):
-            modes.extend([mode] * (2 if mode == 1 else 3))
-        return modes
-    return [int(max_mode)]
-
-
-def repeated_stage_modes(
-    *,
-    max_mode: int,
-    use_mode_continuation: bool,
-    continuation_nfev: int,
-    repeats: int = 5,
-) -> list[int]:
-    """Same-mode repeated continuation used by the QI example.
-
-    Unlike :func:`qs_stage_modes`, repeated same-mode continuation has no
-    lower-mode stages, so a zero ``continuation_nfev`` should not disable the
-    repeated max-mode sequence.
-    """
-
-    del continuation_nfev
-    if bool(use_mode_continuation) and int(max_mode) > 1:
-        return [int(max_mode)] * max(1, int(repeats))
-    return [int(max_mode)]
-
-
-def boozer_b_target_from_wout(
-    wout_path: str | Path,
-    *,
-    surfaces,
-    mboz: int,
-    nboz: int,
-) -> dict[str, np.ndarray | int]:
-    """Return Boozer ``|B|`` target spectra from a VMEC ``wout`` file.
-
-    The returned ``bmnc_b``/``bmns_b`` arrays use the same surface-major shape
-    as ``booz_xform_jax``'s differentiable API, so they can be passed directly
-    to :class:`BoozerBTarget`.
-    """
-
-    from booz_xform_jax import Booz_xform
-
-    bx = Booz_xform(verbose=0)
-    bx.read_wout(str(wout_path), flux=False)
-    s_in = np.asarray(bx.s_in, dtype=float)
-    surface_indices = sorted({int(np.argmin(np.abs(s_in - float(surface)))) for surface in surfaces})
-    bx.compute_surfs = surface_indices
-    bx.mboz = int(mboz)
-    bx.nboz = int(nboz)
-    bx.mnboz = None
-    bx.xm_b = None
-    bx.xn_b = None
-    bx._prepared = False
-    bx.run()
-    bmns_b = getattr(bx, "bmns_b", None)
-    return {
-        "bmnc_b": np.asarray(bx.bmnc_b, dtype=float).T,
-        "bmns_b": None if bmns_b is None else np.asarray(bmns_b, dtype=float).T,
-        "xm_b": np.asarray(bx.xm_b, dtype=int),
-        "xn_b": np.asarray(bx.xn_b, dtype=int),
-        "s_b": np.asarray(bx.s_b, dtype=float),
-        "nfp": int(bx.nfp),
-    }
-
-
-def qs_stage_budget(
-    *,
-    stage_mode: int,
-    max_mode: int,
-    max_nfev: int,
-    continuation_nfev: int,
-) -> int:
-    """Outer residual/Jacobian budget for one fixed-boundary stage."""
-
-    if int(max_nfev) <= 0:
-        raise ValueError("max_nfev must be a positive integer for outer optimization stages.")
-    if int(stage_mode) == int(max_mode):
-        return int(max_nfev)
-    # A zero continuation_nfev disables helper-generated lower-mode stages, but
-    # users may still pass an explicit stage sequence for experiments such as
-    # [2, 2, 3].  SciPy rejects max_nfev=0, so use the final-stage budget for
-    # explicit lower-mode stages when no separate continuation budget is given.
-    return int(continuation_nfev) if int(continuation_nfev) > 0 else int(max_nfev)
-
-
-def normalize_boundary_mode_limits(stage_mode) -> BoundaryModeLimits:
-    """Normalize an int/tuple/dict stage descriptor into mode limits.
-
-    Accepted forms:
-
-    - ``3``: square stage with ``max_m=max_n=3``.
-    - ``(1, 4)``: anisotropic stage with ``max_m=1``, ``max_n=4`` and
-      ``mode=4`` for VMEC resolution/budgeting.
-    - ``(4, 1, 4)``: explicit ``(mode, max_m, max_n)``.
-    - ``{"mode": 4, "max_m": 1, "max_n": 4, "label": "n-first"}``.
-    """
-
-    if isinstance(stage_mode, BoundaryModeLimits):
-        return stage_mode
-    if isinstance(stage_mode, dict):
-        max_m = stage_mode.get("max_m")
-        max_n = stage_mode.get("max_n")
-        mode_raw = stage_mode.get("mode", stage_mode.get("max_mode"))
-        if mode_raw is None:
-            finite_limits = [value for value in (max_m, max_n) if value is not None]
-            if not finite_limits:
-                raise ValueError("Boundary mode-limit dictionaries require mode/max_mode or max_m/max_n.")
-            mode_raw = max(int(value) for value in finite_limits)
-        return BoundaryModeLimits(
-            mode=int(mode_raw),
-            max_m=None if max_m is None else int(max_m),
-            max_n=None if max_n is None else int(max_n),
-            label=stage_mode.get("label"),
-        )
-    if isinstance(stage_mode, (tuple, list)):
-        if len(stage_mode) == 2:
-            max_m, max_n = (None if value is None else int(value) for value in stage_mode)
-            finite_limits = [value for value in (max_m, max_n) if value is not None]
-            if not finite_limits:
-                raise ValueError("At least one of max_m or max_n must be finite.")
-            return BoundaryModeLimits(mode=max(finite_limits), max_m=max_m, max_n=max_n)
-        if len(stage_mode) == 3:
-            mode, max_m, max_n = stage_mode
-            return BoundaryModeLimits(
-                mode=int(mode),
-                max_m=None if max_m is None else int(max_m),
-                max_n=None if max_n is None else int(max_n),
-            )
-        raise ValueError("Boundary stage tuples must be (max_m, max_n) or (mode, max_m, max_n).")
-    return BoundaryModeLimits(mode=int(stage_mode))
-
-
-def describe_boundary_mode_limits(stage_mode) -> str:
-    """Return a compact label for a boundary-mode stage descriptor."""
-
-    limits = normalize_boundary_mode_limits(stage_mode)
-    max_m = limits.mode if limits.max_m is None else limits.max_m
-    max_n = limits.mode if limits.max_n is None else limits.max_n
-    base = f"mode{limits.mode:02d}_m{int(max_m):02d}_n{int(max_n):02d}"
-    return f"{base}_{limits.label}" if limits.label else base
-
-
 def rebuild_for_optimization_resolution(
     indata,
     *,
@@ -2444,233 +729,15 @@ def rebuild_for_optimization_resolution(
 ):
     """Set VMEC spectral resolution for an optimization run.
 
-    By default both VMEC ``MPOL`` and ``NTOR`` are set to at least
-    ``max(min_vmec_mode, max_mode + 2)``.  ``vmec_mpol`` and ``vmec_ntor`` are
-    explicit internal-resolution overrides for diagnostic sweeps that decouple
-    the VMEC spectral grid from active boundary degrees of freedom.  Stage
-    builders still extend a mode table if a later active stage actually needs
-    more modes, so these overrides are safe for anisotropic probes such as
-    ``max_m=1, max_n=5``.
+    This wrapper preserves the historical workflow-level
+    ``rebuild_indata_with_resolution`` seam used by tests and diagnostics.  The
+    reusable implementation lives in ``optimizers.fixed_boundary.seed_inputs``.
     """
 
     floor = max(int(min_vmec_mode), int(max_mode) + 2)
     mpol = max(1, int(vmec_mpol)) if vmec_mpol is not None else floor
     ntor = max(0, int(vmec_ntor)) if vmec_ntor is not None else floor
     return rebuild_indata_with_resolution(indata, mpol=mpol, ntor=ntor)
-
-
-def simple_omnigenity_seed_indata(
-    indata,
-    *,
-    max_mode: int,
-    include: Sequence[str] = ("rc", "zs"),
-    fix: Sequence[str] = ("rc00",),
-    perturbation: float = 1.0e-5,
-    r0: float | None = None,
-    rbc01: float | None = None,
-    zbs01: float | None = None,
-):
-    """Return an input deck with a simple deterministic omnigenity seed boundary.
-
-    The seed keeps only the near-circular base shape ``RBC(0,0)``,
-    ``RBC(0,1)``, and ``ZBS(0,1)`` from the source deck unless explicit values
-    are supplied.  Every other active optimizable boundary coefficient with
-    ``max(abs(m), abs(n)) <= max_mode`` is set to a deterministic
-    ``±perturbation`` value.  This avoids exactly-zero Jacobian columns when
-    examples start far from a QA/QH/QP/QI warm-start boundary.
-    """
-
-    max_mode_i = int(max_mode)
-    perturbation = float(perturbation)
-    if max_mode_i < 0:
-        raise ValueError("max_mode must be non-negative.")
-    if not math.isfinite(perturbation) or perturbation < 0.0:
-        raise ValueError("perturbation must be finite and non-negative.")
-
-    boundary_keys = {"RBC", "RBS", "ZBC", "ZBS"}
-    include_set = {str(item).lower() for item in include}
-    fix_set = {str(item).lower() for item in fix}
-    family_keys = {
-        "rc": "RBC",
-        "rs": "RBS",
-        "zc": "ZBC",
-        "zs": "ZBS",
-    }
-    kind_offsets = {"rc": 17, "rs": 29, "zc": 43, "zs": 59}
-
-    def _source_value(key: str, index: tuple[int, int], default: float) -> float:
-        return float(indata.indexed.get(key, {}).get(index, default))
-
-    def _sign(kind: str, m_i: int, n_i: int) -> float:
-        parity = (kind_offsets[kind] + 1009 * int(m_i) + 9176 * (int(n_i) + 8192)) % 2
-        return 1.0 if parity == 0 else -1.0
-
-    def _spec_name(kind: str, m_i: int, n_i: int) -> str:
-        n_str = f"{int(n_i):+d}".replace("+", "")
-        return f"{kind}{int(m_i)}{n_str}"
-
-    out = copy.deepcopy(indata)
-    out.indexed = {
-        key: copy.deepcopy(values)
-        for key, values in indata.indexed.items()
-        if str(key).upper() not in boundary_keys
-    }
-    out.indexed["RBC"] = {
-        (0, 0): _source_value("RBC", (0, 0), 1.0) if r0 is None else float(r0),
-        (0, 1): _source_value("RBC", (0, 1), 0.2) if rbc01 is None else float(rbc01),
-    }
-    out.indexed["ZBS"] = {
-        (0, 1): _source_value("ZBS", (0, 1), 0.2) if zbs01 is None else float(zbs01),
-    }
-
-    preserved = {("RBC", (0, 0)), ("RBC", (0, 1)), ("ZBS", (0, 1))}
-    for m_i in range(0, max_mode_i + 1):
-        n_values = range(0, max_mode_i + 1) if m_i == 0 else range(-max_mode_i, max_mode_i + 1)
-        for n_i in n_values:
-            if m_i == 0 and n_i == 0:
-                continue
-            for kind, key in family_keys.items():
-                if kind not in include_set:
-                    continue
-                spec_name = _spec_name(kind, m_i, n_i)
-                if spec_name.lower() in fix_set or (key, (n_i, m_i)) in preserved:
-                    continue
-                out.indexed.setdefault(key, {})[(n_i, m_i)] = _sign(kind, m_i, n_i) * perturbation
-
-    return out
-
-
-def prepare_simple_omnigenity_seed_input(
-    input_file,
-    output_dir,
-    *,
-    max_mode: int,
-    min_vmec_mode: int = 5,
-    vmec_mpol: int | None = None,
-    vmec_ntor: int | None = None,
-    enabled: bool = True,
-    include: Sequence[str] = ("rc", "zs"),
-    fix: Sequence[str] = ("rc00",),
-    perturbation: float = 1.0e-5,
-    filename: str = "input.simple_seed",
-):
-    """Write and return a simple omnigenity seed input path when enabled."""
-
-    input_path = Path(input_file)
-    if not bool(enabled):
-        return input_path
-
-    from .namelist import read_indata, write_indata
-
-    output_path = Path(output_dir) / filename
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    indata = read_indata(input_path)
-    indata = rebuild_for_optimization_resolution(
-        indata,
-        max_mode=max_mode,
-        min_vmec_mode=min_vmec_mode,
-        vmec_mpol=vmec_mpol,
-        vmec_ntor=vmec_ntor,
-    )
-    seeded = simple_omnigenity_seed_indata(
-        indata,
-        max_mode=max_mode,
-        include=include,
-        fix=fix,
-        perturbation=perturbation,
-    )
-    write_indata(output_path, seeded)
-    return output_path
-
-
-def interpolate_indata_boundary(
-    seed_indata,
-    reference_indata,
-    lam: float,
-    *,
-    keys: Sequence[str] = ("RBC", "ZBS", "RBS", "ZBC"),
-    scalar_keys: Sequence[str] = (),
-    max_mode: int | None = None,
-    require_same_nfp: bool = True,
-    preserve_seed_scalars: Sequence[str] = ("NFP", "LASYM"),
-):
-    """Interpolate selected VMEC boundary Fourier coefficients and scalars.
-
-    This helper implements a deterministic global-to-local preconditioner for
-    far-seed QI optimization.  ``lam=0`` preserves the seed boundary for the
-    selected keys, while ``lam=1`` uses the reference boundary.  Optional
-    ``scalar_keys`` are interpolated by the same rule.  Scalar VMEC metadata
-    remains seed-owned for entries in ``preserve_seed_scalars`` so a reference
-    family can be used without accidentally changing the user's field-period
-    count or symmetry flag.
-
-    If ``max_mode`` is given, selected boundary coefficient dictionaries are
-    projected to modes with ``abs(m) <= max_mode`` and ``abs(n) <= max_mode``.
-    """
-
-    lam = float(lam)
-    if not math.isfinite(lam):
-        raise ValueError("Boundary interpolation lambda must be finite.")
-    if bool(require_same_nfp) and int(seed_indata.get_int("NFP", -1)) != int(reference_indata.get_int("NFP", -2)):
-        raise ValueError(
-            "Boundary interpolation requires same-NFP inputs; "
-            f"got seed NFP={seed_indata.get_int('NFP')} and reference NFP={reference_indata.get_int('NFP')}."
-        )
-
-    out = copy.deepcopy(seed_indata)
-    for key in preserve_seed_scalars:
-        key = key.upper()
-        if key in seed_indata.scalars:
-            out.scalars[key] = copy.deepcopy(seed_indata.scalars[key])
-
-    if "MPOL" in seed_indata.scalars or "MPOL" in reference_indata.scalars:
-        out.scalars["MPOL"] = max(int(seed_indata.get_int("MPOL", 0)), int(reference_indata.get_int("MPOL", 0)))
-    if "NTOR" in seed_indata.scalars or "NTOR" in reference_indata.scalars:
-        out.scalars["NTOR"] = max(int(seed_indata.get_int("NTOR", 0)), int(reference_indata.get_int("NTOR", 0)))
-
-    def _interpolate_scalar_value(seed_value, reference_value, key: str):
-        if isinstance(seed_value, bool) or isinstance(reference_value, bool):
-            raise TypeError(f"Cannot interpolate boolean VMEC scalar {key!r}.")
-        if isinstance(seed_value, (int, float)) and isinstance(reference_value, (int, float)):
-            return (1.0 - lam) * float(seed_value) + lam * float(reference_value)
-        if isinstance(seed_value, (list, tuple)) and isinstance(reference_value, (list, tuple)):
-            if len(seed_value) != len(reference_value):
-                raise ValueError(
-                    f"Cannot interpolate VMEC scalar list {key!r} with lengths "
-                    f"{len(seed_value)} and {len(reference_value)}."
-                )
-            return [
-                _interpolate_scalar_value(seed_item, reference_item, key)
-                for seed_item, reference_item in zip(seed_value, reference_value, strict=True)
-            ]
-        raise TypeError(
-            f"Cannot interpolate VMEC scalar {key!r} with values "
-            f"{seed_value!r} and {reference_value!r}."
-        )
-
-    preserved = {str(key).upper() for key in preserve_seed_scalars}
-    for key in tuple(str(item).upper() for item in scalar_keys):
-        if key in preserved:
-            raise ValueError(f"Cannot interpolate preserved seed scalar {key!r}.")
-        if key not in seed_indata.scalars or key not in reference_indata.scalars:
-            continue
-        out.scalars[key] = _interpolate_scalar_value(seed_indata.scalars[key], reference_indata.scalars[key], key)
-
-    max_mode_i = None if max_mode is None else int(max_mode)
-    for key in tuple(item.upper() for item in keys):
-        seed_coeffs = seed_indata.indexed.get(key, {})
-        ref_coeffs = reference_indata.indexed.get(key, {})
-        indices = set(seed_coeffs) | set(ref_coeffs)
-        interpolated = {}
-        for idx in sorted(indices):
-            if max_mode_i is not None and any(abs(int(i)) > max_mode_i for i in idx[:2]):
-                continue
-            seed_value = float(seed_coeffs.get(idx, 0.0))
-            reference_value = float(ref_coeffs.get(idx, 0.0))
-            interpolated[idx] = (1.0 - lam) * seed_value + lam * reference_value
-        if interpolated or key in out.indexed:
-            out.indexed[key] = interpolated
-    return out
 
 
 def _indata_get_int(indata, key: str, default: int) -> int:
@@ -2779,108 +846,6 @@ def build_fixed_boundary_objective_stage(
     )
 
 
-def residuals_from_objectives(objectives: Sequence[ObjectiveTerm], ctx: StageContext):
-    """Create the state residual callback consumed by ``FixedBoundaryExactOptimizer``."""
-
-    bound_objectives = tuple(term.bind(ctx) for term in objectives)
-
-    def residuals_from_state(state, *, ctx=ctx, objectives=bound_objectives):
-        return jnp.concatenate([term.residual(ctx, state) for term in objectives])
-
-    field_totals = tuple(term.total for term in bound_objectives if term.total is not None)
-    residuals_from_state._n_non_qs = sum(1 for term in bound_objectives if term.total is None)
-    residuals_from_state._qs_total_from_state = (
-        lambda state, ctx=ctx, field_totals=field_totals: float(
-            sum(float(total(ctx, state)) for total in field_totals)
-        )
-        if field_totals
-        else lambda _state: 0.0
-    )
-    family = next(
-        (
-            term.metadata.get("objective_family")
-            for term in bound_objectives
-            if term.metadata.get("objective_family")
-        ),
-        None,
-    )
-    if family is not None:
-        residuals_from_state._objective_family = str(family)
-    helicity_m = next(
-        (term.metadata.get("helicity_m") for term in bound_objectives if "helicity_m" in term.metadata),
-        None,
-    )
-    helicity_n = next(
-        (term.metadata.get("helicity_n") for term in bound_objectives if "helicity_n" in term.metadata),
-        None,
-    )
-    if helicity_m is not None:
-        residuals_from_state._helicity_m = int(helicity_m)
-    if helicity_n is not None:
-        residuals_from_state._helicity_n = int(helicity_n)
-    return _attach_packed_state_autodiff_hooks(residuals_from_state)
-
-
-def _attach_packed_state_autodiff_hooks(residuals_from_state: Callable) -> Callable:
-    """Attach generic packed-state VJP hooks to an objective residual callback.
-
-    The older direct QS residual factories expose custom hooks used by
-    ``FixedBoundaryExactOptimizer`` to avoid rebuilding a generic packed-state
-    residual VJP for every accepted point.  SIMSOPT-style tuple workflows are
-    more flexible, so use a generic hook here: it differentiates the already
-    assembled residual vector with respect to the packed VMEC state.  The
-    optimizer wraps these hooks in cached ``jax.jit`` helpers, so this keeps the
-    flexible tuple API while enabling the matrix-free and scalar-adjoint paths
-    to stay on the same fast accepted-point replay architecture.
-    """
-
-    def _residuals_from_packed(packed_state, layout):
-        from .state import unpack_state
-
-        state = unpack_state(packed_state, layout)
-        return jnp.asarray(residuals_from_state(state), dtype=jnp.float64).reshape(-1)
-
-    def state_cotangent_operator_from_packed(packed_state, layout):
-        from ._compat import jax, jnp as _jnp
-
-        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
-
-        def _packed_residuals(packed):
-            return _residuals_from_packed(packed, layout)
-
-        _, residual_vjp = jax.vjp(_packed_residuals, packed_state)
-
-        def _apply(residual_cotangent):
-            cotangent = _jnp.asarray(residual_cotangent, dtype=_jnp.float64).reshape(-1)
-            state_cotangent = residual_vjp(cotangent)[0]
-            return _jnp.nan_to_num(state_cotangent, nan=0.0, posinf=0.0, neginf=0.0)
-
-        return _apply
-
-    def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
-        return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
-
-    def state_objective_value_and_cotangent_from_packed(packed_state, layout):
-        from ._compat import jax, jnp as _jnp
-
-        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
-
-        def _objective(packed):
-            residuals = _residuals_from_packed(packed, layout)
-            return 0.5 * _jnp.vdot(residuals, residuals)
-
-        value, cotangent = jax.value_and_grad(_objective)(packed_state)
-        cotangent = _jnp.nan_to_num(cotangent, nan=0.0, posinf=0.0, neginf=0.0)
-        return value, cotangent
-
-    residuals_from_state._state_cotangent_from_packed = state_cotangent_from_packed
-    residuals_from_state._state_cotangent_operator_from_packed = state_cotangent_operator_from_packed
-    residuals_from_state._state_objective_value_and_cotangent_from_packed = (
-        state_objective_value_and_cotangent_from_packed
-    )
-    return residuals_from_state
-
-
 def run_fixed_boundary_objective_optimization(
     *,
     cfg,
@@ -2948,89 +913,48 @@ def run_fixed_boundary_objective_optimization(
             solver_device=solver_device,
             exact_path=exact_path,
         )
-        x_scale = (
-            create_x_scale(stage.specs, alpha=float(ess_alpha))
-            if bool(use_ess)
-            else np.ones(len(stage.specs), dtype=float)
-        )
-        # Each continuation stage is built from the previous stage's optimized
-        # VMEC input, so the new optimization vector starts at zero increment.
-        # This avoids reintroducing higher modes from the original deck when a
-        # lower-mode stage intentionally projected them out.
-        params0 = np.zeros(len(stage.specs), dtype=float)
-        nfev = qs_stage_budget(
-            stage_mode=int(stage_limits.mode),
-            max_mode=int(max_mode),
-            max_nfev=int(max_nfev),
-            continuation_nfev=int(continuation_nfev),
-        )
         iota_fn = (
             (lambda state, ctx=stage.ctx: float(mean_iota(ctx, state)))
             if objectives_track_iota(objectives, target_iota=target_iota) or iota_abs_min is not None
             else None
         )
-
-        if int(stage_limits.mode) == int(max_mode):
-            print_qs_problem_summary(
-                method=method,
-                max_nfev=nfev,
-                use_mode_continuation=use_mode_continuation,
-                use_ess=use_ess,
-                ess_alpha=ess_alpha,
-                objectives=objectives,
-                specs=stage.specs,
-                x_scale=np.asarray(x_scale, dtype=float),
-                optimizer=stage.optimizer,
-                params0=params0,
-            )
-        else:
-            print(
-                "Stage "
-                f"{describe_boundary_mode_limits(stage_limits)} continuation seed "
-                f"(budget={nfev}) ..."
-            )
-
-        result = stage.optimizer.run(
-            params0,
+        params0, result = _run_objective_stage_and_save(
+            stage=stage,
+            stage_limits=stage_limits,
+            stage_index=stage_index,
+            max_mode=max_mode,
+            max_nfev=max_nfev,
+            continuation_nfev=continuation_nfev,
             method=method,
-            max_nfev=nfev,
             ftol=ftol,
             gtol=gtol,
             xtol=xtol,
-            x_scale=x_scale,
-            verbose=1 if int(stage_limits.mode) == int(max_mode) else 0,
+            output_dir=output_dir,
+            use_mode_continuation=use_mode_continuation,
+            use_ess=use_ess,
+            ess_alpha=ess_alpha,
+            objectives=objectives,
             iota_fn=iota_fn,
             target_iota=target_iota,
             target_aspect=target_aspect,
+            iota_abs_min=iota_abs_min,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
             scalar_step_bound=scalar_step_bound,
             scalar_cost_only_trials=scalar_cost_only_trials,
-        )
-        if iota_abs_min is not None:
-            result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
-        save_qs_stage_artifacts(
-            stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
-            optimizer=stage.optimizer,
-            params_initial=params0,
-            params_final=result["x"],
-            result=result,
-            save_inputs=save_stage_inputs,
-            save_wouts=save_stage_wouts,
+            save_stage_inputs=save_stage_inputs,
+            save_stage_wouts=save_stage_wouts,
             save_rerun_wouts=save_rerun_wouts,
         )
-        attempted_record = (int(stage_limits.mode), stage.optimizer, params0, result)
-        stage_records.append(attempted_record)
-        accepted_record = _select_nonworsening_stage_record(
-            attempted_record,
-            accepted_stage_records,
-            stage_label=describe_boundary_mode_limits(stage_limits),
+        current_indata = _record_accepted_stage(
+            stage_records=stage_records,
+            accepted_stage_records=accepted_stage_records,
+            stage_limits=stage_limits,
+            optimizer=stage.optimizer,
+            params0=params0,
+            result=result,
         )
-        if accepted_record is attempted_record:
-            accepted_stage_records.append(accepted_record)
-        _accepted_mode, accepted_optimizer, _accepted_params0, accepted_result = accepted_record
-        current_indata = accepted_optimizer._indata_from_params(accepted_result["x"])
         current_cfg = config_from_indata(current_indata)
 
     final_optimizer = accepted_stage_records[-1][1]
@@ -3384,86 +1308,47 @@ def run_quasi_isodynamic_objective_optimization(
             solver_device=solver_device,
             exact_path=exact_path,
         )
-        x_scale = (
-            create_x_scale(stage.specs, alpha=float(ess_alpha))
-            if bool(use_ess)
-            else np.ones(len(stage.specs), dtype=float)
-        )
-        # The stage input already contains the previous optimized boundary.
-        # New modes therefore start from their deck values (usually zero after
-        # projection) and all active coefficients are represented as increments.
-        params0 = np.zeros(len(stage.specs), dtype=float)
-        nfev = qs_stage_budget(
-            stage_mode=int(stage_limits.mode),
-            max_mode=int(max_mode),
-            max_nfev=int(max_nfev),
-            continuation_nfev=int(continuation_nfev),
-        )
         iota_fn = (
             (lambda state, ctx=stage.ctx: float(mean_iota(ctx, state)))
             if objectives_track_iota(scalar_objectives) or iota_abs_min is not None
             else None
         )
-        if int(stage_limits.mode) == int(max_mode):
-            print_qs_problem_summary(
-                method=method,
-                max_nfev=nfev,
-                use_mode_continuation=use_mode_continuation,
-                use_ess=use_ess,
-                ess_alpha=ess_alpha,
-                objectives=scalar_objectives,
-                specs=stage.specs,
-                x_scale=np.asarray(x_scale, dtype=float),
-                optimizer=stage.optimizer,
-                params0=params0,
-            )
-            print("QI field objectives:")
-            for term in qi_objectives:
-                print(f"  - {term.name}")
-        else:
-            print(
-                "Stage "
-                f"{describe_boundary_mode_limits(stage_limits)} continuation seed "
-                f"(budget={nfev}) ..."
-            )
-
-        result = stage.optimizer.run(
-            params0,
+        params0, result = _run_objective_stage_and_save(
+            stage=stage,
+            stage_limits=stage_limits,
+            stage_index=stage_index,
+            max_mode=max_mode,
+            max_nfev=max_nfev,
+            continuation_nfev=continuation_nfev,
             method=method,
-            max_nfev=nfev,
             ftol=ftol,
             gtol=gtol,
             xtol=xtol,
-            x_scale=x_scale,
-            verbose=1 if int(stage_limits.mode) == int(max_mode) else 0,
+            output_dir=output_dir,
+            use_mode_continuation=use_mode_continuation,
+            use_ess=use_ess,
+            ess_alpha=ess_alpha,
+            objectives=scalar_objectives,
+            qi_objectives=qi_objectives,
             iota_fn=iota_fn,
             target_aspect=target_aspect,
+            iota_abs_min=iota_abs_min,
             scipy_tr_solver=scipy_tr_solver,
             scipy_lsmr_maxiter=scipy_lsmr_maxiter,
             lbfgs_step_bound=lbfgs_step_bound,
             scalar_step_bound=scalar_step_bound,
             scalar_cost_only_trials=scalar_cost_only_trials,
+            save_stage_inputs=save_stage_inputs,
+            save_stage_wouts=save_stage_wouts,
         )
-        if iota_abs_min is not None:
-            result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
-        save_qs_stage_artifacts(
-            stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
+        current_indata = _record_accepted_stage(
+            stage_records=stage_records,
+            accepted_stage_records=accepted_stage_records,
+            stage_limits=stage_limits,
             optimizer=stage.optimizer,
-            params_initial=params0,
-            params_final=result["x"],
+            params0=params0,
             result=result,
-            save_inputs=save_stage_inputs,
-            save_wouts=save_stage_wouts,
         )
-        attempted_record = (int(stage_limits.mode), stage.optimizer, params0, result)
-        stage_records.append(attempted_record)
-        accepted_record = _select_nonworsening_stage_record(
-            attempted_record,
-            accepted_stage_records,
-            stage_label=describe_boundary_mode_limits(stage_limits),
-        )
-        if accepted_record is attempted_record:
-            accepted_stage_records.append(accepted_record)
         write_qi_workflow_stage_checkpoint(
             output_dir=output_dir,
             stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
@@ -3473,8 +1358,6 @@ def run_quasi_isodynamic_objective_optimization(
             completed_stage_modes=[record[0] for record in stage_records],
             requested_stage_modes=normalized_stage_modes,
         )
-        _accepted_mode, accepted_optimizer, _accepted_params0, accepted_result = accepted_record
-        current_indata = accepted_optimizer._indata_from_params(accepted_result["x"])
         current_cfg = config_from_indata(current_indata)
 
     final_optimizer = accepted_stage_records[-1][1]
@@ -3589,29 +1472,7 @@ def least_squares_solve(
             output_dir=vmec.output_dir,
             label=label,
             use_mode_continuation=use_mode_continuation,
-            surfaces=qi_options.surfaces,
-            mboz=qi_options.mboz,
-            nboz=qi_options.nboz,
-            nphi=qi_options.nphi,
-            nalpha=qi_options.nalpha,
-            n_bounce=qi_options.n_bounce,
-            include_bounce_endpoints=qi_options.include_bounce_endpoints,
-            softness=qi_options.softness,
-            width_weight=qi_options.width_weight,
-            branch_width_weight=qi_options.branch_width_weight,
-            branch_width_softness=qi_options.branch_width_softness,
-            profile_weight=qi_options.profile_weight,
-            shuffle_profile_weight=qi_options.shuffle_profile_weight,
-            shuffle_profile_softness=qi_options.shuffle_profile_softness,
-            shuffle_profile_nphi_out=qi_options.shuffle_profile_nphi_out,
-            weighted_shuffle_profile_weight=qi_options.weighted_shuffle_profile_weight,
-            weighted_shuffle_profile_softness=qi_options.weighted_shuffle_profile_softness,
-            aligned_profile_weight=qi_options.aligned_profile_weight,
-            aligned_profile_softness=qi_options.aligned_profile_softness,
-            aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
-            aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
-            phimin=qi_options.phimin,
-            jit_booz=qi_options.jit_booz,
+            **_qi_options_stage_kwargs(qi_options),
             target_aspect=target_aspect,
             iota_abs_min=iota_abs_min,
             include=vmec.include,
@@ -3674,59 +1535,8 @@ def least_squares_solve(
     )
 
 
-def print_qs_problem_summary(
-    *,
-    method: str,
-    max_nfev: int,
-    use_mode_continuation: bool,
-    use_ess: bool,
-    ess_alpha: float,
-    objectives: Sequence[ObjectiveTerm],
-    specs: Sequence[BoundaryParamSpec],
-    x_scale: np.ndarray,
-    optimizer,
-    params0,
-) -> None:
-    """Print the problem summary used by the standalone examples."""
-
-    print(f"Parameter space ({len(specs)} DOFs): {boundary_param_names(specs)}")
-    print("Objectives:")
-    for term in objectives:
-        print(f"  - {term.name}: target={term.target}, weight={term.weight}")
-    if use_ess:
-        print(f"ESS scales (alpha={ess_alpha}): min={x_scale.min():.3f}  max={x_scale.max():.3f}")
-    else:
-        print("ESS disabled - uniform scales.")
-    print(f"Aspect ratio (initial):        {optimizer.aspect_ratio(params0):.6f}")
-    print(f"Field objective (initial):     {optimizer.quasisymmetry_objective(params0):.6e}")
-    print(f"Running {method} (max_nfev={max_nfev}, continuation={use_mode_continuation}) ...")
-
-
-def print_qs_final_summary(
-    result: dict,
-    *,
-    target_iota: float | None = None,
-    iota_abs_min: float | None = None,
-) -> None:
-    """Print the final scalar diagnostics from an optimization result."""
-
-    hist = result.get("_history_dump", {})
-    print(f"\nTermination: {result['message']}")
-    print(f"Aspect ratio (final):          {float(hist.get('aspect_final', float('nan'))):.6f}")
-    if "iota_final" in hist:
-        if target_iota is not None:
-            target = f"  target={target_iota:.6f}"
-        elif iota_abs_min is not None:
-            target = f"  min |iota|={iota_abs_min:.6f}"
-        else:
-            target = ""
-        print(f"Mean iota (final):             {float(hist['iota_final']):.6f}{target}")
-    print(f"Field objective (final):       {float(hist.get('qs_final', float('nan'))):.6e}")
-    print(f"Total objective (final):       {float(hist.get('objective_final', float('nan'))):.6e}")
-    obj0 = hist.get("objective_initial")
-    objf = hist.get("objective_final")
-    if obj0 is not None and float(obj0) > 0.0 and objf is not None:
-        print(f"Objective reduction:           {100.0 * (1.0 - float(objf) / float(obj0)):.1f}%")
+print_qs_problem_summary = _workflow_outputs.print_qs_problem_summary
+print_qs_final_summary = _workflow_outputs.print_qs_final_summary
 
 
 def save_qs_stage_artifacts(
@@ -3740,84 +1550,102 @@ def save_qs_stage_artifacts(
     save_wouts: bool = False,
     save_rerun_wouts: bool = False,
 ) -> None:
-    """Save stage input files and optionally wout files."""
+    """Save input/WOUT artifacts for one continuation optimization stage."""
 
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    if save_inputs:
-        optimizer.save_input(stage_dir / "input.initial", params_initial)
-        optimizer.save_input(stage_dir / "input.final", params_final)
-    if save_wouts:
-        optimizer.save_wout(stage_dir / "wout_initial.nc", params_initial, state=result.get("_state_initial"))
-        optimizer.save_wout(stage_dir / "wout_final.nc", params_final, state=result.get("_state_final"))
-    else:
-        _remove_stale(stage_dir / "wout_initial.nc")
-        _remove_stale(stage_dir / "wout_final.nc")
-    if save_rerun_wouts:
-        rerun = run_fixed_boundary(str(stage_dir / "input.initial"), verbose=False)
-        write_wout_from_fixed_boundary_run(str(stage_dir / "wout_initial_rerun.nc"), rerun)
-        rerun = run_fixed_boundary(str(stage_dir / "input.final"), verbose=False)
-        write_wout_from_fixed_boundary_run(str(stage_dir / "wout_final_rerun.nc"), rerun)
-    else:
-        _remove_stale(stage_dir / "wout_initial_rerun.nc")
-        _remove_stale(stage_dir / "wout_final_rerun.nc")
-
-
-def _result_objective_final(result) -> float:
-    """Return the final scalar objective recorded for a stage result."""
-
-    try:
-        history = result.get("_history_dump", {})
-        if "objective_final" in history:
-            return float(history["objective_final"])
-        if "objective" in result:
-            return float(result["objective"])
-        if "cost" in result:
-            return 2.0 * float(result["cost"])
-    except Exception:
-        return math.inf
-    return math.inf
-
-
-def _select_nonworsening_stage_record(
-    attempted_record,
-    accepted_stage_records,
-    *,
-    stage_label: str,
-):
-    """Reject continuation stages whose final objective worsens the handoff.
-
-    Repeated same-mode continuation is meant to refine the previously accepted
-    boundary.  It can still fail because the VMEC/QI subproblem is nonlinear and
-    finite-budget.  In that case keep the attempted artifacts for diagnostics
-    but do not hand a worse boundary to the next stage or final outputs.  Do not
-    compare different mode numbers here: higher-mode continuation changes the
-    active parameter space and existing tests intentionally use synthetic
-    cross-mode objective values that are not comparable.
-    """
-
-    if not accepted_stage_records:
-        return attempted_record
-    previous_record = accepted_stage_records[-1]
-    if int(attempted_record[0]) != int(previous_record[0]):
-        return attempted_record
-    previous_objective = _result_objective_final(previous_record[3])
-    attempted_objective = _result_objective_final(attempted_record[3])
-    if not math.isfinite(previous_objective):
-        return attempted_record
-    tolerance = max(1.0e-12, 1.0e-10 * max(1.0, abs(previous_objective)))
-    if math.isfinite(attempted_objective) and attempted_objective <= previous_objective + tolerance:
-        return attempted_record
-
-    history = attempted_record[3].setdefault("_history_dump", {})
-    history["stage_rejected_nonworsening"] = True
-    history["stage_rejected_reference_objective"] = float(previous_objective)
-    history["stage_rejected_attempt_objective"] = float(attempted_objective)
-    history["stage_rejected_reason"] = "continuation stage worsened final objective"
-    print(
-        f"Stage {stage_label} rejected by non-worsening continuation guard: "
-        f"{attempted_objective:.6e} > {previous_objective:.6e}."
+    return _workflow_outputs.save_qs_stage_artifacts(
+        stage_dir=stage_dir,
+        optimizer=optimizer,
+        params_initial=params_initial,
+        params_final=params_final,
+        result=result,
+        save_inputs=save_inputs,
+        save_wouts=save_wouts,
+        save_rerun_wouts=save_rerun_wouts,
+        run_fixed_boundary_func=run_fixed_boundary,
+        write_wout_from_fixed_boundary_run_func=write_wout_from_fixed_boundary_run,
     )
-    return previous_record
+
+
+_result_objective_final = _workflow_outputs.result_objective_final
+_select_nonworsening_stage_record = _workflow_outputs.select_nonworsening_stage_record
+
+
+def _run_objective_stage_and_save(
+    *,
+    stage: FixedBoundaryObjectiveStage,
+    stage_limits,
+    stage_index: int,
+    max_mode: int,
+    max_nfev: int,
+    continuation_nfev: int,
+    output_dir: Path,
+    use_mode_continuation: bool,
+    use_ess: bool,
+    ess_alpha: float,
+    objectives: Sequence[ObjectiveTerm],
+    qi_objectives: Sequence[QIObjectiveTerm] = (),
+    iota_abs_min: float | None = None,
+    save_stage_inputs: bool = True,
+    save_stage_wouts: bool = False,
+    save_rerun_wouts: bool = False,
+    **run_kwargs,
+):
+    x_scale = create_x_scale(stage.specs, alpha=float(ess_alpha)) if bool(use_ess) else np.ones(len(stage.specs))
+    params0 = np.zeros(len(stage.specs), dtype=float)
+    nfev = qs_stage_budget(
+        stage_mode=int(stage_limits.mode),
+        max_mode=max_mode,
+        max_nfev=max_nfev,
+        continuation_nfev=continuation_nfev,
+    )
+    is_final_stage = int(stage_limits.mode) == int(max_mode)
+    if is_final_stage:
+        print_qs_problem_summary(
+            method=run_kwargs["method"],
+            max_nfev=nfev,
+            use_mode_continuation=use_mode_continuation,
+            use_ess=use_ess,
+            ess_alpha=ess_alpha,
+            objectives=objectives,
+            specs=stage.specs,
+            x_scale=np.asarray(x_scale, dtype=float),
+            optimizer=stage.optimizer,
+            params0=params0,
+        )
+        if qi_objectives:
+            print("QI field objectives:")
+            for term in qi_objectives:
+                print(f"  - {term.name}")
+    else:
+        print("Stage " f"{describe_boundary_mode_limits(stage_limits)} continuation seed " f"(budget={nfev}) ...")
+    result = stage.optimizer.run(params0, max_nfev=nfev, x_scale=x_scale, verbose=1 if is_final_stage else 0, **run_kwargs)
+    if iota_abs_min is not None:
+        result["_history_dump"]["iota_abs_min"] = float(iota_abs_min)
+    save_qs_stage_artifacts(
+        stage_dir=output_dir / f"stage_{stage_index:02d}_{describe_boundary_mode_limits(stage_limits)}",
+        optimizer=stage.optimizer,
+        params_initial=params0,
+        params_final=result["x"],
+        result=result,
+        save_inputs=save_stage_inputs,
+        save_wouts=save_stage_wouts,
+        save_rerun_wouts=save_rerun_wouts,
+    )
+    return params0, result
+
+
+def _record_accepted_stage(*, stage_records: list, accepted_stage_records: list, stage_limits, optimizer, params0, result):
+    attempted_record = (int(stage_limits.mode), optimizer, params0, result)
+    stage_records.append(attempted_record)
+    accepted_record = _select_nonworsening_stage_record(
+        attempted_record,
+        accepted_stage_records,
+        stage_label=describe_boundary_mode_limits(stage_limits),
+    )
+    if accepted_record is attempted_record:
+        accepted_stage_records.append(accepted_record)
+    _accepted_mode, accepted_optimizer, _accepted_params0, accepted_result = accepted_record
+    return accepted_optimizer._indata_from_params(accepted_result["x"])
 
 
 def write_qi_workflow_stage_checkpoint(
@@ -3830,59 +1658,20 @@ def write_qi_workflow_stage_checkpoint(
     completed_stage_modes,
     requested_stage_modes,
 ) -> Path:
-    """Write a resumable checkpoint after one QI continuation stage.
+    """Write a QI stage checkpoint that survives timeouts and restarts."""
 
-    QI continuation stages can be expensive, especially when final Boozer
-    diagnostics are evaluated at publication resolution.  This lightweight
-    checkpoint is written immediately after a stage optimizer returns, before
-    any later stage or final diagnostics can time out.
-    """
-
-    output_dir = Path(output_dir)
-    stage_dir = Path(stage_dir)
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    limits = normalize_boundary_mode_limits(stage_limits)
-    history = dict(result.get("_history_dump", {}))
-    diagnostics = {
-        "partial": True,
-        "objective_final": history.get("objective_final"),
-        "qs_final": history.get("qs_final"),
-        "aspect": history.get("aspect_final"),
-        "mean_iota": history.get("iota_final"),
-        "nfev": history.get("nfev"),
-        "njev": history.get("njev"),
-        "total_wall_time_s": history.get("total_wall_time_s"),
-        "stage_checkpoint_source": "optimization_workflow",
-    }
-    checkpoint = {
-        "partial": True,
-        "role": "mode_continuation",
-        "stage": int(stage_index),
-        "name": describe_boundary_mode_limits(limits),
-        "stage_modes": [_stage_mode_checkpoint_descriptor(limits)],
-        "completed_stage_modes": [int(mode) for mode in completed_stage_modes],
-        "requested_stage_modes": [_stage_mode_checkpoint_descriptor(mode) for mode in requested_stage_modes],
-        "stage_output_dir": str(stage_dir),
-        "initial_input_path": str(stage_dir / "input.initial"),
-        "final_input_path": str(stage_dir / "input.final"),
-        "initial_wout_path": str(stage_dir / "wout_initial.nc"),
-        "final_wout_path": str(stage_dir / "wout_final.nc"),
-        "input_path": str(stage_dir / "input.final"),
-        "wout_path": str(stage_dir / "wout_final.nc"),
-        "history_path": str(stage_dir / "history.json"),
-        "diagnostics_path": str(stage_dir / "diagnostics.json"),
-        "history": history,
-        "diagnostics": diagnostics,
-    }
-    history_path = stage_dir / "history.json"
-    diagnostics_path = stage_dir / "diagnostics.json"
-    checkpoint_path = stage_dir / "qi_stage_checkpoint.json"
-    root_checkpoint_path = output_dir / "stage_checkpoint.json"
-    _write_json_atomic(history_path, history)
-    _write_json_atomic(diagnostics_path, diagnostics)
-    _write_json_atomic(checkpoint_path, checkpoint)
-    _write_json_atomic(root_checkpoint_path, checkpoint)
-    return checkpoint_path
+    return _workflow_outputs.write_qi_workflow_stage_checkpoint(
+        output_dir=output_dir,
+        stage_dir=stage_dir,
+        stage_index=stage_index,
+        stage_limits=stage_limits,
+        result=result,
+        completed_stage_modes=completed_stage_modes,
+        requested_stage_modes=requested_stage_modes,
+        normalize_boundary_mode_limits_func=normalize_boundary_mode_limits,
+        describe_boundary_mode_limits_func=describe_boundary_mode_limits,
+        stage_mode_checkpoint_descriptor_func=_stage_mode_checkpoint_descriptor,
+    )
 
 
 def save_qs_final_outputs(
@@ -3897,110 +1686,25 @@ def save_qs_final_outputs(
     iota_abs_min: float | None = None,
     save_rerun_wouts: bool = False,
 ) -> None:
-    """Save initial/final inputs, wouts, and history."""
+    """Save final fixed-boundary optimization inputs, WOUTs, and history."""
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _initial_mode, initial_optimizer, initial_params0, initial_result = stage_records[0]
-    initial_optimizer.save_input(output_dir / "input.initial", initial_params0)
-    initial_optimizer.save_wout(
-        output_dir / "wout_initial.nc",
-        initial_params0,
-        state=initial_result.get("_state_initial"),
-    )
-    if save_rerun_wouts:
-        rerun = run_fixed_boundary(str(output_dir / "input.initial"), verbose=False)
-        write_wout_from_fixed_boundary_run(str(output_dir / "wout_initial_rerun.nc"), rerun)
-    else:
-        _remove_stale(output_dir / "wout_initial_rerun.nc")
-
-    final_optimizer.save_input(output_dir / "input.final", final_result["x"])
-    final_optimizer.save_wout(
-        output_dir / "wout_final.nc",
-        final_result["x"],
-        state=final_result.get("_state_final"),
-    )
-    if save_rerun_wouts:
-        rerun = run_fixed_boundary(str(output_dir / "input.final"), verbose=False)
-        write_wout_from_fixed_boundary_run(str(output_dir / "wout_final_rerun.nc"), rerun)
-    else:
-        _remove_stale(output_dir / "wout_final_rerun.nc")
-
-    annotate_qs_final_history(
-        final_result,
+    return _workflow_outputs.save_qs_final_outputs(
+        output_dir=output_dir,
+        stage_records=stage_records,
+        final_optimizer=final_optimizer,
+        final_result=final_result,
         label=label,
         target_aspect=target_aspect,
         target_iota=target_iota,
         iota_abs_min=iota_abs_min,
-    )
-    final_optimizer.save_history(output_dir / "history.json", final_result)
-
-
-def optimization_output_paths(output_dir: str | Path) -> OptimizationOutputPaths:
-    """Return the canonical final-artifact paths for an optimization run."""
-
-    output_dir = Path(output_dir)
-    return OptimizationOutputPaths(
-        initial_input=output_dir / "input.initial",
-        final_input=output_dir / "input.final",
-        initial_wout=output_dir / "wout_initial.nc",
-        final_wout=output_dir / "wout_final.nc",
-        history=output_dir / "history.json",
+        save_rerun_wouts=save_rerun_wouts,
+        annotate_final_history_func=annotate_qs_final_history,
+        run_fixed_boundary_func=run_fixed_boundary,
+        write_wout_from_fixed_boundary_run_func=write_wout_from_fixed_boundary_run,
     )
 
 
-def save_optimization_result(
-    result: FixedBoundaryOptimizationResult,
-    *,
-    output_dir: str | Path | None = None,
-    paths: OptimizationOutputPaths | None = None,
-) -> OptimizationOutputPaths:
-    """Save initial/final inputs, wouts, and history from a solve result.
-
-    The examples use this for the mechanical file writes only.  Diagnostics,
-    plotting, and any extra exports should remain explicit in the user script.
-    """
-
-    if paths is None:
-        if output_dir is None:
-            raise ValueError("Either output_dir or paths must be provided.")
-        paths = optimization_output_paths(output_dir)
-    for path in paths.as_dict().values():
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-    result.initial_optimizer.save_input(paths.initial_input, result.initial_params)
-    result.initial_optimizer.save_wout(
-        paths.initial_wout,
-        result.initial_params,
-        state=result.initial_state,
-    )
-    result.final_optimizer.save_input(paths.final_input, result.final_params)
-    result.final_optimizer.save_wout(
-        paths.final_wout,
-        result.final_params,
-        state=result.final_state,
-    )
-    result.final_optimizer.save_history(paths.history, result.final_result)
-    return paths
-
-
-def annotate_qs_final_history(
-    final_result: dict,
-    *,
-    label: str,
-    target_aspect: float | None = None,
-    target_iota: float | None = None,
-    iota_abs_min: float | None = None,
-) -> None:
-    """Attach final optimization metadata without writing artifacts."""
-
-    history = final_result["_history_dump"]
-    history["label"] = label
-    if target_aspect is not None:
-        history["target_aspect"] = float(target_aspect)
-    if target_iota is not None:
-        history["target_iota"] = float(target_iota)
-    if iota_abs_min is not None:
-        history["iota_abs_min"] = float(iota_abs_min)
+annotate_qs_final_history = _workflow_outputs.annotate_qs_final_history
 
 
 def combine_qs_stage_histories(
@@ -4012,84 +1716,18 @@ def combine_qs_stage_histories(
     stage_modes,
     stage_records,
 ) -> dict | None:
-    """Merge per-stage histories into one optimization history."""
+    """Concatenate accepted objective histories across continuation stages."""
 
-    if len(stage_records) <= 1:
-        return None
-    normalized_stage_modes = [normalize_boundary_mode_limits(stage_mode) for stage_mode in stage_modes]
-
-    combined_entries = []
-    stage_boundaries = []
-    wall_offset = 0.0
-    nfev_total = 0
-    njev_total = 0
-    for idx, (_mode, _optimizer, _params0, result) in enumerate(stage_records):
-        stage_hist = result["_history_dump"]
-        entries = stage_hist["history"] if idx == 0 else stage_hist["history"][1:]
-        for entry in entries:
-            entry_copy = dict(entry)
-            entry_copy["wall_time_s"] = float(entry_copy["wall_time_s"]) + wall_offset
-            combined_entries.append(entry_copy)
-        wall_offset = float(combined_entries[-1]["wall_time_s"]) if combined_entries else wall_offset
-        stage_boundaries.append(len(combined_entries) - 1)
-        nfev_total += int(stage_hist["nfev"])
-        njev_total += int(stage_hist["njev"])
-
-    final_hist = stage_records[-1][3]["_history_dump"]
-    first_hist = stage_records[0][3]["_history_dump"]
-    out = dict(final_hist)
-    out.update(
-        {
-            "label": label,
-            "max_nfev": int(
-                sum(
-                    qs_stage_budget(
-                        stage_mode=int(mode.mode),
-                        max_mode=int(max_mode),
-                        max_nfev=int(max_nfev),
-                        continuation_nfev=int(continuation_nfev),
-                    )
-                    for mode in normalized_stage_modes
-                )
-            ),
-            "total_wall_time_s": float(wall_offset),
-            "nfev": int(nfev_total),
-            "njev": int(njev_total),
-            "objective_initial": float(first_hist["objective_initial"]),
-            "objective_final": float(final_hist["objective_final"]),
-            "qs_initial": float(first_hist["qs_initial"]),
-            "qs_final": float(final_hist["qs_final"]),
-            "aspect_initial": float(first_hist["aspect_initial"]),
-            "aspect_final": float(final_hist["aspect_final"]),
-            "history": combined_entries,
-            "stage_boundaries": stage_boundaries,
-            "stage_mode_descriptors": [
-                {
-                    "mode": int(mode.mode),
-                    "max_m": None if mode.max_m is None else int(mode.max_m),
-                    "max_n": None if mode.max_n is None else int(mode.max_n),
-                    "label": mode.label,
-                }
-                for mode in normalized_stage_modes
-            ],
-        }
+    return _workflow_outputs.combine_qs_stage_histories(
+        label=label,
+        max_mode=max_mode,
+        max_nfev=max_nfev,
+        continuation_nfev=continuation_nfev,
+        stage_modes=stage_modes,
+        stage_records=stage_records,
+        normalize_boundary_mode_limits_func=normalize_boundary_mode_limits,
+        qs_stage_budget_func=qs_stage_budget,
     )
-    if combined_entries and "iota" in combined_entries[0] and "iota" in combined_entries[-1]:
-        out["iota_initial"] = float(combined_entries[0]["iota"])
-        out["iota_final"] = float(combined_entries[-1]["iota"])
-    return out
-
-
-def _as_vector(value):
-    arr = jnp.asarray(value, dtype=jnp.float64)
-    return arr.reshape((1,)) if int(arr.ndim) == 0 else jnp.ravel(arr)
-
-
-def _as_sequence(value) -> tuple:
-    try:
-        return tuple(value)
-    except TypeError:
-        return (value,)
 
 
 def _target_is_zero(target) -> bool:
@@ -4101,152 +1739,65 @@ def _metadata_float(metadata: dict[str, object], key: str) -> float | None:
     return None if value is None else float(value)
 
 
-def _result_timing_summary(result: dict, *, history: dict | None = None) -> dict[str, object]:
-    """Extract timing and optimizer call counts from a raw optimizer result."""
-
-    hist = dict(result.get("_history_dump", {}) if history is None else history)
+def _qi_options_stage_kwargs(qi_options: QuasiIsodynamicOptions) -> dict[str, object]:
     return {
-        "total_wall_time_s": hist.get("total_wall_time_s"),
-        "nfev": hist.get("nfev", result.get("nfev")),
-        "njev": hist.get("njev", result.get("njev")),
-        "nit": hist.get("nit", result.get("nit")),
+        "surfaces": qi_options.surfaces, "mboz": qi_options.mboz, "nboz": qi_options.nboz,
+        "nphi": qi_options.nphi, "nalpha": qi_options.nalpha, "n_bounce": qi_options.n_bounce,
+        "include_bounce_endpoints": qi_options.include_bounce_endpoints,
+        "softness": qi_options.softness, "width_weight": qi_options.width_weight,
+        "branch_width_weight": qi_options.branch_width_weight,
+        "branch_width_softness": qi_options.branch_width_softness,
+        "profile_weight": qi_options.profile_weight, "shuffle_profile_weight": qi_options.shuffle_profile_weight,
+        "shuffle_profile_softness": qi_options.shuffle_profile_softness,
+        "shuffle_profile_nphi_out": qi_options.shuffle_profile_nphi_out,
+        "weighted_shuffle_profile_weight": qi_options.weighted_shuffle_profile_weight,
+        "weighted_shuffle_profile_softness": qi_options.weighted_shuffle_profile_softness,
+        "aligned_profile_weight": qi_options.aligned_profile_weight,
+        "aligned_profile_softness": qi_options.aligned_profile_softness,
+        "aligned_profile_trap_level": qi_options.aligned_profile_trap_level,
+        "aligned_profile_trap_softness": qi_options.aligned_profile_trap_softness,
+        "phimin": qi_options.phimin, "jit_booz": qi_options.jit_booz,
     }
 
 
-def _remove_stale(path: Path) -> None:
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
+_remove_stale = _workflow_outputs.remove_stale
 
 
 def _stage_mode_checkpoint_descriptor(stage_mode) -> dict[str, object]:
-    limits = normalize_boundary_mode_limits(stage_mode)
-    return {
-        "mode": int(limits.mode),
-        "max_m": None if limits.max_m is None else int(limits.max_m),
-        "max_n": None if limits.max_n is None else int(limits.max_n),
-        "label": limits.label,
-    }
+    return _workflow_outputs.stage_mode_checkpoint_descriptor(
+        stage_mode,
+        normalize_boundary_mode_limits_func=normalize_boundary_mode_limits,
+    )
 
 
-def _write_json_atomic(path: Path, payload: object) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w") as f:
-        json.dump(_json_safe(payload), f, indent=2, sort_keys=True)
-        f.write("\n")
-    tmp.replace(path)
+_write_json_atomic = _workflow_outputs.write_json_atomic
 
 
-def _json_safe(value):
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, np.ndarray):
-        return [_json_safe(v) for v in value.tolist()]
-    if isinstance(value, (np.floating, np.integer)):
-        return value.item()
-    if isinstance(value, np.bool_):
-        return bool(value)
-    if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(v) for v in value]
-    return value
+_json_safe = _workflow_outputs.json_safe
 
 
-def _slice_boozer_surfaces(booz: dict, surface_index: int) -> dict:
-    bmnc = booz.get("bmnc_b")
-    if bmnc is None:
-        raise ValueError("Boozer output must include bmnc_b to slice surfaces.")
-    nsurf = int(jnp.asarray(bmnc).shape[0])
-    index = int(surface_index)
-    if index < 0:
-        index += nsurf
-    if index < 0 or index >= nsurf:
-        raise ValueError(f"surface_index {surface_index} is outside the Boozer surface range 0..{nsurf - 1}.")
-    out = dict(booz)
-    for key in ("bmnc_b", "bmns_b", "iota_b", "s_b"):
-        value = out.get(key)
-        if value is not None:
-            out[key] = value[index : index + 1]
-    return out
+_PUBLIC_REEXPORT_MODULES = (
+    _objective_terms,
+    _qi_objectives,
+    _finite_beta_objectives,
+    _seed_inputs,
+    _stage_policy,
+    _workflow_artifacts,
+)
 
+for _module in _PUBLIC_REEXPORT_MODULES:
+    for _name in _module.__all__:
+        globals().setdefault(_name, getattr(_module, _name))
 
-__all__ = [
-    "AbsMeanIotaFloor",
-    "AbsMeanIotaCeiling",
-    "AspectRatio",
-    "AugmentedLagrangianConstraint",
-    "BVector",
-    "BDotB",
-    "BDotGradV",
-    "BetaTotal",
-    "BoozerBTarget",
-    "BoundaryModeLimits",
-    "DMerc",
-    "FixedBoundaryVMEC",
-    "FixedBoundaryObjectiveStage",
-    "FixedBoundaryOptimizationResult",
-    "GlasserResistiveInterchange",
-    "JDotB",
-    "JVector",
-    "LeastSquaresProblem",
-    "LgradB",
-    "MagneticWell",
-    "MaxElongation",
-    "MeanIota",
-    "MirrorRatio",
-    "VMECMirrorRatio",
-    "ObjectiveTerm",
-    "OptimizationOutputPaths",
-    "QuasiIsodynamicOptions",
-    "QuasiIsodynamicResidual",
-    "QuasiIsodynamicResidualCeiling",
-    "QuasisymmetryRatioResidual",
-    "QIObjectiveTerm",
-    "RedlBootstrapMismatch",
-    "StageContext",
-    "ToroidalCurrent",
-    "ToroidalCurrentGradient",
-    "abs_mean_iota_floor_objective",
-    "abs_mean_iota_ceiling_objective",
-    "aspect_objective",
-    "boozer_b_target_from_wout",
-    "build_fixed_boundary_objective_stage",
-    "build_quasi_isodynamic_objective_stage",
-    "combine_qs_stage_histories",
-    "describe_boundary_mode_limits",
-    "interpolate_indata_boundary",
-    "lgradb_objective",
-    "least_squares_solve",
-    "mean_iota",
-    "mean_iota_objective",
-    "normalize_boundary_mode_limits",
-    "objectives_track_iota",
-    "optimization_output_paths",
-    "qs_stage_budget",
-    "qs_stage_modes",
-    "qi_lgradb_objective",
-    "qi_max_elongation_constraint",
-    "qi_boozer_b_target_objective",
-    "qi_max_elongation_objective",
-    "qi_mirror_ratio_constraint",
-    "qi_mirror_ratio_objective",
-    "qi_residual_ceiling_objective",
-    "quasi_isodynamic_field_objective",
-    "quasisymmetry_objective",
-    "rebuild_for_optimization_resolution",
-    "repeated_stage_modes",
-    "prepare_simple_omnigenity_seed_input",
-    "residuals_from_objectives",
-    "run_fixed_boundary_objective_optimization",
-    "run_quasi_isodynamic_objective_optimization",
-    "save_optimization_result",
-    "save_qs_final_outputs",
-    "save_qs_stage_artifacts",
-    "write_qi_workflow_stage_checkpoint",
-    "simple_omnigenity_seed_indata",
-    "VolavgB",
+_LOCAL_EXPORTS = [
+    name
+    for name, value in globals().items()
+    if getattr(value, "__module__", None) == __name__ and not name.startswith("_")
 ]
+
+__all__ = sorted(
+    set(_LOCAL_EXPORTS)
+    | {name for module in _PUBLIC_REEXPORT_MODULES for name in module.__all__}
+)
+
+del _module, _name

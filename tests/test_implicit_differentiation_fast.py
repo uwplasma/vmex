@@ -322,6 +322,89 @@ def test_fixed_boundary_backward_runs_hvp_and_direct_edge_cotangent(monkeypatch)
     assert abs(grad) > 0.1
 
 
+def test_fixed_boundary_implicit_scalar_grad_matches_central_fd(monkeypatch):
+    pytest.importorskip("jax")
+
+    import vmec_jax.implicit as implicit
+    from vmec_jax._compat import enable_x64, jax, jnp
+
+    enable_x64(True)
+    state = _state(2, 2, xp=jnp)
+    static = _static(2, [0, 1], [0, 0])
+
+    def fake_gd(state0, *_args, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin, **_kwargs):
+        return SimpleNamespace(
+            state=VMECState(
+                layout=state0.layout,
+                Rcos=jnp.asarray(state0.Rcos).at[-1].set(edge_Rcos),
+                Rsin=jnp.asarray(state0.Rsin).at[-1].set(edge_Rsin),
+                Zcos=jnp.asarray(state0.Zcos).at[-1].set(edge_Zcos),
+                Zsin=jnp.asarray(state0.Zsin).at[-1].set(edge_Zsin),
+                Lcos=state0.Lcos,
+                Lsin=state0.Lsin,
+            ),
+            grad_rms_history=[0.0],
+            diagnostics={"grad_tol": 1.0},
+        )
+
+    def fake_eval_geom(st, _static):
+        r = jnp.asarray(st.Rcos)[:, :, None]
+        z = jnp.asarray(st.Zsin)[:, :, None]
+        return SimpleNamespace(
+            state=st,
+            g_tt=1.0 + 0.1 * r,
+            g_tp=0.05 * z,
+            g_pp=1.5 + 0.2 * r,
+            sqrtg=1.0 + 0.02 * r + 0.03 * z,
+        )
+
+    def fake_bsup_from_geom(g, *, phipf, chipf, lamscale, **_kwargs):
+        return (
+            jnp.asarray(phipf)[:, None, None] + 0.1 * jnp.asarray(g.state.Rcos)[:, :, None],
+            jnp.asarray(chipf)[:, None, None] + 0.2 * jnp.asarray(g.state.Zsin)[:, :, None],
+        )
+
+    monkeypatch.setattr(implicit, "solve_fixed_boundary_gd", fake_gd)
+    monkeypatch.setattr(implicit, "eval_geom", fake_eval_geom)
+    monkeypatch.setattr(implicit, "bsup_from_geom", fake_bsup_from_geom)
+    monkeypatch.setattr(implicit, "b2_from_bsup", lambda _g, u, v: u * u + v * v)
+    monkeypatch.setattr(implicit, "_cg_solve", lambda matvec, b, **_kwargs: jnp.zeros_like(b) + 0.0 * matvec(b))
+
+    edge_r = jnp.asarray([1.0, -0.5], dtype=jnp.float64)
+    edge_z = jnp.asarray([0.25, -0.125], dtype=jnp.float64)
+    weights_r = jnp.asarray([2.0, -1.0], dtype=jnp.float64)
+    weights_z = jnp.asarray([0.5, 1.5], dtype=jnp.float64)
+
+    def objective(alpha):
+        st = implicit.solve_fixed_boundary_state_implicit(
+            state,
+            static,
+            phipf=jnp.asarray([1.0, 1.2], dtype=jnp.float64),
+            chipf=jnp.asarray([0.1, 0.2], dtype=jnp.float64),
+            signgs=1,
+            lamscale=jnp.asarray([0.8, 0.9], dtype=jnp.float64),
+            pressure=jnp.asarray([0.0, 0.1], dtype=jnp.float64),
+            solver="gd",
+            edge_Rcos=alpha * edge_r,
+            edge_Rsin=jnp.zeros(2, dtype=jnp.float64),
+            edge_Zcos=jnp.zeros(2, dtype=jnp.float64),
+            edge_Zsin=alpha * edge_z,
+            implicit_converge_tol=1.0e-3,
+            implicit_zero_unconverged=False,
+            implicit=implicit.ImplicitFixedBoundaryOptions(cg_max_iter=4, cg_tol=1.0e-12, damping=0.3),
+        )
+        return jnp.sum(weights_r * st.Rcos[-1]) + jnp.sum(weights_z * st.Zsin[-1])
+
+    alpha0 = jnp.asarray(1.25, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    grad_ad = jax.grad(objective)(alpha0)
+    grad_fd = (objective(alpha0 + eps) - objective(alpha0 - eps)) / (2.0 * eps)
+
+    assert np.isfinite(float(np.asarray(grad_ad)))
+    assert np.isfinite(float(np.asarray(grad_fd)))
+    np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=1.0e-9, atol=1.0e-11)
+
+
 def _install_residual_fakes(monkeypatch, implicit, jnp, state0):
     import vmec_jax.boundary as boundary_module
     import vmec_jax.init_guess as init_guess_module

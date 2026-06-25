@@ -93,6 +93,7 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
         figure_path=figure_path,
         table_path=table_path,
     )
+    mod._write_runtime_memory_figure(rows, figure_path, figure_kind="fixed")
 
     csv_text = csv_path.read_text()
     assert "vmec_jax_cold_speedup_vs_vmec2000" in csv_text
@@ -106,6 +107,7 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
     assert record["vmec_jax_gpu_warm_speedup_vs_vmec2000"] == 16.0
     assert record["vmec_jax_gpu_warm_speedup_vs_cpu_warm"] == 4.0
     assert record["vmecpp_speedup_vs_vmec2000"] == 8.0
+    assert figure_path.exists()
 
 
 def test_direct_coil_segmented_replay_report_synthetic_policy_helpers(monkeypatch):

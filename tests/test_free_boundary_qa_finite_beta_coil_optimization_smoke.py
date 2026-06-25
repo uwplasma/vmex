@@ -38,10 +38,12 @@ def test_qa_finite_beta_wrapper_defaults_to_direct_coil_complete_solve_contract(
     assert args.max_current_vars == 1
     assert args.max_fourier_vars == 2
     assert args.max_evals == 2
+    assert args.same_branch_report_vector_keys == "aspect,qs_total,mean_iota,lcfs_boundary_moment,betatotal"
 
     metadata = module.finite_beta_qa_metadata(args)
     assert metadata["complete_solve_acceptance_authority"] is True
     assert metadata["plasma_boundary_optimized"] is False
+    assert metadata["same_branch_report_vector_keys"].endswith(",betatotal")
     assert "No exact adaptive full-loop gradients" in metadata["gradient_claim"]
 
 
@@ -75,4 +77,5 @@ def test_qa_finite_beta_wrapper_dry_run_smoke_writes_summary(tmp_path: Path) -> 
     assert summary["provider"]["radius"] == pytest.approx(10.0)
     assert summary["finite_beta_qa_example"]["complete_solve_acceptance_authority"] is True
     assert summary["finite_beta_qa_example"]["helicity_n"] == 0
+    assert summary["finite_beta_qa_example"]["same_branch_report_vector_keys"].endswith(",betatotal")
     assert (tmp_path / "input.direct_coil_qs").exists()

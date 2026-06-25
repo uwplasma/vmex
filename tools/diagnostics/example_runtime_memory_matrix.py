@@ -199,6 +199,8 @@ run = run_fixed_boundary(
     cli_fixed_boundary_mode=bool(cli_fixed_boundary_mode),
 )
 dt = time.perf_counter() - t0
+cold_res = getattr(run, "result", None)
+cold_diag = {} if cold_res is None else dict(getattr(cold_res, "diagnostics", {}) or {})
 warm_times = []
 for _ in range(max(0, warm_runs)):
     t1 = time.perf_counter()
@@ -217,6 +219,19 @@ if isinstance(free_diag, dict):
     free_boundary = bool(free_diag.get("enabled", False))
 else:
     free_boundary = bool(free_diag)
+policy_keys = (
+    "host_update_assembly",
+    "numpy_force_fast_path",
+    "numpy_force_fast_path_active",
+    "numpy_force_fast_path_max_iter",
+    "numpy_preconditioner_apply",
+    "jit_strict_update_enabled",
+    "jit_strict_update_work",
+    "jit_strict_update_cpu_work_limit",
+    "use_scan",
+)
+execution_policy_cold = {key: cold_diag.get(key) for key in policy_keys if key in cold_diag}
+execution_policy = {key: diag.get(key) for key in policy_keys if key in diag}
 payload = {
     "backend": "vmec_jax",
     "runtime_s": float(dt),
@@ -232,6 +247,8 @@ payload = {
     "cli_fixed_boundary_mode": bool(cli_fixed_boundary_mode),
     "platform": str(jax.default_backend()),
     "device_kind": str(jax.devices()[0].device_kind) if jax.devices() else "unknown",
+    "execution_policy_cold": execution_policy_cold,
+    "execution_policy": execution_policy,
 }
 print(json.dumps(payload))
 """
@@ -280,6 +297,8 @@ print(json.dumps(payload))
         rec["cli_fixed_boundary_mode"] = bool(payload.get("cli_fixed_boundary_mode", cli_fixed_boundary_mode))
         rec["platform"] = str(payload.get("platform", "unknown"))
         rec["device_kind"] = str(payload.get("device_kind", "unknown"))
+        rec["execution_policy_cold"] = dict(payload.get("execution_policy_cold", {}) or {})
+        rec["execution_policy"] = dict(payload.get("execution_policy", {}) or {})
     else:
         rec["runtime_s"] = float(out["time_real_s"])
         rec["ok"] = False

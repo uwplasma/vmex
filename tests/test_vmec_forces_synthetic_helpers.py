@@ -114,6 +114,51 @@ def test_force_profile_log_respects_env(monkeypatch, capsys) -> None:
     assert "elapsed_s" in out
 
 
+def test_force_profile_phases_are_vmec_comparable(monkeypatch, capsys) -> None:
+    cfg = VMECConfig(
+        mpol=2,
+        ntor=0,
+        ns=3,
+        nfp=1,
+        lasym=False,
+        lconm1=False,
+        lthreed=False,
+        ntheta=6,
+        nzeta=1,
+    )
+    static = build_static(cfg)
+    state = _zero_state(static)
+    wout = SimpleNamespace(
+        phips=np.ones((cfg.ns,), dtype=float),
+        pres=np.asarray([0.1, 0.2, 0.3], dtype=float),
+        nfp=1,
+        mpol=cfg.mpol,
+        ntor=cfg.ntor,
+        signgs=-1,
+        lasym=False,
+    )
+
+    def fake_bcovar(*args, **kwargs):
+        return _synthetic_bcovar(static)
+
+    monkeypatch.setattr(vf, "vmec_bcovar_half_mesh_from_wout", fake_bcovar)
+    monkeypatch.setenv("VMEC_JAX_PROFILE_FORCE", "1")
+    vmec_forces_rz_from_wout(state=state, static=static, wout=wout, constraint_tcon0=0.0)
+    out = capsys.readouterr().out
+    for stage in (
+        "m1_physical_done",
+        "bcovar_done",
+        "parity_extract_done",
+        "radial_force_assembly_done",
+        "constraint_finish_done",
+        "force_total_done",
+    ):
+        assert f"'stage': '{stage}'" in out
+    assert "'stage': 'geometry_done'" not in out
+    assert "'stage': 'assembly_done'" not in out
+    assert "'stage': 'constraint_done'" not in out
+
+
 def test_constraint_zero_branch_shape_mismatch_and_debug_dumps(monkeypatch, tmp_path) -> None:
     cfg = VMECConfig(
         mpol=2,

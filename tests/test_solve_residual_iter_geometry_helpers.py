@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import vmec_jax.solve as solve
-from vmec_jax.solve_residual_iter_geometry_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.geometry import (
     _m1_internal_to_physical_pair,
     _mn_sin_to_signed_physical_batch,
     _rz_norm_np,

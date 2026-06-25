@@ -1,0 +1,11 @@
+scalar,scope,method,ad_slope,fd_slope,abs_error,rel_error,tolerance,passed,note
+aspect ratio,fixed-boundary geometry,unrolled JAX AD,-0.4006868069824738,-0.4006868074224456,4.3997183674093776e-10,4.3997183674093776e-10,1e-09,True,equilibrium_aspect_ratio_from_state on a tiny stellarator-symmetric state
+iota profile,fixed-boundary radial profile,JAX profile AD,0.015000000000000003,0.015000000000431333,4.313303186842532e-13,4.313303186842532e-13,1e-09,True,ProfilePolynomial iota-like radial profile
+QS residual,fixed-boundary Boozer/VMEC diagnostic,JAX residual AD,1.5166507727606564e-05,1.5166507727896098e-05,2.8953449609635945e-16,2.8953449609635945e-16,1e-09,True,quasisymmetry_ratio_residual_from_wout
+smooth QI residual,Boozer-space omnigenity diagnostic,smooth JAX AD,0.007996834273863374,0.007996834272723519,1.1398555710417924e-12,1.1398555710417924e-12,1e-09,True,quasi_isodynamic_residual_from_boozer_output
+DMerc,finite-beta profile stability,JAX profile-integral AD,0.0037936558925581367,0.0037936558922035952,3.5454148297753285e-13,3.5454148297753285e-13,1e-09,True,mercier_terms_from_profile_integrals
+D_R,finite-beta profile stability,JAX profile-integral AD,-0.004843688083496865,-0.004843688081179742,2.3171230559282385e-12,2.3171230559282385e-12,1e-09,True,mercier_terms_from_profile_integrals
+free-boundary aspect,direct-coil free-boundary,branch-local replay JVP,1.364389545465055e-12,1.3322676295501878e-11,1.1958286750036824e-11,1.1958286750036824e-11,1e-09,True,same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation
+free-boundary qs_total,direct-coil free-boundary,branch-local replay JVP,2.748760988447319e-13,-2.4424906541753444e-11,2.4699782640598176e-11,2.4699782640598176e-11,1e-09,True,same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation
+free-boundary mean_iota,direct-coil free-boundary,branch-local replay JVP,-1.93855754195821e-13,8.326672684688674e-13,1.0265230226646885e-12,1.0265230226646885e-12,1e-09,True,same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation
+free-boundary lcfs_boundary_moment,direct-coil free-boundary,branch-local replay JVP,-1.937487952071486e-14,0.0,1.937487952071486e-14,1.937487952071486e-14,1e-09,True,same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation

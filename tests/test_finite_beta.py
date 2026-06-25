@@ -7,12 +7,14 @@ import pytest
 
 import vmec_jax as vj
 from vmec_jax import finite_beta
+from vmec_jax._compat import jnp
 from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import load_config
 from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.static import build_static
+from vmec_jax.state import VMECState
 from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
 from vmec_jax.vmec_residue import vmec_force_norms_from_bcovar_dynamic
 from vmec_jax.wout import _compute_mercier, _vmec_wint_from_trig_jax
@@ -164,3 +166,60 @@ def test_mercier_terms_from_state_matches_wout_mercier_path_on_bundled_qi_input(
     )
     np.testing.assert_allclose(np.asarray(actual["torcur"]), expected_torcur, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(np.asarray(actual["ip"]), expected_ip, rtol=1e-12, atol=1e-12)
+
+
+def test_mercier_terms_from_state_dmerc_and_dr_ad_match_fd_on_bundled_qi_input():
+    """Physics-shaped AD/FD gate for finite-beta Mercier and Glasser profiles."""
+
+    jax = pytest.importorskip("jax")
+
+    path = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.nfp4_QI_finite_beta"
+    cfg, indata = load_config(str(path))
+    static = build_static(cfg)
+    boundary = boundary_from_indata(indata, static.modes)
+    state0 = initial_guess_from_boundary(static, boundary, indata)
+    geom = eval_geom(state0, static)
+    signgs = int(signgs_from_sqrtg(np.asarray(geom.sqrtg), axis_index=1))
+
+    mode_m = np.asarray(static.modes.m)
+    mode_n = np.asarray(static.modes.n)
+    idx10 = int(np.flatnonzero((mode_m == 1) & (mode_n == 0))[0])
+    radial_shape = jnp.asarray(static.s, dtype=jnp.float64)
+    radial_shape = radial_shape / jnp.maximum(radial_shape[-1], jnp.asarray(1.0e-12, dtype=jnp.float64))
+
+    Rcos0 = jnp.asarray(state0.Rcos, dtype=jnp.float64)
+    Rsin0 = jnp.asarray(state0.Rsin, dtype=jnp.float64)
+    Zcos0 = jnp.asarray(state0.Zcos, dtype=jnp.float64)
+    Zsin0 = jnp.asarray(state0.Zsin, dtype=jnp.float64)
+    Lcos0 = jnp.asarray(state0.Lcos, dtype=jnp.float64)
+    Lsin0 = jnp.asarray(state0.Lsin, dtype=jnp.float64)
+
+    def state_for_alpha(alpha):
+        return VMECState(
+            layout=state0.layout,
+            Rcos=Rcos0.at[:, idx10].add(alpha * radial_shape),
+            Rsin=Rsin0,
+            Zcos=Zcos0,
+            Zsin=Zsin0,
+            Lcos=Lcos0,
+            Lsin=Lsin0,
+        )
+
+    def objective(alpha, key: str):
+        terms = vj.mercier_terms_from_state(
+            state=state_for_alpha(alpha),
+            static=static,
+            indata=indata,
+            signgs=signgs,
+        )
+        values = jnp.asarray(terms[key], dtype=jnp.float64)
+        return jnp.sum(values[1:-1])
+
+    alpha0 = jnp.asarray(0.0, dtype=jnp.float64)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    for key in ("DMerc", "D_R"):
+        grad_ad = jax.grad(lambda alpha: objective(alpha, key))(alpha0)
+        grad_fd = (objective(alpha0 + eps, key) - objective(alpha0 - eps, key)) / (2.0 * eps)
+        assert np.isfinite(float(np.asarray(grad_ad)))
+        assert np.isfinite(float(np.asarray(grad_fd)))
+        np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=2.0e-7, atol=1.0e-6)

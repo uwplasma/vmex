@@ -100,15 +100,20 @@ def test_env_profiles_lambda_preconditioner_and_cache_helpers(monkeypatch):
 
     monkeypatch.setattr(p1d, "_ENV_USE_PRECOMPUTED", None)
     monkeypatch.setattr(p1d, "_ENV_USE_LAX_TRIDI", None)
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_FULL_JIT", None)
     monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "yes")
     monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "force")
     assert p1d._get_env_tridi_flags() == (True, True)
+    assert p1d._rz_matrix_full_jit_enabled() is True
 
     monkeypatch.setattr(p1d, "_ENV_USE_PRECOMPUTED", None)
     monkeypatch.setattr(p1d, "_ENV_USE_LAX_TRIDI", None)
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_FULL_JIT", None)
     monkeypatch.setenv("VMEC_JAX_TRIDI_PRECOMPUTE", "0")
     monkeypatch.setenv("VMEC_JAX_TRIDI_SOLVE", "no")
+    monkeypatch.setenv("VMEC_JAX_RZ_MATRIX_FULL_JIT", "0")
     assert p1d._get_env_tridi_flags() == (False, False)
+    assert p1d._rz_matrix_full_jit_enabled() is False
 
     monkeypatch.setenv("VMEC_JAX_PRECOND_CACHE_LIMIT", "bad")
     assert p1d._lambda_precond_cache_limit() == 16
@@ -338,6 +343,86 @@ def test_rz_preconditioner_numpy_jax_precomputed_and_lax_agree():
     )
     assert minimal.frss is None
     assert minimal.fzcs is None
+
+
+def test_rz_preconditioner_numpy_host_matrix_seed_matches_jax_3d():
+    pytest.importorskip("jax")
+
+    from vmec_jax.preconditioner_1d_jax import rz_preconditioner_matrices, rz_preconditioner_matrices_numpy_host
+
+    ns = 6
+    ntheta = 6
+    nzeta = 2
+    ntheta_eff = ntheta // 2 + 1
+    shape = (ns, ntheta_eff, nzeta)
+    base = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    cfg = _cfg(mpol=4, ntor=2, ntheta=ntheta, nzeta=nzeta, nfp=3, lasym=False, lthreed=True)
+    bc = SimpleNamespace(
+        guu=np.ones(shape),
+        bsq=1.0 + 0.01 * base,
+        bsupv=0.6 + 0.002 * base,
+        jac=SimpleNamespace(
+            r12=1.2 + 0.01 * base,
+            tau=1.8 + 0.01 * base,
+            sqrtg=0.9 + 0.01 * base,
+            rs=0.7 + 0.02 * base,
+            zs=0.5 + 0.015 * base,
+            ru12=0.4 + 0.01 * base,
+            zu12=0.3 + 0.01 * base,
+        ),
+    )
+    k = SimpleNamespace(
+        pru_even=0.2 + 0.01 * base,
+        pru_odd=0.3 + 0.01 * base,
+        pzu_even=0.4 + 0.01 * base,
+        pzu_odd=0.5 + 0.01 * base,
+        pr1_odd=0.6 + 0.01 * base,
+        pz1_odd=0.7 + 0.01 * base,
+    )
+    s = np.linspace(0.0, 1.0, ns)
+
+    for jmax_override in (ns - 1, ns):
+        mats_np, jmin_np, jmax_np = rz_preconditioner_matrices_numpy_host(
+            bc=bc,
+            k=k,
+            trig=None,
+            s=s,
+            cfg=cfg,
+            jmax_override=jmax_override,
+            use_precomputed=False,
+            use_lax_tridi=False,
+        )
+        mats_jax, jmin_jax, jmax_jax = rz_preconditioner_matrices(
+            bc=bc,
+            k=k,
+            trig=None,
+            s=s,
+            cfg=cfg,
+            jmax_override=jmax_override,
+            use_precomputed=False,
+            use_lax_tridi=False,
+        )
+        assert jmax_np == jmax_jax
+        np.testing.assert_array_equal(jmin_np, np.asarray(jmin_jax))
+        for key in (
+            "ar",
+            "br",
+            "dr",
+            "az",
+            "bz",
+            "dz",
+            "arm_parity",
+            "ard_parity",
+            "brm_parity",
+            "brd_parity",
+            "azm_parity",
+            "azd_parity",
+            "bzm_parity",
+            "bzd_parity",
+            "cxd_full",
+            "delta_s",
+        ):
+            np.testing.assert_allclose(np.asarray(mats_np[key]), np.asarray(mats_jax[key]), rtol=1e-12, atol=1e-12)
 
 
 def test_high_mode_non_lasym_precomputed_tridi_matches_direct_apply():

@@ -151,6 +151,7 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
     import jax.numpy as jnp
     import vmec_jax.boundary as boundary_module
     import vmec_jax.modes as modes_module
+    import vmec_jax.optimizers.fixed_boundary.qs_residuals as qs_residuals_module
     import vmec_jax.quasisymmetry as qs_module
     import vmec_jax.wout as wout_module
 
@@ -166,8 +167,8 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
         "boundary_from_indata",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("force sign fallback")),
     )
-    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
-    monkeypatch.setattr(opt_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
+    monkeypatch.setattr(qs_residuals_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
+    monkeypatch.setattr(qs_residuals_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
     monkeypatch.setattr(
         modes_module,
         "nyquist_mode_table_from_grid",
@@ -227,6 +228,7 @@ def test_qh_qs_residual_factories_fallback_sign_and_min_abs_iota_cotangent(monke
 def test_qs_residual_factory_objective_helper_matches_weighted_residual_cost(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.modes as modes_module
+    import vmec_jax.optimizers.fixed_boundary.qs_residuals as qs_residuals_module
     import vmec_jax.quasisymmetry as qs_module
     import vmec_jax.wout as wout_module
 
@@ -237,8 +239,8 @@ def test_qs_residual_factory_objective_helper_matches_weighted_residual_cost(mon
     )
     state = _state_from_coeffs(r=2.0, rs=0.4, z=0.5)
 
-    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
-    monkeypatch.setattr(opt_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
+    monkeypatch.setattr(qs_residuals_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
+    monkeypatch.setattr(qs_residuals_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
     monkeypatch.setattr(
         modes_module,
         "nyquist_mode_table_from_grid",

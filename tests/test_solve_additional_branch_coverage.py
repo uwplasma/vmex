@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import vmec_jax.solve as solve
+import vmec_jax.solvers.fixed_boundary.jit_cache as jit_cache_helpers
 from vmec_jax._compat import has_jax, jnp
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import TomnspsRZL
@@ -190,6 +191,36 @@ def test_top_level_force_block_and_cache_helpers_cover_unusual_branches(monkeypa
     assert finite_dt < 1.0
     zero_blocks = blocks._replace(frcc=np.zeros_like(base), fzsc=np.zeros_like(base), flsc=np.zeros_like(base))
     assert solve._safe_dt_from_force_blocks(dt_nominal=0.25, max_coeff_delta_rms=1.0e-4, blocks=zero_blocks) == pytest.approx(0.25)
+
+
+def test_scan_cache_miss_category_recording_sanitizes_and_falls_back(monkeypatch):
+    """Cover extracted scan-cache miss diagnostics without running a scan."""
+
+    stats: dict[str, int | float] = {"scan_runner_cache_miss_category_mode_count": 2}
+
+    def fake_counts(_requested_key, _existing_keys):
+        return {"Mode": 3, "shape/name": 2, "": 1}
+
+    monkeypatch.setattr(jit_cache_helpers, "scan_cache_miss_category_counts", fake_counts)
+    jit_cache_helpers.record_scan_runner_cache_miss_categories(
+        stats,
+        requested_key=("new",),
+        existing_keys=(("old",),),
+    )
+    assert stats["scan_runner_cache_miss_category_mode_count"] == 5
+    assert stats["scan_runner_cache_miss_category_shape_name_count"] == 2
+    assert stats["scan_runner_cache_miss_category_unknown_count"] == 1
+
+    def broken_counts(_requested_key, _existing_keys):
+        raise RuntimeError("synthetic category failure")
+
+    monkeypatch.setattr(jit_cache_helpers, "scan_cache_miss_category_counts", broken_counts)
+    jit_cache_helpers.record_scan_runner_cache_miss_categories(
+        stats,
+        requested_key=("new",),
+        existing_keys=(),
+    )
+    assert stats["scan_runner_cache_miss_category_unknown_count"] == 2
 
 
 @pytest.mark.skipif(not has_jax(), reason="fused preconditioner-output scaling requires JAX")

@@ -60,6 +60,7 @@ DEFAULT_CIRCLE_CURRENT = 1.0e7
 DEFAULT_CIRCLE_RADIUS = 10.0
 DEFAULT_TARGET_ASPECT = 5.0
 DEFAULT_TARGET_IOTA = 0.4
+DEFAULT_SAME_BRANCH_VECTOR_KEYS = "aspect,qs_total,mean_iota,lcfs_boundary_moment,betatotal"
 
 
 def finite_beta_qa_metadata(args: argparse.Namespace) -> dict[str, Any]:
@@ -74,6 +75,7 @@ def finite_beta_qa_metadata(args: argparse.Namespace) -> dict[str, Any]:
         "helicity_n": int(args.helicity_n),
         "optimized_dofs": "coil currents and selected direct-coil Fourier coefficients only",
         "plasma_boundary_optimized": False,
+        "same_branch_report_vector_keys": str(args.same_branch_report_vector_keys),
         "complete_solve_acceptance_authority": True,
         "gradient_claim": (
             "No exact adaptive full-loop gradients are promoted. Optional "
@@ -98,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         helicity_n=0,
         target_aspect=DEFAULT_TARGET_ASPECT,
         target_iota=DEFAULT_TARGET_IOTA,
+        same_branch_report_vector_keys=DEFAULT_SAME_BRANCH_VECTOR_KEYS,
         qs_surfaces="0.25,0.5,0.75",
         circle_current=DEFAULT_CIRCLE_CURRENT,
         circle_radius=DEFAULT_CIRCLE_RADIUS,

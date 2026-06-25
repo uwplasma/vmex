@@ -56,6 +56,67 @@ be fetched once::
 
   python tools/fetch_assets.py
 
+AD-vs-finite-difference evidence
+--------------------------------
+
+The README differentiation panel is generated from central finite differences
+and the same public JAX objectives used in examples and tests:
+
+.. image:: _static/figures/readme_ad_fd_evidence.png
+   :width: 100%
+   :align: center
+   :alt: Automatic-differentiation slopes compared with central finite differences
+
+The rows cover fixed-boundary geometry/profile scalars, quasisymmetry and
+smooth quasi-isodynamic residual diagnostics, the finite-beta Mercier
+``DMerc`` and resistive-interchange ``D_R`` terms, and direct-coil
+free-boundary scalar derivatives.  The fixed-boundary and stability rows use
+ordinary JAX AD through the differentiable diagnostic expressions.  The
+free-boundary rows are deliberately narrower: they are branch-local,
+same-fingerprint replay derivatives compared with complete-solve central
+finite differences for the same accepted branch.  They do **not** claim
+differentiation through arbitrary adaptive branch changes in the host
+free-boundary controller.
+
+The checked-in evidence and provenance are:
+
+- :download:`readme_ad_fd_evidence.csv <_static/figures/readme_ad_fd_evidence.csv>`
+- :download:`readme_ad_fd_evidence.json <_static/figures/readme_ad_fd_evidence.json>`
+
+Regenerate the panel from a same-branch direct-coil report with:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke --provider circle \
+     --outdir outputs/pr20_rejected_slot_proposal_full \
+     --write-same-branch-report \
+     --same-branch-report-mode vector \
+     --same-branch-report-ad-mode direct \
+     --same-branch-report-direction current-only \
+     --same-branch-report-vector-keys aspect,qs_total,mean_iota,lcfs_boundary_moment \
+     --same-branch-report-rejected-slot-gate \
+     --same-branch-derivative-proposal \
+     --max-evals 1 --max-iter 1 --vmec-max-iter 2
+
+   JAX_ENABLE_X64=1 python tools/diagnostics/readme_ad_fd_evidence.py \
+     --branch-local-report outputs/pr20_rejected_slot_proposal_full/same_branch_complete_solve_report.json \
+     --figure-out docs/_static/figures/readme_ad_fd_evidence.png \
+     --csv-out docs/_static/figures/readme_ad_fd_evidence.csv \
+     --json-out docs/_static/figures/readme_ad_fd_evidence.json
+
+The focused derivative tests used for this evidence include:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 pytest -q \
+     tests/test_glasser_resistive_interchange.py \
+     tests/test_quasisymmetry.py::test_quasisymmetry_wout_residual_gradient_matches_finite_difference \
+     tests/test_quasisymmetry.py::test_quasisymmetry_wout_residual_jvp_and_vjp_match_finite_difference \
+     tests/test_quasi_isodynamic.py::test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable \
+     tests/test_free_boundary_qs_coil_optimization_smoke.py::test_branch_local_scalar_report_adapter_records_gate_evidence \
+     tests/test_free_boundary_qs_coil_optimization_smoke.py::test_branch_local_scalar_report_adapter_records_failure_modes
+
 Automated parity tests
 ----------------------
 
@@ -112,6 +173,35 @@ and physics-gate checks instead of silent promotion.  Run with:
 .. code-block:: bash
 
    RUN_FULL=1 pytest tests/test_wout_comprehensive_parity.py -v
+
+PR #20 readiness parity
+-----------------------
+
+For PR #20 readiness, the release gate also refreshed four converged WOUTs
+against the local VMEC2000 executable
+``/Users/rogeriojorge/local/STELLOPT/VMEC2000/Release/xvmec2000``:
+``LandremanPaul2021_QA_lowres``, ``nfp4_QH_warm_start``, ``solovev``, and
+``ITERModel``.  All four passed.  The VMEC2000 and ``vmec_jax`` residual RSS
+values matched to the reported precision, and representative relative RMS
+errors were at roundoff to ``~1e-11`` for core geometry/field channels such as
+``rmnc``, ``zmns``, ``iotas``, ``bmnc``, and ``gmnc``.  The worst reported
+channel was ``bsubvmnc`` on ``solovev`` at ``4.37e-5``.
+
+The run provenance is checked in as:
+
+- :download:`pr20_wout_parity_summary.json <_static/figures/pr20_wout_parity_summary.json>`
+
+Regenerate this gate with:
+
+.. code-block:: bash
+
+   python tools/diagnostics/converged_wout_parity_benchmark.py \
+     --nightly --vmec-exec ~/bin/xvmec2000 \
+     --case nfp4_QH_warm_start \
+     --case solovev \
+     --case ITERModel \
+     --case LandremanPaul2021_QA_lowres \
+     --output-dir outputs/pr20_wout_parity
 
 The promoted strict-parity cases pass with the following tolerances per field
 category:

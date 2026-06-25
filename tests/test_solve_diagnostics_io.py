@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.solve_diagnostics_io as dio
-import vmec_jax.solve_profile_helpers as sph
+import vmec_jax.solvers.fixed_boundary.diagnostics.io as dio
+import vmec_jax.solvers.fixed_boundary.profiles as sph
 
 
 def _kernel_terms(ns: int = 3):
@@ -155,6 +155,38 @@ def test_print_cadence_and_formatters_preserve_legacy_text():
         v_norm=11,
         g_norm=12,
     ).startswith("       2        1        3 pre")
+    assert dio._format_residual_physical_status_message(
+        iter_idx=4,
+        fsqr=1.0e-3,
+        fsqz=2.0e-3,
+        fsql=3.0e-3,
+        include_edge=True,
+    ) == (
+        "[solve_fixed_boundary_residual_iter] iter=004 "
+        "fsqr=1.000e-03 fsqz=2.000e-03 fsql=3.000e-03 include_edge=True"
+    )
+    assert dio._format_residual_converged_message(
+        fsqr=1.0e-6,
+        fsqz=2.0e-6,
+        fsql=3.0e-6,
+        target=1.0e-5,
+    ) == (
+        "[solve_fixed_boundary_residual_iter] converged: "
+        "fsqr=1.000e-06 fsqz=2.000e-06 fsql=3.000e-06 target=1.000e-05"
+    )
+    assert dio._format_residual_iteration_update_message(
+        iter_idx=5,
+        dt_eff=0.25,
+        update_rms=0.125,
+        fsqr1=1.0,
+        fsqz1=2.0,
+        fsql1=3.0,
+        step_status="accepted",
+    ) == (
+        "[solve_fixed_boundary_residual_iter] iter=005 "
+        "dt_eff=2.500e-01 update_rms=1.250e-01 "
+        "fsqr1=1.000e+00 fsqz1=2.000e+00 fsql1=3.000e+00 step_status=accepted"
+    )
 
 
 def test_legacy_dump_path_and_iter_filter_truthiness(monkeypatch, tmp_path):

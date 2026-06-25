@@ -220,7 +220,16 @@ def _install_scan_fakes(monkeypatch) -> None:
         dtype = jnp.asarray(state.Rcos).dtype
         one = jnp.ones((3, 1, 1), dtype=dtype)
         jac = SimpleNamespace(sqrtg=one, r12=one, ru12=one, zu12=one, tau=one)
-        bc = SimpleNamespace(guu=one, bsubu=one, bsubv=one, bsq=one, jac=jac)
+        bc = SimpleNamespace(
+            guu=one,
+            bsupu=one,
+            bsupv=one,
+            bsubu=one,
+            bsubv=one,
+            bsq=one,
+            jac=jac,
+            lamscale=1.0,
+        )
         return SimpleNamespace(state=state, bc=bc, tcon=jnp.zeros(3, dtype=dtype))
 
     def fake_residual(k, **_kwargs):
@@ -293,6 +302,7 @@ def test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh(monkeypatch
     _install_scan_fakes(monkeypatch)
 
     import vmec_jax.preconditioner_1d_jax as precond_mod
+    import vmec_jax.preconditioner_1d as precond_np_mod
 
     calls = {"lambda": 0, "mats": 0}
 
@@ -309,7 +319,9 @@ def test_nonscan_reuses_preconditioner_seed_from_same_bcovar_refresh(monkeypatch
         return mats, 0, 2
 
     monkeypatch.setattr(precond_mod, "lambda_preconditioner_cached", fake_lambda_preconditioner_cached)
+    monkeypatch.setattr(precond_np_mod, "lambda_preconditioner", fake_lambda_preconditioner_cached)
     monkeypatch.setattr(precond_mod, "rz_preconditioner_matrices", fake_rz_preconditioner_matrices)
+    monkeypatch.setattr(precond_mod, "rz_preconditioner_matrices_numpy_host", fake_rz_preconditioner_matrices)
     monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_jit", lambda **kwargs: kwargs["frzl_in"])
     monkeypatch.setattr(precond_mod, "rz_preconditioner_apply_numpy", lambda **kwargs: kwargs["frzl_in"])
     monkeypatch.setattr(solve, "_scan_math_ptau_minmax_from_k_host", lambda _k, **_kwargs: (0.1, 0.2))
@@ -428,6 +440,49 @@ def test_precompile_only_jit_precompile_exercises_force_cache_and_lower(monkeypa
     assert len(compiled) == 1
     assert [len(obj.lower_calls) for obj in compiled] == [4]
     assert len(solve._COMPUTE_FORCES_CACHE) == 1
+
+
+def test_precompile_only_compute_force_cache_is_owned_and_limited(monkeypatch) -> None:
+    pytest.importorskip("jax")
+    _quiet_solve_env(monkeypatch)
+    _install_scan_fakes(monkeypatch)
+    monkeypatch.setenv("VMEC_JAX_COMPUTE_FORCES_CACHE_SIZE", "1")
+    solve._COMPUTE_FORCES_CACHE.clear()
+    compiled = []
+
+    class FakeJit:
+        def __init__(self, fn):
+            self.fn = fn
+
+        def __call__(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
+
+        def lower(self, *args, **kwargs):
+            self.fn(*args, **kwargs)
+            return SimpleNamespace(compile=lambda: "compiled")
+
+    def fake_jit(fn, *args, **kwargs):
+        del args, kwargs
+        wrapped = FakeJit(fn)
+        compiled.append(wrapped)
+        return wrapped
+
+    static_a = _static()
+    static_b = _static()
+    static_b.cfg.nfp = 2
+    monkeypatch.setattr(solve, "jit", fake_jit)
+
+    _run_precompile_only(static_a, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    first_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+    _run_precompile_only(static_b, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    second_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+    _run_precompile_only(static_a, jit_forces=True, jit_precompile=True, host_update_assembly=False)
+    third_key = next(iter(solve._COMPUTE_FORCES_CACHE))
+
+    assert first_key != second_key
+    assert third_key == first_key
+    assert len(solve._COMPUTE_FORCES_CACHE) == 1
+    assert len(compiled) == 3
 
 
 def test_precompile_only_jit_precompile_swallows_compile_failure(monkeypatch) -> None:

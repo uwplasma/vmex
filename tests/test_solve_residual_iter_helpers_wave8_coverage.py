@@ -7,6 +7,8 @@ import pytest
 
 import vmec_jax._solve_runtime as solve_runtime
 import vmec_jax.solve as solve
+from vmec_jax.solvers.fixed_boundary import api as fixed_boundary_api
+from vmec_jax.solvers.fixed_boundary.residual import iteration as residual_iteration
 from vmec_jax.state import StateLayout, VMECState
 
 
@@ -202,6 +204,28 @@ def test_solve_runtime_reexports_and_scan_chunk_wrapper_are_accessible(monkeypat
 
     monkeypatch.setenv("VMEC_JAX_SCAN_CHUNK_SIZE", "bad")
     assert solve._scan_chunk_settings(max_iter_scan=11, nstep_screen=4, need_print=False, lthreed=True) == (4, True)
+
+
+def test_solve_facade_private_assignment_forwards_to_residual_iteration(monkeypatch):
+    original = residual_iteration._scan_backend_name
+    replacement = lambda: "synthetic-backend"
+
+    monkeypatch.setattr(solve, "_scan_backend_name", replacement)
+
+    assert residual_iteration._scan_backend_name is replacement
+
+    monkeypatch.setattr(solve, "_scan_backend_name", original)
+
+
+def test_solve_facade_public_assignment_forwards_to_fixed_boundary_api(monkeypatch):
+    original = fixed_boundary_api.solve_lambda_gd
+    replacement = lambda *args, **kwargs: "synthetic-result"
+
+    monkeypatch.setattr(solve, "solve_lambda_gd", replacement)
+
+    assert fixed_boundary_api.solve_lambda_gd is replacement
+
+    monkeypatch.setattr(solve, "solve_lambda_gd", original)
 
 
 def test_residual_iter_config_helpers_reexported_through_solve():

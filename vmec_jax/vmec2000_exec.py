@@ -17,6 +17,8 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Vmec2000Threed1Row:
+    """One parsed VMEC2000 ``threed1`` iteration row."""
+
     it: int
     fsqr: float
     fsqz: float
@@ -35,6 +37,8 @@ class Vmec2000Threed1Row:
 
 @dataclass(frozen=True)
 class Vmec2000Threed1Stage:
+    """One VMEC2000 ``threed1`` stage with its iteration rows."""
+
     ns: int
     niter: int
     ftolv: float
@@ -43,6 +47,8 @@ class Vmec2000Threed1Stage:
 
 @dataclass(frozen=True)
 class Vmec2000ExecResult:
+    """Completed VMEC2000 subprocess run and parsed diagnostic trace."""
+
     workdir: Path
     input_path: Path
     returncode: int

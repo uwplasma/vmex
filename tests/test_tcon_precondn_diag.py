@@ -17,6 +17,18 @@ def test_clear_preconditioner_jit_caches_empties_lambda_cache():
     assert len(p1d._LAMBDA_PRECOND_JIT_CACHE) == 0
 
 
+def test_rz_matrix_assembly_jit_policy_defaults_to_compiled_path(monkeypatch):
+    from vmec_jax import preconditioner_1d_jax as p1d
+
+    monkeypatch.delenv("VMEC_JAX_RZ_MATRIX_ASSEMBLY_JIT", raising=False)
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_ASSEMBLY_JIT", None)
+    assert p1d._rz_matrix_assembly_jit_enabled() is True
+
+    monkeypatch.setenv("VMEC_JAX_RZ_MATRIX_ASSEMBLY_JIT", "0")
+    monkeypatch.setattr(p1d, "_ENV_RZ_MATRIX_ASSEMBLY_JIT", None)
+    assert p1d._rz_matrix_assembly_jit_enabled() is False
+
+
 def test_precomputed_tridiagonal_solve_matches_full_thomas():
     jnp = pytest.importorskip("jax.numpy")
     from vmec_jax.preconditioner_1d_jax import (

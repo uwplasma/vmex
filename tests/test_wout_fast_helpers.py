@@ -8,6 +8,12 @@ import pytest
 
 from vmec_jax.namelist import InData
 import vmec_jax.wout as wout_module
+from vmec_jax.io.wout import diagnostics as wout_diagnostics
+from vmec_jax.io.wout import flux as wout_flux_helpers
+from vmec_jax.io.wout import minimal as wout_minimal_helpers
+from vmec_jax.io.wout import netcdf as wout_io
+from vmec_jax.io.wout import parity as wout_parity_helpers
+from vmec_jax.modes import vmec_mode_table
 from vmec_jax.wout import (
     MU0,
     _apply_bsubv_equif_correction,
@@ -23,6 +29,7 @@ from vmec_jax.wout import (
     _compute_ctor_from_buco,
     _icurv_full_mesh_from_indata,
     _jxbforce_nyquist_limits,
+    _lambda_half_mesh_weights,
     _nc_scalar,
     _pshalf_from_s,
     _read_wout_scalar_metadata,
@@ -33,10 +40,10 @@ from vmec_jax.wout import (
     _wout_phi_profile_from_variables,
     assert_main_modes_match_wout,
 )
-from vmec_jax.wout_schema import WoutData as SchemaWoutData
-from vmec_jax.wout_schema import _bool_from_nc as schema_bool_from_nc
-from vmec_jax.wout_schema import _nc_scalar as schema_nc_scalar
-from vmec_jax.wout_schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
+from vmec_jax.io.wout.schema import WoutData as SchemaWoutData
+from vmec_jax.io.wout.schema import _bool_from_nc as schema_bool_from_nc
+from vmec_jax.io.wout.schema import _nc_scalar as schema_nc_scalar
+from vmec_jax.io.wout.schema import assert_main_modes_match_wout as schema_assert_main_modes_match_wout
 
 
 class _FakeNcVar:
@@ -54,6 +61,7 @@ def test_wout_half_mesh_and_flux_derivative_conventions() -> None:
 
     chips = np.asarray([0.0, 1.0, 4.0, 9.0])
     np.testing.assert_allclose(_chipf_from_chips(chips), [-0.5, 2.5, 6.5, 11.5])
+    np.testing.assert_allclose(wout_flux_helpers.chipf_from_chips(chips), _chipf_from_chips(chips))
     np.testing.assert_allclose(_chipf_from_chips(np.asarray([2.0, 5.0])), [5.0, 6.5])
 
 
@@ -61,6 +69,16 @@ def test_safe_divide_uses_unit_denominator_for_exact_zeros() -> None:
     num = np.asarray([2.0, 4.0, 6.0])
     den = np.asarray([1.0, 0.0, -2.0])
     np.testing.assert_allclose(_safe_divide(num, den), [2.0, 4.0, -3.0])
+    np.testing.assert_allclose(wout_diagnostics.safe_divide(num, den), [2.0, 4.0, -3.0])
+
+
+def test_wout_diagnostics_mesh_helpers_match_vmec_aliases() -> None:
+    s = np.asarray([0.0, 0.25, 1.0])
+    np.testing.assert_allclose(wout_diagnostics.pshalf_from_s(s), _pshalf_from_s(s))
+    sm, sp = wout_diagnostics.lambda_half_mesh_weights(s)
+    sm_alias, sp_alias = _lambda_half_mesh_weights(s)
+    np.testing.assert_allclose(sm, sm_alias)
+    np.testing.assert_allclose(sp, sp_alias)
 
 
 def test_wint_nyquist_and_scalxc_helper_edges(monkeypatch) -> None:
@@ -75,13 +93,21 @@ def test_wint_nyquist_and_scalxc_helper_edges(monkeypatch) -> None:
 
     s = np.asarray([0.0, 0.25, 1.0])
     np.testing.assert_allclose(_bss_scalxc_undo_factor(s).ravel(), [0.5, 0.5, 1.0])
+    np.testing.assert_allclose(wout_parity_helpers.bss_scalxc_undo_factor(s).ravel(), [0.5, 0.5, 1.0])
     arr = np.ones((3, 1, 1))
     monkeypatch.delenv("VMEC_JAX_BSS_UNDO_SCALXC", raising=False)
     assert _bss_should_undo_scalxc() is False
+    assert wout_parity_helpers.bss_should_undo_scalxc() is False
     assert _undo_bss_scalxc_if_enabled(s, arr)[0] is arr
+    assert wout_parity_helpers.undo_bss_scalxc_if_enabled(s, arr)[0] is arr
     monkeypatch.setenv("VMEC_JAX_BSS_UNDO_SCALXC", "1")
     assert _bss_should_undo_scalxc() is True
+    assert wout_parity_helpers.bss_should_undo_scalxc() is True
     np.testing.assert_allclose(_undo_bss_scalxc_if_enabled(s, arr)[0].ravel(), [0.5, 0.5, 1.0])
+    np.testing.assert_allclose(
+        wout_parity_helpers.undo_bss_scalxc_if_enabled(s, arr)[0].ravel(),
+        [0.5, 0.5, 1.0],
+    )
 
 
 def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:
@@ -97,15 +123,244 @@ def test_current_profile_full_mesh_uses_vmec_half_mesh_normalization() -> None:
     )
 
     icurv = _icurv_full_mesh_from_indata(indata=indata, s_full=s_full, signgs=-1)
+    icurv_direct = wout_flux_helpers.icurv_full_mesh_from_indata(indata=indata, s_full=s_full, signgs=-1)
     expected_scale = -MU0 * 10.0 / (2.0 * np.pi) / 2.0
     # I(s_half)=2*s_half and VMEC explicitly zeroes the axis value.
     np.testing.assert_allclose(np.asarray(icurv), expected_scale * np.asarray([0.0, 0.25, 1.25]))
+    np.testing.assert_allclose(np.asarray(icurv_direct), np.asarray(icurv))
 
     no_current = InData(scalars={"NCURR": 0, "CURTOR": 10.0, "AC": [2.0]}, indexed={})
     np.testing.assert_allclose(np.asarray(_icurv_full_mesh_from_indata(indata=no_current, s_full=s_full, signgs=1)), 0.0)
 
     zero_edge = InData(scalars={"NCURR": 1, "CURTOR": 10.0, "AC": [0.0]}, indexed={})
     np.testing.assert_allclose(np.asarray(_icurv_full_mesh_from_indata(indata=zero_edge, s_full=s_full, signgs=1)), 0.0)
+
+
+def test_wout_minimal_geometry_helper_extracts_scaled_axis_coefficients() -> None:
+    modes = vmec_mode_table(mpol=2, ntor=1)
+    ns = 2
+    K = int(modes.K)
+    state = SimpleNamespace(
+        Rcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 1.0,
+        Rsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 11.0,
+        Zcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 21.0,
+        Zsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 31.0,
+        Lcos=np.arange(ns * K, dtype=float).reshape(ns, K) + 41.0,
+        Lsin=np.arange(ns * K, dtype=float).reshape(ns, K) + 51.0,
+    )
+
+    geom = wout_minimal_helpers.build_main_geometry_coefficients(
+        state=state,
+        modes=modes,
+        ntor=1,
+        lasym=True,
+        lconm1=True,
+    )
+
+    assert geom.rmnc.shape == (ns, K)
+    assert geom.lmnc_internal.shape == (ns, K)
+    m_arr = np.asarray(modes.m, dtype=int)
+    n_arr = np.asarray(modes.n, dtype=int)
+    scale = np.where(m_arr == 0, 1.0, np.sqrt(2.0)) * np.where(np.abs(n_arr) == 0, 1.0, np.sqrt(2.0))
+    np.testing.assert_allclose(geom.lmnc_internal, state.Lcos * scale[None, :])
+    for nval in (0, 1):
+        idx = int(np.where((m_arr == 0) & (n_arr == nval))[0][0])
+        np.testing.assert_allclose(geom.raxis_cc[nval], geom.rmnc[0, idx])
+        np.testing.assert_allclose(geom.raxis_cs[nval], geom.rmns[0, idx])
+        np.testing.assert_allclose(geom.zaxis_cc[nval], geom.zmnc[0, idx])
+        np.testing.assert_allclose(geom.zaxis_cs[nval], geom.zmns[0, idx])
+
+    symmetric = wout_minimal_helpers.build_main_geometry_coefficients(
+        state=state,
+        modes=modes,
+        ntor=1,
+        lasym=False,
+        lconm1=True,
+    )
+    np.testing.assert_allclose(symmetric.rmns, 0.0)
+    np.testing.assert_allclose(symmetric.zmnc, 0.0)
+
+
+def test_wout_minimal_vmec_like_payload_matches_force_reconstruction_contract() -> None:
+    flux = SimpleNamespace(
+        phipf=np.asarray([1.0, 2.0, 3.0]),
+        phips=np.asarray([0.0, 0.5, 1.0]),
+    )
+    indata = InData(scalars={"NCURR": 1}, indexed={})
+    s_full = np.asarray([0.0, 0.5, 1.0])
+
+    def fake_icurv(*, indata, s_full, signgs):
+        del indata
+        return np.asarray(s_full, dtype=float) + float(signgs)
+
+    payload = wout_minimal_helpers.WoutMinimalVmecLike(
+        flux=flux,
+        chipf=np.asarray([0.1, 0.2, 0.3]),
+        iotaf=np.asarray([0.0, 0.4, 0.5]),
+        iotas=np.asarray([0.0, 0.3, 0.4]),
+        signgs=-1,
+        nfp=2,
+        mpol=3,
+        ntor=1,
+        lasym=True,
+        ncurr=1,
+        mass=np.asarray([0.0, 1.0, 2.0]),
+        gamma=0.5,
+        indata=indata,
+        s_full=s_full,
+        icurv_full_mesh_from_indata_func=fake_icurv,
+    )
+
+    assert payload.signgs == -1
+    assert payload.nfp == 2
+    assert payload.mpol == 3
+    assert payload.ntor == 1
+    assert payload.lasym is True
+    assert payload.flux_is_internal is True
+    assert payload.ncurr == 1
+    assert payload.lcurrent is True
+    assert payload.gamma == 0.5
+    np.testing.assert_allclose(payload.phipf, flux.phipf)
+    np.testing.assert_allclose(payload.phips, flux.phips)
+    np.testing.assert_allclose(payload.chipf, [0.1, 0.2, 0.3])
+    np.testing.assert_allclose(payload.iotaf, [0.0, 0.4, 0.5])
+    np.testing.assert_allclose(payload.iotas, [0.0, 0.3, 0.4])
+    np.testing.assert_allclose(payload.icurv, [-1.0, -0.5, 0.0])
+    np.testing.assert_allclose(payload.mass, [0.0, 1.0, 2.0])
+
+
+def test_wout_minimal_runtime_policy_helpers_preserve_env_semantics() -> None:
+    opts = wout_minimal_helpers.minimal_wout_runtime_options_from_env({})
+    assert opts.timing_enabled is False
+    assert opts.light is False
+    assert opts.fast_bcovar is True
+
+    opts = wout_minimal_helpers.minimal_wout_runtime_options_from_env(
+        {
+            "VMEC_JAX_WOUT_TIMING": "1",
+            "VMEC_JAX_WOUT_LIGHT": "yes",
+            "VMEC_JAX_WOUT_FAST_BCOVAR": "0",
+        }
+    )
+    assert opts.timing_enabled is True
+    assert opts.light is True
+    assert opts.fast_bcovar is True
+
+    opts = wout_minimal_helpers.minimal_wout_runtime_options_from_env(
+        {
+            "VMEC_JAX_WOUT_TIMING": "no",
+            "VMEC_JAX_WOUT_LIGHT": "false",
+            "VMEC_JAX_WOUT_FAST_BCOVAR": "off",
+        }
+    )
+    assert opts.timing_enabled is False
+    assert opts.light is False
+    assert opts.fast_bcovar is False
+
+    assert wout_minimal_helpers.lbsubs_from_indata_and_env(InData(scalars={"LBSUBS": True}, indexed={}), {}) is True
+    assert wout_minimal_helpers.lbsubs_from_indata_and_env(InData(scalars={"LBSUBS": False}, indexed={}), {}) is False
+    assert (
+        wout_minimal_helpers.lbsubs_from_indata_and_env(
+            InData(scalars={"LBSUBS": False}, indexed={}),
+            {"VMEC_JAX_ENABLE_BSUBS_CORR": "1"},
+        )
+        is True
+    )
+
+    field_opts = wout_minimal_helpers.minimal_wout_field_options_from_env(
+        {
+            "VMEC_JAX_MERCIER_BSUB_SOURCE": "BSUBU_E",
+            "VMEC_JAX_MERCIER_USE_BSUBE": "false",
+            "VMEC_JAX_DISABLE_BSUBV_EQUI_CORR": "0",
+            "VMEC_JAX_WROUT_LOOP": "false",
+            "VMEC_JAX_MERCIER_USE_WROUT_BSUBUV": "false",
+            "VMEC_JAX_WOUT_ZERO_NONCONVERGED_BETA": "off",
+        }
+    )
+    assert field_opts.mercier_bsub_source == "bsubu_e"
+    assert field_opts.mercier_use_bsube is True  # legacy: only "" and "0" disable this flag
+    assert field_opts.disable_bsubv_equif_corr is False
+    assert field_opts.symmetric_wrout_loop is True  # legacy: "false" is enabled for this old toggle
+    assert field_opts.mercier_use_wrout_bsubuv is True  # legacy: "false" is enabled for this old toggle
+    assert field_opts.zero_nonconverged_beta is False
+
+    light_opts = wout_minimal_helpers.minimal_wout_field_options_from_env({}, wout_light=True)
+    assert light_opts.apply_bss_scalxc is True
+    assert light_opts.lasym_filter is True
+    assert light_opts.skip_bsub_filter is True
+
+
+def test_pressure_profiles_from_mass_vp_matches_vmec_full_mesh_edges() -> None:
+    pres, presf = wout_minimal_helpers.pressure_profiles_from_mass_vp(
+        mass=np.asarray([10.0, 8.0, 18.0, 32.0]),
+        vp=np.asarray([0.0, 2.0, 3.0, 4.0]),
+        gamma=2.0,
+    )
+    np.testing.assert_allclose(pres, [0.0, 2.0, 2.0, 2.0])
+    np.testing.assert_allclose(presf, [2.0, 2.0, 2.0, 2.0])
+
+    single, single_f = wout_minimal_helpers.pressure_profiles_from_mass_vp(
+        mass=np.asarray([5.0]),
+        vp=np.asarray([2.0]),
+        gamma=1.0,
+    )
+    np.testing.assert_allclose(single, [0.0])
+    np.testing.assert_allclose(single_f, [0.0])
+
+
+def test_wout_profile_payload_preserves_current_driven_iota_recompute(monkeypatch) -> None:
+    modes = vmec_mode_table(mpol=2, ntor=0)
+    state = SimpleNamespace()
+    static = SimpleNamespace(s=np.asarray([0.0, 0.5, 1.0]))
+    indata = InData(scalars={"NCURR": 1, "GAMMA": 0.0}, indexed={})
+
+    monkeypatch.setattr(
+        "vmec_jax.energy.flux_profiles_from_indata",
+        lambda _indata, s, signgs: SimpleNamespace(
+            chipf=np.asarray([0.0, 0.5, 1.5]),
+            phips=np.asarray([3.0, 4.0, 5.0]) * float(signgs),
+            phipf=np.asarray([1.0, 2.0, 3.0]),
+        ),
+    )
+    monkeypatch.setattr(
+        "vmec_jax.profiles.eval_profiles",
+        lambda _indata, s: {
+            "pressure": np.asarray([9.0, 8.0, 7.0]),
+            "iota": np.asarray([0.9, 0.8, 0.7]),
+        },
+    )
+    monkeypatch.setattr("vmec_jax.boundary.boundary_from_indata", lambda _indata, _modes: SimpleNamespace(R_cos=np.asarray([2.0, 0.0])))
+
+    def fake_equilibrium_iota_profiles_from_state(**kwargs):
+        assert kwargs["state"] is state
+        assert kwargs["static"] is static
+        assert kwargs["indata"] is indata
+        assert kwargs["signgs"] == -1
+        return np.asarray([0.0, 1.0, 4.0]), np.asarray([0.0, 0.11, 0.22]), np.asarray([0.0, 0.33, 0.44])
+
+    payload = wout_minimal_helpers.prepare_profile_payload(
+        state=state,
+        static=static,
+        indata=indata,
+        modes=modes,
+        s=static.s,
+        ns=3,
+        signgs=-1,
+        flux_override=None,
+        profiles_override=None,
+        equilibrium_iota_profiles_from_state_func=fake_equilibrium_iota_profiles_from_state,
+        chipf_from_chips_func=lambda chips: np.asarray(chips, dtype=float) + 10.0,
+    )
+
+    np.testing.assert_allclose(payload.phips, [0.0, -4.0, -5.0])
+    np.testing.assert_allclose(payload.pres, [0.0, 8.0, 7.0])
+    np.testing.assert_allclose(payload.mass, [0.0, 8.0, 7.0])
+    np.testing.assert_allclose(payload.iotas, [0.0, 0.11, 0.22])
+    np.testing.assert_allclose(payload.iotaf, [0.0, 0.33, 0.44])
+    np.testing.assert_allclose(payload.chipf_wout, [10.0, 11.0, 14.0])
+    np.testing.assert_allclose(payload.phipf_internal, [1.0, 2.0, 3.0])
+    assert payload.ncurr == 1
+    assert payload.gamma == 0.0
 
 
 def test_current_profile_guard_branches_keep_output_finite(monkeypatch) -> None:
@@ -157,6 +412,19 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
         wint=wint,
         signgs=1,
     )
+    np.testing.assert_allclose(
+        wout_diagnostics.compute_eqfor_beta(
+            pres=pres,
+            vp=vp,
+            bsq=bsq,
+            r12=r12,
+            bsupv=bsupv,
+            sqrtg=sqrtg,
+            wint=wint,
+            signgs=1,
+        ),
+        (betapol, betator, betatot, betaxis),
+    )
 
     hs = 0.5
     vnorm = (2.0 * np.pi) ** 2 * hs
@@ -171,11 +439,23 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     assert _compute_eqfor_betaxis(pres=pres, vp=vp, bsq=bsq, sqrtg=sqrtg, wint=wint, signgs=1) == pytest.approx(
         betaxis
     )
+    assert wout_diagnostics.compute_eqfor_betaxis(
+        pres=pres,
+        vp=vp,
+        bsq=bsq,
+        sqrtg=sqrtg,
+        wint=wint,
+        signgs=1,
+    ) == pytest.approx(betaxis)
     assert _compute_eqfor_betaxis(pres=pres[:2], vp=vp[:2], bsq=bsq[:2], sqrtg=sqrtg[:2], wint=wint, signgs=1) == 0.0
 
     R = np.asarray([[[1.0, 1.0], [1.0, 1.0]], [[3.0, 3.0], [5.0, 5.0]]])
     Zu = np.ones_like(R)
     Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p = _compute_aspectratio(R=R, Zu=Zu, wint=wint)
+    np.testing.assert_allclose(
+        wout_diagnostics.compute_aspectratio(R=R, Zu=Zu, wint=wint),
+        (Aminor_p, Rmajor_p, aspect, volume_p, cross_area_p),
+    )
     assert cross_area_p == pytest.approx(2.0 * np.pi * 4.0)
     assert volume_p == pytest.approx(2.0 * np.pi * np.pi * 17.0)
     assert Rmajor_p == pytest.approx(volume_p / (2.0 * np.pi * cross_area_p))
@@ -193,6 +473,9 @@ def test_eqfor_beta_aspect_and_ctor_match_vmec_normalizations() -> None:
     free_exact = InData(scalars={"LFREEB": True, "ICTRL_PREC2D": 1, "LHESS_EXACT": True}, indexed={})
     buco = np.asarray([1.0, 2.0, 4.0])
     assert _compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy) == pytest.approx(-2.0 * np.pi * 5.0 / MU0)
+    assert wout_diagnostics.compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy) == pytest.approx(
+        _compute_ctor_from_buco(buco=buco, signgs=-1, indata=fixed_bdy)
+    )
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_legacy) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
     assert _compute_ctor_from_buco(buco=buco, signgs=1, indata=free_exact) == pytest.approx(2.0 * np.pi * 4.0 / MU0)
     assert _compute_ctor_from_buco(buco=np.asarray([1.0]), signgs=1, indata=fixed_bdy) == 0.0
@@ -442,10 +725,12 @@ def test_read_wout_scalar_metadata_defaults_and_validation() -> None:
     }
 
     assert _read_wout_scalar_metadata(variables, path=Path("wout_minimal.nc")) == (3, 2, 0, 1, False, 1)
+    assert wout_io.read_wout_scalar_metadata(variables, path=Path("wout_minimal.nc")) == (3, 2, 0, 1, False, 1)
 
     variables["lasym__logical__"] = _FakeNcVar(np.asarray([1]))
     variables["signgs"] = _FakeNcVar(np.asarray([-1]))
     assert _read_wout_scalar_metadata(variables, path=Path("wout_asym.nc")) == (3, 2, 0, 1, True, -1)
+    assert wout_io.read_wout_scalar_metadata(variables, path=Path("wout_asym.nc")) == (3, 2, 0, 1, True, -1)
 
     bad = {**variables, "ns": _FakeNcVar(np.asarray([0]))}
     with pytest.raises(ValueError, match="Incomplete or masked wout scalar metadata"):
@@ -458,10 +743,18 @@ def test_wout_phi_profile_uses_explicit_field_or_half_mesh_fallback() -> None:
         _wout_phi_profile_from_variables(explicit, ns=3, phipf=np.asarray([2.0, 4.0, 6.0])),
         [0.0, 0.25, 1.0],
     )
+    np.testing.assert_allclose(
+        wout_flux_helpers.wout_phi_profile_from_variables(explicit, ns=3, phipf=np.asarray([2.0, 4.0, 6.0])),
+        [0.0, 0.25, 1.0],
+    )
 
     phipf = np.asarray([2.0, 4.0, 6.0])
     np.testing.assert_allclose(
         _wout_phi_profile_from_variables({}, ns=3, phipf=phipf),
+        [0.0, 2.0, 5.0],
+    )
+    np.testing.assert_allclose(
+        wout_flux_helpers.wout_phi_profile_from_variables({}, ns=3, phipf=phipf),
         [0.0, 2.0, 5.0],
     )
     np.testing.assert_allclose(_wout_phi_profile_from_variables({}, ns=1, phipf=np.asarray([2.0])), [0.0])

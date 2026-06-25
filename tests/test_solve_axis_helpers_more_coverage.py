@@ -5,7 +5,16 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax._compat import has_jax
+from vmec_jax._compat import has_jax, jnp
+from vmec_jax.solvers.fixed_boundary.diagnostics.axis_reset import (
+    bad_jacobian_from_tau_range,
+    bad_jacobian_ptau_from_minmax,
+    evaluate_initial_axis_reset,
+    initial_force_physical_fsq,
+    initial_axis_reset_runtime_decision,
+    reset_axis_from_boundary,
+    run_initial_axis_reset_setup,
+)
 from vmec_jax.solve import (
     _apply_vmec_lambda_axis_rules_to_state,
     _enforce_field_rows,
@@ -54,6 +63,73 @@ def test_merge_axis_reset_state_uses_full_reset_fallback_and_cached_masks():
     cached = _merge_axis_reset_state(st=state, st_axis=axis_state, static=static_cached_mask, full_reset=False)
     np.testing.assert_allclose(np.asarray(cached.Zsin)[:, 1], np.asarray(axis_state.Zsin)[:, 1])
     np.testing.assert_allclose(np.asarray(cached.Zsin)[:, [0, 2]], np.asarray(state.Zsin)[:, [0, 2]])
+
+
+def test_reset_axis_from_boundary_fallback_coefficients_preserve_non_axis_modes():
+    class FakeIndata:
+        def __init__(self, *, scalars, indexed):
+            self.scalars = scalars
+            self.indexed = indexed
+
+    state = _state_from_base(np.arange(4.0).reshape(2, 2))
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(ntor=1, ns=2),
+        modes=SimpleNamespace(m=np.asarray([0, 1])),
+    )
+    indata = FakeIndata(scalars={"RAXIS_CC": [1.0], "ZAXIS_CS": [0.25]}, indexed={})
+
+    def initial_guess_from_boundary(_static, _boundary, indata_local, *, dtype, infer_axis_if_missing):
+        assert not infer_axis_if_missing
+        raxis = float(indata_local.scalars["RAXIS_CC"][0])
+        zaxis = float(indata_local.scalars["ZAXIS_CS"][0])
+        layout = StateLayout(ns=2, K=2, lasym=False)
+        rcos = np.full((2, 2), 110.0, dtype=dtype)
+        zsin = np.full((2, 2), 140.0, dtype=dtype)
+        rcos[0, 0] = raxis
+        zsin[0, 0] = zaxis
+        return VMECState(
+            layout=layout,
+            Rcos=rcos,
+            Rsin=np.full((2, 2), 120.0, dtype=dtype),
+            Zcos=np.full((2, 2), 130.0, dtype=dtype),
+            Zsin=zsin,
+            Lcos=np.full((2, 2), 150.0, dtype=dtype),
+            Lsin=np.full((2, 2), 160.0, dtype=dtype),
+        )
+
+    def read_axis_coeffs(_indata):
+        return {"RAXIS_CC": [1.0], "ZAXIS_CS": [0.25]}
+
+    def recompute_axis_from_boundary(_static, _boundary, *, raxis_cc, zaxis_cs, signgs):
+        assert signgs == 1
+        return np.asarray([2.0, 3.0]), np.asarray([4.0, 5.0])
+
+    out, coeffs = reset_axis_from_boundary(
+        state,
+        boundary_for_axis=object(),
+        static=static,
+        indata=indata,
+        signgs=1,
+        trig=object(),
+        full_reset=False,
+        zero_precond_diag=None,
+        zero_tcon=None,
+        constraint_active_false=False,
+        compute_forces_iter_func=lambda *args, **kwargs: None,
+        apply_vmec_lambda_axis_rules_func=lambda st: st,
+        initial_guess_from_boundary_func=initial_guess_from_boundary,
+        read_axis_coeffs_func=read_axis_coeffs,
+        recompute_axis_from_state_vmec_func=lambda *args, **kwargs: None,
+        recompute_axis_from_boundary_func=recompute_axis_from_boundary,
+        axis_dump_dir="",
+    )
+
+    assert coeffs is not None
+    np.testing.assert_allclose(coeffs[0], [2.0, 3.0])
+    np.testing.assert_allclose(coeffs[3], [4.0, 5.0])
+    np.testing.assert_allclose(np.asarray(out.Rcos)[:, 0], [2.0, 110.0])
+    np.testing.assert_allclose(np.asarray(out.Rcos)[:, 1], np.asarray(state.Rcos)[:, 1])
+    np.testing.assert_allclose(np.asarray(out.Lcos), np.asarray(state.Lcos))
 
 
 @pytest.mark.parametrize(
@@ -130,6 +206,251 @@ def test_merge_axis_reset_state_uses_full_reset_fallback_and_cached_masks():
 def test_initial_axis_reset_decision_branch_matrix(kwargs, expected):
     decision = _initial_axis_reset_decision(**kwargs)
     assert (decision.bad_jacobian, decision.force_reset, decision.reset) == expected
+
+
+def test_initial_axis_reset_evaluation_skips_diagnostics_below_residual_floor():
+    calls = {"ptau": 0, "state": 0}
+    state = _state_from_base(np.ones((2, 2)))
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(lthreed=True, lconm1=True),
+        modes=SimpleNamespace(m=np.asarray([0, 1])),
+    )
+
+    result = evaluate_initial_axis_reset(
+        axis_reset_enabled=True,
+        norms=SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+        gcr2=0.1,
+        gcz2=0.2,
+        gcl2=0.3,
+        k=object(),
+        state=state,
+        static=static,
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        badjac_use_state=True,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        vmec2000_control=True,
+        lmove_axis=True,
+        debug_enabled=False,
+        state_check_on_missing_ptau=True,
+        ptau_minmax_from_k_host=lambda _k: calls.__setitem__("ptau", calls["ptau"] + 1) or (-1.0, 1.0),
+        vmec_half_mesh_jacobian_from_state_func=lambda **_kwargs: calls.__setitem__(
+            "state", calls["state"] + 1
+        ),
+    )
+
+    assert (result.decision.bad_jacobian, result.decision.force_reset, result.decision.reset) == (
+        False,
+        False,
+        False,
+    )
+    assert result.fsq_phys == pytest.approx(0.6)
+    assert result.bad_jacobian_ptau is None
+    assert result.bad_jacobian_state is False
+    assert calls == {"ptau": 0, "state": 0}
+
+
+def test_initial_axis_reset_evaluation_forced_reset_keeps_diagnostics_below_residual_floor():
+    calls = {"ptau": 0, "state": 0}
+    state = _state_from_base(np.ones((2, 2)))
+    static = SimpleNamespace(
+        cfg=SimpleNamespace(lthreed=True, lconm1=True),
+        modes=SimpleNamespace(m=np.asarray([0, 1])),
+    )
+
+    def ptau_minmax(_k):
+        calls["ptau"] += 1
+        return -1.0, 1.0
+
+    result = evaluate_initial_axis_reset(
+        axis_reset_enabled=True,
+        norms=SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+        gcr2=0.1,
+        gcz2=0.2,
+        gcl2=0.3,
+        k=object(),
+        state=state,
+        static=static,
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        badjac_use_state=False,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+        axis_reset_fsq_min=1.0,
+        force_axis_reset=True,
+        axis_reset_always_3d=False,
+        vmec2000_control=True,
+        lmove_axis=True,
+        debug_enabled=False,
+        state_check_on_missing_ptau=True,
+        ptau_minmax_from_k_host=ptau_minmax,
+        vmec_half_mesh_jacobian_from_state_func=lambda **_kwargs: calls.__setitem__(
+            "state", calls["state"] + 1
+        ),
+    )
+
+    assert (result.decision.bad_jacobian, result.decision.force_reset, result.decision.reset) == (
+        False,
+        True,
+        True,
+    )
+    assert result.fsq_phys == pytest.approx(0.6)
+    assert result.bad_jacobian_ptau is True
+    assert result.bad_jacobian_state is False
+    assert calls == {"ptau": 1, "state": 0}
+
+
+def test_initial_axis_reset_setup_keeps_force_probe_when_no_reset():
+    state = _state_from_base(np.ones((2, 2)))
+    force_payload = (
+        SimpleNamespace(),
+        SimpleNamespace(),
+        0.25,
+        0.125,
+        0.0625,
+        np.asarray([1.0]),
+        np.asarray([2.0]),
+        SimpleNamespace(r1=1.0, fnorm=1.0, fnormL=1.0),
+    )
+
+    result = run_initial_axis_reset_setup(
+        state=state,
+        axis_reset_done=False,
+        ijacob=0,
+        state_checkpoint=state,
+        velocities=(1, 2, 3, 4, 5, 6),
+        res0=0.0,
+        res1=0.0,
+        prev_rz_fsq=1.0,
+        vmec2000_control=True,
+        lmove_axis=True,
+        verbose=False,
+        verbose_vmec2000_table=False,
+        timing_enabled=False,
+        timing_stats={},
+        force_axis_reset=False,
+        axis_reset_always_3d=False,
+        axis_reset_fsq_min=1.0,
+        badjac_use_state=False,
+        static=SimpleNamespace(cfg=SimpleNamespace(lthreed=False, lconm1=True), modes=SimpleNamespace(m=np.asarray([0, 1]))),
+        trig=SimpleNamespace(),
+        s=np.asarray([0.0, 1.0]),
+        zero_precond_diag=(np.zeros(2), np.zeros(2)),
+        zero_tcon=np.zeros(2),
+        compute_forces_iter_func=lambda *args, **kwargs: force_payload,
+        reset_axis_from_boundary_func=lambda *args, **kwargs: pytest.fail("reset should not run"),
+        zero_velocity_blocks_like_func=lambda *values: values,
+        ptau_minmax_from_k_host_func=lambda _k: (1.0, 2.0),
+        vmec_half_mesh_jacobian_from_state_func=lambda *args, **kwargs: pytest.fail("state probe unused"),
+        print_axis_guess_func=lambda *args, **kwargs: None,
+        axis_reset_coeffs_func=lambda: None,
+        env_enabled_func=lambda _value: False,
+        getenv_func=lambda _name, default="": default,
+        perf_counter_func=lambda: 0.0,
+        has_jax_func=lambda: False,
+        block_until_ready_func=None,
+        jnp_module=jnp,
+    )
+
+    assert result.reset_applied is False
+    assert result.axis_reset_done is False
+    assert result.force_probe is not None
+    assert result.force_probe[0] is force_payload[0]
+    assert result.force_probe[1] is force_payload[1]
+    assert result.force_probe[2:5] == force_payload[2:5]
+    assert result.force_probe[7] is force_payload[7]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        (
+            dict(
+                bad_jacobian=True,
+                fsq_phys=0.25,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+            ),
+            (False, False, False, False),
+        ),
+        (
+            dict(
+                bad_jacobian=False,
+                fsq_phys=np.inf,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+            ),
+            (False, True, False, True),
+        ),
+        (
+            dict(
+                bad_jacobian=False,
+                fsq_phys=0.25,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=True,
+                lthreed=True,
+            ),
+            (False, False, True, True),
+        ),
+        (
+            dict(
+                bad_jacobian=True,
+                fsq_phys=2.0,
+                axis_reset_fsq_min=1.0,
+                force_axis_reset=False,
+                axis_reset_always_3d=False,
+                lthreed=True,
+                axis_reset_enabled=False,
+            ),
+            (True, False, False, False),
+        ),
+    ],
+)
+def test_initial_axis_reset_runtime_decision_preserves_in_loop_gate(kwargs, expected):
+    decision = initial_axis_reset_runtime_decision(**kwargs)
+    assert (
+        decision.bad_jacobian,
+        decision.huge_initial_forces,
+        decision.force_reset,
+        decision.reset,
+    ) == expected
+
+
+def test_initial_axis_reset_shared_bad_jacobian_helpers():
+    norms = SimpleNamespace(r1=2.0, fnorm=3.0, fnormL=5.0)
+    assert initial_force_physical_fsq(norms=norms, gcr2=0.5, gcz2=0.25, gcl2=0.1) == pytest.approx(5.0)
+    assert initial_force_physical_fsq(norms=object(), gcr2=0.5, gcz2=0.25, gcl2=0.1) is None
+
+    assert bad_jacobian_from_tau_range(min_tau=-1.0, max_tau=2.0)
+    assert not bad_jacobian_from_tau_range(min_tau=-1.0e-4, max_tau=2.0, abs_tol=1.0e-3)
+
+    assert bad_jacobian_ptau_from_minmax(
+        ptau_min=-1.0,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+    )
+    assert not bad_jacobian_ptau_from_minmax(
+        ptau_min=-1.0e-4,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=1.0e-3,
+    )
+    assert bad_jacobian_ptau_from_minmax(
+        ptau_min=None,
+        ptau_max=2.0,
+        ptau_tol=0.0,
+        ptau_tol_rel=0.0,
+    ) is None
 
 
 def test_write_axis_reset_dump_disabled_short_and_success_paths(tmp_path):

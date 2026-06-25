@@ -16,7 +16,8 @@ What is vmec-jax?
 pipeline to JAX:
 
 - vectorized numerical kernels (``jax.numpy`` + ``jit``),
-- end-to-end differentiation through equilibrium objectives and solvers,
+- validated fixed-boundary differentiation and branch-local free-boundary
+  differentiation through equilibrium objectives and solvers,
 - parity-first development against VMEC2000 ``wout_*.nc`` reference outputs.
 
 The recommended end-to-end entrypoint is the axisymmetric showcase script:

@@ -132,54 +132,37 @@ class CaseBudget:
 # Bounded policies for known poor/runaway diagnostic cases. These are opt-in via
 # ``--diagnostic-budgets`` and intentionally very small, so they remain useful
 # for CI/render smoke tests without being mistaken for production results.
+_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET = dict(inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8)
 CASE_BUDGET_OVERRIDES: dict[tuple[str, str, str, int, bool], CaseBudget] = {
     # QA needs a moderately converged inner solve before the iota residual has a
     # useful derivative. The old 40-iteration GPU diagnostic cap kept QA on the
     # zero-iota branch. These budgets were selected to keep each GPU QA case
     # below the old short sweep timeout while moving continuation/ESS cases to the
     # target-iota basin.
-    ("gpu", "continuation", "qa", 1, False): CaseBudget(
-        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 1, True): CaseBudget(
-        max_nfev=12, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 2, False): CaseBudget(
-        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 2, True): CaseBudget(
-        max_nfev=8, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 3, False): CaseBudget(
-        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "continuation", "qa", 3, True): CaseBudget(
-        max_nfev=6, continuation_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 1, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 1, True): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 2, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 2, True): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 3, False): CaseBudget(
-        max_nfev=12, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("gpu", "direct", "qa", 3, True): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("cpu", "direct", "qa", 3, False): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
-    ("cpu", "direct", "qa", 3, True): CaseBudget(
-        max_nfev=24, inner_max_iter=120, inner_ftol=1e-8, trial_max_iter=120, trial_ftol=1e-8
-    ),
+    **{
+        ("gpu", "continuation", "qa", mode, use_ess): CaseBudget(
+            max_nfev=max_nfev,
+            continuation_nfev=12,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for mode, max_nfev in ((1, 12), (2, 8), (3, 6))
+        for use_ess in ESS_OPTIONS
+    },
+    **{
+        ("gpu", "direct", "qa", mode, use_ess): CaseBudget(
+            max_nfev=24 if (mode, use_ess) == (3, True) else 12,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for mode in (1, 2, 3)
+        for use_ess in ESS_OPTIONS
+    },
+    **{
+        ("cpu", "direct", "qa", 3, use_ess): CaseBudget(
+            max_nfev=24,
+            **_QA_GPU_DIAGNOSTIC_SOLVE_BUDGET,
+        )
+        for use_ess in ESS_OPTIONS
+    },
     ("gpu", "direct", "qh", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qh", 3, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
     ("gpu", "direct", "qp", 2, False): CaseBudget(max_nfev=4, inner_max_iter=40, trial_max_iter=40, trial_ftol=1e-8),
@@ -586,37 +569,67 @@ def _profile_wall_time(profile: dict, key: str) -> float | None:
     return wall_f if math.isfinite(wall_f) else None
 
 
+_PROFILE_SUMMARY_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("profile_solve_forward_trial_total_wall_time_s", "solve_forward_trial_total"),
+    ("profile_solve_forward_exact_total_wall_time_s", "solve_forward_exact_total"),
+    ("profile_exact_tape_build_wall_time_s", "exact_tape_build"),
+    ("profile_exact_tape_build_solve_call_wall_time_s", "exact_tape_build_solve_call"),
+    ("profile_exact_tape_build_unattributed_wall_time_s", "exact_tape_build_unattributed"),
+    (
+        "profile_exact_tape_solver_compute_forces_first_wall_time_s",
+        "exact_tape_solver_compute_forces_first",
+    ),
+    (
+        "profile_exact_tape_solver_compute_forces_rest_wall_time_s",
+        "exact_tape_solver_compute_forces_rest",
+    ),
+    ("profile_trial_solver_scan_total_wall_time_s", "trial_solver_scan_total"),
+    (
+        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s",
+        "trial_solver_scan_runner_cache_lookup",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_build_wall_time_s",
+        "trial_solver_scan_runner_cache_build",
+    ),
+    ("profile_trial_solver_scan_runner_cache_hit_count", "trial_solver_scan_runner_cache_hit_count"),
+    ("profile_trial_solver_scan_runner_cache_miss_count", "trial_solver_scan_runner_cache_miss_count"),
+    (
+        "profile_trial_solver_scan_runner_cache_bypass_count",
+        "trial_solver_scan_runner_cache_bypass_count",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_hit_device_run",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_miss_device_run",
+    ),
+    (
+        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s",
+        "trial_solver_scan_runner_cache_bypass_device_run",
+    ),
+    ("profile_trial_solver_scan_device_dispatch_wall_time_s", "trial_solver_scan_device_dispatch"),
+    ("profile_trial_solver_scan_device_ready_wall_time_s", "trial_solver_scan_device_ready"),
+    ("profile_trial_solver_scan_host_materialize_wall_time_s", "trial_solver_scan_host_materialize"),
+    ("profile_jacobian_total_wall_time_s", "jacobian_total"),
+    ("profile_write_wout_wall_time_s", "write_wout"),
+)
+
+_PROFILE_SUMMARY_KEYS = (
+    "profile_wall_time_s",
+    "profile_top_name",
+    "profile_top_wall_time_s",
+) + tuple(field for field, _bucket in _PROFILE_SUMMARY_BUCKETS)
+
+
 def _profile_summary_fields(history: dict | None) -> dict[str, object]:
     """Return compact profile fields suitable for case_result/CSV summaries."""
 
     profile = history.get("profile") if isinstance(history, dict) else None
     if not isinstance(profile, dict) or not profile:
-        return {
-            "profile_wall_time_s": None,
-            "profile_top_name": None,
-            "profile_top_wall_time_s": None,
-            "profile_solve_forward_trial_total_wall_time_s": None,
-            "profile_solve_forward_exact_total_wall_time_s": None,
-            "profile_exact_tape_build_wall_time_s": None,
-            "profile_exact_tape_build_solve_call_wall_time_s": None,
-            "profile_exact_tape_build_unattributed_wall_time_s": None,
-            "profile_exact_tape_solver_compute_forces_first_wall_time_s": None,
-            "profile_exact_tape_solver_compute_forces_rest_wall_time_s": None,
-            "profile_trial_solver_scan_total_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_build_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_hit_count": None,
-            "profile_trial_solver_scan_runner_cache_miss_count": None,
-            "profile_trial_solver_scan_runner_cache_bypass_count": None,
-            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": None,
-            "profile_trial_solver_scan_device_dispatch_wall_time_s": None,
-            "profile_trial_solver_scan_device_ready_wall_time_s": None,
-            "profile_trial_solver_scan_host_materialize_wall_time_s": None,
-            "profile_jacobian_total_wall_time_s": None,
-            "profile_write_wout_wall_time_s": None,
-        }
+        return dict.fromkeys(_PROFILE_SUMMARY_KEYS)
 
     entries: list[tuple[str, float]] = []
     for key in sorted(profile):
@@ -627,66 +640,13 @@ def _profile_summary_fields(history: dict | None) -> dict[str, object]:
     top_wall = None
     if entries:
         top_name, top_wall = max(entries, key=lambda item: item[1])
-    return {
+    summary = {
         "profile_wall_time_s": float(sum(wall for _key, wall in entries)) if entries else 0.0,
         "profile_top_name": top_name,
         "profile_top_wall_time_s": top_wall,
-        "profile_solve_forward_trial_total_wall_time_s": _profile_wall_time(
-            profile, "solve_forward_trial_total"
-        ),
-        "profile_solve_forward_exact_total_wall_time_s": _profile_wall_time(
-            profile, "solve_forward_exact_total"
-        ),
-        "profile_exact_tape_build_wall_time_s": _profile_wall_time(profile, "exact_tape_build"),
-        "profile_exact_tape_build_solve_call_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_build_solve_call"
-        ),
-        "profile_exact_tape_build_unattributed_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_build_unattributed"
-        ),
-        "profile_exact_tape_solver_compute_forces_first_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_solver_compute_forces_first"
-        ),
-        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": _profile_wall_time(
-            profile, "exact_tape_solver_compute_forces_rest"
-        ),
-        "profile_trial_solver_scan_total_wall_time_s": _profile_wall_time(profile, "trial_solver_scan_total"),
-        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_lookup"
-        ),
-        "profile_trial_solver_scan_runner_cache_build_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_build"
-        ),
-        "profile_trial_solver_scan_runner_cache_hit_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_hit_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_miss_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_miss_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_bypass_count": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_bypass_count"
-        ),
-        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_hit_device_run"
-        ),
-        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_miss_device_run"
-        ),
-        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_runner_cache_bypass_device_run"
-        ),
-        "profile_trial_solver_scan_device_dispatch_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_device_dispatch"
-        ),
-        "profile_trial_solver_scan_device_ready_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_device_ready"
-        ),
-        "profile_trial_solver_scan_host_materialize_wall_time_s": _profile_wall_time(
-            profile, "trial_solver_scan_host_materialize"
-        ),
-        "profile_jacobian_total_wall_time_s": _profile_wall_time(profile, "jacobian_total"),
-        "profile_write_wout_wall_time_s": _profile_wall_time(profile, "write_wout"),
     }
+    summary.update({field: _profile_wall_time(profile, bucket) for field, bucket in _PROFILE_SUMMARY_BUCKETS})
+    return summary
 
 
 def _start_worker_session() -> None:
@@ -1307,6 +1267,44 @@ def _normalize_worker_jax_platforms(value: str | None) -> str | None:
     return ",".join(normalized) if normalized else None
 
 
+def _prepare_qi_boozer_stage(problem_cfg: ProblemConfig, stage_static) -> tuple[object, object, object]:
+    """Prepare optional Boozer constants and surface indices for a QI stage."""
+
+    if problem_cfg.objective_kind != "qi":
+        return None, None, None
+
+    from booz_xform_jax import prepare_booz_xform_constants
+    from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
+
+    main_modes = vmec_mode_table(int(stage_static.cfg.mpol), int(stage_static.cfg.ntor))
+    nyq_modes = nyquist_mode_table_from_grid(
+        mpol=int(stage_static.cfg.mpol),
+        ntor=int(stage_static.cfg.ntor),
+        ntheta=int(stage_static.cfg.ntheta),
+        nzeta=int(stage_static.cfg.nzeta),
+    )
+    constants, grids = prepare_booz_xform_constants(
+        nfp=int(stage_static.cfg.nfp),
+        mboz=problem_cfg.qi_mboz,
+        nboz=problem_cfg.qi_nboz,
+        asym=bool(stage_static.cfg.lasym),
+        xm=np.asarray(main_modes.m, dtype=int),
+        xn=np.asarray(main_modes.n * int(stage_static.cfg.nfp), dtype=int),
+        xm_nyq=np.asarray(nyq_modes.m, dtype=int),
+        xn_nyq=np.asarray(nyq_modes.n * int(stage_static.cfg.nfp), dtype=int),
+    )
+    surface_indices = _nearest_half_mesh_indices(
+        problem_cfg.surfaces,
+        n_half=max(int(np.asarray(stage_static.s).shape[0]) - 1, 1),
+    )
+    return constants, grids, surface_indices
+
+
+def _weighted_residual_block(residuals, total, weight: float) -> tuple[object, object]:
+    weight_f = float(weight)
+    return jnp.asarray(residuals, dtype=jnp.float64) * weight_f, weight_f**2 * total
+
+
 def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, solver_device: str | None):
     if bool(problem_cfg.project_input_boundary_to_max_mode):
         indata0 = vj.truncate_indata_boundary_modes(indata0, max_mode=max_mode)
@@ -1330,34 +1328,9 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
     stage_signgs = int(signgs_from_sqrtg(np.asarray(stage_geom.sqrtg), axis_index=1))
     stage_flux = vj.flux_profiles_from_indata(stage_indata, stage_static.s, signgs=stage_signgs)
     stage_pressure = jnp.zeros_like(jnp.asarray(stage_static.s))
-    qi_booz_constants = None
-    qi_booz_grids = None
-    qi_surface_indices = None
-    if problem_cfg.objective_kind == "qi":
-        from booz_xform_jax import prepare_booz_xform_constants
-        from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
-
-        main_modes = vmec_mode_table(int(stage_static.cfg.mpol), int(stage_static.cfg.ntor))
-        nyq_modes = nyquist_mode_table_from_grid(
-            mpol=int(stage_static.cfg.mpol),
-            ntor=int(stage_static.cfg.ntor),
-            ntheta=int(stage_static.cfg.ntheta),
-            nzeta=int(stage_static.cfg.nzeta),
-        )
-        qi_booz_constants, qi_booz_grids = prepare_booz_xform_constants(
-            nfp=int(stage_static.cfg.nfp),
-            mboz=problem_cfg.qi_mboz,
-            nboz=problem_cfg.qi_nboz,
-            asym=bool(stage_static.cfg.lasym),
-            xm=np.asarray(main_modes.m, dtype=int),
-            xn=np.asarray(main_modes.n * int(stage_static.cfg.nfp), dtype=int),
-            xm_nyq=np.asarray(nyq_modes.m, dtype=int),
-            xn_nyq=np.asarray(nyq_modes.n * int(stage_static.cfg.nfp), dtype=int),
-        )
-        qi_surface_indices = _nearest_half_mesh_indices(
-            problem_cfg.surfaces,
-            n_half=max(int(np.asarray(stage_static.s).shape[0]) - 1, 1),
-        )
+    qi_booz_constants, qi_booz_grids, qi_surface_indices = _prepare_qi_boozer_stage(
+        problem_cfg, stage_static
+    )
 
     def stage_qs_eval(state):
         if problem_cfg.objective_kind == "qi":
@@ -1430,10 +1403,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
 
     def qi_field_quality_blocks(state, qi):
         blocks = [
-            (
-                jnp.asarray(qi["residuals1d"], dtype=jnp.float64) * problem_cfg.qs_weight,
-                problem_cfg.qs_weight**2 * qi["total"],
-            )
+            _weighted_residual_block(qi["residuals1d"], qi["total"], problem_cfg.qs_weight)
         ]
         if float(problem_cfg.qi_ceiling_weight) != 0.0:
             qi_total = jnp.asarray(qi["total"], dtype=jnp.float64)
@@ -1447,12 +1417,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
             blocks.append((residual, jnp.sum(residual * residual)))
         if float(problem_cfg.qi_mirror_weight) != 0.0:
             mirror = qi_mirror_objective._evaluate_state(qi_mirror_ctx, state)
-            blocks.append(
-                (
-                    jnp.asarray(mirror["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_mirror_weight,
-                    problem_cfg.qi_mirror_weight**2 * mirror["total"],
-                )
-            )
+            blocks.append(_weighted_residual_block(mirror["residuals1d"], mirror["total"], problem_cfg.qi_mirror_weight))
         if float(problem_cfg.qi_elongation_weight) != 0.0:
             elongation = max_elongation_penalty_from_state(
                 state=state,
@@ -1462,10 +1427,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 nphi=problem_cfg.qi_elongation_nphi,
             )
             blocks.append(
-                (
-                    jnp.asarray(elongation["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_elongation_weight,
-                    problem_cfg.qi_elongation_weight**2 * elongation["total"],
-                )
+                _weighted_residual_block(elongation["residuals1d"], elongation["total"], problem_cfg.qi_elongation_weight)
             )
         if float(problem_cfg.qi_lgradb_weight) != 0.0:
             lgradb = lgradb_penalty_from_state(
@@ -1480,12 +1442,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
                 nphi=problem_cfg.qi_lgradb_nphi,
                 smooth_penalty=problem_cfg.qi_lgradb_smooth_penalty,
             )
-            blocks.append(
-                (
-                    jnp.asarray(lgradb["residuals1d"], dtype=jnp.float64) * problem_cfg.qi_lgradb_weight,
-                    problem_cfg.qi_lgradb_weight**2 * lgradb["total"],
-                )
-            )
+            blocks.append(_weighted_residual_block(lgradb["residuals1d"], lgradb["total"], problem_cfg.qi_lgradb_weight))
         return tuple(blocks)
 
     def lgradb_quality_block(state):
@@ -1503,10 +1460,7 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
             nphi=problem_cfg.lgradb_nphi,
             smooth_penalty=problem_cfg.lgradb_smooth_penalty,
         )
-        return (
-            jnp.asarray(lgradb["residuals1d"], dtype=jnp.float64) * problem_cfg.lgradb_weight,
-            problem_cfg.lgradb_weight**2 * lgradb["total"],
-        )
+        return _weighted_residual_block(lgradb["residuals1d"], lgradb["total"], problem_cfg.lgradb_weight)
 
     def stage_residuals_from_state(state):
         parts = []
@@ -1581,6 +1535,25 @@ def _build_stage(problem_cfg: ProblemConfig, cfg, indata0, max_mode: int, *, sol
 
 StageRecord = tuple[str, int, dict]
 StageCheckpointCallback = Callable[[StageRecord, object, object, object, object], None]
+
+
+@dataclass(frozen=True)
+class CaseRunMetadata:
+    """Immutable per-case metadata shared by checkpoints and final summaries."""
+
+    problem_cfg: ProblemConfig
+    cfg: object
+    backend: str
+    problem: str
+    max_mode: int
+    use_ess: bool
+    output_dir: Path
+    policy: str
+    solver_device: str | None
+    jax_platforms: str | None
+    jax_backend: str | None
+    jax_device_kind: str | None
+    stellarator_asymmetric: bool
 
 
 def _merge_stage_histories(stage_results: list[StageRecord], *, problem_cfg: ProblemConfig) -> dict:
@@ -1772,19 +1745,7 @@ def _iota_final_from_history(problem_cfg: ProblemConfig, history: dict) -> float
 def _case_result_from_history(
     *,
     history: dict,
-    problem_cfg: ProblemConfig,
-    cfg,
-    backend: str,
-    problem: str,
-    max_mode: int,
-    use_ess: bool,
-    output_dir: Path,
-    policy: str,
-    solver_device: str | None,
-    jax_platforms: str | None,
-    jax_backend: str | None,
-    jax_device_kind: str | None,
-    stellarator_asymmetric: bool,
+    metadata: CaseRunMetadata,
     specs,
     params_final,
     opt,
@@ -1793,22 +1754,23 @@ def _case_result_from_history(
     message: str,
     extra_fields: dict | None = None,
 ) -> CaseResult:
+    problem_cfg = metadata.problem_cfg
     profile_summary = _profile_summary_fields(history)
     asym_stats = _checkpoint_asymmetry_stats(
         specs=specs,
         params_final=params_final,
         opt=opt,
-        stellarator_asymmetric=stellarator_asymmetric,
+        stellarator_asymmetric=metadata.stellarator_asymmetric,
     )
     fields = {
-        "backend": str(backend),
-        "problem": problem,
-        "max_mode": int(max_mode),
-        "use_ess": bool(use_ess),
+        "backend": str(metadata.backend),
+        "problem": metadata.problem,
+        "max_mode": int(metadata.max_mode),
+        "use_ess": bool(metadata.use_ess),
         "success": bool(success),
         "crashed": bool(crashed),
         "message": str(message),
-        "policy": str(policy),
+        "policy": str(metadata.policy),
         "objective_final": _float_or_none(history.get("objective_final")),
         "qs_final": _float_or_none(history.get("qs_final")),
         "aspect_final": _float_or_none(history.get("aspect_final")),
@@ -1816,75 +1778,16 @@ def _case_result_from_history(
         "nfev": _int_or_none(history.get("nfev")),
         "njev": _int_or_none(history.get("njev")),
         "total_wall_time_s": _float_or_none(history.get("total_wall_time_s")),
-        "profile_wall_time_s": profile_summary["profile_wall_time_s"],
-        "profile_top_name": profile_summary["profile_top_name"],
-        "profile_top_wall_time_s": profile_summary["profile_top_wall_time_s"],
-        "profile_solve_forward_trial_total_wall_time_s": profile_summary[
-            "profile_solve_forward_trial_total_wall_time_s"
-        ],
-        "profile_solve_forward_exact_total_wall_time_s": profile_summary[
-            "profile_solve_forward_exact_total_wall_time_s"
-        ],
-        "profile_exact_tape_build_wall_time_s": profile_summary["profile_exact_tape_build_wall_time_s"],
-        "profile_exact_tape_build_solve_call_wall_time_s": profile_summary[
-            "profile_exact_tape_build_solve_call_wall_time_s"
-        ],
-        "profile_exact_tape_build_unattributed_wall_time_s": profile_summary[
-            "profile_exact_tape_build_unattributed_wall_time_s"
-        ],
-        "profile_exact_tape_solver_compute_forces_first_wall_time_s": profile_summary[
-            "profile_exact_tape_solver_compute_forces_first_wall_time_s"
-        ],
-        "profile_exact_tape_solver_compute_forces_rest_wall_time_s": profile_summary[
-            "profile_exact_tape_solver_compute_forces_rest_wall_time_s"
-        ],
-        "profile_trial_solver_scan_total_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_total_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_lookup_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_lookup_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_build_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_build_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_hit_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_hit_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_miss_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_miss_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_bypass_count": profile_summary[
-            "profile_trial_solver_scan_runner_cache_bypass_count"
-        ],
-        "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s"
-        ],
-        "profile_trial_solver_scan_device_dispatch_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_device_dispatch_wall_time_s"
-        ],
-        "profile_trial_solver_scan_device_ready_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_device_ready_wall_time_s"
-        ],
-        "profile_trial_solver_scan_host_materialize_wall_time_s": profile_summary[
-            "profile_trial_solver_scan_host_materialize_wall_time_s"
-        ],
-        "profile_jacobian_total_wall_time_s": profile_summary["profile_jacobian_total_wall_time_s"],
-        "profile_write_wout_wall_time_s": profile_summary["profile_write_wout_wall_time_s"],
-        "output_dir": str(output_dir),
-        "jax_backend": jax_backend,
-        "jax_device_kind": jax_device_kind,
-        "solver_device": solver_device,
-        "jax_platforms": jax_platforms,
-        "stellarator_asymmetric": bool(stellarator_asymmetric),
-        "asymmetry_seed": float(ASYMMETRIC_SEED if stellarator_asymmetric else 0.0),
+        **profile_summary,
+        "output_dir": str(metadata.output_dir),
+        "jax_backend": metadata.jax_backend,
+        "jax_device_kind": metadata.jax_device_kind,
+        "solver_device": metadata.solver_device,
+        "jax_platforms": metadata.jax_platforms,
+        "stellarator_asymmetric": bool(metadata.stellarator_asymmetric),
+        "asymmetry_seed": float(ASYMMETRIC_SEED if metadata.stellarator_asymmetric else 0.0),
         "input_file": str(problem_cfg.input_file),
-        "input_nfp": _input_nfp_or_none(cfg),
+        "input_nfp": _input_nfp_or_none(metadata.cfg),
         "project_input_boundary_to_max_mode": bool(problem_cfg.project_input_boundary_to_max_mode),
         "target_aspect": float(problem_cfg.target_aspect),
         "target_iota": (None if problem_cfg.target_iota is None else float(problem_cfg.target_iota)),
@@ -1962,21 +1865,9 @@ def _stage_checkpoint_payload(
 
 def _write_case_checkpoint(
     *,
-    output_dir: Path,
+    metadata: CaseRunMetadata,
     result_path: Path,
     stage_results: list[StageRecord],
-    problem_cfg: ProblemConfig,
-    cfg,
-    backend: str,
-    problem: str,
-    max_mode: int,
-    use_ess: bool,
-    policy: str,
-    solver_device: str | None,
-    jax_platforms: str | None,
-    jax_backend: str | None,
-    jax_device_kind: str | None,
-    stellarator_asymmetric: bool,
     latest_specs,
     latest_opt,
     latest_params_final,
@@ -1991,7 +1882,8 @@ def _write_case_checkpoint(
 
     if not stage_results:
         raise ValueError("stage_results must contain at least one stage")
-    output_dir = Path(output_dir)
+    problem_cfg = metadata.problem_cfg
+    output_dir = Path(metadata.output_dir)
     result_path = Path(result_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     latest_stage_result = stage_results[-1][2]
@@ -2013,19 +1905,7 @@ def _write_case_checkpoint(
     _atomic_write_json(output_dir / "history.json", history)
     case_result = _case_result_from_history(
         history=history,
-        problem_cfg=problem_cfg,
-        cfg=cfg,
-        backend=backend,
-        problem=problem,
-        max_mode=max_mode,
-        use_ess=use_ess,
-        output_dir=output_dir,
-        policy=policy,
-        solver_device=solver_device,
-        jax_platforms=jax_platforms,
-        jax_backend=jax_backend,
-        jax_device_kind=jax_device_kind,
-        stellarator_asymmetric=stellarator_asymmetric,
+        metadata=metadata,
         specs=latest_specs,
         params_final=latest_params_final,
         opt=latest_opt,
@@ -2334,6 +2214,21 @@ def _run_case(
         stellarator_asymmetric=stellarator_asymmetric,
     )
     jax_backend, jax_device_kind = _jax_runtime_info()
+    metadata = CaseRunMetadata(
+        problem_cfg=problem_cfg,
+        cfg=cfg,
+        backend=backend,
+        problem=problem,
+        max_mode=max_mode,
+        use_ess=use_ess,
+        output_dir=Path(output_dir),
+        policy=policy,
+        solver_device=solver_device,
+        jax_platforms=jax_platforms,
+        jax_backend=jax_backend,
+        jax_device_kind=jax_device_kind,
+        stellarator_asymmetric=stellarator_asymmetric,
+    )
 
     stage_results: list[StageRecord] = []
     params_stage = None
@@ -2382,21 +2277,9 @@ def _run_case(
         stage_label = stage_record[0]
         try:
             _write_case_checkpoint(
-                output_dir=output_dir,
+                metadata=metadata,
                 result_path=result_path,
                 stage_results=checkpoint_stage_results,
-                problem_cfg=problem_cfg,
-                cfg=cfg,
-                backend=backend,
-                problem=problem,
-                max_mode=max_mode,
-                use_ess=use_ess,
-                policy=policy,
-                solver_device=solver_device,
-                jax_platforms=jax_platforms,
-                jax_backend=jax_backend,
-                jax_device_kind=jax_device_kind,
-                stellarator_asymmetric=stellarator_asymmetric,
                 latest_specs=stage_specs,
                 latest_opt=stage_opt,
                 latest_params_final=params_final,
@@ -2504,21 +2387,9 @@ def _run_case(
     hist = case_output_result["_history_dump"]
     try:
         _write_case_checkpoint(
-            output_dir=output_dir,
+            metadata=metadata,
             result_path=result_path,
             stage_results=checkpoint_stage_results,
-            problem_cfg=problem_cfg,
-            cfg=cfg,
-            backend=backend,
-            problem=problem,
-            max_mode=max_mode,
-            use_ess=use_ess,
-            policy=policy,
-            solver_device=solver_device,
-            jax_platforms=jax_platforms,
-            jax_backend=jax_backend,
-            jax_device_kind=jax_device_kind,
-            stellarator_asymmetric=stellarator_asymmetric,
             latest_specs=prev_specs,
             latest_opt=final_opt,
             latest_params_final=final_result["x"],
@@ -2553,19 +2424,7 @@ def _run_case(
 
     return _case_result_from_history(
         history=hist,
-        problem_cfg=problem_cfg,
-        cfg=cfg,
-        backend=backend,
-        problem=problem,
-        max_mode=max_mode,
-        use_ess=use_ess,
-        output_dir=output_dir,
-        policy=policy,
-        solver_device=solver_device,
-        jax_platforms=jax_platforms,
-        jax_backend=jax_backend,
-        jax_device_kind=jax_device_kind,
-        stellarator_asymmetric=stellarator_asymmetric,
+        metadata=metadata,
         specs=prev_specs,
         params_final=final_result["x"],
         opt=final_opt,
@@ -2909,30 +2768,7 @@ def _write_summary_csv(results: list[CaseResult], path: Path) -> None:
                 "nfev",
                 "njev",
                 "total_wall_time_s",
-                "profile_wall_time_s",
-                "profile_top_name",
-                "profile_top_wall_time_s",
-                "profile_solve_forward_trial_total_wall_time_s",
-                "profile_solve_forward_exact_total_wall_time_s",
-                "profile_exact_tape_build_wall_time_s",
-                "profile_exact_tape_build_solve_call_wall_time_s",
-                "profile_exact_tape_build_unattributed_wall_time_s",
-                "profile_exact_tape_solver_compute_forces_first_wall_time_s",
-                "profile_exact_tape_solver_compute_forces_rest_wall_time_s",
-                "profile_trial_solver_scan_total_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_lookup_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_build_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_hit_count",
-                "profile_trial_solver_scan_runner_cache_miss_count",
-                "profile_trial_solver_scan_runner_cache_bypass_count",
-                "profile_trial_solver_scan_runner_cache_hit_device_run_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_miss_device_run_wall_time_s",
-                "profile_trial_solver_scan_runner_cache_bypass_device_run_wall_time_s",
-                "profile_trial_solver_scan_device_dispatch_wall_time_s",
-                "profile_trial_solver_scan_device_ready_wall_time_s",
-                "profile_trial_solver_scan_host_materialize_wall_time_s",
-                "profile_jacobian_total_wall_time_s",
-                "profile_write_wout_wall_time_s",
+                *_PROFILE_SUMMARY_KEYS,
                 "jax_backend",
                 "jax_device_kind",
                 "solver_device",

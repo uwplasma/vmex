@@ -179,6 +179,75 @@ class VmecHalfMeshBcovar:
         return cls(*children)
 
 
+@tree_util.register_pytree_node_class
+@dataclass(frozen=True)
+class VmecForceBcovarPayload:
+    """Compact bcovar payload for the force/residual hot path.
+
+    Public diagnostics still use :class:`VmecHalfMeshBcovar`.  This internal
+    payload keeps the fields consumed by force norms, R/Z forces, constraints,
+    and lambda residual transforms while omitting parity/debug intermediates.
+    """
+
+    jac: VmecHalfMeshJacobian
+    guu: Any
+    guv: Any
+    gvv: Any
+    bsupu: Any
+    bsupv: Any
+    bsubu: Any
+    bsubv: Any
+    bsubu_e: Any
+    bsubv_e: Any
+    bsubu_e_scaled: Any
+    bsubv_e_scaled: Any
+    clmn_even: Any
+    clmn_odd: Any
+    blmn_even: Any
+    blmn_odd: Any
+    lu0_force: Any
+    bsq: Any
+    gij_b_uu: Any
+    gij_b_uv: Any
+    gij_b_vv: Any
+    lu_e: Any
+    lv_e: Any
+    lamscale: Any
+
+    def tree_flatten(self):
+        children = (
+            self.jac,
+            self.guu,
+            self.guv,
+            self.gvv,
+            self.bsupu,
+            self.bsupv,
+            self.bsubu,
+            self.bsubv,
+            self.bsubu_e,
+            self.bsubv_e,
+            self.bsubu_e_scaled,
+            self.bsubv_e_scaled,
+            self.clmn_even,
+            self.clmn_odd,
+            self.blmn_even,
+            self.blmn_odd,
+            self.lu0_force,
+            self.bsq,
+            self.gij_b_uu,
+            self.gij_b_uv,
+            self.gij_b_vv,
+            self.lu_e,
+            self.lv_e,
+            self.lamscale,
+        )
+        return children, None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(*children)
+
+
 def _pshalf_from_s(s: Any) -> Any:
     s = jnp.asarray(s)
     if s.shape[0] < 2:
@@ -298,61 +367,92 @@ def _apply_vmec_lambda_axis_closure(
     return _replace_axis_row(Lsin, axis_row)
 
 
-def vmec_bcovar_half_mesh_from_wout(
-    *,
-    state,
-    static,
-    wout,
-    pres: Any | None = None,
-    mass: Any | None = None,
-    use_wout_bsup: bool = False,
-    use_wout_bsub_for_lambda: bool = False,
-    use_wout_bmag_for_bsq: bool = False,
-    freeb_bsqvac_edge: Any | None = None,
-    use_vmec_synthesis: bool = False,
-    trig: VmecTrigTables | None = None,
-    return_parity_aux: bool = False,
-    state_physical_signed: tuple[Any, Any, Any, Any] | None = None,
-) -> VmecHalfMeshBcovar:
-    """Compute VMEC-style half-mesh metric and B components for parity tests.
+@dataclass(frozen=True)
+class BcovarResolvedState:
+    """State/trig inputs normalized for the VMEC bcovar parity path."""
 
-    Parameters
-    ----------
-    state:
-        :class:`~vmec_jax.state.VMECState` (typically from :func:`~vmec_jax.wout.state_from_wout`).
-    static:
-        Static precomputations from :func:`~vmec_jax.static.build_static`.
-    wout:
-        :class:`~vmec_jax.wout.WoutData` providing ``phipf``, ``chipf``, ``phips``, ``signgs``.
-    pres:
-        Optional pressure profile on the *half mesh* in VMEC internal units (mu0*Pa).
-        If omitted, uses ``wout.pres``.
-    mass:
-        Optional mass profile on the half mesh (VMEC internal units) used to
-        reconstruct pressure as ``pres = mass / vp**gamma``. If provided (or
-        present on ``wout`` as ``mass``), this takes precedence over ``pres``.
-    use_vmec_synthesis:
-        If True, evaluate the R/Z/L real-space parity pieces and their derivatives
-        using VMEC's ``fixaray`` trig tables (ntheta2/ntheta3 grids).
-    use_wout_bsub_for_lambda:
-        If True, build the lambda-force full-mesh kernels (``blmn/clmn``) from
-        ``wout``-stored ``bsub*`` fields averaged to the full radial mesh. This
-        is a reference-parity mode that avoids re-deriving ``bsubv_e`` from
-        lambda derivatives.
-    use_wout_bmag_for_bsq:
-        If True, use ``wout`` Nyquist ``|B|`` to form ``bsq = |B|^2/2 + p`` in
-        this parity path, instead of deriving ``|B|^2`` from
-        ``bsup/bsub`` products.
-    freeb_bsqvac_edge:
-        Optional free-boundary vacuum boundary ``0.5*|B|^2`` on the edge
-        surface `(ntheta, nzeta)` (VMEC ``bsqvac`` convention). When provided,
-        the half-mesh edge ``bsq`` is overridden as
-        ``freeb_bsqvac_edge + p_edge``.
-    trig:
-        Optional precomputed VMEC trig tables. If omitted and
-        ``use_vmec_synthesis=True``, they are built internally.
-    """
-    bcovar_start = time.perf_counter()
+    s: Any
+    trig: VmecTrigTables
+    ns: int
+    state_parity: Any
+
+
+@dataclass(frozen=True)
+class BcovarParityChannels:
+    """Even/odd VMEC parity fields used to build half-mesh metrics."""
+
+    parity: ParityRZL
+    R1: Any
+    Z1: Any
+    Ru1: Any
+    Zu1: Any
+    Rv1: Any
+    Zv1: Any
+    Lu1: Any
+    Lv1: Any
+
+
+@dataclass(frozen=True)
+class BcovarMetricAssembly:
+    """Half-mesh metric and lambda derivative fields from parity channels."""
+
+    jac: VmecHalfMeshJacobian
+    guu: Any
+    guv: Any
+    gvv: Any
+    guu_eh: Any
+    guu_oh: Any
+    guv_eh: Any
+    guv_oh: Any
+    gvv_eh: Any
+    gvv_oh: Any
+    lam_u: Any
+    lam_v: Any
+
+
+@dataclass(frozen=True)
+class BcovarFluxContext:
+    """Flux/current profiles used by VMEC bcovar and add_fluxes."""
+
+    lamscale: Any
+    phipf_internal: Any
+    chips_eff: Any
+    ncurr: int
+    lcurrent: bool
+    icurv: Any
+
+
+@dataclass(frozen=True)
+class BcovarLambdaForceAssembly:
+    """Full-mesh lambda-force fields built from half-mesh B-covariant data."""
+
+    bsubu_e: Any
+    bsubv_e: Any
+    bsubu_e_scaled: Any
+    bsubv_e_scaled: Any
+    bsubu_tmp: Any
+    bsubv_preblend: Any
+    bsubv_avg: Any
+    clmn_even: Any
+    clmn_odd: Any
+    blmn_even: Any
+    blmn_odd: Any
+    lvv: Any
+    lvv_sh: Any
+    phip_internal: Any
+    lu0_force: Any
+
+
+def _resolve_bcovar_state_and_trig(
+    *,
+    state: Any,
+    static: Any,
+    wout: Any,
+    trig: VmecTrigTables | None,
+    state_physical_signed: tuple[Any, Any, Any, Any] | None,
+) -> BcovarResolvedState:
+    """Resolve trig tables and physical-signed geometry for bcovar."""
+
     s = jnp.asarray(static.s)
     if trig is None:
         trig = getattr(static, "trig_vmec", None)
@@ -367,8 +467,6 @@ def vmec_bcovar_half_mesh_from_wout(
             dtype=jnp.asarray(state.Rcos).dtype,
         )
     ns = int(s.shape[0])
-    # VMEC stores internal coefficients. Undo the m=1 internal constraint for
-    # R/Z before real-space synthesis.
     if state_physical_signed is None:
         Rcos_int, Zsin_int, Rsin_int, Zcos_int = vmec_m1_internal_to_physical_signed(
             Rcos=state.Rcos,
@@ -383,11 +481,6 @@ def vmec_bcovar_half_mesh_from_wout(
     else:
         Rcos_int, Zsin_int, Rsin_int, Zcos_int = state_physical_signed
 
-    Rcos_geom = jnp.asarray(Rcos_int)
-    Rsin_geom = jnp.asarray(Rsin_int)
-    Zcos_geom = jnp.asarray(Zcos_int)
-    Zsin_geom = jnp.asarray(Zsin_int)
-    Lcos_force = jnp.asarray(state.Lcos)
     Lsin_force = _apply_vmec_lambda_axis_closure(
         Lsin=state.Lsin,
         m_modes=static.modes.m,
@@ -396,17 +489,33 @@ def vmec_bcovar_half_mesh_from_wout(
         lthreed=bool(getattr(static.cfg, "lthreed", False)),
         ntor=int(getattr(static.cfg, "ntor", 0)),
     )
-    Lsin_force = jnp.asarray(Lsin_force)
-
     state_parity = SimpleNamespace(
-        Rcos=Rcos_geom,
-        Rsin=Rsin_geom,
-        Zcos=Zcos_geom,
-        Zsin=Zsin_geom,
-        Lcos=Lcos_force,
-        Lsin=Lsin_force,
+        Rcos=jnp.asarray(Rcos_int),
+        Rsin=jnp.asarray(Rsin_int),
+        Zcos=jnp.asarray(Zcos_int),
+        Zsin=jnp.asarray(Zsin_int),
+        Lcos=jnp.asarray(state.Lcos),
+        Lsin=jnp.asarray(Lsin_force),
     )
-    _vmec_bcovar_profile_log("setup_done", bcovar_start)
+    return BcovarResolvedState(
+        s=s,
+        trig=trig,
+        ns=ns,
+        state_parity=state_parity,
+    )
+
+
+def _compute_bcovar_parity_channels(
+    *,
+    state: Any,
+    static: Any,
+    wout: Any,
+    state_parity: Any,
+    s: Any,
+    trig: VmecTrigTables,
+    use_vmec_synthesis: bool,
+) -> BcovarParityChannels:
+    """Return VMEC parity fields and odd-m internal channels for bcovar."""
 
     parity_start = time.perf_counter()
     if use_vmec_synthesis:
@@ -475,26 +584,19 @@ def vmec_bcovar_half_mesh_from_wout(
             Lp_odd=odd_p[2],
         )
     else:
-        # Split real-space fields into parity subsets. VMEC's bcovar pipeline
-        # is built around even/odd-m parity (with odd-m stored in internal
-        # form), even when LASYM is enabled. Using cos/sin splits here
-        # breaks bsupu/bsupv parity for asymmetric runs.
+        # VMEC's bcovar pipeline is built around even/odd-m parity, even for
+        # LASYM.  Cos/sin splits break bsupu/bsupv parity for asymmetric runs.
         parity = split_rzl_even_odd_m(state_parity, static.basis, static.modes.m)
     _vmec_bcovar_profile_log("parity_done", parity_start)
 
-    # VMEC axis convention (vmec_params.f: jmin1):
-    # - m=1 odd-m internal fields are extrapolated to the axis (copy js=2),
-    # - odd-m with m>=3 are zero on the axis.
     dtype = jnp.asarray(state.Rcos).dtype
     if getattr(static, "m_is_m1", None) is None:
         m_modes = np.asarray(static.modes.m, dtype=int)
         mask_m1 = jnp.asarray(m_modes == 1, dtype=dtype)
         mask_odd_rest = jnp.asarray((m_modes % 2 == 1) & (m_modes != 1), dtype=dtype)
-        mask_odd = jnp.asarray(m_modes % 2 == 1, dtype=dtype)
     else:
         mask_m1 = jnp.asarray(static.m_is_m1, dtype=dtype)
         mask_odd_rest = jnp.asarray(static.m_is_odd_rest, dtype=dtype)
-        mask_odd = jnp.asarray(static.m_is_odd, dtype=dtype)
 
     def _odd_internal_vmec(*, coeff_cos, coeff_sin, eval_fn, odd_is_internal: bool):
         if use_vmec_synthesis:
@@ -526,18 +628,12 @@ def vmec_bcovar_half_mesh_from_wout(
 
     odd_start = time.perf_counter()
     if use_vmec_synthesis:
-        s_grid = s
-        odd_is_internal = True
 
         def _odd_internal_from_phys(phys_m1, phys_rest, *, lambda_field: bool = False):
-            if odd_is_internal:
-                out = phys_m1 + phys_rest
-                if out.shape[0] >= 2:
-                    out = _replace_axis_row(out, phys_m1[1])
-                return out
-            if lambda_field:
-                return internal_odd_from_physical_vmec_jlam(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
-            return internal_odd_from_physical_vmec_m1(odd_m1_phys=phys_m1, odd_mge2_phys=phys_rest, s=s)
+            out = phys_m1 + phys_rest
+            if out.shape[0] >= 2:
+                out = _replace_axis_row(out, phys_m1[1])
+            return out
 
         coeff_cos_stack = jnp.stack([state_parity.Rcos, state_parity.Zcos, state_parity.Lcos], axis=0)
         coeff_sin_stack = jnp.stack([state_parity.Rsin, state_parity.Zsin, state_parity.Lsin], axis=0)
@@ -551,7 +647,7 @@ def vmec_bcovar_half_mesh_from_wout(
             trig=trig,
             coeffs_internal=True,
             apply_scalxc=True,
-            s=s_grid,
+            s=s,
             derivs=("base", "dtheta", "dzeta"),
         )
 
@@ -601,7 +697,6 @@ def vmec_bcovar_half_mesh_from_wout(
             eval_fn=eval_fourier_dzeta_phys,
             odd_is_internal=odd_is_internal,
         )
-
         Lu1 = _odd_internal_vmec_lambda(
             coeff_cos=state_parity.Lcos,
             coeff_sin=state_parity.Lsin,
@@ -615,8 +710,37 @@ def vmec_bcovar_half_mesh_from_wout(
             odd_is_internal=odd_is_internal,
         )
     _vmec_bcovar_profile_log("odd_channels_done", odd_start)
+    return BcovarParityChannels(
+        parity=parity,
+        R1=R1,
+        Z1=Z1,
+        Ru1=Ru1,
+        Zu1=Zu1,
+        Rv1=Rv1,
+        Zv1=Zv1,
+        Lu1=Lu1,
+        Lv1=Lv1,
+    )
 
-    # Half-mesh Jacobian quantities from VMEC's discrete formula.
+
+def _compute_bcovar_metric_assembly(
+    *,
+    channels: BcovarParityChannels,
+    s: Any,
+    ns: int,
+    compact_force_payload: bool = False,
+) -> BcovarMetricAssembly:
+    """Build half-mesh Jacobian, metric tensors, and lambda derivatives."""
+
+    parity = channels.parity
+    R1 = channels.R1
+    Z1 = channels.Z1
+    Ru1 = channels.Ru1
+    Zu1 = channels.Zu1
+    Rv1 = channels.Rv1
+    Zv1 = channels.Zv1
+    Lu1 = channels.Lu1
+    Lv1 = channels.Lv1
     metric_start = time.perf_counter()
     jac = jacobian_half_mesh_from_parity(
         pr1_even=parity.R_even,
@@ -629,8 +753,6 @@ def vmec_bcovar_half_mesh_from_wout(
         pzu_odd=Zu1,
         s=s,
     )
-    # Metric elements on full mesh split into even/odd (internal) pieces, then
-    # staggered to the half mesh using VMEC's pshalf convention.
     guu_e, guu_o = _metric_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Zt_even, b1=Zu1, s=s)
     guv_e, guv_o = _metric_cross_even_odd(a0=parity.Rt_even, a1=Ru1, b0=parity.Rp_even, b1=Rv1, s=s)
     guv_e2, guv_o2 = _metric_cross_even_odd(a0=parity.Zt_even, a1=Zu1, b0=parity.Zp_even, b1=Zv1, s=s)
@@ -638,13 +760,11 @@ def vmec_bcovar_half_mesh_from_wout(
     guv_o = guv_o + guv_o2
     gvv_e, gvv_o = _metric_even_odd(a0=parity.Rp_even, a1=Rv1, b0=parity.Zp_even, b1=Zv1, s=s)
 
-    # R^2 term in cylindrical metric: gvv <- gvv + R^2
     ss = s[:, None, None]
-    R2_e = parity.R_even * parity.R_even + ss * (R1 * R1)
-    R2_o = 2.0 * parity.R_even * R1
-
-    gvv_e_total = gvv_e + R2_e
-    gvv_o_total = gvv_o + R2_o
+    r2_even = parity.R_even * parity.R_even + ss * (R1 * R1)
+    r2_odd = 2.0 * parity.R_even * R1
+    gvv_e_total = gvv_e + r2_even
+    gvv_o_total = gvv_o + r2_odd
 
     guu = _half_mesh_from_even_odd(guu_e, guu_o, s=s)
     guv = _half_mesh_from_even_odd(guv_e, guv_o, s=s)
@@ -664,37 +784,37 @@ def vmec_bcovar_half_mesh_from_wout(
             jnp.concatenate([o_body[:1], o_body], axis=0),
         )
 
-    guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
-    guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
-    gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
-
-    # Lambda derivatives on half mesh (scaled lambda).
-    lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
-    lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
-
-    # NOTE: `lam_u/lam_v` are used downstream in VMEC's magnetic-field and
-    # force pipeline, but the (guu,guv,gvv) metric elements used for bsub*
-    # parity are those constructed above from (Ru,Zu,Rv,Zv) and the cylindrical
-    # +R^2 term.
+    if bool(compact_force_payload):
+        guu_eh = guu_oh = guv_eh = guv_oh = gvv_eh = gvv_oh = None
+        lam_u = lam_v = None
+    else:
+        guu_eh, guu_oh = _half_even_odd_full(guu_e, guu_o)
+        guv_eh, guv_oh = _half_even_odd_full(guv_e, guv_o)
+        gvv_eh, gvv_oh = _half_even_odd_full(gvv_e_total, gvv_o_total)
+        lam_u = _half_mesh_from_even_odd(parity.Lt_even, Lu1, s=s)
+        lam_v = _half_mesh_from_even_odd(parity.Lp_even, Lv1, s=s)
     _vmec_bcovar_profile_log("metric_done", metric_start)
+    return BcovarMetricAssembly(
+        jac=jac,
+        guu=guu,
+        guv=guv,
+        gvv=gvv,
+        guu_eh=guu_eh,
+        guu_oh=guu_oh,
+        guv_eh=guv_eh,
+        guv_oh=guv_oh,
+        gvv_eh=gvv_eh,
+        gvv_oh=gvv_oh,
+        lam_u=lam_u,
+        lam_v=lam_v,
+    )
 
-    # ---------------------------------------------------------------------
-    # Contravariant B components (bsupu, bsupv) on the half mesh.
-    # ---------------------------------------------------------------------
-    field_start = time.perf_counter()
-    # VMEC does not form bsupu/bsupv from pointwise (sqrtg, lam_u, lam_v) alone.
-    # Instead, it:
-    #   1) builds full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv (even/odd-m),
-    #   2) scales LU/LV by lamscale and adds phipf to LU_even,
-    #   3) averages (LU,LV) from full -> half radial mesh using pshalf,
-    #   4) adds the full-mesh flux function chips(js) via `add_fluxes`.
-    #
-    # See `VMEC2000/Sources/General/bcovar.f` and `add_fluxes.f90`.
+
+def _resolve_bcovar_flux_context(*, wout: Any, s: Any, ns: int) -> BcovarFluxContext:
+    """Resolve VMEC internal flux/current arrays for bcovar field assembly."""
+
     lamscale = lamscale_from_phips(wout.phips, s)
     signgs = int(getattr(wout, "signgs", 1))
-
-    # VMEC adds the **full-mesh** flux function `chips(js)` to bsupu in
-    # `add_fluxes`, while `wout` commonly stores the half-mesh array `chipf`.
     chipf_out = getattr(wout, "chipf", None)
     phipf_cached = getattr(wout, "phipf_internal", None)
     chipf_cached = getattr(wout, "chipf_internal", None)
@@ -732,77 +852,363 @@ def vmec_bcovar_half_mesh_from_wout(
     icurv = jnp.asarray(getattr(wout, "icurv", jnp.zeros((ns,), dtype=phipf_internal.dtype)))
     if int(icurv.shape[0]) != ns:
         icurv = jnp.zeros((ns,), dtype=phipf_internal.dtype)
+    return BcovarFluxContext(
+        lamscale=lamscale,
+        phipf_internal=phipf_internal,
+        chips_eff=chips_eff,
+        ncurr=int(ncurr),
+        lcurrent=bool(lcurrent),
+        icurv=icurv,
+    )
 
-    # VMEC bcovar: overg = 1 / sqrtg (phipog in bcovar.f).
+
+def _compute_bcovar_contravariant_field(
+    *,
+    flux_context: BcovarFluxContext,
+    parity: ParityRZL,
+    Lu1: Any,
+    Lv1: Any,
+    jac: VmecHalfMeshJacobian,
+    guu: Any,
+    guv: Any,
+    s: Any,
+    trig: VmecTrigTables,
+    ns: int,
+) -> SimpleNamespace:
+    """Build VMEC half-mesh ``B^u``/``B^v`` channels before reference overrides."""
+
+    lamscale = flux_context.lamscale
+    phipf_internal = flux_context.phipf_internal
     denom = jac.sqrtg
-    # Avoid NaNs in autodiff by preventing division-by-zero in the inactive branch.
     safe_denom = jnp.where(denom != 0, denom, jnp.asarray(1.0, dtype=denom.dtype))
     overg = jnp.where(denom != 0, 1.0 / safe_denom, 0.0)
-
-    # Full-mesh LU = d(lambda)/du and LV = -d(lambda)/dv in VMEC conventions.
-    lu0_full = jnp.asarray(parity.Lt_even)
-    lu1_full = jnp.asarray(Lu1)
-    lv0_full = -jnp.asarray(parity.Lp_even)
-    lv1_full = -jnp.asarray(Lv1)
-
-    # Scale by lamscale and add wout phipf to LU_even (bsupv path).
-    lu0_full = (lamscale * lu0_full) + jnp.asarray(phipf_internal)[:, None, None]
-    lu1_full = lamscale * lu1_full
-    lv0_full = lamscale * lv0_full
-    lv1_full = lamscale * lv1_full
+    lu0_full = (lamscale * jnp.asarray(parity.Lt_even)) + jnp.asarray(phipf_internal)[:, None, None]
+    lu1_full = lamscale * jnp.asarray(Lu1)
+    lv0_full = -lamscale * jnp.asarray(parity.Lp_even)
+    lv1_full = -lamscale * jnp.asarray(Lv1)
 
     pshalf = _pshalf_from_s(s)[:, None, None]
-
-    # Radial full->half average (Fortran: for l=2..ns).
-    bsupu_even = jnp.zeros_like(jac.sqrtg)
-    bsupu_odd = jnp.zeros_like(jac.sqrtg)
-    bsupv_even = jnp.zeros_like(jac.sqrtg)
-    bsupv_odd = jnp.zeros_like(jac.sqrtg)
-    bsupu = jnp.zeros_like(jac.sqrtg)
-    bsupv = jnp.zeros_like(jac.sqrtg)
+    zero = jnp.zeros_like(jac.sqrtg)
+    bsupu_even = bsupu_odd = bsupv_even = bsupv_odd = bsupu = bsupv = zero
     if ns >= 2:
-        avg_lu0 = lu0_full[1:] + lu0_full[:-1]
-        avg_lu1 = lu1_full[1:] + lu1_full[:-1]
-        avg_lv0 = lv0_full[1:] + lv0_full[:-1]
-        avg_lv1 = lv1_full[1:] + lv1_full[:-1]
-
-        bsupv_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lu0, jac.sqrtg)
-        bsupv_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lu1, jac.sqrtg)
-        bsupu_even = _prepend_axis_zero(0.5 * overg[1:] * avg_lv0, jac.sqrtg)
-        bsupu_odd = _prepend_axis_zero(0.5 * overg[1:] * avg_lv1, jac.sqrtg)
-
+        bsupv_even = _prepend_axis_zero(0.5 * overg[1:] * (lu0_full[1:] + lu0_full[:-1]), jac.sqrtg)
+        bsupv_odd = _prepend_axis_zero(0.5 * overg[1:] * (lu1_full[1:] + lu1_full[:-1]), jac.sqrtg)
+        bsupu_even = _prepend_axis_zero(0.5 * overg[1:] * (lv0_full[1:] + lv0_full[:-1]), jac.sqrtg)
+        bsupu_odd = _prepend_axis_zero(0.5 * overg[1:] * (lv1_full[1:] + lv1_full[:-1]), jac.sqrtg)
         bsupv = bsupv_even + pshalf * bsupv_odd
         bsupu = bsupu_even + pshalf * bsupu_odd
 
-    if (ncurr == 1) and lcurrent and (ns >= 2):
-        # VMEC's add_fluxes computes chips using bsup in VMEC orientation.
+    chips_eff = flux_context.chips_eff
+    if (flux_context.ncurr == 1) and flux_context.lcurrent and (ns >= 2):
         pwint = vmec_pwint_from_trig(trig, ns=int(overg.shape[0]), nzeta=int(overg.shape[2])).astype(bsupu.dtype)
         if pwint.shape[1:] != bsupu.shape[1:]:
-            # The non-VMEC-synthesis path uses the full theta grid instead of
-            # VMEC's reduced ntheta3 grid. Fall back to uniform surface-average
-            # weights on that active grid so the current-driven chips update can
-            # run on the same angular discretization as guu/bsupu/bsupv.
             dnorm3 = jnp.asarray(getattr(trig, "dnorm3", 0.0), dtype=bsupu.dtype)
-            pwint = jnp.broadcast_to(dnorm3, bsupu.shape)
-            pwint = _with_axis_zero(pwint)
-
-        top = jnp.asarray(icurv, dtype=bsupu.dtype) - jnp.sum(
+            pwint = _with_axis_zero(jnp.broadcast_to(dnorm3, bsupu.shape))
+        top = jnp.asarray(flux_context.icurv, dtype=bsupu.dtype) - jnp.sum(
             pwint * ((guu * bsupu) + (guv * bsupv)),
             axis=(1, 2),
         )
         bot = jnp.sum(pwint * (overg * guu), axis=(1, 2))
-
         chips_dyn = jnp.asarray(chips_eff, dtype=bsupu.dtype)
         safe_bot = jnp.where(bot != 0.0, bot, jnp.asarray(1.0, dtype=bot.dtype))
-        chips_new = jnp.where(bot != 0.0, top / safe_bot, chips_dyn)
-        chips_dyn = jnp.concatenate([jnp.zeros_like(chips_dyn[:1]), chips_new[1:]], axis=0)
-        chips_eff = chips_dyn
+        chips_eff = jnp.concatenate([jnp.zeros_like(chips_dyn[:1]), jnp.where(bot != 0.0, top / safe_bot, chips_dyn)[1:]], axis=0)
 
-    # `add_fluxes`: VMEC updates `bsupu` in VMEC orientation:
-    #   bsupu <- bsupu + chips*overg.
     chip_term = jnp.asarray(chips_eff)[:, None, None] * overg
-    bsupu_even = bsupu_even + chip_term
-    bsupu = bsupu + chip_term
+    return SimpleNamespace(
+        lamscale=lamscale,
+        phipf_internal=phipf_internal,
+        lu0_full=lu0_full,
+        lu1_full=lu1_full,
+        lv0_full=lv0_full,
+        lv1_full=lv1_full,
+        bsupu=bsupu + chip_term,
+        bsupv=bsupv,
+        bsupu_even=bsupu_even + chip_term,
+        bsupu_odd=bsupu_odd,
+        bsupv_even=bsupv_even,
+        bsupv_odd=bsupv_odd,
+    )
+
+
+def _resolve_bcovar_half_mesh_pressure(*, wout: Any, pres: Any | None, mass: Any | None, jac, ns: int, trig):
+    """Resolve VMEC half-mesh pressure, including the finite-beta mass profile path."""
+
+    try:
+        mass_in = mass if mass is not None else getattr(wout, "mass", None)
+    except Exception:
+        mass_in = mass
+    try:
+        gamma = getattr(wout, "gamma", None)
+    except Exception:
+        gamma = None
+    if mass_in is not None and gamma is not None and trig is not None:
+        try:
+            sqrtg = jnp.asarray(jac.sqrtg)
+            pwint = vmec_pwint_from_trig(trig, ns=int(ns), nzeta=int(sqrtg.shape[2]))
+            signgs = int(getattr(wout, "signgs", 1))
+            vp = jnp.sum(jnp.asarray(float(signgs), dtype=sqrtg.dtype) * pwint * sqrtg, axis=(1, 2))
+            mass_in = jnp.asarray(mass_in, dtype=vp.dtype)
+            safe_vp = jnp.where(vp != 0.0, vp, jnp.asarray(1.0, dtype=vp.dtype))
+            pres_1d = jnp.where(vp != 0.0, mass_in / (safe_vp**float(gamma)), jnp.asarray(0.0, dtype=vp.dtype))
+            return pres_1d[:, None, None]
+        except Exception:
+            pass
+    return jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
+
+
+def _apply_freeb_bsqvac_edge(*, bsq, pres_h, freeb_bsqvac_edge):
+    if freeb_bsqvac_edge is None:
+        return bsq
+    vac_edge = jnp.asarray(freeb_bsqvac_edge, dtype=bsq.dtype)
+    if vac_edge.ndim != 2:
+        raise ValueError(f"freeb_bsqvac_edge must have shape (ntheta,nzeta), got {vac_edge.shape}")
+    if vac_edge.shape != bsq.shape[1:]:
+        raise ValueError(f"freeb_bsqvac_edge shape mismatch: expected {bsq.shape[1:]}, got {vac_edge.shape}")
+    return _replace_edge_row(bsq, vac_edge + pres_h[-1])
+
+
+def _compute_bcovar_lambda_force_assembly(
+    *,
+    s: Any,
+    ns: int,
+    jac: VmecHalfMeshJacobian,
+    parity: ParityRZL,
+    lamscale: Any,
+    phipf_internal: Any,
+    Lu1: Any,
+    guv: Any,
+    gvv: Any,
+    bsupu: Any,
+    bsubu: Any,
+    bsubv: Any,
+    bsubu_lambda: Any,
+    bsubv_lambda: Any,
+    pshalf: Any,
+    use_wout_bsub_for_lambda: bool,
+) -> BcovarLambdaForceAssembly:
+    """Build VMEC bcovar full-mesh lambda-force kernels."""
+
+    lambda_start = time.perf_counter()
+    phip_internal = jnp.asarray(phipf_internal)
+    lu0_force = (lamscale * jnp.asarray(parity.Lt_even)) + phip_internal[:, None, None]
+    lu1 = lamscale * Lu1
+
+    phipog_safe = jnp.where(
+        jac.sqrtg != 0,
+        jac.sqrtg,
+        jnp.asarray(1.0, dtype=jac.sqrtg.dtype),
+    )
+    phipog = jnp.where(jac.sqrtg != 0, 1.0 / phipog_safe, 0.0)
+    if ns >= 1:
+        phipog = _with_axis_zero(phipog)
+    lvv = phipog * gvv
+
+    if bool(use_wout_bsub_for_lambda):
+        bsubu_tmp = jnp.zeros_like(bsubu_lambda)
+        bsubv_preblend = jnp.zeros_like(bsubv_lambda)
+        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu_lambda)
+        bsubv_e = _avg_forward_half_to_int_or_zero(bsubv_lambda)
+        bsubv_avg = bsubv_e
+    else:
+        lvv_sh = lvv * pshalf
+        bsubu_tmp = guv * bsupu
+        if ns >= 2:
+            bsubv_base = jnp.concatenate(
+                [
+                    0.5 * (lvv[:-1] + lvv[1:]) * lu0_force[:-1],
+                    0.5 * lvv[-1:] * lu0_force[-1:],
+                ],
+                axis=0,
+            )
+            bsubv_extra = jnp.concatenate(
+                [
+                    0.5 * ((lvv_sh[:-1] + lvv_sh[1:]) * lu1[:-1] + bsubu_tmp[:-1] + bsubu_tmp[1:]),
+                    0.5 * (lvv_sh[-1:] * lu1[-1:] + bsubu_tmp[-1:]),
+                ],
+                axis=0,
+            )
+            bsubv_e = bsubv_base + bsubv_extra
+        else:
+            bsubv_e = jnp.zeros_like(bsubv)
+        bsubv_preblend = bsubv_e
+        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu)
+
+        pdamp = 0.05
+        bdamp = (2.0 * pdamp * (1.0 - s)).astype(jnp.asarray(bsubv_e).dtype)[:, None, None]
+        if ns >= 2:
+            bsubv_avg = _avg_forward_half_to_int_or_zero(bsubv)
+            bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_avg
+        else:
+            bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_e
+            bsubv_avg = bsubv_e
+
+    psqrts = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
+    clmn_even = _scale_lambda_full_mesh(bsubu_e, lamscale)
+    blmn_even = _scale_lambda_full_mesh(bsubv_e, lamscale)
+    clmn_odd = psqrts * clmn_even
+    blmn_odd = psqrts * blmn_even
+    _vmec_bcovar_profile_log("lambda_done", lambda_start)
+    return BcovarLambdaForceAssembly(
+        bsubu_e=bsubu_e,
+        bsubv_e=bsubv_e,
+        bsubu_e_scaled=clmn_even,
+        bsubv_e_scaled=blmn_even,
+        bsubu_tmp=bsubu_tmp,
+        bsubv_preblend=bsubv_preblend,
+        bsubv_avg=bsubv_avg,
+        clmn_even=clmn_even,
+        clmn_odd=clmn_odd,
+        blmn_even=blmn_even,
+        blmn_odd=blmn_odd,
+        lvv=lvv,
+        lvv_sh=lvv * pshalf,
+        phip_internal=phip_internal,
+        lu0_force=lu0_force,
+    )
+
+
+def vmec_bcovar_half_mesh_from_wout(
+    *,
+    state,
+    static,
+    wout,
+    pres: Any | None = None,
+    mass: Any | None = None,
+    use_wout_bsup: bool = False,
+    use_wout_bsub_for_lambda: bool = False,
+    use_wout_bmag_for_bsq: bool = False,
+    freeb_bsqvac_edge: Any | None = None,
+    use_vmec_synthesis: bool = False,
+    trig: VmecTrigTables | None = None,
+    return_parity_aux: bool = False,
+    state_physical_signed: tuple[Any, Any, Any, Any] | None = None,
+    compact_force_payload: bool = False,
+) -> VmecHalfMeshBcovar | VmecForceBcovarPayload:
+    """Compute VMEC-style half-mesh metric and B components for parity tests.
+
+    Parameters
+    ----------
+    state:
+        :class:`~vmec_jax.state.VMECState` (typically from :func:`~vmec_jax.wout.state_from_wout`).
+    static:
+        Static precomputations from :func:`~vmec_jax.static.build_static`.
+    wout:
+        :class:`~vmec_jax.wout.WoutData` providing ``phipf``, ``chipf``, ``phips``, ``signgs``.
+    pres:
+        Optional pressure profile on the *half mesh* in VMEC internal units (mu0*Pa).
+        If omitted, uses ``wout.pres``.
+    mass:
+        Optional mass profile on the half mesh (VMEC internal units) used to
+        reconstruct pressure as ``pres = mass / vp**gamma``. If provided (or
+        present on ``wout`` as ``mass``), this takes precedence over ``pres``.
+    use_vmec_synthesis:
+        If True, evaluate the R/Z/L real-space parity pieces and their derivatives
+        using VMEC's ``fixaray`` trig tables (ntheta2/ntheta3 grids).
+    use_wout_bsub_for_lambda:
+        If True, build the lambda-force full-mesh kernels (``blmn/clmn``) from
+        ``wout``-stored ``bsub*`` fields averaged to the full radial mesh. This
+        is a reference-parity mode that avoids re-deriving ``bsubv_e`` from
+        lambda derivatives.
+    use_wout_bmag_for_bsq:
+        If True, use ``wout`` Nyquist ``|B|`` to form ``bsq = |B|^2/2 + p`` in
+        this parity path, instead of deriving ``|B|^2`` from
+        ``bsup/bsub`` products.
+    freeb_bsqvac_edge:
+        Optional free-boundary vacuum boundary ``0.5*|B|^2`` on the edge
+        surface `(ntheta, nzeta)` (VMEC ``bsqvac`` convention). When provided,
+        the half-mesh edge ``bsq`` is overridden as
+        ``freeb_bsqvac_edge + p_edge``.
+    trig:
+        Optional precomputed VMEC trig tables. If omitted and
+        ``use_vmec_synthesis=True``, they are built internally.
+    compact_force_payload:
+        Internal force-path option. If True, return a compact payload with the
+        fields needed by force norms, constraints, and residual transforms but
+        without parity/debug intermediates. Public callers should keep the
+        default full payload.
+    """
+    bcovar_start = time.perf_counter()
+    resolved = _resolve_bcovar_state_and_trig(
+        state=state,
+        static=static,
+        wout=wout,
+        trig=trig,
+        state_physical_signed=state_physical_signed,
+    )
+    s = resolved.s
+    trig = resolved.trig
+    ns = resolved.ns
+    state_parity = resolved.state_parity
+    _vmec_bcovar_profile_log("setup_done", bcovar_start)
+
+    parity_channels = _compute_bcovar_parity_channels(
+        state=state,
+        static=static,
+        wout=wout,
+        state_parity=state_parity,
+        s=s,
+        trig=trig,
+        use_vmec_synthesis=bool(use_vmec_synthesis),
+    )
+    parity = parity_channels.parity
+    R1 = parity_channels.R1
+    Z1 = parity_channels.Z1
+    Ru1 = parity_channels.Ru1
+    Zu1 = parity_channels.Zu1
+    Rv1 = parity_channels.Rv1
+    Zv1 = parity_channels.Zv1
+    Lu1 = parity_channels.Lu1
+    Lv1 = parity_channels.Lv1
+
+    metric = _compute_bcovar_metric_assembly(
+        channels=parity_channels,
+        s=s,
+        ns=int(ns),
+        compact_force_payload=bool(compact_force_payload),
+    )
+    jac = metric.jac
+    guu = metric.guu
+    guv = metric.guv
+    gvv = metric.gvv
+    guu_eh = metric.guu_eh
+    guu_oh = metric.guu_oh
+    guv_eh = metric.guv_eh
+    guv_oh = metric.guv_oh
+    gvv_eh = metric.gvv_eh
+    gvv_oh = metric.gvv_oh
+    lam_u = metric.lam_u
+    lam_v = metric.lam_v
+
+    # ---------------------------------------------------------------------
+    # Contravariant B components (bsupu, bsupv) on the half mesh.
+    # ---------------------------------------------------------------------
+    field_start = time.perf_counter()
+    flux_context = _resolve_bcovar_flux_context(wout=wout, s=s, ns=int(ns))
+    field = _compute_bcovar_contravariant_field(
+        flux_context=flux_context,
+        parity=parity,
+        Lu1=Lu1,
+        Lv1=Lv1,
+        jac=jac,
+        guu=guu,
+        guv=guv,
+        s=s,
+        trig=trig,
+        ns=int(ns),
+    )
+    lamscale = field.lamscale
+    phipf_internal = field.phipf_internal
+    lu0_full = field.lu0_full
+    lu1_full = field.lu1_full
+    lv0_full = field.lv0_full
+    lv1_full = field.lv1_full
+    pshalf = _pshalf_from_s(s)[:, None, None]
+    bsupu = field.bsupu
+    bsupv = field.bsupv
+    bsupu_even = field.bsupu_even
+    bsupu_odd = field.bsupu_odd
+    bsupv_even = field.bsupv_even
+    bsupv_odd = field.bsupv_odd
 
     basis_nyq = None
     grid_nyq = None
@@ -842,41 +1248,38 @@ def vmec_bcovar_half_mesh_from_wout(
 
     bsubu = guu * bsupu + guv * bsupv
     bsubv = guv * bsupu + gvv * bsupv
-    s_half = pshalf * pshalf
-    bsubu_parity_even = (
-        guu_eh * bsupu_even
-        + s_half * guu_oh * bsupu_odd
-        + guv_eh * bsupv_even
-        + s_half * guv_oh * bsupv_odd
-    )
-    bsubu_parity_odd = (
-        guu_eh * bsupu_odd
-        + guu_oh * bsupu_even
-        + guv_eh * bsupv_odd
-        + guv_oh * bsupv_even
-    )
-    bsubv_parity_even = (
-        guv_eh * bsupu_even
-        + s_half * guv_oh * bsupu_odd
-        + gvv_eh * bsupv_even
-        + s_half * gvv_oh * bsupv_odd
-    )
-    bsubv_parity_odd = (
-        guv_eh * bsupu_odd
-        + guv_oh * bsupu_even
-        + gvv_eh * bsupv_odd
-        + gvv_oh * bsupv_even
-    )
+    if bool(compact_force_payload):
+        bsubu_parity_even = bsubu_parity_odd = bsubv_parity_even = bsubv_parity_odd = None
+    else:
+        s_half = pshalf * pshalf
+        bsubu_parity_even = (
+            guu_eh * bsupu_even
+            + s_half * guu_oh * bsupu_odd
+            + guv_eh * bsupv_even
+            + s_half * guv_oh * bsupv_odd
+        )
+        bsubu_parity_odd = (
+            guu_eh * bsupu_odd
+            + guu_oh * bsupu_even
+            + guv_eh * bsupv_odd
+            + guv_oh * bsupv_even
+        )
+        bsubv_parity_even = (
+            guv_eh * bsupu_even
+            + s_half * guv_oh * bsupu_odd
+            + gvv_eh * bsupv_even
+            + s_half * gvv_oh * bsupv_odd
+        )
+        bsubv_parity_odd = (
+            guv_eh * bsupu_odd
+            + guv_oh * bsupu_even
+            + gvv_eh * bsupv_odd
+            + gvv_oh * bsupv_even
+        )
 
     # Optional reference parity path for lambda-force kernels.
     bsubu_lambda = bsubu
     bsubv_lambda = bsubv
-    # VMEC internal phipf corresponds to dPhi/(2π) and includes signgs.
-    # `flux_profiles_from_indata` already constructs phipf in that convention,
-    # so use wout.phipf directly for the lambda-force block.
-    phip_internal = jnp.asarray(phipf_internal)
-    lu0_force = (lamscale * jnp.asarray(parity.Lt_even)) + phip_internal[:, None, None]
-
     if bool(use_wout_bsub_for_lambda):
         basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bsubu_lambda = jnp.asarray(eval_fourier(wout.bsubumnc, wout.bsubumns, basis_nyq))
@@ -888,54 +1291,9 @@ def vmec_bcovar_half_mesh_from_wout(
             basis_nyq = nyquist_basis_from_wout(wout=wout, grid=_nyq_grid())
         bmag_ref = jnp.asarray(eval_fourier(wout.bmnc, wout.bmns, basis_nyq))
         b2 = bmag_ref * bmag_ref
-    pres_h = None
-    mass_in = None
-    try:
-        mass_in = getattr(wout, "mass", None)
-    except Exception:
-        mass_in = None
-    if mass is not None:
-        mass_in = mass
-    gamma = None
-    try:
-        gamma = float(getattr(wout, "gamma"))
-    except Exception:
-        gamma = None
-    if mass_in is not None and gamma is not None and trig is not None:
-        try:
-            sqrtg = jnp.asarray(jac.sqrtg)
-            nzeta = int(sqrtg.shape[2])
-            pwint = vmec_pwint_from_trig(trig, ns=int(ns), nzeta=int(nzeta))
-            signgs = int(getattr(wout, "signgs", 1))
-            jac_s = jnp.asarray(float(signgs), dtype=sqrtg.dtype) * sqrtg
-            vp = jnp.sum(pwint * jac_s, axis=(1, 2))
-            mass_in = jnp.asarray(mass_in, dtype=vp.dtype)
-            # Axis value is treated as zero in VMEC (pwint masks js=1).
-            safe_vp = jnp.where(vp != 0.0, vp, jnp.asarray(1.0, dtype=vp.dtype))
-            pres_1d = jnp.where(
-                vp != 0.0,
-                mass_in / (safe_vp**gamma),
-                jnp.asarray(0.0, dtype=vp.dtype),
-            )
-            pres_h = pres_1d[:, None, None]
-        except Exception:
-            pres_h = None
-    if pres_h is None:
-        pres_h = jnp.asarray(wout.pres if pres is None else pres)[:, None, None]
+    pres_h = _resolve_bcovar_half_mesh_pressure(wout=wout, pres=pres, mass=mass, jac=jac, ns=int(ns), trig=trig)
     bsq = 0.5 * b2 + pres_h
-    if freeb_bsqvac_edge is not None:
-        vac_edge = jnp.asarray(freeb_bsqvac_edge, dtype=bsq.dtype)
-        if vac_edge.ndim != 2:
-            raise ValueError(
-                f"freeb_bsqvac_edge must have shape (ntheta,nzeta), got {vac_edge.shape}"
-            )
-        if vac_edge.shape != bsq.shape[1:]:
-            raise ValueError(
-                "freeb_bsqvac_edge shape mismatch: "
-                f"expected {bsq.shape[1:]}, got {vac_edge.shape}"
-            )
-        bsq_edge = vac_edge + pres_h[-1]
-        bsq = _replace_edge_row(bsq, bsq_edge)
+    bsq = _apply_freeb_bsqvac_edge(bsq=bsq, pres_h=pres_h, freeb_bsqvac_edge=freeb_bsqvac_edge)
 
     # Force-kernel inputs matching what `forces.f` expects after `bcovar`.
     gij_b_uu = (bsupu * bsupu) * jac.sqrtg
@@ -945,99 +1303,69 @@ def vmec_bcovar_half_mesh_from_wout(
     lv_e = bsq * jac.tau
     _vmec_bcovar_profile_log("field_done", field_start)
 
-    # ---------------------------------------------------------------------
-    # Lambda force kernels (bcovar.f "lambda full mesh forces" block)
-    # ---------------------------------------------------------------------
-    lambda_start = time.perf_counter()
-    # This reproduces the structure in `bcovar.f`:
-    #   - compute an intermediate bsubv_e on the full radial mesh from LU and metrics
-    #   - average (bsubuh,bsubvh) from the half mesh onto the full mesh
-    #   - blend bsubv_e with averaged bsubvh using bdamp(s) for near-axis stability
-    #
-    # Inputs:
-    # - LU (full mesh, parity-split): LU = phipf + lamscale*dλ/du
-    # - lvv (half mesh): lvv = g_vv / sqrtg (bcovar.f phipog * gvv)
-    # - bsubu/bsubv (half mesh): covariant B components
-
-    # Full-mesh LU parity pieces (odd is VMEC-internal 1/sqrt(s) representation).
-    # VMEC uses the internal phipf (= signgs*phipf/(2π)) in the LU definition.
-    lu0 = (lamscale * parity.Lt_even) + jnp.asarray(phipf_internal)[:, None, None]
-    lu1 = lamscale * Lu1
-
-    # lvv on half mesh: phipog * gvv (bcovar.f uses phipog == 1/sqrtg).
-    # NOTE: phipog does **not** include the 2π scaling used in `overg`.
-    phipog_safe = jnp.where(
-        jac.sqrtg != 0,
-        jac.sqrtg,
-        jnp.asarray(1.0, dtype=jac.sqrtg.dtype),
+    lambda_assembly = _compute_bcovar_lambda_force_assembly(
+        s=s,
+        ns=int(ns),
+        jac=jac,
+        parity=parity,
+        lamscale=lamscale,
+        phipf_internal=phipf_internal,
+        Lu1=Lu1,
+        guv=guv,
+        gvv=gvv,
+        bsupu=bsupu,
+        bsubu=bsubu,
+        bsubv=bsubv,
+        bsubu_lambda=bsubu_lambda,
+        bsubv_lambda=bsubv_lambda,
+        pshalf=pshalf,
+        use_wout_bsub_for_lambda=bool(use_wout_bsub_for_lambda),
     )
-    phipog = jnp.where(jac.sqrtg != 0, 1.0 / phipog_safe, 0.0)
-    if ns >= 1:
-        phipog = _with_axis_zero(phipog)
-    lvv = phipog * gvv
+    bsubu_e = lambda_assembly.bsubu_e
+    bsubv_e = lambda_assembly.bsubv_e
+    bsubu_e_scaled = lambda_assembly.bsubu_e_scaled
+    bsubv_e_scaled = lambda_assembly.bsubv_e_scaled
+    bsubu_tmp = lambda_assembly.bsubu_tmp
+    bsubv_preblend = lambda_assembly.bsubv_preblend
+    bsubv_avg = lambda_assembly.bsubv_avg
+    clmn_even = lambda_assembly.clmn_even
+    clmn_odd = lambda_assembly.clmn_odd
+    blmn_even = lambda_assembly.blmn_even
+    blmn_odd = lambda_assembly.blmn_odd
+    lvv = lambda_assembly.lvv
+    lvv_sh = lambda_assembly.lvv_sh
+    phip_internal = lambda_assembly.phip_internal
+    lu0_force = lambda_assembly.lu0_force
 
-    if bool(use_wout_bsub_for_lambda):
-        # Reference parity mode: use averaged wout bsub* directly.
-        bsubu_tmp = jnp.zeros_like(bsubu_lambda)
-        bsubv_preblend = jnp.zeros_like(bsubv_lambda)
-        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu_lambda)
-        bsubv_e = _avg_forward_half_to_int_or_zero(bsubv_lambda)
-        bsubv_avg = bsubv_e
+    if bool(compact_force_payload):
+        result = VmecForceBcovarPayload(
+            jac=jac,
+            guu=guu,
+            guv=guv,
+            gvv=gvv,
+            bsupu=bsupu,
+            bsupv=bsupv,
+            bsubu=bsubu,
+            bsubv=bsubv,
+            bsubu_e=bsubu_e,
+            bsubv_e=bsubv_e,
+            bsubu_e_scaled=bsubu_e_scaled,
+            bsubv_e_scaled=bsubv_e_scaled,
+            clmn_even=clmn_even,
+            clmn_odd=clmn_odd,
+            blmn_even=blmn_even,
+            blmn_odd=blmn_odd,
+            lu0_force=lu0_force,
+            bsq=bsq,
+            gij_b_uu=gij_b_uu,
+            gij_b_uv=gij_b_uv,
+            gij_b_vv=gij_b_vv,
+            lu_e=lu_e,
+            lv_e=lv_e,
+            lamscale=lamscale,
+        )
     else:
-        # Intermediate full-mesh bsubv_e (before blending), following bcovar.f.
-        lvv_sh = lvv * pshalf
-        bsubu_tmp = guv * bsupu  # bcovar: pguv*bsupu (sigma_an=1 isotropic)
-        if ns >= 2:
-            bsubv_base = jnp.concatenate(
-                [
-                    0.5 * (lvv[:-1] + lvv[1:]) * lu0_force[:-1],
-                    0.5 * lvv[-1:] * lu0_force[-1:],
-                ],
-                axis=0,
-            )
-            bsubv_extra = jnp.concatenate(
-                [
-                    0.5 * ((lvv_sh[:-1] + lvv_sh[1:]) * lu1[:-1] + bsubu_tmp[:-1] + bsubu_tmp[1:]),
-                    0.5 * (lvv_sh[-1:] * lu1[-1:] + bsubu_tmp[-1:]),
-                ],
-                axis=0,
-            )
-            bsubv_e = bsubv_base + bsubv_extra
-        else:
-            bsubv_e = jnp.zeros_like(bsubv)
-        bsubv_preblend = bsubv_e
-
-        # Average lambda forces onto full radial mesh (bsubu_e from bsubu half mesh).
-        bsubu_e = _avg_forward_half_to_int_or_zero(bsubu)
-
-        # Blend bsubv_e with half-mesh bsubv average using bdamp(s) (VMEC: bdamp=2*pdamp*(1-s)).
-        pdamp = 0.05
-        bdamp = (2.0 * pdamp * (1.0 - s)).astype(jnp.asarray(bsubv_e).dtype)[:, None, None]
-        if ns >= 2:
-            bsubv_avg = _avg_forward_half_to_int_or_zero(bsubv)
-            bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_avg
-        else:
-            bsubv_e = bdamp * bsubv_e + (1.0 - bdamp) * bsubv_e
-            bsubv_avg = bsubv_e
-
-    # Final scaling for tomnsps:
-    # VMEC applies the "-lamscale" factor only for js>=2 (1-based). The axis (js=1)
-    # is excluded so the lambda-force kernels do not introduce spurious constant
-    # contributions from the copied/extrapolated half-mesh axis values.
-    #
-    # VMEC also exposes odd-m pieces as sqrt(s)*bsub*_e.
-    psqrts = jnp.sqrt(jnp.maximum(s, 0.0))[:, None, None]
-    clmn_even = _scale_lambda_full_mesh(bsubu_e, lamscale)
-    blmn_even = _scale_lambda_full_mesh(bsubv_e, lamscale)
-    clmn_odd = psqrts * clmn_even
-    blmn_odd = psqrts * blmn_even
-
-    bsubu_e_scaled = clmn_even
-    bsubv_e_scaled = blmn_even
-
-    _vmec_bcovar_profile_log("lambda_done", lambda_start)
-
-    result = VmecHalfMeshBcovar(
+        result = VmecHalfMeshBcovar(
         jac=jac,
         guu=guu,
         guv=guv,
@@ -1079,7 +1407,7 @@ def vmec_bcovar_half_mesh_from_wout(
         clmn_odd=clmn_odd,
         blmn_even=blmn_even,
         blmn_odd=blmn_odd,
-    )
+        )
     _vmec_bcovar_profile_log("bcovar_done", bcovar_start)
     if bool(return_parity_aux):
         aux = SimpleNamespace(

@@ -397,6 +397,174 @@ def _write_runtime_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_k
     plt.close(fig)
 
 
+def _write_runtime_memory_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_kind: str) -> None:
+    plt = _pyplot()
+    outpath.parent.mkdir(parents=True, exist_ok=True)
+    if figure_kind == "fixed":
+        rows = [row for row in rows if not bool(row["lfreeb"])]
+    elif figure_kind == "freeb":
+        rows = [row for row in rows if bool(row["lfreeb"])]
+    if not rows:
+        raise ValueError(f"No rows available for figure_kind={figure_kind!r}.")
+    include_vmecpp = any(row.get("vmecpp_runtime_s") is not None or row.get("vmecpp_mem_bytes") is not None for row in rows)
+    include_warm = any(row.get("cpu_warm_runtime_s") is not None for row in rows)
+    include_gpu = any(
+        row.get("gpu_runtime_s") is not None
+        or row.get("gpu_warm_runtime_s") is not None
+        or row.get("gpu_mem_bytes") is not None
+        for row in rows
+    )
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            -max(
+                (_speedup(row["cpu_runtime_s"], row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("cpu_warm_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("gpu_warm_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+                (_speedup(row.get("vmecpp_runtime_s"), row["vmec_runtime_s"]) or 0.0),
+            ),
+            row["id"],
+        ),
+    )
+    labels = [row["id"] for row in rows]
+    y = np.arange(len(rows), dtype=float)
+
+    runtime_series: list[tuple[str, str, np.ndarray]] = [
+        (
+            "#1f77b4",
+            "VMEC2000",
+            np.array([row["vmec_runtime_s"] if row["vmec_runtime_s"] is not None else np.nan for row in rows], dtype=float),
+        ),
+        (
+            "#ff7f0e",
+            "vmec_jax CPU cold",
+            np.array([row["cpu_runtime_s"] if row["cpu_runtime_s"] is not None else np.nan for row in rows], dtype=float),
+        ),
+    ]
+    if include_warm:
+        runtime_series.append(
+            (
+                "#2ca02c",
+                "vmec_jax CPU warm",
+                np.array(
+                    [row["cpu_warm_runtime_s"] if row.get("cpu_warm_runtime_s") is not None else np.nan for row in rows],
+                    dtype=float,
+                ),
+            )
+        )
+    if include_vmecpp:
+        runtime_series.append(
+            (
+                "#9467bd",
+                "VMEC++",
+                np.array([row.get("vmecpp_runtime_s") if row.get("vmecpp_runtime_s") is not None else np.nan for row in rows], dtype=float),
+            )
+        )
+    if include_gpu:
+        gpu_key = "gpu_warm_runtime_s" if any(row.get("gpu_warm_runtime_s") is not None for row in rows) else "gpu_runtime_s"
+        runtime_series.append(
+            (
+                "#d62728",
+                "vmec_jax GPU warm" if gpu_key == "gpu_warm_runtime_s" else "vmec_jax GPU cold",
+                np.array([row.get(gpu_key) if row.get(gpu_key) is not None else np.nan for row in rows], dtype=float),
+            )
+        )
+
+    memory_series: list[tuple[str, str, np.ndarray]] = [
+        (
+            "#1f77b4",
+            "VMEC2000",
+            np.array(
+                [
+                    row["vmec_mem_bytes"] / (1024.0**3) if row.get("vmec_mem_bytes") is not None else np.nan
+                    for row in rows
+                ],
+                dtype=float,
+            ),
+        ),
+        (
+            "#ff7f0e",
+            "vmec_jax CPU",
+            np.array(
+                [
+                    row["cpu_mem_bytes"] / (1024.0**3) if row.get("cpu_mem_bytes") is not None else np.nan
+                    for row in rows
+                ],
+                dtype=float,
+            ),
+        ),
+    ]
+    if include_vmecpp:
+        memory_series.append(
+            (
+                "#9467bd",
+                "VMEC++",
+                np.array(
+                    [
+                        row["vmecpp_mem_bytes"] / (1024.0**3) if row.get("vmecpp_mem_bytes") is not None else np.nan
+                        for row in rows
+                    ],
+                    dtype=float,
+                ),
+            )
+        )
+    if include_gpu:
+        memory_series.append(
+            (
+                "#d62728",
+                "vmec_jax GPU",
+                np.array(
+                    [
+                        row["gpu_mem_bytes"] / (1024.0**3) if row.get("gpu_mem_bytes") is not None else np.nan
+                        for row in rows
+                    ],
+                    dtype=float,
+                ),
+            )
+        )
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(17.0, max(8.0, 0.46 * len(rows) + 1.8)),
+        sharey=True,
+        gridspec_kw={"width_ratios": [1.25, 1.0]},
+    )
+
+    for ax, series, xlabel, title in (
+        (axes[0], runtime_series, "runtime (seconds, log scale)", "Runtime"),
+        (axes[1], memory_series, "peak memory (GiB, log scale)", "Peak process memory"),
+    ):
+        n_series = len(series)
+        height = min(0.18, 0.88 / max(1, n_series))
+        offsets = np.linspace(-(n_series - 1) / 2 * height, (n_series - 1) / 2 * height, n_series)
+        for (color, label, vals), off in zip(series, offsets):
+            ax.barh(y + off, vals, height=height, color=color, label=label)
+        ax.set_xscale("log")
+        ax.grid(axis="x", alpha=0.18, which="both")
+        ax.set_xlabel(xlabel)
+        ax.set_title(title)
+        ax.legend(frameon=False, fontsize=8, loc="lower right")
+
+    axes[0].set_yticks(y)
+    axes[0].set_yticklabels(labels, fontsize=8)
+    axes[0].invert_yaxis()
+    axes[1].tick_params(axis="y", labelleft=False)
+    missing_vmecpp = sum(1 for row in rows if row.get("vmecpp_runtime_s") is None)
+    vmecpp_note = ""
+    if include_vmecpp and missing_vmecpp:
+        vmecpp_note = f"; VMEC++ omitted on {missing_vmecpp} unsupported/non-converged rows"
+    title = {
+        "all": "Bundled Example Runtime and Memory",
+        "fixed": "Bundled Fixed-Boundary Runtime and Memory",
+        "freeb": "Bundled Free-Boundary Runtime and Memory",
+    }[figure_kind]
+    fig.suptitle(f"{title}: VMEC2000 vs vmec_jax vs VMEC++{vmecpp_note}", y=0.995)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.975))
+    fig.savefig(outpath, dpi=220)
+    plt.close(fig)
+
+
 def _write_figure(rows: list[dict[str, Any]], outpath: Path, *, figure_kind: str) -> None:
     plt = _pyplot()
     if figure_kind == "fixed":
@@ -485,8 +653,8 @@ def main() -> None:
     )
     p.add_argument(
         "--plot-mode",
-        choices=("runtime", "speedup"),
-        default="runtime",
+        choices=("runtime", "runtime_memory", "speedup"),
+        default="runtime_memory",
         help="Figure style for the README plot.",
     )
     args = p.parse_args()
@@ -503,6 +671,8 @@ def main() -> None:
     fig_out = (args.figure_out.expanduser().resolve() if args.figure_out is not None else (outdir / "readme_runtime_compare.png"))
     if str(args.plot_mode) == "speedup":
         _write_figure(rows, fig_out, figure_kind=str(args.figure_kind))
+    elif str(args.plot_mode) == "runtime_memory":
+        _write_runtime_memory_figure(rows, fig_out, figure_kind=str(args.figure_kind))
     else:
         _write_runtime_figure(rows, fig_out, figure_kind=str(args.figure_kind))
     _write_markdown_table(rows, table_out)

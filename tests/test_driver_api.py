@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -428,8 +429,9 @@ def test_host_update_assembly_matches_jax_update_path_lasym():
 def test_host_update_assembly_driver_default_env_override(monkeypatch):
     root = Path(__file__).resolve().parents[1]
     cfg, _indata = load_config(str(root / "examples/data/input.nfp4_QH_warm_start"))
-    cfg_high_work, _indata_high_work = load_config(str(root / "examples/data/input.nfp4_QH_finite_beta"))
+    cfg_finite_beta, _indata_finite_beta = load_config(str(root / "examples/data/input.nfp4_QH_finite_beta"))
     cfg_lasym, _indata_lasym = load_config(str(root / "examples/data/input.basic_non_stellsym_pressure"))
+    cfg_large_work = SimpleNamespace(ns=128, mpol=12, ntor=8, lasym=False)
 
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", raising=False)
@@ -457,8 +459,14 @@ def test_host_update_assembly_driver_default_env_override(monkeypatch):
         backend="cpu",
         use_scan=False,
     )
+    assert driver_module._host_update_assembly_driver_default(
+        cfg=cfg_finite_beta,
+        performance_mode=True,
+        backend="cpu",
+        use_scan=False,
+    )
     assert not driver_module._host_update_assembly_driver_default(
-        cfg=cfg_high_work,
+        cfg=cfg_large_work,
         performance_mode=True,
         backend="cpu",
         use_scan=False,
@@ -474,7 +482,7 @@ def test_host_update_assembly_driver_default_env_override(monkeypatch):
     monkeypatch.delenv("VMEC_JAX_HOST_UPDATE_ASSEMBLY", raising=False)
     monkeypatch.setenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "999999")
     assert driver_module._host_update_assembly_driver_default(
-        cfg=cfg_high_work,
+        cfg=cfg_large_work,
         performance_mode=True,
         backend="cpu",
         use_scan=False,
@@ -1214,6 +1222,43 @@ def test_cli_passes_cli_fixed_boundary_mode(monkeypatch, tmp_path):
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
     assert captured["cli_fixed_boundary_mode"] is True
+    assert captured["finish_policy"] == "auto"
+
+
+def test_cli_passes_public_finish_policy(monkeypatch, tmp_path):
+    input_path = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
+    captured = {}
+
+    def _fake_run_fixed_boundary(input_path_arg, **kwargs):
+        captured["input_path"] = str(input_path_arg)
+        captured.update(kwargs)
+
+        class _Run:
+            state = type("S", (), {"Rcos": np.asarray([0.0])})()
+            result = None
+
+        return _Run()
+
+    monkeypatch.setattr(cli_module, "run_fixed_boundary", _fake_run_fixed_boundary)
+    monkeypatch.setattr(cli_module, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    rc = cli_module.main(
+        [
+            str(input_path),
+            "--output",
+            str(tmp_path / "wout_test.nc"),
+            "--quiet",
+            "--finish-policy",
+            "bounded",
+        ]
+    )
+    assert rc == 0
+    assert captured["finish_policy"] == "bounded"
+
+    captured.clear()
+    rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test2.nc"), "--quiet", "--no-finish"])
+    assert rc == 0
+    assert captured["finish_policy"] == "none"
 
 
 def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_path):

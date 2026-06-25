@@ -64,6 +64,9 @@ the exact policy matrix and selected best-case provenance.
    * - QI
      - ``examples/optimization/QI_optimization.py``
      - Minimal NFP=2 deck by default with Boozer-space QI, mirror, elongation, QI ceiling, ESS, and lower-mode continuation.  Optional target-helicity/reference-family proposals are deterministic basin searches, not hidden initial conditions.
+   * - Simple QI NFP sweep
+     - ``examples/optimization/QI_optimization_nfp1.py`` through ``QI_optimization_nfp4.py``
+     - Circular/minimal seed to QP to QI.  These public per-NFP scripts avoid reference-family scans and expose the two objective lists and optimizer calls directly.
    * - QI seed 3127
      - ``examples/optimization/QI_optimization_seed.py``
      - Diagnostic far-seed preset for ``input.QI_stel_seed_3127``.  Public README QI rows use ``input.minimal_seed_nfp*`` decks instead.
@@ -96,11 +99,10 @@ only ``RBC(0,0)``, ``RBC(0,1)``, and ``ZBS(0,1)`` from the selected seed deck,
 and fills active ``RBC/ZBS`` modes up to ``max_mode`` with deterministic
 ``1e-5`` perturbations.  This keeps the published input files minimal while
 avoiding exactly-zero Jacobian columns in direct max-mode stress tests.  The
-lower-level staged QI policy also has a mode-1 target-helicity preconditioner
-with the deterministic hint set ``RBC(1,0)``, ``ZBS(1,0)``, ``RBC(-1,1)``,
-``ZBS(-1,1)``, ``RBC(1,1)``, and ``ZBS(1,1)`` in VMEC input-index convention.
-The common-minimal showcase uses a ``1e-3`` target-helicity hint by default;
-the raw input decks remain unchanged.
+public per-NFP QI examples use the same generated ``input.simple_seed`` policy,
+then run a QP stage followed by a QI stage.  The lower-level staged QI policy
+still has optional target-helicity and reference-family preconditioners for
+stress tests, but those are not used by the simple public per-NFP examples.
 The QA and QP common-minimal rows additionally use an explicit
 optimization-time reference-family preseed without modifying the raw input
 decks: QA blends the active low-order RBC/ZBS space 25% toward
@@ -110,13 +112,13 @@ optimization and is recorded in ``showcase_case.json``.
 
 The bounded common-seed showcase runner maps those inputs to QI NFP=1/2/3/4,
 QA NFP=2/3, QH NFP=3/4, and QP NFP=2/3 for the full common-minimal target matrix
-(``qp_nfp1`` is also available as a stress row).  The QI rows dispatch through
-``examples/optimization/qi_staged_runner.py`` to the standalone
-``QI_optimization.py`` staged/reference-family policy rather than the simpler
-quasisymmetry sweep path.  The checked-in objective panel and summary table
-currently contain the synced aspect-5, ``max_mode=5`` QA/QH/QP GPU rows.  The
-common-minimal QI rows remain open; the separate QI NFP panel documents
-reviewed case-gated QI coverage instead of the uniform common-minimal matrix:
+(``qp_nfp1`` is also available as a stress row).  Historical QI sweep rows used
+``examples/optimization/qi_staged_runner.py`` and the staged/reference-family
+``QI_optimization.py`` policy.  The public per-NFP scripts below are simpler:
+they run QP directly from the minimal seed, then run QI from that QP result.
+The checked-in objective panel and summary table currently contain the synced
+aspect-5, ``max_mode=5`` QA/QH/QP GPU rows.  The separate QI NFP panel documents
+reviewed QI coverage instead of forcing QI into the same sweep matrix:
 
 .. code-block:: bash
 
@@ -309,10 +311,10 @@ Run one QI field-period example at a time with:
    python examples/optimization/QI_optimization_nfp3.py
    python examples/optimization/QI_optimization_nfp4.py
 
-Each file exposes the VMEC seed, same-NFP reference input, output directory,
-and policy case as ordinary top-level variables before delegating to
-``QI_optimization.py``.  Inspect ``QI_optimization.py`` for the objective tuple
-assembly, optimizer controls, result saving, and plotting workflow.
+Each file exposes the VMEC seed, QP objective tuple list, QI objective tuple
+list, optimizer controls, result saving, and plotting workflow directly.  The
+workflow is deliberately closer to ``QP_optimization.py`` than to the staged
+``QI_optimization.py`` driver: circular/minimal seed, QP basin, QI polish.
 
 The renderer reads reviewed local or release-asset WOUT files plus tracked
 diagnostics, preconditioner summaries, and raw per-stage ``history.json`` files.
@@ -1741,8 +1743,6 @@ Source files
        interval scans and residual-block timings.
    * - ``examples/optimization/plot_optimization_results.py``
      - Standalone plotting helper (regenerates figures from saved wout+JSON).
-   * - ``examples/optimization/target_iota_aspect_volume.py``
-     - Simpler optimisation targeting iota, aspect, volume.
 
 Running the QH example
 -----------------------

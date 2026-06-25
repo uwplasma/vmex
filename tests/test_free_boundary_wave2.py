@@ -241,6 +241,8 @@ def test_interpolation_zero_current_groups_and_decode_scalar_edges():
 
 
 def test_stale_phase_cache_lu_and_axis_filament_edge_branches(monkeypatch):
+    import vmec_jax.solvers.free_boundary.jax_nestor_operator as jax_nestor_operator
+
     modes = SimpleNamespace(n=np.asarray([0]))
     trig = SimpleNamespace(cosnv=np.ones((1, 1)), cosmu=np.ones((1, 1)))
     key = (id(modes), id(trig), ("base",))
@@ -253,9 +255,13 @@ def test_stale_phase_cache_lu_and_axis_filament_edge_branches(monkeypatch):
 
     matrix = np.asarray([[2.0, 0.0], [0.0, 3.0]])
     rhs = np.asarray([4.0, 9.0])
-    monkeypatch.setattr(freeb, "_SCIPY_LU_FACTOR", None)
+    monkeypatch.setattr(jax_nestor_operator, "_SCIPY_LU_FACTOR", None)
     assert _dense_lu_factor(matrix) is None
-    monkeypatch.setattr(freeb, "_SCIPY_LU_SOLVE", lambda lu_fac, rhs_arr: (_ for _ in ()).throw(RuntimeError("bad lu")))
+    monkeypatch.setattr(
+        jax_nestor_operator,
+        "_SCIPY_LU_SOLVE",
+        lambda lu_fac, rhs_arr: (_ for _ in ()).throw(RuntimeError("bad lu")),
+    )
     np.testing.assert_allclose(_dense_lu_solve(("bad",), matrix, rhs), [2.0, 3.0])
 
     R = np.full((2, 2), 2.0)

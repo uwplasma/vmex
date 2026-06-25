@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from vmec_jax.performance_hotspot_helpers import (
+from vmec_jax.solvers.fixed_boundary.performance import (
     accumulate_scan_device_ready_timing,
     exact_parameter_cache_key,
     exact_parameter_cache_key_fingerprint,
@@ -11,7 +11,7 @@ from vmec_jax.performance_hotspot_helpers import (
     scan_cache_key_delta_summary,
     scan_cache_key_field_names,
 )
-from vmec_jax.solve_scan_planning_helpers import build_vmec2000_scan_cache_key
+from vmec_jax.solvers.fixed_boundary.scan.planning import build_vmec2000_scan_cache_key
 
 
 def _scan_cache_key(**overrides):

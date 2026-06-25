@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
+from datetime import datetime
 import os
 from types import SimpleNamespace
 
@@ -7,6 +9,19 @@ import numpy as np
 import pytest
 
 import vmec_jax.driver as driver
+from vmec_jax.drivers import flux as driver_flux
+from vmec_jax.drivers import io as driver_io
+from vmec_jax.drivers import runtime as driver_runtime
+from vmec_jax.drivers import solve as driver_solve
+from vmec_jax.drivers.policy import (
+    dynamic_scan_probe_settings,
+    resolve_fixed_boundary_solver_dispatch,
+    resolve_fixed_boundary_stage_policy,
+    resolve_driver_signgs,
+    resolve_driver_step_size,
+    resolve_stage_jit_settings,
+    resolve_vmec2000_jit_forces_policy,
+)
 
 
 class _Input:
@@ -35,6 +50,8 @@ class _Input:
         ("Fast", False, "default"),
         ("SAFE", True, "parity"),
         (" reference ", True, "parity"),
+        ("memory", True, "parity"),
+        ("low-memory", True, "parity"),
         (" PERF ", False, "accelerated"),
         ("accelerated", True, "accelerated"),
     ],
@@ -46,6 +63,525 @@ def test_normalize_solver_mode_handles_aliases_case_and_defaults(solver_mode, pe
 def test_normalize_solver_mode_reports_valid_modes():
     with pytest.raises(ValueError, match="Expected one of: accelerated, default, parity"):
         driver._normalize_solver_mode(solver_mode="not-a-mode", performance_mode=False)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "auto"),
+        ("auto", "auto"),
+        ("default", "auto"),
+        ("none", "none"),
+        ("bounded", "none"),
+        ("exact_budget", "none"),
+        ("no-finish", "none"),
+        ("converge", "converge"),
+        ("finish", "converge"),
+        ("true", "converge"),
+    ],
+)
+def test_normalize_fixed_boundary_finish_policy_handles_public_aliases(value, expected):
+    assert driver._normalize_fixed_boundary_finish_policy(value) == expected
+
+
+def test_normalize_fixed_boundary_finish_policy_reports_valid_modes():
+    with pytest.raises(ValueError, match="Expected one of: auto, converge, none"):
+        driver._normalize_fixed_boundary_finish_policy("not-a-policy")
+
+
+def test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics():
+    fast = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=True,
+        verbose=False,
+        use_scan=None,
+        getenv=lambda _key, _default: "",
+    )
+    assert fast.solver == "vmec2000_iter"
+    assert fast.use_scan is True
+    assert fast.scan_minimal_default is True
+
+    fast_no_scan = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_scan",
+        performance_mode=True,
+        verbose=True,
+        use_scan=False,
+        getenv=lambda _key, _default: "",
+    )
+    assert fast_no_scan.solver == "vmec2000_iter"
+    assert fast_no_scan.use_scan is False
+    assert fast_no_scan.scan_minimal_default is None
+
+    parity = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        verbose=True,
+        use_scan=True,
+        getenv=lambda _key, _default: "",
+    )
+    assert parity.solver == "vmec2000_iter"
+    assert parity.use_scan is False
+
+    forced_scan = resolve_fixed_boundary_solver_dispatch(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        verbose=True,
+        use_scan=False,
+        getenv=lambda key, default: "1" if key == "VMEC_JAX_USE_SCAN" else default,
+    )
+    assert forced_scan.solver == "vmec2000_iter"
+    assert forced_scan.use_scan is True
+
+
+def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
+    env = {"VMEC_JAX_DYNAMIC_SCAN_ITERS": "7", "VMEC_JAX_DYNAMIC_SCAN_TIMED": "on"}
+
+    assert dynamic_scan_probe_settings(
+        5,
+        backend_name_func=lambda: "gpu",
+        getenv=lambda key, default="": env.get(key, default),
+    ) == (4, True, "gpu")
+
+    env = {"VMEC_JAX_DYNAMIC_SCAN_ITERS": "bad", "VMEC_JAX_DYNAMIC_SCAN_TIMED": "off"}
+    assert dynamic_scan_probe_settings(
+        10,
+        backend_name_func=lambda: "gpu",
+        getenv=lambda key, default="": env.get(key, default),
+    ) == (3, False, "gpu")
+
+    assert dynamic_scan_probe_settings(
+        50,
+        backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+    ) == (10, True, "cpu")
+
+
+def test_resolve_stage_jit_settings_preserves_scan_and_warmup_policy():
+    env = {}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=True,
+        solver="vmec2000_iter",
+        performance_mode=False,
+        jit_precompile=None,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is False
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 0
+    assert settings.jit_precompile_noscan is True
+    assert settings.jit_warmup_noscan == 0
+
+    env = {"VMEC_JAX_SCAN_JIT_FORCES": "1", "VMEC_JAX_JIT_PRECOMPILE": "0"}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=True,
+        solver="vmec2000_iter",
+        performance_mode=False,
+        jit_precompile=None,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is True
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 0
+    assert settings.jit_precompile_noscan is False
+    assert settings.jit_warmup_noscan == 2
+
+    env = {"VMEC_JAX_JIT_WARMUP_ITERS": "bad"}
+    settings = resolve_stage_jit_settings(
+        jit_forces_base=True,
+        scan_mode=False,
+        solver="vmec2000_iter",
+        performance_mode=True,
+        jit_precompile=False,
+        getenv=lambda key, default=None: env.get(key, default),
+    )
+    assert settings.jit_forces_eff is True
+    assert settings.jit_precompile_eff is False
+    assert settings.jit_warmup_iters == 2
+    assert settings.jit_precompile_noscan is False
+    assert settings.jit_warmup_noscan == 2
+
+
+def test_resolve_driver_signgs_preserves_vmec2000_parity_and_sanitizes_input():
+    assert resolve_driver_signgs(solver_lower="vmec2000_iter", indata=_Input(SIGNGS=1)) == -1
+    assert resolve_driver_signgs(solver_lower="VMEC2000_SCAN", indata=_Input(SIGNGS=1)) == -1
+    assert resolve_driver_signgs(solver_lower="vmec_lbfgs", indata=_Input(SIGNGS=1)) == 1
+    assert resolve_driver_signgs(solver_lower="vmec_lbfgs", indata=_Input(SIGNGS=7)) == -1
+
+
+def test_resolve_vmec2000_jit_forces_policy_honors_solver_and_env_overrides():
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="gd",
+        jit_forces="auto",
+        getenv=lambda _key, default="": default,
+    ) == "auto"
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces="auto",
+        getenv=lambda _key, default="": default,
+    ) is True
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces=False,
+        getenv=lambda key, default="": {"VMEC_JAX_VMEC2000_FORCE_JIT": "1"}.get(key, default),
+    ) is True
+    assert resolve_vmec2000_jit_forces_policy(
+        solver_lower="vmec2000_iter",
+        jit_forces=True,
+        getenv=lambda key, default="": {"VMEC_JAX_VMEC2000_FORCE_NOJIT": "yes"}.get(key, default),
+    ) is False
+
+
+def test_resolve_driver_step_size_uses_explicit_vmec_and_generic_defaults():
+    sentinel = object()
+    assert resolve_driver_step_size(
+        step_size=0.125,
+        step_size_sentinel=sentinel,
+        solver_lower="vmec2000_iter",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(0.125)
+    assert resolve_driver_step_size(
+        step_size=sentinel,
+        step_size_sentinel=sentinel,
+        solver_lower="vmec2000_iter",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(0.9)
+    assert resolve_driver_step_size(
+        step_size=None,
+        step_size_sentinel=sentinel,
+        solver_lower="gd",
+        indata=_Input(DELT=0.9),
+    ) == pytest.approx(5.0e-3)
+
+
+def test_profiles_from_static_prefers_host_default_and_uses_vmec_half_mesh():
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=4), s=np.asarray([0.0, 0.25, 0.75, 1.0]))
+    calls = []
+
+    def host_default(indata, s, signgs):
+        calls.append(("host", tuple(s), signgs))
+        return "host-flux"
+
+    def fallback(_indata, _s, _signgs):
+        pytest.fail("host-default profile path should be used")
+
+    def eval_profiles(_indata, s_half):
+        calls.append(("eval", tuple(s_half), None))
+        return {"pressure": np.asarray(s_half) + 1.0}
+
+    flux, profiles, pressure = driver_flux.profiles_from_static(
+        indata=_Input(),
+        static_in=static,
+        signgs=-1,
+        flux_profiles_from_indata_host_default_func=host_default,
+        flux_profiles_from_indata_func=fallback,
+        eval_profiles_func=eval_profiles,
+    )
+
+    assert flux == "host-flux"
+    assert profiles["pressure"].tolist() == pytest.approx([1.0, 1.125, 1.5, 1.875])
+    np.testing.assert_allclose(pressure, [1.0, 1.125, 1.5, 1.875])
+    assert calls == [
+        ("host", (0.0, 0.25, 0.75, 1.0), -1),
+        ("eval", (0.0, 0.125, 0.5, 0.875), None),
+    ]
+
+
+def test_profiles_from_static_falls_back_and_defaults_missing_pressure():
+    static = SimpleNamespace(cfg=SimpleNamespace(ns=1), s=np.asarray([0.0]))
+
+    flux, profiles, pressure = driver_flux.profiles_from_static(
+        indata=_Input(),
+        static_in=static,
+        signgs=1,
+        flux_profiles_from_indata_host_default_func=lambda *_args, **_kwargs: None,
+        flux_profiles_from_indata_func=lambda _indata, s, signgs: ("fallback", tuple(s), signgs),
+        eval_profiles_func=lambda _indata, s_half: {"iota": np.asarray(s_half)},
+    )
+
+    assert flux == ("fallback", (0.0,), 1)
+    np.testing.assert_allclose(profiles["iota"], [0.0])
+    np.testing.assert_allclose(pressure, [0.0])
+
+
+def test_initial_guess_with_optional_nojit_uses_standard_path_by_default():
+    calls = []
+
+    def initial_guess(static, boundary, indata, *, vmec_project, infer_axis_if_missing):
+        calls.append((static, boundary, indata, vmec_project, infer_axis_if_missing))
+        return "state"
+
+    state = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=True,
+        infer_axis_if_missing=False,
+        performance_mode=False,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+    )
+
+    assert state == "state"
+    assert calls == [("static", "boundary", "indata", True, False)]
+
+
+def test_initial_guess_with_optional_nojit_uses_cpu_numpy_patch_when_safe():
+    calls = []
+    patch_events = []
+
+    class Patch:
+        def __enter__(self):
+            patch_events.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            patch_events.append("exit")
+
+    def initial_guess(*_args, **_kwargs):
+        calls.append(tuple(patch_events))
+        return "numpy-state"
+
+    state = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+        contains_jax_tracer_func=lambda _boundary: False,
+        numpy_module_patch_func=Patch,
+    )
+
+    assert state == "numpy-state"
+    assert calls == [("enter",)]
+    assert patch_events == ["enter", "exit"]
+
+
+def test_initial_guess_with_optional_nojit_skips_numpy_patch_for_tracers_or_env_disable():
+    patch_calls = []
+
+    def initial_guess(*_args, **_kwargs):
+        return "state"
+
+    state_traced = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda _key, default="": default,
+        contains_jax_tracer_func=lambda _boundary: True,
+        numpy_module_patch_func=lambda: patch_calls.append("patch"),
+    )
+    state_env = driver_solve.initial_guess_with_optional_nojit(
+        "static",
+        "boundary",
+        "indata",
+        vmec_project=False,
+        infer_axis_if_missing=True,
+        performance_mode=True,
+        initial_guess_from_boundary_func=initial_guess,
+        default_backend_name_func=lambda: "cpu",
+        getenv=lambda key, default="": {"VMEC_JAX_CPU_NUMPY_INIT_GUESS": "0"}.get(key, default),
+        contains_jax_tracer_func=lambda _boundary: False,
+        numpy_module_patch_func=lambda: patch_calls.append("patch"),
+    )
+
+    assert state_traced == "state"
+    assert state_env == "state"
+    assert patch_calls == []
+
+
+def test_run_fixed_boundary_optimizer_solver_returns_none_for_vmec2000_solver() -> None:
+    assert (
+        driver_solve.run_fixed_boundary_optimizer_solver(
+            solver="vmec2000_iter",
+            restart_state=None,
+            static="static",
+            boundary="boundary",
+            indata=_Input(),
+            flux=SimpleNamespace(phipf="phip", chipf="chip", lamscale="lam"),
+            pressure="pressure",
+            signgs=-1,
+            gamma=0.0,
+            max_iter=3,
+            step_size=0.1,
+            history_size=2,
+            gn_damping=None,
+            gn_cg_tol=None,
+            gn_cg_maxiter=5,
+            verbose=False,
+            initial_guess_func=lambda *_args: pytest.fail("should not build state"),
+            solve_fixed_boundary_gd_func=lambda *_args, **_kwargs: pytest.fail("should not solve"),
+            solve_fixed_boundary_lbfgs_func=lambda *_args, **_kwargs: pytest.fail("should not solve"),
+        )
+        is None
+    )
+
+
+def test_run_fixed_boundary_optimizer_solver_reuses_restart_for_gd() -> None:
+    calls = []
+
+    def gd_solver(state, static, **kwargs):
+        calls.append((state, static, kwargs))
+        return "gd-result"
+
+    result = driver_solve.run_fixed_boundary_optimizer_solver(
+        solver="gd",
+        restart_state="restart-state",
+        static="static",
+        boundary="boundary",
+        indata=_Input(),
+        flux=SimpleNamespace(phipf="phip", chipf="chip", lamscale="lam"),
+        pressure="pressure",
+        signgs=-1,
+        gamma=1.2,
+        max_iter=3,
+        step_size=0.1,
+        history_size=2,
+        gn_damping=None,
+        gn_cg_tol=None,
+        gn_cg_maxiter=5,
+        verbose=True,
+        initial_guess_func=lambda *_args: pytest.fail("restart should skip initial guess"),
+        solve_fixed_boundary_gd_func=gd_solver,
+        solve_fixed_boundary_lbfgs_func=lambda *_args, **_kwargs: pytest.fail("wrong solver"),
+    )
+
+    assert result == "gd-result"
+    assert calls == [
+        (
+            "restart-state",
+            "static",
+            {
+                "phipf": "phip",
+                "chipf": "chip",
+                "signgs": -1,
+                "lamscale": "lam",
+                "pressure": "pressure",
+                "gamma": 1.2,
+                "max_iter": 3,
+                "step_size": 0.1,
+                "jacobian_penalty": 1e3,
+                "jit_grad": True,
+                "verbose": True,
+            },
+        )
+    ]
+
+
+def test_run_fixed_boundary_optimizer_solver_dispatches_vmec_gn_with_initial_guess() -> None:
+    calls = []
+
+    def initial_guess(static, boundary):
+        calls.append(("guess", static, boundary))
+        return "state0"
+
+    def gn_solver(state, static, **kwargs):
+        calls.append(("gn", state, static, kwargs))
+        return "gn-result"
+
+    result = driver_solve.run_fixed_boundary_optimizer_solver(
+        solver="vmec_gn",
+        restart_state=None,
+        static="static",
+        boundary="boundary",
+        indata=_Input(),
+        flux=SimpleNamespace(phipf="phip", chipf="chip", lamscale="lam"),
+        pressure="pressure",
+        signgs=1,
+        gamma=0.0,
+        max_iter=7,
+        step_size=0.25,
+        history_size=4,
+        gn_damping=0.5,
+        gn_cg_tol=1.0e-4,
+        gn_cg_maxiter=11,
+        verbose=False,
+        initial_guess_func=initial_guess,
+        solve_fixed_boundary_gd_func=lambda *_args, **_kwargs: pytest.fail("wrong solver"),
+        solve_fixed_boundary_lbfgs_func=lambda *_args, **_kwargs: pytest.fail("wrong solver"),
+        solve_fixed_boundary_gn_vmec_residual_func=gn_solver,
+    )
+
+    assert result == "gn-result"
+    assert calls[0] == ("guess", "static", "boundary")
+    assert calls[1] == (
+        "gn",
+        "state0",
+        "static",
+        {
+            "indata": calls[1][3]["indata"],
+            "signgs": 1,
+            "max_iter": 7,
+            "step_size": 0.25,
+            "damping": 0.5,
+            "cg_tol": 1.0e-4,
+            "cg_maxiter": 11,
+            "jit_kernels": True,
+            "verbose": False,
+        },
+    )
+    assert isinstance(calls[1][3]["indata"], _Input)
+
+
+def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:
+    lines: list[str] = []
+
+    def collect(message="", **_kwargs):
+        lines.append(str(message))
+
+    cfg = SimpleNamespace(ns=7, mpol=3, ntor=1, nfp=2)
+    driver_io.print_fixed_boundary_intro(
+        input_path="input.case",
+        cfg=cfg,
+        solver="gd",
+        use_initial_guess=False,
+        max_iter=5,
+        step_size=0.25,
+        history_size=4,
+        print_func=collect,
+    )
+    assert lines == [
+        "[vmec_jax] fixed-boundary run (gd solve)",
+        "[vmec_jax] input=input.case",
+        "[vmec_jax] ns=7 mpol=3 ntor=1 nfp=2",
+        "[vmec_jax] max_iter=5 step_size=0.25 history_size=4",
+    ]
+
+    lines.clear()
+    driver_io.print_vmec2000_run_header(
+        input_path="input.case",
+        version="test-version",
+        now=datetime(2026, 6, 16, 1, 2, 3),
+        print_func=collect,
+    )
+    assert any("PROCESSING INPUT.CASE" in line for line in lines)
+    assert any("THIS IS PARVMEC (PARALLEL VMEC), VERSION test-version" in line for line in lines)
+    assert any("DATE = Jun 16,2026  TIME = 01:02:03" in line for line in lines)
+
+    lines.clear()
+    result = SimpleNamespace(n_iter=10, diagnostics={"converged": False, "ijacob": 3})
+    driver_io.print_vmec2000_run_summary(
+        input_path="input.case",
+        result=result,
+        niter_stage=10,
+        total_time=1.25,
+        print_func=collect,
+    )
+    assert " Try increasing NITER or PRE_NITER if the preconditioner is on." in lines
+    assert " EXECUTION FINISHED WITHOUT REQUESTED CONVERGENCE" in lines
+    assert any("FILE : case" in line for line in lines)
+    assert any("NUMBER OF JACOBIAN RESETS =    3" in line for line in lines)
+    assert any("TOTAL COMPUTATIONAL TIME (SEC)             1.25" in line for line in lines)
 
 
 @pytest.mark.parametrize(
@@ -62,6 +598,296 @@ def test_normalize_solver_mode_reports_valid_modes():
 )
 def test_default_non_autodiff_solver_policy_for_backend_uses_input_structure(backend, indata, expected):
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, backend) == expected
+
+
+def test_resolve_initial_fixed_boundary_policy_preserves_interactive_cpu_cli_defaults():
+    policy = driver._resolve_initial_fixed_boundary_policy(
+        requested_solver_device="auto",
+        policy_backend="cpu",
+        indata=_Input(),
+        cfg=SimpleNamespace(lfreeb=False),
+        solver="vmec2000_iter",
+        solver_mode=None,
+        performance_mode=True,
+        use_scan=None,
+        verbose=True,
+        grid=None,
+        cli_fixed_boundary_mode=False,
+        auto_cli_fixed_boundary_mode=True,
+    )
+
+    assert policy.solver_mode_explicit is False
+    assert policy.solver_mode_eff == "default"
+    assert policy.performance_mode is True
+    assert policy.accelerated_mode is False
+    assert policy.use_scan is False
+    assert policy.cli_fixed_boundary_mode is True
+
+
+def test_resolve_initial_fixed_boundary_policy_honors_explicit_solver_mode_and_scan():
+    policy = driver._resolve_initial_fixed_boundary_policy(
+        requested_solver_device="gpu",
+        policy_backend="gpu",
+        indata=_Input(NS_ARRAY=[5, 9]),
+        cfg=SimpleNamespace(lfreeb=False),
+        solver="vmec2000_iter",
+        solver_mode="safe",
+        performance_mode=True,
+        use_scan=None,
+        verbose=True,
+        grid=None,
+        cli_fixed_boundary_mode=False,
+        auto_cli_fixed_boundary_mode=True,
+    )
+
+    assert policy.solver_mode_explicit is True
+    assert policy.solver_mode_eff == "parity"
+    assert policy.performance_mode is False
+    assert policy.accelerated_mode is False
+    assert policy.use_scan is True
+    assert policy.cli_fixed_boundary_mode is False
+
+
+def test_resolve_fixed_boundary_stage_policy_preserves_explicit_input_staging():
+    policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=35, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 35], NITER_ARRAY=[10, 20], NITER=30),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+
+    assert policy.multigrid is True
+    assert policy.user_explicitly_staged_cli is True
+    assert policy.accelerated_single_grid_default is False
+    assert policy.max_iter == 30
+    assert policy.ns_stages == [5, 35]
+
+
+def test_resolve_fixed_boundary_stage_policy_uses_direct_final_grid_for_unstaged_accelerated_cli():
+    policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=35, lfreeb=False, lthreed=False),
+        indata=_Input(NITER=1500),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=True,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+
+    assert policy.multigrid is False
+    assert policy.accelerated_single_grid_default is True
+    assert policy.max_iter == 1500
+    assert policy.ns_stages == [35]
+
+
+def test_resolve_fixed_boundary_stage_policy_restart_and_ns_override_disable_multigrid():
+    restart_policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=25, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 25], NITER_ARRAY=[3, 4], NITER=7),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=False,
+        multigrid=None,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=True,
+        restart_solver_state_present=False,
+        ns_override=None,
+        stage_transition_heuristic=None,
+        getenv=lambda _key, default="": default,
+    )
+    override_policy = resolve_fixed_boundary_stage_policy(
+        cfg=SimpleNamespace(ns=25, lfreeb=False, lthreed=True),
+        indata=_Input(NS_ARRAY=[5, 25], NITER_ARRAY=[3, 4], NITER=7),
+        solver_lower="vmec2000_iter",
+        cli_fixed_boundary_mode=True,
+        accelerated_mode=False,
+        multigrid=True,
+        max_iter=driver._MAX_ITER_SENTINEL,
+        max_iter_sentinel=driver._MAX_ITER_SENTINEL,
+        max_iter_overridden=False,
+        restart_state_present=False,
+        restart_solver_state_present=False,
+        ns_override=13,
+        stage_transition_heuristic=None,
+        getenv=lambda key, default="": {"VMEC_JAX_STAGE_HEURISTIC": "yes"}.get(key, default),
+    )
+
+    assert restart_policy.multigrid is False
+    assert restart_policy.ns_stages == [25]
+    assert restart_policy.max_iter == 7
+    assert override_policy.multigrid is False
+    assert override_policy.multigrid_user_provided is True
+    assert override_policy.stage_transition_heuristic is True
+
+
+def test_resolve_axis_infer_missing_policy_matches_parity_performance_and_env():
+    assert driver._resolve_axis_infer_missing_policy(
+        solver_lower="vmec_lbfgs",
+        performance_mode=False,
+    ) is True
+    assert driver._resolve_axis_infer_missing_policy(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        getenv=lambda _key, default="": default,
+    ) is False
+    assert driver._resolve_axis_infer_missing_policy(
+        solver_lower="vmec2000_iter",
+        performance_mode=True,
+        getenv=lambda _key, default="": default,
+    ) is True
+    assert driver._resolve_axis_infer_missing_policy(
+        solver_lower="vmec2000_iter",
+        performance_mode=False,
+        getenv=lambda key, default="": {"VMEC_JAX_ENABLE_AXIS_INFER": "yes"}.get(key, default),
+    ) is True
+    assert driver._resolve_axis_infer_missing_policy(
+        solver_lower="vmec2000_iter",
+        performance_mode=True,
+        getenv=lambda key, default="": {"VMEC_JAX_DISABLE_AXIS_INFER": "1"}.get(key, default),
+    ) is False
+
+
+@dataclass(frozen=True)
+class _RestartCfg:
+    ns: int
+
+
+def test_resolve_restart_context_loads_wout_state_and_copies_resume_state(tmp_path):
+    restart_state = SimpleNamespace(layout=SimpleNamespace(ns=5), marker="restart")
+    resume = {"iter_offset": 7}
+    calls: list[object] = []
+
+    def read_wout_func(path):
+        calls.append(path)
+        return "wout"
+
+    context = driver_runtime.resolve_restart_context(
+        cfg=_RestartCfg(ns=3),
+        restart_state=None,
+        restart_wout_path=tmp_path / "wout_case.nc",
+        restart_solver_state=resume,
+        ns_override=5,
+        read_wout_func=read_wout_func,
+        state_from_wout_func=lambda wout: restart_state if wout == "wout" else None,
+        replace_func=replace,
+    )
+
+    assert calls == [tmp_path / "wout_case.nc"]
+    assert context.cfg.ns == 5
+    assert context.restart_state is restart_state
+    assert context.restart_wout == "wout"
+    assert context.restart_solver_state["iter_offset"] == 7
+    assert context.restart_solver_state["state_checkpoint"] is restart_state
+    assert "state_checkpoint" not in resume
+
+
+def test_resolve_restart_context_rejects_mismatched_ns_override():
+    restart_state = SimpleNamespace(layout=SimpleNamespace(ns=5))
+    with pytest.raises(ValueError, match="restart_state ns=5 does not match ns_override=7"):
+        driver_runtime.resolve_restart_context(
+            cfg=_RestartCfg(ns=3),
+            restart_state=restart_state,
+            restart_wout_path=None,
+            restart_solver_state=None,
+            ns_override=7,
+            read_wout_func=lambda _path: None,
+            state_from_wout_func=lambda _wout: None,
+            replace_func=replace,
+        )
+
+
+def test_resolve_external_field_provider_context_keeps_mgrid_path_legacy() -> None:
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="mgrid",
+        external_field_provider_static={"existing": True},
+        external_field_provider_params=object(),
+    )
+
+    assert context.direct_external_provider is False
+    assert context.provider_kind == "mgrid"
+    assert context.provider_static == {"existing": True}
+
+
+def test_resolve_external_field_provider_context_caches_direct_coil_geometry() -> None:
+    params = SimpleNamespace(regularization_epsilon=1.25, chunk_size=7)
+    calls = []
+
+    def build_geometry(got):
+        calls.append(got)
+        return "geometry"
+
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="Coils",
+        external_field_provider_static={"existing": True},
+        external_field_provider_params=params,
+        getenv=lambda key, default="": {"VMEC_JAX_FREEB_JIT_COIL_SAMPLER": "0"}.get(key, default),
+        build_coil_field_geometry_func=build_geometry,
+    )
+
+    assert context.direct_external_provider is True
+    assert context.provider_kind == "coils"
+    assert context.provider_static["existing"] is True
+    assert context.provider_static["coil_geometry"] == "geometry"
+    assert context.provider_static["regularization_epsilon"] == 1.25
+    assert context.provider_static["chunk_size"] == 7
+    assert context.provider_static["cache_scope"] == "host_forward_only"
+    assert context.provider_static["jit_sampler"] is False
+    assert calls == [params]
+
+
+def test_resolve_external_field_provider_context_respects_existing_or_disabled_cache() -> None:
+    params = SimpleNamespace()
+    existing = {"coil_geometry": object()}
+
+    context_existing = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=existing,
+        external_field_provider_params=params,
+        build_coil_field_geometry_func=lambda _params: pytest.fail("should not rebuild existing geometry"),
+    )
+    assert context_existing.provider_static is existing
+
+    context_disabled = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=None,
+        external_field_provider_params=params,
+        getenv=lambda key, default="": {"VMEC_JAX_FREEB_DISABLE_COIL_GEOMETRY_CACHE": "yes"}.get(key, default),
+        build_coil_field_geometry_func=lambda _params: pytest.fail("cache disabled"),
+    )
+    assert context_disabled.provider_static is None
+
+
+def test_resolve_external_field_provider_context_falls_back_on_custom_provider_error() -> None:
+    original_static = {"custom": object()}
+
+    context = driver_runtime.resolve_external_field_provider_context(
+        external_field_provider_kind="direct_coils",
+        external_field_provider_static=original_static,
+        external_field_provider_params=object(),
+        build_coil_field_geometry_func=lambda _params: (_ for _ in ()).throw(TypeError("custom")),
+    )
+
+    assert context.direct_external_provider is True
+    assert context.provider_static is original_static
 
 
 def test_resolve_jit_forces_auto_policy_preserves_explicit_flags():

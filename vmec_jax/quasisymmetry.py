@@ -609,7 +609,6 @@ def quasisymmetry_ratio_residual_from_wout(
     iotas_full = _as_jax_array(getattr(wout, "iotas"), dtype=np.float64)
     radial_count = int(iotas_full.shape[0])
     s_half = _half_grid(radial_count, iotas_full.dtype)
-    half_count = int(s_half.shape[0])
     xm_nyq = _as_jax_array(getattr(wout, "xm_nyq"), dtype=np.float64)
     xn_nyq = _as_jax_array(getattr(wout, "xn_nyq"), dtype=np.float64)
     mode_count = int(xm_nyq.shape[0])

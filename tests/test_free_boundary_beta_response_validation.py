@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
-from vmec_jax.free_boundary_validation import (
+from vmec_jax.solvers.free_boundary.validation import (
     free_boundary_response_metrics,
     wout_beta_percent,
     wout_fsq_total,

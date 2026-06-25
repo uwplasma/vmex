@@ -944,10 +944,10 @@ def test_extend_boundary_for_max_mode_keeps_anisotropic_resolution_when_sufficie
 
 
 def test_pressure_profile_for_static_defaults_to_zero(monkeypatch):
-    import vmec_jax.optimization as opt_module
+    import vmec_jax.optimizers.fixed_boundary.qs_residuals as qs_module
 
     static = SimpleNamespace(s=np.array([0.0, 0.5, 1.0]))
-    monkeypatch.setattr(opt_module, "eval_profiles", lambda _indata, _s: {})
+    monkeypatch.setattr(qs_module, "eval_profiles", lambda _indata, _s: {})
 
     pressure = _pressure_profile_for_static(SimpleNamespace(), static)
 
@@ -955,7 +955,7 @@ def test_pressure_profile_for_static_defaults_to_zero(monkeypatch):
 
 
 def test_prepare_fixed_boundary_context_uses_shared_precomputations(monkeypatch):
-    import vmec_jax.optimization as opt_module
+    import vmec_jax.optimizers.fixed_boundary.qs_residuals as qs_module
 
     state = SimpleNamespace(name="state")
     static = SimpleNamespace(s=np.array([0.0, 0.5, 1.0]))
@@ -964,12 +964,12 @@ def test_prepare_fixed_boundary_context_uses_shared_precomputations(monkeypatch)
     flux = object()
     booz_inputs = object()
 
-    monkeypatch.setattr(opt_module, "initial_guess_from_boundary", lambda *_args, **_kwargs: state)
-    monkeypatch.setattr(opt_module, "eval_geom", lambda *_args, **_kwargs: SimpleNamespace(sqrtg=np.ones((2, 2))))
-    monkeypatch.setattr(opt_module, "signgs_from_sqrtg", lambda *_args, **_kwargs: -1)
-    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: flux)
-    monkeypatch.setattr(opt_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([1.0, 2.0]))
-    monkeypatch.setattr(opt_module, "booz_xform_inputs_from_state", lambda **_kwargs: booz_inputs)
+    monkeypatch.setattr(qs_module, "initial_guess_from_boundary", lambda *_args, **_kwargs: state)
+    monkeypatch.setattr(qs_module, "eval_geom", lambda *_args, **_kwargs: SimpleNamespace(sqrtg=np.ones((2, 2))))
+    monkeypatch.setattr(qs_module, "signgs_from_sqrtg", lambda *_args, **_kwargs: -1)
+    monkeypatch.setattr(qs_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: flux)
+    monkeypatch.setattr(qs_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([1.0, 2.0]))
+    monkeypatch.setattr(qs_module, "booz_xform_inputs_from_state", lambda **_kwargs: booz_inputs)
 
     context = prepare_fixed_boundary_context(
         static=static,

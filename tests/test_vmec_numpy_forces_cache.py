@@ -4,7 +4,7 @@ import numpy as np
 
 import vmec_jax._compat as compat
 import vmec_jax.solve as solve_mod
-import vmec_jax.solve_force_payload_helpers as payload_helpers_mod
+import vmec_jax.solvers.fixed_boundary.residual.payload_blocks as payload_helpers_mod
 import vmec_jax.vmec_forces as vf
 from vmec_jax.vmec_numpy_forces import (
     _NP_STACK_CACHE,
@@ -177,6 +177,16 @@ def test_np_fft_and_jax_lax_shims_match_numpy():
     rhs = np.arange(12.0).reshape(3, 4)
     out = _NumpyLaxShim.dot_general(lhs, rhs, (((1,), (0,)), ((), ())))
     np.testing.assert_allclose(out, lhs @ rhs)
+    assert _NumpyLaxShim.fori_loop(0, 4, lambda i, acc: acc + i, 0) == 6
+    np.testing.assert_allclose(
+        _NumpyLaxShim.fori_loop(
+            1,
+            4,
+            lambda i, state: (state[0].at[i].set(float(i)), state[1]),
+            (_NpModule.zeros((4,)), "metadata"),
+        )[0],
+        [0.0, 1.0, 2.0, 3.0],
+    )
     with _NumpyJaxShim.named_scope("unit"):
         assert _NumpyJaxShim.default_backend() == "cpu"
     with _NumpyJaxShim.profiler.TraceAnnotation("unit"):

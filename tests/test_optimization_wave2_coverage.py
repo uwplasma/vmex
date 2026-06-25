@@ -1171,6 +1171,7 @@ def test_workflow_residuals_attach_packed_state_cotangent_hooks() -> None:
 def test_qh_and_qs_residual_cotangent_operator_factories(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.modes as modes_module
+    import vmec_jax.optimizers.fixed_boundary.qs_residuals as qs_residuals_module
     import vmec_jax.quasisymmetry as qs_module
     import vmec_jax.wout as wout_module
     from vmec_jax.optimization import make_qh_residuals_fn, make_qs_residuals_fn
@@ -1182,8 +1183,8 @@ def test_qh_and_qs_residual_cotangent_operator_factories(monkeypatch) -> None:
     state = _state_from_coeffs(r=2.0, rs=0.3, z=0.5)
     packed = pack_state(state)
 
-    monkeypatch.setattr(opt_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
-    monkeypatch.setattr(opt_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
+    monkeypatch.setattr(qs_residuals_module, "flux_profiles_from_indata", lambda *_args, **_kwargs: "flux")
+    monkeypatch.setattr(qs_residuals_module, "_pressure_profile_for_static", lambda *_args, **_kwargs: jnp.asarray([0.0, 1.0]))
     monkeypatch.setattr(
         modes_module,
         "nyquist_mode_table_from_grid",

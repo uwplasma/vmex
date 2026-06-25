@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 import vmec_jax.energy as energy_mod
 from vmec_jax.energy import (
@@ -46,6 +47,18 @@ def test_polynomial_and_iotaf_edge_branches():
         np.asarray(_iotaf_from_iotas(np.asarray([0.0, 0.0, 0.0]), lrfp=True)),
         [0.0, 0.0, 0.0],
     )
+
+
+def test_iotaf_from_iotas_keeps_traced_autodiff_path():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+
+    def objective(iotas):
+        return jnp.sum(_iotaf_from_iotas(iotas, lrfp=False))
+
+    grad = jax.grad(objective)(jnp.asarray([0.0, 0.2, 0.4, 0.8]))
+
+    np.testing.assert_allclose(np.asarray(grad), [0.0, 2.0, 0.0, 2.0], rtol=1e-14, atol=1e-14)
 
 
 def test_torflux_cache_and_flux_profiles_nonrfp_and_rfp():

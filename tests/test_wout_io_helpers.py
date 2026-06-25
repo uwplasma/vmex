@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.wout_io import (
+from vmec_jax.io.wout.netcdf import (
     NYQUIST_FOURIER_FIELD_NAMES,
     read_mode_table,
     read_nyquist_fourier_fields,

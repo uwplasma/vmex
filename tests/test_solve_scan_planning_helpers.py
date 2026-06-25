@@ -1,22 +1,34 @@
+from collections import OrderedDict, namedtuple
+
 import pytest
 
-from vmec_jax.solve_residual_iter_policy import vmec2000_scan_options_from_env
-from vmec_jax.solve_scan_planning_helpers import (
+from vmec_jax.solvers.fixed_boundary.residual.policy import vmec2000_scan_options_from_env
+from vmec_jax.solvers.fixed_boundary.scan.planning import (
     SCAN_TIMING_COUNT_KEYS,
     SCAN_TIMING_KEYS,
     apply_state_only_scan_options,
     build_scan_timing_report,
     build_vmec2000_scan_cache_key,
+    default_vmec2000_controller_constants,
     new_scan_timing_stats,
     normalize_scan_print_mode,
     resolve_scan_iteration_plan,
+    resolve_scan_iteration_runtime_plan,
     resolve_scan_preflight_iters,
     resolve_scan_run_flags,
+    resolve_vmec2000_scan_setup,
     scan_chunk_settings,
     scan_jit_forces_enabled,
     scan_jit_preflight_enabled,
     scan_timing_enabled,
     validate_vmec2000_scan_guards,
+)
+from vmec_jax.solvers.fixed_boundary.scan.runtime import (
+    get_or_build_scan_runner,
+    resolve_scan_runtime_hooks,
+    resolve_scan_runtime_hooks_from_env,
+    run_scan_preflight_step,
+    scan_trace_context_or_null,
 )
 
 
@@ -126,6 +138,271 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     assert build_scan_timing_report(iterations=7, stats=stats, scan_total_s=3.0)["scan_unattributed_s"] == 0.0
 
 
+def test_default_vmec2000_controller_constants_match_legacy_values():
+    constants = default_vmec2000_controller_constants()
+
+    assert constants.preconditioner_update_interval == 25
+    assert constants.restart_badjac_factor == pytest.approx(0.9)
+    assert constants.restart_badprog_factor == pytest.approx(1.03)
+    assert constants.vmec2000_fact == pytest.approx(1.0e4)
+    assert constants.ndamp == 10
+
+
+def test_scan_runtime_hooks_disable_optional_callbacks_for_quiet_defaults():
+    hooks = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="0",
+        dump_dir_env="",
+        print_in_scan=False,
+        scan_print_mode="not-a-mode",
+        scan_trace=False,
+    )
+
+    assert not hooks.dump_timecontrol_scan
+    assert hooks.timecontrol_callback is None
+    assert hooks.timecontrol_path is None
+    assert hooks.io_callback is None
+    assert not hooks.print_in_scan
+    assert hooks.scan_print_mode == "debug_print"
+    assert not hooks.scan_trace
+    with scan_trace_context_or_null(hooks, "scan/test") as value:
+        assert value is None
+
+
+def test_scan_runtime_hooks_disable_timecontrol_without_dump_dir(tmp_path):
+    hooks = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env="",
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    assert not hooks.dump_timecontrol_scan
+    assert hooks.timecontrol_path is None
+
+    hooks_with_path = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env=str(tmp_path),
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+    if hooks_with_path.timecontrol_callback is not None:
+        assert hooks_with_path.dump_timecontrol_scan
+        assert hooks_with_path.timecontrol_path == tmp_path / "time_control_trace.log"
+
+
+def test_scan_runtime_hooks_from_env_matches_direct_resolver(tmp_path):
+    hooks = resolve_scan_runtime_hooks_from_env(
+        {
+            "VMEC_JAX_DUMP_TIMECONTROL": "1",
+            "VMEC_JAX_DUMP_DIR": str(tmp_path),
+        },
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    direct = resolve_scan_runtime_hooks(
+        dump_timecontrol_env="1",
+        dump_dir_env=str(tmp_path),
+        print_in_scan=False,
+        scan_print_mode="debug_print",
+        scan_trace=False,
+    )
+
+    assert hooks.dump_timecontrol_scan == direct.dump_timecontrol_scan
+    assert hooks.timecontrol_path == direct.timecontrol_path
+    assert hooks.print_in_scan == direct.print_in_scan
+    assert hooks.scan_print_mode == direct.scan_print_mode
+
+
+def test_get_or_build_scan_runner_records_miss_hit_and_bypass_paths():
+    cache = OrderedDict()
+    stats = {
+        "scan_runner_cache_lookup_s": 0.0,
+        "scan_runner_cache_build_s": 0.0,
+        "scan_runner_cache_hit_count": 0,
+        "scan_runner_cache_miss_count": 0,
+        "scan_runner_cache_bypass_count": 0,
+    }
+    miss_records = []
+    times = iter([10.0, 10.25, 11.0, 11.5, 12.0, 12.1])
+
+    def jit_func(func):
+        return ("jit", func)
+
+    def cache_get(cache_obj, key):
+        return cache_obj.get(key)
+
+    def cache_put(cache_obj, key, value, *, env_name, default):
+        assert env_name == "VMEC_JAX_SCAN_RUNNER_CACHE_SIZE"
+        assert default == 32
+        cache_obj[key] = value
+        return value
+
+    def record_miss(stats_obj, *, requested_key, existing_keys):
+        miss_records.append((requested_key, existing_keys))
+        stats_obj["scan_runner_cache_miss_category_test_count"] = (
+            int(stats_obj.get("scan_runner_cache_miss_category_test_count", 0)) + 1
+        )
+
+    runner_miss, status_miss = get_or_build_scan_runner(
+        "run",
+        cache=cache,
+        key=("case", 1),
+        differentiating_scan=False,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=cache_get,
+        cache_put=cache_put,
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+    runner_hit, status_hit = get_or_build_scan_runner(
+        "run",
+        cache=cache,
+        key=("case", 1),
+        differentiating_scan=False,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=cache_get,
+        cache_put=cache_put,
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+    runner_bypass, status_bypass = get_or_build_scan_runner(
+        "run2",
+        cache=cache,
+        key=("case", 2),
+        differentiating_scan=True,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        jit_func=jit_func,
+        cache_get=lambda *_args: pytest.fail("differentiating path must bypass cache lookup"),
+        cache_put=lambda *_args, **_kwargs: pytest.fail("differentiating path must bypass cache put"),
+        record_miss_categories=record_miss,
+        perf_counter=lambda: next(times),
+    )
+
+    assert status_miss == "miss"
+    assert runner_miss == ("jit", "run")
+    assert status_hit == "hit"
+    assert runner_hit is runner_miss
+    assert status_bypass == "bypass"
+    assert runner_bypass == ("jit", "run2")
+    assert stats["scan_runner_cache_lookup_s"] > 0.0
+    assert stats["scan_runner_cache_build_s"] > 0.0
+    assert stats["scan_runner_cache_miss_count"] == 1
+    assert stats["scan_runner_cache_hit_count"] == 1
+    assert stats["scan_runner_cache_bypass_count"] == 1
+    assert stats["scan_runner_cache_miss_category_test_count"] == 1
+    assert miss_records == [(("case", 1), ())]
+
+
+def test_run_scan_preflight_step_handles_nojit_and_offset_with_timing():
+    Carry = namedtuple("Carry", "iter_offset value")
+    times = iter([1.0, 1.4])
+    stats = {"scan_preflight_s": 0.0}
+    block_calls = []
+
+    class Jnp:
+        int32 = "int32"
+
+        @staticmethod
+        def asarray(value, dtype=None):
+            return ("arr", value, dtype)
+
+    class Jax:
+        class tree_util:
+            @staticmethod
+            def tree_map(fn, value):
+                return tuple(fn(item) for item in value)
+
+        @staticmethod
+        def disable_jit():
+            class Context:
+                def __enter__(self):
+                    return None
+
+                def __exit__(self, exc_type, exc, tb):
+                    return None
+
+            return Context()
+
+    def scan_step(carry, it):
+        assert carry.iter_offset == ("arr", 7, "int32")
+        return carry._replace(value="advanced"), ("h0", it)
+
+    result = run_scan_preflight_step(
+        Carry(iter_offset=None, value="initial"),
+        iter_offset_preflight=7,
+        jit_preflight=False,
+        get_scan_runner=lambda _seq_len: pytest.fail("nojit preflight should not request runner"),
+        scan_step=scan_step,
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        block_scan_value=lambda value: block_calls.append(value) or value,
+        perf_counter=lambda: next(times),
+        jnp_module=Jnp,
+        jax_module=Jax,
+    )
+
+    assert result.carry.value == "advanced"
+    assert result.history_row == ("h0", ("arr", 0, "int32"))
+    assert block_calls == [(result.carry, result.history_row)]
+    assert stats["scan_preflight_s"] == pytest.approx(0.4)
+
+
+def test_run_scan_preflight_step_handles_jitted_sequence_history():
+    Carry = namedtuple("Carry", "iter_offset value")
+
+    class Jnp:
+        int32 = "int32"
+
+        @staticmethod
+        def asarray(value, dtype=None):
+            return tuple(value) if isinstance(value, list) else ("arr", value, dtype)
+
+    class Jax:
+        class tree_util:
+            @staticmethod
+            def tree_map(fn, value):
+                return tuple(fn(item) for item in value)
+
+        @staticmethod
+        def disable_jit():
+            raise AssertionError("jit preflight should not disable jit")
+
+    def get_scan_runner(seq_len):
+        assert seq_len == 1
+
+        def runner(carry, it_seq):
+            assert it_seq == (0,)
+            return carry._replace(value="jitted"), (("fsqr0",), ("fsqz0",), ("fsql0",))
+
+        return runner, "miss"
+
+    result = run_scan_preflight_step(
+        Carry(iter_offset=None, value="initial"),
+        iter_offset_preflight=None,
+        jit_preflight=True,
+        get_scan_runner=get_scan_runner,
+        scan_step=lambda *_args: pytest.fail("jit preflight should use runner"),
+        scan_timing_enabled=False,
+        scan_timing_stats={},
+        block_scan_value=lambda value: pytest.fail("timing disabled should not block"),
+        perf_counter=lambda: pytest.fail("timing disabled should not request time"),
+        jnp_module=Jnp,
+        jax_module=Jax,
+    )
+
+    assert result.carry.value == "jitted"
+    assert result.history_row == ("fsqr0", "fsqz0", "fsql0")
+
+
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():
     normal = resolve_scan_run_flags(
         state_only=False,
@@ -178,6 +455,44 @@ def test_state_only_overrides_light_minimal_and_print_options():
     assert not state_only.print_in_scan
     assert not state_only.chunked_print
     assert apply_state_only_scan_options(options, state_only_scan=False) is options
+
+
+def test_vmec2000_scan_setup_resolves_state_only_and_preconditioner_overrides():
+    setup = resolve_vmec2000_scan_setup(
+        env={
+            "VMEC_JAX_SCAN_LIGHT": "1",
+            "VMEC_JAX_SCAN_PRINT": "1",
+            "VMEC_JAX_SCAN_PRECOND_PRECOMPUTE": "",
+            "VMEC_JAX_SCAN_PRECOND_LAXTRIDI": "",
+            "VMEC_JAX_TRIDI_PRECOMPUTE": "0",
+            "VMEC_JAX_TRIDI_SOLVE": "0",
+        },
+        state_only=True,
+        scan_differentiated=False,
+        scan_fallback_enabled=True,
+        force_chunked_scan=True,
+        indata_nstep=4,
+        preconditioner_use_precomputed_tridi=True,
+        preconditioner_use_lax_tridi=True,
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        light_history=False,
+        scan_minimal_default=False,
+        dump_any=False,
+        fsq_total_target=None,
+        backend_name="gpu",
+    )
+
+    assert setup.state_only_scan
+    assert not setup.scan_fallback_enabled_run
+    assert setup.force_chunked_scan_run
+    assert setup.nstep_screen == 4
+    assert setup.options.scan_minimal
+    assert not setup.options.scan_collect_scalars
+    assert not setup.options.print_in_scan
+    assert setup.options.scan_use_precomputed
+    assert setup.options.scan_use_lax_tridi
 
 
 def test_scan_options_env_branches_for_minimal_light_and_restart_payload():
@@ -407,6 +722,59 @@ def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     assert _cache_key(scan_use_precomputed=True) != base
     assert _cache_key(scan_use_lax_tridi=True) != base
     assert _cache_key(stage_prev_fsq=3)[18] == 3.0
+
+
+def test_scan_iteration_runtime_plan_resolves_offsets_and_cache_key():
+    plan = resolve_scan_iteration_runtime_plan(
+        env={
+            "VMEC_JAX_SCAN_PREFLIGHT": "2",
+            "VMEC_JAX_SCAN_EXTRA_ITERS": "3",
+            "VMEC_JAX_TOMNSPS_FFT": "yes",
+            "VMEC_JAX_TOMNSPS_FFT_FUSED": "0",
+            "VMEC_JAX_TOMNSPS_THETA_FUSED": "1",
+            "VMEC_JAX_TOMNSPS_ZETA_FUSED": "1",
+        },
+        jit_forces_scan=False,
+        vmec2000_control=True,
+        max_iter=10,
+        axis_reset_repeat=True,
+        iter_offset0=4,
+        static_key=("static",),
+        wout_key=("wout",),
+        edge_signature_key=("edge",),
+        step_size=0.2,
+        initial_flip_sign=-1.0,
+        lambda_update_scale=0.5,
+        ftol=1.0e-12,
+        nstep_screen=25,
+        use_restart_triggers=True,
+        vmecpp_restart=False,
+        scan_use_precomputed=True,
+        scan_use_lax_tridi=True,
+        scan_use_restart_payload=True,
+        stage_prev_fsq=None,
+        stage_transition_factor=1.0,
+        stage_transition_scale=2.0,
+        state_only_scan=False,
+        scan_light=True,
+        scan_minimal=False,
+        scan_fallback_iters=7,
+        scan_fallback_accept_frac=0.5,
+        scan_fallback_fsq_factor=3.0,
+        scan_fallback_badjac_limit=2,
+        scan_fallback_fsq_abs=1.0e-4,
+    )
+
+    assert plan.preflight_iters == 2
+    assert plan.max_iter_scan == 13
+    assert plan.max_iter_tail == 11
+    assert plan.iter_offset_preflight == 0
+    assert plan.iter_offset0 == -1
+    assert plan.axis_reset_repeated
+    assert plan.scan_cache_key[1:4] == (("static",), ("wout",), ("edge",))
+    assert plan.scan_cache_key[4] == ("yes", "0", "1", "1")
+    assert plan.scan_cache_key[5:8] == (11, 2, -1)
+    assert plan.scan_cache_key[15:18] == (True, True, True)
 
 
 def test_scan_print_mode_normalization_and_invalid_guard_errors():

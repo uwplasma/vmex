@@ -9,9 +9,9 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.free_boundary import prepare_mgrid_for_config
+from vmec_jax.io.wout.schema import assert_main_modes_match_wout
 from vmec_jax.namelist import read_indata
 from vmec_jax.wout import read_wout
-from vmec_jax.wout_schema import assert_main_modes_match_wout
 
 
 @dataclass(frozen=True)

@@ -68,6 +68,14 @@ def _equilibrium_flux_profiles(
 
 @dataclass(frozen=True)
 class BoozXformInputs:
+    """Differentiable VMEC-to-Boozer input payload.
+
+    The coefficient arrays follow the ``booz_xform_jax`` convention and are
+    registered as a PyTree so QI/QS objectives can differentiate through the
+    VMEC-to-Boozer preparation step.  Stellarator-symmetric channels are always
+    present; ``lasym`` channels are optional and may be ``None``.
+    """
+
     rmnc: Any
     zmns: Any
     lmns: Any
@@ -268,7 +276,6 @@ def _vmec_full_to_half(*, full: Any, m_modes: Any, s_full: Any) -> Any:
     sqrt_s_half = jnp.sqrt(jnp.maximum(s_half, 0.0))
 
     even_mask = (m_modes % 2) == 0
-    odd_mask = ~even_mask
 
     even_val = 0.5 * (full[:-1, :] + full[1:, :])
     denom0 = sqrt_s_full[:-1, None]
@@ -363,7 +370,6 @@ def _lambda_wout_from_full_jax(
         )
 
         even_mask = (m_modes % 2) == 0
-        odd_mask = ~even_mask
 
         def body(js, arr):
             even_val = 0.5 * (arr[js, :] + arr[js - 1, :])

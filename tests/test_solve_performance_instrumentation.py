@@ -5,7 +5,7 @@ import pytest
 
 import vmec_jax.energy as energy_mod
 import vmec_jax.solve as solve
-from vmec_jax.solve_residual_iter_runtime_helpers import _build_residual_iter_timing_report
+from vmec_jax.solvers.fixed_boundary.residual.runtime import _build_residual_iter_timing_report
 
 
 def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
@@ -14,6 +14,8 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "setup_static_grid_rebuild": 0.01,
         "setup_freeb_policy": 0.02,
         "setup_boundary_profiles": 0.03,
+        "setup_profile_data": 0.011,
+        "setup_trig_tables": 0.013,
         "setup_cache_key_hash": 0.04,
         "setup_ptau_constants": 0.005,
         "setup_index_constants": 0.006,
@@ -35,6 +37,7 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "compute_forces_calls": 3,
         "compute_forces_main": 0.4,
         "compute_forces_main_calls": 3,
+        "compute_forces_main_reuse_count": 1,
         "compute_forces_auto_flip": 0.03,
         "compute_forces_auto_flip_calls": 2,
         "compute_forces_trial": 0.05,
@@ -55,8 +58,15 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
         "iteration_control_evolve": 0.01,
         "preconditioner": 0.12,
         "precond_apply": 0.08,
+        "precond_apply_scale_m1_rhs": 0.005,
+        "precond_apply_rz": 0.03,
+        "precond_apply_fused_payload": 0.02,
+        "precond_apply_output_blocks": 0.01,
+        "precond_apply_sync": 0.015,
         "precond_mode_scale": 0.01,
         "precond_refresh_seed": 0.015,
+        "precond_refresh_seed_lambda": 0.004,
+        "precond_refresh_seed_rz_matrices": 0.009,
         "precond_refresh_calls": 3,
         "precond_reassemble_calls": 1,
         "precond_cache_hit_count": 5,
@@ -82,10 +92,14 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["force_eval_calls"] == report["compute_forces_calls"]
     assert report["force_eval_per_iter_s"] == pytest.approx(0.2)
     assert report["compute_forces_main_s"] == pytest.approx(0.4)
+    assert report["compute_forces_main_reuse_count"] == 1
     assert report["force_eval_extra_s"] == pytest.approx(0.15)
     assert report["force_eval_all_s"] == pytest.approx(0.55)
     assert report["force_eval_all_calls"] == 7
     assert report["setup_cache_key_hash_s"] == pytest.approx(0.04)
+    assert report["setup_profile_data_s"] == pytest.approx(0.011)
+    assert report["setup_trig_tables_s"] == pytest.approx(0.013)
+    assert report["setup_boundary_profiles_unattributed_s"] == pytest.approx(0.006)
     assert report["setup_update_constants_s"] == pytest.approx(0.009)
     assert report["setup_unattributed_s"] == pytest.approx(0.08)
     assert report["iteration_control_fsq1_payload_get_s"] == pytest.approx(0.04)
@@ -105,10 +119,21 @@ def test_residual_iter_timing_report_exposes_force_eval_aliases() -> None:
     assert report["finalize_diag_build_s"] == pytest.approx(0.008)
     assert report["finalize_unattributed_s"] == pytest.approx(0.006)
     assert report["precond_refresh_seed_s"] == pytest.approx(0.015)
+    assert report["precond_refresh_seed_lambda_s"] == pytest.approx(0.004)
+    assert report["precond_refresh_seed_rz_matrices_s"] == pytest.approx(0.009)
+    assert report["precond_refresh_seed_lambda_per_iter_s"] == pytest.approx(0.002)
+    assert report["precond_refresh_seed_rz_matrices_per_iter_s"] == pytest.approx(0.0045)
     assert report["precond_refresh_calls"] == 3
     assert report["precond_reassemble_calls"] == 1
     assert report["precond_cache_hit_count"] == 5
     assert report["precond_refresh_seed_reuse_count"] == 2
+    assert report["precond_apply_scale_m1_rhs_s"] == pytest.approx(0.005)
+    assert report["precond_apply_rz_s"] == pytest.approx(0.03)
+    assert report["precond_apply_fused_payload_s"] == pytest.approx(0.02)
+    assert report["precond_apply_output_blocks_s"] == pytest.approx(0.01)
+    assert report["precond_apply_sync_s"] == pytest.approx(0.015)
+    assert report["precond_apply_rz_per_iter_s"] == pytest.approx(0.015)
+    assert report["precond_apply_fused_payload_per_iter_s"] == pytest.approx(0.01)
 
 
 def test_accelerated_scan_timing_is_opt_in_and_path_labeled(

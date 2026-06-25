@@ -19,6 +19,8 @@ def test_root_readme_stays_concise_and_defers_extended_claims() -> None:
     assert "docs/performance.rst" in readme
     assert "docs/release_checklist.rst" in readme
     assert "Latest repository release tag:" in readme
+    assert "readme_runtime_compare.png" not in readme
+    assert "readme_ad_fd_evidence.png" in readme
     assert "readme_best_optimization_qa.png" in readme
     assert "readme_best_optimization_qh.png" in readme
     assert "readme_best_optimization_qp.png" in readme
@@ -27,7 +29,7 @@ def test_root_readme_stays_concise_and_defers_extended_claims() -> None:
     forbidden_fragments = (
         "## Optimization from Different Initial Conditions",
         "## VMEC++ notes",
-        "readme_runtime_compare.png",
+        "readme_runtime_memory_single_grid.png",
         "case-timeout-s 1200",
         "generate_qs_ess_sweep.py --backend-label",
         "VMEC_JAX_QI_OUTPUT_DIR",
@@ -160,3 +162,27 @@ def test_generated_docs_and_bulky_sweep_artifacts_are_not_tracked() -> None:
     )
 
     assert generated == []
+
+
+def test_repo_size_audit_can_report_ignored_local_artifacts() -> None:
+    result = subprocess.run(
+        [
+            "python",
+            "tools/diagnostics/repo_size_audit.py",
+            "--top",
+            "1",
+            "--include-ignored",
+            "--max-total-mib",
+            "50",
+            "--max-file-mib",
+            "2",
+        ],
+        cwd=ROOT,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+
+    assert "Tracked files:" in result.stdout
+    assert "Ignored local artifact report:" in result.stdout
+    assert "Ignored files:" in result.stdout

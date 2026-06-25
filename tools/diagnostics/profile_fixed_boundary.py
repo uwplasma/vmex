@@ -8,10 +8,13 @@ Example:
 from __future__ import annotations
 
 import argparse
+import cProfile
 from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import pstats
+import resource
 import sys
 from typing import Any
 import time
@@ -40,6 +43,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--no-warmup", action="store_true", help="Disable warmup run")
     p.add_argument("--simple-profile", action="store_true", help="Use a timing-only profiler (no TensorBoard trace)")
     p.add_argument("--json-out", type=str, default=None, help="Write a compact JSON timing/solver diagnostic summary.")
+    p.add_argument("--cprofile-out", type=str, default=None, help="Write cProfile stats for the timed profiled run.")
+    p.add_argument(
+        "--cprofile-text-out",
+        type=str,
+        default=None,
+        help="Write a text cProfile summary for the timed profiled run.",
+    )
     p.add_argument(
         "--vmec-timing",
         action="store_true",
@@ -80,6 +90,15 @@ def _parse_args() -> argparse.Namespace:
         choices=("auto", "default", "cpu", "gpu"),
         default="auto",
         help="JAX solver device override passed to run_fixed_boundary (default: auto).",
+    )
+    p.add_argument(
+        "--finish-policy",
+        choices=("auto", "none", "bounded", "converge"),
+        default=None,
+        help=(
+            "Public fixed-boundary post-solve finish policy. If omitted, the legacy "
+            "--auto-cli-policy/--no-auto-cli-policy switch selects auto/none."
+        ),
     )
     p.set_defaults(auto_cli_policy=True)
     p.add_argument(
@@ -158,6 +177,17 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
+def _peak_rss_mib() -> float | None:
+    """Return process peak RSS in MiB using platform-specific ru_maxrss units."""
+    try:
+        rss = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:
+        return None
+    if sys.platform == "darwin":
+        return rss / (1024.0 * 1024.0)
+    return rss / 1024.0
+
+
 def _effective_jit_forces(args: argparse.Namespace) -> bool:
     """Return the production default unless the profiler flag overrides it."""
     if bool(getattr(args, "jit_forces", False)) and bool(getattr(args, "no_jit_forces", False)):
@@ -174,6 +204,8 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "solver_mode",
         "accelerated_mode",
         "cli_fixed_boundary_mode",
+        "fixed_boundary_finish_policy",
+        "cli_fixed_boundary_finish_enabled",
         "cli_fixed_boundary_initial_policy",
         "cli_accelerated_fixed_policy",
         "cli_staged_followup_policy",
@@ -214,6 +246,19 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "scan_use_precomputed",
         "scan_use_lax_tridi",
         "abort_scan",
+        "host_update_assembly",
+        "host_fsq1_norms_on_accelerator",
+        "host_residual_metrics_on_accelerator",
+        "jit_strict_update_enabled",
+        "jit_strict_update_work",
+        "jit_strict_update_cpu_work_limit",
+        "numpy_preconditioner_apply",
+        "numpy_preconditioner_apply_mode_count",
+        "numpy_preconditioner_apply_max_iter_cutoff",
+        "numpy_preconditioner_apply_min_mode_count",
+        "numpy_force_fast_path",
+        "numpy_force_fast_path_active",
+        "numpy_force_fast_path_max_iter",
         "requested_ftol",
         "fsq_total_target",
         "final_fsqr",
@@ -222,6 +267,10 @@ def _compact_diagnostics(diag: dict[str, Any]) -> dict[str, Any]:
         "converged",
         "converged_strict",
         "converged_by_total_fsq",
+        "setup_axis_reset_applied",
+        "setup_axis_reset_done",
+        "setup_axis_force_probe_available",
+        "setup_axis_force_probe_reused",
         "solver_device",
         "solver_device_auto_reroute",
         "solver_device_requested_backend",
@@ -236,6 +285,10 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
     effective_jit_forces = getattr(args, "effective_jit_forces", None)
     if effective_jit_forces is None:
         effective_jit_forces = _effective_jit_forces(args)
+    effective_finish_policy = getattr(args, "effective_finish_policy", None)
+    if effective_finish_policy is None:
+        finish_policy = getattr(args, "finish_policy", None)
+        effective_finish_policy = finish_policy if finish_policy is not None else ("auto" if bool(args.auto_cli_policy) else "none")
     w_hist = np.asarray(getattr(res, "w_history", np.zeros((0,), dtype=float)), dtype=float)
     fsqr_hist = np.asarray(getattr(res, "fsqr2_history", np.zeros((0,), dtype=float)), dtype=float)
     fsqz_hist = np.asarray(getattr(res, "fsqz2_history", np.zeros((0,), dtype=float)), dtype=float)
@@ -267,6 +320,7 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
         "jax_version": getattr(jax_module, "__version__", "unknown"),
         "jax_default_backend": backend,
         "jax_devices": devices,
+        "process_peak_rss_mib": _peak_rss_mib(),
         "args": {
             "solver_mode": str(args.solver_mode),
             "solver_device": str(args.solver_device),
@@ -276,6 +330,7 @@ def _summarize_run(*, args: argparse.Namespace, run: Any, wall_time: float | Non
             "jit_forces": bool(effective_jit_forces),
             "no_jit_forces": bool(args.no_jit_forces),
             "auto_cli_policy": bool(args.auto_cli_policy),
+            "finish_policy": str(effective_finish_policy),
             "dynamic_scan": bool(args.dynamic_scan),
         },
         "result": {
@@ -323,6 +378,8 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
     for key in (
         "solver_mode",
         "cli_fixed_boundary_mode",
+        "fixed_boundary_finish_policy",
+        "cli_fixed_boundary_finish_enabled",
         "cli_fixed_boundary_initial_policy",
         "multigrid_ns_stages",
         "multigrid_niter_stages",
@@ -353,7 +410,19 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
         for key in (
             "iterations",
             "solve_total_s",
+            "setup_total_s",
+            "setup_static_grid_rebuild_s",
+            "setup_boundary_profiles_s",
+            "setup_profile_data_s",
+            "setup_trig_tables_s",
+            "setup_boundary_profiles_unattributed_s",
+            "setup_axis_reset_s",
+            "setup_cache_key_hash_s",
+            "setup_ptau_constants_s",
+            "setup_index_constants_s",
+            "iteration_loop_s",
             "compute_forces_s",
+            "compute_forces_main_reuse_count",
             "force_eval_all_s",
             "force_eval_extra_s",
             "compute_forces_main_s",
@@ -362,7 +431,15 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
             "compute_forces_backtracking_s",
             "preconditioner_s",
             "precond_refresh_s",
+            "precond_refresh_seed_s",
+            "precond_refresh_seed_lambda_s",
+            "precond_refresh_seed_rz_matrices_s",
             "precond_apply_s",
+            "precond_apply_scale_m1_rhs_s",
+            "precond_apply_rz_s",
+            "precond_apply_fused_payload_s",
+            "precond_apply_output_blocks_s",
+            "precond_apply_sync_s",
             "precond_mode_scale_s",
             "update_s",
             "update_state_s",
@@ -397,6 +474,32 @@ def _print_run_summary(summary: dict[str, Any]) -> None:
                 timing_bits.append(f"{key}={int(value)}")
         if timing_bits:
             print("[profile_fixed_boundary] timing " + " ".join(timing_bits), flush=True)
+
+
+def _run_with_optional_cprofile(args: argparse.Namespace, func):
+    if not args.cprofile_out:
+        return func()
+    profiler = cProfile.Profile()
+    try:
+        profiler.enable()
+        return func()
+    finally:
+        profiler.disable()
+        cprofile_path = Path(args.cprofile_out).expanduser().resolve()
+        cprofile_path.parent.mkdir(parents=True, exist_ok=True)
+        profiler.dump_stats(str(cprofile_path))
+        phase_timing = getattr(args, "phase_timing", None)
+        if isinstance(phase_timing, dict):
+            phase_timing["cprofile_out"] = str(cprofile_path)
+        text_out = args.cprofile_text_out
+        if text_out:
+            text_path = Path(text_out).expanduser().resolve()
+            text_path.parent.mkdir(parents=True, exist_ok=True)
+            with text_path.open("w", encoding="utf-8") as stream:
+                stats = pstats.Stats(profiler, stream=stream).sort_stats("cumtime")
+                stats.print_stats(80)
+            if isinstance(phase_timing, dict):
+                phase_timing["cprofile_text_out"] = str(text_path)
 
 
 def _dump_tomnsps_hlo(input_path: str, outdir: Path) -> None:
@@ -520,6 +623,8 @@ def main() -> int:
     args.phase_timing = phase_timing
     solver_device = None if str(args.solver_device) == "auto" else str(args.solver_device)
     solver_mode = None if str(args.solver_mode) == "auto" else str(args.solver_mode)
+    finish_policy = args.finish_policy if args.finish_policy is not None else ("auto" if args.auto_cli_policy else "none")
+    args.effective_finish_policy = str(finish_policy)
 
     def _run_profile_once():
         run_kwargs = dict(
@@ -531,7 +636,7 @@ def main() -> int:
             jit_forces=bool(jit_forces),
             use_scan=args.use_scan,
             solver_device=solver_device,
-            _auto_cli_fixed_boundary_mode=bool(args.auto_cli_policy),
+            finish_policy=str(finish_policy),
         )
         if not bool(args.use_input_niter):
             run_kwargs["max_iter"] = int(args.iters)
@@ -553,6 +658,7 @@ def main() -> int:
 
     with _temporary_env(env_updates):
         if not args.no_warmup:
+            t_warmup = time.perf_counter()
             warm = _run_profile_once()
             try:
                 res = warm.result
@@ -560,6 +666,9 @@ def main() -> int:
                     _ = float(np.asarray(res.fsqr2_history)[-1])
             except Exception:
                 pass
+            phase_timing["warmup_wall_s"] = float(time.perf_counter() - t_warmup)
+        else:
+            phase_timing["warmup_wall_s"] = 0.0
 
         use_simple = bool(args.simple_profile)
         if not use_simple:
@@ -573,7 +682,7 @@ def main() -> int:
         wall_time = None
         if use_simple:
             t0 = time.perf_counter()
-            run = _run_profile_once()
+            run = _run_with_optional_cprofile(args, _run_profile_once)
             res = run.result
             if res is not None and hasattr(res, "fsqr2_history"):
                 _ = float(np.asarray(res.fsqr2_history)[-1])
@@ -583,7 +692,7 @@ def main() -> int:
         else:
             t0 = time.perf_counter()
             try:
-                run = _run_profile_once()
+                run = _run_with_optional_cprofile(args, _run_profile_once)
                 res = run.result
                 if res is not None and hasattr(res, "fsqr2_history"):
                     _ = float(np.asarray(res.fsqr2_history)[-1])

@@ -18,6 +18,8 @@ import numpy as np
 import vmec_jax as vj
 from vmec_jax.namelist import InData
 from vmec_jax.optimization import boundary_param_names, create_x_scale
+from vmec_jax.optimizers.fixed_boundary.workflow_outputs import json_safe as _jsonable
+from vmec_jax.optimizers.fixed_boundary.workflow_outputs import write_json_atomic as _write_json_atomic
 from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
 QI_ENGINEERING_ASPECT_MAX = 7.0
@@ -46,39 +48,6 @@ def _load_basin_prefilter_tools():
             "with the repo-local tools/diagnostics scripts available."
         ) from exc
     return SurveyTargets, generate_basin_candidates, rank_candidate_records, write_csv, build_diagnostic_stage
-
-
-__all__ = [
-    "TARGET_HELICITY_SEED_AMPLITUDE",
-    "TARGET_HELICITY_SEED_MODE_TERMS",
-    "QIOptimizationContext",
-    "apply_qi_example_cli_overrides",
-    "basin_prefilter_score",
-    "boundary_reference_preconditioner_score",
-    "boundary_reference_record_is_qi_safe",
-    "configure",
-    "diagnostic_float",
-    "engineering_promotion_score",
-    "jsonable",
-    "make_basin_prefilter_options",
-    "make_qi_optimization_context",
-    "materialize_qi_stage_inputs",
-    "promotion_score",
-    "qi_mirror_objective_for_stage",
-    "qi_engineering_constraint_tuples",
-    "qi_diagnostics_for_result",
-    "qi_diagnostics_for_run",
-    "qi_stage_modes",
-    "run_basin_prefilter",
-    "run_boundary_reference_preconditioner",
-    "run_qi_stage_policy",
-    "run_target_helicity_seed_preconditioner",
-    "save_raw_seed_initial_artifacts",
-    "stage_modes_for",
-    "stage_promotes_candidate",
-    "target_helicity_seed_terms",
-    "write_qi_stage_checkpoint",
-]
 
 
 @dataclass(frozen=True)
@@ -157,6 +126,32 @@ _CONTEXT_FIELDS = {
     "use_mode_continuation": "USE_MODE_CONTINUATION",
 }
 
+_QI_CLI_OVERRIDE_GROUPS = (
+    (int, (
+        ("VMEC_MPOL", "vmec_mpol"), ("VMEC_NTOR", "vmec_ntor"), ("MAX_NFEV", "max_nfev"),
+        ("CONTINUATION_NFEV", "continuation_nfev"), ("INNER_MAX_ITER", "inner_max_iter"),
+        ("TRIAL_MAX_ITER", "trial_max_iter"), ("STAGE_REPEATS", "stage_repeats"),
+        ("SCIPY_LSMR_MAXITER", "scipy_lsmr_maxiter"),
+    )),
+    (float, (
+        ("FTOL", "ftol"), ("GTOL", "gtol"), ("XTOL", "xtol"), ("INNER_FTOL", "inner_ftol"),
+        ("TRIAL_FTOL", "trial_ftol"), ("ALPHA", "ess_alpha"), ("TARGET_ASPECT", "target_aspect"),
+        ("TARGET_ABS_IOTA_MIN", "target_abs_iota_min"), ("MAX_MIRROR_RATIO", "max_mirror_ratio"),
+        ("MAX_ELONGATION", "max_elongation"), ("MIRROR_WEIGHT", "mirror_weight"),
+        ("ELONGATION_WEIGHT", "elongation_weight"), ("QI_GATE_SMOOTH_MAX", "qi_gate_smooth_max"),
+        ("QI_GATE_LEGACY_MAX", "qi_gate_legacy_max"), ("QI_CEILING_MAX", "qi_ceiling_max"),
+        ("QI_CEILING_SMOOTH_PENALTY", "qi_ceiling_smooth_penalty"),
+    )),
+    (None, (
+        ("METHOD", "method"), ("USE_ESS", "use_ess"), ("USE_MODE_CONTINUATION", "use_mode_continuation"),
+        ("USE_SIMPLE_SEED", "use_simple_seed"), ("USE_TARGET_HELICITY_SEED", "use_target_helicity_seed"),
+        ("USE_REFERENCE_FAMILY_SEED", "use_reference_family_seed"), ("REFERENCE_LAMBDAS", "reference_lambdas"),
+        ("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", "accept_boundary_reference_baseline"),
+        ("STAGE_MODE_POLICY", "stage_mode_policy"), ("SCALAR_COST_ONLY_TRIALS", "scalar_cost_only_trials"),
+        ("MAKE_PLOTS", "make_plots"), ("JIT_BOOZ", "jit_booz"),
+    )),
+)
+
 _DEFAULT_CONTEXT: QIOptimizationContext | None = None
 
 
@@ -167,14 +162,18 @@ def _float_tuple(value: str) -> tuple[float, ...]:
     return tuple(float(part.strip()) for part in text.split(",") if part.strip())
 
 
+def _read_json_file(value, *, label: str):
+    path = Path(value).expanduser()
+    try:
+        return path, json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid {label} JSON file: {path}") from exc
+
+
 def _json_stage_mode_limits(value) -> tuple:
     if value is None:
         return ()
-    path = Path(value).expanduser()
-    try:
-        data = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid stage mode limits JSON file: {path}") from exc
+    _, data = _read_json_file(value, label="stage mode limits")
     if not isinstance(data, list):
         raise ValueError("Stage mode limits JSON must contain a list of ints, tuples, or objects.")
     limits = []
@@ -329,12 +328,23 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--input-file", type=Path)
     parser.add_argument("--output-dir", type=Path)
-    parser.add_argument("--max-mode", type=int)
-    parser.add_argument("--min-vmec-mode", type=int)
-    parser.add_argument("--vmec-mpol", type=int)
-    parser.add_argument("--vmec-ntor", type=int)
-    parser.add_argument("--max-nfev", type=int)
-    parser.add_argument("--continuation-nfev", type=int)
+    for name in (
+        "max-mode", "min-vmec-mode", "vmec-mpol", "vmec-ntor", "max-nfev",
+        "continuation-nfev", "inner-max-iter", "trial-max-iter",
+        "stage-repeats", "scipy-lsmr-maxiter", "qi-mboz", "qi-nboz",
+        "qi-nphi", "qi-nalpha", "qi-n-bounce", "audit-qi-mboz",
+        "audit-qi-nboz", "audit-qi-nphi", "audit-qi-nalpha",
+        "audit-qi-n-bounce",
+    ):
+        parser.add_argument(f"--{name}", type=int)
+    for name in (
+        "ftol", "gtol", "xtol", "inner-ftol", "trial-ftol", "ess-alpha",
+        "target-aspect", "target-abs-iota-min", "max-mirror-ratio",
+        "max-elongation", "mirror-weight", "elongation-weight",
+        "qi-gate-smooth-max", "qi-gate-legacy-max", "qi-ceiling-max",
+        "qi-ceiling-smooth-penalty",
+    ):
+        parser.add_argument(f"--{name}", type=float)
     parser.add_argument(
         "--method",
         choices=(
@@ -347,15 +357,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
             "scalar_trust",
         ),
     )
-    parser.add_argument("--ftol", type=float)
-    parser.add_argument("--gtol", type=float)
-    parser.add_argument("--xtol", type=float)
-    parser.add_argument("--inner-max-iter", type=int)
-    parser.add_argument("--inner-ftol", type=float)
-    parser.add_argument("--trial-max-iter", type=int)
-    parser.add_argument("--trial-ftol", type=float)
     parser.add_argument("--solver-device", choices=("cpu", "gpu", "none", "default"))
-    parser.add_argument("--ess-alpha", type=float)
     parser.add_argument("--use-ess", action=argparse.BooleanOptionalAction)
     parser.add_argument("--use-mode-continuation", action=argparse.BooleanOptionalAction)
     parser.add_argument("--use-simple-seed", action=argparse.BooleanOptionalAction)
@@ -364,34 +366,12 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     parser.add_argument("--reference-input", type=Path)
     parser.add_argument("--reference-lambdas", type=_float_tuple)
     parser.add_argument("--accept-boundary-reference-baseline", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--stage-repeats", type=int)
     parser.add_argument("--stage-mode-policy", choices=("lower", "lower-repeat", "repeat"))
     parser.add_argument("--stage-mode-limits-json", type=Path)
-    parser.add_argument("--scipy-lsmr-maxiter", type=int)
     parser.add_argument("--scalar-cost-only-trials", action=argparse.BooleanOptionalAction)
     parser.add_argument("--make-plots", action=argparse.BooleanOptionalAction)
     parser.add_argument("--jit-booz", action=argparse.BooleanOptionalAction)
-    parser.add_argument("--qi-mboz", type=int)
-    parser.add_argument("--qi-nboz", type=int)
-    parser.add_argument("--qi-nphi", type=int)
-    parser.add_argument("--qi-nalpha", type=int)
-    parser.add_argument("--qi-n-bounce", type=int)
-    parser.add_argument("--target-aspect", type=float)
-    parser.add_argument("--target-abs-iota-min", type=float)
-    parser.add_argument("--max-mirror-ratio", type=float)
-    parser.add_argument("--max-elongation", type=float)
     parser.add_argument("--mirror-surface-index")
-    parser.add_argument("--mirror-weight", type=float)
-    parser.add_argument("--elongation-weight", type=float)
-    parser.add_argument("--qi-gate-smooth-max", type=float)
-    parser.add_argument("--qi-gate-legacy-max", type=float)
-    parser.add_argument("--qi-ceiling-max", type=float)
-    parser.add_argument("--qi-ceiling-smooth-penalty", type=float)
-    parser.add_argument("--audit-qi-mboz", type=int)
-    parser.add_argument("--audit-qi-nboz", type=int)
-    parser.add_argument("--audit-qi-nphi", type=int)
-    parser.add_argument("--audit-qi-nalpha", type=int)
-    parser.add_argument("--audit-qi-n-bounce", type=int)
     parser.add_argument("--boundary-reference-json", type=Path)
     parser.add_argument("--mirror-ramp-stages-json", type=Path)
     args, _unknown = parser.parse_known_args(argv)
@@ -400,50 +380,32 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
         if value is not None:
             namespace[name] = value
 
+    def set_arg(name: str, attr: str, cast=None) -> None:
+        value = getattr(args, attr)
+        if value is not None:
+            namespace[name] = cast(value) if cast is not None else value
+
     if args.input_file is not None:
         namespace["INPUT_FILE"] = args.input_file.expanduser()
     if args.output_dir is not None:
         namespace["OUTPUT_DIR"] = args.output_dir.expanduser()
-    set_if("MAX_MODE", None if args.max_mode is None else int(args.max_mode))
+    set_arg("MAX_MODE", "max_mode", int)
     namespace["MIN_VMEC_MODE"] = (
         int(args.min_vmec_mode)
         if args.min_vmec_mode is not None
         else max(6, int(namespace["MAX_MODE"]) + 3)
     )
-    set_if("VMEC_MPOL", None if args.vmec_mpol is None else int(args.vmec_mpol))
-    set_if("VMEC_NTOR", None if args.vmec_ntor is None else int(args.vmec_ntor))
-    set_if("MAX_NFEV", None if args.max_nfev is None else int(args.max_nfev))
-    set_if("CONTINUATION_NFEV", None if args.continuation_nfev is None else int(args.continuation_nfev))
-    set_if("METHOD", args.method)
-    set_if("FTOL", None if args.ftol is None else float(args.ftol))
-    set_if("GTOL", None if args.gtol is None else float(args.gtol))
-    set_if("XTOL", None if args.xtol is None else float(args.xtol))
-    set_if("INNER_MAX_ITER", None if args.inner_max_iter is None else int(args.inner_max_iter))
-    set_if("INNER_FTOL", None if args.inner_ftol is None else float(args.inner_ftol))
-    set_if("TRIAL_MAX_ITER", None if args.trial_max_iter is None else int(args.trial_max_iter))
-    set_if("TRIAL_FTOL", None if args.trial_ftol is None else float(args.trial_ftol))
     if args.solver_device is not None:
         namespace["SOLVER_DEVICE"] = None if args.solver_device in {"none", "default"} else str(args.solver_device)
-    set_if("ALPHA", None if args.ess_alpha is None else float(args.ess_alpha))
-    set_if("USE_ESS", args.use_ess)
-    set_if("USE_MODE_CONTINUATION", args.use_mode_continuation)
-    set_if("USE_SIMPLE_SEED", args.use_simple_seed)
-    set_if("USE_TARGET_HELICITY_SEED", args.use_target_helicity_seed)
     if args.reference_input is not None:
         namespace["REFERENCE_INPUT_FILE"] = args.reference_input.expanduser()
         if args.use_reference_family_seed is None:
             namespace["USE_REFERENCE_FAMILY_SEED"] = True
-    set_if("USE_REFERENCE_FAMILY_SEED", args.use_reference_family_seed)
-    set_if("REFERENCE_LAMBDAS", args.reference_lambdas)
-    set_if("BOUNDARY_REFERENCE_ACCEPT_AS_BASELINE", args.accept_boundary_reference_baseline)
-    set_if("STAGE_REPEATS", None if args.stage_repeats is None else int(args.stage_repeats))
-    set_if("STAGE_MODE_POLICY", args.stage_mode_policy)
     if args.stage_mode_limits_json is not None:
         namespace["STAGE_MODE_LIMITS"] = _json_stage_mode_limits(args.stage_mode_limits_json)
-    set_if("SCIPY_LSMR_MAXITER", None if args.scipy_lsmr_maxiter is None else int(args.scipy_lsmr_maxiter))
-    set_if("SCALAR_COST_ONLY_TRIALS", args.scalar_cost_only_trials)
-    set_if("MAKE_PLOTS", args.make_plots)
-    set_if("JIT_BOOZ", args.jit_booz)
+    for cast, pairs in _QI_CLI_OVERRIDE_GROUPS:
+        for name, attr in pairs:
+            set_arg(name, attr, cast)
     qi_resolution_updates = {
         "mboz": args.qi_mboz,
         "nboz": args.qi_nboz,
@@ -460,22 +422,9 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
                 audit_resolution[key] = int(value)
         namespace["OPT_QI_RESOLUTION"] = opt_resolution
         namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
-    set_if("TARGET_ASPECT", None if args.target_aspect is None else float(args.target_aspect))
-    set_if("TARGET_ABS_IOTA_MIN", None if args.target_abs_iota_min is None else float(args.target_abs_iota_min))
-    set_if("MAX_MIRROR_RATIO", None if args.max_mirror_ratio is None else float(args.max_mirror_ratio))
-    set_if("MAX_ELONGATION", None if args.max_elongation is None else float(args.max_elongation))
     if args.mirror_surface_index is not None:
         text = str(args.mirror_surface_index).strip().lower()
         namespace["MIRROR_SURFACE_INDEX"] = None if text in {"", "none", "null"} else int(text)
-    set_if("MIRROR_WEIGHT", None if args.mirror_weight is None else float(args.mirror_weight))
-    set_if("ELONGATION_WEIGHT", None if args.elongation_weight is None else float(args.elongation_weight))
-    set_if("QI_GATE_SMOOTH_MAX", None if args.qi_gate_smooth_max is None else float(args.qi_gate_smooth_max))
-    set_if("QI_GATE_LEGACY_MAX", None if args.qi_gate_legacy_max is None else float(args.qi_gate_legacy_max))
-    set_if("QI_CEILING_MAX", None if args.qi_ceiling_max is None else float(args.qi_ceiling_max))
-    set_if(
-        "QI_CEILING_SMOOTH_PENALTY",
-        None if args.qi_ceiling_smooth_penalty is None else float(args.qi_ceiling_smooth_penalty),
-    )
     audit_resolution_updates = {
         "mboz": args.audit_qi_mboz,
         "nboz": args.audit_qi_nboz,
@@ -490,11 +439,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
                 audit_resolution[key] = int(value)
         namespace["AUDIT_QI_RESOLUTION"] = audit_resolution
     if args.boundary_reference_json is not None:
-        reference_path = args.boundary_reference_json.expanduser()
-        try:
-            reference_overrides = json.loads(reference_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid --boundary-reference-json file: {reference_path}") from exc
+        _, reference_overrides = _read_json_file(args.boundary_reference_json, label="--boundary-reference-json")
         if not isinstance(reference_overrides, dict):
             raise ValueError("--boundary-reference-json must contain a JSON object.")
         if reference_overrides.get("reference_input") is not None:
@@ -503,11 +448,7 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
             reference_overrides["lambdas"] = tuple(float(value) for value in reference_overrides["lambdas"])
         namespace["BOUNDARY_REFERENCE_OVERRIDES"] = reference_overrides
     if args.mirror_ramp_stages_json is not None:
-        stages_path = args.mirror_ramp_stages_json.expanduser()
-        try:
-            stages = json.loads(stages_path.read_text())
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid --mirror-ramp-stages-json file: {stages_path}") from exc
+        _, stages = _read_json_file(args.mirror_ramp_stages_json, label="--mirror-ramp-stages-json")
         if not isinstance(stages, list) or not all(isinstance(stage, dict) for stage in stages):
             raise ValueError("--mirror-ramp-stages-json must contain a JSON list of stage dictionaries.")
         namespace["MIRROR_RAMP_STAGES"] = tuple(stages)
@@ -647,6 +588,19 @@ def _finite_or_none(value):
     return out if np.isfinite(out) else None
 
 
+_QI_PREFILTER_METRIC_PAIRS = tuple(
+    (key, key) for key in "qi_smooth_total qi_legacy_total qi_mirror_ratio_max qi_max_elongation mean_iota aspect".split()
+)
+_QI_REFERENCE_RECORD_METRIC_PAIRS = tuple(
+    item.split(":") for item in "smooth_qi:qi_smooth_total legacy_qi:qi_legacy_total mirror:qi_mirror_ratio_max "
+    "elongation:qi_max_elongation mean_iota:mean_iota aspect:aspect aspect_relative_error:aspect_relative_error".split()
+)
+
+
+def _finite_metric_map(diagnostics: dict, pairs) -> dict:
+    return {out_key: _finite_or_none(diagnostics.get(in_key)) for out_key, in_key in pairs}
+
+
 def _parse_float_sequence(value, *, name):
     """Parse a comma/space separated sequence used by subprocess wrappers."""
 
@@ -766,44 +720,10 @@ def run_target_helicity_seed_preconditioner(input_file, output_dir, config, *, c
     return input_out
 
 
-def _jsonable(value):
-    """Convert NumPy/JAX-like values into JSON-serializable containers."""
-
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        return value if np.isfinite(value) else None
-    if isinstance(value, np.generic):
-        return _jsonable(value.item())
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(key): _jsonable(val) for key, val in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    try:
-        arr = np.asarray(value)
-    except Exception:
-        return str(value)
-    if arr.ndim == 0:
-        return _jsonable(arr.item())
-    return _jsonable(arr.tolist())
-
-
 def jsonable(value):
     """Convert NumPy/JAX-like values into JSON-serializable containers."""
 
     return _jsonable(value)
-
-
-def _write_json_atomic(path, payload) -> None:
-    """Write a JSON artifact via replace so interrupted writes do not corrupt it."""
-
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
-    tmp.write_text(json.dumps(_jsonable(payload), indent=2, sort_keys=True) + "\n")
-    tmp.replace(path)
 
 
 def _stage_result_history(stage_result) -> dict:
@@ -845,6 +765,42 @@ def _partial_diagnostics_from_history(history: dict, diagnostics: dict) -> dict:
         out["partial"] = True
         out["diagnostics_pending"] = True
     return out
+
+
+_QI_DIAGNOSTIC_OPTION_ATTRS = (
+    "include_bounce_endpoints softness width_weight branch_width_weight branch_width_softness profile_weight "
+    "shuffle_profile_weight shuffle_profile_softness shuffle_profile_nphi_out weighted_shuffle_profile_weight "
+    "weighted_shuffle_profile_softness aligned_profile_weight aligned_profile_softness aligned_profile_trap_level "
+    "aligned_profile_trap_softness"
+).split()
+
+
+def _qi_diagnostic_options(
+    *,
+    ctx: QIOptimizationContext | None,
+    mirror_threshold,
+    mirror_surface_index,
+    max_elongation,
+    resolution=None,
+):
+    """Build the shared Boozer/QI diagnostic options for result and run audits."""
+
+    qi_options = _ctx(ctx, "qi_options")
+    resolution = resolution or {}
+    copied_options = {name: getattr(qi_options, name) for name in _QI_DIAGNOSTIC_OPTION_ATTRS}
+    return vj.QIDiagnosticOptions(
+        surfaces=_ctx(ctx, "surfaces"),
+        mboz=_resolution_value(resolution, "mboz", qi_options.mboz),
+        nboz=_resolution_value(resolution, "nboz", qi_options.nboz),
+        nphi=_resolution_value(resolution, "nphi", qi_options.nphi),
+        nalpha=_resolution_value(resolution, "nalpha", qi_options.nalpha),
+        n_bounce=_resolution_value(resolution, "n_bounce", qi_options.n_bounce),
+        phimin=float(qi_options.phimin),
+        mirror_threshold=float(mirror_threshold),
+        mirror_surface_index=mirror_surface_index,
+        elongation_threshold=float(max_elongation),
+        **copied_options,
+    )
 
 
 def save_raw_seed_initial_artifacts(input_file, input_out, wout_out, *, ctx: QIOptimizationContext | None = None):
@@ -973,14 +929,7 @@ def run_basin_prefilter(input_file, output_dir, config, *, ctx: QIOptimizationCo
                 prof_local={"pressure": stage.ctx.pressure},
                 pressure_local=stage.ctx.pressure,
             )
-            metrics = {
-                "qi_smooth_total": _finite_or_none(diagnostics.get("qi_smooth_total")),
-                "qi_legacy_total": _finite_or_none(diagnostics.get("qi_legacy_total")),
-                "qi_mirror_ratio_max": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
-                "qi_max_elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
-                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
-                "aspect": _finite_or_none(diagnostics.get("aspect")),
-            }
+            metrics = _finite_metric_map(diagnostics, _QI_PREFILTER_METRIC_PAIRS)
             record["metrics"] = metrics
             record["diagnostics"] = diagnostics
             record["prefilter_score"] = basin_prefilter_score(metrics, targets, config)
@@ -1027,37 +976,15 @@ def qi_diagnostics_for_result(
     legacy_qi_max=None,
     ctx: QIOptimizationContext | None = None,
 ):
-    qi_options = _ctx(ctx, "qi_options")
     surfaces = _ctx(ctx, "surfaces")
     smooth_qi_max = _ctx(ctx, "qi_gate_smooth_max") if smooth_qi_max is None else float(smooth_qi_max)
     legacy_qi_max = _ctx(ctx, "qi_gate_legacy_max") if legacy_qi_max is None else float(legacy_qi_max)
     opt = stage_result.final_optimizer
-    diagnostic_options = vj.QIDiagnosticOptions(
-        surfaces=surfaces,
-        mboz=qi_options.mboz,
-        nboz=qi_options.nboz,
-        nphi=qi_options.nphi,
-        nalpha=qi_options.nalpha,
-        n_bounce=qi_options.n_bounce,
-        include_bounce_endpoints=qi_options.include_bounce_endpoints,
-        softness=qi_options.softness,
-        width_weight=qi_options.width_weight,
-        branch_width_weight=qi_options.branch_width_weight,
-        branch_width_softness=qi_options.branch_width_softness,
-        profile_weight=qi_options.profile_weight,
-        shuffle_profile_weight=qi_options.shuffle_profile_weight,
-        shuffle_profile_softness=qi_options.shuffle_profile_softness,
-        shuffle_profile_nphi_out=qi_options.shuffle_profile_nphi_out,
-        weighted_shuffle_profile_weight=qi_options.weighted_shuffle_profile_weight,
-        weighted_shuffle_profile_softness=qi_options.weighted_shuffle_profile_softness,
-        aligned_profile_weight=qi_options.aligned_profile_weight,
-        aligned_profile_softness=qi_options.aligned_profile_softness,
-        aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
-        aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
-        phimin=float(qi_options.phimin),
+    diagnostic_options = _qi_diagnostic_options(
+        ctx=ctx,
         mirror_threshold=mirror_threshold,
         mirror_surface_index=mirror_surface_index,
-        elongation_threshold=_ctx(ctx, "max_elongation"),
+        max_elongation=_ctx(ctx, "max_elongation"),
     )
     diagnostics = vj.qi_diagnostics_from_state(
         state=stage_result.final_state,
@@ -1096,36 +1023,15 @@ def qi_diagnostics_for_run(
 ):
     """Independent QI diagnostics for a raw fixed-boundary VMEC run."""
 
-    qi_options = _ctx(ctx, "qi_options")
     surfaces = _ctx(ctx, "surfaces")
     smooth_qi_max = _ctx(ctx, "qi_gate_smooth_max") if smooth_qi_max is None else float(smooth_qi_max)
     legacy_qi_max = _ctx(ctx, "qi_gate_legacy_max") if legacy_qi_max is None else float(legacy_qi_max)
-    diagnostic_options = vj.QIDiagnosticOptions(
-        surfaces=surfaces,
-        mboz=_resolution_value(resolution or {}, "mboz", qi_options.mboz),
-        nboz=_resolution_value(resolution or {}, "nboz", qi_options.nboz),
-        nphi=_resolution_value(resolution or {}, "nphi", qi_options.nphi),
-        nalpha=_resolution_value(resolution or {}, "nalpha", qi_options.nalpha),
-        n_bounce=_resolution_value(resolution or {}, "n_bounce", qi_options.n_bounce),
-        include_bounce_endpoints=qi_options.include_bounce_endpoints,
-        softness=qi_options.softness,
-        width_weight=qi_options.width_weight,
-        branch_width_weight=qi_options.branch_width_weight,
-        branch_width_softness=qi_options.branch_width_softness,
-        profile_weight=qi_options.profile_weight,
-        shuffle_profile_weight=qi_options.shuffle_profile_weight,
-        shuffle_profile_softness=qi_options.shuffle_profile_softness,
-        shuffle_profile_nphi_out=qi_options.shuffle_profile_nphi_out,
-        weighted_shuffle_profile_weight=qi_options.weighted_shuffle_profile_weight,
-        weighted_shuffle_profile_softness=qi_options.weighted_shuffle_profile_softness,
-        aligned_profile_weight=qi_options.aligned_profile_weight,
-        aligned_profile_softness=qi_options.aligned_profile_softness,
-        aligned_profile_trap_level=qi_options.aligned_profile_trap_level,
-        aligned_profile_trap_softness=qi_options.aligned_profile_trap_softness,
-        phimin=float(qi_options.phimin),
-        mirror_threshold=float(mirror_threshold),
+    diagnostic_options = _qi_diagnostic_options(
+        ctx=ctx,
+        mirror_threshold=mirror_threshold,
         mirror_surface_index=mirror_surface_index,
-        elongation_threshold=float(max_elongation),
+        max_elongation=max_elongation,
+        resolution=resolution,
     )
     diagnostics = vj.qi_diagnostics_from_state(
         state=run.state,
@@ -1441,13 +1347,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
                 "wout": str(wout_out),
                 "score": score,
                 "selected": False,
-                "smooth_qi": _finite_or_none(diagnostics.get("qi_smooth_total")),
-                "legacy_qi": _finite_or_none(diagnostics.get("qi_legacy_total")),
-                "mirror": _finite_or_none(diagnostics.get("qi_mirror_ratio_max")),
-                "elongation": _finite_or_none(diagnostics.get("qi_max_elongation")),
-                "mean_iota": _finite_or_none(diagnostics.get("mean_iota")),
-                "aspect": _finite_or_none(diagnostics.get("aspect")),
-                "aspect_relative_error": _finite_or_none(diagnostics.get("aspect_relative_error")),
+                **_finite_metric_map(diagnostics, _QI_REFERENCE_RECORD_METRIC_PAIRS),
                 "qi_seed_gate_passed": bool(diagnostics.get("qi_seed_gate_passed")),
                 "qi_engineering_gate_passed": bool(diagnostics.get("qi_engineering_gate_passed")),
                 "failure_reasons": list(diagnostics.get("qi_failure_reasons", [])),
@@ -1475,7 +1375,6 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
         raise RuntimeError("Boundary-reference preconditioner found no successful candidates.")
 
     candidate_pool = [record for record in successful if bool(record.get("qi_engineering_gate_passed"))] or successful
-    target_aspect = float(config.get("target_aspect", _ctx(ctx, "target_aspect")))
     aspect_relative_tolerance = float(config.get("aspect_relative_tolerance", 0.37))
     if bool(config.get("prefer_qi_safe_candidates", True)):
         max_mirror_ratio = float(config.get("max_mirror_ratio", _ctx(ctx, "max_mirror_ratio")))
@@ -1577,6 +1476,42 @@ def engineering_promotion_score(record):
     )
 
 
+def _ctx_or_default(ctx: QIOptimizationContext | None, field: str, default):
+    try:
+        return _ctx(ctx, field)
+    except KeyError:
+        return default
+
+
+def _qi_safe_reference_limits(stage, reference_diagnostics, *, ctx: QIOptimizationContext | None = None) -> dict:
+    """Return QI-safe promotion limits relative to the current reference."""
+
+    reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
+    reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
+    reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
+    reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
+    reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
+    return {
+        "reference_smooth": reference_smooth,
+        "reference_legacy": reference_legacy,
+        "reference_mirror": reference_mirror,
+        "reference_elongation": reference_elongation,
+        "reference_abs_iota": reference_abs_iota,
+        "smooth_limit": float(stage.get("qi_safe_smooth_relax", 1.0))
+        * max(float(stage.get("smooth_qi_max", _ctx_or_default(ctx, "qi_gate_smooth_max", reference_smooth))), reference_smooth),
+        "legacy_limit": float(stage.get("qi_safe_legacy_relax", 1.0))
+        * max(float(stage.get("legacy_qi_max", _ctx_or_default(ctx, "qi_gate_legacy_max", reference_legacy))), reference_legacy),
+        "mirror_limit": float(stage.get("qi_safe_mirror_relax", 1.0))
+        * max(float(stage.get("promotion_mirror_threshold", _ctx_or_default(ctx, "max_mirror_ratio", reference_mirror))), reference_mirror),
+        "elongation_limit": float(stage.get("qi_safe_elongation_relax", 1.0))
+        * max(float(stage.get("max_elongation", _ctx_or_default(ctx, "max_elongation", reference_elongation))), reference_elongation),
+        "min_abs_iota": min(
+            reference_abs_iota,
+            float(stage.get("target_abs_iota_min", _ctx_or_default(ctx, "target_abs_iota_min", reference_abs_iota))),
+        ),
+    }
+
+
 def stage_promotes_candidate(
     stage,
     promotion,
@@ -1588,49 +1523,19 @@ def stage_promotes_candidate(
 
     reasons = list(promotion.get("qi_cleanup_rejection_reasons", []))
     if bool(stage.get("accept_if_qi_safe_aspect_improves", False)) and reference_diagnostics is not None:
-        def ctx_or_default(field, default):
-            try:
-                return _ctx(ctx, field)
-            except KeyError:
-                return default
-
+        safe = _qi_safe_reference_limits(stage, reference_diagnostics, ctx=ctx)
         candidate_aspect_error = _finite_or_inf(promotion.get("aspect_relative_error"))
         reference_aspect_error = _finite_or_inf(reference_diagnostics.get("aspect_relative_error"))
         aspect_gain = reference_aspect_error - candidate_aspect_error
-        reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
-        reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
-        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
-        reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
-        reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
-        smooth_limit = float(stage.get("qi_safe_smooth_relax", 1.0)) * max(
-            float(stage.get("smooth_qi_max", ctx_or_default("qi_gate_smooth_max", reference_smooth))),
-            reference_smooth,
-        )
-        legacy_limit = float(stage.get("qi_safe_legacy_relax", 1.0)) * max(
-            float(stage.get("legacy_qi_max", ctx_or_default("qi_gate_legacy_max", reference_legacy))),
-            reference_legacy,
-        )
-        mirror_limit = float(stage.get("qi_safe_mirror_relax", 1.0)) * max(
-            float(stage.get("promotion_mirror_threshold", ctx_or_default("max_mirror_ratio", reference_mirror))),
-            reference_mirror,
-        )
-        elongation_limit = float(stage.get("qi_safe_elongation_relax", 1.0)) * max(
-            float(stage.get("max_elongation", ctx_or_default("max_elongation", reference_elongation))),
-            reference_elongation,
-        )
-        min_abs_iota = min(
-            reference_abs_iota,
-            float(stage.get("target_abs_iota_min", ctx_or_default("target_abs_iota_min", reference_abs_iota))),
-        )
         candidate_abs_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
         tol = float(stage.get("qi_safe_abs_tol", 1.0e-12))
         if (
             aspect_gain >= float(stage.get("aspect_improvement_min", 1.0e-3))
-            and _finite_or_inf(promotion.get("qi_smooth_total")) <= smooth_limit + tol
-            and _finite_or_inf(promotion.get("qi_legacy_total")) <= legacy_limit + tol
-            and candidate_abs_iota + tol >= min_abs_iota
-            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= mirror_limit + tol
-            and _finite_or_inf(promotion.get("qi_max_elongation")) <= elongation_limit + tol
+            and _finite_or_inf(promotion.get("qi_smooth_total")) <= safe["smooth_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_legacy_total")) <= safe["legacy_limit"] + tol
+            and candidate_abs_iota + tol >= safe["min_abs_iota"]
+            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= safe["mirror_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_max_elongation")) <= safe["elongation_limit"] + tol
         ):
             out = dict(promotion)
             out["qi_cleanup_promoted"] = True
@@ -1642,9 +1547,9 @@ def stage_promotes_candidate(
             return out
         reasons.append(
             "QI-safe aspect promotion failed: "
-            f"aspect_gain={aspect_gain:.6g}, smooth_limit={smooth_limit:.6g}, "
-            f"legacy_limit={legacy_limit:.6g}, mirror_limit={mirror_limit:.6g}, "
-            f"elongation_limit={elongation_limit:.6g}, min_abs_iota={min_abs_iota:.6g}"
+            f"aspect_gain={aspect_gain:.6g}, smooth_limit={safe['smooth_limit']:.6g}, "
+            f"legacy_limit={safe['legacy_limit']:.6g}, mirror_limit={safe['mirror_limit']:.6g}, "
+            f"elongation_limit={safe['elongation_limit']:.6g}, min_abs_iota={safe['min_abs_iota']:.6g}"
         )
     if bool(stage.get("accept_if_iota_improves", False)) and reference_diagnostics is not None:
         candidate_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
@@ -1677,41 +1582,19 @@ def stage_promotes_candidate(
             f"gain={iota_gain:.6g}, smooth_limit={smooth_limit:.6g}, legacy_limit={legacy_limit:.6g}"
         )
     if bool(stage.get("accept_if_qi_improves", False)) and reference_diagnostics is not None:
-        def ctx_or_default(field, default):
-            try:
-                return _ctx(ctx, field)
-            except KeyError:
-                return default
-
+        safe = _qi_safe_reference_limits(stage, reference_diagnostics, ctx=ctx)
         candidate_smooth = _finite_or_inf(promotion.get("qi_smooth_total"))
-        reference_smooth = _finite_or_inf(reference_diagnostics.get("qi_smooth_total"))
         candidate_legacy = _finite_or_inf(promotion.get("qi_legacy_total"))
-        reference_legacy = _finite_or_inf(reference_diagnostics.get("qi_legacy_total"))
-        smooth_gain = reference_smooth - candidate_smooth
-        legacy_gain = reference_legacy - candidate_legacy
-        reference_mirror = _finite_or_inf(reference_diagnostics.get("qi_mirror_ratio_max"))
-        reference_elongation = _finite_or_inf(reference_diagnostics.get("qi_max_elongation"))
-        reference_abs_iota = abs(_finite_or_inf(reference_diagnostics.get("mean_iota")))
-        mirror_limit = float(stage.get("qi_safe_mirror_relax", 1.0)) * max(
-            float(stage.get("promotion_mirror_threshold", ctx_or_default("max_mirror_ratio", reference_mirror))),
-            reference_mirror,
-        )
-        elongation_limit = float(stage.get("qi_safe_elongation_relax", 1.0)) * max(
-            float(stage.get("max_elongation", ctx_or_default("max_elongation", reference_elongation))),
-            reference_elongation,
-        )
-        min_abs_iota = min(
-            reference_abs_iota,
-            float(stage.get("target_abs_iota_min", ctx_or_default("target_abs_iota_min", reference_abs_iota))),
-        )
+        smooth_gain = safe["reference_smooth"] - candidate_smooth
+        legacy_gain = safe["reference_legacy"] - candidate_legacy
         candidate_abs_iota = abs(_finite_or_inf(promotion.get("mean_iota")))
         tol = float(stage.get("qi_safe_abs_tol", 1.0e-12))
         if (
             smooth_gain >= float(stage.get("smooth_qi_improvement_min", 0.0))
             and legacy_gain >= float(stage.get("legacy_qi_improvement_min", 0.0))
-            and candidate_abs_iota + tol >= min_abs_iota
-            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= mirror_limit + tol
-            and _finite_or_inf(promotion.get("qi_max_elongation")) <= elongation_limit + tol
+            and candidate_abs_iota + tol >= safe["min_abs_iota"]
+            and _finite_or_inf(promotion.get("qi_mirror_ratio_max")) <= safe["mirror_limit"] + tol
+            and _finite_or_inf(promotion.get("qi_max_elongation")) <= safe["elongation_limit"] + tol
         ):
             out = dict(promotion)
             out["qi_cleanup_promoted"] = True
@@ -1724,8 +1607,8 @@ def stage_promotes_candidate(
         reasons.append(
             "QI-improvement promotion failed: "
             f"smooth_gain={smooth_gain:.6g}, legacy_gain={legacy_gain:.6g}, "
-            f"mirror_limit={mirror_limit:.6g}, elongation_limit={elongation_limit:.6g}, "
-            f"min_abs_iota={min_abs_iota:.6g}"
+            f"mirror_limit={safe['mirror_limit']:.6g}, elongation_limit={safe['elongation_limit']:.6g}, "
+            f"min_abs_iota={safe['min_abs_iota']:.6g}"
         )
     if bool(stage.get("accept_if_rank_improves", False)) and reference_diagnostics is not None:
         candidate_score = promotion_score(promotion)
@@ -2047,3 +1930,14 @@ def run_qi_stage_policy(
             )
             active_input_file = stage_final_input or stage_output_dir / "input.final"
     return (accepted_result if accepted_result is not None else best_result), promotion_log
+
+
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if (
+        getattr(value, "__module__", None) == __name__
+        and not name.startswith("_")
+    )
+    or name.startswith("TARGET_HELICITY_")
+)

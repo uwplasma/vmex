@@ -32,7 +32,10 @@ Set ``VMEC_JAX_COMPILATION_CACHE=1`` to opt in for CPU runs, or
 
 VMEC2000 is a pre-compiled Fortran binary with no JIT overhead — it is always
 effectively "cold".  When benchmarking, compare ``vmec_jax`` warm runtime
-against VMEC2000 runtime.
+against VMEC2000 runtime.  The docs-facing benchmark is the full bundled
+single-grid fixed-boundary matrix in ``readme_runtime_compare.png`` below; the
+README intentionally keeps only concise differentiation evidence and sends
+detailed performance provenance here.
 
 2026-05-25 rerun snapshot
 -------------------------
@@ -177,6 +180,12 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   once and reused.  Explicit cache clearing between Gauss-Newton Jacobian
   evaluations (``post_jacobian_callback``) releases accumulated caches without
   paying the cost of recompilation on the next call.
+
+  The same host-vs-JAX rule is applied to post-solve flux/profile
+  reconciliation: ordinary NumPy arrays use a host ``add_fluxes`` iota-smoothing
+  path, while traced arrays keep the differentiable JAX implementation.  This
+  avoids launching small XLA scatter/update kernels during non-traced CLI
+  startup without changing autodiff behavior.
 
 **5. Strict-update + no backtracking**
   The VMEC iteration algorithm uses ``strict_update=True, backtracking=False``
@@ -363,22 +372,19 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   converged residual at ``5.6e-13``.  Set
   ``VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT`` to tune the threshold.
 
-**23. CPU host solves use an adaptive NumPy preconditioner apply**
-  The non-scan CPU host-update path uses the pure-NumPy R/Z preconditioner
-  apply for short solves (default threshold
-  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=240``) and for moderate/high spectral
-  mode counts (default threshold
-  ``VMEC_JAX_NUMPY_PRECOND_MIN_MODES=16``, with mode count
-  ``mpol * (ntor + 1)``).  This avoids cold JAX preconditioner compilation in
-  optimization trial/probe solves and also helps long CPU host solves when the
-  R/Z preconditioner apply is bandwidth/dispatch dominated.  Low-mode long
-  solves keep the compiled preconditioner because it still amortizes better.
-  On repeated local finite-beta QH multigrid profiles this reduced in-process
-  wall time from the previous ``15.61 s`` baseline to ``13.62--14.29 s``
-  without a material regression in the small QH warm-start profile
-  (``1.64--1.67 s``).  Set
-  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=0`` and
-  ``VMEC_JAX_NUMPY_PRECOND_MIN_MODES=0`` to disable this policy.
+**23. CPU host solves use a short-solve NumPy preconditioner apply**
+  The non-scan CPU host-update path uses the pure-NumPy lambda
+  preconditioner seed for concrete, non-traced host solves, and uses the
+  pure-NumPy R/Z preconditioner apply for short solves (default threshold
+  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=240``).  Long spectral production solves
+  use the compiled JAX preconditioner apply by default because current
+  Landreman-Paul QA and finite-beta QH profiles show the R/Z apply stage is
+  faster after compilation.  Advanced benchmarks can opt back into the spectral
+  NumPy path with ``VMEC_JAX_NUMPY_PRECOND_MIN_MODES=<mode-count>`` where the
+  mode count is ``mpol * (ntor + 1)``.  Set
+  ``VMEC_JAX_NUMPY_PRECOND_MAX_ITER=0`` to disable the short-solve NumPy path.
+  The lambda-seed dispatch stays on the JAX implementation for traced,
+  differentiable, and accelerator paths.
 
 **24. Fixed-boundary startup avoids free-boundary imports**
   Ordinary fixed-boundary CLI/API runs no longer import or validate the
@@ -409,6 +415,16 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   remaining cold-CPU target is compiled transform/preconditioner work inside
   the VMEC iteration loop plus shape-stable reuse, not WOUT output or
   driver-side staging overhead.
+
+**27. Experimental compact residual force aux**
+  ``VMEC_JAX_COMPACT_FORCE_AUX=1`` makes non-scan residual force evaluations
+  return a compact post-TOMNSP auxiliary payload instead of the full diagnostic
+  force-kernel object.  The compact payload keeps only ``bcovar``, ``tcon``,
+  PTAU geometry fields, and constraint baselines, so it can reduce process
+  memory pressure on large profiles.  It is not the default because the current
+  LP-QA CPU profile showed lower peak memory but worse wall time.  Treat it as
+  an experimental memory diagnostic until the staged force-kernel refactor makes
+  compact payloads speed-neutral.
 
 May 2026 policy validation snapshot
 -----------------------------------
@@ -754,7 +770,7 @@ Raw fixed-boundary throughput:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --no-use-scan \
      --solver-device cpu \
@@ -765,7 +781,7 @@ Raw fixed-boundary throughput:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device gpu \
      --json-out /tmp/vmec_jax_qh20_raw_gpu.json
@@ -982,7 +998,7 @@ with ``--vmec-timing``:
      --simple-profile \
      --no-warmup \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device cpu \
      --vmec-timing \
@@ -995,7 +1011,7 @@ with ``--vmec-timing``:
      --simple-profile \
      --no-warmup \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --solver-device gpu \
      --vmec-timing \
@@ -1117,7 +1133,7 @@ policy, so malformed values fall back to the backend/input auto heuristic.
 
 Use ``--trace-outdir`` for TensorBoard/XProf traces and
 ``--device-memory-profile-out`` for JAX device-memory snapshots when GPU memory
-or launch overhead is the bottleneck.  Use ``--no-auto-cli-policy`` only when
+or launch overhead is the bottleneck.  Use ``--finish-policy none`` only when
 you want raw solver throughput; omit it when measuring the public
 ``run_fixed_boundary`` policy that users see through the CLI/API.
 
@@ -1896,7 +1912,7 @@ accelerated scan path explicitly, use:
      --iters 20 \
      --simple-profile \
      --no-multigrid \
-     --no-auto-cli-policy \
+     --finish-policy none \
      --solver-mode accelerated \
      --use-scan \
      --solver-device gpu \
@@ -2171,7 +2187,7 @@ axis-gauge cotangent cleanup, while QH ``J.Tv`` matches to near roundoff.
 Current performance (representative benchmarks)
 -----------------------------------------------
 
-The README-facing fixed-boundary CPU matrix is generated from
+The docs-facing fixed-boundary CPU matrix is generated from
 ``docs/_static/figures/readme_runtime_compare.csv`` and visualized in:
 
 .. image:: _static/figures/readme_runtime_compare.png
@@ -2179,12 +2195,107 @@ The README-facing fixed-boundary CPU matrix is generated from
    :align: center
    :alt: VMEC2000 versus vmec_jax fixed-boundary runtime comparison
 
-The current data should be read as a performance reality check, not as a broad
-single-solve speedup claim.  On the current local matrix, warm ``vmec_jax``
-beats VMEC2000 on 1 of 16 bundled fixed-boundary rows
-(``circular_tokamak_aspect_100``, about ``1.33x`` faster).  The median warm
-single-solve row is still about ``4.4x`` slower than VMEC2000 on this host.
-Cold runs are slower because they include XLA compilation and runtime setup.
+The current PR #20 readiness matrix should be read as a performance reality
+check, not as a broad cold-process speedup claim.  It was regenerated on the
+local CPU host from 16 historical bundled fixed-boundary rows using
+``example_runtime_memory_matrix.py --backend all --warm-runs 1`` after the
+compact force-payload and compact metric-payload updates.  VMEC2000 and
+``vmec_jax`` converged on all 16 rows.  VMEC++ converged on 9 rows
+(``ITERModel``, ``LandremanPaul2021_QA_lowres``,
+``LandremanPaul2021_QA_lowres1``, ``circular_tokamak``,
+``circular_tokamak_aspect_100``, ``nfp4_QH_warm_start``,
+``purely_toroidal_field``, ``shaped_tokamak_pressure``, and ``solovev``) and is
+omitted on the other 7 unsupported or non-converged rows.
+
+On this run, warm ``vmec_jax`` beat VMEC2000 on 14 of 16 rows and cold
+``vmec_jax`` beat VMEC2000 on 1 of 16 rows.  The median warm single-solve row
+is ``0.83x`` VMEC2000 runtime, while the median cold row is ``2.23x`` slower
+because cold time includes Python/JAX/XLA setup.  Peak process memory remains
+higher than VMEC2000, with a median ``3.04x`` ratio and the largest ratio
+(``16.7x``) on the non-stellarator-symmetric finite-beta row.  The
+current-vs-``origin/main`` comparison now records a small number of material
+per-row threshold hits, mostly near-threshold runtime noise or external-load
+effects; the aggregate warm runtime and memory metrics are materially better
+than both ``origin/main`` and the previous current-branch matrix.
+
+A focused follow-up on the worst peak-memory row
+(``basic_non_stellsym_pressure``) showed that the gap is now a policy tradeoff,
+not scan-history retention.  Explicit ``VMEC_JAX_SCAN_MINIMAL=1`` did not reduce
+peak memory.  The accelerated policy measured about ``5.8 s`` warmed runtime
+and ``1.55 GiB`` peak process memory, while explicit ``solver_mode="parity"``
+measured about ``15.5 s`` warmed runtime and ``0.59 GiB`` peak memory on the
+same row.  VMEC2000 takes about ``14.7 s`` on that input.  Therefore the next
+memory lane is a deliberate memory-aware policy selector or user-facing mode,
+not silently changing the default runtime-optimized policy.
+Use ``run_fixed_boundary(..., solver_mode="memory")`` or
+``vmec input.name --solver-mode memory`` to request this low-memory parity path
+without remembering VMEC-internal policy names.
+
+The first fixed-boundary cold-path hotspot isolated in this pass was first-call
+3D preconditioner seed construction.  A bounded QH no-scan profile with detailed
+VMEC timing reported ``0.922 s`` in preconditioner seed setup, split into
+``0.077 s`` for lambda preconditioning and ``0.845 s`` for R/Z matrix
+construction.  Promoting the shape-keyed full-JIT R/Z coefficient-and-assembly
+builder reduced the same diagnostic row to ``0.232 s`` of preconditioner seed
+setup and ``0.155 s`` of R/Z matrix construction, while preserving the same
+short-trace residual.  Set ``VMEC_JAX_RZ_MATRIX_FULL_JIT=0`` only when
+diagnosing the older eager coefficient path.
+
+The 2026-06-22 CPU host follow-up moved concrete host-update lambda seeding to
+the pure-NumPy implementation.  On bounded three-iteration cold probes this
+reduced `solovev` solve-body time from about ``0.189 s`` to ``0.112 s`` and
+`nfp4_QH_warm_start` solve-body time from about ``0.346 s`` to ``0.274 s``;
+the short-trace residuals were unchanged.  The remaining seed target on those
+probes is R/Z matrix construction, not lambda preconditioning.
+
+The next host follow-up added a NumPy mirror of the JAX 3D R/Z matrix seed for
+concrete non-traced CPU host solves.  It is intentionally not used for traced
+autodiff, scan, accelerator, LASYM, or diagnostic precomputed/lax-tridiagonal
+paths.  On the same bounded QH cold probe, solve-body time dropped from about
+``0.274 s`` to ``0.106 s`` and R/Z matrix seed time dropped from about
+``0.168 s`` to ``0.012 s``.  The `solovev` axisymmetric probe was effectively
+unchanged at about ``0.113 s`` solve-body time because its R/Z seed was already
+near ``0.013 s``.
+
+A compact 16-row bundled single-grid ``vmec_jax`` refresh after the NumPy
+lambda seed showed aggregate improvement against the previous current-branch
+compact matrix: median cold runtime ``0.899x``, median warm runtime ``0.864x``,
+and median peak memory ``0.993x``.  A second compact refresh after the NumPy
+3D R/Z seed remained neutral-to-slightly-better against that NumPy-lambda
+baseline: median cold runtime ``0.996x``, median warm runtime ``0.985x``, and
+median peak memory ``1.003x``.  The first pass had two row-level threshold hits,
+but rerunning those rows classified them as timing/process-memory noise:
+``LandremanPaul2021_QA_reactorScale_lowres`` reran at cold ``1.058x``, warm
+``1.059x``, memory ``0.958x`` and
+``LandremanSengupta2019_section5.4_B2_A80`` reran at cold ``1.038x``, warm
+``1.022x``, memory ``1.028x``.
+
+The next 2026-06-22 host follow-up removed an avoidable first-call JIT pTau
+helper from concrete CPU host bad-Jacobian checks while leaving traced,
+autodiff, scan, and accelerator paths on the existing JAX-capable helper.  It
+also skips initial-axis pTau/state diagnostics when the residual is already
+below the VMEC-style reset floor and no explicit reset was requested.  On the
+bounded three-iteration cold probes, ``nfp4_QH_warm_start`` solve-body time
+dropped from about ``0.106 s`` to ``0.060 s`` and ``solovev`` dropped from
+about ``0.113 s`` to ``0.069 s``.  The iteration-controller bad-Jacobian bucket
+fell from about ``45 ms`` to about ``0.3 ms``.  A compact 16-row bundled
+single-grid matrix after this host pTau change had no row-level regressions
+against either previous host baseline; compared with the NumPy R/Z baseline,
+median cold runtime was about ``0.949x``, median warm runtime ``0.939x``, and
+median peak memory ``0.980x``.  The remaining exposed cold host setup cost is
+``setup_boundary_profiles_unattributed_s``, which is mostly boundary/profile
+setup wrapper work and should be treated as the next focused tranche.
+
+That tranche now keeps setup-only radial arrays, zero constraint payloads, and
+pTau constants on NumPy for concrete non-scan CPU host solves.  Traced,
+autodiff, scan, and accelerator paths still use JAX-compatible arrays.  The
+bounded three-iteration probes measured ``nfp4_QH_warm_start`` solve-body time
+near ``0.042 s`` and ``solovev`` near ``0.050 s``.  The boundary-profile
+unattributed setup bucket fell from about ``34-36 ms`` to about ``0.1 ms``,
+while pTau-constant setup fell to about ``10 us``.  A compact 16-row matrix
+after the host-NumPy setup change again completed with no regressions against
+the NumPy R/Z baseline; the single threshold hit against the immediately prior
+host-pTau run was a ``0.12 s`` LASYM warm row and disappeared on rerun.
 
 A broader 2026-05-24 internal policy matrix compared the default fixed-boundary
 policy against the explicit ``accelerated`` policy on all 35 bundled
@@ -2409,18 +2520,55 @@ and the solver stage about ``2.4 s``.  The largest steady solver terms were
 therefore uses the host path for low-work CPU stages and the fused strict-update
 path only above the ``VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT`` threshold.
 
-The figure rows and provenance are available as:
+The figure rows, current-vs-main comparison, and focused regression rerun
+provenance are available as:
 
 - :download:`readme_runtime_compare.csv <_static/figures/readme_runtime_compare.csv>`
 - :download:`readme_runtime_compare.json <_static/figures/readme_runtime_compare.json>`
+- :download:`readme_runtime_compare_current_vs_main.csv <_static/figures/readme_runtime_compare_current_vs_main.csv>`
+- :download:`readme_runtime_compare_current_vs_main.json <_static/figures/readme_runtime_compare_current_vs_main.json>`
+- :download:`readme_runtime_compare_lpqa_rerun.csv <_static/figures/readme_runtime_compare_lpqa_rerun.csv>`
+- :download:`readme_runtime_compare_lpqa_rerun.json <_static/figures/readme_runtime_compare_lpqa_rerun.json>`
 
-Regenerate the current fixed-boundary plot after a runtime sweep with:
+Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 
 .. code-block:: bash
 
+   PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
+     --inputs-dir examples_single_grid/data \
+     --kind fixed \
+     --backend all \
+     --warm-runs 1 \
+     --jax-platforms cpu \
+     --runner-label current-cpu-compact \
+     --vmec-exec ~/bin/xvmec2000 \
+     --timeout-s 1800 \
+     --vmec-timeout-s 1800 \
+     --outdir outputs/pr20_full_matrix_current_cpu_sg_compact
+
+   cd /path/to/a/clean/origin-main/worktree
+   PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
+     --inputs-dir examples_single_grid/data \
+     --kind fixed \
+     --backend all \
+     --warm-runs 1 \
+     --jax-platforms cpu \
+     --runner-label main-cpu \
+     --vmec-exec ~/bin/xvmec2000 \
+     --timeout-s 1800 \
+     --vmec-timeout-s 1800 \
+     --outdir outputs/pr20_full_matrix_main_cpu_sg
+
+   cd /path/to/the/pr/worktree
+   python tools/diagnostics/compare_runtime_memory_matrix.py \
+     --current outputs/pr20_full_matrix_current_cpu_sg_compact/summary.json \
+     --baseline /path/to/a/clean/origin-main/worktree/outputs/pr20_full_matrix_main_cpu_sg/summary.json \
+     --csv-out docs/_static/figures/readme_runtime_compare_current_vs_main.csv \
+     --json-out docs/_static/figures/readme_runtime_compare_current_vs_main.json
+
    python tools/diagnostics/readme_runtime_compare.py \
-     --cpu-summary outputs/fixed_runtime_accel_cpu_bundle_20260406_r2/summary.json \
-     --figure-kind fixed --plot-mode runtime \
+     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg_compact/summary.json \
+     --figure-kind fixed --plot-mode runtime_memory \
      --figure-out docs/_static/figures/readme_runtime_compare.png \
      --csv-out docs/_static/figures/readme_runtime_compare.csv \
      --json-out docs/_static/figures/readme_runtime_compare.json
@@ -2668,7 +2816,7 @@ Latest serial bundled fixed-boundary reassessment (April 2026)
 
 Historical note: this April 2026 accelerated-branch snapshot is retained to
 explain why the optimized controller exists, but it is not the current public
-VMEC2000 comparison.  Use the README-facing CSV/JSON in the previous section
+VMEC2000 comparison.  Use the docs-facing CSV/JSON in the previous section
 for current release claims.  This snapshot used NS=151 single-grid inputs
 (``examples_single_grid/data/``) and compared
 ``solver_mode="accelerated"`` warm runtimes against VMEC2000.
@@ -2834,7 +2982,7 @@ also guide downstream integration work for ``booz_xform_jax`` and ``neo_jax``.
   ``38.56s`` optimized), ``LandremanPaul2021_QH_reactorScale_lowres``
   (``60.10s`` vs ``46.33s``), ``ITERModel`` (``12.73s`` vs ``5.00s``), and
   ``cth_like_fixed_bdy`` (``4.71s`` vs ``0.97s``),
-- the README-facing VMEC2000 comparison was then rerun separately on the same
+- the docs-facing VMEC2000 comparison was then rerun separately on the same
   host in
   ``outputs/readme_fixed_runtime_vmec2000_accel_cpu_20260312/summary.json``:
   all 13 bundled ``lasym=False`` fixed-boundary cases converged, but the
@@ -3004,7 +3152,7 @@ benchmark story:
 - the optimized fixed-boundary CLI path is a mixed but useful warmed CPU result:
   faster on 13 of 16 rows versus the prior/default branch path, roughly neutral
   on 1, and slower on 2,
-- relative to VMEC2000, the current README-facing CPU matrix still wins on only
+- relative to VMEC2000, the current docs-facing CPU matrix still wins on only
   1 of 16 bundled fixed-boundary rows,
 - the GPU path is functional and convergent on the same bundled matrix, but is
   faster only on selected heavier 3D rows; do not claim uniform GPU superiority.
@@ -3798,6 +3946,25 @@ JAX-friendly for future JIT staging. Control this with:
 
 - ``VMEC_JAX_INIT_GUESS_JAX=1`` (default): use JAX boundary flip path.
 - ``VMEC_JAX_INIT_GUESS_JAX=0``: fall back to NumPy/Python boundary flips.
+
+Branch-local free-boundary replay context reuse
+-----------------------------------------------
+
+The direct-coil same-branch report builds static boundary replay contexts for
+each active NESTOR grid shape.  The accepted/rejected controller-slot gate must
+use a separate padded trace plan, since it deliberately inserts a rejected
+controller slot, but it can still reuse the main vector report's static
+boundary contexts.  The report records this as
+``accepted_rejected_controller_slot_gate.reused_boundary_replay_contexts``.
+
+In the tiny direct-coil smoke report used for PR #20 validation, context reuse
+reduced the rejected-slot replay wall time from about ``8.06 s`` to about
+``7.34 s``.  Narrowing that synthetic slot gate to a single cheap physical
+scalar, while keeping the main vector report authoritative for all requested
+scalars, reduced it again to about ``6.74 s``.  The same current-only JVP fast
+path and complete-solve acceptance authority are preserved.  The main
+branch-local vector JVP remains the dominant cost at about ``9.1--9.2 s`` and
+is the next target for replay graph construction work.
 
 Implementation map (performance-critical paths)
 ------------------------------------------------

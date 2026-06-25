@@ -66,6 +66,40 @@ magnetic-grid bounds, and direct-coil provider wiring.  By default, outputs go
 under ``results/free_boundary_essos_mgrid_forward/`` and
 ``results/free_boundary_essos_direct_forward/``.
 
+Current-only derivative proposal smoke
+--------------------------------------
+
+The fastest same-branch derivative-proposal smoke keeps the report direction
+current-only even when the optimizer still has Fourier coil variables
+available.  The default ``--same-branch-report-direction auto`` does this when
+``--same-branch-derivative-proposal`` is enabled and at least one current
+variable is selected; use ``--same-branch-report-direction current-only`` to
+make the choice explicit.  This lets the branch-local vector/JVP replay reuse
+the fixed coil geometry while the final accept/reject decision still comes
+from a complete free-boundary solve:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --smoke \
+     --max-evals 1 \
+     --write-same-branch-report \
+     --same-branch-report-mode vector \
+     --same-branch-report-direction current-only \
+     --same-branch-report-nestor-solve-mode matrix_free \
+     --same-branch-report-nestor-operator-solver bicgstab \
+     --same-branch-report-replay-max-mode-count 0 \
+     --same-branch-derivative-proposal \
+     --same-branch-proposal-steps 0.05,0.1 \
+     --same-branch-proposal-max-trials 2
+
+Inspect ``summary.json`` for ``same_branch_derivative_proposal``.  A promoted
+current-only report records ``directional_jvp_fast_path=current_only``,
+``current_only_coil_geometry_cache_available=true``, and
+``current_only_coil_geometry_source=cached``.  These fields are performance
+and provenance evidence only; complete solves remain the acceptance authority,
+and adaptive host branch selection is still outside the differentiated scope.
+
 VMEC2000 generated-mgrid promotion fixture
 ------------------------------------------
 
@@ -105,7 +139,8 @@ to git.
 Boozer/QS diagnostics are the intended promotion target for this lane, but the
 current implementation keeps the single-stage optimization example on a cheap
 VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy until
-complete Boozer/QS full-loop gradient checks pass.
+same-branch, fingerprint-gated Boozer/QS derivative checks pass against
+complete-solve finite differences.
 
 Reviewer-facing validation plots for this lane are committed only as compressed
 summary panels. Generated WOUTs, magnetic grids, PDFs, and full-resolution raw
@@ -280,7 +315,8 @@ The reviewer-facing status of this ladder is:
        VMEC residual plus VMEC-state ``qs_total``, aspect, and mean-iota proxy
        instead of Boozer/QS gradients.
      - Add Boozer/QS diagnostics to the complete-solve objective and validate
-       coil-current and coil-geometry gradients against finite differences.
+       same-branch, fingerprint-gated coil-current and coil-geometry
+       derivatives against complete-solve finite differences.
 
 In short, rungs 1--6 validate the mathematical and operator pieces needed for a
 production adjoint, rung 7 validates complete-solve finite response plus
@@ -869,12 +905,24 @@ synchronize JAX arrays before recording device-ready timings, so they are
 suitable for distinguishing Python dispatch, XLA compilation, and CPU/GPU
 execution costs in local profiling.
 The report also writes ``same_branch_report_config`` in ``summary.json`` so the
-artifact remains self-describing.  Its derivative contract is fixed accepted
-branch only; it does not differentiate adaptive host branch selection, rejected
-step selection, resets, or branch changes unless the explicit fingerprint
-remains compatible.  If the complete-solve finite-difference branch fingerprint
-is not same-branch compatible, the example records the incompatibility and skips
-branch-local AD instead of reporting an invalid derivative.
+artifact remains self-describing.  Its derivative contract is fixed
+recorded-branch replay only; it does not differentiate changes in adaptive host
+branch selection.  Rejected-slot and reset effects are replay evidence only
+when the explicit fingerprint remains compatible.  If the complete-solve
+finite-difference branch fingerprint is not same-branch compatible, the example
+records the incompatibility and skips branch-local AD instead of reporting an
+invalid derivative.
+
+The README differentiation evidence panel uses this same branch-local report
+contract.  It compares direct-coil free-boundary scalar JVPs against
+complete-solve central finite differences for ``aspect``, ``qs_total``,
+``mean_iota``, and ``lcfs_boundary_moment`` under an unchanged accepted-branch
+fingerprint.  The promoted PR #20 artifact also requests the
+accepted/rejected-controller-slot gate; its fingerprint includes two accepted
+slots and one fixed rejected slot.  Treat those rows as validated
+proposal/replay derivatives for a fixed accepted/rejected controller trace, not
+as a claim that the full adaptive controller is differentiable through
+arbitrary accept/reject/reset branch changes.
 
 Run the dependency-light direct-coil forward example from the repository root.
 This path constructs a synthetic circular ``CoilFieldParams`` object directly in
@@ -1375,6 +1423,17 @@ same fingerprint.  In the resulting
 how many controller slots were accepted or rejected in the replayed branch.
 The vector blocks also report ``directional_jvp_fast_path`` so current-only
 profiling runs can confirm that fixed coil geometry was reused.
+The rejected-slot gate builds a separate padded trace plan because the
+controller branch is intentionally different from the all-accepted replay, but
+it reuses any static boundary replay contexts from the main vector report; the
+JSON field ``accepted_rejected_controller_slot_gate.reused_boundary_replay_contexts``
+records whether that reuse occurred.  The slot gate intentionally replays only
+the cheapest available physical scalar, usually ``aspect``, because its job is
+to prove that the accepted/rejected controller-slot fingerprint and directional
+JVP path are still valid.  The main vector report remains the authority for the
+full requested scalar set.  For review, the slot gate writes both
+``scalar_keys`` and ``full_report_scalar_keys`` so the narrow replay payload is
+explicit rather than hidden.
 
 An additional opt-in bridge toward derivative-assisted coil optimization is
 available with ``--same-branch-derivative-proposal``.  This mode still does
@@ -1386,6 +1445,12 @@ trial is then evaluated by the ordinary complete free-boundary solve, and only
 that complete-solve objective can accept it.  This keeps the branch-local
 derivative path as a proposal mechanism while the production solve remains the
 acceptance authority.
+Requesting ``--same-branch-derivative-proposal`` automatically enables
+``--write-same-branch-report`` so the command has one explicit derivative
+proposal switch; explicit report options such as
+``--same-branch-report-vector-keys`` and
+``--same-branch-report-rejected-slot-gate`` still control the generated
+evidence.
 The proposal path is deliberately strict: it requires an unchanged complete
 solve branch fingerprint, production-forward scalar values, ``direct``
 ``directional_jvp`` replay, a fixed accepted-branch derivative claim, and
@@ -1418,8 +1483,8 @@ final-point derivative evidence for a reviewer-facing artifact.
      --vmec-max-iter 2 \
      --helicity-m 1 \
      --helicity-n 0 \
-     --write-same-branch-report \
      --same-branch-report-mode vector \
+     --same-branch-report-direction current-only \
      --same-branch-report-vector-keys aspect,qs_total \
      --same-branch-report-rejected-slot-gate \
      --same-branch-derivative-proposal \
@@ -1471,6 +1536,8 @@ to form a safe derivative proposal.
      --nzeta 4 \
      --write-same-branch-report \
      --same-branch-report-mode vector \
+     --same-branch-report-direction current-only \
+     --same-branch-report-rejected-slot-gate \
      --same-branch-derivative-proposal \
      --outdir results/free_boundary_QA_finite_beta_coil_optimization_report
 
@@ -1478,7 +1545,9 @@ The wrapper records the same ``history.json`` and ``summary.json`` schema as
 ``free_boundary_QS_coil_optimization.py`` and adds a
 ``finite_beta_qa_example`` metadata block.  Optional same-branch derivative
 reports remain diagnostics or proposal evidence only; they do not claim exact
-gradients through arbitrary adaptive host branch selection.
+gradients through arbitrary adaptive host branch selection.  The default vector
+keys include ``betatotal`` so finite-beta reports also check a pressure-sensitive
+scalar in the same branch-local AD-vs-FD table.
 
 For the ESSOS Landreman-Paul QA coils, put ESSOS on ``PYTHONPATH`` and use:
 
@@ -1971,7 +2040,8 @@ Next Implementation Steps
   realistic ESSOS/high-beta full-solve finite-difference checks, then promote
   the optional xfail.
 - Replace the phase-1 coil-only optimization proxy with a Boozer/QS objective
-  once the complete direct-coil free-boundary loop has validated gradients.
+  once same-branch, fingerprint-gated Boozer/QS derivatives pass against
+  complete-solve finite differences.
 - Promote the VMEC2000 generated-``mgrid`` comparison after the direct/mgrid
   trace discrepancy is bounded.
 - Replace the dense validation vacuum-adjoint primitive with the production

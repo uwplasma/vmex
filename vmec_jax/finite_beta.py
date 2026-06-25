@@ -28,7 +28,7 @@ from .redl_bootstrap import (
     redl_bootstrap_mismatch_from_profiles,
     trapped_fraction_from_modb_sqrtg,
 )
-from .solve_profile_helpers import (
+from .solvers.fixed_boundary.profiles import (
     _half_mesh_from_full_mesh,
     _icurv_full_mesh_from_indata,
     _mass_half_mesh_from_indata,
@@ -460,7 +460,6 @@ def mercier_bss_geometry_channels_from_state(
 
     coeff_cos_stack = jnp.stack([Rcos, Zcos], axis=0)
     coeff_sin_stack = jnp.stack([Rsin, Zsin], axis=0)
-    zeros = jnp.zeros_like(coeff_cos_stack)
     mask_even = jnp.asarray((m_np % 2) == 0, dtype=jnp.float64)
     mask_m1 = jnp.asarray(m_np == 1, dtype=jnp.float64)
     mask_odd_rest = jnp.asarray(((m_np % 2) == 1) & (m_np != 1), dtype=jnp.float64)
@@ -1130,7 +1129,8 @@ def finite_beta_scalars_from_state(*, state, static, indata, signgs: int) -> dic
         s=jnp.asarray(static.s),
         signgs=int(signgs),
     )
-    beta_total = jnp.where(norms.wb != 0.0, norms.wp / norms.wb, jnp.asarray(0.0, dtype=norms.wb.dtype))
+    wb_safe = jnp.where(norms.wb != 0.0, norms.wb, jnp.asarray(1.0, dtype=norms.wb.dtype))
+    beta_total = jnp.where(norms.wb != 0.0, norms.wp / wb_safe, jnp.asarray(0.0, dtype=norms.wb.dtype))
     volavgB = jnp.sqrt(jnp.maximum(2.0 * norms.wb / jnp.maximum(norms.volume, 1e-300), 0.0))
     return {
         "aspect": aspect,

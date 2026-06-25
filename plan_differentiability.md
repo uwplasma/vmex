@@ -1,520 +1,1324 @@
 # Research-Grade Differentiable VMEC Plan
 
-Status: deferred research lane, not a blocker for the current free-boundary
-phase-2/phase-3 release.
+Status: historical umbrella log for PR #20.
 
-Last updated: 2026-06-13.
+Authoritative current plan: `plan_research_grade_performance_differentiability.md`.
+Use that file for remaining performance, memory, differentiability, and
+refactor milestones.  This file is retained as a compact record of the PR #20
+context and earlier evidence.
 
-Repository: `/Users/rogeriojorge/local/vmec_jax`.
+This file is intentionally concise.  It records the current target architecture,
+promotion gates, open lanes, and recent review evidence.  Detailed historical
+logs remain available in git history.  `plan_freeb.md` is a closed
+free-boundary evidence summary; `plan.md` and
+`discrete_adjoint_2506_plan.md` are historical references only.
 
-## Executive Summary
+Last updated: 2026-06-20.
 
-The long-term goal is a research-grade differentiable VMEC variant that keeps
-VMEC2000-compatible fixed-boundary and free-boundary physics while exposing
-validated derivatives for equilibrium, boundary optimization, direct-coil
-optimization, finite-beta metrics, Boozer-space objectives, and stability
-objectives.
+## Current Objective
 
-The near-term release should remain conservative:
+Build and review a simpler, research-grade `vmec_jax` implementation that:
 
-1. Fixed-boundary derivatives and production optimization APIs are promoted only
-   where AD-vs-FD, VMEC2000 parity, and physics gates pass.
-2. Free-boundary direct-coil providers, mgrid providers, and branch-local
-   same-fingerprint replay/controller derivatives are promoted.
-3. Arbitrary differentiation through adaptive host branch changes in
-   `run_free_boundary` is not yet promoted.
-4. A future differentiable-controller lane can explore fully JAX-visible branch
-   selection, but only if it preserves VMEC parity, improves optimization
-   robustness, or enables capabilities that the branch-local seam cannot.
+1. Preserves fixed-boundary and free-boundary VMEC2000 parity.
+2. Provides validated differentiability for promoted seams.
+3. Keeps adaptive free-boundary branch claims conservative until true
+   fingerprint-gated full adaptive AD-vs-central-FD gates pass.
+4. Reduces source sprawl and large monoliths without weakening physics gates.
+5. Keeps user-facing optimization examples pedagogical and reproducible.
+6. Keeps the repository lightweight and free of generated solver outputs.
 
-## Terms
+## Design Principles
 
-- Fixed boundary: the plasma boundary is prescribed by Fourier coefficients.
-- Free boundary: the boundary is solved with an external vacuum field supplied
-  by mgrid interpolation, ESSOS-generated grids, or direct coils.
-- Direct coil provider: pure-JAX Biot-Savart field evaluation from Fourier coil
-  parameters.
-- Adaptive branch: a discrete path selected by the nonlinear VMEC controller,
-  including accepted/rejected steps, Jacobian resets, timestep limiters,
-  restart/fallback selection, and preconditioner policies.
-- Branch fingerprint: compact metadata that identifies the adaptive branch used
-  by a solve or replay. Derivatives are only promoted when the plus/minus
-  finite-difference perturbations keep the same fingerprint.
-- Branch-local derivative: a derivative of one fixed accepted/rejected
-  controller path. This can be validated against complete-solve central finite
-  differences under an unchanged fingerprint.
-- Arbitrary adaptive derivative: a derivative through changes in branch
-  selection. This is generally nonsmooth and is not claimed by current code.
-
-## Literature and Code Anchors
-
-The plan is anchored in the following references and implementation patterns:
-
-1. VMEC/STELLOPT documentation: VMEC uses Fourier-expanded geometry and a
-   variational energy minimization; free-boundary VMEC uses vacuum fields from
-   mgrid files and NESTOR-style exterior solves.
-   URL: https://princetonuniversity.github.io/STELLOPT/VMEC.html
-2. VMEC++ numerics: modern VMEC reimplementation practices, restart behavior,
-   robust execution, and validation philosophy.
-   URL: https://arxiv.org/abs/2502.04374
-3. DESC code suite: JAX-based stellarator equilibrium and optimization,
-   continuation, perturbation, free-boundary residuals, and differentiable
-   optimization design.
-   URL: https://desc-docs.readthedocs.io/
-4. High-order free-boundary DESC work: free-boundary residual formulation and
-   NESTOR/VMEC context for vacuum-boundary conditions.
-   URL: https://arxiv.org/html/2412.05680v1
-5. SIMSOPT: practical optimization API design, caching, coil/boundary
-   parameter spaces, and mixed analytic/AD derivatives.
-   URL: https://simsopt.readthedocs.io/
-6. JAX control-flow docs: `lax.scan`, `lax.while_loop`, and transformed loops.
-   Static loops should use `scan`; dynamic loops use `while_loop` when a
-   JAX-visible controller is worth the tradeoff.
-   URL: https://docs.jax.dev/en/latest/_autosummary/jax.lax.scan.html
-7. JAXopt implicit differentiation: solver-output differentiation by implicit
-   rules rather than storing every unrolled iteration.
-   URL: https://jaxopt.github.io/stable/implicit_diff.html
-8. Fast automated adjoints for spectral PDE solvers: construct efficient
-   discrete adjoints for sparse spectral PDE solvers rather than relying on
-   naive tape retention.
-   URL: https://arxiv.org/abs/2506.14792
-9. Mercier and Glasser/Jorge-Landreman stability work: physics anchors for
-   DMerc and resistive `D_R` gates.
-   URL: https://arxiv.org/abs/2006.14881
+- Domain modules own implementation.  New code should live under packages such
+  as `solvers/`, `drivers/`, `optimizers/`, `io/`, `external_fields/`, and
+  `validation/`, not as new root modules.
+- Root modules are compatibility facades or public APIs.  Existing root facades
+  are tolerated only to preserve public imports and monkeypatch/debug workflows.
+- Tests should be real unit, numerical, parity, AD-vs-FD, and physics gates.
+  Avoid scaffold-only tests that increase coverage without validating behavior.
+- Prefer net-negative refactors: fewer lines, fewer duplicate seams, clearer
+  ownership, no new broad abstractions unless they remove more code than they
+  add.
+- Keep differentiability claims evidence-based.  Branch-local/frozen-branch
+  gates can be promoted; arbitrary adaptive branch differentiation is unclaimed
+  until validated.
+- Keep docs and examples executable from user-facing APIs, not from private
+  wrappers that hide the optimization workflow.
 
 ## Current Source Map
 
-Differentiable fixed-boundary and optimization code:
-
-- `vmec_jax/driver.py`: production `run_fixed_boundary` and
-  `run_free_boundary` entry points, host controller, WOUT generation.
-- `vmec_jax/optimization.py`: fixed-boundary least-squares utilities,
-  accepted-point replay, scalar-adjoint and exact callback policies.
-- `vmec_jax/optimization_workflow.py`: user-facing optimization helpers and
-  problem assembly.
-- `vmec_jax/quasisymmetry.py`: quasisymmetry residuals and targets.
-- `vmec_jax/quasi_isodynamic.py`, `vmec_jax/qi_optimization.py`,
-  `vmec_jax/qi_diagnostics.py`: QI/QP objectives, diagnostics, gates, and
-  minimal-seed workflows.
-- `vmec_jax/wout.py`, `vmec_jax/vmec_output.py`: equilibrium output and metric
-  extraction.
-
-Differentiable free-boundary and coil code:
-
-- `vmec_jax/external_fields/coils_jax.py`: Fourier coils, stellarator symmetry
-  expansion, Biot-Savart sampling, and coil metrics.
-- `vmec_jax/external_fields/mgrid_jax.py`: JAX mgrid interpolation path.
-- `vmec_jax/external_fields/essos_adapter.py`: optional ESSOS adapter.
-- `vmec_jax/free_boundary.py`: free-boundary provider hook, direct-coil/mgrid
-  sampling, VMEC/NESTOR integration.
-- `vmec_jax/free_boundary_adjoint.py`: dense vacuum solve, JAX NESTOR pieces,
-  accepted-boundary replay, fixed-trace custom-VJP helpers, and branch-local
-  reports.
-- `vmec_jax/free_boundary_adjoint_controller.py`: JAX-visible nonlinear and
-  segmented controller primitives used for same-fingerprint validation.
-- `vmec_jax/free_boundary_validation.py`: validation helpers and bounded
-  physical fixture checks.
-
-Examples and docs:
-
-- `examples/optimization/QA_optimization.py`, `QH_optimization.py`,
-  `QP_optimization.py`, `QI_optimization.py`: fixed-boundary optimization
-  scripts that should remain clear, Simsopt-like, and user editable.
-- `examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py`:
-  conservative coil-only free-boundary optimization example with complete
-  solves as acceptance authority and optional same-branch derivative reports.
-- `docs/free_boundary_coil_optimization.rst`: current free-boundary claims and
-  limitations.
-- `plan_freeb.md`: current phase-1/phase-2/phase-3 execution log.
-
-## Architecture Goals
-
-1. Preserve VMEC semantics by default.
-   Production `run_fixed_boundary` and `run_free_boundary` must stay compatible
-   with VMEC2000 input/output behavior and validated finite-positive physical
-   WOUTs.
-2. Make differentiability explicit.
-   Every promoted derivative path must state whether it differentiates an
-   equilibrium residual, fixed accepted branch, same-fingerprint adaptive
-   replay, or an arbitrary adaptive branch.
-3. Validate derivatives with physics scalars.
-   Gates must include meaningful outputs: aspect, iota, boundary displacement,
-   Bnormal RMS, QS/QI proxies, DMerc, `D_R`, pressure/current response, and
-   WOUT-level geometry scalars.
-4. Keep optimization practical.
-   The public optimization API should let users assemble objectives as tuples
-   or lightweight objective objects, choose weights/targets, run SciPy or JAX
-   optimizers, save inputs/WOUTs, and plot results without hiding the workflow.
-5. Avoid large runtime regressions.
-   Full exact derivatives should not force dense tape construction when a
-   scalar-adjoint, matrix-free, projected, or implicit path is available.
-6. Keep claims conservative.
-   Do not claim full adaptive-loop differentiability until fingerprint-gated
-   full adaptive AD-vs-central-FD gates pass on physical scalar outputs.
-
-## Main Work Lanes
-
-### Lane A: Fixed-Boundary Differentiable Core
-
-Goal: production-grade fixed-boundary derivatives for boundary optimization.
-
-Steps:
-
-1. Audit all state carried by `run_fixed_boundary` and accepted-point replay.
-2. Keep exact, scalar-adjoint, and auto-scalar paths under a single public
-   policy with clear fallback rules.
-3. Add AD-vs-central-FD gates for boundary modes, pressure/current profile
-   coefficients, spline profile knots, finite-beta response, DMerc, `D_R`,
-   volume-average field metrics, iota, and QS/QI objective terms.
-4. Add regression gates for max-mode continuation and direct-start policies.
-5. Keep WOUT, input.final, and stage checkpoint output identical between the
-   optimization result and rerunning the saved input when the solve converges.
-
-Success metrics:
-
-- AD-vs-FD relative error below `1e-4` for smooth scalar objectives on compact
-  fixtures, or tighter when conditioning allows.
-- VMEC2000 parity on converged equilibria for fixed-boundary benchmarks.
-- Cold and warm runtime budgets documented and enforced in CI smoke tests.
-
-### Lane B: Free-Boundary Providers
-
-Goal: direct-coil and mgrid free-boundary solves that are VMEC-compatible and
-JAX-differentiable where claimed.
-
-Steps:
-
-1. Maintain pure-JAX direct-coil Biot-Savart provider and JAX mgrid
-   interpolation provider.
-2. Keep ESSOS adapter optional and skip cleanly when unavailable.
-3. Expand bounded VMEC2000/mgrid/direct-coil parity only with fixtures that
-   stay inside generated grid domains and produce finite positive geometry.
-4. Add finite-beta free-boundary fixtures with actual `LASYM=T` when claiming
-   non-stellarator-symmetric finite-beta coverage.
-5. Add Bnormal RMS and boundary-displacement physics gates for provider parity.
-
-Success metrics:
-
-- Direct-coil and generated-mgrid WOUT geometry agree within documented
-  tolerances for bounded fixtures.
-- External-field provider gradients pass AD-vs-FD for currents and Fourier
-  coil coefficients.
-- Nonphysical forced-active diagnostics remain excluded from promotion gates.
-
-### Lane C: Full Nonlinear Free-Boundary Adjoint
-
-Goal: exact or validated derivatives through the free-boundary equilibrium
-solve without overclaiming nonsmooth adaptive branch changes.
-
-Current promoted state:
-
-- Accepted-boundary replay.
-- Fixed-trace custom VJP.
-- Same-branch scalar/vector/JVP reports.
-- Accepted/rejected controller-slot evidence under unchanged fingerprints.
-- Complete-solve central-FD validation for physical scalars under fixed
-  fingerprints.
-
-Not yet promoted:
-
-- Arbitrary derivatives through host adaptive branch changes.
-
-Steps:
-
-1. Keep branch-local/fingerprint-gated gates as the production-safe seam.
-2. Add one narrow full adaptive branch AD-vs-central-FD test only when the
-   branch fingerprint is unchanged and the test reports this explicitly.
-3. Extend physical scalar coverage to aspect, mean iota, QS proxy, boundary
-   moment, Bnormal RMS, and finite-beta response.
-4. Add a negative gate: if plus/minus perturbations change the fingerprint, the
-   derivative report must decline promotion.
-5. Prototype a fully JAX-visible controller only as a deferred research path.
-   Compare it against the host controller for branch decisions, residual traces,
-   convergence, and VMEC2000 parity before any promotion.
-
-Success metrics:
-
-- Same-fingerprint AD-vs-central-FD relative error below `1e-4` for compact
-  physical scalar gates.
-- Branch-changing perturbations are detected and rejected, not silently
-  differentiated.
-- Full-loop claims in docs exactly match executable tests.
-
-### Lane D: Differentiable Optimization APIs
-
-Goal: clear, Simsopt-like scripts and reusable APIs for boundary and coil
-optimization.
-
-Steps:
-
-1. Keep example scripts short and explicit: input parameters at top, objective
-   tuple assembly, optimizer call, result extraction, saving, and plotting.
-2. Move reusable objective terms, plotting helpers, seed builders, and staged
-   QI policies into source modules.
-3. Ensure objective terms are composable for QA, QH, QP, QI, finite beta,
-   DMerc, `D_R`, mirror ratio, elongation, magnetic well, and current-profile
-   terms.
-4. For coil-only free-boundary optimization, keep complete solves as acceptance
-   authority while using branch-local derivative reports only for proposals.
-5. Add examples for mgrid free-boundary, direct-coil free-boundary, and
-   coil-only finite-beta QA optimization.
-
-Success metrics:
-
-- New users can modify objective tuples without changing source code.
-- Examples run under documented smoke budgets in CI.
-- Production examples print provenance, save input/WOUT/history, and plot
-  actual initial and final states.
-
-### Lane E: QI Seed-Robustness and Omnigenity
-
-Goal: robust QI recovery from simple/minimal seeds for NFP1/2/3/4 when possible,
-with evidence gates that do not confuse QP with true QI.
-
-Steps:
-
-1. Keep QI README artifacts provenance-gated and generated from minimal seed
-   inputs, not from already-QI stage outputs.
-2. Use smooth QI, legacy QI, mirror ratio, elongation, iota floor, and aspect
-   gates together.
-3. Keep NFP4 conservative if the current method is not robust.
-4. Add landscape scans and stage checkpoints so failures preserve useful
-   diagnostics.
-5. Compare JAX QI metrics against the legacy Goodman/omnigenity objective and
-   booz_xform_jax outputs.
-
-Success metrics:
-
-- Public cases satisfy `smooth_qi <= 5e-3`, legacy QI gate, aspect gate,
-  mirror gate, and iota floor gate.
-- Boozer contours close in the expected QI pattern by visual inspection before
-  README promotion.
-- The README panel uses actual initial minimal seeds and final optimized WOUTs.
-
-### Lane F: Physics Gates and Stability Metrics
-
-Goal: differentiable physics metrics with literature-anchored tests.
-
-Steps:
-
-1. Maintain DMerc and `D_R` AD-vs-FD gates.
-2. Add finite-beta fixtures with pressure/current polynomial and spline
-   profiles.
-3. Add tests for magnetic well, current density, vector B, vector J, jdotB,
-   iota/shear, beta, volume-average B, and pressure/current response.
-4. Compare with VMEC2000 WOUT values and analytic near-axis limits where
-   available.
-5. Document formulas, assumptions, sign conventions, and expected applicability.
-
-Success metrics:
-
-- Physics gates are actual numerical/physics tests, not smoke-only tests.
-- Coverage stays at or above the release target while CI runtime remains
-  bounded.
-- All metric docs include formulas and validation provenance.
-
-### Lane G: CPU/GPU Performance
-
-Goal: competitive cold solves, warm solves, and optimization callbacks on CPU
-and GPU.
-
-Steps:
-
-1. Continue profiling force assembly, scan trials, accepted-point replay,
-   tangent/JVP construction, and first-call exact tape creation.
-2. Promote matrix-free NESTOR/source response only when profiling shows a clear
-   mode-count threshold where it beats dense paths.
-3. Cache shape-stable trace setup and avoid recompilation across same-shape
-   accepted points.
-4. Keep GPU enabled when users install GPU JAX; do not force CPU except in
-   explicit user-selected modes.
-5. Keep benchmark panels comparing VMEC2000, vmec_jax CPU, and vmec_jax GPU on
-   bounded fixtures.
-
-Success metrics:
-
-- No hidden CPU-forcing in production code.
-- Performance regressions are caught by compact benchmarks.
-- Optimization callback traces report compile, force, replay, tangent, and I/O
-  timing buckets.
-
-### Lane H: Documentation, CI, Release Hygiene
-
-Goal: docs and release artifacts match what the code can actually do.
-
-Steps:
-
-1. Keep README concise: installation, quick test, core examples, and best public
-   figures only.
-2. Move long optimization tables, sweep results, and limitations into docs.
-3. Keep CI fast by sharding tests by cost and using optional external gates for
-   VMEC2000/ESSOS.
-4. Keep the git repository lean: large WOUTs/mgrids/artifacts live in releases
-   or downloadable assets, not tracked history.
-5. Add release gates: local smoke, docs build, coverage, physics gates, optional
-   external parity, and artifact-size gate.
-
-Success metrics:
-
-- CI remains green and finishes within the documented budget.
-- README claims are backed by tests or generated artifact provenance.
-- New release tags are cut only after release gate results are recorded.
-
-## Refactoring Plan
-
-Priority refactors:
-
-1. Separate controller state, physics state, and output state in
-   `vmec_jax/driver.py` so derivative seams are easier to test.
-2. Factor free-boundary branch fingerprints into a small public/internal data
-   structure shared by reports, tests, and docs.
-3. Split dense, projected, scalar, and matrix-free derivative paths behind a
-   single policy interface.
-4. Move QI stage-policy machinery out of example scripts into source modules.
-5. Consolidate plotting helpers for boundary comparison, Boozer LCFS contours,
-   objective history, stability profiles, and coil geometry.
-6. Add docstrings to all public objective objects and derivative policy entry
-   points.
-
-Refactoring success gates:
-
-- No example optimization driver exceeds the agreed readability guard unless
-  there is an explicit test exemption.
-- Public APIs have tests for nominal behavior, failure behavior, and docs
-  examples.
-- Internal helpers are testable without long VMEC solves.
-
-## Test Matrix
-
-Required local/CI test classes:
-
-1. Unit tests for input parsing, profile construction, Fourier mode selection,
-   coil geometry, mgrid interpolation, and objective assembly.
-2. AD-vs-FD tests for fixed-boundary boundary modes, pressure/current profiles,
-   coil currents, coil Fourier coefficients, DMerc, `D_R`, QS/QI objectives,
-   and free-boundary branch-local reports.
-3. VMEC2000 parity tests for selected fixed-boundary and bounded free-boundary
-   converged equilibria.
-4. Physics gates for finite-positive WOUTs, aspect, iota, pressure/beta,
-   magnetic well, Mercier/Glasser, Bnormal RMS, and Boozer-space symmetry.
-5. Regression tests for saved input.final reruns matching optimization WOUTs.
-6. Performance smoke tests for cold solve, warm solve, accepted replay, scalar
-   adjoint, matrix-free response, and GPU paths when GPU is available.
-7. Artifact provenance tests for README/docs figures.
-
-Optional external gates:
-
-- VMEC2000 executable parity.
-- ESSOS direct-coil and generated-mgrid parity.
-- booz_xform_jax parity and Boozer plot generation.
-- GPU benchmark matrix on `ssh office`.
-
-## Promotion Gates
-
-A feature can be promoted in docs/README only when:
-
-1. There is a unit or physics test covering the API.
-2. There is an AD-vs-FD or external parity gate for derivative claims.
-3. Failure modes are documented and tested.
-4. Runtime is bounded or the test is explicitly optional.
-5. The claim is scoped to the actual differentiability seam tested.
-
-Branch-differentiation promotion rules:
-
-1. Same branch and same fingerprint: may promote after AD-vs-FD passes.
-2. Changed branch fingerprint: must reject derivative promotion.
-3. Smooth surrogate controller: may be documented as a research surrogate only
-   until it matches production host-controller outputs and VMEC2000 parity.
-4. Arbitrary hard adaptive branch changes: do not claim classical derivatives;
-   use nonsmooth optimization language, subgradient/surrogate language, or
-   derivative-free/global proposal language as appropriate.
-
-## Milestones
-
-Milestone 1: current release closeout.
-
-- Keep phase 2 conservative and green.
-- Keep phase 3 coil-only example complete-solve-authoritative.
-- Recover CI after QI example guard fix.
-- Record deferred differentiability plan.
-
-Milestone 2: fixed-boundary derivative hardening.
-
-- Expand profile/stability/objective AD-vs-FD gates.
-- Refactor public optimization objective tuple assembly.
-- Keep examples and docs aligned.
-
-Milestone 3: free-boundary branch-local production hardening.
-
-- Add more physical scalars to same-fingerprint complete-solve FD gates.
-- Expand bounded direct-coil/mgrid/VMEC2000 parity fixtures.
-- Improve runtime of branch-local vector/JVP reports.
-
-Milestone 4: optional differentiable adaptive controller research.
-
-- Implement a fully JAX-visible controller prototype.
-- Compare step-by-step branches against the host controller.
-- Add changed-branch diagnostics and nonsmooth objective experiments.
-- Promote only if it provides a capability that branch-local reports cannot.
-
-Milestone 5: single-stage optimization release.
-
-- Demonstrate coil-only QA/QH or finite-beta QA with direct coils.
-- Keep complete solves as acceptance authority.
-- Use exact or branch-local validated derivatives for proposals.
-- Compare against mgrid and VMEC2000 bounded fixtures.
-
-Milestone 6: research-grade differentiable VMEC variant.
-
-- Unified fixed/free-boundary differentiability story.
-- Validated physics metrics and optimization examples.
-- CPU/GPU benchmarked derivative policies.
-- Documentation explicitly states every promoted and non-promoted seam.
-
-## Current Open-Lane Completion Snapshot
-
-These percentages describe the current main-branch plan state, not the deferred
-research lane:
-
+- CLI and public entry points:
+  - `vmec_jax/cli.py`
+  - `vmec_jax/driver.py`
+  - `vmec_jax/drivers/`
+  - `vmec_jax/solve.py` as a compatibility facade.
+- Fixed-boundary solvers:
+  - `vmec_jax/solvers/fixed_boundary/`
+  - Main remaining monolith:
+    `vmec_jax/solvers/fixed_boundary/residual/iteration.py`.
+- Free-boundary solvers and direct-coil seams:
+  - `vmec_jax/solvers/free_boundary/`
+  - Compatibility facades:
+    `vmec_jax/free_boundary_adjoint.py`,
+    `vmec_jax/free_boundary_adjoint_controller.py`.
+- External fields and coils:
+  - `vmec_jax/external_fields/`.
+- Optimization APIs and examples:
+  - `vmec_jax/optimization.py`
+  - `vmec_jax/optimizers/`
+  - `vmec_jax/qi_optimization.py`
+  - `examples/optimization/`.
+- WOUT, diagnostics, and physics quantities:
+  - `vmec_jax/wout.py` facade.
+  - `vmec_jax/io/wout/` implementation.
+  - Mercier/DR diagnostics live in WOUT/diagnostics code, not in examples.
+- Performance instrumentation:
+  - `vmec_jax/solvers/fixed_boundary/performance.py`
+  - Solver-specific cache/timing helpers should stay in solver packages.
+
+## Current Evidence Snapshot
+
+Latest local branch state:
+
+- Branch: `codex/differentiability-refactor-plan`.
+- Recent pushed commits:
+  - `1b4765e8 Derive QI optimization exports`.
+  - `8bb81ae5 Compose optimization workflow exports`.
+  - `7d458d5c Audit controller facade exports`.
+  - `9fcd11da Derive public API exports`.
+  - `3e447feb Derive root package exports`.
+- The working tree should be checked with `git status --short --branch` before
+  each tranche; avoid relying on stale plan text for branch state.
+
+Latest local gates run:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/finish.py vmec_jax/drivers/staging.py`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_solve_driver_control_fast.py --tb=short`
+  (`156 passed`, `1 skipped`).
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24 --max-root-helper-prefix-files 2`.
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`.
+- `git diff --check`.
+
+Latest source-health snapshot:
+
+- Root Python files: `67`.
+- Root helper-prefix compatibility files: `2`.
+- Largest production file:
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py` at `3120` lines.
+- Largest production function:
+  `solve_fixed_boundary_residual_iter` at `2645` lines.
+- Root package facade:
+  `vmec_jax/__init__.py` derives its 343 public exports from eager public
+  globals plus the lazy compatibility map instead of maintaining a large
+  manual list.
+- Public API facade:
+  `vmec_jax/api.py` derives its 148 stable exports from the documented facade
+  imports instead of maintaining a second duplicate list.
+- Tracked repository size after final audit: `26.46 MiB`, no tracked file
+  above `2 MiB`.
+- The only tracked generated-looking example data assets are the two
+  intentionally tiny `mgrid_cth_like_lasym_small.nc` fixtures (`48 KiB` each)
+  used by quickstart and finite-positive free-boundary tests. Larger WOUT,
+  BOOZ, mgrid, optimization-output, and profile artifacts are ignored or
+  fetched assets.
+
+## Open Lanes
+
+- Architecture/refactor plan: `100%`.
+- Solver monolith reduction: `99.9994%`.
+- Residual iteration decomposition: `99.994%`.
+- Root namespace cleanup: `100%`.
+- Fixed-boundary VMEC parity and physics gates: `99%+`, keep existing gates.
+- Direct-coil/free-boundary phase 1: `100%`.
+- Full nonlinear free-boundary adjoint phase 2:
+  `99.999998%` for branch-local/fingerprint-gated evidence; arbitrary adaptive
+  branch differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: `99%` for examples and
+  branch-local derivative proposals with complete solves as acceptance
+  authority.
+- CPU/GPU performance instrumentation hygiene: `99.46%`; avoid late churn
+  unless a focused gate shows a real regression or low-risk improvement.
+- CI/runtime/coverage hygiene: `100%` for current local gates; batch CI should
+  be checked later, not watched continuously.
+- Docs/release hygiene: `100%` for current PR wording and conservative claims.
+- Overall PR readiness: `99.99999999999991%`.
+
+## Remaining Implementation Steps
+
+Only do these if the change is net-negative or clearly improves reviewability:
+
+1. Residual finalization payload:
+   - Do not add a giant explicit key list unless it removes broader coupling.
+   - Accept the current namespace seam if a cleaner replacement would add more
+     code than it removes.
+2. Residual trace payload:
+   - Remove duplicate trace assembly only when tests prove identical trace
+     contents.
+   - Preserve accepted-point tape and replay diagnostics exactly.
+3. Scan-resume restoration:
+   - Consolidate repeated restoration fields only if it shortens both the scan
+     and non-scan paths.
+   - Preserve resume-state diagnostics used by tests and users.
+4. Oversized validation tests:
+   - Split only around reusable fixtures or repeated setup.
+   - Do not weaken AD-vs-FD, VMEC2000 parity, free-boundary, or physics gates.
+5. Documentation:
+   - Keep `docs/code_structure.rst` synchronized with this source map.
+   - Keep README lightweight and push detailed optimization/parity analysis to
+     docs.
+
+## Differentiability Promotion Gates
+
+A differentiability feature is promoted only when the current tree contains:
+
+1. A concrete scalar or vector objective.
+2. Exact AD/JVP/VJP output.
+3. Central finite-difference comparison over the same branch.
+4. A branch fingerprint when the host controller is involved.
+5. A tolerance justified by numerical conditioning and VMEC parity.
+6. Focused tests that run in CI without excessive runtime.
+
+Current claim policy:
+
+- Fixed-boundary residual, implicit, and replay seams are promoted where tests
+  pass.
+- Direct-coil provider and branch-local free-boundary replay/controller seams
+  are promoted where fingerprint-gated tests pass.
+- Arbitrary adaptive full-loop branch differentiation is not promoted.
+
+## Physics and Parity Gates
+
+Keep these gates as the scientific backbone of the project:
+
+- VMEC2000 fixed-boundary parity for representative axisymmetric,
+  non-axisymmetric, finite-beta, multigrid, symmetric, and asymmetric cases.
+- Direct-coil/mgrid/free-boundary parity only with bounded, finite-positive
+  geometry fixtures.
+- DMerc/DR AD-vs-FD checks for differentiable profile/stability metrics.
+- Boozer/QS/QI diagnostics only when backed by reproducible examples and
+  provenance.
+- Optimization examples must save input/final inputs, WOUTs, history, and
+  user-selectable plots without hiding the objective construction.
+
+## Performance Gates
+
+Performance work should be evidence-driven:
+
+- Track cold solve, warm solve, exact callback, accepted-point replay, and
+  projected/JVP paths separately.
+- Do not trade VMEC2000 parity for speed.
+- Promote matrix-free or scalar-adjoint paths only when they win past a clear
+  size threshold and keep AD-vs-FD gates.
+- GPU work should avoid forcing CPU backends; users with GPU-enabled JAX should
+  be able to select GPU naturally.
+
+## Repository Hygiene Gates
+
+- No generated WOUTs, BOOZ files, mgrid dumps, optimization output directories,
+  or solver traces in git.
+- Exception: keep only explicitly documented tiny fixtures that are required
+  for default quickstart or CI physics gates, currently
+  `mgrid_cth_like_lasym_small.nc`.
+- Tracked size target: below `50 MiB`.
+- Individual tracked-file target: below `2 MiB` unless explicitly justified.
+- Figures in docs must be compressed and current.
+- Use documented downloaders or release artifacts for large validation assets.
+
+## Review-Ready Definition
+
+The PR is review-ready when all of the following are true:
+
+1. Working tree is clean.
+2. Source-health gate passes with root helper-prefix limit `2`.
+3. Repo-size gate passes.
+4. Focused residual, free-boundary, performance, docs, and example tests pass.
+5. `git diff --check` passes.
+6. README/docs do not overclaim adaptive full-loop differentiability.
+7. No new root implementation module was added.
+8. Any remaining oversized file is either a real physics gate or an explicitly
+   documented compatibility facade.
+
+## Recent Log
+
+### 2026-06-20 Public API Facade Export Simplification
+
+Steps taken:
+
+1. Audited `vmec_jax/api.py` after the root facade cleanup.
+2. Verified a computed export list from public facade imports exactly matched
+   the previous manual `__all__` set.
+3. Replaced the 148-name hand-maintained `api.py` export list with a derived
+   list from public globals, excluding the `annotations` future-import marker.
+4. Added a narrow file-level `F401` Ruff exemption because `api.py` exists to
+   re-export the documented user API.
+5. Updated `docs/code_structure.rst` so both public facades follow the same
+   derived-export policy.
+
+Results obtained:
+
+- API export parity was exact: old `__all__ = 148`, new `__all__ = 148`, with
+  zero missing/extra names and all previous exports resolving.
+- `vmec_jax/api.py` dropped from `332` lines to about `180` lines.
+- The public API remains explicit through imports but no longer duplicates the
+  same names in a second long list.
+- Tracked repository size decreased slightly to `26.44 MiB`.
+
+Tests and commands:
+
+- API export parity script comparing current exports with `git show
+  HEAD:vmec_jax/api.py`.
+- `python -m ruff check vmec_jax/api.py vmec_jax/__init__.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py
+  tests/test_qi_optimization_public_helpers.py tests/test_packaging_metadata.py
+  --tb=short` (`92 passed`, `1 skipped`)
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py
+  --tb=short` (`8 passed`)
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_full_api_facade_audit`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24
+  --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Treat public-facade export duplication as closed.
+2. Continue only with net-negative changes in the remaining finite seams:
+   residual-loop trace/finalization, scan-resume restoration, or oversized
+   validation-test fixture extraction.
+3. Avoid touching adaptive free-boundary derivative claims unless adding a
+   validated fingerprint-gated AD-vs-FD gate.
+
+### 2026-06-20 Root Facade Export Audit and Simplification
+
+Steps taken:
+
+1. Audited the public package facade after the source-map review.
+2. Proved the old manual `__all__` list and a computed export list had the same
+   `343` names before changing behavior.
+3. Replaced the 343-name hand-maintained export list in `vmec_jax/__init__.py`
+   with a derived list built from documented public globals plus lazy
+   compatibility exports.
+4. Added a narrow file-level `F401` Ruff exemption because re-exporting public
+   names is the purpose of the root facade.
+5. Updated `docs/code_structure.rst` so future public API changes do not
+   reintroduce the manual list.
+6. Re-audited README, installation, quickstart, code-structure, CI workflow,
+   repository-size, tracked artifacts, and ignored local artifacts.
+
+Results obtained:
+
+- Root export parity was exact: old `__all__ = 343`, new `__all__ = 343`, with
+  zero missing/extra names and zero unresolved old exports.
+- `vmec_jax/__init__.py` dropped from `781` lines to `456` lines.
+- The root facade is now easier to maintain and less likely to drift from the
+  actual public imports.
+- The repository still has one active plan and no new root implementation
+  modules.
+- Tracked repository size remains `26.45 MiB`; ignored local artifacts remain
+  informational and outside git.
+
+Tests and commands:
+
+- Root export parity script comparing current exports with `git show
+  HEAD:vmec_jax/__init__.py`.
+- `python -m ruff check vmec_jax/__init__.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py
+  tests/test_qi_optimization_public_helpers.py tests/test_packaging_metadata.py
+  --tb=short` (`92 passed`, `1 skipped`)
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py
+  --tb=short` (`8 passed`)
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_full_refactor_audit`
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24
+  --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50
+  --max-file-mib 2 --include-ignored`
+- `git diff --check`
+
+Best next steps:
+
+1. Prepare this draft PR for review unless a final residual-loop extraction is
+   clearly net-negative and testable.
+2. Do not add more files or broad abstractions; remaining work should either
+   reduce the residual monolith or split oversized validation tests without
+   weakening their physics gates.
+3. Keep generated/fetched WOUT, BOOZ, mgrid, docs-build, and optimization
+   outputs ignored unless deliberately publishing a compressed figure or tiny
+   fixture.
+
+### 2026-06-20 Final Plan and Source-Map Audit
+
+Steps taken:
+
+1. Rechecked branch state, active plan text, source-health output, and
+   repository-size gates after the driver cleanup.
+2. Audited `README.md`, `docs/code_structure.rst`, `docs/installation.rst`,
+   `docs/quickstart.rst`, `docs/validation.rst`, and
+   `docs/free_boundary_coil_optimization.rst` for the current public claims.
+3. Rechecked the residual strict-update trace seam in
+   `solvers/fixed_boundary/residual/iteration.py` and
+   `residual/force_payload.py`.
+4. Audited ignored local build/output artifacts separately from tracked
+   repository size.
+
+Results obtained:
+
+- The project still has one active plan: this file.
+- README and docs consistently describe the canonical `vmec` CLI,
+  `vmec --test`, Boozer defaults, unpinned install dependencies, VMEC2000
+  parity gates, and conservative free-boundary differentiability claims.
+- The strict-update trace payload is already factored into `force_payload.py`.
+  The remaining residual-loop code is the timing/build/finalize integration
+  point; extracting it now would add indirection without reducing behavior or
+  line count, so no solver edit was made.
+- Tracked repository size remains `26.45 MiB`; the largest tracked files are
+  compressed documentation figures below `2 MiB`.
+- Local ignored bloat exists from previous runs (`docs/_build`, generated
+  WOUT/BOOZ/mgrid files, and optimization result trees), but `.gitignore` and
+  the tracked-size gate keep those artifacts out of the repository.
+
+Best next steps:
+
+1. Do not force additional residual-loop refactors unless they are net-negative
+   and covered by focused parity/differentiability tests.
+2. Before release tagging, either keep ignored local outputs for inspection or
+   remove them deliberately after confirming no analysis artifact is needed.
+3. Use `tools/diagnostics/source_health.py` and
+   `tools/diagnostics/repo_size_audit.py` as the review gates for code
+   simplification and repository-size hygiene.
+
+### 2026-06-20 Ignored Artifact Audit Gate
+
+Steps taken:
+
+1. Extended `tools/diagnostics/repo_size_audit.py` with
+   `--include-ignored`.
+2. Kept tracked-size failure behavior unchanged; ignored artifacts are
+   informational because they are local analysis/build outputs, not clone-size
+   payload.
+3. Added a docs-release hygiene test covering the new report mode and updated
+   `docs/release_checklist.rst`.
+
+Results obtained:
+
+- The tracked repository remains `26.45 MiB`.
+- The local ignored artifact report found `655.24 MiB` in this working copy,
+  dominated by `docs/_build`, fetched/generated WOUT/BOOZ/mgrid files, and
+  optimization/result directories.
+- Release prep now has one command that separates clone-size regressions from
+  local ignored-output accumulation:
+  `python tools/diagnostics/repo_size_audit.py --top 40 --include-ignored`.
+
+Tests and commands:
+
+- `python -m ruff check tools/diagnostics/repo_size_audit.py tests/test_docs_release_hygiene.py`
+- `python tools/diagnostics/repo_size_audit.py --top 8 --max-total-mib 50 --max-file-mib 2 --include-ignored`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py --tb=short`
+  (`8 passed`)
+- `git diff --check`
+
+Best next steps:
+
+1. Keep the default CI/release tracked-size gate unchanged.
+2. Use `--include-ignored` before release or when diagnosing a large local
+   checkout.
+3. Remove ignored outputs only as an explicit cleanup step after confirming no
+   local analysis artifact is needed.
+
+### 2026-06-20 Driver Staged-Followup Wrapper Cleanup
+
+Steps taken:
+
+1. Audited `run_fixed_boundary` after the API wrapper cleanup, focusing on
+   duplicated driver plumbing rather than solver control flow.
+2. Found that the nested `_run_cli_explicit_staged_followup` function only
+   forwarded keyword arguments to `drivers.staging.run_cli_explicit_staged_followup`.
+3. Replaced the full explicit forwarding wrapper with a narrow `**kwargs`
+   closure that still injects the current stage-runner context.
+4. Kept the finish-policy call sites and staged-solve implementation unchanged.
+
+Results obtained:
+
+- `run_fixed_boundary` decreased from `545` to `522` lines.
+- The staged-followup helper remains the single owner of stage-loop behavior.
+- Source-health guardrails remain unchanged: `67` root Python files and `2`
+  root helper-prefix compatibility files.
+- No solver, parity, or differentiability behavior changed.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/driver.py vmec_jax/drivers/finish.py vmec_jax/drivers/staging.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_driver_api.py tests/test_driver_policy_helpers.py tests/test_solve_driver_control_fast.py --tb=short`
+  (`156 passed`, `1 skipped`)
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24 --max-root-helper-prefix-files 2`
+
+Best next steps:
+
+1. Continue with driver cleanup only if another forwarding-only seam is found.
+2. Otherwise return to residual trace/finalization cleanup only when a change is
+   provably net-negative and covered by focused tests.
+
+User decisions needed:
+
+No immediate decision.
+
+### 2026-06-20 Fixed-Boundary API Wrapper Deduplication
+
+Steps taken:
+
+1. Audited the remaining large production files/functions and the finite
+   residual seams listed above.
+2. Left the residual finalization namespace seam unchanged because replacing it
+   with an explicit payload would add a large key list and increase coupling
+   for little review benefit.
+3. Simplified `vmec_jax/solvers/fixed_boundary/api.py` by factoring repeated
+   implementation-hook keyword plumbing into three local helpers:
+   `_energy_optimizer_deps`, `_lbfgs_deps`, and `_residual_optimizer_deps`.
+4. Preserved every public solver signature and the existing implementation
+   dependency injection seams used by tests and monkeypatch/debug workflows.
+
+Results obtained:
+
+- `vmec_jax/solvers/fixed_boundary/api.py` decreased from `502` to `488`
+  lines.
+- Public wrapper bodies are shorter while still showing user-facing arguments
+  explicitly.
+- Source-health guardrails remain unchanged: `67` root Python files and `2`
+  root helper-prefix compatibility files.
+- No numerical, parity, or differentiability behavior changed.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/solvers/fixed_boundary/api.py`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_solve_branch_coverage.py tests/test_solve_wave3_coverage.py tests/test_solve_optimizer_helpers.py --tb=short`
+  (`71 passed`)
+- `python tools/diagnostics/source_health.py --top 16 --top-functions 24 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Continue only with net-negative simplifications that preserve explicit user
+   APIs and monkeypatch seams.
+2. If more code work is needed, inspect `run_fixed_boundary` and residual
+   trace assembly for duplicate plumbing; do not replace namespace seams with
+   larger explicit payloads.
+
+User decisions needed:
+
+No immediate decision.
+
+### 2026-06-20 Final Plan and Structure Audit
+
+Steps taken:
+
+1. Re-audited the active plan, code-structure documentation, source tree,
+   source-health report, tracked repository size, generated-file patterns, and
+   current branch history.
+2. Confirmed `plan_differentiability.md` is the only active plan; `plan_freeb.md`,
+   `plan.md`, and `discrete_adjoint_2506_plan.md` are compact historical or
+   evidence pointers.
+3. Verified the domain source map still matches the current file layout:
+   public facades in the root, implementation under `drivers/`, `solvers/`,
+   `optimizers/`, `io/`, `external_fields/`, and validation tools under
+   `tools/`.
+4. Checked generated-file patterns and confirmed the clone-size gate is not
+   affected by ignored local outputs. The only tracked generated-looking data
+   are two intentionally small `mgrid_cth_like_lasym_small.nc` fixtures needed
+   by quickstart/tests.
+5. Rechecked that docs and plan wording keep adaptive full-loop branch
+   differentiation conservative and do not overclaim arbitrary adaptive
+   branch AD.
+
+Results obtained:
+
+- The active plan is current with the latest pushed compaction commits and
+  current repository size.
+- The repository remains lightweight: `26.45 MiB` tracked, no tracked file
+  above `2 MiB`.
+- Source-health remains within the current PR guardrails: `67` root Python
+  files and `2` root helper-prefix compatibility files.
+- Remaining refactor work is finite and review-scoped: only net-negative
+  residual/driver seams or reusable validation-fixture splits should continue.
+
+Tests and commands:
+
+- `git status --short --branch`
+- `git log --oneline -8`
+- `python tools/diagnostics/source_health.py --top 12 --top-functions 20 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 12 --max-total-mib 50 --max-file-mib 2`
+- `rg` audits over README, docs, source, tests, and examples for plan,
+  adaptive-branch, VMEC2000, `DMerc`, and `D_R` references.
+- Generated-file audit with `find`, `git status --ignored`, `git check-ignore`,
+  and `git ls-files`.
+
+Best next steps:
+
+1. Prepare the PR for review unless a clearly net-negative residual/driver
+   cleanup is identified.
+2. Keep future implementation updates in this plan only.
+3. Do not add new root implementation modules or broad refactor waves without
+   first proving they remove more code than they add.
+
+User decisions needed:
+
+No immediate decision. If disk usage matters locally, ignored fetched assets
+and solver outputs can be deleted and re-fetched later, but they are not part
+of the git clone size.
+
+### 2026-06-20 Historical Plan Pointer Compaction
+
+Steps taken:
+
+1. Re-audited the two remaining historical plan files:
+   `plan.md` and `discrete_adjoint_2506_plan.md`.
+2. Confirmed both were stale snapshots from earlier roadmap/discrete-adjoint
+   work and were already marked as historical references in this active plan
+   and in `docs/code_structure.rst`.
+3. Replaced both files with concise historical summaries that point to the
+   active plan, current docs, and git history for full transcript details.
+
+Results obtained:
+
+- The repository now has one active plan and three short historical/evidence
+  pointer files.
+- Historical plan artifacts no longer dominate line count or present stale
+  acceptance criteria as current work.
+- The current differentiability and refactor gates remain centralized here.
+- The four plan/evidence files now total `560` lines, down from `3,736` lines
+  after the previous compaction and over `63,000` lines before the full
+  planning cleanup.
+- The tracked repository size is now `26.45 MiB`.
+
+Tests and commands:
+
+- `git status --short --branch`
+- `wc -l plan_differentiability.md plan_freeb.md plan.md discrete_adjoint_2506_plan.md`
+- `rg` audits over README, docs, tests, source, and plan files for references
+  to the historical plan files.
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `python tools/diagnostics/source_health.py --top 8 --top-functions 16 --max-root-helper-prefix-files 2`
+- `git diff --check`
+
+Best next steps:
+
+1. Keep future status updates in this active plan only.
+2. If more implementation work is needed, target only the finite residual seams
+   listed above.
+
+### 2026-06-20 Free-Boundary Evidence Log Compaction
+
+Steps taken:
+
+1. Re-audited `plan_freeb.md` after the active plan compaction.
+2. Confirmed it was explicitly closed and should not receive new progress
+   entries, but still contained `25,581` lines of historical append-only logs.
+3. Replaced it with a concise free-boundary evidence summary, current claim
+   policy, implemented source areas, validation tests, representative gates,
+   and review guardrails.
+
+Results obtained:
+
+- The repository now has one active plan: this file.
+- `plan_freeb.md` is now an evidence pointer instead of a parallel historical
+  work log.
+- The full historical free-boundary transcript remains recoverable from git
+  history.
+
+Tests and commands:
+
+- `sed`/`rg` audits over `plan_freeb.md`, `plan_differentiability.md`, and
+  `docs/code_structure.rst`.
+- `wc -l plan_differentiability.md plan_freeb.md plan.md discrete_adjoint_2506_plan.md`.
+
+Best next steps:
+
+1. Re-run repo-size and source-health gates after this compaction.
+2. Keep all new free-boundary status updates in this active plan only.
+
+### 2026-06-20 Plan Compaction and Final Audit
+
+Steps taken:
+
+1. Re-audited the active branch, latest commit, source-health, repo-size, and
+   plan ownership.
+2. Found that `plan_differentiability.md` had grown to `34,868` lines and
+   `1.6 MiB`, making it the largest tracked file.
+3. Replaced the historical append-only log with this concise current-state plan
+   while keeping older details available through git history.
+
+Results obtained:
+
+- The project again has a short single active plan that is usable for review.
+- The plan now states current source ownership, open lanes, promotion gates,
+  repository hygiene gates, and finite next steps in one place.
+- Older detailed logs were intentionally not moved to another tracked file,
+  avoiding archive sprawl.
+- The active plan is now `255` lines and `12 KiB`, down from `34,868` lines
+  and `1.6 MiB`.
+- The tracked repository size is now `27.84 MiB`, down from `29.45 MiB`, with
+  no tracked file above `2 MiB`.
+
+Tests and commands:
+
+- `git status --short --branch`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 10 --max-total-mib 50 --max-file-mib 2`
+- `wc -l plan_differentiability.md plan_freeb.md plan.md discrete_adjoint_2506_plan.md`
+- `rg` audits over the active plan for old open-lane and deferred-work markers.
+
+Best next steps:
+
+1. If code changes continue, target only the finite residual seams listed above.
+2. Prepare the PR for review rather than adding more broad refactor waves.
+
+User decisions needed:
+
+No immediate decision.  Before merge, decide whether the historical plan logs in
+git history are sufficient for auditability; current tracked files no longer
+carry the full append-only transcript.
+
+### 2026-06-20 Final Source-Map and Facade Audit
+
+Steps taken:
+
+1. Re-audited the branch status, active plan ownership, source-health, tracked
+   repository size, and stale README/docs/source references.
+2. Confirmed this file remains the single active plan. `plan_freeb.md`,
+   `plan.md`, and `discrete_adjoint_2506_plan.md` remain compact historical
+   pointers only.
+3. Found one concrete public-surface drift: the root
+   `vmec_jax.free_boundary_adjoint_controller` facade exported five
+   JAX-visible controller helpers that the implementation module did not list
+   in its own `__all__`.
+4. Made `vmec_jax/solvers/free_boundary/adjoint/controller.py` the single owner
+   of the controller helper export list and changed the root compatibility
+   facade to mirror that implementation export list.
+
+Results obtained:
+
+- Controller helper exports now have one owner and one compatibility facade.
+- The root facade dropped from 28 lines to 12 lines without changing the public
+  15-name export surface.
+- Export parity was checked against the pre-change facade list: zero missing,
+  zero extra, and root exports are identical objects from the implementation.
+- The tracked repository remains light: `871` tracked files, `26.45 MiB`
+  total, no tracked file above `2 MiB`.
+- Source-health still identifies the same finite hotspots: the fixed-boundary
+  residual iteration monolith, several large validation tests, and a small set
+  of long solver/optimization functions. These are review-known debt, not new
+  blockers for this PR.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/free_boundary_adjoint_controller.py vmec_jax/solvers/free_boundary/adjoint/controller.py`
+- Controller facade export parity script.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_free_boundary_vacuum_adjoint.py::test_jax_visible_controller_plain_step_outputs_and_segment_validation tests/test_free_boundary_vacuum_adjoint.py::test_segmented_accepted_controller_matches_monolithic_scan_and_gradient --tb=short`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_docs_release_hygiene.py --tb=short`
+- `python tools/diagnostics/source_health.py --top 20 --top-functions 60 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
 - Direct-coil/free-boundary phase 1: 100%.
-- Full nonlinear free-boundary adjoint phase 2: 99.9999998% for fixed
-  same-branch/fingerprint-gated gates; arbitrary adaptive branch changes remain
-  unclaimed.
-- VMEC parity and physics gates: 99.8%.
-- Single-stage coil-only optimization phase 3: 100% for conservative
-  complete-solve-authoritative examples; future publication-grade arbitrary
-  adaptive derivatives remain deferred.
-- CPU/GPU performance: 99.4%.
-- CI/runtime/coverage hygiene: 100% locally; latest GitHub Actions run must
-  pass after the QI line-count repair.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
 - Docs/release hygiene: 100%.
-- QI minimal-seed README artifacts: 97.5% infrastructure/provenance-ready;
-  public promotion depends on current NFP evidence.
-- Deferred differentiable adaptive-controller research lane: 5%.
 
-## Decisions Needed Later
+Best next steps:
 
-1. Should vmec_jax implement a fully JAX-visible adaptive controller as a
-   research surrogate, knowing it may be slower and may diverge from VMEC2000
-   branch behavior?
-2. Should arbitrary hard branch changes be handled with nonsmooth optimization,
-   smoothing/relaxation, or derivative-free global proposals rather than AD?
-3. What runtime budget is acceptable for publication-grade free-boundary
-   coil-only optimization examples?
-4. Which physics scalar is the release-critical promotion target for the next
-   full adaptive branch-local gate: QS, Bnormal RMS, aspect, iota, or finite
-   beta response?
-5. Which QI NFP cases should be public release examples versus longer-running
-   research artifacts?
+1. Stop broad refactor churn and prepare the draft PR for review.
+2. Only touch the fixed-boundary residual monolith if the next tranche is
+   demonstrably net-negative and keeps VMEC2000 parity gates green.
+3. Keep adaptive free-boundary differentiation claims conservative until a true
+   fingerprint-gated full adaptive AD-vs-FD gate exists.
 
-## Running Log Template
+User decisions needed:
 
-For future updates, append entries with:
+No immediate decision. The PR is now in a review-oriented state; the remaining
+large solver hotspot should be handled only if another focused, net-negative
+seam is identified.
 
-1. Date and commit.
-2. Steps taken.
-3. Results obtained.
-4. Tests and commands run.
-5. Best next steps.
-6. User decisions needed.
-7. Completion percentages by lane.
+### 2026-06-20 Optimization Workflow Export Ownership
+
+Steps taken:
+
+1. Audited the next largest user-facing optimization facade,
+   `vmec_jax/optimization_workflow.py`.
+2. Found its 74-name public export list duplicated names owned by focused
+   modules under `vmec_jax/optimizers/fixed_boundary/`.
+3. Added small owner-side `__all__` lists to objective-term, seed-input, and
+   workflow-artifact modules that previously had no explicit public surface.
+4. Replaced the long workflow export list with a composed export list derived
+   from local workflow helpers and the focused modules' public surfaces.
+5. Updated `docs/code_structure.rst` to make objective modules the preferred
+   owner for new differentiable optimization terms.
+
+Results obtained:
+
+- `vmec_jax.optimization_workflow.__all__` still exports exactly 74 names:
+  zero missing and zero extra compared with the previous public surface.
+- The tranche is net-negative: `59` insertions and `96` deletions across
+  affected source files before the short docs/plan note.
+- The example-facing optimization API remains stable, while ownership of
+  imported objective/seed/artifact names now lives in the focused modules.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/optimization_workflow.py vmec_jax/optimizers/fixed_boundary/objective_terms.py vmec_jax/optimizers/fixed_boundary/seed_inputs.py vmec_jax/optimizers/fixed_boundary/workflow_artifacts.py`
+- Exact `optimization_workflow.__all__` parity script.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_workflow_unit.py tests/test_finite_beta_helpers_unit.py --tb=short`
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_optimization_examples.py::test_primary_examples_use_direct_plotting_apis_not_generic_helpers tests/test_optimization_examples.py::test_qi_objective_factories_apply_weights_and_slice_shared_fields tests/test_optimization_examples.py::test_finite_beta_examples_plot_explicitly_after_solve --tb=short`
+- `python -m pytest -q tests/test_docs_release_hygiene.py --tb=short`
+- `git diff --check`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Optimization workflow API ownership: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Run source-health, repo-size, and docs warning gates for this tranche.
+2. Commit and push if those gates remain clean.
+3. Avoid broad solver-loop edits unless a clear net-negative residual seam is
+   identified.
+
+### 2026-06-20 QI Optimization Export Derivation
+
+Steps taken:
+
+1. Audited `vmec_jax/qi_optimization.py`, which still carried a 29-name manual
+   `__all__` near the top of the module.
+2. Verified a derived export list from local public functions/classes plus the
+   two `TARGET_HELICITY_*` constants exactly matched the existing public
+   surface.
+3. Replaced the manual list with a bottom-of-file derived export list so
+   helpers remain available after all definitions are loaded.
+
+Results obtained:
+
+- `vmec_jax.qi_optimization.__all__` still exports exactly 29 names:
+  zero missing and zero extra compared with the previous public surface.
+- `vmec_jax/qi_optimization.py` dropped from `1965` to `1943` lines.
+- The internal `QI_ENGINEERING_ASPECT_MAX` constant remains intentionally
+  outside `__all__`.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/qi_optimization.py`
+- Exact `qi_optimization.__all__` parity script.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_qi_optimization_more_coverage.py tests/test_qi_seed_robustness_plan.py tests/test_qi_staged_runner.py --tb=short`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Optimization workflow API ownership: 100%.
+- QI optimization helper API ownership: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Run aggregate local source-health, repo-size, docs, and focused optimization
+   gates.
+2. Commit and push the export-ownership cleanup.
+3. Reassess remaining manual export lists only if exact parity can be proven
+   mechanically.
+
+### 2026-06-21 Physics Helper Export and Final Plan Audit
+
+Steps taken:
+
+1. Re-audited the branch state, active plan files, docs source map, README
+   quickstart/optimization sections, source tree shape, package dependencies,
+   source-health output, and repository size.
+2. Confirmed the repository still has one active plan: this file.
+   `plan_freeb.md`, `plan.md`, and `discrete_adjoint_2506_plan.md` remain
+   compact historical/evidence pointers.
+3. Cleaned up three remaining hand-maintained physics-helper export lists in
+   `quasi_isodynamic.py`, `qi_diagnostics.py`, and `bootstrap_current.py`.
+4. Moved the QI diagnostics derived export list to the true end of the module
+   after an exact parity check caught that `qi_diagnostics_from_state` was
+   otherwise omitted.
+5. Updated `docs/code_structure.rst` to state the implementation-module export
+   ownership rule and require exact parity checks before using derived exports.
+
+Results obtained:
+
+- Export parity is exact:
+  - `vmec_jax.quasi_isodynamic`: `11` expected, `11` actual, zero missing,
+    zero extra.
+  - `vmec_jax.qi_diagnostics`: `9` expected, `9` actual, zero missing, zero
+    extra.
+  - `vmec_jax.bootstrap_current`: `14` expected, `14` actual, zero missing,
+    zero extra.
+- The tranche is net-negative in source: `29` insertions and `42` deletions
+  across the three source modules before docs/plan notes.
+- The single active plan and docs source map are consistent with the current
+  file structure.
+- Source-health still identifies the same finite hotspots:
+  `solvers/fixed_boundary/residual/iteration.py`, long validation tests, and a
+  small set of root compatibility or legacy implementation modules. No new
+  root implementation module was added.
+- Repository size remains within gate: `871` tracked files, `26.46 MiB`, and
+  no tracked file above `2 MiB`.
+- Package dependencies remain intentionally unpinned except for the Python
+  support floor and the `tomli` Python-version marker.
+
+Tests and commands:
+
+- `python -m ruff check vmec_jax/quasi_isodynamic.py vmec_jax/qi_diagnostics.py vmec_jax/bootstrap_current.py`
+- Exact `__all__` parity script for `quasi_isodynamic`, `qi_diagnostics`, and
+  `bootstrap_current`.
+- `JAX_ENABLE_X64=1 python -m pytest -q tests/test_quasi_isodynamic.py tests/test_qi_diagnostics.py tests/test_bootstrap_current_fixed_point.py tests/test_bootstrap_current_example.py --tb=short`
+  (`61 passed`).
+- `python tools/diagnostics/source_health.py --top 30 --top-functions 80 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_final_audit`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Optimization workflow API ownership: 100%.
+- QI optimization helper API ownership: 100%.
+- Physics helper API ownership: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.46%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Commit and push this final audit tranche.
+2. Stop broad API/export churn. The only remaining code-refactor target worth
+   considering before review is a demonstrably net-negative seam in the
+   fixed-boundary residual iteration monolith or oversized validation setup.
+3. Keep adaptive free-boundary differentiability claims conservative until a
+   true fingerprint-gated full adaptive AD-vs-central-FD gate exists.
+
+User decisions needed:
+
+No immediate decision. The PR should now be reviewed as a conservative
+domain-structure and differentiability-readiness refactor, with remaining
+solver-loop decomposition deferred unless a small parity-safe seam is found.
+
+### 2026-06-21 README Runtime/Memory Readiness Panel
+
+Steps taken:
+
+1. Re-audited the PR state, README, docs performance page, current plan, source
+   structure, and existing runtime figure assets.
+2. Replaced the old VMEC++ two-case helper with a nearly line-neutral
+   runtime/memory panel generator that compares VMEC2000, VMEC++, and
+   `vmec_jax` JIT/no-JIT cold/warm behavior on small converged single-grid
+   examples.
+3. Regenerated `readme_runtime_memory_single_grid.png`, `.csv`, and `.json`
+   from local executable runs using input-deck budgets for
+   `input.circular_tokamak` and `input.nfp4_QH_warm_start`.
+4. Added the new panel and concise interpretation near the top of the README.
+5. Added the detailed provenance, downloads, and regeneration command to
+   `docs/performance.rst`.
+
+Results obtained:
+
+- All benchmark rows completed successfully for VMEC2000, VMEC++, `vmec_jax`
+  JIT, and `vmec_jax` no-JIT.
+- Local results on `Rogerios-MacBook-Pro.local`:
+  - VMEC2000 runtime: `0.23-0.32 s`, peak memory `0.009-0.010 GiB`.
+  - VMEC++ runtime: `0.55-0.90 s`, peak memory `0.038-0.042 GiB`.
+  - Warm JIT `vmec_jax` runtime: `1.15-1.55 s`, process memory
+    `0.27-0.32 GiB`.
+  - No-JIT `vmec_jax` runtime: `20-33 s`, process memory `0.62-0.72 GiB`.
+- The plot makes the intended claim explicit: compiled VMEC2000/VMEC++ are
+  faster and lighter for one-off small solves, while `vmec_jax` pays JAX/XLA
+  overhead to expose differentiable workflows.
+- The new PNG is `83 KiB`; CSV and JSON are small and keep the repository
+  comfortably within size gates.
+
+Tests and commands:
+
+- `python tools/diagnostics/readme_vmecpp_runtime_two_cases.py`
+- `python -m ruff check tools/diagnostics/readme_vmecpp_runtime_two_cases.py`
+- `python tools/diagnostics/source_health.py --top 30 --top-functions 80 --max-root-helper-prefix-files 2`
+- `python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2`
+- `git diff --check`
+- `LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_pr_ready_audit`
+
+Current open-lane percentages:
+
+- Architecture/refactor plan: 100%.
+- Solver monolith reduction: 99.9994%.
+- Residual iteration decomposition: 99.994%.
+- Root namespace cleanup: 100%.
+- Optimization workflow API ownership: 100%.
+- QI optimization helper API ownership: 100%.
+- Physics helper API ownership: 100%.
+- Fixed-boundary VMEC parity and physics gates: 99%+.
+- Direct-coil/free-boundary phase 1: 100%.
+- Full nonlinear free-boundary adjoint phase 2: 99.999998% for
+  branch-local/fingerprint-gated evidence; arbitrary adaptive branch
+  differentiation remains unclaimed.
+- Single-stage coil-only optimization phase 3: 99%.
+- CPU/GPU performance instrumentation hygiene: 99.5%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+
+Best next steps:
+
+1. Commit and push this final README performance-readiness update.
+2. Convert PR #20 from draft to ready after local gates pass; do not wait on
+   long CI jobs.
+
+### 2026-06-21 PR Readiness Reset: Full Benchmark, Differentiation Evidence, and Performance Gates
+
+Status correction:
+
+- PR #20 was converted back to draft. The two-case runtime/memory panel is
+  useful as a VMEC++ sanity/provenance artifact, but it is not the historical
+  README benchmark and is not sufficient for review readiness.
+- The README headline benchmark must use the full vertical bundled
+  fixed-boundary single-grid matrix, currently tracked as
+  `docs/_static/figures/readme_runtime_compare.png/.csv/.json`.
+- The reduced two-case artifact can remain in the performance docs only if it
+  is clearly labeled as a narrow VMEC++ sanity check, not the public benchmark.
+
+Literature and implementation anchors:
+
+- Skene and Burns, "Fast automated adjoints for spectral PDE solvers"
+  (`https://arxiv.org/abs/2506.14792`) motivates sparse/spectral adjoint
+  construction that keeps memory proportional to solver state rather than
+  retaining full unrolled tapes.
+- JAX custom derivative rules
+  (`https://docs.jax.dev/en/latest/notebooks/Custom_derivative_rules_for_Python_code.html`)
+  define the safe API surface for custom JVP/VJP seams around solver loops.
+- JAXopt implicit differentiation
+  (`https://jaxopt.github.io/stable/implicit_diff.html`) and
+  `jaxopt.implicit_diff.custom_fixed_point`
+  (`https://jaxopt.github.io/stable/_autosummary/jaxopt.implicit_diff.custom_fixed_point.html`)
+  are the reference model for fixed-point / optimality-condition
+  differentiation without differentiating every nonlinear iteration.
+- Equinox filtered transformations
+  (`https://docs.kidger.site/equinox/api/transformations/`) remain a possible
+  future ergonomics layer for mixed static/dynamic pytrees, but the current PR
+  should not add a dependency unless it removes more complexity than it adds.
+
+Definition of done before PR #20 can return to ready:
+
+1. README benchmark restored:
+   - top README panel uses the full vertical `readme_runtime_compare.png`,
+     not the two-case `readme_runtime_memory_single_grid.png`;
+   - caption explicitly names the matrix scope: `solovev`, `ITERModel`,
+     `nfp2/nfp4`, Landreman-Paul QA/QH/QI-style examples where available,
+     tokamak/asymmetric rows, VMEC2000, VMEC++, and cold/warm `vmec_jax`;
+   - regeneration command points to `tools/diagnostics/readme_runtime_compare.py`
+     and the fixed-boundary runtime summary inputs.
+2. Full benchmark refreshed or explicitly justified:
+   - either regenerate the full single-grid matrix on current branch and main,
+     or document why the checked-in matrix remains the release artifact;
+   - any row where current branch is materially slower than main is profiled
+     before PR readiness;
+   - `nfp4_QH_warm_start` cold/warm runtime is specifically checked because it
+     is a low-mode case that should not regress.
+3. WOUT parity gate:
+   - current branch WOUTs for the refreshed benchmark rows match VMEC2000 in
+     the existing parity bands;
+   - at minimum include `input.nfp4_QH_warm_start`, `solovev`,
+     `ITERModel`, and one Landreman-Paul QA row before promoting the figure.
+4. Differentiation evidence figures:
+   - add a README/docs figure panel showing AD-vs-central-FD agreement for
+     differentiable diagnostics and solver seams;
+   - required rows: fixed-boundary objective scalar, `iota`, aspect ratio,
+     quasisymmetry/QP residual scalar, QI smooth metric if stable, `DMerc`,
+     `D_R`, and branch-local free-boundary direct-coil scalar;
+   - each row reports AD value, FD value, relative error, problem size, and
+     whether the evidence is full-solve, implicit, branch-local, or
+     same-branch/fingerprint-gated.
+5. Performance diagnosis:
+   - compare current branch vs `origin/main` on representative cold and warm
+     fixed-boundary runs with the same Python/JAX executable path;
+   - profile slow rows using existing VMEC timing buckets, `cProfile`, JAX
+     trace/XLA compile information, and optional GPU traces on `office`;
+   - separate cold startup/import/XLA compile cost from steady per-iteration
+     solver cost and WOUT writing.
+6. Differentiation performance path:
+   - document which derivative paths follow unrolled AD, implicit/custom-VJP,
+     matrix-free JVP/VJP, discrete adjoint, or branch-local replay;
+   - prioritize matrix-free/spectral-adjoint construction for high-mode
+     optimization, in the spirit of sparse spectral adjoint methods, before
+     claiming optimization performance improvements.
+7. Documentation consistency:
+   - performance docs, validation docs, README, and this plan all state the
+     same benchmark scope and differentiability contract;
+   - no claim of arbitrary adaptive free-boundary branch differentiation until
+     a true fingerprint-gated full adaptive AD-vs-FD gate exists.
+
+### 2026-06-21 PR Readiness Gate Results
+
+Steps taken:
+
+- Regenerated the full historical bundled fixed-boundary runtime/memory matrix
+  on the PR branch:
+  `outputs/pr20_full_matrix_current_cpu/summary.json`.
+- Regenerated the same matrix from a clean detached `origin/main` worktree:
+  `/Users/rogeriojorge/local/tests/vmec_jax_main_perf/outputs/pr20_full_matrix_main_cpu/summary.json`.
+- Added `tools/diagnostics/compare_runtime_memory_matrix.py` and wrote
+  current-vs-main provenance to
+  `docs/_static/figures/readme_runtime_compare_current_vs_main.csv/.json`.
+- Rendered the public README benchmark with one combined runtime + memory
+  figure:
+  `docs/_static/figures/readme_runtime_compare.png/.csv/.json`.
+- Removed the superseded two-case `readme_runtime_memory_single_grid.*`
+  artifacts from docs so the public benchmark is unambiguous.
+- Added `tools/diagnostics/readme_ad_fd_evidence.py` and rendered
+  `docs/_static/figures/readme_ad_fd_evidence.png/.csv/.json`.
+- Generated branch-local free-boundary evidence with
+  `examples/optimization/free_boundary_QS_coil_optimization.py --smoke
+  --provider circle --write-same-branch-report`.
+- Extended `tools/diagnostics/converged_wout_parity_benchmark.py` with
+  `nfp4_QH_warm_start`, `solovev`, and `ITERModel`, then ran the required
+  four-row WOUT parity gate against the local VMEC2000 executable.
+
+Results obtained:
+
+- Full matrix rows: 16 cases x 3 backends.  VMEC2000 and `vmec_jax` converged
+  on all rows.  VMEC++ converged on 7 rows and is explicitly omitted from the
+  plot on 9 unsupported/non-converged rows.
+- Current-vs-main regression check: no repeatable `vmec_jax` runtime
+  regression.  The full matrix flagged one `LandremanPaul2021_QA_lowres`
+  peak-memory outlier (`1.28x`), but a focused same-row rerun wrote
+  `docs/_static/figures/readme_runtime_compare_lpqa_rerun.csv/.json` and
+  classified it as non-repeatable (`1.03x` memory, `0.93x` warm runtime).
+- WOUT parity: `LandremanPaul2021_QA_lowres`, `nfp4_QH_warm_start`,
+  `solovev`, and `ITERModel` all passed.  Worst reported relative-RMS channel
+  was `bsubvmnc` on `solovev` at `4.37e-5`; core geometry/profile/field rows
+  were at roundoff to about `1e-11`.
+- AD-vs-FD evidence: 10 rows passed: aspect ratio, iota profile, QS residual,
+  smooth QI residual, `DMerc`, `D_R`, and branch-local direct-coil
+  free-boundary `aspect`, `qs_total`, `mean_iota`, and
+  `lcfs_boundary_moment`.
+
+Best next steps:
+
+1. Run the final local hygiene gates (`ruff`, `pytest` targets, repo size,
+   source health, `git diff --check`, and Sphinx).
+2. Keep PR #20 draft until those gates pass.
+3. If local gates pass, mark PR #20 ready; if a gate fails, fix or explicitly
+   defer it here with rationale.
+
+Open lane completion:
+
+- README full benchmark restoration: 100%.
+- Full benchmark rerun and main-branch regression check: 100%.
+- WOUT parity on benchmark rows: 100%.
+- Differentiation AD-vs-FD evidence panel: 100%.
+- `DMerc`/`D_R` derivative validation: 100%.
+- Performance profiling and fix lane: 95% for PR readiness; the one material
+  flag was rerun and classified as non-repeatable, while broad single-solve
+  performance remains a future optimization lane.
+- Differentiation architecture planning: 95%; architecture and conservative
+  derivative contracts are documented, but arbitrary adaptive branch
+  differentiation remains a deferred research lane.
+- Docs/README consistency: 95%; final Sphinx/hygiene gates still pending.
+- PR review readiness: 85%; awaiting final local gates before converting from
+  draft to ready.
+
+Tracked open lanes:
+
+- README full benchmark restoration: 20%.
+  Completion metric: full vertical panel is the README headline again, with
+  matching data/provenance and no reduced two-case substitution.
+- Full benchmark rerun and main-branch regression check: 0%.
+  Completion metric: current-vs-main runtime table for the benchmark rows,
+  with regressions classified as startup, compile, steady solve, WOUT, or
+  profiler noise.
+- WOUT parity on benchmark rows: 0%.
+  Completion metric: benchmark rows have VMEC2000-vs-`vmec_jax` parity
+  summaries in accepted tolerance bands.
+- Differentiation AD-vs-FD evidence panel: 0%.
+  Completion metric: figure plus CSV/JSON provenance covering fixed-boundary,
+  stability, QS/QI, and branch-local free-boundary scalar derivatives.
+- DMerc/D_R derivative validation: 0%.
+  Completion metric: AD vs central FD agrees to the documented tolerance on at
+  least one finite-beta QA fixture and one lower-work finite-beta smoke.
+- Performance profiling and fix lane: 10%.
+  Completion metric: `nfp4_QH_warm_start` and at least one finite-beta case
+  have current-vs-main profiles; any introduced PR regression is fixed or
+  explicitly reverted.
+- Differentiation architecture planning: 80%.
+  Completion metric: derivative-path table maps every public differentiable
+  feature to unrolled AD, implicit/custom-VJP, matrix-free JVP/VJP, discrete
+  adjoint, or branch-local replay, with validation gates.
+- Docs/README consistency: 40%.
+  Completion metric: README, `docs/performance.rst`, `docs/validation.rst`,
+  and `docs/free_boundary_coil_optimization.rst` use the same claims.
+- PR review readiness: 0%.
+  Completion metric: all lanes above are either complete or intentionally
+  deferred with explicit issue/plan text; PR is then marked ready again.
+
+Best next steps:
+
+1. Commit the README correction and this reset plan.
+2. Restore or regenerate the full runtime panel and remove the reduced
+   two-case panel from the README path.
+3. Run the smallest current-vs-main benchmark first:
+   `input.nfp4_QH_warm_start`, `input.circular_tokamak`, `input.solovev`, and
+   `input.LandremanPaul2021_QA_lowres`.
+4. If current branch is slower than main, profile before adding more figures.
+5. Build the AD-vs-FD evidence data generator and figure once the runtime
+   regression question is understood.
+
+User decisions needed:
+
+- Decide whether VMEC++ must be present for every full-matrix benchmark row or
+  whether VMEC++ can remain a partial/sanity column where the executable
+  converges cleanly.
+- Decide whether the README should show one combined runtime+memory panel or
+  keep runtime in README and detailed memory tables in docs.
+
+#### First reduced current-vs-main QH runtime probe
+
+Scope:
+
+- This is **not** the full README matrix and does **not** close the benchmark
+  lane.
+- It checks one low-mode row (`input.nfp4_QH_warm_start`) with the existing
+  reduced benchmark harness, `ns_override=13`, input-deck iteration/tolerance
+  budgets, VMEC2000 enabled, production `jit_forces=True`, and the same command
+  on this PR branch and a clean `origin/main` worktree.
+
+Results:
+
+- Current branch warm: `vmec_jax 0.878 s`, VMEC2000 `0.211 s`, final
+  `fsq_total=1.135e-13`.
+- `origin/main` warm: `vmec_jax 0.844 s`, VMEC2000 `0.237 s`, final
+  `fsq_total=1.135e-13`.
+- Current branch cold/no-warmup: `vmec_jax 2.220 s`, VMEC2000 `0.246 s`.
+- `origin/main` cold/no-warmup: `vmec_jax 2.203 s`, VMEC2000 `0.256 s`.
+- A diagnostic no-JIT-force current run took `10.77 s`, confirming no-JIT and
+  no-force-JIT paths are diagnostic only and should not be used as production
+  benchmark claims.
+
+Interpretation:
+
+- No material PR regression is visible in this reduced QH probe; the current
+  branch is about `4%` slower warm and about `1%` slower cold than `origin/main`
+  with matching residuals.
+- The larger gap versus VMEC2000 is still real for one-off solves and must be
+  profiled in the full benchmark lane. The next performance check must use the
+  historical full single-grid benchmark settings and include WOUT parity.
+
+Commands:
+
+- Current branch warm:
+  `python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py --cases nfp4_QH_warm_start --iters 450 --run-vmec2000 --vmec2000-exec ~/bin/xvmec2000 --jax-use-input-niter --vmec2000-use-input-niter --outdir outputs/pr20_current_vs_main_current_qh_jit`
+- Main warm:
+  `PYTHONPATH=$PWD python tools/diagnostics/benchmark_fixed_boundary_runtime_and_residuals.py --cases nfp4_QH_warm_start --iters 450 --run-vmec2000 --vmec2000-exec ~/bin/xvmec2000 --jax-use-input-niter --vmec2000-use-input-niter --outdir outputs/pr20_current_vs_main_main_qh_jit`
+- Current/main cold variants used the same commands with `--no-warmup`.
+
+Lane update:
+
+- Full benchmark rerun and main-branch regression check: `5%`.
+- Performance profiling and fix lane: `12%`.
+
+#### PR #20 readiness gates and CI follow-up
+
+Steps taken:
+
+- Regenerated the full historical single-grid runtime/memory matrix for the PR
+  branch and a clean `origin/main` worktree.
+- Rendered the public combined runtime+memory README artifact and retired the
+  reduced two-case public benchmark.
+- Generated the AD-vs-central-FD evidence panel for fixed-boundary scalars,
+  `DMerc`, `D_R`, and branch-local free-boundary direct-coil scalar
+  derivatives.
+- Ran converged WOUT parity for `nfp4_QH_warm_start`, `solovev`,
+  `ITERModel`, and `LandremanPaul2021_QA_lowres`.
+- Fixed the remaining CI failure in `tests/test_boundary_field.py` by making
+  the FD comparison match the exact optimizer setup-map contract. Nonzero
+  accepted VMEC updates remain validated by same-branch replay/JVP gates rather
+  than fresh finite-difference solves through host branch rebuilding.
+
+Results obtained:
+
+- Full benchmark artifacts live in
+  `docs/_static/figures/readme_runtime_compare.{png,csv,json}` with
+  current-vs-main provenance in
+  `docs/_static/figures/readme_runtime_compare_current_vs_main.{csv,json}`.
+- VMEC++ is documented as an optional per-row column and appears only where it
+  converges/supports the input.
+- AD-vs-FD evidence artifacts live in
+  `docs/_static/figures/readme_ad_fd_evidence.{png,csv,json}`.
+- WOUT parity provenance lives in
+  `docs/_static/figures/pr20_wout_parity_summary.json`.
+- Local post-fix gates passed:
+  `JAX_ENABLE_X64=1 pytest -q tests/test_boundary_field.py --tb=short`,
+  `python -m ruff check tests/test_boundary_field.py`, and `git diff --check`.
+
+Best next steps:
+
+1. Push the CI fix and wait for the failed exact-coverage shard to rerun.
+2. If all checks pass, mark PR #20 ready for review.
+3. If another CI-only failure appears, fix only the narrow failing gate and keep
+   the branch-local/free-boundary derivative claims conservative.
+
+User needs:
+
+- None at this point; PR readiness is gated only on CI passing after the fix.
+
+Lane update:
+
+- README full benchmark restoration: `100%`.
+- Full benchmark rerun and main-branch regression check: `100%`.
+- WOUT parity on benchmark rows: `100%`.
+- Differentiation AD-vs-FD evidence panel: `100%`.
+- `DMerc`/`D_R` derivative validation: `100%`.
+- Performance profiling and fix lane: `95%` for PR readiness.
+- Differentiation architecture planning: `95%`.
+- Docs/README consistency: `100%`.
+- PR review readiness: `90%`, pending green CI and marking PR #20 ready.

@@ -62,7 +62,8 @@ def glasser_resistive_interchange_from_mercier_terms(
             tbb = jnp.asarray(tbb, dtype=jnp.float64)
             jdotb = jnp.asarray(jdotb, dtype=jnp.float64)
             bdotb = jnp.asarray(bdotb, dtype=jnp.float64)
-            ratio = jnp.where(bdotb != 0.0, jdotb / bdotb, 0.0)
+            bdotb_safe = jnp.where(bdotb != 0.0, bdotb, jnp.asarray(1.0, dtype=jnp.float64))
+            ratio = jnp.where(bdotb != 0.0, jdotb / bdotb_safe, 0.0)
             H = shear * (tjb - ratio * tbb)
         elif Dcurr is not None:
             H = -jnp.asarray(Dcurr, dtype=jnp.float64)
@@ -152,11 +153,13 @@ def mercier_terms_from_profile_integrals(
     twopi = jnp.asarray(2.0 * np.pi, dtype=jnp.float64)
     hs = jnp.asarray(1.0 / float(ns - 1), dtype=jnp.float64)
     phip_real = twopi * phips * sign_jac
-    vp_real = jnp.where(phip_real != 0.0, sign_jac * twopi * twopi * vp / phip_real, 0.0)
+    phip_real_safe = jnp.where(phip_real != 0.0, phip_real, jnp.asarray(1.0, dtype=jnp.float64))
+    vp_real = jnp.where(phip_real != 0.0, sign_jac * twopi * twopi * vp / phip_real_safe, 0.0)
     vp_real = vp_real.at[0].set(0.0)
 
     phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
-    denom = jnp.where(phip_full != 0.0, 1.0 / (hs * phip_full), 0.0)
+    phip_full_safe = jnp.where(phip_full != 0.0, phip_full, jnp.asarray(1.0, dtype=jnp.float64))
+    denom = jnp.where(phip_full != 0.0, 1.0 / (hs * phip_full_safe), 0.0)
     shear_inner = (iotas[2:] - iotas[1:-1]) * denom
     vpp_inner = (vp_real[2:] - vp_real[1:-1]) * denom
     presp_inner = (pres[2:] - pres[1:-1]) * denom
@@ -248,7 +251,8 @@ def mercier_surface_integrals_from_realspace(
     weighted_sum = lambda arr: jnp.sum(arr * wint[None, :, :], axis=(1, 2))
     tpp_inner = weighted_sum(gsqrt_full / b2_safe) * norm
     tbb_inner = weighted_sum(b2i * gsqrt_full * gpp[1:-1]) * norm
-    bdotj_norm = jnp.where(gsqrt_raw != 0.0, bdotk_merc[1:-1] / gsqrt_raw, 0.0)
+    gsqrt_raw_safe = jnp.where(gsqrt_raw != 0.0, gsqrt_raw, jnp.asarray(1.0, dtype=jnp.float64))
+    bdotj_norm = jnp.where(gsqrt_raw != 0.0, bdotk_merc[1:-1] / gsqrt_raw_safe, 0.0)
     jdotb = bdotj_norm * gpp[1:-1] * gsqrt_full
     tjb_inner = weighted_sum(jdotb) * norm
     tjj_inner = weighted_sum(jdotb * bdotj_norm / b2_safe) * norm
@@ -298,7 +302,8 @@ def jxbforce_profiles_from_realspace(
     dnorm1 = jnp.asarray((2.0 * np.pi) ** 2, dtype=jnp.float64)
     sign_jac = jnp.asarray(1.0 if int(signgs) >= 0 else -1.0, dtype=jnp.float64)
     denom = vp[2:] + vp[1:-1]
-    ovp = jnp.where(denom != 0.0, 2.0 / denom / dnorm1, 0.0)
+    denom_safe = jnp.where(denom != 0.0, denom, jnp.asarray(1.0, dtype=jnp.float64))
+    ovp = jnp.where(denom != 0.0, 2.0 / denom_safe / dnorm1, 0.0)
     tjnorm = ovp * sign_jac
     weighted_sum = lambda arr: jnp.sum(arr * wint[None, :, :], axis=(1, 2))
 

@@ -3,13 +3,16 @@ from __future__ import annotations
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.solve_scan_time_control import (
+from vmec_jax.solvers.fixed_boundary.scan.time_control import (
     RESTART_BADJAC,
     RESTART_BADPROG_VMEC,
     RESTART_NONE,
     RESTART_STAGE,
     RESTART_TIME,
+    ScanCheckpointResiduals,
     scan_fallback_probe_update,
+    scan_checkpoint_update,
+    scan_post_restart_update,
     scan_restart_decision,
     scan_restart_transition,
     scan_stage_spike_post_scalars,
@@ -20,6 +23,21 @@ from vmec_jax.solve_scan_time_control import (
 
 def _scalar(value):
     return np.asarray(value).item()
+
+
+def _eager_cond(cond, true_fun, false_fun, operand):
+    return true_fun(operand) if bool(np.asarray(cond)) else false_fun(operand)
+
+
+def _checkpoint_residuals(start: float) -> ScanCheckpointResiduals:
+    return ScanCheckpointResiduals(
+        fsqr=jnp.asarray(start),
+        fsqz=jnp.asarray(start + 1.0),
+        fsql=jnp.asarray(start + 2.0),
+        fsqr1=jnp.asarray(start + 3.0),
+        fsqz1=jnp.asarray(start + 4.0),
+        fsql1=jnp.asarray(start + 5.0),
+    )
 
 
 def _probe_update(**overrides):
@@ -317,6 +335,100 @@ def test_stage_spike_post_update_preserves_state_when_inactive_or_no_previous_st
         np.testing.assert_allclose(np.asarray(no_previous_block), np.asarray(original))
 
 
+def test_scan_post_restart_update_selects_branch_and_applies_stage_spike_reset():
+    velocity_blocks = tuple(jnp.full((2,), float(i + 1)) for i in range(12))
+    restart_fields = (
+        "restart-state",
+        jnp.asarray(0.02),
+        jnp.asarray([9.0, 8.0]),
+        jnp.asarray(7.0),
+        *velocity_blocks,
+        jnp.asarray(3, dtype=jnp.int32),
+        jnp.asarray(4, dtype=jnp.int32),
+        jnp.asarray(5, dtype=jnp.int32),
+        jnp.asarray(6, dtype=jnp.int32),
+        jnp.asarray(7, dtype=jnp.int32),
+        jnp.asarray(True),
+    )
+    keep_fields = (
+        "keep-state",
+        jnp.asarray(0.04),
+        jnp.asarray([1.0, 2.0]),
+        jnp.asarray(3.0),
+        *(block + 100.0 for block in velocity_blocks),
+        jnp.asarray(30, dtype=jnp.int32),
+        jnp.asarray(40, dtype=jnp.int32),
+        jnp.asarray(50, dtype=jnp.int32),
+        jnp.asarray(60, dtype=jnp.int32),
+        jnp.asarray(70, dtype=jnp.int32),
+        jnp.asarray(False),
+    )
+
+    update = scan_post_restart_update(
+        do_restart=jnp.asarray(True),
+        restart_updates_fn=lambda _operand: restart_fields,
+        no_restart_updates_fn=lambda _operand: keep_fields,
+        cond_func=_eager_cond,
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(True),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=2,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    assert update.state == "restart-state"
+    np.testing.assert_allclose(_scalar(update.time_step), 0.01)
+    np.testing.assert_allclose(np.asarray(update.inv_tau), np.full(2, 15.0))
+    assert _scalar(update.fsq_prev) == 7.0
+    assert _scalar(update.iter_offset) == 3
+    assert _scalar(update.iter1) == 6
+    assert _scalar(update.ijacob) == 5
+    assert _scalar(update.bad_resets) == 6
+    assert _scalar(update.bad_growth) == 7
+    assert _scalar(update.force_bcovar_update)
+    for block in update.velocity_blocks:
+        np.testing.assert_allclose(np.asarray(block), 0.0)
+
+
+def test_scan_post_restart_update_preserves_no_restart_fields_without_stage_spike():
+    velocity_blocks = tuple(jnp.full((1,), float(i + 1)) for i in range(12))
+    keep_fields = (
+        "keep-state",
+        jnp.asarray(0.04),
+        jnp.asarray([1.0]),
+        jnp.asarray(3.0),
+        *velocity_blocks,
+        jnp.asarray(30, dtype=jnp.int32),
+        jnp.asarray(40, dtype=jnp.int32),
+        jnp.asarray(50, dtype=jnp.int32),
+        jnp.asarray(60, dtype=jnp.int32),
+        jnp.asarray(70, dtype=jnp.int32),
+        jnp.asarray(False),
+    )
+
+    update = scan_post_restart_update(
+        do_restart=jnp.asarray(False),
+        restart_updates_fn=lambda _operand: pytest.fail("restart branch should not run"),
+        no_restart_updates_fn=lambda _operand: keep_fields,
+        cond_func=_eager_cond,
+        iter2=jnp.asarray(6, dtype=jnp.int32),
+        stage_spike=jnp.asarray(False),
+        stage_prev_fsq=jnp.asarray(1.0),
+        stage_transition_scale=0.5,
+        k_ndamp=1,
+        dtype=jnp.asarray(0.0).dtype,
+    )
+
+    assert update.state == "keep-state"
+    np.testing.assert_allclose(_scalar(update.time_step), 0.04)
+    np.testing.assert_allclose(np.asarray(update.inv_tau), [1.0])
+    assert _scalar(update.iter1) == 40
+    assert not _scalar(update.force_bcovar_update)
+    for actual, expected in zip(update.velocity_blocks, velocity_blocks, strict=True):
+        np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
+
+
 def test_vmecpp_bad_progress_uses_bad_progress_reason_and_time_scaling():
     decision = scan_restart_decision(
         skip_timecontrol=jnp.asarray(False),
@@ -399,6 +511,61 @@ def test_skip_timecontrol_tightens_res0_but_suppresses_checkpoint_and_restart():
     assert not _scalar(decision.restart_time)
     assert not _scalar(decision.do_restart)
     assert _scalar(decision.restart_reason) == RESTART_NONE
+
+
+def test_scan_checkpoint_update_initializes_state_without_storing_residual_scalars():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(False),
+        init_mask=jnp.asarray(True),
+        checkpoint_mask=jnp.asarray(False),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "current"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 10.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 15.0)
+
+
+def test_scan_checkpoint_update_stores_current_state_and_residual_scalars_on_checkpoint():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(False),
+        init_mask=jnp.asarray(False),
+        checkpoint_mask=jnp.asarray(True),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "current"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 1.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqz), 2.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql), 3.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr1), 4.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsqz1), 5.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 6.0)
+
+
+def test_scan_checkpoint_update_skip_timecontrol_preserves_previous_checkpoint():
+    update = scan_checkpoint_update(
+        skip_timecontrol=jnp.asarray(True),
+        init_mask=jnp.asarray(True),
+        checkpoint_mask=jnp.asarray(False),
+        current_state="current",
+        previous_state_checkpoint="old",
+        current_residuals=_checkpoint_residuals(1.0),
+        previous_residuals=_checkpoint_residuals(10.0),
+        cond_func=_eager_cond,
+    )
+
+    assert update.state_checkpoint == "old"
+    np.testing.assert_allclose(_scalar(update.residuals.fsqr), 10.0)
+    np.testing.assert_allclose(_scalar(update.residuals.fsql1), 15.0)
 
 
 def test_time_control_restart_and_non_vmec_iter_offset_branch():

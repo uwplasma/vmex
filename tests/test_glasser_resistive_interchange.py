@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 import vmec_jax as vj
-import vmec_jax.optimization_workflow as workflow
 from vmec_jax._compat import jnp
 
 
@@ -144,7 +143,9 @@ def test_public_dmerc_and_glasser_objective_gradients_match_central_finite_diffe
             "shear": shear,
         }
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
+
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static="static", indata="indata", signgs=1)
     if objective == "DMerc":
         term = vj.DMerc(minimum=0.0, softness=0.15)
@@ -158,6 +159,45 @@ def test_public_dmerc_and_glasser_objective_gradients_match_central_finite_diffe
     grad_ad = jax.grad(scalar_objective)(alpha0)
     eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
     grad_fd = (scalar_objective(alpha0 + eps) - scalar_objective(alpha0 - eps)) / (2.0 * eps)
+
+    assert np.isfinite(float(np.asarray(grad_ad)))
+    np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-8, atol=5.0e-10)
+
+
+@pytest.mark.parametrize("field", ["DMerc", "D_R"])
+def test_profile_integral_mercier_and_glasser_gradients_match_central_finite_difference(field):
+    """DMerc and D_R profile algebra should be locally AD/FD consistent."""
+
+    jax = pytest.importorskip("jax")
+
+    base = {
+        "s": jnp.linspace(0.0, 1.0, 6, dtype=jnp.float64),
+        "phips": jnp.ones(6, dtype=jnp.float64),
+        "iotas": jnp.asarray([0.0, 0.18, 0.28, 0.43, 0.61, 0.72], dtype=jnp.float64),
+        "vp": jnp.asarray([0.0, 0.90, 1.05, 1.18, 1.32, 1.50], dtype=jnp.float64),
+        "pres": jnp.asarray([0.0, 0.050, 0.041, 0.030, 0.018, 0.0], dtype=jnp.float64),
+        "torcur": jnp.asarray([0.0, 0.030, 0.055, 0.082, 0.110, 0.135], dtype=jnp.float64),
+        "tpp": jnp.asarray([0.0, 1.35, 1.42, 1.55, 1.70, 0.0], dtype=jnp.float64),
+        "tbb": jnp.asarray([0.0, 0.82, 0.91, 1.03, 1.15, 0.0], dtype=jnp.float64),
+        "tjb": jnp.asarray([0.0, 0.18, 0.16, 0.14, 0.12, 0.0], dtype=jnp.float64),
+        "tjj": jnp.asarray([0.0, 0.035, 0.045, 0.055, 0.068, 0.0], dtype=jnp.float64),
+        "jdotb": jnp.asarray([0.0, 0.40, 0.36, 0.30, 0.24, 0.0], dtype=jnp.float64),
+        "bdotb": jnp.asarray([0.0, 1.90, 1.85, 1.70, 1.55, 0.0], dtype=jnp.float64),
+    }
+    iota_direction = jnp.asarray([0.0, 0.02, -0.01, 0.03, -0.02, 0.0], dtype=jnp.float64)
+    pressure_direction = jnp.asarray([0.0, -0.010, 0.015, -0.005, 0.012, 0.0], dtype=jnp.float64)
+
+    def objective(alpha):
+        trial = dict(base)
+        trial["iotas"] = base["iotas"] + alpha * iota_direction
+        trial["pres"] = base["pres"] + alpha * pressure_direction
+        terms = vj.mercier_terms_from_profile_integrals(**trial, shear_epsilon=1.0e-3)
+        return jnp.sum(jnp.asarray(terms[field], dtype=jnp.float64)[1:-1])
+
+    alpha0 = jnp.asarray(0.10, dtype=jnp.float64)
+    grad_ad = jax.grad(objective)(alpha0)
+    eps = jnp.asarray(1.0e-5, dtype=jnp.float64)
+    grad_fd = (objective(alpha0 + eps) - objective(alpha0 - eps)) / (2.0 * eps)
 
     assert np.isfinite(float(np.asarray(grad_ad)))
     np.testing.assert_allclose(np.asarray(grad_ad), np.asarray(grad_fd), rtol=5.0e-8, atol=5.0e-10)
@@ -257,7 +297,9 @@ def test_public_glasser_objective_uses_upper_bound_penalty_and_regularized_terms
         calls.append(kwargs)
         return raw_terms
 
-    monkeypatch.setattr(workflow, "mercier_terms_from_state", fake_mercier_terms_from_state)
+    import vmec_jax.optimizers.fixed_boundary.finite_beta_objectives as finite_beta_objectives
+
+    monkeypatch.setattr(finite_beta_objectives, "mercier_terms_from_state", fake_mercier_terms_from_state)
     ctx = SimpleNamespace(static="static", indata="indata", signgs=-1)
 
     unregularized = vj.GlasserResistiveInterchange(maximum=0.05, softness=0.20, mmax_force=4, nmax_force=5)

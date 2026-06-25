@@ -25,18 +25,6 @@ from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles
 
 QI_DIAGNOSTIC_VERSION = "qi_diagnostics.v1"
 
-__all__ = [
-    "QI_DIAGNOSTIC_VERSION",
-    "QIDiagnosticOptions",
-    "QISeedSuitabilityTargets",
-    "annotate_qi_seed_suitability",
-    "qi_cleanup_candidate_promotable",
-    "qi_diagnostics_from_boozer_output",
-    "qi_diagnostics_from_state",
-    "qi_promotion_score",
-    "rank_qi_seed_records",
-]
-
 
 @dataclass(frozen=True)
 class QIDiagnosticOptions:
@@ -1017,3 +1005,14 @@ def qi_diagnostics_from_state(
             )
 
     return record
+
+
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if (
+        getattr(value, "__module__", None) == __name__
+        and not name.startswith("_")
+    )
+    or name == "QI_DIAGNOSTIC_VERSION"
+)

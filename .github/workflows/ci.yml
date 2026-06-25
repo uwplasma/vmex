@@ -37,6 +37,10 @@ jobs:
         run: |
           python tools/diagnostics/parity_sweep_manifest.py --tier smoke --dry-run --vmec-exec /usr/bin/true
 
+      - name: Source namespace gate
+        run: |
+          python tools/diagnostics/source_health.py --top 20 --max-root-helper-prefix-files 2
+
   test:
     name: Fast Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

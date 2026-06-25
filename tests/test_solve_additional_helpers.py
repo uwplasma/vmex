@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import jnp
+from vmec_jax.solvers.fixed_boundary.residual.policy import new_residual_iter_histories
 import vmec_jax.solve as solve_module
 from vmec_jax.solve import (
     _can_reassemble_precond_mats,
@@ -1613,6 +1614,29 @@ def test_append_residual_iter_history_record_keeps_all_channels_aligned():
     assert histories["freeb_full_update_history"] == [1]
     lengths = {key: len(value) for key, value in histories.items()}
     assert set(lengths.values()) == {1}
+
+
+def test_residual_iteration_histories_provide_record_terminal_and_diagnostics_maps():
+    histories = new_residual_iter_histories()
+    record_lists = histories.record_lists(free_boundary_enabled=True)
+    terminal_lists = histories.terminal_lists(free_boundary_enabled=True)
+
+    record_lists["step_history"].append(0.25)
+    terminal_lists["freeb_nestor_reused_history"].append(1)
+    histories["w_history"].append(1.5)
+    histories["restart_path_history"].append("accepted")
+    rollback = histories.rollback_lists()
+
+    assert histories["step_history"] == [pytest.approx(0.25)]
+    assert histories["freeb_nestor_reused_history"] == [1]
+    assert any(item is histories["w_history"] for item in rollback)
+    assert record_lists["free_boundary_enabled"] is True
+    assert terminal_lists["free_boundary_enabled"] is True
+
+    diagnostics = histories.diagnostics()
+    assert diagnostics["w_curr_history"].shape == (0,)
+    assert diagnostics["restart_path_history"].tolist() == ["accepted"]
+    assert diagnostics["freeb_nestor_reused_history"].tolist() == [1]
 
 
 def test_append_residual_iter_history_record_skips_free_boundary_channels_when_disabled():

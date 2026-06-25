@@ -715,6 +715,121 @@ def _select_mparity(a_even, a_odd, mask_even: jnp.ndarray):
     return jnp.where(mask, a_even, a_odd)
 
 
+def _select_mparity_pairs(mask_even: jnp.ndarray, *pairs):
+    return tuple(_select_mparity(pair[0], pair[1], mask_even) for pair in pairs)
+
+
+def _slice_theta2(a, nt2: int):
+    return jnp.asarray(a)[:, : int(nt2), :]
+
+
+def _slice_theta2_many(nt2: int, *values):
+    return tuple(_slice_theta2(value, nt2) for value in values)
+
+
+def _optional_theta2(a, like, nt2: int):
+    return jnp.zeros_like(like) if a is None else _slice_theta2(a, nt2)
+
+
+def _optional_theta2_pairs(nt2: int, even_like, odd_like, *pairs):
+    out = []
+    for even, odd in pairs:
+        out.extend((_optional_theta2(even, even_like, nt2), _optional_theta2(odd, odd_like, nt2)))
+    return tuple(out)
+
+
+def _stack_even_odd_pairs(*pairs):
+    return tuple(jnp.stack(pair, axis=0) for pair in pairs)
+
+
+def _theta2_tables(trig: VmecTrigTables, nt2: int, mpol: int):
+    cosmui = getattr(trig, "cosmui_nt2", None)
+    sinmui = getattr(trig, "sinmui_nt2", None)
+    cosmumi = getattr(trig, "cosmumi_nt2", None)
+    sinmumi = getattr(trig, "sinmumi_nt2", None)
+    if cosmui is None or int(cosmui.shape[0]) != nt2:
+        cosmui = trig.cosmui[:nt2, :]
+    if sinmui is None or int(sinmui.shape[0]) != nt2:
+        sinmui = trig.sinmui[:nt2, :]
+    if cosmumi is None or int(cosmumi.shape[0]) != nt2:
+        cosmumi = trig.cosmumi[:nt2, :]
+    if sinmumi is None or int(sinmumi.shape[0]) != nt2:
+        sinmumi = trig.sinmumi[:nt2, :]
+    return cosmui[:, :mpol], sinmui[:, :mpol], cosmumi[:, :mpol], sinmumi[:, :mpol]
+
+
+def _masks_match(masks: TomnspsMasks | None, ns: int, mpol: int, include_edge: bool | None = None) -> bool:
+    try:
+        ok = masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol))
+        if include_edge is not None:
+            ok = ok and (bool(masks.include_edge) == bool(include_edge))
+        return bool(ok)
+    except Exception:
+        return False
+
+
+def _xmpq1_from_masks(masks: TomnspsMasks | None, ns: int, mpol: int, dtype_like):
+    if _masks_match(masks, ns, mpol):
+        xmpq1 = getattr(masks, "xmpq1_j", None)
+        if xmpq1 is None:
+            xmpq1 = getattr(masks, "xmpq1", None)
+        if xmpq1 is not None:
+            return jnp.asarray(xmpq1, dtype=jnp.asarray(dtype_like).dtype)
+    m = np.arange(mpol, dtype=int)
+    m = jnp.asarray(m, dtype=jnp.asarray(dtype_like).dtype)
+    return (m * (m - 1.0))[None, :, None]
+
+
+def _mparity_from_masks(masks: TomnspsMasks | None, ns: int, mpol: int, include_edge: bool, dtype_like):
+    if _masks_match(masks, ns, mpol, include_edge):
+        mask_even = getattr(masks, "mask_even_j", None)
+        if mask_even is None:
+            mask_even = getattr(masks, "mask_even", None)
+        if mask_even is not None:
+            return jnp.asarray(mask_even, dtype=jnp.asarray(dtype_like).dtype)
+    return _mparity_mask(mpol, dtype=jnp.asarray(dtype_like).dtype)
+
+
+def _radial_masks_from_masks(masks: TomnspsMasks | None, ns: int, mpol: int, include_edge: bool, rz_like, l_like):
+    if _masks_match(masks, ns, mpol, include_edge):
+        mask_rz = getattr(masks, "mask_rz_j", None)
+        mask_l = getattr(masks, "mask_l_j", None)
+        if mask_rz is None:
+            mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(rz_like).dtype)
+        if mask_l is None:
+            mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(l_like).dtype)
+        return mask_rz, mask_l
+
+    js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
+    m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
+    jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]
+    jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
+    jsmax_rz = int(ns if include_edge else (ns - 1))
+    mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
+    mask_l = js_fortran[:, None] >= jlam
+    return (
+        mask_rz.astype(jnp.asarray(rz_like).dtype)[:, :, None],
+        mask_l.astype(jnp.asarray(l_like).dtype)[:, :, None],
+    )
+
+
+def _apply_tomnsp_radial_masks(*, masks, ns: int, mpol: int, include_edge: bool, rz_fields, l_fields):
+    """Apply VMEC fixed-boundary radial masks to R/Z and lambda blocks."""
+
+    mask_rz, mask_l = _radial_masks_from_masks(
+        masks,
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        rz_like=rz_fields[0],
+        l_like=l_fields[0],
+    )
+    return (
+        tuple(None if field is None else field * mask_rz for field in rz_fields),
+        tuple(None if field is None else field * mask_l for field in l_fields),
+    )
+
+
 def tomnsps_masks(
     *,
     ns: int,
@@ -844,107 +959,54 @@ def tomnsps_rzl(
 
     # Restrict theta integration to VMEC's ntheta2 (u in [0,pi]).
     nt2 = int(trig.ntheta2)
-    armn_even = armn_even[:, :nt2, :]
-    armn_odd = armn_odd[:, :nt2, :]
-    brmn_even = jnp.asarray(brmn_even)[:, :nt2, :]
-    brmn_odd = jnp.asarray(brmn_odd)[:, :nt2, :]
-    crmn_even = jnp.asarray(crmn_even)[:, :nt2, :]
-    crmn_odd = jnp.asarray(crmn_odd)[:, :nt2, :]
-    azmn_even = jnp.asarray(azmn_even)[:, :nt2, :]
-    azmn_odd = jnp.asarray(azmn_odd)[:, :nt2, :]
-    bzmn_even = jnp.asarray(bzmn_even)[:, :nt2, :]
-    bzmn_odd = jnp.asarray(bzmn_odd)[:, :nt2, :]
-    czmn_even = jnp.asarray(czmn_even)[:, :nt2, :]
-    czmn_odd = jnp.asarray(czmn_odd)[:, :nt2, :]
-
-    if arcon_even is None:
-        arcon_even = jnp.zeros_like(armn_even)
-    if arcon_odd is None:
-        arcon_odd = jnp.zeros_like(armn_odd)
-    if azcon_even is None:
-        azcon_even = jnp.zeros_like(armn_even)
-    if azcon_odd is None:
-        azcon_odd = jnp.zeros_like(armn_odd)
-
-    if blmn_even is None:
-        blmn_even = jnp.zeros_like(armn_even)
-    if blmn_odd is None:
-        blmn_odd = jnp.zeros_like(armn_odd)
-    if clmn_even is None:
-        clmn_even = jnp.zeros_like(armn_even)
-    if clmn_odd is None:
-        clmn_odd = jnp.zeros_like(armn_odd)
-    blmn_even = jnp.asarray(blmn_even)[:, :nt2, :]
-    blmn_odd = jnp.asarray(blmn_odd)[:, :nt2, :]
-    clmn_even = jnp.asarray(clmn_even)[:, :nt2, :]
-    clmn_odd = jnp.asarray(clmn_odd)[:, :nt2, :]
-    arcon_even = jnp.asarray(arcon_even)[:, :nt2, :]
-    arcon_odd = jnp.asarray(arcon_odd)[:, :nt2, :]
-    azcon_even = jnp.asarray(azcon_even)[:, :nt2, :]
-    azcon_odd = jnp.asarray(azcon_odd)[:, :nt2, :]
+    (
+        armn_even, armn_odd, brmn_even, brmn_odd, crmn_even, crmn_odd,
+        azmn_even, azmn_odd, bzmn_even, bzmn_odd, czmn_even, czmn_odd,
+    ) = _slice_theta2_many(
+        nt2,
+        armn_even, armn_odd, brmn_even, brmn_odd, crmn_even, crmn_odd,
+        azmn_even, azmn_odd, bzmn_even, bzmn_odd, czmn_even, czmn_odd,
+    )
+    (
+        arcon_even, arcon_odd, azcon_even, azcon_odd,
+        blmn_even, blmn_odd, clmn_even, clmn_odd,
+    ) = _optional_theta2_pairs(
+        nt2,
+        armn_even,
+        armn_odd,
+        (arcon_even, arcon_odd),
+        (azcon_even, azcon_odd),
+        (blmn_even, blmn_odd),
+        (clmn_even, clmn_odd),
+    )
 
     # Tables for m=0..mpol-1 and n=0..ntor.
-    cosmui = getattr(trig, "cosmui_nt2", None)
-    sinmui = getattr(trig, "sinmui_nt2", None)
-    cosmumi = getattr(trig, "cosmumi_nt2", None)
-    sinmumi = getattr(trig, "sinmumi_nt2", None)
-    if cosmui is None or int(cosmui.shape[0]) != nt2:
-        cosmui = trig.cosmui[:nt2, :]
-    if sinmui is None or int(sinmui.shape[0]) != nt2:
-        sinmui = trig.sinmui[:nt2, :]
-    if cosmumi is None or int(cosmumi.shape[0]) != nt2:
-        cosmumi = trig.cosmumi[:nt2, :]
-    if sinmumi is None or int(sinmumi.shape[0]) != nt2:
-        sinmumi = trig.sinmumi[:nt2, :]
-    cosmui = cosmui[:, :mpol]
-    sinmui = sinmui[:, :mpol]
-    cosmumi = cosmumi[:, :mpol]
-    sinmumi = sinmumi[:, :mpol]
+    cosmui, sinmui, cosmumi, sinmumi = _theta2_tables(trig, nt2, mpol)
 
     cosnv = trig.cosnv[:, : (ntor + 1)]  # (nzeta, ntor+1)
     sinnv = trig.sinnv[:, : (ntor + 1)]
-    cosnvn = trig.cosnvn[:, : (ntor + 1)]
-    sinnvn = trig.sinnvn[:, : (ntor + 1)]
 
     # VMEC constraint operator multiplier: xmpq(m,1)=m*(m-1).
-    xmpq1 = None
-    if masks is not None:
-        try:
-            if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
-                xmpq1 = getattr(masks, "xmpq1_j", None)
-                if xmpq1 is None:
-                    xmpq1 = getattr(masks, "xmpq1", None)
-        except Exception:
-            xmpq1 = None
-    if xmpq1 is None:
-        m = np.arange(mpol, dtype=int)
-        xmpq1 = (
-            jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype)
-            * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0)
-        )[None, :, None]
-    else:
-        xmpq1 = jnp.asarray(xmpq1, dtype=jnp.asarray(armn_even).dtype)
+    xmpq1 = _xmpq1_from_masks(masks, ns=ns, mpol=mpol, dtype_like=armn_even)
 
     # Theta integration: compute work arrays for even-parity and odd-parity pieces.
     # Each is (ns, mpol, nzeta).
     # work1 indices follow tomnsp_mod.f numbering but we compute only needed combos.
-    armn = jnp.stack([armn_even, armn_odd], axis=0)
-    brmn = jnp.stack([brmn_even, brmn_odd], axis=0)
-    crmn = jnp.stack([crmn_even, crmn_odd], axis=0)
-    azmn = jnp.stack([azmn_even, azmn_odd], axis=0)
-    bzmn = jnp.stack([bzmn_even, bzmn_odd], axis=0)
-    czmn = jnp.stack([czmn_even, czmn_odd], axis=0)
-    blmn = jnp.stack([blmn_even, blmn_odd], axis=0)
-    clmn = jnp.stack([clmn_even, clmn_odd], axis=0)
-    arcon = jnp.stack([arcon_even, arcon_odd], axis=0)
-    azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
-
-    def _theta_einsum_stack(arr, mat):
-        return _theta_contract(arr, mat)
+    armn, brmn, crmn, azmn, bzmn, czmn, blmn, clmn, arcon, azcon = _stack_even_odd_pairs(
+        (armn_even, armn_odd),
+        (brmn_even, brmn_odd),
+        (crmn_even, crmn_odd),
+        (azmn_even, azmn_odd),
+        (bzmn_even, bzmn_odd),
+        (czmn_even, czmn_odd),
+        (blmn_even, blmn_odd),
+        (clmn_even, clmn_odd),
+        (arcon_even, arcon_odd),
+        (azcon_even, azcon_odd),
+    )
 
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
-    stack_all = jnp.concatenate([stack_cosmui, stack_sinmumi], axis=0)
 
     use_fft = _get_tomnsps_fft() and (not bool(lasym)) and has_jax()
     use_fft_fused = True
@@ -978,19 +1040,20 @@ def tomnsps_rzl(
     else:
         # DFT path: use a single cos/sin basis transform for both stacks,
         # then apply m-derivative scaling for the sinmumi/cosmumi blocks.
+        stack_all = jnp.concatenate([stack_cosmui, stack_sinmumi], axis=0)
         use_theta_fused = bool(_TOMNSPS_THETA_FUSED)
         if use_theta_fused:
             basis_theta = getattr(trig, "basis_theta_cs_nt2", None)
             if basis_theta is None or int(basis_theta.shape[0]) != nt2:
                 basis_theta = jnp.concatenate([cosmui, sinmui], axis=1)
             basis_theta = basis_theta[:, : (2 * int(mpol))]
-            out_all = _theta_einsum_stack(stack_all, basis_theta)
+            out_all = _theta_contract(stack_all, basis_theta)
             mpol_i = int(mpol)
             cos_all = out_all[..., :mpol_i, :]
             sin_all = out_all[..., mpol_i:, :]
         else:
-            cos_all = _theta_einsum_stack(stack_all, cosmui)
-            sin_all = _theta_einsum_stack(stack_all, sinmui)
+            cos_all = _theta_contract(stack_all, cosmui)
+            sin_all = _theta_contract(stack_all, sinmui)
         n_cos = int(stack_cosmui.shape[0])
         cosmui_out = cos_all[:n_cos]
         sinmui_out = sin_all[:n_cos]
@@ -1027,40 +1090,17 @@ def tomnsps_rzl(
     w9 = blmn_sin
     w10 = -clmn_cos
 
-    w1_e, w1_o = w1[0], w1[1]
-    w2_e, w2_o = w2[0], w2[1]
-    w3_e, w3_o = w3[0], w3[1]
-    w4_e, w4_o = w4[0], w4[1]
-    w5_e, w5_o = w5[0], w5[1]
-    w6_e, w6_o = w6[0], w6[1]
-    w7_e, w7_o = w7[0], w7[1]
-    w8_e, w8_o = w8[0], w8[1]
-    w9_e, w9_o = w9[0], w9[1]
-    w10_e, w10_o = w10[0], w10[1]
-    w11_e, w11_o = w11[0], w11[1]
-    w12_e, w12_o = w12[0], w12[1]
-
     # Select parity per m (mparity = mod(m,2)).
-    mask_even = None
-    if masks is not None:
-        if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-            mask_even = getattr(masks, "mask_even_j", None)
-            if mask_even is None:
-                mask_even = jnp.asarray(masks.mask_even, dtype=jnp.asarray(armn_even).dtype)
-    if mask_even is None:
-        mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
-    w1 = _select_mparity(w1_e, w1_o, mask_even)
-    w2 = _select_mparity(w2_e, w2_o, mask_even)
-    w3 = _select_mparity(w3_e, w3_o, mask_even)
-    w4 = _select_mparity(w4_e, w4_o, mask_even)
-    w5 = _select_mparity(w5_e, w5_o, mask_even)
-    w6 = _select_mparity(w6_e, w6_o, mask_even)
-    w7 = _select_mparity(w7_e, w7_o, mask_even)
-    w8 = _select_mparity(w8_e, w8_o, mask_even)
-    w9 = _select_mparity(w9_e, w9_o, mask_even)
-    w10 = _select_mparity(w10_e, w10_o, mask_even)
-    w11 = _select_mparity(w11_e, w11_o, mask_even)
-    w12 = _select_mparity(w12_e, w12_o, mask_even)
+    mask_even = _mparity_from_masks(
+        masks,
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        dtype_like=armn_even,
+    )
+    w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12 = _select_mparity_pairs(
+        mask_even, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12
+    )
 
     lthreed = bool(ntor > 0)
 
@@ -1187,36 +1227,14 @@ def tomnsps_rzl(
     # Apply VMEC's radial evolution masks (jmin2/jlam + fixed-boundary edge).
     # For parity work we use the default vmec_params values:
     #   jmin2(m=0)=1, jmin2(m>=1)=2; jlam(m)=2.
-    if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-        mask_rz = getattr(masks, "mask_rz_j", None)
-        mask_l = getattr(masks, "mask_l_j", None)
-        if mask_rz is None:
-            mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frcc).dtype)
-        if mask_l is None:
-            mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flsc).dtype)
-    else:
-        js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
-        m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
-        jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
-        jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
-
-        # Fixed-boundary convention: R/Z not evolved on the boundary surface (js=ns).
-        # `include_edge=True` reproduces the `jedge=1` branch in `getfsq` diagnostics.
-        jsmax_rz = int(ns if include_edge else (ns - 1))
-        mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
-        mask_l = js_fortran[:, None] >= jlam
-
-        mask_rz = mask_rz.astype(jnp.asarray(frcc).dtype)[:, :, None]
-        mask_l = mask_l.astype(jnp.asarray(flsc).dtype)[:, :, None]
-    frcc = frcc * mask_rz
-    fzsc = fzsc * mask_rz
-    if frss is not None:
-        frss = frss * mask_rz
-    if fzcs is not None:
-        fzcs = fzcs * mask_rz
-    flsc = flsc * mask_l
-    if flcs is not None:
-        flcs = flcs * mask_l
+    (frcc, fzsc, frss, fzcs), (flsc, flcs) = _apply_tomnsp_radial_masks(
+        masks=masks,
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        rz_fields=(frcc, fzsc, frss, fzcs),
+        l_fields=(flsc, flcs),
+    )
 
     return TomnspsRZL(frcc=frcc, frss=frss, fzsc=fzsc, fzcs=fzcs, flsc=flsc, flcs=flcs)
 
@@ -1273,103 +1291,53 @@ def tomnspa_rzl(
 
     # Restrict theta integration to VMEC's ntheta2 (u in [0,pi]).
     nt2 = int(trig.ntheta2)
-    armn_even = armn_even[:, :nt2, :]
-    armn_odd = armn_odd[:, :nt2, :]
-    brmn_even = jnp.asarray(brmn_even)[:, :nt2, :]
-    brmn_odd = jnp.asarray(brmn_odd)[:, :nt2, :]
-    crmn_even = jnp.asarray(crmn_even)[:, :nt2, :]
-    crmn_odd = jnp.asarray(crmn_odd)[:, :nt2, :]
-    azmn_even = jnp.asarray(azmn_even)[:, :nt2, :]
-    azmn_odd = jnp.asarray(azmn_odd)[:, :nt2, :]
-    bzmn_even = jnp.asarray(bzmn_even)[:, :nt2, :]
-    bzmn_odd = jnp.asarray(bzmn_odd)[:, :nt2, :]
-    czmn_even = jnp.asarray(czmn_even)[:, :nt2, :]
-    czmn_odd = jnp.asarray(czmn_odd)[:, :nt2, :]
+    (
+        armn_even, armn_odd, brmn_even, brmn_odd, crmn_even, crmn_odd,
+        azmn_even, azmn_odd, bzmn_even, bzmn_odd, czmn_even, czmn_odd,
+    ) = _slice_theta2_many(
+        nt2,
+        armn_even, armn_odd, brmn_even, brmn_odd, crmn_even, crmn_odd,
+        azmn_even, azmn_odd, bzmn_even, bzmn_odd, czmn_even, czmn_odd,
+    )
+    (
+        arcon_even, arcon_odd, azcon_even, azcon_odd,
+        blmn_even, blmn_odd, clmn_even, clmn_odd,
+    ) = _optional_theta2_pairs(
+        nt2,
+        armn_even,
+        armn_odd,
+        (arcon_even, arcon_odd),
+        (azcon_even, azcon_odd),
+        (blmn_even, blmn_odd),
+        (clmn_even, clmn_odd),
+    )
 
-    if arcon_even is None:
-        arcon_even = jnp.zeros_like(armn_even)
-    if arcon_odd is None:
-        arcon_odd = jnp.zeros_like(armn_odd)
-    if azcon_even is None:
-        azcon_even = jnp.zeros_like(armn_even)
-    if azcon_odd is None:
-        azcon_odd = jnp.zeros_like(armn_odd)
-
-    if blmn_even is None:
-        blmn_even = jnp.zeros_like(armn_even)
-    if blmn_odd is None:
-        blmn_odd = jnp.zeros_like(armn_odd)
-    if clmn_even is None:
-        clmn_even = jnp.zeros_like(armn_even)
-    if clmn_odd is None:
-        clmn_odd = jnp.zeros_like(armn_odd)
-    blmn_even = jnp.asarray(blmn_even)[:, :nt2, :]
-    blmn_odd = jnp.asarray(blmn_odd)[:, :nt2, :]
-    clmn_even = jnp.asarray(clmn_even)[:, :nt2, :]
-    clmn_odd = jnp.asarray(clmn_odd)[:, :nt2, :]
-    arcon_even = jnp.asarray(arcon_even)[:, :nt2, :]
-    arcon_odd = jnp.asarray(arcon_odd)[:, :nt2, :]
-    azcon_even = jnp.asarray(azcon_even)[:, :nt2, :]
-    azcon_odd = jnp.asarray(azcon_odd)[:, :nt2, :]
-
-    cosmui = getattr(trig, "cosmui_nt2", None)
-    sinmui = getattr(trig, "sinmui_nt2", None)
-    cosmumi = getattr(trig, "cosmumi_nt2", None)
-    sinmumi = getattr(trig, "sinmumi_nt2", None)
-    if cosmui is None or int(cosmui.shape[0]) != nt2:
-        cosmui = trig.cosmui[:nt2, :]
-    if sinmui is None or int(sinmui.shape[0]) != nt2:
-        sinmui = trig.sinmui[:nt2, :]
-    if cosmumi is None or int(cosmumi.shape[0]) != nt2:
-        cosmumi = trig.cosmumi[:nt2, :]
-    if sinmumi is None or int(sinmumi.shape[0]) != nt2:
-        sinmumi = trig.sinmumi[:nt2, :]
-    cosmui = cosmui[:, :mpol]
-    sinmui = sinmui[:, :mpol]
-    cosmumi = cosmumi[:, :mpol]
-    sinmumi = sinmumi[:, :mpol]
+    cosmui, sinmui, cosmumi, sinmumi = _theta2_tables(trig, nt2, mpol)
 
     cosnv = trig.cosnv[:, : (ntor + 1)]  # (nzeta, ntor+1)
     sinnv = trig.sinnv[:, : (ntor + 1)]
     cosnvn = trig.cosnvn[:, : (ntor + 1)]
     sinnvn = trig.sinnvn[:, : (ntor + 1)]
 
-    xmpq1 = None
-    if masks is not None:
-        try:
-            if (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)):
-                xmpq1 = getattr(masks, "xmpq1_j", None)
-                if xmpq1 is None:
-                    xmpq1 = getattr(masks, "xmpq1", None)
-        except Exception:
-            xmpq1 = None
-    if xmpq1 is None:
-        m = np.arange(mpol, dtype=int)
-        xmpq1 = (
-            jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype)
-            * (jnp.asarray(m, dtype=jnp.asarray(armn_even).dtype) - 1.0)
-        )[None, :, None]
-    else:
-        xmpq1 = jnp.asarray(xmpq1, dtype=jnp.asarray(armn_even).dtype)
+    xmpq1 = _xmpq1_from_masks(masks, ns=ns, mpol=mpol, dtype_like=armn_even)
 
     # Theta integration work arrays (indices per tomnspa_par).
     # Base (present always):
     #   work1(3): frsc cosnv
     #   work1(5): fzcc cosnv
     #   work1(9): flcc cosnv
-    armn = jnp.stack([armn_even, armn_odd], axis=0)
-    brmn = jnp.stack([brmn_even, brmn_odd], axis=0)
-    crmn = jnp.stack([crmn_even, crmn_odd], axis=0)
-    azmn = jnp.stack([azmn_even, azmn_odd], axis=0)
-    bzmn = jnp.stack([bzmn_even, bzmn_odd], axis=0)
-    czmn = jnp.stack([czmn_even, czmn_odd], axis=0)
-    blmn = jnp.stack([blmn_even, blmn_odd], axis=0)
-    clmn = jnp.stack([clmn_even, clmn_odd], axis=0)
-    arcon = jnp.stack([arcon_even, arcon_odd], axis=0)
-    azcon = jnp.stack([azcon_even, azcon_odd], axis=0)
-
-    def _theta_einsum_stack(arr, mat):
-        return _theta_contract(arr, mat)
+    armn, brmn, crmn, azmn, bzmn, czmn, blmn, clmn, arcon, azcon = _stack_even_odd_pairs(
+        (armn_even, armn_odd),
+        (brmn_even, brmn_odd),
+        (crmn_even, crmn_odd),
+        (azmn_even, azmn_odd),
+        (bzmn_even, bzmn_odd),
+        (czmn_even, czmn_odd),
+        (blmn_even, blmn_odd),
+        (clmn_even, clmn_odd),
+        (arcon_even, arcon_odd),
+        (azcon_even, azcon_odd),
+    )
 
     stack_cosmui = jnp.stack([armn, crmn, azmn, czmn, arcon, azcon, clmn], axis=0)
     stack_sinmumi = jnp.stack([brmn, bzmn, blmn], axis=0)
@@ -1381,7 +1349,7 @@ def tomnspa_rzl(
         if basis_cs is None or int(basis_cs.shape[0]) != nt2:
             basis_cs = jnp.concatenate([cosmui, sinmui], axis=1)
         basis_cs = basis_cs[:, : (2 * mpol_i)]
-        out_cs = _theta_einsum_stack(stack_cosmui, basis_cs)
+        out_cs = _theta_contract(stack_cosmui, basis_cs)
         cosmui_out = out_cs[..., :mpol_i, :]
         sinmui_out = out_cs[..., mpol_i:, :]
 
@@ -1389,14 +1357,14 @@ def tomnspa_rzl(
         if basis_mu is None or int(basis_mu.shape[0]) != nt2:
             basis_mu = jnp.concatenate([sinmumi, cosmumi], axis=1)
         basis_mu = basis_mu[:, : (2 * mpol_i)]
-        out_mu = _theta_einsum_stack(stack_sinmumi, basis_mu)
+        out_mu = _theta_contract(stack_sinmumi, basis_mu)
         sinmumi_out = out_mu[..., :mpol_i, :]
         cosmumi_out = out_mu[..., mpol_i:, :]
     else:
-        cosmui_out = _theta_einsum_stack(stack_cosmui, cosmui)
-        sinmui_out = _theta_einsum_stack(stack_cosmui, sinmui)
-        sinmumi_out = _theta_einsum_stack(stack_sinmumi, sinmumi)
-        cosmumi_out = _theta_einsum_stack(stack_sinmumi, cosmumi)
+        cosmui_out = _theta_contract(stack_cosmui, cosmui)
+        sinmui_out = _theta_contract(stack_cosmui, sinmui)
+        sinmumi_out = _theta_contract(stack_sinmumi, sinmumi)
+        cosmumi_out = _theta_contract(stack_sinmumi, cosmumi)
 
     armn_cos, crmn_cos, azmn_cos, czmn_cos, arcon_cos, azcon_cos, clmn_cos = cosmui_out
     armn_sin, crmn_sin, azmn_sin, czmn_sin, arcon_sin, azcon_sin, clmn_sin = sinmui_out
@@ -1426,32 +1394,16 @@ def tomnspa_rzl(
     w11 = blmn_cos
     w12 = -clmn_sin
 
-    w1_e, w1_o = w1[0], w1[1]
-    w2_e, w2_o = w2[0], w2[1]
-    w3_e, w3_o = w3[0], w3[1]
-    w4_e, w4_o = w4[0], w4[1]
-    w5_e, w5_o = w5[0], w5[1]
-    w6_e, w6_o = w6[0], w6[1]
-    w7_e, w7_o = w7[0], w7[1]
-    w8_e, w8_o = w8[0], w8[1]
-    w9_e, w9_o = w9[0], w9[1]
-    w10_e, w10_o = w10[0], w10[1]
-    w11_e, w11_o = w11[0], w11[1]
-    w12_e, w12_o = w12[0], w12[1]
-
-    mask_even = _mparity_mask(mpol, dtype=jnp.asarray(armn_even).dtype)
-    w1 = _select_mparity(w1_e, w1_o, mask_even)
-    w2 = _select_mparity(w2_e, w2_o, mask_even)
-    w3 = _select_mparity(w3_e, w3_o, mask_even)
-    w4 = _select_mparity(w4_e, w4_o, mask_even)
-    w5 = _select_mparity(w5_e, w5_o, mask_even)
-    w6 = _select_mparity(w6_e, w6_o, mask_even)
-    w7 = _select_mparity(w7_e, w7_o, mask_even)
-    w8 = _select_mparity(w8_e, w8_o, mask_even)
-    w9 = _select_mparity(w9_e, w9_o, mask_even)
-    w10 = _select_mparity(w10_e, w10_o, mask_even)
-    w11 = _select_mparity(w11_e, w11_o, mask_even)
-    w12 = _select_mparity(w12_e, w12_o, mask_even)
+    mask_even = _mparity_from_masks(
+        masks,
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        dtype_like=armn_even,
+    )
+    w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12 = _select_mparity_pairs(
+        mask_even, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, w11, w12
+    )
 
     lthreed = bool(ntor > 0)
     use_zeta_fused = bool(lthreed) and bool(_TOMNSPA_ZETA_FUSED)
@@ -1526,35 +1478,14 @@ def tomnspa_rzl(
                 flss = flss * jnp.asarray(scale_val, dtype=jnp.asarray(flss).dtype)
 
     # Apply radial evolution masks (same as tomnsps): fixed-boundary edge.
-    if masks is not None and (int(masks.ns) == int(ns)) and (int(masks.mpol) == int(mpol)) and (bool(masks.include_edge) == bool(include_edge)):
-        mask_rz = getattr(masks, "mask_rz_j", None)
-        mask_l = getattr(masks, "mask_l_j", None)
-        if mask_rz is None:
-            mask_rz = jnp.asarray(masks.mask_rz, dtype=jnp.asarray(frsc).dtype)
-        if mask_l is None:
-            mask_l = jnp.asarray(masks.mask_l, dtype=jnp.asarray(flcc).dtype)
-    else:
-        js_fortran = jnp.arange(ns, dtype=jnp.int32) + 1  # 1..ns
-        m_fortran = jnp.arange(mpol, dtype=jnp.int32)  # 0..mpol-1
-        jmin2 = jnp.where(m_fortran == 0, 1, 2)[None, :]  # (1, mpol)
-        jlam = jnp.full((1, mpol), 2, dtype=jmin2.dtype)
-
-        jsmax_rz = int(ns if include_edge else (ns - 1))
-        mask_rz = (js_fortran[:, None] >= jmin2) & (js_fortran[:, None] <= jsmax_rz)
-        mask_l = js_fortran[:, None] >= jlam
-        mask_rz = mask_rz.astype(jnp.asarray(frsc).dtype)[:, :, None]
-        mask_l = mask_l.astype(jnp.asarray(flcc).dtype)[:, :, None]
-
-    frsc = frsc * mask_rz
-    fzcc = fzcc * mask_rz
-    if frcs is not None:
-        frcs = frcs * mask_rz
-    if fzss is not None:
-        fzss = fzss * mask_rz
-
-    flcc = flcc * mask_l
-    if flss is not None:
-        flss = flss * mask_l
+    (frsc, fzcc, frcs, fzss), (flcc, flss) = _apply_tomnsp_radial_masks(
+        masks=masks,
+        ns=ns,
+        mpol=mpol,
+        include_edge=include_edge,
+        rz_fields=(frsc, fzcc, frcs, fzss),
+        l_fields=(flcc, flss),
+    )
 
     # Return with symmetric blocks zeroed; caller is expected to merge with tomnsps.
     z_sym = jnp.zeros_like(frsc)

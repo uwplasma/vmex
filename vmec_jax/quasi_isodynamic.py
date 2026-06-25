@@ -20,25 +20,12 @@ Goodman et al. omnigenity workflow, while remaining differentiable.
 
 from __future__ import annotations
 
-from typing import Iterable
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 import numpy as np
 
 from ._compat import jax, jnp
-
-__all__ = [
-    "boundary_max_elongation_from_rz",
-    "lgradb_from_state",
-    "lgradb_penalty_from_state",
-    "max_elongation_penalty_from_state",
-    "boozer_output_from_state",
-    "mirror_ratio_penalty_from_boozer_modes",
-    "mirror_ratio_penalty_from_boozer_output",
-    "mirror_ratio_penalty_from_state",
-    "quasi_isodynamic_residual_from_boozer_modes",
-    "quasi_isodynamic_residual_from_boozer_output",
-    "quasi_isodynamic_residual_from_state",
-]
 
 
 def _require_jax():
@@ -98,6 +85,389 @@ def _nearest_half_mesh_indices(surfaces: Iterable[float], *, n_half: int) -> np.
     surf = np.asarray(list(surfaces), dtype=float)
     s_half = 0.5 * (np.arange(int(n_half), dtype=float) + np.arange(1, int(n_half) + 1, dtype=float)) / float(n_half)
     return np.asarray([int(np.argmin(np.abs(s_half - value))) for value in surf], dtype=np.int32)
+
+
+@dataclass(frozen=True)
+class _QIBoozerSurfaceGrid:
+    """Validated Boozer data and smooth-QI sampling grid."""
+
+    bmnc_b: Any
+    xm_b: Any
+    xn_b: Any
+    iota_b: Any
+    nfp: int
+    nphi: int
+    nalpha: int
+    n_bounce: int
+    nsurf: int
+    weights_arr: Any
+    dtype: Any
+    phi0: Any
+    phi1: Any
+    phi: Any
+    alpha: Any
+    bmag: Any
+    bnorm: Any
+    levels: Any
+    level_count: int
+    eps: Any
+
+
+def _qi_boozer_surface_grid(
+    *,
+    bmnc_b,
+    xm_b,
+    xn_b,
+    iota_b,
+    nfp: int,
+    weights,
+    nphi: int,
+    nalpha: int,
+    n_bounce: int,
+    include_bounce_endpoints: bool,
+    softness: float,
+    phimin: float,
+) -> _QIBoozerSurfaceGrid:
+    """Validate Boozer inputs and evaluate normalized ``|B|`` on field lines."""
+    bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
+    xm_b = jnp.asarray(xm_b, dtype=jnp.float64)
+    xn_b = jnp.asarray(xn_b, dtype=jnp.float64)
+    iota_b = jnp.asarray(iota_b, dtype=jnp.float64)
+    nfp = int(nfp)
+    nphi = int(nphi)
+    nalpha = int(nalpha)
+    n_bounce = int(n_bounce)
+    if bmnc_b.ndim != 2:
+        raise ValueError(f"bmnc_b must have shape (nsurf, nmodes), got {bmnc_b.shape}")
+    if int(bmnc_b.shape[1]) != int(xm_b.shape[0]) or int(xm_b.shape[0]) != int(xn_b.shape[0]):
+        raise ValueError("Boozer mode arrays must have the same mode dimension as bmnc_b")
+    if int(iota_b.shape[0]) != int(bmnc_b.shape[0]):
+        raise ValueError("iota_b must have one value per Boozer surface")
+    if nphi < 4 or nalpha < 2 or n_bounce < 2:
+        raise ValueError("QI residual requires nphi >= 4, nalpha >= 2, and n_bounce >= 2")
+
+    nsurf = int(bmnc_b.shape[0])
+    weights_arr = _as_weight_array(weights, nsurf)
+    if int(weights_arr.shape[0]) != nsurf:
+        raise ValueError("weights must have the same length as the number of Boozer surfaces")
+
+    dtype = bmnc_b.dtype
+    phi0 = jnp.asarray(float(phimin), dtype=dtype)
+    phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
+    phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
+    alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
+
+    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
+    angle = theta[:, :, :, None] * xm_b[None, None, None, :] - phi[None, :, None, None] * xn_b[
+        None, None, None, :
+    ]
+    bmag = jnp.sum(bmnc_b[:, None, None, :] * jnp.cos(angle), axis=-1)
+
+    bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
+    bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
+    denom = jnp.maximum(bmax - bmin, jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype))
+    bnorm = (bmag - bmin) / denom
+
+    if bool(include_bounce_endpoints):
+        levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
+    else:
+        levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
+    eps = jnp.maximum(jnp.asarray(float(softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+
+    return _QIBoozerSurfaceGrid(
+        bmnc_b=bmnc_b,
+        xm_b=xm_b,
+        xn_b=xn_b,
+        iota_b=iota_b,
+        nfp=nfp,
+        nphi=nphi,
+        nalpha=nalpha,
+        n_bounce=n_bounce,
+        nsurf=nsurf,
+        weights_arr=weights_arr,
+        dtype=dtype,
+        phi0=phi0,
+        phi1=phi1,
+        phi=phi,
+        alpha=alpha,
+        bmag=bmag,
+        bnorm=bnorm,
+        levels=levels,
+        level_count=int(levels.shape[0]),
+        eps=eps,
+    )
+
+
+def _qi_branch_width_residuals(grid: _QIBoozerSurfaceGrid, *, branch_width_weight: float, branch_width_softness: float):
+    """Return Goodman-style branch-width residuals on the smooth QI grid."""
+
+    dtype, empty3 = grid.dtype, jnp.zeros((grid.nsurf, grid.nalpha, 0), dtype=grid.dtype)
+    if float(branch_width_weight) == 0.0:
+        return {"residuals1d": jnp.zeros((0,), dtype=dtype), "residuals3d": empty3,
+                "branch_widths": empty3, "branch_widths_mean": jnp.zeros((grid.nsurf, 1, 0), dtype=dtype)}
+
+    bperiodic = jnp.swapaxes(grid.bnorm[:, :-1, :], 1, 2)  # (nsurf, nalpha, nperiodic)
+    nperiodic = int(grid.nphi - 1)
+    offsets = jnp.arange(max(1, nperiodic // 2) + 1, dtype=jnp.int32)
+    min_index = jnp.argmin(bperiodic, axis=-1)
+    left_index = jnp.mod(min_index[:, :, None] - offsets[None, None, :], nperiodic)
+    right_index = jnp.mod(min_index[:, :, None] + offsets[None, None, :], nperiodic)
+    left_branch = jnp.maximum.accumulate(jnp.take_along_axis(bperiodic, left_index, axis=-1), axis=-1)
+    right_branch = jnp.maximum.accumulate(jnp.take_along_axis(bperiodic, right_index, axis=-1), axis=-1)
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    left_branch = (left_branch - left_branch[..., :1]) / jnp.maximum(left_branch[..., -1:] - left_branch[..., :1], tiny)
+    right_branch = (right_branch - right_branch[..., :1]) / jnp.maximum(right_branch[..., -1:] - right_branch[..., :1], tiny)
+    distance = jnp.asarray(offsets, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+    branch_eps = jnp.maximum(jnp.asarray(float(branch_width_softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+
+    def _smooth_branch_crossing(branch):
+        logits = -((branch[:, :, :, None] - grid.levels[None, None, None, :]) / branch_eps) ** 2
+        logits = logits - jnp.max(logits, axis=2, keepdims=True)
+        crossing_weights = jnp.exp(logits)
+        crossing_weights = crossing_weights / jnp.sum(crossing_weights, axis=2, keepdims=True)
+        return jnp.sum(crossing_weights * distance[None, None, :, None], axis=2)
+
+    branch_widths = _smooth_branch_crossing(left_branch) + _smooth_branch_crossing(right_branch)
+    branch_widths_mean = jnp.mean(branch_widths, axis=1, keepdims=True)
+    residuals3d = ((branch_widths - branch_widths_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                   * jnp.asarray(float(branch_width_weight), dtype=dtype))
+    residuals1d = jnp.ravel(residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.level_count, dtype=dtype))
+    return {"residuals1d": residuals1d, "residuals3d": residuals3d, "branch_widths": branch_widths,
+            "branch_widths_mean": branch_widths_mean}
+
+
+def _qi_width_profile_residuals(grid: _QIBoozerSurfaceGrid, *, width_weight: float, profile_weight: float):
+    occupancy = jax_sigmoid((grid.levels[None, None, None, :] - grid.bnorm[:, :, :, None]) / grid.eps)
+    widths = jnp.mean(occupancy, axis=1)
+    widths_mean = jnp.mean(widths, axis=1, keepdims=True)
+    width_residuals3d = ((widths - widths_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                         * jnp.asarray(float(width_weight), dtype=grid.dtype))
+    width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.level_count,
+                                                                            dtype=grid.dtype))
+    profile_mean = jnp.mean(grid.bnorm, axis=2, keepdims=True)
+    profile_residuals3d = ((grid.bnorm - profile_mean) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                           * jnp.asarray(float(profile_weight), dtype=grid.dtype))
+    profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * grid.nphi,
+                                                                                dtype=grid.dtype))
+    return (width_residuals1d, width_residuals3d, widths, widths_mean,
+            profile_residuals1d, profile_residuals3d, profile_mean)
+
+
+def _qi_aligned_profile_residuals(grid: _QIBoozerSurfaceGrid, *, aligned_profile_weight: float,
+                                  aligned_profile_softness: float, aligned_profile_trap_level: float,
+                                  aligned_profile_trap_softness: float):
+    """Return smooth minimum-aligned trapped-well profile residuals."""
+
+    dtype, empty = grid.dtype, jnp.zeros((grid.nsurf, 0, grid.nalpha), dtype=grid.dtype)
+    aligned_min_phi = jnp.zeros((grid.nsurf, grid.nalpha), dtype=dtype)
+    if float(aligned_profile_weight) == 0.0:
+        return {"residuals1d": jnp.zeros((0,), dtype=dtype), "residuals3d": empty, "profile": empty,
+                "profile_mean": jnp.zeros((grid.nsurf, 0, 1), dtype=dtype), "trap_weight": empty,
+                "min_phi": aligned_min_phi}
+
+    # Drop the repeated endpoint before FFT-based periodic shifts.
+    bperiodic = grid.bnorm[:, :-1, :]
+    nperiodic = int(grid.nphi - 1)
+    period = jnp.asarray(2.0 * np.pi / grid.nfp, dtype=dtype)
+    min_temperature = jnp.maximum(jnp.asarray(float(aligned_profile_softness), dtype=dtype),
+                                  jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    shifted_for_weights = bperiodic - jnp.min(bperiodic, axis=1, keepdims=True)
+    argmin_weights = jnp.exp(-shifted_for_weights / min_temperature)
+    argmin_weights = argmin_weights / jnp.sum(argmin_weights, axis=1, keepdims=True)
+    grid_angle = 2.0 * jnp.pi * jnp.arange(nperiodic, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
+    min_angle = jnp.mod(jnp.angle(jnp.sum(argmin_weights * jnp.exp(1j * grid_angle)[None, :, None], axis=1)), 2.0 * jnp.pi)
+    aligned_min_phi = min_angle * period / (2.0 * jnp.pi) + grid.phi0
+
+    coeffs = jnp.fft.fft(bperiodic, axis=1)
+    mode_numbers = jnp.fft.fftfreq(nperiodic) * jnp.asarray(nperiodic, dtype=dtype)
+    phase = jnp.exp(1j * 2.0 * jnp.pi * mode_numbers[None, :, None] * (aligned_min_phi - grid.phi0)[:, None, :] / period)
+    aligned_profile = jnp.real(jnp.fft.ifft(coeffs * phase, axis=1))
+    aligned_profile_mean = jnp.mean(aligned_profile, axis=2, keepdims=True)
+    trap_eps = jnp.maximum(jnp.asarray(float(aligned_profile_trap_softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    trap_weight = jax_sigmoid((jnp.asarray(float(aligned_profile_trap_level), dtype=dtype) - aligned_profile) / trap_eps)
+    residuals3d = ((aligned_profile - aligned_profile_mean) * trap_weight * jnp.sqrt(grid.weights_arr)[:, None, None]
+                   * jnp.asarray(float(aligned_profile_weight), dtype=dtype))
+    residuals1d = jnp.ravel(residuals3d) / jnp.sqrt(jnp.asarray(grid.nalpha * nperiodic, dtype=dtype))
+    return {"residuals1d": residuals1d, "residuals3d": residuals3d, "profile": aligned_profile,
+            "profile_mean": aligned_profile_mean, "trap_weight": trap_weight, "min_phi": aligned_min_phi}
+
+
+def _qi_shuffle_profile_residuals(grid: _QIBoozerSurfaceGrid, *, n_bounce: int, include_bounce_endpoints: bool,
+                                  shuffle_profile_weight: float, shuffle_profile_softness: float,
+                                  shuffle_profile_nphi_out: int | None,
+                                  weighted_shuffle_profile_weight: float,
+                                  weighted_shuffle_profile_softness: float):
+    nsurf, nphi, nalpha, dtype = grid.nsurf, grid.nphi, grid.nalpha, grid.dtype
+    shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
+    weighted_shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    weighted_shuffle_alpha_weights = jnp.zeros((nsurf, nalpha), dtype=dtype)
+    shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
+    shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    weighted_shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
+    if float(shuffle_profile_weight) == 0.0 and float(weighted_shuffle_profile_weight) == 0.0:
+        return (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+                weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+                weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+                shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean)
+
+    b_by_alpha = jnp.swapaxes(grid.bnorm, 1, 2)  # (nsurf, nalpha, nphi)
+    offsets = jnp.arange(nphi, dtype=jnp.int32)
+    offsets_float = jnp.asarray(offsets, dtype=dtype)
+    dphi = (grid.phi1 - grid.phi0) / jnp.asarray(max(nphi - 1, 1), dtype=dtype)
+    period = grid.phi1 - grid.phi0
+    min_index = jnp.argmin(b_by_alpha, axis=-1)
+
+    left_index_raw = min_index[:, :, None] - offsets[None, None, :]
+    right_index_raw = min_index[:, :, None] + offsets[None, None, :]
+    left_valid = left_index_raw >= 0
+    right_valid = right_index_raw < nphi
+    left_index = jnp.clip(left_index_raw, 0, nphi - 1)
+    right_index = jnp.clip(right_index_raw, 0, nphi - 1)
+    left_raw = jnp.take_along_axis(b_by_alpha, left_index, axis=-1)
+    right_raw = jnp.take_along_axis(b_by_alpha, right_index, axis=-1)
+    left_raw = jnp.where(left_valid, left_raw, jnp.asarray(1.0, dtype=dtype))
+    right_raw = jnp.where(right_valid, right_raw, jnp.asarray(1.0, dtype=dtype))
+
+    left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
+    right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
+
+    def _stretch_branches(left, right):
+        pmax = jnp.asarray(50.0, dtype=dtype)
+        pmin = jnp.asarray(15.0, dtype=dtype)
+        denom = jnp.maximum(jnp.asarray(nphi - 1, dtype=dtype), jnp.asarray(1.0, dtype=dtype))
+        x = offsets_float / denom
+        window = ((jnp.cos(2.0 * jnp.pi * x) + 1.0) / 2.0)
+        left_legacy = jnp.flip(left, axis=-1)
+        f_left = jnp.where((x < 0.5)[None, None, :],
+                           (1.0 - left_legacy[..., :1]) * window[None, None, :] ** pmax,
+                           (-left_legacy[..., -1:]) * window[None, None, :] ** pmin)
+        f_right = jnp.where((x < 0.5)[None, None, :],
+                            (-right[..., :1]) * window[None, None, :] ** pmin,
+                            (1.0 - right[..., -1:]) * window[None, None, :] ** pmax)
+        return (jnp.maximum.accumulate(jnp.flip(left_legacy + f_left, axis=-1), axis=-1),
+                jnp.maximum.accumulate(right + f_right, axis=-1))
+
+    if bool(include_bounce_endpoints):
+        shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
+    else:
+        shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
+    shuffle_eps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
+                              jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    trapz_weights = jnp.ones((nphi,), dtype=dtype).at[0].set(0.5).at[-1].set(0.5)
+
+    def _branch_crossing(branch):
+        occupancy_local = jax_sigmoid((shuffle_levels[None, None, None, :] - branch[:, :, :, None]) / shuffle_eps)
+        return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
+
+    def _linear_branch_crossing(branch):
+        distance = offsets_float * dphi
+        branch_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype)
+
+        def _interp_branch_one(branch_1d):
+            return jnp.interp(shuffle_levels, branch_1d + branch_ramp, distance)
+
+        return jax.vmap(jax.vmap(_interp_branch_one, in_axes=0, out_axes=0), in_axes=0, out_axes=0)(branch)
+
+    left_crossing = _branch_crossing(left_branch)
+    right_crossing = _branch_crossing(right_branch)
+    shuffle_branch_widths = left_crossing + right_crossing
+    shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
+    weighted_left_crossing = left_crossing
+    weighted_right_crossing = right_crossing
+    weighted_shuffle_branch_widths = shuffle_branch_widths
+    if float(weighted_shuffle_profile_weight) != 0.0:
+        weighted_left_branch, weighted_right_branch = _stretch_branches(left_branch, right_branch)
+        weighted_left_crossing = _linear_branch_crossing(weighted_left_branch)
+        weighted_right_crossing = _linear_branch_crossing(weighted_right_branch)
+        weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
+        valid_count = jnp.maximum(jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
+                                  jnp.asarray(1.0, dtype=dtype))
+        squash_error = jnp.sum(jnp.where(left_valid, (left_raw - weighted_left_branch) ** 2, 0.0)
+                               + jnp.where(right_valid, (right_raw - weighted_right_branch) ** 2, 0.0),
+                               axis=-1) / valid_count
+        weighted_eps = jnp.maximum(jnp.asarray(float(weighted_shuffle_profile_softness), dtype=dtype) ** 2,
+                                   jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+        inv_error = 1.0 / jnp.maximum(squash_error, weighted_eps)
+        weighted_shuffle_alpha_weights = inv_error / jnp.maximum(
+            jnp.sum(inv_error, axis=1, keepdims=True), jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+        )
+        weighted_shuffle_branch_widths_mean = jnp.sum(
+            weighted_shuffle_branch_widths * weighted_shuffle_alpha_weights[:, :, None], axis=1, keepdims=True
+        )
+
+    min_phi = grid.phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
+    left_endpoint = jnp.maximum(min_phi - grid.phi0, jnp.asarray(0.0, dtype=dtype))
+    right_endpoint = jnp.maximum(grid.phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
+    signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
+    shuffle_eval_count = nphi if shuffle_profile_nphi_out is None else int(shuffle_profile_nphi_out)
+    if shuffle_eval_count == nphi:
+        signed_phi_eval = signed_phi
+        b_eval = b_by_alpha
+    else:
+        phi_eval = jnp.linspace(grid.phi0, grid.phi1, shuffle_eval_count, endpoint=True, dtype=dtype)
+        signed_phi_eval = phi_eval[None, None, :] - min_phi[:, :, None]
+        original_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+        signed_phi_interp = signed_phi + original_ramp[None, None, :]
+
+        def _interp_original_one(xp, fp, x):
+            return jnp.interp(x, xp, fp)
+
+        b_eval = jax.vmap(
+            jax.vmap(_interp_original_one, in_axes=(0, 0, 0), out_axes=0), in_axes=(0, 0, 0), out_axes=0
+        )(signed_phi_interp, b_by_alpha, signed_phi_eval)
+
+    level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), shuffle_levels, jnp.ones((1,), dtype=dtype)])
+    y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
+
+    def _interp_one(xp, x):
+        return jnp.interp(x, xp, y_target)
+
+    def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean, x_eval):
+        delta_width = 0.5 * (branch_widths - width_mean)
+        left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
+        right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
+        left_full = jnp.concatenate([jnp.zeros((nsurf, nalpha, 1), dtype=dtype), left_target,
+                                     left_endpoint[:, :, None]], axis=-1)
+        right_full = jnp.concatenate([jnp.zeros((nsurf, nalpha, 1), dtype=dtype), right_target,
+                                      right_endpoint[:, :, None]], axis=-1)
+        left_full = jnp.maximum.accumulate(left_full, axis=-1)
+        right_full = jnp.maximum.accumulate(right_full, axis=-1)
+        x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
+        ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
+        x_target = x_target + ramp[None, None, :]
+        return jax.vmap(jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0), in_axes=(0, 0), out_axes=0)(
+            x_target, x_eval
+        )
+
+    if float(shuffle_profile_weight) != 0.0:
+        shuffle_profile = _profile_from_width_mean(
+            left_crossing, right_crossing, shuffle_branch_widths, shuffle_branch_widths_mean, signed_phi_eval
+        )
+        shuffle_profile_residuals3d = ((shuffle_profile - b_eval) * jnp.sqrt(grid.weights_arr)[:, None, None]
+                                       * jnp.asarray(float(shuffle_profile_weight), dtype=dtype))
+        shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
+        )
+    if float(weighted_shuffle_profile_weight) != 0.0:
+        weighted_shuffle_profile = _profile_from_width_mean(
+            weighted_left_crossing, weighted_right_crossing, weighted_shuffle_branch_widths,
+            weighted_shuffle_branch_widths_mean, signed_phi_eval
+        )
+        weighted_shuffle_profile_residuals3d = (
+            (weighted_shuffle_profile - b_eval) * jnp.sqrt(grid.weights_arr)[:, None, None]
+            * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
+        )
+        weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
+            jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
+        )
+    return (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+            weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+            weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+            shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean)
 
 
 def mirror_ratio_penalty_from_boozer_modes(
@@ -645,404 +1015,66 @@ def quasi_isodynamic_residual_from_boozer_modes(
     """
     _require_jax()
 
-    bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
-    xm_b = jnp.asarray(xm_b, dtype=jnp.float64)
-    xn_b = jnp.asarray(xn_b, dtype=jnp.float64)
-    iota_b = jnp.asarray(iota_b, dtype=jnp.float64)
-    nfp = int(nfp)
-    nphi = int(nphi)
-    nalpha = int(nalpha)
-    n_bounce = int(n_bounce)
-    if bmnc_b.ndim != 2:
-        raise ValueError(f"bmnc_b must have shape (nsurf, nmodes), got {bmnc_b.shape}")
-    if int(bmnc_b.shape[1]) != int(xm_b.shape[0]) or int(xm_b.shape[0]) != int(xn_b.shape[0]):
-        raise ValueError("Boozer mode arrays must have the same mode dimension as bmnc_b")
-    if int(iota_b.shape[0]) != int(bmnc_b.shape[0]):
-        raise ValueError("iota_b must have one value per Boozer surface")
-    if nphi < 4 or nalpha < 2 or n_bounce < 2:
+    if int(nphi) < 4 or int(nalpha) < 2 or int(n_bounce) < 2:
         raise ValueError("QI residual requires nphi >= 4, nalpha >= 2, and n_bounce >= 2")
     if shuffle_profile_nphi_out is not None and int(shuffle_profile_nphi_out) < 4:
         raise ValueError("shuffle_profile_nphi_out must be >= 4 when supplied")
-
-    nsurf = int(bmnc_b.shape[0])
-    weights_arr = _as_weight_array(weights, nsurf)
-    if int(weights_arr.shape[0]) != nsurf:
-        raise ValueError("weights must have the same length as the number of Boozer surfaces")
-
-    dtype = bmnc_b.dtype
-    phi0 = jnp.asarray(float(phimin), dtype=dtype)
-    phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
-    phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
-    alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
-
-    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
-    angle = theta[:, :, :, None] * xm_b[None, None, None, :] - phi[None, :, None, None] * xn_b[None, None, None, :]
-    bmag = jnp.sum(bmnc_b[:, None, None, :] * jnp.cos(angle), axis=-1)
-
-    bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
-    bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
-    denom = jnp.maximum(bmax - bmin, jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype))
-    bnorm = (bmag - bmin) / denom
-
-    if bool(include_bounce_endpoints):
-        levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
-    else:
-        levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
-    level_count = int(levels.shape[0])
-    eps = jnp.maximum(jnp.asarray(float(softness), dtype=dtype), jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
-    occupancy = jax_sigmoid((levels[None, None, None, :] - bnorm[:, :, :, None]) / eps)
-
-    # Mean over the uniformly sampled toroidal interval. This is proportional
-    # to the bounce width used in the branch-based diagnostic.
-    widths = jnp.mean(occupancy, axis=1)
-    widths_mean = jnp.mean(widths, axis=1, keepdims=True)
-    width_residuals3d = (
-        (widths - widths_mean)
-        * jnp.sqrt(weights_arr)[:, None, None]
-        * jnp.asarray(float(width_weight), dtype=dtype)
+    qi_grid = _qi_boozer_surface_grid(
+        bmnc_b=bmnc_b,
+        xm_b=xm_b,
+        xn_b=xn_b,
+        iota_b=iota_b,
+        nfp=int(nfp),
+        weights=weights,
+        nphi=int(nphi),
+        nalpha=int(nalpha),
+        n_bounce=int(n_bounce),
+        include_bounce_endpoints=bool(include_bounce_endpoints),
+        softness=float(softness),
+        phimin=float(phimin),
     )
-    width_residuals1d = jnp.ravel(width_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * level_count, dtype=dtype))
-
-    branch_width_residuals1d = jnp.zeros((0,), dtype=dtype)
-    branch_width_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    if float(branch_width_weight) != 0.0:
-        bperiodic = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)  # (nsurf, nalpha, nperiodic)
-        nperiodic = int(nphi - 1)
-        half_period = max(1, nperiodic // 2)
-        offsets = jnp.arange(half_period + 1, dtype=jnp.int32)
-        min_index = jnp.argmin(bperiodic, axis=-1)
-        left_index = jnp.mod(min_index[:, :, None] - offsets[None, None, :], nperiodic)
-        right_index = jnp.mod(min_index[:, :, None] + offsets[None, None, :], nperiodic)
-        left_raw = jnp.take_along_axis(bperiodic, left_index, axis=-1)
-        right_raw = jnp.take_along_axis(bperiodic, right_index, axis=-1)
-
-        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
-        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
-        tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
-        left_branch = (left_branch - left_branch[..., :1]) / jnp.maximum(left_branch[..., -1:] - left_branch[..., :1], tiny)
-        right_branch = (right_branch - right_branch[..., :1]) / jnp.maximum(
-            right_branch[..., -1:] - right_branch[..., :1], tiny
-        )
-        distance = jnp.asarray(offsets, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
-        branch_eps = jnp.maximum(
-            jnp.asarray(float(branch_width_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-
-        def _smooth_branch_crossing(branch):
-            logits = -((branch[:, :, :, None] - levels[None, None, None, :]) / branch_eps) ** 2
-            logits = logits - jnp.max(logits, axis=2, keepdims=True)
-            crossing_weights = jnp.exp(logits)
-            crossing_weights = crossing_weights / jnp.sum(crossing_weights, axis=2, keepdims=True)
-            return jnp.sum(crossing_weights * distance[None, None, :, None], axis=2)
-
-        left_crossing = _smooth_branch_crossing(left_branch)
-        right_crossing = _smooth_branch_crossing(right_branch)
-        branch_widths = left_crossing + right_crossing
-        branch_widths_mean = jnp.mean(branch_widths, axis=1, keepdims=True)
-        branch_width_residuals3d = (
-            (branch_widths - branch_widths_mean)
-            * jnp.sqrt(weights_arr)[:, None, None]
-            * jnp.asarray(float(branch_width_weight), dtype=dtype)
-        )
-        branch_width_residuals1d = jnp.ravel(branch_width_residuals3d) / jnp.sqrt(
-            jnp.asarray(nalpha * level_count, dtype=dtype)
-        )
-
-    profile_mean = jnp.mean(bnorm, axis=2, keepdims=True)
-    profile_residuals3d = (
-        (bnorm - profile_mean)
-        * jnp.sqrt(weights_arr)[:, None, None]
-        * jnp.asarray(float(profile_weight), dtype=dtype)
+    iota_b = qi_grid.iota_b
+    phi = qi_grid.phi
+    alpha = qi_grid.alpha
+    bmag = qi_grid.bmag
+    bnorm = qi_grid.bnorm
+    levels = qi_grid.levels
+    width_residuals1d, width_residuals3d, widths, widths_mean, profile_residuals1d, profile_residuals3d, profile_mean = (
+        _qi_width_profile_residuals(qi_grid, width_weight=width_weight, profile_weight=profile_weight)
     )
-    profile_residuals1d = jnp.ravel(profile_residuals3d) / jnp.sqrt(jnp.asarray(nalpha * nphi, dtype=dtype))
-    aligned_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    aligned_profile_residuals3d = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_profile = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_profile_mean = jnp.zeros((nsurf, 0, 1), dtype=dtype)
-    aligned_profile_trap_weight = jnp.zeros((nsurf, 0, nalpha), dtype=dtype)
-    aligned_min_phi = jnp.zeros((nsurf, nalpha), dtype=dtype)
-    if float(aligned_profile_weight) != 0.0:
-        # The base phi grid includes both endpoints for the width integral.
-        # Drop the repeated endpoint before using FFT-based periodic shifts.
-        bperiodic = bnorm[:, :-1, :]
-        nperiodic = int(nphi - 1)
-        period = jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
-        min_temperature = jnp.maximum(
-            jnp.asarray(float(aligned_profile_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        shifted_for_weights = bperiodic - jnp.min(bperiodic, axis=1, keepdims=True)
-        argmin_weights = jnp.exp(-shifted_for_weights / min_temperature)
-        argmin_weights = argmin_weights / jnp.sum(argmin_weights, axis=1, keepdims=True)
-        grid_angle = 2.0 * jnp.pi * jnp.arange(nperiodic, dtype=dtype) / jnp.asarray(nperiodic, dtype=dtype)
-        z = jnp.sum(argmin_weights * jnp.exp(1j * grid_angle)[None, :, None], axis=1)
-        min_angle = jnp.mod(jnp.angle(z), 2.0 * jnp.pi)
-        aligned_min_phi = min_angle * period / (2.0 * jnp.pi) + phi0
 
-        # g(phi) = f(phi + phi_min) aligns the minimum near phi=0.
-        coeffs = jnp.fft.fft(bperiodic, axis=1)
-        mode_numbers = jnp.fft.fftfreq(nperiodic) * jnp.asarray(nperiodic, dtype=dtype)
-        phase = jnp.exp(1j * 2.0 * jnp.pi * mode_numbers[None, :, None] * (aligned_min_phi - phi0)[:, None, :] / period)
-        aligned_profile = jnp.real(jnp.fft.ifft(coeffs * phase, axis=1))
-        aligned_profile_mean = jnp.mean(aligned_profile, axis=2, keepdims=True)
-        trap_eps = jnp.maximum(
-            jnp.asarray(float(aligned_profile_trap_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        aligned_profile_trap_weight = jax_sigmoid(
-            (jnp.asarray(float(aligned_profile_trap_level), dtype=dtype) - aligned_profile) / trap_eps
-        )
-        aligned_profile_residuals3d = (
-            (aligned_profile - aligned_profile_mean)
-            * aligned_profile_trap_weight
-            * jnp.sqrt(weights_arr)[:, None, None]
-            * jnp.asarray(float(aligned_profile_weight), dtype=dtype)
-        )
-        aligned_profile_residuals1d = jnp.ravel(aligned_profile_residuals3d) / jnp.sqrt(
-            jnp.asarray(nalpha * nperiodic, dtype=dtype)
-        )
+    branch_width = _qi_branch_width_residuals(
+        qi_grid,
+        branch_width_weight=branch_width_weight,
+        branch_width_softness=branch_width_softness,
+    )
+    branch_width_residuals1d, branch_width_residuals3d = branch_width["residuals1d"], branch_width["residuals3d"]
+    branch_widths, branch_widths_mean = branch_width["branch_widths"], branch_width["branch_widths_mean"]
 
-    shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_profile_residuals1d = jnp.zeros((0,), dtype=dtype)
-    weighted_shuffle_profile_residuals3d = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_profile = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    weighted_shuffle_alpha_weights = jnp.zeros((nsurf, nalpha), dtype=dtype)
-    shuffle_branch_widths = jnp.zeros((nsurf, nalpha, 0), dtype=dtype)
-    shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    weighted_shuffle_branch_widths_mean = jnp.zeros((nsurf, 1, 0), dtype=dtype)
-    if float(shuffle_profile_weight) != 0.0 or float(weighted_shuffle_profile_weight) != 0.0:
-        if jax is None:  # pragma: no cover - guarded by _require_jax()
-            raise ImportError("shuffle-profile QI residual requires JAX")
-        b_by_alpha = jnp.swapaxes(bnorm, 1, 2)  # (nsurf, nalpha, nphi)
-        offsets = jnp.arange(nphi, dtype=jnp.int32)
-        offsets_float = jnp.asarray(offsets, dtype=dtype)
-        dphi = (phi1 - phi0) / jnp.asarray(max(nphi - 1, 1), dtype=dtype)
-        period = phi1 - phi0
-        min_index = jnp.argmin(b_by_alpha, axis=-1)
+    aligned = _qi_aligned_profile_residuals(
+        qi_grid,
+        aligned_profile_weight=aligned_profile_weight,
+        aligned_profile_softness=aligned_profile_softness,
+        aligned_profile_trap_level=aligned_profile_trap_level,
+        aligned_profile_trap_softness=aligned_profile_trap_softness,
+    )
+    aligned_profile_residuals1d, aligned_profile_residuals3d = aligned["residuals1d"], aligned["residuals3d"]
+    aligned_profile, aligned_profile_mean = aligned["profile"], aligned["profile_mean"]
+    aligned_profile_trap_weight, aligned_min_phi = aligned["trap_weight"], aligned["min_phi"]
 
-        left_index_raw = min_index[:, :, None] - offsets[None, None, :]
-        right_index_raw = min_index[:, :, None] + offsets[None, None, :]
-        left_valid = left_index_raw >= 0
-        right_valid = right_index_raw < nphi
-        left_index = jnp.clip(left_index_raw, 0, nphi - 1)
-        right_index = jnp.clip(right_index_raw, 0, nphi - 1)
-        left_raw = jnp.take_along_axis(b_by_alpha, left_index, axis=-1)
-        right_raw = jnp.take_along_axis(b_by_alpha, right_index, axis=-1)
-        left_raw = jnp.where(left_valid, left_raw, jnp.asarray(1.0, dtype=dtype))
-        right_raw = jnp.where(right_valid, right_raw, jnp.asarray(1.0, dtype=dtype))
-
-        left_branch = jnp.maximum.accumulate(left_raw, axis=-1)
-        right_branch = jnp.maximum.accumulate(right_raw, axis=-1)
-
-        def _stretch_branches(left, right):
-            """Apply the legacy Goodman squash/stretch endpoint correction."""
-            pmax = jnp.asarray(50.0, dtype=dtype)
-            pmin = jnp.asarray(15.0, dtype=dtype)
-            denom = jnp.maximum(jnp.asarray(nphi - 1, dtype=dtype), jnp.asarray(1.0, dtype=dtype))
-            x = offsets_float / denom
-            window = ((jnp.cos(2.0 * jnp.pi * x) + 1.0) / 2.0)
-
-            # ``left`` is stored from well minimum outward to the left endpoint.
-            # Reverse it to match the legacy left-endpoint -> minimum formula,
-            # then reverse back so downstream crossing distances stay unchanged.
-            left_legacy = jnp.flip(left, axis=-1)
-            left_half = x < 0.5
-            f_left = jnp.where(
-                left_half[None, None, :],
-                (1.0 - left_legacy[..., :1]) * window[None, None, :] ** pmax,
-                (-left_legacy[..., -1:]) * window[None, None, :] ** pmin,
-            )
-            left_stretched = jnp.flip(left_legacy + f_left, axis=-1)
-
-            right_half = x < 0.5
-            f_right = jnp.where(
-                right_half[None, None, :],
-                (-right[..., :1]) * window[None, None, :] ** pmin,
-                (1.0 - right[..., -1:]) * window[None, None, :] ** pmax,
-            )
-            right_stretched = right + f_right
-            return (
-                jnp.maximum.accumulate(left_stretched, axis=-1),
-                jnp.maximum.accumulate(right_stretched, axis=-1),
-            )
-
-        if bool(include_bounce_endpoints):
-            shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
-        else:
-            shuffle_levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
-        shuffle_eps = jnp.maximum(
-            jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
-            jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-        )
-        trapz_weights = jnp.ones((nphi,), dtype=dtype)
-        trapz_weights = trapz_weights.at[0].set(0.5)
-        trapz_weights = trapz_weights.at[-1].set(0.5)
-
-        def _branch_crossing(branch):
-            occupancy_local = jax_sigmoid(
-                (shuffle_levels[None, None, None, :] - branch[:, :, :, None]) / shuffle_eps
-            )
-            return jnp.sum(occupancy_local * trapz_weights[None, None, :, None], axis=2) * dphi
-
-        def _linear_branch_crossing(branch):
-            distance = offsets_float * dphi
-            branch_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype)
-
-            def _interp_branch_one(branch_1d):
-                return jnp.interp(shuffle_levels, branch_1d + branch_ramp, distance)
-
-            return jax.vmap(
-                jax.vmap(_interp_branch_one, in_axes=0, out_axes=0),
-                in_axes=0,
-                out_axes=0,
-            )(branch)
-
-        left_crossing = _branch_crossing(left_branch)
-        right_crossing = _branch_crossing(right_branch)
-        shuffle_branch_widths = left_crossing + right_crossing
-        shuffle_branch_widths_mean = jnp.mean(shuffle_branch_widths, axis=1, keepdims=True)
-        weighted_left_crossing = left_crossing
-        weighted_right_crossing = right_crossing
-        weighted_shuffle_branch_widths = shuffle_branch_widths
-        if float(weighted_shuffle_profile_weight) != 0.0:
-            weighted_left_branch, weighted_right_branch = _stretch_branches(left_branch, right_branch)
-            weighted_left_crossing = _linear_branch_crossing(weighted_left_branch)
-            weighted_right_crossing = _linear_branch_crossing(weighted_right_branch)
-            weighted_shuffle_branch_widths = weighted_left_crossing + weighted_right_crossing
-            valid_count = jnp.maximum(
-                jnp.sum(left_valid.astype(dtype) + right_valid.astype(dtype), axis=-1),
-                jnp.asarray(1.0, dtype=dtype),
-            )
-            squash_error = jnp.sum(
-                jnp.where(left_valid, (left_raw - weighted_left_branch) ** 2, 0.0)
-                + jnp.where(right_valid, (right_raw - weighted_right_branch) ** 2, 0.0),
-                axis=-1,
-            ) / valid_count
-            # Legacy qi_functions.py uses the inverse squash/stretch error as
-            # alpha weights.  Keep this differentiable and bounded enough for
-            # trust-region linear algebra by using the shuffle softness as the
-            # regularization scale.
-            weighted_eps = jnp.maximum(
-                jnp.asarray(float(weighted_shuffle_profile_softness), dtype=dtype) ** 2,
-                jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype),
-            )
-            inv_error = 1.0 / jnp.maximum(squash_error, weighted_eps)
-            weighted_shuffle_alpha_weights = inv_error / jnp.maximum(
-                jnp.sum(inv_error, axis=1, keepdims=True),
-                jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype),
-            )
-            weighted_shuffle_branch_widths_mean = jnp.sum(
-                weighted_shuffle_branch_widths * weighted_shuffle_alpha_weights[:, :, None],
-                axis=1,
-                keepdims=True,
-            )
-
-        min_phi = phi0 + jnp.asarray(min_index, dtype=dtype) * dphi
-        left_endpoint = jnp.maximum(min_phi - phi0, jnp.asarray(0.0, dtype=dtype))
-        right_endpoint = jnp.maximum(phi1 - min_phi, jnp.asarray(0.0, dtype=dtype))
-        signed_phi = (offsets_float[None, None, :] - jnp.asarray(min_index[:, :, None], dtype=dtype)) * dphi
-        shuffle_eval_count = nphi if shuffle_profile_nphi_out is None else int(shuffle_profile_nphi_out)
-        if shuffle_eval_count == nphi:
-            signed_phi_eval = signed_phi
-            b_eval = b_by_alpha
-        else:
-            phi_eval = jnp.linspace(phi0, phi1, shuffle_eval_count, endpoint=True, dtype=dtype)
-            signed_phi_eval = phi_eval[None, None, :] - min_phi[:, :, None]
-            original_ramp = jnp.arange(nphi, dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
-            signed_phi_interp = signed_phi + original_ramp[None, None, :]
-
-            def _interp_original_one(xp, fp, x):
-                return jnp.interp(x, xp, fp)
-
-            b_eval = jax.vmap(
-                jax.vmap(_interp_original_one, in_axes=(0, 0, 0), out_axes=0),
-                in_axes=(0, 0, 0),
-                out_axes=0,
-            )(signed_phi_interp, b_by_alpha, signed_phi_eval)
-
-        level_full = jnp.concatenate(
-            [
-                jnp.zeros((1,), dtype=dtype),
-                shuffle_levels,
-                jnp.ones((1,), dtype=dtype),
-            ]
-        )
-        y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
-
-        def _interp_one(xp, x):
-            return jnp.interp(x, xp, y_target)
-
-        def _profile_from_width_mean(left_cross, right_cross, branch_widths, width_mean, x_eval):
-            delta_width = 0.5 * (branch_widths - width_mean)
-            left_target = jnp.clip(left_cross - delta_width, 0.0, left_endpoint[:, :, None])
-            right_target = jnp.clip(right_cross - delta_width, 0.0, right_endpoint[:, :, None])
-            left_full = jnp.concatenate(
-                [
-                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                    left_target,
-                    left_endpoint[:, :, None],
-                ],
-                axis=-1,
-            )
-            right_full = jnp.concatenate(
-                [
-                    jnp.zeros((nsurf, nalpha, 1), dtype=dtype),
-                    right_target,
-                    right_endpoint[:, :, None],
-                ],
-                axis=-1,
-            )
-            left_full = jnp.maximum.accumulate(left_full, axis=-1)
-            right_full = jnp.maximum.accumulate(right_full, axis=-1)
-            x_target = jnp.concatenate([-jnp.flip(left_full, axis=-1), right_full[:, :, 1:]], axis=-1)
-            # ``jnp.interp`` requires strictly increasing xp.  The cumulative-
-            # max monotonicity correction can leave repeated crossings in flat
-            # wells, so add a tiny deterministic ramp below the sampling error.
-            ramp = jnp.arange(x_target.shape[-1], dtype=dtype) * jnp.asarray(1.0e-14, dtype=dtype) * period
-            x_target = x_target + ramp[None, None, :]
-            return jax.vmap(
-                jax.vmap(_interp_one, in_axes=(0, 0), out_axes=0),
-                in_axes=(0, 0),
-                out_axes=0,
-            )(x_target, x_eval)
-
-        if float(shuffle_profile_weight) != 0.0:
-            shuffle_profile = _profile_from_width_mean(
-                left_crossing,
-                right_crossing,
-                shuffle_branch_widths,
-                shuffle_branch_widths_mean,
-                signed_phi_eval,
-            )
-            shuffle_profile_residuals3d = (
-                (shuffle_profile - b_eval)
-                * jnp.sqrt(weights_arr)[:, None, None]
-                * jnp.asarray(float(shuffle_profile_weight), dtype=dtype)
-            )
-            shuffle_profile_residuals1d = jnp.ravel(shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
-            )
-        if float(weighted_shuffle_profile_weight) != 0.0:
-            weighted_shuffle_profile = _profile_from_width_mean(
-                weighted_left_crossing,
-                weighted_right_crossing,
-                weighted_shuffle_branch_widths,
-                weighted_shuffle_branch_widths_mean,
-                signed_phi_eval,
-            )
-            weighted_shuffle_profile_residuals3d = (
-                (weighted_shuffle_profile - b_eval)
-                * jnp.sqrt(weights_arr)[:, None, None]
-                * jnp.asarray(float(weighted_shuffle_profile_weight), dtype=dtype)
-            )
-            weighted_shuffle_profile_residuals1d = jnp.ravel(weighted_shuffle_profile_residuals3d) / jnp.sqrt(
-                jnp.asarray(nalpha * shuffle_eval_count, dtype=dtype)
-            )
+    (shuffle_profile_residuals1d, shuffle_profile_residuals3d, shuffle_profile,
+     weighted_shuffle_profile_residuals1d, weighted_shuffle_profile_residuals3d,
+     weighted_shuffle_profile, weighted_shuffle_alpha_weights, shuffle_branch_widths,
+     shuffle_branch_widths_mean, weighted_shuffle_branch_widths_mean) = _qi_shuffle_profile_residuals(
+        qi_grid,
+        n_bounce=int(n_bounce),
+        include_bounce_endpoints=bool(include_bounce_endpoints),
+        shuffle_profile_weight=shuffle_profile_weight,
+        shuffle_profile_softness=shuffle_profile_softness,
+        shuffle_profile_nphi_out=shuffle_profile_nphi_out,
+        weighted_shuffle_profile_weight=weighted_shuffle_profile_weight,
+        weighted_shuffle_profile_softness=weighted_shuffle_profile_softness,
+    )
     residuals1d = jnp.concatenate(
         [
             width_residuals1d,
@@ -1377,3 +1409,12 @@ def mirror_ratio_penalty_from_state(
         "surfaces": field["surfaces"],
         "surface_indices": field["surface_indices"],
     }
+
+
+__all__ = sorted(
+    name
+    for name, value in globals().items()
+    if getattr(value, "__module__", None) == __name__
+    and not name.startswith("_")
+    and name != "jax_sigmoid"
+)
