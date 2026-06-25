@@ -34,6 +34,32 @@ class VmecIterationScalars:
     w_vmec: float
 
 
+@dataclass(frozen=True)
+class Vmec2000TimeControlCallbacks:
+    """Callbacks required by one VMEC2000 time-control sample."""
+
+    time_control_decision: Callable[..., Any]
+    dump_time_control_trace: Callable[..., None]
+    maybe_dump_checkpoint: Callable[..., None]
+    maybe_dump_time_control: Callable[..., None]
+    apply_controller_sample: Callable[..., Any]
+    controller_sample: Callable[..., Any]
+    host_restart_update: Callable[..., Any]
+    host_restart_branch_result: Callable[..., Any]
+    apply_restart_branch_result: Callable[..., Any]
+    controller_restart_update: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class Vmec2000TimeControlRuntimeResult:
+    """Scalar outputs from one VMEC2000 time-control runtime sample."""
+
+    fsq: float
+    fsq0: float
+    pre_restart_reason: str
+    restarted: bool
+
+
 def resolve_vmec2000_print_context(
     *,
     cfg: Any,
@@ -192,6 +218,82 @@ def evaluate_vmec2000_time_control(
         maybe_dump_time_control(time_step=float(time_step), **checkpoint_args)
         dump_time_control_trace(stage="restart", irst=int(tc.irst), **trace_args)
     return tc
+
+
+def run_vmec2000_time_control_runtime(
+    *,
+    vmec2000_control: bool,
+    skip_time_control: bool,
+    iter2: int,
+    iter1: int,
+    fsq_prev: float,
+    fsq0_curr: float,
+    fsq0_prev: float,
+    res0: float,
+    res1: float,
+    bad_jacobian: bool,
+    vmec2000_fact: float,
+    time_step: float,
+    restart_badjac_factor: float,
+    restart_badprog_factor: float,
+    ijacob: int,
+    bad_resets: int,
+    fsq_prev_before: float,
+    fsq0_prev_before: float,
+    k_ndamp: int,
+    state_checkpoint: Any,
+    prev_rz_fsq_before: float,
+    callbacks: Vmec2000TimeControlCallbacks,
+) -> Vmec2000TimeControlRuntimeResult:
+    """Run VMEC2000 time control and apply restart side effects if needed."""
+
+    if (not bool(vmec2000_control)) or bool(skip_time_control):
+        return Vmec2000TimeControlRuntimeResult(float(fsq_prev), float(fsq0_curr), "none", False)
+
+    tc = evaluate_vmec2000_time_control(
+        iter2=int(iter2),
+        iter1=int(iter1),
+        fsq_prev=float(fsq_prev),
+        fsq0_curr=float(fsq0_curr),
+        fsq0_prev=float(fsq0_prev),
+        res0=float(res0),
+        res1=float(res1),
+        bad_jacobian=bool(bad_jacobian),
+        vmec2000_fact=float(vmec2000_fact),
+        time_step=float(time_step),
+        time_control_decision=callbacks.time_control_decision,
+        dump_time_control_trace=callbacks.dump_time_control_trace,
+        maybe_dump_checkpoint=callbacks.maybe_dump_checkpoint,
+        maybe_dump_time_control=callbacks.maybe_dump_time_control,
+    )
+    callbacks.apply_controller_sample(callbacks.controller_sample, tc)
+    if not bool(tc.restart):
+        return Vmec2000TimeControlRuntimeResult(float(tc.fsq), float(tc.fsq0), "none", False)
+
+    restart_update = callbacks.host_restart_update(
+        irst=int(tc.irst),
+        time_step=float(time_step),
+        restart_badjac_factor=float(restart_badjac_factor),
+        restart_badprog_factor=float(restart_badprog_factor),
+        ijacob=int(ijacob),
+        bad_resets=int(bad_resets),
+        iter2=int(iter2),
+        fsq_prev_before=float(fsq_prev_before),
+        fsq0_prev_before=float(fsq0_prev_before),
+        k_ndamp=int(k_ndamp),
+    )
+    restart_branch = callbacks.host_restart_branch_result(
+        state_checkpoint=state_checkpoint,
+        restart_update=restart_update,
+        pre_restart_reason=tc.pre_restart_reason,
+        prev_rz_fsq_before=prev_rz_fsq_before,
+    )
+    callbacks.apply_restart_branch_result(
+        restart_branch,
+        callbacks.controller_restart_update,
+        time_step_value=float(time_step),
+    )
+    return Vmec2000TimeControlRuntimeResult(float(tc.fsq), float(tc.fsq0), str(tc.pre_restart_reason), True)
 
 
 def dump_residual_evolve_trace(
@@ -502,6 +604,8 @@ def print_residual_iteration_update_status(
 
 
 __all__ = [
+    "Vmec2000TimeControlCallbacks",
+    "Vmec2000TimeControlRuntimeResult",
     "Vmec2000PrintContext",
     "VmecIterationScalars",
     "dump_residual_evolve_trace",
@@ -512,5 +616,6 @@ __all__ = [
     "print_residual_iteration_update_status",
     "residual_update_rms_for_print",
     "resolve_vmec2000_print_context",
+    "run_vmec2000_time_control_runtime",
     "sample_vmec_iteration_scalars",
 ]

@@ -202,14 +202,15 @@ from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
     safe_dt_from_force_blocks as _safe_dt_from_force_blocks,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    Vmec2000TimeControlCallbacks as _Vmec2000TimeControlCallbacks,
     dump_residual_evolve_trace as _dump_residual_evolve_trace,
-    evaluate_vmec2000_time_control as _evaluate_vmec2000_time_control,
     print_compact_converged_status as _print_compact_converged_status,
     print_compact_physical_residual_status as _print_compact_physical_residual_status,
     print_compact_residual_iteration_update_status as _print_compact_residual_iteration_update_status,
     print_residual_iteration_update_status as _print_residual_iteration_update_status,
     residual_update_rms_for_print as _residual_update_rms_for_print,
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
+    run_vmec2000_time_control_runtime as _run_vmec2000_time_control_runtime,
     sample_vmec_iteration_scalars as _sample_vmec_iteration_scalars,
 )
 from vmec_jax.solvers.fixed_boundary.residual.iteration_control import (
@@ -2375,9 +2376,9 @@ def solve_fixed_boundary_residual_iter(
             # VMEC-style time-step control: VMEC2000's `TimeStepControl` + `restart_iter`.
             t_iteration_control_vmec_time_start = time.perf_counter() if timing_enabled else None
             if bool(vmec2000_control) and (not skip_time_control):
-                # VMEC's TimeStepControl uses the *previous* preconditioned
-                # residual (fsq) which is updated at the end of evolve.f.
-                tc = _evaluate_vmec2000_time_control(
+                tc_runtime = _run_vmec2000_time_control_runtime(
+                    vmec2000_control=bool(vmec2000_control),
+                    skip_time_control=bool(skip_time_control),
                     iter2=int(iter2),
                     iter1=int(iter1),
                     fsq_prev=float(fsq_prev),
@@ -2388,39 +2389,32 @@ def solve_fixed_boundary_residual_iter(
                     bad_jacobian=bool(bad_jacobian),
                     vmec2000_fact=float(vmec2000_fact),
                     time_step=float(time_step),
-                    time_control_decision=_vmec2000_time_control_decision,
-                    dump_time_control_trace=_dump_time_control_trace_record,
-                    maybe_dump_checkpoint=_maybe_dump_checkpoint_record,
-                    maybe_dump_time_control=_maybe_dump_time_control_record,
+                    restart_badjac_factor=float(restart_badjac_factor),
+                    restart_badprog_factor=float(restart_badprog_factor),
+                    ijacob=int(ijacob),
+                    bad_resets=int(bad_resets),
+                    fsq_prev_before=float(fsq_prev_before),
+                    fsq0_prev_before=float(fsq0_prev_before),
+                    k_ndamp=int(k_ndamp),
+                    state_checkpoint=state_checkpoint,
+                    prev_rz_fsq_before=prev_rz_fsq_before,
+                    callbacks=_Vmec2000TimeControlCallbacks(
+                        time_control_decision=_vmec2000_time_control_decision,
+                        dump_time_control_trace=_dump_time_control_trace_record,
+                        maybe_dump_checkpoint=_maybe_dump_checkpoint_record,
+                        maybe_dump_time_control=_maybe_dump_time_control_record,
+                        apply_controller_sample=_apply_controller_sample,
+                        controller_sample=_controller_state_after_vmec2000_time_control_sample,
+                        host_restart_update=_host_vmec2000_time_control_restart_update,
+                        host_restart_branch_result=_host_vmec2000_time_control_restart_branch_result,
+                        apply_restart_branch_result=_apply_restart_branch_result,
+                        controller_restart_update=_controller_state_after_vmec2000_time_control_restart_update,
+                    ),
                 )
-                fsq = tc.fsq
-                fsq0 = tc.fsq0
-                _apply_controller_sample(_controller_state_after_vmec2000_time_control_sample, tc)
-                if tc.restart:
-                    pre_restart_reason = tc.pre_restart_reason
-                    restart_update = _host_vmec2000_time_control_restart_update(
-                        irst=int(tc.irst),
-                        time_step=float(time_step),
-                        restart_badjac_factor=float(restart_badjac_factor),
-                        restart_badprog_factor=float(restart_badprog_factor),
-                        ijacob=int(ijacob),
-                        bad_resets=int(bad_resets),
-                        iter2=int(iter2),
-                        fsq_prev_before=float(fsq_prev_before),
-                        fsq0_prev_before=float(fsq0_prev_before),
-                        k_ndamp=int(k_ndamp),
-                    )
-                    restart_branch = _host_vmec2000_time_control_restart_branch_result(
-                        state_checkpoint=state_checkpoint,
-                        restart_update=restart_update,
-                        pre_restart_reason=pre_restart_reason,
-                        prev_rz_fsq_before=prev_rz_fsq_before,
-                    )
-                    _apply_restart_branch_result(
-                        restart_branch,
-                        _controller_state_after_vmec2000_time_control_restart_update,
-                        time_step_value=time_step,
-                    )
+                fsq = tc_runtime.fsq
+                fsq0 = tc_runtime.fsq0
+                if tc_runtime.restarted:
+                    pre_restart_reason = tc_runtime.pre_restart_reason
                     _record_timing("iteration_control_vmec_time", t_iteration_control_vmec_time_start)
                     continue
             _record_timing("iteration_control_vmec_time", t_iteration_control_vmec_time_start)

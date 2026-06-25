@@ -13,6 +13,7 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
     resolve_free_boundary_setup_policy,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    Vmec2000TimeControlCallbacks,
     dump_residual_evolve_trace,
     evaluate_vmec2000_time_control,
     print_compact_converged_status,
@@ -21,6 +22,7 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_residual_iteration_update_status,
     residual_update_rms_for_print,
     resolve_vmec2000_print_context,
+    run_vmec2000_time_control_runtime,
     sample_vmec_iteration_scalars,
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import ResidualVelocityBlocks
@@ -651,6 +653,158 @@ def test_evaluate_vmec2000_time_control_emits_restart_sequence() -> None:
             "time_step": 0.9,
         }
     ]
+
+
+def test_run_vmec2000_time_control_runtime_skips_without_callbacks() -> None:
+    def fail_callback(*_args, **_kwargs):  # pragma: no cover - should not execute.
+        raise AssertionError("time-control callbacks should not run when disabled")
+
+    result = run_vmec2000_time_control_runtime(
+        vmec2000_control=False,
+        skip_time_control=False,
+        iter2=3,
+        iter1=1,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=0.75,
+        res0=0.1,
+        res1=0.2,
+        bad_jacobian=False,
+        vmec2000_fact=2.0,
+        time_step=0.9,
+        restart_badjac_factor=0.5,
+        restart_badprog_factor=2.0,
+        ijacob=1,
+        bad_resets=0,
+        fsq_prev_before=0.6,
+        fsq0_prev_before=0.8,
+        k_ndamp=3,
+        state_checkpoint="checkpoint",
+        prev_rz_fsq_before=1.5,
+        callbacks=Vmec2000TimeControlCallbacks(*(fail_callback for _ in range(10))),
+    )
+
+    assert result.fsq == 0.5
+    assert result.fsq0 == 0.25
+    assert result.pre_restart_reason == "none"
+    assert not result.restarted
+
+
+def test_run_vmec2000_time_control_runtime_applies_sample_without_restart() -> None:
+    calls = []
+
+    def sample_controller(state, decision):
+        calls.append(("sample", state, decision.store_checkpoint, decision.restart))
+        return "updated"
+
+    def fail_restart(*_args, **_kwargs):  # pragma: no cover - should not execute.
+        raise AssertionError("restart callbacks should not run without restart")
+
+    result = run_vmec2000_time_control_runtime(
+        vmec2000_control=True,
+        skip_time_control=False,
+        iter2=1,
+        iter1=1,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=0.75,
+        res0=-1.0,
+        res1=-1.0,
+        bad_jacobian=False,
+        vmec2000_fact=2.0,
+        time_step=0.9,
+        restart_badjac_factor=0.5,
+        restart_badprog_factor=2.0,
+        ijacob=1,
+        bad_resets=0,
+        fsq_prev_before=0.6,
+        fsq0_prev_before=0.8,
+        k_ndamp=3,
+        state_checkpoint="checkpoint",
+        prev_rz_fsq_before=1.5,
+        callbacks=Vmec2000TimeControlCallbacks(
+            vmec2000_time_control_decision,
+            lambda **kwargs: calls.append(("trace", kwargs["stage"])),
+            lambda **kwargs: calls.append(("checkpoint", kwargs["iter_idx"])),
+            lambda **kwargs: calls.append(("time_control", kwargs["iter_idx"])),
+            sample_controller,
+            "controller-state",
+            fail_restart,
+            fail_restart,
+            fail_restart,
+            fail_restart,
+        ),
+    )
+
+    assert result.fsq == 0.5
+    assert result.fsq0 == 0.25
+    assert result.pre_restart_reason == "none"
+    assert not result.restarted
+    assert ("sample", "controller-state", True, False) in calls
+    assert ("trace", "checkpoint") in calls
+
+
+def test_run_vmec2000_time_control_runtime_applies_restart_branch() -> None:
+    calls = []
+
+    def restart_update(**kwargs):
+        calls.append(("restart_update", kwargs))
+        return SimpleNamespace(time_step=0.45, marker="restart-update")
+
+    def restart_branch(**kwargs):
+        calls.append(("restart_branch", kwargs))
+        return SimpleNamespace(marker="restart-branch")
+
+    def apply_restart(branch, state_update, *, time_step_value):
+        calls.append(("apply_restart", branch.marker, state_update, time_step_value))
+
+    result = run_vmec2000_time_control_runtime(
+        vmec2000_control=True,
+        skip_time_control=False,
+        iter2=5,
+        iter1=1,
+        fsq_prev=0.5,
+        fsq0_curr=0.25,
+        fsq0_prev=0.75,
+        res0=0.1,
+        res1=0.1,
+        bad_jacobian=True,
+        vmec2000_fact=2.0,
+        time_step=0.9,
+        restart_badjac_factor=0.5,
+        restart_badprog_factor=2.0,
+        ijacob=1,
+        bad_resets=0,
+        fsq_prev_before=0.6,
+        fsq0_prev_before=0.8,
+        k_ndamp=3,
+        state_checkpoint="checkpoint",
+        prev_rz_fsq_before=1.5,
+        callbacks=Vmec2000TimeControlCallbacks(
+            vmec2000_time_control_decision,
+            lambda **kwargs: calls.append(("trace", kwargs["stage"])),
+            lambda **kwargs: calls.append(("checkpoint", kwargs["iter_idx"])),
+            lambda **kwargs: calls.append(("time_control", kwargs["iter_idx"])),
+            lambda state, decision: calls.append(("sample", state, decision.restart)),
+            "controller-state",
+            restart_update,
+            restart_branch,
+            apply_restart,
+            "restart-controller-state",
+        ),
+    )
+
+    assert result.restarted
+    assert result.pre_restart_reason == "bad_jacobian"
+    assert result.fsq == 0.5
+    assert result.fsq0 == 0.75
+    restart_kwargs = next(call[1] for call in calls if call[0] == "restart_update")
+    assert restart_kwargs["irst"] == 2
+    assert restart_kwargs["fsq_prev_before"] == 0.6
+    branch_kwargs = next(call[1] for call in calls if call[0] == "restart_branch")
+    assert branch_kwargs["state_checkpoint"] == "checkpoint"
+    assert branch_kwargs["pre_restart_reason"] == "bad_jacobian"
+    assert ("apply_restart", "restart-branch", "restart-controller-state", 0.9) in calls
 
 
 def test_dump_residual_evolve_trace_maps_velocity_and_force_blocks() -> None:
