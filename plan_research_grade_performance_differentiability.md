@@ -3768,6 +3768,10 @@ Steps taken:
   ``readme_runtime_compare.png/json``,
   ``readme_ad_fd_evidence.png/csv/json``, and
   ``pr20_wout_parity_summary.json``.
+- Re-rendered the README best-optimization panels from existing optimization
+  provenance: ``readme_best_optimization_qa.png``,
+  ``readme_best_optimization_qh.png``, ``readme_best_optimization_qp.png``,
+  and ``readme_best_optimization_qi.png``.
 
 Results obtained:
 
@@ -3789,8 +3793,8 @@ Results obtained:
 - ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
   docs/_build/html_final_tranche`` passed.
 - ``python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50
-  --max-file-mib 2`` passed: tracked size is ``27.09 MiB`` and no tracked file
-  exceeds ``2 MiB``.
+  --max-file-mib 2`` passed: tracked size is ``28.12 MiB`` after the
+  optimization-panel refresh and no tracked file exceeds ``2 MiB``.
 - ``git diff --check`` passed.
 
 Best next steps:
