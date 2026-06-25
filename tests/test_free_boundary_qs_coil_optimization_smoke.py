@@ -783,6 +783,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
             "branch_local_vector_wall_s": 11.0,
             "branch_local_vector_replay_jvp_wall_s": 10.0,
             "branch_local_vector_cache_probe_replay_jvp_wall_s": 0.5,
+            "branch_local_vector_current_only_jvp_cache_compile_s": 2.0,
             "branch_local_rejected_slot_wall_s": 3.0,
         },
         "branch_local_vector_jacobian": {
@@ -805,6 +806,10 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
                 "hit": False,
                 "closure_bound": True,
                 "cache_key_static_digest": "abc123",
+                "executable_kind": "compiled",
+                "compiled": True,
+                "compiled_on_this_call": True,
+                "compile_s": 2.0,
             },
             "directional_jvp_signature": {
                 "available": True,
@@ -896,6 +901,10 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["gate_evidence"]["directional_jvp_cache_hit"] is False
     assert proposal["gate_evidence"]["directional_jvp_cache_closure_bound"] is True
     assert proposal["gate_evidence"]["directional_jvp_cache_info"]["cache_key_static_digest"] == "abc123"
+    assert proposal["gate_evidence"]["directional_jvp_cache_executable_kind"] == "compiled"
+    assert proposal["gate_evidence"]["directional_jvp_cache_compiled"] is True
+    assert proposal["gate_evidence"]["directional_jvp_cache_compiled_on_this_call"] is True
+    assert proposal["gate_evidence"]["directional_jvp_cache_compile_s"] == pytest.approx(2.0)
     assert proposal["gate_evidence"]["current_jvp_cache_probe_available"] is True
     assert proposal["gate_evidence"]["current_jvp_cache_probe_hit"] is True
     assert proposal["gate_evidence"]["current_jvp_cache_probe_wall_s"] == pytest.approx(0.006)

@@ -146,12 +146,14 @@ lets the complete solve accept or reject the derivative-assisted current step:
 On the 2026-06-25 local check, this fixture had ``qs_total = 1.019`` at the
 same-branch report point, ``max_base_rel_delta = 2.2e-15``, passed the
 branch-local physical-scalar gate for all three requested scalars, hit the
-repeat current-JVP cache probe in about ``10 ms``, passed the fixed
+repeat current-JVP cache probe in about ``4 ms``, passed the fixed
 accepted/rejected controller-slot fingerprint gate, formed two derivative-assisted
 proposals, and rejected both with complete-solve authority because neither
-improved the complete objective.  This is the current QS-relevant phase-3
-proposal fixture; the older LP-QA/circle smoke remains useful for fast wiring
-and failure-provenance diagnostics.
+improved the complete objective.  The same check isolated the cold current-only
+JVP cost: explicit XLA lowering/compilation took about ``15.4 s``, while the
+compiled replay/JVP execution took about ``41 ms``.  This is the current
+QS-relevant phase-3 proposal fixture; the older LP-QA/circle smoke remains
+useful for fast wiring and failure-provenance diagnostics.
 
 VMEC2000 generated-mgrid promotion fixture
 ------------------------------------------
@@ -1579,8 +1581,11 @@ current-only cache probe was requested, the same evidence includes
 ``current_jvp_cache_probe_available``, ``current_jvp_cache_probe_hit``, and the
 probe wall time, along with ``branch_local_vector_replay_jvp_wall_s``,
 ``current_jvp_cache_probe_replay_jvp_wall_s``, and
-``current_jvp_cache_probe_replay_jvp_speedup`` to quantify cold replay/JVP cost
-versus repeated same-payload cache-hit cost.  It also carries
+``current_jvp_cache_probe_replay_jvp_speedup`` to quantify compiled replay/JVP
+execution versus repeated same-payload cache-hit execution.  Current-only
+reports also include ``directional_jvp_cache_compile_s`` and
+``directional_jvp_cache_executable_kind`` so cold XLA lowering/compilation is
+not conflated with replay execution.  It also carries
 ``branch_local_vector_max_base_rel_delta`` and
 ``branch_local_scalar_base_rel_delta`` for stale-branch diagnostics.  If the
 accepted/rejected controller-slot gate is requested, the compact evidence

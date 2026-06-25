@@ -4164,6 +4164,62 @@ Updated lane percentages:
 - Docs/release hygiene: 99.9%.
 - Overall: 98.7%.
 
+### 2026-06-25: Split current-only branch-local JVP compile and execution timing
+
+Steps taken:
+
+- Changed the current-only branch-local JVP executable cache so cache misses
+  try to lower and compile the JAX function explicitly before storing it.
+- Kept a fallback to the previous lazy ``jax.jit`` callable if explicit
+  lowering/compilation is unavailable on a backend.
+- Added ``directional_jvp_cache_executable_kind``,
+  ``directional_jvp_cache_compiled``,
+  ``directional_jvp_cache_compiled_on_this_call``, and
+  ``directional_jvp_cache_compile_s`` to derivative-proposal gate evidence.
+- Re-ran the QH warm-start direct-coil same-branch QS fixture using
+  fingerprint rejected-slot mode and the current-JVP cache probe.
+- Updated free-boundary coil optimization docs so cold XLA compile cost is not
+  conflated with replay/JVP execution cost.
+
+Results obtained:
+
+- The QH fixture still passed the branch-local vector physical-scalar gate.
+- The current-only cache miss compiled a concrete executable:
+  ``executable_kind = compiled``, ``compiled = True``.
+- Cold JVP cache compile/lowering took about ``15.37 s``.
+- Compiled replay/JVP execution took about ``0.041 s``.
+- Repeated same-payload cache-probe replay/JVP execution took about
+  ``0.0038 s``.
+- The accepted/rejected slot fingerprint gate remained cheap at about
+  ``5.0e-5 s``.
+- Two derivative-assisted proposals were formed and rejected by complete-solve
+  objective authority, preserving the production acceptance contract.
+
+Best next steps:
+
+1. Run focused lint/tests and Sphinx after the docs update.
+2. Commit and push this compile-attribution tranche if gates pass.
+3. Treat remaining runtime work as an XLA compile amortization problem:
+   prebuild/warm compile caches for repeated production workloads, or reduce
+   the traced replay graph itself.  Replay execution is no longer the dominant
+   measured cost for the promoted QH fixture.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 60.0%.
+- VMEC2000/VMEC++ parity and physics gates: 98.3%.
+- Docs/release hygiene: 99.9%.
+- Overall: 98.8%.
+
 ### 2026-06-25: Make rejected-slot fingerprint metadata internally consistent
 
 Steps taken:

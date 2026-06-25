@@ -1526,6 +1526,17 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         "directional_jvp_cache_enabled": bool(vector_cache_info.get("enabled", False)),
         "directional_jvp_cache_hit": bool(vector_cache_info.get("hit", False)),
         "directional_jvp_cache_closure_bound": bool(vector_cache_info.get("closure_bound", False)),
+        "directional_jvp_cache_executable_kind": str(vector_cache_info.get("executable_kind", "")),
+        "directional_jvp_cache_compiled": bool(vector_cache_info.get("compiled", False)),
+        "directional_jvp_cache_compiled_on_this_call": bool(
+            vector_cache_info.get("compiled_on_this_call", False)
+        ),
+        "directional_jvp_cache_compile_s": _finite_float(
+            timings.get(
+                "branch_local_vector_current_only_jvp_cache_compile_s",
+                vector_timings.get("current_only_jvp_cache_compile_s", vector_cache_info.get("compile_s", 0.0)),
+            )
+        ),
         "directional_jvp_cache_info": dict(vector_cache_info),
         "current_jvp_cache_probe_available": bool(
             isinstance(current_jvp_cache_probe, dict) and current_jvp_cache_probe.get("available", False)
