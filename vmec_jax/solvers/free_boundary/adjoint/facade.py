@@ -805,6 +805,7 @@ def _branch_local_directional_jvp_signature(
         "nestor_operator_solver": str(replay_options.get("nestor_operator_solver", "")),
         "freeze_vacuum_field": bool(replay_options.get("freeze_vacuum_field", False)),
         "freeze_freeb_bsqvac": bool(replay_options.get("freeze_freeb_bsqvac", False)),
+        "unroll_accepted_only_segments_below": int(replay_options.get("unroll_accepted_only_segments_below", 0)),
         "has_replay_plan": replay_plan is not None,
         "jit_cache_candidate": bool(current_only and ad_mode == "direct" and replay_plan is not None),
     }
