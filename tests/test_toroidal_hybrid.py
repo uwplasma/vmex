@@ -15,6 +15,7 @@ import vmec_jax.toroidal_hybrid as toroidal_hybrid
 from vmec_jax.toroidal_hybrid import (
     ToroidalHybridBoundarySamples,
     evaluate_toroidal_hybrid_indata_boundary,
+    recommended_square_axis_nzeta,
     sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
     square_axis_stellarator_mirror_hybrid_indata,
@@ -90,6 +91,26 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
     assert vj.sample_square_axis_stellarator_mirror_hybrid_boundary is sample_square_axis_stellarator_mirror_hybrid_boundary
     assert vj.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
     assert public_api.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
+    assert public_api.recommended_square_axis_nzeta is recommended_square_axis_nzeta
+
+
+def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
+    assert recommended_square_axis_nzeta(12) == 32
+    assert recommended_square_axis_nzeta(23) == 56
+    with pytest.raises(ValueError, match="ntor must be nonnegative"):
+        recommended_square_axis_nzeta(-1)
+
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
+    config = module.ExampleConfig(
+        outdir=tmp_path / "underresolved",
+        betas_percent=(0.0,),
+        ntor=12,
+        nzeta=16,
+        write_plots=False,
+        beta_continuation_restart=False,
+    )
+    with pytest.raises(ValueError, match="NZETA=16 is underresolved for NTOR=12"):
+        module.run_example(config)
 
 
 def test_square_axis_spline_option_reduces_low_mode_projection_error():
@@ -364,6 +385,7 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
             niter_array=(2,),
             ftol_array=(1.0e-6,),
             use_multigrid_schedule=False,
+            enforce_recommended_nzeta=False,
             field_line_count=1,
             field_line_steps=20,
             field_line_turns=0.2,
@@ -422,6 +444,7 @@ def test_square_coil_hybrid_free_boundary_example_writes_nonblank_plots(tmp_path
             niter_array=(1,),
             ftol_array=(1.0e-6,),
             use_multigrid_schedule=False,
+            enforce_recommended_nzeta=False,
             field_line_count=1,
             field_line_steps=24,
             field_line_turns=0.25,

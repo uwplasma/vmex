@@ -31,6 +31,28 @@ class ToroidalHybridBoundarySamples:
     corner_weight: np.ndarray
 
 
+def recommended_square_axis_nzeta(ntor: int, *, margin: int = 8, block: int = 8) -> int:
+    """Return a conservative toroidal grid size for square-axis hybrids.
+
+    The square-axis surface has localized side/corner structure, so VMEC runs
+    are much less fragile when the toroidal collocation grid has room beyond
+    the largest retained Fourier mode.  The result is rounded up to a small
+    block size so CLI and VMEC2000 comparisons use reproducible grids.
+    """
+
+    ntor = int(ntor)
+    margin = int(margin)
+    block = int(block)
+    if ntor < 0:
+        raise ValueError("ntor must be nonnegative")
+    if margin < 0:
+        raise ValueError("margin must be nonnegative")
+    if block <= 0:
+        raise ValueError("block must be positive")
+    raw = max(16, 2 * ntor + margin)
+    return int(block * np.ceil(raw / block))
+
+
 def sample_toroidal_stellarator_mirror_hybrid_boundary(
     *,
     ntheta: int = 64,

@@ -52,6 +52,15 @@ also activates the dense VMEC-like NESTOR branch on the sign-corrected deck but
 is still underconverged. The current square-coil setup is therefore a
 diagnostic/stability target, not yet a converged production equilibrium.
 
+The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
+NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
+while the same generated-``mgrid`` deck with ``NZETA=32`` completes and reaches
+total residual about ``6.58e-6`` after 1000 iterations. The branch now exposes
+``vmec_jax.recommended_square_axis_nzeta`` and the square-coil example defaults
+to ``NZETA=64`` for ``NTOR=23``. Production-style example runs fail early if
+``NZETA`` is below the recommendation; diagnostic profiling can still run
+underresolved grids and records ``nzeta_underrecommended`` in the JSON report.
+
 Physics And Algorithm Findings
 ------------------------------
 

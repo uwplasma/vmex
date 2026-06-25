@@ -183,7 +183,10 @@ convergence-diagnostic path until fresh final force residuals meet the requested
 negative ``PHIEDGE`` for the default positive-current square-coil orientation.
 Sign-corrected generated-``mgrid`` profiling shows VMEC2000 is currently the
 more robust backend, but the present square-coil setup still remains well above
-``1e-12`` after 1000-5000 iterations. Finite-beta promotion should be based on
+``1e-12`` after 1000-5000 iterations. The same profiling shows that underresolved
+``NZETA`` can fail before useful force iterations; the square-coil path now
+records ``recommended_nzeta`` and guards production-style example runs against
+known-underresolved toroidal grids. Finite-beta promotion should be based on
 VMEC force residuals, total-pressure balance, and
 plasma-field/virtual-casing diagnostics rather than coil-only ``B.n``. Older
 coarse square-coil scans have strict active free-boundary convergence evidence

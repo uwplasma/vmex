@@ -29,7 +29,7 @@ from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary impo
 from vmec_jax.driver import run_free_boundary, write_wout_from_fixed_boundary_run
 from vmec_jax.external_fields import write_mgrid_from_coils
 from vmec_jax.namelist import write_indata
-from vmec_jax.toroidal_hybrid import evaluate_toroidal_hybrid_indata_boundary
+from vmec_jax.toroidal_hybrid import evaluate_toroidal_hybrid_indata_boundary, recommended_square_axis_nzeta
 from vmec_jax.vmec2000_exec import find_vmec2000_exec, run_xvmec2000
 
 
@@ -72,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--activate-fsq", type=float, default=1.0e-3)
     p.add_argument("--axis-kind", default="spline", choices=("spline", "superellipse"))
     p.add_argument("--axis-corner-factor", type=float, default=1.14)
+    p.add_argument("--enforce-recommended-nzeta", action="store_true")
     p.add_argument("--n-coils-per-side", type=int, default=4)
     p.add_argument("--coil-segments", type=int, default=96)
     p.add_argument("--mgrid-nr", type=int, default=36)
@@ -256,6 +257,11 @@ def main(argv: list[str] | None = None) -> int:
     outdir.mkdir(parents=True, exist_ok=True)
     mgrid_nphi = int(args.nzeta if args.mgrid_nphi is None else args.mgrid_nphi)
     ns_array, niter_array, ftol_array = _resolve_schedule(args)
+    recommended_nzeta = recommended_square_axis_nzeta(int(args.ntor))
+    if bool(args.enforce_recommended_nzeta) and int(args.nzeta) < recommended_nzeta:
+        raise ValueError(
+            f"NZETA={int(args.nzeta)} is underresolved for NTOR={int(args.ntor)}; use at least {recommended_nzeta}"
+        )
     config = ExampleConfig(
         outdir=outdir,
         betas_percent=(float(args.beta_percent),),
@@ -320,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
             "ntor": int(args.ntor),
             "ns": int(ns_array[-1]),
             "nzeta": int(args.nzeta),
+            "recommended_nzeta": int(recommended_nzeta),
+            "nzeta_underrecommended": bool(int(args.nzeta) < int(recommended_nzeta)),
             "max_iter": int(niter_array[-1]),
             "ftol": float(ftol_array[-1]),
             "phiedge": float(config.phiedge),

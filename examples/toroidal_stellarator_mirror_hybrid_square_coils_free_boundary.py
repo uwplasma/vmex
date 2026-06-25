@@ -40,7 +40,7 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.namelist import InData, write_indata
 from vmec_jax.plotting import fix_matplotlib_3d, prepare_matplotlib_3d
 from vmec_jax.profiles import pressure_profile_to_vmec_am, standard_finite_beta_profiles
-from vmec_jax.toroidal_hybrid import square_axis_stellarator_mirror_hybrid_indata
+from vmec_jax.toroidal_hybrid import recommended_square_axis_nzeta, square_axis_stellarator_mirror_hybrid_indata
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 
@@ -75,10 +75,11 @@ MPOL = 6
 NTOR = 23
 NS_ARRAY = (9, 13, 17)
 NS = NS_ARRAY[-1]
-NZETA = 32
+NZETA = max(64, recommended_square_axis_nzeta(NTOR))
 NITER_ARRAY = (2500, 5000, 10000)
 FTOL_ARRAY = (1.0e-8, 1.0e-10, 1.0e-12)
 USE_MULTIGRID_SCHEDULE = True
+ENFORCE_RECOMMENDED_NZETA = True
 MAX_ITER = NITER_ARRAY[-1]
 FTOL = 1.0e-12
 PHIEDGE = -0.04 * PLASMA_MINOR_RADIUS**2 / 0.03**2
@@ -133,6 +134,7 @@ class ExampleConfig:
     niter_array: tuple[int, ...] = NITER_ARRAY
     ftol_array: tuple[float, ...] = FTOL_ARRAY
     use_multigrid_schedule: bool = USE_MULTIGRID_SCHEDULE
+    enforce_recommended_nzeta: bool = ENFORCE_RECOMMENDED_NZETA
     phiedge: float = PHIEDGE
     toroidal_current: float = TOROIDAL_CURRENT
     delt: float | None = DELT
@@ -336,6 +338,16 @@ def _run_budget(config: ExampleConfig, *, restart_state: Any | None) -> int:
     if bool(config.use_multigrid_schedule) and restart_state is None:
         return int(sum(int(value) for value in config.niter_array))
     return int(config.max_iter)
+
+
+def _validate_example_config(config: ExampleConfig) -> None:
+    if bool(config.enforce_recommended_nzeta):
+        recommended = recommended_square_axis_nzeta(int(config.ntor))
+        if int(config.nzeta) < recommended:
+            raise ValueError(
+                f"NZETA={int(config.nzeta)} is underresolved for NTOR={int(config.ntor)}; "
+                f"use at least {recommended} or set enforce_recommended_nzeta=False for a diagnostic-only run"
+            )
 
 
 def make_free_boundary_indata(config: ExampleConfig, *, beta_percent: float) -> InData:
@@ -1105,11 +1117,14 @@ def _metrics_payload(
         "ns_array": [int(value) for value in config.ns_array],
         "mpol": int(config.mpol),
         "ntor": int(config.ntor),
+        "recommended_nzeta": int(recommended_square_axis_nzeta(int(config.ntor))),
+        "nzeta_underrecommended": bool(int(config.nzeta) < recommended_square_axis_nzeta(int(config.ntor))),
         "max_iter": int(config.max_iter),
         "ftol": float(config.ftol),
         "niter_array": [int(value) for value in config.niter_array],
         "ftol_array": [float(value) for value in config.ftol_array],
         "use_multigrid_schedule": bool(config.use_multigrid_schedule),
+        "enforce_recommended_nzeta": bool(config.enforce_recommended_nzeta),
         "free_boundary_activate_fsq": (
             None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
         ),
@@ -1127,6 +1142,7 @@ def _metrics_payload(
 
 def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
     enable_x64(True)
+    _validate_example_config(config)
     outdir = Path(config.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     coils = build_square_coils(config)

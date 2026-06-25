@@ -154,9 +154,13 @@ and a staged ``NS_ARRAY``/``NITER_ARRAY``/``FTOL_ARRAY`` schedule ending at
 ``FTOL=1e-12``, and writes one ``wout_*.nc`` per beta. The default
 ``PHIEDGE`` sign is negative for the positive-current square-coil orientation,
 matching the raw VMEC2000 generated-``mgrid`` vacuum sign check. The default
-square axis uses the low-bandwidth rounded ``axis_kind="spline"`` profile before VMEC
-Fourier projection, which is less sensitive to ``NTOR`` than the sharper polar
-superellipse. The plots use the solved VMEC states: 3-D coils plus solved LCFS
+square axis uses the low-bandwidth rounded ``axis_kind="spline"`` profile before
+VMEC Fourier projection, which is less sensitive to ``NTOR`` than the sharper
+polar superellipse. The default ``NZETA`` follows
+``recommended_square_axis_nzeta``; underresolved production-style example runs
+raise before solving because ``NTOR=12, NZETA=16`` was observed to fail while
+``NZETA=32`` completed the same VMEC2000 generated-``mgrid`` case. The plots use
+the solved VMEC states: 3-D coils plus solved LCFS
 and field-line traces, top-view solved boundaries, side/corner cross sections,
 solved-boundary ``|B|``, and residual/iota diagnostics. The metrics JSON records
 convergence status, force components, free-boundary ``B.n`` diagnostics, WOUT
@@ -204,7 +208,7 @@ For direct-provider versus mgrid/VMEC2000 profiling, use::
 
   python tools/diagnostics/profile_square_coil_free_boundary.py \
     --ftol 1e-12 --max-iter 10000 --phiedge -0.04 \
-    --mpol 6 --ntor 23 --nzeta 32 \
+    --mpol 6 --ntor 23 --nzeta 64 \
     --run-vmec2000
 
 The report stays under ignored ``results/`` paths and records ``vmec_jax``
