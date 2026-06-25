@@ -4557,6 +4557,60 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.0%.
 
+### 2026-06-25: Formalize free-boundary turn-on restart control branch
+
+Steps taken:
+
+- Added a pure ``HostFreeBoundaryTurnonRestartUpdate`` controller update to
+  ``vmec_jax/solvers/fixed_boundary/residual/update.py``.
+- Rewired the residual loop's first-active-vacuum retry branch to use this
+  explicit update object instead of mutating ``ijacob``, ``iter1``,
+  ``inv_tau``, and ``bad_growth_streak`` inline.
+- Added tests for both VMEC-style ``iter1`` reset and restart-marker-preserving
+  paths.
+
+Results obtained:
+
+- ``python -m ruff check`` passed for the changed residual update/iteration
+  modules and focused tests.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py
+  tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q``
+  passed.  The free-boundary finite-pressure bucket emitted known NESTOR
+  singular-term warnings but completed successfully.
+- ``source_health.py``, ``repo_size_audit.py``, and ``git diff --check``
+  passed.
+- CI run ``28195401540`` for the previous controller-state seam completed
+  successfully.
+
+Best next steps:
+
+1. Commit and push the free-boundary turn-on restart seam.
+2. Start the next larger refactor by creating an explicit accepted/rejected
+   step-result object for the strict-update path, then move history/status
+   bookkeeping behind that object.
+3. Keep full adaptive-branch differentiability unclaimed until these explicit
+   branch objects support a fingerprint-gated AD-vs-FD gate across the host
+   adaptive loop.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.4%.
+- Free-boundary production differentiability: 96.2%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 62.1%.
+- VMEC2000/VMEC++ parity and physics gates: 98.6%.
+- Docs/release hygiene: 100%.
+- Overall: 99.1%.
+
 ### 2026-06-25: Confirm final CI after readiness artifact refresh
 
 Steps taken:

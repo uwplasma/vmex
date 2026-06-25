@@ -112,6 +112,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
     controller_state_after_catastrophic_restart_update as _controller_state_after_catastrophic_restart_update,
+    controller_state_after_free_boundary_turnon_restart_update as _controller_state_after_free_boundary_turnon_restart_update,
     controller_state_after_initial_axis_reset_update as _controller_after_axis_reset,
     controller_state_after_pre_restart_update as _controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update as _controller_state_after_vmec2000_time_control_restart_update,
@@ -120,6 +121,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
     direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
+    host_free_boundary_turnon_restart_update as _host_free_boundary_turnon_restart_update,
     host_initial_axis_reset_update as _host_axis_reset_update,
     host_pre_restart_trigger_update as _host_pre_restart_trigger_update,
     host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
@@ -1802,17 +1804,22 @@ def solve_fixed_boundary_residual_iter(
                 # VMEC restarts funct3d immediately after the first
                 # free-boundary turn-on solve, keeping the cached ns4 blocks
                 # intact across the same-iteration retry.
-                state = state_checkpoint
+                turnon_update = _host_free_boundary_turnon_restart_update(
+                    state_checkpoint=state_checkpoint,
+                    time_step=float(time_step),
+                    iter2=int(iter2),
+                    iter1=int(iter1),
+                    ijacob=int(ijacob),
+                    k_ndamp=int(k_ndamp),
+                    reset_iter1=_free_boundary_turnon_resets_iter1_immediately(
+                        lthreed=bool(cfg.lthreed),
+                        lasym=bool(cfg.lasym),
+                    ),
+                )
+                state = turnon_update.state
                 _zero_all_velocity_blocks()
-                time_step_report_hold = float(time_step)
-                ijacob += 1
-                if _free_boundary_turnon_resets_iter1_immediately(
-                    lthreed=bool(cfg.lthreed),
-                    lasym=bool(cfg.lasym),
-                ):
-                    iter1 = int(iter2)
-                bad_growth_streak = 0
-                inv_tau = [0.15 / max(float(time_step), 1e-12)] * k_ndamp
+                time_step_report_hold = turnon_update.time_step_report_hold
+                _apply_controller_update(_controller_state_after_free_boundary_turnon_restart_update, turnon_update)
                 freeb_turnon_applied = True
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
             prev_rz_fsq_before = prev_rz_fsq
