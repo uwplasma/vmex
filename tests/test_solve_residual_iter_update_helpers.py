@@ -9,6 +9,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     apply_controller_state_update,
     backtracking_momentum_search,
     controller_state_after_catastrophic_restart_update,
+    controller_state_after_free_boundary_turnon_restart_update,
     controller_state_after_initial_axis_reset_update,
     controller_state_after_pre_restart_update,
     controller_state_after_vmec2000_time_control_restart_update,
@@ -18,6 +19,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     direct_force_fallback_trial,
     force_update_rms,
     host_catastrophic_restart_update,
+    host_free_boundary_turnon_restart_update,
     host_force_update_rms,
     host_initial_axis_reset_update,
     host_momentum_update_np,
@@ -240,6 +242,53 @@ def test_apply_controller_state_update_delegates_to_pure_update() -> None:
     assert got.ijacob == 1
     assert got.prev_rz_fsq == pytest.approx(0.5)
     assert got.state_checkpoint == "new-checkpoint"
+
+
+def test_free_boundary_turnon_restart_update_matches_vmec_retry_semantics() -> None:
+    base = initial_residual_controller_state(
+        step_size=0.3,
+        k_ndamp=3,
+        initial_flip_sign=-1.0,
+        state_checkpoint="old-checkpoint",
+    )._replace(iter1=4, ijacob=2, bad_growth_streak=6)
+
+    update = host_free_boundary_turnon_restart_update(
+        state_checkpoint="turnon-checkpoint",
+        time_step=base.time_step,
+        iter2=9,
+        iter1=base.iter1,
+        ijacob=base.ijacob,
+        k_ndamp=3,
+        reset_iter1=True,
+    )
+    got = controller_state_after_free_boundary_turnon_restart_update(base, update)
+
+    assert update.state == "turnon-checkpoint"
+    assert update.time_step_report_hold == pytest.approx(0.3)
+    assert update.ijacob == 3
+    assert update.iter1 == 9
+    np.testing.assert_allclose(update.inv_tau, [0.5, 0.5, 0.5])
+    assert got.iter1 == 9
+    assert got.ijacob == 3
+    assert got.bad_growth_streak == 0
+    assert got.fsq_prev == pytest.approx(base.fsq_prev)
+    assert got.state_checkpoint == "old-checkpoint"
+
+
+def test_free_boundary_turnon_restart_update_can_preserve_restart_marker() -> None:
+    update = host_free_boundary_turnon_restart_update(
+        state_checkpoint="checkpoint",
+        time_step=0.0,
+        iter2=9,
+        iter1=4,
+        ijacob=2,
+        k_ndamp=2,
+        reset_iter1=False,
+    )
+
+    assert update.iter1 == 4
+    assert update.ijacob == 3
+    np.testing.assert_allclose(update.inv_tau, [0.15 / 1.0e-12] * 2)
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:

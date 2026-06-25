@@ -304,6 +304,17 @@ class HostInitialAxisResetUpdate(NamedTuple):
     state_checkpoint: Any
 
 
+class HostFreeBoundaryTurnonRestartUpdate(NamedTuple):
+    """Controller scalars after VMEC's free-boundary vacuum turn-on retry."""
+
+    state: Any
+    time_step_report_hold: float
+    ijacob: int
+    iter1: int
+    inv_tau: list[float]
+    bad_growth_streak: int
+
+
 def host_initial_axis_reset_update(
     state_checkpoint: Any,
     time_step: float,
@@ -322,6 +333,49 @@ def host_initial_axis_reset_update(
         prev_rz_fsq=float(prev_rz_fsq_before),
         bad_growth_streak=0,
         state_checkpoint=state_checkpoint,
+    )
+
+
+def host_free_boundary_turnon_restart_update(
+    *,
+    state_checkpoint: Any,
+    time_step: float,
+    iter2: int,
+    iter1: int,
+    ijacob: int,
+    k_ndamp: int,
+    reset_iter1: bool,
+) -> HostFreeBoundaryTurnonRestartUpdate:
+    """Return VMEC controller scalars for the first active vacuum retry.
+
+    VMEC restarts ``funct3d`` immediately when the free-boundary vacuum
+    pressure first turns on.  The physical state rolls back to the checkpoint,
+    velocity memory is cleared by the caller, and the nonlinear controller
+    resets its bad-growth history while keeping the current pseudo-time step.
+    """
+
+    dt = float(time_step)
+    return HostFreeBoundaryTurnonRestartUpdate(
+        state=state_checkpoint,
+        time_step_report_hold=dt,
+        ijacob=int(ijacob) + 1,
+        iter1=int(iter2) if bool(reset_iter1) else int(iter1),
+        inv_tau=[0.15 / max(dt, 1.0e-12)] * int(k_ndamp),
+        bad_growth_streak=0,
+    )
+
+
+def controller_state_after_free_boundary_turnon_restart_update(
+    state: ResidualControllerState,
+    update: HostFreeBoundaryTurnonRestartUpdate,
+) -> ResidualControllerState:
+    """Apply free-boundary turn-on retry scalars to controller state."""
+
+    return state._replace(
+        inv_tau=list(update.inv_tau),
+        iter1=int(update.iter1),
+        ijacob=int(update.ijacob),
+        bad_growth_streak=int(update.bad_growth_streak),
     )
 
 
