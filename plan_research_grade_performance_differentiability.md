@@ -4163,3 +4163,47 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.3%.
 - Docs/release hygiene: 99.9%.
 - Overall: 98.7%.
+
+### 2026-06-25: Make rejected-slot fingerprint metadata internally consistent
+
+Steps taken:
+
+- Audited the new fingerprint-only accepted/rejected controller-slot gate
+  against the compact ``controller_slot_summary`` fields.
+- Added active free-boundary masks to the fingerprint metadata so accepted
+  slots are consistently reported as active free-boundary replay slots.
+- Added focused assertions for ``active_free_boundary_slots``,
+  ``accepted_free_boundary_slots``, ``active_free_boundary_mask``, and
+  ``has_active_freeb_replay`` in the fingerprint-only smoke test.
+
+Results obtained:
+
+- Focused lint passed for the touched helper and smoke test.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with
+  ``35`` passing tests and ``1`` expected xfail.
+- The change does not alter solver math or replay acceptance authority; it only
+  makes the lower-overhead provenance artifact easier to audit.
+
+Best next steps:
+
+1. Commit and push this metadata consistency fix.
+2. Re-check CI for the preceding pushed tranche and the new push.
+3. Continue cold branch-local vector/JVP graph-construction profiling only if
+   another performance tranche is needed before review.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 95.9%.
+- Single-stage coil optimization: 92.8%.
+- CPU/GPU runtime and memory footprint: 99.1%.
+- Refactor/API/examples: 60.0%.
+- VMEC2000/VMEC++ parity and physics gates: 98.3%.
+- Docs/release hygiene: 99.9%.
+- Overall: 98.7%.
