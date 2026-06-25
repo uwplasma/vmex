@@ -119,11 +119,20 @@ fresh full updates every iteration. At 5000 iterations, direct-coil
 generated-mgrid ``vmec_jax`` at the same iteration budget. At 10000 iterations,
 direct-coil ``vmec_jax`` reaches about ``1.88e-7``; generated-mgrid ``vmec_jax``
 reaches about ``1.30e-7``; and VMEC2000 reaches about ``1.11e-7``. The direct
-path is therefore slower but tracks the same residual floor. The strict residual
-gap is no longer evidence for a JAX-specific solve-control mismatch or a simple
-direct-provider convention error at this resolution. The current evidence points
-to the square-coil Fourier representation, resolution closure, and long-budget
-free-boundary nonlinear convergence.
+path is therefore slower but tracks the same residual floor. Extending the
+direct-coil run to 25000 iterations did not close the gap to ``1e-12``. It found
+its best fresh summed force residual, about ``1.07e-7``, near iteration 11140,
+then cycled: the final residual-history tail was still near ``1.52e-7`` and the
+fresh final recompute on the returned best-scored state was worse, about
+``4.18e-7``. The run used ``NVACSKIP=1`` and full fresh boundary updates on
+24935 of 25000 iterations, had no bad-Jacobian history flags, and took about
+3435 seconds on the local CPU. The strict residual gap is therefore no longer
+evidence for a JAX-specific solve-control mismatch, a simple direct-provider
+convention error, or a plain iteration-budget issue at this resolution. The
+current evidence points to the square-coil Fourier representation, resolution
+closure, and free-boundary nonlinear cycling around a low-resolution floor. A
+matching 25000-iteration VMEC2000 generated-``mgrid`` comparison is the next
+robustness check.
 
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
@@ -141,7 +150,11 @@ reduces low-mode projection error relative to the superellipse axis. It is
 still projected to VMEC Fourier coefficients, so large straight sections plus
 localized stellarator corners remain a difficult Fourier representation; using
 the spline envelope is a bandwidth reduction, not a replacement for resolution
-closure.
+closure. For the current square-coil shape parameters, the spline envelope
+reduces the max component projection error from about ``3.2e-4`` to
+``1.3e-4`` at ``MPOL=5, NTOR=12`` and from about ``7.1e-5`` to ``1.4e-5`` at
+``MPOL=6, NTOR=23``. This supports using the spline envelope for the hybrid
+square axis, while still requiring ``MPOL``/``NTOR``/``NZETA`` convergence.
 
 Physics And Algorithm Findings
 ------------------------------

@@ -193,7 +193,10 @@ closure rather than a simple field-convention mismatch. A matching direct-coil
 run improves from about ``4.1e-4`` residual at 1000 iterations to ``4.7e-6`` at
 3000 iterations, ``1.35e-6`` at 5000 iterations, and ``1.88e-7`` at 10000
 iterations, essentially matching the generated-mgrid/VMEC2000 floor at the same
-budget. The same profiling shows that
+budget. A 25000-iteration direct-coil extension did not reach ``1e-12``: its
+best fresh residual was about ``1.07e-7`` near iteration 11140, while the final
+fresh recompute was about ``4.18e-7``. This points to low-resolution nonlinear
+cycling rather than a plain iteration-budget miss. The same profiling shows that
 underresolved ``NZETA`` can fail before useful force iterations; the
 square-coil path now records ``recommended_nzeta`` and guards production-style
 example runs against known-underresolved toroidal grids. Finite-beta promotion
@@ -207,7 +210,9 @@ low-bandwidth rounded ``axis_kind="spline"`` square-axis option to reduce
 ``NTOR`` sensitivity before VMEC Fourier projection. The source helper and
 profiler now record ``boundary_projection`` truncation errors for the selected
 ``MPOL``/``NTOR`` grid, so mode changes can be separated from nonlinear
-free-boundary convergence. Direct-coil convergence
+free-boundary convergence. On the current square-coil shape, the spline envelope
+cuts max component projection error from about ``3.2e-4`` to ``1.3e-4`` at
+``MPOL=5, NTOR=12``. Direct-coil convergence
 candidates are gated by a fresh residual recompute using the current
 plasma-current normalization, and the square-coil example records near-axis
 ``|B|`` and mirror-ratio response plots for comparison with the expected
