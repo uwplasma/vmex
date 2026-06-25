@@ -134,6 +134,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
+    strict_step_branch_side_effects as _strict_step_branch_side_effects,
     strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
@@ -2892,7 +2893,8 @@ def solve_fixed_boundary_residual_iter(
                     )
                     if adjoint_trace and branch_result.fallback_direct_dt is not None:
                         trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
-                    if branch_result.restart_path == "fallback_direct":
+                    branch_effects = _strict_step_branch_side_effects(branch_result)
+                    if branch_effects.zero_all_velocity_blocks:
                         _zero_all_velocity_blocks()
             branch_runtime = _strict_step_runtime_fields(
                 branch_result,
@@ -2907,11 +2909,12 @@ def solve_fixed_boundary_residual_iter(
             update_rms = branch_runtime.update_rms
             if not branch_result.accepted:
                 catastrophic_restart = branch_result.catastrophic_restart
-                clear_cache_after_catastrophic = branch_result.clear_cache_after_catastrophic
                 if catastrophic_restart:
                     # Roll back state and zero velocity.
                     state = state_backup
-                    _zero_primary_velocity_blocks()
+                    branch_effects = _strict_step_branch_side_effects(branch_result)
+                    if branch_effects.zero_primary_velocity_blocks:
+                        _zero_primary_velocity_blocks()
                     restart_update = _host_catastrophic_restart_update(
                         probe_bad_jacobian=bool(probe_bad_jacobian),
                         w_try=float(w_try),
@@ -2945,9 +2948,14 @@ def solve_fixed_boundary_residual_iter(
                     restart_path = branch_runtime.restart_path
                     max_coeff_delta_rms = branch_runtime.max_coeff_delta_rms
                     max_update_rms = branch_runtime.max_update_rms
-                    freeb_controls_cached = None
+                    branch_effects = _strict_step_branch_side_effects(
+                        branch_result,
+                        after_catastrophic_restart=True,
+                    )
+                    if branch_effects.clear_freeb_controls_cached:
+                        freeb_controls_cached = None
                     update_rms = branch_runtime.update_rms
-                    if bool(clear_cache_after_catastrophic):
+                    if branch_effects.clear_precond_cache:
                         precond_cache.clear()
             _record_update_state_ready_timing(
                 timing_enabled=bool(timing_enabled),

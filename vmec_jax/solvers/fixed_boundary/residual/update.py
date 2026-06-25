@@ -687,6 +687,15 @@ class StrictStepRuntimeFields(NamedTuple):
     max_update_rms: float
 
 
+class StrictStepBranchSideEffects(NamedTuple):
+    """Loop side effects required by a strict-step branch decision."""
+
+    zero_all_velocity_blocks: bool
+    zero_primary_velocity_blocks: bool
+    clear_freeb_controls_cached: bool
+    clear_precond_cache: bool
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -1521,6 +1530,23 @@ def strict_step_runtime_fields(
             else float(branch.max_coeff_delta_rms)
         ),
         max_update_rms=float(max_update_rms) if branch.max_update_rms is None else float(branch.max_update_rms),
+    )
+
+
+def strict_step_branch_side_effects(
+    branch: StrictStepBranchResult,
+    *,
+    after_catastrophic_restart: bool = False,
+) -> StrictStepBranchSideEffects:
+    """Return non-state side effects selected by a strict-step branch."""
+
+    catastrophic = (not bool(branch.accepted)) and bool(branch.catastrophic_restart)
+    after_restart = bool(after_catastrophic_restart)
+    return StrictStepBranchSideEffects(
+        zero_all_velocity_blocks=bool(branch.accepted) and branch.restart_path == "fallback_direct",
+        zero_primary_velocity_blocks=catastrophic and not after_restart,
+        clear_freeb_controls_cached=catastrophic and after_restart,
+        clear_precond_cache=catastrophic and after_restart and bool(branch.clear_cache_after_catastrophic),
     )
 
 
