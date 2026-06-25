@@ -32,7 +32,9 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     momentum_update_jax,
     residual_evolve_coefficients,
     scale_velocity_blocks,
+    DirectForceFallbackTrial,
     strict_step_branch_result,
+    strict_step_branch_result_after_direct_fallback,
     strict_step_acceptance_decision,
     strict_momentum_update_proposal,
     strict_trial_evaluation,
@@ -375,6 +377,74 @@ def test_direct_force_fallback_acceptance_decision_uses_vmec_trial_threshold() -
     assert not nonfinite.accepted
     assert custom.accepted
     assert custom.accept_ratio == pytest.approx(2.0)
+
+
+def test_strict_step_branch_result_after_direct_fallback_accepts_trial_state() -> None:
+    branch = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True),
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=None,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    fallback = DirectForceFallbackTrial(
+        state="fallback-state",
+        dt_eff=0.0125,
+        update_rms=0.125,
+        residual=1.0,
+    )
+
+    result = strict_step_branch_result_after_direct_fallback(
+        branch=branch,
+        fallback_trial=fallback,
+        acceptance=direct_force_fallback_acceptance_decision(residual=1.0, current_residual=1.0),
+        clear_cache_after_rejected=True,
+    )
+
+    assert result.state == "fallback-state"
+    assert result.accepted
+    assert not result.catastrophic_restart
+    assert not result.clear_cache_after_catastrophic
+    assert result.step_status == "fallback_direct"
+    assert result.restart_reason == "none"
+    assert result.restart_path == "fallback_direct"
+    assert result.huge_force_restart_count == 0
+    assert result.update_rms == pytest.approx(0.125)
+    assert result.fallback_direct_dt == pytest.approx(0.0125)
+
+
+def test_strict_step_branch_result_after_direct_fallback_preserves_rejected_branch() -> None:
+    branch = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True),
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=0.5,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    fallback = DirectForceFallbackTrial(
+        state="fallback-state",
+        dt_eff=0.0125,
+        update_rms=0.125,
+        residual=3.0,
+    )
+
+    result = strict_step_branch_result_after_direct_fallback(
+        branch=branch,
+        fallback_trial=fallback,
+        acceptance=direct_force_fallback_acceptance_decision(residual=3.0, current_residual=1.0),
+        clear_cache_after_rejected=False,
+    )
+
+    assert result.state == "backup-state"
+    assert not result.accepted
+    assert result.catastrophic_restart
+    assert not result.clear_cache_after_catastrophic
+    assert result.step_status == "restart_pending"
+    assert result.restart_path == "trial_rejected"
+    assert result.update_rms == pytest.approx(0.5)
+    assert result.fallback_direct_dt is None
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:

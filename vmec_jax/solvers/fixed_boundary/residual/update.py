@@ -563,6 +563,7 @@ class StrictStepBranchResult(NamedTuple):
     restart_path: str
     huge_force_restart_count: int
     update_rms: float | None
+    fallback_direct_dt: float | None = None
 
 
 class InitialResidualVelocityState(NamedTuple):
@@ -1298,6 +1299,7 @@ def strict_step_branch_result(
             restart_path="momentum_accept",
             huge_force_restart_count=0,
             update_rms=update_rms,
+            fallback_direct_dt=None,
         )
     return StrictStepBranchResult(
         state=state_backup,
@@ -1309,7 +1311,33 @@ def strict_step_branch_result(
         restart_path="trial_rejected",
         huge_force_restart_count=int(huge_force_restart_count),
         update_rms=update_rms,
+        fallback_direct_dt=None,
     )
+
+
+def strict_step_branch_result_after_direct_fallback(
+    *,
+    branch: StrictStepBranchResult,
+    fallback_trial: DirectForceFallbackTrial,
+    acceptance: DirectForceFallbackAcceptanceDecision,
+    clear_cache_after_rejected: bool,
+) -> StrictStepBranchResult:
+    """Update a rejected strict-step branch after a direct-force fallback trial."""
+
+    if bool(acceptance.accepted):
+        return branch._replace(
+            state=fallback_trial.state,
+            accepted=True,
+            catastrophic_restart=False,
+            clear_cache_after_catastrophic=False,
+            step_status="fallback_direct",
+            restart_reason="none",
+            restart_path="fallback_direct",
+            huge_force_restart_count=0,
+            update_rms=fallback_trial.update_rms,
+            fallback_direct_dt=float(fallback_trial.dt_eff),
+        )
+    return branch._replace(clear_cache_after_catastrophic=bool(clear_cache_after_rejected))
 
 
 def backtracking_momentum_search(
@@ -1458,6 +1486,7 @@ _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
 _strict_momentum_update_proposal = strict_momentum_update_proposal
 _strict_trial_evaluation = strict_trial_evaluation
+_strict_step_branch_result_after_direct_fallback = strict_step_branch_result_after_direct_fallback
 _host_catastrophic_restart_update = host_catastrophic_restart_update
 _host_pre_restart_trigger_update = host_pre_restart_trigger_update
 _direct_force_fallback_trial = direct_force_fallback_trial

@@ -132,6 +132,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_step_branch_result as _strict_step_branch_result,
+    strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
     strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
@@ -2842,19 +2843,10 @@ def solve_fixed_boundary_residual_iter(
                 vmec2000_control=bool(vmec2000_control),
                 huge_force_restart_count=int(huge_force_restart_count),
             )
-            state = branch_result.state
-            step_status = branch_result.step_status
-            restart_reason = branch_result.restart_reason
-            huge_force_restart_count = branch_result.huge_force_restart_count
-            restart_path = branch_result.restart_path
-            update_rms = branch_result.update_rms
             if not branch_result.accepted:
-                catastrophic_restart = branch_result.catastrophic_restart
-                clear_cache_after_catastrophic = branch_result.clear_cache_after_catastrophic
                 if use_direct_fallback:
                     # Try a small direct-force step (no momentum memory) before
                     # a full restart. This is an experimental parity path.
-                    clear_cache_after_catastrophic = bool(vmec2000_control)
                     fallback_trial = _direct_force_fallback_trial(
                         forces=force_blocks,
                         dt_eff=float(dt_eff),
@@ -2870,24 +2862,29 @@ def solve_fixed_boundary_residual_iter(
                             zero_m1_value=zero_m1,
                         ),
                     )
-                    dt_direct = fallback_trial.dt_eff
-                    state_dir = fallback_trial.state
-                    w_dir = fallback_trial.residual
                     fallback_acceptance = _direct_force_fallback_acceptance_decision(
-                        residual=float(w_dir),
+                        residual=float(fallback_trial.residual),
                         current_residual=float(w_curr),
                     )
-                    if fallback_acceptance.accepted:
-                        state = state_dir
+                    branch_result = _strict_step_branch_result_after_direct_fallback(
+                        branch=branch_result,
+                        fallback_trial=fallback_trial,
+                        acceptance=fallback_acceptance,
+                        clear_cache_after_rejected=bool(vmec2000_control),
+                    )
+                    if adjoint_trace and branch_result.fallback_direct_dt is not None:
+                        trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
+                    if branch_result.restart_path == "fallback_direct":
                         _zero_all_velocity_blocks()
-                        step_status = "fallback_direct"
-                        restart_reason = "none"
-                        huge_force_restart_count = 0
-                        restart_path = "fallback_direct"
-                        update_rms = fallback_trial.update_rms
-                        if adjoint_trace:
-                            trace_entry["fallback_direct_dt"] = float(dt_direct)
-                        catastrophic_restart = False
+            state = branch_result.state
+            step_status = branch_result.step_status
+            restart_reason = branch_result.restart_reason
+            huge_force_restart_count = branch_result.huge_force_restart_count
+            restart_path = branch_result.restart_path
+            update_rms = branch_result.update_rms
+            if not branch_result.accepted:
+                catastrophic_restart = branch_result.catastrophic_restart
+                clear_cache_after_catastrophic = branch_result.clear_cache_after_catastrophic
                 if catastrophic_restart:
                     # Roll back state and zero velocity.
                     state = state_backup
