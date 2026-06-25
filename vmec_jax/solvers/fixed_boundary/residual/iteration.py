@@ -214,6 +214,14 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
     sample_vmec_iteration_scalars as _sample_vmec_iteration_scalars,
 )
+from vmec_jax.solvers.fixed_boundary.residual.iteration_control import (
+    constraint_preconditioner_channels as _constraint_preconditioner_channels,
+    resolve_residual_iteration_control_sample as _resolve_residual_iteration_control_sample,
+)
+from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
+    physical_residual_metric_channels as _physical_residual_metric_channels,
+    select_residual_norms_for_iteration as _select_residual_norms_for_iteration,
+)
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ResidualScanPathHooks,
     dispatch_residual_scan_path,
@@ -1420,7 +1428,6 @@ def solve_fixed_boundary_residual_iter(
         freeb_controls_cached: tuple[int, int, int] | None = None
         while True:
             t_iteration_prepare_start = time.perf_counter() if timing_enabled else None
-            iter_since_restart = iter2 - iter1
             fsq_prev_before = fsq_prev
             fsq0_prev_before = fsq0_prev
             pre_restart_reason = "none"
@@ -1450,84 +1457,62 @@ def solve_fixed_boundary_residual_iter(
             freeb_controls_cached = freeb_control.controls_cached
             freeb_turnon_iter = freeb_control.turnon_iter
             freeb_ivac_effective = freeb_control.ivac_effective
-            if vmec2000_control:
-                # VMEC2000 `constrain_m1` logic (residue.f90):
-                #   zero gcz(m=1) if (fsqz_prev < 1e-6) OR (iter2 < 2).
-                fsqz_prev = float(fsqz2_history[-1]) if fsqz2_history else 1.0
-                zero_m1_val = 1.0 if (iter2 < 2) or (fsqz_prev < 1.0e-6) else 0.0
-            else:
-                # A conservative heuristic early in a restart window.
-                zero_m1_val = (
-                    1.0 if (iter_since_restart < 2) or (len(fsqz2_history) and fsqz2_history[-1] < 1e-6) else 0.0
-                )
+            control_sample = _resolve_residual_iteration_control_sample(
+                iter2=int(iter2),
+                iter1=int(iter1),
+                vmec2000_control=bool(vmec2000_control),
+                free_boundary_enabled=bool(free_boundary_enabled),
+                freeb_ivac_effective=int(freeb_ivac_effective),
+                prev_rz_fsq=float(prev_rz_fsq),
+                fsqz2_history=fsqz2_history,
+                env_freeb_include_edge=bool(_env_freeb_include_edge),
+                env_force_edge_residual=_env_force_edge_residual,
+                precond_cache_valid=bool(precond_cache.valid),
+                force_bcovar_update=bool(force_bcovar_update),
+                preconditioner_update_interval=int(k_preconditioner_update_interval),
+                ns=int(s.shape[0]),
+            )
+            iter_since_restart = control_sample.iter_since_restart
+            zero_m1_val = control_sample.zero_m1_value
             if host_update_assembly and _jnp_zero_m1_0 is not None:
                 # Use pre-cached JAX scalars to avoid jnp.asarray dispatch + dtype
                 # lookup every iteration (saves 2 apply_primitive calls per iter).
                 zero_m1 = _jnp_zero_m1_1 if zero_m1_val > 0.5 else _jnp_zero_m1_0
             else:
                 zero_m1 = jnp.asarray(zero_m1_val, dtype=jnp.asarray(state.Rcos).dtype)
-            if vmec2000_control:
-                # VMEC2000 keeps the core R/Z residual assembly on the
-                # interior mesh; free-boundary coupling enters through the
-                # dedicated edge `rbsq` terms in `forces.f`, not by enabling
-                # generic edge residual rows.
-                include_edge = _env_freeb_include_edge
-            else:
-                include_edge = bool(iter_since_restart < 50) and (float(prev_rz_fsq) < 1e-6)
+            include_edge = control_sample.include_edge
             if track_history:
                 history_lists["include_edge_history"].append(int(bool(include_edge)))
-            # Residual transform edge handling:
-            # VMEC tomnsp_mod uses jmax=ns once free-boundary vacuum is on
-            # (ivac >= 1), independent of residue's `jedge` scalar gating.
-            # Keep `include_edge` for scalar gating/diagnostics, but include
-            # edge rows in the transform when vacuum coupling is active.
-            include_edge_residual = bool(include_edge)
-            if bool(free_boundary_enabled) and int(freeb_ivac_effective) >= 1:
-                include_edge_residual = True
-            if _env_force_edge_residual in ("1", "true", "yes"):
-                include_edge_residual = True
-            precond_jmax_override: int | None = None
-            if bool(vmec2000_control) and bool(free_boundary_enabled) and (int(freeb_ivac_effective) >= 1):
-                # VMEC scalfor: jmax=ns once free-boundary vacuum is active.
-                precond_jmax_override = int(s.shape[0])
-            precond_expected_jmax = (
-                int(precond_jmax_override) if (precond_jmax_override is not None) else max(int(s.shape[0]) - 1, 1)
-            )
+            include_edge_residual = control_sample.include_edge_residual
+            precond_jmax_override = control_sample.precond_jmax_override
+            precond_expected_jmax = control_sample.precond_expected_jmax
             # `zero_m1` originates from host control flow, so keep the history
             # without forcing an unnecessary device synchronization.
             if track_history:
                 history_lists["zero_m1_history"].append(int(zero_m1_val > 0.5))
 
-            need_bcovar_update = bool(vmec2000_control) and (
-                (not bool(precond_cache.valid))
-                or bool(force_bcovar_update)
-                or ((iter2 - iter1) % k_preconditioner_update_interval == 0)
-            )
+            need_bcovar_update = control_sample.need_bcovar_update
             precond_cache_seeded_from_bcovar_update = False
             precond_refresh_seed_time_in_residual_metrics = 0.0
             force_bcovar_update = False
             history_lists["bcovar_update_history"].append(int(bool(need_bcovar_update)))
 
-            use_cached_precond = (
-                bool(vmec2000_control) and bool(precond_cache.valid) and (not bool(need_bcovar_update))
+            use_cached_precond = control_sample.use_cached_precond
+            constraint_channels = _constraint_preconditioner_channels(
+                use_cached_precond=bool(use_cached_precond),
+                cached_precond_diag=precond_cache.precond_diag,
+                cached_tcon=precond_cache.tcon,
+                zero_precond_diag=zero_precond_diag,
+                zero_tcon=zero_tcon,
+                host_update_assembly=bool(host_update_assembly),
+                jnp_true_bool=_jnp_true_bool,
+                jnp_false_bool=_jnp_false_bool,
+                jnp_module=jnp,
             )
-            constraint_precond_diag = (
-                precond_cache.precond_diag
-                if (use_cached_precond and precond_cache.precond_diag is not None)
-                else zero_precond_diag
-            )
-            # VMEC updates tcon only when refreshing the 1D preconditioner
-            # blocks; between refreshes it reuses the last tcon profile.
-            constraint_tcon_override = (
-                precond_cache.tcon if (use_cached_precond and precond_cache.tcon is not None) else zero_tcon
-            )
-            if host_update_assembly and _jnp_true_bool is not None:
-                # Use pre-cached bool scalars — avoids 2 jnp.asarray dispatches/iter.
-                constraint_precond_active = _jnp_true_bool if use_cached_precond else _jnp_false_bool
-                constraint_tcon_active = _jnp_true_bool if use_cached_precond else _jnp_false_bool
-            else:
-                constraint_precond_active = jnp.asarray(use_cached_precond, dtype=bool)
-                constraint_tcon_active = jnp.asarray(use_cached_precond, dtype=bool)
+            constraint_precond_diag = constraint_channels.precond_diag
+            constraint_tcon_override = constraint_channels.tcon
+            constraint_precond_active = constraint_channels.precond_active
+            constraint_tcon_active = constraint_channels.tcon_active
 
             # Free-boundary WP2 scaffold: run/update the NESTOR-like external
             # vacuum solve and couple bsqvac on the edge slice into bcovar.
@@ -1746,10 +1731,12 @@ def solve_fixed_boundary_residual_iter(
             if timing_enabled and not reuse_setup_axis_force:
                 _record_compute_force_timing("main", t_compute_start, gcr2)
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
-            norms_used = (
-                precond_cache.norms
-                if (bool(vmec2000_control) and bool(precond_cache.valid) and (not bool(need_bcovar_update)))
-                else norms_current
+            norms_used = _select_residual_norms_for_iteration(
+                vmec2000_control=bool(vmec2000_control),
+                precond_cache_valid=bool(precond_cache.valid),
+                need_bcovar_update=bool(need_bcovar_update),
+                cached_norms=precond_cache.norms,
+                current_norms=norms_current,
             )
             use_host_residual_metrics = (
                 bool(startup_policy.host_residual_metrics_on_accelerator)
@@ -1757,41 +1744,19 @@ def solve_fixed_boundary_residual_iter(
                 and (jax.default_backend() != "cpu")
                 and (not _tree_has_tracer((gcr2, gcz2, gcl2, norms_used)))
             )
-            if host_update_assembly:
-                # NumPy path: gcr2/gcz2/gcl2 already synced by block_until_ready above.
-                # float() on synced JAX scalars is fast (no blocking). Avoids 5 JAX dispatches.
-                _gcr2_f = float(gcr2)
-                _gcz2_f = float(gcz2)
-                _gcl2_f = float(gcl2)
-                _fnorm_f = float(norms_used.fnorm)
-                _fnormL_f = float(norms_used.fnormL)
-                _r1_f = float(norms_used.r1)
-                fsqr = _r1_f * _fnorm_f * _gcr2_f
-                fsqz = _r1_f * _fnorm_f * _gcz2_f
-                fsql = _fnormL_f * _gcl2_f
-            elif use_host_residual_metrics:
-                (
-                    _gcr2_f,
-                    _gcz2_f,
-                    _gcl2_f,
-                    _fnorm_f,
-                    _fnormL_f,
-                    _r1_f,
-                ) = _device_get_floats(
-                    gcr2,
-                    gcz2,
-                    gcl2,
-                    norms_used.fnorm,
-                    norms_used.fnormL,
-                    norms_used.r1,
-                )
-                fsqr = _r1_f * _fnorm_f * _gcr2_f
-                fsqz = _r1_f * _fnorm_f * _gcz2_f
-                fsql = _fnormL_f * _gcl2_f
-            else:
-                fsqr = norms_used.r1 * norms_used.fnorm * gcr2
-                fsqz = norms_used.r1 * norms_used.fnorm * gcz2
-                fsql = norms_used.fnormL * gcl2
+            physical_metrics = _physical_residual_metric_channels(
+                gcr2=gcr2,
+                gcz2=gcz2,
+                gcl2=gcl2,
+                norms_used=norms_used,
+                host_update_assembly=bool(host_update_assembly),
+                use_host_residual_metrics=bool(use_host_residual_metrics),
+                device_get_floats=_device_get_floats,
+            )
+            norms_used = physical_metrics.norms_used
+            fsqr = physical_metrics.fsqr
+            fsqz = physical_metrics.fsqz
+            fsql = physical_metrics.fsql
             debug_iter_env = _env_debug_iter
             _maybe_print_nonscan_state_debug(
                 debug_iter_env=debug_iter_env,

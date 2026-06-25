@@ -5,6 +5,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax.solvers.fixed_boundary.residual.iteration_control import (
+    constraint_preconditioner_channels,
+    resolve_residual_iteration_control_sample,
+)
+from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
+    physical_residual_metric_channels,
+    select_residual_norms_for_iteration,
+)
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState,
     ResidualVelocityBlocks,
@@ -64,6 +72,185 @@ from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import ForceBlocks
 def _blocks(*, offset: float, scale: float = 1.0) -> ResidualVelocityBlocks:
     base = np.arange(6.0, dtype=float).reshape(2, 3)
     return ResidualVelocityBlocks(*(scale * (base + offset + float(idx)) for idx in range(12)))
+
+
+def test_residual_iteration_control_sample_matches_vmec2000_edge_and_precond_rules() -> None:
+    initial = resolve_residual_iteration_control_sample(
+        iter2=1,
+        iter1=0,
+        vmec2000_control=True,
+        free_boundary_enabled=False,
+        freeb_ivac_effective=0,
+        prev_rz_fsq=1.0,
+        fsqz2_history=[],
+        env_freeb_include_edge=False,
+        env_force_edge_residual="",
+        precond_cache_valid=False,
+        force_bcovar_update=False,
+        preconditioner_update_interval=25,
+        ns=16,
+    )
+    assert initial.iter_since_restart == 1
+    assert initial.zero_m1_value == pytest.approx(1.0)
+    assert not initial.include_edge
+    assert not initial.include_edge_residual
+    assert initial.precond_jmax_override is None
+    assert initial.precond_expected_jmax == 15
+    assert initial.need_bcovar_update
+    assert not initial.use_cached_precond
+
+    active_free_boundary = resolve_residual_iteration_control_sample(
+        iter2=3,
+        iter1=1,
+        vmec2000_control=True,
+        free_boundary_enabled=True,
+        freeb_ivac_effective=1,
+        prev_rz_fsq=1.0,
+        fsqz2_history=[1.0e-4],
+        env_freeb_include_edge=False,
+        env_force_edge_residual="",
+        precond_cache_valid=True,
+        force_bcovar_update=False,
+        preconditioner_update_interval=25,
+        ns=16,
+    )
+    assert active_free_boundary.zero_m1_value == pytest.approx(0.0)
+    assert not active_free_boundary.include_edge
+    assert active_free_boundary.include_edge_residual
+    assert active_free_boundary.precond_jmax_override == 16
+    assert active_free_boundary.precond_expected_jmax == 16
+    assert not active_free_boundary.need_bcovar_update
+    assert active_free_boundary.use_cached_precond
+
+
+def test_residual_iteration_control_sample_non_vmec_restart_heuristics() -> None:
+    sample = resolve_residual_iteration_control_sample(
+        iter2=7,
+        iter1=6,
+        vmec2000_control=False,
+        free_boundary_enabled=False,
+        freeb_ivac_effective=0,
+        prev_rz_fsq=5.0e-8,
+        fsqz2_history=[2.0],
+        env_freeb_include_edge=False,
+        env_force_edge_residual="true",
+        precond_cache_valid=True,
+        force_bcovar_update=True,
+        preconditioner_update_interval=25,
+        ns=8,
+    )
+    assert sample.iter_since_restart == 1
+    assert sample.zero_m1_value == pytest.approx(1.0)
+    assert sample.include_edge
+    assert sample.include_edge_residual
+    assert sample.precond_expected_jmax == 7
+    assert not sample.need_bcovar_update
+    assert not sample.use_cached_precond
+
+
+def test_constraint_preconditioner_channels_select_cached_or_zero_payloads() -> None:
+    cached_diag = (np.array([1.0]), np.array([2.0]))
+    cached_tcon = np.array([3.0])
+    zero_diag = (np.array([0.0]), np.array([0.0]))
+    zero_tcon = np.array([0.0])
+
+    cached = constraint_preconditioner_channels(
+        use_cached_precond=True,
+        cached_precond_diag=cached_diag,
+        cached_tcon=cached_tcon,
+        zero_precond_diag=zero_diag,
+        zero_tcon=zero_tcon,
+        host_update_assembly=True,
+        jnp_true_bool="true-sentinel",
+        jnp_false_bool="false-sentinel",
+        jnp_module=np,
+    )
+    assert cached.precond_diag is cached_diag
+    assert cached.tcon is cached_tcon
+    assert cached.precond_active == "true-sentinel"
+    assert cached.tcon_active == "true-sentinel"
+
+    zero = constraint_preconditioner_channels(
+        use_cached_precond=False,
+        cached_precond_diag=cached_diag,
+        cached_tcon=cached_tcon,
+        zero_precond_diag=zero_diag,
+        zero_tcon=zero_tcon,
+        host_update_assembly=False,
+        jnp_true_bool=None,
+        jnp_false_bool=None,
+        jnp_module=np,
+    )
+    assert zero.precond_diag is zero_diag
+    assert zero.tcon is zero_tcon
+    assert np.asarray(zero.precond_active).shape == ()
+    assert bool(zero.precond_active) is False
+    assert bool(zero.tcon_active) is False
+
+
+def test_residual_metric_channels_use_cached_norms_and_preserve_device_path() -> None:
+    current = SimpleNamespace(r1=2.0, fnorm=3.0, fnormL=5.0)
+    cached = SimpleNamespace(r1=7.0, fnorm=11.0, fnormL=13.0)
+
+    assert (
+        select_residual_norms_for_iteration(
+            vmec2000_control=True,
+            precond_cache_valid=True,
+            need_bcovar_update=False,
+            cached_norms=cached,
+            current_norms=current,
+        )
+        is cached
+    )
+    assert (
+        select_residual_norms_for_iteration(
+            vmec2000_control=True,
+            precond_cache_valid=True,
+            need_bcovar_update=True,
+            cached_norms=cached,
+            current_norms=current,
+        )
+        is current
+    )
+
+    device_metrics = physical_residual_metric_channels(
+        gcr2=np.array(2.0),
+        gcz2=np.array(3.0),
+        gcl2=np.array(4.0),
+        norms_used=current,
+        host_update_assembly=False,
+        use_host_residual_metrics=False,
+        device_get_floats=lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected host sync")),
+    )
+    assert device_metrics.norms_used is current
+    np.testing.assert_allclose(device_metrics.fsqr, 12.0)
+    np.testing.assert_allclose(device_metrics.fsqz, 18.0)
+    np.testing.assert_allclose(device_metrics.fsql, 20.0)
+
+
+def test_residual_metric_channels_host_sync_path_pulls_expected_scalars() -> None:
+    norms = SimpleNamespace(r1=np.array(2.0), fnorm=np.array(3.0), fnormL=np.array(5.0))
+    calls = []
+
+    def fake_device_get_floats(*vals):
+        calls.append(vals)
+        return tuple(float(np.asarray(value)) for value in vals)
+
+    metrics = physical_residual_metric_channels(
+        gcr2=np.array(2.0),
+        gcz2=np.array(3.0),
+        gcl2=np.array(4.0),
+        norms_used=norms,
+        host_update_assembly=False,
+        use_host_residual_metrics=True,
+        device_get_floats=fake_device_get_floats,
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 6
+    assert metrics.fsqr == pytest.approx(12.0)
+    assert metrics.fsqz == pytest.approx(18.0)
+    assert metrics.fsql == pytest.approx(20.0)
 
 
 def test_initial_residual_velocity_state_sets_caps_and_block_shapes() -> None:

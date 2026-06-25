@@ -6042,3 +6042,75 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.1%.
 - Docs/release hygiene: 100%.
 - Overall: 99.4%.
+
+### 2026-06-25: Split residual iteration scalar-control and metric seams
+
+Steps taken:
+
+- Extracted the VMEC-compatible scalar branch decisions from
+  ``solve_fixed_boundary_residual_iter`` into
+  ``residual/iteration_control.py``:
+  ``zero_m1`` gating, edge-residual selection, active free-boundary ``jmax``
+  selection, cached preconditioner reuse, and constraint-channel activity.
+- Extracted physical residual scalar selection into
+  ``residual/iteration_metrics.py`` so cached VMEC2000 norms and host/device
+  scalar paths are explicit, testable seams.
+- Rewired the residual loop to call those helpers without changing the force
+  assembly, preconditioner, or update branch authority.
+- Added focused tests for VMEC2000/free-boundary edge behavior, non-VMEC
+  restart heuristics, cached constraint channel selection, cached norm reuse,
+  and host-sync vs device-preserving residual metric paths.
+
+Results obtained:
+
+- ``python -m ruff check vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration_control.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration_metrics.py
+  tests/test_solve_residual_iter_update_helpers.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py -q`` passed with 57 tests.
+- Broader loop smoke passed:
+  ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_additional_helpers.py tests/test_driver_api.py
+  tests/test_discrete_adjoint_qh.py -q``.
+- Finite-beta/Mercier/Glasser checks passed:
+  ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_finite_beta_helpers_unit.py tests/test_finite_beta.py
+  tests/test_finite_beta_examples.py
+  tests/test_wout_geometry_mercier_bundled_parity.py -q``.
+- ``tools/diagnostics/readme_ad_fd_evidence.py`` generated a review-copy
+  AD-vs-FD evidence table with all six rows passing ``1e-9`` tolerance,
+  including ``DMerc`` absolute error ``3.55e-13`` and ``D_R`` absolute error
+  ``2.32e-12``.
+- ``git diff --check`` passed.
+- Repo-size gate passed with tracked size ``28.31 MiB`` and no tracked file
+  above ``2 MiB``.
+- Source-health improved the residual loop from 2735 to 2692 lines and the
+  module from 3114 to 3079 lines.  The loop remains the largest production
+  refactor hotspot, but the extracted branch seams now have direct unit tests.
+
+Best next steps:
+
+1. Continue the residual-loop reduction by extracting the free-boundary NESTOR
+   coupling trial setup or the preconditioner-application block, whichever can
+   be isolated with focused tests and no branch-authority change.
+2. Factor the largest free-boundary validation tests only after the production
+   residual loop has at least one more meaningful seam removed.
+3. Keep expensive optimization-matrix/README artifact rerenders deferred unless
+   a solver behavior change or promoted artifact criterion changes.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 96.2%.
+- Free-boundary production differentiability: 96.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 69.1%.
+- VMEC2000/VMEC++ parity and physics gates: 99.1%.
+- Docs/release hygiene: 100%.
+- Overall: 99.5%.
