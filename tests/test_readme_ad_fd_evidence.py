@@ -8,6 +8,21 @@ import pytest
 from tools.diagnostics import readme_ad_fd_evidence as evidence
 
 
+PUBLIC_EVIDENCE_JSON = evidence.REPO_ROOT / "docs/_static/figures/readme_ad_fd_evidence.json"
+PUBLIC_REQUIRED_SCALARS = {
+    "aspect ratio",
+    "iota profile",
+    "QS residual",
+    "smooth QI residual",
+    "DMerc",
+    "D_R",
+    "free-boundary aspect",
+    "free-boundary qs_total",
+    "free-boundary mean_iota",
+    "free-boundary lcfs_boundary_moment",
+}
+
+
 def _write_branch_report(path: Path, *, scalars: dict, passed: bool = True) -> Path:
     payload = {
         "branch_local_vector_gate": {
@@ -53,6 +68,29 @@ def test_branch_local_evidence_requires_promoted_physical_scalars(tmp_path: Path
     assert {row.tolerance for row in rows} == {evidence.STRICT_DETERMINISTIC_TOL}
     assert all(row.passed for row in rows)
     assert all("same-branch/fingerprint-gated" in row.note for row in rows)
+
+
+def test_checked_in_public_evidence_keeps_promoted_rows_and_strict_tolerances() -> None:
+    payload = json.loads(PUBLIC_EVIDENCE_JSON.read_text())
+    records = payload["records"]
+    by_scalar = {record["scalar"]: record for record in records}
+
+    assert set(by_scalar) == PUBLIC_REQUIRED_SCALARS
+    assert all(record["passed"] is True for record in records)
+    assert all(float(record["tolerance"]) <= evidence.STRICT_DETERMINISTIC_TOL for record in records)
+    assert max(float(record["rel_error"]) for record in records) <= evidence.STRICT_DETERMINISTIC_TOL
+
+    metadata = payload["metadata"]
+    assert metadata["branch_local_report"].endswith(
+        "outputs/final_tranche_adfd_evidence/same_branch_complete_solve_report.json"
+    )
+    assert "same-branch/fingerprint-gated" in metadata["contract"]
+    assert "arbitrary adaptive" not in metadata["contract"].lower()
+    assert all(
+        "not arbitrary adaptive branch differentiation" in by_scalar[scalar]["note"]
+        for scalar in PUBLIC_REQUIRED_SCALARS
+        if scalar.startswith("free-boundary")
+    )
 
 
 def test_branch_local_evidence_rejects_incomplete_or_failed_reports(tmp_path: Path) -> None:
