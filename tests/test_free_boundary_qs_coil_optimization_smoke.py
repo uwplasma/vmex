@@ -2211,6 +2211,51 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
     assert profile["policy"]["mode_count"] == 144
 
 
+def test_rejected_slot_fingerprint_gate_does_not_replay():
+    from vmec_jax.solvers.free_boundary.coil_optimization import (
+        same_branch_rejected_slot_gate_from_vector_replay,
+    )
+
+    base_trace = {"state_pre": np.zeros(3), "freeb_bsqvac_half": np.ones(2)}
+    report = {
+        "base": {
+            "traces": [base_trace],
+            "init": SimpleNamespace(static=SimpleNamespace()),
+        }
+    }
+
+    def fail_replay(*_args, **_kwargs):
+        raise AssertionError("fingerprint-only rejected-slot gate must not replay")
+
+    gate, wall_s = same_branch_rejected_slot_gate_from_vector_replay(
+        requested=True,
+        same_branch=True,
+        replay_mode_count_guard_triggered=False,
+        replay_mode_count_guard_reason="",
+        mode="vector",
+        report=report,
+        missing_vector_keys=(),
+        vector_keys=("aspect", "qs_total"),
+        replay_kwargs={"use_stacked_step_controls": True},
+        run_branch_local_vector=fail_replay,
+        summarize_vector_result=fail_replay,
+        gate_mode="fingerprint",
+    )
+
+    assert gate["available"] is True
+    assert gate["passed"] is True
+    assert gate["gate_mode"] == "fingerprint"
+    assert gate["fingerprint_only"] is True
+    assert gate["fixed_rejected_controller_slot_present"] is True
+    assert gate["fixed_rejected_controller_slots"] == 1
+    assert gate["status_derived_rejected_controller_slot_present"] is True
+    assert gate["controller_slot_fingerprint"]["step_status"] == ["accepted", "rejected"]
+    assert gate["controller_slot_summary"]["accepted_slots"] == 1
+    assert gate["controller_slot_summary"]["rejected_slots"] == 1
+    assert gate["replay_option_flags"]["fingerprint_only"] is True
+    assert wall_s is not None and wall_s >= 0.0
+
+
 def test_same_branch_report_profile_skips_above_mode_count_cap(tmp_path, monkeypatch):
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp

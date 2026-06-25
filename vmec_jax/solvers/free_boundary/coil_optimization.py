@@ -25,6 +25,7 @@ from vmec_jax.quasisymmetry import (
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 from vmec_jax.solvers.free_boundary.adjoint.trace_metadata import (
     direct_coil_accepted_trace_controller_slot_fingerprint,
+    direct_coil_accepted_trace_controller_slot_summary,
 )
 
 __all__ = [
@@ -1157,6 +1158,7 @@ def same_branch_rejected_slot_gate_from_vector_replay(
     run_branch_local_vector: Any,
     summarize_vector_result: Any,
     main_vector_replay_plan: dict[str, Any] | None = None,
+    gate_mode: str = "replay",
 ) -> tuple[dict[str, Any], float | None]:
     """Return the fixed accepted/rejected controller-slot gate artifact.
 
@@ -1175,6 +1177,10 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         "same_stacked_step_policy_branch": False,
     }
     if not requested:
+        return gate, None
+    gate_mode = str(gate_mode).strip().lower()
+    if gate_mode not in {"replay", "fingerprint"}:
+        gate["reason"] = "gate_mode must be 'replay' or 'fingerprint'"
         return gate, None
     if replay_mode_count_guard_triggered:
         gate["reason"] = replay_mode_count_guard_reason
@@ -1195,6 +1201,77 @@ def same_branch_rejected_slot_gate_from_vector_replay(
     rejected_trace["step_status"] = "rejected"
     padded_traces = base_traces + (rejected_trace,)
     t0 = time.perf_counter()
+    if gate_mode == "fingerprint":
+        statuses = [
+            str(trace.get("step_status", "accepted")).strip().lower() or "accepted"
+            for trace in padded_traces
+            if isinstance(trace, Mapping)
+        ]
+        accepted_mask = np.asarray(
+            [
+                status != "rejected" and not status.startswith("restart_")
+                for status in statuses
+            ],
+            dtype=bool,
+        )
+        rejected_mask = np.logical_not(accepted_mask)
+        metadata = {
+            "n_steps": len(statuses),
+            "n_free_boundary_replay_steps": int(np.count_nonzero(accepted_mask)),
+            "status_masks": {
+                "step_status": statuses,
+                "accept_mask": accepted_mask,
+                "status_acceptance_source": "trace_step_status",
+            },
+            "status_acceptance_source": "trace_step_status",
+            "accepted_mask": accepted_mask,
+            "rejected_mask": rejected_mask,
+        }
+        controller_slot_summary = direct_coil_accepted_trace_controller_slot_summary(metadata)
+        status_derived_rejected_slot = bool(
+            statuses
+            and np.any(rejected_mask)
+            and metadata["status_acceptance_source"] == "trace_step_status"
+        )
+        passed = bool(same_branch and controller_slot_summary.get("fixed_rejected_controller_slot_present", False)
+                      and status_derived_rejected_slot)
+        wall_s = float(time.perf_counter() - t0)
+        return {
+            "available": True,
+            "requested": True,
+            "passed": passed,
+            "gate_mode": "fingerprint",
+            "fingerprint_only": True,
+            "scope": (
+                "fixed accepted/rejected controller-slot fingerprint; "
+                "no additional replay/JVP and no adaptive host-branch differentiation"
+            ),
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "same_branch": same_branch,
+            "same_stacked_step_policy_branch": False,
+            "scalar_keys": list(slot_vector_keys),
+            "full_report_scalar_keys": list(vector_keys),
+            "fixed_rejected_controller_slot_present": bool(
+                controller_slot_summary.get("fixed_rejected_controller_slot_present", False)
+            ),
+            "fixed_rejected_controller_slots": int(controller_slot_summary.get("rejected_slots", 0)),
+            "status_derived_rejected_controller_slot_present": status_derived_rejected_slot,
+            "status_acceptance_source": "trace_step_status",
+            "controller_slot_fingerprint": direct_coil_accepted_trace_controller_slot_fingerprint(metadata),
+            "controller_slot_summary": controller_slot_summary,
+            "replay_option_flags": {
+                "fingerprint_only": True,
+                "use_stacked_step_controls": bool(replay_kwargs.get("use_stacked_step_controls", False)),
+                "use_accepted_only_fast_path": False,
+                "state_only_replay": bool(slot_uses_state_only_replay),
+            },
+            "replay_branch_metadata": metadata,
+            "max_base_abs_delta": 0.0,
+            "base_delta_source": "not_applicable_fingerprint_only",
+            "scalars": {},
+            "wall_s": wall_s,
+        }, wall_s
     rejected_replay_plan = None
     try:
         from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_replay_plan
