@@ -108,8 +108,12 @@ or interpolation-convention mismatch as the cause of the direct-coil stall.
 With the same provider-parity-checked setup, a 1000-iteration direct-coil
 ``vmec_jax`` run at ``FTOL=1e-12`` remains monotone near the tail but only
 reaches total residual about ``4.1e-4`` and boundary ``B.n`` RMS about
-``6.4e-3``. The direct path therefore still needs solve-control work before it
-can be compared to the mgrid/VMEC2000 residual floor.
+``6.4e-3``. Extending the direct run to 3000 iterations improves the total
+residual to about ``4.7e-6`` and boundary ``B.n`` RMS to about ``4.4e-3`` with
+fresh full updates every iteration, but the force residual tail begins to
+flatten and remains far above ``1e-12``. The direct path is therefore slower
+than VMEC2000 on this deck and still needs solve-control work before it can
+close the strict residual gap.
 
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,

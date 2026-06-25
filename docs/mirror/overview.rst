@@ -187,7 +187,9 @@ more robust backend, but the present square-coil setup still remains well above
 on the widened deck: generated mgrid and exact direct Biot-Savart sampling
 agree to about ``3.2e-4`` RMS relative field-vector error and ``1.5e-3`` RMS
 relative coil-only ``B.n`` error, so the direct-coil blocker is nonlinear solve
-closure rather than a simple field-convention mismatch. The same profiling
+closure rather than a simple field-convention mismatch. A matching direct-coil
+run improves from about ``4.1e-4`` residual at 1000 iterations to ``4.7e-6`` at
+3000 iterations, but still does not close the strict tolerance gap. The same profiling
 shows that underresolved ``NZETA`` can fail before useful force iterations; the
 square-coil path now records ``recommended_nzeta`` and guards production-style
 example runs against known-underresolved toroidal grids. Finite-beta promotion
