@@ -786,6 +786,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
                 "fast_path": "current_only",
                 "current_only": True,
                 "jit_cache_candidate": True,
+                "unroll_accepted_only_segments_below": 8,
                 "scalar_keys": ["aspect", "qs_total", "mean_iota"],
             },
             "max_base_abs_delta": 0.0,
@@ -848,6 +849,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["gate_evidence"]["current_only_coil_geometry_source"] == "cached"
     assert proposal["gate_evidence"]["directional_jvp_cache_candidate"] is True
     assert proposal["gate_evidence"]["directional_jvp_signature"]["fast_path"] == "current_only"
+    assert proposal["gate_evidence"]["directional_jvp_signature"]["unroll_accepted_only_segments_below"] == 8
     assert proposal["gate_evidence"]["directional_jvp_signature"]["scalar_keys"] == [
         "aspect",
         "qs_total",
@@ -1563,6 +1565,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                     "current_only": True,
                     "state_only_replay": True,
                     "use_stacked_step_controls": True,
+                    "unroll_accepted_only_segments_below": 8,
                     "nestor_solve_mode": "matrix_free",
                     "nestor_operator_solver": "bicgstab",
                     "jit_cache_candidate": True,
@@ -1586,6 +1589,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "current_only": True,
                 "state_only_replay": True,
                 "use_stacked_step_controls": True,
+                "unroll_accepted_only_segments_below": 8,
                 "nestor_solve_mode": "matrix_free",
                 "nestor_operator_solver": "bicgstab",
                 "jit_cache_candidate": True,
@@ -1696,6 +1700,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["directional_jvp_signature"]["available"] is True
     assert vector["directional_jvp_signature"]["fast_path"] == "current_only"
     assert vector["directional_jvp_signature"]["jit_cache_candidate"] is True
+    assert vector["directional_jvp_signature"]["unroll_accepted_only_segments_below"] == 8
     assert vector["directional_jvp_signature"]["scalar_keys"] == vector["scalar_keys"]
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False

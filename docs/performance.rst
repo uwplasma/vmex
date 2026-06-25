@@ -2207,16 +2207,15 @@ compact force-payload and compact metric-payload updates.  VMEC2000 and
 ``purely_toroidal_field``, ``shaped_tokamak_pressure``, and ``solovev``) and is
 omitted on the other 7 unsupported or non-converged rows.
 
-On this run, warm ``vmec_jax`` beat VMEC2000 on 14 of 16 rows and cold
-``vmec_jax`` beat VMEC2000 on 1 of 16 rows.  The median warm single-solve row
-is ``0.83x`` VMEC2000 runtime, while the median cold row is ``2.23x`` slower
-because cold time includes Python/JAX/XLA setup.  Peak process memory remains
-higher than VMEC2000, with a median ``3.04x`` ratio and the largest ratio
-(``16.7x``) on the non-stellarator-symmetric finite-beta row.  The
-current-vs-``origin/main`` comparison now records a small number of material
-per-row threshold hits, mostly near-threshold runtime noise or external-load
-effects; the aggregate warm runtime and memory metrics are materially better
-than both ``origin/main`` and the previous current-branch matrix.
+On this run, warm ``vmec_jax`` beat VMEC2000 on 7 of 16 rows and cold
+``vmec_jax`` beat VMEC2000 on 2 of 16 rows.  The median warm single-solve row
+is ``1.51x`` VMEC2000 runtime, while the median cold row is ``3.76x`` VMEC2000
+runtime because cold time includes Python/JAX/XLA setup.  Peak process memory
+remains higher than VMEC2000, with a median ``4.90x`` ratio and the largest
+ratio (``16.6x``) on the non-stellarator-symmetric finite-beta row.  The
+current-vs-``origin/main`` comparison records ``0`` material regressions across
+the 48 backend/case rows, so these benchmark numbers are current PR evidence
+rather than stale pre-refactor data.
 
 A focused follow-up on the worst peak-memory row
 (``basic_non_stellsym_pressure``) showed that the gap is now a policy tradeoff,
@@ -2561,13 +2560,13 @@ Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 
    cd /path/to/the/pr/worktree
    python tools/diagnostics/compare_runtime_memory_matrix.py \
-     --current outputs/pr20_full_matrix_current_cpu_sg_compact/summary.json \
+     --current outputs/pr20_full_matrix_current_cpu_sg/summary.json \
      --baseline /path/to/a/clean/origin-main/worktree/outputs/pr20_full_matrix_main_cpu_sg/summary.json \
      --csv-out docs/_static/figures/readme_runtime_compare_current_vs_main.csv \
      --json-out docs/_static/figures/readme_runtime_compare_current_vs_main.json
 
    python tools/diagnostics/readme_runtime_compare.py \
-     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg_compact/summary.json \
+     --cpu-summary outputs/pr20_full_matrix_current_cpu_sg/summary.json \
      --figure-kind fixed --plot-mode runtime_memory \
      --figure-out docs/_static/figures/readme_runtime_compare.png \
      --csv-out docs/_static/figures/readme_runtime_compare.csv \

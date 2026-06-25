@@ -7,6 +7,7 @@ import pytest
 
 import vmec_jax.solve as solve
 from vmec_jax._compat import jnp
+from vmec_jax.solvers.fixed_boundary.scan import controller as scan_controller
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.vmec_tomnsp import TomnspsRZL
 
@@ -360,6 +361,7 @@ def test_vmec2000_state_only_scan_runner_cache_reports_miss_then_hit_and_replays
     _install_scan_fakes(monkeypatch)
     monkeypatch.setenv("VMEC_JAX_TIMING", "1")
     monkeypatch.setattr(solve, "jit", lambda fn, *args, **kwargs: fn)
+    monkeypatch.setattr(scan_controller, "jit", lambda fn, *args, **kwargs: fn)
     monkeypatch.setattr(solve.jax.lax, "cond", _python_cond)
     monkeypatch.setattr(solve.jax.lax, "scan", _python_scan)
     monkeypatch.setattr(solve.jax, "block_until_ready", lambda value: value)
