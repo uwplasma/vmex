@@ -24,6 +24,10 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                     "solver_mode": "parity",
                     "max_iter": 1000,
                 },
+                "boundary_projection": {
+                    "max_abs_component_error": 1.2e-4,
+                    "max_abs_component_error_rel": 4.5e-4,
+                },
                 "backends": {
                     "vmec_jax_mgrid": {
                         "status": "completed",
@@ -68,6 +72,8 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["final_total"] == pytest.approx(1.2e-5)
     assert rows[1]["best_total"] == pytest.approx(1.0e-5)
     assert rows[1]["solver_mode"] == "parity"
+    assert rows[1]["boundary_proj_max"] == pytest.approx(1.2e-4)
+    assert rows[1]["boundary_proj_rel"] == pytest.approx(4.5e-4)
     assert rows[1]["dt_eff_last"] == pytest.approx(0.02)
     assert rows[1]["dt_eff_min"] == pytest.approx(0.01)
     assert rows[1]["time_step_last"] == pytest.approx(0.019)

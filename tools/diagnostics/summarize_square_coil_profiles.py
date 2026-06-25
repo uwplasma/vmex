@@ -106,6 +106,8 @@ def _tail_projection(backend: dict[str, Any], key: str, *, target: float | None 
 def rows_from_profile(path: Path) -> list[dict[str, Any]]:
     data = json.loads(path.read_text())
     cfg = data.get("configuration", {})
+    projection = data.get("boundary_projection", {})
+    projection = projection if isinstance(projection, dict) else {}
     rows: list[dict[str, Any]] = []
     for backend_name, backend in sorted((data.get("backends", {}) or {}).items()):
         if not isinstance(backend, dict):
@@ -126,6 +128,8 @@ def rows_from_profile(path: Path) -> list[dict[str, Any]]:
                 "nvacskip": cfg.get("nvacskip"),
                 "solver_mode": cfg.get("solver_mode"),
                 "max_iter": cfg.get("max_iter"),
+                "boundary_proj_max": _finite_float(projection.get("max_abs_component_error")),
+                "boundary_proj_rel": _finite_float(projection.get("max_abs_component_error_rel")),
                 "final_iter": final_iter,
                 "final_total": final_total,
                 "best_total": best_total,
@@ -189,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
         "nvacskip",
         "solver_mode",
         "max_iter",
+        "boundary_proj_max",
+        "boundary_proj_rel",
         "final_iter",
         "final_total",
         "best_total",

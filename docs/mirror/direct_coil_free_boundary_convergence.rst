@@ -201,10 +201,11 @@ near-term way to reduce ``NTOR`` sensitivity; a true spline basis inside the
 VMEC solve would be a larger solver reparameterization. The public helper
 ``square_axis_stellarator_mirror_hybrid_projection_error`` and the square-coil
 profiler's ``boundary_projection`` JSON block now report the Fourier truncation
-error for the selected ``MPOL``/``NTOR``/fit-grid combination. These metrics
-should be reviewed whenever changing ``MPOL``, ``NTOR``, or ``NZETA``: they
-diagnose input-boundary underfitting before the free-boundary nonlinear solve is
-interpreted.
+error for the selected ``MPOL``/``NTOR``/fit-grid combination; the profile
+summarizer exposes this as ``boundary_proj_max`` and ``boundary_proj_rel``.
+These metrics should be reviewed whenever changing ``MPOL``, ``NTOR``, or
+``NZETA``: they diagnose input-boundary underfitting before the free-boundary
+nonlinear solve is interpreted.
 
 Promotion Gates
 ---------------
