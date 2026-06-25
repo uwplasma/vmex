@@ -696,6 +696,13 @@ class StrictStepBranchSideEffects(NamedTuple):
     clear_precond_cache: bool
 
 
+class StrictStepBranchApplication(NamedTuple):
+    """Runtime fields and side effects selected by a strict-step branch."""
+
+    runtime: StrictStepRuntimeFields
+    side_effects: StrictStepBranchSideEffects
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -1547,6 +1554,28 @@ def strict_step_branch_side_effects(
         zero_primary_velocity_blocks=catastrophic and not after_restart,
         clear_freeb_controls_cached=catastrophic and after_restart,
         clear_precond_cache=catastrophic and after_restart and bool(branch.clear_cache_after_catastrophic),
+    )
+
+
+def strict_step_branch_application(
+    branch: StrictStepBranchResult,
+    *,
+    max_coeff_delta_rms: float,
+    max_update_rms: float,
+    after_catastrophic_restart: bool = False,
+) -> StrictStepBranchApplication:
+    """Return all runtime effects selected by one strict-step branch."""
+
+    return StrictStepBranchApplication(
+        runtime=strict_step_runtime_fields(
+            branch,
+            max_coeff_delta_rms=float(max_coeff_delta_rms),
+            max_update_rms=float(max_update_rms),
+        ),
+        side_effects=strict_step_branch_side_effects(
+            branch,
+            after_catastrophic_restart=bool(after_catastrophic_restart),
+        ),
     )
 
 

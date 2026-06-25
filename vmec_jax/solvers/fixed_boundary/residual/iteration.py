@@ -134,11 +134,10 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
-    strict_step_branch_side_effects as _strict_step_branch_side_effects,
+    strict_step_branch_application as _strict_step_branch_application,
     strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
-    strict_step_runtime_fields as _strict_step_runtime_fields,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
     strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
@@ -2893,14 +2892,19 @@ def solve_fixed_boundary_residual_iter(
                     )
                     if adjoint_trace and branch_result.fallback_direct_dt is not None:
                         trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
-                    branch_effects = _strict_step_branch_side_effects(branch_result)
-                    if branch_effects.zero_all_velocity_blocks:
+                    branch_application = _strict_step_branch_application(
+                        branch_result,
+                        max_coeff_delta_rms=float(max_coeff_delta_rms),
+                        max_update_rms=float(max_update_rms),
+                    )
+                    if branch_application.side_effects.zero_all_velocity_blocks:
                         _zero_all_velocity_blocks()
-            branch_runtime = _strict_step_runtime_fields(
+            branch_application = _strict_step_branch_application(
                 branch_result,
                 max_coeff_delta_rms=float(max_coeff_delta_rms),
                 max_update_rms=float(max_update_rms),
             )
+            branch_runtime = branch_application.runtime
             state = branch_runtime.state
             step_status = branch_runtime.step_status
             restart_reason = branch_runtime.restart_reason
@@ -2912,8 +2916,7 @@ def solve_fixed_boundary_residual_iter(
                 if catastrophic_restart:
                     # Roll back state and zero velocity.
                     state = state_backup
-                    branch_effects = _strict_step_branch_side_effects(branch_result)
-                    if branch_effects.zero_primary_velocity_blocks:
+                    if branch_application.side_effects.zero_primary_velocity_blocks:
                         _zero_primary_velocity_blocks()
                     restart_update = _host_catastrophic_restart_update(
                         probe_bad_jacobian=bool(probe_bad_jacobian),
@@ -2937,25 +2940,23 @@ def solve_fixed_boundary_residual_iter(
                         restart_update=restart_update,
                         state_backup=state_backup,
                     )
-                    branch_runtime = _strict_step_runtime_fields(
+                    branch_application = _strict_step_branch_application(
                         branch_result,
                         max_coeff_delta_rms=float(max_coeff_delta_rms),
                         max_update_rms=float(max_update_rms),
+                        after_catastrophic_restart=True,
                     )
+                    branch_runtime = branch_application.runtime
                     state = branch_runtime.state
                     restart_reason = branch_runtime.restart_reason
                     step_status = branch_runtime.step_status
                     restart_path = branch_runtime.restart_path
                     max_coeff_delta_rms = branch_runtime.max_coeff_delta_rms
                     max_update_rms = branch_runtime.max_update_rms
-                    branch_effects = _strict_step_branch_side_effects(
-                        branch_result,
-                        after_catastrophic_restart=True,
-                    )
-                    if branch_effects.clear_freeb_controls_cached:
+                    if branch_application.side_effects.clear_freeb_controls_cached:
                         freeb_controls_cached = None
                     update_rms = branch_runtime.update_rms
-                    if branch_effects.clear_precond_cache:
+                    if branch_application.side_effects.clear_precond_cache:
                         precond_cache.clear()
             _record_update_state_ready_timing(
                 timing_enabled=bool(timing_enabled),

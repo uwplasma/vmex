@@ -4902,6 +4902,64 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.3%.
 
+### 2026-06-25: Combine strict-step branch runtime and side-effect application
+
+Steps taken:
+
+- Added ``StrictStepBranchApplication`` and
+  ``strict_step_branch_application`` so strict-step runtime scalar fields and
+  side-effect policy are selected together.
+- Rewired ``solve_fixed_boundary_residual_iter`` to consume the combined
+  branch application after optional direct fallback and after catastrophic
+  restart finalization.
+- Added a focused unit test that verifies catastrophic restart runtime fields
+  and cache side effects stay coupled in the branch application object.
+
+Results obtained:
+
+- ``python -m ruff check vmec_jax/solvers/fixed_boundary/residual/update.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tests/test_solve_residual_iter_update_helpers.py`` passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py::test_strict_step_branch_application_couples_runtime_and_side_effects
+  tests/test_solve_residual_iter_update_helpers.py::test_strict_step_branch_side_effects_capture_velocity_and_cache_policy
+  tests/test_solve_residual_iter_update_helpers.py::test_strict_step_runtime_fields_use_catastrophic_branch_caps
+  -q`` passed.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed with 83 tests.
+- ``python tools/diagnostics/source_health.py --top 20 --top-functions 50
+  --max-root-helper-prefix-files 2`` passed the configured source-health gate.
+- ``python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50
+  --max-file-mib 2`` passed with 28.28 MiB tracked.
+- ``git diff --check`` passed.
+
+Best next steps:
+
+1. Commit and push the combined strict-step branch application.
+2. Pause additional residual-loop churn until CI has a clean run, unless there
+   is a concrete failure to fix.
+3. The next implementation tranche should be a larger controller-state object
+   or a validation/optimization lane, not another local path rewrite.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 95.4%.
+- Free-boundary production differentiability: 96.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 65.7%.
+- VMEC2000/VMEC++ parity and physics gates: 99.0%.
+- Docs/release hygiene: 100%.
+- Overall: 99.3%.
+
 ### 2026-06-25: Package VMEC2000 time-control restart branch side effects
 
 Steps taken:
