@@ -34,6 +34,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     scale_velocity_blocks,
     DirectForceFallbackTrial,
     strict_step_branch_result,
+    strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback,
     strict_step_acceptance_decision,
     strict_momentum_update_proposal,
@@ -445,6 +446,50 @@ def test_strict_step_branch_result_after_direct_fallback_preserves_rejected_bran
     assert result.restart_path == "trial_rejected"
     assert result.update_rms == pytest.approx(0.5)
     assert result.fallback_direct_dt is None
+
+
+def test_strict_step_branch_result_after_catastrophic_restart_carries_policy_outputs() -> None:
+    branch = strict_step_branch_result(
+        acceptance=strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True),
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=0.5,
+        vmec2000_control=False,
+        huge_force_restart_count=3,
+    )
+    restart = host_catastrophic_restart_update(
+        probe_bad_jacobian=True,
+        w_try=np.inf,
+        time_step=0.2,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        step_size=0.1,
+        ijacob=4,
+        bad_resets=5,
+        iter2=9,
+        fsq_prev_before=1.25,
+        fsq0_prev_before=2.5,
+        k_ndamp=2,
+        max_coeff_delta_rms=1.0e-5,
+        max_update_rms=5.0e-3,
+    )
+
+    result = strict_step_branch_result_after_catastrophic_restart(
+        branch=branch,
+        restart_update=restart,
+        state_backup="rollback-state",
+    )
+
+    assert result.state == "rollback-state"
+    assert not result.accepted
+    assert result.catastrophic_restart
+    assert result.clear_cache_after_catastrophic == branch.clear_cache_after_catastrophic
+    assert result.step_status == restart.step_status
+    assert result.restart_reason == restart.restart_reason
+    assert result.restart_path == restart.restart_path
+    assert result.update_rms == pytest.approx(restart.update_rms)
+    assert result.max_coeff_delta_rms == pytest.approx(restart.max_coeff_delta_rms)
+    assert result.max_update_rms == pytest.approx(restart.max_update_rms)
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:
