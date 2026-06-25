@@ -4448,3 +4448,58 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.4%.
 - Docs/release hygiene: 99.9%.
 - Overall: 99.0%.
+
+### 2026-06-25: Refresh docs-facing benchmark and AD-vs-FD evidence artifacts
+
+Steps taken:
+
+- Rebuilt the Sphinx docs with warnings as errors after the residual runtime
+  refactors.
+- Regenerated ``readme_ad_fd_evidence`` from the existing same-branch
+  direct-coil report in ``outputs/pr20_ad_fd/qs_same_branch``.
+- Regenerated the docs-facing fixed-boundary runtime/memory matrix and
+  current-vs-main comparison from the latest full-JIT current summary and the
+  clean ``origin/main`` summary.
+- Kept the README policy unchanged: the AD-vs-FD panel remains visible in the
+  README, while the runtime/memory matrix remains docs-facing.
+
+Results obtained:
+
+- Sphinx completed successfully with ``-W`` over ``80`` source files.
+- AD-vs-FD evidence contains ``10`` rows and ``0`` failures at the documented
+  ``1e-9`` tolerance, including ``DMerc`` and ``D_R`` rows.
+- Runtime/memory comparison contains ``48`` current-vs-main rows and ``0``
+  material regressions.
+- Focused derivative, Glasser, validation, artifact, QI-evidence, and bundled
+  parity tests passed:
+  ``26`` tests in the derivative/finite-beta bucket,
+  ``68`` tests in the bundled WOUT/parity bucket,
+  ``14`` tests in the QI/asset bucket, and
+  ``16`` tests after artifact regeneration.
+- ``repo_size_audit.py`` and ``git diff --check`` passed; tracked size remains
+  ``28.21 MiB``.
+
+Best next steps:
+
+1. Commit and push the refreshed docs artifacts and plan entry.
+2. Check CI state for the final pushes without spending time polling while
+   jobs are simply running.
+3. If CI stays green, PR review can focus on the remaining high-level design
+   question: whether the next tranche should be the broader controller-state
+   API or PR review/merge preparation.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 96.0%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 61.4%.
+- VMEC2000/VMEC++ parity and physics gates: 98.6%.
+- Docs/release hygiene: 100%.
+- Overall: 99.0%.
