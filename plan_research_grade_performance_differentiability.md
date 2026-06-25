@@ -4806,6 +4806,57 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.1%.
 
+### 2026-06-25: Fold catastrophic restart into strict-step branch result
+
+Steps taken:
+
+- Added ``strict_step_branch_result_after_catastrophic_restart`` to carry
+  catastrophic restart status, restart reason/path, update RMS, and updated RMS
+  caps through the same ``StrictStepBranchResult`` object used by accepted and
+  direct-fallback strict-step branches.
+- Rewired ``solve_fixed_boundary_residual_iter`` so catastrophic restart
+  status is copied from the branch result object after applying the pure
+  controller update.
+- Added a focused unit test covering catastrophic branch-result fields and
+  preserving cache-clear policy from the pre-catastrophic branch.
+
+Results obtained:
+
+- ``python -m ruff check`` passed for the changed residual update/iteration
+  modules and focused tests.
+- ``JAX_ENABLE_X64=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_residual_iter_helpers_wave8_coverage.py
+  tests/test_solve_more_coverage.py tests/test_solve_wave4_coverage.py -q``
+  passed with ``75`` tests.
+- ``source_health.py``, ``repo_size_audit.py``, and ``git diff --check``
+  passed.
+
+Best next steps:
+
+1. Commit and push the catastrophic branch-result update.
+2. Add a compact branch-fingerprint helper for ``StrictStepBranchResult`` that
+   records accepted/fallback/catastrophic path, restart reason, and cache-clear
+   intent.
+3. Promote the next AD-vs-FD gate around an accepted and rejected/catastrophic
+   strict-step slot using that fingerprint helper.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.9%.
+- Free-boundary production differentiability: 96.2%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 63.2%.
+- VMEC2000/VMEC++ parity and physics gates: 98.6%.
+- Docs/release hygiene: 100%.
+- Overall: 99.1%.
+
 ### 2026-06-25: Confirm final CI after readiness artifact refresh
 
 Steps taken:

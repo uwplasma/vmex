@@ -132,6 +132,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_step_branch_result as _strict_step_branch_result,
+    strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
     strict_trial_evaluation as _strict_trial_evaluation,
@@ -2906,13 +2907,19 @@ def solve_fixed_boundary_residual_iter(
                         max_update_rms=float(max_update_rms),
                     )
                     _apply_controller_update(_controller_state_after_catastrophic_restart_update, restart_update)
-                    restart_reason = restart_update.restart_reason
-                    step_status = restart_update.step_status
-                    restart_path = restart_update.restart_path
-                    max_coeff_delta_rms = restart_update.max_coeff_delta_rms
-                    max_update_rms = restart_update.max_update_rms
+                    branch_result = _strict_step_branch_result_after_catastrophic_restart(
+                        branch=branch_result,
+                        restart_update=restart_update,
+                        state_backup=state_backup,
+                    )
+                    state = branch_result.state
+                    restart_reason = branch_result.restart_reason
+                    step_status = branch_result.step_status
+                    restart_path = branch_result.restart_path
+                    max_coeff_delta_rms = branch_result.max_coeff_delta_rms
+                    max_update_rms = branch_result.max_update_rms
                     freeb_controls_cached = None
-                    update_rms = restart_update.update_rms
+                    update_rms = branch_result.update_rms
                     if bool(clear_cache_after_catastrophic):
                         precond_cache.clear()
             _record_update_state_ready_timing(
