@@ -243,12 +243,14 @@ the mgrid write chunked even when the direct sampler uses chunk size ``0``.
 The best completed VMEC2000 reference so far uses ``MPOL=6, NTOR=23,
 NZETA=64`` with the spline square-axis projection. A staged
 ``NS=9 -> 13 -> 17`` run on a widened generated ``mgrid`` reaches best sampled
-summed residual about ``2.28e-11`` and final summed residual about ``3.17e-11``
-with no vacuum-grid overflow. This is still not a per-component ``1e-12``
-production solve, but it is several orders below the older ``NTOR=16`` staged
-floor. ``DELT=0.01`` was worse on the lower-mode schedule because the coarse
-stage underconverged; the next comparison target is the direct-coil provider on
-the same high-mode staged deck.
+summed physical residual about ``1.86e-11`` and final summed physical residual
+about ``2.19e-11`` after a 24000-iteration final-stage budget, with no
+vacuum-grid overflow. This is still not a per-component ``1e-12`` production
+solve, but it is several orders below the older ``NTOR=16`` staged floor.
+``DELT=0.01`` was worse on the lower-mode schedule because the coarse stage
+underconverged; the next comparison target is the direct-coil provider on the
+same high-mode staged deck and then the ``MPOL=7, NTOR=28`` / ``MPOL=8,
+NTOR=32`` spline ladders if the direct path shows the same floor.
 
 Summarize one or more reports with::
 

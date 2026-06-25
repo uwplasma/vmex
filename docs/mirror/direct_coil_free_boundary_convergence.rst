@@ -191,6 +191,16 @@ runs. VMEC2000 is therefore the best robustness reference and is much faster
 than the current direct-coil JAX path for these mgrid benchmarks, but even
 VMEC2000 still needs additional algorithmic or resolution work before this
 deck can be promoted at ``FTOL=1e-12``.
+A 24000-iteration final-stage continuation of the same ``MPOL=6, NTOR=23,
+NZETA=64, NS=9 -> 13 -> 17`` VMEC2000 deck finished in about 2369 seconds with
+no vacuum-grid overflow. It improved the best sampled summed physical residual
+only modestly, to about ``1.86e-11``, and ended at about ``2.19e-11``. The best
+physical component row was still above the strict target, with approximately
+``8.42e-12`` radial, ``7.70e-12`` vertical, and ``2.45e-12`` lambda residuals.
+This converts the earlier near miss into a resolution/algorithm floor for this
+Fourier deck: do not spend further CPU on simply extending the same
+``6,23`` schedule before testing the ``7,28`` / ``8,32`` spline ladders or a
+free-boundary acceleration/numerical-kernel change.
 
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
