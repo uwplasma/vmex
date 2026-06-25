@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -80,12 +81,15 @@ NITER_ARRAY = (2500, 5000, 10000)
 FTOL_ARRAY = (1.0e-8, 1.0e-10, 1.0e-12)
 USE_MULTIGRID_SCHEDULE = True
 ENFORCE_RECOMMENDED_NZETA = True
+NVACSKIP = 1
 MAX_ITER = NITER_ARRAY[-1]
 FTOL = 1.0e-12
 PHIEDGE = -0.04 * PLASMA_MINOR_RADIUS**2 / 0.03**2
 TOROIDAL_CURRENT = 3.0e3
 DELT: float | None = 0.05
 FREE_BOUNDARY_ACTIVATE_FSQ: float | None = 1.0e-3
+SOLVER_MODE = "parity"
+RETURN_BEST_SCORED_STATE = True
 LIMIT_UPDATE_RMS = False
 BACKTRACKING = False
 USE_DIRECT_FALLBACK = False
@@ -135,10 +139,13 @@ class ExampleConfig:
     ftol_array: tuple[float, ...] = FTOL_ARRAY
     use_multigrid_schedule: bool = USE_MULTIGRID_SCHEDULE
     enforce_recommended_nzeta: bool = ENFORCE_RECOMMENDED_NZETA
+    nvacskip: int = NVACSKIP
     phiedge: float = PHIEDGE
     toroidal_current: float = TOROIDAL_CURRENT
     delt: float | None = DELT
     free_boundary_activate_fsq: float | None = FREE_BOUNDARY_ACTIVATE_FSQ
+    solver_mode: str | None = SOLVER_MODE
+    return_best_scored_state: bool = RETURN_BEST_SCORED_STATE
     limit_update_rms: bool = LIMIT_UPDATE_RMS
     backtracking: bool = BACKTRACKING
     use_direct_fallback: bool = USE_DIRECT_FALLBACK
@@ -341,6 +348,12 @@ def _run_budget(config: ExampleConfig, *, restart_state: Any | None) -> int:
 
 
 def _validate_example_config(config: ExampleConfig) -> None:
+    if config.solver_mode is not None:
+        solver_mode = str(config.solver_mode).strip().lower()
+        if solver_mode not in {"default", "parity", "accelerated"}:
+            raise ValueError("solver_mode must be one of: default, parity, accelerated, or None")
+    if int(config.nvacskip) < 1:
+        raise ValueError("nvacskip must be at least 1")
     if bool(config.enforce_recommended_nzeta):
         recommended = recommended_square_axis_nzeta(int(config.ntor))
         if int(config.nzeta) < recommended:
@@ -389,7 +402,7 @@ def make_free_boundary_indata(config: ExampleConfig, *, beta_percent: float) -> 
             "FTOL": float(config.ftol),
             "NZETA": int(config.nzeta),
             "NTHETA": 0,
-            "NVACSKIP": max(1, int(config.nzeta)),
+            "NVACSKIP": max(1, int(config.nvacskip)),
             "PMASS_TYPE": "power_series",
             "AM": am,
             "PRES_SCALE": pres_scale,
@@ -564,24 +577,33 @@ def _run_one_beta(
     t0 = time.perf_counter()
     run_budget = _run_budget(config, restart_state=restart_state)
     use_multigrid = bool(config.use_multigrid_schedule and restart_state is None)
-    run = run_free_boundary(
-        input_path,
-        max_iter=int(run_budget),
-        multigrid=use_multigrid,
-        multigrid_use_input_niter=True,
-        verbose=True,
-        jit_forces=config.jit_forces,
-        free_boundary_activate_fsq=(
-            None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
-        ),
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=coils.params,
-        limit_update_rms=bool(config.limit_update_rms),
-        backtracking=bool(config.backtracking),
-        use_direct_fallback=bool(config.use_direct_fallback),
-        restart_state=restart_state,
-        use_initial_guess=False,
-    )
+    previous_return_best = os.environ.get("VMEC_JAX_RETURN_BEST_SCORED_STATE")
+    os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = "1" if bool(config.return_best_scored_state) else "0"
+    try:
+        run = run_free_boundary(
+            input_path,
+            max_iter=int(run_budget),
+            multigrid=use_multigrid,
+            multigrid_use_input_niter=True,
+            verbose=True,
+            jit_forces=config.jit_forces,
+            solver_mode=config.solver_mode,
+            free_boundary_activate_fsq=(
+                None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
+            ),
+            external_field_provider_kind="direct_coils",
+            external_field_provider_params=coils.params,
+            limit_update_rms=bool(config.limit_update_rms),
+            backtracking=bool(config.backtracking),
+            use_direct_fallback=bool(config.use_direct_fallback),
+            restart_state=restart_state,
+            use_initial_guess=False,
+        )
+    finally:
+        if previous_return_best is None:
+            os.environ.pop("VMEC_JAX_RETURN_BEST_SCORED_STATE", None)
+        else:
+            os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = previous_return_best
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     theta, zeta, R, Z, Bmag, Bmag_near_axis, Bxyz, bsupu, bsupv = _solved_surface_and_field(run, config)
@@ -614,6 +636,11 @@ def _run_one_beta(
         "n_iter": None if run.result is None else int(getattr(run.result, "n_iter", -1)),
         "run_budget": int(run_budget),
         "used_multigrid_schedule": bool(use_multigrid),
+        "solver_mode": diag.get("solver_mode") if isinstance(diag, dict) else config.solver_mode,
+        "requested_solver_mode": config.solver_mode,
+        "use_scan": diag.get("use_scan") if isinstance(diag, dict) else None,
+        "nvacskip": int(config.nvacskip),
+        "return_best_scored_state_requested": bool(config.return_best_scored_state),
         "converged": None
         if run.result is None
         else bool(diag.get("converged", getattr(run.result, "converged", False))),
@@ -724,6 +751,11 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "n_iter",
         "run_budget",
         "used_multigrid_schedule",
+        "solver_mode",
+        "requested_solver_mode",
+        "use_scan",
+        "nvacskip",
+        "return_best_scored_state_requested",
         "converged",
         "converged_strict",
         "requested_ftol",
@@ -1125,9 +1157,12 @@ def _metrics_payload(
         "ftol_array": [float(value) for value in config.ftol_array],
         "use_multigrid_schedule": bool(config.use_multigrid_schedule),
         "enforce_recommended_nzeta": bool(config.enforce_recommended_nzeta),
+        "nvacskip": int(config.nvacskip),
+        "return_best_scored_state": bool(config.return_best_scored_state),
         "free_boundary_activate_fsq": (
             None if config.free_boundary_activate_fsq is None else float(config.free_boundary_activate_fsq)
         ),
+        "solver_mode": None if config.solver_mode is None else str(config.solver_mode),
         "limit_update_rms": bool(config.limit_update_rms),
         "backtracking": bool(config.backtracking),
         "use_direct_fallback": bool(config.use_direct_fallback),

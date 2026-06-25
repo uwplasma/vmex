@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -64,12 +65,19 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--nzeta", type=int, default=24)
     p.add_argument("--max-iter", type=int, default=200)
     p.add_argument("--ftol", type=float, default=1.0e-8)
+    p.add_argument(
+        "--solver-mode",
+        default="parity",
+        choices=("auto", "default", "parity", "accelerated"),
+        help="vmec_jax solver mode for JAX backends; 'auto' leaves run_free_boundary policy unchanged.",
+    )
     p.add_argument("--ns-array", default=None, help="Comma-separated VMEC multigrid NS_ARRAY override.")
     p.add_argument("--niter-array", default=None, help="Comma-separated VMEC multigrid NITER_ARRAY override.")
     p.add_argument("--ftol-array", default=None, help="Comma-separated VMEC multigrid FTOL_ARRAY override.")
     p.add_argument("--phiedge", type=float, default=None)
     p.add_argument("--delt", type=float, default=0.05)
     p.add_argument("--activate-fsq", type=float, default=1.0e-3)
+    p.add_argument("--nvacskip", type=int, default=1, help="Initial/floor NVACSKIP for VMEC free-boundary updates.")
     p.add_argument("--axis-kind", default="spline", choices=("spline", "superellipse"))
     p.add_argument("--axis-corner-factor", type=float, default=1.14)
     p.add_argument("--enforce-recommended-nzeta", action="store_true")
@@ -86,6 +94,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--vmec2000-exec", type=Path, default=None)
     p.add_argument("--vmec2000-timeout", type=float, default=600.0)
     p.add_argument("--jit-forces", action="store_true")
+    p.add_argument(
+        "--return-best-scored-state",
+        action="store_true",
+        help="Return the lowest fresh free-boundary residual state if max_iter is exhausted.",
+    )
     return p
 
 
@@ -136,6 +149,76 @@ def _last_finite(values: Any) -> float | None:
     return None if finite.size == 0 else float(finite[-1])
 
 
+def _history_tail(values: Any, *, length: int = 12, dtype: type = float) -> list[Any]:
+    try:
+        arr = np.asarray(values, dtype=dtype).reshape(-1)
+    except Exception:
+        return []
+    if arr.size == 0:
+        return []
+    out: list[Any] = []
+    for value in arr[-int(length) :]:
+        if dtype is int:
+            out.append(int(value))
+            continue
+        value_f = float(value)
+        out.append(value_f if np.isfinite(value_f) else None)
+    return out
+
+
+def _component_sum_tail(run: Any, *, length: int = 12) -> list[float | None]:
+    result = None if run is None else getattr(run, "result", None)
+    if result is None:
+        return []
+    histories = []
+    for attr in ("fsqr2_history", "fsqz2_history", "fsql2_history"):
+        try:
+            arr = np.asarray(getattr(result, attr), dtype=float).reshape(-1)
+        except Exception:
+            return []
+        if arr.size == 0:
+            return []
+        histories.append(arr)
+    n = min(arr.size for arr in histories)
+    if n == 0:
+        return []
+    total = histories[0][-n:] + histories[1][-n:] + histories[2][-n:]
+    return [float(value) if np.isfinite(float(value)) else None for value in total[-int(length) :]]
+
+
+def _jax_history_payload(run: Any, diag: dict[str, Any], *, length: int = 12) -> dict[str, Any]:
+    result = None if run is None else getattr(run, "result", None)
+    return {
+        "length": None if result is None else int(getattr(result, "n_iter", -1)),
+        "w_tail": _history_tail([] if result is None else getattr(result, "w_history", []), length=length),
+        "fsqr_tail": _history_tail([] if result is None else getattr(result, "fsqr2_history", []), length=length),
+        "fsqz_tail": _history_tail([] if result is None else getattr(result, "fsqz2_history", []), length=length),
+        "fsql_tail": _history_tail([] if result is None else getattr(result, "fsql2_history", []), length=length),
+        "fsq_component_sum_tail": _component_sum_tail(run, length=length),
+        "freeb_ivac_tail": _history_tail(diag.get("freeb_ivac_history"), length=length, dtype=int),
+        "freeb_ivacskip_tail": _history_tail(diag.get("freeb_ivacskip_history"), length=length, dtype=int),
+        "freeb_full_update_tail": _history_tail(diag.get("freeb_full_update_history"), length=length, dtype=int),
+        "freeb_nestor_reused_tail": _history_tail(diag.get("freeb_nestor_reused_history"), length=length, dtype=int),
+        "freeb_nestor_source_reused_tail": _history_tail(
+            diag.get("freeb_nestor_source_reused_history"), length=length, dtype=int
+        ),
+        "freeb_nestor_trial_failed_tail": _history_tail(
+            diag.get("freeb_nestor_trial_failed_history"), length=length, dtype=int
+        ),
+        "freeb_nestor_bnormal_rms_tail": _history_tail(
+            diag.get("freeb_nestor_bnormal_rms_history"), length=length
+        ),
+        "freeb_nestor_bsqvac_rms_tail": _history_tail(
+            diag.get("freeb_nestor_bsqvac_rms_history"), length=length
+        ),
+        "include_edge_tail": _history_tail(diag.get("include_edge_history"), length=length, dtype=int),
+        "bcovar_update_tail": _history_tail(diag.get("bcovar_update_history"), length=length, dtype=int),
+        "bad_jacobian_tail": _history_tail(diag.get("bad_jacobian_history"), length=length, dtype=int),
+        "dt_eff_tail": _history_tail(diag.get("dt_eff_history"), length=length),
+        "update_rms_tail": _history_tail(diag.get("update_rms_history"), length=length),
+    }
+
+
 def _classify_run(diag: dict[str, Any], residuals: dict[str, Any]) -> str:
     if bool(residuals.get("converged_strict", False)):
         return "converged_strict"
@@ -168,6 +251,9 @@ def _final_residuals(run: Any) -> dict[str, Any]:
     model = str(freeb.get("nestor_model", "none"))
     out = {
         "n_iter": None if run.result is None else int(getattr(run.result, "n_iter", -1)),
+        "solver_mode": diag.get("solver_mode"),
+        "use_scan": diag.get("use_scan"),
+        "performance_mode": diag.get("performance_mode"),
         "converged": bool(diag.get("converged", False)),
         "converged_strict": bool(diag.get("converged_strict", False)),
         "requested_ftol": diag.get("requested_ftol"),
@@ -175,6 +261,24 @@ def _final_residuals(run: Any) -> dict[str, Any]:
         "final_fsqz": fsqz,
         "final_fsql": fsql,
         "final_fsq_component_sum": float(sum(float(v) for v in values)) if values else None,
+        "pre_update_final_fsqr": diag.get("pre_update_final_fsqr"),
+        "pre_update_final_fsqz": diag.get("pre_update_final_fsqz"),
+        "pre_update_final_fsql": diag.get("pre_update_final_fsql"),
+        "return_best_scored_state": diag.get("return_best_scored_state"),
+        "returned_best_scored_state": diag.get("returned_best_scored_state"),
+        "best_scored_iter": diag.get("best_scored_iter"),
+        "best_scored_fsq": diag.get("best_scored_fsq"),
+        "best_scored_fsqr": diag.get("best_scored_fsqr"),
+        "best_scored_fsqz": diag.get("best_scored_fsqz"),
+        "best_scored_fsql": diag.get("best_scored_fsql"),
+        "best_scored_full_boundary_count": diag.get("best_scored_full_boundary_count"),
+        "best_scored_fresh_boundary_count": diag.get("best_scored_fresh_boundary_count"),
+        "free_boundary_convergence_blocked_count": diag.get("free_boundary_convergence_blocked_count"),
+        "free_boundary_fresh_convergence_gate": diag.get("free_boundary_fresh_convergence_gate"),
+        "free_boundary_fresh_convergence_recheck_count": diag.get("free_boundary_fresh_convergence_recheck_count"),
+        "free_boundary_fresh_convergence_reject_count": diag.get("free_boundary_fresh_convergence_reject_count"),
+        "free_boundary_fresh_convergence_failed_count": diag.get("free_boundary_fresh_convergence_failed_count"),
+        "final_iter2_for_recompute": diag.get("final_iter2_for_recompute"),
         "bad_resets": diag.get("bad_resets"),
         "ijacob": diag.get("ijacob"),
         "final_residual_recomputed_on_accepted_state": diag.get("final_residual_recomputed_on_accepted_state"),
@@ -189,6 +293,7 @@ def _final_residuals(run: Any) -> dict[str, Any]:
         "free_boundary_last_nvacskip": freeb.get("nvacskip"),
         "free_boundary_last_nestor_solve_time_s": _last_finite(diag.get("freeb_nestor_solve_time_history")),
         "free_boundary_last_nestor_sample_time_s": _last_finite(diag.get("freeb_nestor_sample_time_history")),
+        "history": _jax_history_payload(run, diag),
     }
     out["stall_classification"] = _classify_run(diag, out)
     return out
@@ -220,6 +325,8 @@ def _run_jax_backend(
     wout_path: Path,
     config: ExampleConfig,
     direct_params: Any | None,
+    solver_mode: str | None,
+    return_best_scored_state: bool,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if direct_params is not None:
@@ -228,18 +335,27 @@ def _run_jax_backend(
             "external_field_provider_params": direct_params,
         }
     t0 = time.perf_counter()
-    run = run_free_boundary(
-        input_path,
-        max_iter=_run_budget(config, restart_state=None),
-        multigrid=bool(config.use_multigrid_schedule),
-        multigrid_use_input_niter=True,
-        verbose=False,
-        jit_forces=config.jit_forces,
-        free_boundary_activate_fsq=None
-        if config.free_boundary_activate_fsq is None
-        else float(config.free_boundary_activate_fsq),
-        **kwargs,
-    )
+    previous_return_best = os.environ.get("VMEC_JAX_RETURN_BEST_SCORED_STATE")
+    os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = "1" if bool(return_best_scored_state) else "0"
+    try:
+        run = run_free_boundary(
+            input_path,
+            max_iter=_run_budget(config, restart_state=None),
+            multigrid=bool(config.use_multigrid_schedule),
+            multigrid_use_input_niter=True,
+            verbose=False,
+            jit_forces=config.jit_forces,
+            solver_mode=solver_mode,
+            free_boundary_activate_fsq=None
+            if config.free_boundary_activate_fsq is None
+            else float(config.free_boundary_activate_fsq),
+            **kwargs,
+        )
+    finally:
+        if previous_return_best is None:
+            os.environ.pop("VMEC_JAX_RETURN_BEST_SCORED_STATE", None)
+        else:
+            os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = previous_return_best
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     return {
@@ -248,6 +364,20 @@ def _run_jax_backend(
         "input": input_path,
         "wout": wout_path,
         **_final_residuals(run),
+    }
+
+
+def _vmec2000_row_payload(row: Any) -> dict[str, Any]:
+    total = float(row.fsqr) + float(row.fsqz) + float(row.fsql)
+    return {
+        "it": int(row.it),
+        "fsqr": float(row.fsqr),
+        "fsqz": float(row.fsqz),
+        "fsql": float(row.fsql),
+        "total": total,
+        "delt0r": row.delt0r,
+        "delbsq": row.delbsq,
+        "fedge": row.fedge,
     }
 
 
@@ -281,11 +411,13 @@ def main(argv: list[str] | None = None) -> int:
         ftol_array=ftol_array,
         use_multigrid_schedule=len(ns_array) > 1,
         delt=float(args.delt),
+        nvacskip=int(args.nvacskip),
         free_boundary_activate_fsq=float(args.activate_fsq),
         beta_continuation_restart=False,
         jit_forces=bool(args.jit_forces),
         write_plots=False,
     )
+    solver_mode = None if str(args.solver_mode).strip().lower() == "auto" else str(args.solver_mode)
     ns_values, niter_values, ftol_values = _stage_values(config)
     coils = build_square_coils(config)
     label = _case_label(float(args.beta_percent))
@@ -330,9 +462,12 @@ def main(argv: list[str] | None = None) -> int:
             "nzeta_underrecommended": bool(int(args.nzeta) < int(recommended_nzeta)),
             "max_iter": int(niter_array[-1]),
             "ftol": float(ftol_array[-1]),
+            "solver_mode": None if solver_mode is None else str(solver_mode),
+            "return_best_scored_state": bool(args.return_best_scored_state),
             "phiedge": float(config.phiedge),
             "delt": float(args.delt),
             "activate_fsq": float(args.activate_fsq),
+            "nvacskip": int(config.nvacskip),
             "axis_kind": str(args.axis_kind),
             "axis_corner_factor": float(args.axis_corner_factor),
             "use_multigrid_schedule": bool(len(ns_array) > 1),
@@ -355,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
             wout_path=direct_wout,
             config=config,
             direct_params=coils.params,
+            solver_mode=solver_mode,
+            return_best_scored_state=bool(args.return_best_scored_state),
         )
     if not args.skip_mgrid:
         payload["backends"]["vmec_jax_mgrid"] = _run_jax_backend(
@@ -362,6 +499,8 @@ def main(argv: list[str] | None = None) -> int:
             wout_path=mgrid_wout,
             config=config,
             direct_params=None,
+            solver_mode=solver_mode,
+            return_best_scored_state=bool(args.return_best_scored_state),
         )
     if bool(args.run_vmec2000):
         exe = args.vmec2000_exec or find_vmec2000_exec()
@@ -379,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 rows = [row for stage in run.stages for row in stage.rows]
                 last = rows[-1] if rows else None
+                totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
                 payload["backends"]["vmec2000_mgrid"] = {
                     "status": "completed" if run.returncode == 0 else "nonzero_exit",
                     "returncode": int(run.returncode),
@@ -390,17 +530,10 @@ def main(argv: list[str] | None = None) -> int:
                     "stderr_tail": run.stderr.splitlines()[-40:],
                     "threed1_tail": _tail_lines(run.threed1_path, lines=80),
                     "iteration_row_count": len(rows),
-                    "last_row": None
-                    if last is None
-                    else {
-                        "it": int(last.it),
-                        "fsqr": float(last.fsqr),
-                        "fsqz": float(last.fsqz),
-                        "fsql": float(last.fsql),
-                        "delt0r": last.delt0r,
-                        "delbsq": last.delbsq,
-                        "fedge": last.fedge,
-                    },
+                    "first_rows": [_vmec2000_row_payload(row) for row in rows[:8]],
+                    "tail_rows": [_vmec2000_row_payload(row) for row in rows[-12:]],
+                    "last_row": None if last is None else _vmec2000_row_payload(last),
+                    "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
                 }
             except Exception as exc:
                 payload["backends"]["vmec2000_mgrid"] = {"status": "failed", "error": repr(exc)}

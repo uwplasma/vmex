@@ -208,6 +208,7 @@ For direct-provider versus mgrid/VMEC2000 profiling, use::
 
   python tools/diagnostics/profile_square_coil_free_boundary.py \
     --ftol 1e-12 --max-iter 10000 --phiedge -0.04 \
+    --solver-mode parity --nvacskip 1 --return-best-scored-state \
     --mpol 6 --ntor 23 --nzeta 64 \
     --run-vmec2000
 
@@ -216,6 +217,9 @@ direct-coil, ``vmec_jax`` generated-mgrid, and optional raw VMEC2000
 generated-mgrid residuals for the same square-coil field. To profile a staged
 VMEC-style ladder without editing the example, add for example
 ``--ns-array 9,13,17 --niter-array 2500,5000,10000 --ftol-array 1e-8,1e-10,1e-12``.
+Use larger ``--nvacskip`` only as a speed experiment; for convergence review,
+``--nvacskip 1`` avoids stale free-boundary residuals on this square-hybrid
+Fourier deck.
 
 The root-level ``examples/mirror_free_boundary_circular_coils.py`` script is a
 free-boundary planning fixture. It builds ESSOS-compatible circular-loop direct

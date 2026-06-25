@@ -10798,6 +10798,8 @@ def solve_fixed_boundary_residual_iter(
     best_scored_fsql = float("nan")
     best_scored_iter = -1
     best_scored_plascur = float(freeb_plascur)
+    best_scored_constraint_rcon0 = None
+    best_scored_constraint_zcon0 = None
     best_scored_full_boundary_count = 0
     best_scored_fresh_boundary_count = 0
     freeb_convergence_blocked_count = 0
@@ -10805,6 +10807,13 @@ def solve_fixed_boundary_residual_iter(
     freeb_fresh_convergence_reject_count = 0
     freeb_fresh_convergence_failed_count = 0
     returned_best_scored_state = False
+    last_constraint_rcon0_current = None
+    last_constraint_zcon0_current = None
+
+    def _snapshot_optional_constraint(value):
+        if value is None:
+            return None
+        return np.array(value, copy=True)
 
     def _snapshot_best_scored_state(state_current: VMECState) -> VMECState:
         """Keep a stable copy of a scored state without retaining old buffers."""
@@ -11530,6 +11539,8 @@ def solve_fixed_boundary_residual_iter(
                     cache_constraint_zcon0 = 0.9 * jnp.asarray(cache_constraint_zcon0)
                 constraint_rcon0_current = cache_constraint_rcon0
                 constraint_zcon0_current = cache_constraint_zcon0
+            last_constraint_rcon0_current = constraint_rcon0_current
+            last_constraint_zcon0_current = constraint_zcon0_current
 
             if (
                 profile_active
@@ -11791,6 +11802,8 @@ def solve_fixed_boundary_residual_iter(
                 best_scored_fsql = float(fsql_f)
                 best_scored_iter = int(iter2)
                 best_scored_plascur = float(freeb_plascur)
+                best_scored_constraint_rcon0 = _snapshot_optional_constraint(constraint_rcon0_current)
+                best_scored_constraint_zcon0 = _snapshot_optional_constraint(constraint_zcon0_current)
             # VMEC printout uses r00 = r1(1,0): axis R at theta=0, zeta=0,
             # evaluated in real space after scalxc (see funct3d.f).
             # For parity diagnostics, sample these scalars on VMEC's screen cadence.
@@ -14945,6 +14958,8 @@ def solve_fixed_boundary_residual_iter(
     final_nestor_sample_time_s = 0.0
     final_nestor_solve_time_s = 0.0
     final_iter2_for_recompute = int(last_iter2)
+    final_constraint_rcon0 = last_constraint_rcon0_current
+    final_constraint_zcon0 = last_constraint_zcon0_current
     if (
         bool(return_best_scored_state)
         and (not bool(converged))
@@ -14961,6 +14976,8 @@ def solve_fixed_boundary_residual_iter(
         final_pre_update_fsql = float(best_scored_fsql)
         final_iter2_for_recompute = int(best_scored_iter)
         final_bsqvac_half_current = None
+        final_constraint_rcon0 = best_scored_constraint_rcon0
+        final_constraint_zcon0 = best_scored_constraint_zcon0
         returned_best_scored_state = True
     final_nestor_recompute_required = bool(free_boundary_enabled and freeb_couple_edge) and (
         (not bool(final_vacuum_stub)) or bool(direct_free_boundary_provider)
@@ -15014,6 +15031,8 @@ def solve_fixed_boundary_residual_iter(
                 include_edge_residual=True,
                 zero_m1=zero_m1,
                 freeb_bsqvac_half=final_bsqvac_half_current,
+                constraint_rcon0=final_constraint_rcon0,
+                constraint_zcon0=final_constraint_zcon0,
                 constraint_precond_diag=constraint_precond_diag,
                 constraint_tcon=constraint_tcon_override,
                 constraint_precond_active=constraint_precond_active,

@@ -14,9 +14,14 @@ The repo-root example
 now runs actual ``vmec_jax.run_free_boundary`` solves from a direct-coil
 provider. It writes solved WOUT files, solved-state field-line and LCFS plots,
 per-beta CSV/JSON metrics, and checkpoints the summary after each beta row.
-The branch also keeps the final live state by default; older behavior that
-returned a best-scored intermediate state is now opt-in through
-``VMEC_JAX_RETURN_BEST_SCORED_STATE=1``.
+For the square-coil example, unconverged diagnostic WOUTs now return the
+lowest fresh free-boundary residual state by default. The solve still records
+``converged = false`` and ``production_free_boundary_claim = false`` unless the
+strict final residual gates pass. This keeps plots tied to the best available
+scored equilibrium-like state instead of the last unscored update when
+``max_iter`` is exhausted. The behavior is controlled by
+``RETURN_BEST_SCORED_STATE`` in the example and by
+``--return-best-scored-state`` in the backend profiler.
 
 The latest strict fresh residual evidence at the coarse review resolution
 ``NS=9, MPOL=5, NTOR=12`` reaches active free-boundary convergence through
@@ -36,9 +41,13 @@ square-coil field orientation. VMEC2000 rejects the opposite sign in the vacuum
 subroutine for this generated-``mgrid`` deck. The default step size is
 ``DELT=0.05`` and the default free-boundary activation threshold is VMEC-like
 ``1e-3`` so the vacuum/edge coupling has enough final-grid iterations to
-converge. Beta continuation still uses the previous final-grid state after the
-initial staged solve; the driver disables multigrid when a live ``restart_state``
-is supplied.
+converge. The square-coil example now sets ``NVACSKIP=1`` by default. This is
+intentionally conservative: the VMEC-style adaptive vacuum cadence cannot go
+below the input ``NVACSKIP`` floor, so the earlier ``NVACSKIP=NZETA`` default
+allowed long stale vacuum-source reuse windows just when this new geometry
+needed fresh free-boundary residuals. Beta continuation still uses the previous
+final-grid state after the initial staged solve; the driver disables multigrid
+when a live ``restart_state`` is supplied.
 
 Latest backend profiling changes the immediate conclusion. With positive
 ``PHIEDGE``, raw VMEC2000 stops with ``PHIEDGE HAS WRONG SIGN IN VACUUM
@@ -52,9 +61,19 @@ iterations and ``3.39e-8`` at 10000 iterations; and the higher-mode
 ``NS=9, MPOL=6, NTOR=23`` case remains around ``4.94e-3`` after 1000 VMEC2000
 iterations. ``vmec_jax`` generated-``mgrid`` also activates the dense VMEC-like
 NESTOR branch on the sign-corrected deck, but at the well-sampled mid-mode
-point it remains around ``3.31e-4`` after 1000 iterations on the same deck. The
+point it originally reported a final residual around ``3.31e-4`` after 1000
+iterations on the same deck. The cause was not mgrid interpolation: profiling
+showed that the live JAX residual tail matched VMEC2000 when ``NVACSKIP=1``,
+but the final recompute was missing the same free-boundary constraint baseline
+used during the iteration. That final-recompute path now reuses the matching
+``rcon0/zcon0`` baseline, including for best-scored fallback states. With the
+fix, the 1000-iteration ``NS=9, MPOL=5, NTOR=12, NZETA=32, NVACSKIP=1`` JAX
+generated-mgrid best-scored residual recomputes to about ``1.02e-5``. The
+matching VMEC2000 generated-mgrid case reaches about ``1.46e-5`` at 1000
+iterations and about ``7.0e-8`` by 4200--5000 iterations, then oscillates. A
+10000-iteration full-update VMEC2000 profile exceeded the local timeout. The
 current square-coil setup is therefore a diagnostic/stability target, not yet a
-converged production equilibrium.
+converged ``FTOL=1e-12`` production equilibrium.
 
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
@@ -64,6 +83,12 @@ total residual about ``6.58e-6`` after 1000 iterations. The branch now exposes
 to ``NZETA=64`` for ``NTOR=23``. Production-style example runs fail early if
 ``NZETA`` is below the recommendation; diagnostic profiling can still run
 underresolved grids and records ``nzeta_underrecommended`` in the JSON report.
+The rounded-square ``axis_kind="spline"`` option is now the default because it
+reduces low-mode projection error relative to the superellipse axis. It is
+still projected to VMEC Fourier coefficients, so large straight sections plus
+localized stellarator corners remain a difficult Fourier representation; using
+the spline envelope is a bandwidth reduction, not a replacement for resolution
+closure.
 
 Physics And Algorithm Findings
 ------------------------------
@@ -143,11 +168,13 @@ The remaining work is deliberately narrow:
    ``FTOL=1e-8`` to identify provider/parity issues, then repeat the
    best-performing setup at ``FTOL=1e-12``. The profiler accepts explicit
    ``--ns-array``, ``--niter-array``, and ``--ftol-array`` arguments for staged
-   VMEC-style runs.
-2. Re-run the square-coil beta ladder with the live-state default and per-beta
-   checkpointing using the staged ``FTOL_ARRAY`` ending at ``1e-12``. Keep
-   ``DELT=0.05`` and the VMEC-like ``FREE_BOUNDARY_ACTIVATE_FSQ=1e-3`` unless a
-   benchmark shows a better value.
+   VMEC-style runs. Use ``--solver-mode parity`` and ``--nvacskip 1`` for
+   convergence evidence; larger ``NVACSKIP`` values are speed experiments, not
+   strict residual evidence.
+2. Re-run the square-coil beta ladder with per-beta checkpointing and the
+   best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at ``1e-12``. Keep
+   ``DELT=0.05``, ``NVACSKIP=1``, ``solver_mode="parity"``, and the VMEC-like
+   ``FREE_BOUNDARY_ACTIVATE_FSQ=1e-3`` unless a benchmark shows a better value.
 3. Run resolution closure around the first transition beta and at ``10%`` beta,
    comparing ``NS``, ``MPOL``, ``NTOR``, ``NZETA``, generated-mgrid resolution,
    LCFS shape, near-axis field, mirror ratio, mean iota, and residual histories.
