@@ -1288,6 +1288,11 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
 
     vector = report.get("branch_local_vector_jacobian", {})
     replay_flags = vector.get("replay_option_flags", {}) if isinstance(vector, dict) else {}
+    directional_signature = vector.get("directional_jvp_signature", {}) if isinstance(vector, dict) else {}
+    if not isinstance(directional_signature, dict) and isinstance(replay_flags, dict):
+        directional_signature = replay_flags.get("directional_jvp_signature", {})
+    if not isinstance(directional_signature, dict):
+        directional_signature = {}
     current_only_cache = report.get("current_only_coil_geometry_cache", {})
     vector_gate = report.get("branch_local_vector_gate", {})
     physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
@@ -1318,6 +1323,8 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
             if isinstance(replay_flags, dict)
             else ""
         ),
+        "directional_jvp_signature": dict(directional_signature),
+        "directional_jvp_cache_candidate": bool(directional_signature.get("jit_cache_candidate", False)),
         "branch_local_vector_gate_available": bool(
             isinstance(vector_gate, dict) and vector_gate.get("available", False)
         ),

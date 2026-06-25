@@ -781,6 +781,13 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
                 "directional_uses_fixed_coil_geometry": True,
                 "current_only_coil_geometry_source": "cached",
             },
+            "directional_jvp_signature": {
+                "available": True,
+                "fast_path": "current_only",
+                "current_only": True,
+                "jit_cache_candidate": True,
+                "scalar_keys": ["aspect", "qs_total", "mean_iota"],
+            },
             "max_base_abs_delta": 0.0,
             "scalars": {
                 "qs_total": {
@@ -839,6 +846,13 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["gate_evidence"]["directional_uses_fixed_coil_geometry"] is True
     assert proposal["gate_evidence"]["current_only_coil_geometry_cache_available"] is True
     assert proposal["gate_evidence"]["current_only_coil_geometry_source"] == "cached"
+    assert proposal["gate_evidence"]["directional_jvp_cache_candidate"] is True
+    assert proposal["gate_evidence"]["directional_jvp_signature"]["fast_path"] == "current_only"
+    assert proposal["gate_evidence"]["directional_jvp_signature"]["scalar_keys"] == [
+        "aspect",
+        "qs_total",
+        "mean_iota",
+    ]
     assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is True
     assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is True
     assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
