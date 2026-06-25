@@ -25,6 +25,7 @@ import numpy as np
 
 from vmec_jax._compat import has_jax, jax, jnp, jit
 from vmec_jax import _solve_runtime
+from vmec_jax.solvers.fixed_boundary.residual import config as _residual_iter_config
 from vmec_jax.solvers.fixed_boundary.residual import policy as _residual_iter_policy
 from vmec_jax.solvers.fixed_boundary.residual.config import (
     HEAVY_DUMP_ENVS as _HEAVY_DUMP_ENVS,
@@ -35,11 +36,8 @@ from vmec_jax.solvers.fixed_boundary.residual.config import (
     indata_has_profile_setup_work as _indata_has_profile_setup_work,
     resolve_nstep_screen as _resolve_nstep_screen,
     resolve_setup_host_enforce as _resolve_setup_host_enforce,
-    should_probe_bad_jacobian_state as _should_probe_bad_jacobian_state,
 )
 from vmec_jax.solvers.fixed_boundary.residual.policy import (
-    bad_jacobian_requires_state_jacobian as _bad_jacobian_requires_state_jacobian,
-    bad_jacobian_tau_decision as _bad_jacobian_tau_decision,
     host_restart_decision as _host_restart_decision,
     new_residual_iter_histories as _new_residual_iter_histories,
     numpy_preconditioner_apply_policy as _numpy_preconditioner_apply_policy,
@@ -47,7 +45,6 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     resolve_residual_iter_startup_policy as _resolve_residual_iter_startup_policy,
     scan_fallback_decision as _scan_fallback_decision,
     scan_fallback_message as _scan_fallback_message,
-    select_bad_jacobian_decision as _select_bad_jacobian_decision,
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
@@ -239,6 +236,7 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
     maybe_dump_ptau as _maybe_dump_ptau_helper,
     ptau_minmax as _ptau_minmax_helper,
     ptau_minmax_from_k_host as _ptau_minmax_from_k_host_helper,
+    resolve_bad_jacobian_tau_selection as _resolve_bad_jacobian_tau_selection,
     state_tau_minmax_from_vmec_state as _state_tau_minmax_from_vmec_state,
 )
 from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
@@ -2257,84 +2255,48 @@ def solve_fixed_boundary_residual_iter(
             t_iteration_control_badjac_start = time.perf_counter() if timing_enabled else None
             bad_jacobian = False
             if bool(reference_mode) or bool(vmec2000_control):
-                min_tau_ptau = max_tau_ptau = None
-                bad_jacobian_ptau = None
-                if accepted_control_ptau_host is not None:
-                    min_tau_ptau, max_tau_ptau = accepted_control_ptau_host
-                else:
-                    ptau_min, ptau_max = _ptau_minmax_from_k_host(k)
-                    if ptau_min is not None and ptau_max is not None:
-                        t_badjac_ptau_get_start = time.perf_counter() if timing_enabled else None
-                        min_tau_ptau, max_tau_ptau = _device_get_floats(ptau_min, ptau_max)
-                        _record_timing("iteration_control_badjac_ptau_get", t_badjac_ptau_get_start)
-                ptau_decision = None
-                if min_tau_ptau is not None and max_tau_ptau is not None:
-                    ptau_decision = _bad_jacobian_tau_decision(
-                        min_tau=min_tau_ptau,
-                        max_tau=max_tau_ptau,
-                        vmec2000_control=bool(vmec2000_control),
-                        ptau_tol=ptau_tol,
-                    )
-                    bad_jacobian_ptau = bool(ptau_decision.bad_jacobian)
+                from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _hot_numpy_patch
 
-                state_probe = _should_probe_bad_jacobian_state(
-                    state_probe=bool(startup_policy.badjac_state_probe),
-                    initial_state_probe_iters=int(startup_policy.badjac_initial_state_probe_iters),
+                badjac_selection = _resolve_bad_jacobian_tau_selection(
+                    reference_mode=bool(reference_mode),
+                    vmec2000_control=bool(vmec2000_control),
+                    accepted_control_ptau_host=accepted_control_ptau_host,
+                    k=k,
+                    state=state,
                     iter_idx=int(iter2),
-                )
-                need_state_jac = _bad_jacobian_requires_state_jacobian(
+                    startup_policy=startup_policy,
                     badjac_use_state=bool(badjac_use_state),
-                    dump_ptau_state=bool(startup_policy.dump_ptau_state),
-                    state_probe=bool(state_probe),
-                    ptau_decision=ptau_decision,
-                )
-                if need_state_jac:
-                    t_badjac_state_jacobian_start = time.perf_counter() if timing_enabled else None
-                    from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _hot_numpy_patch
-
-                    min_tau_state, max_tau_state = _state_tau_minmax_from_vmec_state(
-                        state=state,
-                        modes=static.modes,
-                        trig=trig,
-                        s=s,
-                        lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                        lthreed=bool(getattr(static.cfg, "lthreed", True)),
-                        mask_even=getattr(static, "m_is_even", None),
-                        mask_odd=getattr(static, "m_is_odd", None),
-                        host_update_assembly=bool(host_update_assembly),
-                        tree_has_tracer=_tree_has_tracer,
-                        jacobian_from_state=vmec_half_mesh_jacobian_from_state,
-                        device_get_floats=_device_get_floats,
-                        jnp_module=jnp,
-                        numpy_patch_context=_hot_numpy_patch,
-                    )
-                    _record_timing("iteration_control_badjac_state_jacobian", t_badjac_state_jacobian_start)
-                    state_decision = _bad_jacobian_tau_decision(
-                        min_tau=min_tau_state,
-                        max_tau=max_tau_state,
-                        vmec2000_control=bool(vmec2000_control),
-                        ptau_tol=ptau_tol,
-                    )
-                    bad_jacobian_state = bool(state_decision.bad_jacobian)
-                else:
-                    min_tau_state = float("nan")
-                    max_tau_state = float("nan")
-                    bad_jacobian_state = False
-                    state_decision = _bad_jacobian_tau_decision(
-                        min_tau=min_tau_state,
-                        max_tau=max_tau_state,
-                        vmec2000_control=bool(vmec2000_control),
-                        ptau_tol=ptau_tol,
-                    )
-
-                badjac_selection = _select_bad_jacobian_decision(
-                    badjac_use_state=bool(badjac_use_state),
-                    ptau_decision=ptau_decision,
-                    state_decision=state_decision,
+                    ptau_tol=ptau_tol,
+                    static=static,
+                    trig=trig,
+                    s=s,
+                    host_update_assembly=bool(host_update_assembly),
+                    timing_enabled=bool(timing_enabled),
+                    perf_counter=time.perf_counter,
+                    record_timing=_record_timing,
+                    ptau_minmax_from_k_host_func=_ptau_minmax_from_k_host,
+                    device_get_floats_func=_device_get_floats,
+                    should_probe_bad_jacobian_state_func=_residual_iter_config.should_probe_bad_jacobian_state,
+                    bad_jacobian_requires_state_jacobian_func=(
+                        _residual_iter_policy.bad_jacobian_requires_state_jacobian
+                    ),
+                    bad_jacobian_tau_decision_func=_residual_iter_policy.bad_jacobian_tau_decision,
+                    select_bad_jacobian_decision_func=_residual_iter_policy.select_bad_jacobian_decision,
+                    state_tau_minmax_from_vmec_state_func=_state_tau_minmax_from_vmec_state,
+                    tree_has_tracer_func=_tree_has_tracer,
+                    jacobian_from_state_func=vmec_half_mesh_jacobian_from_state,
+                    jnp_module=jnp,
+                    numpy_patch_context=_hot_numpy_patch,
                 )
                 bad_jacobian = bool(badjac_selection.bad_jacobian)
                 min_tau = float(badjac_selection.min_tau)
                 max_tau = float(badjac_selection.max_tau)
+                min_tau_ptau = badjac_selection.min_tau_ptau
+                max_tau_ptau = badjac_selection.max_tau_ptau
+                min_tau_state = badjac_selection.min_tau_state
+                max_tau_state = badjac_selection.max_tau_state
+                bad_jacobian_ptau = badjac_selection.bad_jacobian_ptau
+                bad_jacobian_state = bool(badjac_selection.bad_jacobian_state)
 
                 _maybe_dump_ptau(
                     iter_idx=int(iter2),

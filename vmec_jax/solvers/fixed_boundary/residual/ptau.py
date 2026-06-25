@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import numpy as np
+
+
+class BadJacobianTauSelection(NamedTuple):
+    """Resolved bad-Jacobian decision from ptau and optional state probes."""
+
+    bad_jacobian: bool
+    min_tau: float
+    max_tau: float
+    min_tau_ptau: float | None
+    max_tau_ptau: float | None
+    min_tau_state: float
+    max_tau_state: float
+    bad_jacobian_ptau: bool | None
+    bad_jacobian_state: bool
 
 
 def ptau_minmax_from_k_host(
@@ -219,13 +233,153 @@ def maybe_dump_ptau(
     )
 
 
+def resolve_bad_jacobian_tau_selection(
+    *,
+    reference_mode: bool,
+    vmec2000_control: bool,
+    accepted_control_ptau_host: tuple[float, float] | None,
+    k: Any,
+    state: Any,
+    iter_idx: int,
+    startup_policy: Any,
+    badjac_use_state: bool,
+    ptau_tol: float,
+    static: Any,
+    trig: Any,
+    s: Any,
+    host_update_assembly: bool,
+    timing_enabled: bool,
+    perf_counter: Callable[[], float],
+    record_timing: Callable[[str, float | None], Any],
+    ptau_minmax_from_k_host_func: Callable[[Any], tuple[Any | None, Any | None]],
+    device_get_floats_func: Callable[..., tuple[float, ...]],
+    should_probe_bad_jacobian_state_func: Callable[..., bool],
+    bad_jacobian_requires_state_jacobian_func: Callable[..., bool],
+    bad_jacobian_tau_decision_func: Callable[..., Any],
+    select_bad_jacobian_decision_func: Callable[..., Any],
+    state_tau_minmax_from_vmec_state_func: Callable[..., tuple[float, float]],
+    tree_has_tracer_func: Callable[[Any], bool],
+    jacobian_from_state_func: Callable[..., Any],
+    jnp_module: Any,
+    numpy_patch_context: Callable[[], Any] | None = None,
+) -> BadJacobianTauSelection:
+    """Resolve the VMEC bad-Jacobian tau decision for one iteration.
+
+    The hot solver loop still owns side effects such as history appends,
+    debug-file writes, prints, and axis resets.  This helper keeps only the
+    ptau/state tau selection logic in one place so the branch fingerprint is
+    explicit and testable.
+    """
+
+    if not (bool(reference_mode) or bool(vmec2000_control)):
+        return BadJacobianTauSelection(
+            bad_jacobian=False,
+            min_tau=float("nan"),
+            max_tau=float("nan"),
+            min_tau_ptau=None,
+            max_tau_ptau=None,
+            min_tau_state=float("nan"),
+            max_tau_state=float("nan"),
+            bad_jacobian_ptau=None,
+            bad_jacobian_state=False,
+        )
+
+    min_tau_ptau = max_tau_ptau = None
+    bad_jacobian_ptau = None
+    if accepted_control_ptau_host is not None:
+        min_tau_ptau, max_tau_ptau = accepted_control_ptau_host
+    else:
+        ptau_min, ptau_max = ptau_minmax_from_k_host_func(k)
+        if ptau_min is not None and ptau_max is not None:
+            t_badjac_ptau_get_start = perf_counter() if timing_enabled else None
+            min_tau_ptau, max_tau_ptau = device_get_floats_func(ptau_min, ptau_max)
+            record_timing("iteration_control_badjac_ptau_get", t_badjac_ptau_get_start)
+
+    ptau_decision = None
+    if min_tau_ptau is not None and max_tau_ptau is not None:
+        ptau_decision = bad_jacobian_tau_decision_func(
+            min_tau=min_tau_ptau,
+            max_tau=max_tau_ptau,
+            vmec2000_control=bool(vmec2000_control),
+            ptau_tol=ptau_tol,
+        )
+        bad_jacobian_ptau = bool(ptau_decision.bad_jacobian)
+
+    state_probe = should_probe_bad_jacobian_state_func(
+        state_probe=bool(startup_policy.badjac_state_probe),
+        initial_state_probe_iters=int(startup_policy.badjac_initial_state_probe_iters),
+        iter_idx=int(iter_idx),
+    )
+    need_state_jac = bad_jacobian_requires_state_jacobian_func(
+        badjac_use_state=bool(badjac_use_state),
+        dump_ptau_state=bool(startup_policy.dump_ptau_state),
+        state_probe=bool(state_probe),
+        ptau_decision=ptau_decision,
+    )
+    if need_state_jac:
+        t_badjac_state_jacobian_start = perf_counter() if timing_enabled else None
+        min_tau_state, max_tau_state = state_tau_minmax_from_vmec_state_func(
+            state=state,
+            modes=static.modes,
+            trig=trig,
+            s=s,
+            lconm1=bool(getattr(static.cfg, "lconm1", True)),
+            lthreed=bool(getattr(static.cfg, "lthreed", True)),
+            mask_even=getattr(static, "m_is_even", None),
+            mask_odd=getattr(static, "m_is_odd", None),
+            host_update_assembly=bool(host_update_assembly),
+            tree_has_tracer=tree_has_tracer_func,
+            jacobian_from_state=jacobian_from_state_func,
+            device_get_floats=device_get_floats_func,
+            jnp_module=jnp_module,
+            numpy_patch_context=numpy_patch_context,
+        )
+        record_timing("iteration_control_badjac_state_jacobian", t_badjac_state_jacobian_start)
+        state_decision = bad_jacobian_tau_decision_func(
+            min_tau=min_tau_state,
+            max_tau=max_tau_state,
+            vmec2000_control=bool(vmec2000_control),
+            ptau_tol=ptau_tol,
+        )
+        bad_jacobian_state = bool(state_decision.bad_jacobian)
+    else:
+        min_tau_state = float("nan")
+        max_tau_state = float("nan")
+        bad_jacobian_state = False
+        state_decision = bad_jacobian_tau_decision_func(
+            min_tau=min_tau_state,
+            max_tau=max_tau_state,
+            vmec2000_control=bool(vmec2000_control),
+            ptau_tol=ptau_tol,
+        )
+
+    badjac_selection = select_bad_jacobian_decision_func(
+        badjac_use_state=bool(badjac_use_state),
+        ptau_decision=ptau_decision,
+        state_decision=state_decision,
+    )
+    return BadJacobianTauSelection(
+        bad_jacobian=bool(badjac_selection.bad_jacobian),
+        min_tau=float(badjac_selection.min_tau),
+        max_tau=float(badjac_selection.max_tau),
+        min_tau_ptau=min_tau_ptau,
+        max_tau_ptau=max_tau_ptau,
+        min_tau_state=float(min_tau_state),
+        max_tau_state=float(max_tau_state),
+        bad_jacobian_ptau=bad_jacobian_ptau,
+        bad_jacobian_state=bool(bad_jacobian_state),
+    )
+
+
 __all__ = [
     "accepted_control_ptau_arrays",
     "accepted_control_ptau_host_from_payload",
+    "BadJacobianTauSelection",
     "maybe_dump_jacobian_terms",
     "maybe_dump_ptau",
     "ptau_minmax",
     "ptau_minmax_from_k_host",
     "ptau_minmax_from_k_jax",
+    "resolve_bad_jacobian_tau_selection",
     "state_tau_minmax_from_vmec_state",
 ]
