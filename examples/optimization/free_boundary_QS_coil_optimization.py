@@ -1024,6 +1024,7 @@ def write_same_branch_validation_report(
             json_safe_payload_fn=json_safe_payload,
             initial_vector_summary=branch_local_vector,
             initial_gate_summary=branch_local_vector_gate,
+            cache_probe=bool(getattr(args, "same_branch_report_current_jvp_cache_probe", False)),
         )
     )
     rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
@@ -1731,6 +1732,15 @@ def add_same_branch_replay_options(parser: argparse.ArgumentParser) -> None:
             "Opt in to a small closure-bound cache for current-only branch-local "
             "directional JVP executables. This is useful for repeated same-branch "
             "profiling/proposal reports; complete solves remain the acceptance authority."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-current-jvp-cache-probe",
+        action="store_true",
+        help=(
+            "After the main vector/JVP report, rerun the same branch-local vector replay once "
+            "to measure whether the current-only JVP executable cache hits. Requires the cache "
+            "flag to be useful and adds one extra replay/JVP call."
         ),
     )
     parser.add_argument(

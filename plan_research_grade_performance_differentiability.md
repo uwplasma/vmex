@@ -3692,3 +3692,56 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 97.9%.
 - Docs/release hygiene: 99.5%.
 - Overall: 97.8%.
+
+### 2026-06-25: Add same-branch current-only JVP cache timing probe
+
+Steps taken:
+
+- Added ``--same-branch-report-current-jvp-cache-probe`` to the direct-coil
+  QS optimization example.  When requested, the vector/JVP report repeats the
+  same branch-local replay once with the same complete payload, replay plan,
+  and scalar registry, then writes
+  ``branch_local_vector_current_jvp_cache_probe``.
+- The probe records cache-hit status, wall time, cache metadata, and the nested
+  replay/JVP timing buckets without changing the primary report or acceptance
+  authority.
+- Extended the same-branch writer smoke test so the fake vector report is
+  called twice, receives the same replay plan, and writes cache-probe metadata.
+
+Results obtained:
+
+- ``python -m ruff check`` passed on the modified optimization helper, example
+  script, and smoke test.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with
+  ``34 passed, 1 xfailed``.
+- A real tiny public smoke run with both cache flags completed.  The primary
+  vector replay reported ``hit=False`` and ``replay_jvp_dispatch_s`` about
+  ``4.48 s``.  The repeated probe reported ``hit=True``,
+  ``replay_jvp_dispatch_s`` about ``2.4e-3 s``, and total probe wall time about
+  ``6.2e-3 s``.
+- This provides concrete evidence that the cache is useful for repeated
+  same-payload branch-local vector/JVP reports.  It still remains opt-in.
+
+Best next steps:
+
+1. Thread the same cache path into derivative-proposal loops that reuse the same
+   complete payload and replay plan, while keeping complete solves as the only
+   acceptance authority.
+2. Add a small docs example command showing the cache probe output fields, but
+   avoid turning it into a default workflow until more than the tiny smoke case
+   has been profiled.
+3. Continue performance work on cold first-call replay/JVP graph construction;
+   this cache solves repeat-call cost, not cold compile cost.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.0%.
+- Free-boundary production differentiability: 94.6%.
+- Single-stage coil optimization: 90.5%.
+- CPU/GPU runtime and memory footprint: 98.7%.
+- Refactor/API/examples: 58.6%.
+- VMEC2000/VMEC++ parity and physics gates: 97.9%.
+- Docs/release hygiene: 99.6%.
+- Overall: 98.0%.

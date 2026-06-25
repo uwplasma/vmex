@@ -926,6 +926,9 @@ when they reuse the same accepted replay payload, replay plan, and scalar
 registry inside one Python process.  The facade therefore reuses stable replay
 scalar wrappers for identical ``(scalar key, payload, scalar function)``
 triples instead of rebuilding per-call lambdas.
+Use ``--same-branch-report-current-jvp-cache-probe`` with the cache flag to
+rerun the vector replay once and record miss-vs-hit timing in
+``branch_local_vector_current_jvp_cache_probe``.
 The report also writes ``same_branch_report_config`` in ``summary.json`` so the
 artifact remains self-describing.  Its derivative contract is fixed
 recorded-branch replay only; it does not differentiate changes in adaptive host

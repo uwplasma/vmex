@@ -1456,6 +1456,8 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         same_branch_report_nestor_operator_atol=3.0e-12,
         same_branch_report_nestor_operator_maxiter=17,
         same_branch_report_nestor_operator_restart=5,
+        same_branch_report_enable_current_jvp_cache=True,
+        same_branch_report_current_jvp_cache_probe=True,
         vmec_max_iter=2,
         ftol=1.0e-8,
         jit_forces=False,
@@ -1510,7 +1512,10 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         current_step=args.current_step,
         dof_step=args.dof_step,
     )
+    vector_calls = []
+
     def fake_branch_local_vector(*_args, **kwargs):
+        vector_calls.append(kwargs)
         assert kwargs["replay_ad_mode"] == "direct"
         assert kwargs["include_trace_replay_diagnostics"] is False
         assert kwargs["include_payload"] is False
@@ -1525,6 +1530,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["replay_kwargs"]["nestor_operator_atol"] == pytest.approx(3.0e-12)
         assert kwargs["replay_kwargs"]["nestor_operator_maxiter"] == 17
         assert kwargs["replay_kwargs"]["nestor_operator_restart"] == 5
+        assert kwargs["replay_kwargs"]["enable_current_only_jvp_cache"] is True
         assert kwargs["replay_kwargs"]["freeze_vacuum_field"] is True
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is True
         assert kwargs["direction_params"] is not None
@@ -1697,6 +1703,8 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     report = json.loads(path.read_text())
     vector = report["branch_local_vector_jacobian"]
     assert report["current_only_coil_geometry_cache"]["available"] is True
+    assert len(vector_calls) == 2
+    assert vector_calls[0]["replay_plan"] is vector_calls[1]["replay_plan"]
     assert report["timings"]["branch_local_current_only_coil_geometry_build_wall_s"] >= 0.0
     assert vector["available"] is True
     assert "fixed accepted branch only" in vector["scope"]
@@ -1731,6 +1739,10 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["directional_jvp_cache_info"]["enabled"] is True
     assert vector["directional_jvp_cache_info"]["hit"] is True
     assert vector["directional_jvp_cache_info"]["closure_bound"] is True
+    cache_probe = report["branch_local_vector_current_jvp_cache_probe"]
+    assert cache_probe["available"] is True
+    assert cache_probe["cache_hit"] is True
+    assert cache_probe["directional_jvp_cache_info"]["closure_bound"] is True
     assert vector["includes_payload"] is False
     assert vector["includes_replay_graph_metadata"] is False
     assert vector["replay_graph_metadata"]["omitted"] is True
