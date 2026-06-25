@@ -223,6 +223,9 @@ from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
     physical_residual_metric_channels as _physical_residual_metric_channels,
     select_residual_norms_for_iteration as _select_residual_norms_for_iteration,
 )
+from vmec_jax.solvers.fixed_boundary.residual.iteration_preconditioner import (
+    apply_residual_iteration_preconditioner as _apply_residual_iteration_preconditioner,
+)
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ResidualScanPathHooks,
     dispatch_residual_scan_path,
@@ -1902,89 +1905,80 @@ def solve_fixed_boundary_residual_iter(
                 )
                 timing_stats["iteration_residual_metrics"] += max(0.0, residual_metrics_dt)
             t_precond_start = time.perf_counter() if timing_enabled else None
-            frzl_lam_pre = None
-            preconditioner_outputs_scaled = False
-            preconditioner_fsq1_ready = False
             use_fused_precond_output_scaling = (not bool(host_update_assembly)) and jax.default_backend() != "cpu"
-            if (bool(vmec2000_control) and bool(cfg.lthreed)) or (not bool(cfg.lthreed)):
-                precond_apply = _precond_payload_facade.apply_vmec2000_preconditioner_runtime(
-                    frzl=frzl,
-                    k=k,
-                    state=state,
-                    iter2=int(iter2),
-                    cfg=cfg,
-                    s=s,
-                    delta_s=delta_s,
-                    w_mode_mn=w_mode_mn,
-                    lambda_update_scale=float(lambda_update_scale),
-                    lambda_update_scale_j=lambda_update_scale_j,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(precond_cache.valid),
-                    need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=precond_cache.rz_norm,
-                    cache_f_norm1=precond_cache.f_norm1,
-                    host_update_assembly=bool(host_update_assembly),
-                    use_fused_precond_output_scaling=bool(use_fused_precond_output_scaling),
-                    scale_m1_rhs=bool(cfg.lthreed) or bool(getattr(cfg, "lasym", False)),
-                    adjoint_trace=bool(adjoint_trace),
-                    adjoint_trace_mode=adjoint_trace_mode,
-                    accepted_control_ptau_arrays=accepted_control_ptau_arrays,
-                    ptau_pshalf_jax=_ptau_context.pshalf_jax,
-                    ptau_ohs_jax=_ptau_context.ohs_jax,
-                    preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_policy,
-                    preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_policy,
-                    timing_detail_enabled=bool(timing_detail_enabled),
-                    timing_stats=timing_stats,
-                    perf_counter=time.perf_counter,
-                    block_until_ready=jax.block_until_ready if has_jax() else None,
-                    refresh_preconditioner_cache_func=_refresh_preconditioner_cache,
-                    scale_m1_precond_rhs_func=_apply_vmec_scale_m1_precond_rhs,
-                    rz_preconditioner_apply_func=_rz_preconditioner_apply_local,
-                    rz_norm_func=_rz_norm,
-                )
-                lam_prec = precond_apply.lam_prec
-                mats = precond_apply.mats
-                jmax = precond_apply.jmax
-                preconditioner_cache_update_trace = precond_apply.cache_update_trace
-                preconditioned_blocks = precond_apply.blocks
-                frzl_rz = precond_apply.frzl_rz
-                frzl_lam_pre = precond_apply.frzl_lam_pre
-                accepted_control_ptau_payload = precond_apply.accepted_control_ptau_payload
-                preconditioner_outputs_scaled = precond_apply.outputs_scaled
-                preconditioner_fsq1_ready = precond_apply.fsq1_ready
-                if precond_apply.update_blocks is not None:
-                    update_force_blocks = precond_apply.update_blocks
-                if preconditioner_fsq1_ready:
-                    gcr2_p = precond_apply.gcr2_p
-                    gcz2_p = precond_apply.gcz2_p
-                    gcl2_p = precond_apply.gcl2_p
-                    fsqr1_safe = precond_apply.fsqr1_safe
-                    fsqz1_safe = precond_apply.fsqz1_safe
-                    fsql1_safe = precond_apply.fsql1_safe
-                    fsq1_safe = precond_apply.fsq1_safe
-                    fsqr1 = fsqr1_safe
-                    fsqz1 = fsqz1_safe
-                    fsql1 = fsql1_safe
-            else:
-                t_precond_apply_start = time.perf_counter() if timing_detail_enabled else None
-                preconditioned_blocks = _radial_preconditioner_output_blocks_jax(
-                    frzl=frzl,
-                    rz_scale=rz_scale,
-                    l_scale=l_scale,
-                    precond_radial_alpha=precond_radial_alpha,
-                    precond_lambda_alpha=precond_lambda_alpha,
-                    apply_radial_tridi_func=_apply_radial_tridi,
-                )
-                if timing_detail_enabled and t_precond_apply_start is not None:
-                    try:
-                        if has_jax():
-                            jax.block_until_ready(preconditioned_blocks.flsc)
-                    except Exception:
-                        pass
-                    _record_timing("precond_apply", t_precond_apply_start)
-
-            frzl_pre = TomnspsRZL(**preconditioned_blocks._asdict())
+            preconditioner_result = _apply_residual_iteration_preconditioner(
+                use_vmec2000_preconditioner=(bool(vmec2000_control) and bool(cfg.lthreed)) or (not bool(cfg.lthreed)),
+                frzl=frzl,
+                k=k,
+                state=state,
+                iter2=int(iter2),
+                cfg=cfg,
+                static=static,
+                s=s,
+                delta_s=delta_s,
+                w_mode_mn=w_mode_mn,
+                w_mode_mn_np=w_mode_mn_np,
+                lambda_update_scale=float(lambda_update_scale),
+                lambda_update_scale_j=lambda_update_scale_j,
+                vmec2000_control=bool(vmec2000_control),
+                precond_cache=precond_cache,
+                need_bcovar_update=bool(need_bcovar_update),
+                host_update_assembly=bool(host_update_assembly),
+                use_fused_precond_output_scaling=bool(use_fused_precond_output_scaling),
+                adjoint_trace=bool(adjoint_trace),
+                adjoint_trace_mode=adjoint_trace_mode,
+                accepted_control_ptau_arrays=accepted_control_ptau_arrays,
+                ptau_pshalf_jax=_ptau_context.pshalf_jax,
+                ptau_ohs_jax=_ptau_context.ohs_jax,
+                preconditioner_use_precomputed_tridi_policy=preconditioner_use_precomputed_tridi_policy,
+                preconditioner_use_lax_tridi_policy=preconditioner_use_lax_tridi_policy,
+                timing_enabled=bool(timing_enabled),
+                timing_detail_enabled=bool(timing_detail_enabled),
+                timing_stats=timing_stats,
+                t_precond_start=t_precond_start,
+                perf_counter=time.perf_counter,
+                record_timing=_record_timing,
+                has_jax_func=has_jax,
+                block_until_ready=jax.block_until_ready if has_jax() else None,
+                tomnsps_type=TomnspsRZL,
+                refresh_preconditioner_cache_func=_refresh_preconditioner_cache,
+                scale_m1_precond_rhs_func=_apply_vmec_scale_m1_precond_rhs,
+                rz_preconditioner_apply_func=_rz_preconditioner_apply_local,
+                rz_norm_func=_rz_norm,
+                apply_vmec2000_preconditioner_runtime_func=_precond_payload_facade.apply_vmec2000_preconditioner_runtime,
+                radial_preconditioner_output_blocks_jax_func=_radial_preconditioner_output_blocks_jax,
+                apply_radial_tridi_func=_apply_radial_tridi,
+                mode_weight_force_blocks_np_func=_mode_weight_force_blocks_np,
+                mode_weight_force_blocks_jax_func=_mode_weight_force_blocks_jax,
+                zeros_coeff_np=_zeros_coeff_np,
+                rz_scale=rz_scale,
+                l_scale=l_scale,
+                precond_radial_alpha=precond_radial_alpha,
+                precond_lambda_alpha=precond_lambda_alpha,
+            )
+            lam_prec = preconditioner_result.lam_prec
+            mats = preconditioner_result.mats
+            jmax = preconditioner_result.jmax
+            preconditioner_cache_update_trace = preconditioner_result.cache_update_trace
+            preconditioned_blocks = preconditioner_result.preconditioned_blocks
+            update_force_blocks = preconditioner_result.update_force_blocks
+            frzl_pre = preconditioner_result.frzl_pre
+            frzl_rz = preconditioner_result.frzl_rz
+            frzl_lam_pre = preconditioner_result.frzl_lam_pre
+            accepted_control_ptau_payload = preconditioner_result.accepted_control_ptau_payload
+            preconditioner_outputs_scaled = preconditioner_result.outputs_scaled
+            preconditioner_fsq1_ready = preconditioner_result.fsq1_ready
+            if preconditioner_fsq1_ready:
+                gcr2_p = preconditioner_result.gcr2_p
+                gcz2_p = preconditioner_result.gcz2_p
+                gcl2_p = preconditioner_result.gcl2_p
+                fsqr1_safe = preconditioner_result.fsqr1_safe
+                fsqz1_safe = preconditioner_result.fsqz1_safe
+                fsql1_safe = preconditioner_result.fsql1_safe
+                fsq1_safe = preconditioner_result.fsq1_safe
+                fsqr1 = fsqr1_safe
+                fsqz1 = fsqz1_safe
+                fsql1 = fsql1_safe
             if frzl_lam_pre is not None:
                 _maybe_dump_lam_gcl(
                     frzl_pre=frzl_lam_pre,
@@ -1994,52 +1988,8 @@ def solve_fixed_boundary_residual_iter(
                     delta_s=delta_s,
                 )
             _maybe_dump_gc(frzl=frzl_pre, static=static, iter_idx=int(iter2), label="precond")
-
-            # Mode-diagonal preconditioning in (m, n>=0) storage.
-            t_precond_mode_start = time.perf_counter() if timing_detail_enabled else None
-            if preconditioner_outputs_scaled:
-                pass
-            elif host_update_assembly:
-                # NumPy path: avoids 36 JAX dispatches (expand_dims + broadcast + mul per array).
-                # _zeros_coeff_np replaces np.zeros_like (pre-allocated, avoids 6+ allocs/iter).
-                update_force_blocks = _mode_weight_force_blocks_np(
-                    preconditioned_blocks,
-                    w_mode_mn=w_mode_mn_np,
-                    zeros_coeff=_zeros_coeff_np,
-                )
-            else:
-                update_force_blocks = _mode_weight_force_blocks_jax(
-                    preconditioned_blocks,
-                    w_mode_mn=w_mode_mn,
-                )
-            if timing_detail_enabled and t_precond_mode_start is not None:
-                try:
-                    if has_jax():
-                        jax.block_until_ready(update_force_blocks.flsc)
-                except Exception:
-                    pass
-                _record_timing("precond_mode_scale", t_precond_mode_start)
-            if timing_enabled:
-                try:
-                    if has_jax() and not timing_detail_enabled:
-                        jax.block_until_ready(update_force_blocks.flsc)
-                except Exception:
-                    pass
-                _record_timing("preconditioner", t_precond_start)
             t_iteration_control_start = time.perf_counter() if timing_enabled else None
             t_iteration_control_fsq1_start = time.perf_counter() if timing_enabled else None
-
-            # VMEC's lambda coefficients can be expressed in multiple scaling
-            # conventions (e.g. restart vs. `wout` vs. internal). Allow parity drivers
-            # to apply a constant scale to the lambda residual channel before mapping
-            # it into coefficient updates.
-            if (lambda_update_scale != 1.0) and (not preconditioner_outputs_scaled):
-                update_force_blocks = update_force_blocks._replace(
-                    flsc=update_force_blocks.flsc * lambda_update_scale_j,
-                    flcs=update_force_blocks.flcs * lambda_update_scale_j,
-                    flcc=update_force_blocks.flcc * lambda_update_scale_j,
-                    flss=update_force_blocks.flss * lambda_update_scale_j,
-                )
 
             if startup_policy.auto_flip_force and it == 0:
                 # Choose force direction by a tiny trial step on the VMEC residual
