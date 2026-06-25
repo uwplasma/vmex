@@ -252,3 +252,78 @@ def test_square_coil_profile_records_direct_coil_chunk_size(monkeypatch, tmp_pat
 
     data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
     assert data["configuration"]["coil_chunk_size"] is None
+    assert data["mgrid"]["created"] is False
+    assert data["mgrid"]["write_chunk_size"] is None
+
+
+def test_square_coil_profile_direct_only_skips_mgrid_write(monkeypatch, tmp_path: Path):
+    write_calls = []
+
+    def fake_write_mgrid(*args, **kwargs):
+        write_calls.append((args, kwargs))
+
+    monkeypatch.setattr(profile, "write_mgrid_from_coils", fake_write_mgrid)
+
+    outdir = tmp_path / "profile_direct_only"
+    profile.main(
+        [
+            "--outdir",
+            str(outdir),
+            "--mpol",
+            "3",
+            "--ntor",
+            "4",
+            "--ns",
+            "5",
+            "--nzeta",
+            "16",
+            "--max-iter",
+            "2",
+            "--coil-chunk-size",
+            "0",
+            "--skip-direct",
+            "--skip-mgrid",
+            "--skip-provider-parity",
+        ]
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert write_calls == []
+    assert data["mgrid"]["created"] is False
+
+
+def test_square_coil_profile_chunks_mgrid_when_direct_sampler_is_jit(monkeypatch, tmp_path: Path):
+    captured = {}
+    monkeypatch.setattr(profile, "_run_jax_backend", lambda **kwargs: {"status": "skipped_test"})
+
+    def fake_write_mgrid(*args, **kwargs):
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(profile, "write_mgrid_from_coils", fake_write_mgrid)
+
+    outdir = tmp_path / "profile_mgrid_chunked"
+    profile.main(
+        [
+            "--outdir",
+            str(outdir),
+            "--mpol",
+            "3",
+            "--ntor",
+            "4",
+            "--ns",
+            "5",
+            "--nzeta",
+            "16",
+            "--max-iter",
+            "2",
+            "--coil-chunk-size",
+            "0",
+            "--skip-direct",
+            "--skip-provider-parity",
+        ]
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert captured["kwargs"]["chunk_size"] == 512
+    assert data["mgrid"]["created"] is True
+    assert data["mgrid"]["write_chunk_size"] == 512

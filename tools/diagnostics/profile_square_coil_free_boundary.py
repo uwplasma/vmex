@@ -825,6 +825,9 @@ def main(argv: list[str] | None = None) -> int:
     direct_wout = outdir / f"wout_square_{label}_direct.nc"
     mgrid_wout = outdir / f"wout_square_{label}_mgrid.nc"
     mgrid_path = outdir / "mgrid_square_coils.nc"
+    need_mgrid = (
+        (not bool(args.skip_mgrid)) or (not bool(args.skip_provider_parity)) or bool(args.run_vmec2000)
+    )
 
     base_indata = make_free_boundary_indata(config, beta_percent=float(args.beta_percent))
     write_indata(direct_input, base_indata)
@@ -833,21 +836,24 @@ def main(argv: list[str] | None = None) -> int:
         padding_fraction=float(args.mgrid_padding_fraction),
         min_padding=float(args.mgrid_min_padding),
     )
-    write_mgrid_from_coils(
-        mgrid_path,
-        coils.params,
-        rmin=bounds["rmin"],
-        rmax=bounds["rmax"],
-        zmin=bounds["zmin"],
-        zmax=bounds["zmax"],
-        nr=int(args.mgrid_nr),
-        nz=int(args.mgrid_nz),
-        nphi=mgrid_nphi,
-        nfp=int(config.nfp),
-    )
-    mgrid_indata = deepcopy(base_indata)
-    mgrid_indata.scalars["MGRID_FILE"] = mgrid_path.name
-    write_indata(mgrid_input, mgrid_indata)
+    if need_mgrid:
+        mgrid_write_chunk_size = 512 if args.coil_chunk_size is None else args.coil_chunk_size
+        write_mgrid_from_coils(
+            mgrid_path,
+            coils.params,
+            rmin=bounds["rmin"],
+            rmax=bounds["rmax"],
+            zmin=bounds["zmin"],
+            zmax=bounds["zmax"],
+            nr=int(args.mgrid_nr),
+            nz=int(args.mgrid_nz),
+            nphi=mgrid_nphi,
+            nfp=int(config.nfp),
+            chunk_size=mgrid_write_chunk_size,
+        )
+        mgrid_indata = deepcopy(base_indata)
+        mgrid_indata.scalars["MGRID_FILE"] = mgrid_path.name
+        write_indata(mgrid_input, mgrid_indata)
 
     payload: dict[str, Any] = {
         "schema": "square_coil_free_boundary_backend_profile",
@@ -876,10 +882,14 @@ def main(argv: list[str] | None = None) -> int:
             "ftol_array": ftol_values,
         },
         "mgrid": {
+            "created": bool(need_mgrid),
             "path": mgrid_path,
             "nr": int(args.mgrid_nr),
             "nz": int(args.mgrid_nz),
             "nphi": int(mgrid_nphi),
+            "write_chunk_size": None
+            if not need_mgrid
+            else int(512 if args.coil_chunk_size is None else args.coil_chunk_size),
             **bounds,
         },
         "boundary_projection": _boundary_projection_payload(config),
