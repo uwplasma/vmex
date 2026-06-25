@@ -163,6 +163,23 @@ cheaper ``VacuumBoundaryError`` is valid only when pressure and plasma current
 vanish. This matches the interpretation here: coil-only ``B.n`` is a vacuum
 diagnostic, not a finite-beta promotion criterion.
 
+Mirror-physics checks should stay simple and explicit. A two-coil mirror has
+its on-axis field minimum near the midplane and maxima near the coils; this is
+the baseline shape used by standard magnetic-mirror descriptions such as
+Fitzpatrick's plasma-physics notes
+(``https://farside.ph.utexas.edu/teaching/plasma/Plasma/node22.html``).
+Recent axisymmetric mirror design papers also include plasma diamagnetism in
+the mirror-ratio interpretation; for example, the Hammir model notes the
+finite-beta factor entering the mirror ratio
+(``https://arxiv.org/html/2411.06644v1``). Therefore beta-scan validation
+should look for a solved near-axis ``|B|`` depression in the plasma region and
+the corresponding effective mirror-ratio response, not just changes in the coil
+field. For the stellarator-mirror hybrid, non-axisymmetric mirror literature
+warns that bent or non-axisymmetric mirror fields add radial and longitudinal
+drifts, so the hybrid lane must retain field-line pitch, iota, and cross-section
+diagnostics when non-axisymmetric corner shaping is enabled
+(``https://doi.org/10.1063/1.4765692``).
+
 The ``virtual_casing_jax`` package is the preferred optional postprocessor for
 research-grade finite-beta diagnostics because it provides JAX-compatible
 on-surface external/internal field functionals, normal-field JVP columns, and
