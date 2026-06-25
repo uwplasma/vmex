@@ -205,7 +205,7 @@ class _BranchLocalScalarDerivativeResult(NamedTuple):
 
 
 _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_MAX_SIZE = 8
-_CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE: dict[tuple[Any, ...], Any] = {}
+_CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE: dict[tuple[Any, ...], tuple[Any, dict[str, Any]]] = {}
 _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_ORDER: list[tuple[Any, ...]] = []
 _REPLAY_SCALAR_CALLABLE_CACHE_MAX_SIZE = 64
 _REPLAY_SCALAR_CALLABLE_CACHE: dict[tuple[Any, ...], Any] = {}
@@ -989,21 +989,22 @@ def _current_only_directional_jvp_executable_cache_key(
 def _get_current_only_directional_jvp_executable(
     cache_key: tuple[Any, ...],
     factory: Any,
-) -> tuple[Any, bool]:
+) -> tuple[Any, bool, dict[str, Any]]:
     """Return a cached current-only directional JVP executable."""
 
     cached = _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE.get(cache_key)
     if cached is not None:
-        return cached, True
-    executable = factory()
+        executable, metadata = cached
+        return executable, True, {**dict(metadata), "compiled_on_this_call": False}
+    executable, metadata = factory()
     if len(_CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_ORDER) >= (
         _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_MAX_SIZE
     ):
         oldest = _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_ORDER.pop(0)
         _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE.pop(oldest, None)
-    _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE[cache_key] = executable
+    _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE[cache_key] = (executable, dict(metadata))
     _CURRENT_ONLY_DIRECTIONAL_JVP_EXECUTABLE_CACHE_ORDER.append(cache_key)
-    return executable, False
+    return executable, False, {**dict(metadata), "compiled_on_this_call": bool(metadata.get("compiled", False))}
 
 
 def _current_only_coil_geometry_for_base_currents(
@@ -1031,7 +1032,7 @@ def _controller_replay_options(replay_options: Mapping[str, Any]) -> dict[str, A
     return {
         key: value
         for key, value in replay_options.items()
-        if key not in {"enable_current_only_jvp_cache"}
+        if key not in {"enable_current_only_jvp_cache", "compile_current_only_jvp_cache"}
     }
 
 
@@ -1157,15 +1158,50 @@ def _branch_local_scalar_derivatives(
                 def _compiled_current_only_jvp(base_currents, direction_currents):
                     return jax.jvp(_replay_scalars_current_only, (base_currents,), (direction_currents,))
 
-                return jax.jit(_compiled_current_only_jvp)
+                jitted = jax.jit(_compiled_current_only_jvp)
+                metadata = {
+                    "executable_kind": "jax.jit",
+                    "compiled": False,
+                    "compile_s": 0.0,
+                }
+                if bool(replay_options.get("compile_current_only_jvp_cache", True)):
+                    t_compile = time.perf_counter()
+                    try:
+                        compiled = jitted.lower(current_jvp.base_leaf, current_jvp.direction_leaf).compile()
+                    except Exception as exc:  # pragma: no cover - backend/version fallback.
+                        metadata.update(
+                            {
+                                "compile_s": float(time.perf_counter() - t_compile),
+                                "compile_error": f"{type(exc).__name__}: {exc}",
+                            }
+                        )
+                    else:
+                        metadata.update(
+                            {
+                                "executable_kind": "compiled",
+                                "compiled": True,
+                                "compile_s": float(time.perf_counter() - t_compile),
+                            }
+                        )
+                        return compiled, metadata
+                return jitted, metadata
 
-            cached_jvp_fn, cache_hit = _get_current_only_directional_jvp_executable(cache_key, _factory)
-            directional_jvp_cache_info = {**directional_jvp_cache_info, "hit": bool(cache_hit)}
+            cached_jvp_fn, cache_hit, executable_metadata = _get_current_only_directional_jvp_executable(
+                cache_key,
+                _factory,
+            )
+            directional_jvp_cache_info = {
+                **directional_jvp_cache_info,
+                **dict(executable_metadata),
+                "hit": bool(cache_hit),
+            }
             timings["current_only_jvp_cache_get_s"] = float(time.perf_counter() - t0)
+            timings["current_only_jvp_cache_compile_s"] = float(executable_metadata.get("compile_s", 0.0))
             t0 = time.perf_counter()
             replay_values, directional_values = cached_jvp_fn(current_jvp.base_leaf, current_jvp.direction_leaf)
         else:
             timings["current_only_jvp_cache_get_s"] = 0.0
+            timings["current_only_jvp_cache_compile_s"] = 0.0
             t0 = time.perf_counter()
             replay_values, directional_values = jax.jvp(jvp_fn, jvp_primal, jvp_tangent)
         timings["replay_jvp_dispatch_s"] = float(time.perf_counter() - t0)
