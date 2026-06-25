@@ -130,6 +130,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
+    strict_step_branch_result as _strict_step_branch_result,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
     strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
@@ -2832,15 +2833,23 @@ def solve_fixed_boundary_residual_iter(
                 w_curr=float(w_curr),
                 backtracking=bool(backtracking),
             )
-            if step_acceptance.accepted:
-                state = state_try
-                step_status = "momentum"
-                restart_reason = "none"
-                huge_force_restart_count = 0
-                restart_path = "momentum_accept"
-            else:
-                catastrophic_restart = True
-                clear_cache_after_catastrophic = not bool(vmec2000_control)
+            branch_result = _strict_step_branch_result(
+                acceptance=step_acceptance,
+                state_try=state_try,
+                state_backup=state_backup,
+                update_rms=update_rms,
+                vmec2000_control=bool(vmec2000_control),
+                huge_force_restart_count=int(huge_force_restart_count),
+            )
+            state = branch_result.state
+            step_status = branch_result.step_status
+            restart_reason = branch_result.restart_reason
+            huge_force_restart_count = branch_result.huge_force_restart_count
+            restart_path = branch_result.restart_path
+            update_rms = branch_result.update_rms
+            if not branch_result.accepted:
+                catastrophic_restart = branch_result.catastrophic_restart
+                clear_cache_after_catastrophic = branch_result.clear_cache_after_catastrophic
                 if use_direct_fallback:
                     # Try a small direct-force step (no momentum memory) before
                     # a full restart. This is an experimental parity path.

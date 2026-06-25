@@ -31,6 +31,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     momentum_update_jax,
     residual_evolve_coefficients,
     scale_velocity_blocks,
+    strict_step_branch_result,
     strict_step_acceptance_decision,
     strict_momentum_update_proposal,
     strict_trial_evaluation,
@@ -304,6 +305,61 @@ def test_strict_step_acceptance_decision_covers_accept_reject_and_nonfinite_path
     assert not nonfinite.accepted
     assert no_backtracking.accepted
     assert np.isinf(no_backtracking.accept_ratio)
+
+
+def test_strict_step_branch_result_packages_accepted_momentum_status() -> None:
+    acceptance = strict_step_acceptance_decision(w_try=0.5, w_curr=1.0, backtracking=True)
+
+    result = strict_step_branch_result(
+        acceptance=acceptance,
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=0.25,
+        vmec2000_control=False,
+        huge_force_restart_count=7,
+    )
+
+    assert result.state == "trial-state"
+    assert result.accepted
+    assert not result.catastrophic_restart
+    assert not result.clear_cache_after_catastrophic
+    assert result.step_status == "momentum"
+    assert result.restart_reason == "none"
+    assert result.restart_path == "momentum_accept"
+    assert result.huge_force_restart_count == 0
+    assert result.update_rms == pytest.approx(0.25)
+
+
+def test_strict_step_branch_result_packages_rejected_restart_status() -> None:
+    acceptance = strict_step_acceptance_decision(w_try=np.inf, w_curr=1.0, backtracking=True)
+
+    non_vmec = strict_step_branch_result(
+        acceptance=acceptance,
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=None,
+        vmec2000_control=False,
+        huge_force_restart_count=7,
+    )
+    vmec = strict_step_branch_result(
+        acceptance=acceptance,
+        state_try="trial-state",
+        state_backup="backup-state",
+        update_rms=None,
+        vmec2000_control=True,
+        huge_force_restart_count=7,
+    )
+
+    assert non_vmec.state == "backup-state"
+    assert not non_vmec.accepted
+    assert non_vmec.catastrophic_restart
+    assert non_vmec.clear_cache_after_catastrophic
+    assert non_vmec.step_status == "restart_pending"
+    assert non_vmec.restart_reason == "trial_rejected"
+    assert non_vmec.restart_path == "trial_rejected"
+    assert non_vmec.huge_force_restart_count == 7
+    assert non_vmec.update_rms is None
+    assert not vmec.clear_cache_after_catastrophic
 
 
 def test_initial_residual_controller_state_matches_vmec_defaults() -> None:

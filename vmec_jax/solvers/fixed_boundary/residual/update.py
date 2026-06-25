@@ -544,6 +544,20 @@ class StrictStepAcceptanceDecision(NamedTuple):
     accept_ratio: float
 
 
+class StrictStepBranchResult(NamedTuple):
+    """State and status selected by the strict trial accept/reject branch."""
+
+    state: Any
+    accepted: bool
+    catastrophic_restart: bool
+    clear_cache_after_catastrophic: bool
+    step_status: str
+    restart_reason: str
+    restart_path: str
+    huge_force_restart_count: int
+    update_rms: float | None
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -1253,6 +1267,42 @@ def strict_step_acceptance_decision(
     accept_ratio = 1.001 if bool(backtracking) else float("inf")
     accepted = bool(np.isfinite(w_try) and (float(w_try) <= accept_ratio * max(float(w_curr), 1.0e-30)))
     return StrictStepAcceptanceDecision(accepted=accepted, accept_ratio=float(accept_ratio))
+
+
+def strict_step_branch_result(
+    *,
+    acceptance: StrictStepAcceptanceDecision,
+    state_try: Any,
+    state_backup: Any,
+    update_rms: float | None,
+    vmec2000_control: bool,
+    huge_force_restart_count: int,
+) -> StrictStepBranchResult:
+    """Package strict-step accept/reject state and host status bookkeeping."""
+
+    if bool(acceptance.accepted):
+        return StrictStepBranchResult(
+            state=state_try,
+            accepted=True,
+            catastrophic_restart=False,
+            clear_cache_after_catastrophic=False,
+            step_status="momentum",
+            restart_reason="none",
+            restart_path="momentum_accept",
+            huge_force_restart_count=0,
+            update_rms=update_rms,
+        )
+    return StrictStepBranchResult(
+        state=state_backup,
+        accepted=False,
+        catastrophic_restart=True,
+        clear_cache_after_catastrophic=not bool(vmec2000_control),
+        step_status="restart_pending",
+        restart_reason="trial_rejected",
+        restart_path="trial_rejected",
+        huge_force_restart_count=int(huge_force_restart_count),
+        update_rms=update_rms,
+    )
 
 
 def backtracking_momentum_search(
