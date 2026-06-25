@@ -225,6 +225,7 @@ from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.iteration_preconditioner import (
     apply_residual_iteration_preconditioner as _apply_residual_iteration_preconditioner,
+    resolve_preconditioned_residual_scalars as _resolve_preconditioned_residual_scalars,
 )
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
     ResidualScanPathHooks,
@@ -2039,97 +2040,9 @@ def solve_fixed_boundary_residual_iter(
                         )
 
             # Damping for the fixed-point update.
-            accepted_control_ptau_host: tuple[float, float] | None = None
-            use_host_fsq1_norms = (
-                bool(startup_policy.host_fsq1_norms_on_accelerator)
-                and (not bool(host_update_assembly))
-                and (jax.default_backend() != "cpu")
-                and (not _tree_has_tracer(state))
-                and (not _tree_has_tracer(frzl_pre))
-            )
-            frzl_pre_host = None
             t_fsq1_precond_norm_start = time.perf_counter() if timing_enabled else None
-            if preconditioner_fsq1_ready:
-                pass
-            elif host_update_assembly or use_host_fsq1_norms:
-                # NumPy path: avoids 6+ JAX dispatches for sum-of-squares.
-                frzl_pre_host = frzl_pre if host_update_assembly else _tomnsps_to_numpy_host(frzl_pre)
-                gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps_np(
-                    frzl=frzl_pre_host,
-                    include_edge=True,
-                )
-            else:
-                gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(
-                    frzl=frzl_pre,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    apply_m1_constraints=False,
-                    # VMEC residue.f90 calls getfsq(..., medge=m1) for fsq*1,
-                    # i.e. it includes the edge row in preconditioned R/Z norms.
-                    include_edge=True,
-                    apply_scalxc=False,
-                    s=s,
-                )
-            if host_update_assembly or use_host_fsq1_norms:
-                host_channels = _precond_payload_facade.host_preconditioned_residual_scalar_channels(
-                    gcr2_p=gcr2_p,
-                    gcz2_p=gcz2_p,
-                    gcl2_p=gcl2_p,
-                    frzl_pre=frzl_pre,
-                    frzl_pre_host=frzl_pre_host,
-                    vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(precond_cache.valid),
-                    need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=precond_cache.rz_norm,
-                    cache_f_norm1=precond_cache.f_norm1,
-                    state=state,
-                    delta_s=float(delta_s),
-                    numpy_module=np,
-                    rz_norm_np=_rz_norm_np,
-                    lambda_preconditioned_full_norm=_lambda_preconditioned_full_norm,
-                    finite_float_or_zero=_finite_float_or_zero,
-                )
-                (
-                    rz_norm,
-                    f_norm1,
-                    fsqr1,
-                    fsqz1,
-                    fsql1,
-                    fsqr1_safe,
-                    fsqz1_safe,
-                    fsql1_safe,
-                    fsq1,
-                ) = host_channels
-            elif not preconditioner_fsq1_ready:
-                jax_channels = _precond_payload_facade.jax_preconditioned_residual_scalar_channels(
-                    gcr2_p=gcr2_p,
-                    gcz2_p=gcz2_p,
-                    gcl2_p=gcl2_p,
-                    frzl_pre=frzl_pre,
-                    vmec2000_control=bool(vmec2000_control),
-                    vmec2000_cache_valid=bool(precond_cache.valid),
-                    need_bcovar_update=bool(need_bcovar_update),
-                    cache_rz_norm=precond_cache.rz_norm,
-                    cache_f_norm1=precond_cache.f_norm1,
-                    state=state,
-                    delta_s=delta_s,
-                    jnp_module=jnp,
-                    cached_or_current_f_norm1_jax=_cached_or_current_f_norm1_jax,
-                    rz_norm_func=_rz_norm,
-                    lambda_preconditioned_full_norm=_lambda_preconditioned_full_norm,
-                )
-                (
-                    rz_norm,
-                    f_norm1,
-                    fsqr1,
-                    fsqz1,
-                    fsql1,
-                    fsqr1_safe,
-                    fsqz1_safe,
-                    fsql1_safe,
-                    fsq1,
-                ) = jax_channels
-            _record_timing("iteration_control_fsq1_precond_norm", t_fsq1_precond_norm_start)
-            if _env_dump_lam not in ("", "0") and frzl_lam_pre is None:
+
+            def _dump_lam_fsql1_if_requested(fsql1_post):
                 gcr2_raw, gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps(
                     frzl=frzl,
                     lconm1=bool(getattr(static.cfg, "lconm1", True)),
@@ -2141,48 +2054,80 @@ def solve_fixed_boundary_residual_iter(
                 fsql1_pre = gcl2_raw * delta_s
                 _maybe_dump_lam_fsql1(
                     fsql1_pre=fsql1_pre,
-                    fsql1_post=fsql1,
+                    fsql1_post=fsql1_post,
                     static=static,
                     iter_idx=int(iter2),
                 )
-            if not (host_update_assembly or use_host_fsq1_norms):
-                t_fsq1_scalar_build_start = time.perf_counter() if timing_enabled else None
-                # Extremely small late-iteration channels can occasionally surface
-                # as NaN/Inf through mixed 0*Inf paths in XLA. VMEC treats these
-                # as effectively zero for the preconditioned residual diagnostics.
-                if preconditioner_fsq1_ready:
-                    fsq1_j = fsq1_safe
-                else:
-                    fsq1_j = fsq1
-                _record_timing("iteration_control_fsq1_scalar_build", t_fsq1_scalar_build_start)
-                use_control_payload = (
-                    (not bool(converged_physical))
-                    and (bool(reference_mode) or bool(vmec2000_control))
-                    and (not bool(badjac_use_state))
-                    and (not bool(startup_policy.dump_ptau_state))
-                    and os.getenv("VMEC_JAX_DUMP_PTAU", "") in ("", "0")
-                    and jax.default_backend() != "cpu"
-                )
-                control_payload = _precond_payload_facade.materialize_accepted_control_payload(
-                    accepted_control_ptau_payload=accepted_control_ptau_payload,
-                    use_control_payload=bool(use_control_payload),
-                    fsq1_j=fsq1_j,
-                    k=k,
-                    ptau_pshalf_jax=_ptau_context.pshalf_jax,
-                    ptau_ohs_jax=_ptau_context.ohs_jax,
-                    timing_enabled=bool(timing_enabled),
-                    timing_stats=timing_stats,
-                    perf_counter=time.perf_counter,
-                    jax_module=jax,
-                    device_get_floats=_device_get_floats,
-                    accepted_control_ptau_host_from_payload=_accepted_control_ptau_host_from_payload,
-                    scan_math_kernel_arrays_from_k=_scan_math_kernel_arrays_from_k,
-                    accepted_control_payload_jit=_accepted_control_payload_jit,
-                )
-                fsq1 = control_payload.fsq1
-                accepted_control_ptau_host = control_payload.accepted_control_ptau_host
-                control_payload_used = control_payload.control_payload_used
-            _record_timing("iteration_control_fsq1", t_iteration_control_fsq1_start)
+
+            scalar_result = _resolve_preconditioned_residual_scalars(
+                preconditioner_payload=preconditioner_result,
+                frzl_pre=frzl_pre,
+                state=state,
+                static=static,
+                k=k,
+                s=s,
+                delta_s=delta_s,
+                host_update_assembly=bool(host_update_assembly),
+                host_fsq1_norms_on_accelerator=bool(startup_policy.host_fsq1_norms_on_accelerator),
+                backend_name=jax.default_backend(),
+                vmec2000_control=bool(vmec2000_control),
+                precond_cache=precond_cache,
+                need_bcovar_update=bool(need_bcovar_update),
+                converged_physical=bool(converged_physical),
+                reference_mode=bool(reference_mode),
+                badjac_use_state=bool(badjac_use_state),
+                dump_ptau_state=bool(startup_policy.dump_ptau_state),
+                dump_ptau_env=os.getenv("VMEC_JAX_DUMP_PTAU", ""),
+                timing_enabled=bool(timing_enabled),
+                timing_stats=timing_stats,
+                t_fsq1_precond_norm_start=t_fsq1_precond_norm_start,
+                t_iteration_control_fsq1_start=t_iteration_control_fsq1_start,
+                perf_counter=time.perf_counter,
+                record_timing=_record_timing,
+                tree_has_tracer_func=_tree_has_tracer,
+                tomnsps_to_numpy_host_func=_tomnsps_to_numpy_host,
+                vmec_gcx2_from_tomnsps_np_func=vmec_gcx2_from_tomnsps_np,
+                vmec_gcx2_from_tomnsps_func=vmec_gcx2_from_tomnsps,
+                host_preconditioned_residual_scalar_channels_func=(
+                    _precond_payload_facade.host_preconditioned_residual_scalar_channels
+                ),
+                jax_preconditioned_residual_scalar_channels_func=(
+                    _precond_payload_facade.jax_preconditioned_residual_scalar_channels
+                ),
+                materialize_accepted_control_payload_func=_precond_payload_facade.materialize_accepted_control_payload,
+                numpy_module=np,
+                jnp_module=jnp,
+                jax_module=jax,
+                rz_norm_np_func=_rz_norm_np,
+                rz_norm_func=_rz_norm,
+                lambda_preconditioned_full_norm_func=_lambda_preconditioned_full_norm,
+                finite_float_or_zero_func=_finite_float_or_zero,
+                cached_or_current_f_norm1_jax_func=_cached_or_current_f_norm1_jax,
+                dump_lam_fsql1_func=(
+                    _dump_lam_fsql1_if_requested if _env_dump_lam not in ("", "0") and frzl_lam_pre is None else None
+                ),
+                device_get_floats_func=_device_get_floats,
+                accepted_control_ptau_host_from_payload_func=_accepted_control_ptau_host_from_payload,
+                scan_math_kernel_arrays_from_k_func=_scan_math_kernel_arrays_from_k,
+                accepted_control_payload_jit_func=_accepted_control_payload_jit,
+                ptau_pshalf_jax=_ptau_context.pshalf_jax,
+                ptau_ohs_jax=_ptau_context.ohs_jax,
+            )
+            use_host_fsq1_norms = scalar_result.use_host_fsq1_norms
+            gcr2_p = scalar_result.gcr2_p
+            gcz2_p = scalar_result.gcz2_p
+            gcl2_p = scalar_result.gcl2_p
+            rz_norm = scalar_result.rz_norm
+            f_norm1 = scalar_result.f_norm1
+            fsqr1 = scalar_result.fsqr1
+            fsqz1 = scalar_result.fsqz1
+            fsql1 = scalar_result.fsql1
+            fsqr1_safe = scalar_result.fsqr1_safe
+            fsqz1_safe = scalar_result.fsqz1_safe
+            fsql1_safe = scalar_result.fsql1_safe
+            fsq1 = scalar_result.fsq1
+            accepted_control_ptau_host = scalar_result.accepted_control_ptau_host
+            control_payload_used = scalar_result.control_payload_used
             precond_diag_host: tuple[float, float, float] | None = None
 
             def _precond_diag_floats() -> tuple[float, float, float]:
