@@ -4035,3 +4035,55 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 98.2%.
 - Docs/release hygiene: 99.8%.
 - Overall: 98.5%.
+
+### 2026-06-25: Attach cold-vs-cache replay timing evidence to proposals
+
+Steps taken:
+
+- Added compact timing fields to derivative-proposal ``gate_evidence``:
+  ``branch_local_vector_wall_s``, ``branch_local_vector_replay_jvp_wall_s``,
+  ``current_jvp_cache_probe_replay_jvp_wall_s``,
+  ``current_jvp_cache_probe_replay_jvp_speedup``, and
+  ``accepted_rejected_controller_slot_gate_wall_s``.
+- Kept the timing fields metadata-only; no branch-local derivative gate or
+  complete-solve acceptance rule changed.
+- Updated focused smoke coverage and the free-boundary coil optimization docs
+  so the cold replay/JVP cost, cache-hit cost, and rejected-slot replay cost are
+  explicit in reviewer-facing proposal artifacts.
+- Re-ran the QH warm-start same-branch QS proposal fixture with the new fields.
+
+Results obtained:
+
+- The QH fixture still passed the branch-local vector physical-scalar gate for
+  ``aspect``, ``qs_total``, and ``mean_iota``.
+- The current artifact reports first branch-local replay/JVP wall time
+  ``15.98 s``, current-JVP cache-probe replay wall time ``0.00488 s``, and a
+  same-payload replay-JVP speedup of about ``3275x``.
+- The accepted/rejected controller-slot gate still passed and took ``23.94 s``;
+  this confirms that the rejected-slot gate is a separate cold replay program
+  and currently dominates the optional validation artifact wall time.
+- Two derivative-assisted proposals were again formed and rejected only by
+  complete-solve objective authority.
+
+Best next steps:
+
+1. If wall-clock reduction is needed for this artifact, make the
+   accepted/rejected controller-slot gate optional in promoted commands or add a
+   separate cache/probe path for the rejected-slot replay program.
+2. Continue reducing cold branch-local JVP graph construction; repeat-call
+   cache evidence is now strong, so the remaining cost is first-call compile /
+   graph construction rather than replay execution.
+3. Keep the QH fixture as phase-3 QS proposal evidence and avoid using the
+   ill-conditioned LP-QA/circle fixture as promotion evidence.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 95.5%.
+- Single-stage coil optimization: 92.6%.
+- CPU/GPU runtime and memory footprint: 99.0%.
+- Refactor/API/examples: 59.8%.
+- VMEC2000/VMEC++ parity and physics gates: 98.2%.
+- Docs/release hygiene: 99.8%.
+- Overall: 98.6%.

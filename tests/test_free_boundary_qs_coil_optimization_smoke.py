@@ -776,7 +776,14 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
             "scope": "fixed accepted/rejected controller-slot replay",
             "same_stacked_step_policy_branch": True,
             "fixed_rejected_controller_slots": 1,
+            "wall_s": 3.0,
             "controller_slot_summary": {"accepted_slots": 2, "rejected_slots": 1},
+        },
+        "timings": {
+            "branch_local_vector_wall_s": 11.0,
+            "branch_local_vector_replay_jvp_wall_s": 10.0,
+            "branch_local_vector_cache_probe_replay_jvp_wall_s": 0.5,
+            "branch_local_rejected_slot_wall_s": 3.0,
         },
         "branch_local_vector_jacobian": {
             "available": True,
@@ -893,6 +900,10 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["gate_evidence"]["current_jvp_cache_probe_hit"] is True
     assert proposal["gate_evidence"]["current_jvp_cache_probe_wall_s"] == pytest.approx(0.006)
     assert proposal["gate_evidence"]["current_jvp_cache_probe_info"]["hit"] is True
+    assert proposal["gate_evidence"]["branch_local_vector_wall_s"] == pytest.approx(11.0)
+    assert proposal["gate_evidence"]["branch_local_vector_replay_jvp_wall_s"] == pytest.approx(10.0)
+    assert proposal["gate_evidence"]["current_jvp_cache_probe_replay_jvp_wall_s"] == pytest.approx(0.5)
+    assert proposal["gate_evidence"]["current_jvp_cache_probe_replay_jvp_speedup"] == pytest.approx(20.0)
     assert proposal["gate_evidence"]["directional_jvp_signature"]["fast_path"] == "current_only"
     assert proposal["gate_evidence"]["directional_jvp_signature"]["unroll_accepted_only_segments_below"] == 8
     assert proposal["gate_evidence"]["directional_jvp_signature"]["scalar_keys"] == [
@@ -904,6 +915,7 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is True
     assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
     assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_passed"] is True
+    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_wall_s"] == pytest.approx(3.0)
     assert proposal["gate_evidence"]["same_stacked_step_policy_branch"] is True
     assert proposal["gate_evidence"]["fixed_rejected_controller_slots"] == 1
     assert proposal["gate_evidence"]["controller_slot_summary"] == {"accepted_slots": 2, "rejected_slots": 1}

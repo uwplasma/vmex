@@ -1345,6 +1345,13 @@ def same_branch_derivative_proposal_from_report(
 def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, Any]:
     """Return compact gate evidence attached to derivative-assisted proposals."""
 
+    def _finite_float(value: Any, default: float = 0.0) -> float:
+        try:
+            result = float(value)
+        except Exception:
+            return float(default)
+        return result if np.isfinite(result) else float(default)
+
     vector = report.get("branch_local_vector_jacobian", {})
     replay_flags = vector.get("replay_option_flags", {}) if isinstance(vector, dict) else {}
     directional_signature = vector.get("directional_jvp_signature", {}) if isinstance(vector, dict) else {}
@@ -1366,6 +1373,34 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
     )
     if not isinstance(probe_cache_info, dict):
         probe_cache_info = {}
+    timings = report.get("timings", {})
+    if not isinstance(timings, dict):
+        timings = {}
+    vector_timings = vector.get("timings", {}) if isinstance(vector, dict) else {}
+    if not isinstance(vector_timings, dict):
+        vector_timings = {}
+    probe_timings = (
+        current_jvp_cache_probe.get("timings", {})
+        if isinstance(current_jvp_cache_probe, dict)
+        else {}
+    )
+    if not isinstance(probe_timings, dict):
+        probe_timings = {}
+    vector_wall_s = _finite_float(timings.get("branch_local_vector_wall_s", vector_timings.get("total_wall_s")))
+    vector_replay_jvp_wall_s = _finite_float(
+        timings.get("branch_local_vector_replay_jvp_wall_s", vector_timings.get("replay_jvp_wall_s"))
+    )
+    probe_replay_jvp_wall_s = _finite_float(
+        timings.get(
+            "branch_local_vector_cache_probe_replay_jvp_wall_s",
+            probe_timings.get("replay_jvp_wall_s"),
+        )
+    )
+    cache_probe_speedup = (
+        vector_replay_jvp_wall_s / probe_replay_jvp_wall_s
+        if vector_replay_jvp_wall_s > 0.0 and probe_replay_jvp_wall_s > 0.0
+        else 0.0
+    )
     vector_gate = report.get("branch_local_vector_gate", {})
     physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
     scalar_evidence = vector.get("scalars", {}) if isinstance(vector, dict) else {}
@@ -1416,6 +1451,10 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         "current_jvp_cache_probe_wall_s": float(
             current_jvp_cache_probe.get("wall_s", 0.0) if isinstance(current_jvp_cache_probe, dict) else 0.0
         ),
+        "branch_local_vector_wall_s": vector_wall_s,
+        "branch_local_vector_replay_jvp_wall_s": vector_replay_jvp_wall_s,
+        "current_jvp_cache_probe_replay_jvp_wall_s": probe_replay_jvp_wall_s,
+        "current_jvp_cache_probe_replay_jvp_speedup": float(cache_probe_speedup),
         "current_jvp_cache_probe_info": dict(probe_cache_info),
         "branch_local_vector_gate_available": bool(
             isinstance(vector_gate, dict) and vector_gate.get("available", False)
@@ -1442,6 +1481,11 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         ),
         "accepted_rejected_controller_slot_scope": str(
             rejected_slot_gate.get("scope", "") if isinstance(rejected_slot_gate, dict) else ""
+        ),
+        "accepted_rejected_controller_slot_gate_wall_s": _finite_float(
+            rejected_slot_gate.get("wall_s", timings.get("branch_local_rejected_slot_wall_s", 0.0))
+            if isinstance(rejected_slot_gate, dict)
+            else timings.get("branch_local_rejected_slot_wall_s", 0.0)
         ),
         "same_stacked_step_policy_branch": bool(
             isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("same_stacked_step_policy_branch", False)

@@ -1564,9 +1564,16 @@ point.  The proposal's ``gate_evidence`` also carries the
 the accepted/rejected proposal artifact is self-contained.  When the
 current-only cache probe was requested, the same evidence includes
 ``current_jvp_cache_probe_available``, ``current_jvp_cache_probe_hit``, and the
-probe wall time, along with ``branch_local_vector_max_base_rel_delta`` and
-``branch_local_scalar_base_rel_delta`` for stale-branch diagnostics.  After the
-trial solve, the same block records
+probe wall time, along with ``branch_local_vector_replay_jvp_wall_s``,
+``current_jvp_cache_probe_replay_jvp_wall_s``, and
+``current_jvp_cache_probe_replay_jvp_speedup`` to quantify cold replay/JVP cost
+versus repeated same-payload cache-hit cost.  It also carries
+``branch_local_vector_max_base_rel_delta`` and
+``branch_local_scalar_base_rel_delta`` for stale-branch diagnostics.  If the
+accepted/rejected controller-slot gate is requested, the compact evidence
+includes ``accepted_rejected_controller_slot_gate_wall_s`` because that gate is
+a distinct replay program and can dominate the validation artifact wall time.
+After the trial solve, the same block records
 ``acceptance_decision_source = 'complete_solve_objective'`` together with
 ``accepted_by_complete_solve`` and ``rejected_by_complete_solve`` so the JSON
 artifact makes clear that branch-local derivatives only propose a step.
