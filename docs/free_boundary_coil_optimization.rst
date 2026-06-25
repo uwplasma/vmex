@@ -105,6 +105,53 @@ current-only report records ``directional_jvp_fast_path=current_only``,
 and provenance evidence only; complete solves remain the acceptance authority,
 and adaptive host branch selection is still outside the differentiated scope.
 
+For a QS-relevant passing gate, use the bundled QH warm-start input rather than
+the deliberately crude synthetic-circle smoke default.  The command below keeps
+the same direct-coil/no-``mgrid`` workflow, validates ``aspect``, ``qs_total``,
+and ``mean_iota`` against complete-solve central finite differences, and then
+lets the complete solve accept or reject the derivative-assisted current step:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python examples/optimization/free_boundary_QS_coil_optimization.py \
+     --provider circle \
+     --input examples/data/input.nfp4_QH_warm_start \
+     --max-evals 1 \
+     --max-iter 1 \
+     --vmec-max-iter 3 \
+     --max-current-vars 1 \
+     --max-fourier-vars 0 \
+     --circle-current 0.2 \
+     --circle-radius 1.2 \
+     --helicity-m 1 \
+     --helicity-n -1 \
+     --target-iota -0.4 \
+     --qs-ntheta 15 \
+     --qs-nphi 16 \
+     --same-branch-derivative-proposal \
+     --same-branch-report-mode vector \
+     --same-branch-report-direction current-only \
+     --same-branch-report-vector-keys aspect,qs_total,mean_iota \
+     --same-branch-report-enable-current-jvp-cache \
+     --same-branch-report-current-jvp-cache-probe \
+     --same-branch-report-rejected-slot-gate \
+     --same-branch-report-nestor-solve-mode matrix_free \
+     --same-branch-report-nestor-operator-solver bicgstab \
+     --same-branch-report-replay-max-mode-count 0 \
+     --same-branch-proposal-steps 0.02,0.05 \
+     --same-branch-proposal-max-trials 2 \
+     --outdir results/free_boundary_QS_coil_optimization_qh_warm_same_branch_proposal
+
+On the 2026-06-25 local check, this fixture had ``qs_total = 1.019`` at the
+same-branch report point, ``max_base_rel_delta = 2.2e-15``, passed the
+branch-local physical-scalar gate for all three requested scalars, hit the
+repeat current-JVP cache probe in about ``10 ms``, passed the fixed
+accepted/rejected controller-slot gate, formed two derivative-assisted
+proposals, and rejected both with complete-solve authority because neither
+improved the complete objective.  This is the current QS-relevant phase-3
+proposal fixture; the older LP-QA/circle smoke remains useful for fast wiring
+and failure-provenance diagnostics.
+
 VMEC2000 generated-mgrid promotion fixture
 ------------------------------------------
 

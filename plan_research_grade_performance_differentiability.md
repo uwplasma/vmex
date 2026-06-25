@@ -3977,3 +3977,61 @@ Best next steps refinement:
    replay scalar if the same derivative mismatch appears on a physical fixture.
 3. Keep the aspect-only proposal sanity as plumbing evidence, not as QS
    optimization evidence.
+
+### 2026-06-25: Promote a better-conditioned QH same-branch QS proposal fixture
+
+Steps taken:
+
+- Ran a bounded complete-solve conditioning scan over synthetic circular-coil
+  current/radius values using the LP-QA default input.  The coil geometry/current
+  was not the controlling issue: reduced-grid VMEC-state ``qs_total`` stayed
+  near ``1.2e14`` and mean iota stayed near ``4.26``.
+- Ran the same direct-coil free-boundary wrapper on bundled inputs.  The
+  ``input.nfp4_QH_warm_start`` row was the first well-conditioned QS candidate:
+  ``qs_total = 0.950`` with QA helicity in the scan and a residual proxy near
+  ``10``; LP-QA and nfp2-QA remained poorly scaled, while minimal seeds produced
+  NaN QS diagnostics under this tiny free-boundary wrapper.
+- Re-ran the same-branch derivative-proposal path on
+  ``examples/data/input.nfp4_QH_warm_start`` with QH helicity ``(m,n)=(1,-1)``,
+  current-only direct-coil direction, matrix-free NESTOR/source replay, the
+  current-JVP cache probe, and the accepted/rejected controller-slot gate.
+- Documented this QH warm-start command and outcome in
+  ``docs/free_boundary_coil_optimization.rst`` as the QS-relevant phase-3
+  proposal fixture.
+
+Results obtained:
+
+- The QH fixture generated a well-scaled same-branch report point with
+  ``qs_total = 1.019`` and ``mean_iota = -0.564``.
+- The branch-local vector/JVP physical-scalar gate passed for ``aspect``,
+  ``qs_total``, and ``mean_iota``.
+- Replay base drift was negligible: ``max_base_abs_delta = 2.66e-15`` and
+  ``max_base_rel_delta = 2.18e-15``.
+- The accepted/rejected controller-slot gate passed with one fixed rejected
+  slot, so the report exercises the current controller-slot fingerprint lane.
+- The current-JVP cache probe hit on the repeated same-payload replay in about
+  ``9.9 ms``.
+- Two derivative-assisted proposals were formed and both were evaluated by
+  complete free-boundary solves.  Both were rejected by complete-solve
+  objective authority, which is the intended conservative behavior.
+
+Best next steps:
+
+1. Use this QH warm-start command as the QS-relevant phase-3 proposal evidence
+   while keeping LP-QA/circle as a failure-provenance stress fixture.
+2. If stricter coil-only improvement evidence is needed, tune proposal step
+   sizes or use a physical coil fixture; do not alter acceptance authority.
+3. Continue runtime work on cold branch-local graph construction and broader
+   physical fixtures after this PR-readiness tranche.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 93.2%.
+- Free-boundary production differentiability: 95.4%.
+- Single-stage coil optimization: 92.4%.
+- CPU/GPU runtime and memory footprint: 98.9%.
+- Refactor/API/examples: 59.7%.
+- VMEC2000/VMEC++ parity and physics gates: 98.2%.
+- Docs/release hygiene: 99.8%.
+- Overall: 98.5%.
