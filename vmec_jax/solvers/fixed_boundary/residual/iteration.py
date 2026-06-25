@@ -137,6 +137,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
+    strict_step_runtime_fields as _strict_step_runtime_fields,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
     strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
@@ -2893,12 +2894,17 @@ def solve_fixed_boundary_residual_iter(
                         trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
                     if branch_result.restart_path == "fallback_direct":
                         _zero_all_velocity_blocks()
-            state = branch_result.state
-            step_status = branch_result.step_status
-            restart_reason = branch_result.restart_reason
-            huge_force_restart_count = branch_result.huge_force_restart_count
-            restart_path = branch_result.restart_path
-            update_rms = branch_result.update_rms
+            branch_runtime = _strict_step_runtime_fields(
+                branch_result,
+                max_coeff_delta_rms=float(max_coeff_delta_rms),
+                max_update_rms=float(max_update_rms),
+            )
+            state = branch_runtime.state
+            step_status = branch_runtime.step_status
+            restart_reason = branch_runtime.restart_reason
+            huge_force_restart_count = branch_runtime.huge_force_restart_count
+            restart_path = branch_runtime.restart_path
+            update_rms = branch_runtime.update_rms
             if not branch_result.accepted:
                 catastrophic_restart = branch_result.catastrophic_restart
                 clear_cache_after_catastrophic = branch_result.clear_cache_after_catastrophic
@@ -2928,14 +2934,19 @@ def solve_fixed_boundary_residual_iter(
                         restart_update=restart_update,
                         state_backup=state_backup,
                     )
-                    state = branch_result.state
-                    restart_reason = branch_result.restart_reason
-                    step_status = branch_result.step_status
-                    restart_path = branch_result.restart_path
-                    max_coeff_delta_rms = branch_result.max_coeff_delta_rms
-                    max_update_rms = branch_result.max_update_rms
+                    branch_runtime = _strict_step_runtime_fields(
+                        branch_result,
+                        max_coeff_delta_rms=float(max_coeff_delta_rms),
+                        max_update_rms=float(max_update_rms),
+                    )
+                    state = branch_runtime.state
+                    restart_reason = branch_runtime.restart_reason
+                    step_status = branch_runtime.step_status
+                    restart_path = branch_runtime.restart_path
+                    max_coeff_delta_rms = branch_runtime.max_coeff_delta_rms
+                    max_update_rms = branch_runtime.max_update_rms
                     freeb_controls_cached = None
-                    update_rms = branch_result.update_rms
+                    update_rms = branch_runtime.update_rms
                     if bool(clear_cache_after_catastrophic):
                         precond_cache.clear()
             _record_update_state_ready_timing(

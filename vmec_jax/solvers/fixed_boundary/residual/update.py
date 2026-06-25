@@ -674,6 +674,19 @@ class StrictStepBranchFingerprint(NamedTuple):
     has_direct_fallback: bool
 
 
+class StrictStepRuntimeFields(NamedTuple):
+    """Runtime scalar slots selected by a strict-step branch decision."""
+
+    state: Any
+    step_status: str
+    restart_reason: str
+    huge_force_restart_count: int
+    restart_path: str
+    update_rms: float | None
+    max_coeff_delta_rms: float
+    max_update_rms: float
+
+
 class InitialResidualVelocityState(NamedTuple):
     """Initial residual-loop velocity memory and conservative update caps."""
 
@@ -1484,6 +1497,30 @@ def strict_step_branch_fingerprint(branch: StrictStepBranchResult) -> StrictStep
         restart_reason=str(branch.restart_reason),
         step_status=str(branch.step_status),
         has_direct_fallback=branch.fallback_direct_dt is not None,
+    )
+
+
+def strict_step_runtime_fields(
+    branch: StrictStepBranchResult,
+    *,
+    max_coeff_delta_rms: float,
+    max_update_rms: float,
+) -> StrictStepRuntimeFields:
+    """Return the legacy residual-loop scalar slots selected by ``branch``."""
+
+    return StrictStepRuntimeFields(
+        state=branch.state,
+        step_status=str(branch.step_status),
+        restart_reason=str(branch.restart_reason),
+        huge_force_restart_count=int(branch.huge_force_restart_count),
+        restart_path=str(branch.restart_path),
+        update_rms=branch.update_rms,
+        max_coeff_delta_rms=(
+            float(max_coeff_delta_rms)
+            if branch.max_coeff_delta_rms is None
+            else float(branch.max_coeff_delta_rms)
+        ),
+        max_update_rms=float(max_update_rms) if branch.max_update_rms is None else float(branch.max_update_rms),
     )
 
 
