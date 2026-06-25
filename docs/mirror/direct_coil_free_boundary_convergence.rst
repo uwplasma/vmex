@@ -403,14 +403,25 @@ The remaining work is deliberately narrow:
    iteration/runtime schedule, mode/mgrid refinement, and radial-resolution
    closure. A larger ``NS`` ladder should not be interpreted unless
    ``vacuum_grid_exceeded_count`` remains zero.
-4. Keep the optional virtual-casing postsolve diagnostic
+4. If the ``MPOL=7, NTOR=28`` and ``MPOL=8, NTOR=32`` spline-projected
+   VMEC/VMEC2000 ladders still stall above the strict ``1e-12`` component gate,
+   move the square-axis hybrid into a true spline-basis lane instead of only
+   increasing Fourier modes. The current code already uses a spline-smoothed
+   real-space target before VMEC Fourier projection; that is a bandwidth
+   reduction, not a new nonlinear-solve basis. A true spline-basis lane should
+   keep the same direct-coil/free-boundary diagnostics but replace the
+   boundary/control representation with a small set of periodic side/corner
+   spline control points, then project to Fourier only for VMEC2000 parity or
+   WOUT export. This keeps the primary ``vmec_jax`` path closer to the intended
+   straight-side geometry while preserving a benchmarkable VMEC2000 comparison.
+5. Keep the optional virtual-casing postsolve diagnostic
    ``vmec_jax.free_boundary_validation.virtual_casing_finite_beta_boundary_diagnostics``
    attached to the square-coil example outputs. The helper accepts a solved
    surface, total surface field, and direct-coil field, then reports the
    required external-field normal mismatch and finite-beta magnetic-pressure
    jump. It is optional at import time and should be skipped when
    ``virtual_casing_jax`` is not installed.
-5. Promote only rows that pass the force-residual and postsolve boundary
+6. Promote only rows that pass the force-residual and postsolve boundary
    diagnostics. Keep unconverged rows in the example output as explicit stall
    evidence with ``production_free_boundary_claim = false``.
 
