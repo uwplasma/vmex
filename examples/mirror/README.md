@@ -227,7 +227,9 @@ interpreting the residual floor, for example::
 
 The current ``NS=9 -> 17`` VMEC2000 reference is not yet a ``1e-12`` solve, but
 with that widened mgrid and ``DELT=0.02`` it reaches a monotone final total
-residual of about ``1.4e-7`` after 3000 final-stage iterations.
+residual of about ``1.4e-7`` after 3000 final-stage iterations and about
+``1.0e-7`` after 5000 final-stage iterations. ``DELT=0.01`` is worse for the
+same schedule because the coarse stage underconverges.
 
 Summarize one or more reports with::
 

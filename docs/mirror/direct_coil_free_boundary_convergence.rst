@@ -81,10 +81,13 @@ best sampled total residual about ``3.45e-7`` and final row about ``9.77e-6``
 after 3000 iterations at ``DELT=0.05``. Repeating the same widened-mgrid staged
 profile with ``DELT=0.02`` removed the large oscillations and reached a final
 ``NS=17`` total residual of about ``1.42e-7`` after 3000 iterations, with no
-vacuum-grid warnings. The current square-coil setup is therefore a
+vacuum-grid warnings. Extending the final ``NS=17`` stage to 5000 iterations
+plateaus near ``1.0e-7``. Reducing to ``DELT=0.01`` with the same iteration
+schedule is worse, because the coarse stage underconverges and the final stage
+remains near ``1e-5``. The current square-coil setup is therefore a
 diagnostic/stability target, not yet a converged ``FTOL=1e-12`` production
 equilibrium, but the evidence now points to widened mgrid envelopes plus
-smaller step sizes as the productive continuation path.
+moderate damping around ``DELT=0.02`` as the productive continuation path.
 
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
@@ -195,10 +198,12 @@ The remaining work is deliberately narrow:
 3. Run resolution closure around the first transition beta and at ``10%`` beta,
    comparing ``NS``, ``MPOL``, ``NTOR``, ``NZETA``, generated-mgrid resolution,
    LCFS shape, near-axis field, mirror ratio, mean iota, and residual histories.
-   The next numerical knob to test is longer ``DELT=0.02`` continuation on the
-   widened ``NS=17`` mgrid, followed by ``NS=31`` only if the ``NS=17`` floor
-   continues to fall. A larger ``NS`` ladder should not be interpreted unless
-   ``vacuum_grid_exceeded_count`` remains zero.
+   The next numerical knob is not a smaller global step size; ``DELT=0.01`` is
+   too slow for the current schedule. Instead, compare vmec_jax against the
+   VMEC2000 ``DELT=0.02`` reference floor, then test mode/mgrid refinement or a
+   staged step-size schedule only if the JAX mgrid path can reproduce the
+   VMEC2000 ``~1e-7`` floor. A larger ``NS`` ladder should not be interpreted
+   unless ``vacuum_grid_exceeded_count`` remains zero.
 4. Keep the optional virtual-casing postsolve diagnostic
    ``vmec_jax.free_boundary_validation.virtual_casing_finite_beta_boundary_diagnostics``
    attached to the square-coil example outputs. The helper accepts a solved
