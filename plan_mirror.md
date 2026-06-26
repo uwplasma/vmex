@@ -5738,7 +5738,6 @@ Visual validation:
 
 No user input is needed.
 
-
 ---
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
@@ -28189,6 +28188,67 @@ ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square
   solver-native update still open.
 - Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
   pending strict VMEC2000 completion and ``vmec_jax`` pressure-turn-on fixes.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 239. Added Free-Boundary Turn-On Timing Logs
+
+### Steps taken
+
+- Added verbose timing markers around ``vmec_jax`` free-boundary NESTOR vacuum
+  updates.
+- Added verbose timing markers around pressure-coupled force evaluations.
+- Gated the extra timing lines with ``VMEC_JAX_FREEB_VERBOSE_TIMING``; the
+  default is enabled when ``--verbose-solver`` prints the VMEC-style table, and
+  users can set ``VMEC_JAX_FREEB_VERBOSE_TIMING=0`` to keep only residual rows.
+- Updated ``examples/mirror/README.md`` to document the timing switch.
+- Fast-forwarded ``office`` to the timing-instrumentation commit.
+
+### Results obtained
+
+- Future ``vmec_jax`` direct or generated-``mgrid`` strict-profile rows will
+  show whether a slow pressure-turn-on step is dominated by external-field
+  sampling, NESTOR solve time, or the first coupled force evaluation.
+- No production solver behavior changes were made; this is logging only.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_solve_additional_branch_coverage.py tests/test_free_boundary_wp0.py::test_run_fixed_boundary_freeb_edge_coupling_diag tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m pytest -q tests/test_solve_additional_branch_coverage.py tests/test_free_boundary_wp0.py::test_run_fixed_boundary_freeb_edge_coupling_diag
+python -m py_compile vmec_jax/solve.py
+git diff --check
+```
+
+### File structure and best-practice notes
+
+- The logging is in ``vmec_jax/solve.py`` next to the free-boundary cadence and
+  force calls it measures.
+- Documentation is in the existing mirror profiling section, not a new page.
+- No runtime output artifacts were committed.
+
+### Best next steps
+
+1. Let the active VMEC2000 strict-reference run finish or hit its stage limit.
+2. If VMEC2000 stalls above ``1e-8``, launch a VMEC2000 timestep/staging scan
+   instead of spending more time on direct ``vmec_jax`` rows.
+3. When CPU is available, relaunch a short ``vmec_jax`` generated-``mgrid``
+   row with ``--verbose-solver`` and the new timing logs to pinpoint turn-on
+   cost.
+
+### Completion percentages after M239
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``88%``.
+- VMEC2000 robustness/reference lane: ``93%``.
+- Direct-coil GPU/JIT parity lane: ``77%``.
+- ``vmec_jax`` generated-``mgrid`` parity/performance lane: ``72%`` with
+  turn-on timing now instrumented.
+- Square-axis spline-smoothed Fourier closure lane: ``97%``.
+- True spline/control-basis hybrid lane: ``35%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``.
 
 ### User input needed
 
