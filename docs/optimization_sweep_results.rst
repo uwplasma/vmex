@@ -756,7 +756,7 @@ preseed: legacy-ranked QI diagnostic ``4.31e-4``, smooth QI diagnostic
 elongation ``6.90`` for a target ``8.2``, aspect ratio ``6.002``, mean iota
 ``-0.5690``, and total wall time ``10.9 min``.  It is not current aspect-5
 promotion evidence.  Best-row selection uses
-``vmec_jax.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
+``vmec_jax.quasi_isodynamic.qi_promotion_score``: raw-fallback legacy diagnostics are rejected,
 rows above the loose ``2e-2`` QI promotion ceiling cannot win solely by having
 good mirror/elongation, and engineering-clean rows are preferred over lower-QI
 rows only when they remain QI-like.
