@@ -5738,6 +5738,139 @@ Visual validation:
 
 No user input is needed.
 
+## M272 - Strict square-coil solver-kernel profiling controls
+
+### Steps taken
+
+- Polled the active `office` strict profiles without mutating their worktrees.
+- Added explicit square-coil profiler flags for the hidden free-boundary solver
+  controls:
+  - `--freeb-jax-nestor-operator`;
+  - `--freeb-jax-nestor-jit-operator` / `--no-freeb-jax-nestor-jit-operator`;
+  - `--freeb-include-edge` / `--no-freeb-include-edge`;
+  - `--freeb-dense-solve-mode mode|grid`;
+  - `--freeb-experimental-fouri-matrix` /
+    `--no-freeb-experimental-fouri-matrix`;
+  - `--freeb-add-analytic-bvec` / `--no-freeb-add-analytic-bvec`.
+- Made the profiler set and restore those environment variables around each
+  JAX backend run, including explicitly disabling the experimental JAX NESTOR
+  operator unless requested.
+- Added `free_boundary_solver_overrides` to each JAX backend payload and added
+  the same fields to the top-level `configuration`.
+- Added a `direct-gpu-jax-nestor` follow-up command kind for controlled
+  direct-coil GPU/NESTOR A-B profiling.
+- Updated the convergence documentation and mirror README with the strict
+  follow-up workflow.
+
+### Results obtained
+
+- Current active evidence still says VMEC2000 is more robust than direct JAX on
+  the strict square-coil deck, but neither has proven `FTOL=1e-12` convergence:
+  - VMEC2000 generated-`mgrid`, `MPOL=5`, `NTOR=28`, `NZETA=64`, `NSTEP=1`:
+    latest partial row has `iteration_row_count=23627`, last force iteration
+    `it=11627`, `fsqr=1.12e-11`, `fsqz=8.08e-12`, `fsql=3.79e-12`, total
+    `2.307e-11`, max component `1.12e-11`, and no vacuum-grid overflow.
+  - Direct-GPU baseline and Anderson rows are still active at about 900 final
+    stage iterations, with component residuals near `5e-8` and no final JSON
+    yet.
+- The new command lane lets the next direct-GPU run compare the current
+  VMEC-like dense integral against the experimental JAX NESTOR operator without
+  changing `NS_ARRAY`, `NITER_ARRAY`, `FTOL_ARRAY`, `MPOL`, `NTOR`, `NZETA`, or
+  the square-axis spline target.
+- The current `control_spline` geometry remains a spline-to-Fourier bridge, not
+  a solver-native spline-control update. This is still the right short-term
+  representation for VMEC2000/mgrid parity; the solver-native reduced-control
+  lane remains the simplification path if Fourier-projected square sides keep
+  blocking strict convergence.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_square_coil_followup_commands.py \
+  -k 'square_coil_profile_parser_accepts_control_spline_axis_kind or square_coil_profile_passes_direct_sampler_cache_flags or square_coil_profile_run_jax_backend_uses_static_direct_sampler or square_coil_followup_commands_emit_direct_gpu_jax_nestor_probe or square_coil_followup_commands_emit_direct_gpu_speed_probe'
+
+venv/bin/python -m py_compile \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/square_coil_followup_commands.py
+
+ruff check \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/square_coil_followup_commands.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_square_coil_followup_commands.py
+
+git diff --check
+```
+
+Results: `5 passed, 26 deselected, 1 warning`; py-compile, ruff, and
+whitespace checks passed.
+
+Additional no-solve smoke:
+
+```bash
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/square_solver_knobs_profile.XXXXXX \
+  --mpol 5 --ntor 28 --nzeta auto --mgrid-nphi 64 \
+  --ns-array 9,13,17 --niter-array 4000,8000,24000 \
+  --ftol-array 1e-8,1e-10,1e-12 \
+  --axis-kind control_spline --side-power 1.0 --corner-power 1.0 \
+  --max-boundary-projection-error 5e-12 \
+  --freeb-jax-nestor-operator \
+  --no-freeb-jax-nestor-jit-operator \
+  --freeb-include-edge \
+  --freeb-dense-solve-mode grid \
+  --no-freeb-experimental-fouri-matrix \
+  --freeb-add-analytic-bvec \
+  --resolution-diagnostics-only
+```
+
+The smoke recorded `ftol=1e-12`,
+`resolution_deck.status=production_ready`,
+`freeb_jax_nestor_operator=true`,
+`freeb_jax_nestor_jit_operator=false`, `freeb_include_edge=true`,
+`freeb_dense_solve_mode=grid`, `freeb_experimental_fouri_matrix=false`,
+`freeb_add_analytic_bvec=true`, and
+`spline_bridge.status=spline_control_to_fourier_bridge`.
+
+### File structure and best-practice notes
+
+- Solver-kernel switches stay in the square-coil profiling tools under
+  `tools/diagnostics`; no production solver defaults changed.
+- Tests extend the existing profiler and follow-up command modules rather than
+  adding another test surface.
+- Documentation changes stay in the existing mirror README and strict
+  free-boundary convergence note.
+- No generated WOUT, mgrid, figure, or result files are tracked.
+
+### Best next steps
+
+1. Finish the focused local test/ruff/no-solve validation for the new controls.
+2. Commit and push this profiling-control tranche.
+3. Let the active VMEC2000/direct-GPU rows finish or reach a clear plateau.
+4. Launch one `direct-gpu-jax-nestor` A-B row after the current direct-GPU
+   profiles finish, keeping the strict deck unchanged.
+5. If VMEC2000 remains plateaued above `1e-12`, run the planned narrow
+   `DELT`/stage-budget scan before increasing Fourier modes.
+
+### Completion percentages after M272
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `86%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `70%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- Strict spline-bridge diagnostics lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## 266. Promoted Reduced-Control Projection To Source API
 
 ### Steps taken

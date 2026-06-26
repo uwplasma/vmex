@@ -726,7 +726,18 @@ The remaining work is deliberately narrow:
    ``free_boundary_anderson_pressure_last_theta``,
    ``freeb_anderson_pressure_applied_stats``, final component residuals, and
    the tail projection against the non-Anderson profile before changing any
-   other solver knob.
+   other solver knob. For the next direct-GPU solver-kernel A/B, emit the
+   cached-JIT direct row with ``--profile-kind direct-gpu-jax-nestor`` from
+   ``tools/diagnostics/square_coil_followup_commands.py``. That adds
+   ``--freeb-jax-nestor-operator`` while keeping the strict ``FTOL_ARRAY`` and
+   staged ``NS_ARRAY`` deck fixed. Optional one-at-a-time switches are
+   ``--freeb-include-edge``, ``--freeb-dense-solve-mode mode|grid``,
+   ``--freeb-experimental-fouri-matrix``/``--no-freeb-experimental-fouri-matrix``,
+   and ``--freeb-add-analytic-bvec``/``--no-freeb-add-analytic-bvec``. The
+   profiler writes the selected values to ``configuration`` and each JAX
+   backend's ``free_boundary_solver_overrides`` block, and it explicitly sets
+   ``VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR=0`` unless the flag is requested so
+   ambient shell environment cannot contaminate a robustness comparison.
 2. Re-run the square-coil beta ladder with per-beta checkpointing and the
    best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at
    ``1e-12``. Keep ``DELT=0.02``, ``NVACSKIP=1``,

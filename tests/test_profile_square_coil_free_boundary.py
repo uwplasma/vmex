@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -33,6 +34,13 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "--virtual-casing-target-chunk-size",
             "none",
             "--accepted-provider-parity",
+            "--freeb-jax-nestor-operator",
+            "--no-freeb-jax-nestor-jit-operator",
+            "--freeb-include-edge",
+            "--freeb-dense-solve-mode",
+            "grid",
+            "--no-freeb-experimental-fouri-matrix",
+            "--freeb-add-analytic-bvec",
             "--resolution-diagnostics-only",
         ]
     )
@@ -46,6 +54,12 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.virtual_casing_chunk_size == 128
     assert args.virtual_casing_target_chunk_size is None
     assert args.accepted_provider_parity is True
+    assert args.freeb_jax_nestor_operator is True
+    assert args.freeb_jax_nestor_jit_operator is False
+    assert args.freeb_include_edge is True
+    assert args.freeb_dense_solve_mode == "grid"
+    assert args.freeb_experimental_fouri_matrix is False
+    assert args.freeb_add_analytic_bvec is True
     assert args.resolution_diagnostics_only is True
 
 
@@ -881,6 +895,13 @@ def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_
             "64",
             "--virtual-casing-target-chunk-size",
             "128",
+            "--freeb-jax-nestor-operator",
+            "--no-freeb-jax-nestor-jit-operator",
+            "--freeb-include-edge",
+            "--freeb-dense-solve-mode",
+            "grid",
+            "--no-freeb-experimental-fouri-matrix",
+            "--freeb-add-analytic-bvec",
             "--skip-mgrid",
             "--skip-provider-parity",
             "--max-boundary-projection-error",
@@ -898,6 +919,12 @@ def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_
     assert data["configuration"]["virtual_casing_quad_factor"] == 4
     assert data["configuration"]["virtual_casing_chunk_size"] == 64
     assert data["configuration"]["virtual_casing_target_chunk_size"] == 128
+    assert data["configuration"]["freeb_jax_nestor_operator"] is True
+    assert data["configuration"]["freeb_jax_nestor_jit_operator"] is False
+    assert data["configuration"]["freeb_include_edge"] is True
+    assert data["configuration"]["freeb_dense_solve_mode"] == "grid"
+    assert data["configuration"]["freeb_experimental_fouri_matrix"] is False
+    assert data["configuration"]["freeb_add_analytic_bvec"] is True
     assert captured[0]["config"].side_power == pytest.approx(1.25)
     assert captured[0]["config"].corner_power == pytest.approx(1.5)
     assert captured[0]["direct_static_cache"] is False
@@ -907,6 +934,12 @@ def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_
     assert captured[0]["virtual_casing_quad_factor"] == 4
     assert captured[0]["virtual_casing_chunk_size"] == 64
     assert captured[0]["virtual_casing_target_chunk_size"] == 128
+    assert captured[0]["freeb_jax_nestor_operator"] is True
+    assert captured[0]["freeb_jax_nestor_jit_operator"] is False
+    assert captured[0]["freeb_include_edge"] is True
+    assert captured[0]["freeb_dense_solve_mode"] == "grid"
+    assert captured[0]["freeb_experimental_fouri_matrix"] is False
+    assert captured[0]["freeb_add_analytic_bvec"] is True
 
 
 def test_square_coil_profile_virtual_casing_payload_uses_cached_geometry(monkeypatch):
@@ -968,9 +1001,22 @@ def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypa
 
     monkeypatch.setattr(profile, "build_coil_field_geometry", lambda params: geometry)
     monkeypatch.setattr(profile, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+    env_names = [
+        "VMEC_JAX_RETURN_BEST_SCORED_STATE",
+        "VMEC_JAX_FREEB_ANDERSON_PRESSURE",
+        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR",
+        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR",
+        "VMEC_JAX_FREEB_INCLUDE_EDGE",
+        "VMEC_JAX_FREEB_DENSE_SOLVE_MODE",
+        "VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX",
+        "VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC",
+    ]
+    for name in env_names:
+        monkeypatch.setenv(name, f"previous_{name}")
 
     def fake_run_free_boundary(*args, **kwargs):
         captured.update(kwargs)
+        captured["env"] = {name: os.environ.get(name) for name in env_names}
         result = SimpleNamespace(
             n_iter=1,
             diagnostics={
@@ -1004,12 +1050,27 @@ def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypa
         direct_params=direct_params,
         solver_mode="parity",
         return_best_scored_state=False,
+        freeb_anderson_pressure=True,
+        freeb_jax_nestor_operator=True,
+        freeb_jax_nestor_jit_operator=False,
+        freeb_include_edge=True,
+        freeb_dense_solve_mode="grid",
+        freeb_experimental_fouri_matrix=False,
+        freeb_add_analytic_bvec=True,
         direct_static_cache=True,
         jit_direct_sampler=True,
         direct_trial_bsqvac_resample=False,
     )
 
     assert out["status"] == "completed"
+    assert out["free_boundary_solver_overrides"]["return_best_scored_state"] is False
+    assert out["free_boundary_solver_overrides"]["freeb_anderson_pressure"] is True
+    assert out["free_boundary_solver_overrides"]["freeb_jax_nestor_operator"] is True
+    assert out["free_boundary_solver_overrides"]["freeb_jax_nestor_jit_operator"] is False
+    assert out["free_boundary_solver_overrides"]["freeb_include_edge"] is True
+    assert out["free_boundary_solver_overrides"]["freeb_dense_solve_mode"] == "grid"
+    assert out["free_boundary_solver_overrides"]["freeb_experimental_fouri_matrix"] is False
+    assert out["free_boundary_solver_overrides"]["freeb_add_analytic_bvec"] is True
     assert out["virtual_casing"]["status"] == "disabled"
     assert out["free_boundary_promotion"]["boundary_condition_mode"] == "vacuum_coil_normal"
     assert out["free_boundary_promotion"]["coil_bnormal_role"] == "vacuum_boundary_condition"
@@ -1023,3 +1084,13 @@ def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypa
     assert static["chunk_size"] is None
     assert static["jit_sampler"] is True
     assert static["resample_trial_bsqvac"] is False
+    assert captured["env"]["VMEC_JAX_RETURN_BEST_SCORED_STATE"] == "0"
+    assert captured["env"]["VMEC_JAX_FREEB_ANDERSON_PRESSURE"] == "1"
+    assert captured["env"]["VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR"] == "1"
+    assert captured["env"]["VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR"] == "0"
+    assert captured["env"]["VMEC_JAX_FREEB_INCLUDE_EDGE"] == "1"
+    assert captured["env"]["VMEC_JAX_FREEB_DENSE_SOLVE_MODE"] == "grid"
+    assert captured["env"]["VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX"] == "0"
+    assert captured["env"]["VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC"] == "1"
+    for name in env_names:
+        assert os.environ.get(name) == f"previous_{name}"

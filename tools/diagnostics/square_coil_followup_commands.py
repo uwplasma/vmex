@@ -50,14 +50,22 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--coil-chunk-size", type=int, default=512)
     p.add_argument(
         "--profile-kind",
-        choices=("vmec2000", "resolution-preflight", "provider-parity", "full-backend", "direct-gpu"),
+        choices=(
+            "vmec2000",
+            "resolution-preflight",
+            "provider-parity",
+            "full-backend",
+            "direct-gpu",
+            "direct-gpu-jax-nestor",
+        ),
         default="vmec2000",
         help=(
             "vmec2000 keeps the existing generated-mgrid reference command. "
             "resolution-preflight emits a cheap projection/NZETA/mgrid compatibility check. "
             "provider-parity runs JAX direct and generated-mgrid with initial and accepted-LCFS parity. "
             "full-backend adds VMEC2000 to that comparison. "
-            "direct-gpu emits direct-only cached-JIT commands for GPU speed probes."
+            "direct-gpu emits direct-only cached-JIT commands for GPU speed probes. "
+            "direct-gpu-jax-nestor adds the experimental JAX NESTOR operator to that probe."
         ),
     )
     p.add_argument(
@@ -70,6 +78,42 @@ def _parser() -> argparse.ArgumentParser:
         "--freeb-anderson-pressure",
         action="store_true",
         help="Add pressure Anderson mixing to JAX backend commands.",
+    )
+    p.add_argument(
+        "--freeb-jax-nestor-operator",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Add the experimental JAX NESTOR operator flag to JAX backend commands.",
+    )
+    p.add_argument(
+        "--freeb-jax-nestor-jit-operator",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Control JIT caching for the experimental JAX NESTOR operator.",
+    )
+    p.add_argument(
+        "--freeb-include-edge",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add an explicit edge-residual override to JAX backend commands.",
+    )
+    p.add_argument(
+        "--freeb-dense-solve-mode",
+        choices=("mode", "grid"),
+        default=None,
+        help="Add a dense free-boundary solve-mode override to JAX backend commands.",
+    )
+    p.add_argument(
+        "--freeb-experimental-fouri-matrix",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add a Fourier-matrix override for NESTOR operator profiling.",
+    )
+    p.add_argument(
+        "--freeb-add-analytic-bvec",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add an analytic-B-vector override for NESTOR operator profiling.",
     )
     return p
 
@@ -180,12 +224,34 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
         "parity",
     ]
     kind = str(args.profile_kind)
-    if bool(args.freeb_anderson_pressure) and kind in {"provider-parity", "full-backend", "direct-gpu"}:
+    jax_kind = kind in {"provider-parity", "full-backend", "direct-gpu", "direct-gpu-jax-nestor"}
+    if bool(args.freeb_anderson_pressure) and jax_kind:
         command.append("--freeb-anderson-pressure")
+    use_jax_nestor = bool(args.freeb_jax_nestor_operator) or kind == "direct-gpu-jax-nestor"
+    if jax_kind and use_jax_nestor:
+        command.append("--freeb-jax-nestor-operator")
+        if bool(args.freeb_jax_nestor_jit_operator):
+            command.append("--freeb-jax-nestor-jit-operator")
+        else:
+            command.append("--no-freeb-jax-nestor-jit-operator")
+    if jax_kind and args.freeb_include_edge is not None:
+        command.append("--freeb-include-edge" if bool(args.freeb_include_edge) else "--no-freeb-include-edge")
+    if jax_kind and args.freeb_dense_solve_mode is not None:
+        command.extend(["--freeb-dense-solve-mode", str(args.freeb_dense_solve_mode)])
+    if jax_kind and args.freeb_experimental_fouri_matrix is not None:
+        command.append(
+            "--freeb-experimental-fouri-matrix"
+            if bool(args.freeb_experimental_fouri_matrix)
+            else "--no-freeb-experimental-fouri-matrix"
+        )
+    if jax_kind and args.freeb_add_analytic_bvec is not None:
+        command.append(
+            "--freeb-add-analytic-bvec" if bool(args.freeb_add_analytic_bvec) else "--no-freeb-add-analytic-bvec"
+        )
     if kind == "resolution-preflight":
         command.append("--resolution-diagnostics-only")
         return command
-    if kind == "direct-gpu":
+    if kind in {"direct-gpu", "direct-gpu-jax-nestor"}:
         command.extend(
             [
                 "--skip-mgrid",

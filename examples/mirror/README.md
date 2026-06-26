@@ -283,6 +283,16 @@ For direct-provider versus mgrid/VMEC2000 profiling, use::
     --verbose-solver \
     --run-vmec2000
 
+To emit repeatable strict follow-up commands instead of editing shell lines by
+hand, use ``tools/diagnostics/square_coil_followup_commands.py``. The
+``vmec2000`` profile kind is the generated-``mgrid`` robustness reference. The
+``direct-gpu-jax-nestor`` profile kind emits the cached direct-coil GPU row with
+``--freeb-jax-nestor-operator`` enabled for solver-kernel A/B tests. The
+profiler writes these switches to ``configuration`` and to each JAX backend's
+``free_boundary_solver_overrides`` block, and disables the experimental
+operator unless requested so shell environment variables cannot silently change
+``MPOL``/``NTOR``/``NZETA`` comparisons.
+
 The production square-axis shape uses the first-order localization defaults
 ``--side-power 1.0 --corner-power 1.0``. Sharper values, such as the older
 ``1.4`` stress case, are useful for boundary-representation tests but require

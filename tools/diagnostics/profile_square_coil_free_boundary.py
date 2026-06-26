@@ -205,6 +205,45 @@ def _parser() -> argparse.ArgumentParser:
         help="Enable opt-in Anderson(1) mixing for free-boundary vacuum pressure in vmec_jax backends.",
     )
     p.add_argument(
+        "--freeb-jax-nestor-operator",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Use the experimental JAX-assembled NESTOR boundary operator. "
+            "The profiler explicitly disables it unless this flag is set."
+        ),
+    )
+    p.add_argument(
+        "--freeb-jax-nestor-jit-operator",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="JIT-cache the experimental JAX NESTOR operator when it is enabled.",
+    )
+    p.add_argument(
+        "--freeb-include-edge",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override VMEC_JAX_FREEB_INCLUDE_EDGE for backend A/B profiles.",
+    )
+    p.add_argument(
+        "--freeb-dense-solve-mode",
+        choices=("mode", "grid"),
+        default=None,
+        help="Override VMEC_JAX_FREEB_DENSE_SOLVE_MODE for the dense free-boundary solve.",
+    )
+    p.add_argument(
+        "--freeb-experimental-fouri-matrix",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX for NESTOR operator profiling.",
+    )
+    p.add_argument(
+        "--freeb-add-analytic-bvec",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC for NESTOR operator profiling.",
+    )
+    p.add_argument(
         "--verbose-solver",
         action="store_true",
         help="Print VMEC-style vmec_jax iteration progress for long direct/mgrid backend profiles.",
@@ -1030,6 +1069,28 @@ def _mgrid_bounds(indata: Any, *, padding_fraction: float, min_padding: float) -
     }
 
 
+def _bool_env(value: bool) -> str:
+    return "1" if bool(value) else "0"
+
+
+def _set_backend_env(overrides: dict[str, str | None]) -> dict[str, str | None]:
+    previous = {name: os.environ.get(name) for name in overrides}
+    for name, value in overrides.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = str(value)
+    return previous
+
+
+def _restore_backend_env(previous: dict[str, str | None]) -> None:
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+
 def _run_jax_backend(
     *,
     input_path: Path,
@@ -1040,6 +1101,12 @@ def _run_jax_backend(
     solver_mode: str | None,
     return_best_scored_state: bool,
     freeb_anderson_pressure: bool = False,
+    freeb_jax_nestor_operator: bool = False,
+    freeb_jax_nestor_jit_operator: bool = True,
+    freeb_include_edge: bool | None = None,
+    freeb_dense_solve_mode: str | None = None,
+    freeb_experimental_fouri_matrix: bool | None = None,
+    freeb_add_analytic_bvec: bool | None = None,
     direct_static_cache: bool = True,
     jit_direct_sampler: bool = False,
     direct_trial_bsqvac_resample: bool = True,
@@ -1073,11 +1140,21 @@ def _run_jax_backend(
                 "resample_trial_bsqvac": bool(direct_trial_bsqvac_resample),
             }
     t0 = time.perf_counter()
-    previous_return_best = os.environ.get("VMEC_JAX_RETURN_BEST_SCORED_STATE")
-    previous_anderson = os.environ.get("VMEC_JAX_FREEB_ANDERSON_PRESSURE")
-    os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = "1" if bool(return_best_scored_state) else "0"
-    if bool(freeb_anderson_pressure):
-        os.environ["VMEC_JAX_FREEB_ANDERSON_PRESSURE"] = "1"
+    env_overrides: dict[str, str | None] = {
+        "VMEC_JAX_RETURN_BEST_SCORED_STATE": _bool_env(return_best_scored_state),
+        "VMEC_JAX_FREEB_ANDERSON_PRESSURE": _bool_env(freeb_anderson_pressure),
+        "VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR": _bool_env(freeb_jax_nestor_operator),
+        "VMEC_JAX_FREEB_JAX_NESTOR_JIT_OPERATOR": _bool_env(freeb_jax_nestor_jit_operator),
+    }
+    if freeb_include_edge is not None:
+        env_overrides["VMEC_JAX_FREEB_INCLUDE_EDGE"] = _bool_env(freeb_include_edge)
+    if freeb_dense_solve_mode is not None:
+        env_overrides["VMEC_JAX_FREEB_DENSE_SOLVE_MODE"] = str(freeb_dense_solve_mode)
+    if freeb_experimental_fouri_matrix is not None:
+        env_overrides["VMEC_JAX_FREEB_EXPERIMENTAL_FOURI_MATRIX"] = _bool_env(freeb_experimental_fouri_matrix)
+    if freeb_add_analytic_bvec is not None:
+        env_overrides["VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC"] = _bool_env(freeb_add_analytic_bvec)
+    previous_env = _set_backend_env(env_overrides)
     try:
         run = run_free_boundary(
             input_path,
@@ -1093,15 +1170,7 @@ def _run_jax_backend(
             **kwargs,
         )
     finally:
-        if previous_return_best is None:
-            os.environ.pop("VMEC_JAX_RETURN_BEST_SCORED_STATE", None)
-        else:
-            os.environ["VMEC_JAX_RETURN_BEST_SCORED_STATE"] = previous_return_best
-        if bool(freeb_anderson_pressure):
-            if previous_anderson is None:
-                os.environ.pop("VMEC_JAX_FREEB_ANDERSON_PRESSURE", None)
-            else:
-                os.environ["VMEC_JAX_FREEB_ANDERSON_PRESSURE"] = previous_anderson
+        _restore_backend_env(previous_env)
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
     residuals = _final_residuals(run, config=config)
@@ -1136,6 +1205,20 @@ def _run_jax_backend(
         "input": input_path,
         "wout": wout_path,
         **residuals,
+        "free_boundary_solver_overrides": {
+            "return_best_scored_state": bool(return_best_scored_state),
+            "freeb_anderson_pressure": bool(freeb_anderson_pressure),
+            "freeb_jax_nestor_operator": bool(freeb_jax_nestor_operator),
+            "freeb_jax_nestor_jit_operator": bool(freeb_jax_nestor_jit_operator),
+            "freeb_include_edge": None if freeb_include_edge is None else bool(freeb_include_edge),
+            "freeb_dense_solve_mode": None if freeb_dense_solve_mode is None else str(freeb_dense_solve_mode),
+            "freeb_experimental_fouri_matrix": None
+            if freeb_experimental_fouri_matrix is None
+            else bool(freeb_experimental_fouri_matrix),
+            "freeb_add_analytic_bvec": None
+            if freeb_add_analytic_bvec is None
+            else bool(freeb_add_analytic_bvec),
+        },
         "accepted_provider_parity": accepted_parity,
         "virtual_casing": vc_payload,
         "free_boundary_promotion": free_boundary_promotion_status(
@@ -1889,6 +1972,19 @@ def main(argv: list[str] | None = None) -> int:
                 "ftol_array": ftol_values,
                 "resolution_diagnostics_only": True,
                 "accepted_provider_parity": bool(args.accepted_provider_parity),
+                "freeb_anderson_pressure": bool(args.freeb_anderson_pressure),
+                "freeb_jax_nestor_operator": bool(args.freeb_jax_nestor_operator),
+                "freeb_jax_nestor_jit_operator": bool(args.freeb_jax_nestor_jit_operator),
+                "freeb_include_edge": None if args.freeb_include_edge is None else bool(args.freeb_include_edge),
+                "freeb_dense_solve_mode": None
+                if args.freeb_dense_solve_mode is None
+                else str(args.freeb_dense_solve_mode),
+                "freeb_experimental_fouri_matrix": None
+                if args.freeb_experimental_fouri_matrix is None
+                else bool(args.freeb_experimental_fouri_matrix),
+                "freeb_add_analytic_bvec": None
+                if args.freeb_add_analytic_bvec is None
+                else bool(args.freeb_add_analytic_bvec),
                 "virtual_casing_quad_factor": int(args.virtual_casing_quad_factor),
                 "virtual_casing_chunk_size": args.virtual_casing_chunk_size,
                 "virtual_casing_target_chunk_size": args.virtual_casing_target_chunk_size,
@@ -1976,6 +2072,18 @@ def main(argv: list[str] | None = None) -> int:
             "solver_mode": None if solver_mode is None else str(solver_mode),
             "return_best_scored_state": bool(args.return_best_scored_state),
             "freeb_anderson_pressure": bool(args.freeb_anderson_pressure),
+            "freeb_jax_nestor_operator": bool(args.freeb_jax_nestor_operator),
+            "freeb_jax_nestor_jit_operator": bool(args.freeb_jax_nestor_jit_operator),
+            "freeb_include_edge": None if args.freeb_include_edge is None else bool(args.freeb_include_edge),
+            "freeb_dense_solve_mode": None
+            if args.freeb_dense_solve_mode is None
+            else str(args.freeb_dense_solve_mode),
+            "freeb_experimental_fouri_matrix": None
+            if args.freeb_experimental_fouri_matrix is None
+            else bool(args.freeb_experimental_fouri_matrix),
+            "freeb_add_analytic_bvec": None
+            if args.freeb_add_analytic_bvec is None
+            else bool(args.freeb_add_analytic_bvec),
             "direct_static_cache": bool(args.direct_static_cache),
             "jit_direct_sampler": bool(args.jit_direct_sampler),
             "direct_trial_bsqvac_resample": bool(args.direct_trial_bsqvac_resample),
@@ -2042,6 +2150,12 @@ def main(argv: list[str] | None = None) -> int:
             solver_mode=solver_mode,
             return_best_scored_state=bool(args.return_best_scored_state),
             freeb_anderson_pressure=bool(args.freeb_anderson_pressure),
+            freeb_jax_nestor_operator=bool(args.freeb_jax_nestor_operator),
+            freeb_jax_nestor_jit_operator=bool(args.freeb_jax_nestor_jit_operator),
+            freeb_include_edge=args.freeb_include_edge,
+            freeb_dense_solve_mode=args.freeb_dense_solve_mode,
+            freeb_experimental_fouri_matrix=args.freeb_experimental_fouri_matrix,
+            freeb_add_analytic_bvec=args.freeb_add_analytic_bvec,
             direct_static_cache=bool(args.direct_static_cache),
             jit_direct_sampler=bool(args.jit_direct_sampler),
             direct_trial_bsqvac_resample=bool(args.direct_trial_bsqvac_resample),
@@ -2068,6 +2182,12 @@ def main(argv: list[str] | None = None) -> int:
             solver_mode=solver_mode,
             return_best_scored_state=bool(args.return_best_scored_state),
             freeb_anderson_pressure=bool(args.freeb_anderson_pressure),
+            freeb_jax_nestor_operator=bool(args.freeb_jax_nestor_operator),
+            freeb_jax_nestor_jit_operator=bool(args.freeb_jax_nestor_jit_operator),
+            freeb_include_edge=args.freeb_include_edge,
+            freeb_dense_solve_mode=args.freeb_dense_solve_mode,
+            freeb_experimental_fouri_matrix=args.freeb_experimental_fouri_matrix,
+            freeb_add_analytic_bvec=args.freeb_add_analytic_bvec,
             verbose_solver=bool(args.verbose_solver),
             virtual_casing_diagnostics=False,
             accepted_provider_parity=bool(args.accepted_provider_parity),

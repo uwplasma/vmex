@@ -149,6 +149,41 @@ def test_square_coil_followup_commands_emit_direct_gpu_speed_probe(tmp_path: Pat
     assert "direct_gpu" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_direct_gpu_jax_nestor_probe(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "direct-gpu-jax-nestor",
+            "--no-freeb-jax-nestor-jit-operator",
+            "--freeb-include-edge",
+            "--freeb-dense-solve-mode",
+            "grid",
+            "--no-freeb-experimental-fouri-matrix",
+            "--freeb-add-analytic-bvec",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert "--skip-mgrid" in command
+    assert "--skip-provider-parity" in command
+    assert "--jit-forces" in command
+    assert "--jit-direct-sampler" in command
+    assert "--freeb-jax-nestor-operator" in command
+    assert "--no-freeb-jax-nestor-jit-operator" in command
+    assert "--freeb-include-edge" in command
+    assert command[command.index("--freeb-dense-solve-mode") + 1] == "grid"
+    assert "--no-freeb-experimental-fouri-matrix" in command
+    assert "--freeb-add-analytic-bvec" in command
+    assert "--run-vmec2000" not in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "direct_gpu_jax_nestor" in outdir.name
+
+
 def test_square_coil_followup_commands_default_nzeta_tracks_ntor(tmp_path: Path):
     ntor = 31
     args = followup._parser().parse_args(
