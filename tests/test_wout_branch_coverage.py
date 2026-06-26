@@ -9,7 +9,7 @@ import pytest
 import vmec_jax.wout as wout_module
 from vmec_jax.modes import ModeTable
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 from vmec_jax.wout import (
     _apply_nyquist_half_weight,
     _bsubuv_parity_from_state,

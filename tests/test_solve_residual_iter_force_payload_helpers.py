@@ -22,7 +22,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
     resolve_residual_force_mask_pack,
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import strict_step_acceptance_decision, strict_step_branch_result
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _frzl(*, edge_z_nan: bool = False) -> TomnspsRZL:

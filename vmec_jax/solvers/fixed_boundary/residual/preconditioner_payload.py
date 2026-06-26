@@ -13,7 +13,7 @@ from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     preconditioner_output_blocks_jax,
     preconditioner_output_blocks_np,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _jax_available(has_jax_func=None) -> bool:
@@ -511,7 +511,7 @@ def seed_preconditioner_cache_from_bcovar_update(
         cache.precond_diag = None
         cache.tcon = zero_tcon
     else:
-        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+        from vmec_jax.kernels.constraints import precondn_diag_axd1_from_bcovar
 
         use_numpy_patch = (
             bool(host_update_assembly)
@@ -519,7 +519,7 @@ def seed_preconditioner_cache_from_bcovar_update(
             and (not tree_has_tracer(s))
         )
         if use_numpy_patch:
-            from vmec_jax.vmec_numpy_forces import _numpy_module_patch
+            from vmec_jax.kernels.numpy_forces import _numpy_module_patch
 
             with _numpy_module_patch():
                 ard1, azd1 = precondn_diag_axd1_from_bcovar(

@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.vmec_forces as vf
-import vmec_jax.vmec_lforbal as vl
-from vmec_jax.vmec_forces import VmecRZForceKernels, vmec_residual_internal_from_kernels
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+import vmec_jax.kernels.forces as vf
+import vmec_jax.kernels.lforbal as vl
+from vmec_jax.kernels.forces import VmecRZForceKernels, vmec_residual_internal_from_kernels
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
 
 def _trig():

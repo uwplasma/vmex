@@ -1246,7 +1246,7 @@ def test_exact_residual_after_jacobian_evaluates_cached_state_on_cache_miss() ->
 def test_post_jacobian_clear_invokes_global_cache_clearers(monkeypatch) -> None:
     import vmec_jax.discrete_adjoint as adjoint_module
     import vmec_jax.preconditioner_1d_jax as precond_module
-    import vmec_jax.vmec_numpy_forces as numpy_forces_module
+    import vmec_jax.kernels.numpy_forces as numpy_forces_module
 
     calls = []
     monkeypatch.setattr(adjoint_module, "clear_replay_scan_caches", lambda: calls.append("replay"))

@@ -6,7 +6,7 @@ import numpy as np
 
 from vmec_jax.config import VMECConfig
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import (
+from vmec_jax.kernels.bcovar import (
     _apply_vmec_lambda_axis_closure,
     _half_mesh_from_even_odd,
     _metric_cross_even_odd,
@@ -14,7 +14,7 @@ from vmec_jax.vmec_bcovar import (
     _pshalf_from_s,
     vmec_bcovar_half_mesh_from_wout,
 )
-from vmec_jax.vmec_residue import vmec_pwint_from_trig
+from vmec_jax.kernels.residue import vmec_pwint_from_trig
 
 
 def _circular_axisymmetric_case(*, ns: int = 4):

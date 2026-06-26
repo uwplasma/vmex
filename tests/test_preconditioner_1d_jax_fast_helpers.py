@@ -71,7 +71,7 @@ def _manual_mats(*, ns=4, mpol=3, nrange=2):
 
 
 def _frzl(*, ns=4, mpol=3, nrange=2, include_optional=True):
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     base = (np.arange(ns * mpol * nrange, dtype=float).reshape(ns, mpol, nrange) + 1.0) / 10.0
     zeros = np.zeros_like(base)
@@ -464,7 +464,7 @@ def test_high_mode_non_lasym_precomputed_tridi_matches_direct_apply():
 
 def test_rz_preconditioner_apply_jit_reuses_inactive_placeholders(monkeypatch):
     from vmec_jax import preconditioner_1d_jax as p1d
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     mats = _manual_mats()
     frzl = _frzl(include_optional=False)

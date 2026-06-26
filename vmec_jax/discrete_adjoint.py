@@ -979,7 +979,7 @@ def _packed_dynamic_replay_step_from_carry(
         refreshed_azd1 = jnp.zeros_like(jnp.asarray(constraint_azd1_before))
         refreshed_tcon = jnp.zeros_like(jnp.asarray(constraint_tcon_before))
     else:
-        from .vmec_constraints import precondn_diag_axd1_from_bcovar
+        from .kernels.constraints import precondn_diag_axd1_from_bcovar
 
         refreshed_ard1, refreshed_azd1 = precondn_diag_axd1_from_bcovar(
             trig=trig,

@@ -25,10 +25,10 @@ from .geom import _eval_geom_jit, eval_geom
 from .grids import AngleGrid
 from .modes import ModeTable
 from .field import b2_from_bsup, bsub_from_bsup, bsup_from_geom, bsup_from_sqrtg_lambda, lamscale_from_phips
-from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
-from .vmec_realspace import vmec_realspace_geom_from_state
-from .vmec_tomnsp import vmec_trig_tables
-from .vmec_parity import vmec_m1_internal_to_physical_signed
+from .kernels.jacobian import vmec_half_mesh_jacobian_from_state
+from .kernels.realspace import vmec_realspace_geom_from_state
+from .kernels.tomnsp import vmec_trig_tables
+from .kernels.parity import vmec_m1_internal_to_physical_signed
 from .energy import flux_profiles_from_indata
 from .field import signgs_from_sqrtg
 from .config import load_config
@@ -390,7 +390,7 @@ def bmag_from_state_physical(
     lthreed = bool(getattr(cfg, "lthreed", int(getattr(cfg, "ntor", 0)) > 0))
     lasym = bool(getattr(cfg, "lasym", False))
     if lconm1 and (lthreed or lasym) and int(getattr(cfg, "mpol", 0)) > 1:
-        from .vmec_parity import vmec_m1_internal_to_physical_signed
+        from .kernels.parity import vmec_m1_internal_to_physical_signed
         from .state import VMECState
 
         Rcos, Zsin, Rsin, Zcos = vmec_m1_internal_to_physical_signed(

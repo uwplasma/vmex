@@ -315,7 +315,7 @@ def test_implicit_linear_algebra_and_state_packing_helpers():
         _zero_state_like,
     )
     from vmec_jax.solve import _zero_edge_rz_force_block, _zero_edge_rz_force_blocks
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     layout = StateLayout(ns=2, K=3, lasym=True)
     state = VMECState(

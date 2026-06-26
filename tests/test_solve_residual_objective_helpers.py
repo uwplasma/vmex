@@ -10,7 +10,7 @@ from vmec_jax.solvers.fixed_boundary.optimization.residual_objective import (
     prepare_residual_objective_blocks,
     residual_objective_vector,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _block(value: float, *, ns: int = 3) -> np.ndarray:

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.vmec_forces as vf
+import vmec_jax.kernels.forces as vf
 from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.config import VMECConfig
 from vmec_jax.fourier import eval_fourier
@@ -14,7 +14,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.namelist import InData
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import (
+from vmec_jax.kernels.forces import (
     VmecRZForceKernels,
     _constraint_kernels_from_state,
     _vmec_force_profile_enabled,

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from ._compat import jax, jnp, jit, has_jax
-from .vmec_tomnsp import TomnspsRZL
+from .kernels.tomnsp import TomnspsRZL
 
 _LAMBDA_PRECOND_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
@@ -218,7 +218,7 @@ def lambda_preconditioner(
     Parameters
     ----------
     bc:
-        :class:`~vmec_jax.vmec_bcovar.VmecHalfMeshBcovar` (or compatible) providing
+        :class:`~vmec_jax.kernels.bcovar.VmecHalfMeshBcovar` (or compatible) providing
         ``guu/guv/gvv`` and ``jac.sqrtg`` on the *half mesh* and scalar ``lamscale``.
     trig:
         Unused placeholder to keep parity-call signatures consistent with the

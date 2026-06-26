@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import vmec_jax.vmec_forces as vf
+import vmec_jax.kernels.forces as vf
 from vmec_jax.config import VMECConfig
 from vmec_jax.namelist import InData
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import (
+from vmec_jax.kernels.bcovar import (
     _apply_vmec_lambda_axis_closure,
     _half_mesh_from_even_odd,
     _metric_cross_even_odd,

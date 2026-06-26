@@ -19,7 +19,7 @@ def test_end_to_end_gn_vmec_residual_decreases_for_circular_tokamak():
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_gn_vmec_residual
     from vmec_jax.static import build_static
-    from vmec_jax.vmec_tomnsp import vmec_angle_grid
+    from vmec_jax.kernels.tomnsp import vmec_angle_grid
     from vmec_jax.wout import read_wout
 
     enable_x64(True)

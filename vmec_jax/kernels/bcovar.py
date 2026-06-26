@@ -5,7 +5,7 @@ fixed-boundary parity work:
 
 - Build half-mesh metric elements ``g_uu, g_uv, g_vv`` using VMEC's even/odd-m
   decomposition and half-mesh staggering.
-- Build half-mesh Jacobian-related fields via :mod:`vmec_jax.vmec_jacobian`.
+- Build half-mesh Jacobian-related fields via :mod:`vmec_jax.kernels.jacobian`.
 - Compute VMEC contravariant field components ``(B^u, B^v)`` and the covariant
   components ``(B_u, B_v)`` on the radial half mesh.
 - Provide force-kernel inputs used by VMEC's ``forces`` routine.
@@ -26,26 +26,26 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp, tree_util
-from .field import TWOPI
-from .field import lamscale_from_phips
-from .field import chips_from_wout_chipf
-from .vmec_jacobian import VmecHalfMeshJacobian, jacobian_half_mesh_from_parity
-from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
-from .grids import AngleGrid
-from .vmec_residue import vmec_pwint_from_trig
-from .vmec_parity import (
+from .._compat import jnp, tree_util
+from ..field import TWOPI
+from ..field import lamscale_from_phips
+from ..field import chips_from_wout_chipf
+from .jacobian import VmecHalfMeshJacobian, jacobian_half_mesh_from_parity
+from ..fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
+from ..grids import AngleGrid
+from .residue import vmec_pwint_from_trig
+from .parity import (
     ParityRZL,
     internal_odd_from_physical_vmec_jlam,
     internal_odd_from_physical_vmec_m1,
     split_rzl_even_odd_m,
     vmec_m1_internal_to_physical_signed,
 )
-from .vmec_realspace import (
+from .realspace import (
     vmec_realspace_synthesis_multi,
 )
-from .vmec_tomnsp import VmecTrigTables, vmec_trig_tables
-from .nyquist import nyquist_basis_from_wout
+from .tomnsp import VmecTrigTables, vmec_trig_tables
+from ..nyquist import nyquist_basis_from_wout
 
 
 def _vmec_bcovar_profile_enabled() -> bool:

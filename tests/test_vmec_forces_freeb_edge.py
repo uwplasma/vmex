@@ -7,7 +7,7 @@ import pytest
 
 
 from vmec_jax.driver import load_example
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout
 pytestmark = pytest.mark.full
 
 

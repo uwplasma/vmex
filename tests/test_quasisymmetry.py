@@ -216,7 +216,7 @@ def test_quasisymmetry_nyquist_coeff_helpers_project_known_modes_and_validate_in
         _vmec_wrout_nyquist_sin_coeffs_jax,
         quasisymmetry_ratio_residual_from_wout,
     )
-    from vmec_jax.vmec_tomnsp import vmec_trig_tables
+    from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
     trig = vmec_trig_tables(ntheta=6, nzeta=5, nfp=1, mmax=2, nmax=2, lasym=False)
     modes = ModeTable(m=np.array([0, 1, 1, 2]), n=np.array([0, 1, -1, 0]))
@@ -270,8 +270,8 @@ def test_quasisymmetry_diagnostics_from_state_uses_lightweight_vmec_dependencies
     import vmec_jax.driver as driver
     import vmec_jax.energy as energy
     import vmec_jax.profiles as profiles
-    import vmec_jax.vmec_bcovar as vmec_bcovar
-    import vmec_jax.vmec_lforbal as vmec_lforbal
+    import vmec_jax.kernels.bcovar as vmec_bcovar
+    import vmec_jax.kernels.lforbal as vmec_lforbal
     from vmec_jax.quasisymmetry import quasisymmetry_diagnostics_from_state
 
     class InData:

@@ -18,8 +18,8 @@ from ..._compat import has_jax, jax
 from ...integrals import cumrect_s_halfmesh
 from ...modes import nyquist_mode_table_from_grid, vmec_mode_table
 from ...namelist import InData
-from ...vmec_parity import vmec_m1_internal_to_physical_signed_host
-from ...vmec_tomnsp import vmec_trig_tables
+from ...kernels.parity import vmec_m1_internal_to_physical_signed_host
+from ...kernels.tomnsp import vmec_trig_tables
 
 
 class WoutMainGeometryCoefficients(NamedTuple):

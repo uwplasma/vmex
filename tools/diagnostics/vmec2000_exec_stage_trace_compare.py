@@ -30,8 +30,8 @@ import math
 import vmec_jax.api as vj
 from vmec_jax.solve import SolveVmecResidualResult
 from vmec_jax.wout import read_wout
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout
 from vmec_jax.wout import _compute_bsubs_half_mesh
 
 
@@ -1989,7 +1989,7 @@ def _dump_bsubs_final(run: vj.FixedBoundaryRun, outdir: Path) -> None:
     # Apply VMEC jxbforce-style bsubv equilibration and low-pass filter so
     # the diagnostic dump can be compared directly to jxbout outputs.
     from vmec_jax.fourier import build_helical_basis
-    from vmec_jax.vmec_tomnsp import vmec_angle_grid
+    from vmec_jax.kernels.tomnsp import vmec_angle_grid
     from vmec_jax.wout import (
         _apply_bsubv_equif_correction,
         _bsubuv_parity_from_coeffs,
@@ -4787,7 +4787,7 @@ def main() -> None:
 
     if wout is not None:
         from vmec_jax.modes import vmec_mode_table
-        from vmec_jax.vmec_parity import vmec_m1_internal_to_physical_signed
+        from vmec_jax.kernels.parity import vmec_m1_internal_to_physical_signed
         from vmec_jax.wout import state_from_wout
 
         wout_state = state_from_wout(wout)

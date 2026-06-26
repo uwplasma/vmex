@@ -9,7 +9,7 @@ import numpy as np
 from vmec_jax.field import lamscale_from_phips
 from vmec_jax.modes import vmec_mode_table
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_parity import vmec_m1_physical_to_internal_signed
+from vmec_jax.kernels.parity import vmec_m1_physical_to_internal_signed
 
 from .flux import lambda_full_from_wout_half_mesh
 from .schema import WoutData, assert_main_modes_match_wout

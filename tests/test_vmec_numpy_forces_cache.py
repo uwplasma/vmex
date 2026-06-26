@@ -5,8 +5,8 @@ import numpy as np
 import vmec_jax._compat as compat
 import vmec_jax.solve as solve_mod
 import vmec_jax.solvers.fixed_boundary.residual.payload_blocks as payload_helpers_mod
-import vmec_jax.vmec_forces as vf
-from vmec_jax.vmec_numpy_forces import (
+import vmec_jax.kernels.forces as vf
+from vmec_jax.kernels.numpy_forces import (
     _NP_STACK_CACHE,
     _NP_STACK_CACHE_LIMIT,
     _NP_STACK_CACHE_MAX_BYTES,
@@ -215,7 +215,7 @@ def test_numpy_module_patch_restores_force_path_modules_and_numpy_mode():
 
 
 def test_numpy_module_patch_deletes_attrs_that_were_absent(monkeypatch):
-    import vmec_jax.vmec_numpy_forces as vmn
+    import vmec_jax.kernels.numpy_forces as vmn
 
     class DummyModule:
         pass
@@ -229,8 +229,8 @@ def test_numpy_module_patch_deletes_attrs_that_were_absent(monkeypatch):
 
 
 def test_numpy_module_patch_honors_tomnsps_fft_policy(monkeypatch):
-    import vmec_jax.vmec_numpy_forces as vmn
-    import vmec_jax.vmec_tomnsp as vt
+    import vmec_jax.kernels.numpy_forces as vmn
+    import vmec_jax.kernels.tomnsp as vt
 
     vmn._NP_TOMNSPS_FFT_CACHE.clear()
     monkeypatch.setattr(vt, "_TOMNSPS_FFT_ENV", "0")

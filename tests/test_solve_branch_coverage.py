@@ -26,7 +26,7 @@ from vmec_jax.solve import (
     _vmec_scale_m1_factors_from_mats_np,
 )
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _static(*, m=(0, 1, 2), n=(0, 1, -1), nfp=2, ns=3, mpol=3, ntor=1, lasym=False, lthreed=True):
@@ -227,8 +227,8 @@ def _nan_residual(state: VMECState) -> TomnspsRZL:
 def _install_fake_residual_physics(monkeypatch, residual_from_state):
     import vmec_jax.boundary as boundary_mod
     import vmec_jax.energy as energy_mod
-    import vmec_jax.vmec_forces as forces_mod
-    import vmec_jax.vmec_residue as residue_mod
+    import vmec_jax.kernels.forces as forces_mod
+    import vmec_jax.kernels.residue as residue_mod
 
     monkeypatch.setattr(
         energy_mod,

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from vmec_jax.vmec_residue import (
+from vmec_jax.kernels.residue import (
     VmecForceNorms,
     VmecForceNormsDynamic,
     vmec_force_norms_from_bcovar,
@@ -14,7 +14,7 @@ from vmec_jax.vmec_residue import (
     vmec_scalxc_from_s,
     vmec_wint_from_trig,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
 
 def test_dynamic_force_norms_match_vmec_scalar_path_for_synthetic_bcovar() -> None:

@@ -400,9 +400,9 @@ def quasisymmetry_diagnostics_from_state(
     from .modes import nyquist_mode_table_from_grid
     from .energy import flux_profiles_from_indata
     from .profiles import eval_profiles
-    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-    from .vmec_lforbal import currents_from_bcovar
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+    from .kernels.lforbal import currents_from_bcovar
+    from .kernels.tomnsp import vmec_trig_tables
 
     if pressure_local is None:
         prof_seed = eval_profiles(indata, np.asarray(static.s))

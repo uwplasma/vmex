@@ -30,10 +30,10 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.grids import AngleGrid
 from vmec_jax.modes import ModeTable
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-from vmec_jax.vmec_residue import vmec_force_norms_from_bcovar_dynamic, vmec_fsq_from_tomnsps_dynamic
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+from vmec_jax.kernels.residue import vmec_force_norms_from_bcovar_dynamic, vmec_fsq_from_tomnsps_dynamic
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 
 

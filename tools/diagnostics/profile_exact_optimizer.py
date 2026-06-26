@@ -675,7 +675,7 @@ def _cache_snapshot(opt: Any | None = None, *, include_global: bool = True) -> d
             )
         out["preconditioner_1d_jax"] = precond
         out["vmec_numpy_forces"] = _module_cache_lengths(
-            "vmec_jax.vmec_numpy_forces",
+            "vmec_jax.kernels.numpy_forces",
             ("_NP_STACK_CACHE",),
         )
     out["total_entries"] = _sum_cache_entries(out)

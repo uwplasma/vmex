@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from vmec_jax.vmec_parity import internal_odd_from_physical, internal_odd_from_physical_vmec_m1
+from vmec_jax.kernels.parity import internal_odd_from_physical, internal_odd_from_physical_vmec_m1
 
 
 def test_internal_odd_axis_rules_copy_vs_zero():

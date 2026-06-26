@@ -94,9 +94,9 @@ def final_flux_profiles_from_state(
     if os.getenv("VMEC_JAX_DISABLE_WOUT_NCURR_RECOMPUTE", "0") not in ("", "0"):
         return flux_local, prof_local
 
-    from ..vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-    from ..vmec_residue import vmec_pwint_from_trig
-    from ..vmec_tomnsp import vmec_trig_tables
+    from ..kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+    from ..kernels.residue import vmec_pwint_from_trig
+    from ..kernels.tomnsp import vmec_trig_tables
     from ..wout import _chipf_from_chips, _icurv_full_mesh_from_indata
 
     traced = False
@@ -199,7 +199,7 @@ def final_flux_profiles_from_state(
             trig=trig,
         )
     else:
-        from ..vmec_numpy_forces import _numpy_module_patch
+        from ..kernels.numpy_forces import _numpy_module_patch
 
         with _numpy_module_patch():
             bc_pre = vmec_bcovar_half_mesh_from_wout(

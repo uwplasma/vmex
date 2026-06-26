@@ -16,13 +16,13 @@ import numpy as np
 from ._compat import has_jax, jax, jnp
 from .state import VMECState
 from .fourier import eval_fourier
-from .vmec_parity import vmec_m1_internal_to_physical_signed
-from .vmec_realspace import (
+from .kernels.parity import vmec_m1_internal_to_physical_signed
+from .kernels.realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
     vmec_realspace_geom_from_state,
 )
-from .vmec_residue import vmec_pwint_from_trig, vmec_wint_from_trig
+from .kernels.residue import vmec_pwint_from_trig, vmec_wint_from_trig
 from .io.wout import bsubs as _wout_bsubs_helpers
 from .io.wout import debug as _wout_debug_helpers
 from .io.wout import diagnostics as _wout_diagnostics
@@ -73,7 +73,7 @@ from .io.wout.schema import (
     _nc_scalar,  # noqa: F401 - compatibility export
     assert_main_modes_match_wout,
 )
-from .vmec_tomnsp import vmec_trig_tables
+from .kernels.tomnsp import vmec_trig_tables
 
 
 MU0 = 4e-7 * np.pi  # N/A^2
@@ -241,7 +241,7 @@ def equilibrium_iota_profiles_from_state(*, state: VMECState, static, indata, si
     from .energy import _iotaf_from_iotas, flux_profiles_from_indata
     from .profiles import eval_profiles
     from .solvers.fixed_boundary.profiles import _half_mesh_from_full_mesh, _mass_half_mesh_from_indata
-    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
 
     s = jnp.asarray(static.s)
     if s.shape[0] < 2:
@@ -413,7 +413,7 @@ def _synthesize_wout_geometry_from_state(
     timing: dict[str, float],
 ) -> dict[str, np.ndarray | None]:
     """Synthesize real-space geometry for minimal WOUT construction."""
-    from .vmec_numpy_forces import _numpy_module_patch
+    from .kernels.numpy_forces import _numpy_module_patch
 
     if timing_enabled:
         import time as _time
@@ -551,8 +551,8 @@ def wout_minimal_from_fixed_boundary(
       These can be filled in later once the full VMEC nyquist output path is
       fully ported end-to-end.
     """
-    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-    from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
+    from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+    from .kernels.residue import vmec_force_norms_from_bcovar_dynamic
 
     runtime_options = minimal_wout_runtime_options_from_env()
     wout_timing_enabled = runtime_options.timing_enabled
@@ -611,8 +611,8 @@ def wout_minimal_from_fixed_boundary(
     chipf_out = core.chipf_out
     phi = core.phi
     wout_like = core.wout_like
-    from .vmec_forces import vmec_forces_rz_from_wout
-    from .vmec_numpy_forces import _numpy_module_patch
+    from .kernels.forces import vmec_forces_rz_from_wout
+    from .kernels.numpy_forces import _numpy_module_patch
 
     force_sources = prepare_minimal_wout_force_sources(
         state=state,
@@ -679,7 +679,7 @@ def wout_minimal_from_fixed_boundary(
     aspect = derived.aspect
 
     from .fourier import build_helical_basis
-    from .vmec_tomnsp import vmec_angle_grid
+    from .kernels.tomnsp import vmec_angle_grid
 
     nyquist_fields = prepare_minimal_wout_nyquist_fields(
         state=state,

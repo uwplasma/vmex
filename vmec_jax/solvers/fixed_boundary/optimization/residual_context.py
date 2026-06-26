@@ -115,7 +115,7 @@ def prepare_residual_force_context(
     if boundary_from_indata_func is None:
         from ....boundary import boundary_from_indata as boundary_from_indata_func
     if vmec_trig_tables_func is None:
-        from ....vmec_tomnsp import vmec_trig_tables as vmec_trig_tables_func
+        from ....kernels.tomnsp import vmec_trig_tables as vmec_trig_tables_func
 
     signgs = int(signgs)
     idx00 = int(idx00 if idx00 is not None else mode00_index_func(static.modes))
@@ -231,8 +231,8 @@ def residual_terms_from_force_context(
         jnp_module = jnp
     if assemble_residual_objective_terms_func is None:
         from .residual_objective import assemble_residual_objective_terms as assemble_residual_objective_terms_func
-    from ....vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from ....vmec_residue import vmec_force_norms_from_bcovar_dynamic
+    from ....kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from ....kernels.residue import vmec_force_norms_from_bcovar_dynamic
 
     kernels = vmec_forces_rz_from_wout(
         state=state,

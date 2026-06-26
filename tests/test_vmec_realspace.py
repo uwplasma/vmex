@@ -5,12 +5,12 @@ import numpy as np
 from vmec_jax._compat import enable_x64
 from vmec_jax.fourier import build_helical_basis, eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 from vmec_jax.modes import vmec_mode_table
-from vmec_jax.vmec_realspace import (
+from vmec_jax.kernels.realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
     vmec_realspace_synthesis_dzeta_phys,
 )
-from vmec_jax.vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_angle_grid, vmec_trig_tables
 
 
 def test_vmec_realspace_matches_eval_fourier():

@@ -511,7 +511,7 @@ def _dump_tomnsps_hlo(input_path: str, outdir: Path) -> None:
         return
     try:
         from vmec_jax.config import load_config
-        from vmec_jax.vmec_tomnsp import vmec_trig_tables, tomnsps_rzl
+        from vmec_jax.kernels.tomnsp import vmec_trig_tables, tomnsps_rzl
     except Exception as exc:  # pragma: no cover
         print(f"[profile_fixed_boundary] HLO dump skipped (vmec_jax import failed): {exc}")
         return

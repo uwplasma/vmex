@@ -112,7 +112,7 @@ def build_static(
     vmec_phase_dtheta_stack = None
     vmec_phase_dzeta_stack = None
     try:
-        from .vmec_tomnsp import vmec_trig_tables, tomnsps_masks as _tomnsps_masks
+        from .kernels.tomnsp import vmec_trig_tables, tomnsps_masks as _tomnsps_masks
 
         trig_vmec = vmec_trig_tables(
             ntheta=int(cfg.ntheta),
@@ -221,7 +221,7 @@ def build_static(
     except Exception:
         m0_n_index = None
     try:
-        from .vmec_parity import signed_maps_from_modes
+        from .kernels.parity import signed_maps_from_modes
 
         signed_maps = signed_maps_from_modes(modes)
         idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)

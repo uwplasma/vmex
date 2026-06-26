@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp, einsum
-from .vmec_tomnsp import VmecTrigTables
+from .._compat import jnp, einsum
+from .tomnsp import VmecTrigTables
 
 
 @dataclass(frozen=True)
@@ -321,7 +321,7 @@ def tcon_from_precondn_axisym(
     hs = jnp.asarray(s[1] - s[0], dtype=dtype)
 
     # Import preconditioner helpers lazily to avoid circular imports.
-    from . import preconditioner_1d_jax as _p1d
+    from .. import preconditioner_1d_jax as _p1d
 
     w_int = _p1d._wint_from_config(cfg=cfg, dtype=dtype)
     sqrt_sf, sqrt_sh = _p1d._sqrt_profiles_from_ns(ns, dtype=dtype)
@@ -423,7 +423,7 @@ def alias_gcon(
     ztemp:
         Shape (ns, ntheta3, nzeta), defined on the VMEC internal theta grid.
     trig:
-        Trig tables from :func:`vmec_jax.vmec_tomnsp.vmec_trig_tables`.
+        Trig tables from :func:`vmec_jax.kernels.tomnsp.vmec_trig_tables`.
     ntor, mpol:
         Spectral truncation. Uses n=0..ntor and m=0..mpol-1.
     signgs:

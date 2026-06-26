@@ -8,9 +8,9 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-from vmec_jax.vmec_residue import vmec_force_norms_from_bcovar, vmec_fsq_from_tomnsps, vmec_fsq_sums_from_tomnsps
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+from vmec_jax.kernels.residue import vmec_force_norms_from_bcovar, vmec_fsq_from_tomnsps, vmec_fsq_sums_from_tomnsps
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 

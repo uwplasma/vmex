@@ -12,9 +12,9 @@ from vmec_jax.boundary import BoundaryCoeffs
 from vmec_jax.modes import ModeTable, vmec_mode_table
 from vmec_jax.namelist import InData
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_bcovar import VmecHalfMeshBcovar
-from vmec_jax.vmec_jacobian import VmecHalfMeshJacobian
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.bcovar import VmecHalfMeshBcovar
+from vmec_jax.kernels.jacobian import VmecHalfMeshJacobian
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _axisym_state(ns: int = 3) -> VMECState:
@@ -107,9 +107,9 @@ def test_wout_minimal_constructor_threads_synthetic_physics_diagnostics(monkeypa
             Z_sin=np.zeros(2),
         ),
     )
-    monkeypatch.setattr("vmec_jax.vmec_bcovar.vmec_bcovar_half_mesh_from_wout", lambda **_kwargs: bc)
+    monkeypatch.setattr("vmec_jax.kernels.bcovar.vmec_bcovar_half_mesh_from_wout", lambda **_kwargs: bc)
     monkeypatch.setattr(
-        "vmec_jax.vmec_residue.vmec_force_norms_from_bcovar_dynamic",
+        "vmec_jax.kernels.residue.vmec_force_norms_from_bcovar_dynamic",
         lambda **_kwargs: SimpleNamespace(
             vp=np.asarray([0.0, 1.5, 2.0]),
             wb=np.asarray(4.0),

@@ -9,7 +9,7 @@ import pytest
 from vmec_jax._compat import jnp
 from vmec_jax.integrals import cumrect_s_halfmesh
 from vmec_jax.namelist import InData
-from vmec_jax.vmec_lforbal import MU0 as LFORBAL_MU0
+from vmec_jax.kernels.lforbal import MU0 as LFORBAL_MU0
 from vmec_jax.wout import (
     MU0,
     WoutData,

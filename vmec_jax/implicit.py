@@ -346,7 +346,7 @@ def _build_vmec_residual_setup(*, state0_c: VMECState, static, indata, signgs_i:
     """Build profile, force, and structural residual metadata for implicit VMEC residual AD."""
     from .boundary import boundary_from_indata
     from .solvers.fixed_boundary.optimization.residual_context import prepare_residual_force_context
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.tomnsp import vmec_trig_tables
 
     context = prepare_residual_force_context(
         state0_c,
@@ -411,8 +411,8 @@ def _vmec_residual_vector_from_state(
     from .preconditioner_1d_jax import (
         lambda_preconditioner_cached,
     )
-    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from .vmec_residue import (
+    from .kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from .kernels.residue import (
         vmec_apply_m1_constraints,
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,

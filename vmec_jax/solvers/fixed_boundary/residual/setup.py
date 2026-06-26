@@ -135,7 +135,7 @@ def build_residual_profile_setup(
     profile_numpy_patch = None
     if bool(host_update_assembly) or bool(host_profile_setup):
         try:
-            from vmec_jax.vmec_numpy_forces import _numpy_module_patch as profile_numpy_patch
+            from vmec_jax.kernels.numpy_forces import _numpy_module_patch as profile_numpy_patch
         except Exception:
             profile_numpy_patch = None
     if bool(state0_has_tracer):
@@ -145,7 +145,7 @@ def build_residual_profile_setup(
         _t_profile_data = _timer_start()
         s_profile = s
         if profile_numpy_patch is not None:
-            from vmec_jax.vmec_numpy_forces import _wrap as _np_wrap
+            from vmec_jax.kernels.numpy_forces import _wrap as _np_wrap
 
             s_profile = _np_wrap(np.asarray(s))
         profile_setup = build_wout_like_profiles_func(

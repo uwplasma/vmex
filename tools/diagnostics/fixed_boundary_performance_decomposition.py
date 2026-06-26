@@ -62,8 +62,8 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/free_boundary/laplace_solver/laplace_solver.cc",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_tomnsp.py",
-            "vmec_jax/vmec_utils.py",
+            "vmec_jax/kernels/tomnsp.py",
+            "vmec_jax/kernels/realspace.py",
         ],
         "profiler_keys": [
             "compute_forces_s",
@@ -82,8 +82,8 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/vmec/thread_local_storage/thread_local_storage.h",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_bcovar.py",
-            "vmec_jax/vmec_forces.py",
+            "vmec_jax/kernels/bcovar.py",
+            "vmec_jax/kernels/forces.py",
         ],
         "profiler_keys": [
             "compute_forces_main_s",
@@ -103,7 +103,7 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/vmec/thread_local_storage/thread_local_storage.h",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_forces.py",
+            "vmec_jax/kernels/forces.py",
             "vmec_jax/solvers/fixed_boundary/residual/iteration.py",
         ],
         "profiler_keys": [

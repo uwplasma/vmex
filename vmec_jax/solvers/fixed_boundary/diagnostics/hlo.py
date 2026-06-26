@@ -131,7 +131,7 @@ def maybe_dump_initial_residual_hlo_kernels(
     try:
 
         def _bcovar_only(st):
-            from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+            from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
 
             return vmec_bcovar_half_mesh_from_wout(
                 state=st,
@@ -156,8 +156,8 @@ def maybe_dump_initial_residual_hlo_kernels(
     except Exception:
         pass
     try:
-        from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
-        from vmec_jax.vmec_forces import vmec_residual_internal_from_kernels
+        from vmec_jax.kernels.forces import vmec_forces_rz_from_wout
+        from vmec_jax.kernels.forces import vmec_residual_internal_from_kernels
 
         k_hlo = vmec_forces_rz_from_wout(
             state=state0,

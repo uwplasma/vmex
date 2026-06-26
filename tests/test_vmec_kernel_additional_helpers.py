@@ -7,14 +7,14 @@ import pytest
 
 import vmec_jax.discrete_adjoint as da
 import vmec_jax.preconditioner_1d_jax as pc
-import vmec_jax.vmec_forces as vf
-from vmec_jax.vmec_residue import (
+import vmec_jax.kernels.forces as vf
+from vmec_jax.kernels.residue import (
     _constrain_m1_pair,
     vmec_fsq_sums_from_tomnsps,
     vmec_gcx2_from_tomnsps,
     vmec_scalxc_from_s,
 )
-from vmec_jax.vmec_tomnsp import (
+from vmec_jax.kernels.tomnsp import (
     TomnspsRZL,
     _select_mparity,
     tomnsps_masks,

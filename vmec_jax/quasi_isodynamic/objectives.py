@@ -663,7 +663,7 @@ def max_elongation_penalty_from_state(
     from ..fourier import build_helical_basis, eval_fourier
     from ..grids import AngleGrid
     from ..state import VMECState
-    from ..vmec_parity import vmec_m1_internal_to_physical_signed
+    from ..kernels.parity import vmec_m1_internal_to_physical_signed
 
     nfp = int(static.cfg.nfp)
     # Keep the angular grid host-static. ``build_helical_basis`` intentionally
@@ -719,7 +719,7 @@ def max_elongation_penalty_from_state(
 def _state_with_physical_m1_modes(state, static):
     """Return a state whose m=1 modes use the public VMEC convention."""
     from ..state import VMECState
-    from ..vmec_parity import vmec_m1_internal_to_physical_signed
+    from ..kernels.parity import vmec_m1_internal_to_physical_signed
 
     cfg = static.cfg
     lconm1 = bool(getattr(cfg, "lconm1", True))

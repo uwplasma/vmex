@@ -71,7 +71,7 @@ For derivative terms, VMEC uses ``cosnvn/sinnvn`` which already include the
 field-period scaling (:math:`n\,\mathrm{NFP}`); the same tables are used in
 ``vmec-jax``.
 
-The implementation in ``vmec_jax.vmec_tomnsp`` performs these two DFT stages as
+The implementation in ``vmec_jax.kernels.tomnsp`` performs these two DFT stages as
 batched ``dot_general`` calls (GEMM-friendly) to match VMEC2000 scaling while
 enabling XLA fusion. See References [4-6] for the VMEC2000 ``fixaray`` tables
 and the VMEC++ DFT/basis discussion.
@@ -618,7 +618,7 @@ In VMEC2000 this is not done with a plain FFT. Instead the code uses:
 
 In ``vmec-jax`` these conventions are implemented in:
 
-- ``vmec_jax.vmec_tomnsp`` (``fixaray``-style trig/weight tables + a vectorized ``tomnsps`` core)
+- ``vmec_jax.kernels.tomnsp`` (``fixaray``-style trig/weight tables + a vectorized ``tomnsps`` core)
 
 Constraint pipeline (alias / gcon)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -662,7 +662,7 @@ additional surface-dependent scaling ``tcon(js)`` computed in VMEC's ``bcovar``.
 
 In ``vmec-jax`` we port the discrete ``alias`` operator in:
 
-- ``vmec_jax.vmec_constraints`` (``alias_gcon``).
+- ``vmec_jax.kernels.constraints`` (``alias_gcon``).
 
 For fixed-boundary parity, ``vmec-jax`` computes the constraint multiplier
 ``tcon(js)`` using the diagonal pieces of the VMEC preconditioner (matching the

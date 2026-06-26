@@ -15,7 +15,7 @@ from vmec_jax.solvers.fixed_boundary.residual.preconditioner_payload import (
     refresh_preconditioner_cache_state_runtime,
     seed_preconditioner_cache_from_bcovar_update,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 class _FakeJax:

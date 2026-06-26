@@ -9,7 +9,7 @@ import vmec_jax.profiles as profiles_module
 import vmec_jax.wout as wout
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _grid(shape: tuple[int, ...], offset: float = 0.0, scale: float = 0.01) -> np.ndarray:

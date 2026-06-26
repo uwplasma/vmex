@@ -9,7 +9,7 @@ import numpy as np
 
 from ...._compat import jnp
 from ....state import VMECState
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.tomnsp import TomnspsRZL
 
 
 @dataclass(frozen=True)
@@ -150,7 +150,7 @@ def _build_first_step_force_setup(
     from ....boundary import boundary_from_indata
     from ....energy import flux_profiles_from_indata
     from ....static import build_static
-    from ....vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
+    from ....kernels.tomnsp import vmec_angle_grid, vmec_trig_tables
 
     cfg = static.cfg
     grid_vmec = vmec_angle_grid(
@@ -435,8 +435,8 @@ def first_step_diagnostics_impl(
         wout_like_vmec_forces_cls=wout_like_vmec_forces_cls,
     )
 
-    from ....vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from ....vmec_residue import (
+    from ....kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from ....kernels.residue import (
         vmec_apply_m1_constraints,
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,

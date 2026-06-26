@@ -696,7 +696,7 @@ def _maybe_default_fixed_boundary_grid(grid: Any, *, cfg: VMECConfig, solver_low
 
     if grid is not None or solver_lower not in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
         return grid
-    from .vmec_tomnsp import vmec_angle_grid
+    from .kernels.tomnsp import vmec_angle_grid
 
     return vmec_angle_grid(
         ntheta=int(cfg.ntheta),

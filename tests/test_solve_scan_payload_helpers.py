@@ -21,7 +21,7 @@ from vmec_jax.solvers.fixed_boundary.scan.payload import (
     select_scan_force_payload,
     select_scan_step_fields,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _frzl(value: float = 1.0, *, lasym: bool = False) -> TomnspsRZL:

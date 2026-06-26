@@ -7,14 +7,14 @@ import pytest
 
 from vmec_jax import finite_beta
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_residue import (
+from vmec_jax.kernels.residue import (
     vmec_force_norms_from_bcovar,
     vmec_force_norms_from_bcovar_dynamic,
     vmec_fsq_sums_from_tomnsps,
     vmec_rz_decompose_signed,
     vmec_rz_norm_from_state,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 from vmec_jax.modes import vmec_mode_table
 
 

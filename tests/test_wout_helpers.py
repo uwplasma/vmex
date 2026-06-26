@@ -68,7 +68,7 @@ from vmec_jax.io.wout.diagnostics import (
     glasser_profiles_from_wout_variables,
 )
 from vmec_jax.io.wout.flux import wout_current_profile_metadata_from_indata
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _reference_mode_coeffs(*, f, modes, trig, kind: str, wrout: bool) -> np.ndarray:

@@ -9,7 +9,7 @@ from vmec_jax.fourier import build_helical_basis, eval_fourier, eval_fourier_dth
 from vmec_jax.grids import AngleGrid
 from vmec_jax.modes import ModeTable, vmec_mode_table
 from vmec_jax.static import build_static
-from vmec_jax.vmec_parity import (
+from vmec_jax.kernels.parity import (
     _mn_cos_to_signed,
     _mn_cos_to_signed_cached,
     _mn_cos_to_signed_host,

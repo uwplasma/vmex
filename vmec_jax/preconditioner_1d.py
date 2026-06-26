@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .vmec_tomnsp import TomnspsRZL
+from .kernels.tomnsp import TomnspsRZL
 
 
 def _sqrt_profiles_from_ns(ns: int) -> tuple[np.ndarray, np.ndarray]:

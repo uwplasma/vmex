@@ -2556,7 +2556,7 @@ def _assert_trace_force_channels_and_step_replay(trace: dict, static):
     from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
     from vmec_jax.free_boundary_adjoint import accepted_trace_effective_state_pre
     from vmec_jax.state import pack_state
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     traced_rz_force = TomnspsRZL(
         **{

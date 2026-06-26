@@ -10,10 +10,10 @@ import pytest
 from vmec_jax.config import load_config
 from vmec_jax.modes import ModeTable
 from vmec_jax.static import build_static
-from vmec_jax.vmec_jacobian import vmec_half_mesh_jacobian_from_state
-from vmec_jax.vmec_realspace import vmec_realspace_synthesis
-from vmec_jax.vmec_residue import vmec_wint_from_trig
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.jacobian import vmec_half_mesh_jacobian_from_state
+from vmec_jax.kernels.realspace import vmec_realspace_synthesis
+from vmec_jax.kernels.residue import vmec_wint_from_trig
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 

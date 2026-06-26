@@ -12,8 +12,8 @@ from typing import Any, Literal
 
 import numpy as np
 
-from ._compat import jnp
-from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
+from .._compat import jnp
+from ..fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
 
 
 @dataclass(frozen=True)

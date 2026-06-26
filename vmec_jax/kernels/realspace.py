@@ -12,11 +12,11 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp, has_jax, einsum
-from .modes import ModeTable
-from .vmec_residue import vmec_scalxc_from_s
-from .vmec_tomnsp import VmecTrigTables
-from .vmec_parity import vmec_m1_internal_to_physical_signed
+from .._compat import jnp, has_jax, einsum
+from ..modes import ModeTable
+from .residue import vmec_scalxc_from_s
+from .tomnsp import VmecTrigTables
+from .parity import vmec_m1_internal_to_physical_signed
 
 
 _PHASE_CACHE: dict[tuple[int, int], tuple[Any, Any]] = {}

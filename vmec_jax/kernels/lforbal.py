@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp
-from .vmec_tomnsp import VmecTrigTables
+from .._compat import jnp
+from .tomnsp import VmecTrigTables
 
 TWOPI = 2.0 * np.pi
 MU0 = 4e-7 * np.pi

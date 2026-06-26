@@ -1736,7 +1736,7 @@ Results obtained:
   startup/setup dominated, and LASYM/memory-heavy rows remain separate open
   targets.
 - Focused validation passed:
-  `python -m ruff check vmec_jax/vmec_residue.py
+  `python -m ruff check vmec_jax/kernels/residue.py
   vmec_jax/solvers/fixed_boundary/residual/force_payload.py
   tests/test_vmec_residue_fast_helpers.py`;
   `JAX_ENABLE_X64=1 python -m pytest -q
@@ -1856,7 +1856,7 @@ Steps taken:
 Results obtained:
 
 - Focused validation passed:
-  `python -m ruff check vmec_jax/vmec_forces.py
+  `python -m ruff check vmec_jax/kernels/forces.py
   tests/test_vmec_forces_synthetic_helpers.py`;
   `JAX_ENABLE_X64=1 python -m pytest -q
   tests/test_vmec_forces_synthetic_helpers.py::test_force_profile_phases_are_vmec_comparable
@@ -1907,7 +1907,7 @@ Steps taken:
 Results obtained:
 
 - TOMNSP-focused validation passed:
-  `python -m ruff check vmec_jax/vmec_tomnsp.py
+  `python -m ruff check vmec_jax/kernels/tomnsp.py
   tests/test_vmec_tomnsp_branch_coverage.py tests/test_vmec_tomnsp_tables.py`;
   `JAX_ENABLE_X64=1 python -m pytest -q
   tests/test_vmec_tomnsp_branch_coverage.py tests/test_vmec_tomnsp_tables.py -q`.
@@ -2140,7 +2140,7 @@ Steps taken:
 Results obtained:
 
 - Focused validation passed:
-  `python -m ruff check vmec_jax/vmec_bcovar.py vmec_jax/vmec_forces.py
+  `python -m ruff check vmec_jax/kernels/bcovar.py vmec_jax/kernels/forces.py
   tests/test_forces_bcovar_wave12_coverage.py
   tests/test_vmec_forces_synthetic_helpers.py
   tests/test_force_norms_dynamic_parity.py`.
@@ -8573,3 +8573,65 @@ Current lane percentages:
 - Docs/release hygiene: 100%.
 - Repository layout/navigation cleanup: 93.0%.
 - Overall: 99.85%.
+
+## 2026-06-26 Kernel Package Refactor
+
+Steps taken:
+
+- Moved the low-level VMEC numerical kernels out of the package root into the
+  focused ``vmec_jax.kernels`` namespace:
+  ``bcovar``, ``constraints``, ``forces``, ``jacobian``, ``lforbal``,
+  ``numpy_forces``, ``parity``, ``realspace``, ``residue``, and ``tomnsp``.
+- Added ``vmec_jax/kernels/README.md`` and package exports so developers can
+  find Fourier transforms, real-space synthesis, force assembly, residue
+  reductions, parity transforms, and Jacobian helpers without scanning root
+  files.
+- Updated current source, tests, tools, examples, and API docs to the new
+  namespace with no root compatibility shims. This keeps the layout simple and
+  avoids preserving legacy import paths that would add long-term maintenance
+  cost.
+- Updated the performance decomposition diagnostic source labels to point at
+  the new kernel package.
+
+Results obtained:
+
+- Root package Python files decreased from 63 to 53.
+- No current source/test/tool/doc references remain to old module paths such as
+  ``vmec_jax.vmec_forces`` or ``vmec_jax/vmec_forces.py`` outside historical
+  plan logs.
+- Kernel-focused test shard passed:
+  ``38 passed, 1 skipped in 10.90s`` for tomnsp, realspace, parity-host,
+  constraints, residue, forces, and bcovar coverage.
+- Integration import/driver shard passed:
+  ``9 passed in 4.73s`` for Boozer input, WOUT helpers, and driver fast
+  reconstruction paths.
+- Static and repository health gates passed:
+  ``ruff``, ``compileall``, ``source_health``, and ``repo_size_audit``.
+  The tracked repository remains compact at about ``27.16 MiB``.
+
+Best next steps:
+
+1. Build the full Sphinx docs with warnings as errors to catch stale
+   autosummary references after the namespace move.
+2. Run ``git diff --check`` and commit/push the kernel-package tranche if docs
+   are clean.
+3. Continue only larger refactor tranches after this commit: reduce the
+   remaining long fixed-boundary residual iteration file and simplify
+   optimization workflows, rather than adding more small wrapper modules.
+
+User needs:
+
+- No input needed for this tranche.
+
+Current lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.5%.
+- Free-boundary production differentiability: 97.7%.
+- Single-stage coil optimization: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 94.0%.
+- VMEC2000/VMEC++ parity and physics gates: 99.4%.
+- Docs/release hygiene: 100%.
+- Repository layout/navigation cleanup: 98.0%.
+- Overall: 99.9%.

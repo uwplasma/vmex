@@ -212,8 +212,8 @@ from .field import (
 )
 from .energy import magnetic_wb_from_state, flux_profiles_from_indata
 from .diagnostics import Summary, print_jacobian_stats, print_summary, summarize_array, summarize_many
-from .vmec_jacobian import vmec_half_mesh_jacobian_from_state
-from .vmec_realspace import vmec_realspace_analysis, vmec_realspace_geom_from_state
+from .kernels.jacobian import vmec_half_mesh_jacobian_from_state
+from .kernels.realspace import vmec_realspace_analysis, vmec_realspace_geom_from_state
 from .preconditioner_1d_jax import clear_preconditioner_jit_caches
 from .solve import (
     SolveFixedBoundaryResult,

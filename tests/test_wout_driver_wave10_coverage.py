@@ -12,9 +12,9 @@ import vmec_jax.driver as driver
 import vmec_jax.energy as energy_module
 import vmec_jax.field as field_module
 import vmec_jax.profiles as profiles_module
-import vmec_jax.vmec_bcovar as bcovar_module
-import vmec_jax.vmec_forces as forces_module
-import vmec_jax.vmec_residue as residue_module
+import vmec_jax.kernels.bcovar as bcovar_module
+import vmec_jax.kernels.forces as forces_module
+import vmec_jax.kernels.residue as residue_module
 import vmec_jax.wout as wout_module
 from vmec_jax.config import VMECConfig
 from vmec_jax.energy import FluxProfiles

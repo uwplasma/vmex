@@ -29,8 +29,8 @@ from typing import Any
 import os
 import numpy as np
 
-from ._compat import jnp, tree_util, has_jax
-from .grids import AngleGrid
+from .._compat import jnp, tree_util, has_jax
+from ..grids import AngleGrid
 
 
 @tree_util.register_pytree_node_class

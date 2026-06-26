@@ -6,8 +6,8 @@ from contextlib import nullcontext
 from typing import Any, Callable, NamedTuple
 
 from ...._compat import jax, jnp
-from ....vmec_residue import vmec_gcx2_from_tomnsps
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.residue import vmec_gcx2_from_tomnsps
+from ....kernels.tomnsp import TomnspsRZL
 
 
 class ScanForceBlocks(NamedTuple):
@@ -149,7 +149,7 @@ def build_initial_preconditioner_cache(
         cache_precond_diag = zero_precond_diag
         cache_tcon = zero_tcon
     else:
-        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+        from vmec_jax.kernels.constraints import precondn_diag_axd1_from_bcovar
 
         ard1, azd1 = precondn_diag_axd1_from_bcovar(
             trig=trig,
@@ -593,7 +593,7 @@ def build_current_preconditioned_scan_payload(
             cache_precond_diag = zero_precond_diag
             cache_tcon = zero_tcon
         else:
-            from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+            from vmec_jax.kernels.constraints import precondn_diag_axd1_from_bcovar
 
             ard1, azd1 = precondn_diag_axd1_from_bcovar(
                 trig=trig,
@@ -759,7 +759,7 @@ def build_restart_preconditioned_scan_payload(
         cache_precond_diag_r = zero_precond_diag
         cache_tcon_r = zero_tcon
     else:
-        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+        from vmec_jax.kernels.constraints import precondn_diag_axd1_from_bcovar
 
         ard1_r, azd1_r = precondn_diag_axd1_from_bcovar(
             trig=trig,

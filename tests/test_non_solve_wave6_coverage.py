@@ -14,14 +14,14 @@ from vmec_jax.modes import ModeTable, vmec_mode_table
 from vmec_jax.namelist import InData
 from vmec_jax.static import build_static
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from vmec_jax.vmec_forces import VmecRZResidualCoeffs, rz_residual_scalars_like_vmec
-from vmec_jax.vmec_realspace import (
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.forces import VmecRZResidualCoeffs, rz_residual_scalars_like_vmec
+from vmec_jax.kernels.realspace import (
     vmec_realspace_analysis,
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_multi,
 )
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _k_index(modes, m: int, n: int) -> int:
@@ -296,7 +296,7 @@ def test_driver_policy_list_parsing_and_scan_selection_edges() -> None:
 def test_bcovar_pytree_roundtrip_preserves_field_order() -> None:
     children = tuple(np.asarray([float(i)]) for i in range(41))
     aux = None
-    from vmec_jax.vmec_bcovar import VmecHalfMeshBcovar
+    from vmec_jax.kernels.bcovar import VmecHalfMeshBcovar
 
     bc = VmecHalfMeshBcovar.tree_unflatten(aux, children)
     flattened, flattened_aux = bc.tree_flatten()

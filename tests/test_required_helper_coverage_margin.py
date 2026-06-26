@@ -13,20 +13,20 @@ from vmec_jax.preconditioner_1d import (
     lambda_preconditioner,
 )
 from vmec_jax.solvers.fixed_boundary.scan.math import _ptau_minmax_from_k_host, _state_jacobian
-from vmec_jax.vmec_lforbal import (
+from vmec_jax.kernels.lforbal import (
     _eqfactor_from_precondn_like_vmec,
     _pshalf_from_s,
     currents_from_bcovar,
     equif_from_bcovar,
     plascur_edge_from_bcovar,
 )
-from vmec_jax.vmec_residue import (
+from vmec_jax.kernels.residue import (
     vmec_apply_m1_constraints,
     vmec_fsq_sums_from_tomnsps,
     vmec_gcx2_from_tomnsps,
     vmec_zero_m1_zforce,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
 
 def _ptau_kernel(ns: int = 3) -> SimpleNamespace:

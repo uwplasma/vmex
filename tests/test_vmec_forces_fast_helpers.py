@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import vmec_jax.vmec_forces as vf
-from vmec_jax import vmec_bcovar as vb
-from vmec_jax.vmec_forces import (
+import vmec_jax.kernels.forces as vf
+import vmec_jax.kernels.bcovar as vb
+from vmec_jax.kernels.forces import (
     VmecRZResidualCoeffs,
     _add_edge_row,
     _avg_forward_half,

@@ -10,9 +10,9 @@ from typing import Any
 import numpy as np
 
 from vmec_jax.state import VMECState
-from vmec_jax.vmec_jacobian import _apply_vmec_axis_rules
-from vmec_jax.vmec_parity import vmec_m1_internal_to_physical_signed
-from vmec_jax.vmec_realspace import (
+from vmec_jax.kernels.jacobian import _apply_vmec_axis_rules
+from vmec_jax.kernels.parity import vmec_m1_internal_to_physical_signed
+from vmec_jax.kernels.realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
     vmec_realspace_synthesis_dzeta_phys,

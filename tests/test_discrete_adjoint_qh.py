@@ -2230,7 +2230,7 @@ def test_preconditioned_force_channels_from_rz_output_reconstructs_first_qh_step
     from vmec_jax.geom import eval_geom
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
     state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -2291,7 +2291,7 @@ def test_preconditioned_force_channels_from_rz_output_vjp_identity_qh(load_case_
     from vmec_jax.geom import eval_geom
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     enable_x64(True)
 
@@ -2388,7 +2388,7 @@ def test_rz_output_to_accepted_step_reconstructs_first_qh_step(load_case_qh_warm
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
     from vmec_jax.state import pack_state
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
     state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -2475,7 +2475,7 @@ def test_preconditioned_force_channels_from_raw_forces_reconstructs_first_qh_ste
     from vmec_jax.geom import eval_geom
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
     state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
@@ -2540,7 +2540,7 @@ def test_preconditioned_force_channels_from_raw_forces_vjp_identity_qh(load_case
     from vmec_jax.geom import eval_geom
     from vmec_jax.init_guess import initial_guess_from_boundary
     from vmec_jax.solve import solve_fixed_boundary_residual_iter
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     enable_x64(True)
 

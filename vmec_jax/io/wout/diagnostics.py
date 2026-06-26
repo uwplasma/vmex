@@ -229,7 +229,7 @@ def apply_bsubv_equif_correction(
     """Apply VMEC ``bcovar`` IEQUI=1 surface-average correction to ``bsubv``."""
 
     if vmec_pwint_from_trig_func is None:
-        from ...vmec_residue import vmec_pwint_from_trig as vmec_pwint_from_trig_func
+        from ...kernels.residue import vmec_pwint_from_trig as vmec_pwint_from_trig_func
 
     bsubv = np.asarray(bsubv, dtype=float)
     bsubv_e = np.asarray(bsubv_e, dtype=float)

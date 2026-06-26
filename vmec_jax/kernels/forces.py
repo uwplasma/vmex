@@ -4,7 +4,7 @@ This module implements a direct, array-based port of VMEC2000's ``forces`` core
 for the **R/Z** equations, operating on:
 
 - VMEC even/odd-m real-space decomposition (odd stored in 1/sqrt(s) form),
-- half-mesh quantities from :mod:`vmec_jax.vmec_bcovar`.
+- half-mesh quantities from :mod:`vmec_jax.kernels.bcovar`.
 
 Scope
 -----
@@ -27,20 +27,20 @@ import time
 
 import numpy as np
 
-from ._compat import jnp, has_jax, jax, tree_util
-from ._solve_runtime import _parse_iter_list
-from .fourier import project_to_modes
-from .fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
-from .field import lamscale_from_phips
-from .grids import AngleGrid
-from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from .vmec_constraints import (
+from .._compat import jnp, has_jax, jax, tree_util
+from .._solve_runtime import _parse_iter_list
+from ..fourier import project_to_modes
+from ..fourier import eval_fourier, eval_fourier_dtheta, eval_fourier_dzeta_phys
+from ..field import lamscale_from_phips
+from ..grids import AngleGrid
+from .bcovar import vmec_bcovar_half_mesh_from_wout
+from .constraints import (
     alias_gcon,
     precondn_diag_axd1_from_bcovar,
     tcon_from_cached_precondn_diag,
     tcon_from_tcon0_heuristic,
 )
-from .vmec_tomnsp import (
+from .tomnsp import (
     TomnspsMasks,
     TomnspsRZL,
     VmecTrigTables,
@@ -48,8 +48,8 @@ from .vmec_tomnsp import (
     tomnspa_rzl,
     vmec_trig_tables,
 )
-from .nyquist import nyquist_basis_from_wout
-from .vmec_parity import (
+from ..nyquist import nyquist_basis_from_wout
+from .parity import (
     internal_odd_from_physical_vmec_jlam,
     internal_odd_from_physical_vmec_m1,
     split_rzl_even_odd_m,
@@ -226,9 +226,9 @@ def _production_bcovar_half_mesh_from_wout(*, expected_s: Any | None = None, **k
             return result
     except Exception:
         pass
-    from . import vmec_bcovar as _vmec_bcovar_module
+    from . import bcovar as _bcovar_module
 
-    reloaded = importlib.reload(_vmec_bcovar_module)
+    reloaded = importlib.reload(_bcovar_module)
     return reloaded.vmec_bcovar_half_mesh_from_wout(**kwargs)
 
 
@@ -688,7 +688,7 @@ def _constraint_kernels_from_state(
         axis=0,
     )
     if trig is not None:
-        from .vmec_realspace import vmec_realspace_synthesis
+        from .realspace import vmec_realspace_synthesis
 
         eval_stack = vmec_realspace_synthesis(
             coeff_cos=coeff_cos_stack,
@@ -1419,7 +1419,7 @@ def vmec_forces_rz_from_wout_reference_fields(
     pzv_0, pzv_1 = jnp.asarray(parity.Zp_even), jnp.asarray(Zv1)
 
     # Half-mesh Jacobian-like quantities (r12/rs/zs/ru12/zu12) from our parity kernel.
-    from .vmec_jacobian import jacobian_half_mesh_from_parity
+    from .jacobian import jacobian_half_mesh_from_parity
 
     jac = jacobian_half_mesh_from_parity(
         pr1_even=pr1_0,
@@ -1550,7 +1550,7 @@ def vmec_forces_rz_from_wout_reference_fields(
     blmn_odd = psqrts * blmn_even
 
     # `bc` object is used only for downstream scaling helpers; provide the pieces we need.
-    from .vmec_jacobian import VmecHalfMeshJacobian
+    from .jacobian import VmecHalfMeshJacobian
 
     bc_obj = SimpleNamespace(
         jac=VmecHalfMeshJacobian(
@@ -1916,7 +1916,7 @@ def vmec_residual_internal_from_kernels(
     # flux-surface-averaged force balance exactly. This primarily affects
     # the scalar residuals `fsqr/fsqz`. See `VMEC2000/Sources/General/tomnsp_mod.f`.
     if bool(apply_lforbal):
-        from .vmec_lforbal import apply_lforbal_to_tomnsps, lforbal_factors_from_state
+        from .lforbal import apply_lforbal_to_tomnsps, lforbal_factors_from_state
 
         ns = int(jnp.asarray(out_sym.frcc).shape[0])
         s_grid = jnp.linspace(0.0, 1.0, ns, dtype=jnp.asarray(out_sym.frcc).dtype)

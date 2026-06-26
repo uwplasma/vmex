@@ -93,7 +93,7 @@ class ModeTransformContext:
 
         if self.host_update_assembly:
             return self.mn_cos_to_signed_host(cc, ss)
-        from vmec_jax.vmec_parity import _mn_cos_to_signed_cached
+        from vmec_jax.kernels.parity import _mn_cos_to_signed_cached
 
         cc = jnp.asarray(cc)
         ss = jnp.asarray(ss) if ss is not None else jnp.zeros_like(cc)
@@ -104,7 +104,7 @@ class ModeTransformContext:
 
         if self.host_update_assembly:
             return self.mn_sin_to_signed_host(sc, cs)
-        from vmec_jax.vmec_parity import _mn_sin_to_signed_cached
+        from vmec_jax.kernels.parity import _mn_sin_to_signed_cached
 
         sc = jnp.asarray(sc)
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
@@ -113,7 +113,7 @@ class ModeTransformContext:
     def mn_sin_to_signed_batch(self, sc: Any, cs: Any) -> Any:
         """Batched sine-like transform for physical lambda helper paths."""
 
-        from vmec_jax.vmec_parity import _mn_sin_to_signed_cached
+        from vmec_jax.kernels.parity import _mn_sin_to_signed_cached
 
         sc = jnp.asarray(sc)
         cs = jnp.asarray(cs) if cs is not None else jnp.zeros_like(sc)
@@ -326,7 +326,7 @@ def build_mode_transform_context(
 ) -> ModeTransformContext:
     """Build all mode-transform constants for the residual iteration loop."""
 
-    from vmec_jax.vmec_parity import signed_maps_from_modes
+    from vmec_jax.kernels.parity import signed_maps_from_modes
 
     mpol = int(static.cfg.mpol)
     ntor = int(static.cfg.ntor)

@@ -21,9 +21,9 @@ from typing import Any
 
 import numpy as np
 
-from ._compat import jnp, has_jax, tree_util
-from .vmec_tomnsp import TomnspsRZL, VmecTrigTables
-from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
+from .._compat import jnp, has_jax, tree_util
+from .tomnsp import TomnspsRZL, VmecTrigTables
+from .parity import signed_maps_from_modes, _signed_to_mn_cos_cached, _signed_to_mn_sin_cached
 
 
 _WINT_CACHE: dict[tuple[int, int], jnp.ndarray] = {}

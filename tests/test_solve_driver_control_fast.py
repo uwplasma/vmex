@@ -14,7 +14,7 @@ from vmec_jax.solve import (
     _resolve_cg_tol,
     _resolve_lm_damping,
 )
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 
 
 def _small_grid():

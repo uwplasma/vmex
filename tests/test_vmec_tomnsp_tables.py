@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from vmec_jax._compat import tree_util
-from vmec_jax.vmec_tomnsp import (
+from vmec_jax.kernels.tomnsp import (
     TomnspsRZL,
     _GRID_CACHE,
     _TOMNSPS_MASK_CACHE,

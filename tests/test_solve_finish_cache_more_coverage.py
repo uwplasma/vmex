@@ -9,7 +9,7 @@ import vmec_jax.solve as solve
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.fixed_boundary.scan import controller as scan_controller
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 class _FakeInData:
@@ -105,7 +105,7 @@ def _install_setup_fakes(monkeypatch, *, build_static=None, eval_profiles=None, 
     import vmec_jax.energy as energy_mod
     import vmec_jax.profiles as profiles_mod
     import vmec_jax.static as static_mod
-    import vmec_jax.vmec_tomnsp as tomnsp_mod
+    import vmec_jax.kernels.tomnsp as tomnsp_mod
 
     def fake_flux(_indata, s, signgs):
         del signgs
@@ -212,8 +212,8 @@ def test_precompile_setup_rebuilds_mismatched_trig_tables(monkeypatch) -> None:
 
 def _install_scan_fakes(monkeypatch) -> None:
     import vmec_jax.preconditioner_1d_jax as precond_mod
-    import vmec_jax.vmec_forces as forces_mod
-    import vmec_jax.vmec_residue as residue_mod
+    import vmec_jax.kernels.forces as forces_mod
+    import vmec_jax.kernels.residue as residue_mod
 
     _install_setup_fakes(monkeypatch)
 

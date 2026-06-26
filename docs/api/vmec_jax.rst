@@ -39,6 +39,17 @@ Submodules
    vmec_jax.implicit
    vmec_jax.init_guess
    vmec_jax.integrals
+   vmec_jax.kernels
+   vmec_jax.kernels.bcovar
+   vmec_jax.kernels.constraints
+   vmec_jax.kernels.forces
+   vmec_jax.kernels.jacobian
+   vmec_jax.kernels.lforbal
+   vmec_jax.kernels.numpy_forces
+   vmec_jax.kernels.parity
+   vmec_jax.kernels.realspace
+   vmec_jax.kernels.residue
+   vmec_jax.kernels.tomnsp
    vmec_jax.mercier
    vmec_jax.modes
    vmec_jax.namelist
@@ -57,11 +68,4 @@ Submodules
    vmec_jax.state
    vmec_jax.static
    vmec_jax.visualization
-   vmec_jax.vmec_constraints
-   vmec_jax.vmec_bcovar
-   vmec_jax.vmec_forces
-   vmec_jax.vmec_jacobian
-   vmec_jax.vmec_parity
-   vmec_jax.vmec_residue
-   vmec_jax.vmec_tomnsp
    vmec_jax.wout

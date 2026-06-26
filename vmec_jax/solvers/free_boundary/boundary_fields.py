@@ -81,7 +81,7 @@ def freeb_host_phase_stack(*, modes: Any, trig: Any, derivs: tuple[str, ...]) ->
 def freeb_boundary_trig(*, cfg: Any, nzeta: int) -> Any:
     """Return cached trig tables for free-boundary boundary sampling."""
 
-    from ...vmec_tomnsp import vmec_trig_tables
+    from ...kernels.tomnsp import vmec_trig_tables
 
     key = (
         int(cfg.ntheta),
@@ -137,7 +137,7 @@ def vmec_boundary_wint(*, static: Any, ntheta: int, nzeta: int, trig: Any | None
     trig = getattr(static, "trig_vmec", None) if trig is None else trig
     if trig is not None:
         try:
-            from ...vmec_residue import vmec_wint_from_trig
+            from ...kernels.residue import vmec_wint_from_trig
 
             w = np.asarray(vmec_wint_from_trig(trig, nzeta=int(nzeta)), dtype=float)
             if w.shape == (int(ntheta), int(nzeta)):

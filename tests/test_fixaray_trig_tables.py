@@ -6,7 +6,7 @@ import numpy as np
 def test_vmec_trig_tables_match_fixaray_endpoint_weights():
     # VMEC fixaray.f uses endpoint half-weights for cosmui at i=1 and i=ntheta2,
     # but does NOT apply endpoint half-weights to sinmui (because sin(0)=sin(pi)=0).
-    from vmec_jax.vmec_tomnsp import vmec_theta_sizes, vmec_trig_tables
+    from vmec_jax.kernels.tomnsp import vmec_theta_sizes, vmec_trig_tables
 
     ntheta = 8
     nzeta = 5
@@ -50,7 +50,7 @@ def test_vmec_trig_tables_match_fixaray_endpoint_weights():
 
 
 def test_vmec_trig_tables_lasym_full_theta_grid():
-    from vmec_jax.vmec_tomnsp import vmec_theta_sizes, vmec_trig_tables
+    from vmec_jax.kernels.tomnsp import vmec_theta_sizes, vmec_trig_tables
 
     ntheta = 16
     nzeta = 5

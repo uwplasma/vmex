@@ -189,8 +189,8 @@ def free_boundary_boundary_geometry_jax(
     """Synthesize accepted free-boundary geometry through JAX."""
 
     from vmec_jax.free_boundary import _freeb_boundary_sample_setup
-    from vmec_jax.vmec_parity import vmec_m1_internal_to_physical_signed
-    from vmec_jax.vmec_realspace import vmec_realspace_synthesis_multi
+    from vmec_jax.kernels.parity import vmec_m1_internal_to_physical_signed
+    from vmec_jax.kernels.realspace import vmec_realspace_synthesis_multi
 
     cfg = static.cfg
     if sample_nzeta is None:

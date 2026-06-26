@@ -1058,7 +1058,7 @@ def test_checkpoint_tape_builder_collects_step_payloads_until_converged(monkeypa
 
 
 def test_dynamic_fsq1_uses_vmec2000_lambda_norm_and_safe_zero_rz_norm(monkeypatch):
-    import vmec_jax.vmec_residue as residue
+    import vmec_jax.kernels.residue as residue
 
     def fake_gcx2_from_tomnsps(**_kwargs):
         return (np.asarray(2.0), np.asarray(3.0), np.asarray(5.0))

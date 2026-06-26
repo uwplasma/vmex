@@ -26,7 +26,7 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solve import SolveVmecResidualResult
 from vmec_jax.static import build_static
 from vmec_jax.solve import solve_fixed_boundary_residual_iter
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 
 
 def _write_staged_no_niter_input(tmp_path: Path) -> Path:
@@ -265,7 +265,7 @@ def test_final_flux_profiles_from_state_supports_traced_lsin():
 
     from vmec_jax._compat import enable_x64, jax, jnp
     from vmec_jax.driver import _final_flux_profiles_from_state, run_fixed_boundary
-    from vmec_jax.vmec_tomnsp import vmec_angle_grid
+    from vmec_jax.kernels.tomnsp import vmec_angle_grid
 
     enable_x64(True)
 

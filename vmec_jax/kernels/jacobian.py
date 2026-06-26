@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from typing import Any
 
 
-from ._compat import jnp, tree_util
-from .vmec_realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta
-from .vmec_parity import vmec_m1_internal_to_physical_signed
-from .vmec_tomnsp import VmecTrigTables
+from .._compat import jnp, tree_util
+from .realspace import vmec_realspace_synthesis, vmec_realspace_synthesis_dtheta
+from .parity import vmec_m1_internal_to_physical_signed
+from .tomnsp import VmecTrigTables
 
 
 @tree_util.register_pytree_node_class

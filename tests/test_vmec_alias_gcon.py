@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from vmec_jax.vmec_constraints import alias_gcon
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.constraints import alias_gcon
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _alias_ref_symmetric(*, ztemp, trig, ntor: int, mpol: int, signgs: int, tcon):

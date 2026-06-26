@@ -7,8 +7,8 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.vmec_tomnsp as vt
-from vmec_jax.vmec_tomnsp import tomnspa_rzl, tomnsps_masks, tomnsps_rzl, vmec_trig_tables
+import vmec_jax.kernels.tomnsp as vt
+from vmec_jax.kernels.tomnsp import tomnspa_rzl, tomnsps_masks, tomnsps_rzl, vmec_trig_tables
 
 
 def test_tomnsps_fft_policy_override_is_scoped(monkeypatch) -> None:

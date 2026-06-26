@@ -11,7 +11,7 @@ import vmec_jax.solve as solve_module
 from vmec_jax.driver import run_fixed_boundary
 from vmec_jax.energy import FluxProfiles
 from vmec_jax.solve import SolveVmecResidualResult
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 
 
 def _example_input(name: str = "input.circular_tokamak") -> Path:
@@ -764,8 +764,8 @@ def test_run_fixed_boundary_accepts_tuple_array_and_scalar_stage_inputs(monkeypa
 
 
 def test_driver_history_and_flux_profile_helper_branches(monkeypatch) -> None:
-    import vmec_jax.vmec_bcovar as bcovar_module
-    import vmec_jax.vmec_residue as residue_module
+    import vmec_jax.kernels.bcovar as bcovar_module
+    import vmec_jax.kernels.residue as residue_module
     import vmec_jax.wout as wout_module
 
     assert driver._vmec_history_relerr([2.0, 4.0], [1.0, 2.0]) == pytest.approx(1.0)

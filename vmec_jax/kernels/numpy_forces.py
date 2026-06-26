@@ -7,11 +7,12 @@ per-iteration CPU hot loop when ``host_update_assembly=True``.
 
 Design
 ------
-All force-path modules bind ``jnp`` at import time (``from ._compat import
+All force-path modules bind ``jnp`` at import time (``from .._compat import
 jnp``).  We temporarily replace that module-level name with ``_NpModule``,
 a thin wrapper around numpy that:
-  - Returns ``_NpArray`` objects (numpy arrays with ``.at[].set()`` support).
-  - Provides ``jax.lax.cond`` semantics via a Python if/else shim.
+
+* Returns ``_NpArray`` objects (numpy arrays with ``.at[].set()`` support).
+* Provides ``jax.lax.cond`` semantics via a Python if/else shim.
 
 Thread-safety: This context **must not** be re-entered concurrently from
 multiple threads (it mutates module-level globals).  The VMEC iteration loop
@@ -712,14 +713,14 @@ def _build_patches() -> list[tuple[Any, list[tuple[str, Any]]]]:
     """Build the patch list from already-imported modules."""
     import vmec_jax.energy as _energy
     import vmec_jax.profiles as _profiles
-    import vmec_jax.vmec_forces as _vmec_forces
-    import vmec_jax.vmec_bcovar as _vmec_bcovar
-    import vmec_jax.vmec_jacobian as _vmec_jacobian
-    import vmec_jax.vmec_tomnsp as _vmec_tomnsp
-    import vmec_jax.vmec_parity as _vmec_parity
-    import vmec_jax.vmec_realspace as _vmec_realspace
-    import vmec_jax.vmec_residue as _vmec_residue
-    import vmec_jax.vmec_constraints as _vmec_constraints
+    import vmec_jax.kernels.forces as _vmec_forces
+    import vmec_jax.kernels.bcovar as _vmec_bcovar
+    import vmec_jax.kernels.jacobian as _vmec_jacobian
+    import vmec_jax.kernels.tomnsp as _vmec_tomnsp
+    import vmec_jax.kernels.parity as _vmec_parity
+    import vmec_jax.kernels.realspace as _vmec_realspace
+    import vmec_jax.kernels.residue as _vmec_residue
+    import vmec_jax.kernels.constraints as _vmec_constraints
     import vmec_jax.fourier as _fourier
     import vmec_jax.field as _field
     import vmec_jax.boundary as _boundary

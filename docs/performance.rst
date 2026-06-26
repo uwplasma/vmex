@@ -1023,9 +1023,9 @@ The fixed-boundary raw-solve source path is:
 ``vmec_jax/solve.py::solve_fixed_boundary_residual_iter`` for the VMEC loop and
 ``_run_vmec2000_scan`` scan runner, ``vmec_jax/solve.py::_compute_forces`` for
 per-iteration force assembly and residual norms,
-``vmec_jax/vmec_forces.py::vmec_forces_rz_from_wout`` and
+``vmec_jax/kernels/forces.py::vmec_forces_rz_from_wout`` and
 ``vmec_residual_internal_from_kernels`` for bcovar/force/tomnsps assembly, and
-``vmec_jax/vmec_tomnsp.py::tomnsps_rzl`` for the Fourier transform hot kernel.
+``vmec_jax/kernels/tomnsp.py::tomnsps_rzl`` for the Fourier transform hot kernel.
 The fixed-boundary profiler now keeps any ``diagnostics.timing`` block in its
 JSON, and ``compare_profile_reports.py`` / ``gpu_cpu_performance_matrix.py``
 surface ``vmec_compute_forces_s``, ``vmec_preconditioner_s``, and
@@ -3975,7 +3975,7 @@ when profiling the next cache tranche.
 Implementation map (performance-critical paths)
 ------------------------------------------------
 
-- ``vmec_jax/vmec_tomnsp.py``: VMEC ``fixaray`` tables + DFT-based ``tomnsps``.
+- ``vmec_jax/kernels/tomnsp.py``: VMEC ``fixaray`` tables + DFT-based ``tomnsps``.
 - ``vmec_jax/init_guess.py``: initial guess, axis blending, JAX boundary flip.
 - ``vmec_jax/boundary.py``: input boundary decomposition + cache.
 - ``vmec_jax/static.py``: cached grids, phase stacks, and per-solve constants.

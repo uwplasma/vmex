@@ -261,7 +261,7 @@ from vmec_jax.solvers.fixed_boundary.preconditioning.operators import (
     scale_m1_precond_rhs_from_mats as _scale_m1_precond_rhs_from_mats,
     update_preconditioner_cache as _update_preconditioner_cache,  # noqa: F401 - re-exported for existing internal tests/importers.
 )
-from vmec_jax.vmec_lforbal import plascur_edge_from_bcovar
+from vmec_jax.kernels.lforbal import plascur_edge_from_bcovar
 from vmec_jax.solvers.fixed_boundary.results import (
     SolveVmecResidualResult,
 )
@@ -822,13 +822,13 @@ def solve_fixed_boundary_residual_iter(
         _read_axis_coeffs,
         initial_guess_from_boundary,
     )
-    from vmec_jax.vmec_residue import (
+    from vmec_jax.kernels.residue import (
         vmec_gcx2_from_tomnsps,
         vmec_gcx2_from_tomnsps_np,
         vmec_scalxc_from_s,
     )
-    from vmec_jax.vmec_jacobian import vmec_half_mesh_jacobian_from_state
-    from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
+    from vmec_jax.kernels.jacobian import vmec_half_mesh_jacobian_from_state
+    from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_angle_grid, vmec_trig_tables
     from vmec_jax.free_boundary import NestorRuntimeState, nestor_external_only_step
 
     # VMEC2000 evaluates force kernels on VMEC's internal angle grid. Rebuild
@@ -2475,7 +2475,7 @@ def solve_fixed_boundary_residual_iter(
             t_iteration_control_badjac_start = time.perf_counter() if timing_enabled else None
             bad_jacobian = False
             if bool(reference_mode) or bool(vmec2000_control):
-                from vmec_jax.vmec_numpy_forces import _numpy_module_patch as _hot_numpy_patch
+                from vmec_jax.kernels.numpy_forces import _numpy_module_patch as _hot_numpy_patch
 
                 badjac_selection = _resolve_bad_jacobian_tau_selection(
                     reference_mode=bool(reference_mode),
