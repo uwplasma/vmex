@@ -131,7 +131,7 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
 
 
 def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Path):
-    case_dir = tmp_path / "square_coil_freeb_backend_profile_live"
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_niter24k_fg"
     workdir = case_dir / "vmec2000_mgrid"
     workdir.mkdir(parents=True)
     threed1 = workdir / "threed1.square_beta_00p000_mgrid"
@@ -152,9 +152,14 @@ def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Pat
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["case"] == "live"
+    assert row["case"] == "vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_niter24k_fg"
     assert row["backend"] == "vmec2000_mgrid"
     assert row["status"] == "running_partial"
+    assert row["mpol"] == 7
+    assert row["ntor"] == 28
+    assert row["ns"] == 17
+    assert row["nzeta"] == 64
+    assert row["max_iter"] == 24000
     assert row["requested_ftol"] == pytest.approx(1.0e-12)
     assert row["final_iter"] == 400
     assert row["final_total"] == pytest.approx(6.3e-11)

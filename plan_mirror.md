@@ -26519,10 +26519,10 @@ review/undraft/merge decision.
 
 - The active VMEC2000 ``MPOL=7, NTOR=28`` run is still running. A live
   ``threed1`` summary copied from office reports the current visible final row
-  at iteration ``8200`` of the final ``NS=17`` stage:
-  - final summed residual: about ``3.96e-11``;
-  - final max component residual: about ``1.60e-11``;
-  - best visible summed residual: about ``3.66e-11``;
+  at iteration ``14200`` of the final ``NS=17`` stage:
+  - final summed residual: about ``2.38e-11``;
+  - final max component residual: about ``1.07e-11``;
+  - best visible summed residual: about ``2.38e-11``;
   - strict per-component ``1e-12``: not yet met;
   - vacuum-grid overflow count: ``0``.
 - The evidence still favors VMEC2000 generated-``mgrid`` as the robustness and

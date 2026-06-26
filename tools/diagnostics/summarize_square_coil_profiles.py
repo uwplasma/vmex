@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -123,6 +124,26 @@ def _case_name(path: Path) -> str:
     return path.parent.name
 
 
+def _config_from_case_name(case: str) -> dict[str, Any]:
+    """Infer resolution hints from standard profile directory names."""
+
+    cfg: dict[str, Any] = {}
+    for key in ("mpol", "ntor", "nzeta"):
+        match = re.search(rf"(?:^|_){key}(\d+)(?:_|$)", case)
+        if match is not None:
+            cfg[key] = int(match.group(1))
+    ns_match = re.search(r"(?:^|_)ns((?:\d+_)*\d+)(?:_mpol|_ntor|_nzeta|_|$)", case)
+    if ns_match is not None:
+        ns_values = [int(tok) for tok in ns_match.group(1).split("_") if tok]
+        if ns_values:
+            cfg["ns"] = ns_values[-1]
+    niter_match = re.search(r"(?:^|_)niter(\d+)(k?)(?:_|$)", case)
+    if niter_match is not None:
+        scale = 1000 if niter_match.group(2) == "k" else 1
+        cfg["max_iter"] = int(niter_match.group(1)) * scale
+    return cfg
+
+
 def _stat(backend: dict[str, Any], history_key: str, stat_key: str) -> float | None:
     history = backend.get("history")
     if not isinstance(history, dict):
@@ -157,6 +178,8 @@ def _summary_row(
     projection: dict[str, Any],
     status: str | None = None,
 ) -> dict[str, Any]:
+    case = _case_name(path)
+    cfg = {**_config_from_case_name(case), **cfg}
     requested_ftol = _finite_float(cfg.get("ftol"))
     if requested_ftol is None:
         requested_ftol = _finite_float(backend.get("requested_ftol"))
@@ -175,7 +198,7 @@ def _summary_row(
         final_total, best_total, final_iter = _jax_total(backend)
         final_max_component = _jax_final_max_component(backend)
     return {
-        "case": _case_name(path),
+        "case": case,
         "backend": backend_name,
         "status": status if status is not None else backend.get("status"),
         "mpol": cfg.get("mpol"),
