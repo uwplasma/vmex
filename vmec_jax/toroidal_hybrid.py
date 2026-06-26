@@ -134,10 +134,45 @@ def _periodic_cubic_hermite_interpolate(x_nodes: Any, y_nodes: Any, x_eval: Any)
     return np.asarray(h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1, dtype=float)
 
 
+def _periodic_trigonometric_interpolate(
+    controls: SquareAxisSplineControls,
+    x_eval: Any,
+) -> np.ndarray | None:
+    """Evaluate uniformly spaced controls as a low-bandwidth periodic series."""
+
+    controls = controls.validate()
+    x_nodes = np.asarray(controls.zeta, dtype=float)
+    y_nodes = np.asarray(controls.radius, dtype=float)
+    n = int(x_nodes.size)
+    period = 2.0 * np.pi
+    spacing = period / float(n)
+    offsets = np.mod(x_nodes - x_nodes[0], period)
+    expected = spacing * np.arange(n, dtype=float)
+    if not np.allclose(offsets, expected, rtol=1.0e-12, atol=1.0e-12):
+        return None
+
+    x = np.asarray(x_eval, dtype=float)
+    x_rel = np.mod(x - x_nodes[0], period)
+    coeffs = np.fft.rfft(y_nodes) / float(n)
+    out = np.full_like(x_rel, float(np.real(coeffs[0])), dtype=float)
+    for harmonic in range(1, coeffs.size):
+        coeff = coeffs[harmonic]
+        scale = 1.0 if n % 2 == 0 and harmonic == n // 2 else 2.0
+        out += scale * (
+            float(np.real(coeff)) * np.cos(float(harmonic) * x_rel)
+            - float(np.imag(coeff)) * np.sin(float(harmonic) * x_rel)
+        )
+    return np.asarray(out, dtype=float)
+
+
 def square_axis_spline_radius(zeta: Any, controls: SquareAxisSplineControls) -> np.ndarray:
     """Evaluate a periodic square-axis spline radius at VMEC ``zeta`` nodes."""
 
-    return _periodic_cubic_hermite_interpolate(controls.zeta, controls.radius, zeta)
+    validated = controls.validate()
+    trigonometric = _periodic_trigonometric_interpolate(validated, zeta)
+    if trigonometric is not None:
+        return trigonometric
+    return _periodic_cubic_hermite_interpolate(validated.zeta, validated.radius, zeta)
 
 
 def recommended_square_axis_nzeta(ntor: int, *, margin: int = 8, block: int = 8) -> int:

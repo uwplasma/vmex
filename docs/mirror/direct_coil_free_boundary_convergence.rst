@@ -263,6 +263,10 @@ independent of ``MPOL`` and ``NTOR``, then projects the sampled target to a VMEC
 Fourier boundary when building ``InData``. This is still a projection bridge,
 not a solver-native spline basis, but it makes the intended control variables
 explicit and testable before replacing the nonlinear solve representation.
+Uniformly spaced controls are evaluated with a periodic trigonometric
+interpolant so the default side/corner control set preserves the same
+low-bandwidth projection behavior as the rounded ``axis_kind="spline"`` target;
+irregular controls fall back to a periodic cubic Hermite interpolation.
 A projection spot check on the first-order spline shape gives max component
 boundary errors of about ``5.60e-6`` for ``MPOL=5, NTOR=12``, ``1.76e-9`` for
 ``5,20``, ``1.92e-11`` for ``5,25``, and ``3.5e-12`` for ``5,28`` or

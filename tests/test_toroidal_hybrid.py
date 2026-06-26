@@ -158,6 +158,24 @@ def test_square_axis_control_spline_samples_and_projects_to_vmec_boundary():
     assert reconstructed.R.shape == (64, 128)
     assert np.min(reconstructed.R) > 0.0
 
+    projection = square_axis_stellarator_mirror_hybrid_projection_error(
+        axis_kind="control_spline",
+        axis_spline_controls=controls,
+        mpol=5,
+        ntor=28,
+        ntheta_fit=64,
+        nzeta_fit=224,
+        ntheta_eval=64,
+        nzeta_eval=224,
+        minor_radius=0.03,
+        side_elongation=0.08,
+        side_minor_modulation=0.08,
+        corner_ellipticity=0.04,
+        corner_amplitude=0.004,
+        corner_rotation=0.30,
+    )
+    assert projection["max_abs_component_error"] < 1.0e-10
+
 
 @pytest.mark.parametrize(
     ("controls", "match"),

@@ -164,9 +164,12 @@ polar superellipse. For the spline-control bridge, set
 ``PLASMA_AXIS_KIND = "control_spline"`` in the root example; the default
 controls are periodic side/corner radii, or an explicit
 ``SquareAxisSplineControls`` object can be assigned to
-``PLASMA_AXIS_SPLINE_CONTROLS``. This still projects to VMEC Fourier
-coefficients for the solve and for VMEC2000/mgrid parity, but it keeps the
-intended square-axis control variables independent of ``MPOL`` and ``NTOR``.
+``PLASMA_AXIS_SPLINE_CONTROLS``. Uniform controls use a low-bandwidth periodic
+interpolant, so the default ``control_spline`` projection error matches the
+rounded ``spline`` target at the production mode counts. This still projects to
+VMEC Fourier coefficients for the solve and for VMEC2000/mgrid parity, but it
+keeps the intended square-axis control variables independent of ``MPOL`` and
+``NTOR``.
 The default square-axis side/corner weights use
 ``SIDE_POWER = CORNER_POWER = 1.0``; this keeps the rounded-square target close
 to finite Fourier bandwidth. Sharper values such as ``1.4`` remain useful

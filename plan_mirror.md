@@ -5739,120 +5739,6 @@ Visual validation:
 No user input is needed.
 
 ---
-## 233. Square-Axis Spline-Control Bridge For Hybrid Robustness
-
-### Steps taken
-
-- Rechecked the local PR branch and active ``office`` profiling jobs.
-- Added ``SquareAxisSplineControls`` to the public toroidal-hybrid API.
-- Added a periodic cubic Hermite control-spline evaluator for the square-axis
-  radial envelope.
-- Extended
-  ``sample_square_axis_stellarator_mirror_hybrid_boundary`` and
-  ``square_axis_stellarator_mirror_hybrid_indata`` callers so
-  ``axis_kind="control_spline"`` can use explicit side/corner controls before
-  projecting to VMEC Fourier coefficients.
-- Wired the root square-coil free-boundary example to accept
-  ``PLASMA_AXIS_SPLINE_CONTROLS`` and to record those controls in the metrics
-  payload.
-- Allowed the backend profiler to launch ``--axis-kind control_spline`` rows.
-- Updated the README and convergence document to distinguish three layers:
-  low-bandwidth sampled spline target, explicit spline-control bridge, and the
-  still-open solver-native spline/control-basis lane.
-- Re-summarized the live ``office`` VMEC2000 ``5,28``/``NSTEP=1`` profile.
-
-### Results obtained
-
-- The root example and diagnostics can now exercise a square-axis control
-  spline without changing ``MPOL``/``NTOR``. This is the first concrete bridge
-  toward using the splines that worked for mirror geometry in the toroidal
-  square-coil hybrid path.
-- The implementation still projects the sampled control-spline target into
-  VMEC Fourier coefficients for the solve and for VMEC2000 parity. It is not
-  yet a solver-native spline-basis update.
-- The live VMEC2000 lower-bandwidth row is observable and progressing with
-  ``NSTEP=1``:
-  - case:
-    ``square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1``;
-  - backend: generated ``mgrid`` plus VMEC2000;
-  - phase: ``force_iterations``;
-  - last checked iteration: ``561``;
-  - current stage requested ``FTOL``: ``1e-8``;
-  - live ``final_max_component``: about ``1.37e-3``;
-  - ``vacuum_grid_exceeded_count``: ``0``.
-- This does not answer the strict ``FTOL=1e-12`` question yet. It shows
-  VMEC2000 is more observable and making progress on the lower-bandwidth row,
-  while the direct GPU rows should continue in parallel.
-
-### How it was tested
-
-```bash
-git diff --check
-venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py tests/test_profile_square_coil_free_boundary.py
-venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py vmec_jax/api.py vmec_jax/__init__.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tools/diagnostics/profile_square_coil_free_boundary.py
-ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square_coil_profiles.py results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 results/square_coil_freeb_backend_profile_direct_gpu_jit_ns9_13_17_mpol6_ntor23_nzeta64_staged_anderson results/square_coil_freeb_backend_profile_direct_gpu_jit_ns9_13_17_mpol7_ntor28_nzeta64_staged_auto_mixer --markdown"
-```
-
-Results:
-
-- ``git diff --check`` passed.
-- ``60 passed`` for the focused toroidal-hybrid/profile suite.
-- Python compilation passed.
-- Existing warnings only: one JAX deprecation warning and one NumPy binary-size
-  runtime warning from the local environment.
-
-### File structure and best-practice notes
-
-- The spline controls live in ``vmec_jax/toroidal_hybrid.py`` next to the
-  square-axis sampling/projection helpers, avoiding a new module for a small,
-  local geometry abstraction.
-- Public exports are mirrored through ``vmec_jax.__init__`` and
-  ``vmec_jax.api``.
-- Root-example support stays in the top-of-file input block through
-  ``PLASMA_AXIS_KIND`` and ``PLASMA_AXIS_SPLINE_CONTROLS``; no parser was added
-  to the example.
-- Backend profiling support is a single extra accepted ``--axis-kind`` value,
-  so direct-coil, generated-``mgrid``, and VMEC2000 comparisons use the same
-  profiling machinery.
-- Tests cover public exports, invalid control validation, root-example input
-  generation, and profiler argument parsing without adding heavy generated
-  outputs to the repository.
-
-### Best next steps
-
-1. Commit and push the spline-control bridge.
-2. Fast-forward ``office`` after the push so future profile launches can use
-   ``--axis-kind control_spline``.
-3. Let the active VMEC2000 ``5,28`` and direct GPU ``6,23``/``7,28`` rows
-   continue until they either reach the strict final stage or show a clear
-   residual floor.
-4. Launch one matching ``control_spline`` profiling row after the current
-   VMEC2000 slot frees up, starting with ``MPOL=5, NTOR=28, NZETA=64`` and the
-   same ``FTOL_ARRAY = 1e-8, 1e-10, 1e-12``.
-5. If Fourier-projected ``spline`` and ``control_spline`` rows both stall above
-   ``1e-12``, start the solver-native spline/control-basis lane instead of
-   further increasing Fourier modes.
-6. Profile VMEC2000 against the same geometry only after the generated-``mgrid``
-   run reaches the strict stage or a reproducible floor; VMEC2000 is the
-   reference path, but it should be compared on identical geometry and cadence.
-
-### Completion percentages after M233
-
-- Square-coil strict ``FTOL=1e-12`` profiling lane: ``84%``.
-- VMEC2000 robustness/reference lane: ``90%``.
-- Direct-coil GPU/JIT parity lane: ``70%``.
-- Direct-provider profiling/instrumentation lane: ``99%``.
-- Square-axis spline-smoothed Fourier closure lane: ``95%``.
-- True spline/control-basis hybrid lane: ``30%`` bridge implemented, solver-native update still open.
-- Documentation and diagnostics for active profiling: ``100%``.
-- Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
-  pending strict ``5,28``/``7,28`` convergence evidence.
-
-### User input needed
-
-No user input is needed.
-
----
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -27710,6 +27596,222 @@ Results:
 - Direct-provider profiling/instrumentation lane: ``99%``.
 - Square-axis spline-smoothed Fourier closure lane: ``94%``.
 - True spline/control-basis hybrid lane: ``20%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``100%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
+  pending strict ``5,28``/``7,28`` convergence evidence.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 233. Square-Axis Spline-Control Bridge For Hybrid Robustness
+
+### Steps taken
+
+- Rechecked the local PR branch and active ``office`` profiling jobs.
+- Added ``SquareAxisSplineControls`` to the public toroidal-hybrid API.
+- Added a periodic cubic Hermite control-spline evaluator for the square-axis
+  radial envelope.
+- Extended
+  ``sample_square_axis_stellarator_mirror_hybrid_boundary`` and
+  ``square_axis_stellarator_mirror_hybrid_indata`` callers so
+  ``axis_kind="control_spline"`` can use explicit side/corner controls before
+  projecting to VMEC Fourier coefficients.
+- Wired the root square-coil free-boundary example to accept
+  ``PLASMA_AXIS_SPLINE_CONTROLS`` and to record those controls in the metrics
+  payload.
+- Allowed the backend profiler to launch ``--axis-kind control_spline`` rows.
+- Updated the README and convergence document to distinguish three layers:
+  low-bandwidth sampled spline target, explicit spline-control bridge, and the
+  still-open solver-native spline/control-basis lane.
+- Re-summarized the live ``office`` VMEC2000 ``5,28``/``NSTEP=1`` profile.
+
+### Results obtained
+
+- The root example and diagnostics can now exercise a square-axis control
+  spline without changing ``MPOL``/``NTOR``. This is the first concrete bridge
+  toward using the splines that worked for mirror geometry in the toroidal
+  square-coil hybrid path.
+- The implementation still projects the sampled control-spline target into
+  VMEC Fourier coefficients for the solve and for VMEC2000 parity. It is not
+  yet a solver-native spline-basis update.
+- The live VMEC2000 lower-bandwidth row is observable and progressing with
+  ``NSTEP=1``:
+  - case:
+    ``square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1``;
+  - backend: generated ``mgrid`` plus VMEC2000;
+  - phase: ``force_iterations``;
+  - last checked iteration: ``561``;
+  - current stage requested ``FTOL``: ``1e-8``;
+  - live ``final_max_component``: about ``1.37e-3``;
+  - ``vacuum_grid_exceeded_count``: ``0``.
+- This does not answer the strict ``FTOL=1e-12`` question yet. It shows
+  VMEC2000 is more observable and making progress on the lower-bandwidth row,
+  while the direct GPU rows should continue in parallel.
+
+### How it was tested
+
+```bash
+git diff --check
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py vmec_jax/api.py vmec_jax/__init__.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tools/diagnostics/profile_square_coil_free_boundary.py
+ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square_coil_profiles.py results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 results/square_coil_freeb_backend_profile_direct_gpu_jit_ns9_13_17_mpol6_ntor23_nzeta64_staged_anderson results/square_coil_freeb_backend_profile_direct_gpu_jit_ns9_13_17_mpol7_ntor28_nzeta64_staged_auto_mixer --markdown"
+```
+
+Results:
+
+- ``git diff --check`` passed.
+- ``60 passed`` for the focused toroidal-hybrid/profile suite.
+- Python compilation passed.
+- Existing warnings only: one JAX deprecation warning and one NumPy binary-size
+  runtime warning from the local environment.
+
+### File structure and best-practice notes
+
+- The spline controls live in ``vmec_jax/toroidal_hybrid.py`` next to the
+  square-axis sampling/projection helpers, avoiding a new module for a small,
+  local geometry abstraction.
+- Public exports are mirrored through ``vmec_jax.__init__`` and
+  ``vmec_jax.api``.
+- Root-example support stays in the top-of-file input block through
+  ``PLASMA_AXIS_KIND`` and ``PLASMA_AXIS_SPLINE_CONTROLS``; no parser was added
+  to the example.
+- Backend profiling support is a single extra accepted ``--axis-kind`` value,
+  so direct-coil, generated-``mgrid``, and VMEC2000 comparisons use the same
+  profiling machinery.
+- Tests cover public exports, invalid control validation, root-example input
+  generation, and profiler argument parsing without adding heavy generated
+  outputs to the repository.
+
+### Best next steps
+
+1. Commit and push the spline-control bridge.
+2. Fast-forward ``office`` after the push so future profile launches can use
+   ``--axis-kind control_spline``.
+3. Let the active VMEC2000 ``5,28`` and direct GPU ``6,23``/``7,28`` rows
+   continue until they either reach the strict final stage or show a clear
+   residual floor.
+4. Launch one matching ``control_spline`` profiling row after the current
+   VMEC2000 slot frees up, starting with ``MPOL=5, NTOR=28, NZETA=64`` and the
+   same ``FTOL_ARRAY = 1e-8, 1e-10, 1e-12``.
+5. If Fourier-projected ``spline`` and ``control_spline`` rows both stall above
+   ``1e-12``, start the solver-native spline/control-basis lane instead of
+   further increasing Fourier modes.
+6. Profile VMEC2000 against the same geometry only after the generated-``mgrid``
+   run reaches the strict stage or a reproducible floor; VMEC2000 is the
+   reference path, but it should be compared on identical geometry and cadence.
+
+### Completion percentages after M233
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``84%``.
+- VMEC2000 robustness/reference lane: ``90%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``99%``.
+- Square-axis spline-smoothed Fourier closure lane: ``95%``.
+- True spline/control-basis hybrid lane: ``30%`` bridge implemented, solver-native update still open.
+- Documentation and diagnostics for active profiling: ``100%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
+  pending strict ``5,28``/``7,28`` convergence evidence.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 234. Low-Bandwidth Control-Spline Projection Fix
+
+### Steps taken
+
+- Ran a local projection comparison for ``axis_kind="spline"`` versus the new
+  ``axis_kind="control_spline"`` bridge across representative
+  ``MPOL``/``NTOR`` pairs.
+- Found that the first cubic-only control bridge was not acceptable for strict
+  profiling:
+  - ``control_spline`` at ``MPOL=5, NTOR=28`` gave a projection component error
+    of about ``3.26e-5``;
+  - the existing rounded ``spline`` target at the same resolution gives about
+    ``3.48e-12``.
+- Updated ``square_axis_spline_radius`` so uniformly spaced controls use a
+  periodic trigonometric interpolant and irregular controls retain the periodic
+  cubic Hermite fallback.
+- Added a regression test requiring the default control-spline production deck
+  to stay below ``1e-10`` projection component error.
+- Updated the README and convergence document to state that uniform controls
+  use the low-bandwidth periodic interpolant.
+
+### Results obtained
+
+- The default ``control_spline`` bridge now matches the current production
+  rounded-spline projection behavior:
+
+```text
+axis_kind,mpol,ntor,nzeta,max_component,rel
+spline,5,12,64,5.603270e-06,2.028251e-05
+spline,5,20,64,1.763382e-09,6.383024e-09
+spline,5,25,64,1.921577e-11,6.955655e-11
+spline,5,28,64,3.480549e-12,1.259876e-11
+spline,6,23,64,3.315160e-10,1.200009e-09
+spline,7,28,64,3.480549e-12,1.259876e-11
+control_spline,5,12,64,5.603270e-06,2.028251e-05
+control_spline,5,20,64,1.763382e-09,6.383024e-09
+control_spline,5,25,64,1.921577e-11,6.955655e-11
+control_spline,5,28,64,3.480771e-12,1.259957e-11
+control_spline,6,23,64,3.315160e-10,1.200009e-09
+control_spline,7,28,64,3.480771e-12,1.259957e-11
+```
+
+- A long ``control_spline`` solve should now be meaningful. Before this fix it
+  would have mixed solver convergence with a boundary-representation defect.
+
+### How it was tested
+
+```bash
+venv/bin/python - <<'PY'
+from vmec_jax.toroidal_hybrid import square_axis_stellarator_mirror_hybrid_projection_error
+# Projection scan over spline/control_spline and representative MPOL/NTOR pairs.
+PY
+git diff --check
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py vmec_jax/api.py vmec_jax/__init__.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tools/diagnostics/profile_square_coil_free_boundary.py
+```
+
+Results:
+
+- ``git diff --check`` passed.
+- ``60 passed`` for the focused toroidal-hybrid/profile suite.
+- Python compilation passed.
+- Existing warnings only: one JAX deprecation warning and one NumPy binary-size
+  runtime warning from the local environment.
+
+### File structure and best-practice notes
+
+- The trigonometric evaluator is private and local to
+  ``vmec_jax/toroidal_hybrid.py``.
+- Public API stays unchanged: users still pass
+  ``SquareAxisSplineControls`` and call ``square_axis_spline_radius`` or use
+  ``axis_kind="control_spline"``.
+- The fallback path preserves support for irregular control nodes without
+  adding a SciPy dependency.
+
+### Best next steps
+
+1. Run focused tests and compilation after this projection fix.
+2. Commit and push the low-bandwidth correction.
+3. Queue a strict ``control_spline`` profile after the current VMEC2000 slot
+   frees up, using the same ``MPOL=5, NTOR=28, NZETA=64`` schedule.
+4. Compare ``spline`` and ``control_spline`` rows on final residual,
+   projection error, wall time, and mode sensitivity before starting a
+   solver-native spline/control-basis update.
+
+### Completion percentages after M234
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``84%``.
+- VMEC2000 robustness/reference lane: ``90%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``99%``.
+- Square-axis spline-smoothed Fourier closure lane: ``96%``.
+- True spline/control-basis hybrid lane: ``35%`` bridge corrected, solver-native update still open.
 - Documentation and diagnostics for active profiling: ``100%``.
 - Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
   pending strict ``5,28``/``7,28`` convergence evidence.
