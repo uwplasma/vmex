@@ -203,10 +203,13 @@ Fourier deck: do not spend further CPU on simply extending the same
 free-boundary acceleration/numerical-kernel change.
 
 The active strict reference has now moved to the projection-gated
-``MPOL=5, NTOR=28, NZETA=64`` control-spline square-axis deck, with
+``MPOL=5, NTOR=28, NZETA=64`` rounded-spline square-axis deck, with
 ``NS=9 -> 13 -> 17``, ``NITER_ARRAY=4000,8000,24000``,
 ``FTOL_ARRAY=1e-8,1e-10,1e-12``, ``DELT=0.02``, ``NVACSKIP=1``, and a widened
-``88 x 64 x 64`` generated ``mgrid``. The current VMEC2000 row is still
+``88 x 64 x 64`` generated ``mgrid``. This active row was launched with
+``axis_kind="spline"``; the follow-up commands use ``axis_kind="control_spline"``,
+which gives the same low-bandwidth rounded-square projection for the default
+uniform controls. The current VMEC2000 row is still
 running, not converged: a copied live sidecar snapshot at final-stage iteration
 ``5927`` reports summed residual about ``3.67e-11``, max component about
 ``1.78e-11``, strict gap about ``17.8``, and no vacuum-grid overflow. The

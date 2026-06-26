@@ -29477,8 +29477,10 @@ No user input is needed.
   - `NZETA` and generated-`mgrid` plane compatibility;
   - mgrid radial/vertical envelope coverage;
   - `DELT` and staged iteration budgets.
-- The active `MPOL=5, NTOR=28, NZETA=64` VMEC2000 row is still running and
-  improving:
+- The active `MPOL=5, NTOR=28, NZETA=64` VMEC2000 row uses
+  `axis_kind=spline`; the next generated commands use `control_spline`, which
+  has essentially the same projection for the default uniform rounded-square
+  controls. The active row is still running and improving:
   - final-stage iteration `5927/24000`;
   - final summed residual about `3.674e-11`;
   - max component about `1.78e-11`;
