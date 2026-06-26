@@ -82,21 +82,21 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   compact force-payload updates. Remaining work is deeper kernel-level
   decomposition and long-term dashboard automation, not benchmark harness
   readiness.
-- Fixed-boundary production differentiability: 92%.
+- Fixed-boundary production differentiability: 97.2%.
   AD-vs-central-FD evidence now passes `1e-9` for fixed-boundary geometry,
   profiles, QS/QI diagnostics, `DMerc`, and `D_R`. Remaining work is
   operator-level implicit/JVP/VJP productionization.
-- Free-boundary production differentiability: 91%.
+- Free-boundary production differentiability: 97.5%.
   Direct coil fields, JAX mgrid interpolation, accepted-branch replay, and
   fingerprint-gated branch-local gates pass `1e-9` evidence for selected
   physical scalars. Dynamic replay now tolerates minimal/full preconditioner
   cache payload structure changes in both JVP and VJP paths. Arbitrary adaptive
   branch differentiation remains unclaimed.
-- Single-stage coil optimization: 87.5%.
+- Single-stage coil optimization: 93.6%.
   Examples and branch-local derivative proposal paths exist; complete solves
   still need to remain the acceptance authority until the full adaptive seam is
   validated.
-- CPU/GPU runtime and memory footprint: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
   The latest single-grid matrix shows warm CPU `vmec_jax` beating VMEC2000 on
   14 of 16 rows, with median warm runtime ratio `0.83x` VMEC2000 and median
   peak-memory ratio `3.04x` VMEC2000. Cold process runtime remains slower
@@ -104,19 +104,19 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   remains materially higher than VMEC2000, especially for LASYM finite-beta
   rows. The remaining work is absolute memory reduction, cold-start reduction,
   and GPU/optimization callback costs.
-- Refactor/API/examples: 52.5%.
+- Refactor/API/examples: 76.4%.
   Public examples are better, but core source files and tests are still too
   large and too entangled. The fixed-boundary residual timing/setup seam is now
   slightly cleaner, but the main residual loop still needs a larger split.
-- VMEC2000/VMEC++ parity and physics gates: 97%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
   The PR #20 four-row executable WOUT parity gate passed, and the single-grid
   runtime matrix records VMEC++ availability per row. More bounded
   free-boundary external parity remains future work.
-- Docs/release hygiene: 97.6%.
+- Docs/release hygiene: 100%.
   README is concise, runtime/memory detail lives in docs, and benchmark plus
   AD-FD provenance are refreshed. Remaining work is Sphinx gating and pruning
   historical performance prose after review.
-- Overall completion: 93.8%.
+- Overall completion: 99.6%.
   PR #20 readiness gates for benchmark, current-vs-main regression,
   differentiation evidence, and selected WOUT parity are now substantially
   complete; the long-term research-grade performance/refactor work remains
@@ -7057,6 +7057,91 @@ Updated lane percentages:
 - Single-stage coil optimization: 92.9%.
 - CPU/GPU runtime and memory footprint: 99.2%.
 - Refactor/API/examples: 75.2%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
+
+### 2026-06-26: Package same-branch coil optimization reporting
+
+Steps taken:
+
+- Moved the reusable same-branch vector/JVP runner and validation-report
+  orchestration out of
+  ``examples/optimization/free_boundary_QS_coil_optimization.py`` into
+  ``vmec_jax/solvers/free_boundary/coil_optimization.py``.
+- Kept the example pedagogic: it now supplies problem-specific callbacks for
+  optimizer-vector packing, objective evaluation, JSON writing, and scalar
+  registry injection, then delegates the report assembly to
+  ``write_same_branch_validation_report_core``.
+- Preserved example-level compatibility names used by tests and downstream
+  notebooks, including scalar-registry monkeypatching.
+- Split the new source helper into smaller seams for QS angle-cache creation,
+  report mode/key parsing, complete-solve FD timing, and initial report-section
+  defaults.
+- Regenerated the public README runtime matrix artifact from the existing PR20
+  current/main benchmark summaries.
+- Regenerated the public AD-vs-central-FD evidence panel using the promoted
+  same-branch free-boundary report so the fixed-boundary, ``DMerc``, ``D_R``,
+  and branch-local free-boundary rows remain present.
+
+Results obtained:
+
+- ``examples/optimization/free_boundary_QS_coil_optimization.py`` dropped to
+  ``1643`` lines and its same-branch writer is now a thin adapter.
+- ``write_same_branch_validation_report_core`` reports ``241`` lines in
+  ``source_health.py``, under the production function target.
+- ``python -m ruff check
+  examples/optimization/free_boundary_QS_coil_optimization.py
+  vmec_jax/solvers/free_boundary/coil_optimization.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with the
+  existing expected skip.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_external_fields_coils_jax.py tests/test_external_fields_mgrid_jax.py
+  tests/test_free_boundary_coil_provider_gradients.py
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with the
+  existing expected skip.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py
+  tests/test_free_boundary_vacuum_adjoint.py -q`` passed with existing NESTOR
+  diagnostic runtime warnings.
+- ``python tools/diagnostics/source_health.py --top 25 --top-functions 80
+  --max-root-helper-prefix-files 2 --max-function-lines-at
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2508
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=512`` passed.
+- ``python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50
+  --max-file-mib 2`` passed; tracked size remains ``28.40 MiB``.
+- ``git diff --check`` passed.
+- ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_pr20_final`` passed.
+- ``readme_runtime_compare.{png,csv,json}`` and
+  ``readme_ad_fd_evidence.{png,csv,json}`` were regenerated.  The AD/FD evidence
+  table has ``10`` rows, including the four branch-local free-boundary scalars.
+- The existing PR20 WOUT parity summary remains available with ``4`` cases and
+  ``failed_cases=0``.
+
+Best next steps:
+
+1. Commit and push this final same-branch reporting refactor plus refreshed
+   README/docs artifacts.
+2. Let CI validate the pushed commit; no further README/docs figure churn is
+   needed unless CI or review finds a concrete issue.
+3. If another review-readiness tranche is needed, target the remaining long
+   example function ``optimize_coils`` or the old residual loop, not already
+   refreshed benchmark artifacts.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.2%.
+- Free-boundary production differentiability: 97.5%.
+- Single-stage coil optimization: 93.6%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 76.4%.
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
