@@ -627,6 +627,16 @@ VMEC ``NZETA`` grid. This makes user edits to ``MPOL``, ``NTOR``, ``NZETA``,
 or ``mgrid_nphi`` fail fast unless the run is explicitly marked diagnostic by
 using ``--max-boundary-projection-error none``.
 
+For post-stall follow-up commands, use
+``tools/diagnostics/square_coil_followup_commands.py``. The default
+``--profile-kind vmec2000`` preserves the generated-``mgrid`` VMEC2000
+reference scan. Use ``--profile-kind provider-parity`` for the next
+direct-coil/generated-mgrid comparison with both initial-boundary parity and
+accepted-LCFS parity. Use ``--profile-kind full-backend`` only when resources
+are available for direct, generated-mgrid, and VMEC2000 in one profile. Use
+``--profile-kind direct-gpu`` for direct-only cached-JIT GPU speed probes; that
+mode intentionally skips generated mgrid and accepted-provider parity.
+
 Promotion Gates
 ---------------
 

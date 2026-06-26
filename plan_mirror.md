@@ -30934,3 +30934,81 @@ passed.
 ### User input needed
 
 No user input is needed.
+
+---
+## 265. Added Accepted-Parity Follow-Up Command Modes
+
+### Steps taken
+
+- Extended `tools/diagnostics/square_coil_followup_commands.py` with
+  `--profile-kind` choices:
+  - `vmec2000`;
+  - `provider-parity`;
+  - `full-backend`;
+  - `direct-gpu`.
+- Kept the default `vmec2000` behavior compatible with the existing strict
+  generated-mgrid reference scan.
+- Made `provider-parity` and `full-backend` emit `--accepted-provider-parity`
+  by default.
+- Made `direct-gpu` emit the cached direct-coil/JIT speed-probe flags and skip
+  generated mgrid/provider parity.
+- Added tests for all new command modes.
+- Documented the command modes in
+  `docs/mirror/direct_coil_free_boundary_convergence.rst`.
+
+### Results obtained
+
+- The next post-stall command can be generated without hand-editing flags.
+- Provider-parity follow-up now explicitly runs direct and generated-mgrid JAX
+  backends with both initial-boundary and accepted-LCFS parity diagnostics.
+- Direct-GPU follow-up stays light by skipping mgrid generation.
+- Outdir names now identify the actual profile kind, for example
+  `square_coil_freeb_backend_profile_provider_parity_...`.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_square_coil_followup_commands.py
+ruff check \
+  tools/diagnostics/square_coil_followup_commands.py \
+  tests/test_square_coil_followup_commands.py
+venv/bin/python -m py_compile \
+  tools/diagnostics/square_coil_followup_commands.py
+venv/bin/python tools/diagnostics/square_coil_followup_commands.py \
+  --profile-kind provider-parity --delt-values 0.02 --outdir-root results
+```
+
+Results: `6 passed`; ruff and py-compile passed. The sample command includes
+`--accepted-provider-parity` and writes to a `provider_parity` outdir.
+
+### File structure and best-practice notes
+
+- The helper still only prints commands and does not run VMEC.
+- No generated results are tracked.
+- The command modes keep heavy full-backend, light direct-GPU, and VMEC2000-only
+  follow-ups separate, which avoids accidental resource contention.
+
+### Best next steps
+
+1. Do not launch a new heavy follow-up until the active VMEC2000/direct-GPU rows
+   finish or are intentionally stopped.
+2. When resources are free, run the generated `provider-parity` command first
+   to measure accepted-LCFS direct/mgrid agreement on the production
+   `control_spline` deck.
+3. Use `full-backend` only after the lighter provider-parity row confirms the
+   provider comparison is meaningful.
+
+### Completion percentages after M265
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `82%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- True spline/control-basis hybrid lane: `62%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.

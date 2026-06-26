@@ -2,8 +2,8 @@
 """Print strict square-coil follow-up profile commands.
 
 This helper does not run VMEC.  It emits serial, copy-pasteable commands for
-the next VMEC2000 reference scans after a strict square-coil row stalls above
-the requested force tolerance.
+the next strict square-coil scans after a row stalls above the requested force
+tolerance.
 """
 
 from __future__ import annotations
@@ -48,6 +48,28 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--corner-power", type=float, default=ExampleConfig().corner_power)
     p.add_argument("--coil-segments", type=int, default=64)
     p.add_argument("--coil-chunk-size", type=int, default=512)
+    p.add_argument(
+        "--profile-kind",
+        choices=("vmec2000", "provider-parity", "full-backend", "direct-gpu"),
+        default="vmec2000",
+        help=(
+            "vmec2000 keeps the existing generated-mgrid reference command. "
+            "provider-parity runs JAX direct and generated-mgrid with initial and accepted-LCFS parity. "
+            "full-backend adds VMEC2000 to that comparison. "
+            "direct-gpu emits direct-only cached-JIT commands for GPU speed probes."
+        ),
+    )
+    p.add_argument(
+        "--accepted-provider-parity",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include accepted-LCFS direct/mgrid parity for provider-parity and full-backend commands.",
+    )
+    p.add_argument(
+        "--freeb-anderson-pressure",
+        action="store_true",
+        help="Add pressure Anderson mixing to JAX backend commands.",
+    )
     return p
 
 
@@ -80,8 +102,9 @@ def _iter_label(value: int) -> str:
 
 
 def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi: int) -> Path:
+    kind = str(args.profile_kind).replace("-", "_")
     return Path(args.outdir_root) / (
-        "square_coil_freeb_backend_profile_vmec2000"
+        f"square_coil_freeb_backend_profile_{kind}"
         f"_ns{_list_label(args.ns_array)}"
         f"_mpol{int(args.mpol)}_ntor{int(args.ntor)}_nzeta{int(nzeta)}"
         f"_mgrid{int(args.mgrid_nr)}x{int(args.mgrid_nz)}x{int(mgrid_nphi)}"
@@ -95,7 +118,7 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
     nzeta = int(args.nzeta or max(64, recommended_square_axis_nzeta(int(args.ntor))))
     mgrid_nphi = int(args.mgrid_nphi or nzeta)
     max_iter = _last_int(args.niter_array)
-    return [
+    command = [
         str(args.python),
         str(args.profile_script),
         "--outdir",
@@ -140,8 +163,6 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
         str(int(ExampleConfig().n_coils_per_side)),
         "--coil-segments",
         str(int(args.coil_segments)),
-        "--coil-chunk-size",
-        str(int(args.coil_chunk_size)),
         "--mgrid-nr",
         str(int(args.mgrid_nr)),
         "--mgrid-nz",
@@ -154,17 +175,56 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
         "0.5",
         "--max-boundary-projection-error",
         f"{ExampleConfig().max_boundary_projection_error:.0e}",
-        "--skip-direct",
-        "--skip-mgrid",
-        "--skip-provider-parity",
-        "--run-vmec2000",
-        "--vmec2000-exec",
-        str(args.vmec2000_exec),
-        "--vmec2000-timeout",
-        str(int(args.vmec2000_timeout)),
         "--solver-mode",
         "parity",
     ]
+    kind = str(args.profile_kind)
+    if bool(args.freeb_anderson_pressure) and kind in {"provider-parity", "full-backend", "direct-gpu"}:
+        command.append("--freeb-anderson-pressure")
+    if kind == "direct-gpu":
+        command.extend(
+            [
+                "--skip-mgrid",
+                "--skip-provider-parity",
+                "--coil-chunk-size",
+                "0",
+                "--jit-forces",
+                "--jit-direct-sampler",
+                "--return-best-scored-state",
+            ]
+        )
+        return command
+    command.extend(["--coil-chunk-size", str(int(args.coil_chunk_size))])
+    if kind in {"provider-parity", "full-backend"} and bool(args.accepted_provider_parity):
+        command.append("--accepted-provider-parity")
+    if kind == "provider-parity":
+        command.append("--return-best-scored-state")
+        return command
+    if kind == "full-backend":
+        command.extend(
+            [
+                "--run-vmec2000",
+                "--vmec2000-exec",
+                str(args.vmec2000_exec),
+                "--vmec2000-timeout",
+                str(int(args.vmec2000_timeout)),
+                "--return-best-scored-state",
+            ]
+        )
+        return command
+    command.extend(
+        [
+            "--skip-direct",
+            "--skip-mgrid",
+            "--skip-provider-parity",
+            "--run-vmec2000",
+            "--vmec2000-exec",
+            str(args.vmec2000_exec),
+            "--vmec2000-timeout",
+            str(int(args.vmec2000_timeout)),
+        ]
+    )
+    return command
 
 
 def build_commands(args: argparse.Namespace) -> list[list[str]]:
