@@ -362,6 +362,30 @@ def test_square_coil_followup_commands_emit_stellarator_native_edge_polish(tmp_p
     assert "edge_stellarator_native_coordinate" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_strict_backtracking_native_polish(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "direct-gpu-edge-stellarator-native-polish",
+            "--strict-backtracking",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert "--strict-backtracking" in command
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "stellarator"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "native_coordinate"
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "direct_gpu_edge_stellarator_native_polish" in outdir.name
+    assert "edge_stellarator_native_coordinate" in outdir.name
+    assert outdir.name.endswith("_strictbt")
+
+
 def test_square_coil_followup_commands_reject_underrecommended_ntheta(tmp_path: Path):
     recommended = recommended_square_axis_ntheta(5)
     args = followup._parser().parse_args(

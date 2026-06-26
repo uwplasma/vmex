@@ -116,6 +116,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Add pressure Anderson mixing to JAX backend commands.",
     )
     p.add_argument(
+        "--strict-backtracking",
+        action="store_true",
+        help=(
+            "Add strict-loop trial-step backtracking to JAX backend commands. "
+            "This is a convergence diagnostic for stalled direct-coil rows."
+        ),
+    )
+    p.add_argument(
         "--freeb-jax-nestor-operator",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -285,6 +293,7 @@ def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi
         if int(args.axis_spline_control_count) == 8
         else f"_axisctrl{int(args.axis_spline_control_count)}"
     )
+    strict_bt_label = "_strictbt" if bool(args.strict_backtracking) else ""
     return Path(args.outdir_root) / (
         f"square_coil_freeb_backend_profile_{kind}"
         f"_ns{_list_label(args.ns_array)}"
@@ -299,6 +308,7 @@ def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi
         f"{edge_label}"
         f"{ridge_label}"
         f"{trust_label}"
+        f"{strict_bt_label}"
     )
 
 
@@ -490,6 +500,8 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
             )
     if (bool(args.freeb_anderson_pressure) or _is_polish_kind(kind)) and jax_kind:
         command.append("--freeb-anderson-pressure")
+    if bool(args.strict_backtracking) and jax_kind:
+        command.append("--strict-backtracking")
     hot_restart_count = _hot_restart_count(args) if jax_kind else 0
     if hot_restart_count > 0:
         command.extend(["--jax-hot-restart-count", str(int(hot_restart_count))])

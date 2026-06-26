@@ -471,6 +471,10 @@ rows use ``--freeb-edge-control-projection stellarator`` and output directories
 labelled ``edge_stellarator_coordinate`` or
 ``edge_stellarator_native_coordinate``. The JAX-NESTOR polish variants
 additionally enable the experimental JAX NESTOR operator.
+Add ``--strict-backtracking`` to the follow-up helper when the intended next
+row is a trial-residual/backtracking diagnostic rather than the default
+VMEC2000-parity strict update. Generated JAX commands carry the profiler flag
+and label the output directory with ``strictbt``.
 The summary table now reports the edge-control projection status, requested
 basis, control count, pseudo-inverse cutoff, update mode, coordinate-update
 count, native-update count, reduced native force/velocity/update norms,
