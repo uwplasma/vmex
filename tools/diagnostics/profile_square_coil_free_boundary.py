@@ -96,7 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--niter-array", default=None, help="Comma-separated VMEC multigrid NITER_ARRAY override.")
     p.add_argument("--ftol-array", default=None, help="Comma-separated VMEC multigrid FTOL_ARRAY override.")
     p.add_argument("--phiedge", type=float, default=None)
-    p.add_argument("--delt", type=float, default=0.05)
+    p.add_argument("--delt", type=float, default=ExampleConfig().delt)
     p.add_argument("--activate-fsq", type=float, default=1.0e-3)
     p.add_argument("--nvacskip", type=int, default=1, help="Initial/floor NVACSKIP for VMEC free-boundary updates.")
     p.add_argument(

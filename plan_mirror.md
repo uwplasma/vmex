@@ -5739,6 +5739,69 @@ Visual validation:
 No user input is needed.
 
 ---
+## 250. Aligned The Profiler `DELT` Default With The Strict Example
+
+### Steps taken
+
+- Checked the square-coil profiler parser against the root example defaults.
+- Found that the root example and docs use ``DELT=0.02`` for the strict
+  square-coil profile, while the profiler CLI still defaulted to ``0.05`` when
+  ``--delt`` was omitted.
+- Updated the profiler parser to use ``ExampleConfig().delt`` and pinned that
+  default in the parser test.
+
+### Results obtained
+
+- Future profiler runs that omit ``--delt`` now follow the same moderate
+  damping used by the strict square-coil example and current VMEC2000 reference
+  lane.
+- This removes another hidden source of mismatch when changing
+  ``MPOL``/``NTOR``/``NZETA`` or comparing direct, generated-``mgrid``, and
+  VMEC2000 rows.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py
+```
+
+Result: `19 passed, 1 warning`.
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+### File structure and best-practice notes
+
+- The profiler keeps deriving strict defaults from the root example instead of
+  duplicating numerical constants.
+- The change is isolated to the parser default and its unit test; no solve logic
+  changed.
+
+### Best next steps
+
+1. Let the active VMEC2000 strict row reach a decision point.
+2. Start the next `control_spline` VMEC2000 profile from these aligned defaults,
+   adding explicit flags only for the scan variable under test.
+
+### Completion percentages after M250
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `96%`.
+- VMEC2000 robustness/reference lane: `96%`.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `76%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- True spline/control-basis hybrid lane: `42%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
 ## 249. Made The Square-Axis Control Spline The Default Hybrid Representation
 
 ### Steps taken

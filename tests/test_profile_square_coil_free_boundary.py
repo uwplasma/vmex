@@ -31,6 +31,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
 
     assert args.axis_kind == "control_spline"
     assert args.ftol == pytest.approx(profile.ExampleConfig().ftol)
+    assert args.delt == pytest.approx(profile.ExampleConfig().delt)
     assert args.verbose_solver is True
     assert args.virtual_casing_diagnostics is True
     assert args.resolution_diagnostics_only is True
