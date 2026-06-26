@@ -284,6 +284,12 @@ measure how far the accepted LCFS moved from the initial prescribed boundary.
 These are evidence that a row used a moving free boundary; they complement, but
 do not replace, the strict force-component and finite-beta pressure-balance
 promotion gates.
+The profiler and summary table also report the final ``fsqr``, ``fsqz``, and
+``fsql`` components separately, their individual gaps to the requested
+``FTOL``, the limiting component, and per-component tail projections to
+``1e-12``. Use those fields to distinguish a true iteration-budget problem from
+an ``R``-, ``Z``-, or lambda-limited stall before changing ``MPOL``, ``NTOR``,
+``NZETA``, or the free-boundary pressure-coupling algorithm.
 For ``spline`` and ``control_spline`` square-axis rows, the same solved
 boundary displacement is also projected onto the square-reduced side/corner
 control map. The nested ``boundary_reduced_control_projection`` block reports

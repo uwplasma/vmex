@@ -31,6 +31,7 @@ CASE_PREFIXES = (
     "square_coil_direct_gpu_",
     "square_coil_",
 )
+FORCE_COMPONENTS = ("fsqr", "fsqz", "fsql")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -263,6 +264,61 @@ def _tail_projection(backend: dict[str, Any], key: str, *, target: float | None 
     if not isinstance(estimates, dict):
         return None
     return _finite_float(estimates.get(f"{float(target):.0e}"))
+
+
+def _component_tail_projection(
+    backend: dict[str, Any],
+    component: str,
+    key: str,
+    *,
+    target: float | None = None,
+) -> float | None:
+    history = backend.get("history")
+    if not isinstance(history, dict):
+        return None
+    by_component = history.get("fsq_component_tail_projection_by_component")
+    if not isinstance(by_component, dict):
+        return None
+    payload = by_component.get(component)
+    if not isinstance(payload, dict):
+        return None
+    if target is None:
+        return _finite_float(payload.get(key))
+    estimates = payload.get("estimated_additional_iterations_to_target")
+    if not isinstance(estimates, dict):
+        return None
+    return _finite_float(estimates.get(f"{float(target):.0e}"))
+
+
+def _final_force_components(backend: dict[str, Any]) -> dict[str, float | None]:
+    out = {name: _finite_float(backend.get(f"final_{name}")) for name in FORCE_COMPONENTS}
+    last = backend.get("last_row")
+    if isinstance(last, dict):
+        for name in FORCE_COMPONENTS:
+            if out[name] is None:
+                out[name] = _finite_float(last.get(name))
+    return out
+
+
+def _strict_gap_for_component(value: float | None, requested_ftol: float | None) -> float | None:
+    if value is None or requested_ftol is None:
+        return None
+    requested = float(requested_ftol)
+    if not np.isfinite(requested) or requested <= 0.0:
+        return None
+    return float(float(value) / requested)
+
+
+def _limiting_component(backend: dict[str, Any], components: dict[str, float | None]) -> str | None:
+    history = backend.get("history")
+    if isinstance(history, dict):
+        value = history.get("fsq_limiting_component")
+        if isinstance(value, str) and value in FORCE_COMPONENTS:
+            return value
+    finite = {name: value for name, value in components.items() if value is not None and np.isfinite(value)}
+    if not finite:
+        return None
+    return max(finite, key=lambda name: float(finite[name]))
 
 
 def _last_stage_value(backend: dict[str, Any], key: str) -> Any:
@@ -712,6 +768,29 @@ def _vmec2000_tail_projection(rows: list[Any], *, length: int = 12) -> dict[str,
     return out
 
 
+def _vmec2000_component_tail_projections(rows: list[Any]) -> dict[str, Any]:
+    """Return VMEC2000 residual-tail projections by force component."""
+
+    return {
+        component: _vmec2000_tail_projection(
+            [
+                {
+                    "it": int(row.get("it") if isinstance(row, dict) else row.it),
+                    "total": float(row.get(component) if isinstance(row, dict) else getattr(row, component)),
+                    "fsqr": float(row.get(component) if isinstance(row, dict) else getattr(row, component)),
+                    "fsqz": 0.0,
+                    "fsql": 0.0,
+                    "max_component": float(row.get(component) if isinstance(row, dict) else getattr(row, component)),
+                }
+                for row in rows
+                if _finite_float(row.get(component) if isinstance(row, dict) else getattr(row, component, None))
+                is not None
+            ]
+        )
+        for component in FORCE_COMPONENTS
+    }
+
+
 def _row_total_and_max(row: Any) -> tuple[int, float, float] | None:
     try:
         if isinstance(row, dict):
@@ -899,6 +978,7 @@ def _vmec_style_log_payload(path: Path) -> dict[str, Any]:
         "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
         "history": {
             "fsq_component_sum_tail_projection": _vmec2000_tail_projection(rows),
+            "fsq_component_tail_projection_by_component": _vmec2000_component_tail_projections(rows),
         },
         "tail_plateau": _tail_plateau_payload(rows, stage_ftol=stage_ftol),
         "initial_jacobian_changed_sign": bool(saw_axis_repair),
@@ -934,6 +1014,9 @@ def _summary_row(
                 **backend,
                 "history": {
                     "fsq_component_sum_tail_projection": _vmec2000_tail_projection(tail_rows),
+                    "fsq_component_tail_projection_by_component": _vmec2000_component_tail_projections(
+                        tail_rows
+                    ),
                 },
             }
     requested_ftol = _finite_float(cfg.get("ftol"))
@@ -998,6 +1081,8 @@ def _summary_row(
         control_projection = {}
     stellarator_projection = _control_projection_candidate(control_projection, "stellarator")
     iters_to_target = _tail_projection(backend_for_projection, "", target=1.0e-12)
+    component_values = _final_force_components(backend)
+    limiting_component = _limiting_component(backend_for_projection, component_values)
     max_iter = cfg.get("max_iter")
     if max_iter is None:
         max_iter = _last_stage_value(backend, "niter")
@@ -1160,6 +1245,13 @@ def _summary_row(
         "final_iter": final_iter,
         "final_total": final_total,
         "final_max_component": final_max_component,
+        "final_fsqr": component_values["fsqr"],
+        "final_fsqz": component_values["fsqz"],
+        "final_fsql": component_values["fsql"],
+        "limiting_component": limiting_component,
+        "fsqr_strict_gap": _strict_gap_for_component(component_values["fsqr"], requested_ftol),
+        "fsqz_strict_gap": _strict_gap_for_component(component_values["fsqz"], requested_ftol),
+        "fsql_strict_gap": _strict_gap_for_component(component_values["fsql"], requested_ftol),
         "strict_components_met": strict_met,
         "boundary_condition_mode": promotion.get("boundary_condition_mode"),
         "coil_bnormal_role": promotion.get("coil_bnormal_role"),
@@ -1228,6 +1320,24 @@ def _summary_row(
         "virtual_casing_wall_s": _finite_float(virtual_casing.get("wall_s")),
         "tail_decay_factor": _tail_projection(backend_for_projection, "per_iter_factor"),
         "iters_to_1e-12_est": iters_to_target,
+        "fsqr_tail_decay_factor": _component_tail_projection(
+            backend_for_projection, "fsqr", "per_iter_factor"
+        ),
+        "fsqz_tail_decay_factor": _component_tail_projection(
+            backend_for_projection, "fsqz", "per_iter_factor"
+        ),
+        "fsql_tail_decay_factor": _component_tail_projection(
+            backend_for_projection, "fsql", "per_iter_factor"
+        ),
+        "fsqr_iters_to_1e-12_est": _component_tail_projection(
+            backend_for_projection, "fsqr", "", target=1.0e-12
+        ),
+        "fsqz_iters_to_1e-12_est": _component_tail_projection(
+            backend_for_projection, "fsqz", "", target=1.0e-12
+        ),
+        "fsql_iters_to_1e-12_est": _component_tail_projection(
+            backend_for_projection, "fsql", "", target=1.0e-12
+        ),
         "tail_plateau_status": tail_plateau.get("status"),
         "tail_plateau_window": tail_plateau.get("window"),
         "tail_total_rel_span": _finite_float(tail_plateau.get("total_rel_span")),
@@ -1305,6 +1415,7 @@ def _vmec2000_partial_payload_from_threed1(path: Path) -> dict[str, Any]:
         "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
         "history": {
             "fsq_component_sum_tail_projection": _vmec2000_tail_projection(rows),
+            "fsq_component_tail_projection_by_component": _vmec2000_component_tail_projections(rows),
         },
         "tail_plateau": _tail_plateau_payload(rows, stage_ftol=stage_ftol),
         "final_max_component": None
@@ -1504,6 +1615,13 @@ def main(argv: list[str] | None = None) -> int:
         "final_iter",
         "final_total",
         "final_max_component",
+        "final_fsqr",
+        "final_fsqz",
+        "final_fsql",
+        "limiting_component",
+        "fsqr_strict_gap",
+        "fsqz_strict_gap",
+        "fsql_strict_gap",
         "strict_components_met",
         "boundary_condition_mode",
         "coil_bnormal_role",
@@ -1560,6 +1678,12 @@ def main(argv: list[str] | None = None) -> int:
         "virtual_casing_wall_s",
         "tail_decay_factor",
         "iters_to_1e-12_est",
+        "fsqr_tail_decay_factor",
+        "fsqz_tail_decay_factor",
+        "fsql_tail_decay_factor",
+        "fsqr_iters_to_1e-12_est",
+        "fsqz_iters_to_1e-12_est",
+        "fsql_iters_to_1e-12_est",
         "tail_plateau_status",
         "tail_plateau_window",
         "tail_total_rel_span",

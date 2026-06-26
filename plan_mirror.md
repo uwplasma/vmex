@@ -32962,3 +32962,160 @@ Result: completed and wrote
 ### User input needed
 
 No user input is needed.
+
+## M291 - Component-Wise Strict-Convergence Diagnostics
+
+### Steps taken
+
+- Re-audited the direct-coil convergence state after the reduced-control
+  projection tranche:
+  - the local branch was clean and at draft PR head `d2ca0fe2`;
+  - `office` remained loaded by two direct-GPU strict rows and one VMEC2000
+    generated-`mgrid` row;
+  - the queued projected-control row was still alive and correctly waiting for
+    load and active direct rows to drop.
+- Re-read the active DESC free-boundary implementation:
+  - `VacuumBoundaryError` is the cheap vacuum normal-field / pressure-jump
+    objective and warns when pressure/current are nonzero;
+  - finite-beta `BoundaryError` computes the plasma contribution with virtual
+    casing and checks total exterior-field normal and pressure-balance
+    residuals;
+  - experimental DESC `BoundaryErrorNESTOR` is pressure-balance-only and still
+    not the recommended finite-beta objective.
+- Added component-wise strict convergence diagnostics:
+  - `tools/diagnostics/profile_square_coil_free_boundary.py` now writes
+    `history.fsq_component_tail_projection_by_component`,
+    `history.fsq_limiting_component`, and
+    `history.fsq_limiting_component_value`;
+  - `tools/diagnostics/summarize_square_coil_profiles.py` now prints
+    `final_fsqr`, `final_fsqz`, `final_fsql`, `limiting_component`,
+    `fsqr/fsqz/fsql_strict_gap`, per-component decay factors, and
+    per-component estimated additional iterations to `1e-12`;
+  - active `launcher.log` and copied VMEC2000 partial sidecars are backfilled
+    from their tail rows, so long-running rows can be diagnosed before final
+    JSON is written.
+- Updated the convergence doc and mirror examples README to explain how to use
+  the component-level columns before changing `MPOL`, `NTOR`, `NZETA`, or
+  pressure-coupling controls.
+
+### Results obtained
+
+- Local live-log summary with the new columns showed the active direct hot
+  restart is currently `fsqr` limited:
+  - iteration `1269`;
+  - requested `FTOL = 1e-12`;
+  - `final_fsqr = 2.15e-10`, `final_fsqz = 1.86e-10`,
+    `final_fsql = 2.38e-11`;
+  - component max gap `215`;
+  - tail classification `oscillatory`;
+  - per-component tail estimates to `1e-12` are not meaningful because the
+    recent tail is growing/oscillatory.
+- The active VMEC2000 generated-`mgrid` row is still on its first loose
+  `FTOL = 1e-8` stage, so it is not strict evidence yet:
+  - iteration `861`;
+  - `final_fsqr = 1.21e-3`, `final_fsqz = 3.96e-4`,
+    `final_fsql = 2.44e-5`;
+  - limiting component `fsqr`;
+  - tail classification `monotone_decreasing`;
+  - no vacuum-grid overflow in the copied sidecar.
+- Interpretation:
+  - VMEC2000 has not proven strict robustness yet, but its current first-stage
+    residual is decreasing rather than cycling;
+  - the direct hot-restart row is close enough to strict tolerance that the
+    component-limited oscillation matters more than simply adding a small
+    number of iterations;
+  - the queued projected-control A/B row remains the next highest-value solve
+    profile once office load permits.
+
+### How it was tested
+
+- Focused diagnostics tests:
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: `50 passed, 1 warning`.
+
+- Syntax:
+
+```bash
+venv/bin/python -m py_compile \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py
+```
+
+Result: passed.
+
+- Lint:
+
+```bash
+python3 -m ruff check \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: passed.
+
+- Whitespace hygiene:
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+- Live-log smoke:
+
+```bash
+venv/bin/python tools/diagnostics/summarize_square_coil_profiles.py \
+  /tmp/vmec_mirror_live_logs/square_coil_direct_gpu_hot_restart_from_anderson_ns17_mpol5_ntor28_nzeta64_niter8k_x2_control_spline/launcher.log \
+  /tmp/vmec_mirror_live_logs/vmec2000_partial.json \
+  --csv /tmp/vmec_mirror_live_logs/summary.csv
+```
+
+Result: summary rows produced the component-limited fields listed above.
+
+### File structure and best-practice adherence
+
+- No solver behavior changed in this milestone.
+- Profiling JSON additions live in the existing square-coil backend profiler.
+- Summary-table additions live in the existing summarizer and reconstruct
+  component evidence from existing live log/sidecar formats.
+- Documentation changes are concise and placed where users already read about
+  strict convergence and summary-table interpretation.
+- No WOUTs, raw results, or figures were added to git.
+
+### Best next steps
+
+1. Commit and push this diagnostics tranche.
+2. Pull the branch into the active `office` checkouts used for future summary
+   commands so the new columns are available remotely.
+3. Let the current VMEC2000 row reach the strict `1e-12` stage before judging
+   whether VMEC2000 is more robust for this edited `MPOL/NTOR/NZETA` deck.
+4. When the two active direct rows finish, let the queued
+   `--freeb-edge-control-projection square` row run; compare whether the
+   `fsqr` oscillatory floor drops below the current `~2e-10` direct hot-restart
+   plateau.
+5. If projected-control still stalls above `1e-12`, run the same deck with the
+   `stellarator` control basis and then decide whether to move to a true
+   solver-native spline-coordinate state.
+
+### Completion percentages after M291
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component floor still open.
+- Seeded hot-restart lane: `99%`, active row is `fsqr`-limited and oscillatory.
+- VMEC2000 robustness/reference lane: `99%`, active row is still in loose
+  stage and monotone decreasing.
+- Resolution/edit robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `79%`, projected-control A/B queued.
+- Strict convergence diagnostics lane: `100%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

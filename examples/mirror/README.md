@@ -486,6 +486,12 @@ The summary table reports both ``final_total`` and ``final_max_component``.
 Use ``final_max_component <= requested_ftol`` / ``strict_components_met`` for
 the production convergence gate; ``final_total`` is useful for trend
 comparison but is not sufficient for a per-component ``FTOL=1e-12`` claim.
+It also prints ``final_fsqr``, ``final_fsqz``, ``final_fsql``,
+``limiting_component``, per-component strict gaps, and per-component
+``iters_to_1e-12`` tail projections. Use those fields before changing mode
+counts: an ``fsqr``-limited oscillatory tail points to solve/control updates,
+while a monotone component tail with enough remaining budget can simply be left
+running.
 The ``strict_gap`` column is ``final_max_component / requested_ftol`` and the
 ``next_action`` column turns the compact residual evidence into a run decision:
 for example, a flat tail above tolerance with no vacuum-grid overflow points to

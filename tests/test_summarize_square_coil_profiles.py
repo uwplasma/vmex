@@ -112,6 +112,21 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                                 "per_iter_factor": 0.98,
                                 "estimated_additional_iterations_to_target": {"1e-12": 1234},
                             },
+                            "fsq_component_tail_projection_by_component": {
+                                "fsqr": {
+                                    "per_iter_factor": 0.97,
+                                    "estimated_additional_iterations_to_target": {"1e-12": 111},
+                                },
+                                "fsqz": {
+                                    "per_iter_factor": 0.96,
+                                    "estimated_additional_iterations_to_target": {"1e-12": 222},
+                                },
+                                "fsql": {
+                                    "per_iter_factor": 0.95,
+                                    "estimated_additional_iterations_to_target": {"1e-12": 333},
+                                },
+                            },
+                            "fsq_limiting_component": "fsql",
                         },
                         "wall_s": 3.5,
                     },
@@ -155,12 +170,26 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[0]["final_total"] == pytest.approx(5.4e-6)
     assert rows[0]["requested_ftol"] == pytest.approx(1.0e-6)
     assert rows[0]["final_max_component"] == pytest.approx(3.0e-6)
+    assert rows[0]["final_fsqr"] == pytest.approx(2.0e-6)
+    assert rows[0]["final_fsqz"] == pytest.approx(3.0e-6)
+    assert rows[0]["final_fsql"] == pytest.approx(4.0e-7)
+    assert rows[0]["limiting_component"] == "fsqz"
+    assert rows[0]["fsqz_strict_gap"] == pytest.approx(3.0)
     assert rows[0]["strict_components_met"] is False
     assert rows[0]["best_total"] == pytest.approx(5.0e-6)
     assert rows[0]["tail_decay_factor"] < 1.0
     assert rows[0]["iters_to_1e-12_est"] > 0
+    assert rows[0]["fsqr_tail_decay_factor"] < 1.0
+    assert rows[0]["fsqz_iters_to_1e-12_est"] is None
     assert rows[1]["final_total"] == pytest.approx(9.0e-7)
     assert rows[1]["final_max_component"] == pytest.approx(4.0e-7)
+    assert rows[1]["final_fsqr"] == pytest.approx(2.0e-7)
+    assert rows[1]["final_fsqz"] == pytest.approx(3.0e-7)
+    assert rows[1]["final_fsql"] == pytest.approx(4.0e-7)
+    assert rows[1]["limiting_component"] == "fsql"
+    assert rows[1]["fsql_strict_gap"] == pytest.approx(0.4)
+    assert rows[1]["fsqr_tail_decay_factor"] == pytest.approx(0.97)
+    assert rows[1]["fsqz_iters_to_1e-12_est"] == pytest.approx(222)
     assert rows[1]["strict_components_met"] is True
     assert rows[1]["backend_role"] == "vmec_jax_mgrid_parity"
     assert rows[1]["strict_evidence_status"] == "non_strict_ftol"
@@ -672,9 +701,15 @@ def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Pat
     assert row["final_iter"] == 400
     assert row["final_total"] == pytest.approx(6.3e-11)
     assert row["final_max_component"] == pytest.approx(3.0e-11)
+    assert row["final_fsqr"] == pytest.approx(3.0e-11)
+    assert row["final_fsqz"] == pytest.approx(2.5e-11)
+    assert row["final_fsql"] == pytest.approx(8.0e-12)
+    assert row["limiting_component"] == "fsqr"
+    assert row["fsqr_strict_gap"] == pytest.approx(30.0)
     assert row["strict_components_met"] is False
     assert row["tail_decay_factor"] == pytest.approx(0.9994733361578259)
     assert row["iters_to_1e-12_est"] == pytest.approx(7865)
+    assert row["fsqr_iters_to_1e-12_est"] is not None
     assert row["recommended_followup_profile_kind"] == "wait_current_run"
     assert row["recommended_followup_reason"] == "active_profile_still_running"
 

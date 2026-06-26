@@ -170,6 +170,12 @@ def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tail
     assert payload["history"]["fsq_component_sum_tail_projection"][
         "estimated_additional_iterations_to_target"
     ]["1e-12"] == 8
+    component_projection = payload["history"]["fsq_component_tail_projection_by_component"]
+    assert payload["history"]["fsq_limiting_component"] == "fsqz"
+    assert payload["history"]["fsq_limiting_component_value"] == pytest.approx(2.0e-5)
+    assert component_projection["fsqr"]["per_iter_factor"] == pytest.approx(0.1)
+    assert component_projection["fsqz"]["estimated_additional_iterations_to_target"]["1e-12"] == 8
+    assert component_projection["fsql"]["estimated_additional_iterations_to_target"]["1e-12"] == 7
     assert payload["history"]["freeb_full_update_stats"]["sum"] == pytest.approx(2.0)
     assert payload["history"]["freeb_nestor_source_reused_stats"]["sum"] == pytest.approx(1.0)
     assert payload["history"]["freeb_nestor_provider_allows_source_reuse_stats"]["last"] == pytest.approx(1.0)

@@ -773,6 +773,35 @@ def _component_sum_history(run: Any) -> np.ndarray:
     return histories[0][-n:] + histories[1][-n:] + histories[2][-n:]
 
 
+def _component_tail_projection_payload(run: Any) -> dict[str, Any]:
+    """Return component-wise residual tail projections for strict FTOL checks."""
+
+    result = None if run is None else getattr(run, "result", None)
+    components: dict[str, dict[str, Any]] = {}
+    limiting_name: str | None = None
+    limiting_value: float | None = None
+    for name, attr in (
+        ("fsqr", "fsqr2_history"),
+        ("fsqz", "fsqz2_history"),
+        ("fsql", "fsql2_history"),
+    ):
+        values = [] if result is None else getattr(result, attr, [])
+        projection = _tail_decay_projection(values)
+        components[name] = projection
+        try:
+            last = float(projection.get("last"))
+        except Exception:
+            last = float("nan")
+        if np.isfinite(last) and (limiting_value is None or last > limiting_value):
+            limiting_name = name
+            limiting_value = last
+    return {
+        "components": components,
+        "limiting_component": limiting_name,
+        "limiting_component_value": limiting_value,
+    }
+
+
 def _internal_to_physical_mode_scale(static: Any) -> np.ndarray:
     """Return the VMEC-internal to physical Fourier coefficient scale."""
 
@@ -959,6 +988,7 @@ def _boundary_motion_payload(run: Any, *, config: ExampleConfig | None = None) -
 def _jax_history_payload(run: Any, diag: dict[str, Any], *, length: int = 12) -> dict[str, Any]:
     result = None if run is None else getattr(run, "result", None)
     component_sum = _component_sum_history(run)
+    component_projection = _component_tail_projection_payload(run)
     return {
         "length": None if result is None else int(getattr(result, "n_iter", -1)),
         "w_tail": _history_tail([] if result is None else getattr(result, "w_history", []), length=length),
@@ -968,6 +998,9 @@ def _jax_history_payload(run: Any, diag: dict[str, Any], *, length: int = 12) ->
         "fsq_component_sum_tail": _history_tail(component_sum, length=length),
         "fsq_component_sum_stats": _history_stats(component_sum),
         "fsq_component_sum_tail_projection": _tail_decay_projection(component_sum),
+        "fsq_component_tail_projection_by_component": component_projection["components"],
+        "fsq_limiting_component": component_projection["limiting_component"],
+        "fsq_limiting_component_value": component_projection["limiting_component_value"],
         "freeb_ivac_tail": _history_tail(diag.get("freeb_ivac_history"), length=length, dtype=int),
         "freeb_ivacskip_tail": _history_tail(diag.get("freeb_ivacskip_history"), length=length, dtype=int),
         "freeb_full_update_tail": _history_tail(diag.get("freeb_full_update_history"), length=length, dtype=int),
