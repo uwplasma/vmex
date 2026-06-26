@@ -172,7 +172,11 @@ rounded ``spline`` target at the production mode counts. This is less sensitive
 to ``NTOR`` than the sharper polar superellipse. It still projects to VMEC
 Fourier coefficients for the solve and for VMEC2000/mgrid parity, while keeping
 the intended square-axis control variables independent of ``MPOL`` and
-``NTOR`` before projection.
+``NTOR`` before projection. To edit only the reduced symmetry-preserving
+variables, set ``PLASMA_AXIS_REDUCED_RADII`` at the top of the example. With
+the default ``PLASMA_AXIS_CONTROL_SYMMETRY = "square"``, this is a two-value
+``(side_radius, corner_radius)`` tuple that expands to the full eight spline
+controls.
 Use ``vmec_jax.square_axis_spline_radius_matrix`` to inspect the linear map
 from those few control radii to sampled square-axis radius values. The helper
 does not replace VMEC's Fourier state yet, but it makes the low-dimensional

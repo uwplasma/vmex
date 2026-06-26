@@ -398,8 +398,12 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     assert module.ExampleConfig().nstep == 1
     assert module.ExampleConfig().plasma_axis_kind == "control_spline"
     assert module.ExampleConfig().plasma_axis_spline_controls is None
+    assert module.ExampleConfig().plasma_axis_control_symmetry == "square"
+    assert module.ExampleConfig().plasma_axis_reduced_radii is None
     assert module.build_square_coils(module.ExampleConfig()).params.chunk_size == 512
     assert module.build_square_coils(module.ExampleConfig(coil_chunk_size=None)).params.chunk_size is None
+    default_kwargs = module._square_axis_sample_kwargs(module.ExampleConfig())
+    assert default_kwargs["axis_spline_controls"].radius.size == 8
     indata = module.make_free_boundary_indata(module.ExampleConfig(nstep=3), beta_percent=0.0)
     assert indata.get_int("NVACSKIP") == 1
     assert indata.get_int("NSTEP") == 3
@@ -414,6 +418,19 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     np.testing.assert_allclose(spline_kwargs["axis_spline_controls"].radius, controls.validate().radius)
     spline_indata = module.make_free_boundary_indata(spline_config, beta_percent=0.0)
     assert spline_indata.get_int("NSTEP") == 4
+    reduced_config = module.ExampleConfig(plasma_axis_reduced_radii=(1.42, 1.73))
+    reduced_kwargs = module._square_axis_sample_kwargs(reduced_config)
+    reduced_radius = reduced_kwargs["axis_spline_controls"].radius
+    np.testing.assert_allclose(reduced_radius[::2], np.full(4, 1.42))
+    np.testing.assert_allclose(reduced_radius[1::2], np.full(4, 1.73))
+    with pytest.raises(ValueError, match="requires plasma_axis_kind='control_spline'"):
+        module._square_axis_sample_kwargs(
+            module.ExampleConfig(plasma_axis_kind="spline", plasma_axis_reduced_radii=(1.42, 1.73))
+        )
+    with pytest.raises(ValueError, match="set either plasma_axis_spline_controls or plasma_axis_reduced_radii"):
+        module._square_axis_sample_kwargs(
+            module.ExampleConfig(plasma_axis_spline_controls=controls, plasma_axis_reduced_radii=(1.42, 1.73))
+        )
     with pytest.raises(ValueError, match="boundary projection error is too large"):
         module.run_example(
             module.ExampleConfig(
@@ -811,6 +828,7 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     metrics = json.loads(metrics_path.read_text())
     rows = metrics["rows"]
     assert metrics["metrics_schema"] == "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
+    assert metrics["metrics_schema_version"] == "0.3"
     assert metrics["workflow_status"] == "actual_vmec_jax_free_boundary_beta_scan"
     assert metrics["actual_free_boundary_solve"] is True
     assert metrics["production_free_boundary_claim"] is False
@@ -820,6 +838,9 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert metrics["boundary_projection"]["mpol"] == 3
     assert metrics["boundary_projection"]["ntor"] == 4
     assert np.isfinite(float(metrics["boundary_projection"]["max_abs_error"]))
+    assert metrics["plasma_axis_control_symmetry"] == "square"
+    assert metrics["plasma_axis_reduced_radii"] is None
+    assert metrics["plasma_axis_spline_controls"]["radius"][0] == pytest.approx(1.5)
     assert metrics["betas_percent"] == [0.0]
     assert metrics["figures"] == {}
     assert Path(metrics["coils_json"]).exists()

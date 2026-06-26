@@ -45,6 +45,7 @@ from vmec_jax.toroidal_hybrid import (
     SquareAxisSplineControls,
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
+    square_axis_spline_symmetric_control_basis,
     square_axis_stellarator_mirror_hybrid_indata,
     square_axis_stellarator_mirror_hybrid_projection_error,
 )
@@ -71,6 +72,8 @@ PLASMA_AXIS_KIND = "control_spline"
 PLASMA_AXIS_SQUARE_POWER = 3.0
 PLASMA_AXIS_SPLINE_CORNER_RADIUS_FACTOR = 1.14
 PLASMA_AXIS_SPLINE_CONTROLS: SquareAxisSplineControls | None = None
+PLASMA_AXIS_CONTROL_SYMMETRY = "square"
+PLASMA_AXIS_REDUCED_RADII: tuple[float, ...] | None = None
 PLASMA_MINOR_RADIUS = 0.03
 SIDE_ELONGATION = 0.08
 SIDE_MINOR_MODULATION = 0.08
@@ -115,7 +118,7 @@ FIELD_LINE_TURNS = 1.25
 
 
 SCHEMA = "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
-SCHEMA_VERSION = "0.2"
+SCHEMA_VERSION = "0.3"
 
 
 @dataclass(frozen=True)
@@ -134,6 +137,8 @@ class ExampleConfig:
     plasma_axis_square_power: float = PLASMA_AXIS_SQUARE_POWER
     plasma_axis_spline_corner_radius_factor: float = PLASMA_AXIS_SPLINE_CORNER_RADIUS_FACTOR
     plasma_axis_spline_controls: SquareAxisSplineControls | None = PLASMA_AXIS_SPLINE_CONTROLS
+    plasma_axis_control_symmetry: str = PLASMA_AXIS_CONTROL_SYMMETRY
+    plasma_axis_reduced_radii: tuple[float, ...] | None = PLASMA_AXIS_REDUCED_RADII
     plasma_minor_radius: float = PLASMA_MINOR_RADIUS
     side_elongation: float = SIDE_ELONGATION
     side_minor_modulation: float = SIDE_MINOR_MODULATION
@@ -378,9 +383,38 @@ def _square_axis_sample_kwargs(config: ExampleConfig) -> dict[str, Any]:
         "corner_rotation": float(config.corner_rotation),
         "corner_helicity": int(config.corner_helicity),
     }
-    if config.plasma_axis_spline_controls is not None:
-        kwargs["axis_spline_controls"] = config.plasma_axis_spline_controls.validate()
+    controls = _resolved_axis_spline_controls(config)
+    if controls is not None:
+        kwargs["axis_spline_controls"] = controls
     return kwargs
+
+
+def _resolved_axis_spline_controls(config: ExampleConfig) -> SquareAxisSplineControls | None:
+    """Return explicit spline controls, optionally from reduced radii."""
+
+    reduced = config.plasma_axis_reduced_radii
+    explicit = config.plasma_axis_spline_controls
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if reduced is not None and axis_kind != "control_spline":
+        raise ValueError("plasma_axis_reduced_radii requires plasma_axis_kind='control_spline'")
+    if reduced is not None and explicit is not None:
+        raise ValueError("set either plasma_axis_spline_controls or plasma_axis_reduced_radii, not both")
+    if explicit is not None:
+        controls = explicit.validate()
+    elif reduced is not None or axis_kind == "control_spline":
+        controls = SquareAxisSplineControls.rounded_square(
+            axis_half_width=float(config.plasma_axis_half_width),
+            corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
+        )
+    else:
+        return None
+    if reduced is None:
+        return controls.validate()
+    basis = square_axis_spline_symmetric_control_basis(
+        controls,
+        symmetry=str(config.plasma_axis_control_symmetry),
+    )
+    return basis.controls_from_reduced(np.asarray(reduced, dtype=float))
 
 
 def _spline_controls_payload(controls: SquareAxisSplineControls | None) -> dict[str, Any] | None:
@@ -421,6 +455,8 @@ def _validate_example_config(config: ExampleConfig) -> None:
             raise ValueError("solver_mode must be one of: default, parity, accelerated, or None")
     if int(config.nvacskip) < 1:
         raise ValueError("nvacskip must be at least 1")
+    if config.plasma_axis_reduced_radii is not None and str(config.plasma_axis_kind).strip().lower() != "control_spline":
+        raise ValueError("plasma_axis_reduced_radii requires plasma_axis_kind='control_spline'")
     if bool(config.enforce_recommended_nzeta):
         recommended = recommended_square_axis_nzeta(int(config.ntor))
         if int(config.nzeta) < recommended:
@@ -603,6 +639,7 @@ def _virtual_casing_row_metrics(
             "virtual_casing_pressure_balance_rms": None,
             "virtual_casing_pressure_balance_max": None,
         }
+    resolved_controls = _resolved_axis_spline_controls(config)
     return {
         "virtual_casing_status": "computed",
         "virtual_casing_external_bnormal_residual_rms": diagnostics.external_bnormal_residual_rms,
@@ -1177,6 +1214,12 @@ def _metrics_payload(
     all_converged = bool(complete) and all(bool(row.get("converged")) for row in rows)
     completed = [float(row.get("beta_percent")) for row in rows]
     remaining = [float(beta) for beta in config.betas_percent if float(beta) not in completed]
+    resolved_controls = _resolved_axis_spline_controls(config)
+    reduced_radii = (
+        None
+        if config.plasma_axis_reduced_radii is None
+        else [float(value) for value in config.plasma_axis_reduced_radii]
+    )
     return {
         "metrics_schema": SCHEMA,
         "metrics_schema_version": SCHEMA_VERSION,
@@ -1195,7 +1238,9 @@ def _metrics_payload(
         "plasma_axis_half_width": float(config.plasma_axis_half_width),
         "plasma_axis_kind": str(config.plasma_axis_kind),
         "plasma_axis_spline_corner_radius_factor": float(config.plasma_axis_spline_corner_radius_factor),
-        "plasma_axis_spline_controls": _spline_controls_payload(config.plasma_axis_spline_controls),
+        "plasma_axis_control_symmetry": str(config.plasma_axis_control_symmetry),
+        "plasma_axis_reduced_radii": reduced_radii,
+        "plasma_axis_spline_controls": _spline_controls_payload(resolved_controls),
         "side_power": float(config.side_power),
         "corner_power": float(config.corner_power),
         "coil_square_side_length": float(config.coil_square_side_length),

@@ -30042,3 +30042,90 @@ under `/tmp` and not tracked.
 ### User input needed
 
 No user input is needed.
+---
+## 262. Exposed Reduced Square-Axis Controls In The Root Square-Coil Example
+
+### Steps taken
+
+- Added top-level example parameters:
+  - `PLASMA_AXIS_CONTROL_SYMMETRY`;
+  - `PLASMA_AXIS_REDUCED_RADII`.
+- Added matching `ExampleConfig` fields.
+- Added `_resolved_axis_spline_controls(config)` so the example can expand a
+  reduced side/corner tuple into the full eight-node `SquareAxisSplineControls`
+  object.
+- Reused `square_axis_spline_symmetric_control_basis` from
+  `vmec_jax.toroidal_hybrid` instead of duplicating basis logic in the example.
+- Added validation so reduced radii require `plasma_axis_kind="control_spline"`
+  and cannot be supplied together with explicit full spline controls.
+- Bumped the square-coil example metrics schema to `0.3` and recorded the
+  resolved controls, reduced radii, and control symmetry in metrics JSON.
+- Documented the new top-level controls in `examples/mirror/README.md`.
+
+### Results obtained
+
+- The runnable square-coil example now supports the intended low-dimensional
+  spline path directly:
+  - default behavior still uses the eight-node rounded-square control spline;
+  - setting `PLASMA_AXIS_REDUCED_RADII = (side_radius, corner_radius)` uses the
+    two-parameter square basis;
+  - users no longer need to hand-build the full control array for simple
+    side/corner scans.
+- The implementation still projects to ordinary VMEC Fourier coefficients for
+  the active solve and VMEC2000 parity, so this is a controlled bridge rather
+  than a new solver state vector.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py::test_square_coil_hybrid_free_boundary_example_runs_without_plots
+ruff check \
+  examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py \
+  tests/test_toroidal_hybrid.py
+venv/bin/python -m py_compile \
+  examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Results:
+
+- Full toroidal-hybrid suite: `48 passed, 2 warnings`.
+- Focused metrics/example test: `1 passed, 2 warnings`.
+- Ruff, py-compile, and whitespace checks passed.
+
+### File structure and best-practice notes
+
+- Reduced-control UX belongs in the root example because it is the user-facing
+  control surface for square-coil scans.
+- The reusable basis math remains in `vmec_jax/toroidal_hybrid.py`.
+- Tests stay in `tests/test_toroidal_hybrid.py` with the rest of the
+  square-hybrid example coverage.
+- No output files, WOUT files, figures, or `/tmp` probes were tracked.
+
+### Best next steps
+
+1. Use `PLASMA_AXIS_REDUCED_RADII` for the next square-coil sensitivity scan
+   instead of increasing Fourier modes first.
+2. If strict VMEC2000 remains plateaued above `1e-12`, prototype the nonlinear
+   JAX update in this reduced basis while keeping Fourier projection for WOUT
+   and VMEC2000 comparisons.
+3. Keep `--resolution-diagnostics-only` as the preflight for any changed
+   `MPOL`/`NTOR`/`NZETA` deck.
+
+### Completion percentages after M262
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `79%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `77%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `61%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
