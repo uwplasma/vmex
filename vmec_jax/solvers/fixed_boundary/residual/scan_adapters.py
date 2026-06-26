@@ -514,6 +514,7 @@ def _dispatch_vmec2000_residual_scan(
             _scan_backend_name=hooks.scan_backend_name,
             _scan_chunk_settings=hooks.scan_chunk_settings,
             _tree_has_tracer=hooks.tree_has_tracer,
+            axis_reset_coeffs=_axis_reset_coeffs_from_namespace(namespace),
         ),
         state,
     )
@@ -618,6 +619,16 @@ def _dispatch_accelerated_residual_scan(
         state=state,
         resume_state=namespace["resume_state"],
     )
+
+
+def _axis_reset_coeffs_from_namespace(namespace: dict[str, Any]) -> Any:
+    """Return the current axis-reset coefficients carried by the reset callback."""
+
+    reset_callback = namespace.get("_reset_axis_from_boundary")
+    coeffs_func = getattr(reset_callback, "coeffs", None)
+    if callable(coeffs_func):
+        return coeffs_func()
+    return namespace.get("axis_reset_coeffs")
 
 
 def dispatch_residual_scan_path(

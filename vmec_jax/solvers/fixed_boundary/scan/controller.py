@@ -105,6 +105,17 @@ def _scan_tree_select(cond, t_true, t_false):
     return jnp.where(cond, jnp.asarray(t_true), jnp.asarray(t_false))
 
 
+def _axis_reset_coeffs_from_context(ctx: "Vmec2000ScanControllerContext") -> Any:
+    """Return fresh axis-reset coefficients from the reset callback, if available."""
+
+    coeffs_func = getattr(ctx._reset_axis_from_boundary, "coeffs", None)
+    if callable(coeffs_func):
+        coeffs = coeffs_func()
+        if coeffs is not None:
+            return coeffs
+    return ctx.axis_reset_coeffs
+
+
 @dataclass(slots=True)
 class Vmec2000ScanControllerContext:
     """Closed-over solver state needed by the VMEC2000-style scan controller."""
@@ -907,8 +918,9 @@ def _prepare_scan_initial_force_and_axis_reset(
             print(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS", flush=True)
         state_init = ctx._reset_axis_from_boundary(state_init, k_guess=k0, full_reset=False, refine_axis_guess=False)
         if bool(verbose) and bool(vmec2000_control) and bool(verbose_vmec2000_table):
-            if ctx.axis_reset_coeffs is not None:
-                raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = ctx.axis_reset_coeffs
+            coeffs = _axis_reset_coeffs_from_context(ctx)
+            if coeffs is not None:
+                raxis_cc, _raxis_cs, _zaxis_cc, zaxis_cs = coeffs
                 scan_print_context.print_axis_guess(raxis_cc, zaxis_cs)
         scan_resume0 = scan_resume0._replace(
             ijacob=jnp.asarray(1, dtype=jnp.int32),
@@ -1108,7 +1120,6 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     _rz_norm = ctx._rz_norm
     _scan_backend_name = ctx._scan_backend_name
     _tree_has_tracer = ctx._tree_has_tracer
-    axis_reset_coeffs = ctx.axis_reset_coeffs
     startup_policy = ctx.startup_policy
     badjac_initial_state_probe_iters = startup_policy.badjac_initial_state_probe_iters
     badjac_state_probe = startup_policy.badjac_state_probe
