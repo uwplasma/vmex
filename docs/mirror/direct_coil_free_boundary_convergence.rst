@@ -423,10 +423,14 @@ The remaining work is deliberately narrow:
    direct-coil iterations, do not spend more local CPU on longer single-stage
    runs at either same deck before changing resolution, schedule, or geometry
    representation. For pure direct-provider GPU profiling, use
-   ``--jit-forces --coil-chunk-size 0 --skip-mgrid --skip-provider-parity`` so
-   the run does not spend memory generating an unused mgrid. When a backend
-   comparison still needs a generated mgrid, keep the mgrid write chunked even
-   if the direct sampler is using the full-geometry JIT path.
+   ``--jit-forces --coil-chunk-size 0 --jit-direct-sampler --skip-mgrid
+   --skip-provider-parity`` so the run does not spend memory generating an
+   unused mgrid and uses the cached direct-coil sampler. The profiler caches
+   static direct-coil geometry by default because this is a forward CLI
+   workflow; pass ``--no-direct-static-cache`` only for differentiable-provider
+   parity checks. When a backend comparison still needs a generated mgrid, keep
+   the mgrid write chunked even if the direct sampler uses the full-geometry
+   JIT path.
    For the first pressure-mixing A/B run, keep the same staged deck and add
    ``--freeb-anderson-pressure`` only to the direct-coil backend run; compare
    ``free_boundary_anderson_pressure_last_theta``,

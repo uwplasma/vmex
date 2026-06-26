@@ -252,11 +252,15 @@ interpreting the residual floor, for example::
   --delt 0.02 --mgrid-nr 72 --mgrid-nz 56 --mgrid-nphi 64 --mgrid-padding-fraction 1.2 --mgrid-min-padding 0.5
 
 For direct-coil-only GPU profiling, add ``--jit-forces --coil-chunk-size 0
---skip-mgrid --skip-provider-parity``. The default chunk size of ``512`` is the
-conservative host-forward path; chunk size ``0`` uses the cached full-geometry
-JIT direct-coil sampler and is the intended mode for direct-provider GPU
-comparisons. Backend-comparison profiles that still need a generated mgrid keep
-the mgrid write chunked even when the direct sampler uses chunk size ``0``.
+--jit-direct-sampler --skip-mgrid --skip-provider-parity``. The profiler caches
+static direct-coil geometry by default because this CLI path is for forward
+profiling, not differentiating through the coil shapes. Pass
+``--no-direct-static-cache`` only when deliberately comparing against the fully
+differentiable provider path. The default chunk size of ``512`` is the
+conservative host-forward path; chunk size ``0`` permits full-geometry
+sampling, and ``--jit-direct-sampler`` selects the cached JIT sampler. Backend
+comparison profiles that still need a generated mgrid keep the mgrid write
+chunked even when the direct sampler uses chunk size ``0``.
 To test the opt-in VMEC++-style Anderson(1) vacuum-pressure mixer for a
 direct-coil run, add ``--freeb-anderson-pressure`` to the same profile command
 and compare the final component residuals, tail projection, and

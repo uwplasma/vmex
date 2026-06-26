@@ -117,6 +117,18 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--vmec2000-timeout", type=float, default=600.0)
     p.add_argument("--jit-forces", action="store_true")
     p.add_argument(
+        "--direct-static-cache",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cache direct-coil geometry outside the solve. This is faster for CLI profiling but not differentiable.",
+    )
+    p.add_argument(
+        "--jit-direct-sampler",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use the cached JIT direct-coil sampler when --coil-chunk-size is 0/none.",
+    )
+    p.add_argument(
         "--skip-provider-parity",
         action="store_true",
         help="Skip the initial-boundary direct-coil/generated-mgrid field parity diagnostic.",
@@ -626,6 +638,8 @@ def _run_jax_backend(
     solver_mode: str | None,
     return_best_scored_state: bool,
     freeb_anderson_pressure: bool = False,
+    direct_static_cache: bool = True,
+    jit_direct_sampler: bool = False,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
     if direct_params is not None:
@@ -633,6 +647,14 @@ def _run_jax_backend(
             "external_field_provider_kind": "direct_coils",
             "external_field_provider_params": direct_params,
         }
+        if bool(direct_static_cache):
+            kwargs["external_field_provider_static"] = {
+                "coil_geometry": build_coil_field_geometry(direct_params),
+                "regularization_epsilon": getattr(direct_params, "regularization_epsilon", 0.0),
+                "chunk_size": getattr(direct_params, "chunk_size", None),
+                "cache_scope": "square_coil_profile_direct_solve",
+                "jit_sampler": bool(jit_direct_sampler),
+            }
     t0 = time.perf_counter()
     previous_return_best = os.environ.get("VMEC_JAX_RETURN_BEST_SCORED_STATE")
     previous_anderson = os.environ.get("VMEC_JAX_FREEB_ANDERSON_PRESSURE")
@@ -1007,6 +1029,8 @@ def main(argv: list[str] | None = None) -> int:
             "solver_mode": None if solver_mode is None else str(solver_mode),
             "return_best_scored_state": bool(args.return_best_scored_state),
             "freeb_anderson_pressure": bool(args.freeb_anderson_pressure),
+            "direct_static_cache": bool(args.direct_static_cache),
+            "jit_direct_sampler": bool(args.jit_direct_sampler),
             "phiedge": float(config.phiedge),
             "delt": float(args.delt),
             "activate_fsq": float(args.activate_fsq),
@@ -1053,6 +1077,8 @@ def main(argv: list[str] | None = None) -> int:
             solver_mode=solver_mode,
             return_best_scored_state=bool(args.return_best_scored_state),
             freeb_anderson_pressure=bool(args.freeb_anderson_pressure),
+            direct_static_cache=bool(args.direct_static_cache),
+            jit_direct_sampler=bool(args.jit_direct_sampler),
         )
     if not args.skip_mgrid:
         _log_step("running vmec_jax generated-mgrid backend")

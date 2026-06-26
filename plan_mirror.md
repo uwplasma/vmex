@@ -26605,3 +26605,103 @@ No user input is needed right now. The active and queued office profiles should
 continue running, and the next decision point is numerical: whether the high
 ``MPOL``/``NTOR`` ladders reach the strict per-component ``1e-12`` gate or
 plateau above it.
+
+---
+## 221. Direct-Provider Static-Cache Profiling Guard
+
+### Steps taken
+
+- Found that running ``python tools/diagnostics/summarize_square_coil_profiles.py``
+  on ``office`` could import an older ``vmec_jax`` checkout from ``PYTHONPATH``.
+- Added repo-root import protection to the square-profile summarizer and a
+  regression test that puts a stale ``vmec_jax.vmec2000_exec`` earlier on
+  ``PYTHONPATH``.
+- Added NESTOR reuse/source-reuse/sample/solve timing columns to the square
+  profile JSON and summary table so completed direct-coil runs expose whether
+  the bottleneck is Biot-Savart sampling, NESTOR solve work, or trial
+  resampling.
+- Added a forward-CLI direct-provider cache path to
+  ``tools/diagnostics/profile_square_coil_free_boundary.py``:
+  - ``--direct-static-cache`` is now the default for profile runs;
+  - ``--no-direct-static-cache`` keeps the fully differentiable provider path;
+  - ``--jit-direct-sampler`` uses the cached JIT sampler when
+    ``--coil-chunk-size 0`` is selected.
+- Updated the README and convergence notes so direct-only GPU profiles use
+  ``--jit-forces --coil-chunk-size 0 --jit-direct-sampler``.
+- Patched the already-queued ``office`` direct ``MPOL=7, NTOR=28`` launcher to
+  add ``--jit-direct-sampler`` before it starts.
+
+### Results obtained
+
+- The live ``office`` VMEC2000 ``MPOL=7, NTOR=28, NZETA=64`` summary now works
+  from the active profile directory. Its latest visible row advanced to
+  iteration ``20200`` with:
+  - final summed residual: about ``1.761e-11``;
+  - final max component residual: about ``6.46e-12``;
+  - best visible summed residual: about ``1.702e-11``;
+  - strict per-component ``1e-12``: not met;
+  - vacuum-grid overflow count: ``0``.
+- A tiny local active-vacuum direct smoke showed the new timing columns:
+  - prior uncached path mean NESTOR sample time: about ``0.128 s``;
+  - cached non-JIT path mean sample time: about ``0.127 s``;
+  - cached JIT path mean sample time: about ``0.078 s``;
+  - wall time is not lower on an eight-iteration smoke because first-call JIT
+    compile cost dominates, but long direct profiles should benefit.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile tools/diagnostics/summarize_square_coil_profiles.py
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py --outdir results/tmp_direct_timing_smoke_active ...
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py --outdir results/tmp_direct_timing_smoke_cached ...
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py --outdir results/tmp_direct_timing_smoke_cached_jit --coil-chunk-size 0 --jit-direct-sampler ...
+```
+
+Focused results:
+
+- Summary tests: ``4 passed``.
+- Profile/summary tests together: ``15 passed``.
+- Profile tests after the sampler-cache change: ``13 passed``.
+- Py-compile checks passed.
+
+### File structure and best-practice notes
+
+- Changes stayed in diagnostics/profiling tools, tests, and docs.
+- The direct static cache is a CLI profiling choice and is explicitly labelled
+  as not differentiable through coil geometry; the library differentiable
+  provider path remains available through ``--no-direct-static-cache`` and the
+  existing ``run_free_boundary`` provider arguments.
+- Generated smoke outputs remain under ignored ``results/`` directories.
+- The summary table remains the single audit surface for completed JSON,
+  active VMEC2000 sidecars, and active VMEC2000 ``threed1`` files.
+
+### Best next steps
+
+1. Let the active direct Anderson ``6,23`` run finish, then compare it against
+   the non-Anderson direct baseline.
+2. Let VMEC2000 ``7,28`` finish; if it remains above ``1e-12``, allow the queued
+   VMEC2000 ``8,32`` run to start as the next robustness reference.
+3. If higher Fourier resolution and cached direct sampling still plateau,
+   start the true spline/control-basis lane rather than only extending
+   iteration budgets.
+
+### Completion percentages after M221
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``74%``.
+- VMEC2000 robustness/reference lane: ``84%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``90%``.
+- Square-axis spline-smoothed Fourier closure lane: ``85%``.
+- True spline/control-basis hybrid lane: ``15%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``97%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``91%``
+  pending strict high-mode evidence.
+
+### User input needed
+
+No user input is needed. The next steps are remote launcher hygiene and waiting
+for the active numerical profiles to produce final rows.

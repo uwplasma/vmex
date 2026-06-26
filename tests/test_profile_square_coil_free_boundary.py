@@ -410,3 +410,98 @@ def test_square_coil_profile_chunks_mgrid_when_direct_sampler_is_jit(monkeypatch
     assert captured["kwargs"]["chunk_size"] == 512
     assert data["mgrid"]["created"] is True
     assert data["mgrid"]["write_chunk_size"] == 512
+
+
+def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_path: Path):
+    captured = []
+    monkeypatch.setattr(
+        profile,
+        "_run_jax_backend",
+        lambda **kwargs: captured.append(kwargs) or {"status": "skipped_test"},
+    )
+
+    outdir = tmp_path / "profile_direct_sampler_flags"
+    profile.main(
+        [
+            "--outdir",
+            str(outdir),
+            "--mpol",
+            "3",
+            "--ntor",
+            "4",
+            "--ns",
+            "5",
+            "--nzeta",
+            "16",
+            "--max-iter",
+            "2",
+            "--coil-chunk-size",
+            "0",
+            "--no-direct-static-cache",
+            "--jit-direct-sampler",
+            "--skip-mgrid",
+            "--skip-provider-parity",
+        ]
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert data["configuration"]["direct_static_cache"] is False
+    assert data["configuration"]["jit_direct_sampler"] is True
+    assert captured[0]["direct_static_cache"] is False
+    assert captured[0]["jit_direct_sampler"] is True
+
+
+def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypatch, tmp_path: Path):
+    captured = {}
+    geometry = ("gamma", "gamma_dash", "currents")
+
+    monkeypatch.setattr(profile, "build_coil_field_geometry", lambda params: geometry)
+    monkeypatch.setattr(profile, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    def fake_run_free_boundary(*args, **kwargs):
+        captured.update(kwargs)
+        result = SimpleNamespace(
+            n_iter=1,
+            diagnostics={
+                "requested_ftol": 1.0e-12,
+                "final_fsqr": 1.0e-6,
+                "final_fsqz": 2.0e-6,
+                "final_fsql": 3.0e-6,
+                "free_boundary": {"nestor_model": "vmec2000_like_dense_integral"},
+            },
+            w_history=[],
+            fsqr2_history=[],
+            fsqz2_history=[],
+            fsql2_history=[],
+        )
+        return SimpleNamespace(result=result)
+
+    monkeypatch.setattr(profile, "run_free_boundary", fake_run_free_boundary)
+
+    direct_params = SimpleNamespace(chunk_size=None, regularization_epsilon=1.0e-6)
+    config = SimpleNamespace(
+        use_multigrid_schedule=False,
+        max_iter=1,
+        jit_forces=True,
+        free_boundary_activate_fsq=1.0e99,
+    )
+
+    out = profile._run_jax_backend(
+        input_path=tmp_path / "input.case",
+        wout_path=tmp_path / "wout_case.nc",
+        config=config,
+        direct_params=direct_params,
+        solver_mode="parity",
+        return_best_scored_state=False,
+        direct_static_cache=True,
+        jit_direct_sampler=True,
+    )
+
+    assert out["status"] == "completed"
+    assert captured["external_field_provider_kind"] == "direct_coils"
+    assert captured["external_field_provider_params"] is direct_params
+    static = captured["external_field_provider_static"]
+    assert static["coil_geometry"] == geometry
+    assert static["regularization_epsilon"] == pytest.approx(1.0e-6)
+    assert static["chunk_size"] is None
+    assert static["jit_sampler"] is True
