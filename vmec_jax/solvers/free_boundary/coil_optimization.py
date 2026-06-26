@@ -9,6 +9,7 @@ solve must still evaluate every proposal before it is trusted.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import time
 from typing import Any, Mapping, Sequence
 
@@ -303,6 +304,27 @@ def same_branch_report_runtime_configs(
         "differentiates_adaptive_controller": False,
     }
     return report_config, proposal_config
+
+
+@dataclass(frozen=True)
+class SameBranchReportContext:
+    """Reusable setup shared by complete-solve FD and branch-local replay reports."""
+
+    requested_direction_policy: str
+    effective_direction_policy: str
+    direction_policy_reason: str
+    direction_x: np.ndarray
+    direction_params: CoilFieldParams
+    qs_surfaces: Sequence[float]
+    mode: str
+    ad_mode: str
+    vector_keys: tuple[str, ...]
+    scalar_key: str
+    requested_report_keys: set[str]
+    scalar_value_fns: dict[str, Any]
+    scalar_replay_fns: dict[str, Any]
+    params_for: Any
+    objective_fn: Any
 
 
 def same_branch_report_mode_count(report: dict[str, Any]) -> int:
@@ -1722,31 +1744,18 @@ def _same_branch_report_mode_and_keys(args: Any) -> tuple[str, str, tuple[str, .
     return mode, ad_mode, vector_keys, scalar_key, requested_report_keys
 
 
-def write_same_branch_validation_report_core(
+def _same_branch_report_context(
     *,
-    input_path: Any,
+    args: Any,
     base_params: CoilFieldParams,
     variables: list[tuple[str, tuple[int, ...]]],
-    args: Any,
-    outdir: Any,
-    report_anchor: str = "initial",
     direction_from_variables_fn: Any,
     coil_param_direction_from_variables_fn: Any,
     params_for_scale_fn: Any,
     objective_values_callback_fn: Any,
-    variable_records_fn: Any,
     scalar_function_registry_fn: Any,
-    write_json_fn: Any,
-    json_safe_payload_fn: Any,
-) -> Any:
-    """Write the complete-solve same-branch FD plus branch-local replay report.
-
-    The report orchestration is generic to direct-coil free-boundary examples:
-    it builds one central finite-difference complete-solve report, optionally
-    replays a fixed accepted branch for scalar/vector AD evidence, and writes a
-    compact JSON artifact.  Example scripts provide only their optimizer-vector
-    packing and objective callbacks.
-    """
+) -> SameBranchReportContext:
+    """Build the reusable inputs for same-branch validation report sections."""
 
     requested_direction_policy, effective_direction_policy, direction_policy_reason = (
         same_branch_report_direction_policy(args, variables)
@@ -1774,16 +1783,38 @@ def write_same_branch_validation_report_core(
         scalar_value_fns=scalar_value_fns,
         requested_report_keys=requested_report_keys,
     )
-
-    timings: dict[str, float] = {}
-    report = _run_same_branch_complete_fd_report(
-        input_path=input_path,
-        base_params=base_params,
+    return SameBranchReportContext(
+        requested_direction_policy=requested_direction_policy,
+        effective_direction_policy=effective_direction_policy,
+        direction_policy_reason=direction_policy_reason,
+        direction_x=direction_x,
+        direction_params=direction_params,
+        qs_surfaces=qs_surfaces,
+        mode=mode,
+        ad_mode=ad_mode,
+        vector_keys=vector_keys,
+        scalar_key=scalar_key,
+        requested_report_keys=requested_report_keys,
+        scalar_value_fns=scalar_value_fns,
+        scalar_replay_fns=scalar_replay_fns,
         params_for=params_for,
         objective_fn=objective_fn,
-        args=args,
-        timings=timings,
     )
+
+
+def _same_branch_compact_fd_report(
+    *,
+    input_path: Any,
+    report_anchor: str,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: Any,
+    ctx: SameBranchReportContext,
+    report: dict[str, Any],
+    variable_records_fn: Any,
+) -> dict[str, Any]:
+    """Build the compact complete-solve FD metadata written to JSON."""
+
     variable_manifest = variable_records_fn(
         variables,
         base_params,
@@ -1792,34 +1823,44 @@ def write_same_branch_validation_report_core(
     )
     direction_variables = [
         manifest
-        for active, manifest in zip(direction_x != 0.0, variable_manifest, strict=True)
+        for active, manifest in zip(ctx.direction_x != 0.0, variable_manifest, strict=True)
         if bool(active)
     ]
-    compact_report = same_branch_complete_fd_report_metadata(
+    return same_branch_complete_fd_report_metadata(
         input_path=input_path,
         report_anchor=report_anchor,
         eps=float(args.same_branch_report_eps),
         direction_policy=(
-            requested_direction_policy,
-            effective_direction_policy,
-            direction_policy_reason,
+            ctx.requested_direction_policy,
+            ctx.effective_direction_policy,
+            ctx.direction_policy_reason,
         ),
-        direction_x=direction_x,
+        direction_x=ctx.direction_x,
         direction_variables=direction_variables,
         report=report,
     )
-    same_branch = bool(report["branch_compatibility"]["same_branch"])
-    compact_report["current_only_coil_geometry_cache"] = {
-        "available": False,
-        "reason": "not requested",
-        "scope": "current-only branch-local vector/profile replays",
-    }
+
+
+def _same_branch_report_replay_sections(
+    *,
+    args: Any,
+    base_params: CoilFieldParams,
+    ctx: SameBranchReportContext,
+    report: dict[str, Any],
+    compact_report: dict[str, Any],
+    timings: dict[str, float],
+    replay_payload: dict[str, Any] | None,
+    same_branch: bool,
+    json_safe_payload_fn: Any,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Run optional branch-local scalar/vector/gate/profile sections."""
+
     branch_local_scalar, branch_local_vector, branch_local_vector_gate = (
         _initial_same_branch_report_sections(
-            mode=mode,
-            ad_mode=ad_mode,
+            mode=ctx.mode,
+            ad_mode=ctx.ad_mode,
             same_branch=same_branch,
-            vector_keys=vector_keys,
+            vector_keys=ctx.vector_keys,
         )
     )
     report_base_values = {
@@ -1827,13 +1868,8 @@ def write_same_branch_validation_report_core(
         for key, values in report["objective_values"].items()
         if isinstance(values, dict) and "base" in values
     }
-    replay_payload = (
-        {"init": report["base"]["init"]}
-        if isinstance(report.get("base"), dict) and "init" in report["base"]
-        else None
-    )
-    scalar_uses_state_only_replay = scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
-    vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in vector_keys)
+    scalar_uses_state_only_replay = ctx.scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
+    vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in ctx.vector_keys)
     replay_kwargs = same_branch_replay_options_from_args(args)
     mode_count = same_branch_report_mode_count(report)
     compact_report["mode_count"] = int(mode_count)
@@ -1844,13 +1880,13 @@ def write_same_branch_validation_report_core(
     compact_report["same_branch_replay_mode_count_guard"] = replay_guard
     run_branch_local_vector = SameBranchVectorRunner(
         base_params=base_params,
-        direction_params=direction_params,
+        direction_params=ctx.direction_params,
         report=report,
         report_base_values=report_base_values,
-        scalar_value_fns=scalar_value_fns,
-        scalar_replay_fns=scalar_replay_fns,
+        scalar_value_fns=ctx.scalar_value_fns,
+        scalar_replay_fns=ctx.scalar_replay_fns,
         replay_payload=replay_payload,
-        ad_mode=ad_mode,
+        ad_mode=ctx.ad_mode,
     )
 
     def summarize_vector_result(vector: dict[str, Any], scalar_keys: tuple[str, ...]) -> dict[str, Any]:
@@ -1858,55 +1894,55 @@ def write_same_branch_validation_report_core(
             vector,
             scalar_keys,
             report=report,
-            direction_params=direction_params,
+            direction_params=ctx.direction_params,
         )
 
-    if mode in {"scalar", "vector"} and replay_mode_count_guard_triggered:
+    if ctx.mode in {"scalar", "vector"} and replay_mode_count_guard_triggered:
         branch_local_scalar["reason"] = replay_mode_count_guard_reason
         branch_local_vector["reason"] = replay_mode_count_guard_reason
     run_scalar_report = (
         same_branch
         and not replay_mode_count_guard_triggered
-        and mode == "scalar"
+        and ctx.mode == "scalar"
         and "base" in report
-        and scalar_key in report["objective_values"]
+        and ctx.scalar_key in report["objective_values"]
     )
     branch_local_scalar = run_same_branch_scalar_report_section(
         enabled=run_scalar_report,
-        scalar_key=scalar_key,
+        scalar_key=ctx.scalar_key,
         scalar_uses_state_only_replay=scalar_uses_state_only_replay,
         base_params=base_params,
         report=report,
         report_base_values=report_base_values,
         replay_payload=replay_payload,
         replay_kwargs=replay_kwargs,
-        ad_mode=ad_mode,
-        scalar_value_fns=scalar_value_fns,
-        scalar_replay_fns=scalar_replay_fns,
-        direction_params=direction_params,
+        ad_mode=ctx.ad_mode,
+        scalar_value_fns=ctx.scalar_value_fns,
+        scalar_replay_fns=ctx.scalar_replay_fns,
+        direction_params=ctx.direction_params,
         compact_report=compact_report,
         timings=timings,
         initial_summary=branch_local_scalar,
     )
-    missing_vector_keys = tuple(key for key in vector_keys if key not in report["objective_values"])
-    if mode == "vector" and missing_vector_keys:
+    missing_vector_keys = tuple(key for key in ctx.vector_keys if key not in report["objective_values"])
+    if ctx.mode == "vector" and missing_vector_keys:
         branch_local_vector["reason"] = f"missing complete-solve objective value(s): {missing_vector_keys}"
     main_vector_summary: dict[str, Any] | None = None
     main_vector_replay_plan: dict[str, Any] | None = None
     run_vector_report = (
         same_branch
         and not replay_mode_count_guard_triggered
-        and mode == "vector"
+        and ctx.mode == "vector"
         and "base" in report
         and not missing_vector_keys
     )
     branch_local_vector, branch_local_vector_gate, main_vector_summary, main_vector_replay_plan = (
         run_same_branch_vector_report_section(
             enabled=run_vector_report,
-            vector_keys=vector_keys,
+            vector_keys=ctx.vector_keys,
             vector_uses_state_only_replay=vector_uses_state_only_replay,
             base_params=base_params,
-            direction_params=direction_params,
+            direction_params=ctx.direction_params,
             report=report,
             replay_kwargs=replay_kwargs,
             run_branch_local_vector=run_branch_local_vector,
@@ -1923,10 +1959,10 @@ def write_same_branch_validation_report_core(
         same_branch=same_branch,
         replay_mode_count_guard_triggered=bool(replay_mode_count_guard_triggered),
         replay_mode_count_guard_reason=replay_mode_count_guard_reason,
-        mode=mode,
+        mode=ctx.mode,
         report=report,
         missing_vector_keys=missing_vector_keys,
-        vector_keys=vector_keys,
+        vector_keys=ctx.vector_keys,
         replay_kwargs=replay_kwargs,
         run_branch_local_vector=run_branch_local_vector,
         summarize_vector_result=summarize_vector_result,
@@ -1938,14 +1974,14 @@ def write_same_branch_validation_report_core(
     nestor_profile = same_branch_nestor_profile_from_vector_replay(
         args=args,
         same_branch=same_branch,
-        mode=mode,
+        mode=ctx.mode,
         report=report,
         mode_count=mode_count,
         replay_mode_count_guard_triggered=replay_mode_count_guard_triggered,
         replay_mode_count_guard_reason=replay_mode_count_guard_reason,
         replay_max_mode_count=replay_max_mode_count,
         missing_vector_keys=missing_vector_keys,
-        vector_keys=vector_keys,
+        vector_keys=ctx.vector_keys,
         replay_kwargs=replay_kwargs,
         vector_uses_state_only_replay=vector_uses_state_only_replay,
         main_vector_summary=main_vector_summary,
@@ -1953,6 +1989,89 @@ def write_same_branch_validation_report_core(
         timings=timings,
         run_branch_local_vector=run_branch_local_vector,
         summarize_vector_result=summarize_vector_result,
+    )
+    return branch_local_scalar, branch_local_vector, branch_local_vector_gate, rejected_slot_gate, nestor_profile
+
+
+def write_same_branch_validation_report_core(
+    *,
+    input_path: Any,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: Any,
+    outdir: Any,
+    report_anchor: str = "initial",
+    direction_from_variables_fn: Any,
+    coil_param_direction_from_variables_fn: Any,
+    params_for_scale_fn: Any,
+    objective_values_callback_fn: Any,
+    variable_records_fn: Any,
+    scalar_function_registry_fn: Any,
+    write_json_fn: Any,
+    json_safe_payload_fn: Any,
+) -> Any:
+    """Write the complete-solve same-branch FD plus branch-local replay report.
+
+    The report orchestration is generic to direct-coil free-boundary examples:
+    it builds one central finite-difference complete-solve report, optionally
+    replays a fixed accepted branch for scalar/vector AD evidence, and writes a
+    compact JSON artifact.  Example scripts provide only their optimizer-vector
+    packing and objective callbacks.
+    """
+
+    ctx = _same_branch_report_context(
+        args=args,
+        base_params=base_params,
+        variables=variables,
+        direction_from_variables_fn=direction_from_variables_fn,
+        coil_param_direction_from_variables_fn=coil_param_direction_from_variables_fn,
+        params_for_scale_fn=params_for_scale_fn,
+        objective_values_callback_fn=objective_values_callback_fn,
+        scalar_function_registry_fn=scalar_function_registry_fn,
+    )
+
+    timings: dict[str, float] = {}
+    report = _run_same_branch_complete_fd_report(
+        input_path=input_path,
+        base_params=base_params,
+        params_for=ctx.params_for,
+        objective_fn=ctx.objective_fn,
+        args=args,
+        timings=timings,
+    )
+    compact_report = _same_branch_compact_fd_report(
+        input_path=input_path,
+        report_anchor=report_anchor,
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        ctx=ctx,
+        report=report,
+        variable_records_fn=variable_records_fn,
+    )
+    same_branch = bool(report["branch_compatibility"]["same_branch"])
+    compact_report["current_only_coil_geometry_cache"] = {
+        "available": False,
+        "reason": "not requested",
+        "scope": "current-only branch-local vector/profile replays",
+    }
+    replay_payload = (
+        {"init": report["base"]["init"]}
+        if isinstance(report.get("base"), dict) and "init" in report["base"]
+        else None
+    )
+    branch_local_scalar, branch_local_vector, branch_local_vector_gate, rejected_slot_gate, nestor_profile = (
+        _same_branch_report_replay_sections(
+            args=args,
+            base_params=base_params,
+            ctx=ctx,
+            report=report,
+            compact_report=compact_report,
+            timings=timings,
+            replay_payload=replay_payload,
+            same_branch=same_branch,
+            json_safe_payload_fn=json_safe_payload_fn,
+        )
     )
     compact_report["branch_local_scalar_gradient"] = branch_local_scalar
     compact_report["branch_local_vector_jacobian"] = branch_local_vector
