@@ -226,12 +226,15 @@ The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
 while the same generated-``mgrid`` deck with ``NZETA=32`` completes and reaches
 total residual about ``6.58e-6`` after 1000 iterations. The branch now exposes
-``vmec_jax.recommended_square_axis_nzeta`` and the square-coil example defaults
-to ``NZETA=64`` for ``NTOR=23``. The backend profiler now also resolves omitted
-``--nzeta`` or ``--nzeta auto`` to this recommendation for the selected
-``NTOR``. Production-style example runs fail early if ``NZETA`` is below the
+``vmec_jax.recommended_square_axis_nzeta`` and the square-coil example leaves
+``NZETA=None`` by default, resolving the VMEC zeta grid from the edited
+``NTOR`` at runtime. The backend profiler also resolves omitted ``--nzeta`` or
+``--nzeta auto`` to this recommendation for the selected ``NTOR``.
+Production-style example runs fail early if ``NZETA`` is below the
 recommendation; diagnostic profiling can still run underresolved grids and
 records ``nzeta_auto`` and ``nzeta_underrecommended`` in the JSON report.
+The example metrics JSON now also carries a ``resolution_deck`` block with the
+same projection/``NZETA`` gate used by the profiler.
 The profiler also rejects generated-mgrid plane counts that are not multiples
 of ``NZETA`` because the VMEC-plane mgrid sampler intentionally uses the
 discrete VMEC zeta planes without toroidal interpolation.

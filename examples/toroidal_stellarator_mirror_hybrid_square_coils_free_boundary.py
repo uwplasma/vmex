@@ -46,6 +46,7 @@ from vmec_jax.toroidal_hybrid import (
     SquareAxisSplineControls,
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
+    square_axis_resolution_deck_status,
     square_axis_spline_symmetric_control_basis,
     square_axis_stellarator_mirror_hybrid_indata,
     square_axis_stellarator_mirror_hybrid_projection_error,
@@ -90,7 +91,7 @@ MPOL = 5
 NTOR = 28
 NS_ARRAY = (9, 13, 17)
 NS = NS_ARRAY[-1]
-NZETA = max(64, recommended_square_axis_nzeta(NTOR))
+NZETA: int | None = None
 NITER_ARRAY = (4000, 8000, 24000)
 FTOL_ARRAY = (1.0e-8, 1.0e-10, 1.0e-12)
 USE_MULTIGRID_SCHEDULE = True
@@ -154,7 +155,7 @@ class ExampleConfig:
     ntor: int = NTOR
     ns: int = NS
     ns_array: tuple[int, ...] = NS_ARRAY
-    nzeta: int = NZETA
+    nzeta: int | None = NZETA
     max_iter: int = MAX_ITER
     ftol: float = FTOL
     niter_array: tuple[int, ...] = NITER_ARRAY
@@ -435,6 +436,14 @@ def _boundary_fit_grid(config: ExampleConfig) -> dict[str, int]:
     }
 
 
+def _resolved_nzeta(config: ExampleConfig) -> int:
+    """Return the VMEC toroidal grid count for the current mode deck."""
+
+    if config.nzeta is None:
+        return int(max(64, recommended_square_axis_nzeta(int(config.ntor))))
+    return int(config.nzeta)
+
+
 def _run_budget(config: ExampleConfig, *, restart_state: Any | None) -> int:
     if bool(config.use_multigrid_schedule) and restart_state is None:
         return int(sum(int(value) for value in config.niter_array))
@@ -446,7 +455,8 @@ def _validate_example_config(config: ExampleConfig) -> None:
         raise ValueError("mpol must be at least 3 so the square-hybrid corner shaping fits")
     if int(config.ntor) < 4:
         raise ValueError("ntor must be at least 4 so the square-like axis fits")
-    if int(config.nzeta) < 8:
+    nzeta = _resolved_nzeta(config)
+    if nzeta < 8:
         raise ValueError("nzeta must be at least 8")
     if int(config.nstep) < 1:
         raise ValueError("nstep must be at least 1")
@@ -460,9 +470,9 @@ def _validate_example_config(config: ExampleConfig) -> None:
         raise ValueError("plasma_axis_reduced_radii requires plasma_axis_kind='control_spline'")
     if bool(config.enforce_recommended_nzeta):
         recommended = recommended_square_axis_nzeta(int(config.ntor))
-        if int(config.nzeta) < recommended:
+        if nzeta < recommended:
             raise ValueError(
-                f"NZETA={int(config.nzeta)} is underresolved for NTOR={int(config.ntor)}; "
+                f"NZETA={nzeta} is underresolved for NTOR={int(config.ntor)}; "
                 f"use at least {recommended} or set enforce_recommended_nzeta=False for a diagnostic-only run"
             )
     if config.max_boundary_projection_error is not None:
@@ -489,7 +499,7 @@ def _validate_example_config(config: ExampleConfig) -> None:
             raise ValueError(
                 "square-hybrid boundary projection error is too large for a production solve: "
                 f"max_abs_component_error={observed:.3e} exceeds {limit:.3e} "
-                f"for MPOL={int(config.mpol)}, NTOR={int(config.ntor)}, NZETA={int(config.nzeta)}. "
+                f"for MPOL={int(config.mpol)}, NTOR={int(config.ntor)}, NZETA={nzeta}. "
                 "Suggested finite Fourier closure for the current spline-smoothed target: "
                 f"MPOL={int(suggested['mpol'])}, NTOR={int(suggested['ntor'])}, "
                 f"NZETA>={int(suggested['recommended_nzeta'])} "
@@ -525,7 +535,7 @@ def make_free_boundary_indata(config: ExampleConfig, *, beta_percent: float) -> 
             "FTOL_ARRAY": ftol_values,
             "NITER": int(config.max_iter),
             "FTOL": float(config.ftol),
-            "NZETA": int(config.nzeta),
+            "NZETA": _resolved_nzeta(config),
             "NTHETA": 0,
             "NSTEP": int(config.nstep),
             "NVACSKIP": max(1, int(config.nvacskip)),
@@ -559,6 +569,19 @@ def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
         ftol_array=ftol_values,
         phiedge=float(config.phiedge),
         **_square_axis_sample_kwargs(config),
+    )
+
+
+def _resolution_deck_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return the cheap representation/grid gate for edited mode settings."""
+
+    return square_axis_resolution_deck_status(
+        projection=_boundary_projection_payload(config),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ns=int(config.ns),
+        nzeta=_resolved_nzeta(config),
+        target_max_component_error=config.max_boundary_projection_error,
     )
 
 
@@ -1270,13 +1293,17 @@ def _metrics_payload(
         "coil_square_side_length": float(config.coil_square_side_length),
         "toroidal_current": float(config.toroidal_current),
         "boundary_projection": _boundary_projection_payload(config),
+        "resolution_deck": _resolution_deck_payload(config),
         "delt": None if config.delt is None else float(config.delt),
         "ns": int(config.ns),
         "ns_array": [int(value) for value in config.ns_array],
         "mpol": int(config.mpol),
         "ntor": int(config.ntor),
         "recommended_nzeta": int(recommended_square_axis_nzeta(int(config.ntor))),
-        "nzeta_underrecommended": bool(int(config.nzeta) < recommended_square_axis_nzeta(int(config.ntor))),
+        "nzeta": _resolved_nzeta(config),
+        "nzeta_underrecommended": bool(
+            _resolved_nzeta(config) < recommended_square_axis_nzeta(int(config.ntor))
+        ),
         "max_iter": int(config.max_iter),
         "ftol": float(config.ftol),
         "niter_array": [int(value) for value in config.niter_array],

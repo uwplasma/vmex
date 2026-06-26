@@ -470,6 +470,7 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     assert module.ExampleConfig().corner_power == pytest.approx(1.0)
     assert module.ExampleConfig().nstep == 1
     assert module.ExampleConfig().plasma_axis_kind == "control_spline"
+    assert module.ExampleConfig().nzeta is None
     assert module.ExampleConfig().plasma_axis_spline_controls is None
     assert module.ExampleConfig().plasma_axis_control_symmetry == "square"
     assert module.ExampleConfig().plasma_axis_reduced_radii is None
@@ -480,6 +481,13 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     indata = module.make_free_boundary_indata(module.ExampleConfig(nstep=3), beta_percent=0.0)
     assert indata.get_int("NVACSKIP") == 1
     assert indata.get_int("NSTEP") == 3
+    assert indata.get_int("NZETA") == max(64, recommended_square_axis_nzeta(module.ExampleConfig().ntor))
+    higher_ntor = module.ExampleConfig(ntor=40, max_boundary_projection_error=None)
+    higher_ntor_indata = module.make_free_boundary_indata(higher_ntor, beta_percent=0.0)
+    assert higher_ntor_indata.get_int("NZETA") == max(64, recommended_square_axis_nzeta(40))
+    deck = module._resolution_deck_payload(module.ExampleConfig())
+    assert deck["status"] == "production_ready"
+    assert deck["nzeta"] == max(64, recommended_square_axis_nzeta(module.ExampleConfig().ntor))
     controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
     spline_config = module.ExampleConfig(
         plasma_axis_kind="control_spline",

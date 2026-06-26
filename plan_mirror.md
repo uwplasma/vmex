@@ -31095,3 +31095,92 @@ Results: `18 passed`; ruff, py-compile, and diff whitespace checks passed.
 ### User input needed
 
 No user input is needed.
+
+---
+## 268. Made Square-Coil Example Resolution Edits More Robust
+
+### Steps taken
+
+- Changed the root square-coil stellarator-mirror example so `NZETA = None`
+  means "resolve from the edited `NTOR` at runtime."
+- Added `_resolved_nzeta(...)` and used it in validation, input-deck writing,
+  and metrics.
+- Added a root-example `resolution_deck` metrics block using
+  `square_axis_resolution_deck_status`, matching the profiler's
+  projection/`NZETA` preflight gate.
+- Updated the example README and convergence notes.
+- Added tests that changing `ntor` without manually editing `nzeta` now writes
+  the recommended VMEC zeta grid.
+
+### Results obtained
+
+- The top-level example is less fragile when `MPOL`, `NTOR`, and `NZETA` are
+  edited by hand.
+- Production-style runs still fail early for explicitly underresolved `NZETA`
+  values, but the default path now follows the chosen `NTOR` automatically.
+- Metrics JSON records both the Fourier boundary projection error and the
+  strict-resolution deck status, so successful and failed mode choices are
+  easier to audit.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py -k 'square_axis_recommended_nzeta_and_example_guard or square_axis_resolution_deck_status_classifies_projection_and_grid_gates or square_axis_first_order_weights_reduce_production_projection_error'
+ruff check examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tests/test_toroidal_hybrid.py
+venv/bin/python -m py_compile examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
+git diff --check
+tmpdir=$(mktemp -d /tmp/vmec_square_example_preflight.XXXXXX)
+venv/bin/python - <<'PY' "$tmpdir"
+import json, sys
+from pathlib import Path
+from examples import toroidal_stellarator_mirror_hybrid_square_coils_free_boundary as ex
+out = Path(sys.argv[1])
+path = ex.run_example(ex.ExampleConfig(outdir=out, betas_percent=(), write_plots=False))
+data = json.loads(path.read_text())
+print(path)
+print("nzeta", data["nzeta"])
+print("recommended_nzeta", data["recommended_nzeta"])
+print("resolution_status", data["resolution_deck"]["status"])
+print("projection_error", data["resolution_deck"]["projection_max_abs_component_error"])
+PY
+```
+
+Results: `3 passed, 48 deselected, 1 warning`; ruff, py-compile, and
+whitespace checks passed. The no-solve example smoke wrote metrics under
+`/tmp`, with `nzeta=64`, `recommended_nzeta=64`,
+`resolution_deck.status=production_ready`, and projection error `3.48e-12`.
+
+### File structure and best-practice notes
+
+- The change stays in the root example and reuses the public
+  `square_axis_resolution_deck_status` source helper.
+- It does not add generated figures, WOUT files, or profile artifacts.
+- The default remains strict (`FTOL=1e-12`, staged `NS_ARRAY`, projection gate
+  enabled) while keeping diagnostic underresolution opt-in.
+
+### Best next steps
+
+1. Let the active strict profiles continue.
+2. Once a current run finishes, rerun the root example with `NZETA = None` and
+   a small beta set to verify the metrics JSON records `resolution_deck` before
+   plots are produced.
+3. If the reduced-control projection captures the accepted LCFS motion well,
+   prototype a solver-side reduced-control update instead of increasing Fourier
+   modes further.
+
+### Completion percentages after M268
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `82%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- Follow-up recommendation lane: `100%`.
+- Root-example resolution robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `64%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.

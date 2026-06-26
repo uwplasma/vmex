@@ -196,9 +196,11 @@ The default square-axis side/corner weights use
 to finite Fourier bandwidth. Sharper values such as ``1.4`` remain useful
 stress tests, but they reintroduce a high-mode projection tail. The default
 ``NZETA`` follows
-``recommended_square_axis_nzeta``; the backend profiler also treats omitted
-``--nzeta`` or ``--nzeta auto`` as that recommendation. Underresolved
-production-style example runs
+``recommended_square_axis_nzeta``; the top-level square-coil example leaves
+``NZETA = None`` by default, resolves it from the edited ``NTOR`` at runtime,
+and writes a ``resolution_deck`` block to the metrics JSON. The backend
+profiler also treats omitted ``--nzeta`` or ``--nzeta auto`` as that
+recommendation. Underresolved production-style example runs
 raise before solving because ``NTOR=12, NZETA=16`` was observed to fail while
 ``NZETA=32`` completed the same VMEC2000 generated-``mgrid`` case. The top-level
 ``MAX_BOUNDARY_PROJECTION_ERROR`` gate also rejects low-mode decks whose
