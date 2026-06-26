@@ -492,6 +492,84 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert projected_direction_metrics["captured_fraction"] == pytest.approx(1.0)
 
 
+def test_free_boundary_edge_control_host_projection_uses_shared_reduced_step(monkeypatch):
+    from vmec_jax.solvers.free_boundary import control as freeb_control
+    from vmec_jax.solvers.free_boundary.reduced_controls import reduced_control_least_squares_step
+
+    cfg = VMECConfig(
+        mpol=2,
+        ntor=0,
+        ns=3,
+        nfp=1,
+        lasym=False,
+        lthreed=False,
+        lconm1=True,
+        ntheta=8,
+        nzeta=1,
+    )
+    static = build_static(cfg)
+    layout = StateLayout(ns=3, K=static.modes.K, lasym=False)
+    zeros = np.zeros((3, static.modes.K), dtype=float)
+    state0 = VMECState(
+        layout=layout,
+        Rcos=zeros.copy(),
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zeros.copy(),
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    jacobian = np.zeros((4 * static.modes.K, 1), dtype=float)
+    jacobian[0, 0] = 1.0
+    projection = freeb_control._prepare_freeb_edge_control_projection(
+        {
+            "enabled": True,
+            "basis_symmetry": "test",
+            "labels": ["R00"],
+            "control_jacobian": jacobian,
+            "initial_boundary": {
+                "R_cos": np.zeros(static.modes.K),
+                "R_sin": np.zeros(static.modes.K),
+                "Z_cos": np.zeros(static.modes.K),
+                "Z_sin": np.zeros(static.modes.K),
+            },
+        },
+        indata=None,
+        static=static,
+        state0=state0,
+        free_boundary_enabled=True,
+    )
+    assert projection["enabled"] is True
+
+    calls = {"count": 0}
+
+    def wrapped_step(*args, **kwargs):
+        calls["count"] += 1
+        return reduced_control_least_squares_step(*args, **kwargs)
+
+    monkeypatch.setattr(freeb_control, "reduced_control_least_squares_step", wrapped_step)
+
+    rcos = zeros.copy()
+    rcos[-1, 0] = 0.2
+    trial = VMECState(
+        layout=layout,
+        Rcos=rcos,
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zeros.copy(),
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    freeb_control._project_freeb_edge_control_state(trial, projection, host_update=True)
+    freeb_control._project_freeb_edge_control_delta_tuple(
+        (rcos, zeros.copy(), zeros.copy(), zeros.copy(), zeros.copy(), zeros.copy()),
+        projection,
+        host_update=True,
+    )
+
+    assert calls["count"] == 2
+
+
 def test_square_coil_profile_hot_restart_solver_state_filters_freeb_resume_keys():
     resume_state = {
         "time_step": 0.02,

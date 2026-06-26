@@ -283,8 +283,6 @@ def _project_freeb_edge_control_state(
     if bool(host_update):
         scale = np.asarray(projection["mode_scale_np"], dtype=float)
         initial = {name: np.asarray(value, dtype=float) for name, value in projection["initial_np"].items()}
-        jacobian = np.asarray(projection["jacobian_np"], dtype=float)
-        pinv = np.asarray(projection["pinv_np"], dtype=float)
         Rcos = np.array(state.Rcos, dtype=float, copy=True)
         Rsin = np.array(state.Rsin, dtype=float, copy=True)
         Zcos = np.array(state.Zcos, dtype=float, copy=True)
@@ -298,7 +296,7 @@ def _project_freeb_edge_control_state(
             ],
             axis=0,
         )
-        projected = jacobian @ (pinv @ target)
+        projected = _freeb_edge_control_project_vector_np(target, projection).predicted_delta
         Rcos[-1] = (initial["R_cos"] + projected[0:k]) / scale
         Rsin[-1] = (initial["R_sin"] + projected[k : 2 * k]) / scale
         Zcos[-1] = (initial["Z_cos"] + projected[2 * k : 3 * k]) / scale
@@ -347,6 +345,25 @@ def _project_freeb_edge_control_state(
     )
 
 
+def _freeb_edge_control_project_vector_np(
+    target: Any,
+    projection: dict[str, Any],
+):
+    """Project one physical edge vector using the shared reduced-control solver."""
+
+    target_arr = np.asarray(target, dtype=float).reshape(-1)
+    jacobian = np.asarray(projection["jacobian_np"], dtype=float)
+    if target_arr.size != jacobian.shape[0]:
+        raise ValueError("edge-control target and Jacobian have incompatible sizes")
+    labels = tuple(str(label) for label in dict(projection.get("info", {})).get("labels", []))
+    return reduced_control_least_squares_step(
+        jacobian,
+        target_arr,
+        labels=labels if labels else None,
+        rcond=dict(projection.get("info", {})).get("rcond"),
+    )
+
+
 def _freeb_edge_control_vector_projection_metrics(
     target: Any,
     projection: dict[str, Any],
@@ -355,17 +372,8 @@ def _freeb_edge_control_vector_projection_metrics(
 ) -> dict[str, Any]:
     """Project one stacked physical edge vector onto reduced controls."""
 
-    target = np.asarray(target, dtype=float).reshape(-1)
     jacobian = np.asarray(projection["jacobian_np"], dtype=float)
-    if target.size != jacobian.shape[0]:
-        raise ValueError("edge-control target and Jacobian have incompatible sizes")
-    labels = tuple(str(label) for label in dict(projection.get("info", {})).get("labels", []))
-    step = reduced_control_least_squares_step(
-        jacobian,
-        target,
-        labels=labels if labels else None,
-        rcond=dict(projection.get("info", {})).get("rcond"),
-    )
+    step = _freeb_edge_control_project_vector_np(target, projection)
     projected = step.predicted_delta
     residual = step.residual_after
     finite = residual[np.isfinite(residual)]
@@ -438,8 +446,6 @@ def _project_freeb_edge_control_delta_tuple(
     dR, dR_sin, dZ_cos, dZ, dL_cos, dL = deltas
     if bool(host_update):
         scale = np.asarray(projection["mode_scale_np"], dtype=float)
-        jacobian = np.asarray(projection["jacobian_np"], dtype=float)
-        pinv = np.asarray(projection["pinv_np"], dtype=float)
         dR_out = np.array(dR, dtype=float, copy=True)
         dR_sin_out = np.array(dR_sin, dtype=float, copy=True)
         dZ_cos_out = np.array(dZ_cos, dtype=float, copy=True)
@@ -453,7 +459,7 @@ def _project_freeb_edge_control_delta_tuple(
             ],
             axis=0,
         )
-        projected = jacobian @ (pinv @ target)
+        projected = _freeb_edge_control_project_vector_np(target, projection).predicted_delta
         dR_out[-1] = projected[0:k] / scale
         dR_sin_out[-1] = projected[k : 2 * k] / scale
         dZ_cos_out[-1] = projected[2 * k : 3 * k] / scale
