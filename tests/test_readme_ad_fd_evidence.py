@@ -82,7 +82,7 @@ def test_checked_in_public_evidence_keeps_promoted_rows_and_strict_tolerances() 
 
     metadata = payload["metadata"]
     assert metadata["branch_local_report"].endswith(
-        "outputs/final_tranche_adfd_evidence/same_branch_complete_solve_report.json"
+        "outputs/pr20_ad_fd/qs_same_branch/same_branch_complete_solve_report.json"
     )
     assert "same-branch/fingerprint-gated" in metadata["contract"]
     assert "arbitrary adaptive" not in metadata["contract"].lower()

@@ -6585,6 +6585,57 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
 
+### 2026-06-26: Fix README AD-vs-FD evidence provenance gate
+
+Steps taken:
+
+- Investigated CI run ``28210740141`` after ``Fast Tests (py3.11 core coverage:
+  rest)`` failed while all other required jobs passed.
+- Reproduced the exact CI shard locally using
+  ``tools/diagnostics/ci_core_bucket_args.py rest``.
+- Updated ``tests/test_readme_ad_fd_evidence.py`` so the checked-in public
+  evidence provenance matches the regenerated promoted branch-local report path
+  recorded in ``docs/_static/figures/readme_ad_fd_evidence.json``:
+  ``outputs/pr20_ad_fd/qs_same_branch/same_branch_complete_solve_report.json``.
+
+Results obtained:
+
+- ``python -m ruff check tests/test_readme_ad_fd_evidence.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 pytest -q
+  tests/test_readme_ad_fd_evidence.py -q`` passed.
+- The exact local reproduction of the failed CI shard passed:
+  ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1
+  VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 xargs pytest -q -n 4 -m
+  "not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax
+  --cov-report= < /tmp/py311-core-rest-args.txt`` with
+  ``674 passed, 2 skipped``.
+- The failed CI run had all other required jobs green; this was a test
+  provenance expectation mismatch, not a numerical or artifact failure.
+
+Best next steps:
+
+1. Push the provenance-test fix and let the new CI run validate the full suite.
+2. If CI passes, do not regenerate benchmark/AD-vs-FD artifacts again unless a
+   numerical path changes.
+3. Treat any future CI failure by reproducing the exact shard locally before
+   changing code.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.1%.
+- Free-boundary production differentiability: 97.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 74.5%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
+
 ### 2026-06-26: Extract fixed-boundary driver stage policy context
 
 Steps taken:
