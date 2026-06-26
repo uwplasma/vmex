@@ -384,6 +384,10 @@ Edited square-axis decks are now treated as production only after the effective
 to an effective ``NZETA=64`` production deck under the strict projection gate;
 underresolved edited decks must either auto-promote or run as diagnostic-only
 profiles with the projection gate disabled.
+``tools/diagnostics/square_coil_resolution_matrix.py`` prints both the
+requested deck and the effective deck, and its generated strict-profile commands
+use the effective production deck.  This keeps quick resolution scans aligned
+with the root square-coil example and the long profile harness.
 The first 30-iteration direct-GPU coordinate-control smoke on the same
 ``MPOL=5, NTOR=28, NZETA=64`` hot-restart state preserved the LCFS in the
 two-control square subspace to about ``3e-15`` relative reconstruction residual

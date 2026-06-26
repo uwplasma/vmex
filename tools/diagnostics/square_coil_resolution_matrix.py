@@ -18,6 +18,9 @@ if str(REPO_ROOT) not in sys.path:
 from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary import (
     ExampleConfig,
     _boundary_fit_grid,
+    _effective_solve_config,
+    _effective_square_axis_mode_deck,
+    _effective_square_axis_resolution,
     _square_axis_sample_kwargs,
 )
 from vmec_jax.toroidal_hybrid import (
@@ -294,32 +297,37 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     requested_ntheta = _parse_optional_int(args.ntheta)
     rows: list[dict[str, Any]] = []
     for deck in _parse_decks(args.decks):
-        mpol = int(deck["mpol"])
-        ntor = int(deck["ntor"])
-        ntheta = int(requested_ntheta or recommended_square_axis_ntheta(mpol))
-        nzeta = int(deck["nzeta"] or max(64, recommended_square_axis_nzeta(ntor)))
-        mgrid_nphi = int(deck["mgrid_nphi"] or nzeta)
+        requested_mpol = int(deck["mpol"])
+        requested_ntor = int(deck["ntor"])
+        input_ntheta = int(requested_ntheta or recommended_square_axis_ntheta(requested_mpol))
+        raw_requested_nzeta = None if deck["nzeta"] is None else int(deck["nzeta"])
+        input_nzeta = int(raw_requested_nzeta or max(64, recommended_square_axis_nzeta(requested_ntor)))
+        raw_requested_mgrid_nphi = None if deck["mgrid_nphi"] is None else int(deck["mgrid_nphi"])
         config = ExampleConfig(
-            mpol=mpol,
-            ntor=ntor,
+            mpol=requested_mpol,
+            ntor=requested_ntor,
             ns=int(ns_array[-1]),
             ns_array=ns_array,
             niter_array=niter_array,
             ftol_array=ftol_array,
             max_iter=int(niter_array[-1]),
             ftol=float(ftol_array[-1]),
-            ntheta=ntheta,
-            nzeta=nzeta,
+            ntheta=input_ntheta,
+            nzeta=input_nzeta,
             plasma_axis_kind=str(args.axis_kind),
             plasma_axis_spline_corner_radius_factor=float(args.axis_corner_factor),
             side_power=float(args.side_power),
             corner_power=float(args.corner_power),
+            max_boundary_projection_error=target_error,
+            enforce_recommended_nzeta=bool(target_error is not None),
+            auto_bump_nzeta_to_recommended=bool(target_error is not None),
+            auto_bump_mode_deck_to_recommended=bool(target_error is not None),
             write_plots=False,
         )
-        projection = square_axis_stellarator_mirror_hybrid_projection_error(
+        requested_projection = square_axis_stellarator_mirror_hybrid_projection_error(
             nfp=int(config.nfp),
-            mpol=mpol,
-            ntor=ntor,
+            mpol=requested_mpol,
+            ntor=requested_ntor,
             **_boundary_fit_grid(config),
             ns_array=list(ns_array),
             niter_array=list(niter_array),
@@ -327,30 +335,80 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             phiedge=float(config.phiedge),
             **_square_axis_sample_kwargs(config),
         )
-        status = square_axis_resolution_deck_status(
-            projection=projection,
-            mpol=mpol,
-            ntor=ntor,
+        requested_mgrid_nphi = int(raw_requested_mgrid_nphi or input_nzeta)
+        requested_status = square_axis_resolution_deck_status(
+            projection=requested_projection,
+            mpol=requested_mpol,
+            ntor=requested_ntor,
             ns=int(ns_array[-1]),
-            ntheta=ntheta,
-            nzeta=nzeta,
-            mgrid_nphi=mgrid_nphi,
+            ntheta=input_ntheta,
+            nzeta=input_nzeta,
+            mgrid_nphi=requested_mgrid_nphi,
+            target_max_component_error=target_error,
+        )
+        mode_deck = _effective_square_axis_mode_deck(config)
+        effective_config = _effective_solve_config(config)
+        effective_resolution = _effective_square_axis_resolution(effective_config)
+        effective_mgrid_nphi = int(raw_requested_mgrid_nphi or effective_resolution.effective_nzeta)
+        effective_projection = square_axis_stellarator_mirror_hybrid_projection_error(
+            nfp=int(effective_config.nfp),
+            mpol=int(effective_config.mpol),
+            ntor=int(effective_config.ntor),
+            **_boundary_fit_grid(effective_config),
+            ns_array=list(ns_array),
+            niter_array=list(niter_array),
+            ftol_array=list(ftol_array),
+            phiedge=float(effective_config.phiedge),
+            **_square_axis_sample_kwargs(effective_config),
+        )
+        status = square_axis_resolution_deck_status(
+            projection=effective_projection,
+            mpol=int(effective_config.mpol),
+            ntor=int(effective_config.ntor),
+            ns=int(ns_array[-1]),
+            ntheta=int(effective_resolution.effective_ntheta),
+            nzeta=int(effective_resolution.effective_nzeta),
+            mgrid_nphi=effective_mgrid_nphi,
             target_max_component_error=target_error,
         )
         row = {
             **status,
+            "requested_mpol": requested_mpol,
+            "requested_ntor": requested_ntor,
+            "requested_ntheta": None if requested_ntheta is None else int(requested_ntheta),
+            "input_ntheta": input_ntheta,
+            "requested_nzeta": raw_requested_nzeta,
+            "input_nzeta": input_nzeta,
+            "requested_mgrid_nphi": raw_requested_mgrid_nphi,
+            "input_mgrid_nphi": requested_mgrid_nphi,
+            "requested_status": requested_status.get("status"),
+            "requested_reasons": requested_status.get("reasons"),
+            "requested_projection_max_abs_component_error": float(
+                requested_projection["max_abs_component_error"]
+            ),
+            "mpol": int(effective_config.mpol),
+            "ntor": int(effective_config.ntor),
+            "ntheta": int(effective_resolution.effective_ntheta),
+            "nzeta": int(effective_resolution.effective_nzeta),
+            "mgrid_nphi": effective_mgrid_nphi,
+            "mode_deck_auto_bumped_to_recommended": bool(
+                mode_deck.mode_deck_auto_bumped_to_recommended
+            ),
+            "nzeta_auto_bumped_to_recommended": bool(effective_resolution.nzeta_auto_bumped_to_recommended),
             "ns_array": ns_array,
             "niter_array": niter_array,
             "ftol_array": ftol_array,
             "axis_kind": str(args.axis_kind),
             "side_power": float(args.side_power),
             "corner_power": float(args.corner_power),
-            "projection_max_abs_error": float(projection["max_abs_error"]),
-            "projection_max_abs_error_rel": float(projection["max_abs_error_rel"]),
-            "projection_max_abs_component_error_rel": float(projection["max_abs_component_error_rel"]),
+            "projection_max_abs_error": float(effective_projection["max_abs_error"]),
+            "projection_max_abs_error_rel": float(effective_projection["max_abs_error_rel"]),
+            "projection_max_abs_component_error_rel": float(
+                effective_projection["max_abs_component_error_rel"]
+            ),
         }
         if bool(args.include_control_map):
-            row.update(_control_map_rows(config))
+            row.update(_control_map_rows(effective_config))
         if bool(args.print_preflight_commands):
             row["preflight_command"] = _shell_join(
                 _profile_command(row, args, resolution_only=True, vmec2000=False)
@@ -377,16 +435,24 @@ def _format_value(value: Any) -> str:
 
 def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
     keys = [
+        "requested_mpol",
+        "requested_ntor",
+        "requested_nzeta",
         "mpol",
         "ntor",
         "ntheta",
         "recommended_ntheta",
         "nzeta",
         "recommended_nzeta",
+        "mode_deck_auto_bumped_to_recommended",
+        "nzeta_auto_bumped_to_recommended",
         "mgrid_nphi",
         "status",
         "reasons",
+        "requested_status",
+        "requested_reasons",
         "mode_count",
+        "requested_projection_max_abs_component_error",
         "projection_max_abs_component_error",
         "projection_target_max_component_error",
     ]

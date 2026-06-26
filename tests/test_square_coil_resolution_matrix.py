@@ -72,6 +72,37 @@ def test_square_coil_resolution_matrix_auto_nzeta_and_commands(tmp_path: Path):
     assert "mgrid_nphi_not_multiple_of_nzeta" in rows[1]["reasons"]
 
 
+def test_square_coil_resolution_matrix_reports_effective_auto_bumped_deck(tmp_path: Path):
+    args = matrix._parser().parse_args(
+        [
+            "--decks",
+            "5:28:32",
+            "--target-error",
+            "5e-12",
+            "--outdir-root",
+            str(tmp_path),
+            "--print-preflight-commands",
+        ]
+    )
+
+    rows = matrix.build_rows(args)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["requested_mpol"] == 5
+    assert row["requested_ntor"] == 28
+    assert row["requested_nzeta"] == 32
+    assert row["requested_status"] == "diagnostic_underresolved"
+    assert "nzeta_below_square_axis_recommendation" in row["requested_reasons"]
+    assert row["mpol"] == 5
+    assert row["ntor"] == 28
+    assert row["nzeta"] == recommended_square_axis_nzeta(28)
+    assert row["mgrid_nphi"] == row["nzeta"]
+    assert row["nzeta_auto_bumped_to_recommended"] is True
+    assert row["status"] == "production_ready"
+    assert "--nzeta 64" in row["preflight_command"]
+
+
 def test_square_coil_resolution_matrix_main_json(capsys, tmp_path: Path):
     rc = matrix.main(
         [
