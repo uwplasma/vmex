@@ -7,7 +7,7 @@ import pytest
 
 from vmec_jax import optimization_workflow as workflow
 from vmec_jax._compat import jnp
-from vmec_jax.optimizers.fixed_boundary import qi_objectives
+from vmec_jax.quasi_isodynamic import optimization_terms as qi_objectives
 
 
 class _StateViolation:

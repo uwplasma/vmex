@@ -10,6 +10,8 @@ This package keeps all QI-specific code behind one domain name:
   validation and ranking, not autodiff optimization.
 - `optimization.py` holds reusable staged-QI workflow helpers used by the
   example scripts.
+- `optimization_terms.py` adapts QI, mirror, elongation, and LgradB metrics to
+  the fixed-boundary least-squares objective tuple API.
 """
 
 from .diagnostics import (

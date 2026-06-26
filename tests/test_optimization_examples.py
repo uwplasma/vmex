@@ -11,7 +11,7 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.optimizers.fixed_boundary import qi_objectives
+from vmec_jax.quasi_isodynamic import optimization_terms as qi_objectives
 
 
 ROOT = Path(__file__).resolve().parents[1]

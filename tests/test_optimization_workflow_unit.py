@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.optimization import BoundaryParamSpec
-from vmec_jax.optimizers.fixed_boundary import qi_objectives
+from vmec_jax.quasi_isodynamic import optimization_terms as qi_objectives
 
 
 def test_objective_factory_callbacks_dispatch_to_helpers(monkeypatch) -> None:

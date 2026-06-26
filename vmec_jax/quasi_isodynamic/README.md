@@ -4,6 +4,8 @@ This folder owns all QI-specific logic.
 
 - `objectives.py`: differentiable smooth-QI, mirror-ratio, elongation, and
   LgradB objectives.
+- `optimization_terms.py`: SIMSOPT-style QI objective-term wrappers used by
+  fixed-boundary optimization examples.
 - `diagnostics.py`: solved-state and Boozer-output diagnostic records, seed
   ranking, and promotion gates.
 - `legacy.py`: non-differentiable NumPy/SciPy branch diagnostic used as an
