@@ -572,12 +572,14 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
                                 "residual_linf": 2.5e-14,
                                 "residual_rms": 1.0e-14,
                                 "residual_rel": 4.0e-13,
+                                "captured_fraction": 1.0,
                             },
                             "update_direction": {
                                 "status": "measured",
                                 "residual_linf": 3.0e-11,
                                 "residual_rms": 9.0e-12,
                                 "residual_rel": 0.25,
+                                "captured_fraction": 0.9682458365518543,
                             },
                         },
                         "free_boundary_solver_overrides": {
@@ -612,10 +614,14 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_state_residual_linf"] == pytest.approx(2.5e-14)
     assert row["freeb_edge_control_projection_state_residual_rms"] == pytest.approx(1.0e-14)
     assert row["freeb_edge_control_projection_state_residual_rel"] == pytest.approx(4.0e-13)
+    assert row["freeb_edge_control_projection_state_captured_fraction"] == pytest.approx(1.0)
     assert row["freeb_edge_control_projection_update_direction_status"] == "measured"
     assert row["freeb_edge_control_projection_update_direction_linf"] == pytest.approx(3.0e-11)
     assert row["freeb_edge_control_projection_update_direction_rms"] == pytest.approx(9.0e-12)
     assert row["freeb_edge_control_projection_update_direction_rel"] == pytest.approx(0.25)
+    assert row["freeb_edge_control_projection_update_direction_captured_fraction"] == pytest.approx(
+        0.9682458365518543
+    )
 
 
 def test_square_coil_profile_summary_infers_resolution_deck_for_live_launcher_log(

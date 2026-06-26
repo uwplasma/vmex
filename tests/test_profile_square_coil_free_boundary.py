@@ -476,11 +476,13 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert direction_metrics["status"] == "measured"
     assert direction_metrics["residual_linf"] > 0.1
     assert direction_metrics["control_delta_by_label"]["R00"] == pytest.approx(0.2)
+    assert 0.0 < direction_metrics["captured_fraction"] < 1.0
     assert np.asarray(projected_direction[0])[-1, 0] == pytest.approx(0.2)
     assert np.asarray(projected_direction[0])[-1, 1] == pytest.approx(0.0)
     assert np.asarray(projected_direction[3])[-1, 1] == pytest.approx(0.0)
     assert np.asarray(projected_direction[4])[-1, 0] == pytest.approx(2.0)
     assert projected_direction_metrics["residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
+    assert projected_direction_metrics["captured_fraction"] == pytest.approx(1.0)
 
 
 def test_square_coil_profile_hot_restart_solver_state_filters_freeb_resume_keys():

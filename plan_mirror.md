@@ -5738,6 +5738,147 @@ Visual validation:
 
 No user input is needed.
 
+## M311. Reduced-control capture diagnostics for square-axis strict runs
+
+### Steps taken
+
+- Refreshed current PR/CI and `office` run state:
+  - local branch was clean at `8fbe002b`;
+  - CI for the prior commit had docs/build/console/py3.10/manifest passing and
+    longer shards pending;
+  - direct JAX hot restart remained active at iteration `7216/8000`, with
+    `final_max_component=1.47e-11`, strict gap `14.7`, and a flat tail;
+  - VMEC2000/mgrid reference remained active in the `FTOL=1e-10` stage with
+    `final_max_component=2.19e-09`, strict gap `21.9` relative to that stage,
+    and not yet strict;
+  - the projected-control row was still queued before force rows.
+- Added reduced-control capture diagnostics:
+  - every edge-control projection metric now reports `captured_fraction`, the
+    projected-vector L2 norm divided by the target-vector L2 norm;
+  - it also reports `residual_energy_fraction` for JSON consumers;
+  - the square-coil summary table now includes captured fractions for both the
+    edge state and final update-direction diagnostics;
+  - the root square-coil example CSV now includes the same state/update
+    captured-fraction fields.
+- Kept all full-force convergence gates unchanged.
+
+### Results obtained
+
+- A local projected-control smoke confirmed the new diagnostics are present:
+  - `apply_count=2`;
+  - `delta_projection_count=1`;
+  - `state_captured_fraction=0.9999999999999993`;
+  - `state_residual_energy_fraction=1.69e-29`;
+  - the update-direction captured fraction was `null` in the smoke because the
+    final measured update-direction target norm was zero.
+- The summary markdown exposes the new columns:
+  - `freeb_edge_control_projection_state_captured_fraction`;
+  - `freeb_edge_control_projection_update_direction_captured_fraction`.
+
+### How it was tested
+
+```bash
+venv/bin/python -m py_compile \
+  vmec_jax/solvers/free_boundary/control.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
+```
+
+Result: passed.
+
+```bash
+ruff check \
+  vmec_jax/solvers/free_boundary/control.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: passed.
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py \
+  tests/test_toroidal_hybrid.py
+```
+
+Result: `108 passed, 2 warnings`.
+
+```bash
+rm -rf /tmp/vmec_edge_capture_fraction_smoke && \
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/vmec_edge_capture_fraction_smoke \
+  --beta-percent 0 --mpol 3 --ntor 4 --ns 5 --nzeta 16 \
+  --ns-array 5 --niter-array 1 --ftol-array 1e-8 \
+  --max-iter 1 --ftol 1e-8 --phiedge -0.02 --delt 0.02 \
+  --activate-fsq 1e-3 --nvacskip 1 --nstep 1 \
+  --axis-kind control_spline --side-power 1.0 --corner-power 1.0 \
+  --n-coils-per-side 2 --coil-segments 16 --coil-chunk-size 128 \
+  --skip-mgrid --skip-provider-parity --solver-mode parity \
+  --freeb-edge-control-projection square \
+  --max-boundary-projection-error none
+```
+
+Result: passed and wrote captured-fraction diagnostics to the profile JSON and
+summary table.
+
+```bash
+venv/bin/python tools/diagnostics/source_health.py --top 20 \
+  --max-root-helper-prefix-files 2 \
+  --max-function-lines-at \
+    vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2440 \
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420
+```
+
+Result: passed current source-health ratchets.
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+### File structure and best-practice adherence
+
+- Projection quality diagnostics remain in
+  `vmec_jax/solvers/free_boundary/control.py`, next to the projection math.
+- Summary/report plumbing is limited to existing square-coil diagnostic
+  surfaces.
+- The example CSV gains scalar diagnostics only; no generated outputs are
+  committed.
+- No convergence rule was weakened or replaced by reduced-space metrics.
+
+### Best next steps
+
+1. Fast-forward waiting `office` checkouts to this commit before the queued
+   projected-control row starts.
+2. When projected-control results arrive, inspect:
+   `delta_projection_count`, state captured fraction, update-direction captured
+   fraction, full `fsqr/fsqz/fsql`, and strict gap.
+3. If the reduced bridge captures nearly all state/update motion while full
+   Fourier force residuals remain above `1e-12`, start the solver-native
+   spline-control state/Jacobian tranche.
+4. Continue VMEC2000/mgrid as the reference backend, but require full
+   `1e-12` force convergence before treating it as a validated alternative.
+
+### Completion percentages after M311
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row remains flat above `1e-12`.
+- VMEC2000 robustness/reference lane: `99%`, still running and not yet strict.
+- True spline/control-basis hybrid lane: `88%`, reduced-control capture
+  diagnostics are now available for the queued strict rows.
+- DELT/stage-budget polish lane: `75%`, still queued.
+- Finite-beta virtual-casing validation lane: `87%`, unchanged in this tranche.
+- CI/API health lane: `99%`, local affected checks pass.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M310. Projected LCFS delta proposals for reduced square-axis solves
 
 ### Steps taken

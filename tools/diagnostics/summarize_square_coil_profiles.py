@@ -1357,6 +1357,9 @@ def _summary_row(
         "freeb_edge_control_projection_state_residual_rel": _finite_float(
             freeb_edge_control_state_residual.get("residual_rel")
         ),
+        "freeb_edge_control_projection_state_captured_fraction": _finite_float(
+            freeb_edge_control_state_residual.get("captured_fraction")
+        ),
         "freeb_edge_control_projection_update_direction_status": freeb_edge_control_update_direction.get(
             "status"
         ),
@@ -1368,6 +1371,9 @@ def _summary_row(
         ),
         "freeb_edge_control_projection_update_direction_rel": _finite_float(
             freeb_edge_control_update_direction.get("residual_rel")
+        ),
+        "freeb_edge_control_projection_update_direction_captured_fraction": _finite_float(
+            freeb_edge_control_update_direction.get("captured_fraction")
         ),
         "free_boundary_jax_nestor_operator_applied": backend.get(
             "free_boundary_jax_nestor_operator_applied"
@@ -1783,10 +1789,12 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_state_residual_linf",
         "freeb_edge_control_projection_state_residual_rms",
         "freeb_edge_control_projection_state_residual_rel",
+        "freeb_edge_control_projection_state_captured_fraction",
         "freeb_edge_control_projection_update_direction_status",
         "freeb_edge_control_projection_update_direction_linf",
         "freeb_edge_control_projection_update_direction_rms",
         "freeb_edge_control_projection_update_direction_rel",
+        "freeb_edge_control_projection_update_direction_captured_fraction",
         "free_boundary_jax_nestor_operator_applied",
         "free_boundary_jax_nestor_operator_reason",
         "free_boundary_jax_nestor_operator_jitted",

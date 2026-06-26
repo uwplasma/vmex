@@ -986,6 +986,12 @@ def _run_one_beta(
     edge_projection_diag = freeb.get("edge_control_projection", {}) if isinstance(freeb, dict) else {}
     if not isinstance(edge_projection_diag, dict):
         edge_projection_diag = {}
+    edge_state_diag = edge_projection_diag.get("state_residual")
+    if not isinstance(edge_state_diag, dict):
+        edge_state_diag = {}
+    edge_update_diag = edge_projection_diag.get("update_direction")
+    if not isinstance(edge_update_diag, dict):
+        edge_update_diag = {}
     nestor = freeb.get("last_nestor_diagnostics", {}) if isinstance(freeb, dict) else {}
     w_stats = _history_stats([] if run.result is None else getattr(run.result, "w_history", []))
     bnormal_stats = _history_stats(diag.get("freeb_nestor_bnormal_rms_history", []) if isinstance(diag, dict) else [])
@@ -1025,6 +1031,12 @@ def _run_one_beta(
         "free_boundary_edge_control_projection_control_count": edge_projection_diag.get("control_count"),
         "free_boundary_edge_control_projection_mode_count": edge_projection_diag.get("mode_count"),
         "free_boundary_edge_control_projection_reason": edge_projection_diag.get("reason"),
+        "free_boundary_edge_control_projection_state_captured_fraction": edge_state_diag.get(
+            "captured_fraction"
+        ),
+        "free_boundary_edge_control_projection_update_direction_captured_fraction": edge_update_diag.get(
+            "captured_fraction"
+        ),
         "converged": None
         if run.result is None
         else bool(diag.get("converged", getattr(run.result, "converged", False))),
@@ -1164,6 +1176,8 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_edge_control_projection_control_count",
         "free_boundary_edge_control_projection_mode_count",
         "free_boundary_edge_control_projection_reason",
+        "free_boundary_edge_control_projection_state_captured_fraction",
+        "free_boundary_edge_control_projection_update_direction_captured_fraction",
         "converged",
         "converged_strict",
         "boundary_condition_mode",

@@ -369,6 +369,8 @@ def _freeb_edge_control_vector_projection_metrics(
     residual_linf = float(np.max(np.abs(finite))) if finite.size else 0.0
     residual_rms = float(np.sqrt(np.mean(finite * finite))) if finite.size else 0.0
     residual_rel = None if target_l2 <= np.finfo(float).tiny else float(residual_l2 / target_l2)
+    captured_fraction = None if target_l2 <= np.finfo(float).tiny else float(projected_l2 / target_l2)
+    residual_energy_fraction = None if target_l2 <= np.finfo(float).tiny else float((residual_l2 / target_l2) ** 2)
     labels = list(dict(projection.get("info", {})).get("labels", []))
     return {
         "enabled": True,
@@ -382,6 +384,8 @@ def _freeb_edge_control_vector_projection_metrics(
         "residual_linf": residual_linf,
         "residual_rms": residual_rms,
         "residual_rel": residual_rel,
+        "captured_fraction": captured_fraction,
+        "residual_energy_fraction": residual_energy_fraction,
         "control_delta_l2": float(np.linalg.norm(control_delta)),
         "control_delta_linf": float(np.max(np.abs(control_delta))) if control_delta.size else 0.0,
         "control_delta_by_label": {
