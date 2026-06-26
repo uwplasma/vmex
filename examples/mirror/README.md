@@ -359,6 +359,13 @@ Before launching a long solve after changing ``MPOL``, ``NTOR``, ``NZETA``, or
 The JSON report exits before coil, mgrid, or equilibrium work and writes a
 ``resolution_deck`` block with production-gate status, projection error,
 recommended ``NTHETA``/``NZETA``, and ``mgrid_nphi``/``NZETA`` compatibility.
+If the projection gate auto-promotes the requested ``MPOL``/``NTOR`` pair, the
+profile now promotes the actual solve grids at the same time: the JSON
+``configuration`` block keeps ``requested_mpol``/``requested_ntor`` and reports
+the effective ``mpol``/``ntor``/``nzeta`` used by the generated input deck. When
+``--mgrid-nphi`` is omitted it follows the effective ``NZETA``. If it is given
+explicitly, it must be a multiple of that effective ``NZETA`` before any backend
+is launched.
 On the current spline-smoothed target, ``MPOL=5, NTOR=20, NZETA=48`` fails the
 strict projection gate with max component error about ``1.8e-9`` and
 recommends ``MPOL=5, NTOR=28, NZETA>=64``.

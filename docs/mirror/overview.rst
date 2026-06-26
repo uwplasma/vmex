@@ -243,7 +243,10 @@ toroidal mode. The source helper
 ``recommend_square_axis_stellarator_mirror_hybrid_resolution`` gives a finite
 Fourier closure suggestion for the current control-spline-smoothed target before a long
 solve is launched, and the profiler treats omitted ``--nzeta`` as the
-recommendation for the selected ``NTOR``. On the current square-coil shape, the
+recommendation for the selected ``NTOR``. For production-gated profile runs, an
+auto-promoted mode deck now also promotes the actual solve ``NTHETA``/``NZETA``
+and omitted ``mgrid_nphi`` before any backend is launched, while preserving the
+requested modes in the JSON provenance. On the current square-coil shape, the
 control-spline envelope
 cuts max component projection error from superellipse-scale underfitting to
 about ``1.5e-4`` at ``MPOL=3, NTOR=8``, about ``5.6e-6`` at

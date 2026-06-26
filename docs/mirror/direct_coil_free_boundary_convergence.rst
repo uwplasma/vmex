@@ -807,6 +807,12 @@ closure recommended by the spline-target projection gate, while preserving the
 requested values in the JSON and CSV provenance.  Set that flag to ``False`` or
 disable ``MAX_BOUNDARY_PROJECTION_ERROR`` when the purpose is an exact
 underresolved diagnostic deck.
+The backend profiler now follows the same rule before it writes any VMEC input:
+after the projection payload selects an effective mode deck, the profiler sizes
+``NTHETA``, ``NZETA``, and omitted ``mgrid_nphi`` from that effective
+``MPOL``/``NTOR``. This prevents strict profiles from combining a promoted
+high-mode square-axis boundary with an old low ``NZETA`` grid after a user edits
+``MPOL``, ``NTOR``, or ``NZETA``.
 It also includes ``control_fourier_map`` for the square-reduced spline controls:
 side/corner labels, stacked ``4K x 2`` coefficient-Jacobian shape, singular
 values, condition number, and column norms. This is a preflight diagnostic for

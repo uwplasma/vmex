@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -459,6 +460,85 @@ def _resolve_profile_ntheta(args: argparse.Namespace, recommended_ntheta: int) -
     if production_gate and requested < int(recommended_ntheta):
         return int(recommended_ntheta), False, True
     return requested, False, False
+
+
+def _projection_mode_deck(projection: dict[str, Any]) -> dict[str, Any]:
+    """Return mode-deck metadata from a boundary-projection payload."""
+
+    mode_deck = projection.get("mode_deck", {}) if isinstance(projection, dict) else {}
+    return mode_deck if isinstance(mode_deck, dict) else {}
+
+
+def _effective_mode_deck_value(mode_deck: dict[str, Any], key: str, fallback: int) -> int:
+    try:
+        value = int(mode_deck.get(key, fallback))
+    except Exception:
+        return int(fallback)
+    return int(value)
+
+
+def _config_with_effective_mode_deck(config: ExampleConfig, projection: dict[str, Any]) -> ExampleConfig:
+    """Align the profile solve config with the projection-selected Fourier deck.
+
+    The example helper may auto-promote ``MPOL``/``NTOR`` when the requested deck
+    cannot represent the spline-smoothed square axis within the production
+    projection gate.  The profile must then promote the collocation grids too;
+    otherwise a user can request a strict run whose input file silently combines
+    the effective high-mode boundary with the old low ``NZETA`` deck.
+    """
+
+    mode_deck = _projection_mode_deck(projection)
+    if not bool(mode_deck.get("mode_deck_auto_bumped_to_recommended", False)):
+        return config
+
+    effective_mpol = _effective_mode_deck_value(mode_deck, "effective_mpol", int(config.mpol))
+    effective_ntor = _effective_mode_deck_value(mode_deck, "effective_ntor", int(config.ntor))
+    ntheta_recommended = int(recommended_square_axis_ntheta(effective_mpol))
+    nzeta_recommended = int(recommended_square_axis_nzeta(effective_ntor))
+
+    ntheta = int(config.ntheta) if config.ntheta is not None else ntheta_recommended
+    ntheta = max(ntheta, ntheta_recommended)
+
+    default_nzeta = max(64, nzeta_recommended)
+    nzeta = int(config.nzeta) if config.nzeta is not None else default_nzeta
+    production_gate = config.max_boundary_projection_error is not None
+    if production_gate or bool(config.enforce_recommended_nzeta) or bool(config.auto_bump_nzeta_to_recommended):
+        nzeta = max(nzeta, nzeta_recommended)
+
+    return replace(
+        config,
+        mpol=effective_mpol,
+        ntor=effective_ntor,
+        ntheta=ntheta,
+        nzeta=nzeta,
+    )
+
+
+def _resolution_flags_for_effective_config(
+    args: argparse.Namespace,
+    *,
+    config: ExampleConfig,
+    recommended_ntheta: int,
+    recommended_nzeta: int,
+) -> dict[str, bool]:
+    """Return auto/default flags after effective-deck promotion."""
+
+    requested_ntheta = None if args.ntheta is None else int(args.ntheta)
+    requested_nzeta = None if args.nzeta is None else int(args.nzeta)
+    ntheta = int(config.ntheta)
+    nzeta = int(config.nzeta)
+    return {
+        "ntheta_auto": bool(requested_ntheta is None),
+        "ntheta_auto_bumped_to_recommended": bool(
+            requested_ntheta is not None and requested_ntheta > 0 and ntheta > requested_ntheta
+        ),
+        "ntheta_underrecommended": bool(ntheta < int(recommended_ntheta)),
+        "nzeta_auto": bool(requested_nzeta is None),
+        "nzeta_auto_bumped_to_recommended": bool(
+            requested_nzeta is not None and requested_nzeta > 0 and nzeta > requested_nzeta
+        ),
+        "nzeta_underrecommended": bool(nzeta < int(recommended_nzeta)),
+    }
 
 
 def _parse_virtual_casing_chunk_arg(raw: str) -> int | str | None:
@@ -2679,22 +2759,17 @@ def main(argv: list[str] | None = None) -> int:
     virtual_casing_pythonpath = _configure_virtual_casing_pythonpath(args.virtual_casing_pythonpath)
     outdir = args.outdir
     outdir.mkdir(parents=True, exist_ok=True)
-    recommended_ntheta = recommended_square_axis_ntheta(int(args.mpol))
-    recommended_nzeta = recommended_square_axis_nzeta(int(args.ntor))
-    resolved_ntheta, ntheta_auto, ntheta_auto_bumped = _resolve_profile_ntheta(args, recommended_ntheta)
-    resolved_nzeta, nzeta_auto, nzeta_auto_bumped = _resolve_profile_nzeta(args, recommended_nzeta)
-    mgrid_nphi = int(resolved_nzeta if args.mgrid_nphi is None else args.mgrid_nphi)
-    if mgrid_nphi % max(1, resolved_nzeta) != 0 and not bool(args.resolution_diagnostics_only):
-        raise ValueError(
-            f"--mgrid-nphi={mgrid_nphi} is incompatible with --nzeta={resolved_nzeta} for VMEC-plane "
-            "mgrid sampling; omit --mgrid-nphi or use a multiple of --nzeta."
-        )
+    requested_recommended_ntheta = recommended_square_axis_ntheta(int(args.mpol))
+    requested_recommended_nzeta = recommended_square_axis_nzeta(int(args.ntor))
+    resolved_ntheta, _, _ = _resolve_profile_ntheta(args, requested_recommended_ntheta)
+    resolved_nzeta, _, _ = _resolve_profile_nzeta(args, requested_recommended_nzeta)
     ns_array, niter_array, ftol_array = _resolve_schedule(args)
-    if bool(args.enforce_recommended_nzeta) and resolved_nzeta < recommended_nzeta:
+    if bool(args.enforce_recommended_nzeta) and resolved_nzeta < requested_recommended_nzeta:
         raise ValueError(
-            f"NZETA={resolved_nzeta} is underresolved for NTOR={int(args.ntor)}; use at least {recommended_nzeta}"
+            f"NZETA={resolved_nzeta} is underresolved for NTOR={int(args.ntor)}; "
+            f"use at least {requested_recommended_nzeta}"
         )
-    config = ExampleConfig(
+    requested_config = ExampleConfig(
         outdir=outdir,
         betas_percent=(float(args.beta_percent),),
         n_coils_per_side=int(args.n_coils_per_side),
@@ -2727,6 +2802,29 @@ def main(argv: list[str] | None = None) -> int:
         jit_forces=bool(args.jit_forces),
         write_plots=False,
     )
+    boundary_projection = _boundary_projection_payload(requested_config)
+    config = _config_with_effective_mode_deck(requested_config, boundary_projection)
+    recommended_ntheta = recommended_square_axis_ntheta(int(config.mpol))
+    recommended_nzeta = recommended_square_axis_nzeta(int(config.ntor))
+    resolved_ntheta = int(config.ntheta)
+    resolved_nzeta = int(config.nzeta)
+    resolution_flags = _resolution_flags_for_effective_config(
+        args,
+        config=config,
+        recommended_ntheta=recommended_ntheta,
+        recommended_nzeta=recommended_nzeta,
+    )
+    mgrid_nphi = int(resolved_nzeta if args.mgrid_nphi is None else args.mgrid_nphi)
+    if mgrid_nphi % max(1, resolved_nzeta) != 0 and not bool(args.resolution_diagnostics_only):
+        raise ValueError(
+            f"--mgrid-nphi={mgrid_nphi} is incompatible with effective --nzeta={resolved_nzeta} "
+            "for VMEC-plane mgrid sampling; omit --mgrid-nphi or use a multiple of --nzeta."
+        )
+    if bool(args.enforce_recommended_nzeta) and resolved_nzeta < recommended_nzeta:
+        raise ValueError(
+            f"NZETA={resolved_nzeta} is underresolved for effective NTOR={int(config.ntor)}; "
+            f"use at least {recommended_nzeta}"
+        )
     solver_mode = None if str(args.solver_mode).strip().lower() == "auto" else str(args.solver_mode)
     ns_values, niter_values, ftol_values = _stage_values(config)
     strict_schedule = square_axis_strict_schedule_status(
@@ -2737,11 +2835,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     _log_step(
         "building square-coil configuration "
-        f"beta={float(args.beta_percent):g}%, mpol={int(args.mpol)}, ntor={int(args.ntor)}, "
+        f"beta={float(args.beta_percent):g}%, requested_mpol={int(args.mpol)}, "
+        f"requested_ntor={int(args.ntor)}, effective_mpol={int(config.mpol)}, "
+        f"effective_ntor={int(config.ntor)}, "
         f"ns={ns_values}, ntheta={resolved_ntheta}, nzeta={resolved_nzeta}, "
         f"side_power={float(args.side_power):g}, corner_power={float(args.corner_power):g}"
     )
-    boundary_projection = _boundary_projection_payload(config)
     control_basis = _control_basis_payload(config)
     control_fourier_map = _control_fourier_map_payload(config)
     resolution_deck = _resolution_deck_payload(
@@ -2772,6 +2871,7 @@ def main(argv: list[str] | None = None) -> int:
         solver_native_spline_controls=bool(spline_bridge.get("solver_native_spline_controls", False)),
         target_ftol=STRICT_COMPONENT_FTOL,
     )
+    mode_deck = _projection_mode_deck(boundary_projection)
     if bool(args.resolution_diagnostics_only) or bool(args.scale_diagnostics_only):
         scale_payload = {"status": "skipped_resolution_diagnostics_only"}
         if bool(args.scale_diagnostics_only):
@@ -2786,21 +2886,31 @@ def main(argv: list[str] | None = None) -> int:
             "schema": "square_coil_free_boundary_backend_profile",
             "configuration": {
                 "beta_percent": float(args.beta_percent),
-                "mpol": int(args.mpol),
-                "ntor": int(args.ntor),
+                "requested_mpol": int(args.mpol),
+                "requested_ntor": int(args.ntor),
+                "mpol": int(config.mpol),
+                "ntor": int(config.ntor),
+                "mode_deck_auto_bumped_to_recommended": bool(
+                    mode_deck.get("mode_deck_auto_bumped_to_recommended", False)
+                ),
                 "ns": int(ns_array[-1]),
                 "ntheta": resolved_ntheta,
                 "requested_ntheta": None if args.ntheta is None else int(args.ntheta),
-                "ntheta_auto": bool(ntheta_auto),
-                "ntheta_auto_bumped_to_recommended": bool(ntheta_auto_bumped),
+                "ntheta_auto": bool(resolution_flags["ntheta_auto"]),
+                "ntheta_auto_bumped_to_recommended": bool(
+                    resolution_flags["ntheta_auto_bumped_to_recommended"]
+                ),
                 "recommended_ntheta": int(recommended_ntheta),
-                "ntheta_underrecommended": bool(resolved_ntheta < int(recommended_ntheta)),
+                "ntheta_underrecommended": bool(resolution_flags["ntheta_underrecommended"]),
                 "nzeta": resolved_nzeta,
-                "nzeta_auto": bool(nzeta_auto),
-                "nzeta_auto_bumped_to_recommended": bool(nzeta_auto_bumped),
+                "requested_nzeta": None if args.nzeta is None else int(args.nzeta),
+                "nzeta_auto": bool(resolution_flags["nzeta_auto"]),
+                "nzeta_auto_bumped_to_recommended": bool(
+                    resolution_flags["nzeta_auto_bumped_to_recommended"]
+                ),
                 "auto_bump_nzeta_to_recommended": bool(args.auto_bump_nzeta_to_recommended),
                 "recommended_nzeta": int(recommended_nzeta),
-                "nzeta_underrecommended": bool(resolved_nzeta < int(recommended_nzeta)),
+                "nzeta_underrecommended": bool(resolution_flags["nzeta_underrecommended"]),
                 "max_iter": int(niter_array[-1]),
                 "ftol": float(ftol_array[-1]),
                 "axis_kind": str(args.axis_kind),
@@ -2943,21 +3053,31 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "square_coil_free_boundary_backend_profile",
         "configuration": {
             "beta_percent": float(args.beta_percent),
-            "mpol": int(args.mpol),
-            "ntor": int(args.ntor),
+            "requested_mpol": int(args.mpol),
+            "requested_ntor": int(args.ntor),
+            "mpol": int(config.mpol),
+            "ntor": int(config.ntor),
+            "mode_deck_auto_bumped_to_recommended": bool(
+                mode_deck.get("mode_deck_auto_bumped_to_recommended", False)
+            ),
             "ns": int(ns_array[-1]),
             "ntheta": resolved_ntheta,
             "requested_ntheta": None if args.ntheta is None else int(args.ntheta),
-            "ntheta_auto": bool(ntheta_auto),
-            "ntheta_auto_bumped_to_recommended": bool(ntheta_auto_bumped),
+            "ntheta_auto": bool(resolution_flags["ntheta_auto"]),
+            "ntheta_auto_bumped_to_recommended": bool(
+                resolution_flags["ntheta_auto_bumped_to_recommended"]
+            ),
             "recommended_ntheta": int(recommended_ntheta),
-            "ntheta_underrecommended": bool(resolved_ntheta < int(recommended_ntheta)),
+            "ntheta_underrecommended": bool(resolution_flags["ntheta_underrecommended"]),
             "nzeta": resolved_nzeta,
-            "nzeta_auto": bool(nzeta_auto),
-            "nzeta_auto_bumped_to_recommended": bool(nzeta_auto_bumped),
+            "requested_nzeta": None if args.nzeta is None else int(args.nzeta),
+            "nzeta_auto": bool(resolution_flags["nzeta_auto"]),
+            "nzeta_auto_bumped_to_recommended": bool(
+                resolution_flags["nzeta_auto_bumped_to_recommended"]
+            ),
             "auto_bump_nzeta_to_recommended": bool(args.auto_bump_nzeta_to_recommended),
             "recommended_nzeta": int(recommended_nzeta),
-            "nzeta_underrecommended": bool(resolved_nzeta < int(recommended_nzeta)),
+            "nzeta_underrecommended": bool(resolution_flags["nzeta_underrecommended"]),
             "max_iter": int(niter_array[-1]),
             "ftol": float(ftol_array[-1]),
             "nstep": int(config.nstep),

@@ -1240,6 +1240,83 @@ def test_square_coil_profile_production_gate_auto_bumps_underrecommended_nzeta(
     assert data["resolution_deck"]["status"] == "production_ready"
 
 
+def test_square_coil_profile_aligns_grids_after_mode_deck_auto_bump(
+    monkeypatch,
+    tmp_path: Path,
+):
+    promoted_mpol = 5
+    promoted_ntor = 28
+
+    def fake_boundary_projection(config):
+        return {
+            "max_abs_component_error": 1.0e-13,
+            "max_abs_error": 1.0e-13,
+            "rms_error": 1.0e-14,
+            "mode_count": 1,
+            "requested_mpol": int(config.mpol),
+            "requested_ntor": int(config.ntor),
+            "mpol": promoted_mpol,
+            "ntor": promoted_ntor,
+            "mode_deck": {
+                "requested_mpol": int(config.mpol),
+                "requested_ntor": int(config.ntor),
+                "effective_mpol": promoted_mpol,
+                "effective_ntor": promoted_ntor,
+                "mode_deck_auto_bumped_to_recommended": True,
+            },
+        }
+
+    monkeypatch.setattr(profile, "_boundary_projection_payload", fake_boundary_projection)
+    monkeypatch.setattr(profile, "_control_basis_payload", lambda config: {"status": "skipped_test"})
+    monkeypatch.setattr(profile, "_control_fourier_map_payload", lambda config: {"status": "skipped_test"})
+    monkeypatch.setattr(
+        profile,
+        "_spline_bridge_payload",
+        lambda **kwargs: {
+            "solver_native_spline_controls": False,
+            "status": "skipped_test",
+        },
+    )
+
+    outdir = tmp_path / "profile_mode_bumped"
+    assert (
+        profile.main(
+            [
+                "--outdir",
+                str(outdir),
+                "--mpol",
+                "3",
+                "--ntor",
+                "4",
+                "--ns",
+                "5",
+                "--nzeta",
+                "16",
+                "--max-iter",
+                "2",
+                "--max-boundary-projection-error",
+                "5e-12",
+                "--skip-direct",
+                "--skip-mgrid",
+                "--skip-provider-parity",
+            ]
+        )
+        == 0
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert data["configuration"]["requested_mpol"] == 3
+    assert data["configuration"]["requested_ntor"] == 4
+    assert data["configuration"]["mpol"] == promoted_mpol
+    assert data["configuration"]["ntor"] == promoted_ntor
+    assert data["configuration"]["mode_deck_auto_bumped_to_recommended"] is True
+    assert data["configuration"]["ntheta"] == profile.recommended_square_axis_ntheta(promoted_mpol)
+    assert data["configuration"]["nzeta"] == profile.recommended_square_axis_nzeta(promoted_ntor)
+    assert data["configuration"]["nzeta_auto_bumped_to_recommended"] is True
+    assert data["mgrid"]["nphi"] == profile.recommended_square_axis_nzeta(promoted_ntor)
+    assert data["resolution_deck"]["status"] == "production_ready"
+
+
 def test_square_coil_profile_production_gate_rejects_underrecommended_nzeta_without_auto_bump(
     monkeypatch,
     tmp_path: Path,
