@@ -415,7 +415,10 @@ turn-on iteration before the final JSON exists. It recognizes both the standard
 ``NTOR``, ``NS``, ``NZETA``, and final-stage budget metadata in the summary.
 For completed stalled direct-coil rows that have not yet used the experimental
 JAX NESTOR operator, the recommendation column points to
-``direct-gpu-jax-nestor`` as the next A/B profile.
+``direct-gpu-jax-nestor`` as the next A/B profile. Completed backend JSON rows
+also expose whether that operator actually applied, why it did or did not, and
+whether the JIT cache was used; use those fields rather than the requested flag
+alone when interpreting an A/B run.
 With ``--verbose-solver``, free-boundary NESTOR timing lines are printed by
 default around vacuum updates and coupled force evaluations. Set
 ``VMEC_JAX_FREEB_VERBOSE_TIMING=0`` to keep the VMEC-style residual rows without

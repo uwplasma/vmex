@@ -5738,6 +5738,124 @@ Visual validation:
 
 No user input is needed.
 
+## M274 - JAX-NESTOR Operator Application Evidence
+
+### Steps taken
+
+- Polled the active office rows again:
+  - VMEC2000 remains active with `iteration_row_count=23927`, max component
+    `1.12e-11`, and no vacuum-grid overflow.
+  - Direct-GPU baseline is around iteration `1200` with component residuals in
+    the low `4e-8` range.
+  - Direct-GPU Anderson is around iteration `1184` with similar residual scale.
+- Ran a tiny local direct-coil profile with `--freeb-jax-nestor-operator` and
+  `--no-freeb-jax-nestor-jit-operator` to check profiler call-path wiring.
+- Confirmed that the tiny underresolved two-iteration smoke did not perform a
+  full free-boundary vacuum update, so it is a call-path smoke only, not
+  evidence that the experimental operator improved convergence.
+- Exposed low-level NESTOR operator evidence from completed JAX backend
+  profiles:
+  - `free_boundary_jax_nestor_operator_applied`;
+  - `free_boundary_jax_nestor_operator_reason`;
+  - `free_boundary_jax_nestor_operator_time_s`;
+  - `free_boundary_jax_nestor_operator_jitted`;
+  - `free_boundary_jax_nestor_operator_cache_hit`;
+  - `free_boundary_nestor_matrix_override_applied`;
+  - `free_boundary_nestor_rhs_mode`.
+- Added those fields to the square-coil summary table where appropriate and
+  documented how to interpret requested-versus-applied operator state.
+
+### Results obtained
+
+- The local smoke completed and wrote a profile JSON with the requested
+  overrides:
+  - `freeb_jax_nestor_operator=true`;
+  - `freeb_jax_nestor_jit_operator=false`;
+  - `return_best_scored_state=true`.
+- Because the smoke only ran two iterations and did not reach a real vacuum
+  update, its reported `free_boundary_nestor_model` remained
+  `vmec2000_like_dense_integral`; this correctly showed that the requested flag
+  alone is not enough evidence that the experimental operator was applied.
+- The next heavy `direct-gpu-jax-nestor` A/B row can now be audited by checking
+  the explicit `free_boundary_jax_nestor_operator_applied` and
+  `free_boundary_jax_nestor_operator_reason` fields.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py \
+  -k 'residual_payload_keeps_solver_mode_and_history_tails or recommends_direct_gpu_after_jax_nestor_probe or recommends_direct_gpu_for_stalled_direct or direct_gpu_launcher_dir_name'
+
+venv/bin/python -m py_compile \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py
+
+ruff check \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+
+git diff --check
+```
+
+Results: `4 passed, 39 deselected`; py-compile, ruff, and whitespace checks
+passed.
+
+Additional local smoke:
+
+```bash
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --mpol 3 --ntor 4 --ns 5 --nzeta 16 \
+  --ns-array 5 --niter-array 2 --ftol-array 1e-8 \
+  --max-iter 2 --ftol 1e-8 \
+  --axis-kind control_spline --coil-segments 16 --coil-chunk-size 64 \
+  --max-boundary-projection-error none \
+  --skip-mgrid --skip-provider-parity \
+  --solver-mode parity --verbose-solver --return-best-scored-state \
+  --freeb-jax-nestor-operator --no-freeb-jax-nestor-jit-operator
+```
+
+The smoke completed in about 26 seconds on the local machine and wrote a profile
+report, but it is not convergence evidence because it did not reach an actual
+vacuum-update application of the experimental operator.
+
+### File structure and best-practice notes
+
+- The new fields are exposed through the existing profiler and summarizer; no
+  new report format was introduced.
+- Tests cover both the profiler export and the summary-table surface.
+- Documentation stays in the existing mirror README and strict convergence
+  note.
+- No generated WOUT, mgrid, figure, or result files were tracked.
+
+### Best next steps
+
+1. Wait for the active baseline/Anderson direct-GPU rows to finish or plateau.
+2. Launch one heavy `direct-gpu-jax-nestor` A/B row only after the current
+   direct rows stop consuming the same profile lane.
+3. Use the new `*_applied`/`*_reason` fields to verify that the heavy A/B row
+   actually exercised the experimental operator before interpreting residuals.
+
+### Completion percentages after M274
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `88%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `75%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command and summary reproducibility lane: `100%`.
+- Strict spline-bridge diagnostics lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M272 - Strict square-coil solver-kernel profiling controls
 
 ### Steps taken
@@ -31681,6 +31799,60 @@ modified.
 - Follow-up command and summary reproducibility lane: `100%`.
 - Strict spline-bridge diagnostics lane: `100%`.
 - True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+## M276 - Current Tail Status After Operator-Evidence Patch
+
+### Steps taken
+
+- Kept the active office solve jobs running.
+- Added profiler and summary fields that distinguish a requested experimental
+  JAX NESTOR operator from an actually applied operator update.
+- Ran a tiny local call-path smoke and confirmed it was not convergence
+  evidence because it did not reach a vacuum update.
+
+### Results obtained
+
+- The latest active evidence remains:
+  - VMEC2000 strict row is flat near max component `1.12e-11`.
+  - Direct-GPU baseline/Anderson rows are still in the low `4e-8` range.
+  - No active row has proven `FTOL=1e-12` strict convergence yet.
+- Completed backend profiles can now be audited with
+  `free_boundary_jax_nestor_operator_applied` and
+  `free_boundary_jax_nestor_operator_reason`.
+
+### How it was tested
+
+Full touched-test run:
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: `43 passed, 1 warning`. Py-compile, ruff, and `git diff --check`
+also passed.
+
+### Best next steps
+
+1. Let the active strict rows continue to completion or a clear plateau.
+2. When the current direct rows finish, summarize them with the patched helper.
+3. If the baseline direct row exits above strict tolerance, launch the
+   `direct-gpu-jax-nestor` A/B row and verify the `*_applied`/`*_reason`
+   fields before interpreting residuals.
+
+### Completion percentages after M276
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `88%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `76%`.
 - Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
 
 ### User input needed

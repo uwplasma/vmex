@@ -930,6 +930,21 @@ def _summary_row(
         "solver_mode": cfg.get("solver_mode"),
         "freeb_jax_nestor_operator": freeb_jax_nestor_operator,
         "freeb_jax_nestor_jit_operator": freeb_jax_nestor_jit_operator,
+        "free_boundary_jax_nestor_operator_applied": backend.get(
+            "free_boundary_jax_nestor_operator_applied"
+        ),
+        "free_boundary_jax_nestor_operator_reason": backend.get(
+            "free_boundary_jax_nestor_operator_reason"
+        ),
+        "free_boundary_jax_nestor_operator_jitted": backend.get(
+            "free_boundary_jax_nestor_operator_jitted"
+        ),
+        "free_boundary_jax_nestor_operator_cache_hit": backend.get(
+            "free_boundary_jax_nestor_operator_cache_hit"
+        ),
+        "free_boundary_jax_nestor_operator_time_s": _finite_float(
+            backend.get("free_boundary_jax_nestor_operator_time_s")
+        ),
         "side_power": cfg.get("side_power"),
         "corner_power": cfg.get("corner_power"),
         "max_iter": max_iter,
@@ -1263,6 +1278,11 @@ def main(argv: list[str] | None = None) -> int:
         "solver_mode",
         "freeb_jax_nestor_operator",
         "freeb_jax_nestor_jit_operator",
+        "free_boundary_jax_nestor_operator_applied",
+        "free_boundary_jax_nestor_operator_reason",
+        "free_boundary_jax_nestor_operator_jitted",
+        "free_boundary_jax_nestor_operator_cache_hit",
+        "free_boundary_jax_nestor_operator_time_s",
         "side_power",
         "corner_power",
         "max_iter",

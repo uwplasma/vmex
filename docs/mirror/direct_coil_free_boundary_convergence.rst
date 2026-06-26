@@ -466,6 +466,14 @@ folder name. Completed stalled direct rows that have not already used
 ``freeb_jax_nestor_operator`` now recommend ``direct-gpu-jax-nestor`` as the
 next profile kind; rows that already used it fall back to the ordinary
 direct-GPU ``DELT``/stage-budget lane.
+Completed JAX backend profiles also expose
+``free_boundary_jax_nestor_operator_applied``,
+``free_boundary_jax_nestor_operator_reason``,
+``free_boundary_jax_nestor_operator_jitted``,
+``free_boundary_jax_nestor_operator_cache_hit``, and
+``free_boundary_jax_nestor_operator_time_s``. Treat a requested operator flag
+as a setup condition and the ``*_applied``/``*_reason`` fields as the evidence
+that the experimental operator was actually used on a vacuum update.
 The profiler also records ``--virtual-casing-quad-factor``,
 ``--virtual-casing-chunk-size``, and
 ``--virtual-casing-target-chunk-size`` for finite-beta postsolve diagnostics.

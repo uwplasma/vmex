@@ -87,6 +87,13 @@ def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tail
             "last_nestor_diagnostics": {
                 "bnormal_rms": 4.0e-4,
                 "bsqvac_rms": 1.5e-2,
+                "jax_nestor_operator_applied": True,
+                "jax_nestor_operator_reason": "applied",
+                "jax_nestor_operator_time_s": 0.125,
+                "jax_nestor_operator_jitted": False,
+                "jax_nestor_operator_cache_hit": False,
+                "matrix_override_applied": True,
+                "rhs_mode": "vmec_mode",
             },
         },
         "freeb_ivac_history": np.array([1, 2, 3]),
@@ -126,6 +133,13 @@ def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tail
     assert payload["solver_mode"] == "parity"
     assert payload["use_scan"] is True
     assert payload["free_boundary_active"] is True
+    assert payload["free_boundary_jax_nestor_operator_applied"] is True
+    assert payload["free_boundary_jax_nestor_operator_reason"] == "applied"
+    assert payload["free_boundary_jax_nestor_operator_time_s"] == pytest.approx(0.125)
+    assert payload["free_boundary_jax_nestor_operator_jitted"] is False
+    assert payload["free_boundary_jax_nestor_operator_cache_hit"] is False
+    assert payload["free_boundary_nestor_matrix_override_applied"] is True
+    assert payload["free_boundary_nestor_rhs_mode"] == "vmec_mode"
     assert payload["free_boundary_anderson_pressure_enabled"] is True
     assert payload["free_boundary_anderson_pressure_last_applied"] == pytest.approx(1.0)
     assert payload["free_boundary_anderson_pressure_last_theta"] == pytest.approx(0.4)

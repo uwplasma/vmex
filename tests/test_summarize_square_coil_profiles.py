@@ -480,6 +480,11 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
                             "freeb_jax_nestor_operator": True,
                             "freeb_jax_nestor_jit_operator": False,
                         },
+                        "free_boundary_jax_nestor_operator_applied": True,
+                        "free_boundary_jax_nestor_operator_reason": "applied",
+                        "free_boundary_jax_nestor_operator_jitted": False,
+                        "free_boundary_jax_nestor_operator_cache_hit": False,
+                        "free_boundary_jax_nestor_operator_time_s": 0.25,
                     }
                 },
             }
@@ -490,6 +495,11 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
 
     assert row["freeb_jax_nestor_operator"] is True
     assert row["freeb_jax_nestor_jit_operator"] is False
+    assert row["free_boundary_jax_nestor_operator_applied"] is True
+    assert row["free_boundary_jax_nestor_operator_reason"] == "applied"
+    assert row["free_boundary_jax_nestor_operator_jitted"] is False
+    assert row["free_boundary_jax_nestor_operator_cache_hit"] is False
+    assert row["free_boundary_jax_nestor_operator_time_s"] == pytest.approx(0.25)
     assert row["recommended_followup_profile_kind"] == "direct-gpu"
     assert row["recommended_followup_reason"] == "scan_delt_stage_budget_or_pressure_acceleration"
 
