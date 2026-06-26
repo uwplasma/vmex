@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.optimizers.fixed_boundary import qi_objectives
+from vmec_jax.quasi_isodynamic import optimization_terms as qi_objectives
 
 
 def test_smooth_positive_part_hard_and_soft_branches() -> None:

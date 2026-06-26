@@ -12,10 +12,10 @@ Main entry points:
   differentiable local optimization strategies.
 - `exact_replay.py`, `replay_policy.py`, and `state_cache.py`: accepted-point
   replay/cache policies used to avoid unnecessary exact solves.
-- `qs_residuals.py` and `qi_objectives.py`: symmetry-specific residual
-  adapters that keep example scripts concise.
+- `qs_residuals.py`: quasisymmetry residual adapters that keep example scripts
+  concise. Quasi-isodynamic optimization terms live in
+  `vmec_jax/quasi_isodynamic/optimization_terms.py`.
 
 Example scripts should assemble objectives explicitly and call these helpers;
 problem-specific parameters should stay in the script, not hidden inside a
 large wrapper.
-

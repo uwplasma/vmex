@@ -36,7 +36,6 @@ from .optimization import (
 from .optimizers.fixed_boundary import (
     finite_beta_objectives as _finite_beta_objectives,
     objective_terms as _objective_terms,
-    qi_objectives as _qi_objectives,
     seed_inputs as _seed_inputs,
     stage_policy as _stage_policy,
     workflow_artifacts as _workflow_artifacts,
@@ -46,7 +45,6 @@ from .optimizers.fixed_boundary.objective_terms import (
     as_vector, attach_packed_state_autodiff_hooks as _attach_packed_state_autodiff_hooks,
     residuals_from_objectives,
 )
-from .optimizers.fixed_boundary.qi_objectives import QuasiIsodynamicOptions
 from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
 from .optimizers.fixed_boundary.seed_inputs import simple_omnigenity_seed_indata
 from .optimizers.fixed_boundary.stage_policy import (
@@ -55,6 +53,8 @@ from .optimizers.fixed_boundary.stage_policy import (
 from .optimizers.fixed_boundary.workflow_artifacts import FixedBoundaryOptimizationResult
 from .optimizers.fixed_boundary import workflow_outputs as _workflow_outputs
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
+from .quasi_isodynamic import optimization_terms as _qi_objectives
+from .quasi_isodynamic.optimization_terms import QuasiIsodynamicOptions
 from .quasi_isodynamic import quasi_isodynamic_residual_from_state
 from .quasi_isodynamic.objectives import _nearest_half_mesh_indices
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
