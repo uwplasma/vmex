@@ -5739,126 +5739,6 @@ Visual validation:
 No user input is needed.
 
 ---
-## M287 - Final-Grid Hot-Restart Profiler Lane For Strict `1e-12`
-
-### Steps taken
-
-- Reviewed the current branch, draft PR, active `office` jobs, and completed
-  direct-GPU result directories.
-- Rechecked the relevant free-boundary references and source paths before
-  changing code:
-  - DESC free-boundary formulation: finite beta requires both normal-field and
-    magnetic-pressure/virtual-casing diagnostics, not only coil-field `B.n`.
-  - STELLOPT/VMEC free-boundary documentation and VMEC2000 source: generated
-    `mgrid`/NESTOR remains the mature reference path and couples `NZETA` to the
-    mgrid toroidal grid.
-  - VMEC++ documentation/source: hot restart is an explicit convergence tool
-    for nearby equilibria, with free-boundary restarts initialized near the
-    vacuum-pressure state.
-- Summarized the completed direct-GPU strict rows on `office`:
-  - Anderson row finished with final total `8.29768e-10` and max component
-    `4.23813e-10`.
-  - Baseline row finished with final total `1.41337e-9` and max component
-    `7.42050e-10`.
-  - Both used `FTOL=1e-12`, `NS_ARRAY=9,13,17`, `NITER_ARRAY=1000,2000,8000`,
-    `MPOL=5`, `NTOR=28`, `NZETA=64`, and the control-spline square axis.
-- Added opt-in final-grid hot restarts to
-  `tools/diagnostics/profile_square_coil_free_boundary.py`:
-  - `--jax-hot-restart-count`;
-  - `--jax-hot-restart-iters`;
-  - `--jax-hot-restart-policy state|freeb|full`;
-  - `--jax-hot-restart-always`;
-  - `--jax-initial-restart-wout`.
-- The default `freeb` hot-restart policy restarts from the accepted state and
-  carries only the VMEC/NESTOR free-boundary cadence/runtime fields
-  (`ivac`, `ivacskip`, `nvacskip`, `freeb_nestor_runtime`, and the previous
-  R/Z activation residual), not the full nonlinear time-step controller.
-- Added a backend `hot_restart` JSON block with per-stage strict residual
-  status, component max/sum, final accepted-state recomputation status, and
-  free-boundary cadence scalars.
-- Added the WOUT seed hook so a completed strict-deck row can provide the first
-  final-grid state for a hot-restart profile without replaying the full
-  multigrid ladder.
-- Exposed hot-restart metadata in
-  `tools/diagnostics/summarize_square_coil_profiles.py` so CSV/Markdown rows
-  show requested/executed restart count, per-pass budget, policy, stop reason,
-  and final hot-restart strict status.
-- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` with the new
-  strict-stall hot-restart lane.
-
-### Results obtained
-
-- The direct-GPU evidence is now clear: the best current row is Anderson, but
-  it remains about `4.2e2` above the strict per-component `1e-12` target.
-- The completed direct rows did not show bad-Jacobian limits, vacuum-grid
-  problems, or missing accepted-state recomputation; the next useful test is
-  therefore restart/schedule behavior rather than another identical 8k pass.
-- The already-launched JAX-NESTOR queued row started from pushed commit
-  `4dfcc7c1`; it does not include this hot-restart lane, which keeps it a clean
-  solver-kernel A/B against the completed direct rows.
-- The VMEC2000 `DELT=0.015/0.02/0.025` waiter remains queued behind the
-  JAX-NESTOR row and is still the reference robustness benchmark.
-
-### How it was tested
-
-- Ran:
-  `venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
-- Result: `47 passed`, with the existing JAX deprecation warning only.
-- Ran:
-  `ruff check tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
-- Ran:
-  `venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py`.
-
-### File structure and best-practice notes
-
-- The hot-restart experiment stays in the existing profiling tool; no new
-  solver default or heavyweight example was added.
-- The core solver already supported `restart_state`/`restart_solver_state`; the
-  profiler now uses that public hook in a controlled, auditable way.
-- Summary/reporting logic remains in the existing summarizer instead of being
-  duplicated across scripts.
-- The spline path remains correctly documented as an input/control-spline to
-  Fourier bridge. It reduces and smooths the target boundary but is not yet a
-  solver-native spline/control-basis update. If strict rows keep stalling, the
-  next implementation lane should move nonlinear update variables into that
-  reduced basis rather than only raising `MPOL`/`NTOR`.
-- No WOUT, mgrid, figure, or launcher-log outputs were added to the repository.
-
-### Best next steps
-
-1. Commit and push the hot-restart profiler lane.
-2. Queue a direct-GPU hot-restart row on `office`, starting from the current
-   best Anderson settings:
-   `--freeb-anderson-pressure --jax-initial-restart-wout <anderson-wout>
-   --jax-hot-restart-count 2 --jax-hot-restart-iters 8000
-   --jax-hot-restart-policy freeb`.
-3. Let the already-running JAX-NESTOR row finish, then summarize it against the
-   completed baseline/Anderson rows.
-4. Let the VMEC2000 `DELT` scan run and compare strict gaps, runtime, memory,
-   and any mgrid/NZETA sensitivity.
-5. If JAX-NESTOR, VMEC2000, and hot restart all remain above `1e-12`, start the
-   solver-native reduced spline/control-basis nonlinear-update prototype for
-   the square stellarator-mirror hybrid.
-
-### Completion percentages after M287
-
-- Square-coil strict `FTOL=1e-12` profiling lane: `99%`.
-- Direct-coil GPU/JIT parity lane: `95%`, baseline/Anderson rows complete,
-  hot-restart row next.
-- Experimental JAX NESTOR operator profiling lane: `82%`, running from the
-  previous pushed commit.
-- VMEC2000 robustness/reference lane: `99%`, strict `DELT` scan queued.
-- Hot-restart profiler lane: `100%` implemented, remote production row still
-  to run.
-- True spline/control-basis hybrid lane: `67%`, planned but gated on the
-  strict-stall evidence above.
-- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
-
-### User input needed
-
-No user input is needed.
-
----
 ## M283 - Stage-Budget Summary for Strict Direct Rows
 
 ### Steps taken
@@ -32546,6 +32426,203 @@ No user input is needed.
 - Raw backend strict-verdict lane: `100%`.
 - True spline/control-basis hybrid lane: `66%`, still waiting on strict-stall
   evidence before implementation.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+---
+## M287 - Final-Grid Hot-Restart Profiler Lane For Strict `1e-12`
+
+### Steps taken
+
+- Reviewed the current branch, draft PR, active `office` jobs, and completed
+  direct-GPU result directories.
+- Rechecked the relevant free-boundary references and source paths before
+  changing code:
+  - DESC free-boundary formulation: finite beta requires both normal-field and
+    magnetic-pressure/virtual-casing diagnostics, not only coil-field `B.n`.
+  - STELLOPT/VMEC free-boundary documentation and VMEC2000 source: generated
+    `mgrid`/NESTOR remains the mature reference path and couples `NZETA` to the
+    mgrid toroidal grid.
+  - VMEC++ documentation/source: hot restart is an explicit convergence tool
+    for nearby equilibria, with free-boundary restarts initialized near the
+    vacuum-pressure state.
+- Summarized the completed direct-GPU strict rows on `office`:
+  - Anderson row finished with final total `8.29768e-10` and max component
+    `4.23813e-10`.
+  - Baseline row finished with final total `1.41337e-9` and max component
+    `7.42050e-10`.
+  - Both used `FTOL=1e-12`, `NS_ARRAY=9,13,17`, `NITER_ARRAY=1000,2000,8000`,
+    `MPOL=5`, `NTOR=28`, `NZETA=64`, and the control-spline square axis.
+- Added opt-in final-grid hot restarts to
+  `tools/diagnostics/profile_square_coil_free_boundary.py`:
+  - `--jax-hot-restart-count`;
+  - `--jax-hot-restart-iters`;
+  - `--jax-hot-restart-policy state|freeb|full`;
+  - `--jax-hot-restart-always`;
+  - `--jax-initial-restart-wout`.
+- The default `freeb` hot-restart policy restarts from the accepted state and
+  carries only the VMEC/NESTOR free-boundary cadence/runtime fields
+  (`ivac`, `ivacskip`, `nvacskip`, `freeb_nestor_runtime`, and the previous
+  R/Z activation residual), not the full nonlinear time-step controller.
+- Added a backend `hot_restart` JSON block with per-stage strict residual
+  status, component max/sum, final accepted-state recomputation status, and
+  free-boundary cadence scalars.
+- Added the WOUT seed hook so a completed strict-deck row can provide the first
+  final-grid state for a hot-restart profile without replaying the full
+  multigrid ladder.
+- Exposed hot-restart metadata in
+  `tools/diagnostics/summarize_square_coil_profiles.py` so CSV/Markdown rows
+  show requested/executed restart count, per-pass budget, policy, stop reason,
+  and final hot-restart strict status.
+- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` with the new
+  strict-stall hot-restart lane.
+
+### Results obtained
+
+- The direct-GPU evidence is now clear: the best current row is Anderson, but
+  it remains about `4.2e2` above the strict per-component `1e-12` target.
+- The completed direct rows did not show bad-Jacobian limits, vacuum-grid
+  problems, or missing accepted-state recomputation; the next useful test is
+  therefore restart/schedule behavior rather than another identical 8k pass.
+- The already-launched JAX-NESTOR queued row started from pushed commit
+  `4dfcc7c1`; it does not include this hot-restart lane, which keeps it a clean
+  solver-kernel A/B against the completed direct rows.
+- The VMEC2000 `DELT=0.015/0.02/0.025` waiter remains queued behind the
+  JAX-NESTOR row and is still the reference robustness benchmark.
+
+### How it was tested
+
+- Ran:
+  `venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
+- Result: `47 passed`, with the existing JAX deprecation warning only.
+- Ran:
+  `ruff check tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
+- Ran:
+  `venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py`.
+
+### File structure and best-practice notes
+
+- The hot-restart experiment stays in the existing profiling tool; no new
+  solver default or heavyweight example was added.
+- The core solver already supported `restart_state`/`restart_solver_state`; the
+  profiler now uses that public hook in a controlled, auditable way.
+- Summary/reporting logic remains in the existing summarizer instead of being
+  duplicated across scripts.
+- The spline path remains correctly documented as an input/control-spline to
+  Fourier bridge. It reduces and smooths the target boundary but is not yet a
+  solver-native spline/control-basis update. If strict rows keep stalling, the
+  next implementation lane should move nonlinear update variables into that
+  reduced basis rather than only raising `MPOL`/`NTOR`.
+- No WOUT, mgrid, figure, or launcher-log outputs were added to the repository.
+
+### Best next steps
+
+1. Commit and push the hot-restart profiler lane.
+2. Queue a direct-GPU hot-restart row on `office`, starting from the current
+   best Anderson settings:
+   `--freeb-anderson-pressure --jax-initial-restart-wout <anderson-wout>
+   --jax-hot-restart-count 2 --jax-hot-restart-iters 8000
+   --jax-hot-restart-policy freeb`.
+3. Let the already-running JAX-NESTOR row finish, then summarize it against the
+   completed baseline/Anderson rows.
+4. Let the VMEC2000 `DELT` scan run and compare strict gaps, runtime, memory,
+   and any mgrid/NZETA sensitivity.
+5. If JAX-NESTOR, VMEC2000, and hot restart all remain above `1e-12`, start the
+   solver-native reduced spline/control-basis nonlinear-update prototype for
+   the square stellarator-mirror hybrid.
+
+### Completion percentages after M287
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `99%`.
+- Direct-coil GPU/JIT parity lane: `95%`, baseline/Anderson rows complete,
+  hot-restart row next.
+- Experimental JAX NESTOR operator profiling lane: `82%`, running from the
+  previous pushed commit.
+- VMEC2000 robustness/reference lane: `99%`, strict `DELT` scan queued.
+- Hot-restart profiler lane: `100%` implemented, remote production row still
+  to run.
+- True spline/control-basis hybrid lane: `67%`, planned but gated on the
+  strict-stall evidence above.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+## M288 - Queued Seeded Hot-Restart Production Row
+
+### Steps taken
+
+- Pushed the seed-capable hot-restart profiler to `origin/codex/mirror-geometry`
+  at commit `3f79d1da`.
+- Created `/home/rjorge/local/vmec_mirror_hot_restart` on `office` from the
+  current draft-PR branch.
+- Queued a waiter with PID `548932`.
+- The waiter is blocked behind the active JAX-NESTOR GPU row PID `547798`.
+- The hot-restart row will refetch `origin/codex/mirror-geometry` after
+  JAX-NESTOR exits and will write its commit to `source_commit.txt`.
+
+### Queued command shape
+
+The queued row will write to:
+
+`/home/rjorge/local/vmec_mirror_hot_restart/results/square_coil_direct_gpu_hot_restart_from_anderson_ns17_mpol5_ntor28_nzeta64_niter8k_x2_control_spline`
+
+It uses the completed Anderson WOUT seed:
+
+`/home/rjorge/local/vmec_mirror_direct_gpu/results/square_coil_direct_gpu_ns9_13_17_mpol5_ntor28_nzeta64_niter8k_control_spline_anderson/wout_square_beta_00p000_direct.nc`
+
+Key solve flags:
+
+```bash
+--ftol 1e-12
+--ns-array 9,13,17
+--niter-array 1000,2000,8000
+--ftol-array 1e-8,1e-10,1e-12
+--solver-mode parity
+--freeb-anderson-pressure
+--jax-initial-restart-wout <anderson-wout>
+--jax-hot-restart-count 2
+--jax-hot-restart-iters 8000
+--jax-hot-restart-policy freeb
+--coil-chunk-size 0
+--jit-forces
+--jit-direct-sampler
+--skip-mgrid
+--skip-provider-parity
+```
+
+### Results obtained
+
+- No new physics result yet; the job is queued, not running.
+- The queued job is efficient relative to a fresh staged row because it starts
+  from the completed Anderson final-grid WOUT instead of replaying the full
+  multigrid ladder.
+
+### How it was tested
+
+- Verified the remote waiter log:
+  `[hot-restart-waiter] waiting for JAX-NESTOR pid 547798`.
+- Verified the hot-restart worktree branch points at `3f79d1da`.
+- Verified the Anderson WOUT seed exists on `office`.
+
+### Best next steps
+
+1. Let the active JAX-NESTOR row finish.
+2. Let the seeded hot-restart row run and summarize its final JSON.
+3. Let the VMEC2000 `DELT` scan continue as the reference robustness lane.
+4. Decide between longer restart continuation, VMEC2000/mgrid parity work, or
+   solver-native spline/control-basis updates based on the strict gaps.
+
+### Completion percentages after M288
+
+- Direct-coil GPU/JIT parity lane: `96%`, hot-restart row queued.
+- Experimental JAX NESTOR operator profiling lane: `84%`, active on `office`.
+- VMEC2000 robustness/reference lane: `99%`, queued behind JAX-NESTOR.
+- Hot-restart profiler lane: `100%` implemented, production evidence pending.
 - Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
 
 ### User input needed
