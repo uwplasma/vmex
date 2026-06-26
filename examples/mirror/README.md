@@ -177,6 +177,11 @@ variables, set ``PLASMA_AXIS_REDUCED_RADII`` at the top of the example. With
 the default ``PLASMA_AXIS_CONTROL_SYMMETRY = "square"``, this is a two-value
 ``(side_radius, corner_radius)`` tuple that expands to the full eight spline
 controls.
+Set ``PREFLIGHT_ONLY = True`` after editing ``MPOL``, ``NTOR``, ``NTHETA``, or
+``NZETA`` to write the projection, effective-deck, strict-schedule, coil, and
+summary artifacts without launching the beta solves. This is the fastest way to
+check whether the example auto-promoted an underfit mode/grid deck or rejected a
+diagnostic-only edit before spending hours on ``FTOL=1e-12`` profiles.
 The backend profiler can also constrain the nonlinear free-boundary edge
 motion to this same reduced spline-control subspace with
 ``--freeb-edge-control-projection square`` or ``stellarator``. This is an

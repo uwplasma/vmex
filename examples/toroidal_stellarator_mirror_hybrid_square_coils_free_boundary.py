@@ -124,6 +124,7 @@ USE_DIRECT_FALLBACK = False
 BETA_CONTINUATION_RESTART = True
 CHECKPOINT_EACH_BETA = True
 JIT_FORCES: bool | str = "auto"
+PREFLIGHT_ONLY = False
 
 FIELD_LINE_COUNT = 3
 FIELD_LINE_STEPS = 900
@@ -198,6 +199,7 @@ class ExampleConfig:
     beta_continuation_restart: bool = BETA_CONTINUATION_RESTART
     checkpoint_each_beta: bool = CHECKPOINT_EACH_BETA
     jit_forces: bool | str = JIT_FORCES
+    preflight_only: bool = PREFLIGHT_ONLY
     field_line_count: int = FIELD_LINE_COUNT
     field_line_steps: int = FIELD_LINE_STEPS
     field_line_turns: float = FIELD_LINE_TURNS
@@ -2114,6 +2116,7 @@ def _metrics_payload(
     complete: bool,
 ) -> dict[str, Any]:
     all_converged = bool(complete) and all(bool(row.get("converged")) for row in rows)
+    preflight_only = bool(config.preflight_only)
     completed = [float(row.get("beta_percent")) for row in rows]
     remaining = [float(beta) for beta in config.betas_percent if float(beta) not in completed]
     mode_deck = _effective_square_axis_mode_deck(config)
@@ -2128,12 +2131,21 @@ def _metrics_payload(
     return {
         "metrics_schema": SCHEMA,
         "metrics_schema_version": SCHEMA_VERSION,
-        "workflow_status": "actual_vmec_jax_free_boundary_beta_scan",
+        "workflow_status": (
+            "preflight_only" if preflight_only else "actual_vmec_jax_free_boundary_beta_scan"
+        ),
         "free_boundary_solve_status": (
-            "converged" if all_converged else "not_converged_or_max_iter" if complete else "partial_running"
+            "not_run_preflight_only"
+            if preflight_only
+            else "converged"
+            if all_converged
+            else "not_converged_or_max_iter"
+            if complete
+            else "partial_running"
         ),
         "hybrid_fixture_kind": "square_axis_toroidal_stellarator_mirror_hybrid",
-        "actual_free_boundary_solve": True,
+        "actual_free_boundary_solve": not preflight_only,
+        "preflight_only": preflight_only,
         "production_free_boundary_claim": False,
         "betas_percent": [float(beta) for beta in config.betas_percent],
         "completed_betas_percent": completed,
@@ -2221,6 +2233,22 @@ def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
     cases = []
     summary_csv = outdir / "square_coil_hybrid_free_boundary_solve_summary.csv"
     metrics_path = outdir / "square_coil_hybrid_free_boundary_solve_metrics.json"
+    if bool(config.preflight_only):
+        _write_csv(summary_csv, [])
+        metrics = _metrics_payload(
+            config=config,
+            coils=coils,
+            coils_json=coils_json,
+            preflight_json=preflight_json,
+            preflight=preflight,
+            summary_csv=summary_csv,
+            rows=[],
+            figures={},
+            complete=True,
+        )
+        metrics_path.write_text(json.dumps(_json_sanitize(metrics), indent=2, allow_nan=False) + "\n")
+        return metrics_path
+
     restart_state = None
     for beta in config.betas_percent:
         case = _run_one_beta(

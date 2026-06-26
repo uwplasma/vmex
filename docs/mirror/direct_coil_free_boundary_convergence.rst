@@ -267,6 +267,11 @@ projection/``NZETA`` deck status, spline-control map conditioning, and a
 ``spline_bridge`` block stating that the current control-spline path is still a
 projection bridge into VMEC Fourier coefficients rather than a solver-native
 spline-control update.
+Set the example's top-level ``PREFLIGHT_ONLY = True`` after editing
+``MPOL``, ``NTOR``, ``NTHETA``, or ``NZETA`` to write those checks, the coils
+JSON, and an empty summary CSV without launching any beta solves. This keeps
+mode/grid experiments cheap and makes strict-deck auto-promotion or rejection
+visible before a long ``FTOL=1e-12`` run starts.
 The preflight and final metrics now also include a combined
 ``effective_resolution`` block with requested, recommended, and effective
 ``NTHETA``/``NZETA`` values. Completed beta rows and the summary CSV repeat the

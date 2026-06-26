@@ -1403,6 +1403,40 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert "virtual_casing_status" in csv_rows[0]
 
 
+def test_square_coil_hybrid_example_preflight_only_writes_deck_artifacts(tmp_path: Path):
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
+    metrics_path = module.run_example(
+        module.ExampleConfig(
+            outdir=tmp_path / "square_coils_preflight",
+            betas_percent=(0.0, 10.0),
+            n_coils_per_side=1,
+            coil_segments=16,
+            mpol=4,
+            ntor=10,
+            nzeta=16,
+            preflight_only=True,
+            write_plots=True,
+        )
+    )
+
+    metrics = json.loads(metrics_path.read_text())
+    assert metrics["workflow_status"] == "preflight_only"
+    assert metrics["free_boundary_solve_status"] == "not_run_preflight_only"
+    assert metrics["actual_free_boundary_solve"] is False
+    assert metrics["preflight_only"] is True
+    assert metrics["betas_percent"] == [0.0, 10.0]
+    assert metrics["completed_betas_percent"] == []
+    assert metrics["remaining_betas_percent"] == [0.0, 10.0]
+    assert metrics["rows"] == []
+    assert metrics["figures"] == {}
+    assert Path(metrics["preflight_json"]).exists()
+    assert Path(metrics["coils_json"]).exists()
+    assert Path(metrics["summary_csv"]).exists()
+    assert metrics["preflight"]["schema"] == "square_coil_hybrid_preflight"
+    assert metrics["effective_resolution"]["effective_nzeta"] >= metrics["recommended_nzeta"]
+    assert metrics["effective_resolution"]["nzeta_auto_bumped_to_recommended"] is True
+
+
 def test_square_coil_hybrid_free_boundary_example_writes_nonblank_plots(tmp_path: Path):
     image = pytest.importorskip("matplotlib.image")
     module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
