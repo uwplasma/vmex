@@ -29434,3 +29434,97 @@ were written under ignored `results/preflight_*` directories.
 ### User input needed
 
 No user input is needed.
+---
+## 255. Audited VMEC2000 Robustness Against The Strict Square-Coil Deck
+
+### Steps taken
+
+- Polled the active office VMEC2000 strict row again and summarized a copied
+  live sidecar locally.
+- Reviewed current external references:
+  - STELLOPT VMEC and MAKEGRID documentation;
+  - the STELLOPT free-boundary tutorial;
+  - VMEC++ numerics preprint;
+  - DESC continuation/free-boundary docs;
+  - VMEC/DESC/SPEC free-boundary Shafranov-shift verification.
+- Read local VMEC2000 source under
+  `/Users/rogeriojorge/local/vmec2000_pr623_ref/Sources`, especially:
+  - `TimeStep/vmec.f`;
+  - `Input_Output/readin.f`;
+  - `General/funct3d.f`;
+  - `TimeStep/eqsolve.f`;
+  - `NESTOR_vacuum/vacuum.f`;
+  - `NESTOR_vacuum/becoil.f`;
+  - `LIBSTELL_minimal/mgrid_mod.f`.
+- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` with the
+  active `5,28,64` strict-reference status and the preflight matrix.
+
+### Results obtained
+
+- VMEC2000 is still the right robustness reference for this lane because its
+  free-boundary path is the mature `mgrid` + NESTOR implementation:
+  - `LFREEB` requires an `mgrid`/MAKEGRID vacuum field;
+  - `readin.f` reads the `mgrid` before the solve;
+  - `funct3d.f` turns on vacuum pressure only after the interior residual is
+    small, forces full NESTOR updates for early vacuum iterations, and then
+    applies `NVACSKIP`;
+  - `vacuum.f` builds the surface, samples the external field, solves scalar
+    potential coefficients, and returns `bsqvac` at the interface;
+  - `becoil.f` clamps samples outside the vacuum grid and emits the same
+    vacuum-grid warning surfaced by our profiler.
+- VMEC2000 is not a guaranteed fix for this geometry. It still depends on:
+  - Fourier representation quality;
+  - `NZETA` and generated-`mgrid` plane compatibility;
+  - mgrid radial/vertical envelope coverage;
+  - `DELT` and staged iteration budgets.
+- The active `MPOL=5, NTOR=28, NZETA=64` VMEC2000 row is still running and
+  improving:
+  - final-stage iteration `5927/24000`;
+  - final summed residual about `3.674e-11`;
+  - max component about `1.78e-11`;
+  - strict gap about `17.8`;
+  - no vacuum-grid overflow.
+
+### How it was tested
+
+```bash
+scp office:/home/rjorge/local/vmec_mirror/results/.../_partial_vmec2000_payload.json \
+  /tmp/square_coil_vmec2000_active_payload.json
+venv/bin/python tools/diagnostics/summarize_square_coil_profiles.py \
+  /tmp/square_coil_vmec2000_active_payload.json --markdown
+```
+
+Targeted local test result after the docs update: `32 passed, 1 warning`.
+
+### File structure and best-practice notes
+
+- Runtime profile payloads remain under ignored `results/` paths or `/tmp`; no
+  bulky solver artifacts are committed.
+- The source audit is summarized in the plan and convergence docs rather than
+  introducing new code abstractions.
+- The conclusion keeps `control_spline` as the practical near-term geometry
+  bridge and reserves a true solver-native spline/control-basis lane for after
+  VMEC2000 has reached a decision point.
+
+### Best next steps
+
+1. Let the active `5,28,64` VMEC2000 row finish.
+2. If it exits above `1e-12`, run the generated `DELT=0.015,0.02,0.025` /
+   `NITER_ARRAY=8000,16000,32000` VMEC2000 follow-up scan.
+3. Use the best VMEC2000 row to launch matching `vmec_jax` generated-`mgrid`
+   and direct-coil profiles on the same production-ready deck.
+
+### Completion percentages after M255
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `96%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `76%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- True spline/control-basis hybrid lane: `38%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.

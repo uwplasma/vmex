@@ -202,6 +202,17 @@ Fourier deck: do not spend further CPU on simply extending the same
 ``6,23`` schedule before testing the ``7,28`` / ``8,32`` spline ladders or a
 free-boundary acceleration/numerical-kernel change.
 
+The active strict reference has now moved to the projection-gated
+``MPOL=5, NTOR=28, NZETA=64`` control-spline square-axis deck, with
+``NS=9 -> 13 -> 17``, ``NITER_ARRAY=4000,8000,24000``,
+``FTOL_ARRAY=1e-8,1e-10,1e-12``, ``DELT=0.02``, ``NVACSKIP=1``, and a widened
+``88 x 64 x 64`` generated ``mgrid``. The current VMEC2000 row is still
+running, not converged: a copied live sidecar snapshot at final-stage iteration
+``5927`` reports summed residual about ``3.67e-11``, max component about
+``1.78e-11``, strict gap about ``17.8``, and no vacuum-grid overflow. The
+tail is still decreasing slowly, so the row should finish before launching the
+prepared ``DELT``/stage-budget follow-up scan.
+
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
 while the same generated-``mgrid`` deck with ``NZETA=32`` completes and reaches
@@ -457,6 +468,30 @@ The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12`` by default and uses
 ``MPOL=5, NTOR=28, NZETA=64`` as the production-style deck. This is strict
 enough for ``FTOL=1e-12`` studies on the current spline-smoothed square target.
+The latest preflight matrix gives the current deck classification:
+
+.. list-table::
+   :header-rows: 1
+
+   * - deck
+     - status
+     - reason
+   * - ``MPOL=5, NTOR=20, NZETA=48``
+     - diagnostic-only
+     - projection max ``1.763e-9`` exceeds ``5e-12``
+   * - ``MPOL=5, NTOR=28, NZETA=48``
+     - diagnostic-only
+     - ``NZETA=48`` is below recommendation ``64``
+   * - ``MPOL=5, NTOR=28, NZETA=64``
+     - production-ready
+     - projection max ``3.481e-12`` and mgrid-compatible
+   * - ``MPOL=6, NTOR=32, NZETA=72``
+     - production-ready
+     - projection max ``3.468e-12`` and mgrid-compatible
+   * - ``MPOL=5, NTOR=28, NZETA=64, mgrid_nphi=96``
+     - diagnostic-only
+     - ``mgrid_nphi`` is not a multiple of ``NZETA``
+
 Lower-mode decks remain useful for diagnostic profiling, but they should set
 the threshold to ``None`` or pass ``--max-boundary-projection-error none`` so
 the report explicitly labels them as underresolved experiments. This guard
