@@ -18,7 +18,7 @@ from .fourier import build_helical_basis, eval_fourier, project_to_modes
 from .grids import AngleGrid
 from .modes import vmec_mode_table
 from .namelist import InData, minimal_fixed_boundary_indata
-from .solvers.free_boundary.reduced_controls import reduced_control_least_squares_step
+from .solvers.free_boundary.reduced_controls import ReducedControlMap, reduced_control_least_squares_step
 
 
 @dataclass(frozen=True)
@@ -174,6 +174,30 @@ def _stack_boundary_coeffs(coeffs: BoundaryCoeffs) -> np.ndarray:
     )
 
 
+def _unstack_boundary_coeffs(values: Any, template: BoundaryCoeffs) -> BoundaryCoeffs:
+    """Return boundary coefficients with the same channel shapes as ``template``."""
+
+    vector = np.asarray(values, dtype=float).reshape(-1)
+    shapes = (
+        np.asarray(template.R_cos).shape,
+        np.asarray(template.R_sin).shape,
+        np.asarray(template.Z_cos).shape,
+        np.asarray(template.Z_sin).shape,
+    )
+    sizes = tuple(int(np.prod(shape, dtype=int)) for shape in shapes)
+    if vector.size != sum(sizes):
+        raise ValueError("stacked boundary vector has incompatible size")
+    stops = np.cumsum(sizes)
+    starts = np.concatenate([[0], stops[:-1]])
+    chunks = [vector[start:stop].reshape(shape) for start, stop, shape in zip(starts, stops, shapes, strict=True)]
+    return BoundaryCoeffs(
+        R_cos=chunks[0],
+        R_sin=chunks[1],
+        Z_cos=chunks[2],
+        Z_sin=chunks[3],
+    )
+
+
 @dataclass(frozen=True)
 class SquareAxisControlFourierMatrix:
     """Linearized VMEC boundary coefficients for square-axis control radii."""
@@ -192,6 +216,13 @@ class SquareAxisControlFourierMatrix:
         """Number of spline-control variables represented by this map."""
 
         return int(np.asarray(self.R_cos).shape[1])
+
+    def _control_labels(self) -> tuple[str, ...]:
+        return (
+            tuple(str(label) for label in self.control_basis.labels)
+            if self.control_basis is not None
+            else tuple(f"control_{idx}" for idx in range(self.control_count))
+        )
 
     def boundary_delta(self, radius_delta: Any) -> BoundaryCoeffs:
         """Map a control-radius update to VMEC boundary coefficient deltas."""
@@ -219,6 +250,74 @@ class SquareAxisControlFourierMatrix:
             axis=0,
         )
 
+    def reduced_control_map(
+        self,
+        initial_boundary: BoundaryCoeffs,
+        *,
+        rcond: float | None = None,
+    ) -> ReducedControlMap:
+        """Return the affine map from reduced controls to full boundary states."""
+
+        initial = _stack_boundary_coeffs(initial_boundary)
+        jacobian = self.stacked_jacobian()
+        if jacobian.shape[0] != initial.size:
+            raise ValueError("initial boundary and control map have incompatible sizes")
+        return ReducedControlMap(
+            initial=initial,
+            jacobian=jacobian,
+            labels=self._control_labels(),
+            rcond=rcond,
+        )
+
+    def encode_boundary(
+        self,
+        boundary: BoundaryCoeffs,
+        *,
+        initial_boundary: BoundaryCoeffs,
+        rcond: float | None = None,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ):
+        """Fit a full boundary state with reduced spline-control coordinates."""
+
+        control_map = self.reduced_control_map(initial_boundary, rcond=rcond)
+        return control_map.encode(
+            _stack_boundary_coeffs(boundary),
+            ridge=ridge,
+            trust_radius=trust_radius,
+        )
+
+    def decode_boundary(
+        self,
+        radius_delta: Any,
+        *,
+        initial_boundary: BoundaryCoeffs,
+        rcond: float | None = None,
+    ) -> BoundaryCoeffs:
+        """Decode reduced-control coordinates into a full boundary state."""
+
+        control_map = self.reduced_control_map(initial_boundary, rcond=rcond)
+        return _unstack_boundary_coeffs(control_map.decode(radius_delta), initial_boundary)
+
+    def project_boundary(
+        self,
+        boundary: BoundaryCoeffs,
+        *,
+        initial_boundary: BoundaryCoeffs,
+        rcond: float | None = None,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ) -> BoundaryCoeffs:
+        """Project a full boundary state onto the affine reduced-control map."""
+
+        control_map = self.reduced_control_map(initial_boundary, rcond=rcond)
+        projected = control_map.project(
+            _stack_boundary_coeffs(boundary),
+            ridge=ridge,
+            trust_radius=trust_radius,
+        )
+        return _unstack_boundary_coeffs(projected, initial_boundary)
+
     def project_boundary_delta(self, delta: BoundaryCoeffs) -> SquareAxisControlProjection:
         """Fit a VMEC boundary-coefficient displacement to this control map."""
 
@@ -229,11 +328,7 @@ class SquareAxisControlFourierMatrix:
         if jacobian.shape[1] == 0:
             raise ValueError("control map has no control columns")
 
-        labels = (
-            tuple(str(label) for label in self.control_basis.labels)
-            if self.control_basis is not None
-            else tuple(f"control_{idx}" for idx in range(self.control_count))
-        )
+        labels = self._control_labels()
         step = reduced_control_least_squares_step(jacobian, target, labels=labels)
         predicted = self.boundary_delta(step.control_delta)
         residual = BoundaryCoeffs(

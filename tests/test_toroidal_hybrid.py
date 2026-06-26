@@ -10,8 +10,9 @@ from importlib import import_module
 import numpy as np
 import pytest
 
-from vmec_jax.boundary import boundary_input_from_indata
+from vmec_jax.boundary import BoundaryCoeffs, boundary_input_from_indata
 from vmec_jax.namelist import read_indata, write_indata
+from vmec_jax.solvers.free_boundary import ReducedControlMap
 import vmec_jax.toroidal_hybrid as toroidal_hybrid
 from vmec_jax.toroidal_hybrid import (
     SquareAxisControlBasis,
@@ -408,6 +409,61 @@ def test_square_axis_control_fourier_matrix_projects_boundary_delta():
     assert projection.captured_fraction == pytest.approx(1.0)
     assert projection.condition_number is not None
     assert projection.rank == 2
+
+
+def test_square_axis_control_fourier_matrix_encodes_boundary_state():
+    controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
+    control_basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
+    kwargs = {
+        "minor_radius": 0.03,
+        "side_elongation": 0.08,
+        "side_minor_modulation": 0.08,
+        "corner_ellipticity": 0.04,
+        "corner_amplitude": 0.004,
+        "corner_rotation": 0.30,
+    }
+    matrix = square_axis_spline_control_fourier_matrix(
+        control_basis=control_basis,
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        **kwargs,
+    )
+    base_indata = square_axis_stellarator_mirror_hybrid_indata(
+        axis_kind="control_spline",
+        axis_spline_controls=controls,
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        **kwargs,
+    )
+    modes = toroidal_hybrid.vmec_mode_table(mpol=4, ntor=8)
+    base = boundary_input_from_indata(base_indata, modes)
+    reduced_delta = np.array([2.0e-3, -1.0e-3])
+    delta = matrix.boundary_delta(reduced_delta)
+    changed = BoundaryCoeffs(
+        R_cos=np.asarray(base.R_cos) + np.asarray(delta.R_cos),
+        R_sin=np.asarray(base.R_sin) + np.asarray(delta.R_sin),
+        Z_cos=np.asarray(base.Z_cos) + np.asarray(delta.Z_cos),
+        Z_sin=np.asarray(base.Z_sin) + np.asarray(delta.Z_sin),
+    )
+
+    control_map = matrix.reduced_control_map(base, rcond=1.0e-12)
+    step = matrix.encode_boundary(changed, initial_boundary=base, rcond=1.0e-12)
+    decoded = matrix.decode_boundary(step.control_delta, initial_boundary=base, rcond=1.0e-12)
+    projected = matrix.project_boundary(changed, initial_boundary=base, rcond=1.0e-12)
+
+    assert isinstance(control_map, ReducedControlMap)
+    assert control_map.labels == ("side", "corner")
+    np.testing.assert_allclose(step.control_delta, reduced_delta, atol=1.0e-12)
+    np.testing.assert_allclose(decoded.R_cos, changed.R_cos, atol=1.0e-13)
+    np.testing.assert_allclose(decoded.R_sin, changed.R_sin, atol=1.0e-13)
+    np.testing.assert_allclose(decoded.Z_cos, changed.Z_cos, atol=1.0e-13)
+    np.testing.assert_allclose(decoded.Z_sin, changed.Z_sin, atol=1.0e-13)
+    np.testing.assert_allclose(projected.R_cos, changed.R_cos, atol=1.0e-13)
+    np.testing.assert_allclose(projected.Z_sin, changed.Z_sin, atol=1.0e-13)
 
 
 def test_square_axis_control_fourier_map_status_reports_conditioning():

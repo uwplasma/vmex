@@ -564,6 +564,12 @@ projection.
 ``vmec_jax.solvers.free_boundary.ReducedControlMap`` is the public host-side
 encode/decode primitive for that next lane: it maps full Fourier edge vectors
 to reduced controls and back without changing the current solve path.
+For square-axis studies, ``SquareAxisControlFourierMatrix`` now wraps that
+primitive with ``reduced_control_map(...)``, ``encode_boundary(...)``,
+``decode_boundary(...)``, and ``project_boundary(...)`` methods that accept
+full ``BoundaryCoeffs`` states around an initial LCFS. Use those methods for
+prototype notebooks and diagnostics before promoting side/corner spline
+controls into the nonlinear solve itself.
 Edge-projected free-boundary solves now also write
 ``free_boundary.edge_control_projection.state_coordinates`` in their solver
 diagnostics. That compact block reports the accepted LCFS edge in the same

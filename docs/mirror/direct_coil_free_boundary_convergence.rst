@@ -595,6 +595,12 @@ nonlinear unknown vector can be promoted from edge-only projection to
 solver-native spline/control coordinates.
 The same map now underlies the accepted-state ``state_coordinates`` diagnostics
 for edge-projected free-boundary solves.
+``SquareAxisControlFourierMatrix`` now exposes the same affine state map through
+``reduced_control_map(...)``, ``encode_boundary(...)``, ``decode_boundary(...)``,
+and ``project_boundary(...)``. Those methods operate on full
+``BoundaryCoeffs`` states around an initial LCFS, which is the source-level
+pack/unpack contract needed before the nonlinear unknown vector can be reduced
+from all Fourier edge coefficients to side/corner spline controls.
 For staged solves, the same table now exposes ``stage_count``,
 ``stage_ns_array``, ``stage_niter_array``, ``stage_ftol_array``,
 ``stage_budget_total``, ``stage_budget_final``, ``current_stage_index``,
