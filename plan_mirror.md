@@ -5738,6 +5738,109 @@ Visual validation:
 
 No user input is needed.
 
+## M302. Live square-coil summaries now infer strict resolution gates
+
+### Steps taken
+
+- Added inferred square-axis resolution-deck diagnostics for live launcher-log
+  and partial-VMEC2000 summary rows when completed profile JSON is not yet
+  available.
+- The inference uses the same standard square-axis preflight ingredients as the
+  profile tooling: `ntheta_fit=max(64,4*MPOL)`, `nzeta_fit=max(128,8*NTOR)`,
+  the current `control_spline` defaults, the parsed live `side_power` and
+  `corner_power`, and a strict projection gate of `5e-12`.
+- Re-ran a cheap local resolution matrix over representative user-edited decks:
+  - `MPOL=3, NTOR=12, NZETA=16`: diagnostic-only, projection error and `NZETA`
+    both fail the strict deck gate;
+  - `MPOL=4, NTOR=20, NZETA=32`: diagnostic-only, projection error and `NZETA`
+    both fail the strict deck gate;
+  - `MPOL=5, NTOR=28, NZETA=64`: production-ready, projection max component
+    error `3.48e-12`;
+  - `MPOL=6, NTOR=32, NZETA=72` and `NZETA=80`: production-ready.
+- Verified that an intentionally underrecommended `NZETA=48` profile fails
+  before backend work with an explicit message recommending `NZETA>=64` or a
+  diagnostic-only projection gate.
+- Pulled the active direct-GPU launcher log into `/tmp` and ran the patched
+  local summarizer against it without touching the active `office` checkout.
+
+### Results obtained
+
+- Active live rows now report `resolution_deck_status=production_ready`,
+  `recommended_nzeta=64`, `boundary_proj_max=3.48077e-12`, and
+  `max_boundary_projection_error=5e-12` before the backend finishes.
+- The same live summary still reports the strict force issue separately:
+  the active direct-GPU row was at about iteration `4903/8000`, max force
+  component `2.25e-11`, strict gap `22.5`, and
+  `tail_plateau_status=flat_above_stage_ftol`.
+- This makes the current diagnosis sharper: the active `5/28/64` deck is not
+  failing the Fourier projection/NZETA gate; it is a nonlinear/free-boundary
+  convergence stall above the requested `FTOL=1e-12`.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_summarize_square_coil_profiles.py
+```
+
+Result: `25 passed`, one existing JAX deprecation warning.
+
+```bash
+ruff check tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_summarize_square_coil_profiles.py
+git diff --check
+```
+
+Result: all passed.
+
+```bash
+venv/bin/python tools/diagnostics/square_coil_resolution_matrix.py \
+  --decks '3:12:16:16,4:20:32:32,5:28:64:64,6:32:72:72,6:32:80:80' \
+  --format markdown --include-control-map --print-preflight-commands
+```
+
+Result: reproduced the production/diagnostic deck classifications above.
+
+### File structure and best-practice adherence
+
+- The change stays in the existing diagnostic summarizer and its tests.
+- No generated WOUTs, plots, CSVs, or solver outputs were committed.
+- The solver code remains untouched; this is an observability improvement that
+  helps decide whether to wait, rerun VMEC2000, or move to solver-native spline
+  controls.
+
+### Best next steps
+
+1. Let the active direct-GPU and VMEC2000 jobs continue; they are the current
+   strict/reference evidence lanes.
+2. After the direct row finishes, inspect the completed JSON boundary-motion
+   reduced-control capture fields. If the boundary motion is mostly captured
+   but strict force components remain flat, prioritize JAX-NESTOR/DELT/stage
+   algorithmic changes.
+3. If completed rows show substantial uncontrolled boundary motion, prioritize
+   the solver-native spline-control state tranche.
+
+### Completion percentages after M302
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row still running near strict but
+  above target.
+- VMEC2000 robustness/reference lane: `99%`, active generated-`mgrid` row still
+  running and not yet at the strict stage.
+- True spline/control-basis hybrid lane: `86%`, live diagnostics now distinguish
+  projection/NZETA failures from nonlinear solve stalls.
+- DELT/stage-budget polish lane: `75%`, queued.
+- Finite-beta virtual-casing validation lane: `87%`, source path ready.
+- CI/API health lane: `99%`, local tests pass and GitHub long shards are left
+  to run asynchronously.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M301. Hardened NESTOR diagnostic-history regression guard
 
 ### Steps taken

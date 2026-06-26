@@ -20,6 +20,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1
 from vmec_jax.solvers.free_boundary.validation import free_boundary_promotion_status
+from vmec_jax.toroidal_hybrid import (
+    square_axis_resolution_deck_status,
+    square_axis_stellarator_mirror_hybrid_projection_error,
+)
 
 
 DEFAULT_GLOB = "results/square_coil_freeb_backend_profile_*/square_coil_free_boundary_backend_profile.json"
@@ -32,6 +36,7 @@ CASE_PREFIXES = (
     "square_coil_",
 )
 FORCE_COMPONENTS = ("fsqr", "fsqz", "fsql")
+INFERRED_SQUARE_AXIS_PROJECTION_GATE = 5.0e-12
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -238,7 +243,115 @@ def _config_from_case_name(case: str) -> dict[str, Any]:
     if niter_match is not None:
         scale = 1000 if niter_match.group(2) == "k" else 1
         cfg["max_iter"] = int(niter_match.group(1)) * scale
+    mgrid_match = re.search(r"(?:^|_)mgrid\d+x\d+x(\d+)(?:_|$)", case)
+    if mgrid_match is not None:
+        cfg["mgrid_nphi"] = int(mgrid_match.group(1))
+    if "control_spline" in case:
+        cfg["axis_kind"] = "control_spline"
+    elif "superellipse" in case:
+        cfg["axis_kind"] = "superellipse"
+    elif "spline" in case:
+        cfg["axis_kind"] = "spline"
     return cfg
+
+
+_SQUARE_BUILD_RE = re.compile(
+    r"building square-coil configuration beta=(?P<beta>[+\-0-9.Ee]+)%,\s*"
+    r"mpol=(?P<mpol>\d+),\s*ntor=(?P<ntor>\d+),\s*ns=(?P<ns>\[[^\]]+\]|\d+),\s*"
+    r"nzeta=(?P<nzeta>\d+),\s*side_power=(?P<side>[+\-0-9.Ee]+),\s*"
+    r"corner_power=(?P<corner>[+\-0-9.Ee]+)"
+)
+
+
+def _parse_square_build_config(text: str) -> dict[str, Any]:
+    """Extract square-coil profile settings from a live launcher log."""
+
+    match = _SQUARE_BUILD_RE.search(text)
+    if match is None:
+        return {}
+    ns_text = match.group("ns")
+    ns_values = [int(value) for value in re.findall(r"\d+", ns_text)]
+    return {
+        "beta_percent": float(match.group("beta")),
+        "mpol": int(match.group("mpol")),
+        "ntor": int(match.group("ntor")),
+        "ns": ns_values[-1] if ns_values else None,
+        "nzeta": int(match.group("nzeta")),
+        "side_power": float(match.group("side")),
+        "corner_power": float(match.group("corner")),
+    }
+
+
+def _infer_square_axis_resolution(
+    cfg: dict[str, Any],
+    *,
+    case: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Infer cheap square-axis projection gates for live/partial rows.
+
+    Completed profile JSON files carry exact ``boundary_projection`` and
+    ``resolution_deck`` blocks.  Launcher-log and partial-VMEC2000 summaries do
+    not, so this helper reconstructs the standard square-axis preflight from
+    the encoded case/config values and marks the result as inferred.
+    """
+
+    required = ("mpol", "ntor", "nzeta")
+    if any(cfg.get(key) is None for key in required):
+        return {}, {}
+    axis_kind = str(cfg.get("axis_kind") or "control_spline").strip().lower()
+    if axis_kind not in {"control_spline", "spline", "superellipse"}:
+        return {}, {}
+    try:
+        mpol = int(cfg["mpol"])
+        ntor = int(cfg["ntor"])
+        nzeta = int(cfg["nzeta"])
+        ns = None if cfg.get("ns") is None else int(cfg["ns"])
+        projection = square_axis_stellarator_mirror_hybrid_projection_error(
+            nfp=1,
+            mpol=mpol,
+            ntor=ntor,
+            ntheta_fit=max(64, 4 * mpol),
+            nzeta_fit=max(128, 8 * ntor),
+            ns_array=ns if ns is not None else 17,
+            niter_array=1,
+            ftol_array=1.0e-12,
+            phiedge=-0.04,
+            axis_half_width=1.5,
+            axis_kind=axis_kind,
+            axis_square_power=3.0,
+            axis_spline_corner_radius_factor=1.14,
+            minor_radius=0.03,
+            side_elongation=0.08,
+            side_minor_modulation=0.08,
+            side_power=float(cfg.get("side_power", 1.0)),
+            corner_power=float(cfg.get("corner_power", 1.0)),
+            corner_ellipticity=0.04,
+            corner_amplitude=0.004,
+            corner_rotation=0.30,
+            corner_helicity=1,
+        )
+        deck = square_axis_resolution_deck_status(
+            projection=projection,
+            mpol=mpol,
+            ntor=ntor,
+            nzeta=nzeta,
+            ns=ns,
+            mgrid_nphi=cfg.get("mgrid_nphi"),
+            target_max_component_error=INFERRED_SQUARE_AXIS_PROJECTION_GATE,
+        )
+    except Exception:
+        return {}, {}
+    projection = {
+        **projection,
+        "inferred": True,
+        "inferred_from": "case_or_launcher_log",
+    }
+    deck = {
+        **deck,
+        "inferred": True,
+        "inferred_from": "case_or_launcher_log",
+    }
+    return projection, deck
 
 
 def _stat(backend: dict[str, Any], history_key: str, stat_key: str) -> float | None:
@@ -1017,6 +1130,15 @@ def _summary_row(
 ) -> dict[str, Any]:
     case = _case_name(path)
     cfg = {**_config_from_case_name(case), **cfg}
+    if not projection and not resolution_deck:
+        projection, inferred_resolution = _infer_square_axis_resolution(cfg, case=case)
+        if inferred_resolution:
+            resolution_deck = inferred_resolution
+            cfg.setdefault("recommended_nzeta", inferred_resolution.get("recommended_nzeta"))
+            cfg.setdefault(
+                "max_boundary_projection_error",
+                inferred_resolution.get("projection_target_max_component_error"),
+            )
     backend_for_projection = backend
     if backend_name == "vmec2000_mgrid" and not isinstance(backend.get("history"), dict):
         tail_rows = backend.get("tail_rows")
@@ -1494,13 +1616,14 @@ def rows_from_vmec2000_partial(path: Path) -> list[dict[str, Any]]:
 
 
 def rows_from_launcher_log(path: Path) -> list[dict[str, Any]]:
+    text = path.read_text(errors="replace")
     backend = _vmec_style_log_payload(path)
     return [
         _summary_row(
             path=path,
             backend_name=str(backend.get("backend_name", "vmec_jax_live")),
             backend=backend,
-            cfg={},
+            cfg=_parse_square_build_config(text),
             projection={},
             status="running_partial",
         )

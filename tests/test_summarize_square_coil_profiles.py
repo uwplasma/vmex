@@ -590,6 +590,63 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_rcond"] == pytest.approx(1.0e-12)
 
 
+def test_square_coil_profile_summary_infers_resolution_deck_for_live_launcher_log(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_direct_gpu_ns17_mpol5_ntor28_nzeta64_niter8k_control_spline"
+    case_dir.mkdir()
+    launcher = case_dir / "launcher.log"
+    launcher.write_text(
+        "\n".join(
+            [
+                "[square-coil-profile] building square-coil configuration beta=0%, "
+                "mpol=5, ntor=28, ns=[9, 13, 17], nzeta=64, side_power=1, corner_power=1",
+                "[square-coil-profile] running vmec_jax direct-coil backend",
+                "  NS =   17 NO. FOURIER MODES =  257 FTOLV =  1.000E-12 NITER =   8000",
+                "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)    DELT       WMHD",
+                "    1  7.37E-08  6.27E-08  3.44E-11  1.457E+00  2.00E-02  3.2171E-01",
+            ]
+        )
+    )
+
+    row = summary.rows_from_source(launcher)[0]
+
+    assert row["backend"] == "vmec_jax_direct_live"
+    assert row["resolution_deck_status"] == "production_ready"
+    assert row["resolution_deck_reasons"] == ""
+    assert row["boundary_proj_max"] == pytest.approx(3.480773921149713e-12)
+    assert row["recommended_nzeta"] == 64
+    assert row["boundary_recommended_nzeta"] == 64
+    assert row["max_boundary_projection_error"] == pytest.approx(5.0e-12)
+
+
+def test_square_coil_profile_summary_infers_underresolved_live_launcher_log(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_direct_gpu_ns17_mpol5_ntor28_nzeta48_niter8k_control_spline"
+    case_dir.mkdir()
+    launcher = case_dir / "launcher.log"
+    launcher.write_text(
+        "\n".join(
+            [
+                "[square-coil-profile] building square-coil configuration beta=0%, "
+                "mpol=5, ntor=28, ns=[9, 13, 17], nzeta=48, side_power=1, corner_power=1",
+                "[square-coil-profile] running vmec_jax direct-coil backend",
+                "  NS =   17 NO. FOURIER MODES =  257 FTOLV =  1.000E-12 NITER =   8000",
+                "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)    DELT       WMHD",
+                "    1  7.37E-08  6.27E-08  3.44E-11  1.457E+00  2.00E-02  3.2171E-01",
+            ]
+        )
+    )
+
+    row = summary.rows_from_source(launcher)[0]
+
+    assert row["resolution_deck_status"] == "diagnostic_underresolved"
+    assert row["resolution_deck_reasons"] == "nzeta_below_square_axis_recommendation"
+    assert "resolution_deck_diagnostic_underresolved" in row["strict_evidence_blockers"]
+    assert row["strict_evidence_status"] == "diagnostic_underresolved"
+
+
 def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_probe(
     tmp_path: Path,
 ):
