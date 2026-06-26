@@ -19,7 +19,7 @@ from functools import partial
 import time
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -552,6 +552,133 @@ def _use_numpy_force_fast_path_policy(
 _default_scan_core = _solve_runtime._default_scan_core
 
 
+class _ResidualBoundarySetup(NamedTuple):
+    """Boundary/profile setup values reused across residual-iteration phases."""
+
+    idx00: int
+    concrete_host_setup: bool
+    s: Any
+    freeb_pres_scale: Any
+    dtype_state: Any
+    zero_precond_diag: tuple[Any, Any]
+    zero_tcon: Any
+    constraint_active_false: Any
+    axis_reset_done: bool
+    lmove_axis: bool
+    force_axis_reset: bool
+    axis_reset_always_3d: bool
+    axis_reset_fsq_min: float
+
+
+class _ResidualFreeBoundarySetup(NamedTuple):
+    """Resolved free-boundary setup controls for residual iteration."""
+
+    free_boundary_enabled: bool
+    direct_free_boundary_provider: bool
+    freeb_nvacskip: int
+    freeb_nvskip0: int
+    freeb_couple_edge: bool
+    use_scan: bool
+    freeb_sample_external: bool
+    jit_strict_update_enabled: bool
+    attach_diag: Any
+
+
+def _prepare_residual_free_boundary_setup(
+    *,
+    cfg: Any,
+    static: Any,
+    external_field_provider_kind: str | None,
+    use_scan: bool,
+    host_update_assembly: bool,
+) -> _ResidualFreeBoundarySetup:
+    """Resolve free-boundary coupling policy and diagnostic attachment."""
+
+    policy = _resolve_free_boundary_setup_policy(
+        cfg,
+        external_field_provider_kind=external_field_provider_kind,
+        use_scan=use_scan,
+        freeb_couple_env=os.getenv("VMEC_JAX_FREEB_COUPLE_EDGE", "1"),
+        freeb_sample_env=os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1"),
+        jit_strict_update_env=os.getenv("VMEC_JAX_JIT_STRICT_UPDATE", "auto"),
+        backend_name=_scan_backend_name(),
+        host_update_assembly=host_update_assembly,
+        cpu_work_limit_env=os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "1000"),
+    )
+    attach_diag = partial(
+        _runtime_attach_free_boundary_external_field_diag,
+        free_boundary_enabled=policy.free_boundary_enabled,
+        external_field_provider_kind=external_field_provider_kind,
+        freeb_sample_external=policy.freeb_sample_external,
+        sample_external_field_func=_sample_free_boundary_external_field,
+        static=static,
+        result_type=SolveVmecResidualResult,
+    )
+    return _ResidualFreeBoundarySetup(
+        free_boundary_enabled=policy.free_boundary_enabled,
+        direct_free_boundary_provider=policy.direct_free_boundary_provider,
+        freeb_nvacskip=policy.freeb_nvacskip,
+        freeb_nvskip0=policy.freeb_nvskip0,
+        freeb_couple_edge=policy.freeb_couple_edge,
+        use_scan=policy.use_scan,
+        freeb_sample_external=policy.freeb_sample_external,
+        jit_strict_update_enabled=policy.jit_strict_update_enabled,
+        attach_diag=attach_diag,
+    )
+
+
+def _prepare_residual_boundary_setup(
+    *,
+    static: Any,
+    state0: VMECState,
+    indata: Any,
+    state0_has_tracer: bool,
+    host_update_assembly: bool,
+    use_scan: bool,
+    free_boundary_enabled: bool,
+    resume_state: dict | None,
+) -> _ResidualBoundarySetup:
+    """Prepare boundary-profile constants before profile and force setup."""
+
+    idx00 = _mode00_index(static.modes)
+    concrete_host_setup = bool(host_update_assembly) and not bool(state0_has_tracer) and not bool(use_scan)
+    s = np.asarray(static.s) if concrete_host_setup else jnp.asarray(static.s)
+    freeb_pres_scale = _free_boundary_pressure_edge_scale(
+        free_boundary_enabled=bool(free_boundary_enabled),
+        indata=indata,
+        s=s,
+    )
+    dtype_state = np.asarray(state0.Rcos).dtype if concrete_host_setup else jnp.asarray(state0.Rcos).dtype
+    zeros_like_radial = np.zeros if concrete_host_setup else jnp.zeros
+    zero_precond_diag = (
+        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
+        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
+    )
+    zero_tcon = zeros_like_radial((int(s.shape[0]),), dtype=dtype_state)
+    constraint_active_false = np.asarray(False) if concrete_host_setup else jnp.asarray(False)
+
+    axis_reset_config = _resolve_axis_reset_config(
+        force_axis_reset_env=os.getenv("VMEC_JAX_FORCE_AXIS_RESET_INIT", "0"),
+        axis_reset_always_3d_env=os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0"),
+        axis_reset_fsq_min_env=os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0"),
+    )
+    return _ResidualBoundarySetup(
+        idx00=idx00,
+        concrete_host_setup=concrete_host_setup,
+        s=s,
+        freeb_pres_scale=freeb_pres_scale,
+        dtype_state=dtype_state,
+        zero_precond_diag=zero_precond_diag,
+        zero_tcon=zero_tcon,
+        constraint_active_false=constraint_active_false,
+        axis_reset_done=bool(resume_state is not None),
+        lmove_axis=True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True)),
+        force_axis_reset=axis_reset_config.force_axis_reset,
+        axis_reset_always_3d=axis_reset_config.axis_reset_always_3d,
+        axis_reset_fsq_min=axis_reset_config.axis_reset_fsq_min,
+    )
+
+
 def solve_fixed_boundary_residual_iter(
     state0: VMECState,
     static,
@@ -716,69 +843,53 @@ def solve_fixed_boundary_residual_iter(
     # Free-boundary control + coupling path:
     # VMEC-style ivac/ivacskip cadence with edge bsqvac coupling.
     _t_setup_freeb_policy = _setup_timer_start()
-    _freeb_policy = _resolve_free_boundary_setup_policy(
-        cfg,
+    freeb_setup = _prepare_residual_free_boundary_setup(
+        cfg=cfg,
+        static=static,
         external_field_provider_kind=external_field_provider_kind,
-        use_scan=use_scan,
-        freeb_couple_env=os.getenv("VMEC_JAX_FREEB_COUPLE_EDGE", "1"),
-        freeb_sample_env=os.getenv("VMEC_JAX_FREEB_SAMPLE_EXTERNAL", "1"),
-        jit_strict_update_env=os.getenv("VMEC_JAX_JIT_STRICT_UPDATE", "auto"),
-        backend_name=_scan_backend_name(),
-        host_update_assembly=host_update_assembly,
-        cpu_work_limit_env=os.getenv("VMEC_JAX_HOST_UPDATE_CPU_WORK_LIMIT", "1000"),
+        use_scan=bool(use_scan),
+        host_update_assembly=bool(host_update_assembly),
     )
-    free_boundary_enabled = _freeb_policy.free_boundary_enabled
-    direct_free_boundary_provider = _freeb_policy.direct_free_boundary_provider
-    freeb_nvacskip = _freeb_policy.freeb_nvacskip
-    freeb_nvskip0 = _freeb_policy.freeb_nvskip0
-    freeb_couple_edge = _freeb_policy.freeb_couple_edge
-    use_scan = _freeb_policy.use_scan
-    freeb_sample_external = _freeb_policy.freeb_sample_external
-    jit_strict_update_enabled = _freeb_policy.jit_strict_update_enabled
+    free_boundary_enabled = freeb_setup.free_boundary_enabled
+    direct_free_boundary_provider = freeb_setup.direct_free_boundary_provider
+    freeb_nvacskip = freeb_setup.freeb_nvacskip
+    freeb_nvskip0 = freeb_setup.freeb_nvskip0
+    freeb_couple_edge = freeb_setup.freeb_couple_edge
+    use_scan = freeb_setup.use_scan
+    freeb_sample_external = freeb_setup.freeb_sample_external
+    jit_strict_update_enabled = freeb_setup.jit_strict_update_enabled
+    _attach_freeb_diag = freeb_setup.attach_diag
     _record_setup_timing("setup_freeb_policy", _t_setup_freeb_policy)
 
-    _attach_freeb_diag = partial(
-        _runtime_attach_free_boundary_external_field_diag,
-        free_boundary_enabled=free_boundary_enabled,
-        external_field_provider_kind=external_field_provider_kind,
-        freeb_sample_external=freeb_sample_external,
-        sample_external_field_func=_sample_free_boundary_external_field,
-        static=static,
-        result_type=SolveVmecResidualResult,
-    )
-
     _t_setup_boundary_profiles = _setup_timer_start()
-    idx00 = _mode00_index(static.modes)
-    concrete_host_setup = bool(host_update_assembly) and not bool(state0_has_tracer) and not bool(use_scan)
-    s = np.asarray(static.s) if concrete_host_setup else jnp.asarray(static.s)
-    freeb_pres_scale = _free_boundary_pressure_edge_scale(
-        free_boundary_enabled=bool(free_boundary_enabled),
+    boundary_setup = _prepare_residual_boundary_setup(
+        static=static,
+        state0=state0,
         indata=indata,
-        s=s,
+        state0_has_tracer=bool(state0_has_tracer),
+        host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan),
+        free_boundary_enabled=bool(free_boundary_enabled),
+        resume_state=resume_state,
     )
-    dtype_state = np.asarray(state0.Rcos).dtype if concrete_host_setup else jnp.asarray(state0.Rcos).dtype
-    zeros_like_radial = np.zeros if concrete_host_setup else jnp.zeros
-    zero_precond_diag = (
-        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
-        zeros_like_radial((int(s.shape[0]),), dtype=dtype_state),
-    )
-    zero_tcon = zeros_like_radial((int(s.shape[0]),), dtype=dtype_state)
-    constraint_active_false = np.asarray(False) if concrete_host_setup else jnp.asarray(False)
+    idx00 = boundary_setup.idx00
+    concrete_host_setup = boundary_setup.concrete_host_setup
+    s = boundary_setup.s
+    freeb_pres_scale = boundary_setup.freeb_pres_scale
+    dtype_state = boundary_setup.dtype_state
+    zero_precond_diag = boundary_setup.zero_precond_diag
+    zero_tcon = boundary_setup.zero_tcon
+    constraint_active_false = boundary_setup.constraint_active_false
 
     # Boundary coefficients for VMEC-style bad-Jacobian reset are needed only
     # when a reset is actually applied.  Build them lazily so ordinary cold
     # solves do not pay a duplicate boundary conversion during setup.
     boundary_for_axis = None
-    axis_reset_done = bool(resume_state is not None)
-    lmove_axis = True if indata is None else bool(indata.get_bool("LMOVE_AXIS", True))
-    axis_reset_config = _resolve_axis_reset_config(
-        force_axis_reset_env=os.getenv("VMEC_JAX_FORCE_AXIS_RESET_INIT", "0"),
-        axis_reset_always_3d_env=os.getenv("VMEC_JAX_AXIS_RESET_ALWAYS_3D", "0"),
-        axis_reset_fsq_min_env=os.getenv("VMEC_JAX_AXIS_RESET_FSQ_MIN", "1.0"),
-    )
-    force_axis_reset = axis_reset_config.force_axis_reset
-    axis_reset_always_3d = axis_reset_config.axis_reset_always_3d
-    axis_reset_fsq_min = axis_reset_config.axis_reset_fsq_min
+    axis_reset_done = boundary_setup.axis_reset_done
+    lmove_axis = boundary_setup.lmove_axis
+    force_axis_reset = boundary_setup.force_axis_reset
+    axis_reset_always_3d = boundary_setup.axis_reset_always_3d
+    axis_reset_fsq_min = boundary_setup.axis_reset_fsq_min
 
     # VMEC applies the m=0 lambda axis-closure during real-space synthesis
     # without overwriting stored axis coefficients; only enforce the gauge here.

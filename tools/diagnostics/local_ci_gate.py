@@ -119,7 +119,7 @@ def _stages(cli_outdir: Path) -> tuple[Stage, ...]:
                     "--max-function-lines-at",
                     (
                         "vmec_jax/solvers/fixed_boundary/residual/iteration.py:"
-                        "solve_fixed_boundary_residual_iter=2479"
+                        "solve_fixed_boundary_residual_iter=2463"
                     ),
                     "--max-function-lines-at",
                     "vmec_jax/driver.py:run_fixed_boundary=420",

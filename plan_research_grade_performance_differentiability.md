@@ -7854,3 +7854,90 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.7%.
+
+### 2026-06-26: Extract residual free-boundary and boundary setup objects
+
+Steps taken:
+
+- Split residual-loop free-boundary setup into
+  ``_prepare_residual_free_boundary_setup`` and a typed
+  ``_ResidualFreeBoundarySetup`` record.
+- Split boundary/profile setup constants into
+  ``_prepare_residual_boundary_setup`` and a typed
+  ``_ResidualBoundarySetup`` record.
+- Kept the extraction setup-only: the force kernel, scan controller,
+  VMEC2000 restart policy, free-boundary coupling cadence, and WOUT output path
+  are unchanged.
+- Tightened the source-health baseline for
+  ``solve_fixed_boundary_residual_iter`` from 2479 to 2463 source lines.
+- Rerendered the README runtime and AD/FD evidence panels from existing
+  provenance; no image/CSV changes were retained, and timestamp-only JSON churn
+  was reverted.
+
+Results obtained:
+
+- ``solve_fixed_boundary_residual_iter`` is now 2463 source lines by
+  ``inspect``.
+- ``python -m ruff check
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tools/diagnostics/local_ci_gate.py tests/test_local_ci_gate.py`` passed.
+- ``python -m compileall -q
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tools/diagnostics/local_ci_gate.py tests/test_local_ci_gate.py`` passed.
+- ``python tools/diagnostics/source_health.py --top 20
+  --max-root-helper-prefix-files 2 --max-function-lines-at
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2463
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420`` passed.
+- ``python tools/diagnostics/local_ci_gate.py --dry-run --only
+  source-health`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_solve_performance_instrumentation.py
+  tests/test_free_boundary_coil_provider_forward.py tests/test_local_ci_gate.py
+  -q`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_beta_response_validation.py::test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field
+  -q`` skipped cleanly when optional fetched assets were absent.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_driver_api.py tests/test_driver_fast_reconstruction.py
+  tests/test_driver_api_finish_more_coverage.py tests/test_driver_policy_helpers.py
+  tests/test_driver_policy_coverage_extra.py -q`` passed with existing
+  optimized-controller numerical warnings.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_residue_getfsq_parity.py
+  tests/test_wout_profiles_currents_bundled_parity.py
+  tests/test_physics_parity_helper_gates.py
+  tests/test_vmec_parity_physics_fast_gates.py
+  tests/test_converged_wout_matrix_parity.py
+  tests/test_parity_sweep_manifest_thresholds.py -q`` passed with the
+  existing expected xfail.
+- ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_final_tranche_residual_boundary`` passed.
+- ``python tools/diagnostics/repo_size_audit.py --top 30 --max-total-mib 50
+  --max-file-mib 2`` passed; tracked size is 28.47 MiB.
+
+Best next steps:
+
+1. Commit and push this boundary/free-boundary setup split, then let CI validate
+   the newest source-health baseline.
+2. If CI stays green, the next refactor with meaningful ROI is not another tiny
+   setup slice; it should target residual state setup or split the largest
+   free-boundary exact-gradient validation tests.
+3. Keep benchmark/artifact changes frozen unless new benchmark data are
+   generated; current README runtime and AD/FD figures already match checked-in
+   provenance.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.2%.
+- Free-boundary production differentiability: 97.6%.
+- Single-stage coil optimization: 94.0%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 82.0%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.7%.
