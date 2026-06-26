@@ -6,6 +6,14 @@ import pytest
 from vmec_jax.solvers.free_boundary import reduced_control_least_squares_step
 
 
+def test_reduced_control_least_squares_step_is_public() -> None:
+    import vmec_jax as vj
+    import vmec_jax.api as public_api
+
+    assert vj.reduced_control_least_squares_step is reduced_control_least_squares_step
+    assert public_api.reduced_control_least_squares_step is reduced_control_least_squares_step
+
+
 def test_reduced_control_least_squares_step_reports_exact_and_uncontrolled_parts() -> None:
     jacobian = np.asarray(
         [
