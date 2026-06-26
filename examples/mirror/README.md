@@ -279,6 +279,9 @@ The summary table reports both ``final_total`` and ``final_max_component``.
 Use ``final_max_component <= requested_ftol`` / ``strict_components_met`` for
 the production convergence gate; ``final_total`` is useful for trend
 comparison but is not sufficient for a per-component ``FTOL=1e-12`` claim.
+The table also includes ``nzeta_auto``, ``recommended_nzeta``,
+``boundary_mode_count``, and ``boundary_recommended_nzeta`` so
+``MPOL``/``NTOR``/``NZETA`` edits can be audited with the residuals.
 For Anderson A/B runs, the same table includes
 ``anderson_pressure_enabled``, ``anderson_pressure_applied_count``, and
 ``anderson_pressure_last_theta``.

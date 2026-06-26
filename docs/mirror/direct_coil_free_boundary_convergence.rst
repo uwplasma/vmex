@@ -342,7 +342,8 @@ VMEC solve would be a larger solver reparameterization. The public helper
 profiler's ``boundary_projection`` JSON block now report the Fourier truncation
 error, mode count, and recommended ``NZETA`` for the selected
 ``MPOL``/``NTOR``/fit-grid combination; the profile summarizer exposes this as
-``boundary_proj_max`` and ``boundary_proj_rel``.
+``boundary_mode_count``, ``boundary_recommended_nzeta``,
+``boundary_proj_max``, and ``boundary_proj_rel``.
 These metrics should be reviewed whenever changing ``MPOL``, ``NTOR``, or
 ``NZETA``: they diagnose input-boundary underfitting before the free-boundary
 nonlinear solve is interpreted.

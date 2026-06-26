@@ -20,12 +20,16 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                     "ntor": 12,
                     "ns": 9,
                     "nzeta": 32,
+                    "nzeta_auto": True,
+                    "recommended_nzeta": 32,
                     "nvacskip": 1,
                     "solver_mode": "parity",
                     "max_iter": 1000,
                     "ftol": 1.0e-6,
                 },
                 "boundary_projection": {
+                    "mode_count": 65,
+                    "recommended_nzeta": 32,
                     "max_abs_component_error": 1.2e-4,
                     "max_abs_component_error_rel": 4.5e-4,
                 },
@@ -84,6 +88,10 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["strict_components_met"] is True
     assert rows[1]["best_total"] == pytest.approx(8.0e-7)
     assert rows[1]["solver_mode"] == "parity"
+    assert rows[1]["nzeta_auto"] is True
+    assert rows[1]["recommended_nzeta"] == 32
+    assert rows[1]["boundary_mode_count"] == 65
+    assert rows[1]["boundary_recommended_nzeta"] == 32
     assert rows[1]["boundary_proj_max"] == pytest.approx(1.2e-4)
     assert rows[1]["boundary_proj_rel"] == pytest.approx(4.5e-4)
     assert rows[1]["dt_eff_last"] == pytest.approx(0.02)
