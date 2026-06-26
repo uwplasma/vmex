@@ -226,26 +226,25 @@ reduces low-mode projection error relative to the superellipse axis. It is
 still projected to VMEC Fourier coefficients, so large straight sections plus
 localized stellarator corners remain a difficult Fourier representation; using
 the spline envelope is a bandwidth reduction, not a replacement for resolution
-closure. For the current square-coil shape parameters, the spline envelope
-reduces the max component projection error from about ``3.2e-4`` to
-``1.3e-4`` at ``MPOL=5, NTOR=12`` and from about ``7.1e-5`` to ``1.4e-5`` at
-``MPOL=6, NTOR=23``. This supports using the spline envelope for the hybrid
-square axis, while still requiring ``MPOL``/``NTOR``/``NZETA`` convergence.
+closure. The square-axis side/corner localization powers are also important:
+the older ``side_power=corner_power=1.4`` stress shape has a high-mode tail,
+while the current first-order default ``1.0`` keeps the same broad side/corner
+geometry much closer to finite Fourier bandwidth.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and
 returns the lowest estimated-cost candidate whose projection error satisfies
 the requested threshold. This is a boundary-representation gate, not a
 nonlinear-convergence claim.
-A higher-mode projection spot check on the same spline shape gives max
-component boundary errors of about ``1.27e-4`` for ``MPOL=5, NTOR=12``,
-``4.76e-5`` for ``6,16``, ``2.41e-5`` for ``6,20``, ``1.44e-5`` for
-``6,23``, ``8.98e-6`` for ``7,28``, and ``6.14e-6`` for ``8,32``.
-If the current ``6,23`` strict solves
-plateau above ``1e-12``, the next finite resolution ladder should therefore be
-``7,28`` and ``8,32`` with ``NZETA`` at least the corresponding
-``recommended_square_axis_nzeta`` value, rather than a blind iteration-budget
-extension of the same Fourier deck.
+A projection spot check on the first-order spline shape gives max component
+boundary errors of about ``5.60e-6`` for ``MPOL=5, NTOR=12``, ``1.36e-7`` for
+``6,16``, ``1.78e-9`` for ``6,20``, ``3.32e-10`` for ``6,23``, and
+``3.5e-12`` for ``7,28`` or ``8,32``. The older sharpened ``1.4`` shape, used
+by the already-running strict profiles before this update, gave about
+``1.27e-4``, ``4.76e-5``, ``2.41e-5``, ``1.44e-5``, ``8.98e-6``, and
+``6.14e-6`` on the same ladder. Future strict profiles should therefore rerun
+the first-order-weight geometry before spending more time on higher Fourier
+mode counts for the sharpened stress shape.
 
 Physics And Algorithm Findings
 ------------------------------
@@ -370,11 +369,13 @@ These metrics should be reviewed whenever changing ``MPOL``, ``NTOR``, or
 nonlinear solve is interpreted.
 The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-5`` by default. This keeps the current
-``MPOL=6, NTOR=23, NZETA=64`` production-style deck enabled, while rejecting
-the older ``MPOL=5, NTOR=12`` low-mode deck unless the user explicitly sets the
-threshold to ``None`` for diagnostic profiling. This guard keeps Fourier
-boundary underfitting separate from nonlinear-solver or direct-coil provider
-failures.
+``MPOL=6, NTOR=23, NZETA=64`` production-style deck enabled, while still
+rejecting intentionally sharpened low-mode decks unless the user explicitly
+sets the threshold to ``None`` for diagnostic profiling. With the current
+first-order side/corner powers, ``MPOL=5, NTOR=12`` is no longer rejected by the
+projection gate; it remains a solver-convergence question, not an input
+underfitting failure. This guard keeps Fourier boundary underfitting separate
+from nonlinear-solver or direct-coil provider failures.
 
 Promotion Gates
 ---------------

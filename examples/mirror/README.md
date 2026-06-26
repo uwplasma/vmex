@@ -160,7 +160,11 @@ iteration ladder is ``NS_ARRAY = 9, 13, 17``,
 ``NVACSKIP = 1``. The default
 square axis uses the low-bandwidth rounded ``axis_kind="spline"`` profile before
 VMEC Fourier projection, which is less sensitive to ``NTOR`` than the sharper
-polar superellipse. The default ``NZETA`` follows
+polar superellipse. The default square-axis side/corner weights use
+``SIDE_POWER = CORNER_POWER = 1.0``; this keeps the rounded-square target close
+to finite Fourier bandwidth. Sharper values such as ``1.4`` remain useful
+stress tests, but they reintroduce a high-mode projection tail. The default
+``NZETA`` follows
 ``recommended_square_axis_nzeta``; the backend profiler also treats omitted
 ``--nzeta`` or ``--nzeta auto`` as that recommendation. Underresolved
 production-style example runs
@@ -169,7 +173,8 @@ raise before solving because ``NTOR=12, NZETA=16`` was observed to fail while
 ``MAX_BOUNDARY_PROJECTION_ERROR`` gate also rejects low-mode decks whose
 Fourier-projected square-axis boundary is too far from the sampled spline
 target. The default ``MPOL=6, NTOR=23, NZETA=64`` deck passes this gate; an
-``MPOL=5, NTOR=12`` diagnostic deck does not. Set
+``MPOL=5, NTOR=12`` first-order-weight deck now also passes the projection
+gate, while the older sharpened ``1.4`` diagnostic deck does not. Set
 ``MAX_BOUNDARY_PROJECTION_ERROR = None`` only when deliberately profiling an
 underfit diagnostic input. Use
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` to get

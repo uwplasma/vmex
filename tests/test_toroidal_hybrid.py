@@ -133,6 +133,8 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     assert module.ExampleConfig().niter_array == (4000, 8000, 12000)
     assert module.ExampleConfig().coil_chunk_size == 512
     assert module.ExampleConfig().max_boundary_projection_error == pytest.approx(5.0e-5)
+    assert module.ExampleConfig().side_power == pytest.approx(1.0)
+    assert module.ExampleConfig().corner_power == pytest.approx(1.0)
     assert module.build_square_coils(module.ExampleConfig()).params.chunk_size == 512
     assert module.build_square_coils(module.ExampleConfig(coil_chunk_size=None)).params.chunk_size is None
     assert module.make_free_boundary_indata(module.ExampleConfig(), beta_percent=0.0).get_int("NVACSKIP") == 1
@@ -144,6 +146,8 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
                 mpol=5,
                 ntor=12,
                 nzeta=32,
+                side_power=1.4,
+                corner_power=1.4,
                 write_plots=False,
             )
         )
@@ -155,6 +159,8 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
                 mpol=5,
                 ntor=12,
                 nzeta=32,
+                side_power=1.4,
+                corner_power=1.4,
                 write_plots=False,
             )
         )
@@ -209,6 +215,29 @@ def test_square_axis_spline_option_reduces_low_mode_projection_error():
 
     assert errors["spline"] < errors["superellipse"]
     assert errors["spline"] < 2.0e-4
+
+
+def test_square_axis_first_order_weights_reduce_production_projection_error():
+    module = import_module("examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary")
+    config = module.ExampleConfig()
+    base_kwargs = module._square_axis_sample_kwargs(config)
+    smooth_error = square_axis_stellarator_mirror_hybrid_projection_error(
+        mpol=6,
+        ntor=23,
+        ntheta_fit=64,
+        nzeta_fit=184,
+        **{**base_kwargs, "side_power": 1.0, "corner_power": 1.0},
+    )
+    sharp_error = square_axis_stellarator_mirror_hybrid_projection_error(
+        mpol=6,
+        ntor=23,
+        ntheta_fit=64,
+        nzeta_fit=184,
+        **{**base_kwargs, "side_power": 1.4, "corner_power": 1.4},
+    )
+
+    assert smooth_error["max_abs_component_error"] < 1.0e-7
+    assert sharp_error["max_abs_component_error"] > 1.0e-5
 
 
 def test_square_axis_resolution_recommendation_reports_finite_fourier_closure():

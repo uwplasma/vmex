@@ -5739,6 +5739,85 @@ Visual validation:
 No user input is needed.
 
 ---
+## 224. First-Order Square-Axis Weights
+
+### Steps taken
+
+- Audited the current square-axis spline target after the VMEC2000 ``7,28``
+  run showed a slow residual tail.
+- Scanned the production square-coil shape over side/corner localization
+  powers and found that ``side_power=corner_power=1.4`` was creating most of
+  the Fourier projection tail.
+- Changed the square-axis helper default and the square-coil free-boundary
+  example defaults to first-order weights:
+  ``SIDE_POWER = CORNER_POWER = 1.0``.
+- Added these parameters to the example's user-facing top parameter block,
+  sample kwargs, and metrics payload.
+- Kept the old ``1.4`` sharpened geometry available as a deliberate stress
+  case and updated projection-guard tests to use it when checking rejection.
+
+### Results obtained
+
+- For the production square-coil shape at ``MPOL=6, NTOR=23``, the max
+  component projection error dropped from about ``1.44e-5`` with the old
+  sharpened weights to about ``3.3e-10`` with first-order weights.
+- Projection spot checks for the first-order shape:
+  - ``5,12``: about ``5.60e-6``;
+  - ``6,16``: about ``1.36e-7``;
+  - ``6,20``: about ``1.78e-9``;
+  - ``6,23``: about ``3.32e-10``;
+  - ``7,28`` and ``8,32``: about ``3.5e-12``.
+- This means future strict profiles should first rerun the smoother
+  first-order geometry before spending more time on higher Fourier modes for
+  the old sharpened stress shape.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py
+venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
+```
+
+Results:
+
+- Toroidal-hybrid tests: ``39 passed``.
+- Py-compile checks passed.
+
+### File structure and best-practice notes
+
+- The change stays inside the existing toroidal-hybrid geometry helper and the
+  square-coil example parameter block; no new module or file split was needed.
+- This is still a VMEC Fourier projection path. It is a bandwidth-reduced
+  spline target, not a solver-native spline basis.
+- The old sharpened behavior remains accessible by setting
+  ``side_power=corner_power=1.4`` in ``ExampleConfig`` or in direct helper
+  calls.
+
+### Best next steps
+
+1. Queue a first-order-weight VMEC2000 ``6,23`` strict profile after the active
+   ``8,32`` sharpened run, so the old and new geometry choices are compared on
+   the same VMEC2000 generated-``mgrid`` backend.
+2. Queue a first-order-weight direct ``6,23`` cached-JIT profile after the
+   active direct Anderson run, so direct-coil performance and convergence are
+   measured on the lower-bandwidth geometry.
+3. If the first-order geometry still does not close at ``FTOL=1e-12``, then
+   start the deeper solver-native spline/control-basis reparameterization.
+
+### Completion percentages after M224
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``80%``.
+- VMEC2000 robustness/reference lane: ``88%``.
+- Direct-coil GPU/JIT parity lane: ``72%``.
+- Square-axis spline-smoothed Fourier closure lane: ``92%``.
+- True spline/control-basis hybrid lane: ``22%`` planned, partially de-risked
+  by the first-order target scan.
+
+### User input needed
+
+No user input is needed.
+
+---
 ## 223. VMEC2000 7,28 High-Mode Result
 
 ### Steps taken

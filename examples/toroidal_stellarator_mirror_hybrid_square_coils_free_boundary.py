@@ -72,6 +72,8 @@ PLASMA_AXIS_SPLINE_CORNER_RADIUS_FACTOR = 1.14
 PLASMA_MINOR_RADIUS = 0.03
 SIDE_ELONGATION = 0.08
 SIDE_MINOR_MODULATION = 0.08
+SIDE_POWER = 1.0
+CORNER_POWER = 1.0
 CORNER_ELLIPTICITY = 0.04
 CORNER_AMPLITUDE = 0.004
 CORNER_ROTATION = 0.30
@@ -131,6 +133,8 @@ class ExampleConfig:
     plasma_minor_radius: float = PLASMA_MINOR_RADIUS
     side_elongation: float = SIDE_ELONGATION
     side_minor_modulation: float = SIDE_MINOR_MODULATION
+    side_power: float = SIDE_POWER
+    corner_power: float = CORNER_POWER
     corner_ellipticity: float = CORNER_ELLIPTICITY
     corner_amplitude: float = CORNER_AMPLITUDE
     corner_rotation: float = CORNER_ROTATION
@@ -362,6 +366,8 @@ def _square_axis_sample_kwargs(config: ExampleConfig) -> dict[str, Any]:
         "minor_radius": float(config.plasma_minor_radius),
         "side_elongation": float(config.side_elongation),
         "side_minor_modulation": float(config.side_minor_modulation),
+        "side_power": float(config.side_power),
+        "corner_power": float(config.corner_power),
         "corner_ellipticity": float(config.corner_ellipticity),
         "corner_amplitude": float(config.corner_amplitude),
         "corner_rotation": float(config.corner_rotation),
@@ -1221,6 +1227,8 @@ def _metrics_payload(
         "plasma_axis_half_width": float(config.plasma_axis_half_width),
         "plasma_axis_kind": str(config.plasma_axis_kind),
         "plasma_axis_spline_corner_radius_factor": float(config.plasma_axis_spline_corner_radius_factor),
+        "side_power": float(config.side_power),
+        "corner_power": float(config.corner_power),
         "coil_square_side_length": float(config.coil_square_side_length),
         "toroidal_current": float(config.toroidal_current),
         "boundary_projection": _boundary_projection_payload(config),

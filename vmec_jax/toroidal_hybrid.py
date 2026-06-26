@@ -234,8 +234,8 @@ def sample_square_axis_stellarator_mirror_hybrid_boundary(
     corner_helicity: int = 1,
     corner_ellipticity: float = 0.16,
     corner_rotation: float = 0.30,
-    side_power: float = 1.4,
-    corner_power: float = 1.4,
+    side_power: float = 1.0,
+    corner_power: float = 1.0,
 ) -> ToroidalHybridBoundarySamples:
     """Sample a toroidal stellarator-mirror LCFS around a square-like axis.
 
