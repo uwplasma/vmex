@@ -203,6 +203,21 @@ class _FixedBoundaryStageContext:
     ns_stages: list[int]
 
 
+@dataclass(frozen=True)
+class _FixedBoundaryRuntimeSetup:
+    """Late-bound runtime setup that would otherwise clutter the public driver."""
+
+    direct_external_provider: bool
+    external_field_provider_static_eff: Any
+    boundary_coeffs: Any
+    signgs: int
+    jit_forces: Any
+    gamma: float
+    static_profile_cache: Any
+    step_size_val: float
+    initial_guess_with_optional_nojit: Any
+
+
 def _default_backend_name() -> str:
     try:
         import jax
@@ -691,6 +706,128 @@ def _maybe_default_fixed_boundary_grid(grid: Any, *, cfg: VMECConfig, solver_low
     )
 
 
+def _prepare_fixed_boundary_runtime_setup(
+    *,
+    cfg: VMECConfig,
+    indata: Any,
+    grid: Any,
+    solver_lower: str,
+    step_size: Any,
+    vmec_project: bool,
+    axis_infer_missing: bool,
+    performance_mode: bool,
+    external_field_provider_kind: str | None,
+    external_field_provider_static: Any,
+    external_field_provider_params: Any,
+    restart_state_eff: Any,
+    jit_forces: Any,
+) -> _FixedBoundaryRuntimeSetup:
+    """Prepare free-boundary providers, profiles, and initial-guess callbacks."""
+
+    from .modes import vmec_mode_table
+
+    fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
+    fb_strict = fb_strict_env not in ("", "0", "false", "no")
+    external_provider_context = _driver_runtime_helpers.resolve_external_field_provider_context(
+        external_field_provider_kind=external_field_provider_kind,
+        external_field_provider_static=external_field_provider_static,
+        external_field_provider_params=external_field_provider_params,
+    )
+    direct_external_provider = bool(external_provider_context.direct_external_provider)
+    external_field_provider_static_eff = external_provider_context.provider_static
+    if not direct_external_provider:
+        fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
+    else:
+        fb_meta, fb_extcur = None, None
+
+    boundary_coeffs = None
+    if restart_state_eff is None:
+        boundary_modes = vmec_mode_table(cfg.mpol, cfg.ntor)
+        boundary_coeffs = boundary_from_indata(indata, boundary_modes)
+
+    signgs = _resolve_driver_signgs(solver_lower=solver_lower, indata=indata)
+    jit_forces_eff = _resolve_vmec2000_jit_forces_policy(solver_lower=solver_lower, jit_forces=jit_forces)
+    gamma = indata.get_float("GAMMA", 0.0)
+    profiles_from_static = partial(
+        _driver_flux_helpers.profiles_from_static,
+        indata=indata,
+        signgs=signgs,
+        flux_profiles_from_indata_host_default_func=flux_profiles_from_indata_host_default,
+        flux_profiles_from_indata_func=flux_profiles_from_indata,
+        eval_profiles_func=eval_profiles,
+    )
+    static_profile_cache = _driver_runtime_helpers.StaticProfileCache(
+        cfg=cfg,
+        indata=indata,
+        grid=grid,
+        signgs=signgs,
+        free_boundary_metadata=fb_meta,
+        free_boundary_extcur=fb_extcur,
+        build_static_func=build_static,
+        boundary_from_indata_func=boundary_from_indata,
+        profiles_from_static_func=profiles_from_static,
+    )
+    step_size_val = _resolve_driver_step_size(
+        step_size=step_size,
+        step_size_sentinel=_STEP_SIZE_SENTINEL,
+        solver_lower=solver_lower,
+        indata=indata,
+    )
+    initial_guess_with_optional_nojit = partial(
+        _driver_solve_helpers.initial_guess_with_optional_nojit,
+        indata=indata,
+        vmec_project=bool(vmec_project),
+        infer_axis_if_missing=bool(axis_infer_missing),
+        performance_mode=bool(performance_mode),
+        initial_guess_from_boundary_func=initial_guess_from_boundary,
+        default_backend_name_func=_default_backend_name,
+    )
+    return _FixedBoundaryRuntimeSetup(
+        direct_external_provider=direct_external_provider,
+        external_field_provider_static_eff=external_field_provider_static_eff,
+        boundary_coeffs=boundary_coeffs,
+        signgs=signgs,
+        jit_forces=jit_forces_eff,
+        gamma=gamma,
+        static_profile_cache=static_profile_cache,
+        step_size_val=float(step_size_val),
+        initial_guess_with_optional_nojit=initial_guess_with_optional_nojit,
+    )
+
+
+def _maybe_print_fixed_boundary_run_intro(
+    *,
+    input_path: str | Path,
+    cfg: VMECConfig,
+    solver: str,
+    solver_lower: str,
+    use_initial_guess: bool,
+    max_iter: int,
+    step_size_val: float,
+    history_size: int,
+    verbose: bool,
+) -> None:
+    """Emit the user-facing fixed-boundary or VMEC2000-style run header."""
+
+    if not verbose:
+        return
+    if solver_lower != "vmec2000_iter" or use_initial_guess:
+        _driver_io_helpers.print_fixed_boundary_intro(
+            input_path=input_path,
+            cfg=cfg,
+            solver=solver,
+            use_initial_guess=bool(use_initial_guess),
+            max_iter=int(max_iter),
+            step_size=float(step_size_val),
+            history_size=int(history_size),
+        )
+        return
+    _driver_io_helpers.print_vmec2000_run_header(
+        input_path=input_path,
+        version=os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax"),
+    )
+
+
 def _run_fixed_boundary_vmec2000_iter_solver_branch(
     *,
     input_path: str | Path,
@@ -971,7 +1108,6 @@ def run_fixed_boundary(
     max_iter = stage_context.max_iter
     stage_transition_heuristic = stage_context.stage_transition_heuristic
     ns_stages = stage_context.ns_stages
-
     sanitize_resume_state_for_stage = partial(
         _sanitize_resume_state_for_driver_stage,
         step_size=step_size,
@@ -1077,21 +1213,30 @@ def run_fixed_boundary(
         )
 
     multigrid_use_input_niter = bool(multigrid_use_input_niter)
-
-    fb_strict_env = os.getenv("VMEC_JAX_FREEB_STRICT", "1").strip().lower()
-    fb_strict = fb_strict_env not in ("", "0", "false", "no")
-    external_provider_context = _driver_runtime_helpers.resolve_external_field_provider_context(
+    runtime_setup = _prepare_fixed_boundary_runtime_setup(
+        cfg=cfg,
+        indata=indata,
+        grid=grid,
+        solver_lower=solver_lower,
+        step_size=step_size,
+        vmec_project=bool(vmec_project),
+        axis_infer_missing=bool(axis_infer_missing),
+        performance_mode=bool(performance_mode),
         external_field_provider_kind=external_field_provider_kind,
         external_field_provider_static=external_field_provider_static,
         external_field_provider_params=external_field_provider_params,
+        restart_state_eff=restart_state_eff,
+        jit_forces=jit_forces,
     )
-    direct_external_provider = bool(external_provider_context.direct_external_provider)
-    external_field_provider_static_eff = external_provider_context.provider_static
-    if not bool(direct_external_provider):
-        fb_meta, fb_extcur = _free_boundary_static_inputs(cfg, load_fields=False, strict=fb_strict)
-    else:
-        fb_meta, fb_extcur = None, None
-
+    direct_external_provider = runtime_setup.direct_external_provider
+    external_field_provider_static_eff = runtime_setup.external_field_provider_static_eff
+    boundary_coeffs = runtime_setup.boundary_coeffs
+    signgs = runtime_setup.signgs
+    jit_forces = runtime_setup.jit_forces
+    gamma = runtime_setup.gamma
+    static_profile_cache = runtime_setup.static_profile_cache
+    step_size_val = runtime_setup.step_size_val
+    _initial_guess_with_optional_nojit = runtime_setup.initial_guess_with_optional_nojit
     if bool(cli_budgeted_multigrid_requested):
         budget_total = _accelerated_cli_budgeted_total_iters(total_budget=int(max_iter), ns_stages=ns_stages)
         return _driver_staging_helpers.run_cli_accelerated_budgeted_multigrid(
@@ -1101,74 +1246,22 @@ def run_fixed_boundary(
             final_stage_budget=int(max_iter),
         )
 
-    from .modes import vmec_mode_table
-
-    # Precompute boundary coefficients without triggering JAX initialization.
-    boundary_coeffs = None
-    if restart_state_eff is None:
-        boundary_modes = vmec_mode_table(cfg.mpol, cfg.ntor)
-        boundary_coeffs = boundary_from_indata(indata, boundary_modes)
-
-    signgs = _resolve_driver_signgs(solver_lower=solver_lower, indata=indata)
-    jit_forces = _resolve_vmec2000_jit_forces_policy(solver_lower=solver_lower, jit_forces=jit_forces)
-
-    gamma = indata.get_float("GAMMA", 0.0)
-    profiles_from_static = partial(
-        _driver_flux_helpers.profiles_from_static,
-        indata=indata,
-        signgs=signgs,
-        flux_profiles_from_indata_host_default_func=flux_profiles_from_indata_host_default,
-        flux_profiles_from_indata_func=flux_profiles_from_indata,
-        eval_profiles_func=eval_profiles,
-    )
-    static_profile_cache = _driver_runtime_helpers.StaticProfileCache(
-        cfg=cfg,
-        indata=indata,
-        grid=grid,
-        signgs=signgs,
-        free_boundary_metadata=fb_meta,
-        free_boundary_extcur=fb_extcur,
-        build_static_func=build_static,
-        boundary_from_indata_func=boundary_from_indata,
-        profiles_from_static_func=profiles_from_static,
-    )
     static = None
     bdy = None
     flux = None
     prof = None
     pressure = None
 
-    step_size_val = _resolve_driver_step_size(
-        step_size=step_size,
-        step_size_sentinel=_STEP_SIZE_SENTINEL,
+    _maybe_print_fixed_boundary_run_intro(
+        input_path=input_path,
+        cfg=cfg,
+        solver=solver,
         solver_lower=solver_lower,
-        indata=indata,
-    )
-
-    if verbose and (solver_lower != "vmec2000_iter" or use_initial_guess):
-        _driver_io_helpers.print_fixed_boundary_intro(
-            input_path=input_path,
-            cfg=cfg,
-            solver=solver,
-            use_initial_guess=bool(use_initial_guess),
-            max_iter=int(max_iter),
-            step_size=float(step_size_val),
-            history_size=int(history_size),
-        )
-    elif verbose and (solver_lower == "vmec2000_iter") and (not use_initial_guess):
-        _driver_io_helpers.print_vmec2000_run_header(
-            input_path=input_path,
-            version=os.getenv("VMEC_JAX_VMEC2000_VERSION", "vmec_jax"),
-        )
-
-    _initial_guess_with_optional_nojit = partial(
-        _driver_solve_helpers.initial_guess_with_optional_nojit,
-        indata=indata,
-        vmec_project=bool(vmec_project),
-        infer_axis_if_missing=bool(axis_infer_missing),
-        performance_mode=bool(performance_mode),
-        initial_guess_from_boundary_func=initial_guess_from_boundary,
-        default_backend_name_func=_default_backend_name,
+        use_initial_guess=bool(use_initial_guess),
+        max_iter=int(max_iter),
+        step_size_val=float(step_size_val),
+        history_size=int(history_size),
+        verbose=bool(verbose),
     )
 
     if use_initial_guess:
