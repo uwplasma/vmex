@@ -36595,3 +36595,85 @@ Result: printed the expected `NTHETA` columns and scale-only command.
 ### User input needed
 
 No user input is needed.
+
+## M322 - Summary Table Reports Square-Coil Scale Preflights
+
+### Steps taken
+
+- Added `vmec_free_boundary_scale` to
+  `tools/diagnostics/summarize_square_coil_profiles.py` rows.
+- Added compact `vmec_scale_*` columns for status, input `PHIEDGE`, sampled
+  external `R B_phi` RMS, VMEC proxy ratio, suggested `PHIEDGE`, and suggested
+  current scaling.
+- Changed preflight-only profile JSON handling so reports with no backend rows
+  still produce one `preflight_diagnostics` summary row when projection,
+  resolution, or scale diagnostics are present.
+- Updated docs to tell users that `--scale-diagnostics-only` reports can be
+  inspected through the normal summary helper.
+
+### Results obtained
+
+- The real `/tmp/vmec_mirror_scale_only_smoke` report now appears in the
+  summary table with:
+  - `backend = preflight_diagnostics`;
+  - `vmec_scale_status = severe_scale_mismatch`;
+  - `vmec_scale_phiedge = -0.04`;
+  - `vmec_scale_external_r_bphi_rms = 2.43163`;
+  - `vmec_scale_proxy_over_external_r_bphi_rms = 15.9497`;
+  - `vmec_scale_suggested_phiedge = -0.00250789`.
+
+### How it was tested
+
+```bash
+./venv/bin/python -m pytest -q \
+  tests/test_summarize_square_coil_profiles.py::test_square_coil_profile_summary_reads_jax_and_vmec2000_rows \
+  tests/test_summarize_square_coil_profiles.py::test_square_coil_profile_summary_reports_scale_only_preflight \
+  tests/test_square_coil_resolution_matrix.py \
+  tests/test_profile_square_coil_free_boundary.py::test_square_coil_profile_scale_diagnostics_only_writes_scale_payload
+```
+
+Result: `6 passed, 1 warning`.
+
+```bash
+python3 -m ruff check \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: passed.
+
+```bash
+./venv/bin/python tools/diagnostics/summarize_square_coil_profiles.py \
+  --markdown /tmp/vmec_mirror_scale_only_smoke
+```
+
+Result: printed the preflight diagnostic row and the new `vmec_scale_*`
+columns.
+
+### File structure and best-practice adherence
+
+- The change stays in the existing profile summarizer and focused tests.
+- No generated outputs are committed; `/tmp` smoke artifacts remain outside
+  the repo.
+
+### Best next steps
+
+1. Use the new summary columns when comparing the queued scaled-`PHIEDGE` row
+   against the current `PHIEDGE=-0.04` rows.
+2. Continue letting the active direct JAX and VMEC2000 office runs finish before
+   adding more heavy queues.
+
+### Completion percentages after M322
+
+- Resolution/edit robustness lane: `100%`, now visible through both preflight
+  JSON and summary tables.
+- VMEC2000 robustness/reference lane: `99%`, current reference row still
+  running.
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- True spline/control-basis hybrid lane: `84%`, native spline state remains
+  open.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

@@ -39,6 +39,14 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                     "max_abs_component_error": 1.2e-4,
                     "max_abs_component_error_rel": 4.5e-4,
                 },
+                "vmec_free_boundary_scale": {
+                    "status": "severe_scale_mismatch",
+                    "phiedge": -0.04,
+                    "external_r_bphi_rms": 2.4,
+                    "phiedge_proxy_over_external_r_bphi_rms": 16.0,
+                    "suggested_phiedge_for_external_r_bphi_rms": -0.0025,
+                    "suggested_phiedge_over_current": 0.0625,
+                },
                 "backends": {
                     "vmec_jax_mgrid": {
                         "status": "completed",
@@ -221,6 +229,9 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["max_boundary_projection_error"] == pytest.approx(1.0e-4)
     assert rows[1]["boundary_proj_max"] == pytest.approx(1.2e-4)
     assert rows[1]["boundary_proj_rel"] == pytest.approx(4.5e-4)
+    assert rows[1]["vmec_scale_status"] == "severe_scale_mismatch"
+    assert rows[1]["vmec_scale_proxy_over_external_r_bphi_rms"] == pytest.approx(16.0)
+    assert rows[1]["vmec_scale_suggested_phiedge"] == pytest.approx(-0.0025)
     assert rows[1]["boundary_coeff_delta_l2"] == pytest.approx(0.04)
     assert rows[1]["boundary_coeff_delta_linf"] == pytest.approx(0.02)
     assert rows[1]["boundary_coeff_delta_rel"] == pytest.approx(1.0e-2)
@@ -273,6 +284,54 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["tail_decay_factor"] == pytest.approx(0.98)
     assert rows[1]["iters_to_1e-12_est"] == pytest.approx(1234)
     assert rows[0]["vacuum_grid_exceeded_count"] == 2
+
+
+def test_square_coil_profile_summary_reports_scale_only_preflight(tmp_path: Path):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_scale_only"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {
+                    "beta_percent": 0.0,
+                    "mpol": 5,
+                    "ntor": 28,
+                    "ns": 17,
+                    "ntheta": 64,
+                    "nzeta": 64,
+                    "ftol": 1.0e-12,
+                },
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "vmec_free_boundary_scale": {
+                    "status": "severe_scale_mismatch",
+                    "phiedge": -0.04,
+                    "external_r_bphi_rms": 2.4316,
+                    "phiedge_proxy_over_external_r_bphi_rms": 15.95,
+                    "suggested_phiedge_for_external_r_bphi_rms": -0.0025079,
+                    "suggested_phiedge_over_current": 0.0627,
+                },
+                "backends": {},
+            }
+        )
+    )
+
+    rows = summary.rows_from_profile(report)
+
+    assert len(rows) == 1
+    assert rows[0]["backend"] == "preflight_diagnostics"
+    assert rows[0]["status"] == "preflight_only"
+    assert rows[0]["backend_role"] == "diagnostic_backend"
+    assert rows[0]["resolution_deck_status"] == "production_ready"
+    assert rows[0]["vmec_scale_status"] == "severe_scale_mismatch"
+    assert rows[0]["vmec_scale_phiedge"] == pytest.approx(-0.04)
+    assert rows[0]["vmec_scale_external_r_bphi_rms"] == pytest.approx(2.4316)
+    assert rows[0]["vmec_scale_proxy_over_external_r_bphi_rms"] == pytest.approx(15.95)
+    assert rows[0]["vmec_scale_suggested_phiedge"] == pytest.approx(-0.0025079)
 
 
 def test_square_coil_profile_summary_marks_strict_direct_row_as_evidence(tmp_path: Path):

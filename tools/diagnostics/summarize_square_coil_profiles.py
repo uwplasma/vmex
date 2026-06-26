@@ -1127,6 +1127,7 @@ def _summary_row(
     projection: dict[str, Any],
     resolution_deck: dict[str, Any] | None = None,
     strict_convergence_assessment: dict[str, Any] | None = None,
+    vmec_free_boundary_scale: dict[str, Any] | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
     case = _case_name(path)
@@ -1286,6 +1287,7 @@ def _summary_row(
     convergence_assessment = (
         strict_convergence_assessment if isinstance(strict_convergence_assessment, dict) else {}
     )
+    scale = vmec_free_boundary_scale if isinstance(vmec_free_boundary_scale, dict) else {}
     return {
         "case": case,
         "backend": backend_name,
@@ -1412,6 +1414,18 @@ def _summary_row(
         ),
         "resolution_deck_status": resolution.get("status"),
         "resolution_deck_reasons": ",".join(_as_text_list(resolution.get("reasons"))),
+        "vmec_scale_status": scale.get("status"),
+        "vmec_scale_phiedge": _finite_float(scale.get("phiedge")),
+        "vmec_scale_external_r_bphi_rms": _finite_float(scale.get("external_r_bphi_rms")),
+        "vmec_scale_proxy_over_external_r_bphi_rms": _finite_float(
+            scale.get("phiedge_proxy_over_external_r_bphi_rms")
+        ),
+        "vmec_scale_suggested_phiedge": _finite_float(
+            scale.get("suggested_phiedge_for_external_r_bphi_rms")
+        ),
+        "vmec_scale_suggested_phiedge_over_current": _finite_float(
+            scale.get("suggested_phiedge_over_current")
+        ),
         "accepted_provider_parity_status": accepted_parity.get("status"),
         "accepted_provider_parity_sample": accepted_parity.get("sample"),
         "accepted_provider_parity_field_diff_rms_rel": _finite_float(
@@ -1576,6 +1590,8 @@ def rows_from_profile(path: Path) -> list[dict[str, Any]]:
     strict_convergence_assessment = (
         strict_convergence_assessment if isinstance(strict_convergence_assessment, dict) else {}
     )
+    scale = data.get("vmec_free_boundary_scale", {})
+    scale = scale if isinstance(scale, dict) else {}
     rows: list[dict[str, Any]] = []
     for backend_name, backend in sorted((data.get("backends", {}) or {}).items()):
         if isinstance(backend, dict):
@@ -1588,8 +1604,22 @@ def rows_from_profile(path: Path) -> list[dict[str, Any]]:
                     projection=projection,
                     resolution_deck=resolution_deck,
                     strict_convergence_assessment=strict_convergence_assessment,
+                    vmec_free_boundary_scale=scale,
                 )
             )
+    if not rows and (projection or resolution_deck or scale):
+        rows.append(
+            _summary_row(
+                path=path,
+                backend_name="preflight_diagnostics",
+                backend={"status": "preflight_only"},
+                cfg=cfg,
+                projection=projection,
+                resolution_deck=resolution_deck,
+                strict_convergence_assessment=strict_convergence_assessment,
+                vmec_free_boundary_scale=scale,
+            )
+        )
     return rows
 
 
@@ -1833,6 +1863,12 @@ def main(argv: list[str] | None = None) -> int:
         "recommended_followup_reason",
         "resolution_deck_status",
         "resolution_deck_reasons",
+        "vmec_scale_status",
+        "vmec_scale_phiedge",
+        "vmec_scale_external_r_bphi_rms",
+        "vmec_scale_proxy_over_external_r_bphi_rms",
+        "vmec_scale_suggested_phiedge",
+        "vmec_scale_suggested_phiedge_over_current",
         "accepted_provider_parity_status",
         "accepted_provider_parity_sample",
         "accepted_provider_parity_field_diff_rms_rel",

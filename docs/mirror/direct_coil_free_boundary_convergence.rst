@@ -687,8 +687,11 @@ coil current: it writes the same preflight payload plus
 proxy with the directly sampled external ``R B_phi`` RMS and reporting a
 suggested ``PHIEDGE`` for that field scale. This mode builds the coils and
 samples the initial boundary, but still exits before generated-``mgrid`` files
-or equilibrium solves. Production-gated square-coil rows must also request a
-strict final force tolerance. The shared
+or equilibrium solves. The summary helper emits a diagnostic row for these
+preflight-only reports and exposes the compact ``vmec_scale_*`` columns, so
+PHIEDGE scale mismatches are visible in the same table as real backend rows.
+Production-gated square-coil rows must also request a strict final force
+tolerance. The shared
 ``vmec_jax.square_axis_strict_schedule_status`` helper classifies the
 ``NS_ARRAY``/``NITER_ARRAY``/``FTOL_ARRAY`` schedule, and both the root example
 and ``tools/diagnostics/profile_square_coil_free_boundary.py`` reject real

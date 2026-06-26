@@ -358,7 +358,9 @@ sampled square-coil toroidal field before a solve, add
 ``vmec_free_boundary_scale`` with VMEC's ``|PHIEDGE|/(R1*Z1)`` edge-field
 proxy, the sampled external ``R B_phi`` RMS, and a suggested ``PHIEDGE`` at the
 current coil current. It does not write a generated ``mgrid`` or run any
-equilibrium backend.
+equilibrium backend. The summary helper emits a diagnostic row for these
+preflight-only reports and exposes the compact ``vmec_scale_*`` columns, so the
+scale recommendation is visible without opening the JSON by hand.
 The same JSON now includes ``spline_bridge``. For the current
 ``axis_kind="control_spline"`` path, that block should read as a spline target
 projected to VMEC Fourier coefficients, not as a solver-native spline basis.
