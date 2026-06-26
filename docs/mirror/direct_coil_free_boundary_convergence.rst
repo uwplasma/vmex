@@ -367,16 +367,20 @@ pass ``none``, for diagnostic underresolved profiles.
 The current strict profiling answer to whether VMEC2000 is more robust is:
 VMEC2000 remains the fastest and most useful generated-``mgrid`` robustness
 reference, but it has not yet proven the requested component-wise
-``FTOL=1e-12`` for the square-axis deck.  The active direct-GPU hot-restart row
-on ``MPOL=5, NTOR=28, NZETA=64`` was still running at final-grid iteration
-``3026`` with max component about ``9.65e-12``.  The active VMEC2000 row at
-``DELT=0.015`` was still in its ``NS=13, FTOL=1e-10`` stage at iteration
-``5677`` with max component about ``3.97e-10`` and no vacuum-grid overflow.
-Both rows were launched before the free-boundary resume-state fix described
-below, so they remain useful plateau evidence but are not the final comparison
-for corrected staged/hot-restart behavior. It is premature to replace the
-direct research lane by VMEC2000; use VMEC2000 as the mgrid reference while the
-direct lane tests projection, pressure-coupling, and JAX-NESTOR kernels.
+``FTOL=1e-12`` for the square-axis deck.  A direct-GPU full-Fourier hot-restart
+row on ``MPOL=5, NTOR=28, NZETA=64`` reached final-grid iteration ``3631`` with
+max component about ``3.36e-12`` and a flat 12-row tail above the strict target;
+it was stopped so the reduced coordinate edge-control row could use the same
+GPU.  The concurrent VMEC2000 generated-``mgrid`` row at ``DELT=0.015`` was
+still running at final-grid iteration ``4531`` with max component about
+``5.03e-11``; its tail projection remained above the strict component target,
+although it was still slowly trending downward and had no vacuum-grid overflow.
+This evidence does not support replacing the direct research lane by VMEC2000.
+Use VMEC2000 as the mgrid reference while the direct lane tests projection,
+pressure-coupling, JAX-NESTOR kernels, and reduced spline/control edge updates.
+The active strict follow-up is now the direct-GPU
+``--freeb-edge-control-projection square`` row with
+``--freeb-edge-control-update-mode coordinate``.
 The follow-up command helper now exposes two finite strict-polish lanes for the
 direct research path:
 
@@ -878,7 +882,9 @@ The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12`` by default and uses
 ``MPOL=5, NTOR=28, NZETA=64`` as the production-style deck. This is strict
 enough for ``FTOL=1e-12`` studies on the current spline-smoothed square target.
-The latest preflight matrix gives the current deck classification:
+The latest preflight matrix gives the current deck classification. It also
+shows why simply lowering ``MPOL``/``NTOR`` is not robust even when the
+underlying spline-control maps are well conditioned:
 
 .. list-table::
    :header-rows: 1
@@ -889,6 +895,9 @@ The latest preflight matrix gives the current deck classification:
    * - ``MPOL=5, NTOR=20, NZETA=48``
      - diagnostic-only
      - projection max ``1.763e-9`` exceeds ``5e-12``
+   * - ``MPOL=4, NTOR=16, NZETA=64``
+     - diagnostic-only
+     - projection max ``1.357e-7`` exceeds ``5e-12``
    * - ``MPOL=5, NTOR=28, NZETA=48``
      - diagnostic-only
      - ``NZETA=48`` is below recommendation ``64``
@@ -898,6 +907,9 @@ The latest preflight matrix gives the current deck classification:
    * - ``MPOL=6, NTOR=32, NZETA=72``
      - production-ready
      - projection max ``3.468e-12`` and mgrid-compatible
+   * - ``MPOL=8, NTOR=40, NZETA=88``
+     - production-ready
+     - projection max ``3.476e-12`` and mgrid-compatible
    * - ``MPOL=5, NTOR=28, NZETA=64, mgrid_nphi=96``
      - diagnostic-only
      - ``mgrid_nphi`` is not a multiple of ``NZETA``
