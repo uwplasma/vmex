@@ -10,6 +10,9 @@ import pytest
 import vmec_jax.solvers.free_boundary.validation as validation
 from vmec_jax.solvers.free_boundary.validation import (
     free_boundary_response_metrics,
+    free_boundary_promotion_status,
+    virtual_casing_finite_beta_boundary_diagnostics,
+    virtual_casing_grid_adequacy_status,
     wout_beta_percent,
     wout_fsq_total,
     wout_mean_iota,
@@ -33,6 +36,114 @@ def test_virtual_casing_loader_uses_source_path_environment(
     module = validation._load_virtual_casing_functional()
 
     assert module.SENTINEL == "loaded-from-env-path"
+
+
+def test_virtual_casing_boundary_diagnostics_reports_grid_metadata() -> None:
+    """Finite-beta virtual-casing diagnostics record the grid used for promotion."""
+
+    class FakeVirtualCasingFunctional:
+        @staticmethod
+        def prepare_functional_setup(
+            _x: np.ndarray,
+            *,
+            digits: int,
+            nfp: int,
+            half_period: bool,
+            surf_nt: int,
+            surf_np: int,
+            src_nt: int,
+            src_np: int,
+            trg_nt: int,
+            trg_np: int,
+            quad_nt: int,
+            quad_np: int,
+            patch_dim0: int | None,
+        ) -> SimpleNamespace:
+            return SimpleNamespace(
+                digits=digits,
+                nfp=nfp,
+                half_period=half_period,
+                surf_nt=surf_nt,
+                surf_np=surf_np,
+                src_nt=src_nt,
+                src_np=src_np,
+                trg_nt=trg_nt,
+                trg_np=trg_np,
+                quad_nt=quad_nt,
+                quad_np=quad_np,
+                patch_dim0=patch_dim0,
+                patch_idx=np.arange(quad_nt * quad_np),
+                orient=1.0,
+            )
+
+        @staticmethod
+        def compute_external_B_functional(x: np.ndarray, _b_total: np.ndarray, **_kwargs: object) -> np.ndarray:
+            return np.zeros_like(x)
+
+        @staticmethod
+        def target_surface_normal(x: np.ndarray, **_kwargs: object) -> np.ndarray:
+            normal = np.zeros_like(x)
+            normal[0, :, :] = 1.0
+            return normal
+
+    surface = np.zeros((3, 4, 3))
+    total_b = np.zeros_like(surface)
+    diagnostics = virtual_casing_finite_beta_boundary_diagnostics(
+        surface,
+        total_b,
+        target_external_b=np.zeros_like(surface),
+        quad_nt=8,
+        quad_np=6,
+        chunk_size=5,
+        target_chunk_size="auto",
+        vc_module=FakeVirtualCasingFunctional,
+    )
+    payload = diagnostics.to_dict()
+
+    assert diagnostics.grid_adequacy_status == "production_ready"
+    assert diagnostics.surface_ntheta == 4
+    assert diagnostics.surface_nphi == 3
+    assert diagnostics.quad_ntheta == 8
+    assert diagnostics.quad_nphi == 6
+    assert diagnostics.quad_factor_theta == pytest.approx(2.0)
+    assert diagnostics.quad_factor_phi == pytest.approx(2.0)
+    assert payload["grid_adequacy_status"] == "production_ready"
+    assert payload["chunk_size"] == 5
+    assert payload["target_chunk_size"] == "auto"
+
+
+def test_virtual_casing_grid_adequacy_controls_finite_beta_promotion() -> None:
+    """Finite-beta direct-coil promotion needs a production-sized virtual-casing grid."""
+
+    assert (
+        virtual_casing_grid_adequacy_status(
+            surface_ntheta=16,
+            surface_nphi=8,
+            quad_ntheta=32,
+            quad_nphi=16,
+        )
+        == "production_ready"
+    )
+    underresolved = virtual_casing_grid_adequacy_status(
+        surface_ntheta=16,
+        surface_nphi=8,
+        quad_ntheta=16,
+        quad_nphi=16,
+    )
+    assert underresolved == "diagnostic_only_low_quad_theta"
+
+    promotion = free_boundary_promotion_status(
+        beta_percent=1.0,
+        strict_components_met=True,
+        final_residual_recomputed=True,
+        virtual_casing_status="computed",
+        virtual_casing_grid_adequacy_status=underresolved,
+        direct_coil_backend=True,
+    )
+
+    assert promotion["production_candidate"] is False
+    assert promotion["coil_bnormal_role"] == "diagnostic_only"
+    assert promotion["promotion_blockers"] == [f"virtual_casing_grid_{underresolved}"]
 
 
 @pytest.mark.py311_coverage_only

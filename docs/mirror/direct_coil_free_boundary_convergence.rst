@@ -476,6 +476,12 @@ write this block for direct-coil rows with ``--virtual-casing-diagnostics``.
 The flag is opt-in because the singular integral can be expensive and depends
 on the optional ``virtual_casing_jax`` package; when the package is missing the
 profile records a skipped status instead of failing the run.
+Finite-beta direct-coil promotion also records the target surface grid,
+virtual-casing quadrature grid, chunk settings, and
+``virtual_casing_grid_adequacy_status``. A computed virtual-casing residual is
+treated as production evidence only when that status is
+``production_ready``; lower quadrature factors remain useful diagnostics but
+are explicitly blocked from finite-beta promotion.
 
 Mirror-physics checks should stay simple and explicit. A two-coil mirror has
 its on-axis field minimum near the midplane and maxima near the coils; this is
@@ -552,7 +558,10 @@ not a convergence claim, but it separates monotone under-budget runs from true
 residual floors. Direct-coil rows produced with
 ``--virtual-casing-diagnostics`` also expose virtual-casing status,
 external-normal residuals, pressure-balance residuals, and required/target
-external-field RMS values in the same summary table.
+external-field RMS values in the same summary table. The table also prints the
+virtual-casing target grid, quadrature grid, quadrature factors, and
+``virtual_casing_grid_adequacy_status`` so finite-beta rows cannot be promoted
+from an underresolved postsolve check.
 When ``virtual_casing_jax`` exists as a source checkout but is not installed in
 the active Python environment, pass
 ``--virtual-casing-pythonpath /path/to/virtual_casing_jax`` to the profiler, or

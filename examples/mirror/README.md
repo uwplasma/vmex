@@ -434,7 +434,10 @@ block. The profiler records a skipped status when ``virtual_casing_jax`` is not
 installed. The summary table exposes these fields as ``virtual_casing_*``
 columns. Add ``--virtual-casing-quad-factor`` and the two virtual-casing chunk
 flags when a finite-beta postsolve diagnostic needs more source quadrature or a
-lower memory footprint; these flags do not alter the equilibrium solve.
+lower memory footprint; these flags do not alter the equilibrium solve. The
+summary table also reports ``virtual_casing_grid_adequacy_status`` plus the
+target/quadrature grid sizes; finite-beta rows need a ``production_ready``
+virtual-casing grid before they count as production evidence.
 Long VMEC2000 runs also refresh
 ``_partial_vmec2000_payload.json`` in the profile directory; use this sidecar
 to inspect the current stage, component residuals, and vacuum-grid warnings

@@ -61,14 +61,40 @@ class VirtualCasingBoundaryDiagnostics:
     pressure_balance: np.ndarray
     pressure_balance_rms: float
     pressure_balance_max: float
+    surface_ntheta: int
+    surface_nphi: int
+    quad_ntheta: int
+    quad_nphi: int
+    quad_factor_theta: float
+    quad_factor_phi: float
+    grid_adequacy_status: str
+    nfp: int
+    half_period: bool
+    digits: int
+    patch_dim0: int | None
+    chunk_size: int | str | None
+    target_chunk_size: int | str | None
 
-    def to_dict(self) -> dict[str, float]:
+    def to_dict(self) -> dict[str, float | int | str | bool | None]:
         """Return scalar diagnostics suitable for summary tables."""
         return {
             "external_bnormal_residual_rms": self.external_bnormal_residual_rms,
             "external_bnormal_residual_max": self.external_bnormal_residual_max,
             "pressure_balance_rms": self.pressure_balance_rms,
             "pressure_balance_max": self.pressure_balance_max,
+            "surface_ntheta": self.surface_ntheta,
+            "surface_nphi": self.surface_nphi,
+            "quad_ntheta": self.quad_ntheta,
+            "quad_nphi": self.quad_nphi,
+            "quad_factor_theta": self.quad_factor_theta,
+            "quad_factor_phi": self.quad_factor_phi,
+            "grid_adequacy_status": self.grid_adequacy_status,
+            "nfp": self.nfp,
+            "half_period": self.half_period,
+            "digits": self.digits,
+            "patch_dim0": self.patch_dim0,
+            "chunk_size": self.chunk_size,
+            "target_chunk_size": self.target_chunk_size,
         }
 
 
@@ -94,6 +120,7 @@ def free_boundary_promotion_status(
     strict_components_met: Any,
     final_residual_recomputed: Any | None = None,
     virtual_casing_status: Any | None = None,
+    virtual_casing_grid_adequacy_status: Any | None = None,
     direct_coil_backend: bool = True,
     require_fresh_residual: bool = True,
     beta_tol: float = 1.0e-12,
@@ -134,6 +161,9 @@ def free_boundary_promotion_status(
     fresh_met = _optional_bool(final_residual_recomputed)
     fresh_known = fresh_met is not None
     vc_status = None if virtual_casing_status is None else str(virtual_casing_status)
+    vc_grid_status = None if virtual_casing_grid_adequacy_status is None else str(
+        virtual_casing_grid_adequacy_status
+    )
     vc_required = bool(finite_beta and direct_coil_backend)
     vc_available = None if not vc_required else bool(vc_status == "computed")
 
@@ -147,6 +177,8 @@ def free_boundary_promotion_status(
             blockers.append("virtual_casing_diagnostics_missing")
         else:
             blockers.append(f"virtual_casing_diagnostics_{vc_status}")
+    if vc_required and vc_available is True and vc_grid_status not in {None, "production_ready"}:
+        blockers.append(f"virtual_casing_grid_{vc_grid_status}")
 
     return {
         "beta_percent": beta_value,
@@ -159,6 +191,7 @@ def free_boundary_promotion_status(
         "direct_coil_backend": bool(direct_coil_backend),
         "virtual_casing_required": vc_required,
         "virtual_casing_status": vc_status,
+        "virtual_casing_grid_adequacy_status": vc_grid_status,
         "virtual_casing_available": vc_available,
         "production_candidate": not blockers,
         "promotion_blockers": blockers,
@@ -192,6 +225,42 @@ def _broadcast_surface_scalar(values: Any, shape: tuple[int, int], *, name: str)
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"{name} must contain only finite values")
     return np.asarray(arr, dtype=float)
+
+
+def virtual_casing_grid_adequacy_status(
+    *,
+    surface_ntheta: int,
+    surface_nphi: int,
+    quad_ntheta: int,
+    quad_nphi: int,
+    recommended_quad_factor: float = 2.0,
+) -> str:
+    """Classify whether a virtual-casing diagnostic grid is production-sized.
+
+    The virtual-casing residual is only a postsolve diagnostic, but finite-beta
+    free-boundary promotion depends on it.  We therefore require at least the
+    default 2x source quadrature in both angular directions before treating the
+    result as production evidence.
+    """
+
+    ntheta = int(surface_ntheta)
+    nphi = int(surface_nphi)
+    qtheta = int(quad_ntheta)
+    qphi = int(quad_nphi)
+    if ntheta <= 0 or nphi <= 0 or qtheta <= 0 or qphi <= 0:
+        return "invalid_grid"
+    if qtheta < ntheta or qphi < nphi:
+        return "invalid_quad_below_surface"
+    recommended = float(recommended_quad_factor)
+    theta_ok = qtheta >= int(np.ceil(recommended * ntheta))
+    phi_ok = qphi >= int(np.ceil(recommended * nphi))
+    if theta_ok and phi_ok:
+        return "production_ready"
+    if not theta_ok and not phi_ok:
+        return "diagnostic_only_low_quad_theta_phi"
+    if not theta_ok:
+        return "diagnostic_only_low_quad_theta"
+    return "diagnostic_only_low_quad_phi"
 
 
 def _load_virtual_casing_functional():
@@ -410,6 +479,12 @@ def virtual_casing_finite_beta_boundary_diagnostics(
     quad_np_eff = int(quad_np) if quad_np is not None else max(nphi, 2 * nphi)
     if quad_nt_eff < ntheta or quad_np_eff < nphi:
         raise ValueError("quad_nt and quad_np must be at least the target surface resolution")
+    grid_status = virtual_casing_grid_adequacy_status(
+        surface_ntheta=ntheta,
+        surface_nphi=nphi,
+        quad_ntheta=quad_nt_eff,
+        quad_nphi=quad_np_eff,
+    )
 
     setup = vc.prepare_functional_setup(
         x,
@@ -488,6 +563,19 @@ def virtual_casing_finite_beta_boundary_diagnostics(
         pressure_balance=pressure_balance,
         pressure_balance_rms=float(np.sqrt(np.mean(pressure_balance**2))),
         pressure_balance_max=float(np.max(np.abs(pressure_balance))),
+        surface_ntheta=ntheta,
+        surface_nphi=nphi,
+        quad_ntheta=quad_nt_eff,
+        quad_nphi=quad_np_eff,
+        quad_factor_theta=float(quad_nt_eff) / float(ntheta),
+        quad_factor_phi=float(quad_np_eff) / float(nphi),
+        grid_adequacy_status=grid_status,
+        nfp=int(nfp),
+        half_period=bool(half_period),
+        digits=int(digits),
+        patch_dim0=None if patch_dim0 is None else int(patch_dim0),
+        chunk_size=chunk_size,
+        target_chunk_size=target_chunk_size,
     )
 
 

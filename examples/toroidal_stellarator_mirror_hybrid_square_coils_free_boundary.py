@@ -127,6 +127,9 @@ JIT_FORCES: bool | str = "auto"
 FIELD_LINE_COUNT = 3
 FIELD_LINE_STEPS = 900
 FIELD_LINE_TURNS = 1.25
+VIRTUAL_CASING_QUAD_FACTOR = 2
+VIRTUAL_CASING_CHUNK_SIZE: int | str | None = "auto"
+VIRTUAL_CASING_TARGET_CHUNK_SIZE: int | str | None = "auto"
 
 
 SCHEMA = "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
@@ -196,6 +199,9 @@ class ExampleConfig:
     field_line_count: int = FIELD_LINE_COUNT
     field_line_steps: int = FIELD_LINE_STEPS
     field_line_turns: float = FIELD_LINE_TURNS
+    virtual_casing_quad_factor: int = VIRTUAL_CASING_QUAD_FACTOR
+    virtual_casing_chunk_size: int | str | None = VIRTUAL_CASING_CHUNK_SIZE
+    virtual_casing_target_chunk_size: int | str | None = VIRTUAL_CASING_TARGET_CHUNK_SIZE
     write_plots: bool = True
 
 
@@ -1242,10 +1248,23 @@ def _virtual_casing_row_metrics(
     coils: SquareCoilSet,
     config: ExampleConfig,
 ) -> dict[str, Any]:
+    base = {
+        "virtual_casing_quad_factor": int(config.virtual_casing_quad_factor),
+        "virtual_casing_chunk_size": config.virtual_casing_chunk_size,
+        "virtual_casing_target_chunk_size": config.virtual_casing_target_chunk_size,
+        "virtual_casing_grid_adequacy_status": "not_computed",
+        "virtual_casing_surface_ntheta": None,
+        "virtual_casing_surface_nzeta": None,
+        "virtual_casing_quad_ntheta": None,
+        "virtual_casing_quad_nzeta": None,
+        "virtual_casing_quad_factor_theta": None,
+        "virtual_casing_quad_factor_zeta": None,
+    }
     try:
         __import__("virtual_casing_jax.functional")
     except ImportError:
         return {
+            **base,
             "virtual_casing_status": "skipped_missing_virtual_casing_jax",
             "virtual_casing_external_bnormal_residual_rms": None,
             "virtual_casing_external_bnormal_residual_max": None,
@@ -1258,18 +1277,29 @@ def _virtual_casing_row_metrics(
             coil_params=coils.params,
             nfp=int(config.nfp),
             digits=6,
+            quad_factor=int(config.virtual_casing_quad_factor),
+            chunk_size=config.virtual_casing_chunk_size,
+            target_chunk_size=config.virtual_casing_target_chunk_size,
         )
     except Exception as exc:
         return {
+            **base,
             "virtual_casing_status": f"failed:{type(exc).__name__}",
             "virtual_casing_external_bnormal_residual_rms": None,
             "virtual_casing_external_bnormal_residual_max": None,
             "virtual_casing_pressure_balance_rms": None,
             "virtual_casing_pressure_balance_max": None,
         }
-    resolved_controls = _resolved_axis_spline_controls(config)
     return {
+        **base,
         "virtual_casing_status": "computed",
+        "virtual_casing_grid_adequacy_status": diagnostics.grid_adequacy_status,
+        "virtual_casing_surface_ntheta": diagnostics.surface_ntheta,
+        "virtual_casing_surface_nzeta": diagnostics.surface_nphi,
+        "virtual_casing_quad_ntheta": diagnostics.quad_ntheta,
+        "virtual_casing_quad_nzeta": diagnostics.quad_nphi,
+        "virtual_casing_quad_factor_theta": diagnostics.quad_factor_theta,
+        "virtual_casing_quad_factor_zeta": diagnostics.quad_factor_phi,
         "virtual_casing_external_bnormal_residual_rms": diagnostics.external_bnormal_residual_rms,
         "virtual_casing_external_bnormal_residual_max": diagnostics.external_bnormal_residual_max,
         "virtual_casing_pressure_balance_rms": diagnostics.pressure_balance_rms,
@@ -1479,6 +1509,7 @@ def _run_one_beta(
         strict_components_met=row.get("converged_strict"),
         final_residual_recomputed=row.get("final_residual_recomputed_on_accepted_state"),
         virtual_casing_status=row.get("virtual_casing_status"),
+        virtual_casing_grid_adequacy_status=row.get("virtual_casing_grid_adequacy_status"),
         direct_coil_backend=True,
     )
     row.update(
@@ -1488,6 +1519,7 @@ def _run_one_beta(
             "production_candidate": promotion["production_candidate"],
             "promotion_blockers": ",".join(str(item) for item in promotion["promotion_blockers"]),
             "virtual_casing_required": promotion["virtual_casing_required"],
+            "virtual_casing_grid_adequacy_status": promotion["virtual_casing_grid_adequacy_status"],
             "virtual_casing_available": promotion["virtual_casing_available"],
         }
     )
@@ -1565,6 +1597,7 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "promotion_blockers",
         "virtual_casing_required",
         "virtual_casing_available",
+        "virtual_casing_grid_adequacy_status",
         "requested_ftol",
         "final_fsq",
         "final_fsqr",
@@ -1592,6 +1625,15 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_bsqvac_rms",
         "free_boundary_gsource_rms",
         "virtual_casing_status",
+        "virtual_casing_quad_factor",
+        "virtual_casing_chunk_size",
+        "virtual_casing_target_chunk_size",
+        "virtual_casing_surface_ntheta",
+        "virtual_casing_surface_nzeta",
+        "virtual_casing_quad_ntheta",
+        "virtual_casing_quad_nzeta",
+        "virtual_casing_quad_factor_theta",
+        "virtual_casing_quad_factor_zeta",
         "virtual_casing_external_bnormal_residual_rms",
         "virtual_casing_external_bnormal_residual_max",
         "virtual_casing_pressure_balance_rms",

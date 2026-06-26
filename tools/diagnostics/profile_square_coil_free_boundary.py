@@ -1338,6 +1338,7 @@ def _virtual_casing_profile_payload(
             "quad_factor": quad,
             "chunk_size": chunk_size,
             "target_chunk_size": target_chunk_size,
+            "grid_adequacy_status": "not_computed",
         }
 
     t0 = time.perf_counter()
@@ -1358,17 +1359,25 @@ def _virtual_casing_profile_payload(
             "quad_factor": quad,
             "chunk_size": chunk_size,
             "target_chunk_size": target_chunk_size,
+            "grid_adequacy_status": "not_computed",
         }
-    ntheta = int(np.asarray(diagnostics.external_bnormal_residual).shape[0])
-    nzeta = int(np.asarray(diagnostics.external_bnormal_residual).shape[1])
+    ntheta = int(diagnostics.surface_ntheta)
+    nzeta = int(diagnostics.surface_nphi)
     return {
         "status": "computed",
         "wall_s": float(time.perf_counter() - t0),
         "quad_factor": quad,
         "chunk_size": chunk_size,
         "target_chunk_size": target_chunk_size,
-        "quad_ntheta": max(quad * ntheta, ntheta),
-        "quad_nzeta": max(quad * nzeta, nzeta),
+        "grid_adequacy_status": diagnostics.grid_adequacy_status,
+        "quad_ntheta": diagnostics.quad_ntheta,
+        "quad_nzeta": diagnostics.quad_nphi,
+        "quad_factor_theta": diagnostics.quad_factor_theta,
+        "quad_factor_zeta": diagnostics.quad_factor_phi,
+        "nfp": diagnostics.nfp,
+        "half_period": diagnostics.half_period,
+        "digits": diagnostics.digits,
+        "patch_dim0": diagnostics.patch_dim0,
         "external_bnormal_residual_rms": diagnostics.external_bnormal_residual_rms,
         "external_bnormal_residual_max": diagnostics.external_bnormal_residual_max,
         "pressure_balance_rms": diagnostics.pressure_balance_rms,
@@ -1882,6 +1891,7 @@ def _run_jax_backend(
             strict_components_met=residuals.get("converged_strict"),
             final_residual_recomputed=residuals.get("final_residual_recomputed_on_accepted_state"),
             virtual_casing_status=vc_payload.get("status"),
+            virtual_casing_grid_adequacy_status=vc_payload.get("grid_adequacy_status"),
             direct_coil_backend=direct_params is not None,
         ),
     }
@@ -2652,6 +2662,9 @@ def main(argv: list[str] | None = None) -> int:
         niter_array=niter_array,
         ftol_array=ftol_array,
         use_multigrid_schedule=len(ns_array) > 1,
+        enforce_recommended_nzeta=bool(args.enforce_recommended_nzeta),
+        auto_bump_nzeta_to_recommended=bool(args.auto_bump_nzeta_to_recommended),
+        max_boundary_projection_error=args.max_boundary_projection_error,
         nstep=int(args.nstep),
         delt=float(args.delt),
         nvacskip=int(args.nvacskip),

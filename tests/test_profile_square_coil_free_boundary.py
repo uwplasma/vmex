@@ -943,8 +943,11 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert data["configuration"]["ntheta_auto"] is True
     assert data["configuration"]["ntheta_underrecommended"] is False
     projection = data["boundary_projection"]
+    assert projection["requested_mpol"] == 3
+    assert projection["requested_ntor"] == 4
     assert projection["mpol"] == 3
     assert projection["ntor"] == 4
+    assert projection["mode_deck"]["mode_deck_auto_bumped_to_recommended"] is False
     assert projection["recommended_nzeta"] == 16
     assert projection["mode_count"] > 0
     assert np.isfinite(float(projection["max_abs_error"]))
@@ -1484,6 +1487,17 @@ def test_square_coil_profile_virtual_casing_payload_uses_cached_geometry(monkeyp
             required_external_b=np.ones((3, 2, 3)),
             target_external_b=2.0 * np.ones((3, 2, 3)),
             external_bnormal_residual=np.zeros((2, 3)),
+            surface_ntheta=2,
+            surface_nphi=3,
+            quad_ntheta=6,
+            quad_nphi=9,
+            quad_factor_theta=3.0,
+            quad_factor_phi=3.0,
+            grid_adequacy_status="production_ready",
+            nfp=1,
+            half_period=False,
+            digits=6,
+            patch_dim0=None,
         )
 
     monkeypatch.setattr(profile, "virtual_casing_diagnostics_from_run", fake_diagnostics_from_run)
@@ -1504,6 +1518,9 @@ def test_square_coil_profile_virtual_casing_payload_uses_cached_geometry(monkeyp
     assert payload["target_chunk_size"] == 128
     assert payload["quad_ntheta"] == 6
     assert payload["quad_nzeta"] == 9
+    assert payload["quad_factor_theta"] == pytest.approx(3.0)
+    assert payload["quad_factor_zeta"] == pytest.approx(3.0)
+    assert payload["grid_adequacy_status"] == "production_ready"
     assert payload["external_bnormal_residual_rms"] == pytest.approx(1.0e-9)
     assert payload["pressure_balance_max"] == pytest.approx(4.0e-6)
     assert payload["required_external_b_rms"] == pytest.approx(np.sqrt(3.0))
