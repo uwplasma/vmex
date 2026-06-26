@@ -414,6 +414,123 @@ def same_branch_replay_mode_count_guard(mode_count: int, replay_max_mode_count: 
                                      "reason": reason if triggered else "not triggered"}
 
 
+def _same_branch_scalar_value_fns(
+    *,
+    pack_state: Any,
+    lcfs_boundary_moment: Any,
+    mean_iota_from_state: Any,
+    accepted_bnormal_rms_from_payload: Any,
+    qs_total_from_state: Any,
+    boozer_qs_total_from_state: Any,
+) -> dict[str, Any]:
+    """Return production scalar functions evaluated from complete-solve payloads."""
+
+    return {
+        "state_norm": lambda payload: float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
+        "aspect": lambda payload: float(
+            np.asarray(
+                equilibrium_aspect_ratio_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                )
+            )
+        ),
+        "mean_iota": lambda payload: float(
+            np.asarray(
+                mean_iota_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "qs_total": lambda payload: float(
+            np.asarray(
+                qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "boozer_qs_total": lambda payload: float(
+            np.asarray(
+                boozer_qs_total_from_state(
+                    payload["result"].state,
+                    payload["init"].static,
+                    payload["init"].indata,
+                    payload["init"].signgs,
+                )
+            )
+        ),
+        "lcfs_boundary_moment": lambda payload: float(
+            np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
+        ),
+        "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
+        "betatotal": lambda payload: float(
+            np.asarray(
+                finite_beta_scalars_from_state(
+                    state=payload["result"].state,
+                    static=payload["init"].static,
+                    indata=payload["init"].indata,
+                    signgs=payload["init"].signgs,
+                )["betatotal"]
+            )
+        ),
+    }
+
+
+def _same_branch_scalar_replay_fns(
+    *,
+    pack_state: Any,
+    lcfs_boundary_moment: Any,
+    mean_iota_from_state: Any,
+    accepted_bnormal_rms_from_replay: Any,
+    qs_total_from_state: Any,
+    boozer_qs_total_from_state: Any,
+) -> dict[str, Any]:
+    """Return scalar functions evaluated from fixed-branch replay payloads."""
+
+    return {
+        "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
+        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+        ),
+        "mean_iota": lambda replay, payload: mean_iota_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "qs_total": lambda replay, payload: qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "boozer_qs_total": lambda replay, payload: boozer_qs_total_from_state(
+            replay["state"],
+            payload["init"].static,
+            payload["init"].indata,
+            payload["init"].signgs,
+        ),
+        "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
+            replay["state"],
+            payload["init"].static,
+        ),
+        "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
+        "betatotal": lambda replay, payload: finite_beta_scalars_from_state(
+            state=replay["state"],
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=payload["init"].signgs,
+        )["betatotal"],
+    }
+
+
 def same_branch_scalar_function_registry(
     *,
     args: Any,
@@ -496,97 +613,22 @@ def same_branch_scalar_function_registry(
         )
         return qs["total"]
 
-    scalar_value_fns = {
-        "state_norm": lambda payload: float(np.linalg.norm(np.asarray(pack_state(payload["result"].state), dtype=float))),
-        "aspect": lambda payload: float(
-            np.asarray(
-                equilibrium_aspect_ratio_from_state(
-                    state=payload["result"].state,
-                    static=payload["init"].static,
-                )
-            )
-        ),
-        "mean_iota": lambda payload: float(
-            np.asarray(
-                mean_iota_from_state(
-                    payload["result"].state,
-                    payload["init"].static,
-                    payload["init"].indata,
-                    payload["init"].signgs,
-                )
-            )
-        ),
-        "qs_total": lambda payload: float(
-            np.asarray(
-                qs_total_from_state(
-                    payload["result"].state,
-                    payload["init"].static,
-                    payload["init"].indata,
-                    payload["init"].signgs,
-                )
-            )
-        ),
-        "boozer_qs_total": lambda payload: float(
-            np.asarray(
-                boozer_qs_total_from_state(
-                    payload["result"].state,
-                    payload["init"].static,
-                    payload["init"].indata,
-                    payload["init"].signgs,
-                )
-            )
-        ),
-        "lcfs_boundary_moment": lambda payload: float(
-            np.asarray(lcfs_boundary_moment(payload["result"].state, payload["init"].static))
-        ),
-        "accepted_bnormal_rms": accepted_bnormal_rms_from_payload,
-        "betatotal": lambda payload: float(
-            np.asarray(
-                finite_beta_scalars_from_state(
-                    state=payload["result"].state,
-                    static=payload["init"].static,
-                    indata=payload["init"].indata,
-                    signgs=payload["init"].signgs,
-                )["betatotal"]
-            )
-        ),
-    }
-    scalar_replay_fns = {
-        "state_norm": lambda replay, _payload: jnp.linalg.norm(pack_state(replay["state"])),
-        "aspect": lambda replay, payload: equilibrium_aspect_ratio_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-        ),
-        "mean_iota": lambda replay, payload: mean_iota_from_state(
-            replay["state"],
-            payload["init"].static,
-            payload["init"].indata,
-            payload["init"].signgs,
-        ),
-        "qs_total": lambda replay, payload: qs_total_from_state(
-            replay["state"],
-            payload["init"].static,
-            payload["init"].indata,
-            payload["init"].signgs,
-        ),
-        "boozer_qs_total": lambda replay, payload: boozer_qs_total_from_state(
-            replay["state"],
-            payload["init"].static,
-            payload["init"].indata,
-            payload["init"].signgs,
-        ),
-        "lcfs_boundary_moment": lambda replay, payload: lcfs_boundary_moment(
-            replay["state"],
-            payload["init"].static,
-        ),
-        "accepted_bnormal_rms": lambda replay, _payload: accepted_bnormal_rms_from_replay(replay),
-        "betatotal": lambda replay, payload: finite_beta_scalars_from_state(
-            state=replay["state"],
-            static=payload["init"].static,
-            indata=payload["init"].indata,
-            signgs=payload["init"].signgs,
-        )["betatotal"],
-    }
+    scalar_value_fns = _same_branch_scalar_value_fns(
+        pack_state=pack_state,
+        lcfs_boundary_moment=lcfs_boundary_moment,
+        mean_iota_from_state=mean_iota_from_state,
+        accepted_bnormal_rms_from_payload=accepted_bnormal_rms_from_payload,
+        qs_total_from_state=qs_total_from_state,
+        boozer_qs_total_from_state=boozer_qs_total_from_state,
+    )
+    scalar_replay_fns = _same_branch_scalar_replay_fns(
+        pack_state=pack_state,
+        lcfs_boundary_moment=lcfs_boundary_moment,
+        mean_iota_from_state=mean_iota_from_state,
+        accepted_bnormal_rms_from_replay=accepted_bnormal_rms_from_replay,
+        qs_total_from_state=qs_total_from_state,
+        boozer_qs_total_from_state=boozer_qs_total_from_state,
+    )
     return scalar_value_fns, scalar_replay_fns
 
 
