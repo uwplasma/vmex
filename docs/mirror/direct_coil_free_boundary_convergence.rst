@@ -215,6 +215,10 @@ records ``nzeta_auto`` and ``nzeta_underrecommended`` in the JSON report.
 The profiler also rejects generated-mgrid plane counts that are not multiples
 of ``NZETA`` because the VMEC-plane mgrid sampler intentionally uses the
 discrete VMEC zeta planes without toroidal interpolation.
+During long VMEC2000 runs the profiler writes
+``_partial_vmec2000_payload.json`` beside the final profile report, so strict
+``FTOL=1e-12`` ladders can be audited for live stage residuals and
+vacuum-grid overflow before ``xvmec`` exits.
 The rounded-square ``axis_kind="spline"`` option is now the default because it
 reduces low-mode projection error relative to the superellipse axis. It is
 still projected to VMEC Fourier coefficients, so large straight sections plus

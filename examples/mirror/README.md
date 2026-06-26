@@ -239,6 +239,10 @@ direct-coil, ``vmec_jax`` generated-mgrid, and optional raw VMEC2000
 generated-mgrid residuals for the same square-coil field. To profile a staged
 VMEC-style ladder without editing the example, add for example
 ``--ns-array 9,13,17 --niter-array 4000,8000,12000 --ftol-array 1e-8,1e-10,1e-12``.
+Long VMEC2000 runs also refresh
+``_partial_vmec2000_payload.json`` in the profile directory; use this sidecar
+to inspect the current stage, component residuals, and vacuum-grid warnings
+before the external executable exits.
 Use larger ``--nvacskip`` only as a speed experiment; for convergence review,
 ``--nvacskip 1`` avoids stale free-boundary residuals on this square-hybrid
 Fourier deck. For ``NS`` ladders above the initial surface, use a widened mgrid

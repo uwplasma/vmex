@@ -126,6 +126,30 @@ def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_pat
     assert payload["vacuum_grid_exceeded_count"] == 1
 
 
+def test_square_coil_profile_writes_partial_vmec2000_sidecar(tmp_path: Path):
+    workdir = tmp_path / "vmec2000_mgrid"
+    workdir.mkdir()
+    (workdir / "threed1.case").write_text(
+        "\n".join(
+            [
+                " NS =    9 NO. FOURIER MODES =  113 FTOLV =  1.000E-12 NITER =   5000",
+                " ITER    FSQR      FSQZ      FSQL      fsqr      fsqz      fsql      DELT",
+                "  200   4.00E-11  2.00E-11  1.00E-11  1.00E-12  2.00E-12  3.00E-12  2.00E-02",
+            ]
+        )
+        + "\n"
+    )
+
+    path = profile._write_partial_vmec2000_payload(outdir=tmp_path, workdir=workdir)
+
+    data = json.loads(path.read_text())
+    assert path.name == "_partial_vmec2000_payload.json"
+    assert data["iteration_row_count"] == 1
+    assert data["updated_unix_s"] > 0.0
+    assert data["final_max_component"] == pytest.approx(4.0e-11)
+    assert data["strict_components_met"] is False
+
+
 def test_square_coil_profile_provider_parity_payload_reports_field_and_bnormal_error(monkeypatch, tmp_path: Path):
     vac_direct = SimpleNamespace(
         bnormal=np.array([[2.0, 4.0], [6.0, 8.0]]),

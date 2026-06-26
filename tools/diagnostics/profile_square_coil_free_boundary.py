@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
 import time
 from typing import Any
 
@@ -208,6 +209,7 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
     final_ftol = float(stages[-1].ftolv) if stages else None
     return {
         "workdir": workdir,
+        "updated_unix_s": float(time.time()),
         "threed1": threed1,
         "threed1_tail": _tail_lines(threed1, lines=80),
         "iteration_row_count": len(rows),
@@ -219,6 +221,42 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
         "strict_components_met": None if last is None else _vmec2000_strict_components_met(last, final_ftol),
         "vacuum_grid_exceeded_count": _vacuum_grid_exceeded_count(threed1),
     }
+
+
+def _write_partial_vmec2000_payload(*, outdir: Path, workdir: Path) -> Path:
+    """Write a live VMEC2000 progress report using an atomic file replace."""
+
+    path = Path(outdir) / "_partial_vmec2000_payload.json"
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    payload = _partial_vmec2000_payload(Path(workdir))
+    tmp.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True, allow_nan=False) + "\n")
+    tmp.replace(path)
+    return path
+
+
+def _start_vmec2000_progress_monitor(
+    *,
+    outdir: Path,
+    workdir: Path,
+    interval_s: float = 30.0,
+) -> tuple[threading.Event, threading.Thread]:
+    """Refresh partial VMEC2000 progress while the external executable runs."""
+
+    stop = threading.Event()
+    outdir = Path(outdir)
+    workdir = Path(workdir)
+
+    def _monitor() -> None:
+        while not stop.wait(max(0.1, float(interval_s))):
+            try:
+                _write_partial_vmec2000_payload(outdir=outdir, workdir=workdir)
+            except Exception:
+                # Progress monitoring must never affect the VMEC2000 solve.
+                continue
+
+    thread = threading.Thread(target=_monitor, name="vmec2000-progress-monitor", daemon=True)
+    thread.start()
+    return stop, thread
 
 
 def _last_finite(values: Any) -> float | None:
@@ -1000,11 +1038,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _log_step(f"running VMEC2000 backend with {exe}")
             t0 = time.perf_counter()
+            vmec2000_workdir = outdir / "vmec2000_mgrid"
+            monitor_stop, monitor_thread = _start_vmec2000_progress_monitor(
+                outdir=outdir,
+                workdir=vmec2000_workdir,
+            )
             try:
                 run = run_xvmec2000(
                     mgrid_input,
                     exec_path=exe,
-                    workdir=outdir / "vmec2000_mgrid",
+                    workdir=vmec2000_workdir,
                     timeout_s=float(args.vmec2000_timeout),
                     keep_workdir=True,
                 )
@@ -1035,12 +1078,18 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                 }
             except Exception as exc:
-                workdir = outdir / "vmec2000_mgrid"
                 payload["backends"]["vmec2000_mgrid"] = {
                     "status": "failed",
                     "error": repr(exc),
-                    **_partial_vmec2000_payload(workdir),
+                    **_partial_vmec2000_payload(vmec2000_workdir),
                 }
+            finally:
+                monitor_stop.set()
+                monitor_thread.join(timeout=2.0)
+                try:
+                    _write_partial_vmec2000_payload(outdir=outdir, workdir=vmec2000_workdir)
+                except Exception:
+                    pass
 
     report = outdir / "square_coil_free_boundary_backend_profile.json"
     _log_step(f"writing profile report {report}")
