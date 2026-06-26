@@ -533,6 +533,46 @@ def _freeb_edge_control_state_coordinates(state: VMECState, projection: dict[str
     }
 
 
+def _freeb_edge_control_reduced_unknown_vector_diagnostics(
+    state: VMECState,
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the reduced edge-state vector implied by the accepted LCFS."""
+
+    if not bool(projection.get("enabled", False)):
+        return {"enabled": False, "status": "disabled"}
+    control_map = _freeb_edge_control_reduced_map(projection)
+    edge_values = _freeb_edge_control_state_edge_values(state, projection)
+    step = control_map.encode(edge_values)
+    decoded = control_map.decode(step.control_delta)
+    residual = edge_values - decoded
+    finite = residual[np.isfinite(residual)]
+    residual_linf = float(np.max(np.abs(finite))) if finite.size else 0.0
+    residual_rms = float(np.sqrt(np.mean(finite * finite))) if finite.size else 0.0
+    full_size = int(control_map.full_size)
+    control_count = int(control_map.control_count)
+    return {
+        "enabled": True,
+        "status": "measured",
+        "mode": "reduced_edge_unknown_vector",
+        "full_edge_size": full_size,
+        "reduced_unknown_size": control_count,
+        "full_to_reduced_size_ratio": None if control_count == 0 else float(full_size / control_count),
+        "reduction_fraction": None if full_size == 0 else float(control_count / full_size),
+        "labels": list(step.labels),
+        "unknown_vector": [float(value) for value in step.control_delta],
+        "unknown_by_label": step.control_delta_by_label,
+        "unknown_l2": float(step.control_l2),
+        "unknown_linf": float(step.control_linf),
+        "rank": int(step.rank),
+        "condition_number": step.condition_number,
+        "decoded_residual_l2": float(np.linalg.norm(residual)),
+        "decoded_residual_linf": residual_linf,
+        "decoded_residual_rms": residual_rms,
+        "decoded_residual_rel": step.residual_rel,
+    }
+
+
 def _freeb_edge_control_vector_projection_metrics(
     target: Any,
     projection: dict[str, Any],

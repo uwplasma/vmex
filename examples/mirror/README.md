@@ -587,6 +587,11 @@ diagnostics. That compact block reports the accepted LCFS edge in the same
 reduced controls, with reconstruction residual and conditioning, so edited
 ``MPOL``/``NTOR``/``NZETA`` runs can be compared in the physical square-axis
 control basis rather than only in raw Fourier coefficients.
+They also write ``free_boundary.edge_control_projection.reduced_unknown_vector``
+with the candidate reduced edge unknown size, full edge coefficient size,
+reduction fraction, and decoded residual. This is the local audit field to
+check before replacing the full Fourier LCFS edge with native side/corner
+controls.
 As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the direct
 JAX hot-restart row is closer to the requested ``1e-12`` component target than
 the active VMEC2000 generated-``mgrid`` row, while VMEC2000 is flat above its

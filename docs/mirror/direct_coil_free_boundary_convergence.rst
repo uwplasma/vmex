@@ -320,6 +320,12 @@ the fitted coordinates, reconstruction residual, rank, and conditioning. Use it
 to tell whether a strict-tolerance stall is still moving in the intended
 side/corner spline-control variables or leaking into uncontrolled Fourier edge
 modes.
+The same diagnostics now include
+``free_boundary.edge_control_projection.reduced_unknown_vector``. It reports the
+candidate reduced nonlinear unknown vector, the full edge coefficient size, the
+reduction fraction, and the decoded-state residual. These fields are the
+bridge audit before replacing the full Fourier LCFS edge unknowns with native
+side/corner controls.
 Backend rows now also include a compact ``free_boundary_promotion`` block. The
 summary table exposes this as ``boundary_condition_mode``,
 ``coil_bnormal_role``, ``production_candidate``, ``promotion_blockers``,
@@ -383,10 +389,11 @@ Use ``--freeb-edge-control-projection stellarator`` when testing the
 stellarator-corner control subspace.
 The summary table now reports the edge-control projection status, requested
 basis, control count, pseudo-inverse cutoff, accepted-state reduced-coordinate
-norms, and reconstruction residuals. Stalled direct rows that did not use the
-reduced edge projection recommend ``direct-gpu-edge-polish`` before additional
-kernel experiments; stalled rows that already used edge projection recommend
-the edge-projected JAX-NESTOR profile next.
+norms, reduced unknown-vector size, and reconstruction residuals. Stalled direct
+rows that did not use the reduced edge projection recommend
+``direct-gpu-edge-polish`` before additional kernel experiments; stalled rows
+that already used edge projection recommend the edge-projected JAX-NESTOR
+profile next.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and

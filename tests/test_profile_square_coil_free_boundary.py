@@ -369,6 +369,7 @@ def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement(
 def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes():
     from vmec_jax.solve import (
         _freeb_edge_control_delta_tuple_projection_metrics,
+        _freeb_edge_control_reduced_unknown_vector_diagnostics,
         _freeb_edge_control_reduced_map,
         _freeb_edge_control_state_from_coordinates,
         _freeb_edge_control_state_coordinates,
@@ -448,8 +449,10 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     projected = _project_freeb_edge_control_state(trial, projection, host_update=True)
     raw_metrics = _freeb_edge_control_state_residual_metrics(trial, projection)
     raw_coordinates = _freeb_edge_control_state_coordinates(trial, projection)
+    raw_unknown = _freeb_edge_control_reduced_unknown_vector_diagnostics(trial, projection)
     projected_metrics = _freeb_edge_control_state_residual_metrics(projected, projection)
     projected_coordinates = _freeb_edge_control_state_coordinates(projected, projection)
+    projected_unknown = _freeb_edge_control_reduced_unknown_vector_diagnostics(projected, projection)
     decoded_projected = _freeb_edge_control_state_from_coordinates(
         trial,
         projection,
@@ -517,11 +520,19 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert raw_coordinates["coordinate_by_label"]["R00"] == pytest.approx(0.2)
     assert raw_coordinates["coordinate_linf"] == pytest.approx(0.2)
     assert raw_coordinates["reconstruction_residual_linf"] > 0.1
+    assert raw_unknown["mode"] == "reduced_edge_unknown_vector"
+    assert raw_unknown["full_edge_size"] == 4 * static.modes.K
+    assert raw_unknown["reduced_unknown_size"] == 1
+    assert raw_unknown["unknown_by_label"]["R00"] == pytest.approx(0.2)
+    assert raw_unknown["decoded_residual_linf"] > 0.1
+    assert raw_unknown["full_to_reduced_size_ratio"] == pytest.approx(4 * static.modes.K)
     assert projected_metrics["residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
     assert projected_metrics["residual_rms"] == pytest.approx(0.0, abs=1.0e-12)
     assert projected_coordinates["coordinate_by_label"]["R00"] == pytest.approx(0.2)
     assert projected_coordinates["reconstruction_residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
     assert projected_coordinates["rank"] == 1
+    assert projected_unknown["decoded_residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
+    assert projected_unknown["reduction_fraction"] == pytest.approx(1.0 / (4 * static.modes.K))
     np.testing.assert_allclose(projected_control_step.control_delta, [0.2])
     np.testing.assert_allclose(control_map.decode(projected_control_step.control_delta), projected_edge_values)
     assert direction_metrics["status"] == "measured"

@@ -1239,6 +1239,9 @@ def _summary_row(
     freeb_edge_control_state_coordinates = freeb_edge_control_runtime.get("state_coordinates")
     if not isinstance(freeb_edge_control_state_coordinates, dict):
         freeb_edge_control_state_coordinates = {}
+    freeb_edge_control_reduced_unknown = freeb_edge_control_runtime.get("reduced_unknown_vector")
+    if not isinstance(freeb_edge_control_reduced_unknown, dict):
+        freeb_edge_control_reduced_unknown = {}
     freeb_edge_control_update_direction = freeb_edge_control_runtime.get("update_direction")
     if not isinstance(freeb_edge_control_update_direction, dict):
         freeb_edge_control_update_direction = {}
@@ -1461,6 +1464,24 @@ def _summary_row(
         ),
         "freeb_edge_control_projection_state_reconstruction_residual_rel": _finite_float(
             freeb_edge_control_state_coordinates.get("reconstruction_residual_rel")
+        ),
+        "freeb_edge_control_projection_reduced_unknown_status": freeb_edge_control_reduced_unknown.get(
+            "status"
+        ),
+        "freeb_edge_control_projection_reduced_unknown_size": freeb_edge_control_reduced_unknown.get(
+            "reduced_unknown_size"
+        ),
+        "freeb_edge_control_projection_full_edge_size": freeb_edge_control_reduced_unknown.get(
+            "full_edge_size"
+        ),
+        "freeb_edge_control_projection_unknown_reduction_fraction": _finite_float(
+            freeb_edge_control_reduced_unknown.get("reduction_fraction")
+        ),
+        "freeb_edge_control_projection_unknown_decoded_residual_linf": _finite_float(
+            freeb_edge_control_reduced_unknown.get("decoded_residual_linf")
+        ),
+        "freeb_edge_control_projection_unknown_decoded_residual_rel": _finite_float(
+            freeb_edge_control_reduced_unknown.get("decoded_residual_rel")
         ),
         "freeb_edge_control_projection_update_direction_status": freeb_edge_control_update_direction.get(
             "status"
@@ -1958,6 +1979,12 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_state_reconstruction_residual_linf",
         "freeb_edge_control_projection_state_reconstruction_residual_rms",
         "freeb_edge_control_projection_state_reconstruction_residual_rel",
+        "freeb_edge_control_projection_reduced_unknown_status",
+        "freeb_edge_control_projection_reduced_unknown_size",
+        "freeb_edge_control_projection_full_edge_size",
+        "freeb_edge_control_projection_unknown_reduction_fraction",
+        "freeb_edge_control_projection_unknown_decoded_residual_linf",
+        "freeb_edge_control_projection_unknown_decoded_residual_rel",
         "freeb_edge_control_projection_update_direction_status",
         "freeb_edge_control_projection_update_direction_linf",
         "freeb_edge_control_projection_update_direction_rms",
