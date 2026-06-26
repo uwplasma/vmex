@@ -49,6 +49,115 @@ class ReducedControlStep:
         return out
 
 
+@dataclass(frozen=True)
+class ReducedControlMap:
+    """Affine map between full boundary coefficients and reduced controls.
+
+    ``initial`` is the full coefficient vector at zero reduced-control delta.
+    ``jacobian`` maps reduced-control deltas into that same full vector.  This
+    host-side object is the small reusable building block needed by diagnostics
+    today and by a future solver-native reduced-coordinate update path.
+    """
+
+    initial: np.ndarray
+    jacobian: np.ndarray
+    labels: tuple[str, ...] = ()
+    rcond: float | None = None
+
+    def __post_init__(self) -> None:
+        initial = np.asarray(self.initial, dtype=float).reshape(-1)
+        jacobian = np.asarray(self.jacobian, dtype=float)
+        if jacobian.ndim != 2:
+            raise ValueError("jacobian must be two-dimensional")
+        if jacobian.shape[0] != initial.size:
+            raise ValueError("jacobian row count must match initial size")
+        if jacobian.shape[1] == 0:
+            raise ValueError("jacobian must have at least one control column")
+        if not (np.all(np.isfinite(initial)) and np.all(np.isfinite(jacobian))):
+            raise ValueError("initial and jacobian must be finite")
+        if self.rcond is not None and (not np.isfinite(float(self.rcond)) or float(self.rcond) < 0.0):
+            raise ValueError("rcond must be finite and nonnegative when supplied")
+        if self.labels:
+            labels = tuple(str(label) for label in self.labels)
+            if len(labels) != jacobian.shape[1]:
+                raise ValueError("labels length must match the number of control columns")
+        else:
+            labels = tuple(f"control_{idx}" for idx in range(jacobian.shape[1]))
+        object.__setattr__(self, "initial", np.asarray(initial, dtype=float))
+        object.__setattr__(self, "jacobian", np.asarray(jacobian, dtype=float))
+        object.__setattr__(self, "labels", labels)
+        object.__setattr__(self, "rcond", None if self.rcond is None else float(self.rcond))
+
+    @property
+    def full_size(self) -> int:
+        """Number of full boundary coefficients represented by this map."""
+
+        return int(self.jacobian.shape[0])
+
+    @property
+    def control_count(self) -> int:
+        """Number of reduced controls."""
+
+        return int(self.jacobian.shape[1])
+
+    def encode(
+        self,
+        full_values: Any,
+        *,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ) -> ReducedControlStep:
+        """Fit full boundary values with this reduced-control map."""
+
+        values = np.asarray(full_values, dtype=float).reshape(-1)
+        if values.size != self.full_size:
+            raise ValueError("full_values size must match this reduced-control map")
+        return reduced_control_least_squares_step(
+            self.jacobian,
+            values - self.initial,
+            labels=self.labels,
+            ridge=ridge,
+            rcond=self.rcond,
+            trust_radius=trust_radius,
+        )
+
+    def decode(self, control_delta: Any) -> np.ndarray:
+        """Return full boundary values for a reduced-control delta."""
+
+        controls = np.asarray(control_delta, dtype=float).reshape(-1)
+        if controls.size != self.control_count:
+            raise ValueError("control_delta size must match this reduced-control map")
+        if not np.all(np.isfinite(controls)):
+            raise ValueError("control_delta must be finite")
+        return self.initial + self.jacobian @ controls
+
+    def project(
+        self,
+        full_values: Any,
+        *,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ) -> np.ndarray:
+        """Project full boundary values onto this reduced-control map."""
+
+        return self.decode(self.encode(full_values, ridge=ridge, trust_radius=trust_radius).control_delta)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return compact JSON-friendly map diagnostics."""
+
+        rank, singular_values, condition = _rank_and_condition(self.jacobian, rcond=self.rcond)
+        return {
+            "full_size": self.full_size,
+            "control_count": self.control_count,
+            "labels": list(self.labels),
+            "rcond": self.rcond,
+            "rank": int(rank),
+            "rank_deficient": bool(rank < self.control_count),
+            "singular_values": [float(value) for value in singular_values],
+            "condition_number": condition,
+        }
+
+
 def _rank_and_condition(jacobian: np.ndarray, *, rcond: float | None) -> tuple[int, np.ndarray, float | None]:
     singular_values = np.linalg.svd(jacobian, compute_uv=False)
     finite = singular_values[np.isfinite(singular_values)]

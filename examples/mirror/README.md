@@ -561,6 +561,9 @@ strict step, so uncontrolled Fourier edge momentum is not carried into the next
 iteration. This is still a bridge: the full VMEC Fourier residual is reported
 separately until solver-native spline/control coordinates replace the edge-only
 projection.
+``vmec_jax.solvers.free_boundary.ReducedControlMap`` is the public host-side
+encode/decode primitive for that next lane: it maps full Fourier edge vectors
+to reduced controls and back without changing the current solve path.
 As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the direct
 JAX hot-restart row is closer to the requested ``1e-12`` component target than
 the active VMEC2000 generated-``mgrid`` row, while VMEC2000 is flat above its

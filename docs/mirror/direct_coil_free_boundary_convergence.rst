@@ -578,6 +578,13 @@ the next profile kind; rows that already used edge projection but have not used
 the JAX NESTOR operator recommend ``direct-gpu-edge-jax-nestor-polish``.
 Rows that already used both edge projection and the JAX NESTOR operator fall
 back to the ordinary direct-GPU ``DELT``/stage-budget lane.
+The shared reduced-coordinate primitive for the next lane is
+``vmec_jax.solvers.free_boundary.ReducedControlMap``. It stores the baseline
+full boundary vector plus a reduced-control Jacobian, then encodes full
+Fourier boundary values into controls and decodes controls back to the full
+coefficient vector. This is the tested host-side map needed before the
+nonlinear unknown vector can be promoted from edge-only projection to
+solver-native spline/control coordinates.
 For staged solves, the same table now exposes ``stage_count``,
 ``stage_ns_array``, ``stage_niter_array``, ``stage_ftol_array``,
 ``stage_budget_total``, ``stage_budget_final``, ``current_stage_index``,

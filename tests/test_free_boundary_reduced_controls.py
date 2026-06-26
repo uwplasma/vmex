@@ -3,13 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from vmec_jax.solvers.free_boundary import reduced_control_least_squares_step
+from vmec_jax.solvers.free_boundary import ReducedControlMap, reduced_control_least_squares_step
 
 
 def test_reduced_control_least_squares_step_is_public() -> None:
     import vmec_jax as vj
     import vmec_jax.api as public_api
 
+    assert vj.ReducedControlMap is ReducedControlMap
+    assert public_api.ReducedControlMap is ReducedControlMap
     assert vj.reduced_control_least_squares_step is reduced_control_least_squares_step
     assert public_api.reduced_control_least_squares_step is reduced_control_least_squares_step
 
@@ -56,6 +58,38 @@ def test_reduced_control_least_squares_step_supports_trust_radius() -> None:
     assert step.trust_scale == pytest.approx(0.5)
 
 
+def test_reduced_control_map_encodes_decodes_and_projects_boundary_values() -> None:
+    control_map = ReducedControlMap(
+        initial=np.asarray([10.0, -1.0, 0.5]),
+        jacobian=np.asarray(
+            [
+                [1.0, 0.0],
+                [0.0, 2.0],
+                [0.0, 0.0],
+            ]
+        ),
+        labels=("side", "corner"),
+        rcond=1.0e-12,
+    )
+    full_values = np.asarray([13.0, 3.0, 7.5])
+
+    step = control_map.encode(full_values)
+    decoded = control_map.decode(step.control_delta)
+    projected = control_map.project(full_values)
+    payload = control_map.to_dict()
+
+    np.testing.assert_allclose(step.control_delta, [3.0, 2.0])
+    np.testing.assert_allclose(decoded, [13.0, 3.0, 0.5])
+    np.testing.assert_allclose(projected, decoded)
+    np.testing.assert_allclose(step.residual_after, [0.0, 0.0, 7.0])
+    assert step.control_delta_by_label == {"side": 3.0, "corner": 2.0}
+    assert control_map.full_size == 3
+    assert control_map.control_count == 2
+    assert payload["rank"] == 2
+    assert payload["rank_deficient"] is False
+    assert payload["labels"] == ["side", "corner"]
+
+
 @pytest.mark.parametrize(
     ("jacobian", "target", "kwargs", "match"),
     [
@@ -72,3 +106,30 @@ def test_reduced_control_least_squares_step_rejects_invalid_inputs(
 ) -> None:
     with pytest.raises(ValueError, match=match):
         reduced_control_least_squares_step(jacobian, target, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("initial", "jacobian", "kwargs", "match"),
+    [
+        ([0.0], [[[1.0]]], {}, "two-dimensional"),
+        ([0.0, 0.0], [[1.0]], {}, "row count"),
+        ([0.0], [[]], {}, "at least one control"),
+        ([np.nan], [[1.0]], {}, "finite"),
+        ([0.0], [[1.0]], {"labels": ("a", "b")}, "labels length"),
+        ([0.0], [[1.0]], {"rcond": -1.0}, "rcond"),
+    ],
+)
+def test_reduced_control_map_rejects_invalid_inputs(initial, jacobian, kwargs, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        ReducedControlMap(initial=initial, jacobian=jacobian, **kwargs)
+
+
+def test_reduced_control_map_rejects_mismatched_decode_and_encode_sizes() -> None:
+    control_map = ReducedControlMap(initial=[0.0, 0.0], jacobian=np.eye(2))
+
+    with pytest.raises(ValueError, match="full_values size"):
+        control_map.encode([1.0])
+    with pytest.raises(ValueError, match="control_delta size"):
+        control_map.decode([1.0])
+    with pytest.raises(ValueError, match="finite"):
+        control_map.decode([1.0, np.nan])

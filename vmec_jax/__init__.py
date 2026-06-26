@@ -260,6 +260,7 @@ _LAZY_ATTRS = {
     "load_mgrid": ".free_boundary",
     "prepare_mgrid_for_config": ".free_boundary",
     "validate_free_boundary_config": ".free_boundary",
+    "ReducedControlMap": ".solvers.free_boundary",
     "ReducedControlStep": ".solvers.free_boundary",
     "reduced_control_least_squares_step": ".solvers.free_boundary",
     "SquareAxisControlBasis": ".toroidal_hybrid",
