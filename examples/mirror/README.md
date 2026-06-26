@@ -207,7 +207,11 @@ does not pass the strict gate. Set
 underfit diagnostic input. Use
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` to get
 a finite ``MPOL``/``NTOR``/``NZETA`` suggestion for the current spline-smoothed
-target before starting a long free-boundary run. The plots use the solved VMEC
+target before starting a long free-boundary run. Backend profile JSON files also
+include a ``control_basis`` block with the full spline-control radii and the
+square/stellarator-symmetric reduced bases, so mode-deck robustness runs can be
+interpreted together with the intended low-dimensional control variables. The
+plots use the solved VMEC
 states: 3-D coils plus
 solved LCFS
 and field-line traces, top-view solved boundaries, side/corner cross sections,

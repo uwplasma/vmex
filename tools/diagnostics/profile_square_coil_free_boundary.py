@@ -38,9 +38,11 @@ from vmec_jax.free_boundary import _sample_external_boundary_arrays
 from vmec_jax.free_boundary_validation import virtual_casing_diagnostics_from_run
 from vmec_jax.namelist import write_indata
 from vmec_jax.toroidal_hybrid import (
+    SquareAxisSplineControls,
     evaluate_toroidal_hybrid_indata_boundary,
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
+    square_axis_spline_symmetric_control_basis,
 )
 from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1, find_vmec2000_exec, run_xvmec2000
 
@@ -1112,6 +1114,45 @@ def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
     return _example_boundary_projection_payload(config)
 
 
+def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return compact square-axis spline-control metadata for diagnostics."""
+
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if axis_kind not in {"spline", "control_spline", "spline_controls", "periodic_spline"}:
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": axis_kind,
+        }
+    controls = (
+        config.plasma_axis_spline_controls
+        if config.plasma_axis_spline_controls is not None
+        else SquareAxisSplineControls.rounded_square(
+            axis_half_width=float(config.plasma_axis_half_width),
+            corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
+        )
+    ).validate()
+    bases: dict[str, Any] = {}
+    for symmetry in ("square", "stellarator"):
+        basis = square_axis_spline_symmetric_control_basis(controls, symmetry=symmetry)
+        reduced_radius = basis.project_radius(controls.radius)
+        bases[symmetry] = {
+            "symmetry": basis.symmetry,
+            "labels": list(basis.labels),
+            "reduced_count": len(basis.labels),
+            "reduced_radius": [float(value) for value in reduced_radius],
+            "expansion_matrix_shape": [int(value) for value in basis.matrix.shape],
+            "expansion_matrix": np.asarray(basis.matrix, dtype=float),
+        }
+    return {
+        "status": "available",
+        "axis_kind": axis_kind,
+        "control_count": int(np.asarray(controls.radius).size),
+        "control_zeta": np.asarray(controls.zeta, dtype=float),
+        "control_radius": np.asarray(controls.radius, dtype=float),
+        "bases": bases,
+    }
+
+
 def _finite_float(value: Any) -> float | None:
     try:
         out = float(value)
@@ -1410,6 +1451,7 @@ def main(argv: list[str] | None = None) -> int:
         f"side_power={float(args.side_power):g}, corner_power={float(args.corner_power):g}"
     )
     boundary_projection = _boundary_projection_payload(config)
+    control_basis = _control_basis_payload(config)
     resolution_deck = _resolution_deck_payload(
         config=config,
         projection=boundary_projection,
@@ -1448,6 +1490,7 @@ def main(argv: list[str] | None = None) -> int:
                 "nphi": int(mgrid_nphi),
             },
             "boundary_projection": boundary_projection,
+            "control_basis": control_basis,
             "resolution_deck": resolution_deck,
             "provider_parity": None,
             "backends": {},
@@ -1557,6 +1600,7 @@ def main(argv: list[str] | None = None) -> int:
             **bounds,
         },
         "boundary_projection": boundary_projection,
+        "control_basis": control_basis,
         "resolution_deck": resolution_deck,
         "provider_parity": None,
         "backends": {},

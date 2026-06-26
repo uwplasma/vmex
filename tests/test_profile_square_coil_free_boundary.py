@@ -388,6 +388,13 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert projection["recommended_nzeta"] == 16
     assert projection["mode_count"] > 0
     assert np.isfinite(float(projection["max_abs_error"]))
+    control_basis = data["control_basis"]
+    assert control_basis["status"] == "available"
+    assert control_basis["control_count"] == 8
+    assert control_basis["bases"]["square"]["labels"] == ["side", "corner"]
+    assert control_basis["bases"]["square"]["reduced_count"] == 2
+    assert control_basis["bases"]["square"]["expansion_matrix_shape"] == [8, 2]
+    assert control_basis["bases"]["stellarator"]["reduced_count"] == 5
     deck = data["resolution_deck"]
     assert deck["status"] == "production_ready"
     assert deck["projection_meets_gate"] is True
@@ -566,6 +573,7 @@ def test_square_coil_profile_projection_gate_disabled_allows_diagnostic_underrec
     assert deck["status"] == "diagnostic_underresolved"
     assert "projection_gate_disabled" in deck["reasons"]
     assert "nzeta_below_square_axis_recommendation" in deck["reasons"]
+    assert data["control_basis"]["bases"]["square"]["reduced_count"] == 2
 
 
 def test_square_coil_profile_defaults_nzeta_to_square_axis_recommendation(monkeypatch, tmp_path: Path):

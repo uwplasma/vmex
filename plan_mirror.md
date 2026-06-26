@@ -29872,3 +29872,90 @@ Results:
 ### User input needed
 
 No user input is needed.
+---
+## 260. Added Control-Basis Metadata To Square-Coil Profiles
+
+### Steps taken
+
+- Added a compact `control_basis` block to
+  `tools/diagnostics/profile_square_coil_free_boundary.py`.
+- The block reports:
+  - the active square-axis spline-control radii;
+  - the two-parameter square reduced basis;
+  - the five-parameter stellarator-symmetric reduced basis.
+- Wrote the block in both normal backend-profile JSON and
+  `--resolution-diagnostics-only` JSON.
+- Updated tests, the mirror README, and the convergence notes.
+
+### Results obtained
+
+- Robustness runs over `MPOL`, `NTOR`, `NZETA`, and `mgrid_nphi` now carry the
+  low-dimensional spline-control context alongside the Fourier projection and
+  resolution-deck gates.
+- This makes strict-profile interpretation more direct: a stalled row can be
+  classified as a Fourier projection/solver issue without losing track of the
+  intended square-axis control variables.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_profile_square_coil_free_boundary.py
+ruff check \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_profile_square_coil_free_boundary.py
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/square_control_basis_probe \
+  --mpol 5 --ntor 28 --ns 5 --nzeta 64 --mgrid-nphi 64 \
+  --max-iter 2 --max-boundary-projection-error 5e-12 \
+  --skip-direct --skip-mgrid --skip-provider-parity \
+  --resolution-diagnostics-only
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_square_coil_followup_commands.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Results:
+
+- Profile/summarizer focused tests: `34 passed, 1 warning`.
+- Combined focused square-hybrid/profile suite: `85 passed, 2 warnings`.
+- Py-compile and Ruff checks passed.
+- CLI resolution probe reported `production_ready`, projection max
+  `3.4807712268047908e-12`, and square reduced labels `side`, `corner`.
+
+### File structure and best-practice notes
+
+- The metadata helper stays in the profiler because it describes profile JSON,
+  not the core geometry API.
+- The reusable basis math remains in `vmec_jax/toroidal_hybrid.py`.
+- No result files, WOUT files, or figures are tracked.
+
+### Best next steps
+
+1. Run a few `--resolution-diagnostics-only` deck probes with changed
+   `MPOL`/`NTOR`/`NZETA` and inspect the new `control_basis` block.
+2. Let the active VMEC2000 strict row reach a final state or a clear plateau.
+3. Use the reduced basis in the next direct-coil/JAX prototype before adding
+   more Fourier modes.
+
+### Completion percentages after M260
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `79%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `77%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `57%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.

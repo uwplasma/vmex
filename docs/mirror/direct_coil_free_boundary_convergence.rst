@@ -481,7 +481,11 @@ writes the ``boundary_projection`` and ``resolution_deck`` JSON blocks, then
 exits before coil, mgrid, or equilibrium work. Use it as the first check after
 changing mode counts or ``mgrid_nphi``; it records projection-gate status,
 recommended ``NZETA``, and whether the generated mgrid toroidal plane count is
-compatible with the VMEC ``NZETA`` grid.
+compatible with the VMEC ``NZETA`` grid. The same report includes
+``control_basis`` metadata for ``spline`` and ``control_spline`` axes: the full
+spline-control radii plus the square and stellarator-symmetric reduced bases.
+This makes it clear whether a strict run is testing the intended compact spline
+controls or only a larger Fourier projection deck.
 The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12`` by default and uses
 ``MPOL=5, NTOR=28, NZETA=64`` as the production-style deck. This is strict
