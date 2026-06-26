@@ -254,8 +254,8 @@ def _resolve_force_wout_and_pressure(*, wout: Any, indata: Any | None, s: Any):
     if not need_fill:
         return wout, None
 
-    from .energy import flux_profiles_from_indata
-    from .profiles import eval_profiles
+    from ..energy import flux_profiles_from_indata
+    from ..profiles import eval_profiles
 
     signgs = int(getattr(wout, "signgs", 1))
     flux = flux_profiles_from_indata(indata, s, signgs=signgs)
@@ -302,7 +302,7 @@ def _apply_freeb_edge_forcing(ctx):
         pres_edge = jnp.asarray(pres_edge) * jnp.asarray(ctx.freeb_pres_scale, dtype=vac_edge.dtype)
     elif (ctx.indata is not None) and int(ctx.s.shape[0]) >= 2:
         try:
-            from .profiles import eval_profiles
+            from ..profiles import eval_profiles
 
             hs_f = float(np.asarray(ctx.s[1] - ctx.s[0], dtype=float))
             sedge = hs_f * (float(int(ctx.s.shape[0])) - 1.5)
