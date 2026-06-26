@@ -584,6 +584,41 @@ class _ResidualFreeBoundarySetup(NamedTuple):
     attach_diag: Any
 
 
+class _ResidualIndexStateSetup(NamedTuple):
+    """Mode-transform and initial-state setup for residual iteration."""
+
+    mpol: int
+    ntor: int
+    nrange: int
+    ncoeff: int
+    setup_host_enforce: bool
+    mode_context: Any
+    m0_mask: Any
+    w_mode_mn: Any
+    w_mode_mn_np: Any
+    state0_dtype: Any
+    mn_cos_to_signed: Any
+    mn_sin_to_signed: Any
+    mn_cos_to_signed_physical: Any
+    mn_sin_to_signed_physical: Any
+    mn_sin_to_signed_physical_lambda: Any
+    mn_cos_to_signed_physical_lambda: Any
+    physical_delta_transforms: tuple[Any, Any, Any, Any]
+    internal_delta_transforms: tuple[Any, Any, Any, Any]
+    rz_norm_np: Any
+    rz_norm: Any
+    state: VMECState
+    precomputed_axis_mask_np: Any
+    jnp_state_dtype: Any
+    jnp_zero_m1_0: Any
+    jnp_zero_m1_1: Any
+    jnp_true_bool: Any
+    jnp_false_bool: Any
+    zeros_coeff_np: Any
+    zeros_dR_np: Any
+    delta_s: Any
+
+
 def _prepare_residual_free_boundary_setup(
     *,
     cfg: Any,
@@ -676,6 +711,114 @@ def _prepare_residual_boundary_setup(
         force_axis_reset=axis_reset_config.force_axis_reset,
         axis_reset_always_3d=axis_reset_config.axis_reset_always_3d,
         axis_reset_fsq_min=axis_reset_config.axis_reset_fsq_min,
+    )
+
+
+def _prepare_residual_index_state_setup(
+    *,
+    static: Any,
+    state0: VMECState,
+    s: Any,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    free_boundary_enabled: bool,
+    host_update_assembly: bool,
+    use_scan: bool,
+    state0_has_tracer: bool,
+    divide_by_scalxc_for_update: bool,
+    mode_diag_exponent: float,
+    idx00: int,
+    apply_lambda_axis_rules: Any,
+    vmec_scalxc_from_s_func: Any,
+) -> _ResidualIndexStateSetup:
+    """Build mode transforms and initial residual state setup."""
+
+    mpol = int(static.cfg.mpol)
+    ntor = int(static.cfg.ntor)
+    nrange = ntor + 1
+    ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
+    setup_host_enforce = _resolve_setup_host_enforce(
+        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
+        host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan),
+        state_has_tracer=state0_has_tracer,
+        backend_name=_scan_backend_name(),
+    )
+    mode_context = _build_mode_transform_context(
+        static=static,
+        state0=state0,
+        s=s,
+        host_update_assembly=bool(host_update_assembly),
+        setup_host_enforce=bool(setup_host_enforce),
+        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+        mode_diag_exponent=mode_diag_exponent,
+        tree_has_tracer=_tree_has_tracer,
+        vmec_scalxc_from_s=vmec_scalxc_from_s_func,
+    )
+    state_setup = _build_residual_state_setup(
+        state0=state0,
+        static=static,
+        s=s,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        free_boundary_enabled=bool(free_boundary_enabled),
+        host_update_assembly=bool(host_update_assembly),
+        setup_host_enforce=bool(setup_host_enforce),
+        idx00=idx00,
+        mpol=mpol,
+        nrange=nrange,
+        state0_dtype=mode_context.state0_dtype,
+        apply_lambda_axis_rules=apply_lambda_axis_rules,
+        tree_has_tracer=_tree_has_tracer,
+        has_jax_func=has_jax,
+    )
+    physical_delta_transforms = (
+        mode_context.mn_cos_to_signed_physical,
+        mode_context.mn_sin_to_signed_physical,
+        mode_context.mn_cos_to_signed_physical_lambda,
+        mode_context.mn_sin_to_signed_physical_lambda,
+    )
+    internal_delta_transforms = (
+        mode_context.mn_cos_to_signed,
+        mode_context.mn_sin_to_signed,
+        mode_context.mn_cos_to_signed,
+        mode_context.mn_sin_to_signed,
+    )
+    return _ResidualIndexStateSetup(
+        mpol=mpol,
+        ntor=ntor,
+        nrange=nrange,
+        ncoeff=ncoeff,
+        setup_host_enforce=bool(setup_host_enforce),
+        mode_context=mode_context,
+        m0_mask=mode_context.m0_mask,
+        w_mode_mn=mode_context.w_mode_mn,
+        w_mode_mn_np=mode_context.w_mode_mn_np,
+        state0_dtype=mode_context.state0_dtype,
+        mn_cos_to_signed=mode_context.mn_cos_to_signed,
+        mn_sin_to_signed=mode_context.mn_sin_to_signed,
+        mn_cos_to_signed_physical=mode_context.mn_cos_to_signed_physical,
+        mn_sin_to_signed_physical=mode_context.mn_sin_to_signed_physical,
+        mn_sin_to_signed_physical_lambda=mode_context.mn_sin_to_signed_physical_lambda,
+        mn_cos_to_signed_physical_lambda=mode_context.mn_cos_to_signed_physical_lambda,
+        physical_delta_transforms=physical_delta_transforms,
+        internal_delta_transforms=internal_delta_transforms,
+        rz_norm_np=mode_context.rz_norm_np,
+        rz_norm=mode_context.rz_norm,
+        state=state_setup.state,
+        precomputed_axis_mask_np=state_setup.precomputed_axis_mask_np,
+        jnp_state_dtype=state_setup.jnp_state_dtype,
+        jnp_zero_m1_0=state_setup.jnp_zero_m1_0,
+        jnp_zero_m1_1=state_setup.jnp_zero_m1_1,
+        jnp_true_bool=state_setup.jnp_true_bool,
+        jnp_false_bool=state_setup.jnp_false_bool,
+        zeros_coeff_np=state_setup.zeros_coeff_np,
+        zeros_dR_np=state_setup.zeros_dR_np,
+        delta_s=state_setup.delta_s,
     )
 
 
@@ -1199,51 +1342,9 @@ def solve_fixed_boundary_residual_iter(
     )
 
     _t_setup_index_constants = _setup_timer_start()
-    mpol = int(static.cfg.mpol)
-    ntor = int(static.cfg.ntor)
-    nrange = ntor + 1
-    ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
-    # On accelerator host-forward runs the initial row/gauge enforcement is
-    # setup work.  Using the NumPy row-assignment path avoids several tiny eager
-    # device dispatches without touching traced/differentiable solves.
-    setup_host_enforce = _resolve_setup_host_enforce(
-        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
-        host_update_assembly=bool(host_update_assembly),
-        use_scan=bool(use_scan),
-        state_has_tracer=state0_has_tracer,
-        backend_name=_scan_backend_name(),
-    )
-
-    _mode_context = _build_mode_transform_context(
+    index_state_setup = _prepare_residual_index_state_setup(
         static=static,
         state0=state0,
-        s=s,
-        host_update_assembly=bool(host_update_assembly),
-        setup_host_enforce=bool(setup_host_enforce),
-        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
-        mode_diag_exponent=mode_diag_exponent,
-        tree_has_tracer=_tree_has_tracer,
-        vmec_scalxc_from_s=vmec_scalxc_from_s,
-    )
-    m0_mask = _mode_context.m0_mask
-    w_mode_mn = _mode_context.w_mode_mn
-    w_mode_mn_np = _mode_context.w_mode_mn_np
-    _state0_dtype = _mode_context.state0_dtype
-    _record_setup_timing("setup_index_constants", _t_setup_index_constants)
-
-    _mn_cos_to_signed = _mode_context.mn_cos_to_signed
-    _mn_sin_to_signed = _mode_context.mn_sin_to_signed
-    _mn_cos_to_signed_physical = _mode_context.mn_cos_to_signed_physical
-    _mn_sin_to_signed_physical = _mode_context.mn_sin_to_signed_physical
-    _mn_sin_to_signed_physical_lambda = _mode_context.mn_sin_to_signed_physical_lambda
-    _mn_cos_to_signed_physical_lambda = _mode_context.mn_cos_to_signed_physical_lambda
-    _physical_delta_transforms = (_mn_cos_to_signed_physical, _mn_sin_to_signed_physical, _mn_cos_to_signed_physical_lambda, _mn_sin_to_signed_physical_lambda)
-    _internal_delta_transforms = (_mn_cos_to_signed, _mn_sin_to_signed, _mn_cos_to_signed, _mn_sin_to_signed)
-    _rz_norm_np = _mode_context.rz_norm_np
-    _rz_norm = _mode_context.rz_norm
-    state_setup = _build_residual_state_setup(
-        state0=state0,
-        static=static,
         s=s,
         edge_Rcos=edge_Rcos,
         edge_Rsin=edge_Rsin,
@@ -1251,25 +1352,45 @@ def solve_fixed_boundary_residual_iter(
         edge_Zsin=edge_Zsin,
         free_boundary_enabled=bool(free_boundary_enabled),
         host_update_assembly=bool(host_update_assembly),
-        setup_host_enforce=bool(setup_host_enforce),
+        use_scan=bool(use_scan),
+        state0_has_tracer=bool(state0_has_tracer),
+        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+        mode_diag_exponent=mode_diag_exponent,
         idx00=idx00,
-        mpol=mpol,
-        nrange=nrange,
-        state0_dtype=_state0_dtype,
         apply_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
-        tree_has_tracer=_tree_has_tracer,
-        has_jax_func=has_jax,
+        vmec_scalxc_from_s_func=vmec_scalxc_from_s,
     )
-    state = state_setup.state
-    _precomputed_axis_mask_np = state_setup.precomputed_axis_mask_np
-    _jnp_state_dtype = state_setup.jnp_state_dtype
-    _jnp_zero_m1_0 = state_setup.jnp_zero_m1_0
-    _jnp_zero_m1_1 = state_setup.jnp_zero_m1_1
-    _jnp_true_bool = state_setup.jnp_true_bool
-    _jnp_false_bool = state_setup.jnp_false_bool
-    _zeros_coeff_np = state_setup.zeros_coeff_np
-    _zeros_dR_np = state_setup.zeros_dR_np
-    delta_s = state_setup.delta_s
+    mpol = index_state_setup.mpol
+    ntor = index_state_setup.ntor
+    nrange = index_state_setup.nrange
+    ncoeff = index_state_setup.ncoeff
+    setup_host_enforce = index_state_setup.setup_host_enforce
+    _mode_context = index_state_setup.mode_context
+    m0_mask = index_state_setup.m0_mask
+    w_mode_mn = index_state_setup.w_mode_mn
+    w_mode_mn_np = index_state_setup.w_mode_mn_np
+    _state0_dtype = index_state_setup.state0_dtype
+    _record_setup_timing("setup_index_constants", _t_setup_index_constants)
+    _mn_cos_to_signed = index_state_setup.mn_cos_to_signed
+    _mn_sin_to_signed = index_state_setup.mn_sin_to_signed
+    _mn_cos_to_signed_physical = index_state_setup.mn_cos_to_signed_physical
+    _mn_sin_to_signed_physical = index_state_setup.mn_sin_to_signed_physical
+    _mn_sin_to_signed_physical_lambda = index_state_setup.mn_sin_to_signed_physical_lambda
+    _mn_cos_to_signed_physical_lambda = index_state_setup.mn_cos_to_signed_physical_lambda
+    _physical_delta_transforms = index_state_setup.physical_delta_transforms
+    _internal_delta_transforms = index_state_setup.internal_delta_transforms
+    _rz_norm_np = index_state_setup.rz_norm_np
+    _rz_norm = index_state_setup.rz_norm
+    state = index_state_setup.state
+    _precomputed_axis_mask_np = index_state_setup.precomputed_axis_mask_np
+    _jnp_state_dtype = index_state_setup.jnp_state_dtype
+    _jnp_zero_m1_0 = index_state_setup.jnp_zero_m1_0
+    _jnp_zero_m1_1 = index_state_setup.jnp_zero_m1_1
+    _jnp_true_bool = index_state_setup.jnp_true_bool
+    _jnp_false_bool = index_state_setup.jnp_false_bool
+    _zeros_coeff_np = index_state_setup.zeros_coeff_np
+    _zeros_dR_np = index_state_setup.zeros_dR_np
+    delta_s = index_state_setup.delta_s
 
     ftol = float(indata.get_float("FTOL", 1e-13)) if ftol is None else float(ftol)
     gamma = float(indata.get_float("GAMMA", 0.0))
