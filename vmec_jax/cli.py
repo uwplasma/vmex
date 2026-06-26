@@ -312,7 +312,7 @@ def _copy_test_input(outdir: Path) -> Path:
     """Copy the packaged quick-start input into ``outdir`` and return its path."""
     outdir.mkdir(parents=True, exist_ok=True)
     dst = outdir / _TEST_INPUT_NAME
-    resource = resources.files("vmec_jax").joinpath("data", _TEST_INPUT_NAME)
+    resource = resources.files("vmec_jax").joinpath("resources", _TEST_INPUT_NAME)
     with resources.as_file(resource) as src:
         shutil.copyfile(src, dst)
     _set_test_input_ftol(dst, ftol=_TEST_FTOL)
