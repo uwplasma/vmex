@@ -2109,58 +2109,98 @@ def same_branch_derivative_proposal_from_report(
     return {"available": False, "reason": "no same-branch derivative proposal was generated"}
 
 
-def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, Any]:
-    """Return compact gate evidence attached to derivative-assisted proposals."""
+@dataclass(frozen=True)
+class _SameBranchDerivativeGateSources:
+    """Normalized nested sections used by proposal gate evidence."""
 
-    def _finite_float(value: Any, default: float = 0.0) -> float:
-        try:
-            result = float(value)
-        except Exception:
-            return float(default)
-        return result if np.isfinite(result) else float(default)
+    vector: dict[str, Any]
+    replay_flags: dict[str, Any]
+    directional_signature: dict[str, Any]
+    current_only_cache: dict[str, Any]
+    current_jvp_cache_probe: dict[str, Any]
+    vector_cache_info: dict[str, Any]
+    probe_cache_info: dict[str, Any]
+    timings: dict[str, Any]
+    vector_timings: dict[str, Any]
+    probe_timings: dict[str, Any]
+    vector_gate: dict[str, Any]
+    physical_gate: dict[str, Any]
+    scalar_base_rel_delta: dict[str, float]
+    rejected_slot_gate: dict[str, Any]
 
-    vector = report.get("branch_local_vector_jacobian", {})
-    replay_flags = vector.get("replay_option_flags", {}) if isinstance(vector, dict) else {}
-    directional_signature = vector.get("directional_jvp_signature", {}) if isinstance(vector, dict) else {}
-    if not isinstance(directional_signature, dict) and isinstance(replay_flags, dict):
-        directional_signature = replay_flags.get("directional_jvp_signature", {})
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    """Return ``value`` when it is a dict, otherwise an empty dict."""
+
+    return value if isinstance(value, dict) else {}
+
+
+def _finite_float(value: Any, default: float = 0.0) -> float:
+    """Return a finite float or a small reporting default."""
+
+    try:
+        result = float(value)
+    except Exception:
+        return float(default)
+    return result if np.isfinite(result) else float(default)
+
+
+def _same_branch_derivative_gate_sources(report: dict[str, Any]) -> _SameBranchDerivativeGateSources:
+    """Normalize the nested same-branch report sections used by gate evidence."""
+
+    vector = _dict_or_empty(report.get("branch_local_vector_jacobian", {}))
+    replay_flags = _dict_or_empty(vector.get("replay_option_flags", {}))
+    directional_signature = vector.get("directional_jvp_signature", {})
     if not isinstance(directional_signature, dict):
-        directional_signature = {}
-    current_only_cache = report.get("current_only_coil_geometry_cache", {})
-    current_jvp_cache_probe = report.get("branch_local_vector_current_jvp_cache_probe", {})
-    vector_cache_info = vector.get("directional_jvp_cache_info", {}) if isinstance(vector, dict) else {}
-    if not isinstance(vector_cache_info, dict) and isinstance(replay_flags, dict):
-        vector_cache_info = replay_flags.get("directional_jvp_cache_info", {})
+        directional_signature = replay_flags.get("directional_jvp_signature", {})
+    directional_signature = _dict_or_empty(directional_signature)
+    current_only_cache = _dict_or_empty(report.get("current_only_coil_geometry_cache", {}))
+    current_jvp_cache_probe = _dict_or_empty(report.get("branch_local_vector_current_jvp_cache_probe", {}))
+    vector_cache_info = vector.get("directional_jvp_cache_info", {})
     if not isinstance(vector_cache_info, dict):
-        vector_cache_info = {}
-    probe_cache_info = (
-        current_jvp_cache_probe.get("directional_jvp_cache_info", {})
-        if isinstance(current_jvp_cache_probe, dict)
-        else {}
+        vector_cache_info = replay_flags.get("directional_jvp_cache_info", {})
+    vector_cache_info = _dict_or_empty(vector_cache_info)
+    probe_cache_info = _dict_or_empty(current_jvp_cache_probe.get("directional_jvp_cache_info", {}))
+    timings = _dict_or_empty(report.get("timings", {}))
+    vector_timings = _dict_or_empty(vector.get("timings", {}))
+    probe_timings = _dict_or_empty(current_jvp_cache_probe.get("timings", {}))
+    vector_gate = _dict_or_empty(report.get("branch_local_vector_gate", {}))
+    physical_gate = _dict_or_empty(vector_gate.get("physical_scalar_gate", {}))
+    scalar_evidence = _dict_or_empty(vector.get("scalars", {}))
+    scalar_base_rel_delta = {
+        str(key): float(value.get("base_rel_delta", np.nan))
+        for key, value in scalar_evidence.items()
+        if isinstance(value, dict) and "base_rel_delta" in value
+    }
+    return _SameBranchDerivativeGateSources(
+        vector=vector,
+        replay_flags=replay_flags,
+        directional_signature=directional_signature,
+        current_only_cache=current_only_cache,
+        current_jvp_cache_probe=current_jvp_cache_probe,
+        vector_cache_info=vector_cache_info,
+        probe_cache_info=probe_cache_info,
+        timings=timings,
+        vector_timings=vector_timings,
+        probe_timings=probe_timings,
+        vector_gate=vector_gate,
+        physical_gate=physical_gate,
+        scalar_base_rel_delta=scalar_base_rel_delta,
+        rejected_slot_gate=_dict_or_empty(report.get("accepted_rejected_controller_slot_gate", {})),
     )
-    if not isinstance(probe_cache_info, dict):
-        probe_cache_info = {}
-    timings = report.get("timings", {})
-    if not isinstance(timings, dict):
-        timings = {}
-    vector_timings = vector.get("timings", {}) if isinstance(vector, dict) else {}
-    if not isinstance(vector_timings, dict):
-        vector_timings = {}
-    probe_timings = (
-        current_jvp_cache_probe.get("timings", {})
-        if isinstance(current_jvp_cache_probe, dict)
-        else {}
-    )
-    if not isinstance(probe_timings, dict):
-        probe_timings = {}
-    vector_wall_s = _finite_float(timings.get("branch_local_vector_wall_s", vector_timings.get("total_wall_s")))
+
+
+def _same_branch_derivative_timing_gate_evidence(src: _SameBranchDerivativeGateSources) -> dict[str, Any]:
+    """Return timing and current-JVP-cache evidence for a branch-local report."""
+
+    vector_wall_s = _finite_float(src.timings.get("branch_local_vector_wall_s", src.vector_timings.get("total_wall_s")))
     vector_replay_jvp_wall_s = _finite_float(
-        timings.get("branch_local_vector_replay_jvp_wall_s", vector_timings.get("replay_jvp_wall_s"))
+        src.timings.get("branch_local_vector_replay_jvp_wall_s", src.vector_timings.get("replay_jvp_wall_s"))
     )
     probe_replay_jvp_wall_s = _finite_float(
-        timings.get(
+        src.timings.get(
             "branch_local_vector_cache_probe_replay_jvp_wall_s",
-            probe_timings.get("replay_jvp_wall_s"),
+            src.probe_timings.get("replay_jvp_wall_s"),
         )
     )
     cache_probe_speedup = (
@@ -2168,117 +2208,83 @@ def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, An
         if vector_replay_jvp_wall_s > 0.0 and probe_replay_jvp_wall_s > 0.0
         else 0.0
     )
-    vector_gate = report.get("branch_local_vector_gate", {})
-    physical_gate = vector_gate.get("physical_scalar_gate", {}) if isinstance(vector_gate, dict) else {}
-    scalar_evidence = vector.get("scalars", {}) if isinstance(vector, dict) else {}
-    scalar_base_rel_delta = {
-        str(key): float(value.get("base_rel_delta", np.nan))
-        for key, value in scalar_evidence.items()
-        if isinstance(value, dict) and "base_rel_delta" in value
-    }
-    rejected_slot_gate = report.get("accepted_rejected_controller_slot_gate", {})
-    rejected_slot_requested = isinstance(rejected_slot_gate, dict) and bool(rejected_slot_gate.get("requested", False))
     return {
-        "directional_jvp_fast_path": str(
-            vector.get("directional_jvp_fast_path", replay_flags.get("directional_jvp_fast_path", "none"))
-            if isinstance(vector, dict)
-            else "none"
-        ),
-        "directional_uses_fixed_coil_geometry": bool(
-            vector.get(
-                "directional_uses_fixed_coil_geometry",
-                replay_flags.get("directional_uses_fixed_coil_geometry", False),
-            )
-            if isinstance(vector, dict)
-            else False
-        ),
-        "current_only_coil_geometry_cache_available": bool(
-            isinstance(current_only_cache, dict) and current_only_cache.get("available", False)
-        ),
-        "current_only_coil_geometry_cache_reason": str(
-            current_only_cache.get("reason", "") if isinstance(current_only_cache, dict) else ""
-        ),
-        "current_only_coil_geometry_source": str(
-            replay_flags.get("current_only_coil_geometry_source", "")
-            if isinstance(replay_flags, dict)
-            else ""
-        ),
-        "directional_jvp_signature": dict(directional_signature),
-        "directional_jvp_cache_candidate": bool(directional_signature.get("jit_cache_candidate", False)),
-        "directional_jvp_cache_enabled": bool(vector_cache_info.get("enabled", False)),
-        "directional_jvp_cache_hit": bool(vector_cache_info.get("hit", False)),
-        "directional_jvp_cache_closure_bound": bool(vector_cache_info.get("closure_bound", False)),
-        "directional_jvp_cache_executable_kind": str(vector_cache_info.get("executable_kind", "")),
-        "directional_jvp_cache_compiled": bool(vector_cache_info.get("compiled", False)),
-        "directional_jvp_cache_compiled_on_this_call": bool(
-            vector_cache_info.get("compiled_on_this_call", False)
-        ),
         "directional_jvp_cache_compile_s": _finite_float(
-            timings.get(
+            src.timings.get(
                 "branch_local_vector_current_only_jvp_cache_compile_s",
-                vector_timings.get("current_only_jvp_cache_compile_s", vector_cache_info.get("compile_s", 0.0)),
+                src.vector_timings.get(
+                    "current_only_jvp_cache_compile_s",
+                    src.vector_cache_info.get("compile_s", 0.0),
+                ),
             )
         ),
-        "directional_jvp_cache_info": dict(vector_cache_info),
-        "current_jvp_cache_probe_available": bool(
-            isinstance(current_jvp_cache_probe, dict) and current_jvp_cache_probe.get("available", False)
-        ),
-        "current_jvp_cache_probe_hit": bool(
-            isinstance(current_jvp_cache_probe, dict) and current_jvp_cache_probe.get("cache_hit", False)
-        ),
-        "current_jvp_cache_probe_wall_s": float(
-            current_jvp_cache_probe.get("wall_s", 0.0) if isinstance(current_jvp_cache_probe, dict) else 0.0
-        ),
+        "current_jvp_cache_probe_available": bool(src.current_jvp_cache_probe.get("available", False)),
+        "current_jvp_cache_probe_hit": bool(src.current_jvp_cache_probe.get("cache_hit", False)),
+        "current_jvp_cache_probe_wall_s": float(src.current_jvp_cache_probe.get("wall_s", 0.0)),
         "branch_local_vector_wall_s": vector_wall_s,
         "branch_local_vector_replay_jvp_wall_s": vector_replay_jvp_wall_s,
         "current_jvp_cache_probe_replay_jvp_wall_s": probe_replay_jvp_wall_s,
         "current_jvp_cache_probe_replay_jvp_speedup": float(cache_probe_speedup),
-        "current_jvp_cache_probe_info": dict(probe_cache_info),
-        "branch_local_vector_gate_available": bool(
-            isinstance(vector_gate, dict) and vector_gate.get("available", False)
-        ),
-        "branch_local_vector_gate_passed": bool(
-            isinstance(vector_gate, dict) and vector_gate.get("passed", False)
-        ),
-        "branch_local_vector_max_base_abs_delta": float(
-            vector.get("max_base_abs_delta", np.nan) if isinstance(vector, dict) else np.nan
-        ),
-        "branch_local_vector_max_base_rel_delta": float(
-            vector.get("max_base_rel_delta", np.nan) if isinstance(vector, dict) else np.nan
-        ),
-        "branch_local_scalar_base_rel_delta": scalar_base_rel_delta,
-        "physical_scalar_gate_passed": bool(
-            isinstance(physical_gate, dict) and physical_gate.get("passed", False)
-        ),
-        "accepted_rejected_controller_slot_gate_requested": bool(rejected_slot_requested),
-        "accepted_rejected_controller_slot_gate_available": bool(
-            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("available", False)
-        ),
-        "accepted_rejected_controller_slot_gate_passed": bool(
-            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("passed", False)
-        ),
-        "accepted_rejected_controller_slot_scope": str(
-            rejected_slot_gate.get("scope", "") if isinstance(rejected_slot_gate, dict) else ""
-        ),
+        "current_jvp_cache_probe_info": dict(src.probe_cache_info),
+    }
+
+
+def _same_branch_derivative_rejected_slot_evidence(src: _SameBranchDerivativeGateSources) -> dict[str, Any]:
+    """Return accepted/rejected controller-slot gate evidence."""
+
+    gate = src.rejected_slot_gate
+    return {
+        "accepted_rejected_controller_slot_gate_requested": bool(gate.get("requested", False)),
+        "accepted_rejected_controller_slot_gate_available": bool(gate.get("available", False)),
+        "accepted_rejected_controller_slot_gate_passed": bool(gate.get("passed", False)),
+        "accepted_rejected_controller_slot_scope": str(gate.get("scope", "")),
         "accepted_rejected_controller_slot_gate_wall_s": _finite_float(
-            rejected_slot_gate.get("wall_s", timings.get("branch_local_rejected_slot_wall_s", 0.0))
-            if isinstance(rejected_slot_gate, dict)
-            else timings.get("branch_local_rejected_slot_wall_s", 0.0)
+            gate.get("wall_s", src.timings.get("branch_local_rejected_slot_wall_s", 0.0))
         ),
-        "same_stacked_step_policy_branch": bool(
-            isinstance(rejected_slot_gate, dict) and rejected_slot_gate.get("same_stacked_step_policy_branch", False)
-        ),
-        "fixed_rejected_controller_slots": int(
-            rejected_slot_gate.get("fixed_rejected_controller_slots", 0)
-            if isinstance(rejected_slot_gate, dict)
-            else 0
-        ),
+        "same_stacked_step_policy_branch": bool(gate.get("same_stacked_step_policy_branch", False)),
+        "fixed_rejected_controller_slots": int(gate.get("fixed_rejected_controller_slots", 0)),
         "controller_slot_summary": (
-            dict(rejected_slot_gate.get("controller_slot_summary", {}))
-            if isinstance(rejected_slot_gate, dict)
-            and isinstance(rejected_slot_gate.get("controller_slot_summary", {}), dict)
+            dict(gate.get("controller_slot_summary", {}))
+            if isinstance(gate.get("controller_slot_summary", {}), dict)
             else {}
         ),
+    }
+
+
+def same_branch_derivative_gate_evidence(report: dict[str, Any]) -> dict[str, Any]:
+    """Return compact gate evidence attached to derivative-assisted proposals."""
+
+    src = _same_branch_derivative_gate_sources(report)
+    return {
+        "directional_jvp_fast_path": str(
+            src.vector.get("directional_jvp_fast_path", src.replay_flags.get("directional_jvp_fast_path", "none"))
+        ),
+        "directional_uses_fixed_coil_geometry": bool(
+            src.vector.get(
+                "directional_uses_fixed_coil_geometry",
+                src.replay_flags.get("directional_uses_fixed_coil_geometry", False),
+            )
+        ),
+        "current_only_coil_geometry_cache_available": bool(src.current_only_cache.get("available", False)),
+        "current_only_coil_geometry_cache_reason": str(src.current_only_cache.get("reason", "")),
+        "current_only_coil_geometry_source": str(src.replay_flags.get("current_only_coil_geometry_source", "")),
+        "directional_jvp_signature": dict(src.directional_signature),
+        "directional_jvp_cache_candidate": bool(src.directional_signature.get("jit_cache_candidate", False)),
+        "directional_jvp_cache_enabled": bool(src.vector_cache_info.get("enabled", False)),
+        "directional_jvp_cache_hit": bool(src.vector_cache_info.get("hit", False)),
+        "directional_jvp_cache_closure_bound": bool(src.vector_cache_info.get("closure_bound", False)),
+        "directional_jvp_cache_executable_kind": str(src.vector_cache_info.get("executable_kind", "")),
+        "directional_jvp_cache_compiled": bool(src.vector_cache_info.get("compiled", False)),
+        "directional_jvp_cache_compiled_on_this_call": bool(src.vector_cache_info.get("compiled_on_this_call", False)),
+        "directional_jvp_cache_info": dict(src.vector_cache_info),
+        **_same_branch_derivative_timing_gate_evidence(src),
+        "branch_local_vector_gate_available": bool(src.vector_gate.get("available", False)),
+        "branch_local_vector_gate_passed": bool(src.vector_gate.get("passed", False)),
+        "branch_local_vector_max_base_abs_delta": float(src.vector.get("max_base_abs_delta", np.nan)),
+        "branch_local_vector_max_base_rel_delta": float(src.vector.get("max_base_rel_delta", np.nan)),
+        "branch_local_scalar_base_rel_delta": src.scalar_base_rel_delta,
+        "physical_scalar_gate_passed": bool(src.physical_gate.get("passed", False)),
+        **_same_branch_derivative_rejected_slot_evidence(src),
     }
 
 
