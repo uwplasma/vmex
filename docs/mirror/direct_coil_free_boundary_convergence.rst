@@ -509,6 +509,9 @@ It also includes ``control_fourier_map`` for the square-reduced spline controls:
 side/corner labels, stacked ``4K x 2`` coefficient-Jacobian shape, singular
 values, condition number, and column norms. This is a preflight diagnostic for
 the solver-native reduced-control lane, not a nonlinear convergence claim.
+Its nested ``candidate_bases`` block records the same conditioning diagnostics
+for both the two-control square basis and the five-control
+stellarator-symmetric basis.
 The reusable source hook is
 ``SquareAxisControlFourierMatrix.project_boundary_delta(...)``. It returns a
 ``SquareAxisControlProjection`` with the fitted control update, reconstructed

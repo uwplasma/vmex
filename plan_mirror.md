@@ -5865,6 +5865,63 @@ No user input is needed.
 
 No user input is needed.
 
+---
+
+## 268. Added Candidate-Basis Conditioning To Control-Fourier Preflight
+
+### Steps taken
+
+- Added `candidate_bases` to the `control_fourier_map` preflight JSON block.
+- The preflight now reports conditioning for both:
+  - the two-control square side/corner basis;
+  - the five-control stellarator-symmetric basis.
+- Updated the resolution-only profile test and documentation.
+
+### Results obtained
+
+- A user can now inspect whether the five-control basis is well conditioned
+  before spending time on a long free-boundary solve.
+- This complements the M267 postsolve capture comparison: preflight reports map
+  conditioning, postsolve reports how much of the accepted LCFS motion each
+  basis captures.
+
+### How it was tested
+
+- The existing resolution-only profile test now checks the nested candidate map
+  shape and control count.
+- Focused and broader profile tests are run before commit.
+
+### File structure and best-practice notes
+
+- The candidate-map construction reuses the same private profile helper as the
+  default square map.
+- Full singular values remain in JSON; only compact columns are added to the
+  summary where needed.
+- No generated outputs were tracked.
+
+### Best next steps
+
+1. Use the preflight candidate-basis conditioning together with postsolve
+   capture to choose the first solver-native reduced-control basis.
+2. Launch updated short JAX profiles after the active long rows finish or on a
+   separate checkout.
+
+### Completion percentages after M268
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `90%`.
+- Direct-coil GPU/JIT parity lane: `81%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `78%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `74%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
 ## 265. Project Accepted Square-Coil LCFS Motion Onto Reduced Controls
 
 ### Steps taken

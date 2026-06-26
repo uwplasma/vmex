@@ -1307,17 +1307,10 @@ def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
     }
 
 
-def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
-    """Return conditioning diagnostics for the reduced control-to-Fourier map."""
-
+def _control_fourier_map_for_symmetry(config: ExampleConfig, *, symmetry: str) -> dict[str, Any]:
     axis_kind = str(config.plasma_axis_kind).strip().lower()
-    if not _square_axis_uses_spline_controls(config):
-        return {
-            "status": "not_applicable_for_axis_kind",
-            "axis_kind": axis_kind,
-        }
     try:
-        basis, matrix = _square_control_fourier_matrix(config)
+        basis, matrix = _square_control_fourier_matrix(config, symmetry=symmetry)
         jacobian = matrix.stacked_jacobian()
         singular_values = np.linalg.svd(jacobian, compute_uv=False)
         finite_singular_values = singular_values[np.isfinite(singular_values)]
@@ -1339,8 +1332,27 @@ def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
         return {
             "status": f"failed:{type(exc).__name__}",
             "axis_kind": axis_kind,
+            "basis_symmetry": str(symmetry),
             "error": repr(exc),
         }
+
+
+def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return conditioning diagnostics for the reduced control-to-Fourier map."""
+
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if not _square_axis_uses_spline_controls(config):
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": axis_kind,
+        }
+    payload = _control_fourier_map_for_symmetry(config, symmetry="square")
+    if payload is not None:
+        payload["candidate_bases"] = {
+            symmetry: _control_fourier_map_for_symmetry(config, symmetry=symmetry)
+            for symmetry in ("square", "stellarator")
+        }
+    return payload
 
 
 def _finite_float(value: Any) -> float | None:
