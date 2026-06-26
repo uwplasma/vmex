@@ -796,6 +796,9 @@ The remaining work is deliberately narrow:
    free-boundary cadence/runtime fields, not the full nonlinear time-step
    controller.  This mirrors the VMEC++ hot-restart idea while keeping the
    experiment opt-in and auditable in the backend ``hot_restart`` JSON block.
+   Use ``--jax-initial-restart-wout <wout_*.nc>`` when a completed strict-deck
+   row already exists; this seeds the first final-grid pass from that WOUT and
+   avoids replaying the full multigrid ladder just to test the restart tail.
 2. Re-run the square-coil beta ladder with per-beta checkpointing and the
    best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at
    ``1e-12``. Keep ``DELT=0.02``, ``NVACSKIP=1``,

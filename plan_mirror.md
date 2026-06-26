@@ -5767,7 +5767,8 @@ No user input is needed.
   - `--jax-hot-restart-count`;
   - `--jax-hot-restart-iters`;
   - `--jax-hot-restart-policy state|freeb|full`;
-  - `--jax-hot-restart-always`.
+  - `--jax-hot-restart-always`;
+  - `--jax-initial-restart-wout`.
 - The default `freeb` hot-restart policy restarts from the accepted state and
   carries only the VMEC/NESTOR free-boundary cadence/runtime fields
   (`ivac`, `ivacskip`, `nvacskip`, `freeb_nestor_runtime`, and the previous
@@ -5775,6 +5776,9 @@ No user input is needed.
 - Added a backend `hot_restart` JSON block with per-stage strict residual
   status, component max/sum, final accepted-state recomputation status, and
   free-boundary cadence scalars.
+- Added the WOUT seed hook so a completed strict-deck row can provide the first
+  final-grid state for a hot-restart profile without replaying the full
+  multigrid ladder.
 - Exposed hot-restart metadata in
   `tools/diagnostics/summarize_square_coil_profiles.py` so CSV/Markdown rows
   show requested/executed restart count, per-pass budget, policy, stop reason,
@@ -5825,8 +5829,9 @@ No user input is needed.
 1. Commit and push the hot-restart profiler lane.
 2. Queue a direct-GPU hot-restart row on `office`, starting from the current
    best Anderson settings:
-   `--freeb-anderson-pressure --jax-hot-restart-count 2
-   --jax-hot-restart-iters 8000 --jax-hot-restart-policy freeb`.
+   `--freeb-anderson-pressure --jax-initial-restart-wout <anderson-wout>
+   --jax-hot-restart-count 2 --jax-hot-restart-iters 8000
+   --jax-hot-restart-policy freeb`.
 3. Let the already-running JAX-NESTOR row finish, then summarize it against the
    completed baseline/Anderson rows.
 4. Let the VMEC2000 `DELT` scan run and compare strict gaps, runtime, memory,

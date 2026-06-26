@@ -362,6 +362,7 @@ def test_square_coil_profile_summary_recommends_provider_parity_when_missing(
                     "jax_hot_restart_iters": 4000,
                     "jax_hot_restart_policy": "freeb",
                     "jax_hot_restart_always": False,
+                    "jax_initial_restart_wout": "results/seed/wout.nc",
                 },
                 "resolution_deck": {
                     "status": "production_ready",
@@ -539,6 +540,7 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
                             "jax_hot_restart_iters": 4000,
                             "jax_hot_restart_policy": "freeb",
                             "jax_hot_restart_always": False,
+                            "jax_initial_restart_wout": "results/seed/wout.nc",
                         },
                         "hot_restart": {
                             "requested_count": 2,
@@ -569,6 +571,7 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
     assert row["jax_hot_restart_iters"] == 4000
     assert row["jax_hot_restart_policy"] == "freeb"
     assert row["jax_hot_restart_always"] is False
+    assert row["jax_initial_restart_wout"] == "results/seed/wout.nc"
     assert row["jax_hot_restart_stopped_after_strict"] is False
     assert row["jax_hot_restart_last_status"] == "stalled_above_strict_ftol"
     assert row["jax_hot_restart_last_component_max"] == pytest.approx(3.0e-9)

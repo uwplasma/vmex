@@ -231,6 +231,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Run every requested hot-restart pass even if an earlier pass satisfies strict convergence.",
     )
     p.add_argument(
+        "--jax-initial-restart-wout",
+        type=Path,
+        default=None,
+        help=(
+            "Optional existing wout_*.nc used to seed the first vmec_jax pass on the final grid. "
+            "This avoids rerunning the full multigrid ladder when profiling strict hot restarts."
+        ),
+    )
+    p.add_argument(
         "--freeb-anderson-pressure",
         action="store_true",
         help="Enable opt-in Anderson(1) mixing for free-boundary vacuum pressure in vmec_jax backends.",
@@ -1364,6 +1373,7 @@ def _run_jax_backend(
     jax_hot_restart_iters: int | None = None,
     jax_hot_restart_policy: str = "freeb",
     jax_hot_restart_always: bool = False,
+    jax_initial_restart_wout: Path | None = None,
     verbose_solver: bool = False,
     virtual_casing_diagnostics: bool = False,
     virtual_casing_quad_factor: int = 2,
@@ -1422,12 +1432,15 @@ def _run_jax_backend(
             *,
             max_iter: int,
             restart_state: Any | None,
+            restart_wout_path: Path | None,
             restart_solver_state: dict[str, Any] | None,
             multigrid: bool,
         ) -> Any:
             pass_kwargs = dict(kwargs)
             if restart_state is not None:
                 pass_kwargs["restart_state"] = restart_state
+            if restart_wout_path is not None:
+                pass_kwargs["restart_wout_path"] = restart_wout_path
             if restart_solver_state is not None:
                 pass_kwargs["restart_solver_state"] = restart_solver_state
             return run_free_boundary(
@@ -1444,20 +1457,25 @@ def _run_jax_backend(
                 **pass_kwargs,
             )
 
-        initial_budget = _run_budget(config, restart_state=None)
+        initial_budget = (
+            int(hot_restart_iters_eff)
+            if jax_initial_restart_wout is not None
+            else _run_budget(config, restart_state=None)
+        )
         run = _run_solver_pass(
             max_iter=initial_budget,
             restart_state=None,
+            restart_wout_path=jax_initial_restart_wout,
             restart_solver_state=None,
-            multigrid=bool(config.use_multigrid_schedule),
+            multigrid=bool(config.use_multigrid_schedule) and jax_initial_restart_wout is None,
         )
         residuals = _final_residuals(run, config=config)
         hot_restart_stages = [
             _jax_hot_restart_stage_payload(
                 stage_index=0,
-                kind="initial",
+                kind="initial_restart_wout" if jax_initial_restart_wout is not None else "initial",
                 budget=int(initial_budget),
-                restart_policy=None,
+                restart_policy="wout" if jax_initial_restart_wout is not None else None,
                 run=run,
                 residuals=residuals,
             )
@@ -1474,6 +1492,7 @@ def _run_jax_backend(
             run = _run_solver_pass(
                 max_iter=int(hot_restart_iters_eff),
                 restart_state=run.state,
+                restart_wout_path=None,
                 restart_solver_state=restart_solver_state,
                 multigrid=False,
             )
@@ -1540,6 +1559,9 @@ def _run_jax_backend(
             "jax_hot_restart_iters": int(hot_restart_iters_eff),
             "jax_hot_restart_policy": str(hot_restart_policy),
             "jax_hot_restart_always": bool(jax_hot_restart_always),
+            "jax_initial_restart_wout": None
+            if jax_initial_restart_wout is None
+            else str(jax_initial_restart_wout),
         },
         "hot_restart": {
             "enabled": bool(hot_restart_count > 0),
@@ -1547,6 +1569,9 @@ def _run_jax_backend(
             "executed_count": max(0, len(hot_restart_stages) - 1),
             "iters_per_restart": int(hot_restart_iters_eff),
             "resume_policy": str(hot_restart_policy),
+            "initial_restart_wout": None
+            if jax_initial_restart_wout is None
+            else str(jax_initial_restart_wout),
             "always": bool(jax_hot_restart_always),
             "stopped_after_strict_convergence": bool(
                 hot_restart_count > 0
@@ -2328,6 +2353,9 @@ def main(argv: list[str] | None = None) -> int:
                 else int(args.jax_hot_restart_iters),
                 "jax_hot_restart_policy": str(args.jax_hot_restart_policy),
                 "jax_hot_restart_always": bool(args.jax_hot_restart_always),
+                "jax_initial_restart_wout": None
+                if args.jax_initial_restart_wout is None
+                else str(args.jax_initial_restart_wout),
                 "virtual_casing_quad_factor": int(args.virtual_casing_quad_factor),
                 "virtual_casing_chunk_size": args.virtual_casing_chunk_size,
                 "virtual_casing_target_chunk_size": args.virtual_casing_target_chunk_size,
@@ -2433,6 +2461,9 @@ def main(argv: list[str] | None = None) -> int:
             else int(args.jax_hot_restart_iters),
             "jax_hot_restart_policy": str(args.jax_hot_restart_policy),
             "jax_hot_restart_always": bool(args.jax_hot_restart_always),
+            "jax_initial_restart_wout": None
+            if args.jax_initial_restart_wout is None
+            else str(args.jax_initial_restart_wout),
             "direct_static_cache": bool(args.direct_static_cache),
             "jit_direct_sampler": bool(args.jit_direct_sampler),
             "direct_trial_bsqvac_resample": bool(args.direct_trial_bsqvac_resample),
@@ -2512,6 +2543,7 @@ def main(argv: list[str] | None = None) -> int:
             jax_hot_restart_iters=args.jax_hot_restart_iters,
             jax_hot_restart_policy=str(args.jax_hot_restart_policy),
             jax_hot_restart_always=bool(args.jax_hot_restart_always),
+            jax_initial_restart_wout=args.jax_initial_restart_wout,
             verbose_solver=bool(args.verbose_solver),
             virtual_casing_diagnostics=bool(args.virtual_casing_diagnostics),
             virtual_casing_quad_factor=int(args.virtual_casing_quad_factor),
@@ -2545,6 +2577,7 @@ def main(argv: list[str] | None = None) -> int:
             jax_hot_restart_iters=args.jax_hot_restart_iters,
             jax_hot_restart_policy=str(args.jax_hot_restart_policy),
             jax_hot_restart_always=bool(args.jax_hot_restart_always),
+            jax_initial_restart_wout=args.jax_initial_restart_wout,
             verbose_solver=bool(args.verbose_solver),
             virtual_casing_diagnostics=False,
             accepted_provider_parity=bool(args.accepted_provider_parity),

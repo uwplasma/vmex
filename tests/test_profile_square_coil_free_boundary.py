@@ -41,6 +41,8 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "--jax-hot-restart-policy",
             "freeb",
             "--jax-hot-restart-always",
+            "--jax-initial-restart-wout",
+            str(tmp_path / "seed.nc"),
             "--freeb-jax-nestor-operator",
             "--no-freeb-jax-nestor-jit-operator",
             "--freeb-include-edge",
@@ -65,6 +67,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.jax_hot_restart_iters == 500
     assert args.jax_hot_restart_policy == "freeb"
     assert args.jax_hot_restart_always is True
+    assert args.jax_initial_restart_wout == tmp_path / "seed.nc"
     assert args.freeb_jax_nestor_operator is True
     assert args.freeb_jax_nestor_jit_operator is False
     assert args.freeb_include_edge is True
@@ -1266,3 +1269,60 @@ def test_square_coil_profile_run_jax_backend_hot_restarts_from_freeb_state(
     assert out["free_boundary_solver_overrides"]["jax_hot_restart_iters"] == 5
     assert out["free_boundary_solver_overrides"]["jax_hot_restart_policy"] == "freeb"
     assert written["state"] is states[1]
+
+
+def test_square_coil_profile_run_jax_backend_can_seed_initial_pass_from_wout(
+    monkeypatch, tmp_path: Path
+):
+    calls = []
+    seed = tmp_path / "seed_wout.nc"
+    monkeypatch.setattr(profile, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    def fake_run_free_boundary(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        result = SimpleNamespace(
+            n_iter=3,
+            diagnostics={
+                "requested_ftol": 1.0e-12,
+                "final_fsqr": 2.0e-13,
+                "final_fsqz": 3.0e-13,
+                "final_fsql": 4.0e-13,
+                "final_residual_recomputed_on_accepted_state": True,
+                "free_boundary": {"nestor_model": "vmec2000_like_dense_integral"},
+            },
+            w_history=[],
+            fsqr2_history=[],
+            fsqz2_history=[],
+            fsql2_history=[],
+        )
+        return SimpleNamespace(result=result, state=SimpleNamespace(name="seeded"))
+
+    monkeypatch.setattr(profile, "run_free_boundary", fake_run_free_boundary)
+    config = SimpleNamespace(
+        use_multigrid_schedule=True,
+        max_iter=8000,
+        niter_array=[1000, 2000, 8000],
+        jit_forces=True,
+        free_boundary_activate_fsq=1.0e-3,
+    )
+
+    out = profile._run_jax_backend(
+        input_path=tmp_path / "input.case",
+        wout_path=tmp_path / "wout_case.nc",
+        config=config,
+        direct_params=None,
+        solver_mode="parity",
+        return_best_scored_state=True,
+        jax_hot_restart_count=0,
+        jax_hot_restart_iters=5000,
+        jax_initial_restart_wout=seed,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["kwargs"]["max_iter"] == 5000
+    assert calls[0]["kwargs"]["multigrid"] is False
+    assert calls[0]["kwargs"]["restart_wout_path"] == seed
+    assert out["hot_restart"]["stages"][0]["kind"] == "initial_restart_wout"
+    assert out["hot_restart"]["stages"][0]["restart_policy"] == "wout"
+    assert out["hot_restart"]["initial_restart_wout"] == str(seed)
+    assert out["free_boundary_solver_overrides"]["jax_initial_restart_wout"] == str(seed)

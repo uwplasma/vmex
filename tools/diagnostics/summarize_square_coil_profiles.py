@@ -1080,6 +1080,9 @@ def _summary_row(
         "jax_hot_restart_always": solver_overrides.get(
             "jax_hot_restart_always", cfg.get("jax_hot_restart_always")
         ),
+        "jax_initial_restart_wout": solver_overrides.get(
+            "jax_initial_restart_wout", cfg.get("jax_initial_restart_wout")
+        ),
         "jax_hot_restart_stopped_after_strict": hot_restart.get("stopped_after_strict_convergence"),
         "jax_hot_restart_last_status": hot_restart_last_stage.get("strict_status"),
         "jax_hot_restart_last_component_max": _finite_float(
@@ -1439,6 +1442,7 @@ def main(argv: list[str] | None = None) -> int:
         "jax_hot_restart_iters",
         "jax_hot_restart_policy",
         "jax_hot_restart_always",
+        "jax_initial_restart_wout",
         "jax_hot_restart_stopped_after_strict",
         "jax_hot_restart_last_status",
         "jax_hot_restart_last_component_max",
