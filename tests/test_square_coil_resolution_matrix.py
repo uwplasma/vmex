@@ -43,6 +43,7 @@ def test_square_coil_resolution_matrix_auto_nzeta_and_commands(tmp_path: Path):
             str(tmp_path),
             "--print-preflight-commands",
             "--print-vmec2000-commands",
+            "--include-control-map",
             "--vmec2000-exec",
             "/opt/xvmec",
         ]
@@ -53,6 +54,11 @@ def test_square_coil_resolution_matrix_auto_nzeta_and_commands(tmp_path: Path):
     assert rows[0]["nzeta"] == max(64, recommended_square_axis_nzeta(28))
     assert rows[0]["mgrid_nphi"] == rows[0]["nzeta"]
     assert rows[0]["status"] == "production_ready"
+    assert rows[0]["control_map_status"] == "available"
+    assert rows[0]["control_map_square_count"] == 2
+    assert rows[0]["control_map_square_condition"] is not None
+    assert rows[0]["control_map_stellarator_count"] == 5
+    assert rows[0]["control_map_stellarator_condition"] is not None
     assert "--resolution-diagnostics-only" in rows[0]["preflight_command"]
     assert "--run-vmec2000" in rows[0]["vmec2000_command"]
     assert "--vmec2000-exec /opt/xvmec" in rows[0]["vmec2000_command"]

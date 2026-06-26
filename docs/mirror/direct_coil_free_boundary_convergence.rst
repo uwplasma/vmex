@@ -567,14 +567,19 @@ profiler:
 
    python tools/diagnostics/square_coil_resolution_matrix.py \
      --decks 5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto \
-     --print-preflight-commands
+     --print-preflight-commands \
+     --include-control-map
 
 The matrix command uses the public
 ``vmec_jax.square_axis_resolution_deck_status`` helper, so scripts and
 notebooks can apply the same projection/``NZETA``/``mgrid_nphi`` gate before
 starting a strict ``FTOL=1e-12`` run.  Add
 ``--print-vmec2000-commands`` to emit generated-``mgrid`` VMEC2000 reference
-commands for only the rows you want to run.
+commands for only the rows you want to run.  The optional
+``--include-control-map`` column set reports the square two-control and
+stellarator-symmetric five-control spline-map conditioning.  Use it to decide
+whether a low-dimensional spline/control update is numerically credible before
+changing the nonlinear solver's boundary update path.
 After the strict-deck gate update, a finite
 ``--max-boundary-projection-error`` requires the whole ``resolution_deck`` to
 be production-ready before any backend solve starts. Passing the projection

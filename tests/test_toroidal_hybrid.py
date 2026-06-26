@@ -25,6 +25,7 @@ from vmec_jax.toroidal_hybrid import (
     sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
     square_axis_resolution_deck_status,
+    square_axis_spline_control_fourier_map_status,
     square_axis_spline_control_fourier_matrix,
     square_axis_spline_radius,
     square_axis_spline_radius_matrix,
@@ -104,6 +105,7 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
     assert vj.SquareAxisControlFourierMatrix is SquareAxisControlFourierMatrix
     assert vj.SquareAxisControlProjection is SquareAxisControlProjection
     assert vj.SquareAxisSplineControls is SquareAxisSplineControls
+    assert vj.square_axis_spline_control_fourier_map_status is square_axis_spline_control_fourier_map_status
     assert vj.square_axis_spline_control_fourier_matrix is square_axis_spline_control_fourier_matrix
     assert vj.square_axis_spline_radius is square_axis_spline_radius
     assert vj.square_axis_spline_radius_matrix is square_axis_spline_radius_matrix
@@ -119,6 +121,7 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
     assert public_api.SquareAxisControlFourierMatrix is SquareAxisControlFourierMatrix
     assert public_api.SquareAxisControlProjection is SquareAxisControlProjection
     assert public_api.SquareAxisSplineControls is SquareAxisSplineControls
+    assert public_api.square_axis_spline_control_fourier_map_status is square_axis_spline_control_fourier_map_status
     assert public_api.square_axis_spline_control_fourier_matrix is square_axis_spline_control_fourier_matrix
     assert public_api.square_axis_spline_radius is square_axis_spline_radius
     assert public_api.square_axis_spline_radius_matrix is square_axis_spline_radius_matrix
@@ -387,6 +390,32 @@ def test_square_axis_control_fourier_matrix_projects_boundary_delta():
     assert projection.captured_fraction == pytest.approx(1.0)
     assert projection.condition_number is not None
     assert projection.rank == 2
+
+
+def test_square_axis_control_fourier_map_status_reports_conditioning():
+    controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
+
+    status = square_axis_spline_control_fourier_map_status(
+        controls=controls,
+        symmetry="stellarator",
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        minor_radius=0.03,
+        side_elongation=0.08,
+        side_minor_modulation=0.08,
+        corner_ellipticity=0.04,
+        corner_amplitude=0.004,
+        corner_rotation=0.30,
+    )
+
+    assert status["status"] == "available"
+    assert status["basis_symmetry"] == "stellarator"
+    assert status["control_count"] == 5
+    assert status["mode_count"] > 0
+    assert status["condition_number"] is not None
+    assert len(status["singular_values"]) == 5
 
 
 @pytest.mark.parametrize(

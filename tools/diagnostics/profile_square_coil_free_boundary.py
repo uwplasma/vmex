@@ -46,6 +46,7 @@ from vmec_jax.toroidal_hybrid import (
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
     square_axis_resolution_deck_status,
+    square_axis_spline_control_fourier_map_status,
     square_axis_spline_control_fourier_matrix,
     square_axis_spline_symmetric_control_basis,
 )
@@ -1311,24 +1312,22 @@ def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
 def _control_fourier_map_for_symmetry(config: ExampleConfig, *, symmetry: str) -> dict[str, Any]:
     axis_kind = str(config.plasma_axis_kind).strip().lower()
     try:
-        basis, matrix = _square_control_fourier_matrix(config, symmetry=symmetry)
-        jacobian = matrix.stacked_jacobian()
-        singular_values = np.linalg.svd(jacobian, compute_uv=False)
-        finite_singular_values = singular_values[np.isfinite(singular_values)]
-        min_sv = float(np.min(finite_singular_values)) if finite_singular_values.size else None
-        max_sv = float(np.max(finite_singular_values)) if finite_singular_values.size else None
-        condition = None if min_sv in (None, 0.0) or max_sv is None else float(max_sv / max(min_sv, TINY))
-        return {
-            "status": "available",
-            "basis_symmetry": basis.symmetry,
-            "labels": list(basis.labels),
-            "control_count": int(matrix.control_count),
-            "mode_count": int(np.asarray(matrix.m).size),
-            "jacobian_shape": [int(value) for value in jacobian.shape],
-            "singular_values": [float(value) for value in singular_values],
-            "condition_number": condition,
-            "column_norms": [float(value) for value in np.linalg.norm(jacobian, axis=0)],
+        controls = _square_axis_controls(config)
+        sample_kwargs = {
+            key: value
+            for key, value in _square_axis_sample_kwargs(config).items()
+            if key not in {"axis_kind", "axis_spline_controls"}
         }
+        return square_axis_spline_control_fourier_map_status(
+            controls=controls,
+            symmetry=symmetry,
+            nfp=int(config.nfp),
+            mpol=int(config.mpol),
+            ntor=int(config.ntor),
+            ntheta_fit=max(64, 4 * int(config.mpol)),
+            nzeta_fit=max(128, 8 * int(config.ntor)),
+            **sample_kwargs,
+        )
     except Exception as exc:
         return {
             "status": f"failed:{type(exc).__name__}",

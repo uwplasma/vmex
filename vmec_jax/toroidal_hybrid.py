@@ -271,6 +271,59 @@ class SquareAxisControlFourierMatrix:
         )
 
 
+def square_axis_spline_control_fourier_map_status(
+    *,
+    controls: SquareAxisSplineControls | None = None,
+    control_basis: SquareAxisControlBasis | None = None,
+    symmetry: str = "square",
+    nfp: int = 1,
+    mpol: int = 5,
+    ntor: int = 28,
+    ntheta_fit: int = 64,
+    nzeta_fit: int = 224,
+    **sample_kwargs: Any,
+) -> dict[str, Any]:
+    """Return conditioning diagnostics for a spline-control boundary map.
+
+    This summarizes the chain-rule map from square-axis spline radii to VMEC
+    Fourier boundary coefficients.  It is a representation diagnostic: good
+    conditioning here says the reduced control layer is numerically usable, but
+    it does not by itself imply nonlinear VMEC convergence.
+    """
+
+    basis = (
+        control_basis
+        if control_basis is not None
+        else square_axis_spline_symmetric_control_basis(controls, symmetry=symmetry)
+    )
+    matrix = square_axis_spline_control_fourier_matrix(
+        control_basis=basis,
+        nfp=int(nfp),
+        mpol=int(mpol),
+        ntor=int(ntor),
+        ntheta_fit=int(ntheta_fit),
+        nzeta_fit=int(nzeta_fit),
+        **sample_kwargs,
+    )
+    jacobian = matrix.stacked_jacobian()
+    singular_values = np.linalg.svd(jacobian, compute_uv=False)
+    finite_singular_values = singular_values[np.isfinite(singular_values)]
+    min_sv = float(np.min(finite_singular_values)) if finite_singular_values.size else None
+    max_sv = float(np.max(finite_singular_values)) if finite_singular_values.size else None
+    condition = None if min_sv in (None, 0.0) or max_sv is None else float(max_sv / max(min_sv, np.finfo(float).tiny))
+    return {
+        "status": "available",
+        "basis_symmetry": basis.symmetry,
+        "labels": list(basis.labels),
+        "control_count": int(matrix.control_count),
+        "mode_count": int(np.asarray(matrix.m).size),
+        "jacobian_shape": [int(value) for value in jacobian.shape],
+        "singular_values": [float(value) for value in singular_values],
+        "condition_number": condition,
+        "column_norms": [float(value) for value in np.linalg.norm(jacobian, axis=0)],
+    }
+
+
 def _periodic_angle_distance(a: Any, b: Any) -> np.ndarray:
     return np.abs((np.asarray(a, dtype=float) - np.asarray(b, dtype=float) + np.pi) % (2.0 * np.pi) - np.pi)
 

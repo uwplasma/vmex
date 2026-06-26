@@ -6007,6 +6007,75 @@ printed the expected production-ready and diagnostic-only classifications.
 
 No user input is needed.
 
+---
+
+## 270. Promoted Reduced-Control Map Conditioning To Source
+
+### Steps taken
+
+- Added the public helper
+  `vmec_jax.square_axis_spline_control_fourier_map_status(...)`.
+- Rewired the square-coil backend profiler to use that helper for its
+  `control_fourier_map` conditioning payload.
+- Added `--include-control-map` to
+  `tools/diagnostics/square_coil_resolution_matrix.py`.
+- Updated the docs and example README so the matrix can report both production
+  deck status and spline-control conditioning.
+
+### Results obtained
+
+- The square-coil resolution matrix can now answer two separate questions in one
+  cheap run:
+  1. whether the Fourier deck is credible for a strict `FTOL=1e-12` solve;
+  2. whether the square two-control or stellarator-symmetric five-control
+     spline map is well conditioned for that deck.
+- The reduced-control conditioning logic now lives in the source module instead
+  of being duplicated in diagnostics scripts.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py::test_square_axis_control_fourier_map_status_reports_conditioning \
+  tests/test_square_coil_resolution_matrix.py
+```
+
+Additional focused and broader checks should be run before the next push.
+
+### File structure and best-practice notes
+
+- Source-level representation diagnostics live in `vmec_jax/toroidal_hybrid.py`.
+- The profiler still owns run-specific payload assembly and solved-LCFS
+  projection, but source owns the map conditioning calculation.
+- The matrix command remains non-solve, non-output-generating, and suitable for
+  preflight use before committing to VMEC/VMEC2000 runs.
+
+### Best next steps
+
+1. Run the matrix with `--include-control-map` on the production-ready decks and
+   use the square/stellarator condition numbers to pick the first solver-native
+   reduced-control experiment.
+2. Wait for the active VMEC2000/generated-`mgrid` row to finish or time out
+   before starting another full VMEC2000 strict row on `office`.
+3. Keep direct-coil GPU rows running to capture real LCFS motion and compare it
+   with the reduced-control projections.
+
+### Completion percentages after M270
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `90%`.
+- Direct-coil GPU/JIT parity lane: `81%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `79%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `78%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
 ## 265. Project Accepted Square-Coil LCFS Motion Onto Reduced Controls
 
 ### Steps taken

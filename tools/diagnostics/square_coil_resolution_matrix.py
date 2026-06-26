@@ -23,6 +23,7 @@ from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary impo
 from vmec_jax.toroidal_hybrid import (
     recommended_square_axis_nzeta,
     square_axis_resolution_deck_status,
+    square_axis_spline_control_fourier_map_status,
     square_axis_stellarator_mirror_hybrid_projection_error,
 )
 
@@ -64,6 +65,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--vmec2000-timeout", type=int, default=21600)
     p.add_argument("--print-preflight-commands", action="store_true")
     p.add_argument("--print-vmec2000-commands", action="store_true")
+    p.add_argument(
+        "--include-control-map",
+        action="store_true",
+        help="Also report reduced spline-control to Fourier-map conditioning.",
+    )
     return p
 
 
@@ -215,6 +221,43 @@ def _shell_join(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+def _control_map_rows(config: ExampleConfig) -> dict[str, Any]:
+    """Return compact reduced-control conditioning diagnostics for one deck."""
+
+    sample_kwargs = _square_axis_sample_kwargs(config)
+    axis_kind = str(sample_kwargs.pop("axis_kind", config.plasma_axis_kind)).strip().lower()
+    controls = sample_kwargs.pop("axis_spline_controls", None)
+    if controls is None or axis_kind not in {"control_spline", "spline_controls", "periodic_spline"}:
+        return {
+            "control_map_status": "not_applicable_for_axis_kind",
+            "control_map_axis_kind": axis_kind,
+        }
+    out: dict[str, Any] = {
+        "control_map_status": "available",
+        "control_map_axis_kind": axis_kind,
+    }
+    for symmetry in ("square", "stellarator"):
+        try:
+            status = square_axis_spline_control_fourier_map_status(
+                controls=controls,
+                symmetry=symmetry,
+                nfp=int(config.nfp),
+                mpol=int(config.mpol),
+                ntor=int(config.ntor),
+                **_boundary_fit_grid(config),
+                **sample_kwargs,
+            )
+        except Exception as exc:
+            out[f"control_map_{symmetry}_status"] = f"failed:{type(exc).__name__}"
+            out[f"control_map_{symmetry}_condition"] = None
+            out[f"control_map_{symmetry}_count"] = None
+            continue
+        out[f"control_map_{symmetry}_status"] = status.get("status")
+        out[f"control_map_{symmetry}_condition"] = status.get("condition_number")
+        out[f"control_map_{symmetry}_count"] = status.get("control_count")
+    return out
+
+
 def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
     """Return one cheap resolution status row per requested deck."""
 
@@ -278,6 +321,8 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             "projection_max_abs_error_rel": float(projection["max_abs_error_rel"]),
             "projection_max_abs_component_error_rel": float(projection["max_abs_component_error_rel"]),
         }
+        if bool(args.include_control_map):
+            row.update(_control_map_rows(config))
         if bool(args.print_preflight_commands):
             row["preflight_command"] = _shell_join(_profile_command(row, args, resolution_only=True, vmec2000=False))
         if bool(args.print_vmec2000_commands):
@@ -313,6 +358,18 @@ def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
         keys.append("preflight_command")
     if any("vmec2000_command" in row for row in rows):
         keys.append("vmec2000_command")
+    if any("control_map_status" in row for row in rows):
+        keys.extend(
+            [
+                "control_map_status",
+                "control_map_square_status",
+                "control_map_square_count",
+                "control_map_square_condition",
+                "control_map_stellarator_status",
+                "control_map_stellarator_count",
+                "control_map_stellarator_condition",
+            ]
+        )
     sep = " | " if markdown else "\t"
     if markdown:
         print("| " + sep.join(keys) + " |")
