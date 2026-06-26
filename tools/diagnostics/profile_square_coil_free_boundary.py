@@ -1200,6 +1200,8 @@ def _final_residuals(run: Any, *, config: ExampleConfig | None = None) -> dict[s
         "best_scored_fsql": diag.get("best_scored_fsql"),
         "best_scored_full_boundary_count": diag.get("best_scored_full_boundary_count"),
         "best_scored_fresh_boundary_count": diag.get("best_scored_fresh_boundary_count"),
+        "update_delta_rms": diag.get("update_delta_rms"),
+        "update_delta_to_velocity_rms_ratio": diag.get("update_delta_to_velocity_rms_ratio"),
         "free_boundary_convergence_blocked_count": diag.get("free_boundary_convergence_blocked_count"),
         "free_boundary_fresh_convergence_gate": diag.get("free_boundary_fresh_convergence_gate"),
         "free_boundary_fresh_convergence_recheck_count": diag.get("free_boundary_fresh_convergence_recheck_count"),

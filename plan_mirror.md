@@ -5738,6 +5738,168 @@ Visual validation:
 
 No user input is needed.
 
+## M314. Projected update-delta RMS diagnostics for strict reduced-control rows
+
+### Steps taken
+
+- Added a strict-update diagnostic for the RMS of the actual projected
+  coefficient delta after any reduced edge-control projection has been applied.
+- Carried the diagnostic through the residual-iteration finalization payload,
+  the square-coil backend profile JSON, and the profile summary CSV/markdown
+  table.
+- Added the companion ratio
+  `update_delta_to_velocity_rms_ratio = update_delta_rms / update_rms`, so
+  strict rows can distinguish a large unconstrained velocity from a small
+  projected candidate-state motion.
+- Rechecked PR #21 status:
+  - the PR remains a draft at head `8bcc3fa6`;
+  - the only current failing check is
+    `Fast Tests (py3.11 core coverage: rest)`;
+  - the Actions log shows `The operation was canceled` at about 77% progress,
+    not a Python assertion or traceback.
+- Refreshed the active `office` strict rows:
+  - the direct-coil GPU row finished its first 8000-iteration pass without
+    strict convergence and entered hot restart `1/2`;
+  - the visible hot-restart tail reached a best recent component scale near
+    `4.33e-11` before rising again, with `FSQL` around `1.1e-11`;
+  - the VMEC2000 generated-`mgrid` row remains active and decreasing, with the
+    visible `threed1` tail near iteration `2347` still around
+    `1.9e-09`, `1.7e-09`, and `4.5e-10` in its leading residual columns;
+  - the serialized projected-control, edge-polish, small-`DELT`,
+    edge-velocity-scrub, and five-control stellarator queues are still waiting.
+
+### Results obtained
+
+- The projected-delta diagnostic is now available in the same JSON/CSV path as
+  the existing residual, Anderson, NESTOR, and reduced-control diagnostics.
+- A local one-iteration smoke profile reported:
+  - `update_delta_rms = 3.9645300899270165e-05`;
+  - `update_delta_to_velocity_rms_ratio = 0.7776835137649016`.
+- No convergence threshold or acceptance gate was loosened.  The strict
+  production requirement remains per-component `FTOL = 1e-12`.
+- Current live evidence still says the direct JAX row and the VMEC2000
+  reference row are not strict.  The next expensive projected-control rows now
+  have the instrumentation needed to say whether a residual floor is caused by
+  projected-control step suppression or by the underlying free-boundary solve.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py::test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tails \
+  tests/test_summarize_square_coil_profiles.py::test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge_direct \
+  tests/test_solve_residual_iter_update_helpers.py
+```
+
+Result: `59 passed`.
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py \
+  tests/test_solve_residual_iter_update_helpers.py
+```
+
+Result: `112 passed, 1 warning`.
+
+```bash
+venv/bin/python -m pytest -q tests/test_source_health_diagnostics.py
+```
+
+Result: `10 passed`.
+
+```bash
+/Users/rogeriojorge/Library/Python/3.11/bin/ruff check \
+  vmec_jax/solvers/fixed_boundary/residual/update.py \
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py \
+  vmec_jax/solvers/fixed_boundary/residual/finalize.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+```
+
+Result: passed.  The project venv did not have `ruff`; the user-level
+`ruff` executable was used.
+
+```bash
+venv/bin/python -m py_compile \
+  vmec_jax/solvers/fixed_boundary/residual/update.py \
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py \
+  vmec_jax/solvers/fixed_boundary/residual/finalize.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+git diff --check
+```
+
+Result: passed.
+
+```bash
+rm -rf /tmp/vmec_update_delta_rms_verbose_smoke
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/vmec_update_delta_rms_verbose_smoke \
+  --beta-percent 0 --mpol 3 --ntor 4 --ns 5 --nzeta 16 \
+  --ns-array 5 --niter-array 1 --ftol-array 1e-8 \
+  --max-iter 1 --ftol 1e-8 --phiedge -0.02 --delt 0.02 \
+  --activate-fsq 1e-3 --nvacskip 1 --nstep 1 \
+  --axis-kind control_spline --side-power 1.0 --corner-power 1.0 \
+  --n-coils-per-side 2 --coil-segments 16 --coil-chunk-size 128 \
+  --skip-mgrid --skip-provider-parity --solver-mode parity \
+  --freeb-edge-control-projection square \
+  --max-boundary-projection-error none --verbose-solver
+```
+
+Result: completed and wrote the projected update-delta RMS diagnostics into
+`/tmp/vmec_update_delta_rms_verbose_smoke/square_coil_free_boundary_backend_profile.json`.
+
+### File structure and best-practice adherence
+
+- Residual-update math stays in
+  `vmec_jax/solvers/fixed_boundary/residual/update.py`.
+- Iteration state threading stays in
+  `vmec_jax/solvers/fixed_boundary/residual/iteration.py`.
+- Materialized run diagnostics stay in
+  `vmec_jax/solvers/fixed_boundary/residual/finalize.py`.
+- CLI/profile propagation stays in `tools/diagnostics/`, with tests next to
+  the existing profile and summary coverage.
+- No generated WOUTs, mgrid files, figures, or profile result trees were added
+  to the repository.
+
+### Best next steps
+
+1. Commit and push this diagnostic tranche.
+2. Fast-forward the waiting `office` checkouts so the queued reduced-control
+   rows report projected update-delta RMS when they run.
+3. Recheck PR CI after the new push; treat the current `rest` failure as a
+   cancellation unless it reproduces with a real log.
+4. Let the active direct hot-restart and VMEC2000 rows finish, then compare
+   strict residual tails with the projected-update diagnostics from the queued
+   square and stellarator reduced-control rows.
+5. If the projected update RMS collapses while residuals stay above `1e-12`,
+   promote the reduced spline/control state natively instead of adding more
+   Fourier-projected polishing variants.
+
+### Completion percentages after M314
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active hot restart remains non-strict and
+  oscillatory after its first strict pass.
+- VMEC2000 robustness/reference lane: `99%`, still active and decreasing but
+  not strict.
+- True spline/control-basis hybrid lane: `91%`, reduced-control diagnostics are
+  now sufficient to diagnose square versus stellarator projected rows.
+- DELT/stage-budget polish lane: `75%`, still queued.
+- Finite-beta virtual-casing validation lane: `87%`, unchanged in this
+  tranche.
+- CI/API health lane: `98%`, local gates pass; one remote shard was canceled.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M313. Queued five-control stellarator edge-projection strict profile
 
 ### Steps taken

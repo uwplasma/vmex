@@ -668,6 +668,8 @@ class StrictMomentumProposal(NamedTuple):
     update_rms_j: Any
     update_rms: float | None
     update_rms_preclip: float | None
+    update_delta_rms_j: Any
+    update_delta_rms: float | None
     scale: float
 
 
@@ -1002,6 +1004,18 @@ def host_force_update_rms(scale: float, *blocks) -> float:
     return float(np.asarray(force_update_rms(scale, *blocks)))
 
 
+def delta_tuple_rms(*deltas):
+    """Return the JAX-visible RMS of an already transformed update tuple."""
+
+    if not deltas:
+        return jnp.asarray(0.0)
+    total = None
+    for delta in deltas:
+        term = jnp.asarray(delta) ** 2
+        total = term if total is None else total + term
+    return jnp.sqrt(jnp.mean(total))
+
+
 class ResidualEvolveCoefficients(NamedTuple):
     """Damping coefficients for one residual-loop evolve step."""
 
@@ -1175,6 +1189,12 @@ def strict_momentum_update_proposal(
     )
     if delta_tuple_projector is not None:
         update_deltas = delta_tuple_projector(update_deltas, host_update=bool(host_update_assembly))
+    update_delta_rms_j = (
+        delta_tuple_rms(*update_deltas)
+        if need_update_rms
+        else jnp.asarray(0.0, dtype=jnp.asarray(updated_velocities.rcc).dtype)
+    )
+    update_delta_rms = float(np.asarray(update_delta_rms_j)) if materialize_update_rms else None
     state = candidate_state_from_delta_tuple(
         update_deltas,
         use_numpy_arrays=bool(host_update_assembly),
@@ -1187,6 +1207,8 @@ def strict_momentum_update_proposal(
         update_rms_j=update_rms_j,
         update_rms=update_rms,
         update_rms_preclip=update_rms_preclip,
+        update_delta_rms_j=update_delta_rms_j,
+        update_delta_rms=update_delta_rms,
         scale=float(scale),
     )
 
@@ -1226,7 +1248,10 @@ def jit_strict_momentum_update_proposal(
     )
     return StrictMomentumProposal(
         state=step_out["state_post"], velocities=updated_velocities, update_deltas=None,
-        update_rms_j=update_rms_j, update_rms=None, update_rms_preclip=None, scale=1.0,
+        update_rms_j=update_rms_j, update_rms=None, update_rms_preclip=None,
+        update_delta_rms_j=jnp.asarray(0.0, dtype=jnp.asarray(updated_velocities.rcc).dtype),
+        update_delta_rms=None,
+        scale=1.0,
     )
 
 
@@ -1774,6 +1799,7 @@ _scale_velocity_blocks = scale_velocity_blocks
 _scale_primary_velocity_blocks = scale_primary_velocity_blocks
 _velocity_blocks_from_force_blocks = velocity_blocks_from_force_blocks
 _host_force_update_rms = host_force_update_rms
+_delta_tuple_rms = delta_tuple_rms
 _momentum_update_jax = momentum_update_jax
 _host_momentum_update_np = host_momentum_update_np
 _strict_momentum_update_proposal = strict_momentum_update_proposal

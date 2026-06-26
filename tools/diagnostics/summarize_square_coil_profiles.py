@@ -1483,6 +1483,10 @@ def _summary_row(
         "fresh_convergence_rejects": backend.get("free_boundary_fresh_convergence_reject_count"),
         "fresh_convergence_failures": backend.get("free_boundary_fresh_convergence_failed_count"),
         "freeb_convergence_blocked_count": backend.get("free_boundary_convergence_blocked_count"),
+        "update_delta_rms": _finite_float(backend.get("update_delta_rms")),
+        "update_delta_to_velocity_rms_ratio": _finite_float(
+            backend.get("update_delta_to_velocity_rms_ratio")
+        ),
         "dt_eff_last": _stat(backend, "dt_eff_stats", "last"),
         "dt_eff_min": _stat(backend, "dt_eff_stats", "min"),
         "time_step_last": _stat(backend, "time_step_stats", "last"),
@@ -1879,6 +1883,8 @@ def main(argv: list[str] | None = None) -> int:
         "fresh_convergence_rejects",
         "fresh_convergence_failures",
         "freeb_convergence_blocked_count",
+        "update_delta_rms",
+        "update_delta_to_velocity_rms_ratio",
         "dt_eff_last",
         "dt_eff_min",
         "time_step_last",

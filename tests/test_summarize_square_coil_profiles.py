@@ -560,6 +560,8 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
                         "final_fsqr": 2.0e-9,
                         "final_fsqz": 3.0e-9,
                         "final_fsql": 4.0e-10,
+                        "update_delta_rms": 2.0e-5,
+                        "update_delta_to_velocity_rms_ratio": 0.4,
                         "tail_plateau": {"status": "oscillatory"},
                         "accepted_provider_parity": {"status": "completed"},
                         "final_residual_recomputed_on_accepted_state": True,
@@ -622,6 +624,8 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_update_direction_captured_fraction"] == pytest.approx(
         0.9682458365518543
     )
+    assert row["update_delta_rms"] == pytest.approx(2.0e-5)
+    assert row["update_delta_to_velocity_rms_ratio"] == pytest.approx(0.4)
 
 
 def test_square_coil_profile_summary_infers_resolution_deck_for_live_launcher_log(

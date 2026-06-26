@@ -133,6 +133,18 @@ def _edge_control_update_direction_payload(ns: Mapping[str, Any]) -> dict[str, A
         }
 
 
+def _optional_float(value: Any) -> float | None:
+    """Materialize an optional scalar diagnostic without failing finalization."""
+
+    if value is None:
+        return None
+    try:
+        result = float(np.asarray(value))
+    except Exception:
+        return None
+    return result if np.isfinite(result) else None
+
+
 def build_residual_iter_resume_state_payload(
     *,
     resume_state_mode: str,
@@ -360,6 +372,12 @@ def finalize_residual_iter_from_namespace(
     t_finalize_diag_build_start = time.perf_counter() if timing_enabled else None
     freeb_policy = ns.get("_freeb_policy")
     numpy_precond_policy = ns.get("_numpy_precond_policy")
+    update_delta_rms_final = _optional_float(ns.get("update_delta_rms"))
+    if update_delta_rms_final is None:
+        update_delta_rms_final = _optional_float(ns.get("update_delta_rms_j"))
+    update_rms_final = _optional_float(ns.get("update_rms"))
+    if update_rms_final is None:
+        update_rms_final = _optional_float(ns.get("update_rms_j"))
     diag: dict[str, Any] = {
         "ftol": ns["ftol"],
         "requested_ftol": float(ns["ftol"]),
@@ -401,6 +419,14 @@ def finalize_residual_iter_from_namespace(
         "use_restart_triggers": bool(_policy_attr("use_restart_triggers")),
         "use_direct_fallback": bool(ns["use_direct_fallback"]),
         "max_update_rms": float(ns["max_update_rms"]),
+        "update_delta_rms": update_delta_rms_final,
+        "update_delta_to_velocity_rms_ratio": (
+            None
+            if update_delta_rms_final is None
+            or update_rms_final is None
+            or abs(float(update_rms_final)) <= 0.0
+            else float(update_delta_rms_final) / abs(float(update_rms_final))
+        ),
         "converged": bool(ns["converged"]),
         "converged_strict": bool(converged_strict_final),
         "converged_by_total_fsq": bool(converged_total_final),

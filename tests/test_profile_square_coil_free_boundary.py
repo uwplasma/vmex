@@ -97,6 +97,8 @@ def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tail
         "final_fsqr": 1.0e-5,
         "final_fsqz": 2.0e-5,
         "final_fsql": 3.0e-6,
+        "update_delta_rms": 2.0e-4,
+        "update_delta_to_velocity_rms_ratio": 0.25,
         "bad_resets": 0,
         "ijacob": 1,
         "free_boundary": {
@@ -167,6 +169,8 @@ def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tail
     assert payload["free_boundary_anderson_pressure_last_applied"] == pytest.approx(1.0)
     assert payload["free_boundary_anderson_pressure_last_theta"] == pytest.approx(0.4)
     assert payload["final_fsq_component_sum"] == pytest.approx(3.3e-5)
+    assert payload["update_delta_rms"] == pytest.approx(2.0e-4)
+    assert payload["update_delta_to_velocity_rms_ratio"] == pytest.approx(0.25)
     assert payload["history"]["fsq_component_sum_tail"] == pytest.approx([0.0033, 0.00033, 3.3e-5])
     assert payload["history"]["fsq_component_sum_stats"]["min"] == pytest.approx(3.3e-5)
     assert payload["history"]["fsq_component_sum_tail_projection"]["per_iter_factor"] == pytest.approx(0.1)
