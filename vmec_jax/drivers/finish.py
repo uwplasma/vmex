@@ -106,6 +106,22 @@ class FinishDiagnosticInputs:
 
 
 @dataclass(frozen=True)
+class FinishRequest:
+    """Resolved fixed-boundary finish request and retry budgets."""
+
+    base_diag: dict[str, Any]
+    requested_ftol: float
+    target_fsq: float
+    staged_input: bool
+    ns_stage_count: int
+    explicit_niter_stages: list[int] | None
+    explicit_ftol_stages: list[float]
+    require_staged_followup: bool
+    base_total_budget: int
+    max_fallback_budget: int
+
+
+@dataclass(frozen=True)
 class FixedBoundaryFinishContext:
     """Driver state and callbacks needed by the CLI fixed-boundary finisher."""
 
@@ -167,6 +183,58 @@ class FixedBoundaryFinishContext:
     @classmethod
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "FixedBoundaryFinishContext":
         return _dataclass_from_namespace(cls, namespace, label="fixed-boundary finish", overrides=overrides)
+
+
+def _finish_request_from_run(
+    run_in: Any,
+    *,
+    initial_policy: str,
+    ctx: FixedBoundaryFinishContext,
+) -> FinishRequest:
+    """Resolve finish tolerances, staged-input metadata, and retry budgets."""
+
+    base_diag = dict(run_in.result.diagnostics)
+    base_diag["solver_mode"] = str(ctx.solver_mode_eff)
+    base_diag["accelerated_mode"] = bool(ctx.accelerated_mode)
+    base_diag["cli_fixed_boundary_mode"] = True
+    base_diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
+    requested_ftol = float(ctx.requested_final_ftol(indata=ctx.indata, ftol_list_input=ctx.ftol_list_input))
+    target_fsq = float(ctx.accelerated_fsq_total_target_from_ftol(float(requested_ftol)))
+    base_diag["requested_ftol"] = float(requested_ftol)
+    base_diag["fsq_total_target"] = float(target_fsq)
+    staged_input = (ctx.ns_list_input is not None) and (len(ctx.ns_list_input) > 1)
+    ns_stage_count = len(ctx.ns_list_input) if staged_input else 0
+    explicit_niter_stages = (
+        [int(v) for v in ctx.niter_list_input]
+        if (ctx.niter_list_input is not None) and (len(ctx.niter_list_input) == ns_stage_count)
+        else None
+    )
+    explicit_ftol_stages = (
+        [float(v) for v in ctx.ftol_list_input]
+        if (ctx.ftol_list_input is not None) and (len(ctx.ftol_list_input) == ns_stage_count)
+        else [float(ctx.indata.get_float("FTOL", 1.0e-13))] * ns_stage_count
+    )
+    require_staged_followup = (
+        bool(ctx.accelerated_mode)
+        and str(initial_policy) == "single_grid"
+        and bool(staged_input)
+        and (explicit_niter_stages is not None)
+        and bool(ctx.cfg.lthreed)
+        and (not bool(ctx.deferred_staged_current_driven_3d_cli))
+    )
+    base_total_budget = max(1, int(ctx.max_iter))
+    return FinishRequest(
+        base_diag=base_diag,
+        requested_ftol=float(requested_ftol),
+        target_fsq=float(target_fsq),
+        staged_input=bool(staged_input),
+        ns_stage_count=int(ns_stage_count),
+        explicit_niter_stages=explicit_niter_stages,
+        explicit_ftol_stages=explicit_ftol_stages,
+        require_staged_followup=bool(require_staged_followup),
+        base_total_budget=int(base_total_budget),
+        max_fallback_budget=int(2 * base_total_budget),
+    )
 
 
 def _empty_finish_diagnostics(diag: dict, *, converged: bool, strict: bool, total: bool) -> dict:
@@ -360,6 +428,227 @@ def _finish_run_with_diagnostics(info: FinishDiagnosticInputs) -> Any:
     return replace(best_run, result=replace(best_run.result, diagnostics=diag))
 
 
+def _maybe_apply_input_staged_followup(
+    ctx: FixedBoundaryFinishContext,
+    request: FinishRequest,
+    *,
+    initial_policy: str,
+    best_run: Any,
+    best_fsq: float,
+) -> tuple[Any, float, StagedFollowupDiagnostics]:
+    """Apply explicit input multigrid followup after a single-grid start."""
+
+    staged_followup_diag = StagedFollowupDiagnostics()
+    if not (request.staged_input and bool(ctx.accelerated_mode) and str(initial_policy) == "single_grid"):
+        return best_run, float(best_fsq), staged_followup_diag
+    missed_target = not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol)))
+    should_run_staged_followup = bool(request.explicit_niter_stages is not None) and (
+        bool(request.require_staged_followup) or bool(missed_target)
+    )
+    if not should_run_staged_followup:
+        return best_run, float(best_fsq), staged_followup_diag
+    staged_followup = ctx.run_cli_explicit_staged_followup(
+        ns_stage_list=[int(v) for v in ctx.ns_list_input],
+        niter_stage_list=request.explicit_niter_stages,
+        ftol_stage_list=request.explicit_ftol_stages,
+        policy_name="input_multigrid",
+    )
+    staged_followup_diag = StagedFollowupDiagnostics.from_run(staged_followup, policy="input_multigrid")
+    staged_fsq_val = float(ctx.result_final_fsq(staged_followup.result))
+    staged_conv = bool(ctx.result_meets_requested_ftol(staged_followup.result, ftol=float(request.requested_ftol)))
+    if staged_conv or (staged_fsq_val < float(best_fsq)):
+        return staged_followup, float(staged_fsq_val), staged_followup_diag
+    return best_run, float(best_fsq), staged_followup_diag
+
+
+def _multigrid_partial_restart_payload(
+    ctx: FixedBoundaryFinishContext,
+    *,
+    partial_start_stage: int,
+) -> tuple[Any | None, Any | None, Any | None]:
+    """Return restart payload for partial parity multigrid fallback if available."""
+
+    try:
+        stage_results = ctx.get_stage_results()
+        stage_statics = ctx.get_stage_statics()
+        if len(stage_results) >= int(partial_start_stage):
+            prev_idx = int(partial_start_stage) - 1
+            return (
+                stage_results[prev_idx].state,
+                stage_statics[prev_idx],
+                ctx.sanitize_resume_state_for_stage(stage_results[prev_idx].diagnostics.get("resume_state")),
+            )
+    except Exception:
+        return None, None, None
+    return None, None, None
+
+
+def _maybe_apply_accelerated_multigrid_fallbacks(
+    ctx: FixedBoundaryFinishContext,
+    request: FinishRequest,
+    *,
+    initial_policy: str,
+    best_run: Any,
+    best_fsq: float,
+) -> tuple[Any, float, bool, bool]:
+    """Apply partial and full parity fallbacks for accelerated multigrid starts."""
+
+    fallback_used = False
+    partial_fallback_used = False
+    should_try = (
+        bool(request.staged_input)
+        and bool(ctx.accelerated_mode)
+        and str(initial_policy) == "multigrid"
+        and (request.explicit_niter_stages is not None)
+        and (not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol))))
+    )
+    if not should_try:
+        return best_run, float(best_fsq), partial_fallback_used, fallback_used
+
+    partial_start_stage = int(max(1, len(ctx.ns_list_input) - 1))
+    partial_restart_state, partial_restart_static_prev, partial_restart_resume_state = (
+        _multigrid_partial_restart_payload(ctx, partial_start_stage=partial_start_stage)
+    )
+    if (partial_restart_state is not None) and (partial_restart_static_prev is not None):
+        partial_fallback = ctx.run_cli_explicit_staged_followup(
+            ns_stage_list=[int(v) for v in ctx.ns_list_input],
+            niter_stage_list=request.explicit_niter_stages,
+            ftol_stage_list=request.explicit_ftol_stages,
+            start_stage_index=int(partial_start_stage),
+            restart_state=partial_restart_state,
+            restart_static_prev=partial_restart_static_prev,
+            restart_resume_state=partial_restart_resume_state,
+            stage_mode_override="parity",
+            use_scan_override=False,
+            performance_mode_override=False,
+            policy_name="partial_parity_multigrid",
+        )
+        partial_fallback_used = True
+        partial_fallback_fsq = float(ctx.result_final_fsq(partial_fallback.result))
+        partial_fallback_conv = bool(
+            ctx.result_meets_requested_ftol(partial_fallback.result, ftol=float(request.requested_ftol))
+        )
+        if partial_fallback_conv or partial_fallback_fsq < best_fsq:
+            best_run = partial_fallback
+            best_fsq = float(partial_fallback_fsq)
+
+    if not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol))):
+        fallback_used = True
+        fallback = _run_full_parity_fallback(ctx, max_fallback_budget=int(request.max_fallback_budget), multigrid=True)
+        fallback_fsq = float(ctx.result_final_fsq(fallback.result))
+        fallback_conv = bool(ctx.result_meets_requested_ftol(fallback.result, ftol=float(request.requested_ftol)))
+        if fallback_conv or fallback_fsq < best_fsq:
+            best_run = fallback
+            best_fsq = float(fallback_fsq)
+    return best_run, float(best_fsq), partial_fallback_used, fallback_used
+
+
+def _run_accelerated_finish_attempts(
+    ctx: FixedBoundaryFinishContext,
+    request: FinishRequest,
+    *,
+    initial_policy: str,
+    staged_followup_diag: StagedFollowupDiagnostics,
+    best_run: Any,
+    best_fsq: float,
+    attempt_log: FinishAttemptLog,
+    finish_budget: FinishBudgetTracker,
+    improvement_floor: float,
+) -> tuple[Any, float]:
+    """Run bounded accelerated finish attempts after a single-grid start."""
+
+    if not (
+        bool(ctx.accelerated_mode)
+        and str(initial_policy) == "single_grid"
+        and (not bool(staged_followup_diag.used))
+        and not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol)))
+    ):
+        return best_run, float(best_fsq)
+    accelerated_finish_uses_scan = False if ctx.use_scan is False else True
+    accel_budget_i = int(request.base_total_budget)
+    accel_budget_used = 0
+    while int(accel_budget_i) >= 1 and int(accel_budget_used) < int(request.max_fallback_budget):
+        budget_this = finish_budget.bounded(accel_budget_i)
+        if int(budget_this) <= 0:
+            break
+        prev_best_fsq = float(best_fsq)
+        trial = _run_finish_attempt(
+            ctx,
+            best_run=best_run,
+            target_fsq=request.target_fsq,
+            budget_i=budget_this,
+            mode_i="accelerated",
+            use_scan_i=bool(accelerated_finish_uses_scan),
+            performance_mode_i=True,
+        )
+        trial_fsq, trial_conv = attempt_log.record(
+            ctx,
+            trial,
+            requested_ftol=request.requested_ftol,
+            budget_i=budget_this,
+            mode_i="accelerated",
+        )
+        accel_budget_used += int(budget_this)
+        finish_budget.add(budget_this)
+        improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
+        if improved:
+            best_run = trial
+            best_fsq = float(trial_fsq)
+        if trial_conv or (not improved):
+            break
+    return best_run, float(best_fsq)
+
+
+def _run_parity_finish_attempts(
+    ctx: FixedBoundaryFinishContext,
+    request: FinishRequest,
+    *,
+    best_run: Any,
+    best_fsq: float,
+    attempt_log: FinishAttemptLog,
+    finish_budget: FinishBudgetTracker,
+    improvement_floor: float,
+) -> tuple[Any, float]:
+    """Run bounded parity finish attempts from the current best state."""
+
+    budget_i = int(request.base_total_budget)
+    while int(budget_i) >= 1:
+        budget_this = finish_budget.bounded(budget_i)
+        if int(budget_this) <= 0:
+            break
+        prev_best_fsq = float(best_fsq)
+        trial = _run_finish_attempt(
+            ctx,
+            best_run=best_run,
+            target_fsq=request.target_fsq,
+            budget_i=budget_this,
+            mode_i="parity",
+            use_scan_i=False,
+            performance_mode_i=False,
+        )
+        trial_fsq, trial_conv = attempt_log.record(
+            ctx,
+            trial,
+            requested_ftol=request.requested_ftol,
+            budget_i=budget_this,
+            mode_i="parity",
+        )
+        finish_budget.add(budget_this)
+        improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
+        if improved:
+            best_run = trial
+            best_fsq = float(trial_fsq)
+        if trial_conv:
+            break
+        if improved:
+            continue
+        next_budget = max(1, int(np.ceil(float(budget_i) / 2.0)))
+        if int(next_budget) == int(budget_i):
+            break
+        budget_i = int(next_budget)
+    return best_run, float(best_fsq)
+
+
 def maybe_finish_cli_fixed_boundary_run(
     run_in: Any,
     *,
@@ -374,43 +663,12 @@ def maybe_finish_cli_fixed_boundary_run(
         return run_in
     if run_in.result is None:
         return run_in
-    base_diag = dict(run_in.result.diagnostics)
-    base_diag["solver_mode"] = str(ctx.solver_mode_eff)
-    base_diag["accelerated_mode"] = bool(ctx.accelerated_mode)
-    base_diag["cli_fixed_boundary_mode"] = True
-    base_diag["cli_fixed_boundary_initial_policy"] = str(initial_policy)
-    requested_ftol = ctx.requested_final_ftol(indata=ctx.indata, ftol_list_input=ctx.ftol_list_input)
-    target_fsq = ctx.accelerated_fsq_total_target_from_ftol(float(requested_ftol))
-    base_diag["requested_ftol"] = float(requested_ftol)
-    base_diag["fsq_total_target"] = float(target_fsq)
-    staged_input = (ctx.ns_list_input is not None) and (len(ctx.ns_list_input) > 1)
-    ns_stage_count = len(ctx.ns_list_input) if staged_input else 0
-    explicit_niter_stages = (
-        [int(v) for v in ctx.niter_list_input]
-        if (ctx.niter_list_input is not None) and (len(ctx.niter_list_input) == ns_stage_count)
-        else None
-    )
-    explicit_ftol_stages = (
-        [float(v) for v in ctx.ftol_list_input]
-        if (ctx.ftol_list_input is not None) and (len(ctx.ftol_list_input) == ns_stage_count)
-        else [float(ctx.indata.get_float("FTOL", 1.0e-13))] * ns_stage_count
-    )
-    require_staged_followup = (
-        bool(ctx.accelerated_mode)
-        and str(initial_policy) == "single_grid"
-        and bool(staged_input)
-        and (explicit_niter_stages is not None)
-        and bool(ctx.cfg.lthreed)
-        and (not bool(ctx.deferred_staged_current_driven_3d_cli))
-    )
-    run_in_strict = ctx.result_meets_requested_ftol(run_in.result, ftol=float(requested_ftol))
-    run_in_total = ctx.result_hits_total_target(run_in.result, fsq_total_target=float(target_fsq))
-    if bool(run_in_strict) and (not bool(require_staged_followup)):
-        _empty_finish_diagnostics(base_diag, converged=True, strict=True, total=bool(run_in_total))
-        return replace(run_in, result=replace(run_in.result, diagnostics=base_diag))
-
-    base_total_budget = max(1, int(ctx.max_iter))
-    max_fallback_budget = int(2 * base_total_budget)
+    request = _finish_request_from_run(run_in, initial_policy=str(initial_policy), ctx=ctx)
+    run_in_strict = ctx.result_meets_requested_ftol(run_in.result, ftol=float(request.requested_ftol))
+    run_in_total = ctx.result_hits_total_target(run_in.result, fsq_total_target=float(request.target_fsq))
+    if bool(run_in_strict) and (not bool(request.require_staged_followup)):
+        _empty_finish_diagnostics(request.base_diag, converged=True, strict=True, total=bool(run_in_total))
+        return replace(run_in, result=replace(run_in.result, diagnostics=request.base_diag))
 
     best_run = run_in
     best_fsq = float(ctx.result_final_fsq(run_in.result))
@@ -419,126 +677,37 @@ def maybe_finish_cli_fixed_boundary_run(
     partial_fallback_used = False
     staged_followup_diag = StagedFollowupDiagnostics()
 
-    if staged_input and bool(ctx.accelerated_mode) and str(initial_policy) == "single_grid":
-        missed_target = not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
-        should_run_staged_followup = bool(explicit_niter_stages is not None) and (
-            bool(require_staged_followup) or bool(missed_target)
-        )
-        if should_run_staged_followup:
-            staged_followup = ctx.run_cli_explicit_staged_followup(
-                ns_stage_list=[int(v) for v in ctx.ns_list_input],
-                niter_stage_list=explicit_niter_stages,
-                ftol_stage_list=explicit_ftol_stages,
-                policy_name="input_multigrid",
-            )
-            staged_followup_diag = StagedFollowupDiagnostics.from_run(staged_followup, policy="input_multigrid")
-            staged_fsq_val = float(ctx.result_final_fsq(staged_followup.result))
-            staged_conv = bool(ctx.result_meets_requested_ftol(staged_followup.result, ftol=float(requested_ftol)))
-            if staged_conv or (staged_fsq_val < float(best_fsq)):
-                best_run = staged_followup
-                best_fsq = float(staged_fsq_val)
+    best_run, best_fsq, staged_followup_diag = _maybe_apply_input_staged_followup(
+        ctx,
+        request,
+        initial_policy=str(initial_policy),
+        best_run=best_run,
+        best_fsq=best_fsq,
+    )
 
     # Accelerated multigrid can still miss the correct branch on some explicit
     # staged inputs even though xvmec2000 converges with the same sequence.
-    if (
-        bool(staged_input)
-        and bool(ctx.accelerated_mode)
-        and str(initial_policy) == "multigrid"
-        and (explicit_niter_stages is not None)
-        and (not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))))
-    ):
-        partial_start_stage = int(max(1, len(ctx.ns_list_input) - 1))
-        partial_restart_state = None
-        partial_restart_static_prev = None
-        partial_restart_resume_state = None
-        try:
-            stage_results = ctx.get_stage_results()
-            stage_statics = ctx.get_stage_statics()
-            if len(stage_results) >= int(partial_start_stage):
-                prev_idx = int(partial_start_stage) - 1
-                partial_restart_state = stage_results[prev_idx].state
-                partial_restart_static_prev = stage_statics[prev_idx]
-                partial_restart_resume_state = ctx.sanitize_resume_state_for_stage(
-                    stage_results[prev_idx].diagnostics.get("resume_state")
-                )
-        except Exception:
-            partial_restart_state = None
-            partial_restart_static_prev = None
-            partial_restart_resume_state = None
+    best_run, best_fsq, partial_fallback_used, fallback_used = _maybe_apply_accelerated_multigrid_fallbacks(
+        ctx,
+        request,
+        initial_policy=str(initial_policy),
+        best_run=best_run,
+        best_fsq=best_fsq,
+    )
 
-        if (partial_restart_state is not None) and (partial_restart_static_prev is not None):
-            partial_fallback = ctx.run_cli_explicit_staged_followup(
-                ns_stage_list=[int(v) for v in ctx.ns_list_input],
-                niter_stage_list=explicit_niter_stages,
-                ftol_stage_list=explicit_ftol_stages,
-                start_stage_index=int(partial_start_stage),
-                restart_state=partial_restart_state,
-                restart_static_prev=partial_restart_static_prev,
-                restart_resume_state=partial_restart_resume_state,
-                stage_mode_override="parity",
-                use_scan_override=False,
-                performance_mode_override=False,
-                policy_name="partial_parity_multigrid",
-            )
-            partial_fallback_used = True
-            partial_fallback_fsq = float(ctx.result_final_fsq(partial_fallback.result))
-            partial_fallback_conv = bool(
-                ctx.result_meets_requested_ftol(partial_fallback.result, ftol=float(requested_ftol))
-            )
-            if partial_fallback_conv or partial_fallback_fsq < best_fsq:
-                best_run = partial_fallback
-                best_fsq = float(partial_fallback_fsq)
-
-        if not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))):
-            fallback_used = True
-            fallback = _run_full_parity_fallback(ctx, max_fallback_budget=int(max_fallback_budget), multigrid=True)
-            fallback_fsq = float(ctx.result_final_fsq(fallback.result))
-            fallback_conv = bool(ctx.result_meets_requested_ftol(fallback.result, ftol=float(requested_ftol)))
-            if fallback_conv or fallback_fsq < best_fsq:
-                best_run = fallback
-                best_fsq = float(fallback_fsq)
-
-    improvement_floor = np.finfo(float).eps * max(1.0, abs(float(best_fsq)), abs(float(target_fsq)))
-    finish_budget = FinishBudgetTracker(cap=int(max_fallback_budget) if bool(ctx.max_iter_overridden) else None)
-    accelerated_finish_uses_scan = False if ctx.use_scan is False else True
-
-    if (
-        bool(ctx.accelerated_mode)
-        and str(initial_policy) == "single_grid"
-        and (not bool(staged_followup_diag.used))
-        and not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
-    ):
-        accel_budget_i = int(base_total_budget)
-        accel_budget_used = 0
-        while int(accel_budget_i) >= 1 and int(accel_budget_used) < int(max_fallback_budget):
-            budget_this = finish_budget.bounded(accel_budget_i)
-            if int(budget_this) <= 0:
-                break
-            prev_best_fsq = float(best_fsq)
-            trial = _run_finish_attempt(
-                ctx,
-                best_run=best_run,
-                target_fsq=target_fsq,
-                budget_i=budget_this,
-                mode_i="accelerated",
-                use_scan_i=bool(accelerated_finish_uses_scan),
-                performance_mode_i=True,
-            )
-            trial_fsq, trial_conv = attempt_log.record(
-                ctx,
-                trial,
-                requested_ftol=requested_ftol,
-                budget_i=budget_this,
-                mode_i="accelerated",
-            )
-            accel_budget_used += int(budget_this)
-            finish_budget.add(budget_this)
-            improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
-            if improved:
-                best_run = trial
-                best_fsq = float(trial_fsq)
-            if trial_conv or (not improved):
-                break
+    improvement_floor = np.finfo(float).eps * max(1.0, abs(float(best_fsq)), abs(float(request.target_fsq)))
+    finish_budget = FinishBudgetTracker(cap=int(request.max_fallback_budget) if bool(ctx.max_iter_overridden) else None)
+    best_run, best_fsq = _run_accelerated_finish_attempts(
+        ctx,
+        request,
+        initial_policy=str(initial_policy),
+        staged_followup_diag=staged_followup_diag,
+        best_run=best_run,
+        best_fsq=best_fsq,
+        attempt_log=attempt_log,
+        finish_budget=finish_budget,
+        improvement_floor=float(improvement_floor),
+    )
     # For multigrid paths where the final stage exhausted its NITER budget, skip
     # extra parity iterations to match VMEC2000's normal-termination behavior.
     multigrid_niter_exhausted = (
@@ -546,58 +715,32 @@ def maybe_finish_cli_fixed_boundary_run(
         and bool(best_run.result.diagnostics.get("multigrid_final_stage_niter_exhausted", False))
     )
     if not bool(multigrid_niter_exhausted) and not bool(
-        ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol))
+        ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol))
     ):
-        budget_i = int(base_total_budget)
-        while int(budget_i) >= 1:
-            budget_this = finish_budget.bounded(budget_i)
-            if int(budget_this) <= 0:
-                break
-            prev_best_fsq = float(best_fsq)
-            trial = _run_finish_attempt(
-                ctx,
-                best_run=best_run,
-                target_fsq=target_fsq,
-                budget_i=budget_this,
-                mode_i="parity",
-                use_scan_i=False,
-                performance_mode_i=False,
-            )
-            trial_fsq, trial_conv = attempt_log.record(
-                ctx,
-                trial,
-                requested_ftol=requested_ftol,
-                budget_i=budget_this,
-                mode_i="parity",
-            )
-            finish_budget.add(budget_this)
-            improved = trial_conv or (float(trial_fsq) < float(prev_best_fsq - improvement_floor))
-            if improved:
-                best_run = trial
-                best_fsq = float(trial_fsq)
-            if trial_conv:
-                break
-            if improved:
-                continue
-            next_budget = max(1, int(np.ceil(float(budget_i) / 2.0)))
-            if int(next_budget) == int(budget_i):
-                break
-            budget_i = int(next_budget)
+        best_run, best_fsq = _run_parity_finish_attempts(
+            ctx,
+            request,
+            best_run=best_run,
+            best_fsq=best_fsq,
+            attempt_log=attempt_log,
+            finish_budget=finish_budget,
+            improvement_floor=float(improvement_floor),
+        )
 
     if (
-        staged_input
-        and not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(requested_ftol)))
+        request.staged_input
+        and not bool(ctx.result_meets_requested_ftol(best_run.result, ftol=float(request.requested_ftol)))
         and bool(ctx.accelerated_mode)
         and not bool(multigrid_niter_exhausted)
     ):
         fallback_used = True
         fallback = _run_full_parity_fallback(
             ctx,
-            max_fallback_budget=int(max_fallback_budget),
+            max_fallback_budget=int(request.max_fallback_budget),
             multigrid=ctx.multigrid if bool(ctx.multigrid_user_provided) else None,
         )
         fallback_fsq = float(ctx.result_final_fsq(fallback.result))
-        fallback_conv = bool(ctx.result_meets_requested_ftol(fallback.result, ftol=float(requested_ftol)))
+        fallback_conv = bool(ctx.result_meets_requested_ftol(fallback.result, ftol=float(request.requested_ftol)))
         if fallback_conv or fallback_fsq < best_fsq:
             best_run = fallback
             best_fsq = float(fallback_fsq)
@@ -606,9 +749,9 @@ def maybe_finish_cli_fixed_boundary_run(
         FinishDiagnosticInputs(
             ctx=ctx,
             best_run=best_run,
-            requested_ftol=float(requested_ftol),
-            target_fsq=float(target_fsq),
-            base_diag=base_diag,
+            requested_ftol=float(request.requested_ftol),
+            target_fsq=float(request.target_fsq),
+            base_diag=request.base_diag,
             initial_policy=str(initial_policy),
             partial_fallback_used=bool(partial_fallback_used),
             fallback_used=bool(fallback_used),
