@@ -7772,3 +7772,85 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
+
+### 2026-06-26: Extract residual-loop setup policies and cache-key preparation
+
+Steps taken:
+
+- Split residual-iteration startup policy resolution out of
+  ``solve_fixed_boundary_residual_iter`` into
+  ``_resolve_startup_policy_for_residual_iter``.
+- Split edge-coefficient/cache-key preparation out of the main residual loop
+  into ``_prepare_residual_cache_keys_for_state``.
+- Split the optional short-stage NumPy force fast-path decision into
+  ``_use_numpy_force_fast_path_policy``.
+- Tightened the CI/local source-health baseline for
+  ``solve_fixed_boundary_residual_iter`` from 2508 to 2479 source lines.
+- Kept the change in fixed-boundary setup/plumbing only; no force kernels,
+  timestep control, scan acceptance, WOUT construction, public plots, or
+  benchmark provenance files changed.
+
+Results obtained:
+
+- ``solve_fixed_boundary_residual_iter`` is now 2479 source lines by
+  ``inspect``.
+- ``python -m ruff check
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tools/diagnostics/local_ci_gate.py tests/test_local_ci_gate.py`` passed.
+- ``python -m compileall -q
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tools/diagnostics/local_ci_gate.py tests/test_local_ci_gate.py`` passed.
+- ``python tools/diagnostics/source_health.py --top 20
+  --max-root-helper-prefix-files 2 --max-function-lines-at
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2479
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420`` passed.
+- ``python tools/diagnostics/local_ci_gate.py --dry-run --only
+  source-health`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_solve_additional_helpers.py tests/test_solve_branch_coverage.py
+  tests/test_solve_performance_instrumentation.py tests/test_local_ci_gate.py
+  -q`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_driver_api.py tests/test_driver_fast_reconstruction.py
+  tests/test_driver_api_finish_more_coverage.py tests/test_driver_policy_helpers.py
+  tests/test_driver_policy_coverage_extra.py -q`` passed with the existing
+  numerical warnings in the optimized-controller smoke row.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_residue_getfsq_parity.py
+  tests/test_wout_profiles_currents_bundled_parity.py
+  tests/test_physics_parity_helper_gates.py
+  tests/test_vmec_parity_physics_fast_gates.py
+  tests/test_converged_wout_matrix_parity.py
+  tests/test_parity_sweep_manifest_thresholds.py -q`` passed with the
+  existing expected xfail.
+- ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_final_tranche_residual_setup`` passed.
+- ``python tools/diagnostics/repo_size_audit.py --top 30 --max-total-mib 50
+  --max-file-mib 2`` passed; tracked size remains 28.46 MiB.
+
+Best next steps:
+
+1. Commit and push this residual-loop setup split, then let CI validate the
+   tightened source-health gate.
+2. If CI stays green, treat PR readiness blockers as documentation/review
+   decisions rather than artifact-generation blockers; README benchmark and
+   AD/FD figures were already regenerated from provenance in this tranche.
+3. If another refactor tranche is requested before review, target a larger
+   source boundary than startup setup: either residual state setup or the
+   largest free-boundary validation tests.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.2%.
+- Free-boundary production differentiability: 97.6%.
+- Single-stage coil optimization: 94.0%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 81.5%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.7%.
