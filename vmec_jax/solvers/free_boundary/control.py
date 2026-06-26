@@ -389,6 +389,66 @@ def _freeb_edge_control_reduced_map(projection: dict[str, Any]) -> ReducedContro
     )
 
 
+def _freeb_edge_control_state_edge_values(state: VMECState, projection: dict[str, Any]) -> np.ndarray:
+    """Return stacked physical LCFS edge coefficients for a prepared projection."""
+
+    k = int(projection["mode_count"])
+    scale = np.asarray(projection["mode_scale_np"], dtype=float)
+    edge_values = np.concatenate(
+        [
+            np.asarray(state.Rcos, dtype=float)[-1] * scale,
+            np.asarray(state.Rsin, dtype=float)[-1] * scale,
+            np.asarray(state.Zcos, dtype=float)[-1] * scale,
+            np.asarray(state.Zsin, dtype=float)[-1] * scale,
+        ],
+        axis=0,
+    )
+    if edge_values.size != 4 * k:
+        raise ValueError("state edge row has the wrong size for the edge-control projection")
+    return edge_values
+
+
+def _freeb_edge_control_state_coordinates(state: VMECState, projection: dict[str, Any]) -> dict[str, Any]:
+    """Fit the accepted LCFS edge row in reduced-control coordinates."""
+
+    if not bool(projection.get("enabled", False)):
+        return {"enabled": False, "status": "disabled"}
+    control_map = _freeb_edge_control_reduced_map(projection)
+    edge_values = _freeb_edge_control_state_edge_values(state, projection)
+    step = control_map.encode(edge_values)
+    residual = step.residual_after
+    finite = residual[np.isfinite(residual)]
+    residual_linf = float(np.max(np.abs(finite))) if finite.size else 0.0
+    residual_rms = float(np.sqrt(np.mean(finite * finite))) if finite.size else 0.0
+    map_diag = control_map.to_dict()
+    info = dict(projection.get("info", {}))
+    return {
+        "enabled": True,
+        "status": "measured",
+        "mode": "affine_edge_control_coordinates",
+        "basis_symmetry": info.get("basis_symmetry"),
+        "initial_boundary_source": info.get("initial_boundary_source"),
+        "mode_count": int(projection["mode_count"]),
+        "full_size": int(map_diag["full_size"]),
+        "control_count": int(map_diag["control_count"]),
+        "rank": int(map_diag["rank"]),
+        "rank_deficient": bool(map_diag["rank_deficient"]),
+        "condition_number": map_diag["condition_number"],
+        "rcond": map_diag["rcond"],
+        "labels": list(step.labels),
+        "coordinates": [float(value) for value in step.control_delta],
+        "coordinate_by_label": step.control_delta_by_label,
+        "coordinate_l2": float(step.control_l2),
+        "coordinate_linf": float(step.control_linf),
+        "target_l2": float(step.target_l2),
+        "reconstruction_l2": float(step.predicted_l2),
+        "reconstruction_residual_l2": float(step.residual_l2),
+        "reconstruction_residual_linf": residual_linf,
+        "reconstruction_residual_rms": residual_rms,
+        "reconstruction_residual_rel": step.residual_rel,
+    }
+
+
 def _freeb_edge_control_vector_projection_metrics(
     target: Any,
     projection: dict[str, Any],
@@ -521,21 +581,9 @@ def _freeb_edge_control_state_residual_metrics(state: VMECState, projection: dic
 
     if not bool(projection.get("enabled", False)):
         return {"enabled": False, "status": "disabled"}
-    k = int(projection["mode_count"])
-    scale = np.asarray(projection["mode_scale_np"], dtype=float)
     control_map = _freeb_edge_control_reduced_map(projection)
-    edge_values = np.concatenate(
-        [
-            np.asarray(state.Rcos, dtype=float)[-1] * scale,
-            np.asarray(state.Rsin, dtype=float)[-1] * scale,
-            np.asarray(state.Zcos, dtype=float)[-1] * scale,
-            np.asarray(state.Zsin, dtype=float)[-1] * scale,
-        ],
-        axis=0,
-    )
+    edge_values = _freeb_edge_control_state_edge_values(state, projection)
     target = edge_values - control_map.initial
-    if target.size != 4 * k:
-        raise ValueError("state edge row has the wrong size for the edge-control projection")
     return _freeb_edge_control_vector_projection_metrics(target, projection, status="measured")
 
 

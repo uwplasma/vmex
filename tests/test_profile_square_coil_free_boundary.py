@@ -369,6 +369,7 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     from vmec_jax.solve import (
         _freeb_edge_control_delta_tuple_projection_metrics,
         _freeb_edge_control_reduced_map,
+        _freeb_edge_control_state_coordinates,
         _freeb_edge_control_state_residual_metrics,
         _prepare_freeb_edge_control_projection,
         _project_freeb_edge_control_delta_tuple,
@@ -444,7 +445,9 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
 
     projected = _project_freeb_edge_control_state(trial, projection, host_update=True)
     raw_metrics = _freeb_edge_control_state_residual_metrics(trial, projection)
+    raw_coordinates = _freeb_edge_control_state_coordinates(trial, projection)
     projected_metrics = _freeb_edge_control_state_residual_metrics(projected, projection)
+    projected_coordinates = _freeb_edge_control_state_coordinates(projected, projection)
     control_map = _freeb_edge_control_reduced_map(projection)
     scale = np.asarray(projection["mode_scale_np"], dtype=float)
     projected_edge_values = np.concatenate(
@@ -491,8 +494,16 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert raw_metrics["status"] == "measured"
     assert raw_metrics["residual_linf"] > 0.1
     assert raw_metrics["control_delta_by_label"]["R00"] == pytest.approx(0.2)
+    assert raw_coordinates["status"] == "measured"
+    assert raw_coordinates["mode"] == "affine_edge_control_coordinates"
+    assert raw_coordinates["coordinate_by_label"]["R00"] == pytest.approx(0.2)
+    assert raw_coordinates["coordinate_linf"] == pytest.approx(0.2)
+    assert raw_coordinates["reconstruction_residual_linf"] > 0.1
     assert projected_metrics["residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
     assert projected_metrics["residual_rms"] == pytest.approx(0.0, abs=1.0e-12)
+    assert projected_coordinates["coordinate_by_label"]["R00"] == pytest.approx(0.2)
+    assert projected_coordinates["reconstruction_residual_linf"] == pytest.approx(0.0, abs=1.0e-12)
+    assert projected_coordinates["rank"] == 1
     np.testing.assert_allclose(projected_control_step.control_delta, [0.2])
     np.testing.assert_allclose(control_map.decode(projected_control_step.control_delta), projected_edge_values)
     assert direction_metrics["status"] == "measured"
@@ -1687,6 +1698,13 @@ def test_square_coil_profile_run_jax_backend_passes_edge_control_projection(
                         "apply_count": 3,
                         "delta_projection_count": 5,
                         "zero_velocity_count": 4,
+                        "state_coordinates": {
+                            "enabled": True,
+                            "status": "measured",
+                            "coordinate_by_label": {"side": 0.1, "corner": -0.2},
+                            "coordinate_linf": 0.2,
+                            "reconstruction_residual_linf": 0.0,
+                        },
                     },
                 },
             },
@@ -1724,6 +1742,9 @@ def test_square_coil_profile_run_jax_backend_passes_edge_control_projection(
     assert out["free_boundary_edge_control_projection"]["apply_count"] == 3
     assert out["free_boundary_edge_control_projection"]["delta_projection_count"] == 5
     assert out["free_boundary_edge_control_projection"]["zero_velocity_count"] == 4
+    state_coordinates = out["free_boundary_edge_control_projection"]["state_coordinates"]
+    assert state_coordinates["coordinate_by_label"] == {"side": 0.1, "corner": -0.2}
+    assert state_coordinates["reconstruction_residual_linf"] == pytest.approx(0.0)
 
 
 def test_square_coil_profile_run_jax_backend_hot_restarts_from_freeb_state(

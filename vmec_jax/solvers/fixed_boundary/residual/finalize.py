@@ -10,6 +10,7 @@ import numpy as np
 from ..diagnostics.io import _pack_resume_state_record
 from ...free_boundary.control import (
     _freeb_edge_control_delta_tuple_projection_metrics,
+    _freeb_edge_control_state_coordinates,
     _freeb_edge_control_state_residual_metrics,
 )
 from .runtime import (
@@ -98,6 +99,20 @@ def _edge_control_state_residual_payload(ns: Mapping[str, Any]) -> dict[str, Any
     try:
         projection = ns.get("freeb_edge_control_projection", {"enabled": False})
         return _freeb_edge_control_state_residual_metrics(ns["state"], projection)
+    except Exception as exc:
+        return {
+            "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
+            "status": "failed",
+            "error": repr(exc),
+        }
+
+
+def _edge_control_state_coordinates_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """Return reduced-edge coordinates without risking finalization."""
+
+    try:
+        projection = ns.get("freeb_edge_control_projection", {"enabled": False})
+        return _freeb_edge_control_state_coordinates(ns["state"], projection)
     except Exception as exc:
         return {
             "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
@@ -536,6 +551,7 @@ def finalize_residual_iter_from_namespace(
                 ),
                 "zero_velocity_count": int(ns.get("freeb_edge_control_projection_zero_velocity_count", 0)),
                 "state_residual": _edge_control_state_residual_payload(ns),
+                "state_coordinates": _edge_control_state_coordinates_payload(ns),
                 "update_direction": _edge_control_update_direction_payload(ns),
             },
         },

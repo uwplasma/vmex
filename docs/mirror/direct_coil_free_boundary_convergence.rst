@@ -313,6 +313,13 @@ means a reduced update would need more controls or a different basis.
 The square-control projection now uses the same shared reduced-control
 least-squares kernel as the solver edge-control projection, so those diagnostics
 share rank, conditioning, and residual conventions.
+When the solver edge projection is enabled, the final solve diagnostics also
+include ``free_boundary.edge_control_projection.state_coordinates``. That block
+fits the accepted LCFS edge back into the affine reduced-control map and reports
+the fitted coordinates, reconstruction residual, rank, and conditioning. Use it
+to tell whether a strict-tolerance stall is still moving in the intended
+side/corner spline-control variables or leaking into uncontrolled Fourier edge
+modes.
 Backend rows now also include a compact ``free_boundary_promotion`` block. The
 summary table exposes this as ``boundary_condition_mode``,
 ``coil_bnormal_role``, ``production_candidate``, ``promotion_blockers``,
@@ -375,10 +382,11 @@ The second command additionally enables the experimental JAX NESTOR operator.
 Use ``--freeb-edge-control-projection stellarator`` when testing the
 stellarator-corner control subspace.
 The summary table now reports the edge-control projection status, requested
-basis, control count, and pseudo-inverse cutoff.  Stalled direct rows that did
-not use the reduced edge projection recommend ``direct-gpu-edge-polish`` before
-additional kernel experiments; stalled rows that already used edge projection
-recommend the edge-projected JAX-NESTOR profile next.
+basis, control count, pseudo-inverse cutoff, accepted-state reduced-coordinate
+norms, and reconstruction residuals. Stalled direct rows that did not use the
+reduced edge projection recommend ``direct-gpu-edge-polish`` before additional
+kernel experiments; stalled rows that already used edge projection recommend
+the edge-projected JAX-NESTOR profile next.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and
@@ -585,6 +593,8 @@ Fourier boundary values into controls and decodes controls back to the full
 coefficient vector. This is the tested host-side map needed before the
 nonlinear unknown vector can be promoted from edge-only projection to
 solver-native spline/control coordinates.
+The same map now underlies the accepted-state ``state_coordinates`` diagnostics
+for edge-projected free-boundary solves.
 For staged solves, the same table now exposes ``stage_count``,
 ``stage_ns_array``, ``stage_niter_array``, ``stage_ftol_array``,
 ``stage_budget_total``, ``stage_budget_final``, ``current_stage_index``,

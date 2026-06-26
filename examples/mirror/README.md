@@ -564,6 +564,12 @@ projection.
 ``vmec_jax.solvers.free_boundary.ReducedControlMap`` is the public host-side
 encode/decode primitive for that next lane: it maps full Fourier edge vectors
 to reduced controls and back without changing the current solve path.
+Edge-projected free-boundary solves now also write
+``free_boundary.edge_control_projection.state_coordinates`` in their solver
+diagnostics. That compact block reports the accepted LCFS edge in the same
+reduced controls, with reconstruction residual and conditioning, so edited
+``MPOL``/``NTOR``/``NZETA`` runs can be compared in the physical square-axis
+control basis rather than only in raw Fourier coefficients.
 As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the direct
 JAX hot-restart row is closer to the requested ``1e-12`` component target than
 the active VMEC2000 generated-``mgrid`` row, while VMEC2000 is flat above its

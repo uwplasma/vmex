@@ -1236,6 +1236,9 @@ def _summary_row(
     freeb_edge_control_state_residual = freeb_edge_control_runtime.get("state_residual")
     if not isinstance(freeb_edge_control_state_residual, dict):
         freeb_edge_control_state_residual = {}
+    freeb_edge_control_state_coordinates = freeb_edge_control_runtime.get("state_coordinates")
+    if not isinstance(freeb_edge_control_state_coordinates, dict):
+        freeb_edge_control_state_coordinates = {}
     freeb_edge_control_update_direction = freeb_edge_control_runtime.get("update_direction")
     if not isinstance(freeb_edge_control_update_direction, dict):
         freeb_edge_control_update_direction = {}
@@ -1434,6 +1437,24 @@ def _summary_row(
         ),
         "freeb_edge_control_projection_state_captured_fraction": _finite_float(
             freeb_edge_control_state_residual.get("captured_fraction")
+        ),
+        "freeb_edge_control_projection_state_coordinates_status": freeb_edge_control_state_coordinates.get(
+            "status"
+        ),
+        "freeb_edge_control_projection_state_coordinate_linf": _finite_float(
+            freeb_edge_control_state_coordinates.get("coordinate_linf")
+        ),
+        "freeb_edge_control_projection_state_coordinate_l2": _finite_float(
+            freeb_edge_control_state_coordinates.get("coordinate_l2")
+        ),
+        "freeb_edge_control_projection_state_reconstruction_residual_linf": _finite_float(
+            freeb_edge_control_state_coordinates.get("reconstruction_residual_linf")
+        ),
+        "freeb_edge_control_projection_state_reconstruction_residual_rms": _finite_float(
+            freeb_edge_control_state_coordinates.get("reconstruction_residual_rms")
+        ),
+        "freeb_edge_control_projection_state_reconstruction_residual_rel": _finite_float(
+            freeb_edge_control_state_coordinates.get("reconstruction_residual_rel")
         ),
         "freeb_edge_control_projection_update_direction_status": freeb_edge_control_update_direction.get(
             "status"
@@ -1916,6 +1937,12 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_state_residual_rms",
         "freeb_edge_control_projection_state_residual_rel",
         "freeb_edge_control_projection_state_captured_fraction",
+        "freeb_edge_control_projection_state_coordinates_status",
+        "freeb_edge_control_projection_state_coordinate_linf",
+        "freeb_edge_control_projection_state_coordinate_l2",
+        "freeb_edge_control_projection_state_reconstruction_residual_linf",
+        "freeb_edge_control_projection_state_reconstruction_residual_rms",
+        "freeb_edge_control_projection_state_reconstruction_residual_rel",
         "freeb_edge_control_projection_update_direction_status",
         "freeb_edge_control_projection_update_direction_linf",
         "freeb_edge_control_projection_update_direction_rms",
