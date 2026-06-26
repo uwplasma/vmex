@@ -140,6 +140,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--enforce-recommended-nzeta", action="store_true")
     p.add_argument(
+        "--auto-bump-nzeta-to-recommended",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "For production-gated square-axis runs, increase an explicit underrecommended "
+            "--nzeta to the square-axis recommendation instead of launching an underresolved deck."
+        ),
+    )
+    p.add_argument(
         "--nstep",
         type=int,
         default=ExampleConfig().nstep,
@@ -384,6 +393,23 @@ def _parse_optional_positive_float(raw: str) -> float | None:
     if not np.isfinite(parsed) or parsed <= 0.0:
         raise argparse.ArgumentTypeError("value must be positive, finite, or 'none'")
     return parsed
+
+
+def _resolve_profile_nzeta(args: argparse.Namespace, recommended_nzeta: int) -> tuple[int, bool, bool]:
+    """Return the effective toroidal grid size and auto-resolution flags."""
+
+    if args.nzeta is None:
+        return int(recommended_nzeta), True, False
+    requested = int(args.nzeta)
+    production_gate = args.max_boundary_projection_error is not None
+    should_bump = (
+        bool(args.auto_bump_nzeta_to_recommended)
+        and requested < int(recommended_nzeta)
+        and (production_gate or bool(args.enforce_recommended_nzeta))
+    )
+    if should_bump:
+        return int(recommended_nzeta), False, True
+    return requested, False, False
 
 
 def _parse_virtual_casing_chunk_arg(raw: str) -> int | str | None:
@@ -2410,7 +2436,7 @@ def main(argv: list[str] | None = None) -> int:
     outdir = args.outdir
     outdir.mkdir(parents=True, exist_ok=True)
     recommended_nzeta = recommended_square_axis_nzeta(int(args.ntor))
-    resolved_nzeta = int(recommended_nzeta if args.nzeta is None else args.nzeta)
+    resolved_nzeta, nzeta_auto, nzeta_auto_bumped = _resolve_profile_nzeta(args, recommended_nzeta)
     mgrid_nphi = int(resolved_nzeta if args.mgrid_nphi is None else args.mgrid_nphi)
     if mgrid_nphi % max(1, resolved_nzeta) != 0 and not bool(args.resolution_diagnostics_only):
         raise ValueError(
@@ -2491,7 +2517,9 @@ def main(argv: list[str] | None = None) -> int:
                 "ntor": int(args.ntor),
                 "ns": int(ns_array[-1]),
                 "nzeta": resolved_nzeta,
-                "nzeta_auto": bool(args.nzeta is None),
+                "nzeta_auto": bool(nzeta_auto),
+                "nzeta_auto_bumped_to_recommended": bool(nzeta_auto_bumped),
+                "auto_bump_nzeta_to_recommended": bool(args.auto_bump_nzeta_to_recommended),
                 "recommended_nzeta": int(recommended_nzeta),
                 "nzeta_underrecommended": bool(resolved_nzeta < int(recommended_nzeta)),
                 "max_iter": int(niter_array[-1]),
@@ -2616,7 +2644,9 @@ def main(argv: list[str] | None = None) -> int:
             "ntor": int(args.ntor),
             "ns": int(ns_array[-1]),
             "nzeta": resolved_nzeta,
-            "nzeta_auto": bool(args.nzeta is None),
+            "nzeta_auto": bool(nzeta_auto),
+            "nzeta_auto_bumped_to_recommended": bool(nzeta_auto_bumped),
+            "auto_bump_nzeta_to_recommended": bool(args.auto_bump_nzeta_to_recommended),
             "recommended_nzeta": int(recommended_nzeta),
             "nzeta_underrecommended": bool(resolved_nzeta < int(recommended_nzeta)),
             "max_iter": int(niter_array[-1]),

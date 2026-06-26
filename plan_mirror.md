@@ -5738,6 +5738,150 @@ Visual validation:
 
 No user input is needed.
 
+## M306. Strict-FTOL robustness assessment, NZETA guard, and queue repair
+
+### Steps taken
+
+- Rechecked PR #21 and the active `office` strict rows without interrupting
+  any running solver processes.
+- Repaired two remote scratch queue scripts that could deadlock by requiring
+  `other_waiters=0` before attempting the shared
+  `/tmp/vmec_mirror_freeb_queue.lock`; the scripts now let `flock` serialize
+  queued jobs and still wait for active `profile_square_coil_free_boundary.py`
+  and `xvmec` jobs to finish.
+- Ran the square-coil resolution matrix with reduced-control conditioning for
+  `MPOL/NTOR/NZETA` decks around the production case.
+- Added a profiling-CLI robustness guard:
+  `tools/diagnostics/profile_square_coil_free_boundary.py` now auto-bumps an
+  explicit underrecommended `--nzeta` to the square-axis recommendation when a
+  finite production projection gate is active, while
+  `--no-auto-bump-nzeta-to-recommended` preserves the old hard-fail behavior.
+- Rechecked current documentation/literature:
+  - STELLOPT VMEC docs describe the Fourier VMEC basis, Richardson descent,
+    staged `NS_ARRAY`/`FTOL_ARRAY`, and free-boundary `mgrid` vacuum-field
+    condition.
+  - MAKEGRID docs confirm the VMEC2000 reference path is a gridded Biot-Savart
+    external field, not a solver-native direct-coil path.
+  - DESC free-boundary docs use `SplineMagneticField.from_mgrid`, direct field
+    objects, `BoundaryError`, `VacuumBoundaryError`, and mode-continuation
+    constraints for robustness.
+  - Recent mirror-equilibrium literature treats finite-beta mirrors through
+    force balance and diamagnetic field response, so beta scans should check
+    pressure-driven expansion/field depression rather than only visual surface
+    drift.
+
+### Results obtained
+
+- Active direct JAX strict row:
+  - still running at about iteration `5520/8000`;
+  - latest tail is essentially flat with `fsqr≈1.98e-11`,
+    `fsqz≈1.86e-11`, `fsql≈9.0e-12`;
+  - strict gap is therefore about `20x` above the requested component
+    `FTOL=1e-12`.
+- Active VMEC2000/mgrid reference:
+  - still running in its first loose `NS=9`, `FTOL=1e-8` stage;
+  - latest `threed1` tail is around `1.45e-8`;
+  - it has not yet reached the `1e-10` or `1e-12` stages, so it is not yet
+    evidence that VMEC2000 is more robust for this geometry.
+- Resolution matrix result:
+  - `MPOL=5, NTOR=28, NZETA=48` is underrecommended;
+  - `MPOL=5, NTOR=28, NZETA=64` is the first production-ready deck among the
+    tested rows;
+  - raising `MPOL` alone does not remove the `NZETA` gate.
+- The spline/control path is confirmed to be a useful real-space and
+  reduced-edge-control bridge, but not yet a solver-native spline state. If the
+  queued polish rows remain above `1e-12`, the next finite tranche is to move
+  the nonlinear free-boundary LCFS update into reduced square-axis controls
+  rather than adding more Fourier-only polish variants.
+
+### How it was tested
+
+```bash
+venv/bin/python tools/diagnostics/square_coil_resolution_matrix.py \
+  --decks 5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto \
+  --format markdown --include-control-map --target-error 5e-12 \
+  --ns-array 9,13,17 --niter-array 4000,8000,24000 \
+  --ftol-array 1e-8,1e-10,1e-12
+```
+
+Result: production-ready rows begin at `MPOL=5, NTOR=28, NZETA=64`;
+reduced control-map conditioning remains finite and benign for both the
+two-control square basis and five-control stellarator basis.
+
+```bash
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/square_profile_auto_bump_smoke --beta-percent 0 \
+  --mpol 5 --ntor 28 --ns 5 --nzeta 32 --max-iter 1 \
+  --max-boundary-projection-error 5e-12 \
+  --skip-direct --skip-mgrid --skip-provider-parity \
+  --resolution-diagnostics-only
+```
+
+Result: wrote a production-ready diagnostic report with effective
+`NZETA=64`, `recommended_nzeta=64`, and
+`nzeta_auto_bumped_to_recommended=True`.
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py
+ruff check tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_profile_square_coil_free_boundary.py
+git diff --check
+```
+
+Result: `30 passed`; ruff and whitespace checks passed.
+
+CI note: PR #21 has one red `py3.11 core coverage: rest` shard on commit
+`63295c34`, but the exact job log shows the pytest process was canceled at
+`77%` progress, not that a test assertion failed. The next push should rerun
+that shard.
+
+### File structure and best-practice adherence
+
+- Source change is limited to the square-coil profiling CLI and its focused
+  tests.
+- The root example already defaults to strict `FTOL=1e-12` and auto-bumps
+  low `NZETA`; this change aligns the profiling CLI with that safer behavior.
+- Remote queue fixes were applied only to scratch launcher scripts on
+  `office`; no generated solver outputs, figures, WOUT files, or mgrid files
+  were committed.
+- The file structure keeps the reusable square-axis control math in
+  `vmec_jax/toroidal_hybrid.py`, runtime profiling policy in
+  `tools/diagnostics/profile_square_coil_free_boundary.py`, and examples in
+  the repo-root `examples/` folder.
+
+### Best next steps
+
+1. Commit and push the profiling-CLI `NZETA` guard plus this plan update.
+2. Let the active direct JAX and VMEC2000 rows continue; do not kill or update
+   their active checkouts.
+3. Let the queued edge/projected/small-DELT rows run under the repaired queue
+   logic.
+4. If all strict direct rows plateau above `1e-12`, begin the solver-native
+   reduced spline/control LCFS state tranche.
+5. When VMEC2000 reaches strict stages, compare iteration history, memory,
+   wall time, and final force components against the JAX direct-coil rows.
+
+### Completion percentages after M306
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row is flat around `2e-11`.
+- VMEC2000 robustness/reference lane: `99%`, active row is still in the loose
+  first stage.
+- Resolution/edit robustness lane: `100%`, profile CLI now auto-bumps
+  production-gated underrecommended `NZETA`.
+- True spline/control-basis hybrid lane: `85%`, bridge and edge projection are
+  ready; solver-native reduced state remains open.
+- DELT/stage-budget polish lane: `78%`, queues are repaired and waiting.
+- Finite-beta virtual-casing validation lane: `87%`, strict finite-beta row
+  still waits on strict vacuum baseline behavior.
+- CI/API health lane: `99%`, all actionable local checks pass; one remote shard
+  was canceled and should rerun after the next push.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M305. Fast-forwarded waiting solver lanes to edge-velocity-scrub code
 
 ### Steps taken

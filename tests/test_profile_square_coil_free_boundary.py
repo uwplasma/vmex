@@ -810,7 +810,56 @@ def test_square_coil_profile_projection_gate_fails_before_backend_work(monkeypat
         )
 
 
-def test_square_coil_profile_production_gate_rejects_underrecommended_nzeta(
+def test_square_coil_profile_production_gate_auto_bumps_underrecommended_nzeta(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(
+        profile,
+        "_boundary_projection_payload",
+        lambda config: {
+            "max_abs_component_error": 1.0e-13,
+            "max_abs_error": 1.0e-13,
+            "rms_error": 1.0e-14,
+            "mode_count": 1,
+        },
+    )
+
+    outdir = tmp_path / "profile_auto_bumped_nzeta"
+    assert (
+        profile.main(
+            [
+                "--outdir",
+                str(outdir),
+                "--mpol",
+                "5",
+                "--ntor",
+                "28",
+                "--ns",
+                "5",
+                "--nzeta",
+                "32",
+                "--max-iter",
+                "2",
+                "--max-boundary-projection-error",
+                "5e-12",
+                "--skip-direct",
+                "--skip-mgrid",
+                "--skip-provider-parity",
+            ]
+        )
+        == 0
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert data["configuration"]["nzeta"] == profile.recommended_square_axis_nzeta(28)
+    assert data["configuration"]["nzeta_auto"] is False
+    assert data["configuration"]["nzeta_auto_bumped_to_recommended"] is True
+    assert data["configuration"]["nzeta_underrecommended"] is False
+    assert data["resolution_deck"]["status"] == "production_ready"
+
+
+def test_square_coil_profile_production_gate_rejects_underrecommended_nzeta_without_auto_bump(
     monkeypatch,
     tmp_path: Path,
 ):
@@ -840,6 +889,7 @@ def test_square_coil_profile_production_gate_rejects_underrecommended_nzeta(
                 "32",
                 "--mgrid-nphi",
                 "32",
+                "--no-auto-bump-nzeta-to-recommended",
                 "--max-iter",
                 "2",
                 "--max-boundary-projection-error",
