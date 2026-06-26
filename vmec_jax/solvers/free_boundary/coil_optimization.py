@@ -1883,6 +1883,66 @@ def _same_branch_compact_fd_report(
     )
 
 
+def _same_branch_rejected_slot_and_profile_sections(
+    *,
+    args: Any,
+    ctx: SameBranchReportContext,
+    report: dict[str, Any],
+    timings: dict[str, float],
+    same_branch: bool,
+    replay_kwargs: dict[str, Any],
+    replay_mode_count_guard_triggered: bool,
+    replay_mode_count_guard_reason: str,
+    replay_max_mode_count: int,
+    mode_count: int,
+    missing_vector_keys: tuple[str, ...],
+    vector_uses_state_only_replay: bool,
+    main_vector_summary: dict[str, Any] | None,
+    main_vector_replay_plan: dict[str, Any] | None,
+    run_branch_local_vector: SameBranchVectorRunner,
+    summarize_vector_result: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run optional rejected-slot and NESTOR-profile report sections."""
+
+    rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
+        requested=bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
+        same_branch=same_branch,
+        replay_mode_count_guard_triggered=bool(replay_mode_count_guard_triggered),
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        mode=ctx.mode,
+        report=report,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=ctx.vector_keys,
+        replay_kwargs=replay_kwargs,
+        run_branch_local_vector=run_branch_local_vector,
+        summarize_vector_result=summarize_vector_result,
+        main_vector_replay_plan=main_vector_replay_plan,
+        gate_mode=str(getattr(args, "same_branch_report_rejected_slot_mode", "replay")),
+    )
+    if rejected_slot_wall_s is not None:
+        timings["branch_local_rejected_slot_wall_s"] = rejected_slot_wall_s
+    nestor_profile = same_branch_nestor_profile_from_vector_replay(
+        args=args,
+        same_branch=same_branch,
+        mode=ctx.mode,
+        report=report,
+        mode_count=mode_count,
+        replay_mode_count_guard_triggered=replay_mode_count_guard_triggered,
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        replay_max_mode_count=replay_max_mode_count,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=ctx.vector_keys,
+        replay_kwargs=replay_kwargs,
+        vector_uses_state_only_replay=vector_uses_state_only_replay,
+        main_vector_summary=main_vector_summary,
+        main_vector_replay_plan=main_vector_replay_plan,
+        timings=timings,
+        run_branch_local_vector=run_branch_local_vector,
+        summarize_vector_result=summarize_vector_result,
+    )
+    return rejected_slot_gate, nestor_profile
+
+
 def _same_branch_report_replay_sections(
     *,
     args: Any,
@@ -1996,39 +2056,21 @@ def _same_branch_report_replay_sections(
             cache_probe=bool(getattr(args, "same_branch_report_current_jvp_cache_probe", False)),
         )
     )
-    rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
-        requested=bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
-        same_branch=same_branch,
-        replay_mode_count_guard_triggered=bool(replay_mode_count_guard_triggered),
-        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
-        mode=ctx.mode,
-        report=report,
-        missing_vector_keys=missing_vector_keys,
-        vector_keys=ctx.vector_keys,
-        replay_kwargs=replay_kwargs,
-        run_branch_local_vector=run_branch_local_vector,
-        summarize_vector_result=summarize_vector_result,
-        main_vector_replay_plan=main_vector_replay_plan,
-        gate_mode=str(getattr(args, "same_branch_report_rejected_slot_mode", "replay")),
-    )
-    if rejected_slot_wall_s is not None:
-        timings["branch_local_rejected_slot_wall_s"] = rejected_slot_wall_s
-    nestor_profile = same_branch_nestor_profile_from_vector_replay(
+    rejected_slot_gate, nestor_profile = _same_branch_rejected_slot_and_profile_sections(
         args=args,
-        same_branch=same_branch,
-        mode=ctx.mode,
+        ctx=ctx,
         report=report,
-        mode_count=mode_count,
+        timings=timings,
+        same_branch=same_branch,
+        replay_kwargs=replay_kwargs,
         replay_mode_count_guard_triggered=replay_mode_count_guard_triggered,
         replay_mode_count_guard_reason=replay_mode_count_guard_reason,
         replay_max_mode_count=replay_max_mode_count,
+        mode_count=mode_count,
         missing_vector_keys=missing_vector_keys,
-        vector_keys=ctx.vector_keys,
-        replay_kwargs=replay_kwargs,
         vector_uses_state_only_replay=vector_uses_state_only_replay,
         main_vector_summary=main_vector_summary,
         main_vector_replay_plan=main_vector_replay_plan,
-        timings=timings,
         run_branch_local_vector=run_branch_local_vector,
         summarize_vector_result=summarize_vector_result,
     )

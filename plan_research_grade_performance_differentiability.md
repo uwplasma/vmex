@@ -104,7 +104,7 @@ Make `vmec_jax` a research-grade VMEC implementation that is:
   startup, and peak memory remains materially higher than VMEC2000, especially
   for LASYM finite-beta rows. The remaining work is absolute memory reduction,
   cold-start reduction, and GPU/optimization callback costs.
-- Refactor/API/examples: 80.6%.
+- Refactor/API/examples: 80.8%.
   Public examples are better, but core source files and tests are still too
   large and too entangled. The fixed-boundary residual timing/setup seam is now
   slightly cleaner, but the main residual loop still needs a larger split.
@@ -7657,6 +7657,58 @@ Updated lane percentages:
 - Single-stage coil optimization: 94.0%.
 - CPU/GPU runtime and memory footprint: 99.2%.
 - Refactor/API/examples: 80.6%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
+
+### 2026-06-26: Split same-branch replay tail sections
+
+Steps taken:
+
+- Split the rejected-slot and NESTOR profiling tail out of
+  ``_same_branch_report_replay_sections`` into
+  ``_same_branch_rejected_slot_and_profile_sections``.
+- Preserved the existing scalar/vector replay orchestration and the JSON report
+  shape used by the direct-coil optimization example.
+- Kept the change in branch-local report plumbing only; no VMEC solve,
+  accepted-branch replay kernel, or optimizer acceptance path changed.
+
+Results obtained:
+
+- ``_same_branch_report_replay_sections`` no longer appears in the long-function
+  source-health warning list.
+- ``python -m ruff check
+  vmec_jax/solvers/free_boundary/coil_optimization.py
+  tests/test_free_boundary_qs_coil_optimization_smoke.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with the
+  existing expected ``xfailed`` case.
+- ``python tools/diagnostics/source_health.py --top 25 --top-functions 160
+  --max-root-helper-prefix-files 2 --max-function-lines-at
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2508
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=464`` passed.
+
+Best next steps:
+
+1. Run compile, repo-size, and whitespace checks, then commit and push this
+   replay-section split.
+2. Let CI validate the newest main commit; if it fails, reproduce the exact
+   failing shard locally before changing code.
+3. Next substantial refactor should target a larger residual-loop phase or a
+   source/test split for the largest free-boundary adjoint validation tests.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.2%.
+- Free-boundary production differentiability: 97.6%.
+- Single-stage coil optimization: 94.0%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 80.8%.
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
