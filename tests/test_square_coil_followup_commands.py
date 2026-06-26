@@ -73,6 +73,30 @@ def test_square_coil_followup_commands_emit_accepted_provider_parity_scan(tmp_pa
     assert "provider_parity" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_projected_delta_for_non_polish_edge_projection(
+    tmp_path: Path,
+):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "provider-parity",
+            "--freeb-edge-control-projection",
+            "square",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "square"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "projected_delta"
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "edge_square_projected_delta" in outdir.name
+
+
 def test_square_coil_followup_commands_emit_resolution_preflight(tmp_path: Path):
     args = followup._parser().parse_args(
         [
@@ -213,6 +237,7 @@ def test_square_coil_followup_commands_emit_direct_gpu_edge_polish(tmp_path: Pat
     assert "--freeb-anderson-pressure" in command
     assert command[command.index("--freeb-edge-control-projection") + 1] == "square"
     assert command[command.index("--freeb-edge-control-rcond") + 1] == "1e-12"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
     assert command[command.index("--jax-hot-restart-count") + 1] == "2"
     assert command[command.index("--jax-hot-restart-iters") + 1] == "32000"
     assert command[command.index("--jax-hot-restart-policy") + 1] == "freeb"
@@ -220,7 +245,7 @@ def test_square_coil_followup_commands_emit_direct_gpu_edge_polish(tmp_path: Pat
     assert "--freeb-jax-nestor-operator" not in command
     outdir = Path(command[command.index("--outdir") + 1])
     assert "direct_gpu_edge_polish" in outdir.name
-    assert "edge_square" in outdir.name
+    assert "edge_square_coordinate" in outdir.name
 
 
 def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: Path):
@@ -259,6 +284,7 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
     assert command[command.index("--nzeta") + 1] == "64"
     assert command[command.index("--phiedge") + 1] == "-0.002507885639125676"
     assert command[command.index("--freeb-edge-control-projection") + 1] == "square"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
     assert command[command.index("--jax-hot-restart-count") + 1] == "1"
     assert command[command.index("--jax-hot-restart-iters") + 1] == "8000"
     assert "--freeb-anderson-pressure" in command
@@ -270,7 +296,7 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
     assert "ntheta64" in outdir.name
     assert "nzeta64" in outdir.name
     assert "phiedgem0p00250789" in outdir.name
-    assert "edge_square" in outdir.name
+    assert "edge_square_coordinate" in outdir.name
 
 
 def test_square_coil_followup_commands_reject_underrecommended_ntheta(tmp_path: Path):
@@ -316,13 +342,14 @@ def test_square_coil_followup_commands_emit_direct_gpu_edge_jax_nestor_polish(tm
     command = followup.build_commands(args)[0]
 
     assert command[command.index("--freeb-edge-control-projection") + 1] == "stellarator"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
     assert "--freeb-jax-nestor-operator" in command
     assert command[command.index("--jax-hot-restart-count") + 1] == "1"
     assert command[command.index("--jax-hot-restart-iters") + 1] == "1234"
     assert "--jax-hot-restart-always" in command
     outdir = Path(command[command.index("--outdir") + 1])
     assert "direct_gpu_edge_jax_nestor_polish" in outdir.name
-    assert "edge_stellarator" in outdir.name
+    assert "edge_stellarator_coordinate" in outdir.name
 
 
 def test_square_coil_followup_commands_default_nzeta_tracks_ntor(tmp_path: Path):

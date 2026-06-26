@@ -152,6 +152,16 @@ def _parser() -> argparse.ArgumentParser:
         help="Pseudo-inverse cutoff for the reduced edge-control projection.",
     )
     p.add_argument(
+        "--freeb-edge-control-update-mode",
+        choices=("projected_delta", "coordinate"),
+        default=None,
+        help=(
+            "How the solver applies reduced edge-control updates. Edge-polish "
+            "profile kinds default to 'coordinate'; other edge-projected JAX "
+            "commands default to 'projected_delta'."
+        ),
+    )
+    p.add_argument(
         "--jax-hot-restart-count",
         type=int,
         default=None,
@@ -214,7 +224,11 @@ def _iter_label(value: int) -> str:
 def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi: int) -> Path:
     kind = str(args.profile_kind).replace("-", "_")
     edge = _edge_control_projection(args)
-    edge_label = "" if edge in {None, "none"} else f"_edge_{edge}"
+    edge_label = (
+        ""
+        if edge in {None, "none"}
+        else f"_edge_{edge}_{_edge_control_update_mode(args)}"
+    )
     ntheta_label = "" if args.ntheta is None else f"_ntheta{int(args.ntheta)}"
     default_phiedge = float(ExampleConfig().phiedge)
     phiedge_label = (
@@ -256,6 +270,13 @@ def _edge_control_projection(args: argparse.Namespace) -> str | None:
     return "square" if _is_polish_kind(str(args.profile_kind)) else None
 
 
+def _edge_control_update_mode(args: argparse.Namespace) -> str:
+    requested = args.freeb_edge_control_update_mode
+    if requested is not None:
+        return str(requested)
+    return "coordinate" if _is_polish_kind(str(args.profile_kind)) else "projected_delta"
+
+
 def _hot_restart_count(args: argparse.Namespace) -> int:
     if args.jax_hot_restart_count is not None:
         return max(0, int(args.jax_hot_restart_count))
@@ -270,6 +291,7 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
     max_iter = _last_int(args.niter_array)
     kind = str(args.profile_kind)
     edge_projection = _edge_control_projection(args)
+    edge_update_mode = _edge_control_update_mode(args)
     ntheta_args = [] if args.ntheta is None else ["--ntheta", str(int(args.ntheta))]
     command = [
         str(args.python),
@@ -340,6 +362,8 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
                 str(edge_projection),
                 "--freeb-edge-control-rcond",
                 f"{float(args.freeb_edge_control_rcond):.16g}",
+                "--freeb-edge-control-update-mode",
+                str(edge_update_mode),
             ]
         )
     if (bool(args.freeb_anderson_pressure) or _is_polish_kind(kind)) and jax_kind:

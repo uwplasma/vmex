@@ -392,9 +392,10 @@ direct research path:
 
 Both commands use ``FTOL_ARRAY=1e-8,1e-10,1e-12`` by default, cached direct
 coil sampling, ``--return-best-scored-state``, pressure Anderson mixing,
-two final-grid hot restarts, and ``--freeb-edge-control-projection square``.
-For the reduced-coordinate bridge profile, also pass
-``--freeb-edge-control-update-mode coordinate``.
+two final-grid hot restarts, ``--freeb-edge-control-projection square``, and
+``--freeb-edge-control-update-mode coordinate``; their output directories carry
+an ``edge_square_coordinate`` label so they are not mixed with older
+projected-delta bridge rows.
 The second command additionally enables the experimental JAX NESTOR operator.
 Use ``--freeb-edge-control-projection stellarator`` when testing the
 stellarator-corner control subspace.
