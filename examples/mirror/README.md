@@ -461,6 +461,11 @@ columns. A ``tail_plateau_status`` of ``flat_above_stage_ftol`` means the most
 recent residual tail is nearly flat while still above the current stage
 tolerance, which should trigger a ``DELT``/stage-budget scan before claiming
 strict ``FTOL=1e-12`` convergence.
+The same sidecar writes ``history.fsq_component_sum_tail_projection`` and
+``history.fsq_component_tail_projection_by_component`` while VMEC2000 is still
+running. Use their ``estimated_additional_iterations_to_target["1e-12"]``
+entries to decide whether the current ``NITER`` budget is plausibly large
+enough for the strict component-wise target.
 Use ``--nstep 1`` for strict VMEC2000 profiling when live residual cadence
 matters; larger values can hide force rows for long high-mode startup or early
 iteration windows.

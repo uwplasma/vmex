@@ -62,6 +62,7 @@ DEFAULT_OUTDIR = REPO_ROOT / "results" / "square_coil_freeb_backend_profile"
 TINY = 1.0e-300
 STRICT_COMPONENT_FTOL = 1.0e-12
 LOOSE_COMPONENT_FTOL = 1.0e-8
+FORCE_COMPONENTS = ("fsqr", "fsqz", "fsql")
 
 
 def _json_ready(value: Any) -> Any:
@@ -639,6 +640,7 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
         "threed1_tail": _tail_lines(threed1, lines=80),
         "iteration_row_count": len(rows),
         "stage_summaries": [_vmec2000_stage_payload(stage) for stage in stages],
+        "history": _vmec2000_tail_history_payload(rows),
         "tail_rows": [_vmec2000_row_payload(row) for row in rows[-12:]],
         "last_row": None if last is None else _vmec2000_row_payload(last),
         "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
@@ -2735,6 +2737,146 @@ def _vmec2000_tail_plateau_payload(
         }
     )
     return out
+
+
+def _vmec2000_tail_value(row: Any, *, component: str | None = None) -> tuple[int, float] | None:
+    """Read a VMEC2000 iteration row as an iteration/value pair."""
+
+    try:
+        if isinstance(row, dict):
+            iteration = int(row.get("it"))
+            if component is None:
+                value = _finite_float_or_none(row.get("total"))
+                if value is None:
+                    parts = [_finite_float_or_none(row.get(name)) for name in FORCE_COMPONENTS]
+                    if not all(part is not None for part in parts):
+                        return None
+                    value = float(sum(parts))  # type: ignore[arg-type]
+            else:
+                value = _finite_float_or_none(row.get(component))
+        else:
+            iteration = int(getattr(row, "it"))
+            if component is None:
+                parts = [_finite_float_or_none(getattr(row, name, None)) for name in FORCE_COMPONENTS]
+                if not all(part is not None for part in parts):
+                    return None
+                value = float(sum(parts))  # type: ignore[arg-type]
+            else:
+                value = _finite_float_or_none(getattr(row, component, None))
+    except Exception:
+        return None
+    if value is None or not np.isfinite(value) or value <= 0.0:
+        return None
+    return iteration, float(value)
+
+
+def _vmec2000_tail_projection(
+    rows: list[Any],
+    *,
+    component: str | None = None,
+    length: int = 12,
+    targets: tuple[float, ...] = (1.0e-8, 1.0e-10, 1.0e-12),
+) -> dict[str, Any]:
+    """Estimate residual decay per VMEC2000 iteration from the current stage tail."""
+
+    pairs: list[tuple[int, float]] = []
+    last_it: int | None = None
+    for row in reversed(list(rows)):
+        parsed = _vmec2000_tail_value(row, component=component)
+        if parsed is None:
+            continue
+        iteration, value = parsed
+        if last_it is not None and iteration >= last_it:
+            break
+        pairs.append((iteration, value))
+        last_it = iteration
+        if len(pairs) >= int(length):
+            break
+    pairs.reverse()
+
+    out: dict[str, Any] = {
+        "window": len(pairs),
+        "first_iter": None,
+        "last_iter": None,
+        "first": None,
+        "last": None,
+        "min": None,
+        "max": None,
+        "monotone_decrease_fraction": None,
+        "per_iter_log_slope": None,
+        "per_iter_factor": None,
+        "estimated_additional_iterations_to_target": {},
+    }
+    if not pairs:
+        return out
+
+    iterations = np.asarray([pair[0] for pair in pairs], dtype=float)
+    values = np.asarray([pair[1] for pair in pairs], dtype=float)
+    last = float(values[-1])
+    out.update(
+        {
+            "first_iter": int(iterations[0]),
+            "last_iter": int(iterations[-1]),
+            "first": float(values[0]),
+            "last": last,
+            "min": float(np.nanmin(values)),
+            "max": float(np.nanmax(values)),
+        }
+    )
+    if len(pairs) < 2:
+        out["estimated_additional_iterations_to_target"] = {
+            f"{float(target):.0e}": 0 if last <= float(target) else None for target in targets
+        }
+        return out
+
+    diffs = np.diff(values)
+    out["monotone_decrease_fraction"] = float(np.mean(diffs < 0.0)) if diffs.size else None
+    try:
+        slope, _intercept = np.polyfit(iterations, np.log(values), 1)
+    except Exception:
+        return out
+    if not np.isfinite(slope):
+        return out
+    out["per_iter_log_slope"] = float(slope)
+    out["per_iter_factor"] = float(np.exp(slope))
+
+    estimates: dict[str, int | None] = {}
+    for target in targets:
+        target_f = float(target)
+        key = f"{target_f:.0e}"
+        if last <= target_f:
+            estimates[key] = 0
+        elif slope < 0.0:
+            estimates[key] = int(np.ceil(np.log(target_f / last) / slope))
+        else:
+            estimates[key] = None
+    out["estimated_additional_iterations_to_target"] = estimates
+    return out
+
+
+def _vmec2000_tail_history_payload(rows: list[Any]) -> dict[str, Any]:
+    """Return live VMEC2000 residual-tail projections for strict FTOL decisions."""
+
+    components = {
+        component: _vmec2000_tail_projection(rows, component=component) for component in FORCE_COMPONENTS
+    }
+    limiting_component: str | None = None
+    limiting_value: float | None = None
+    last = list(rows)[-1] if rows else None
+    if last is not None:
+        for component in FORCE_COMPONENTS:
+            value = _finite_float_or_none(
+                last.get(component) if isinstance(last, dict) else getattr(last, component, None)
+            )
+            if value is not None and (limiting_value is None or value > limiting_value):
+                limiting_component = component
+                limiting_value = value
+    return {
+        "fsq_component_sum_tail_projection": _vmec2000_tail_projection(rows),
+        "fsq_component_tail_projection_by_component": components,
+        "fsq_limiting_component": limiting_component,
+        "fsq_limiting_component_value": limiting_value,
+    }
 
 
 def _vmec2000_stage_payload(stage: Any) -> dict[str, Any]:

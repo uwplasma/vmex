@@ -684,6 +684,11 @@ For active VMEC2000 rows, the profiler and summary table now also report
 recent relative span is small while the last residual remains above the current
 stage tolerance; those rows should be treated as stalled until a
 ``DELT``/stage-budget scan moves the floor.
+The live ``_partial_vmec2000_payload.json`` sidecar also includes
+``history.fsq_component_sum_tail_projection`` and
+``history.fsq_component_tail_projection_by_component``. These fields estimate
+the additional VMEC iterations needed to hit ``1e-12`` from the latest printed
+tail, so long strict runs can be triaged before the external executable exits.
 Raw backend payloads also include a compact ``strict_convergence`` block.  It
 reports the component-wise force maximum, summed residual, gap to the strict
 ``1e-12`` target, gap to the requested ``FTOL``, loose ``1e-8`` status, and

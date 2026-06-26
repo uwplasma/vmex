@@ -317,6 +317,28 @@ def test_square_coil_profile_vmec2000_tail_plateau_classifies_flat_above_stage_f
     assert plateau["max_component_last"] == pytest.approx(2.53e-10)
 
 
+def test_square_coil_profile_vmec2000_tail_history_projects_strict_target():
+    rows = [
+        SimpleNamespace(it=10, fsqr=1.0e-8, fsqz=1.0e-9, fsql=1.0e-10),
+        SimpleNamespace(it=11, fsqr=1.0e-9, fsqz=1.0e-10, fsql=1.0e-11),
+        SimpleNamespace(it=12, fsqr=1.0e-10, fsqz=1.0e-11, fsql=1.0e-12),
+    ]
+
+    history = profile._vmec2000_tail_history_payload(rows)
+    summed = history["fsq_component_sum_tail_projection"]
+    components = history["fsq_component_tail_projection_by_component"]
+
+    assert summed["window"] == 3
+    assert summed["last_iter"] == 12
+    assert summed["per_iter_factor"] == pytest.approx(0.1)
+    assert summed["estimated_additional_iterations_to_target"]["1e-12"] == 3
+    assert components["fsqr"]["estimated_additional_iterations_to_target"]["1e-12"] == 2
+    assert components["fsqz"]["estimated_additional_iterations_to_target"]["1e-12"] == 1
+    assert components["fsql"]["estimated_additional_iterations_to_target"]["1e-12"] == 0
+    assert history["fsq_limiting_component"] == "fsqr"
+    assert history["fsq_limiting_component_value"] == pytest.approx(1.0e-10)
+
+
 def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement():
     cfg = VMECConfig(
         mpol=2,
@@ -804,6 +826,8 @@ def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_pat
     assert payload["strict_convergence"]["component_max_over_strict_target"] == pytest.approx(4.0e6)
     assert payload["strict_convergence"]["fresh_residual_required"] is False
     assert "requested_ftol_above_1e-12" in payload["strict_convergence"]["blockers"]
+    assert payload["history"]["fsq_component_sum_tail_projection"]["window"] == 2
+    assert payload["history"]["fsq_limiting_component"] == "fsqr"
     assert payload["tail_plateau"]["status"] == "insufficient_tail"
     assert payload["stage_summaries"][0]["strict_components_met"] is False
     assert payload["vacuum_grid_exceeded_count"] == 1
@@ -835,6 +859,9 @@ def test_square_coil_profile_writes_partial_vmec2000_sidecar(tmp_path: Path):
     assert data["strict_components_met"] is False
     assert data["strict_convergence"]["status"] == "near_strict_not_met"
     assert data["strict_convergence"]["component_max_over_strict_target"] == pytest.approx(40.0)
+    assert data["history"]["fsq_component_sum_tail_projection"]["window"] == 1
+    assert data["history"]["fsq_component_tail_projection_by_component"]["fsqr"]["last"] == pytest.approx(4.0e-11)
+    assert data["history"]["fsq_limiting_component"] == "fsqr"
     assert data["tail_plateau"]["stage_ftol"] == pytest.approx(1.0e-12)
 
 
