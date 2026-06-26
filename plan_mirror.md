@@ -32164,3 +32164,76 @@ No user input is needed.
 ### User input needed
 
 No user input is needed.
+
+---
+## M284 - Queued VMEC2000 DELT/Stage-Budget Scan
+
+### Steps taken
+
+- Rechecked `office` capacity before launching more heavy work:
+  - 36 CPU cores;
+  - load already above core count while two direct-GPU/JAX rows are active.
+- Generated the next VMEC2000 follow-up command set with
+  `tools/diagnostics/square_coil_followup_commands.py`.
+- Created an updated office worktree:
+  `/home/rjorge/local/vmec_mirror_vmec2000_scan`.
+- Checked it out at `codex/mirror-geometry` commit `1e91e414`.
+- Started lightweight waiter PID `546797` in:
+  `results/square_coil_vmec2000_delt_scan_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter32k_control_spline`.
+- The waiter first waits for active direct PIDs `530365` and `530366`, then
+  waits for the queued JAX-NESTOR row if its waiter or launcher is active, then
+  runs the VMEC2000 rows serially.
+
+### Results obtained
+
+- No new heavy VMEC2000 process was started immediately.
+- The queued VMEC2000 scan uses:
+  - `MPOL=5`, `NTOR=28`, `NZETA=64`;
+  - `NS_ARRAY=9,13,17`;
+  - `NITER_ARRAY=8000,16000,32000`;
+  - `FTOL_ARRAY=1e-8,1e-10,1e-12`;
+  - `MGRID=88x64x64`;
+  - `axis_kind=control_spline`;
+  - `side_power=corner_power=1`;
+  - `DELT=0.015`, `0.02`, and `0.025`;
+  - VMEC2000 timeout `43200` seconds per row.
+- This scan directly addresses whether VMEC2000 can move the current
+  `~1e-11` near-strict floor to a true component-wise `1e-12` solve by
+  changing damping and final-stage budget.
+
+### How it was tested
+
+- Verified the waiter PID exists and is sleeping on the active direct rows.
+- Verified the scan worktree is at commit `1e91e414`.
+- Verified no VMEC2000 launcher has started yet; only the waiter is active.
+
+### File structure and best-practice notes
+
+- The scan runs in a separate office worktree to avoid mutating the existing
+  active direct and JAX-NESTOR worktrees.
+- Output remains under ignored `results/` directories.
+- The local repository only tracks the plan/doc/tooling changes, not generated
+  logs or profile artifacts.
+
+### Best next steps
+
+1. Let the current direct rows finish.
+2. Let the queued JAX-NESTOR A/B row run and summarize its live launcher log
+   with the staged-budget summary fields.
+3. After the VMEC2000 waiter starts the serial scan, monitor
+   `_partial_vmec2000_payload.json` / `threed1*` with the summary tool and
+   check whether any `DELT` row reaches component-wise `1e-12`.
+
+### Completion percentages after M284
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `99%`, follow-up scan queued.
+- Direct-coil GPU/JIT parity lane: `91%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `79%`, queued behind active
+  direct rows.
+- Follow-up command and summary reproducibility lane: `100%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
