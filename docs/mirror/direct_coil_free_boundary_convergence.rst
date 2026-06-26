@@ -495,6 +495,10 @@ compatible with the VMEC ``NZETA`` grid. The same report includes
 spline-control radii plus the square and stellarator-symmetric reduced bases.
 This makes it clear whether a strict run is testing the intended compact spline
 controls or only a larger Fourier projection deck.
+It also includes ``control_fourier_map`` for the square-reduced spline controls:
+side/corner labels, stacked ``4K x 2`` coefficient-Jacobian shape, singular
+values, condition number, and column norms. This is a preflight diagnostic for
+the solver-native reduced-control lane, not a nonlinear convergence claim.
 The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12`` by default and uses
 ``MPOL=5, NTOR=28, NZETA=64`` as the production-style deck. This is strict

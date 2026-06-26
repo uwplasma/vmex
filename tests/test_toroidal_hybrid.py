@@ -258,6 +258,8 @@ def test_square_axis_spline_control_fourier_matrix_predicts_coefficients():
     assert matrix.R_sin.shape == matrix.R_cos.shape
     assert matrix.Z_cos.shape == matrix.R_cos.shape
     assert matrix.Z_sin.shape == matrix.R_cos.shape
+    assert matrix.control_count == controls.radius.size
+    assert matrix.stacked_jacobian().shape == (4 * matrix.m.size, controls.radius.size)
 
     delta = np.zeros(controls.radius.size)
     delta[2] = 2.0e-3
@@ -284,11 +286,14 @@ def test_square_axis_spline_control_fourier_matrix_predicts_coefficients():
     modes = toroidal_hybrid.vmec_mode_table(mpol=4, ntor=8)
     base = boundary_input_from_indata(base_indata, modes)
     perturbed = boundary_input_from_indata(changed_indata, modes)
+    predicted = matrix.boundary_delta(delta)
 
-    np.testing.assert_allclose(perturbed.R_cos - base.R_cos, matrix.R_cos @ delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.R_sin - base.R_sin, matrix.R_sin @ delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, matrix.Z_cos @ delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, matrix.Z_sin @ delta, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.R_cos - base.R_cos, predicted.R_cos, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.R_sin - base.R_sin, predicted.R_sin, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, predicted.Z_cos, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, predicted.Z_sin, atol=1.0e-13)
+    with pytest.raises(ValueError, match="wrong length"):
+        matrix.boundary_delta(np.zeros(controls.radius.size + 1))
 
 
 def test_square_axis_spline_control_fourier_matrix_accepts_reduced_basis():
@@ -313,6 +318,7 @@ def test_square_axis_spline_control_fourier_matrix_accepts_reduced_basis():
 
     assert matrix.control_basis is control_basis
     assert matrix.R_cos.shape == (matrix.m.size, len(control_basis.labels))
+    assert matrix.control_count == len(control_basis.labels)
 
     reduced_delta = np.array([1.0e-3, -1.5e-3])
     full_delta = control_basis.matrix @ reduced_delta
@@ -338,11 +344,12 @@ def test_square_axis_spline_control_fourier_matrix_accepts_reduced_basis():
     modes = toroidal_hybrid.vmec_mode_table(mpol=4, ntor=8)
     base = boundary_input_from_indata(base_indata, modes)
     perturbed = boundary_input_from_indata(changed_indata, modes)
+    predicted = matrix.boundary_delta(reduced_delta)
 
-    np.testing.assert_allclose(perturbed.R_cos - base.R_cos, matrix.R_cos @ reduced_delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.R_sin - base.R_sin, matrix.R_sin @ reduced_delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, matrix.Z_cos @ reduced_delta, atol=1.0e-13)
-    np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, matrix.Z_sin @ reduced_delta, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.R_cos - base.R_cos, predicted.R_cos, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.R_sin - base.R_sin, predicted.R_sin, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, predicted.Z_cos, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, predicted.Z_sin, atol=1.0e-13)
 
 
 @pytest.mark.parametrize(

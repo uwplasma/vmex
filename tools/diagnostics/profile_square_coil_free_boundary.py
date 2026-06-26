@@ -45,6 +45,7 @@ from vmec_jax.toroidal_hybrid import (
     evaluate_toroidal_hybrid_indata_boundary,
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
+    square_axis_spline_control_fourier_matrix,
     square_axis_spline_symmetric_control_basis,
 )
 from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1, find_vmec2000_exec, run_xvmec2000
@@ -1167,6 +1168,64 @@ def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
     }
 
 
+def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return conditioning diagnostics for the reduced control-to-Fourier map."""
+
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if axis_kind not in {"spline", "control_spline", "spline_controls", "periodic_spline"}:
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": axis_kind,
+        }
+    controls = (
+        config.plasma_axis_spline_controls
+        if config.plasma_axis_spline_controls is not None
+        else SquareAxisSplineControls.rounded_square(
+            axis_half_width=float(config.plasma_axis_half_width),
+            corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
+        )
+    ).validate()
+    try:
+        basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
+        sample_kwargs = {
+            key: value
+            for key, value in _square_axis_sample_kwargs(config).items()
+            if key not in {"axis_kind", "axis_spline_controls"}
+        }
+        matrix = square_axis_spline_control_fourier_matrix(
+            control_basis=basis,
+            nfp=int(config.nfp),
+            mpol=int(config.mpol),
+            ntor=int(config.ntor),
+            ntheta_fit=max(64, 4 * int(config.mpol)),
+            nzeta_fit=max(128, 8 * int(config.ntor)),
+            **sample_kwargs,
+        )
+        jacobian = matrix.stacked_jacobian()
+        singular_values = np.linalg.svd(jacobian, compute_uv=False)
+        finite_singular_values = singular_values[np.isfinite(singular_values)]
+        min_sv = float(np.min(finite_singular_values)) if finite_singular_values.size else None
+        max_sv = float(np.max(finite_singular_values)) if finite_singular_values.size else None
+        condition = None if min_sv in (None, 0.0) or max_sv is None else float(max_sv / max(min_sv, TINY))
+        return {
+            "status": "available",
+            "basis_symmetry": basis.symmetry,
+            "labels": list(basis.labels),
+            "control_count": int(matrix.control_count),
+            "mode_count": int(np.asarray(matrix.m).size),
+            "jacobian_shape": [int(value) for value in jacobian.shape],
+            "singular_values": [float(value) for value in singular_values],
+            "condition_number": condition,
+            "column_norms": [float(value) for value in np.linalg.norm(jacobian, axis=0)],
+        }
+    except Exception as exc:
+        return {
+            "status": f"failed:{type(exc).__name__}",
+            "axis_kind": axis_kind,
+            "error": repr(exc),
+        }
+
+
 def _finite_float(value: Any) -> float | None:
     try:
         out = float(value)
@@ -1466,6 +1525,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     boundary_projection = _boundary_projection_payload(config)
     control_basis = _control_basis_payload(config)
+    control_fourier_map = _control_fourier_map_payload(config)
     resolution_deck = _resolution_deck_payload(
         config=config,
         projection=boundary_projection,
@@ -1505,6 +1565,7 @@ def main(argv: list[str] | None = None) -> int:
             },
             "boundary_projection": boundary_projection,
             "control_basis": control_basis,
+            "control_fourier_map": control_fourier_map,
             "resolution_deck": resolution_deck,
             "provider_parity": None,
             "backends": {},
@@ -1615,6 +1676,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "boundary_projection": boundary_projection,
         "control_basis": control_basis,
+        "control_fourier_map": control_fourier_map,
         "resolution_deck": resolution_deck,
         "provider_parity": None,
         "backends": {},

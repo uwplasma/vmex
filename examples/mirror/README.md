@@ -308,6 +308,10 @@ recommended ``NZETA``, and ``mgrid_nphi``/``NZETA`` compatibility. On the
 current spline-smoothed target, ``MPOL=5, NTOR=20, NZETA=48`` fails the strict
 projection gate with max component error about ``1.8e-9`` and recommends
 ``MPOL=5, NTOR=28, NZETA>=64``.
+It also writes ``control_fourier_map`` for the two reduced square-axis controls,
+including the stacked coefficient-Jacobian shape, singular values, condition
+number, and column norms. Use that block to decide whether a deck is a good
+candidate for reduced spline-control updates before starting a long solve.
 The latest control-spline square-axis preflight matrix is:
 
 | deck | status | reason |

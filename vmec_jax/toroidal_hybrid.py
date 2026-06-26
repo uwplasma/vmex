@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from .boundary import BoundaryCoeffs
 from .fourier import build_helical_basis, eval_fourier, project_to_modes
 from .grids import AngleGrid
 from .modes import vmec_mode_table
@@ -147,6 +148,38 @@ class SquareAxisControlFourierMatrix:
     Z_cos: np.ndarray
     Z_sin: np.ndarray
     control_basis: SquareAxisControlBasis | None = None
+
+    @property
+    def control_count(self) -> int:
+        """Number of spline-control variables represented by this map."""
+
+        return int(np.asarray(self.R_cos).shape[1])
+
+    def boundary_delta(self, radius_delta: Any) -> BoundaryCoeffs:
+        """Map a control-radius update to VMEC boundary coefficient deltas."""
+
+        delta = np.asarray(radius_delta, dtype=float).reshape(-1)
+        if delta.size != self.control_count:
+            raise ValueError("radius_delta has the wrong length for this control map")
+        return BoundaryCoeffs(
+            R_cos=np.asarray(self.R_cos, dtype=float) @ delta,
+            R_sin=np.asarray(self.R_sin, dtype=float) @ delta,
+            Z_cos=np.asarray(self.Z_cos, dtype=float) @ delta,
+            Z_sin=np.asarray(self.Z_sin, dtype=float) @ delta,
+        )
+
+    def stacked_jacobian(self) -> np.ndarray:
+        """Return the stacked coefficient Jacobian used by reduced solvers."""
+
+        return np.concatenate(
+            [
+                np.asarray(self.R_cos, dtype=float),
+                np.asarray(self.R_sin, dtype=float),
+                np.asarray(self.Z_cos, dtype=float),
+                np.asarray(self.Z_sin, dtype=float),
+            ],
+            axis=0,
+        )
 
 
 def _periodic_angle_distance(a: Any, b: Any) -> np.ndarray:

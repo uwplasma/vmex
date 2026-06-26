@@ -5738,6 +5738,98 @@ Visual validation:
 
 No user input is needed.
 ---
+## 264. Added The Reduced Square-Control Boundary-Delta Hook
+
+### Steps taken
+
+- Extended `SquareAxisControlFourierMatrix` with:
+  - `control_count`;
+  - `boundary_delta(radius_delta)`;
+  - `stacked_jacobian()`.
+- Added a profiler `control_fourier_map` block for the square-reduced
+  side/corner control map.
+- The block records:
+  - labels;
+  - reduced control count;
+  - VMEC mode count;
+  - stacked `4K x 2` coefficient-Jacobian shape;
+  - singular values;
+  - condition number;
+  - column norms.
+- Documented the new preflight block in the convergence notes and mirror
+  README.
+
+### Results obtained
+
+- A reduced side/corner spline-radius update can now be mapped directly to a
+  VMEC boundary-coefficient delta through a tested public method instead of
+  manually multiplying the four raw Jacobian arrays.
+- `--resolution-diagnostics-only` now gives a quick conditioning diagnostic for
+  the reduced spline-control lane before any coil generation, mgrid writing, or
+  equilibrium solve starts.
+- This is still a bridge: active VMEC/JAX and VMEC2000 solves keep using
+  ordinary Fourier boundary coefficients. The next solver step is to use this
+  map to restrict trial boundary updates to the reduced control space.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py::test_square_axis_spline_control_fourier_matrix_predicts_coefficients \
+  tests/test_toroidal_hybrid.py::test_square_axis_spline_control_fourier_matrix_accepts_reduced_basis \
+  tests/test_profile_square_coil_free_boundary.py::test_square_coil_profile_records_boundary_projection_payload
+ruff check \
+  vmec_jax/toroidal_hybrid.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_toroidal_hybrid.py \
+  tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile \
+  vmec_jax/toroidal_hybrid.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_toroidal_hybrid.py \
+  tests/test_profile_square_coil_free_boundary.py
+git diff --check
+```
+
+Result: targeted tests `3 passed, 1 warning`; Ruff, py-compile, and whitespace
+checks passed.
+
+### File structure and best-practice notes
+
+- The reusable coefficient-delta method lives on
+  `SquareAxisControlFourierMatrix`, next to the control-to-Fourier data it
+  applies.
+- The profile-only conditioning summary stays in
+  `tools/diagnostics/profile_square_coil_free_boundary.py`.
+- No generated results are tracked.
+
+### Best next steps
+
+1. Add a diagnostic projection of a solved/free-boundary LCFS displacement onto
+   this reduced control map, so we know how much of VMEC's accepted boundary
+   motion is representable by the two side/corner controls.
+2. Prototype a damped reduced-control boundary trial step using
+   `boundary_delta(...)` while keeping Fourier coefficients as the exported
+   VMEC state.
+3. Compare reduced-control trial residuals against the active VMEC2000
+   generated-`mgrid` reference once the current strict row finishes.
+
+### Completion percentages after M264
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `98%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `91%`.
+- Direct-coil GPU/JIT parity lane: `80%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `78%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+---
 ## 263. Added Explicit Free-Boundary Promotion Gates To Profiles And Examples
 
 ### Steps taken

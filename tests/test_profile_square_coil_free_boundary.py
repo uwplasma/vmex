@@ -395,6 +395,13 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert control_basis["bases"]["square"]["reduced_count"] == 2
     assert control_basis["bases"]["square"]["expansion_matrix_shape"] == [8, 2]
     assert control_basis["bases"]["stellarator"]["reduced_count"] == 5
+    control_map = data["control_fourier_map"]
+    assert control_map["status"] == "available"
+    assert control_map["labels"] == ["side", "corner"]
+    assert control_map["control_count"] == 2
+    assert control_map["jacobian_shape"] == [4 * projection["mode_count"], 2]
+    assert len(control_map["singular_values"]) == 2
+    assert control_map["condition_number"] > 0.0
     deck = data["resolution_deck"]
     assert deck["status"] == "production_ready"
     assert deck["projection_meets_gate"] is True
