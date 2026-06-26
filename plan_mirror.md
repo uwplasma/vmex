@@ -27345,3 +27345,83 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 230. Queued First-Order VMEC2000 5,28 Robustness Row
+
+### Steps taken
+
+- Queued a VMEC2000 generated-``mgrid`` profile for the current first-order
+  spline target at ``MPOL=5, NTOR=28, NZETA=64``.
+- The row is staged behind the existing VMEC2000 smooth ``6,23`` launcher and
+  will pull the latest branch before starting.
+- The queued command uses:
+  - ``NS_ARRAY = 9,13,17``;
+  - ``NITER_ARRAY = 4000,8000,24000``;
+  - ``FTOL_ARRAY = 1e-8,1e-10,1e-12``;
+  - ``DELT = 0.02`` and ``NVACSKIP = 1``;
+  - generated ``mgrid`` size ``88 x 64 x 64``;
+  - production projection gate ``--max-boundary-projection-error 5e-12``.
+- Two early launcher attempts accidentally expanded shell variables while
+  writing the remote script and started immediately. Those aborted ``5,28``
+  Python/VMEC2000 processes were stopped, and the deleted-workdir orphaned
+  ``xvmec`` was killed. The corrected launcher uses a literal
+  ``kill -0 509843`` wait condition and is waiting as intended.
+
+### Results obtained
+
+- Corrected waiting launcher PID on ``office``:
+  ``512715``.
+- Active intended processes after cleanup:
+  - direct ``6,23`` Anderson profile;
+  - VMEC2000 ``8,32`` profile;
+  - queued direct ``7,28`` auto-mixer launcher;
+  - queued VMEC2000 smooth ``6,23`` launcher;
+  - queued VMEC2000 first-order ``5,28`` launcher.
+- No repository output files were added; the launcher and future results live
+  under ignored ``results/``.
+
+### How it was tested
+
+```bash
+ssh office "ps -u \$USER -o pid,ppid,etime,stat,command | grep -E 'profile_square_coil_free_boundary|xvmec|launcher.sh' | grep -v grep"
+ssh office "cd ~/local/vmec_mirror && tail -20 results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder/launcher.log"
+```
+
+Results:
+
+- The corrected ``5,28`` launcher prints that it is waiting for PID ``509843``.
+- No extra orphaned ``xvmec`` process remains from the aborted attempts.
+
+### File structure and best-practice notes
+
+- The profile remains outside version control under ``results/``.
+- The row is queued rather than run concurrently, avoiding extra VMEC2000 CPU
+  oversubscription while the active ``8,32`` run is still in progress.
+- The projection gate is explicit so this row cannot silently become an
+  underfit boundary test.
+
+### Best next steps
+
+1. Let the active ``8,32`` row either produce force iterations or establish a
+   startup/performance problem.
+2. Let the existing smooth ``6,23`` and queued ``5,28`` rows run sequentially.
+3. Compare ``5,28`` against ``7,28``/``8,32`` to decide whether high ``MPOL`` is
+   needed for nonlinear convergence after the first-order spline target is
+   projection-closed.
+
+### Completion percentages after M230
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``82%``.
+- VMEC2000 robustness/reference lane: ``88%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``98%``.
+- Square-axis spline-smoothed Fourier closure lane: ``94%``.
+- True spline/control-basis hybrid lane: ``18%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``99%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``93%``
+  pending strict high-mode evidence.
+
+### User input needed
+
+No user input is needed.
