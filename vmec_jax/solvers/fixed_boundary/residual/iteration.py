@@ -362,6 +362,18 @@ def _accepted_control_payload_jit(*args, **kwargs):
     return _precond_payload_facade._accepted_control_payload_jit(*args, **kwargs)
 
 
+def _strict_update_rms_pair(proposal) -> tuple[Any, float | None, float | None]:
+    """Return materialized strict-update RMS diagnostics from a proposal."""
+
+    return proposal.update_rms_j, proposal.update_rms, proposal.update_rms_preclip
+
+
+def _strict_update_delta_rms_pair(proposal) -> tuple[Any, float | None]:
+    """Return projected strict-update delta RMS diagnostics from a proposal."""
+
+    return proposal.update_delta_rms_j, proposal.update_delta_rms
+
+
 _cached_or_current_f_norm1_jax = _precond_payload_facade._cached_or_current_f_norm1_jax
 
 _ptau_compute_jit = _precond_payload_facade._ptau_compute_jit
@@ -1501,8 +1513,6 @@ def solve_fixed_boundary_residual_iter(
     velocity_blocks = _initial_velocity.velocities
     max_coeff_delta_rms = _initial_velocity.max_coeff_delta_rms
     max_update_rms = _initial_velocity.max_update_rms
-    update_delta_rms_j = jnp.asarray(0.0)
-    update_delta_rms = None
     # VMEC initializes ivac=-1, then promotes to 0/1/... after activation.
     freeb_loop_state = _runtime_initial_free_boundary_loop_state(
         nvacskip=int(freeb_nvacskip),
@@ -2930,11 +2940,8 @@ def solve_fixed_boundary_residual_iter(
                     delta_tuple_projector=freeb_edge_control_projector.delta_tuple_projector(),
                 )
             velocity_blocks = update_proposal.velocities
-            update_rms_j = update_proposal.update_rms_j
-            update_rms = update_proposal.update_rms
-            update_rms_preclip = update_proposal.update_rms_preclip
-            update_delta_rms_j = update_proposal.update_delta_rms_j
-            update_delta_rms = update_proposal.update_delta_rms
+            update_rms_j, update_rms, update_rms_preclip = _strict_update_rms_pair(update_proposal)
+            update_delta_rms_j, update_delta_rms = _strict_update_delta_rms_pair(update_proposal)
             scl = update_proposal.scale
             update_deltas = update_proposal.update_deltas
             state_try = update_proposal.state
@@ -3103,8 +3110,6 @@ def solve_fixed_boundary_residual_iter(
             )
             dt_eff = non_strict_update.dt_eff
             update_rms = non_strict_update.update_rms
-            update_delta_rms_j = jnp.asarray(0.0)
-            update_delta_rms = None
             step_status = non_strict_update.step_status
             timing_stats["iterations"] += 1
             restart_reason = "none"

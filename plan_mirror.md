@@ -5738,6 +5738,81 @@ Visual validation:
 
 No user input is needed.
 
+## M315. Source-health repair after projected update-delta diagnostics
+
+### Steps taken
+
+- Inspected the new PR #21 parity-smoke failure on head `719e2569`.
+- Confirmed the failure was the source-health ratchet, not a parity manifest
+  case failure:
+  `solve_fixed_boundary_residual_iter` had grown to `2446` lines against the
+  `2440` baseline.
+- Moved strict proposal RMS unpacking into two small helpers outside the long
+  solver function.
+- Removed the unnecessary projected-delta initialization/reset lines from
+  non-strict paths.  If no strict projected update is taken, finalization now
+  naturally records `None` for `update_delta_rms`.
+
+### Results obtained
+
+- `solve_fixed_boundary_residual_iter` is back under the ratchet at `2439`
+  lines.
+- Projected update-delta diagnostics remain unchanged for strict proposal
+  paths.
+
+### How it was tested
+
+```bash
+python tools/diagnostics/source_health.py --top 20 \
+  --max-root-helper-prefix-files 2 \
+  --max-function-lines-at vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2440 \
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420
+```
+
+Result: passed.
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_solve_residual_iter_update_helpers.py \
+  tests/test_source_health_diagnostics.py
+```
+
+Result: `67 passed`.
+
+```bash
+/Users/rogeriojorge/Library/Python/3.11/bin/ruff check \
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+venv/bin/python -m py_compile \
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+git diff --check
+```
+
+Result: passed.
+
+### File structure and best-practice adherence
+
+- The repair is limited to the fixed-boundary residual iteration module and
+  the plan log.
+- The long solver function stays below its ratcheted source-health limit
+  without weakening the diagnostic path.
+- No generated artifacts were added.
+
+### Best next steps
+
+1. Commit and push the source-health repair.
+2. Let CI rerun on the new head; the parity smoke should pass the ratchet.
+3. Fast-forward the waiting `office` checkouts once the follow-up is pushed.
+
+### Completion percentages after M315
+
+- CI/API health lane: `99%`, local source-health parity-smoke gate is fixed;
+  remote rerun is pending.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M314. Projected update-delta RMS diagnostics for strict reduced-control rows
 
 ### Steps taken
