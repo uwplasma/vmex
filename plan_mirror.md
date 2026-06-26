@@ -27161,3 +27161,79 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 228. VMEC2000 Startup-Phase Reporting For Strict Profiles
+
+### Steps taken
+
+- Added ``progress_phase``, ``force_rows_started``, ``threed1_size_bytes``,
+  and ``threed1_mtime_unix_s`` to live VMEC2000 partial payloads.
+- The profile sidecar now distinguishes:
+  - ``waiting_for_threed1`` before VMEC2000 opens the output file;
+  - ``startup_or_pre_iteration_output`` after ``threed1`` exists but before
+    parseable force rows appear;
+  - ``force_iterations`` once the residual table is available.
+- Extended the summary tool to emit the same fields for completed sidecars and
+  raw active ``threed1`` files.
+- The summary tool now enriches legacy sidecars from the nearby
+  ``vmec2000_mgrid/threed1*`` file when an old sidecar lacks these fields.
+- Updated docs so blank active VMEC2000 residual rows are interpreted as startup
+  diagnostics, not convergence results.
+
+### Results obtained
+
+- High-mode VMEC2000 runs that spend a long time in pre-iteration output are
+  now diagnosable from the standard summary table.
+- This addresses the current ``MPOL=8, NTOR=32`` profile behavior: ``threed1``
+  is open and growing, but parseable force rows have not yet appeared, so the
+  right status is ``startup_or_pre_iteration_output`` rather than an empty
+  residual comparison.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py
+git diff --check
+```
+
+Results:
+
+- Profile and summary tests: ``21 passed``.
+- Py-compile checks passed.
+- Whitespace checks passed.
+
+### File structure and best-practice notes
+
+- The change is restricted to progress reporting and summary parsing.
+- Existing VMEC2000 force-row parsing remains the source for residual values.
+- Legacy sidecars are enriched at read time instead of rewriting ignored
+  ``results/`` files.
+
+### Best next steps
+
+1. Commit and push the startup-phase reporting.
+2. Fast-forward ``office`` so queued VMEC2000 profiles write the new fields.
+3. Continue the active strict profiles without polling continuously; inspect
+   the enriched summary after the current runs have had enough wall time to
+   produce force rows or final reports.
+4. If ``8,32`` remains stuck in startup for too long, treat that as a practical
+   robustness/performance result and prioritize first-order ``6,23``/``7,28``
+   plus true spline/control-basis planning.
+
+### Completion percentages after M228
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``80%``.
+- VMEC2000 robustness/reference lane: ``87%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``98%``.
+- Square-axis spline-smoothed Fourier closure lane: ``90%``.
+- True spline/control-basis hybrid lane: ``15%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``99%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``92%``
+  pending strict high-mode evidence.
+
+### User input needed
+
+No user input is needed.

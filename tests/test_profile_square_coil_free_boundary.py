@@ -187,6 +187,10 @@ def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_pat
 
     payload = profile._partial_vmec2000_payload(workdir)
 
+    assert payload["progress_phase"] == "force_iterations"
+    assert payload["force_rows_started"] is True
+    assert payload["threed1_size_bytes"] > 0
+    assert payload["threed1_mtime_unix_s"] > 0.0
     assert payload["iteration_row_count"] == 2
     assert payload["last_row"]["it"] == 200
     assert payload["last_row"]["total"] == pytest.approx(7.0e-6)
@@ -216,6 +220,8 @@ def test_square_coil_profile_writes_partial_vmec2000_sidecar(tmp_path: Path):
 
     data = json.loads(path.read_text())
     assert path.name == "_partial_vmec2000_payload.json"
+    assert data["progress_phase"] == "force_iterations"
+    assert data["force_rows_started"] is True
     assert data["iteration_row_count"] == 1
     assert data["updated_unix_s"] > 0.0
     assert data["final_max_component"] == pytest.approx(4.0e-11)

@@ -226,6 +226,10 @@ def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Pat
     assert row["case"] == "vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_niter24k_fg"
     assert row["backend"] == "vmec2000_mgrid"
     assert row["status"] == "running_partial"
+    assert row["progress_phase"] == "force_iterations"
+    assert row["force_rows_started"] is True
+    assert row["threed1_size_bytes"] > 0
+    assert row["threed1_mtime_unix_s"] > 0.0
     assert row["mpol"] == 7
     assert row["ntor"] == 28
     assert row["ns"] == 17
@@ -263,6 +267,52 @@ def test_square_coil_profile_summary_prefers_active_partial_sidecar(tmp_path: Pa
     assert row["requested_ftol"] == pytest.approx(1.0e-12)
     assert row["final_max_component"] == pytest.approx(9.0e-13)
     assert row["strict_components_met"] is True
+
+
+def test_square_coil_profile_summary_labels_vmec2000_startup_before_force_rows(tmp_path: Path):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_vmec2000_ns17_mpol8_ntor32_nzeta72"
+    workdir = case_dir / "vmec2000_mgrid"
+    workdir.mkdir(parents=True)
+    threed1 = workdir / "threed1.square_beta_00p000_mgrid"
+    threed1.write_text(
+        "\n".join(
+            [
+                " THIS IS PARVMEC (PARALLEL VMEC), VERSION 9.0",
+                " COMPUTATION PARAMETERS: (u = theta, v = zeta)",
+                "     ns     nu     nv     mu     mv",
+                "     17     22     72      8     32",
+                " R-Z FOURIER BOUNDARY COEFFICIENTS AND MAGNETIC AXIS INITIAL GUESS",
+                "   nb  mb     rbc         rbs         zbc         zbs",
+                "    0   0  1.6050E+00  0.0000E+00  0.0000E+00  0.0000E+00",
+            ]
+        )
+        + "\n"
+    )
+
+    row = summary.rows_from_source(threed1)[0]
+
+    assert row["progress_phase"] == "startup_or_pre_iteration_output"
+    assert row["force_rows_started"] is False
+    assert row["threed1_size_bytes"] > 0
+    assert row["final_iter"] is None
+    assert row["final_total"] is None
+
+
+def test_square_coil_profile_summary_enriches_legacy_partial_sidecar_from_threed1(tmp_path: Path):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_legacy_partial"
+    workdir = case_dir / "vmec2000_mgrid"
+    workdir.mkdir(parents=True)
+    partial = case_dir / "_partial_vmec2000_payload.json"
+    partial.write_text(json.dumps({"iteration_row_count": 0, "stage_summaries": []}))
+    (workdir / "threed1.square_beta_00p000_mgrid").write_text(
+        " R-Z FOURIER BOUNDARY COEFFICIENTS AND MAGNETIC AXIS INITIAL GUESS\n"
+    )
+
+    row = summary.rows_from_source(partial)[0]
+
+    assert row["progress_phase"] == "startup_or_pre_iteration_output"
+    assert row["force_rows_started"] is False
+    assert row["threed1_size_bytes"] > 0
 
 
 def test_square_coil_profile_summary_script_uses_repo_local_vmec_parser(tmp_path: Path):

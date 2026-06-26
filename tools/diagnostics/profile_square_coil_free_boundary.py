@@ -239,6 +239,13 @@ def _vacuum_grid_exceeded_count(path: Path | None) -> int:
     )
 
 
+def _file_status_payload(path: Path | None, *, prefix: str) -> dict[str, Any]:
+    if path is None or not Path(path).exists():
+        return {f"{prefix}_size_bytes": None, f"{prefix}_mtime_unix_s": None}
+    stat = Path(path).stat()
+    return {f"{prefix}_size_bytes": int(stat.st_size), f"{prefix}_mtime_unix_s": float(stat.st_mtime)}
+
+
 def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
     matches = sorted(Path(workdir).glob("threed1*"))
     threed1 = matches[0] if matches else None
@@ -254,10 +261,18 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
     totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
     last = rows[-1] if rows else None
     final_ftol = float(stages[-1].ftolv) if stages else None
+    progress_phase = (
+        "waiting_for_threed1"
+        if threed1 is None
+        else ("force_iterations" if rows else "startup_or_pre_iteration_output")
+    )
     return {
         "workdir": workdir,
         "updated_unix_s": float(time.time()),
         "threed1": threed1,
+        **_file_status_payload(threed1, prefix="threed1"),
+        "progress_phase": progress_phase,
+        "force_rows_started": bool(rows),
         "threed1_tail": _tail_lines(threed1, lines=80),
         "iteration_row_count": len(rows),
         "stage_summaries": [_vmec2000_stage_payload(stage) for stage in stages],

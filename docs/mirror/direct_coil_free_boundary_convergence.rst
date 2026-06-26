@@ -221,6 +221,9 @@ During long VMEC2000 runs the profiler writes
 vacuum-grid overflow before ``xvmec`` exits. The summary tool also accepts an
 active VMEC2000 profile directory and will read that sidecar, or parse
 ``vmec2000_mgrid/threed1*`` directly when the sidecar is not present.
+Rows with no parsed force iterations now include ``progress_phase``. A value
+of ``startup_or_pre_iteration_output`` means VMEC2000 has opened ``threed1``
+but has not yet printed the force table; it is not a strict residual result.
 Completed ``vmec_jax`` backend rows also report
 ``boundary_coeff_delta_*`` and ``boundary_sample_displacement_*`` fields, which
 measure how far the accepted LCFS moved from the initial prescribed boundary.

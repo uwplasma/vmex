@@ -88,6 +88,13 @@ def _vmec2000_total(backend: dict[str, Any]) -> tuple[float | None, float | None
     return last_total, _finite_float(backend.get("min_total")), last_iter
 
 
+def _file_status_payload(path: Path | None, *, prefix: str) -> dict[str, Any]:
+    if path is None or not Path(path).exists():
+        return {f"{prefix}_size_bytes": None, f"{prefix}_mtime_unix_s": None}
+    stat = Path(path).stat()
+    return {f"{prefix}_size_bytes": int(stat.st_size), f"{prefix}_mtime_unix_s": float(stat.st_mtime)}
+
+
 def _vmec2000_final_max_component(backend: dict[str, Any]) -> float | None:
     last = backend.get("last_row")
     if not isinstance(last, dict):
@@ -277,6 +284,10 @@ def _summary_row(
         "case": case,
         "backend": backend_name,
         "status": status if status is not None else backend.get("status"),
+        "progress_phase": backend.get("progress_phase"),
+        "force_rows_started": backend.get("force_rows_started"),
+        "threed1_size_bytes": backend.get("threed1_size_bytes"),
+        "threed1_mtime_unix_s": _finite_float(backend.get("threed1_mtime_unix_s")),
         "mpol": cfg.get("mpol"),
         "ntor": cfg.get("ntor"),
         "ns": cfg.get("ns"),
@@ -416,8 +427,12 @@ def _vmec2000_partial_payload_from_threed1(path: Path) -> dict[str, Any]:
     rows = [row for stage in stages for row in stage.rows]
     totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
     last = rows[-1] if rows else None
+    progress_phase = "force_iterations" if rows else "startup_or_pre_iteration_output"
     return {
         "threed1": path,
+        **_file_status_payload(path, prefix="threed1"),
+        "progress_phase": progress_phase,
+        "force_rows_started": bool(rows),
         "stage_summaries": [_vmec2000_stage_payload(stage) for stage in stages],
         "iteration_row_count": len(rows),
         "last_row": None if last is None else _vmec2000_row_payload(last),
@@ -439,6 +454,17 @@ def _vmec2000_partial_payload_from_threed1(path: Path) -> dict[str, Any]:
 def rows_from_vmec2000_partial(path: Path) -> list[dict[str, Any]]:
     if path.name == PARTIAL_VMEC2000_NAME:
         backend = json.loads(path.read_text())
+        if isinstance(backend, dict) and backend.get("progress_phase") is None:
+            threed1_matches = sorted((path.parent / "vmec2000_mgrid").glob("threed1*"))
+            if threed1_matches:
+                from_threed1 = _vmec2000_partial_payload_from_threed1(threed1_matches[0])
+                for key in (
+                    "progress_phase",
+                    "force_rows_started",
+                    "threed1_size_bytes",
+                    "threed1_mtime_unix_s",
+                ):
+                    backend.setdefault(key, from_threed1.get(key))
     else:
         backend = _vmec2000_partial_payload_from_threed1(path)
     if not isinstance(backend, dict):
@@ -501,6 +527,10 @@ def main(argv: list[str] | None = None) -> int:
         "case",
         "backend",
         "status",
+        "progress_phase",
+        "force_rows_started",
+        "threed1_size_bytes",
+        "threed1_mtime_unix_s",
         "mpol",
         "ntor",
         "ns",

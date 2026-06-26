@@ -260,7 +260,11 @@ the accepted LCFS moved from the initial prescribed boundary.
 Long VMEC2000 runs also refresh
 ``_partial_vmec2000_payload.json`` in the profile directory; use this sidecar
 to inspect the current stage, component residuals, and vacuum-grid warnings
-before the external executable exits.
+before the external executable exits. The summary table prints
+``progress_phase`` for active VMEC2000 rows, so a high-mode run that has opened
+``threed1`` but has not yet printed force iterations is labelled
+``startup_or_pre_iteration_output`` instead of appearing as a blank residual
+row.
 Use larger ``--nvacskip`` only as a speed experiment; for convergence review,
 ``--nvacskip 1`` avoids stale free-boundary residuals on this square-hybrid
 Fourier deck. For ``NS`` ladders above the initial surface, use a widened mgrid
