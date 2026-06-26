@@ -372,8 +372,8 @@ row on ``MPOL=5, NTOR=28, NZETA=64`` reached final-grid iteration ``3631`` with
 max component about ``3.36e-12`` and a flat 12-row tail above the strict target;
 it was stopped so the reduced coordinate edge-control row could use the same
 GPU.  The concurrent VMEC2000 generated-``mgrid`` row at ``DELT=0.015`` was
-still running at final-grid iteration ``7981`` with max component about
-``1.4e-11``; its tail projection remained above the strict component target,
+still running at final-grid iteration ``11491`` with max component about
+``1.05e-11``; its tail projection remained above the strict component target,
 although it was still slowly trending downward and had no vacuum-grid overflow.
 This evidence does not support replacing the direct research lane by VMEC2000.
 Use VMEC2000 as the mgrid reference while the direct lane tests projection,
@@ -392,7 +392,11 @@ Reduced edge-control profiles can now also set
 ``--freeb-edge-control-ridge`` and ``--freeb-edge-control-trust-radius``.  The
 defaults preserve the original least-squares projection, while finite values
 make strict-polish A/B rows reproducible when testing whether the plateau is an
-undamped reduced-coordinate step or a deeper free-boundary residual issue.
+undamped reduced-coordinate step or a deeper free-boundary residual issue.  The
+follow-up command helper carries these values into generated strict-polish
+commands, gives non-default damped rows distinct output-directory labels, and
+the summary table reports the configured ridge, trust radius, and measured
+trust scale for the accepted edge update.
 The first 30-iteration direct-GPU coordinate-control smoke on the same
 ``MPOL=5, NTOR=28, NZETA=64`` hot-restart state preserved the LCFS in the
 two-control square subspace to about ``3e-15`` relative reconstruction residual
