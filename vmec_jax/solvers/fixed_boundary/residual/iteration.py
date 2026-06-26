@@ -472,6 +472,29 @@ def _record_best_scored_state(
         )
 
 
+def _record_best_scored_state_from_iteration_context(tracker: dict[str, Any], ctx: Mapping[str, Any]) -> None:
+    """Record the current iteration's candidate best free-boundary state."""
+
+    _record_best_scored_state(
+        tracker,
+        state=ctx["force_state_pre_current"],
+        iter2=ctx["iter2"],
+        fsq=(ctx["fsqr_f"], ctx["fsqz_f"], ctx["fsql_f"]),
+        free_boundary_enabled=ctx["free_boundary_enabled"],
+        freeb_ivacskip=ctx["freeb_ivacskip"],
+        freeb_reused=ctx["freeb_reused"],
+        freeb_bsqvac_half_current=ctx["freeb_bsqvac_half_current"],
+        freeb_nestor_runtime=ctx["freeb_nestor_runtime"],
+        freeb_last_model=ctx["freeb_last_model"],
+        freeb_last_diagnostics=ctx["freeb_last_diagnostics"],
+        freeb_ivac=ctx["freeb_ivac"],
+        freeb_nvacskip=ctx["freeb_nvacskip"],
+        freeb_nvskip0=ctx["freeb_nvskip0"],
+        freeb_plascur=ctx["freeb_plascur"],
+        skip=ctx["freeb_turnon_applied"],
+    )
+
+
 class _FreeBoundaryBestStateDriftDecision(NamedTuple):
     """Decision to roll a free-boundary solve back to its best scored state."""
 
@@ -541,6 +564,96 @@ def _free_boundary_best_state_drift_decision(
     )
 
 
+class _FreeBoundaryBestStateDriftRestart(NamedTuple):
+    """Loop scalars restored when a free-boundary solve returns to its best state."""
+
+    state: Any
+    freeb_bsqvac_half_current: Any
+    freeb_nestor_runtime: Any
+    freeb_last_model: str | None
+    freeb_last_diagnostics: Any
+    freeb_ivac: int
+    freeb_ivacskip: int
+    freeb_nvacskip: int
+    freeb_nvskip0: int
+    freeb_plascur: float
+    time_step: float
+    inv_tau: list[float]
+    iter1: int
+    ijacob: int
+    bad_resets: int
+    fsq_prev: float
+    fsq0_prev: float
+    prev_rz_fsq: float
+    res0: float
+    res1: float
+    state_checkpoint: Any
+    step_status: str
+    restart_reason: str
+    pre_restart_reason: str
+
+
+def _free_boundary_best_state_drift_restart(
+    tracker: Mapping[str, Any],
+    decision: _FreeBoundaryBestStateDriftDecision,
+    *,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    freeb_nvacskip: int,
+    freeb_nvskip0: int,
+    freeb_plascur: float,
+    time_step: float,
+    restart_badprog_factor: float,
+    k_ndamp: int,
+    iter2: int,
+    ijacob: int,
+    bad_resets: int,
+    fsq_prev: float,
+    res0: float,
+    res1: float,
+) -> _FreeBoundaryBestStateDriftRestart | None:
+    """Return the restored loop state for an accepted best-state drift restart."""
+
+    if not bool(decision.restart):
+        return None
+    best_state = tracker.get("state")
+    if best_state is None:
+        return None
+
+    time_step_next = max(float(restart_badprog_factor) * float(time_step), 1.0e-12)
+    fsq_prev_next = float(tracker.get("fsq") or fsq_prev)
+    return _FreeBoundaryBestStateDriftRestart(
+        state=best_state,
+        freeb_bsqvac_half_current=tracker.get("freeb_bsqvac_half_current"),
+        freeb_nestor_runtime=tracker.get("freeb_nestor_runtime"),
+        freeb_last_model=tracker.get("freeb_last_model"),
+        freeb_last_diagnostics=tracker.get("freeb_last_diagnostics"),
+        freeb_ivac=freeb_ivac if tracker.get("freeb_ivac") is None else int(tracker["freeb_ivac"]),
+        freeb_ivacskip=(
+            freeb_ivacskip if tracker.get("freeb_ivacskip") is None else int(tracker["freeb_ivacskip"])
+        ),
+        freeb_nvacskip=(
+            freeb_nvacskip if tracker.get("freeb_nvacskip") is None else int(tracker["freeb_nvacskip"])
+        ),
+        freeb_nvskip0=freeb_nvskip0 if tracker.get("freeb_nvskip0") is None else int(tracker["freeb_nvskip0"]),
+        freeb_plascur=freeb_plascur if tracker.get("freeb_plascur") is None else float(tracker["freeb_plascur"]),
+        time_step=time_step_next,
+        inv_tau=[0.15 / float(time_step_next)] * int(k_ndamp),
+        iter1=int(iter2),
+        ijacob=int(ijacob) + 1,
+        bad_resets=int(bad_resets) + 1,
+        fsq_prev=fsq_prev_next,
+        fsq0_prev=fsq_prev_next,
+        prev_rz_fsq=float(tracker.get("fsqr") or 0.0) + float(tracker.get("fsqz") or 0.0),
+        res0=min(float(res0), fsq_prev_next) if float(res0) >= 0.0 else fsq_prev_next,
+        res1=min(float(res1), fsq_prev_next) if float(res1) >= 0.0 else fsq_prev_next,
+        state_checkpoint=best_state,
+        step_status="restart_freeb_drift",
+        restart_reason=decision.reason,
+        pre_restart_reason=decision.reason,
+    )
+
+
 def _finalize_residual_iter_result_from_namespace(
     namespace: Mapping[str, Any],
     *,
@@ -594,6 +707,131 @@ def _runtime_env_int(name: str, default: int) -> int:
     except Exception:
         return int(default)
     return max(0, int(value))
+
+
+class _ResidualIterRuntimeEnv(NamedTuple):
+    """Environment-derived switches cached once for a residual iteration solve."""
+
+    freeb_include_edge: bool
+    force_edge_residual: str
+    freeb_raise: bool
+    debug_iter: str
+    dump_lam: str
+    dump_lamcal: str
+    dump_badjac: str
+    dump_dir: str
+    freeb_drift_restart_enabled: bool
+    freeb_drift_restart_factor: float
+    freeb_drift_restart_min_iter_since_best: int
+    freeb_drift_restart_streak: int
+    freeb_drift_restart_max_restarts: int
+    return_best_scored_requested: bool
+
+
+def _residual_iter_runtime_env() -> _ResidualIterRuntimeEnv:
+    """Read residual-iteration environment knobs once per solve."""
+
+    return _ResidualIterRuntimeEnv(
+        freeb_include_edge=_runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0")),
+        force_edge_residual=os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower(),
+        freeb_raise=_runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_RAISE", "")),
+        debug_iter=os.getenv("VMEC_JAX_DEBUG_ITER", "").strip(),
+        dump_lam=os.getenv("VMEC_JAX_DUMP_LAM", ""),
+        dump_lamcal=os.getenv("VMEC_JAX_DUMP_LAMCAL", ""),
+        dump_badjac=os.getenv("VMEC_JAX_DUMP_BADJAC", ""),
+        dump_dir=os.getenv("VMEC_JAX_DUMP_DIR", ""),
+        freeb_drift_restart_enabled=_runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_DRIFT_RESTART", "0")),
+        freeb_drift_restart_factor=max(1.0, _runtime_env_float("VMEC_JAX_FREEB_DRIFT_RESTART_FACTOR", 3.0)),
+        freeb_drift_restart_min_iter_since_best=_runtime_env_int(
+            "VMEC_JAX_FREEB_DRIFT_RESTART_MIN_ITER_SINCE_BEST",
+            20,
+        ),
+        freeb_drift_restart_streak=max(1, _runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_STREAK", 10)),
+        freeb_drift_restart_max_restarts=_runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_MAX_RESTARTS", 4),
+        return_best_scored_requested=_runtime_env_enabled(os.getenv("VMEC_JAX_RETURN_BEST_SCORED_STATE", "0")),
+    )
+
+
+def _dump_lam_fsql1_for_preconditioned_residual(
+    fsql1_post: Any,
+    *,
+    frzl: Any,
+    static: Any,
+    s: Any,
+    delta_s: Any,
+    iter2: int,
+    vmec_gcx2_from_tomnsps_func: Any,
+) -> None:
+    """Write pre/post lambda residual diagnostics for one residual iteration."""
+
+    _gcr2_raw, _gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps_func(
+        frzl=frzl,
+        lconm1=bool(getattr(static.cfg, "lconm1", True)),
+        apply_m1_constraints=False,
+        include_edge=True,
+        apply_scalxc=False,
+        s=s,
+    )
+    _maybe_dump_lam_fsql1(
+        fsql1_pre=gcl2_raw * delta_s,
+        fsql1_post=fsql1_post,
+        static=static,
+        iter_idx=int(iter2),
+    )
+
+
+def _handle_converged_residual_iteration(
+    ctx: Mapping[str, Any],
+    *,
+    append_zero_update_history_func: Any,
+    record_timing_func: Any,
+    should_print_vmec2000_func: Any,
+    print_vmec2000_iter_row_func: Any,
+    precond_diag_floats_func: Any,
+) -> bool:
+    """Handle convergence-history, timing, and status output for one iteration."""
+
+    append_zero_update_history_func(
+        restart_path="converged",
+        step_status="converged",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step_value=ctx["time_step"],
+    )
+    _print_compact_converged_status(
+        verbose=bool(ctx["verbose"]),
+        vmec2000_control=bool(ctx["vmec2000_control"]),
+        verbose_vmec2000_table=bool(ctx["verbose_vmec2000_table"]),
+        fsqr=ctx["fsqr_f"],
+        fsqz=ctx["fsqz_f"],
+        fsql=ctx["fsql_f"],
+        target=float(ctx["fsq_total_target"]) if ctx["fsq_total_target"] is not None else float(ctx["ftol"]),
+    )
+    timing_cleared = bool(record_timing_func("iteration_control", ctx["t_iteration_control_start"]))
+    _print_residual_iteration_update_status(
+        verbose=bool(ctx["verbose"]),
+        vmec2000_control=bool(ctx["vmec2000_control"]),
+        verbose_vmec2000_table=bool(ctx["verbose_vmec2000_table"]),
+        should_print_vmec2000=should_print_vmec2000_func,
+        print_vmec2000_iter_row=print_vmec2000_iter_row_func,
+        precond_diag_floats=precond_diag_floats_func,
+        iter_idx=int(ctx["iter2"]),
+        max_iter=int(ctx["max_iter"]),
+        compact_iter_idx=int(ctx["it"]),
+        fsqr=ctx["fsqr_f"],
+        fsqz=ctx["fsqz_f"],
+        fsql=ctx["fsql_f"],
+        dt_eff=0.0,
+        update_rms=0.0,
+        time_step=float(ctx["time_step"]),
+        r00=float(ctx["r00_last"]),
+        z00=float(ctx["z00_last"]),
+        w_mhd=float(ctx["w_vmec_last"]),
+        step_status="converged",
+        force_vmec2000_row=True,
+        compact_status=False,
+    )
+    return timing_cleared
 
 
 def _scan_chunk_settings(
@@ -1979,6 +2217,7 @@ def solve_fixed_boundary_residual_iter(
         mpol=int(cfg.mpol),
         host_update_assembly=host_update_assembly,
     )
+    runtime_env = _residual_iter_runtime_env()
 
     def _refresh_preconditioner_cache(k, *, iter2: int):
         return _precond_payload_facade.refresh_preconditioner_cache_state_runtime(
@@ -1987,8 +2226,8 @@ def solve_fixed_boundary_residual_iter(
             cfg=cfg,
             static=static,
             iter2=int(iter2),
-            env_dump_lam=_env_dump_lam,
-            env_dump_lamcal=_env_dump_lamcal,
+            env_dump_lam=runtime_env.dump_lam,
+            env_dump_lamcal=runtime_env.dump_lamcal,
             timing_enabled=bool(timing_enabled),
             timing_stats=timing_stats,
             perf_counter=time.perf_counter,
@@ -2132,27 +2371,8 @@ def solve_fixed_boundary_residual_iter(
         cache_constraint_rcon0 = None
         cache_constraint_zcon0 = None
 
-    # Cache hot-loop environment switches once per solve.
-    _env_freeb_include_edge = _runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_INCLUDE_EDGE", "0"))
-    _env_force_edge_residual = os.getenv("VMEC_JAX_FORCE_EDGE_RESIDUAL", "").strip().lower()
-    _env_freeb_raise = _runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_RAISE", ""))
-    _env_debug_iter = os.getenv("VMEC_JAX_DEBUG_ITER", "").strip()
-    _env_dump_lam = os.getenv("VMEC_JAX_DUMP_LAM", "")
-    _env_dump_lamcal = os.getenv("VMEC_JAX_DUMP_LAMCAL", "")
-    _env_dump_badjac = os.getenv("VMEC_JAX_DUMP_BADJAC", "")
-    _env_dump_dir = os.getenv("VMEC_JAX_DUMP_DIR", "")
-    freeb_drift_restart_enabled = _runtime_env_enabled(os.getenv("VMEC_JAX_FREEB_DRIFT_RESTART", "0"))
-    freeb_drift_restart_factor = max(1.0, _runtime_env_float("VMEC_JAX_FREEB_DRIFT_RESTART_FACTOR", 3.0))
-    freeb_drift_restart_min_iter_since_best = _runtime_env_int(
-        "VMEC_JAX_FREEB_DRIFT_RESTART_MIN_ITER_SINCE_BEST",
-        20,
-    )
-    freeb_drift_restart_streak = max(1, _runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_STREAK", 10))
-    freeb_drift_restart_max_restarts = _runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_MAX_RESTARTS", 4)
-    return_best_scored_requested = _runtime_env_enabled(os.getenv("VMEC_JAX_RETURN_BEST_SCORED_STATE", "0"))
-    return_best_scored_state = bool(return_best_scored_requested)
     best_scored = _new_best_scored_state_tracker(
-        bool(return_best_scored_requested) or bool(freeb_drift_restart_enabled)
+        bool(runtime_env.return_best_scored_requested) or bool(runtime_env.freeb_drift_restart_enabled)
     )
 
     if timing_enabled:
@@ -2204,8 +2424,8 @@ def solve_fixed_boundary_residual_iter(
                 freeb_ivac_effective=int(freeb_ivac_effective),
                 prev_rz_fsq=float(prev_rz_fsq),
                 fsqz2_history=fsqz2_history,
-                env_freeb_include_edge=bool(_env_freeb_include_edge),
-                env_force_edge_residual=_env_force_edge_residual,
+                env_freeb_include_edge=bool(runtime_env.freeb_include_edge),
+                env_force_edge_residual=runtime_env.force_edge_residual,
                 precond_cache_valid=bool(precond_cache.valid),
                 force_bcovar_update=bool(force_bcovar_update),
                 preconditioner_update_interval=int(k_preconditioner_update_interval),
@@ -2275,7 +2495,7 @@ def solve_fixed_boundary_residual_iter(
                 controls_cached=freeb_controls_cached,
                 last_model=freeb_last_model,
                 last_diagnostics=freeb_last_diagnostics,
-                env_freeb_raise=bool(_env_freeb_raise),
+                env_freeb_raise=bool(runtime_env.freeb_raise),
                 nestor_external_only_step_func=nestor_external_only_step,
                 edge_bsqvac_from_nestor_func=_edge_bsqvac_from_nestor,
                 nestor_iteration_coupling_func=_free_boundary_nestor_iteration_coupling,
@@ -2463,7 +2683,7 @@ def solve_fixed_boundary_residual_iter(
             fsqr = physical_metrics.fsqr
             fsqz = physical_metrics.fsqz
             fsql = physical_metrics.fsql
-            debug_iter_env = _env_debug_iter
+            debug_iter_env = runtime_env.debug_iter
             _maybe_print_nonscan_state_debug(
                 debug_iter_env=debug_iter_env,
                 iter2=int(iter2),
@@ -2535,24 +2755,7 @@ def solve_fixed_boundary_residual_iter(
                 _apply_controller_update(_controller_state_after_free_boundary_turnon_restart_update, turnon_update)
                 freeb_turnon_applied = True
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
-            _record_best_scored_state(
-                best_scored,
-                state=force_state_pre_current,
-                iter2=iter2,
-                fsq=(fsqr_f, fsqz_f, fsql_f),
-                free_boundary_enabled=free_boundary_enabled,
-                freeb_ivacskip=freeb_ivacskip,
-                freeb_reused=freeb_reused,
-                freeb_bsqvac_half_current=freeb_bsqvac_half_current,
-                freeb_nestor_runtime=freeb_nestor_runtime,
-                freeb_last_model=freeb_last_model,
-                freeb_last_diagnostics=freeb_last_diagnostics,
-                freeb_ivac=freeb_ivac,
-                freeb_nvacskip=freeb_nvacskip,
-                freeb_nvskip0=freeb_nvskip0,
-                freeb_plascur=freeb_plascur,
-                skip=freeb_turnon_applied,
-            )
+            _record_best_scored_state_from_iteration_context(best_scored, locals())
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = _free_boundary_prev_rz_fsq_next(
                 prev_fsq_before=prev_rz_fsq_before,
@@ -2773,23 +2976,6 @@ def solve_fixed_boundary_residual_iter(
             # Damping for the fixed-point update.
             t_fsq1_precond_norm_start = time.perf_counter() if timing_enabled else None
 
-            def _dump_lam_fsql1_if_requested(fsql1_post):
-                gcr2_raw, gcz2_raw, gcl2_raw = vmec_gcx2_from_tomnsps(
-                    frzl=frzl,
-                    lconm1=bool(getattr(static.cfg, "lconm1", True)),
-                    apply_m1_constraints=False,
-                    include_edge=True,
-                    apply_scalxc=False,
-                    s=s,
-                )
-                fsql1_pre = gcl2_raw * delta_s
-                _maybe_dump_lam_fsql1(
-                    fsql1_pre=fsql1_pre,
-                    fsql1_post=fsql1_post,
-                    static=static,
-                    iter_idx=int(iter2),
-                )
-
             scalar_result = _resolve_preconditioned_residual_scalars(
                 preconditioner_payload=preconditioner_result,
                 frzl_pre=frzl_pre,
@@ -2835,7 +3021,17 @@ def solve_fixed_boundary_residual_iter(
                 finite_float_or_zero_func=_finite_float_or_zero,
                 cached_or_current_f_norm1_jax_func=_cached_or_current_f_norm1_jax,
                 dump_lam_fsql1_func=(
-                    _dump_lam_fsql1_if_requested if _env_dump_lam not in ("", "0") and frzl_lam_pre is None else None
+                    partial(
+                        _dump_lam_fsql1_for_preconditioned_residual,
+                        frzl=frzl,
+                        static=static,
+                        s=s,
+                        delta_s=delta_s,
+                        iter2=int(iter2),
+                        vmec_gcx2_from_tomnsps_func=vmec_gcx2_from_tomnsps,
+                    )
+                    if runtime_env.dump_lam not in ("", "0") and frzl_lam_pre is None
+                    else None
                 ),
                 device_get_floats_func=_device_get_floats,
                 accepted_control_ptau_host_from_payload_func=_accepted_control_ptau_host_from_payload,
@@ -2896,33 +3092,6 @@ def solve_fixed_boundary_residual_iter(
                     freeb_ivacskip=freeb_ivacskip,
                 )
 
-            def _apply_restart_branch_result(branch, controller_update_func, *, time_step_value: float) -> None:
-                nonlocal force_bcovar_update, freeb_controls_cached, prev_rz_fsq, restart_reason
-                nonlocal skip_time_control, state, step_status
-
-                state = branch.state
-                _zero_all_velocity_blocks()
-                _apply_controller_update(controller_update_func, branch.update)
-                step_status = branch.step_status
-                restart_reason = branch.restart_reason
-                if branch.clear_freeb_controls:
-                    freeb_controls_cached = None
-                if branch.clear_preconditioner_cache:
-                    precond_cache.clear()
-                if branch.force_bcovar_update:
-                    force_bcovar_update = True
-                _append_current_zero_update_history(
-                    restart_path=branch.restart_path,
-                    step_status=step_status,
-                    restart_reason=restart_reason,
-                    pre_restart_reason=branch.pre_restart_reason,
-                    time_step_value=time_step_value,
-                )
-                if branch.pop_iteration_history:
-                    _pop_iteration_histories()
-                prev_rz_fsq = branch.prev_rz_fsq
-                skip_time_control = branch.skip_time_control
-
             history_lists.append_preconditioned(
                 track_history=bool(track_history),
                 rz_norm=rz_norm,
@@ -2938,104 +3107,69 @@ def solve_fixed_boundary_residual_iter(
 
             drift_decision = _free_boundary_best_state_drift_decision(
                 best_scored,
-                enabled=bool(free_boundary_enabled) and bool(freeb_drift_restart_enabled),
+                enabled=bool(free_boundary_enabled) and bool(runtime_env.freeb_drift_restart_enabled),
                 iter2=int(iter2),
                 current_fsq=(fsqr_f, fsqz_f, fsql_f),
-                factor=float(freeb_drift_restart_factor),
-                min_iter_since_best=int(freeb_drift_restart_min_iter_since_best),
-                streak_window=int(freeb_drift_restart_streak),
-                max_restarts=int(freeb_drift_restart_max_restarts),
+                factor=float(runtime_env.freeb_drift_restart_factor),
+                min_iter_since_best=int(runtime_env.freeb_drift_restart_min_iter_since_best),
+                streak_window=int(runtime_env.freeb_drift_restart_streak),
+                max_restarts=int(runtime_env.freeb_drift_restart_max_restarts),
             )
-            if drift_decision.restart:
-                best_state = best_scored.get("state")
-                if best_state is not None:
-                    state = best_state
-                    freeb_bsqvac_half_current = best_scored.get("freeb_bsqvac_half_current")
-                    freeb_nestor_runtime = best_scored.get("freeb_nestor_runtime")
-                    freeb_last_model = best_scored.get("freeb_last_model")
-                    freeb_last_diagnostics = best_scored.get("freeb_last_diagnostics")
-                    if best_scored.get("freeb_ivac") is not None:
-                        freeb_ivac = int(best_scored["freeb_ivac"])
-                    if best_scored.get("freeb_ivacskip") is not None:
-                        freeb_ivacskip = int(best_scored["freeb_ivacskip"])
-                    if best_scored.get("freeb_nvacskip") is not None:
-                        freeb_nvacskip = int(best_scored["freeb_nvacskip"])
-                    if best_scored.get("freeb_nvskip0") is not None:
-                        freeb_nvskip0 = int(best_scored["freeb_nvskip0"])
-                    if best_scored.get("freeb_plascur") is not None:
-                        freeb_plascur = float(best_scored["freeb_plascur"])
-                    _zero_all_velocity_blocks()
-                    freeb_controls_cached = None
-                    precond_cache.clear()
-                    force_bcovar_update = True
-                    time_step = max(float(restart_badprog_factor) * float(time_step), 1.0e-12)
-                    inv_tau = [0.15 / float(time_step)] * int(k_ndamp)
-                    iter1 = int(iter2)
-                    ijacob = int(ijacob) + 1
-                    bad_resets = int(bad_resets) + 1
-                    fsq_prev = float(best_scored.get("fsq") or fsq_prev)
-                    fsq0_prev = fsq_prev
-                    prev_rz_fsq = float(best_scored.get("fsqr") or 0.0) + float(best_scored.get("fsqz") or 0.0)
-                    res0 = min(float(res0), fsq_prev) if float(res0) >= 0.0 else fsq_prev
-                    res1 = min(float(res1), fsq0_prev) if float(res1) >= 0.0 else fsq0_prev
-                    state_checkpoint = state
-                    _set_controller_state(_current_controller_state())
-                    step_status = "restart_freeb_drift"
-                    restart_reason = drift_decision.reason
-                    pre_restart_reason = drift_decision.reason
-                    _append_current_zero_update_history(
-                        restart_path="freeb_best_state_drift",
-                        step_status=step_status,
-                        restart_reason=restart_reason,
-                        pre_restart_reason=pre_restart_reason,
-                        time_step_value=float(time_step),
-                    )
-                    skip_time_control = True
-                    continue
+            drift_restart = _free_boundary_best_state_drift_restart(
+                best_scored,
+                drift_decision,
+                freeb_ivac=freeb_ivac,
+                freeb_ivacskip=freeb_ivacskip,
+                freeb_nvacskip=freeb_nvacskip,
+                freeb_nvskip0=freeb_nvskip0,
+                freeb_plascur=freeb_plascur,
+                time_step=time_step,
+                restart_badprog_factor=restart_badprog_factor,
+                k_ndamp=k_ndamp,
+                iter2=iter2,
+                ijacob=ijacob,
+                bad_resets=bad_resets,
+                fsq_prev=fsq_prev,
+                res0=res0,
+                res1=res1,
+            )
+            if drift_restart is not None:
+                (
+                    state,
+                    freeb_bsqvac_half_current,
+                    freeb_nestor_runtime,
+                    freeb_last_model,
+                    freeb_last_diagnostics,
+                ) = drift_restart[:5]
+                freeb_ivac, freeb_ivacskip, freeb_nvacskip, freeb_nvskip0, freeb_plascur = drift_restart[5:10]
+                time_step, inv_tau, iter1, ijacob, bad_resets = drift_restart[10:15]
+                fsq_prev, fsq0_prev, prev_rz_fsq, res0, res1 = drift_restart[15:20]
+                state_checkpoint, step_status, restart_reason, pre_restart_reason = drift_restart[20:24]
+                _zero_all_velocity_blocks()
+                freeb_controls_cached = None
+                precond_cache.clear()
+                force_bcovar_update = True
+                _set_controller_state(_current_controller_state())
+                _append_current_zero_update_history(
+                    restart_path="freeb_best_state_drift",
+                    step_status=step_status,
+                    restart_reason=restart_reason,
+                    pre_restart_reason=pre_restart_reason,
+                    time_step_value=float(time_step),
+                )
+                skip_time_control = True
+                continue
 
             if converged_physical:
-                # Keep histories aligned when convergence happens before update.
-                _append_current_zero_update_history(
-                    restart_path="converged",
-                    step_status="converged",
-                    restart_reason="none",
-                    pre_restart_reason="none",
-                    time_step_value=time_step,
-                )
-                _print_compact_converged_status(
-                    verbose=bool(verbose),
-                    vmec2000_control=bool(vmec2000_control),
-                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
-                )
-                if _record_timing("iteration_control", t_iteration_control_start):
+                if _handle_converged_residual_iteration(
+                    locals(),
+                    append_zero_update_history_func=_append_current_zero_update_history,
+                    record_timing_func=_record_timing,
+                    should_print_vmec2000_func=_should_print_vmec2000,
+                    print_vmec2000_iter_row_func=_print_vmec2000_iter_row,
+                    precond_diag_floats_func=_precond_diag_floats,
+                ):
                     t_iteration_control_start = None
-                _print_residual_iteration_update_status(
-                    verbose=bool(verbose),
-                    vmec2000_control=bool(vmec2000_control),
-                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
-                    should_print_vmec2000=_should_print_vmec2000,
-                    print_vmec2000_iter_row=_print_vmec2000_iter_row,
-                    precond_diag_floats=_precond_diag_floats,
-                    iter_idx=int(iter2),
-                    max_iter=int(max_iter),
-                    compact_iter_idx=int(it),
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    dt_eff=0.0,
-                    update_rms=0.0,
-                    time_step=float(time_step),
-                    r00=float(r00_last),
-                    z00=float(z00_last),
-                    w_mhd=float(w_vmec_last),
-                    step_status="converged",
-                    force_vmec2000_row=True,
-                    compact_status=False,
-                )
                 converged = True
                 break
 
@@ -3101,8 +3235,8 @@ def solve_fixed_boundary_residual_iter(
 
                 if np.isfinite(min_tau) and np.isfinite(max_tau):
                     history_lists.append_bad_jacobian(track_history, min_tau, max_tau, bool(bad_jacobian))
-                    if bad_jacobian and _env_dump_badjac not in ("", "0"):
-                        dump_dir = _env_dump_dir
+                    if bad_jacobian and runtime_env.dump_badjac not in ("", "0"):
+                        dump_dir = runtime_env.dump_dir
                         if dump_dir:
                             try:
                                 path = Path(dump_dir) / "bad_jacobian.log"

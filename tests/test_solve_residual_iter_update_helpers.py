@@ -16,6 +16,7 @@ from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
 from vmec_jax.solvers.fixed_boundary.residual.iteration import (
     _FreeBoundaryEdgeControlProjector,
     _free_boundary_best_state_drift_decision,
+    _free_boundary_best_state_drift_restart,
     _new_best_scored_state_tracker,
     _record_best_scored_state,
 )
@@ -204,6 +205,82 @@ def test_free_boundary_best_state_drift_decision_requires_tail_streak_and_caps_r
     )
     assert not capped.restart
     assert capped.reason == "max_restarts"
+
+
+def test_free_boundary_best_state_drift_restart_restores_vacuum_payload_and_damping() -> None:
+    tracker = _new_best_scored_state_tracker(True)
+    _record_best_scored_state(
+        tracker,
+        state="best-state",
+        iter2=7,
+        fsq=(2.0e-9, 3.0e-9, 4.0e-12),
+        free_boundary_enabled=True,
+        freeb_ivacskip=2,
+        freeb_reused=True,
+        freeb_bsqvac_half_current="bsqvac-best",
+        freeb_nestor_runtime={"model": "direct"},
+        freeb_last_model="jax_direct",
+        freeb_last_diagnostics={"bnormal_rms": 1.0e-8},
+        freeb_ivac=5,
+        freeb_nvacskip=11,
+        freeb_nvskip0=13,
+        freeb_plascur=0.42,
+    )
+    decision = _free_boundary_best_state_drift_decision(
+        tracker,
+        enabled=True,
+        iter2=10,
+        current_fsq=(9.0e-9, 1.0e-9, 1.0e-12),
+        factor=2.0,
+        min_iter_since_best=1,
+        streak_window=1,
+        max_restarts=3,
+    )
+
+    restart = _free_boundary_best_state_drift_restart(
+        tracker,
+        decision,
+        freeb_ivac=99,
+        freeb_ivacskip=99,
+        freeb_nvacskip=99,
+        freeb_nvskip0=99,
+        freeb_plascur=99.0,
+        time_step=0.02,
+        restart_badprog_factor=0.5,
+        k_ndamp=3,
+        iter2=10,
+        ijacob=4,
+        bad_resets=6,
+        fsq_prev=1.0,
+        res0=1.0e-8,
+        res1=-1.0,
+    )
+
+    assert restart is not None
+    assert restart.state == "best-state"
+    assert restart.freeb_bsqvac_half_current == "bsqvac-best"
+    assert restart.freeb_nestor_runtime == {"model": "direct"}
+    assert restart.freeb_last_model == "jax_direct"
+    assert restart.freeb_last_diagnostics == {"bnormal_rms": 1.0e-8}
+    assert restart.freeb_ivac == 5
+    assert restart.freeb_ivacskip == 2
+    assert restart.freeb_nvacskip == 11
+    assert restart.freeb_nvskip0 == 13
+    assert restart.freeb_plascur == pytest.approx(0.42)
+    assert restart.time_step == pytest.approx(0.01)
+    assert restart.inv_tau == pytest.approx([15.0, 15.0, 15.0])
+    assert restart.iter1 == 10
+    assert restart.ijacob == 5
+    assert restart.bad_resets == 7
+    assert restart.fsq_prev == pytest.approx(5.004e-9)
+    assert restart.fsq0_prev == pytest.approx(restart.fsq_prev)
+    assert restart.prev_rz_fsq == pytest.approx(5.0e-9)
+    assert restart.res0 == pytest.approx(5.004e-9)
+    assert restart.res1 == pytest.approx(5.004e-9)
+    assert restart.state_checkpoint == "best-state"
+    assert restart.step_status == "restart_freeb_drift"
+    assert restart.restart_reason == "freeb_best_state_drift"
+    assert restart.pre_restart_reason == "freeb_best_state_drift"
 
 
 def test_free_boundary_edge_coordinate_mode_applies_reduced_update_once(monkeypatch) -> None:
