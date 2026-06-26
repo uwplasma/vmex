@@ -299,10 +299,19 @@ Fitzpatrick's plasma-physics notes
 Recent axisymmetric mirror design papers also include plasma diamagnetism in
 the mirror-ratio interpretation; for example, the Hammir model notes the
 finite-beta factor entering the mirror ratio
-(``https://arxiv.org/html/2411.06644v1``). Therefore beta-scan validation
-should look for a solved near-axis ``|B|`` depression in the plasma region and
-the corresponding effective mirror-ratio response, not just changes in the coil
-field. For the stellarator-mirror hybrid, non-axisymmetric mirror literature
+(``https://arxiv.org/html/2411.06644v1``). The WHAM physics-basis paper
+emphasizes self-consistent finite-beta anisotropic equilibria
+(``https://doi.org/10.1017/S0022377823000806``), and recent Pleiades/WHAM
+reconstruction work treats beta, stored energy, and diamagnetic magnetic
+signals as equilibrium validation quantities
+(``https://doi.org/10.1063/5.0306291``). Therefore beta-scan validation should
+look for a solved near-axis ``|B|`` depression in the plasma region, the
+corresponding effective mirror-ratio response, stored-energy/pressure trends,
+and finite-beta boundary-balance diagnostics, not just changes in the coil
+field. The 2025 Hammir performance model keeps the same integrated
+heating-equilibrium-transport viewpoint for tandem-mirror end plugs
+(``https://doi.org/10.1017/S002237782510055X``). For the
+stellarator-mirror hybrid, non-axisymmetric mirror literature
 warns that bent or non-axisymmetric mirror fields add radial and longitudinal
 drifts, so the hybrid lane must retain field-line pitch, iota, and cross-section
 diagnostics when non-axisymmetric corner shaping is enabled
