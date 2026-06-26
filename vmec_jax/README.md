@@ -22,16 +22,18 @@ building blocks, or compatibility entry points.
 - `io/`: persisted VMEC data formats, especially WOUT netCDF helpers.
 - `drivers/`: implementation helpers for `driver.py`; these are not general
   input/output utilities.
-- `data/`: package-bundled tiny data used by import-time or CLI helper code.
+- `resources/`: tiny package-bundled inputs needed after `pip install`, such
+  as the `vmec --test` quick-start deck. User-facing examples live in
+  `examples/data/`.
 
 ## Root physics modules
 
 Small standalone physics modules may remain at the root when they are commonly
 imported directly, for example `quasisymmetry.py`, `finite_beta.py`,
-`profiles.py`, `boundary.py`, and `field.py`.  Large topic families should move
-toward domain folders with clear names.  For example, QI-related implementation
-should consolidate behind a future `quasi_isodynamic/` package instead of
-adding more `qi_*` root modules.
+`profiles.py`, `boundary.py`, and `field.py`.  Large topic families should live
+in domain folders with clear names.  QI-related implementation belongs under
+`quasi_isodynamic/`, and low-level VMEC force/residue kernels belong under
+`kernels/`.
 
 ## Naming rules
 

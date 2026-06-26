@@ -8611,8 +8611,9 @@ Results obtained:
 
 Best next steps:
 
-1. Build the full Sphinx docs with warnings as errors to catch stale
-   autosummary references after the namespace move.
+1. Rename the package-bundled quick-start input directory from ``data`` to
+   ``resources`` so the repository has one obvious user-facing data location:
+   ``examples/data``.
 2. Run ``git diff --check`` and commit/push the kernel-package tranche if docs
    are clean.
 3. Continue only larger refactor tranches after this commit: reduce the
@@ -8634,4 +8635,48 @@ Current lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.4%.
 - Docs/release hygiene: 100%.
 - Repository layout/navigation cleanup: 98.0%.
+- Overall: 99.9%.
+
+## 2026-06-26 Package Resource Directory Cleanup
+
+Steps taken:
+
+- Renamed the internal package data directory from ``vmec_jax/data`` to
+  ``vmec_jax/resources``.
+- Updated package-data metadata, ``vmec --test`` resource loading, package
+  navigation notes, and tests.
+- Left ``examples/data`` as the only user-facing data directory, which makes the
+  examples layout easier to explain and avoids confusing package runtime
+  resources with public input decks.
+
+Results obtained:
+
+- Directory audit now reports only ``examples/data`` as a directory named
+  ``data``.
+- CLI/package-resource tests passed:
+  ``31 passed in 0.30s`` for ``tests/test_cli_helpers.py`` and the Boozer
+  tracked-input default gate.
+
+Best next steps:
+
+1. Rerun static checks and docs after the resource rename.
+2. Commit/push this navigation cleanup if gates remain clean.
+3. Keep future package resources tiny and avoid adding WOUT/MGRID/optimization
+   output files to the wheel.
+
+User needs:
+
+- No input needed.
+
+Current lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.5%.
+- Free-boundary production differentiability: 97.7%.
+- Single-stage coil optimization: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 94.5%.
+- VMEC2000/VMEC++ parity and physics gates: 99.4%.
+- Docs/release hygiene: 100%.
+- Repository layout/navigation cleanup: 99.0%.
 - Overall: 99.9%.

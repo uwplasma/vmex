@@ -89,7 +89,7 @@ def test_booz_private_parsers_cover_scalar_truthiness_and_errors(tmp_path: Path)
 
 
 def test_tracked_example_inputs_carry_disabled_boozer_defaults() -> None:
-    roots = [Path("examples/data"), Path("vmec_jax/data")]
+    roots = [Path("examples/data"), Path("vmec_jax/resources")]
     input_paths = sorted(path for root in roots for path in root.glob("input.*"))
     assert input_paths
     for path in input_paths:
