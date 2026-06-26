@@ -420,6 +420,15 @@ def _parser() -> argparse.ArgumentParser:
             "then exit before mgrid generation or equilibrium solves."
         ),
     )
+    p.add_argument(
+        "--native-spline-control-prototype",
+        action="store_true",
+        help=(
+            "Write the native reduced spline-control solver design/readiness report, "
+            "then exit before mgrid generation or equilibrium solves. This is a "
+            "prototype gate, not an equilibrium solve."
+        ),
+    )
     return p
 
 
@@ -2579,6 +2588,79 @@ def _spline_bridge_payload(
     }
 
 
+def _native_spline_control_prototype_payload(
+    *,
+    config: ExampleConfig,
+    projection: dict[str, Any],
+    resolution_deck: dict[str, Any],
+    control_basis: dict[str, Any],
+    control_fourier_map: dict[str, Any],
+    strict_schedule: dict[str, Any],
+) -> dict[str, Any]:
+    """Describe the native reduced-control solver lane without claiming a solve."""
+
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    uses_controls = bool(_square_axis_uses_spline_controls(config))
+    candidate_bases = control_fourier_map.get("candidate_bases", {}) if isinstance(control_fourier_map, dict) else {}
+    stellarator = candidate_bases.get("stellarator", {}) if isinstance(candidate_bases, dict) else {}
+    square = candidate_bases.get("square", {}) if isinstance(candidate_bases, dict) else {}
+    preferred = stellarator if stellarator else square
+    control_count = preferred.get("control_count")
+    mode_count = int(resolution_deck.get("mode_count", projection.get("mode_count", 0)) or 0)
+    full_edge_size = 4 * mode_count
+    strict_ready = bool(
+        uses_controls
+        and resolution_deck.get("status") == "production_ready"
+        and strict_schedule.get("requested_final_ftol_meets_target")
+    )
+    blockers: list[str] = []
+    if not uses_controls:
+        blockers.append("axis_kind_not_control_spline")
+    if resolution_deck.get("status") != "production_ready":
+        blockers.append(f"resolution_deck_{resolution_deck.get('status', 'unknown')}")
+        blockers.extend(str(reason) for reason in resolution_deck.get("reasons", []) or [])
+    if not bool(strict_schedule.get("requested_final_ftol_meets_target")):
+        blockers.append("final_ftol_above_strict_target")
+
+    return {
+        "status": "ready_for_solver_implementation" if strict_ready else "blocked_by_preflight",
+        "prototype_only": True,
+        "equilibrium_solve_performed": False,
+        "axis_kind": axis_kind,
+        "real_space_axis_basis": "periodic_spline_controls" if uses_controls else "sampled_fourier_target",
+        "recommended_reduced_basis": "stellarator" if stellarator else "square" if square else None,
+        "control_count": None if control_count is None else int(control_count),
+        "full_fourier_edge_size": int(full_edge_size),
+        "reduction_fraction": (
+            None
+            if control_count is None or full_edge_size <= 0
+            else float(int(control_count) / float(full_edge_size))
+        ),
+        "control_map_condition_number": preferred.get("condition_number"),
+        "resolution_deck_status": resolution_deck.get("status"),
+        "strict_schedule_status": strict_schedule.get("status"),
+        "blockers": list(dict.fromkeys(blockers)),
+        "vmec2000_role": (
+            "VMEC2000 is the generated-mgrid robustness reference for a chosen Fourier deck. "
+            "It cannot remove the Fourier representation pressure created by a square/linear-axis "
+            "real-space target; native spline controls must change vmec_jax's nonlinear state basis."
+        ),
+        "solver_changes_required": [
+            "store LCFS reduced spline controls as nonlinear unknowns for this lane",
+            "decode reduced controls to full VMEC Fourier edge coefficients before force evaluation",
+            "pull back edge force and trial-update directions with the reduced-control Jacobian transpose",
+            "keep interior R/Z and lambda updates on the existing VMEC radial/Fourier preconditioned path",
+            "reuse the existing direct-coil and generated-mgrid free-boundary pressure cadence",
+            "add an implicit/adjoinable reduced-control solve gate before claiming differentiability",
+        ],
+        "next_action": (
+            "implement_native_spline_control_state"
+            if strict_ready
+            else "repair_preflight_before_native_spline_solver_work"
+        ),
+    }
+
+
 def _resolution_deck_payload(
     *,
     config: ExampleConfig,
@@ -3118,7 +3200,11 @@ def main(argv: list[str] | None = None) -> int:
         requested=str(args.freeb_edge_control_projection),
     )
     mode_deck = _projection_mode_deck(boundary_projection)
-    if bool(args.resolution_diagnostics_only) or bool(args.scale_diagnostics_only):
+    if (
+        bool(args.resolution_diagnostics_only)
+        or bool(args.scale_diagnostics_only)
+        or bool(args.native_spline_control_prototype)
+    ):
         scale_payload = {"status": "skipped_resolution_diagnostics_only"}
         if bool(args.scale_diagnostics_only):
             coils = build_square_coils(config)
@@ -3128,6 +3214,18 @@ def main(argv: list[str] | None = None) -> int:
                 coil_params=coils.params,
                 config=config,
             )
+        native_spline_payload = (
+            _native_spline_control_prototype_payload(
+                config=config,
+                projection=boundary_projection,
+                resolution_deck=resolution_deck,
+                control_basis=control_basis,
+                control_fourier_map=control_fourier_map,
+                strict_schedule=strict_schedule,
+            )
+            if bool(args.native_spline_control_prototype)
+            else {"status": "not_requested"}
+        )
         payload = {
             "schema": "square_coil_free_boundary_backend_profile",
             "configuration": {
@@ -3176,6 +3274,7 @@ def main(argv: list[str] | None = None) -> int:
                 "nvacskip": int(config.nvacskip),
                 "resolution_diagnostics_only": bool(args.resolution_diagnostics_only),
                 "scale_diagnostics_only": bool(args.scale_diagnostics_only),
+                "native_spline_control_prototype": bool(args.native_spline_control_prototype),
                 "accepted_provider_parity": bool(args.accepted_provider_parity),
                 "freeb_anderson_pressure": bool(args.freeb_anderson_pressure),
                 "freeb_jax_nestor_operator": bool(args.freeb_jax_nestor_operator),
@@ -3220,6 +3319,7 @@ def main(argv: list[str] | None = None) -> int:
             "control_fourier_map": control_fourier_map,
             "edge_control_projection": edge_control_projection_summary,
             "spline_bridge": spline_bridge,
+            "native_spline_control_prototype": native_spline_payload,
             "strict_schedule": strict_schedule,
             "strict_convergence_assessment": strict_convergence_assessment,
             "resolution_deck": resolution_deck,

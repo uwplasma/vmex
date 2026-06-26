@@ -657,6 +657,12 @@ The helper only prints commands; it does not launch VMEC2000.
 Pass ``--profile-kind resolution-preflight`` to emit the cheap
 ``--resolution-diagnostics-only`` command when a mode-deck edit should be
 checked before starting another equilibrium solve.
+Pass ``--profile-kind native-spline-control-prototype`` when the summary
+recommends ``native-spline-control-prototype``. That command writes the same
+pre-solve deck report plus ``native_spline_control_prototype`` metadata and
+exits before coils, ``mgrid``, VMEC, or VMEC2000 are run. It is a design/readiness
+gate: it reports the reduced basis, control count, full Fourier edge size, and
+the solver changes required to promote spline controls into the nonlinear state.
 The table also includes ``nzeta_auto``, ``recommended_nzeta``,
 ``side_power``, ``corner_power``, ``boundary_mode_count``, and
 ``boundary_recommended_nzeta`` so ``MPOL``/``NTOR``/``NZETA`` and

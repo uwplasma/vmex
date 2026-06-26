@@ -413,6 +413,31 @@ def test_square_coil_followup_commands_emit_stellarator_edge_jax_nestor_polish(
     assert "edge_stellarator_coordinate" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_native_spline_control_prototype(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "native-spline-control-prototype",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert "--native-spline-control-prototype" in command
+    assert "--resolution-diagnostics-only" in command
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "stellarator"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
+    assert "--run-vmec2000" not in command
+    assert "--jit-forces" not in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "native_spline_control_prototype" in outdir.name
+    assert "edge_stellarator_coordinate" in outdir.name
+
+
 def test_square_coil_followup_commands_default_nzeta_tracks_ntor(tmp_path: Path):
     ntor = 31
     args = followup._parser().parse_args(

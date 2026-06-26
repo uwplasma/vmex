@@ -65,6 +65,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "--freeb-edge-control-update-mode",
             "coordinate",
             "--resolution-diagnostics-only",
+            "--native-spline-control-prototype",
         ]
     )
 
@@ -95,6 +96,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.freeb_edge_control_trust_radius == pytest.approx(0.25)
     assert args.freeb_edge_control_update_mode == "coordinate"
     assert args.resolution_diagnostics_only is True
+    assert args.native_spline_control_prototype is True
 
 
 def test_square_coil_profile_residual_payload_keeps_solver_mode_and_history_tails():
@@ -1250,6 +1252,51 @@ def test_square_coil_profile_resolution_diagnostics_only_reports_incompatible_mg
     assert deck["mgrid_nphi_multiple_of_nzeta"] is False
     assert "mgrid_nphi_not_multiple_of_nzeta" in deck["reasons"]
     assert "projection_gate_disabled" in deck["reasons"]
+
+
+def test_square_coil_profile_native_spline_control_prototype_is_no_solve(tmp_path: Path):
+    outdir = tmp_path / "profile_native_spline_prototype"
+
+    assert (
+        profile.main(
+            [
+                "--outdir",
+                str(outdir),
+                "--mpol",
+                "3",
+                "--ntor",
+                "4",
+                "--ns",
+                "5",
+                "--nzeta",
+                "16",
+                "--mgrid-nphi",
+                "16",
+                "--freeb-edge-control-projection",
+                "stellarator",
+                "--freeb-edge-control-update-mode",
+                "coordinate",
+                "--max-boundary-projection-error",
+                "none",
+                "--native-spline-control-prototype",
+            ]
+        )
+        == 0
+    )
+
+    data = json.loads((outdir / "square_coil_free_boundary_backend_profile.json").read_text())
+    assert data["configuration"]["native_spline_control_prototype"] is True
+    assert data["mgrid"]["created"] is False
+    assert data["backends"] == {}
+    prototype = data["native_spline_control_prototype"]
+    assert prototype["prototype_only"] is True
+    assert prototype["equilibrium_solve_performed"] is False
+    assert prototype["recommended_reduced_basis"] == "stellarator"
+    assert prototype["control_count"] == 5
+    assert prototype["full_fourier_edge_size"] == 4 * data["boundary_projection"]["mode_count"]
+    assert prototype["next_action"] == "repair_preflight_before_native_spline_solver_work"
+    assert "projection_gate_disabled" in prototype["blockers"]
+    assert "change vmec_jax's nonlinear state basis" in prototype["vmec2000_role"]
 
 
 def test_square_coil_profile_projection_gate_fails_before_backend_work(monkeypatch, tmp_path: Path):

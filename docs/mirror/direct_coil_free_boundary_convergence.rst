@@ -446,6 +446,10 @@ two-control square edge basis underfits the preconditioned force direction:
      --profile-kind direct-gpu-edge-stellarator-jax-nestor-polish \
      --delt-values 0.015,0.02,0.025
 
+   python tools/diagnostics/square_coil_followup_commands.py \
+     --profile-kind native-spline-control-prototype \
+     --delt-values 0.02
+
 These commands use ``FTOL_ARRAY=1e-8,1e-10,1e-12`` by default, cached direct
 coil sampling, ``--return-best-scored-state``, pressure Anderson mixing,
 two final-grid hot restarts, and ``--freeb-edge-control-update-mode
@@ -466,6 +470,14 @@ recommend ``direct-gpu-edge-stellarator-polish``; stalled rows that already use
 the five-control stellarator basis and still underfit recommend the
 ``native-spline-control-prototype`` lane; otherwise edge-projected rows
 recommend the matching edge-projected JAX-NESTOR profile next.
+The ``native-spline-control-prototype`` command is intentionally no-solve: it
+adds ``--native-spline-control-prototype`` to the profiler's
+``--resolution-diagnostics-only`` path and writes a
+``native_spline_control_prototype`` JSON block. That block records the preferred
+reduced basis, the number of spline controls, the full Fourier LCFS edge size,
+the reduction fraction, and the source-code work needed to replace the VMEC
+Fourier LCFS unknowns with reduced spline controls. It does not claim an
+equilibrium or convergence result.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and

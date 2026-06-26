@@ -77,6 +77,7 @@ def _parser() -> argparse.ArgumentParser:
             "direct-gpu-edge-stellarator-polish",
             "direct-gpu-edge-jax-nestor-polish",
             "direct-gpu-edge-stellarator-jax-nestor-polish",
+            "native-spline-control-prototype",
         ),
         default="vmec2000",
         help=(
@@ -90,7 +91,8 @@ def _parser() -> argparse.ArgumentParser:
             "basis, enables pressure mixing and hot restarts by default, and keeps the direct-coil "
             "cached-JIT path. direct-gpu-edge-stellarator-polish uses the richer stellarator-symmetric "
             "edge-control basis. The JAX-NESTOR polish variants add the experimental JAX NESTOR "
-            "operator too."
+            "operator too. native-spline-control-prototype emits the no-solve reduced spline-control "
+            "readiness report used after both edge bases underfit the force direction."
         ),
     )
     p.add_argument(
@@ -304,10 +306,16 @@ def _is_polish_kind(kind: str) -> bool:
     }
 
 
+def _is_native_spline_prototype_kind(kind: str) -> bool:
+    return str(kind) == "native-spline-control-prototype"
+
+
 def _edge_control_projection(args: argparse.Namespace) -> str | None:
     requested = args.freeb_edge_control_projection
     if requested is not None:
         return str(requested)
+    if _is_native_spline_prototype_kind(str(args.profile_kind)):
+        return "stellarator"
     if str(args.profile_kind) in {
         "direct-gpu-edge-stellarator-polish",
         "direct-gpu-edge-stellarator-jax-nestor-polish",
@@ -320,7 +328,11 @@ def _edge_control_update_mode(args: argparse.Namespace) -> str:
     requested = args.freeb_edge_control_update_mode
     if requested is not None:
         return str(requested)
-    return "coordinate" if _is_polish_kind(str(args.profile_kind)) else "projected_delta"
+    return (
+        "coordinate"
+        if _is_polish_kind(str(args.profile_kind)) or _is_native_spline_prototype_kind(str(args.profile_kind))
+        else "projected_delta"
+    )
 
 
 def _hot_restart_count(args: argparse.Namespace) -> int:
@@ -400,6 +412,29 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
         "--solver-mode",
         "parity",
     ]
+    if _is_native_spline_prototype_kind(kind):
+        if edge_projection not in {None, "none"}:
+            command.extend(
+                [
+                    "--freeb-edge-control-projection",
+                    str(edge_projection),
+                    "--freeb-edge-control-rcond",
+                    f"{float(args.freeb_edge_control_rcond):.16g}",
+                    "--freeb-edge-control-ridge",
+                    f"{float(args.freeb_edge_control_ridge):.16g}",
+                    "--freeb-edge-control-update-mode",
+                    str(edge_update_mode),
+                ]
+            )
+            if args.freeb_edge_control_trust_radius is not None:
+                command.extend(
+                    [
+                        "--freeb-edge-control-trust-radius",
+                        f"{float(args.freeb_edge_control_trust_radius):.16g}",
+                    ]
+                )
+        command.extend(["--resolution-diagnostics-only", "--native-spline-control-prototype"])
+        return command
     jax_kind = kind in {"provider-parity", "full-backend"} or _is_direct_jax_kind(kind)
     if jax_kind and edge_projection not in {None, "none"}:
         command.extend(
