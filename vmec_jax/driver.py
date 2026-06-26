@@ -676,6 +676,21 @@ def _finalize_fixed_boundary_solver_run(
     )
 
 
+def _maybe_default_fixed_boundary_grid(grid: Any, *, cfg: VMECConfig, solver_lower: str) -> Any:
+    """Build the default VMEC angle grid only for solvers that need one."""
+
+    if grid is not None or solver_lower not in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
+        return grid
+    from .vmec_tomnsp import vmec_angle_grid
+
+    return vmec_angle_grid(
+        ntheta=int(cfg.ntheta),
+        nzeta=int(cfg.nzeta),
+        nfp=int(cfg.nfp),
+        lasym=bool(cfg.lasym),
+    )
+
+
 def run_fixed_boundary(
     input_path: str | Path,
     *,
@@ -786,15 +801,7 @@ def run_fixed_boundary(
     restart_solver_state = startup.restart_solver_state
     solver_lower = startup.solver_lower
     axis_infer_missing = startup.axis_infer_missing
-    if grid is None and solver_lower in ("vmec_lbfgs", "vmec_gn", "vmec2000_iter"):
-        from .vmec_tomnsp import vmec_angle_grid
-
-        grid = vmec_angle_grid(
-            ntheta=int(cfg.ntheta),
-            nzeta=int(cfg.nzeta),
-            nfp=int(cfg.nfp),
-            lasym=bool(cfg.lasym),
-        )
+    grid = _maybe_default_fixed_boundary_grid(grid, cfg=cfg, solver_lower=solver_lower)
     stage_context = _resolve_fixed_boundary_stage_context(
         cfg=cfg,
         indata=indata,
