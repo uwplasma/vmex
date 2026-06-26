@@ -429,6 +429,66 @@ def _freeb_edge_control_state_from_coordinates(
     return _freeb_edge_control_state_from_edge_values(state, projection, edge_values, host_update=False)
 
 
+def _freeb_edge_control_apply_coordinate_update(
+    state: VMECState,
+    projection: dict[str, Any],
+    control_update: Any,
+    *,
+    host_update: bool,
+) -> VMECState:
+    """Apply a reduced edge-control update to the current LCFS edge state."""
+
+    if not bool(projection.get("enabled", False)):
+        return state
+    if bool(host_update):
+        control_map = _freeb_edge_control_reduced_map(projection)
+        current = control_map.encode(_freeb_edge_control_state_edge_values(state, projection)).control_delta
+        update = np.asarray(control_update, dtype=float).reshape(-1)
+        if update.size != control_map.control_count:
+            raise ValueError("control_update size must match the reduced edge-control count")
+        return _freeb_edge_control_state_from_coordinates(
+            state,
+            projection,
+            current + update,
+            host_update=True,
+        )
+
+    dtype = jnp.asarray(state.Rcos).dtype
+    k = int(projection["mode_count"])
+    scale = jnp.asarray(projection["mode_scale_np"], dtype=dtype)
+    initial = jnp.concatenate(
+        [
+            jnp.asarray(projection["initial_np"]["R_cos"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["R_sin"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["Z_cos"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["Z_sin"], dtype=dtype),
+        ],
+        axis=0,
+    )
+    edge_values = jnp.concatenate(
+        [
+            jnp.asarray(state.Rcos)[-1] * scale,
+            jnp.asarray(state.Rsin)[-1] * scale,
+            jnp.asarray(state.Zcos)[-1] * scale,
+            jnp.asarray(state.Zsin)[-1] * scale,
+        ],
+        axis=0,
+    )
+    if int(edge_values.shape[0]) != 4 * k:
+        raise ValueError("state edge row has the wrong size for the edge-control projection")
+    pinv = jnp.asarray(projection["pinv_np"], dtype=dtype)
+    current = pinv @ (edge_values - initial)
+    update = jnp.asarray(control_update, dtype=dtype).reshape((-1,))
+    if int(update.shape[0]) != int(current.shape[0]):
+        raise ValueError("control_update size must match the reduced edge-control count")
+    return _freeb_edge_control_state_from_coordinates(
+        state,
+        projection,
+        current + update,
+        host_update=False,
+    )
+
+
 def _freeb_edge_control_project_vector_np(
     target: Any,
     projection: dict[str, Any],

@@ -368,6 +368,7 @@ def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement(
 
 def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes():
     from vmec_jax.solve import (
+        _freeb_edge_control_apply_coordinate_update,
         _freeb_edge_control_delta_tuple_projection_metrics,
         _freeb_edge_control_reduced_unknown_vector_diagnostics,
         _freeb_edge_control_reduced_map,
@@ -465,6 +466,18 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
         [0.2],
         host_update=False,
     )
+    updated_projected = _freeb_edge_control_apply_coordinate_update(
+        trial,
+        projection,
+        [0.05],
+        host_update=True,
+    )
+    updated_projected_jax = _freeb_edge_control_apply_coordinate_update(
+        trial,
+        projection,
+        [0.05],
+        host_update=False,
+    )
     control_map = _freeb_edge_control_reduced_map(projection)
     scale = np.asarray(projection["mode_scale_np"], dtype=float)
     projected_edge_values = np.concatenate(
@@ -512,6 +525,11 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     np.testing.assert_allclose(np.asarray(decoded_projected.Zsin), np.asarray(projected.Zsin))
     np.testing.assert_allclose(np.asarray(decoded_projected_jax.Rcos), np.asarray(projected.Rcos))
     np.testing.assert_allclose(np.asarray(decoded_projected_jax.Zsin), np.asarray(projected.Zsin))
+    assert np.asarray(updated_projected.Rcos)[-1, 0] == pytest.approx(3.25)
+    assert np.asarray(updated_projected.Rcos)[-1, 1] == pytest.approx(0.0)
+    assert np.asarray(updated_projected.Zsin)[-1, 1] == pytest.approx(0.0)
+    np.testing.assert_allclose(np.asarray(updated_projected_jax.Rcos), np.asarray(updated_projected.Rcos))
+    np.testing.assert_allclose(np.asarray(updated_projected_jax.Zsin), np.asarray(updated_projected.Zsin))
     assert raw_metrics["status"] == "measured"
     assert raw_metrics["residual_linf"] > 0.1
     assert raw_metrics["control_delta_by_label"]["R00"] == pytest.approx(0.2)
