@@ -8197,3 +8197,79 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.7%.
+
+### 2026-06-26: Current PR-readiness status after residual state module split
+
+Context:
+
+- This section is intentionally appended at the true end of the plan so the
+  latest status is visible from ``tail`` even though two earlier 2026-06-26
+  refactor log entries were appended after a newer artifact-refresh entry.
+- The current branch is ``main`` at ``47acd276``:
+  ``refactor: move residual state setup helper``.
+- The active GitHub Actions run for this commit is
+  ``https://github.com/uwplasma/vmec_jax/actions/runs/28216441701``. Completed
+  jobs were green at the time of this entry; remaining shard jobs were still in
+  progress.
+
+Steps taken:
+
+- Moved residual index/state setup out of
+  ``vmec_jax/solvers/fixed_boundary/residual/iteration.py`` into the domain
+  module ``vmec_jax/solvers/fixed_boundary/residual/state_setup.py``.
+- Kept the public solver behavior unchanged: force assembly, time-step policy,
+  free-boundary coupling, scan/replay controls, WOUT writing, and CLI behavior
+  were not modified.
+- Tightened the active source-health gate for
+  ``solve_fixed_boundary_residual_iter`` to 2440 inspected source lines in CI,
+  the local gate, and the local gate tests.
+- Preserved the refreshed README/docs readiness artifacts from the previous
+  tranche:
+  ``readme_runtime_compare``, ``readme_ad_fd_evidence``, QI README cases, best
+  optimization panels, and free-boundary panels.
+
+Results obtained:
+
+- Local focused readiness gates passed for the residual setup split, driver
+  API/policy coverage, fast VMEC parity/physics tests, docs, source health,
+  repo-size audit, and whitespace checks.
+- The tracked repository payload remained small after artifact compression:
+  about 27.12 MiB, below the 50 MiB local gate and with no tracked file above
+  the 2 MiB gate.
+- The AD-vs-FD public evidence artifact remains below the stricter
+  ``1e-9`` relative-error threshold; the largest recorded relative error in the
+  checked-in CSV is about ``4.4e-10``.
+- The current README QI minimal-seed artifact provenance passes the promoted
+  README gates for NFP 1, 2, 3, and 4 using the current gate columns. Older raw
+  audit columns are retained in the CSV for traceability and should not be
+  interpreted as the current promotion decision.
+
+Best next steps:
+
+1. Let the current GitHub Actions run finish and fix only concrete failures.
+2. Run the final local readiness gate set once more after this plan-tail update:
+   ruff/source-health, repo-size audit, docs, focused parity/physics tests, and
+   the public artifact provenance checks.
+3. If CI and local gates are green, keep PR #20 review-ready from a technical
+   standpoint; PR #21 remains a separate draft branch and should not be merged
+   as part of this readiness pass.
+4. Defer large-risk refactors, especially splitting multi-thousand-line
+   free-boundary validation tests, unless review explicitly asks for them. They
+   remain valuable but are not necessary for the current readiness gate.
+
+User needs:
+
+- No input is needed unless a CI failure exposes a policy decision rather than a
+  code defect.
+
+Current lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.5%.
+- Free-boundary production differentiability: 97.7%.
+- Single-stage coil optimization: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 84.0%.
+- VMEC2000/VMEC++ parity and physics gates: 99.4%.
+- Docs/release hygiene: 100%.
+- Overall: 99.8%.
