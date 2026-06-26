@@ -211,8 +211,8 @@ The active strict reference has now moved to the projection-gated
 which gives the same low-bandwidth rounded-square projection for the default
 uniform controls. The current VMEC2000 row is still
 running, not converged: a live sidecar snapshot at final-stage iteration
-``10307`` reports summed residual about ``2.31e-11``, max component about
-``1.11e-11``, strict gap about ``11.1``, and no vacuum-grid overflow. The tail
+``12991`` reports summed residual about ``2.23e-11``, max component about
+``1.07e-11``, strict gap about ``10.7``, and no vacuum-grid overflow. The tail
 is still decreasing slowly but is close enough to a floor that simply launching
 another identical VMEC2000 row is not useful. VMEC2000 is therefore the
 robustness and speed reference for generated-``mgrid`` studies, but it has not
@@ -424,8 +424,9 @@ the first vacuum turn-on rows; the JIT row reached about ``6.4 GB`` RSS, and
 the non-JIT row was lower-memory but still did not advance.  This makes native
 or reduced-control operator work more useful than spending more strict-deck
 time on the current experimental JAX-NESTOR path.
-The follow-up command helper now exposes two finite strict-polish lanes for the
-direct research path:
+The follow-up command helper now exposes finite strict-polish lanes for the
+direct research path, including five-control stellarator-basis rows when the
+two-control square edge basis underfits the preconditioned force direction:
 
 .. code-block:: console
 
@@ -437,23 +438,34 @@ direct research path:
      --profile-kind direct-gpu-edge-jax-nestor-polish \
      --delt-values 0.015,0.02,0.025
 
-Both commands use ``FTOL_ARRAY=1e-8,1e-10,1e-12`` by default, cached direct
+   python tools/diagnostics/square_coil_followup_commands.py \
+     --profile-kind direct-gpu-edge-stellarator-polish \
+     --delt-values 0.015,0.02,0.025
+
+   python tools/diagnostics/square_coil_followup_commands.py \
+     --profile-kind direct-gpu-edge-stellarator-jax-nestor-polish \
+     --delt-values 0.015,0.02,0.025
+
+These commands use ``FTOL_ARRAY=1e-8,1e-10,1e-12`` by default, cached direct
 coil sampling, ``--return-best-scored-state``, pressure Anderson mixing,
-two final-grid hot restarts, ``--freeb-edge-control-projection square``, and
-``--freeb-edge-control-update-mode coordinate``; their output directories carry
-an ``edge_square_coordinate`` label so they are not mixed with older
-projected-delta bridge rows.
-The second command additionally enables the experimental JAX NESTOR operator.
-Use ``--freeb-edge-control-projection stellarator`` when testing the
-stellarator-corner control subspace.
+two final-grid hot restarts, and ``--freeb-edge-control-update-mode
+coordinate``. Square-basis rows use ``--freeb-edge-control-projection square``
+and output directories labelled ``edge_square_coordinate``; stellarator-basis
+rows use ``--freeb-edge-control-projection stellarator`` and output
+directories labelled ``edge_stellarator_coordinate``. The JAX-NESTOR polish
+variants additionally enable the experimental JAX NESTOR operator.
 The summary table now reports the edge-control projection status, requested
 basis, control count, pseudo-inverse cutoff, update mode, coordinate-update
 count, accepted-state reduced-coordinate norms, reduced unknown-vector size,
-and reconstruction residuals. Stalled direct
+reconstruction residuals, force-direction capture status, and the next
+recommended reduced basis. Stalled direct
 rows that did not use the reduced edge projection recommend
 ``direct-gpu-edge-polish`` before additional kernel experiments; stalled rows
-that already used edge projection recommend the edge-projected JAX-NESTOR
-profile next.
+whose two-control square basis underfits the preconditioned force direction
+recommend ``direct-gpu-edge-stellarator-polish``; stalled rows that already use
+the five-control stellarator basis and still underfit recommend the
+``native-spline-control-prototype`` lane; otherwise edge-projected rows
+recommend the matching edge-projected JAX-NESTOR profile next.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and

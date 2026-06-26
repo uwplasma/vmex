@@ -792,6 +792,39 @@ def _backend_role(backend_name: str) -> str:
     return "diagnostic_backend"
 
 
+def _edge_force_capture_status(force_direction: dict[str, Any]) -> str:
+    """Classify how well the reduced edge basis captures the force direction."""
+
+    status = str(force_direction.get("status", "") or "")
+    if status and status != "measured":
+        return status
+    captured = _finite_float(force_direction.get("captured_fraction"))
+    rel = _finite_float(force_direction.get("residual_rel"))
+    if captured is None and rel is None:
+        return "not_measured"
+    if (captured is not None and captured < 0.9) or (rel is not None and rel > 0.5):
+        return "basis_underfit"
+    if (captured is not None and captured >= 0.95) and (rel is None or rel <= 0.35):
+        return "captured"
+    return "marginal"
+
+
+def _edge_force_capture_next_basis(
+    *,
+    edge_enabled: bool,
+    basis: Any,
+    capture_status: str,
+) -> str | None:
+    """Return the next reduced edge basis to try after a stalled profile."""
+
+    if not bool(edge_enabled) or str(capture_status) != "basis_underfit":
+        return None
+    basis_key = str(basis or "").strip().lower()
+    if basis_key in {"", "square"}:
+        return "stellarator"
+    return "native_spline_controls"
+
+
 def _as_text_list(values: Any) -> list[str]:
     if values is None:
         return []
@@ -891,6 +924,8 @@ def _recommended_followup_payload(
     accepted_provider_parity_status: Any,
     freeb_jax_nestor_operator: Any,
     freeb_edge_control_projection: dict[str, Any],
+    freeb_edge_force_capture_status: str,
+    freeb_edge_force_capture_next_basis: str | None,
     vacuum_grid_exceeded_count: Any,
 ) -> dict[str, str]:
     """Return the next profile kind that best matches the summary evidence."""
@@ -907,6 +942,13 @@ def _recommended_followup_payload(
     except Exception:
         grid_exceeded = 0
     edge_enabled = bool(freeb_edge_control_projection.get("enabled"))
+    edge_basis = str(freeb_edge_control_projection.get("basis_symmetry") or "").strip().lower()
+    edge_capture = str(freeb_edge_force_capture_status or "")
+    edge_next_basis = (
+        None
+        if freeb_edge_force_capture_next_basis is None
+        else str(freeb_edge_force_capture_next_basis)
+    )
 
     if evidence == "strict_production_evidence":
         return {
@@ -938,6 +980,18 @@ def _recommended_followup_payload(
         if "direct" in backend:
             if not edge_enabled:
                 kind = "direct-gpu-edge-polish"
+            elif edge_capture == "basis_underfit" and edge_next_basis == "stellarator":
+                return {
+                    "recommended_followup_profile_kind": "direct-gpu-edge-stellarator-polish",
+                    "recommended_followup_reason": "square_edge_basis_underfits_force_direction",
+                }
+            elif edge_capture == "basis_underfit" and edge_next_basis == "native_spline_controls":
+                return {
+                    "recommended_followup_profile_kind": "native-spline-control-prototype",
+                    "recommended_followup_reason": (
+                        f"{edge_basis or 'reduced'}_edge_basis_underfits_force_direction"
+                    ),
+                }
             elif bool(freeb_jax_nestor_operator):
                 return {
                     "recommended_followup_profile_kind": "native-spline-control-prototype",
@@ -945,6 +999,8 @@ def _recommended_followup_payload(
                         "edge_control_and_jax_nestor_still_stalled_promote_native_spline_controls"
                     ),
                 }
+            elif edge_basis == "stellarator":
+                kind = "direct-gpu-edge-stellarator-jax-nestor-polish"
             else:
                 kind = "direct-gpu-edge-jax-nestor-polish"
         elif backend == "vmec2000_mgrid":
@@ -1508,6 +1564,12 @@ def _summary_row(
     accepted_parity_vac = accepted_parity_vac if isinstance(accepted_parity_vac, dict) else {}
     accepted_parity_bnormal = accepted_parity_vac.get("bnormal")
     accepted_parity_bnormal = accepted_parity_bnormal if isinstance(accepted_parity_bnormal, dict) else {}
+    edge_force_capture_status = _edge_force_capture_status(freeb_edge_control_force_direction)
+    edge_force_capture_next_basis = _edge_force_capture_next_basis(
+        edge_enabled=bool(freeb_edge_control_projection.get("enabled")),
+        basis=freeb_edge_control_projection.get("basis_symmetry"),
+        capture_status=edge_force_capture_status,
+    )
     status_value = status if status is not None else backend.get("status")
     next_action = _recommended_next_action(
         status=status_value,
@@ -1545,6 +1607,8 @@ def _summary_row(
         accepted_provider_parity_status=accepted_parity.get("status"),
         freeb_jax_nestor_operator=freeb_jax_nestor_operator,
         freeb_edge_control_projection=freeb_edge_control_projection,
+        freeb_edge_force_capture_status=edge_force_capture_status,
+        freeb_edge_force_capture_next_basis=edge_force_capture_next_basis,
         vacuum_grid_exceeded_count=vacuum_grid_exceeded_count,
     )
     convergence_assessment = (
@@ -1728,6 +1792,8 @@ def _summary_row(
         "freeb_edge_control_projection_force_direction_trust_scale": _finite_float(
             freeb_edge_control_force_direction.get("trust_scale")
         ),
+        "freeb_edge_control_projection_force_capture_status": edge_force_capture_status,
+        "freeb_edge_control_projection_force_capture_next_basis": edge_force_capture_next_basis,
         "freeb_edge_control_projection_reduced_update_status": freeb_edge_control_reduced_update_direction.get(
             "status"
         ),
@@ -2281,6 +2347,8 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_force_direction_rel",
         "freeb_edge_control_projection_force_direction_captured_fraction",
         "freeb_edge_control_projection_force_direction_trust_scale",
+        "freeb_edge_control_projection_force_capture_status",
+        "freeb_edge_control_projection_force_capture_next_basis",
         "freeb_edge_control_projection_reduced_update_status",
         "freeb_edge_control_projection_reduced_update_size",
         "freeb_edge_control_projection_full_update_size",

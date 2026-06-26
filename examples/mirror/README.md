@@ -402,6 +402,13 @@ solve can be checked before replacing Fourier boundary updates with reduced
 spline-control updates. The nested candidate-basis comparison also reports the
 five-control stellarator-symmetric capture, which is the next basis to try if
 the two-control square capture is poor.
+Strict free-boundary profile summaries also print
+``freeb_edge_control_projection_force_capture_status`` and
+``freeb_edge_control_projection_force_capture_next_basis``. If the square
+basis underfits the preconditioned force direction, rerun the polish profile
+with ``--profile-kind direct-gpu-edge-stellarator-polish``; if the
+stellarator basis still underfits, the next finite implementation lane is the
+solver-native spline-control prototype.
 The latest control-spline square-axis preflight matrix is:
 
 | deck | status | reason |

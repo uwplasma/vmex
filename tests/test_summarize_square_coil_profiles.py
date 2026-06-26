@@ -779,6 +779,8 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
         0.9797958971132712
     )
     assert row["freeb_edge_control_projection_force_direction_trust_scale"] == pytest.approx(0.5)
+    assert row["freeb_edge_control_projection_force_capture_status"] == "captured"
+    assert row["freeb_edge_control_projection_force_capture_next_basis"] is None
     assert row["freeb_edge_control_projection_reduced_update_status"] == "measured"
     assert row["freeb_edge_control_projection_reduced_update_size"] == 2
     assert row["freeb_edge_control_projection_full_update_size"] == 128
@@ -802,6 +804,120 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     )
     assert row["update_delta_rms"] == pytest.approx(2.0e-5)
     assert row["update_delta_to_velocity_rms_ratio"] == pytest.approx(0.4)
+
+
+def test_square_coil_profile_summary_recommends_stellarator_basis_for_underfit_edge_direct(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_stalled_edge_underfit"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 1000,
+                        "final_fsqr": 2.0e-9,
+                        "final_fsqz": 3.0e-9,
+                        "final_fsql": 4.0e-10,
+                        "tail_plateau": {"status": "oscillatory"},
+                        "accepted_provider_parity": {"status": "completed"},
+                        "final_residual_recomputed_on_accepted_state": True,
+                        "free_boundary_edge_control_projection": {
+                            "force_direction": {
+                                "status": "measured",
+                                "residual_linf": 8.0e-10,
+                                "residual_rms": 3.0e-10,
+                                "residual_rel": 0.72,
+                                "captured_fraction": 0.69,
+                            },
+                        },
+                        "free_boundary_solver_overrides": {
+                            "freeb_edge_control_projection": {
+                                "requested": "square",
+                                "enabled": True,
+                                "status": "enabled",
+                                "basis_symmetry": "square",
+                                "control_count": 2,
+                                "update_mode": "coordinate",
+                            },
+                        },
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["recommended_followup_profile_kind"] == "direct-gpu-edge-stellarator-polish"
+    assert row["recommended_followup_reason"] == "square_edge_basis_underfits_force_direction"
+    assert row["freeb_edge_control_projection_force_capture_status"] == "basis_underfit"
+    assert row["freeb_edge_control_projection_force_capture_next_basis"] == "stellarator"
+
+
+def test_square_coil_profile_summary_recommends_native_spline_after_stellarator_underfit(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_stalled_stellarator_underfit"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 1000,
+                        "final_fsqr": 2.0e-9,
+                        "final_fsqz": 3.0e-9,
+                        "final_fsql": 4.0e-10,
+                        "tail_plateau": {"status": "oscillatory"},
+                        "accepted_provider_parity": {"status": "completed"},
+                        "final_residual_recomputed_on_accepted_state": True,
+                        "free_boundary_edge_control_projection": {
+                            "force_direction": {
+                                "status": "measured",
+                                "residual_rel": 0.61,
+                                "captured_fraction": 0.81,
+                            },
+                        },
+                        "free_boundary_solver_overrides": {
+                            "freeb_edge_control_projection": {
+                                "requested": "stellarator",
+                                "enabled": True,
+                                "status": "enabled",
+                                "basis_symmetry": "stellarator",
+                                "control_count": 5,
+                                "update_mode": "coordinate",
+                            },
+                        },
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["recommended_followup_profile_kind"] == "native-spline-control-prototype"
+    assert row["recommended_followup_reason"] == "stellarator_edge_basis_underfits_force_direction"
+    assert row["freeb_edge_control_projection_force_capture_status"] == "basis_underfit"
+    assert row["freeb_edge_control_projection_force_capture_next_basis"] == "native_spline_controls"
 
 
 def test_square_coil_profile_summary_infers_resolution_deck_for_live_launcher_log(

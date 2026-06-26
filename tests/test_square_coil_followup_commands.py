@@ -309,6 +309,31 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
     assert "trust1em07" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_stellarator_edge_polish(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "direct-gpu-edge-stellarator-polish",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "stellarator"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
+    assert "--freeb-jax-nestor-operator" not in command
+    assert "--freeb-anderson-pressure" in command
+    assert "--skip-mgrid" in command
+    assert "--run-vmec2000" not in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "direct_gpu_edge_stellarator_polish" in outdir.name
+    assert "edge_stellarator_coordinate" in outdir.name
+
+
 def test_square_coil_followup_commands_reject_underrecommended_ntheta(tmp_path: Path):
     recommended = recommended_square_axis_ntheta(5)
     args = followup._parser().parse_args(
@@ -359,6 +384,32 @@ def test_square_coil_followup_commands_emit_direct_gpu_edge_jax_nestor_polish(tm
     assert "--jax-hot-restart-always" in command
     outdir = Path(command[command.index("--outdir") + 1])
     assert "direct_gpu_edge_jax_nestor_polish" in outdir.name
+    assert "edge_stellarator_coordinate" in outdir.name
+
+
+def test_square_coil_followup_commands_emit_stellarator_edge_jax_nestor_polish(
+    tmp_path: Path,
+):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.015",
+            "--profile-kind",
+            "direct-gpu-edge-stellarator-jax-nestor-polish",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "stellarator"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
+    assert "--freeb-jax-nestor-operator" in command
+    assert "--freeb-anderson-pressure" in command
+    assert "--skip-mgrid" in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "direct_gpu_edge_stellarator_jax_nestor_polish" in outdir.name
     assert "edge_stellarator_coordinate" in outdir.name
 
 

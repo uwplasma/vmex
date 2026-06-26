@@ -74,7 +74,9 @@ def _parser() -> argparse.ArgumentParser:
             "direct-gpu",
             "direct-gpu-jax-nestor",
             "direct-gpu-edge-polish",
+            "direct-gpu-edge-stellarator-polish",
             "direct-gpu-edge-jax-nestor-polish",
+            "direct-gpu-edge-stellarator-jax-nestor-polish",
         ),
         default="vmec2000",
         help=(
@@ -86,7 +88,9 @@ def _parser() -> argparse.ArgumentParser:
             "direct-gpu-jax-nestor adds the experimental JAX NESTOR operator to that probe. "
             "direct-gpu-edge-polish constrains LCFS edge motion to the square-axis spline-control "
             "basis, enables pressure mixing and hot restarts by default, and keeps the direct-coil "
-            "cached-JIT path. direct-gpu-edge-jax-nestor-polish adds the JAX NESTOR operator too."
+            "cached-JIT path. direct-gpu-edge-stellarator-polish uses the richer stellarator-symmetric "
+            "edge-control basis. The JAX-NESTOR polish variants add the experimental JAX NESTOR "
+            "operator too."
         ),
     )
     p.add_argument(
@@ -285,18 +289,30 @@ def _is_direct_jax_kind(kind: str) -> bool:
         "direct-gpu",
         "direct-gpu-jax-nestor",
         "direct-gpu-edge-polish",
+        "direct-gpu-edge-stellarator-polish",
         "direct-gpu-edge-jax-nestor-polish",
+        "direct-gpu-edge-stellarator-jax-nestor-polish",
     }
 
 
 def _is_polish_kind(kind: str) -> bool:
-    return kind in {"direct-gpu-edge-polish", "direct-gpu-edge-jax-nestor-polish"}
+    return kind in {
+        "direct-gpu-edge-polish",
+        "direct-gpu-edge-stellarator-polish",
+        "direct-gpu-edge-jax-nestor-polish",
+        "direct-gpu-edge-stellarator-jax-nestor-polish",
+    }
 
 
 def _edge_control_projection(args: argparse.Namespace) -> str | None:
     requested = args.freeb_edge_control_projection
     if requested is not None:
         return str(requested)
+    if str(args.profile_kind) in {
+        "direct-gpu-edge-stellarator-polish",
+        "direct-gpu-edge-stellarator-jax-nestor-polish",
+    }:
+        return "stellarator"
     return "square" if _is_polish_kind(str(args.profile_kind)) else None
 
 
@@ -425,6 +441,7 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
     use_jax_nestor = bool(args.freeb_jax_nestor_operator) or kind in {
         "direct-gpu-jax-nestor",
         "direct-gpu-edge-jax-nestor-polish",
+        "direct-gpu-edge-stellarator-jax-nestor-polish",
     }
     if jax_kind and use_jax_nestor:
         command.append("--freeb-jax-nestor-operator")
