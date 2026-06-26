@@ -392,6 +392,163 @@ def _scan_chunk_settings(
     )
 
 
+def _resolve_startup_policy_for_residual_iter(
+    *,
+    max_iter: int,
+    step_size: float,
+    precompile_only: bool,
+    signgs: int,
+    lambda_update_scale: float,
+    enforce_vmec_lambda_axis: bool,
+    vmec2000_control: bool,
+    reference_mode: bool,
+    limit_dt_from_force: bool,
+    limit_update_rms: bool,
+    backtracking: bool,
+    strict_update: bool,
+    jit_precompile: bool,
+    use_scan: bool,
+    host_update_assembly: bool | None,
+    state_has_tracer: bool,
+    preconditioner_use_precomputed_tridi: bool | None,
+    preconditioner_use_lax_tridi: bool | None,
+    adjoint_trace: bool,
+    adjoint_trace_mode: str,
+    fsq_total_target: float | None,
+    light_history: bool | None,
+    resume_state_mode: str | None,
+    use_restart_triggers: bool | None,
+    use_direct_fallback: bool | None,
+    vmecpp_restart: bool,
+    verbose_vmec2000_table: bool,
+    stage_prev_fsq: float | None,
+    stage_transition_factor: float,
+    stage_transition_scale: float,
+    auto_flip_force: bool,
+    jit_forces: bool,
+) -> _residual_iter_policy.ResidualIterStartupPolicy:
+    """Resolve host startup policy before entering the numerical loop."""
+
+    return _resolve_residual_iter_startup_policy(
+        max_iter=max_iter,
+        step_size=step_size,
+        precompile_only=precompile_only,
+        signgs=signgs,
+        lambda_update_scale=lambda_update_scale,
+        enforce_vmec_lambda_axis=enforce_vmec_lambda_axis,
+        vmec2000_control=vmec2000_control,
+        reference_mode=reference_mode,
+        limit_dt_from_force=limit_dt_from_force,
+        limit_update_rms=limit_update_rms,
+        backtracking=backtracking,
+        strict_update=strict_update,
+        jit_precompile=jit_precompile,
+        use_scan=use_scan,
+        host_update_assembly=host_update_assembly,
+        backend_name=jax.default_backend(),
+        scan_backend_name=_scan_backend_name(),
+        state_has_tracer=state_has_tracer,
+        env=os.environ,
+        validate_options=validate_residual_iteration_options,
+        resolve_tridi_policies=_resolve_preconditioner_tridi_policies,
+        normalize_adjoint_trace_mode=_normalize_adjoint_trace_mode,
+        normalize_resume_state_mode=_normalize_resume_state_mode,
+        resolve_scan_fallback_policy=_scan_fallback_policy,
+        preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi,
+        preconditioner_use_lax_tridi=preconditioner_use_lax_tridi,
+        adjoint_trace=adjoint_trace,
+        adjoint_trace_mode=adjoint_trace_mode,
+        fsq_total_target=fsq_total_target,
+        light_history=light_history,
+        resume_state_mode=resume_state_mode,
+        use_restart_triggers=use_restart_triggers,
+        use_direct_fallback=use_direct_fallback,
+        vmecpp_restart=vmecpp_restart,
+        verbose_vmec2000_table=verbose_vmec2000_table,
+        stage_prev_fsq=stage_prev_fsq,
+        stage_transition_factor=stage_transition_factor,
+        stage_transition_scale=stage_transition_scale,
+        auto_flip_force=auto_flip_force,
+        jit_forces=jit_forces,
+        heavy_dump_envs=_HEAVY_DUMP_ENVS,
+        light_dump_envs=_LIGHT_DUMP_ENVS,
+    )
+
+
+def _prepare_residual_cache_keys_for_state(
+    *,
+    state0: VMECState,
+    state0_has_tracer: bool,
+    static: Any,
+    wout_like: Any,
+    indata: Any,
+    include_constraint_force: bool,
+) -> tuple[Any, Any, Any, Any, float | None, bool, Any, Any, Any, Any]:
+    """Build static/profile/edge cache keys for residual force kernels."""
+
+    if state0_has_tracer:
+        edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
+        edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
+        edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
+        edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
+    else:
+        edge_Rcos = np.asarray(state0.Rcos)[-1, :]
+        edge_Rsin = np.asarray(state0.Rsin)[-1, :]
+        edge_Zcos = np.asarray(state0.Zcos)[-1, :]
+        edge_Zsin = np.asarray(state0.Zsin)[-1, :]
+
+    constraint_tcon0: float | None = None
+    if bool(include_constraint_force):
+        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
+    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
+
+    cache_keys = _build_residual_cache_keys(
+        static=static,
+        wout_like=wout_like,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        constraint_tcon0=constraint_tcon0,
+        hash_array_bytes_func=_hash_array_bytes,
+        edge_signature_key_func=_edge_signature_key,
+        edge_value_key_func=_edge_value_key,
+    )
+    return (
+        edge_Rcos,
+        edge_Rsin,
+        edge_Zcos,
+        edge_Zsin,
+        constraint_tcon0,
+        apply_lforbal,
+        cache_keys.static_key,
+        cache_keys.wout_key,
+        cache_keys.edge_signature_key,
+        cache_keys.edge_value_key,
+    )
+
+
+def _use_numpy_force_fast_path_policy(
+    *,
+    host_update_assembly: bool,
+    max_iter: int,
+    fast_path_env: str,
+    max_iter_env: str,
+) -> bool:
+    """Resolve the optional NumPy force fast path for short CPU stages."""
+
+    try:
+        numpy_force_max_iter = max(0, int(max_iter_env))
+    except Exception:
+        numpy_force_max_iter = 600
+    if fast_path_env in ("1", "true", "yes", "on"):
+        return bool(host_update_assembly)
+    if fast_path_env in ("0", "false", "no", "off"):
+        return False
+    short_stage_for_numpy_force = int(max_iter) <= int(numpy_force_max_iter)
+    return bool(host_update_assembly) and bool(short_stage_for_numpy_force)
+
+
 _default_scan_core = _solve_runtime._default_scan_core
 
 
@@ -463,7 +620,7 @@ def solve_fixed_boundary_residual_iter(
     _setup_timer_start = partial(_runtime_setup_timer_start, timing_enabled=bool(timing_enabled), perf_counter=time.perf_counter)
     _record_setup_timing = partial(_runtime_record_setup_timing, _setup_phase_timings, perf_counter=time.perf_counter)
 
-    startup_policy = _resolve_residual_iter_startup_policy(
+    startup_policy = _resolve_startup_policy_for_residual_iter(
         max_iter=max_iter,
         step_size=step_size,
         precompile_only=precompile_only,
@@ -479,15 +636,7 @@ def solve_fixed_boundary_residual_iter(
         jit_precompile=jit_precompile,
         use_scan=use_scan,
         host_update_assembly=host_update_assembly,
-        backend_name=jax.default_backend(),
-        scan_backend_name=_scan_backend_name(),
         state_has_tracer=state0_has_tracer,
-        env=os.environ,
-        validate_options=validate_residual_iteration_options,
-        resolve_tridi_policies=_resolve_preconditioner_tridi_policies,
-        normalize_adjoint_trace_mode=_normalize_adjoint_trace_mode,
-        normalize_resume_state_mode=_normalize_resume_state_mode,
-        resolve_scan_fallback_policy=_scan_fallback_policy,
         preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi,
         preconditioner_use_lax_tridi=preconditioner_use_lax_tridi,
         adjoint_trace=adjoint_trace,
@@ -504,8 +653,6 @@ def solve_fixed_boundary_residual_iter(
         stage_transition_scale=stage_transition_scale,
         auto_flip_force=auto_flip_force,
         jit_forces=jit_forces,
-        heavy_dump_envs=_HEAVY_DUMP_ENVS,
-        light_dump_envs=_LIGHT_DUMP_ENVS,
     )
     max_iter = startup_policy.max_iter
     step_size = startup_policy.step_size
@@ -723,39 +870,26 @@ def solve_fixed_boundary_residual_iter(
     # residual/preconditioner updates operate in the same internal coefficient
     # space as `VMECState`.
 
-    if state0_has_tracer:
-        edge_Rcos = jnp.asarray(state0.Rcos)[-1, :]
-        edge_Rsin = jnp.asarray(state0.Rsin)[-1, :]
-        edge_Zcos = jnp.asarray(state0.Zcos)[-1, :]
-        edge_Zsin = jnp.asarray(state0.Zsin)[-1, :]
-    else:
-        edge_Rcos = np.asarray(state0.Rcos)[-1, :]
-        edge_Rsin = np.asarray(state0.Rsin)[-1, :]
-        edge_Zcos = np.asarray(state0.Zcos)[-1, :]
-        edge_Zsin = np.asarray(state0.Zsin)[-1, :]
-
-    constraint_tcon0: float | None = None
-    if bool(include_constraint_force):
-        constraint_tcon0 = float(indata.get_float("TCON0", 1.0))
-    apply_lforbal = bool(indata.get_bool("LFORBAL", False)) if indata is not None else False
-
     _t_setup_cache_key_hash = _setup_timer_start()
-    cache_keys = _build_residual_cache_keys(
+    (
+        edge_Rcos,
+        edge_Rsin,
+        edge_Zcos,
+        edge_Zsin,
+        constraint_tcon0,
+        apply_lforbal,
+        static_key,
+        wout_key,
+        edge_signature_key,
+        edge_value_key,
+    ) = _prepare_residual_cache_keys_for_state(
+        state0=state0,
+        state0_has_tracer=bool(state0_has_tracer),
         static=static,
         wout_like=wout_like,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        constraint_tcon0=constraint_tcon0,
-        hash_array_bytes_func=_hash_array_bytes,
-        edge_signature_key_func=_edge_signature_key,
-        edge_value_key_func=_edge_value_key,
+        indata=indata,
+        include_constraint_force=bool(include_constraint_force),
     )
-    static_key = cache_keys.static_key
-    wout_key = cache_keys.wout_key
-    edge_signature_key = cache_keys.edge_signature_key
-    edge_value_key = cache_keys.edge_value_key
     _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
     _t_setup_ptau_constants = _setup_timer_start()
@@ -856,18 +990,12 @@ def solve_fixed_boundary_residual_iter(
 
     _compute_forces_impl = _compute_forces
 
-    numpy_force_env = os.getenv("VMEC_JAX_NUMPY_FORCE_FAST_PATH", "auto").strip().lower()
-    try:
-        numpy_force_max_iter = max(0, int(os.getenv("VMEC_JAX_NUMPY_FORCE_MAX_ITER", "600")))
-    except Exception:
-        numpy_force_max_iter = 600
-    if numpy_force_env in ("1", "true", "yes", "on"):
-        use_numpy_force_fast_path = bool(host_update_assembly)
-    elif numpy_force_env in ("0", "false", "no", "off"):
-        use_numpy_force_fast_path = False
-    else:
-        short_stage_for_numpy_force = int(max_iter) <= int(numpy_force_max_iter)
-        use_numpy_force_fast_path = bool(host_update_assembly) and bool(short_stage_for_numpy_force)
+    use_numpy_force_fast_path = _use_numpy_force_fast_path_policy(
+        host_update_assembly=bool(host_update_assembly),
+        max_iter=int(max_iter),
+        fast_path_env=os.getenv("VMEC_JAX_NUMPY_FORCE_FAST_PATH", "auto").strip().lower(),
+        max_iter_env=os.getenv("VMEC_JAX_NUMPY_FORCE_MAX_ITER", "600"),
+    )
 
     # NumPy hot-path: wrap _compute_forces_impl with pure-NumPy module patching.
     # Used for short host-update CPU stages to eliminate JAX dispatch overhead.
