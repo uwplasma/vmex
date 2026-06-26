@@ -180,6 +180,88 @@ class ReducedControlMap:
         }
 
 
+@dataclass(frozen=True)
+class ReducedControlState:
+    """A boundary state represented by reduced control coordinates.
+
+    The state stores only the reduced coordinates and the affine map needed to
+    decode them.  This is the native-coordinate counterpart of a full Fourier
+    edge row: solvers can advance ``control_delta`` directly and decode to full
+    coefficients only when VMEC kernels need the physical boundary.
+    """
+
+    control_map: ReducedControlMap
+    control_delta: np.ndarray
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.control_map, ReducedControlMap):
+            raise TypeError("control_map must be a ReducedControlMap")
+        controls = np.asarray(self.control_delta, dtype=float).reshape(-1)
+        if controls.size != self.control_map.control_count:
+            raise ValueError("control_delta size must match the reduced-control map")
+        if not np.all(np.isfinite(controls)):
+            raise ValueError("control_delta must be finite")
+        object.__setattr__(self, "control_delta", np.asarray(controls, dtype=float))
+
+    @classmethod
+    def from_full_values(
+        cls,
+        control_map: ReducedControlMap,
+        full_values: Any,
+        *,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ) -> "ReducedControlState":
+        """Fit full boundary values and return the matching reduced state."""
+
+        step = control_map.encode(full_values, ridge=ridge, trust_radius=trust_radius)
+        return cls(control_map=control_map, control_delta=step.control_delta)
+
+    @property
+    def control_delta_by_label(self) -> dict[str, float]:
+        """Return the reduced coordinates keyed by label."""
+
+        return {str(label): float(value) for label, value in zip(self.control_map.labels, self.control_delta, strict=False)}
+
+    def decode(self) -> np.ndarray:
+        """Decode this reduced state to full boundary coefficients."""
+
+        return self.control_map.decode(self.control_delta)
+
+    def decode_jax(self):
+        """Decode this reduced state with JAX-compatible array operations."""
+
+        return self.control_map.decode_jax(self.control_delta)
+
+    def update(self, control_update: Any) -> "ReducedControlState":
+        """Return a new reduced state after adding ``control_update``."""
+
+        update = np.asarray(control_update, dtype=float).reshape(-1)
+        if update.size != self.control_map.control_count:
+            raise ValueError("control_update size must match the reduced-control map")
+        if not np.all(np.isfinite(update)):
+            raise ValueError("control_update must be finite")
+        return ReducedControlState(
+            control_map=self.control_map,
+            control_delta=self.control_delta + update,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return compact JSON-friendly reduced-state diagnostics."""
+
+        control_l2 = float(np.linalg.norm(self.control_delta))
+        control_linf = float(np.max(np.abs(self.control_delta))) if self.control_delta.size else 0.0
+        return {
+            "full_size": self.control_map.full_size,
+            "reduced_unknown_size": self.control_map.control_count,
+            "labels": list(self.control_map.labels),
+            "unknown_vector": [float(value) for value in self.control_delta],
+            "unknown_by_label": self.control_delta_by_label,
+            "unknown_l2": control_l2,
+            "unknown_linf": control_linf,
+        }
+
+
 def _rank_and_condition(jacobian: np.ndarray, *, rcond: float | None) -> tuple[int, np.ndarray, float | None]:
     singular_values = np.linalg.svd(jacobian, compute_uv=False)
     finite = singular_values[np.isfinite(singular_values)]

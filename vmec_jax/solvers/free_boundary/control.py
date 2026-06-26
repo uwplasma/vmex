@@ -12,6 +12,7 @@ from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.state import VMECState
 from vmec_jax.solvers.free_boundary.reduced_controls import (
     ReducedControlMap,
+    ReducedControlState,
     reduced_control_decode,
     reduced_control_least_squares_step,
 )
@@ -28,6 +29,7 @@ class FreeBoundaryNativeControlStep(NamedTuple):
     state: VMECState
     update_deltas: Any
     control_velocity: np.ndarray
+    control_coordinates: np.ndarray
     control_update: np.ndarray
     control_force: np.ndarray
     target_l2: float
@@ -579,6 +581,19 @@ def _freeb_edge_control_apply_coordinate_update(
     )
 
 
+def _freeb_edge_control_reduced_state_from_state(
+    state: VMECState,
+    projection: dict[str, Any],
+) -> ReducedControlState:
+    """Encode the current LCFS edge as a reduced-control state."""
+
+    control_map = _freeb_edge_control_reduced_map(projection)
+    return ReducedControlState.from_full_values(
+        control_map,
+        _freeb_edge_control_state_edge_values(state, projection),
+    )
+
+
 def _freeb_edge_control_pullback_force_np(force_deltas: Any, projection: dict[str, Any]) -> tuple[np.ndarray, np.ndarray]:
     """Pull one physical LCFS edge force/update direction into controls."""
 
@@ -653,6 +668,7 @@ def _freeb_edge_control_native_coordinate_step(
     force_deltas: Any,
     projection: dict[str, Any],
     control_velocity: Any | None,
+    control_coordinates: Any | None,
     dt_eff: float,
     b1: float,
     fac: float,
@@ -674,10 +690,19 @@ def _freeb_edge_control_native_coordinate_step(
     if trust_scale != 1.0:
         next_velocity = control_update / max(float(dt_eff), np.finfo(float).tiny)
 
-    native_edge_state = _freeb_edge_control_apply_coordinate_update(
+    current_state = (
+        _freeb_edge_control_reduced_state_from_state(state_current, projection)
+        if control_coordinates is None
+        else ReducedControlState(
+            control_map=_freeb_edge_control_reduced_map(projection),
+            control_delta=control_coordinates,
+        )
+    )
+    next_control_state = current_state.update(control_update)
+    native_edge_state = _freeb_edge_control_state_from_coordinates(
         state_current,
         projection,
-        control_update,
+        next_control_state.control_delta,
         host_update=bool(host_update),
     )
     native_edge_values = _freeb_edge_control_state_edge_values(native_edge_state, projection)
@@ -697,6 +722,7 @@ def _freeb_edge_control_native_coordinate_step(
         state=state_out,
         update_deltas=update_deltas_out,
         control_velocity=np.asarray(next_velocity, dtype=float),
+        control_coordinates=np.asarray(next_control_state.control_delta, dtype=float),
         control_update=np.asarray(control_update, dtype=float),
         control_force=np.asarray(control_force, dtype=float),
         target_l2=float(np.linalg.norm(target)),

@@ -137,6 +137,48 @@ def _edge_control_reduced_unknown_payload(ns: Mapping[str, Any]) -> dict[str, An
         }
 
 
+def _edge_control_native_control_state_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the tracked native reduced-control vector, when available."""
+
+    try:
+        projection = ns.get("freeb_edge_control_projection", {"enabled": False})
+        if not bool(projection.get("enabled", False)):
+            return {"enabled": False, "status": "disabled"}
+        coordinates = ns.get(
+            "freeb_edge_control_projection_native_control_coordinates",
+            getattr(ns.get("freeb_edge_control_projector"), "native_control_coordinates", None),
+        )
+        if coordinates is None:
+            return {"enabled": True, "status": "unavailable"}
+        values = np.asarray(coordinates, dtype=float).reshape(-1)
+        info = dict(projection.get("info", {}))
+        labels = tuple(str(label) for label in info.get("labels", []))
+        if labels and len(labels) != values.size:
+            labels = ()
+        labels = labels or tuple(f"control_{idx}" for idx in range(values.size))
+        return {
+            "enabled": True,
+            "status": "tracked",
+            "mode": "native_reduced_control_state",
+            "full_edge_size": int(4 * int(projection["mode_count"])),
+            "reduced_unknown_size": int(values.size),
+            "reduction_fraction": None
+            if int(projection["mode_count"]) == 0
+            else float(values.size / (4 * int(projection["mode_count"]))),
+            "labels": list(labels),
+            "unknown_vector": [float(value) for value in values],
+            "unknown_by_label": {str(label): float(value) for label, value in zip(labels, values, strict=False)},
+            "unknown_l2": float(np.linalg.norm(values)),
+            "unknown_linf": float(np.max(np.abs(values))) if values.size else 0.0,
+        }
+    except Exception as exc:
+        return {
+            "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
+            "status": "failed",
+            "error": repr(exc),
+        }
+
+
 def _edge_control_update_direction_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
     """Return reduced-edge projection residuals for the final force direction.
 
@@ -239,6 +281,7 @@ def _edge_control_projection_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
         "state_residual": _edge_control_state_residual_payload(ns),
         "state_coordinates": _edge_control_state_coordinates_payload(ns),
         "reduced_unknown_vector": _edge_control_reduced_unknown_payload(ns),
+        "native_control_state": _edge_control_native_control_state_payload(ns),
         "force_direction": force_direction,
         "reduced_force_direction": reduced_force_direction,
         "update_direction": force_direction,

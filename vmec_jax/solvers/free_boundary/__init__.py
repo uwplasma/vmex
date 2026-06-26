@@ -11,6 +11,7 @@ from .derivatives import (
 )
 from .reduced_controls import (
     ReducedControlMap,
+    ReducedControlState,
     ReducedControlStep,
     reduced_control_decode,
     reduced_control_least_squares_step,
@@ -21,6 +22,7 @@ __all__ = [
     "DEFAULT_FREE_BOUNDARY_DERIVATIVE_OUTPUTS",
     "FreeBoundaryDerivativeOptions",
     "ReducedControlMap",
+    "ReducedControlState",
     "ReducedControlStep",
     "canonical_free_boundary_output_keys",
     "coil_direction",

@@ -23,6 +23,7 @@ import types as _types
 from .namelist import minimal_fixed_boundary_indata, read_indata, write_indata
 from .solvers.free_boundary import (
     ReducedControlMap,
+    ReducedControlState,
     ReducedControlStep,
     reduced_control_decode,
     reduced_control_least_squares_step,

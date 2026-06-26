@@ -266,6 +266,7 @@ _LAZY_ATTRS = {
     "free_boundary_value_and_jacobian": ".solvers.free_boundary.derivatives",
     "free_boundary_value_and_jvp": ".solvers.free_boundary.derivatives",
     "ReducedControlMap": ".solvers.free_boundary",
+    "ReducedControlState": ".solvers.free_boundary",
     "ReducedControlStep": ".solvers.free_boundary",
     "reduced_control_decode": ".solvers.free_boundary",
     "reduced_control_least_squares_step": ".solvers.free_boundary",

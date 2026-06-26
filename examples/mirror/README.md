@@ -629,7 +629,9 @@ It can also apply a reduced edge-coordinate update by encoding the current LCFS
 edge, adding a reduced update vector, and decoding back to a ``VMECState`` edge
 row.
 The ``native_coordinate`` strict-loop mode uses this operation each iteration
-after pulling the current edge force into reduced controls.
+after pulling the current edge force into reduced controls, and now carries the
+reduced control vector itself between iterations instead of re-encoding the LCFS
+edge from Fourier coefficients after every accepted step.
 Solver diagnostics include
 ``free_boundary.edge_control_projection.reduced_update_direction`` to compare
 the current full Fourier update direction against that reduced update vector.
@@ -648,6 +650,9 @@ with the candidate reduced edge unknown size, full edge coefficient size,
 reduction fraction, and decoded residual. This is the local audit field to
 check before replacing the full Fourier LCFS edge with native side/corner
 controls.
+When ``native_coordinate`` is active, diagnostics also include
+``free_boundary.edge_control_projection.native_control_state`` with the tracked
+reduced unknown vector used by the strict update.
 The root square-coil beta-scan example mirrors the same evidence in its
 ``square_coil_hybrid_free_boundary_solve_summary.csv`` rows, including state
 reconstruction residuals, reduced-unknown size, reduced-update size, and decoded

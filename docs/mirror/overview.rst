@@ -263,7 +263,9 @@ The example's default update mode is now ``"native_coordinate"``: the LCFS edge
 force is pulled back with the reduced-control Jacobian transpose, reduced edge
 velocity memory is advanced, and only the decoded edge update is written back to
 the VMEC state while the interior and lambda updates remain on the existing
-VMEC preconditioned path.
+VMEC preconditioned path. The solver now also tracks the reduced control vector
+between strict updates and reports it as
+``free_boundary.edge_control_projection.native_control_state``.
 When reduced square and stellarator edge bases still underfit the force
 direction, the profiler/summarizer first recommends the executable
 ``direct-gpu-edge-stellarator-native-polish`` profile. The

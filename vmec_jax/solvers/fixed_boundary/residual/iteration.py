@@ -1235,6 +1235,7 @@ class _FreeBoundaryEdgeControlProjector:
         self.native_velocity_reset_count = 0
         self.zero_velocity_count = 0
         self.native_control_velocity = None
+        self.native_control_coordinates = None
         self.native_control_last_step = {}
         self.use_scan = bool(use_scan)
         self.jit_strict_update_enabled = bool(jit_strict_update_enabled)
@@ -1305,6 +1306,7 @@ class _FreeBoundaryEdgeControlProjector:
         if not self.enabled or self.update_mode != "native_coordinate":
             return
         self.native_control_velocity = None
+        self.native_control_coordinates = None
         self.native_velocity_reset_count += 1
 
     def apply_native_coordinate_update_from_force_tuple(
@@ -1331,6 +1333,7 @@ class _FreeBoundaryEdgeControlProjector:
             force_deltas=force_deltas,
             projection=self.projection,
             control_velocity=self.native_control_velocity,
+            control_coordinates=self.native_control_coordinates,
             dt_eff=float(dt_eff),
             b1=float(b1),
             fac=float(fac),
@@ -1339,10 +1342,15 @@ class _FreeBoundaryEdgeControlProjector:
             host_update=bool(host_update),
         )
         self.native_control_velocity = step.control_velocity
+        self.native_control_coordinates = step.control_coordinates
         self.native_control_last_step = {
             "status": "applied",
             "target_l2": float(step.target_l2),
             "control_force_l2": float(step.control_force_l2),
+            "control_coordinate_l2": float(np.linalg.norm(step.control_coordinates)),
+            "control_coordinate_linf": float(np.max(np.abs(step.control_coordinates)))
+            if np.asarray(step.control_coordinates).size
+            else 0.0,
             "control_velocity_l2": float(step.control_velocity_l2),
             "control_update_l2": float(step.control_update_l2),
             "trust_scale": float(step.trust_scale),
