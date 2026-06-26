@@ -5737,6 +5737,74 @@ Visual validation:
 ### User input needed
 
 No user input is needed.
+
+## 265. Project Accepted Square-Coil LCFS Motion Onto Reduced Controls
+
+### Steps taken
+
+- Added a shared square-axis control-to-Fourier map builder in
+  `tools/diagnostics/profile_square_coil_free_boundary.py` so the preflight
+  map and postsolve diagnostics use the same square-symmetric side/corner
+  basis.
+- Added `boundary_reduced_control_projection` to completed JAX backend rows.
+  It projects the accepted LCFS Fourier-coefficient displacement onto the
+  square-reduced spline controls and reports fitted side/corner radius deltas,
+  rank, singular values, condition number, relative residual, and captured
+  fraction.
+- Added compact summary columns for projection status, relative residual,
+  captured fraction, and fitted radius deltas.
+- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` and
+  `examples/mirror/README.md` to distinguish preflight Fourier closure from
+  postsolve reduced-control representability.
+
+### Results obtained
+
+- The profile JSON now answers the immediate reduced-basis question for real
+  solves: whether the free-boundary motion found in Fourier space is mostly
+  representable by the intended side/corner spline controls.
+- The diagnostic is non-invasive. It does not restrict the solve yet and does
+  not change VMEC/WOUT compatibility.
+
+### How it was tested
+
+- Added a focused unit test with a tiny exact Jacobian to verify the least-
+  squares projection, labels, fitted deltas, and zero residual.
+- Broader test and lint commands are recorded in the commit and turn summary.
+
+### File structure and best-practice notes
+
+- Reusable basis math remains in `vmec_jax/toroidal_hybrid.py`.
+- Backend profile orchestration remains in
+  `tools/diagnostics/profile_square_coil_free_boundary.py`.
+- Summary-only presentation stays in
+  `tools/diagnostics/summarize_square_coil_profiles.py`.
+- No generated WOUT, mgrid, figure, or results files were tracked.
+
+### Best next steps
+
+1. Re-run or let active square-coil strict profiles finish with this diagnostic
+   enabled so each backend row reports reduced-control captured fraction.
+2. If captured fraction is high on converging/near-converging rows, prototype a
+   nonlinear free-boundary update constrained to the reduced controls while
+   still exporting Fourier coefficients for VMEC2000 parity.
+3. If captured fraction is low, expand from two square controls to the
+   stellarator-symmetric five-control basis before changing solver algorithms.
+
+### Completion percentages after M265
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `89%`.
+- Direct-coil GPU/JIT parity lane: `80%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `77%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
 ---
 ## 264. Added The Reduced Square-Control Boundary-Delta Hook
 

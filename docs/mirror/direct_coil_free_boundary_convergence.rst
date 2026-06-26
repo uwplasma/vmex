@@ -248,6 +248,16 @@ measure how far the accepted LCFS moved from the initial prescribed boundary.
 These are evidence that a row used a moving free boundary; they complement, but
 do not replace, the strict force-component and finite-beta pressure-balance
 promotion gates.
+For ``spline`` and ``control_spline`` square-axis rows, the same solved
+boundary displacement is also projected onto the square-reduced side/corner
+control map. The nested ``boundary_reduced_control_projection`` block reports
+the fitted side/corner radius changes, rank, singular values, relative
+projection residual, and captured fraction. The summary table exposes the
+status, relative residual, captured fraction, and compact fitted deltas. This
+is the bridge diagnostic for deciding whether a solver-native spline-control
+update is justified: high capture means the accepted Fourier LCFS motion lies
+mostly in the intended low-dimensional control subspace, while low capture
+means a reduced update would need more controls or a different basis.
 Backend rows now also include a compact ``free_boundary_promotion`` block. The
 summary table exposes this as ``boundary_condition_mode``,
 ``coil_bnormal_role``, ``production_candidate``, ``promotion_blockers``,
@@ -499,6 +509,13 @@ It also includes ``control_fourier_map`` for the square-reduced spline controls:
 side/corner labels, stacked ``4K x 2`` coefficient-Jacobian shape, singular
 values, condition number, and column norms. This is a preflight diagnostic for
 the solver-native reduced-control lane, not a nonlinear convergence claim.
+Completed JAX backend rows add the complementary postsolve diagnostic
+``boundary_reduced_control_projection``. It projects the actual accepted LCFS
+coefficient displacement onto the same ``control_fourier_map`` and reports the
+least-squares side/corner update, relative residual, and captured fraction.
+Use this after real solves to tell whether the observed free-boundary motion is
+representable by the compact spline controls before moving the nonlinear
+iteration into that reduced basis.
 The root square-coil example now enforces
 ``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12`` by default and uses
 ``MPOL=5, NTOR=28, NZETA=64`` as the production-style deck. This is strict

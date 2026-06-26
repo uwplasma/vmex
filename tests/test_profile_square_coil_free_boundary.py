@@ -208,6 +208,46 @@ def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement(
     assert payload["boundary_sample_displacement_rel"] == pytest.approx(0.1 / 3.0)
 
 
+def test_square_coil_profile_boundary_reduced_control_projection_payload(monkeypatch):
+    basis = SimpleNamespace(symmetry="square", labels=["side", "corner"])
+
+    class FakeControlMap:
+        def stacked_jacobian(self):
+            return np.asarray(
+                [
+                    [1.0, 0.0],
+                    [0.0, 2.0],
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                ]
+            )
+
+    monkeypatch.setattr(
+        profile,
+        "_square_control_fourier_matrix",
+        lambda _config: (basis, FakeControlMap()),
+    )
+    config = SimpleNamespace(plasma_axis_kind="control_spline")
+    payload = profile._boundary_reduced_control_projection_payload(
+        config=config,
+        deltas={
+            "R_cos": np.asarray([1.0]),
+            "R_sin": np.asarray([4.0]),
+            "Z_cos": np.asarray([0.0]),
+            "Z_sin": np.asarray([3.0]),
+        },
+    )
+
+    assert payload is not None
+    assert payload["status"] == "available"
+    assert payload["labels"] == ["side", "corner"]
+    assert payload["radius_delta"] == pytest.approx([1.0, 2.0])
+    assert payload["radius_delta_by_label"]["side"] == pytest.approx(1.0)
+    assert payload["radius_delta_by_label"]["corner"] == pytest.approx(2.0)
+    assert payload["residual_rel"] == pytest.approx(0.0, abs=1.0e-14)
+    assert payload["captured_fraction"] == pytest.approx(1.0)
+
+
 def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_path: Path):
     workdir = tmp_path / "vmec2000_mgrid"
     workdir.mkdir()

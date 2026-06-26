@@ -295,6 +295,26 @@ def _promotion_payload(
     )
 
 
+def _control_projection_delta_text(payload: dict[str, Any]) -> str | None:
+    values = payload.get("radius_delta_by_label")
+    if isinstance(values, dict):
+        items: list[str] = []
+        for key, value in values.items():
+            finite = _finite_float(value)
+            if finite is not None:
+                items.append(f"{key}:{finite:.6g}")
+        return ",".join(items) if items else None
+    values = payload.get("radius_delta")
+    if isinstance(values, list):
+        items = []
+        for value in values:
+            finite = _finite_float(value)
+            if finite is not None:
+                items.append(f"{finite:.6g}")
+        return ",".join(items) if items else None
+    return None
+
+
 def _vmec2000_tail_projection(rows: list[Any], *, length: int = 12) -> dict[str, Any]:
     """Estimate residual decay per VMEC2000 iteration from the current stage tail."""
 
@@ -619,6 +639,9 @@ def _summary_row(
         promotion_blockers_text = ",".join(str(item) for item in promotion_blockers)
     else:
         promotion_blockers_text = promotion_blockers
+    control_projection = backend.get("boundary_reduced_control_projection")
+    if not isinstance(control_projection, dict):
+        control_projection = {}
     iters_to_target = _tail_projection(backend_for_projection, "", target=1.0e-12)
     max_iter = cfg.get("max_iter")
     if max_iter is None:
@@ -679,6 +702,14 @@ def _summary_row(
         "boundary_sample_displacement_rel": _finite_float(
             backend.get("boundary_sample_displacement_rel")
         ),
+        "boundary_control_projection_status": control_projection.get("status"),
+        "boundary_control_projection_residual_rel": _finite_float(
+            control_projection.get("residual_rel")
+        ),
+        "boundary_control_projection_captured_fraction": _finite_float(
+            control_projection.get("captured_fraction")
+        ),
+        "boundary_control_projection_radius_delta": _control_projection_delta_text(control_projection),
         "final_iter": final_iter,
         "final_total": final_total,
         "final_max_component": final_max_component,
@@ -971,6 +1002,10 @@ def main(argv: list[str] | None = None) -> int:
         "boundary_sample_displacement_rms",
         "boundary_sample_displacement_max",
         "boundary_sample_displacement_rel",
+        "boundary_control_projection_status",
+        "boundary_control_projection_residual_rel",
+        "boundary_control_projection_captured_fraction",
+        "boundary_control_projection_radius_delta",
         "final_iter",
         "final_total",
         "final_max_component",

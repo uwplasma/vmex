@@ -526,7 +526,98 @@ def _internal_to_physical_mode_scale(static: Any) -> np.ndarray:
     return np.where(m == 0.0, 1.0, sqrt2) * np.where(np.abs(n) == 0.0, 1.0, sqrt2)
 
 
-def _boundary_motion_payload(run: Any) -> dict[str, float] | None:
+def _stack_boundary_components(components: dict[str, np.ndarray]) -> np.ndarray:
+    """Stack boundary coefficient blocks in the VMEC map order."""
+
+    return np.concatenate(
+        [
+            np.asarray(components["R_cos"], dtype=float).reshape(-1),
+            np.asarray(components["R_sin"], dtype=float).reshape(-1),
+            np.asarray(components["Z_cos"], dtype=float).reshape(-1),
+            np.asarray(components["Z_sin"], dtype=float).reshape(-1),
+        ]
+    )
+
+
+def _boundary_reduced_control_projection_payload(
+    *,
+    config: ExampleConfig | None,
+    deltas: dict[str, np.ndarray],
+) -> dict[str, Any] | None:
+    """Project a solved boundary move onto the square side/corner controls."""
+
+    if config is None:
+        return None
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if not _square_axis_uses_spline_controls(config):
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": axis_kind,
+        }
+    try:
+        basis, matrix = _square_control_fourier_matrix(config)
+        jacobian = matrix.stacked_jacobian()
+        target = _stack_boundary_components(deltas)
+        if jacobian.shape[0] != target.size:
+            return {
+                "status": "shape_mismatch",
+                "axis_kind": axis_kind,
+                "basis_symmetry": basis.symmetry,
+                "labels": list(basis.labels),
+                "jacobian_shape": [int(value) for value in jacobian.shape],
+                "target_size": int(target.size),
+            }
+        if jacobian.shape[1] == 0:
+            return {
+                "status": "empty_control_basis",
+                "axis_kind": axis_kind,
+                "basis_symmetry": basis.symmetry,
+                "jacobian_shape": [int(value) for value in jacobian.shape],
+                "target_size": int(target.size),
+            }
+        solution, _residuals, rank, singular_values = np.linalg.lstsq(jacobian, target, rcond=None)
+        predicted = jacobian @ solution
+        residual = target - predicted
+        target_norm = float(np.linalg.norm(target))
+        predicted_norm = float(np.linalg.norm(predicted))
+        residual_norm = float(np.linalg.norm(residual))
+        residual_max = float(np.max(np.abs(residual))) if residual.size else 0.0
+        residual_rms = float(np.sqrt(np.mean(residual * residual))) if residual.size else 0.0
+        residual_rel = None if target_norm <= TINY else float(residual_norm / target_norm)
+        captured_fraction = None if residual_rel is None else float(max(0.0, 1.0 - residual_rel))
+        min_sv = float(np.min(singular_values)) if singular_values.size else None
+        max_sv = float(np.max(singular_values)) if singular_values.size else None
+        condition = None if min_sv in (None, 0.0) or max_sv is None else float(max_sv / max(min_sv, TINY))
+        return {
+            "status": "available" if target_norm > TINY else "zero_boundary_motion",
+            "axis_kind": axis_kind,
+            "basis_symmetry": basis.symmetry,
+            "labels": list(basis.labels),
+            "radius_delta": [float(value) for value in solution],
+            "radius_delta_by_label": {
+                str(label): float(value) for label, value in zip(basis.labels, solution, strict=False)
+            },
+            "rank": int(rank),
+            "singular_values": [float(value) for value in singular_values],
+            "condition_number": condition,
+            "jacobian_shape": [int(value) for value in jacobian.shape],
+            "target_l2": target_norm,
+            "predicted_l2": predicted_norm,
+            "residual_l2": residual_norm,
+            "residual_linf": residual_max,
+            "residual_rms": residual_rms,
+            "residual_rel": residual_rel,
+            "captured_fraction": captured_fraction,
+        }
+    except Exception as exc:
+        return {
+            "status": f"failed:{type(exc).__name__}",
+            "axis_kind": axis_kind,
+            "error": repr(exc),
+        }
+
+
+def _boundary_motion_payload(run: Any, *, config: ExampleConfig | None = None) -> dict[str, Any] | None:
     """Measure how far the accepted LCFS moved from the input boundary."""
 
     try:
@@ -550,11 +641,13 @@ def _boundary_motion_payload(run: Any) -> dict[str, float] | None:
         coeff_norm_sq = 0.0
         coeff_ref_norm_sq = 0.0
         coeff_max = 0.0
+        deltas: dict[str, np.ndarray] = {}
         for name, final_values in final.items():
             initial_values = initial_components[name]
             if final_values.shape != initial_values.shape:
                 return None
             delta = final_values - initial_values
+            deltas[name] = delta
             coeff_norm_sq += float(np.sum(delta * delta))
             coeff_ref_norm_sq += float(np.sum(initial_values * initial_values))
             if delta.size:
@@ -579,7 +672,7 @@ def _boundary_motion_payload(run: Any) -> dict[str, float] | None:
         ref_rms = float(np.sqrt(np.mean(ref_radius * ref_radius)))
         coeff_norm = float(np.sqrt(coeff_norm_sq))
         coeff_ref_norm = float(np.sqrt(coeff_ref_norm_sq))
-        return {
+        payload: dict[str, Any] = {
             "boundary_coeff_delta_l2": coeff_norm,
             "boundary_coeff_delta_linf": coeff_max,
             "boundary_coeff_delta_rel": float(coeff_norm / max(coeff_ref_norm, TINY)),
@@ -587,6 +680,10 @@ def _boundary_motion_payload(run: Any) -> dict[str, float] | None:
             "boundary_sample_displacement_max": max_abs,
             "boundary_sample_displacement_rel": float(rms / max(ref_rms, TINY)),
         }
+        projection = _boundary_reduced_control_projection_payload(config=config, deltas=deltas)
+        if projection is not None:
+            payload["boundary_reduced_control_projection"] = projection
+        return payload
     except Exception:
         return None
 
@@ -708,7 +805,7 @@ def _classify_run(diag: dict[str, Any], residuals: dict[str, Any]) -> str:
     return "incomplete"
 
 
-def _final_residuals(run: Any) -> dict[str, Any]:
+def _final_residuals(run: Any, *, config: ExampleConfig | None = None) -> dict[str, Any]:
     diag = run.result.diagnostics if run.result is not None else {}
     diag = diag if isinstance(diag, dict) else {}
     fsqr = diag.get("final_fsqr")
@@ -775,7 +872,7 @@ def _final_residuals(run: Any) -> dict[str, Any]:
         "free_boundary_last_nestor_sample_time_s": _last_finite(diag.get("freeb_nestor_sample_time_history")),
         "history": _jax_history_payload(run, diag),
     }
-    boundary_motion = _boundary_motion_payload(run)
+    boundary_motion = _boundary_motion_payload(run, config=config)
     if boundary_motion is not None:
         out.update(boundary_motion)
     out["stall_classification"] = _classify_run(diag, out)
@@ -923,7 +1020,7 @@ def _run_jax_backend(
                 os.environ["VMEC_JAX_FREEB_ANDERSON_PRESSURE"] = previous_anderson
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
-    residuals = _final_residuals(run)
+    residuals = _final_residuals(run, config=config)
     vc_payload = (
         _virtual_casing_profile_payload(
             run=run,
@@ -1129,16 +1226,13 @@ def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
     return _example_boundary_projection_payload(config)
 
 
-def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
-    """Return compact square-axis spline-control metadata for diagnostics."""
-
+def _square_axis_uses_spline_controls(config: ExampleConfig) -> bool:
     axis_kind = str(config.plasma_axis_kind).strip().lower()
-    if axis_kind not in {"spline", "control_spline", "spline_controls", "periodic_spline"}:
-        return {
-            "status": "not_applicable_for_axis_kind",
-            "axis_kind": axis_kind,
-        }
-    controls = (
+    return axis_kind in {"spline", "control_spline", "spline_controls", "periodic_spline"}
+
+
+def _square_axis_controls(config: ExampleConfig) -> SquareAxisSplineControls:
+    return (
         config.plasma_axis_spline_controls
         if config.plasma_axis_spline_controls is not None
         else SquareAxisSplineControls.rounded_square(
@@ -1146,6 +1240,40 @@ def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
             corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
         )
     ).validate()
+
+
+def _square_control_fourier_matrix(config: ExampleConfig) -> tuple[Any, Any]:
+    """Build the square-symmetric spline-control to Fourier map."""
+
+    controls = _square_axis_controls(config)
+    basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
+    sample_kwargs = {
+        key: value
+        for key, value in _square_axis_sample_kwargs(config).items()
+        if key not in {"axis_kind", "axis_spline_controls"}
+    }
+    matrix = square_axis_spline_control_fourier_matrix(
+        control_basis=basis,
+        nfp=int(config.nfp),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ntheta_fit=max(64, 4 * int(config.mpol)),
+        nzeta_fit=max(128, 8 * int(config.ntor)),
+        **sample_kwargs,
+    )
+    return basis, matrix
+
+
+def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return compact square-axis spline-control metadata for diagnostics."""
+
+    axis_kind = str(config.plasma_axis_kind).strip().lower()
+    if not _square_axis_uses_spline_controls(config):
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": axis_kind,
+        }
+    controls = _square_axis_controls(config)
     bases: dict[str, Any] = {}
     for symmetry in ("square", "stellarator"):
         basis = square_axis_spline_symmetric_control_basis(controls, symmetry=symmetry)
@@ -1172,35 +1300,13 @@ def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
     """Return conditioning diagnostics for the reduced control-to-Fourier map."""
 
     axis_kind = str(config.plasma_axis_kind).strip().lower()
-    if axis_kind not in {"spline", "control_spline", "spline_controls", "periodic_spline"}:
+    if not _square_axis_uses_spline_controls(config):
         return {
             "status": "not_applicable_for_axis_kind",
             "axis_kind": axis_kind,
         }
-    controls = (
-        config.plasma_axis_spline_controls
-        if config.plasma_axis_spline_controls is not None
-        else SquareAxisSplineControls.rounded_square(
-            axis_half_width=float(config.plasma_axis_half_width),
-            corner_radius_factor=float(config.plasma_axis_spline_corner_radius_factor),
-        )
-    ).validate()
     try:
-        basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
-        sample_kwargs = {
-            key: value
-            for key, value in _square_axis_sample_kwargs(config).items()
-            if key not in {"axis_kind", "axis_spline_controls"}
-        }
-        matrix = square_axis_spline_control_fourier_matrix(
-            control_basis=basis,
-            nfp=int(config.nfp),
-            mpol=int(config.mpol),
-            ntor=int(config.ntor),
-            ntheta_fit=max(64, 4 * int(config.mpol)),
-            nzeta_fit=max(128, 8 * int(config.ntor)),
-            **sample_kwargs,
-        )
+        basis, matrix = _square_control_fourier_matrix(config)
         jacobian = matrix.stacked_jacobian()
         singular_values = np.linalg.svd(jacobian, compute_uv=False)
         finite_singular_values = singular_values[np.isfinite(singular_values)]

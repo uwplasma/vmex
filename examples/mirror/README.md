@@ -312,6 +312,12 @@ It also writes ``control_fourier_map`` for the two reduced square-axis controls,
 including the stacked coefficient-Jacobian shape, singular values, condition
 number, and column norms. Use that block to decide whether a deck is a good
 candidate for reduced spline-control updates before starting a long solve.
+Completed JAX backend rows also write ``boundary_reduced_control_projection``,
+which projects the actual solved LCFS coefficient motion onto that same
+side/corner map. The summary table prints the projection status, relative
+residual, captured fraction, and fitted side/corner radius deltas, so a real
+solve can be checked before replacing Fourier boundary updates with reduced
+spline-control updates.
 The latest control-spline square-axis preflight matrix is:
 
 | deck | status | reason |
