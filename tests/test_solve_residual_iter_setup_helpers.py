@@ -13,6 +13,7 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
     resolve_free_boundary_setup_policy,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    PreRestartTriggerCallbacks,
     Vmec2000TimeControlCallbacks,
     dump_residual_evolve_trace,
     evaluate_vmec2000_time_control,
@@ -22,6 +23,7 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_residual_iteration_update_status,
     residual_update_rms_for_print,
     resolve_vmec2000_print_context,
+    run_pre_restart_trigger_runtime,
     run_vmec2000_time_control_runtime,
     sample_vmec_iteration_scalars,
 )
@@ -805,6 +807,122 @@ def test_run_vmec2000_time_control_runtime_applies_restart_branch() -> None:
     assert branch_kwargs["state_checkpoint"] == "checkpoint"
     assert branch_kwargs["pre_restart_reason"] == "bad_jacobian"
     assert ("apply_restart", "restart-branch", "restart-controller-state", 0.9) in calls
+
+
+def test_run_pre_restart_trigger_runtime_skips_without_callbacks() -> None:
+    def fail_callback(*_args, **_kwargs):  # pragma: no cover - should not execute.
+        raise AssertionError("pre-restart callbacks should not run when disabled")
+
+    result = run_pre_restart_trigger_runtime(
+        use_restart_triggers=False,
+        pre_restart_reason="bad_progress",
+        huge_initial_forces=False,
+        huge_force_restart_count=0,
+        time_step=0.9,
+        restart_badjac_factor=0.5,
+        restart_badprog_factor=2.0,
+        stage_transition_scale=0.75,
+        step_size=0.1,
+        ijacob=1,
+        bad_resets=0,
+        iter2=4,
+        compact_iter_idx=2,
+        fsq_prev_before=0.6,
+        fsq0_prev_before=0.8,
+        k_ndamp=3,
+        state_checkpoint="checkpoint",
+        state_before_restart="state",
+        velocity_blocks_before="velocities",
+        static="static",
+        prev_rz_fsq_before=1.5,
+        vmec2000_control=False,
+        verbose=True,
+        verbose_vmec2000_table=False,
+        callbacks=PreRestartTriggerCallbacks(*(fail_callback for _ in range(7))),
+    )
+
+    assert not result.applied
+    assert result.pre_restart_reason == "bad_progress"
+    assert result.time_step_iter == 0.9
+    assert result.step_status == "none"
+
+
+def test_run_pre_restart_trigger_runtime_applies_branch_callbacks() -> None:
+    calls = []
+
+    def host_update(**kwargs):
+        calls.append(("update", kwargs))
+        return SimpleNamespace(marker="pre-restart-update", time_step_iter=0.25)
+
+    def host_branch_result(**kwargs):
+        calls.append(("branch", kwargs))
+        return SimpleNamespace(
+            marker="pre-restart-branch",
+            pre_restart_reason=kwargs["pre_restart_reason"],
+            time_step_iter=0.25,
+            step_status="restart_bad_progress",
+        )
+
+    def apply_restart(branch, state_update, *, time_step_value):
+        calls.append(("apply", branch.marker, state_update, time_step_value))
+
+    result = run_pre_restart_trigger_runtime(
+        use_restart_triggers=True,
+        pre_restart_reason="bad_progress",
+        huge_initial_forces=True,
+        huge_force_restart_count=2,
+        time_step=0.9,
+        restart_badjac_factor=0.5,
+        restart_badprog_factor=2.0,
+        stage_transition_scale=0.75,
+        step_size=0.1,
+        ijacob=1,
+        bad_resets=3,
+        iter2=4,
+        compact_iter_idx=2,
+        fsq_prev_before=0.6,
+        fsq0_prev_before=0.8,
+        k_ndamp=3,
+        state_checkpoint="checkpoint",
+        state_before_restart="state",
+        velocity_blocks_before="velocities",
+        static="static",
+        prev_rz_fsq_before=1.5,
+        vmec2000_control=True,
+        verbose=True,
+        verbose_vmec2000_table=False,
+        callbacks=PreRestartTriggerCallbacks(
+            host_update,
+            host_branch_result,
+            apply_restart,
+            "restart-controller-state",
+            lambda **kwargs: calls.append(("print", kwargs)),
+            lambda: (1.0, 2.0, 3.0),
+            lambda **kwargs: calls.append(("dump", kwargs)),
+        ),
+    )
+
+    assert result.applied
+    assert result.pre_restart_reason == "bad_progress"
+    assert result.time_step_iter == 0.25
+    assert result.step_status == "restart_bad_progress"
+    update_kwargs = next(call[1] for call in calls if call[0] == "update")
+    assert update_kwargs["huge_initial_forces"]
+    assert update_kwargs["huge_force_restart_count"] == 2
+    assert update_kwargs["fsq_prev_before"] == 0.6
+    branch_kwargs = next(call[1] for call in calls if call[0] == "branch")
+    assert branch_kwargs["state_checkpoint"] == "checkpoint"
+    assert branch_kwargs["prev_rz_fsq_before"] == 1.5
+    assert branch_kwargs["vmec2000_control"]
+    assert ("apply", "pre-restart-branch", "restart-controller-state", 0.25) in calls
+    print_kwargs = next(call[1] for call in calls if call[0] == "print")
+    assert print_kwargs["iter_idx"] == 2
+    assert print_kwargs["step_status"] == "restart_bad_progress"
+    dump_kwargs = next(call[1] for call in calls if call[0] == "dump")
+    assert dump_kwargs["state"] == "state"
+    assert dump_kwargs["velocities"] == "velocities"
+    assert dump_kwargs["static"] == "static"
+    assert dump_kwargs["iter_idx"] == 4
 
 
 def test_dump_residual_evolve_trace_maps_velocity_and_force_blocks() -> None:

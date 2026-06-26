@@ -202,6 +202,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_norms import (
     safe_dt_from_force_blocks as _safe_dt_from_force_blocks,
 )
 from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
+    PreRestartTriggerCallbacks as _PreRestartTriggerCallbacks,
     Vmec2000TimeControlCallbacks as _Vmec2000TimeControlCallbacks,
     dump_residual_evolve_trace as _dump_residual_evolve_trace,
     print_compact_converged_status as _print_compact_converged_status,
@@ -210,6 +211,7 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_residual_iteration_update_status as _print_residual_iteration_update_status,
     residual_update_rms_for_print as _residual_update_rms_for_print,
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
+    run_pre_restart_trigger_runtime as _run_pre_restart_trigger_runtime,
     run_vmec2000_time_control_runtime as _run_vmec2000_time_control_runtime,
     sample_vmec_iteration_scalars as _sample_vmec_iteration_scalars,
 )
@@ -2447,9 +2449,8 @@ def solve_fixed_boundary_residual_iter(
             huge_initial_forces = restart_decision.huge_initial_forces
 
             if startup_policy.use_restart_triggers and pre_restart_reason != "none":
-                state_before_restart = state
-                velocity_blocks_before = velocity_blocks
-                pre_restart_update = _host_pre_restart_trigger_update(
+                pre_restart_runtime = _run_pre_restart_trigger_runtime(
+                    use_restart_triggers=True,
                     pre_restart_reason=pre_restart_reason,
                     huge_initial_forces=bool(huge_initial_forces),
                     huge_force_restart_count=int(huge_force_restart_count),
@@ -2461,41 +2462,39 @@ def solve_fixed_boundary_residual_iter(
                     ijacob=int(ijacob),
                     bad_resets=int(bad_resets),
                     iter2=int(iter2),
+                    compact_iter_idx=int(it),
                     fsq_prev_before=float(fsq_prev_before),
                     fsq0_prev_before=float(fsq0_prev_before),
                     k_ndamp=int(k_ndamp),
-                )
-                pre_restart_branch = _host_pre_restart_trigger_branch_result(
                     state_checkpoint=state_checkpoint,
-                    pre_restart_update=pre_restart_update,
-                    pre_restart_reason=pre_restart_reason,
+                    state_before_restart=state,
+                    velocity_blocks_before=velocity_blocks,
+                    static=static,
                     prev_rz_fsq_before=prev_rz_fsq_before,
                     vmec2000_control=bool(vmec2000_control),
-                )
-                _apply_restart_branch_result(
-                    pre_restart_branch,
-                    _controller_state_after_pre_restart_update,
-                    time_step_value=pre_restart_branch.time_step_iter,
-                )
-                time_step_iter = pre_restart_branch.time_step_iter
-                step_status = pre_restart_branch.step_status
-                _print_compact_residual_iteration_update_status(
                     verbose=bool(verbose),
-                    vmec2000_control=bool(vmec2000_control),
                     verbose_vmec2000_table=bool(verbose_vmec2000_table),
-                    precond_diag_floats=_precond_diag_floats,
-                    iter_idx=int(it),
-                    dt_eff=0.0,
-                    update_rms=0.0,
-                    step_status=step_status,
+                    callbacks=_PreRestartTriggerCallbacks(
+                        host_update=_host_pre_restart_trigger_update,
+                        host_branch_result=_host_pre_restart_trigger_branch_result,
+                        apply_restart_branch_result=_apply_restart_branch_result,
+                        controller_restart_update=_controller_state_after_pre_restart_update,
+                        print_compact_update_status=_print_compact_residual_iteration_update_status,
+                        preconditioner_diag_floats=_precond_diag_floats,
+                        dump_xc_with_velocity_blocks=lambda *, state, velocities, static, iter_idx: (
+                            _dump_xc_with_velocity_blocks(
+                                dump_xc=_maybe_dump_xc,
+                                state=state,
+                                velocities=velocities,
+                                static=static,
+                                iter_idx=iter_idx,
+                            )
+                        ),
+                    ),
                 )
-                _dump_xc_with_velocity_blocks(
-                    dump_xc=_maybe_dump_xc,
-                    state=state_before_restart,
-                    velocities=velocity_blocks_before,
-                    static=static,
-                    iter_idx=int(iter2),
-                )
+                pre_restart_reason = pre_restart_runtime.pre_restart_reason
+                time_step_iter = pre_restart_runtime.time_step_iter
+                step_status = pre_restart_runtime.step_status
                 _record_timing("iteration_control_restart", t_iteration_control_restart_start)
                 continue
 

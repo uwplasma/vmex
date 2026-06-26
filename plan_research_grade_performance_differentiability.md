@@ -6584,3 +6584,76 @@ Updated lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
+
+### 2026-06-26: Package pre-restart trigger runtime seam
+
+Steps taken:
+
+- Extracted the optional pre-restart trigger branch from
+  ``solve_fixed_boundary_residual_iter`` into
+  ``run_pre_restart_trigger_runtime`` in
+  ``vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py``.
+- Added explicit callback/result dataclasses for that branch so the residual
+  loop now delegates the VMEC-style restart-trigger update, branch result,
+  controller update, compact status print, and optional ``xc`` dump through a
+  named host-runtime seam.
+- Replaced the inline branch in
+  ``vmec_jax/solvers/fixed_boundary/residual/iteration.py`` with the packaged
+  helper while preserving the existing closure that mutates controller state,
+  rollback histories, velocity resets, and timing.
+- Added focused tests for the disabled and applied pre-restart trigger paths in
+  ``tests/test_solve_residual_iter_setup_helpers.py``.
+
+Results obtained:
+
+- ``python -m ruff check
+  vmec_jax/solvers/fixed_boundary/residual/host_diagnostics.py
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py
+  tests/test_solve_residual_iter_setup_helpers.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_residual_iter_setup_helpers.py -q`` passed with
+  ``25 passed``.
+- ``PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+  tests/test_solve_axis_helpers_more_coverage.py tests/test_residual_ptau.py
+  tests/test_residual_iteration_preconditioner.py
+  tests/test_solve_residual_iter_setup_helpers.py
+  tests/test_solve_residual_iter_update_helpers.py
+  tests/test_solve_additional_helpers.py tests/test_driver_api.py
+  tests/test_free_boundary_wp0.py`` passed with ``282 passed, 2 skipped``.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_vacuum_adjoint.py
+  tests/test_free_boundary_direct_coil_finite_pressure_sensitivity.py -q``
+  passed.
+- ``git diff --check`` passed.
+- ``python tools/diagnostics/repo_size_audit.py --top 20 --max-total-mib 50
+  --max-file-mib 2`` passed; tracked size is ``28.37 MiB`` and no tracked file
+  is above ``2 MiB``.
+- ``source_health.py`` now reports the residual module at ``2910`` lines and
+  ``solve_fixed_boundary_residual_iter`` at ``2516`` lines.  This is a modest
+  branch-packaging reduction, not the full residual-loop split.
+
+Best next steps:
+
+1. Let CI validate this controller-packaging commit on ``main``.
+2. If review asks for more simplification before release, extract the next
+   residual-loop phase runner only when it removes a materially larger block
+   than this branch-local seam.
+3. Treat README/docs figures, full runtime matrix, WOUT parity, and AD-vs-FD
+   evidence as already refreshed by the prior readiness tranche unless a future
+   numerical or performance-path change invalidates those artifacts.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.1%.
+- Free-boundary production differentiability: 97.3%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 73.3%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
