@@ -287,6 +287,8 @@ def test_square_coil_profile_summary_marks_strict_direct_row_as_evidence(tmp_pat
     assert row["strict_evidence_status"] == "strict_production_evidence"
     assert row["strict_evidence_blockers"] == ""
     assert row["resolution_deck_status"] == "production_ready"
+    assert row["recommended_followup_profile_kind"] == "none"
+    assert row["recommended_followup_reason"] == "strict_evidence"
 
 
 def test_square_coil_profile_summary_blocks_underresolved_resolution_deck(tmp_path: Path):
@@ -337,6 +339,116 @@ def test_square_coil_profile_summary_blocks_underresolved_resolution_deck(tmp_pa
     )
     assert "resolution_deck_diagnostic_underresolved" in row["strict_evidence_blockers"]
     assert "mgrid_nphi_not_multiple_of_nzeta" in row["strict_evidence_blockers"]
+    assert row["recommended_followup_profile_kind"] == "resolution-preflight"
+    assert row["recommended_followup_reason"] == "fix_projection_nzeta_or_mgrid_gate_first"
+
+
+def test_square_coil_profile_summary_recommends_provider_parity_when_missing(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_missing_parity"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 1000,
+                        "final_fsqr": 2.0e-9,
+                        "final_fsqz": 3.0e-9,
+                        "final_fsql": 4.0e-10,
+                        "final_residual_recomputed_on_accepted_state": True,
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["strict_evidence_status"] == "underconverged"
+    assert row["accepted_provider_parity_status"] == "not_run"
+    assert row["recommended_followup_profile_kind"] == "provider-parity"
+    assert row["recommended_followup_reason"] == "accepted_lcfs_provider_parity_missing"
+
+
+def test_square_coil_profile_summary_recommends_vmec2000_when_grid_exceeded(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_grid_exceeded_completed"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "backends": {
+                    "vmec2000_mgrid": {
+                        "status": "completed",
+                        "tail_rows": [
+                            {"it": 1, "total": 2.0e-9, "max_component": 1.0e-9},
+                            {"it": 2, "total": 2.1e-9, "max_component": 1.0e-9},
+                            {"it": 3, "total": 2.2e-9, "max_component": 1.0e-9},
+                        ],
+                        "vacuum_grid_exceeded_count": 1,
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["vacuum_grid_exceeded_count"] == 1
+    assert row["next_action"] == "widen_mgrid_before_interpreting_residual"
+    assert row["recommended_followup_profile_kind"] == "vmec2000"
+    assert row["recommended_followup_reason"] == "widen_mgrid_before_backend_comparison"
+
+
+def test_square_coil_profile_summary_recommends_direct_gpu_for_stalled_direct(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_stalled_direct"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 1000,
+                        "final_fsqr": 2.0e-9,
+                        "final_fsqz": 3.0e-9,
+                        "final_fsql": 4.0e-10,
+                        "tail_plateau": {"status": "oscillatory"},
+                        "accepted_provider_parity": {"status": "completed"},
+                        "final_residual_recomputed_on_accepted_state": True,
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["next_action"] == "scan_delt_stage_budget_or_pressure_acceleration"
+    assert row["recommended_followup_profile_kind"] == "direct-gpu"
+    assert row["recommended_followup_reason"] == "scan_delt_stage_budget_or_pressure_acceleration"
 
 
 def test_square_coil_profile_summary_markdown_includes_virtual_casing_columns(
@@ -430,6 +542,8 @@ def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Pat
     assert row["strict_components_met"] is False
     assert row["tail_decay_factor"] == pytest.approx(0.9994733361578259)
     assert row["iters_to_1e-12_est"] == pytest.approx(7865)
+    assert row["recommended_followup_profile_kind"] == "wait_current_run"
+    assert row["recommended_followup_reason"] == "active_profile_still_running"
 
 
 def test_square_coil_profile_summary_prefers_active_partial_sidecar(tmp_path: Path):

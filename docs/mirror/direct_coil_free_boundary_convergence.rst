@@ -479,6 +479,13 @@ projection/``NZETA``/``mgrid_nphi`` deck gate is production-ready. Rows run at
 converge to that looser target. Rows with bad Fourier projection, low
 ``NZETA``, or mgrid-plane mismatch are labelled ``diagnostic_underresolved``
 even if their force components happen to be small.
+The table also emits ``recommended_followup_profile_kind`` and
+``recommended_followup_reason``. These columns translate the convergence,
+resolution, grid, and accepted-LCFS provider-parity evidence into the next
+profile family to run: wait for active rows, repair the resolution preflight,
+widen the VMEC2000 mgrid, run accepted-provider parity, or run a direct-GPU
+``DELT``/stage-budget probe. They are recommendations for the next diagnostic
+row, not a replacement for inspecting the residual tail and physics plots.
 
 Finite-beta mirror validation should check the sign of the magnetic response,
 not only numerical convergence. Ideal MHD force balance gives the familiar

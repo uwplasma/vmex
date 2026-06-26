@@ -274,7 +274,7 @@ def _virtual_casing_payload(backend: dict[str, Any]) -> dict[str, Any]:
 
 def _accepted_provider_parity_payload(backend: dict[str, Any]) -> dict[str, Any]:
     payload = backend.get("accepted_provider_parity")
-    return payload if isinstance(payload, dict) else {}
+    return payload if isinstance(payload, dict) else {"status": "not_run"}
 
 
 def _promotion_payload(
@@ -400,6 +400,81 @@ def _strict_evidence_payload(
         "backend_role": _backend_role(str(backend_name)),
         "strict_evidence_status": evidence_status,
         "strict_evidence_blockers": ",".join(unique_blockers),
+    }
+
+
+def _recommended_followup_payload(
+    *,
+    backend_name: str,
+    status: Any,
+    next_action: str,
+    strict_evidence_status: Any,
+    accepted_provider_parity_status: Any,
+    vacuum_grid_exceeded_count: Any,
+) -> dict[str, str]:
+    """Return the next profile kind that best matches the summary evidence."""
+
+    evidence = "" if strict_evidence_status is None else str(strict_evidence_status)
+    status_text = "" if status is None else str(status)
+    next_action_text = "" if next_action is None else str(next_action)
+    backend = str(backend_name)
+    accepted_status = (
+        "" if accepted_provider_parity_status is None else str(accepted_provider_parity_status)
+    )
+    try:
+        grid_exceeded = int(vacuum_grid_exceeded_count or 0)
+    except Exception:
+        grid_exceeded = 0
+
+    if evidence == "strict_production_evidence":
+        return {
+            "recommended_followup_profile_kind": "none",
+            "recommended_followup_reason": "strict_evidence",
+        }
+    if status_text.startswith("running"):
+        return {
+            "recommended_followup_profile_kind": "wait_current_run",
+            "recommended_followup_reason": "active_profile_still_running",
+        }
+    if grid_exceeded > 0:
+        return {
+            "recommended_followup_profile_kind": "vmec2000",
+            "recommended_followup_reason": "widen_mgrid_before_backend_comparison",
+        }
+    if evidence == "diagnostic_underresolved":
+        return {
+            "recommended_followup_profile_kind": "resolution-preflight",
+            "recommended_followup_reason": "fix_projection_nzeta_or_mgrid_gate_first",
+        }
+    if accepted_status not in {"completed", "not_applicable"} and backend in {
+        "vmec_jax_direct",
+        "vmec_jax_mgrid",
+        "vmec_jax_direct_live",
+        "vmec_jax_mgrid_live",
+        "vmec2000_mgrid",
+    }:
+        return {
+            "recommended_followup_profile_kind": "provider-parity",
+            "recommended_followup_reason": "accepted_lcfs_provider_parity_missing",
+        }
+    if next_action_text in {
+        "scan_delt_stage_budget_or_pressure_acceleration",
+        "scan_delt_or_stage_budget",
+        "let_current_run_finish_then_scan_delt_or_stage_budget",
+    }:
+        kind = "direct-gpu" if "direct" in backend else "provider-parity"
+        return {
+            "recommended_followup_profile_kind": kind,
+            "recommended_followup_reason": next_action_text,
+        }
+    if backend == "vmec2000_mgrid":
+        return {
+            "recommended_followup_profile_kind": "provider-parity",
+            "recommended_followup_reason": "vmec2000_reference_not_strict",
+        }
+    return {
+        "recommended_followup_profile_kind": "provider-parity",
+        "recommended_followup_reason": next_action_text or "inspect_backend_comparison",
     }
 
 
@@ -773,8 +848,9 @@ def _summary_row(
     accepted_parity_vac = accepted_parity_vac if isinstance(accepted_parity_vac, dict) else {}
     accepted_parity_bnormal = accepted_parity_vac.get("bnormal")
     accepted_parity_bnormal = accepted_parity_bnormal if isinstance(accepted_parity_bnormal, dict) else {}
+    status_value = status if status is not None else backend.get("status")
     next_action = _recommended_next_action(
-        status=status if status is not None else backend.get("status"),
+        status=status_value,
         progress_phase=backend.get("progress_phase"),
         force_rows_started=backend.get("force_rows_started"),
         strict_components_met=strict_met,
@@ -785,7 +861,7 @@ def _summary_row(
     )
     resolution = resolution_deck if isinstance(resolution_deck, dict) else {}
     strict_evidence = _strict_evidence_payload(
-        status=status if status is not None else backend.get("status"),
+        status=status_value,
         backend_name=backend_name,
         requested_ftol=requested_ftol,
         strict_components_met=strict_met,
@@ -797,11 +873,20 @@ def _summary_row(
         cfg=cfg,
         tail_plateau_status=tail_plateau.get("status"),
     )
+    recommended_followup = _recommended_followup_payload(
+        backend_name=backend_name,
+        status=status_value,
+        next_action=next_action,
+        strict_evidence_status=strict_evidence.get("strict_evidence_status"),
+        accepted_provider_parity_status=accepted_parity.get("status"),
+        vacuum_grid_exceeded_count=vacuum_grid_exceeded_count,
+    )
     return {
         "case": case,
         "backend": backend_name,
         **strict_evidence,
-        "status": status if status is not None else backend.get("status"),
+        **recommended_followup,
+        "status": status_value,
         "progress_phase": backend.get("progress_phase"),
         "force_rows_started": backend.get("force_rows_started"),
         "launcher_log_size_bytes": backend.get("launcher_log_size_bytes"),
@@ -1156,6 +1241,8 @@ def main(argv: list[str] | None = None) -> int:
         "strict_gap",
         "remaining_iterations",
         "next_action",
+        "recommended_followup_profile_kind",
+        "recommended_followup_reason",
         "resolution_deck_status",
         "resolution_deck_reasons",
         "accepted_provider_parity_status",

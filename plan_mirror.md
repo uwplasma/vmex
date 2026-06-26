@@ -6170,7 +6170,7 @@ No user input is needed.
 ### User input needed
 
 No user input is needed.
----
+
 ## 264. Added The Reduced Square-Control Boundary-Delta Hook
 
 ### Steps taken
@@ -31006,6 +31006,89 @@ Results: `6 passed`; ruff and py-compile passed. The sample command includes
 - `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
 - Accepted-boundary provider-parity lane: `100%`.
 - Follow-up command reproducibility lane: `100%`.
+- True spline/control-basis hybrid lane: `62%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 267. Added Summary Follow-Up Profile Recommendations
+
+### Steps taken
+
+- Wired the square-coil profile summarizer to emit
+  `recommended_followup_profile_kind` and `recommended_followup_reason`.
+- Added recommendation rules for active rows, strict evidence, underresolved
+  projection decks, VMEC2000 vacuum-grid overflow, missing accepted-LCFS
+  provider parity, and stalled direct-coil tails that should move to a
+  direct-GPU `DELT`/stage-budget probe.
+- Added focused unit tests for the new recommendation states.
+- Documented the columns in
+  `docs/mirror/direct_coil_free_boundary_convergence.rst`.
+- Polled the active `office` VMEC2000 and direct-GPU runs without mutating
+  those worktrees.
+
+### Results obtained
+
+- The compact summary now turns the `FTOL=1e-12`, `mpol`/`ntor`/`nzeta`,
+  `mgrid_nphi`, accepted-provider parity, and residual-tail diagnostics into a
+  concrete next profiling lane.
+- Active long runs remain marked as `wait_current_run`, so the table does not
+  encourage duplicate heavy jobs while VMEC2000 or direct-GPU rows are still
+  running.
+- Rows that are numerically underresolved are routed to the cheap
+  `resolution-preflight` path before spending time on full equilibrium solves.
+- The active VMEC2000 row is at iteration `10817/24000`, total residual
+  `2.232e-11`, max component `1.05e-11`, no vacuum-grid overflow, and a
+  flat-above-tolerance tail. It is closer than the direct-coil rows, but not
+  strict `1e-12` evidence yet.
+- The active direct-GPU baseline and Anderson rows are still in early final
+  stage force iterations near iteration `160`, with monotone decreasing totals
+  around `4.8e-6` and max components around `2.8e-6`; both remain active
+  `wait_current_run` rows.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_summarize_square_coil_profiles.py
+ruff check tools/diagnostics/summarize_square_coil_profiles.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile tools/diagnostics/summarize_square_coil_profiles.py
+git diff --check
+```
+
+Results: `18 passed`; ruff, py-compile, and diff whitespace checks passed.
+
+### File structure and best-practice notes
+
+- The recommendation logic stays in the summarizer, which already owns compact
+  evidence classification.
+- No result or figure artifacts are tracked.
+- The rules consume existing JSON/table fields and do not add another output
+  format.
+- The remote profile snapshot used only copied sidecar/log files in `/tmp`;
+  no `results/` artifacts were added to the repository.
+
+### Best next steps
+
+1. Let the active VMEC2000/direct-GPU rows continue unless they hit a hard
+   stall or exceed their time budget.
+2. When one row finishes, run the summary table and follow
+   `recommended_followup_profile_kind` rather than launching a duplicate heavy
+   profile.
+3. If VMEC2000 remains flat above `1e-12`, run a narrow `DELT` and stage-budget
+   scan before treating it as a representation or mgrid-provider limit.
+
+### Completion percentages after M267
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `82%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- Follow-up recommendation lane: `100%`.
 - True spline/control-basis hybrid lane: `62%`.
 - Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
 
