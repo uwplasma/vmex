@@ -252,6 +252,90 @@ def _vmec2000_tail_projection(rows: list[Any], *, length: int = 12) -> dict[str,
     return out
 
 
+def _row_total_and_max(row: Any) -> tuple[int, float, float] | None:
+    try:
+        if isinstance(row, dict):
+            iteration = int(row.get("it"))
+            total = _finite_float(row.get("total"))
+            if total is None:
+                parts = [_finite_float(row.get(key)) for key in ("fsqr", "fsqz", "fsql")]
+                if not all(value is not None for value in parts):
+                    return None
+                total = float(sum(parts))  # type: ignore[arg-type]
+            max_component = _finite_float(row.get("max_component"))
+            if max_component is None:
+                parts = [_finite_float(row.get(key)) for key in ("fsqr", "fsqz", "fsql")]
+                if not all(value is not None for value in parts):
+                    return None
+                max_component = float(max(parts))  # type: ignore[arg-type]
+        else:
+            iteration = int(row.it)
+            parts = [float(row.fsqr), float(row.fsqz), float(row.fsql)]
+            total = float(sum(parts))
+            max_component = float(max(parts))
+    except Exception:
+        return None
+    if not (np.isfinite(total) and total > 0.0 and np.isfinite(max_component)):
+        return None
+    return iteration, float(total), float(max_component)
+
+
+def _tail_plateau_payload(
+    rows: list[Any],
+    *,
+    stage_ftol: float | None,
+    length: int = 12,
+    rel_span_tol: float = 0.02,
+) -> dict[str, Any]:
+    """Classify whether the recent residual tail is flat above tolerance."""
+
+    parsed = [item for item in (_row_total_and_max(row) for row in list(rows)[-int(length) :]) if item]
+    out: dict[str, Any] = {
+        "window": int(len(parsed)),
+        "status": "insufficient_tail",
+        "stage_ftol": None if stage_ftol is None else float(stage_ftol),
+        "total_rel_span": None,
+        "total_last_over_min": None,
+        "monotone_decrease_fraction": None,
+    }
+    if len(parsed) < 3:
+        return out
+    totals = np.asarray([item[1] for item in parsed], dtype=float)
+    max_components = np.asarray([item[2] for item in parsed], dtype=float)
+    diffs = np.diff(totals)
+    total_min = float(np.min(totals))
+    total_max = float(np.max(totals))
+    total_last = float(totals[-1])
+    rel_span = float((total_max - total_min) / max(total_min, np.finfo(float).tiny))
+    stage = None if stage_ftol is None else float(stage_ftol)
+    above_stage = bool(stage is not None and np.isfinite(stage) and total_last > stage)
+    flat = bool(rel_span <= float(rel_span_tol))
+    if flat and above_stage:
+        status = "flat_above_stage_ftol"
+    elif flat:
+        status = "flat_near_stage_ftol"
+    elif np.all(diffs < 0.0):
+        status = "monotone_decreasing"
+    else:
+        status = "oscillatory"
+    out.update(
+        {
+            "status": status,
+            "first_iter": int(parsed[0][0]),
+            "last_iter": int(parsed[-1][0]),
+            "total_first": float(totals[0]),
+            "total_last": total_last,
+            "total_min": total_min,
+            "total_max": total_max,
+            "total_rel_span": rel_span,
+            "total_last_over_min": float(total_last / max(total_min, np.finfo(float).tiny)),
+            "max_component_last": float(max_components[-1]),
+            "monotone_decrease_fraction": float(np.mean(diffs < 0.0)),
+        }
+    )
+    return out
+
+
 _VMEC_STYLE_STAGE_RE = re.compile(
     r"^\s*NS\s*=\s*(?P<ns>\d+)\s+NO\.\s+FOURIER\s+MODES\s*=\s*(?P<modes>\d+)"
     r"\s+FTOLV\s*=\s*(?P<ftolv>[+\-0-9.Ee]+)\s+NITER\s*=\s*(?P<niter>\d+)"
@@ -340,6 +424,7 @@ def _vmec_style_log_payload(path: Path) -> dict[str, Any]:
         if saw_axis_repair
         else "startup_or_pre_iteration_output"
     )
+    stage_ftol = _finite_float(stages[-1].get("ftolv")) if stages else None
     payload: dict[str, Any] = {
         "launcher_log": path,
         **_file_status_payload(path, prefix="launcher_log"),
@@ -355,6 +440,7 @@ def _vmec_style_log_payload(path: Path) -> dict[str, Any]:
         "history": {
             "fsq_component_sum_tail_projection": _vmec2000_tail_projection(rows),
         },
+        "tail_plateau": _tail_plateau_payload(rows, stage_ftol=stage_ftol),
         "initial_jacobian_changed_sign": bool(saw_axis_repair),
         "vacuum_pressure_turn_on_iter": vacuum_turn_on_iter,
         "n_iter": None if last is None else int(last["it"]),
@@ -398,6 +484,14 @@ def _summary_row(
             last_stage = stage_summaries[-1]
             if isinstance(last_stage, dict):
                 requested_ftol = _finite_float(last_stage.get("ftolv"))
+    tail_plateau = backend.get("tail_plateau")
+    if not isinstance(tail_plateau, dict):
+        tail_rows = backend.get("tail_rows")
+        tail_plateau = (
+            _tail_plateau_payload(tail_rows, stage_ftol=requested_ftol)
+            if isinstance(tail_rows, list)
+            else {}
+        )
     if backend_name == "vmec2000_mgrid":
         final_total, best_total, final_iter = _vmec2000_total(backend)
         final_max_component = _vmec2000_final_max_component(backend) or _finite_float(
@@ -513,6 +607,10 @@ def _summary_row(
         "virtual_casing_wall_s": _finite_float(virtual_casing.get("wall_s")),
         "tail_decay_factor": _tail_projection(backend_for_projection, "per_iter_factor"),
         "iters_to_1e-12_est": _tail_projection(backend_for_projection, "", target=1.0e-12),
+        "tail_plateau_status": tail_plateau.get("status"),
+        "tail_plateau_window": tail_plateau.get("window"),
+        "tail_total_rel_span": _finite_float(tail_plateau.get("total_rel_span")),
+        "tail_last_over_min": _finite_float(tail_plateau.get("total_last_over_min")),
         "wall_s": _finite_float(backend.get("wall_s")),
         "vacuum_grid_exceeded_count": backend.get("vacuum_grid_exceeded_count"),
     }
@@ -571,6 +669,7 @@ def _vmec2000_partial_payload_from_threed1(path: Path) -> dict[str, Any]:
     totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
     last = rows[-1] if rows else None
     progress_phase = "force_iterations" if rows else "startup_or_pre_iteration_output"
+    stage_ftol = _finite_float(getattr(stages[-1], "ftolv", None)) if stages else None
     return {
         "threed1": path,
         **_file_status_payload(path, prefix="threed1"),
@@ -583,6 +682,7 @@ def _vmec2000_partial_payload_from_threed1(path: Path) -> dict[str, Any]:
         "history": {
             "fsq_component_sum_tail_projection": _vmec2000_tail_projection(rows),
         },
+        "tail_plateau": _tail_plateau_payload(rows, stage_ftol=stage_ftol),
         "final_max_component": None
         if last is None
         else float(max(float(last.fsqr), float(last.fsqz), float(last.fsql))),
@@ -770,6 +870,10 @@ def main(argv: list[str] | None = None) -> int:
         "virtual_casing_wall_s",
         "tail_decay_factor",
         "iters_to_1e-12_est",
+        "tail_plateau_status",
+        "tail_plateau_window",
+        "tail_total_rel_span",
+        "tail_last_over_min",
         "wall_s",
         "vacuum_grid_exceeded_count",
     ]

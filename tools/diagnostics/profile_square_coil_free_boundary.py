@@ -315,6 +315,7 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
         "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
         "final_max_component": None if last is None else _vmec2000_max_component(last),
         "strict_components_met": None if last is None else _vmec2000_strict_components_met(last, final_ftol),
+        "tail_plateau": _vmec2000_tail_plateau_payload(rows, stage_ftol=final_ftol),
         "vacuum_grid_exceeded_count": _vacuum_grid_exceeded_count(threed1),
     }
 
@@ -1256,6 +1257,72 @@ def _vmec2000_strict_components_met(row: Any, requested_ftol: float | None) -> b
     return bool(_vmec2000_max_component(row) <= requested)
 
 
+def _vmec2000_tail_plateau_payload(
+    rows: list[Any],
+    *,
+    stage_ftol: float | None,
+    length: int = 12,
+    rel_span_tol: float = 0.02,
+) -> dict[str, Any]:
+    """Classify the most recent VMEC2000 residual tail."""
+
+    tail: list[dict[str, float | int]] = []
+    for row in list(rows)[-int(length) :]:
+        try:
+            payload = row if isinstance(row, dict) else _vmec2000_row_payload(row)
+            total = float(payload["total"])
+            max_component = float(payload["max_component"])
+            iteration = int(payload["it"])
+        except Exception:
+            continue
+        if np.isfinite(total) and total > 0.0 and np.isfinite(max_component):
+            tail.append({"it": iteration, "total": total, "max_component": max_component})
+    out: dict[str, Any] = {
+        "window": int(len(tail)),
+        "status": "insufficient_tail",
+        "stage_ftol": None if stage_ftol is None else float(stage_ftol),
+        "total_rel_span": None,
+        "total_last_over_min": None,
+        "monotone_decrease_fraction": None,
+    }
+    if len(tail) < 3:
+        return out
+    totals = np.asarray([float(row["total"]) for row in tail], dtype=float)
+    max_components = np.asarray([float(row["max_component"]) for row in tail], dtype=float)
+    diffs = np.diff(totals)
+    total_min = float(np.min(totals))
+    total_max = float(np.max(totals))
+    total_last = float(totals[-1])
+    rel_span = float((total_max - total_min) / max(total_min, TINY))
+    stage = None if stage_ftol is None else float(stage_ftol)
+    above_stage = bool(stage is not None and np.isfinite(stage) and total_last > stage)
+    flat = bool(rel_span <= float(rel_span_tol))
+    if flat and above_stage:
+        status = "flat_above_stage_ftol"
+    elif flat:
+        status = "flat_near_stage_ftol"
+    elif np.all(diffs < 0.0):
+        status = "monotone_decreasing"
+    else:
+        status = "oscillatory"
+    out.update(
+        {
+            "status": status,
+            "first_iter": int(tail[0]["it"]),
+            "last_iter": int(tail[-1]["it"]),
+            "total_first": float(totals[0]),
+            "total_last": total_last,
+            "total_min": total_min,
+            "total_max": total_max,
+            "total_rel_span": rel_span,
+            "total_last_over_min": float(total_last / max(total_min, TINY)),
+            "max_component_last": float(max_components[-1]),
+            "monotone_decrease_fraction": float(np.mean(diffs < 0.0)),
+        }
+    )
+    return out
+
+
 def _vmec2000_stage_payload(stage: Any) -> dict[str, Any]:
     rows = list(getattr(stage, "rows", []) or [])
     totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
@@ -1541,6 +1608,7 @@ def main(argv: list[str] | None = None) -> int:
                 last = rows[-1] if rows else None
                 totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
                 final_max_component = None if last is None else _vmec2000_max_component(last)
+                stage_ftol = float(run.stages[-1].ftolv) if run.stages else float(config.ftol)
                 payload["backends"]["vmec2000_mgrid"] = {
                     "status": "completed" if run.returncode == 0 else "nonzero_exit",
                     "returncode": int(run.returncode),
@@ -1562,6 +1630,7 @@ def main(argv: list[str] | None = None) -> int:
                     "strict_components_met": (
                         None if last is None else _vmec2000_strict_components_met(last, float(config.ftol))
                     ),
+                    "tail_plateau": _vmec2000_tail_plateau_payload(rows, stage_ftol=stage_ftol),
                 }
             except Exception as exc:
                 payload["backends"]["vmec2000_mgrid"] = {

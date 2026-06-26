@@ -138,6 +138,22 @@ def test_square_coil_profile_tail_decay_projection_estimates_remaining_iteration
     assert projection["estimated_additional_iterations_to_target"]["1e-12"] == 9
 
 
+def test_square_coil_profile_vmec2000_tail_plateau_classifies_flat_above_stage_ftol():
+    rows = [
+        {"it": 10, "total": 5.60e-10, "max_component": 2.50e-10},
+        {"it": 11, "total": 5.61e-10, "max_component": 2.51e-10},
+        {"it": 12, "total": 5.62e-10, "max_component": 2.52e-10},
+        {"it": 13, "total": 5.63e-10, "max_component": 2.53e-10},
+    ]
+
+    plateau = profile._vmec2000_tail_plateau_payload(rows, stage_ftol=1.0e-10)
+
+    assert plateau["status"] == "flat_above_stage_ftol"
+    assert plateau["window"] == 4
+    assert plateau["total_last_over_min"] == pytest.approx(5.63e-10 / 5.60e-10)
+    assert plateau["max_component_last"] == pytest.approx(2.53e-10)
+
+
 def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement():
     cfg = VMECConfig(
         mpol=2,
@@ -219,6 +235,7 @@ def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_pat
     assert payload["min_total"] == pytest.approx(7.0e-6)
     assert payload["final_max_component"] == pytest.approx(4.0e-6)
     assert payload["strict_components_met"] is False
+    assert payload["tail_plateau"]["status"] == "insufficient_tail"
     assert payload["stage_summaries"][0]["strict_components_met"] is False
     assert payload["vacuum_grid_exceeded_count"] == 1
 
@@ -247,6 +264,7 @@ def test_square_coil_profile_writes_partial_vmec2000_sidecar(tmp_path: Path):
     assert data["updated_unix_s"] > 0.0
     assert data["final_max_component"] == pytest.approx(4.0e-11)
     assert data["strict_components_met"] is False
+    assert data["tail_plateau"]["stage_ftol"] == pytest.approx(1.0e-12)
 
 
 def test_square_coil_profile_provider_parity_payload_reports_field_and_bnormal_error(monkeypatch, tmp_path: Path):

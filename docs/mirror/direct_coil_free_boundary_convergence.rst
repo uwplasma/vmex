@@ -399,6 +399,11 @@ residual floors. Direct-coil rows produced with
 ``--virtual-casing-diagnostics`` also expose virtual-casing status,
 external-normal residuals, pressure-balance residuals, and required/target
 external-field RMS values in the same summary table.
+For active VMEC2000 rows, the profiler and summary table now also report
+``tail_plateau_*`` fields. ``flat_above_stage_ftol`` identifies tails whose
+recent relative span is small while the last residual remains above the current
+stage tolerance; those rows should be treated as stalled until a
+``DELT``/stage-budget scan moves the floor.
 
 The square-axis stellarator-mirror hybrid geometry now has a lower-bandwidth
 ``axis_kind="spline"`` option. It is still projected into VMEC Fourier boundary

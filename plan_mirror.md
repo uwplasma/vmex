@@ -28622,3 +28622,80 @@ Targeted test result: `18 passed, 1 warning`.
 ### User input needed
 
 No user input is needed.
+---
+## 244. Added VMEC2000 Tail-Plateau Diagnostics
+
+### Steps taken
+
+- Added `tail_plateau` metadata to VMEC2000 profile payloads and live partial
+  sidecars from `tools/diagnostics/profile_square_coil_free_boundary.py`.
+- Added `tail_plateau_*` columns to
+  `tools/diagnostics/summarize_square_coil_profiles.py`.
+- Made the summary helper compute plateau status from legacy sidecars that
+  only have `tail_rows`.
+- Added tests for the plateau classifier, profile-sidecar payloads, and
+  summary rows generated from partial VMEC2000 sidecars.
+- Updated mirror README and convergence docs to explain
+  `tail_plateau_status=flat_above_stage_ftol`.
+
+### Results obtained
+
+- Live VMEC2000 rows can now be reviewed as:
+  - `monotone_decreasing`;
+  - `oscillatory`;
+  - `flat_near_stage_ftol`;
+  - `flat_above_stage_ftol`;
+  - `insufficient_tail`.
+- This makes the current strict-reference behavior explicit. The active
+  `MPOL=5, NTOR=28, NZETA=64` VMEC2000 run is still improving in the long
+  view, but the latest sampled tail is nearly flat above the current stage
+  tolerance: best/latest total residual `3.827e-10`, latest max component
+  `1.78e-10`, and zero vacuum-grid excursions.
+- This supports the current diagnosis: VMEC2000 is more robust than the JAX
+  direct/mgrid paths for the strict square-coil generated-`mgrid` reference,
+  but the current deck still needs a `DELT`/stage-budget scan before any
+  `FTOL=1e-12` convergence claim.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+git diff --check
+```
+
+Targeted test result: `30 passed, 1 warning`.
+
+### File structure and best-practice notes
+
+- This is a reporting-only change to existing diagnostic tools. No solver
+  behavior or differentiable API is changed.
+- Plateau classification is compact JSON metadata and summary-table columns;
+  it avoids storing long VMEC2000 histories in the repository.
+- The classification uses the recent relative span of the residual tail and
+  the current stage tolerance, so it is a triage aid rather than a replacement
+  for the strict per-component convergence gate.
+
+### Best next steps
+
+1. Let the active VMEC2000 run finish or time out.
+2. If final rows stay in `flat_above_stage_ftol`, run the focused VMEC2000
+   `DELT`/stage-budget scan on the same `5,28,64` production deck.
+3. After the VMEC2000 reference floor is understood, run the matching
+   `vmec_jax` generated-`mgrid` and direct-coil profiles and compare
+   `tail_plateau_*`, `final_max_component`, and `strict_components_met`.
+
+### Completion percentages after M244
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `93%`.
+- VMEC2000 robustness/reference lane: `95%`, pending final row or timeout.
+- Direct-coil finite-beta diagnostic lane: `86%`.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `75%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- True spline/control-basis hybrid lane: `36%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.

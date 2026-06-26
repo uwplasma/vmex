@@ -326,6 +326,34 @@ def test_square_coil_profile_summary_prefers_active_partial_sidecar(tmp_path: Pa
     assert row["strict_components_met"] is True
 
 
+def test_square_coil_profile_summary_reports_vmec2000_tail_plateau_from_sidecar(tmp_path: Path):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_plateau_sidecar"
+    case_dir.mkdir()
+    partial = case_dir / "_partial_vmec2000_payload.json"
+    partial.write_text(
+        json.dumps(
+            {
+                "stage_summaries": [{"ns": 17, "ftolv": 1.0e-10}],
+                "last_row": {"it": 13, "fsqr": 2.53e-10, "fsqz": 2.42e-10, "fsql": 6.8e-11},
+                "min_total": 5.60e-10,
+                "tail_rows": [
+                    {"it": 10, "total": 5.60e-10, "max_component": 2.50e-10},
+                    {"it": 11, "total": 5.61e-10, "max_component": 2.51e-10},
+                    {"it": 12, "total": 5.62e-10, "max_component": 2.52e-10},
+                    {"it": 13, "total": 5.63e-10, "max_component": 2.53e-10},
+                ],
+            }
+        )
+    )
+
+    row = summary.rows_from_source(partial)[0]
+
+    assert row["tail_plateau_status"] == "flat_above_stage_ftol"
+    assert row["tail_plateau_window"] == 4
+    assert row["tail_last_over_min"] == pytest.approx(5.63e-10 / 5.60e-10)
+    assert row["tail_total_rel_span"] == pytest.approx((5.63e-10 - 5.60e-10) / 5.60e-10)
+
+
 def test_square_coil_profile_summary_labels_vmec2000_startup_before_force_rows(tmp_path: Path):
     case_dir = tmp_path / "square_coil_freeb_backend_profile_vmec2000_ns17_mpol8_ntor32_nzeta72"
     workdir = case_dir / "vmec2000_mgrid"

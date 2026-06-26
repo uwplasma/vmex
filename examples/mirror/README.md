@@ -306,6 +306,11 @@ before the external executable exits. The summary table prints
 ``threed1`` but has not yet printed force iterations is labelled
 ``startup_or_pre_iteration_output`` instead of appearing as a blank residual
 row.
+The live VMEC2000 sidecar and summary table also report ``tail_plateau_*``
+columns. A ``tail_plateau_status`` of ``flat_above_stage_ftol`` means the most
+recent residual tail is nearly flat while still above the current stage
+tolerance, which should trigger a ``DELT``/stage-budget scan before claiming
+strict ``FTOL=1e-12`` convergence.
 Use ``--nstep 1`` for strict VMEC2000 profiling when live residual cadence
 matters; larger values can hide force rows for long high-mode startup or early
 iteration windows.
