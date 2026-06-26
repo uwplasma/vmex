@@ -409,7 +409,13 @@ backend exits before any residual evidence appears.
 The summary helper also parses those live direct launcher logs, so
 ``python tools/diagnostics/summarize_square_coil_profiles.py <profile-dir> --markdown``
 reports running direct residuals, axis-repair status, and the vacuum-pressure
-turn-on iteration before the final JSON exists.
+turn-on iteration before the final JSON exists. It recognizes both the standard
+``square_coil_freeb_backend_profile_*`` folders and direct-GPU folders such as
+``square_coil_direct_gpu_*``, so active speed probes still retain ``MPOL``,
+``NTOR``, ``NS``, ``NZETA``, and final-stage budget metadata in the summary.
+For completed stalled direct-coil rows that have not yet used the experimental
+JAX NESTOR operator, the recommendation column points to
+``direct-gpu-jax-nestor`` as the next A/B profile.
 With ``--verbose-solver``, free-boundary NESTOR timing lines are printed by
 default around vacuum updates and coupled force evaluations. Set
 ``VMEC_JAX_FREEB_VERBOSE_TIMING=0`` to keep the VMEC-style residual rows without

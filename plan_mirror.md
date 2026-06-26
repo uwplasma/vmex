@@ -31580,3 +31580,109 @@ The report recorded `ftol=1e-12`, `virtual_casing_quad_factor=3`,
 ### User input needed
 
 No user input is needed.
+
+---
+## M273 - Live Direct-GPU Summary Repair and JAX-NESTOR Follow-up Routing
+
+### Steps taken
+
+- Rechecked the local branch and active `office` profiles.
+- Confirmed the active VMEC2000 and two direct-GPU rows are still running in
+  remote worktrees, so no new heavy solve was launched.
+- Found that the existing summary helper parsed live direct launcher logs, but
+  active directories named `square_coil_direct_gpu_*` collapsed to case name
+  `launcher` and lost resolution metadata.
+- Updated `tools/diagnostics/summarize_square_coil_profiles.py` so it
+  recognizes `square_coil_direct_gpu_*` folders, preserves the active direct-GPU
+  case label, and infers `MPOL`, `NTOR`, `NS`, `NZETA`, and final-stage budget
+  from those names.
+- Added `freeb_jax_nestor_operator` and `freeb_jax_nestor_jit_operator` summary
+  columns from each backend's `free_boundary_solver_overrides` payload.
+- Updated the follow-up classifier so a completed stalled direct-coil row that
+  has not used the experimental JAX NESTOR operator recommends
+  `direct-gpu-jax-nestor`; if that operator has already been used, the row falls
+  back to the ordinary direct-GPU `DELT`/stage-budget lane.
+- Updated the mirror README and strict convergence notes with the live-log
+  naming and follow-up behavior.
+
+### Results obtained
+
+- Copied only lightweight live logs/sidecars from `office` into `/tmp` and ran
+  the patched local summarizer. Current live evidence:
+  - Direct-GPU baseline:
+    - case `ns9_13_17_mpol5_ntor28_nzeta64_niter8k_control_spline_baseline`;
+    - `final_iter=1124`, `final_max_component=4.82e-08`, strict gap `4.82e4`;
+    - `tail_plateau_status=flat_above_stage_ftol`;
+    - still running, so follow-up remains `wait_current_run`.
+  - Direct-GPU Anderson:
+    - case `ns9_13_17_mpol5_ntor28_nzeta64_niter8k_control_spline_anderson`;
+    - `final_iter=1109`, `final_max_component=4.85e-08`, strict gap `4.85e4`;
+    - `tail_plateau_status=monotone_decreasing`;
+    - still running, so follow-up remains `wait_current_run`.
+  - VMEC2000 generated-mgrid:
+    - case `vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1`;
+    - `final_iter=11837`, `final_max_component=1.13e-11`, strict gap `11.3`;
+    - `tail_plateau_status=flat_above_stage_ftol`;
+    - no vacuum-grid overflow.
+- The live summary now supports the next decision point: if the baseline direct
+  row exits without strict convergence, the first completed-row recommendation
+  will be `direct-gpu-jax-nestor` rather than repeating the same direct-GPU
+  baseline.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_summarize_square_coil_profiles.py
+
+venv/bin/python -m py_compile tools/diagnostics/summarize_square_coil_profiles.py
+
+ruff check \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_summarize_square_coil_profiles.py
+
+git diff --check
+```
+
+Results: `20 passed`; py-compile, ruff, and whitespace checks passed.
+
+Additional live-evidence smoke used copied `/tmp` logs from the active office
+runs and the patched local summarizer; no remote worktree or running process was
+modified.
+
+### File structure and best-practice notes
+
+- The change stays in the existing summary tool and summary tests.
+- The summary logic now follows the existing profiler/follow-up command naming
+  rather than creating another report format.
+- Documentation updates stay in the existing mirror README and convergence note.
+- No WOUT, mgrid, figure, or result files were tracked.
+
+### Best next steps
+
+1. Let the active direct-GPU and VMEC2000 runs finish or reach an unmistakable
+   plateau.
+2. Summarize the completed rows with the patched summary helper.
+3. If the baseline direct row exits above strict `FTOL=1e-12`, launch one
+   `direct-gpu-jax-nestor` A/B row on the same `MPOL=5`, `NTOR=28`, `NZETA=64`,
+   `NS_ARRAY=9,13,17` deck.
+4. If VMEC2000 remains flat near `1e-11`, run the narrow `DELT`/stage-budget
+   scan before increasing Fourier modes or moving to solver-native spline
+   controls.
+
+### Completion percentages after M273
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `88%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `72%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command and summary reproducibility lane: `100%`.
+- Strict spline-bridge diagnostics lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

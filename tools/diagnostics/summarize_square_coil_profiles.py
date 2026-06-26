@@ -26,6 +26,11 @@ DEFAULT_GLOB = "results/square_coil_freeb_backend_profile_*/square_coil_free_bou
 FINAL_REPORT_NAME = "square_coil_free_boundary_backend_profile.json"
 PARTIAL_VMEC2000_NAME = "_partial_vmec2000_payload.json"
 LAUNCHER_LOG_NAME = "launcher.log"
+CASE_PREFIXES = (
+    "square_coil_freeb_backend_profile_",
+    "square_coil_direct_gpu_",
+    "square_coil_",
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -205,8 +210,11 @@ def _recommended_next_action(
 def _case_name(path: Path) -> str:
     for parent in (path.parent, path.parent.parent):
         name = parent.name
-        if name.startswith("square_coil_freeb_backend_profile_"):
-            return name.replace("square_coil_freeb_backend_profile_", "")
+        for prefix in CASE_PREFIXES:
+            if name.startswith(prefix):
+                return name[len(prefix) :]
+    if path.name == LAUNCHER_LOG_NAME and path.parent.name not in {"", "."}:
+        return path.parent.name
     if path.name != FINAL_REPORT_NAME:
         return path.stem
     return path.parent.name
@@ -275,6 +283,11 @@ def _virtual_casing_payload(backend: dict[str, Any]) -> dict[str, Any]:
 def _accepted_provider_parity_payload(backend: dict[str, Any]) -> dict[str, Any]:
     payload = backend.get("accepted_provider_parity")
     return payload if isinstance(payload, dict) else {"status": "not_run"}
+
+
+def _solver_overrides_payload(backend: dict[str, Any]) -> dict[str, Any]:
+    payload = backend.get("free_boundary_solver_overrides")
+    return payload if isinstance(payload, dict) else {}
 
 
 def _promotion_payload(
@@ -410,6 +423,7 @@ def _recommended_followup_payload(
     next_action: str,
     strict_evidence_status: Any,
     accepted_provider_parity_status: Any,
+    freeb_jax_nestor_operator: Any,
     vacuum_grid_exceeded_count: Any,
 ) -> dict[str, str]:
     """Return the next profile kind that best matches the summary evidence."""
@@ -462,7 +476,10 @@ def _recommended_followup_payload(
         "scan_delt_or_stage_budget",
         "let_current_run_finish_then_scan_delt_or_stage_budget",
     }:
-        kind = "direct-gpu" if "direct" in backend else "provider-parity"
+        if "direct" in backend:
+            kind = "direct-gpu" if bool(freeb_jax_nestor_operator) else "direct-gpu-jax-nestor"
+        else:
+            kind = "provider-parity"
         return {
             "recommended_followup_profile_kind": kind,
             "recommended_followup_reason": next_action_text,
@@ -817,6 +834,13 @@ def _summary_row(
         final_total, best_total, final_iter = _jax_total(backend)
         final_max_component = _jax_final_max_component(backend)
     virtual_casing = _virtual_casing_payload(backend)
+    solver_overrides = _solver_overrides_payload(backend)
+    freeb_jax_nestor_operator = solver_overrides.get(
+        "freeb_jax_nestor_operator", cfg.get("freeb_jax_nestor_operator")
+    )
+    freeb_jax_nestor_jit_operator = solver_overrides.get(
+        "freeb_jax_nestor_jit_operator", cfg.get("freeb_jax_nestor_jit_operator")
+    )
     strict_met = _strict_components_met(final_max_component, requested_ftol)
     strict_gap = _strict_gap(final_max_component, requested_ftol)
     promotion = _promotion_payload(
@@ -879,6 +903,7 @@ def _summary_row(
         next_action=next_action,
         strict_evidence_status=strict_evidence.get("strict_evidence_status"),
         accepted_provider_parity_status=accepted_parity.get("status"),
+        freeb_jax_nestor_operator=freeb_jax_nestor_operator,
         vacuum_grid_exceeded_count=vacuum_grid_exceeded_count,
     )
     return {
@@ -903,6 +928,8 @@ def _summary_row(
         "recommended_nzeta": cfg.get("recommended_nzeta"),
         "nvacskip": cfg.get("nvacskip"),
         "solver_mode": cfg.get("solver_mode"),
+        "freeb_jax_nestor_operator": freeb_jax_nestor_operator,
+        "freeb_jax_nestor_jit_operator": freeb_jax_nestor_jit_operator,
         "side_power": cfg.get("side_power"),
         "corner_power": cfg.get("corner_power"),
         "max_iter": max_iter,
@@ -1234,6 +1261,8 @@ def main(argv: list[str] | None = None) -> int:
         "recommended_nzeta",
         "nvacskip",
         "solver_mode",
+        "freeb_jax_nestor_operator",
+        "freeb_jax_nestor_jit_operator",
         "side_power",
         "corner_power",
         "max_iter",

@@ -458,6 +458,14 @@ residual floors. Direct-coil rows produced with
 ``--virtual-casing-diagnostics`` also expose virtual-casing status,
 external-normal residuals, pressure-balance residuals, and required/target
 external-field RMS values in the same summary table.
+The summary helper also recognizes direct-GPU result folders named
+``square_coil_direct_gpu_*``. This keeps active cached-JIT speed probes from
+collapsing to a generic ``launcher`` case name, and preserves ``MPOL``,
+``NTOR``, ``NS``, ``NZETA``, and final-stage budget hints inferred from the
+folder name. Completed stalled direct rows that have not already used
+``freeb_jax_nestor_operator`` now recommend ``direct-gpu-jax-nestor`` as the
+next profile kind; rows that already used it fall back to the ordinary
+direct-GPU ``DELT``/stage-budget lane.
 The profiler also records ``--virtual-casing-quad-factor``,
 ``--virtual-casing-chunk-size``, and
 ``--virtual-casing-target-chunk-size`` for finite-beta postsolve diagnostics.

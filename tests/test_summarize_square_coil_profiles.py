@@ -447,6 +447,49 @@ def test_square_coil_profile_summary_recommends_direct_gpu_for_stalled_direct(
     row = summary.rows_from_profile(report)[0]
 
     assert row["next_action"] == "scan_delt_stage_budget_or_pressure_acceleration"
+    assert row["recommended_followup_profile_kind"] == "direct-gpu-jax-nestor"
+    assert row["recommended_followup_reason"] == "scan_delt_stage_budget_or_pressure_acceleration"
+
+
+def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_probe(
+    tmp_path: Path,
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_stalled_direct_jax_nestor"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 1000,
+                        "final_fsqr": 2.0e-9,
+                        "final_fsqz": 3.0e-9,
+                        "final_fsql": 4.0e-10,
+                        "tail_plateau": {"status": "oscillatory"},
+                        "accepted_provider_parity": {"status": "completed"},
+                        "final_residual_recomputed_on_accepted_state": True,
+                        "free_boundary_solver_overrides": {
+                            "freeb_jax_nestor_operator": True,
+                            "freeb_jax_nestor_jit_operator": False,
+                        },
+                    }
+                },
+            }
+        )
+    )
+
+    row = summary.rows_from_profile(report)[0]
+
+    assert row["freeb_jax_nestor_operator"] is True
+    assert row["freeb_jax_nestor_jit_operator"] is False
     assert row["recommended_followup_profile_kind"] == "direct-gpu"
     assert row["recommended_followup_reason"] == "scan_delt_stage_budget_or_pressure_acceleration"
 
@@ -814,6 +857,39 @@ def test_square_coil_profile_summary_labels_live_mgrid_launcher_log(tmp_path: Pa
     row = summary.rows_from_source(launcher_log)[0]
 
     assert row["backend"] == "vmec_jax_mgrid_live"
+
+
+def test_square_coil_profile_summary_parses_direct_gpu_launcher_dir_name(tmp_path: Path):
+    case_dir = (
+        tmp_path
+        / "square_coil_direct_gpu_ns9_13_17_mpol5_ntor28_nzeta64_niter8k_control_spline_baseline"
+    )
+    case_dir.mkdir()
+    launcher_log = case_dir / "launcher.log"
+    launcher_log.write_text(
+        "\n".join(
+            [
+                "[square-coil-profile] running vmec_jax direct-coil backend",
+                "  NS =    9 NO. FOURIER MODES =  257 FTOLV =  1.000E-12 NITER =   8000",
+                "  ITER    FSQR      FSQZ      FSQL    RAX(v=0)    DELT       WMHD",
+                " 1059  5.37E-08  3.57E-08  4.06E-09  1.458E+00  2.00E-02  3.2171E-01",
+            ]
+        )
+    )
+
+    row = summary.rows_from_source(launcher_log)[0]
+
+    assert row["case"] == "ns9_13_17_mpol5_ntor28_nzeta64_niter8k_control_spline_baseline"
+    assert row["backend"] == "vmec_jax_direct_live"
+    assert row["mpol"] == 5
+    assert row["ntor"] == 28
+    assert row["ns"] == 17
+    assert row["nzeta"] == 64
+    assert row["max_iter"] == 8000
+    assert row["requested_ftol"] == pytest.approx(1.0e-12)
+    assert row["final_iter"] == 1059
+    assert row["final_max_component"] == pytest.approx(5.37e-8)
+    assert row["strict_gap"] == pytest.approx(5.37e4)
 
 
 def test_square_coil_profile_summary_marks_live_direct_log_before_force_rows(tmp_path: Path):
