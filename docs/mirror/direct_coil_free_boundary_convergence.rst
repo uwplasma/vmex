@@ -253,10 +253,15 @@ returns the lowest estimated-cost candidate whose projection error satisfies
 the requested threshold. This is a boundary-representation gate, not a
 nonlinear-convergence claim.
 A projection spot check on the first-order spline shape gives max component
-boundary errors of about ``5.60e-6`` for ``MPOL=5, NTOR=12``, ``1.36e-7`` for
-``6,16``, ``1.78e-9`` for ``6,20``, ``3.32e-10`` for ``6,23``, and
-``3.5e-12`` for ``7,28`` or ``8,32``. The older sharpened ``1.4`` shape, used
-by the already-running strict profiles before this update, gave about
+boundary errors of about ``5.60e-6`` for ``MPOL=5, NTOR=12``, ``1.76e-9`` for
+``5,20``, ``1.92e-11`` for ``5,25``, and ``3.5e-12`` for ``5,28`` or
+``5,32``. Mixed higher-poloidal rows give comparable values:
+``6,23`` is about ``3.33e-10``, while ``7,28`` and ``8,32`` are both around
+``3.46e-12``. Therefore ``8,32`` is useful as a robustness/performance probe,
+but it is not clearly improving boundary projection over ``7,28`` or
+``5,28`` for the current first-order spline target. The older sharpened
+``1.4`` shape, used by the already-running strict profiles before this update,
+gave about
 ``1.27e-4``, ``4.76e-5``, ``2.41e-5``, ``1.44e-5``, ``8.98e-6``, and
 ``6.14e-6`` on the same ladder. Future strict profiles should therefore rerun
 the first-order-weight geometry before spending more time on higher Fourier

@@ -27237,3 +27237,111 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 229. First-Order Spline Projection Floor Assessment
+
+### Steps taken
+
+- Rechecked the current first-order square-axis spline target with the public
+  projection diagnostic instead of relying on the older mixed ``MPOL``/``NTOR``
+  spot check.
+- Scanned fixed ``MPOL=5`` rows over increasing ``NTOR`` and compared them
+  with the active high-mode ``7,28``/``8,32`` rows.
+- Updated the active convergence docs to separate boundary-projection closure
+  from nonlinear free-boundary solve robustness.
+
+### Results obtained
+
+Projection max component errors for the current first-order spline target:
+
+- ``MPOL=5, NTOR=12``: ``5.603270431105319e-06``.
+- ``MPOL=5, NTOR=20``: ``1.7633816629114563e-09``.
+- ``MPOL=5, NTOR=25``: ``1.921577480468173e-11``.
+- ``MPOL=5, NTOR=28``: ``3.4805491821998658e-12``.
+- ``MPOL=5, NTOR=32``: ``3.468114684324064e-12``.
+
+The mixed high-mode checks are consistent:
+
+- ``MPOL=6, NTOR=23``: about ``3.33e-10``.
+- ``MPOL=7, NTOR=28``: about ``3.46e-12``.
+- ``MPOL=8, NTOR=32``: about ``3.47e-12``.
+
+This means the current ``8,32`` VMEC2000 run is a useful performance and
+robustness probe, but it is not clearly improving boundary representation over
+``7,28`` or even ``5,28`` for the first-order spline target. The strict
+``FTOL=1e-12`` blocker is therefore increasingly a nonlinear/free-boundary
+algorithm and continuation question rather than only a Fourier boundary-fit
+question.
+
+### How it was tested
+
+```bash
+venv/bin/python - <<'PY'
+from vmec_jax.toroidal_hybrid import (
+    recommend_square_axis_stellarator_mirror_hybrid_resolution,
+    square_axis_stellarator_mirror_hybrid_projection_error,
+)
+base = dict(
+    axis_kind="spline",
+    axis_spline_corner_radius_factor=1.14,
+    axis_half_width=1.5,
+    minor_radius=0.03,
+    side_minor_modulation=0.08,
+    side_elongation=0.08,
+    side_power=1.0,
+    corner_power=1.0,
+    corner_ellipticity=0.04,
+    corner_amplitude=0.004,
+    corner_rotation=0.30,
+    corner_helicity=1,
+)
+for mpol, ntor in [(5, 12), (5, 20), (5, 25), (5, 28), (5, 32), (6, 23), (7, 28), (8, 32)]:
+    print(mpol, ntor, square_axis_stellarator_mirror_hybrid_projection_error(mpol=mpol, ntor=ntor, **base))
+for target in [5e-5, 1e-8, 1e-10, 5e-12, 1e-12]:
+    print(target, recommend_square_axis_stellarator_mirror_hybrid_resolution(
+        target_max_component_error=target, mpol=5, ntor=12, max_mpol=8, max_ntor=32, **base
+    )["recommended"])
+PY
+```
+
+Results:
+
+- Projection scan completed locally.
+- The helper reports ``status="not_met"`` for a literal ``1e-12`` projection
+  target within the current scan because the measured floor is about
+  ``3.47e-12``.
+
+### File structure and best-practice notes
+
+- No source-code change was needed; this used the existing public projection
+  helper.
+- Documentation was updated in the active convergence page rather than adding
+  another diagnostic script.
+- No result files or figures were committed.
+
+### Best next steps
+
+1. Let the active VMEC2000 ``8,32`` run continue long enough to decide whether
+   its startup cost is acceptable.
+2. Prioritize ``7,28``/``5,28`` first-order spline rows before further
+   increasing ``MPOL``/``NTOR`` for projection reasons.
+3. Plan the true spline/control-basis lane as a solver-representation change:
+   a spline target can reduce projection stress, but a real VMEC solve still
+   consumes Fourier boundary coefficients today.
+
+### Completion percentages after M229
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``81%``.
+- VMEC2000 robustness/reference lane: ``87%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``98%``.
+- Square-axis spline-smoothed Fourier closure lane: ``94%``.
+- True spline/control-basis hybrid lane: ``18%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``99%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``93%``
+  pending strict high-mode evidence.
+
+### User input needed
+
+No user input is needed.
