@@ -539,7 +539,7 @@ def same_branch_scalar_function_registry(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return production and replay scalar functions for same-branch reports."""
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import free_boundary_boundary_geometry_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import free_boundary_boundary_geometry_jax
     from vmec_jax.state import pack_state
 
     def lcfs_boundary_moment(state: Any, static: Any) -> Any:
@@ -647,7 +647,7 @@ def same_branch_replay_plan_cache(
 ) -> tuple[dict[str, Any] | None, dict[str, Any], float | None]:
     """Build an accepted-trace replay plan for repeated same-branch reports."""
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_replay_plan
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_accepted_trace_controller_replay_plan
 
     try:
         t0 = time.perf_counter()
@@ -720,7 +720,7 @@ def _vector_jacobian_directional(jacobian: Any, direction: Any, n_outputs: int) 
 def _controller_slot_summary_from_result(result: dict[str, Any]) -> dict[str, Any]:
     """Return compact accepted/rejected slot metadata from a replay result."""
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_slot_summary
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_accepted_trace_controller_slot_summary
 
     summary = result.get("controller_slot_summary")
     if isinstance(summary, dict) and summary:
@@ -912,7 +912,7 @@ class SameBranchVectorRunner:
     ) -> dict[str, Any]:
         """Evaluate branch-local replay values and derivatives for scalar keys."""
 
-        from vmec_jax.solvers.free_boundary.adjoint.facade import (
+        from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
             direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
         )
 
@@ -976,7 +976,7 @@ def run_same_branch_scalar_report_section(
     if not enabled:
         return initial_summary
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax
 
     scalar_replay_plan, scalar_plan_cache, scalar_plan_wall_s = same_branch_replay_plan_cache(
         report,
@@ -1040,7 +1040,7 @@ def run_same_branch_vector_report_section(
     if not enabled:
         return initial_vector_summary, initial_gate_summary, None, None
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
     )
@@ -1442,7 +1442,7 @@ def _rejected_slot_replay_plan(
     """Precompute a rejected-slot replay plan when metadata is available."""
 
     try:
-        from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_replay_plan
+        from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_accepted_trace_controller_replay_plan
 
         inherited_contexts = (
             {}
@@ -1741,7 +1741,7 @@ def _run_same_branch_complete_fd_report(
 ) -> dict[str, Any]:
     """Run and time the complete-solve finite-difference branch report."""
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_same_branch_complete_solve_fd_report,
     )
 

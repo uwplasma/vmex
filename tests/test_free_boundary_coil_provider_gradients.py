@@ -5,7 +5,7 @@ import pytest
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import CoilFieldParams
-from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_boundary_bnormal_rms_jax
+from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_boundary_bnormal_rms_jax
 
 
 def _accepted_boundary_fixture():

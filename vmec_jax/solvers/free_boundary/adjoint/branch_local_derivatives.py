@@ -1,5 +1,5 @@
 # ruff: noqa: F401
-"""Branch-local adjoint facade for direct-coil free-boundary solves.
+"""Branch-local derivative implementation for direct-coil free-boundary solves.
 
 This module collects the validated free-boundary differentiation seams: dense
 and mode-space NESTOR solves, direct-coil accepted-boundary replay, custom-VJP
@@ -11,7 +11,7 @@ free-boundary chain
 The current production claim is deliberately narrow and testable: values come
 from complete ``run_free_boundary`` solves, while derivatives are validated for
 the same accepted/rejected branch fingerprint.  Hard changes in the adaptive
-host controller are still nonsmooth events, so this facade does not claim an
+host controller are still nonsmooth events, so this module does not claim an
 arbitrary custom VJP through branch selection.
 """
 
@@ -1793,7 +1793,7 @@ _FACADE_MODULE = sys.modules[__name__]
 
 
 class _FreeBoundaryAdjointFacadeModule(types.ModuleType):
-    """Forward root-facade monkeypatches to moved adjoint implementations."""
+    """Forward compatibility monkeypatches to moved adjoint implementations."""
 
     def __setattr__(self, name, value):
         if not (name.startswith("__") and name.endswith("__")):
@@ -1806,7 +1806,7 @@ class _FreeBoundaryAdjointFacadeModule(types.ModuleType):
 
 
 def install_compat_facade_module(module_name: str) -> None:
-    """Install compatibility monkeypatch forwarding for an imported facade."""
+    """Install compatibility monkeypatch forwarding for this implementation module."""
 
     sys.modules[module_name].__class__ = _FreeBoundaryAdjointFacadeModule
 
