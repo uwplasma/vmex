@@ -32796,3 +32796,169 @@ Results: all passed.
 ### User input needed
 
 No user input is needed.
+
+## M290 - Opt-In Reduced-Control LCFS Projection For Square-Coil Free-Boundary Profiles
+
+### Steps taken
+
+- Reviewed the active strict-convergence state after the pause:
+  - existing direct JAX GPU hot-restart rows on `office` are still running;
+  - the immediate VMEC2000 generated-`mgrid` scan is still in its first active
+    case and remains the speed/robustness reference lane;
+  - current direct hot-restart evidence is still above component-wise
+    `1e-12`, so simply lowering `DELT` is not enough.
+- Implemented the first solver-side reduced-control prototype:
+  - added a generic `free_boundary_edge_control_projection` payload to
+    `solve_fixed_boundary_residual_iter`;
+  - projected each free-boundary trial LCFS edge onto
+    `input boundary + least-squares reduced-control displacement`;
+  - kept default behavior unchanged unless the payload is explicitly provided;
+  - disabled the fused strict-update kernel only for projected solves, so the
+    ordinary VMEC-style momentum/preconditioner path remains unchanged for all
+    existing full-Fourier runs.
+- Plumbed the option through `run_fixed_boundary`/`run_free_boundary`, including
+  finish and corrector direct calls.
+- Added profiler support:
+  - `--freeb-edge-control-projection none|square|stellarator`;
+  - `--freeb-edge-control-rcond`;
+  - square/stellarator payload construction from
+    `SquareAxisControlFourierMatrix`;
+  - backend JSON summaries and solver diagnostics for enabled status, labels,
+    control count, rank, singular values, condition number, and apply count.
+- Updated documentation:
+  - `docs/mirror/direct_coil_free_boundary_convergence.rst`;
+  - `examples/mirror/README.md`;
+  - this plan log.
+
+### Results obtained
+
+- The new path is not a native spline-coordinate VMEC state. It is a controlled
+  Fourier-edge update: VMEC still stores Fourier coefficients, but the LCFS edge
+  row is constrained to the reduced square-axis spline-control subspace before
+  vacuum-pressure sampling.
+- A local smoke profile with `--freeb-edge-control-projection square` completed
+  and reported:
+  - projection status `enabled`;
+  - `control_count = 2`;
+  - `rank = 2`;
+  - `condition_number ~= 1`;
+  - `apply_count = 3`;
+  - solver initial boundary source `indata`.
+- The smoke residuals were intentionally poor because the run used only two
+  iterations and loose `FTOL=1e-6`; it was a path-validation smoke, not
+  convergence evidence.
+- I did not launch a full strict projected GPU profile yet because `office` is
+  already heavily loaded by the active strict JAX and VMEC2000 rows. The next
+  full run should use the new flag from this commit.
+
+### How it was tested
+
+- Syntax:
+
+```bash
+venv/bin/python -m py_compile \
+  vmec_jax/solve.py \
+  vmec_jax/driver.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py
+```
+
+- Focused tests:
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py
+```
+
+Result: `28 passed, 1 warning`.
+
+- Broader affected tests:
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_driver_run_wave8_coverage.py \
+  tests/test_driver_policy_coverage_extra.py \
+  tests/test_driver_api_finish_more_coverage.py \
+  tests/test_solve_wave7_coverage.py
+```
+
+Result: `62 passed, 2 warnings`.
+
+- Lint and hygiene:
+
+```bash
+python3 -m ruff check \
+  vmec_jax/solve.py \
+  vmec_jax/driver.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_profile_square_coil_free_boundary.py
+
+git diff --check
+```
+
+Results: passed. The local venv does not contain `ruff`, so the available
+system Python ruff module was used.
+
+- Local smoke profile outside the repo tree:
+
+```bash
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/vmec_jax_edge_projection_smoke \
+  --beta-percent 0 \
+  --mpol 3 --ntor 4 --ns 5 --nzeta auto \
+  --ns-array 5 --niter-array 2 --ftol-array 1e-6 \
+  --max-iter 2 --ftol 1e-6 \
+  --phiedge -0.02 --delt 0.01 \
+  --activate-fsq 1e-3 --nvacskip 1 --nstep 1 \
+  --axis-kind control_spline \
+  --side-power 1.0 --corner-power 1.0 \
+  --n-coils-per-side 4 --coil-segments 16 --coil-chunk-size 128 \
+  --skip-mgrid --skip-provider-parity \
+  --solver-mode parity \
+  --freeb-edge-control-projection square \
+  --freeb-edge-control-rcond 1e-12 \
+  --max-boundary-projection-error none
+```
+
+Result: completed and wrote
+`/tmp/vmec_jax_edge_projection_smoke/square_coil_free_boundary_backend_profile.json`.
+
+### File structure and best-practice adherence
+
+- Solver-generic code lives in `vmec_jax/solve.py`; it accepts a Jacobian payload
+  and knows nothing about square-coil geometry.
+- Public driver plumbing lives in `vmec_jax/driver.py`.
+- Square-axis-specific payload construction remains in
+  `tools/diagnostics/profile_square_coil_free_boundary.py`, using existing
+  `vmec_jax.toroidal_hybrid` control-map helpers.
+- Tests stay focused in `tests/test_profile_square_coil_free_boundary.py`:
+  one test validates projection behavior on a tiny mode table; another validates
+  profiler-to-driver payload plumbing.
+- No generated profile outputs, WOUT files, or figures were added to git.
+
+### Best next steps
+
+1. Commit and push this reduced-control projection tranche.
+2. When `office` load drops or one active row finishes, launch a strict A/B row:
+   same `MPOL=5, NTOR=28, NZETA=64, NS_ARRAY=9,13,17` deck, but add
+   `--freeb-edge-control-projection square`.
+3. Compare full-Fourier direct JAX, projected-control direct JAX, and VMEC2000
+   generated-`mgrid` on:
+   final max component, best fresh component, tail plateau, boundary motion,
+   `B.n`, runtime, memory, and robustness to edited `mpol/ntor/nzeta`.
+4. If the projected-control row improves but still misses `1e-12`, test the
+   `stellarator` reduced basis and the `MPOL=7,NTOR=28` / `MPOL=8,NTOR=32`
+   ladders before designing a deeper native spline-coordinate state.
+
+### Completion percentages after M290
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict floor not solved.
+- Seeded hot-restart lane: `99%`, active rows running but still above strict.
+- VMEC2000 robustness/reference lane: `99%`, active strict `DELT` scan running.
+- Resolution/edit robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `78%`, first solver-side projected
+  update implemented and smoke-tested; full strict A/B profiling remains.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

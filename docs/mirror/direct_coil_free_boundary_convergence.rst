@@ -222,6 +222,21 @@ strict tolerance, around the ``1e-6`` force scale in their current ``1e-10``
 stage, so they remain differentiable research rows rather than production
 evidence.
 
+The first reduced-control nonlinear-update prototype is now available as an
+opt-in ``vmec_jax`` path. ``run_free_boundary`` accepts a generic
+``free_boundary_edge_control_projection`` payload whose Jacobian maps reduced
+real-space controls to physical VMEC boundary-coefficient deltas. During a
+free-boundary solve, each trial LCFS edge is projected back to the input
+boundary plus the least-squares reduced-control displacement before
+vacuum-pressure sampling.
+The square-coil backend profiler builds this payload from the existing
+``SquareAxisControlFourierMatrix`` with
+``--freeb-edge-control-projection square`` or ``stellarator``. This is not a
+native spline-coordinate VMEC solve: the equilibrium state is still represented
+by VMEC Fourier coefficients. It does, however, constrain free-boundary edge
+motion to the low-dimensional square-axis spline-control subspace and is the
+next A/B profile against the full-Fourier and VMEC2000/mgrid rows.
+
 The same profiling identified an ``NZETA`` robustness rule. ``MPOL=5,
 NTOR=12, NZETA=16`` fails in VMEC2000 after the initial Jacobian changes sign,
 while the same generated-``mgrid`` deck with ``NZETA=32`` completes and reaches

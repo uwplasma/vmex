@@ -3451,6 +3451,250 @@ def _enforce_fixed_boundary_and_axis_np(
     )
 
 
+def _freeb_edge_control_mode_scale(static) -> np.ndarray:
+    """Return the internal-to-physical coefficient scale for one edge row."""
+
+    modes = getattr(static, "modes", None)
+    m = np.asarray(getattr(modes, "m"), dtype=float)
+    n = np.asarray(getattr(modes, "n"), dtype=float)
+    sqrt2 = np.sqrt(2.0)
+    return np.where(m == 0.0, 1.0, sqrt2) * np.where(np.abs(n) == 0.0, 1.0, sqrt2)
+
+
+def _prepare_freeb_edge_control_projection(
+    payload: Any,
+    *,
+    indata: Any,
+    static: Any,
+    state0: VMECState,
+    free_boundary_enabled: bool,
+) -> dict[str, Any]:
+    """Prepare a reduced-control LCFS projection for free-boundary solves.
+
+    The input Jacobian maps reduced real-space controls to physical VMEC
+    boundary coefficient deltas stacked as R_cos, R_sin, Z_cos, Z_sin. The
+    nonlinear solve stores edge coefficients in VMEC's internal normalization,
+    so this helper converts back and forth at the edge row only.
+    """
+
+    info: dict[str, Any] = {
+        "enabled": False,
+        "requested": bool(payload is not None),
+        "reason": "not_requested",
+    }
+    if payload is None:
+        return {"enabled": False, "info": info}
+    if not isinstance(payload, dict):
+        info.update({"reason": "invalid_payload_type", "payload_type": type(payload).__name__})
+        return {"enabled": False, "info": info}
+    if not bool(payload.get("enabled", True)):
+        info["reason"] = "disabled_by_payload"
+        return {"enabled": False, "info": info}
+    if not bool(free_boundary_enabled):
+        info["reason"] = "not_free_boundary"
+        return {"enabled": False, "info": info}
+
+    jacobian_raw = payload.get("control_jacobian", payload.get("jacobian"))
+    try:
+        jacobian = np.asarray(jacobian_raw, dtype=float)
+    except Exception as exc:
+        info.update({"reason": "invalid_jacobian", "error": repr(exc)})
+        return {"enabled": False, "info": info}
+
+    modes = getattr(static, "modes", None)
+    mode_count = int(np.asarray(getattr(modes, "m")).size)
+    if jacobian.ndim != 2 or jacobian.shape[0] != 4 * mode_count:
+        info.update(
+            {
+                "reason": "jacobian_shape_mismatch",
+                "jacobian_shape": [int(value) for value in getattr(jacobian, "shape", ())],
+                "expected_rows": int(4 * mode_count),
+            }
+        )
+        return {"enabled": False, "info": info}
+    if jacobian.shape[1] <= 0:
+        info.update(
+            {
+                "reason": "empty_control_basis",
+                "jacobian_shape": [int(value) for value in jacobian.shape],
+            }
+        )
+        return {"enabled": False, "info": info}
+
+    mode_scale = _freeb_edge_control_mode_scale(static)
+    if mode_scale.shape[0] != mode_count:
+        info.update({"reason": "mode_scale_shape_mismatch"})
+        return {"enabled": False, "info": info}
+
+    initial_source = "state0_edge"
+    try:
+        initial_payload = payload.get("initial_boundary")
+        if isinstance(initial_payload, dict):
+            initial = {
+                "R_cos": np.asarray(initial_payload["R_cos"], dtype=float).reshape(-1),
+                "R_sin": np.asarray(initial_payload["R_sin"], dtype=float).reshape(-1),
+                "Z_cos": np.asarray(initial_payload["Z_cos"], dtype=float).reshape(-1),
+                "Z_sin": np.asarray(initial_payload["Z_sin"], dtype=float).reshape(-1),
+            }
+            initial_source = "payload"
+        elif indata is not None:
+            from .boundary import boundary_from_indata
+
+            boundary = boundary_from_indata(indata, static.modes)
+            initial = {
+                "R_cos": np.asarray(boundary.R_cos, dtype=float).reshape(-1),
+                "R_sin": np.asarray(boundary.R_sin, dtype=float).reshape(-1),
+                "Z_cos": np.asarray(boundary.Z_cos, dtype=float).reshape(-1),
+                "Z_sin": np.asarray(boundary.Z_sin, dtype=float).reshape(-1),
+            }
+            initial_source = "indata"
+        else:
+            initial = {
+                "R_cos": np.asarray(state0.Rcos, dtype=float)[-1] * mode_scale,
+                "R_sin": np.asarray(state0.Rsin, dtype=float)[-1] * mode_scale,
+                "Z_cos": np.asarray(state0.Zcos, dtype=float)[-1] * mode_scale,
+                "Z_sin": np.asarray(state0.Zsin, dtype=float)[-1] * mode_scale,
+            }
+    except Exception as exc:
+        info.update({"reason": "initial_boundary_failed", "error": repr(exc)})
+        return {"enabled": False, "info": info}
+
+    for name, values in initial.items():
+        if np.asarray(values).shape != (mode_count,):
+            info.update(
+                {
+                    "reason": "initial_boundary_shape_mismatch",
+                    "component": name,
+                    "shape": [int(value) for value in np.asarray(values).shape],
+                    "expected_shape": [int(mode_count)],
+                }
+            )
+            return {"enabled": False, "info": info}
+
+    try:
+        rcond = float(payload.get("rcond", 1.0e-12))
+    except Exception:
+        rcond = 1.0e-12
+    try:
+        pinv = np.linalg.pinv(jacobian, rcond=rcond)
+        singular_values = np.linalg.svd(jacobian, compute_uv=False)
+    except Exception as exc:
+        info.update({"reason": "jacobian_factorization_failed", "error": repr(exc)})
+        return {"enabled": False, "info": info}
+    smax = float(np.max(singular_values)) if singular_values.size else 0.0
+    rank = int(np.sum(singular_values > max(float(rcond) * smax, np.finfo(float).eps)))
+    condition_number = (
+        None
+        if singular_values.size == 0 or float(np.min(singular_values)) <= 0.0
+        else float(np.max(singular_values) / np.min(singular_values))
+    )
+
+    info.update(
+        {
+            "enabled": True,
+            "reason": "enabled",
+            "mode": "edge_delta_least_squares",
+            "basis_symmetry": payload.get("basis_symmetry", payload.get("symmetry")),
+            "labels": [str(value) for value in payload.get("labels", [])],
+            "control_count": int(jacobian.shape[1]),
+            "mode_count": int(mode_count),
+            "jacobian_shape": [int(value) for value in jacobian.shape],
+            "rank": int(rank),
+            "rcond": float(rcond),
+            "singular_values": [float(value) for value in singular_values],
+            "condition_number": condition_number,
+            "initial_boundary_source": initial_source,
+        }
+    )
+    return {
+        "enabled": True,
+        "info": info,
+        "mode_count": int(mode_count),
+        "jacobian_np": jacobian,
+        "pinv_np": pinv,
+        "mode_scale_np": mode_scale,
+        "initial_np": initial,
+    }
+
+
+def _project_freeb_edge_control_state(
+    state: VMECState,
+    projection: dict[str, Any],
+    *,
+    host_update: bool,
+) -> VMECState:
+    """Project the LCFS edge row onto an enabled reduced-control subspace."""
+
+    if not bool(projection.get("enabled", False)):
+        return state
+    k = int(projection["mode_count"])
+    if bool(host_update):
+        scale = np.asarray(projection["mode_scale_np"], dtype=float)
+        initial = {name: np.asarray(value, dtype=float) for name, value in projection["initial_np"].items()}
+        jacobian = np.asarray(projection["jacobian_np"], dtype=float)
+        pinv = np.asarray(projection["pinv_np"], dtype=float)
+        Rcos = np.array(state.Rcos, dtype=float, copy=True)
+        Rsin = np.array(state.Rsin, dtype=float, copy=True)
+        Zcos = np.array(state.Zcos, dtype=float, copy=True)
+        Zsin = np.array(state.Zsin, dtype=float, copy=True)
+        target = np.concatenate(
+            [
+                Rcos[-1] * scale - initial["R_cos"],
+                Rsin[-1] * scale - initial["R_sin"],
+                Zcos[-1] * scale - initial["Z_cos"],
+                Zsin[-1] * scale - initial["Z_sin"],
+            ],
+            axis=0,
+        )
+        projected = jacobian @ (pinv @ target)
+        Rcos[-1] = (initial["R_cos"] + projected[0:k]) / scale
+        Rsin[-1] = (initial["R_sin"] + projected[k : 2 * k]) / scale
+        Zcos[-1] = (initial["Z_cos"] + projected[2 * k : 3 * k]) / scale
+        Zsin[-1] = (initial["Z_sin"] + projected[3 * k : 4 * k]) / scale
+        return VMECState(
+            layout=state.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=state.Lcos,
+            Lsin=state.Lsin,
+        )
+
+    dtype = jnp.asarray(state.Rcos).dtype
+    scale = jnp.asarray(projection["mode_scale_np"], dtype=dtype)
+    initial = {name: jnp.asarray(value, dtype=dtype) for name, value in projection["initial_np"].items()}
+    jacobian = jnp.asarray(projection["jacobian_np"], dtype=dtype)
+    pinv = jnp.asarray(projection["pinv_np"], dtype=dtype)
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    target = jnp.concatenate(
+        [
+            Rcos[-1] * scale - initial["R_cos"],
+            Rsin[-1] * scale - initial["R_sin"],
+            Zcos[-1] * scale - initial["Z_cos"],
+            Zsin[-1] * scale - initial["Z_sin"],
+        ],
+        axis=0,
+    )
+    projected = jacobian @ (pinv @ target)
+    Rcos = Rcos.at[-1, :].set((initial["R_cos"] + projected[0:k]) / scale)
+    Rsin = Rsin.at[-1, :].set((initial["R_sin"] + projected[k : 2 * k]) / scale)
+    Zcos = Zcos.at[-1, :].set((initial["Z_cos"] + projected[2 * k : 3 * k]) / scale)
+    Zsin = Zsin.at[-1, :].set((initial["Z_sin"] + projected[3 * k : 4 * k]) / scale)
+    return VMECState(
+        layout=state.layout,
+        Rcos=Rcos,
+        Rsin=Rsin,
+        Zcos=Zcos,
+        Zsin=Zsin,
+        Lcos=state.Lcos,
+        Lsin=state.Lsin,
+    )
+
+
 def _grad_rms_state(grad: VMECState) -> float:
     g = np.asarray(grad.Rcos) ** 2
     g = g + np.asarray(grad.Rsin) ** 2
@@ -5471,6 +5715,7 @@ def solve_fixed_boundary_residual_iter(
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
     free_boundary_activate_fsq: float | None = None,
+    free_boundary_edge_control_projection: Any = None,
     state_only: bool = False,
     return_final_force_payload: bool = False,
 ) -> SolveVmecResidualResult:
@@ -6270,6 +6515,30 @@ def solve_fixed_boundary_residual_iter(
     )
     edge_signature_key = _edge_signature_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
     edge_value_key = _edge_value_key(edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin)
+    freeb_edge_control_projection = _prepare_freeb_edge_control_projection(
+        free_boundary_edge_control_projection,
+        indata=indata,
+        static=static,
+        state0=state0,
+        free_boundary_enabled=bool(free_boundary_enabled),
+    )
+    freeb_edge_control_projection_info = dict(
+        freeb_edge_control_projection.get("info", {"enabled": False, "reason": "not_requested"})
+    )
+    freeb_edge_control_projection_enabled = bool(freeb_edge_control_projection.get("enabled", False))
+    freeb_edge_control_projection_apply_count = 0
+
+    def _project_freeb_edge_control(state_in: VMECState, *, host_update: bool) -> VMECState:
+        nonlocal freeb_edge_control_projection_apply_count
+        if not bool(freeb_edge_control_projection_enabled):
+            return state_in
+        freeb_edge_control_projection_apply_count += 1
+        return _project_freeb_edge_control_state(
+            state_in,
+            freeb_edge_control_projection,
+            host_update=bool(host_update),
+        )
+
     _record_setup_timing("setup_cache_key_hash", _t_setup_cache_key_hash)
 
     def _apply_radial_tridi(a, alpha: float):
@@ -6981,6 +7250,7 @@ def solve_fixed_boundary_residual_iter(
             and (not bool(limit_dt_from_force))
             and (not bool(limit_update_rms))
             and (not bool(need_trial_eval_precompile))
+            and (not bool(freeb_edge_control_projection_enabled))
             and (not _tree_has_tracer(state0))
         )
         if use_strict_update_precompile:
@@ -7646,6 +7916,10 @@ def solve_fixed_boundary_residual_iter(
             idx00=idx00,
         )
     state = _apply_vmec_lambda_axis_rules(state)
+    state = _project_freeb_edge_control(
+        state,
+        host_update=bool(host_update_assembly) or bool(setup_host_enforce),
+    )
 
     ftol = float(indata.get_float("FTOL", 1e-13)) if ftol is None else float(ftol)
     gamma = float(indata.get_float("GAMMA", 0.0))
@@ -14135,6 +14409,7 @@ def solve_fixed_boundary_residual_iter(
                 and (not bool(limit_dt_from_force))
                 and (not bool(limit_update_rms))
                 and (not bool(need_trial_eval))
+                and (not bool(freeb_edge_control_projection_enabled))
                 and (not _tree_has_tracer(state))
             )
             if use_jit_strict_update_step:
@@ -14395,6 +14670,10 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
+                state_try = _project_freeb_edge_control(
+                    state_try,
+                    host_update=bool(host_update_assembly),
+                )
             probe_bad_jacobian = False
             if need_trial_eval:
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
@@ -14491,6 +14770,10 @@ def solve_fixed_boundary_residual_iter(
                             idx00=idx00,
                     )
                     state_try = _apply_vmec_lambda_axis_rules(state_try)
+                    state_try = _project_freeb_edge_control(
+                        state_try,
+                        host_update=bool(host_update_assembly),
+                    )
                     freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                     t_trial_force_start = time.perf_counter() if timing_detail_enabled else None
                     _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
@@ -14593,6 +14876,10 @@ def solve_fixed_boundary_residual_iter(
                         idx00=idx00,
                     )
                     state_dir = _apply_vmec_lambda_axis_rules(state_dir)
+                    state_dir = _project_freeb_edge_control(
+                        state_dir,
+                        host_update=False,
+                    )
                     freeb_bsqvac_half_dir = _freeb_bsqvac_half_for_trial_state(state_dir)
                     _, _, gcr2_d, gcz2_d, gcl2_d, _, _, norms_d = _compute_forces_iter(
                         state_dir,
@@ -14897,6 +15184,10 @@ def solve_fixed_boundary_residual_iter(
                     idx00=idx00,
                 )
                 state_try = _apply_vmec_lambda_axis_rules(state_try)
+                state_try = _project_freeb_edge_control(
+                    state_try,
+                    host_update=False,
+                )
                 freeb_bsqvac_half_trial = _freeb_bsqvac_half_for_trial_state(state_try)
                 t_backtracking_force_start = time.perf_counter() if timing_detail_enabled else None
                 _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
@@ -15361,6 +15652,10 @@ def solve_fixed_boundary_residual_iter(
             "vacuum_stub": bool(final_vacuum_stub),
             "activate_fsq": None if free_boundary_activate_fsq is None else float(free_boundary_activate_fsq),
             "plascur": float(freeb_plascur),
+            "edge_control_projection": {
+                **dict(freeb_edge_control_projection_info),
+                "apply_count": int(freeb_edge_control_projection_apply_count),
+            },
             "last_nestor_diagnostics": dict(final_nestor_diagnostics),
             "final_nestor_recompute_attempted": bool(final_nestor_recompute_attempted),
             "final_nestor_recompute_failed": bool(final_nestor_recompute_failed),

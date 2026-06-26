@@ -177,6 +177,12 @@ variables, set ``PLASMA_AXIS_REDUCED_RADII`` at the top of the example. With
 the default ``PLASMA_AXIS_CONTROL_SYMMETRY = "square"``, this is a two-value
 ``(side_radius, corner_radius)`` tuple that expands to the full eight spline
 controls.
+The backend profiler can also constrain the nonlinear free-boundary edge
+motion to this same reduced spline-control subspace with
+``--freeb-edge-control-projection square`` or ``stellarator``. This is an
+opt-in A/B convergence path: VMEC still stores Fourier coefficients, but the
+LCFS edge update is projected through the spline-control Fourier map before
+vacuum-pressure sampling.
 Use ``vmec_jax.square_axis_spline_radius_matrix`` to inspect the linear map
 from those few control radii to sampled square-axis radius values. The helper
 does not replace VMEC's Fourier state yet, but it makes the low-dimensional

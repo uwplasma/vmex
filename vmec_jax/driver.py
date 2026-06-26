@@ -1590,6 +1590,7 @@ def run_fixed_boundary(
     external_field_provider_static: Any = None,
     external_field_provider_params: Any = None,
     free_boundary_activate_fsq: float | None = None,
+    free_boundary_edge_control_projection: Any = None,
     backtracking: bool | None = None,
     limit_update_rms: bool | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
@@ -2421,6 +2422,7 @@ def run_fixed_boundary(
                 host_update_assembly=host_update_assembly_i,
                 preconditioner_use_precomputed_tridi=preconditioner_use_precomputed_tridi_i,
                 preconditioner_use_lax_tridi=preconditioner_use_lax_tridi_i,
+                free_boundary_edge_control_projection=free_boundary_edge_control_projection,
                 return_final_force_payload=True,
                 jit_forces=_resolve_finish_jit_forces(static_i, int(budget_i)),
             )
@@ -3504,6 +3506,7 @@ def run_fixed_boundary(
                 external_field_provider_static=external_field_provider_static_eff,
                 external_field_provider_params=external_field_provider_params,
                 free_boundary_activate_fsq=free_boundary_activate_fsq,
+                free_boundary_edge_control_projection=free_boundary_edge_control_projection,
                 return_final_force_payload=True,
             )
             dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
@@ -4007,6 +4010,7 @@ def run_fixed_boundary(
                     fsq_total_target=(
                         _accelerated_fsq_total_target_from_ftol(float(ftol_corr)) if accelerated_mode else None
                     ),
+                    free_boundary_edge_control_projection=free_boundary_edge_control_projection,
                     return_final_force_payload=True,
                 )
                 res_corr = solve_fixed_boundary_residual_iter(

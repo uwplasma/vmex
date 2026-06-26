@@ -50,6 +50,10 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "grid",
             "--no-freeb-experimental-fouri-matrix",
             "--freeb-add-analytic-bvec",
+            "--freeb-edge-control-projection",
+            "square",
+            "--freeb-edge-control-rcond",
+            "1e-10",
             "--resolution-diagnostics-only",
         ]
     )
@@ -74,6 +78,8 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.freeb_dense_solve_mode == "grid"
     assert args.freeb_experimental_fouri_matrix is False
     assert args.freeb_add_analytic_bvec is True
+    assert args.freeb_edge_control_projection == "square"
+    assert args.freeb_edge_control_rcond == pytest.approx(1.0e-10)
     assert args.resolution_diagnostics_only is True
 
 
@@ -324,6 +330,86 @@ def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement(
     assert payload["boundary_sample_displacement_rms"] == pytest.approx(0.1)
     assert payload["boundary_sample_displacement_max"] == pytest.approx(0.1)
     assert payload["boundary_sample_displacement_rel"] == pytest.approx(0.1 / 3.0)
+
+
+def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes():
+    from vmec_jax.solve import (
+        _prepare_freeb_edge_control_projection,
+        _project_freeb_edge_control_state,
+    )
+
+    cfg = VMECConfig(
+        mpol=2,
+        ntor=0,
+        ns=3,
+        nfp=1,
+        lasym=False,
+        lthreed=False,
+        lconm1=True,
+        ntheta=8,
+        nzeta=1,
+    )
+    static = build_static(cfg)
+    indata = InData(
+        scalars={
+            "MPOL": 2,
+            "NTOR": 0,
+            "NS_ARRAY": [3],
+            "NFP": 1,
+            "LASYM": False,
+            "LCONM1": True,
+        },
+        indexed={"RBC": {(0, 0): 3.0}},
+    )
+    layout = StateLayout(ns=3, K=static.modes.K, lasym=False)
+    zeros = np.zeros((3, static.modes.K), dtype=float)
+    state0 = VMECState(
+        layout=layout,
+        Rcos=zeros.copy(),
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zeros.copy(),
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    jacobian = np.zeros((4 * static.modes.K, 1), dtype=float)
+    jacobian[0, 0] = 1.0
+    projection = _prepare_freeb_edge_control_projection(
+        {
+            "enabled": True,
+            "basis_symmetry": "test",
+            "labels": ["R00"],
+            "control_jacobian": jacobian,
+        },
+        indata=indata,
+        static=static,
+        state0=state0,
+        free_boundary_enabled=True,
+    )
+
+    assert projection["enabled"] is True
+    assert projection["info"]["control_count"] == 1
+
+    rcos = zeros.copy()
+    zsin = zeros.copy()
+    rcos[-1, 0] = 3.2
+    rcos[-1, 1] = 0.5
+    zsin[-1, 1] = 0.25
+    trial = VMECState(
+        layout=layout,
+        Rcos=rcos,
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zsin,
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+
+    projected = _project_freeb_edge_control_state(trial, projection, host_update=True)
+
+    assert np.asarray(projected.Rcos)[-1, 0] == pytest.approx(3.2)
+    assert np.asarray(projected.Rcos)[-1, 1] == pytest.approx(0.0)
+    assert np.asarray(projected.Zsin)[-1, 1] == pytest.approx(0.0)
 
 
 def test_square_coil_profile_hot_restart_solver_state_filters_freeb_resume_keys():
@@ -604,10 +690,11 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     spline_bridge = data["spline_bridge"]
     assert spline_bridge["status"] == "spline_control_to_fourier_bridge"
     assert spline_bridge["solver_native_spline_controls"] is False
+    assert spline_bridge["optional_solver_edge_control_projection"] is True
     assert spline_bridge["requires_fourier_projection"] is True
     assert spline_bridge["reduced_square_control_count"] == 2
     assert spline_bridge["can_reduce_input_shape_dofs"] is True
-    assert spline_bridge["can_reduce_nonlinear_solver_dofs"] is False
+    assert spline_bridge["can_reduce_nonlinear_solver_dofs"] is True
     deck = data["resolution_deck"]
     assert deck["status"] == "production_ready"
     assert deck["projection_meets_gate"] is True
@@ -1168,6 +1255,78 @@ def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypa
     assert captured["env"]["VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC"] == "1"
     for name in env_names:
         assert os.environ.get(name) == f"previous_{name}"
+
+
+def test_square_coil_profile_run_jax_backend_passes_edge_control_projection(
+    monkeypatch, tmp_path: Path
+):
+    captured = {}
+    projection_payload = {
+        "enabled": True,
+        "basis_symmetry": "square",
+        "labels": ["side", "corner"],
+        "control_jacobian": np.asarray([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, 0.0]]),
+        "rcond": 1.0e-10,
+    }
+
+    monkeypatch.setattr(
+        profile,
+        "_freeb_edge_control_projection_solver_payload",
+        lambda config, *, symmetry, rcond: projection_payload,
+    )
+    monkeypatch.setattr(profile, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
+
+    def fake_run_free_boundary(*args, **kwargs):
+        captured.update(kwargs)
+        result = SimpleNamespace(
+            n_iter=1,
+            diagnostics={
+                "requested_ftol": 1.0e-12,
+                "final_fsqr": 1.0e-6,
+                "final_fsqz": 2.0e-6,
+                "final_fsql": 3.0e-6,
+                "free_boundary": {
+                    "nestor_model": "vmec2000_like_dense_integral",
+                    "edge_control_projection": {
+                        "enabled": True,
+                        "basis_symmetry": "square",
+                        "control_count": 2,
+                        "apply_count": 3,
+                    },
+                },
+            },
+            w_history=[],
+            fsqr2_history=[],
+            fsqz2_history=[],
+            fsql2_history=[],
+        )
+        return SimpleNamespace(result=result, state=SimpleNamespace(name="state"))
+
+    monkeypatch.setattr(profile, "run_free_boundary", fake_run_free_boundary)
+    config = SimpleNamespace(
+        use_multigrid_schedule=False,
+        max_iter=1,
+        jit_forces=True,
+        free_boundary_activate_fsq=1.0e-3,
+    )
+
+    out = profile._run_jax_backend(
+        input_path=tmp_path / "input.case",
+        wout_path=tmp_path / "wout_case.nc",
+        config=config,
+        direct_params=None,
+        solver_mode="parity",
+        return_best_scored_state=False,
+        freeb_edge_control_projection="square",
+        freeb_edge_control_rcond=1.0e-10,
+    )
+
+    assert captured["free_boundary_edge_control_projection"] is projection_payload
+    summary = out["free_boundary_solver_overrides"]["freeb_edge_control_projection"]
+    assert summary["status"] == "enabled"
+    assert summary["basis_symmetry"] == "square"
+    assert summary["control_count"] == 2
+    assert out["free_boundary_edge_control_projection"]["apply_count"] == 3
 
 
 def test_square_coil_profile_run_jax_backend_hot_restarts_from_freeb_state(

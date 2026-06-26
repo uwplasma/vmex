@@ -284,6 +284,21 @@ def _parser() -> argparse.ArgumentParser:
         help="Override VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC for NESTOR operator profiling.",
     )
     p.add_argument(
+        "--freeb-edge-control-projection",
+        choices=("none", "square", "stellarator"),
+        default="none",
+        help=(
+            "Constrain vmec_jax free-boundary LCFS edge motion to the selected square-axis spline-control "
+            "basis. This is an opt-in research profile for long straight hybrid axes."
+        ),
+    )
+    p.add_argument(
+        "--freeb-edge-control-rcond",
+        type=float,
+        default=1.0e-12,
+        help="Pseudo-inverse cutoff used by --freeb-edge-control-projection.",
+    )
+    p.add_argument(
         "--verbose-solver",
         action="store_true",
         help="Print VMEC-style vmec_jax iteration progress for long direct/mgrid backend profiles.",
@@ -1117,6 +1132,7 @@ def _final_residuals(run: Any, *, config: ExampleConfig | None = None) -> dict[s
         "free_boundary_bnormal_rms": nestor.get("bnormal_rms"),
         "free_boundary_bsqvac_rms": nestor.get("bsqvac_rms"),
         "free_boundary_couple_edge": freeb.get("couple_edge"),
+        "free_boundary_edge_control_projection": freeb.get("edge_control_projection"),
         "free_boundary_anderson_pressure_enabled": freeb.get("anderson_pressure_enabled"),
         "free_boundary_anderson_pressure_last_applied": _last_finite(
             diag.get("freeb_anderson_pressure_applied_history")
@@ -1366,6 +1382,8 @@ def _run_jax_backend(
     freeb_dense_solve_mode: str | None = None,
     freeb_experimental_fouri_matrix: bool | None = None,
     freeb_add_analytic_bvec: bool | None = None,
+    freeb_edge_control_projection: str = "none",
+    freeb_edge_control_rcond: float = 1.0e-12,
     direct_static_cache: bool = True,
     jit_direct_sampler: bool = False,
     direct_trial_bsqvac_resample: bool = True,
@@ -1403,6 +1421,15 @@ def _run_jax_backend(
                 "jit_sampler": bool(jit_direct_sampler),
                 "resample_trial_bsqvac": bool(direct_trial_bsqvac_resample),
             }
+    edge_control_projection_payload = _freeb_edge_control_projection_solver_payload(
+        config,
+        symmetry=str(freeb_edge_control_projection),
+        rcond=float(freeb_edge_control_rcond),
+    )
+    edge_control_projection_summary = _freeb_edge_control_projection_summary(
+        edge_control_projection_payload,
+        requested=str(freeb_edge_control_projection),
+    )
     hot_restart_count = max(0, int(jax_hot_restart_count))
     hot_restart_iters_eff = (
         int(jax_hot_restart_iters) if jax_hot_restart_iters is not None else int(config.max_iter)
@@ -1443,6 +1470,8 @@ def _run_jax_backend(
                 pass_kwargs["restart_wout_path"] = restart_wout_path
             if restart_solver_state is not None:
                 pass_kwargs["restart_solver_state"] = restart_solver_state
+            if edge_control_projection_payload is not None:
+                pass_kwargs["free_boundary_edge_control_projection"] = edge_control_projection_payload
             return run_free_boundary(
                 input_path,
                 max_iter=int(max_iter),
@@ -1555,6 +1584,7 @@ def _run_jax_backend(
             "freeb_add_analytic_bvec": None
             if freeb_add_analytic_bvec is None
             else bool(freeb_add_analytic_bvec),
+            "freeb_edge_control_projection": edge_control_projection_summary,
             "jax_hot_restart_count": int(hot_restart_count),
             "jax_hot_restart_iters": int(hot_restart_iters_eff),
             "jax_hot_restart_policy": str(hot_restart_policy),
@@ -1905,6 +1935,58 @@ def _square_control_fourier_matrix(config: ExampleConfig, *, symmetry: str = "sq
     return basis, matrix
 
 
+def _freeb_edge_control_projection_solver_payload(
+    config: ExampleConfig,
+    *,
+    symmetry: str,
+    rcond: float,
+) -> dict[str, Any] | None:
+    """Return the generic solver payload for square-axis edge controls."""
+
+    symmetry = str(symmetry).strip().lower()
+    if symmetry in {"", "none", "off", "false"}:
+        return None
+    if symmetry not in {"square", "stellarator"}:
+        raise ValueError(f"unsupported free-boundary edge-control projection: {symmetry!r}")
+    if not _square_axis_uses_spline_controls(config):
+        raise ValueError("--freeb-edge-control-projection requires --axis-kind control_spline")
+    basis, matrix = _square_control_fourier_matrix(config, symmetry=symmetry)
+    jacobian = matrix.stacked_jacobian()
+    if jacobian.ndim != 2 or jacobian.shape[1] <= 0:
+        raise ValueError(f"empty edge-control Jacobian for symmetry {symmetry!r}")
+    return {
+        "enabled": True,
+        "source": "profile_square_coil_free_boundary",
+        "basis_symmetry": basis.symmetry,
+        "labels": list(basis.labels),
+        "control_jacobian": np.asarray(jacobian, dtype=float),
+        "rcond": float(rcond),
+    }
+
+
+def _freeb_edge_control_projection_summary(payload: dict[str, Any] | None, *, requested: str) -> dict[str, Any]:
+    """Return JSON-safe metadata for an edge-control projection request."""
+
+    requested = str(requested).strip().lower()
+    if payload is None:
+        return {
+            "requested": requested,
+            "enabled": False,
+            "status": "disabled",
+        }
+    jacobian = np.asarray(payload.get("control_jacobian"), dtype=float)
+    return {
+        "requested": requested,
+        "enabled": bool(payload.get("enabled", False)),
+        "status": "enabled" if bool(payload.get("enabled", False)) else "disabled",
+        "basis_symmetry": payload.get("basis_symmetry"),
+        "labels": list(payload.get("labels", [])),
+        "control_count": int(jacobian.shape[1]) if jacobian.ndim == 2 else None,
+        "jacobian_shape": [int(value) for value in jacobian.shape],
+        "rcond": float(payload.get("rcond", 1.0e-12)),
+    }
+
+
 def _control_basis_payload(config: ExampleConfig) -> dict[str, Any]:
     """Return compact square-axis spline-control metadata for diagnostics."""
 
@@ -2009,7 +2091,7 @@ def _spline_bridge_payload(
     stellarator_count = stellarator_basis.get("reduced_count")
     status = "spline_control_to_fourier_bridge" if uses_controls else "fourier_boundary_only"
     next_action = (
-        "prototype_solver_native_spline_control_update"
+        "profile_freeb_edge_control_projection"
         if resolution_deck.get("status") == "production_ready"
         else "repair_projection_or_zeta_deck_before_solver_profiling"
     )
@@ -2019,6 +2101,7 @@ def _spline_bridge_payload(
         "real_space_axis_basis": "periodic_spline_controls" if uses_controls else "sampled_fourier_target",
         "nonlinear_solver_boundary_basis": "vmec_fourier_coefficients",
         "solver_native_spline_controls": False,
+        "optional_solver_edge_control_projection": uses_controls,
         "requires_fourier_projection": True,
         "reduced_square_control_count": None if square_count is None else int(square_count),
         "reduced_stellarator_control_count": None if stellarator_count is None else int(stellarator_count),
@@ -2029,11 +2112,12 @@ def _spline_bridge_payload(
         "projection_target_max_component_error": resolution_deck.get("projection_target_max_component_error"),
         "control_map_status": control_fourier_map.get("status") if isinstance(control_fourier_map, dict) else None,
         "can_reduce_input_shape_dofs": uses_controls,
-        "can_reduce_nonlinear_solver_dofs": False,
+        "can_reduce_nonlinear_solver_dofs": uses_controls,
         "recommended_next_action": next_action,
         "interpretation": (
-            "The current spline path reduces and smooths the real-space square-axis target before projection, "
-            "but strict convergence still depends on the VMEC Fourier deck and free-boundary nonlinear solve."
+            "The square-axis spline path still enters VMEC through Fourier coefficients, but the vmec_jax "
+            "free-boundary edge update can now be constrained to a reduced spline-control subspace for "
+            "A/B convergence profiles."
         ),
     }
 
@@ -2347,6 +2431,8 @@ def main(argv: list[str] | None = None) -> int:
                 "freeb_add_analytic_bvec": None
                 if args.freeb_add_analytic_bvec is None
                 else bool(args.freeb_add_analytic_bvec),
+                "freeb_edge_control_projection": str(args.freeb_edge_control_projection),
+                "freeb_edge_control_rcond": float(args.freeb_edge_control_rcond),
                 "jax_hot_restart_count": int(args.jax_hot_restart_count),
                 "jax_hot_restart_iters": None
                 if args.jax_hot_restart_iters is None
@@ -2455,6 +2541,8 @@ def main(argv: list[str] | None = None) -> int:
             "freeb_add_analytic_bvec": None
             if args.freeb_add_analytic_bvec is None
             else bool(args.freeb_add_analytic_bvec),
+            "freeb_edge_control_projection": str(args.freeb_edge_control_projection),
+            "freeb_edge_control_rcond": float(args.freeb_edge_control_rcond),
             "jax_hot_restart_count": int(args.jax_hot_restart_count),
             "jax_hot_restart_iters": None
             if args.jax_hot_restart_iters is None
@@ -2536,6 +2624,8 @@ def main(argv: list[str] | None = None) -> int:
             freeb_dense_solve_mode=args.freeb_dense_solve_mode,
             freeb_experimental_fouri_matrix=args.freeb_experimental_fouri_matrix,
             freeb_add_analytic_bvec=args.freeb_add_analytic_bvec,
+            freeb_edge_control_projection=str(args.freeb_edge_control_projection),
+            freeb_edge_control_rcond=float(args.freeb_edge_control_rcond),
             direct_static_cache=bool(args.direct_static_cache),
             jit_direct_sampler=bool(args.jit_direct_sampler),
             direct_trial_bsqvac_resample=bool(args.direct_trial_bsqvac_resample),
@@ -2573,6 +2663,8 @@ def main(argv: list[str] | None = None) -> int:
             freeb_dense_solve_mode=args.freeb_dense_solve_mode,
             freeb_experimental_fouri_matrix=args.freeb_experimental_fouri_matrix,
             freeb_add_analytic_bvec=args.freeb_add_analytic_bvec,
+            freeb_edge_control_projection=str(args.freeb_edge_control_projection),
+            freeb_edge_control_rcond=float(args.freeb_edge_control_rcond),
             jax_hot_restart_count=int(args.jax_hot_restart_count),
             jax_hot_restart_iters=args.jax_hot_restart_iters,
             jax_hot_restart_policy=str(args.jax_hot_restart_policy),
