@@ -22,11 +22,7 @@ import numpy as np
 
 from vmec_jax._compat import jax, jnp
 from vmec_jax.external_fields import CoilFieldParams
-from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
-    direct_coil_branch_local_scalars_report_from_complete_fd,
-    direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
-    direct_coil_same_branch_complete_solve_fd_report,
-)
+from vmec_jax.solvers.free_boundary.adjoint import branch_local_derivatives as _branch_local_derivatives
 from vmec_jax.solvers.free_boundary.coil_optimization import (
     SUPPORTED_SAME_BRANCH_VECTOR_KEYS,
     same_branch_scalar_function_registry,
@@ -173,6 +169,89 @@ def _public_projection(report_map: Mapping[str, Any], public_to_internal: Mappin
     return projected
 
 
+def _cotangent_by_internal_key(
+    cotangent: Mapping[str, float] | Sequence[float] | None,
+    outputs: Sequence[str],
+    public_to_internal: Mapping[str, str],
+) -> dict[str, float] | None:
+    """Return cotangent weights keyed by internal scalar names."""
+
+    if cotangent is None:
+        return None
+    weights: dict[str, float] = {}
+    if isinstance(cotangent, Mapping):
+        for raw_key, raw_weight in cotangent.items():
+            key = str(raw_key).strip()
+            internal = PUBLIC_OUTPUT_ALIASES.get(key, key)
+            if internal not in set(public_to_internal.values()):
+                raise ValueError(f"cotangent key {key!r} was not requested as an output")
+            weights[internal] = weights.get(internal, 0.0) + float(raw_weight)
+    else:
+        raw_weights = tuple(float(value) for value in cotangent)
+        if len(raw_weights) != len(outputs):
+            raise ValueError("cotangent sequence length must match the requested outputs")
+        for output, raw_weight in zip(outputs, raw_weights, strict=True):
+            internal = public_to_internal[str(output)]
+            weights[internal] = weights.get(internal, 0.0) + float(raw_weight)
+    return weights
+
+
+def _cotangent_directional_check(
+    *,
+    cotangent_by_key: Mapping[str, float] | None,
+    branch_local: Mapping[str, Any],
+    complete_report: Mapping[str, Any] | None,
+    rtol: float = 1.0e-2,
+    atol: float = 5.0e-8,
+) -> dict[str, Any] | None:
+    """Compare cotangent-projected AD and complete-solve FD directionals."""
+
+    if cotangent_by_key is None:
+        return None
+    directionals = branch_local.get("directional_derivatives")
+    if directionals is None:
+        return {
+            "available": False,
+            "reason": "cotangent validation requires direction_params/JVP mode",
+        }
+    ad_directional = 0.0
+    fd_directional = 0.0
+    terms: dict[str, dict[str, float]] = {}
+    for key, weight in cotangent_by_key.items():
+        ad_value = float(np.asarray(directionals[key], dtype=float))
+        fd_value = np.nan
+        if complete_report is not None:
+            fd_value = float(complete_report["objective_values"][key]["central_fd_directional"])
+            fd_directional += float(weight) * fd_value
+        ad_directional += float(weight) * ad_value
+        terms[key] = {
+            "cotangent": float(weight),
+            "ad_directional": ad_value,
+            "fd_directional": fd_value,
+        }
+    if complete_report is None:
+        return {
+            "available": True,
+            "fd_available": False,
+            "ad_cotangent_directional": float(ad_directional),
+            "terms": terms,
+        }
+    abs_error = abs(ad_directional - fd_directional)
+    rel_error = abs_error / max(1.0, abs(ad_directional), abs(fd_directional))
+    return {
+        "available": True,
+        "fd_available": True,
+        "passed": bool(abs_error <= float(atol) + float(rtol) * max(abs(ad_directional), abs(fd_directional))),
+        "ad_cotangent_directional": float(ad_directional),
+        "fd_cotangent_directional": float(fd_directional),
+        "abs_error": float(abs_error),
+        "rel_error": float(rel_error),
+        "rtol": float(rtol),
+        "atol": float(atol),
+        "terms": terms,
+    }
+
+
 def free_boundary_value_and_jvp(
     input_path: Any,
     params: CoilFieldParams,
@@ -186,6 +265,10 @@ def free_boundary_value_and_jvp(
     replay_payload: Mapping[str, Any] | None = None,
     replay_plan: Mapping[str, Any] | None = None,
     production_values: Mapping[str, Any] | None = None,
+    scalar_value_fns: Mapping[str, Any] | None = None,
+    scalar_replay_fns: Mapping[str, Any] | None = None,
+    current_only_coil_geometry: Any | None = None,
+    cotangent: Mapping[str, float] | Sequence[float] | None = None,
     validate_fd: bool = False,
     fd_epsilon: float = 1.0e-4,
     fingerprint_rtol: float = 1.0e-6,
@@ -208,16 +291,26 @@ def free_boundary_value_and_jvp(
         raise ValueError("validate_fd=True requires direction_params for the central-FD path")
     options = options or FreeBoundaryDerivativeOptions()
     internal_keys, public_to_internal = canonical_free_boundary_output_keys(outputs)
-    args = _options_args(options)
-    scalar_value_fns, scalar_replay_fns = same_branch_scalar_function_registry(
-        args=args,
-        qs_surfaces=tuple(float(value) for value in options.qs_surfaces),
-        qs_angle_cache_for_static=_qs_angle_cache_factory(args),
-    )
+    cotangent_by_key = _cotangent_by_internal_key(cotangent, outputs, public_to_internal)
+    if scalar_value_fns is None or scalar_replay_fns is None:
+        args = _options_args(options)
+        default_value_fns, default_replay_fns = same_branch_scalar_function_registry(
+            args=args,
+            qs_surfaces=tuple(float(value) for value in options.qs_surfaces),
+            qs_angle_cache_for_static=_qs_angle_cache_factory(args),
+        )
+        scalar_value_fns = default_value_fns if scalar_value_fns is None else scalar_value_fns
+        scalar_replay_fns = default_replay_fns if scalar_replay_fns is None else scalar_replay_fns
+    missing_value_fns = tuple(key for key in internal_keys if key not in scalar_value_fns)
+    missing_replay_fns = tuple(key for key in internal_keys if key not in scalar_replay_fns)
+    if missing_value_fns:
+        raise ValueError(f"missing complete-solve scalar function(s): {missing_value_fns}")
+    if missing_replay_fns:
+        raise ValueError(f"missing branch-local replay scalar function(s): {missing_replay_fns}")
     replay_kwargs = dict(options.replay_kwargs or {})
     complete_solve_kwargs = dict(solve_kwargs or {})
 
-    branch_local = direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
+    branch_local = _branch_local_derivatives.direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
         input_path=input_path,
         params=params,
         direction_params=direction_params,
@@ -236,7 +329,21 @@ def free_boundary_value_and_jvp(
         include_payload=bool(include_payload),
         include_replay_graph_metadata=bool(include_replay_graph_metadata),
         require_active_trace=bool(options.require_active_trace),
+        current_only_coil_geometry=current_only_coil_geometry,
     )
+
+    base_abs_delta = dict(branch_local["base_abs_delta"])
+    base_rel_delta = branch_local.get("base_rel_delta")
+    if base_rel_delta is None:
+        base_rel_delta = {
+            key: float(base_abs_delta.get(key, 0.0))
+            / max(
+                1.0,
+                abs(float(np.asarray(branch_local["values"].get(key, 0.0), dtype=float))),
+                abs(float(np.asarray(branch_local["replay_value_map"].get(key, 0.0), dtype=float))),
+            )
+            for key in internal_keys
+        }
 
     result = {
         "contract": "complete-solve values with same-branch branch-local derivatives",
@@ -249,10 +356,10 @@ def free_boundary_value_and_jvp(
         "internal_values": branch_local["values"],
         "replay_values": _public_projection(branch_local["replay_value_map"], public_to_internal),
         "internal_replay_values": branch_local["replay_value_map"],
-        "base_abs_delta": _public_projection(branch_local["base_abs_delta"], public_to_internal),
-        "internal_base_abs_delta": branch_local["base_abs_delta"],
-        "base_rel_delta": _public_projection(branch_local["base_rel_delta"], public_to_internal),
-        "internal_base_rel_delta": branch_local["base_rel_delta"],
+        "base_abs_delta": _public_projection(base_abs_delta, public_to_internal),
+        "internal_base_abs_delta": base_abs_delta,
+        "base_rel_delta": _public_projection(base_rel_delta, public_to_internal),
+        "internal_base_rel_delta": base_rel_delta,
         "directional_derivatives": None
         if branch_local.get("directional_derivatives") is None
         else _public_projection(branch_local["directional_derivatives"], public_to_internal),
@@ -262,11 +369,16 @@ def free_boundary_value_and_jvp(
         "derivative_mode": branch_local.get("derivative_mode"),
         "branch_local_report": branch_local,
         "fd_validation": None,
+        "cotangent_vjp_fd_check": _cotangent_directional_check(
+            cotangent_by_key=cotangent_by_key,
+            branch_local=branch_local,
+            complete_report=None,
+        ),
     }
 
     if validate_fd:
         params_for = _params_for_direction(params, direction_params)  # type: ignore[arg-type]
-        complete_report = direct_coil_same_branch_complete_solve_fd_report(
+        complete_report = _branch_local_derivatives.direct_coil_same_branch_complete_solve_fd_report(
             input_path,
             params,
             params_for=params_for,
@@ -278,7 +390,7 @@ def free_boundary_value_and_jvp(
             fingerprint_atol=float(fingerprint_atol),
             require_active_trace=bool(options.require_active_trace),
         )
-        scalar_report = direct_coil_branch_local_scalars_report_from_complete_fd(
+        scalar_report = _branch_local_derivatives.direct_coil_branch_local_scalars_report_from_complete_fd(
             complete_report,
             branch_local,
             scalar_keys=internal_keys,
@@ -296,6 +408,11 @@ def free_boundary_value_and_jvp(
                 if internal in scalar_report.get("scalars", {})
             },
         }
+        result["cotangent_vjp_fd_check"] = _cotangent_directional_check(
+            cotangent_by_key=cotangent_by_key,
+            branch_local=branch_local,
+            complete_report=complete_report,
+        )
 
     return result
 

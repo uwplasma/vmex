@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax.external_fields import CoilFieldParams
@@ -89,7 +90,7 @@ def test_free_boundary_value_and_jvp_projects_public_names(monkeypatch):
 
     monkeypatch.setattr(derivatives, "same_branch_scalar_function_registry", _fake_registry)
     monkeypatch.setattr(
-        derivatives,
+        derivatives._branch_local_derivatives,
         "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
         fake_branch_local,
     )
@@ -157,24 +158,49 @@ def test_free_boundary_value_and_jvp_can_attach_complete_solve_fd_validation(mon
 
     monkeypatch.setattr(derivatives, "same_branch_scalar_function_registry", _fake_registry)
     monkeypatch.setattr(
-        derivatives,
+        derivatives._branch_local_derivatives,
         "direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax",
         fake_branch_local,
     )
-    monkeypatch.setattr(derivatives, "direct_coil_same_branch_complete_solve_fd_report", fake_fd_report)
-    monkeypatch.setattr(derivatives, "direct_coil_branch_local_scalars_report_from_complete_fd", fake_scalar_report)
+    monkeypatch.setattr(derivatives._branch_local_derivatives, "direct_coil_same_branch_complete_solve_fd_report", fake_fd_report)
+    monkeypatch.setattr(
+        derivatives._branch_local_derivatives,
+        "direct_coil_branch_local_scalars_report_from_complete_fd",
+        fake_scalar_report,
+    )
 
     report = derivatives.free_boundary_value_and_jvp(
         "input.test",
         base,
         direction_params=direction,
         outputs=("aspect", "qs_residual"),
+        cotangent={"aspect": 2.0, "qs_residual": -1.0},
         validate_fd=True,
         fd_epsilon=1.0e-5,
     )
 
     assert report["fd_validation"]["scalar_report"]["passed"] is True
     assert report["fd_validation"]["public_scalar_report"]["qs_residual"]["abs_error"] == 0.0
+    cotangent_check = report["cotangent_vjp_fd_check"]
+    assert cotangent_check["passed"] is True
+    assert cotangent_check["ad_cotangent_directional"] == 2.0 * 0.2 + (-1.0) * (-0.6)
+    assert cotangent_check["fd_cotangent_directional"] == 2.0 * 0.2 + (-1.0) * (-0.6)
+
+
+def test_free_boundary_value_and_jvp_rejects_unrequested_cotangent_key(monkeypatch):
+    base = _params()
+    direction = derivatives.coil_direction(base, current=0.1)
+
+    monkeypatch.setattr(derivatives, "same_branch_scalar_function_registry", _fake_registry)
+
+    with pytest.raises(ValueError, match="was not requested"):
+        derivatives.free_boundary_value_and_jvp(
+            "input.test",
+            base,
+            direction_params=direction,
+            outputs=("aspect",),
+            cotangent={"qs_residual": 1.0},
+        )
 
 
 def test_contract_free_boundary_vjp_contracts_row_stacked_pytree_jacobian():

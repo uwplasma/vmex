@@ -1772,6 +1772,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
 
     report = json.loads(path.read_text())
     vector = report["branch_local_vector_jacobian"]
+    assert vector["public_api_entrypoint"] == "free_boundary_value_and_jvp"
     assert report["current_only_coil_geometry_cache"]["available"] is True
     assert len(vector_calls) == 2
     assert vector_calls[0]["replay_plan"] is vector_calls[1]["replay_plan"]

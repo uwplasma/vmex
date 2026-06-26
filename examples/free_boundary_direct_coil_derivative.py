@@ -73,6 +73,7 @@ def _compact_report(report: dict[str, Any]) -> dict[str, Any]:
         "base_abs_delta": report["base_abs_delta"],
         "fd_passed": scalar_report.get("passed"),
         "fd_scalars": public_scalar_report,
+        "cotangent_vjp_fd_check": report.get("cotangent_vjp_fd_check"),
         "scalar_keys": report["scalar_keys"],
         "requested_outputs": report["requested_outputs"],
     }
@@ -165,6 +166,13 @@ def main(argv: list[str] | None = None) -> int:
         params,
         direction_params=direction,
         outputs=("aspect", "mean_iota", "boundary_displacement", "bnormal_rms", "qs_residual"),
+        cotangent={
+            "aspect": 1.0,
+            "mean_iota": 1.0,
+            "boundary_displacement": 1.0,
+            "bnormal_rms": 1.0,
+            "qs_residual": 1.0,
+        },
         options=options,
         solve_kwargs=solve_kwargs,
         validate_fd=not bool(args.no_fd),
@@ -187,6 +195,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name:22s} value={float(np.asarray(value)): .6e}  jvp={float(np.asarray(deriv)): .6e}")
     if compact["fd_passed"] is not None:
         print(f"  complete-solve FD validation passed: {compact['fd_passed']}")
+    cotangent_check = compact.get("cotangent_vjp_fd_check") or {}
+    if cotangent_check.get("available") and cotangent_check.get("fd_available"):
+        print(
+            "  cotangent VJP/FD check: "
+            f"passed={cotangent_check['passed']} "
+            f"ad={cotangent_check['ad_cotangent_directional']:.6e} "
+            f"fd={cotangent_check['fd_cotangent_directional']:.6e}"
+        )
     return 0
 
 

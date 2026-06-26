@@ -769,6 +769,8 @@ def _branch_replay_common_summary(result: dict[str, Any], *, state_only_replay: 
         "controller_slot_summary": _controller_slot_summary_from_result(result),
         "timings": {str(key): float(value) for key, value in result.get("timings", {}).items()},
     }
+    if "public_api_entrypoint" in result:
+        summary["public_api_entrypoint"] = str(result["public_api_entrypoint"])
     signature = result.get("directional_jvp_signature")
     if isinstance(signature, dict):
         summary["directional_jvp_signature"] = signature
@@ -912,27 +914,33 @@ class SameBranchVectorRunner:
     ) -> dict[str, Any]:
         """Evaluate branch-local replay values and derivatives for scalar keys."""
 
-        from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
-            direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
+        from vmec_jax.solvers.free_boundary.derivatives import (
+            FreeBoundaryDerivativeOptions,
+            free_boundary_value_and_jvp,
         )
 
-        return direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
+        report = free_boundary_value_and_jvp(
+            None,
             params=self.base_params,
             direction_params=self.direction_params if self.ad_mode == "direct" else None,
-            current_only_coil_geometry=self.current_only_coil_geometry,
+            outputs=scalar_keys,
+            options=FreeBoundaryDerivativeOptions(
+                replay_ad_mode=self.ad_mode,
+                replay_kwargs=replay_kwargs_for_call,
+            ),
             complete_payload=self.report["base"],
-            scalar_keys=scalar_keys,
             production_values={key: self.report_base_values[key] for key in scalar_keys},
             replay_payload=self.replay_payload,
-            scalar_fn=lambda payload: {key: self.scalar_value_fns[key](payload) for key in scalar_keys},
-            replay_scalar_fns=self.scalar_replay_fns,
             replay_plan=replay_plan_for_call,
-            replay_kwargs=replay_kwargs_for_call,
-            replay_ad_mode=self.ad_mode,
-            include_trace_replay_diagnostics=False,
+            scalar_value_fns=self.scalar_value_fns,
+            scalar_replay_fns=self.scalar_replay_fns,
+            current_only_coil_geometry=self.current_only_coil_geometry,
             include_payload=False,
             include_replay_graph_metadata=include_replay_graph_metadata,
         )
+        branch_report = dict(report["branch_local_report"])
+        branch_report["public_api_entrypoint"] = "free_boundary_value_and_jvp"
+        return branch_report
 
 
 def summarize_same_branch_vector_result(
