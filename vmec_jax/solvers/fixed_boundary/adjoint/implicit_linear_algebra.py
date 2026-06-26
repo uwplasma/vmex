@@ -154,7 +154,7 @@ def stellsym_reduced_z_indices(*, rz_idx, K: int, idx00: int | None):
 
 def stellsym_lambda_mn_indices(static, *, idx00: int | None, mask_lambda_axis: bool = True):
     """Independent stellarator-symmetric lambda coordinates in VMEC mn-sin storage."""
-    from .kernels.parity import signed_maps_from_modes
+    from ....kernels.parity import signed_maps_from_modes
 
     ns = int(static.cfg.ns)
     maps = signed_maps_from_modes(static.modes)
@@ -189,7 +189,7 @@ def pack_stellsym_reduced_state(
     lam_maps,
 ):
     """Pack reduced lasym=False coordinates using VMEC lambda mn-sin storage."""
-    from .kernels.parity import _signed_to_mn_sin_cached
+    from ....kernels.parity import _signed_to_mn_sin_cached
 
     lam_sc, lam_cs = _signed_to_mn_sin_cached(jnp.asarray(state.Lsin), maps=lam_maps)
     return jnp.concatenate(
@@ -216,7 +216,7 @@ def update_stellsym_reduced_state(
     K: int,
 ):
     """Update reduced lasym=False coordinates in VMEC lambda mn-sin storage."""
-    from .kernels.parity import _mn_sin_to_signed_cached, _signed_to_mn_sin_cached
+    from ....kernels.parity import _mn_sin_to_signed_cached, _signed_to_mn_sin_cached
 
     x = jnp.asarray(x)
     n_rz = int(rz_idx.shape[0])
