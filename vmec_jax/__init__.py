@@ -80,7 +80,9 @@ from .fourier import (
 from .driver import (
     ExampleData,
     FixedBoundaryRun,
+    FixedBoundarySolvedState,
     example_paths,
+    fixed_boundary_solved_state,
     load_example,
     load_input,
     load_wout,
@@ -406,6 +408,7 @@ _LAZY_ATTRS = {
     "ImplicitFixedBoundaryOptions": ".implicit",
     "ImplicitLambdaOptions": ".implicit",
     "solve_fixed_boundary_state_implicit": ".implicit",
+    "solve_fixed_boundary_state_implicit_vmec_residual": ".implicit",
     "solve_lambda_state_implicit": ".implicit",
     "ResidualCheckpointTape": ".discrete_adjoint",
     "ResidualIterationTrace": ".discrete_adjoint",

@@ -33,6 +33,8 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "128",
             "--virtual-casing-target-chunk-size",
             "none",
+            "--virtual-casing-pythonpath",
+            str(tmp_path),
             "--accepted-provider-parity",
             "--jax-hot-restart-count",
             "2",
@@ -66,6 +68,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.virtual_casing_quad_factor == 3
     assert args.virtual_casing_chunk_size == 128
     assert args.virtual_casing_target_chunk_size is None
+    assert args.virtual_casing_pythonpath == tmp_path
     assert args.accepted_provider_parity is True
     assert args.jax_hot_restart_count == 2
     assert args.jax_hot_restart_iters == 500
@@ -1062,6 +1065,8 @@ def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_
             "64",
             "--virtual-casing-target-chunk-size",
             "128",
+            "--virtual-casing-pythonpath",
+            str(tmp_path),
             "--freeb-jax-nestor-operator",
             "--no-freeb-jax-nestor-jit-operator",
             "--freeb-include-edge",
@@ -1086,6 +1091,7 @@ def test_square_coil_profile_passes_direct_sampler_cache_flags(monkeypatch, tmp_
     assert data["configuration"]["virtual_casing_quad_factor"] == 4
     assert data["configuration"]["virtual_casing_chunk_size"] == 64
     assert data["configuration"]["virtual_casing_target_chunk_size"] == 128
+    assert data["configuration"]["virtual_casing_pythonpath"] == str(tmp_path.resolve())
     assert data["configuration"]["freeb_jax_nestor_operator"] is True
     assert data["configuration"]["freeb_jax_nestor_jit_operator"] is False
     assert data["configuration"]["freeb_include_edge"] is True

@@ -49,7 +49,9 @@ from .toroidal_hybrid import (
 from .driver import (
     ExampleData,
     FixedBoundaryRun,
+    FixedBoundarySolvedState,
     example_paths,
+    fixed_boundary_solved_state,
     load_example,
     load_input,
     load_wout,
@@ -76,6 +78,7 @@ from .finite_beta import (
     finite_beta_scalars_from_state,
     magnetic_well_from_state,
 )
+from .implicit import solve_fixed_boundary_state_implicit_vmec_residual
 from .bootstrap_current import (
     BootstrapCurrentIteration,
     BootstrapCurrentOptions,

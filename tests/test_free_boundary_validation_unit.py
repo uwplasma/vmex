@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,6 +14,25 @@ from vmec_jax.solvers.free_boundary.validation import (
     wout_fsq_total,
     wout_mean_iota,
 )
+
+
+def test_virtual_casing_loader_uses_source_path_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Finite-beta diagnostics can use an optional source checkout without installation."""
+
+    package = tmp_path / "virtual_casing_jax"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "functional.py").write_text("SENTINEL = 'loaded-from-env-path'\n")
+    monkeypatch.setenv("VMEC_JAX_VIRTUAL_CASING_JAX_PATH", str(tmp_path))
+    monkeypatch.delitem(sys.modules, "virtual_casing_jax", raising=False)
+    monkeypatch.delitem(sys.modules, "virtual_casing_jax.functional", raising=False)
+
+    module = validation._load_virtual_casing_functional()
+
+    assert module.SENTINEL == "loaded-from-env-path"
 
 
 @pytest.mark.py311_coverage_only

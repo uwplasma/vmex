@@ -328,6 +328,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Target chunk size passed to virtual_casing_jax; use auto or none.",
     )
     p.add_argument(
+        "--virtual-casing-pythonpath",
+        type=Path,
+        default=None,
+        help=(
+            "Optional path to a virtual_casing_jax source checkout. The profiler prepends it to "
+            "sys.path and exports VMEC_JAX_VIRTUAL_CASING_JAX_PATH for finite-beta diagnostics."
+        ),
+    )
+    p.add_argument(
         "--resolution-diagnostics-only",
         action="store_true",
         help=(
@@ -386,6 +395,24 @@ def _parse_virtual_casing_chunk_arg(raw: str) -> int | str | None:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("virtual-casing chunk sizes must be positive, auto, or none")
     return parsed
+
+
+def _configure_virtual_casing_pythonpath(path: Path | None) -> str | None:
+    """Prepend an optional virtual_casing_jax source path for this process."""
+
+    if path is None:
+        return None
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists() or not resolved.is_dir():
+        raise ValueError(f"--virtual-casing-pythonpath must be an existing directory: {resolved}")
+    text = str(resolved)
+    if text not in sys.path:
+        sys.path.insert(0, text)
+    existing = os.environ.get("VMEC_JAX_VIRTUAL_CASING_JAX_PATH")
+    parts = [part for part in (existing or "").split(os.pathsep) if part]
+    if text not in parts:
+        os.environ["VMEC_JAX_VIRTUAL_CASING_JAX_PATH"] = os.pathsep.join([text, *parts])
+    return text
 
 
 def _resolve_schedule(args: argparse.Namespace) -> tuple[tuple[int, ...], tuple[int, ...], tuple[float, ...]]:
@@ -2362,6 +2389,7 @@ def _vmec2000_stage_payload(stage: Any) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    virtual_casing_pythonpath = _configure_virtual_casing_pythonpath(args.virtual_casing_pythonpath)
     outdir = args.outdir
     outdir.mkdir(parents=True, exist_ok=True)
     recommended_nzeta = recommended_square_axis_nzeta(int(args.ntor))
@@ -2484,6 +2512,7 @@ def main(argv: list[str] | None = None) -> int:
                 "virtual_casing_quad_factor": int(args.virtual_casing_quad_factor),
                 "virtual_casing_chunk_size": args.virtual_casing_chunk_size,
                 "virtual_casing_target_chunk_size": args.virtual_casing_target_chunk_size,
+                "virtual_casing_pythonpath": virtual_casing_pythonpath,
             },
             "mgrid": {
                 "created": False,
@@ -2599,6 +2628,7 @@ def main(argv: list[str] | None = None) -> int:
             "virtual_casing_quad_factor": int(args.virtual_casing_quad_factor),
             "virtual_casing_chunk_size": args.virtual_casing_chunk_size,
             "virtual_casing_target_chunk_size": args.virtual_casing_target_chunk_size,
+            "virtual_casing_pythonpath": virtual_casing_pythonpath,
             "resolution_diagnostics_only": bool(args.resolution_diagnostics_only),
             "accepted_provider_parity": bool(args.accepted_provider_parity),
             "phiedge": float(config.phiedge),

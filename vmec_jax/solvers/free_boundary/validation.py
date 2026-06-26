@@ -11,7 +11,9 @@ change itself.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -193,11 +195,18 @@ def _broadcast_surface_scalar(values: Any, shape: tuple[int, int], *, name: str)
 
 
 def _load_virtual_casing_functional():
+    extra_path = os.environ.get("VMEC_JAX_VIRTUAL_CASING_JAX_PATH")
+    if extra_path:
+        for raw in reversed([part for part in extra_path.split(os.pathsep) if part.strip()]):
+            path = str(Path(raw).expanduser())
+            if path not in sys.path:
+                sys.path.insert(0, path)
     try:
         from virtual_casing_jax import functional as vc_functional
     except ImportError as exc:
         raise ImportError(
-            "virtual_casing_jax is required for virtual-casing finite-beta boundary diagnostics"
+            "virtual_casing_jax is required for virtual-casing finite-beta boundary diagnostics. "
+            "Install virtual-casing-jax or set VMEC_JAX_VIRTUAL_CASING_JAX_PATH to its source checkout."
         ) from exc
     return vc_functional
 

@@ -33556,3 +33556,266 @@ Result: checkout was clean and at `8a970c1c`.
 ### User input needed
 
 No user input is needed.
+
+## M296 - Virtual-Casing Path Hook And Queue Repair
+
+### Steps taken
+
+- Re-summarized the active strict rows with the current summary tool:
+  - direct-GPU hot restart at `MPOL=5, NTOR=28, NZETA=64` was still active at
+    iteration `3206`, with `final_fsqr=4.72e-11`,
+    `final_fsqz=4.41e-11`, `final_fsql=1.43e-11`, strict gap `47.2`,
+    and `tail_plateau_status=flat_above_stage_ftol`;
+  - VMEC2000 generated-`mgrid` `DELT=0.015` was still active in the first
+    loose `NS=9, FTOL=1e-8` stage at iteration `3051`, with
+    `final_fsqr=2.90e-7`, `final_fsqz=1.78e-7`, `final_fsql=2.42e-8`,
+    strict gap relative to that loose stage `29`, and no vacuum-grid overflow.
+- Confirmed `virtual_casing_jax` source checkouts exist locally and on
+  `office`, but neither active Python environment could import it by default:
+  - local path: `/Users/rogeriojorge/local/stellarator_codes/virtual_casing_jax`;
+  - office path: `/home/rjorge/local/virtual_casing_jax`.
+- Added a general optional import hook:
+  - `vmec_jax.solvers.free_boundary.validation` now honors
+    `VMEC_JAX_VIRTUAL_CASING_JAX_PATH` before importing
+    `virtual_casing_jax.functional`.
+- Added a profiler CLI hook:
+  - `tools/diagnostics/profile_square_coil_free_boundary.py` now accepts
+    `--virtual-casing-pythonpath PATH`, prepends it to `sys.path`, exports the
+    same environment variable, and records the resolved path in profile JSON.
+- Updated the direct-coil convergence docs to explain the optional
+  virtual-casing source-path hook and the current edge-polish follow-up
+  sequence.
+- Repaired the remote queued-run setup:
+  - the edge-polish waiter had an empty `CMD`; it is now rewritten with the
+    generated `direct-gpu-edge-polish` command;
+  - duplicate stale projected-control waiters were stopped;
+  - the remaining projected-control and edge-polish waiters now use a shared
+    `/tmp/vmec_mirror_freeb_queue.lock` so they cannot start heavy solves at
+    the same time after the active rows finish;
+  - the projected-control active-process check was simplified to count real
+    `profile_square_coil_free_boundary.py`/`xvmec` processes and ignore
+    waiters.
+
+### Results obtained
+
+- Finite-beta direct-coil promotion will no longer be blocked by requiring a
+  manual package install when a local `virtual_casing_jax` checkout exists.
+- Local import smoke with
+  `VMEC_JAX_VIRTUAL_CASING_JAX_PATH=/Users/rogeriojorge/local/stellarator_codes/virtual_casing_jax`
+  loaded `virtual_casing_jax.functional` and found
+  `compute_external_B_functional`.
+- On `office`, direct `PYTHONPATH=/home/rjorge/local/virtual_casing_jax`
+  import smoke also loaded `virtual_casing_jax.functional`; the new env hook
+  will become active there after the checkout is fast-forwarded to this commit.
+- The remaining remote queued work is now:
+  - one active projected-control waiter;
+  - one active edge-polish waiter;
+  - both waiting behind the active direct-GPU and VMEC2000 rows and serialized
+    by a shared lock.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_free_boundary_validation_unit.py \
+  tests/test_profile_square_coil_free_boundary.py
+```
+
+Result: `31 passed, 1 warning`.
+
+```bash
+VMEC_JAX_VIRTUAL_CASING_JAX_PATH=/Users/rogeriojorge/local/stellarator_codes/virtual_casing_jax \
+  venv/bin/python - <<'PY'
+from vmec_jax.solvers.free_boundary.validation import _load_virtual_casing_functional
+f = _load_virtual_casing_functional()
+print(getattr(f, "__file__", "unknown"), hasattr(f, "compute_external_B_functional"))
+PY
+```
+
+Result: loaded the local `virtual_casing_jax.functional` module and printed
+`True` for `compute_external_B_functional`.
+
+```bash
+venv/bin/python tools/diagnostics/profile_square_coil_free_boundary.py \
+  --outdir /tmp/vmec_vc_path_smoke \
+  --beta-percent 0 --mpol 3 --ntor 4 --ns 5 --nzeta 16 \
+  --ns-array 5 --niter-array 1 --ftol-array 1e-6 \
+  --max-iter 1 --ftol 1e-6 --phiedge -0.02 \
+  --axis-kind control_spline \
+  --skip-direct --skip-mgrid --skip-provider-parity \
+  --resolution-diagnostics-only \
+  --max-boundary-projection-error none \
+  --virtual-casing-pythonpath /Users/rogeriojorge/local/stellarator_codes/virtual_casing_jax
+```
+
+Result: wrote resolution diagnostics and recorded the resolved
+`virtual_casing_pythonpath`.
+
+```bash
+python3 -m ruff check \
+  vmec_jax/solvers/free_boundary/validation.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_free_boundary_validation_unit.py \
+  tests/test_profile_square_coil_free_boundary.py
+```
+
+Result: passed.
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+### File structure and best-practice adherence
+
+- The optional dependency hook lives in the finite-beta validation module,
+  where the optional import is needed.
+- The profiler CLI option is local to the square-coil profile runner and is
+  recorded in JSON for reproducibility.
+- No generated solver outputs, WOUTs, or figures were added to git.
+- Remote queue repairs were made only to waiting shell scripts, not active
+  solver processes.
+
+### Best next steps
+
+1. Commit and push this tranche.
+2. Fast-forward the office edge-polish checkout so future finite-beta
+   diagnostics can use the new `VMEC_JAX_VIRTUAL_CASING_JAX_PATH` hook.
+3. Let the active direct-GPU and VMEC2000 rows finish.
+4. Let the serialized projected-control and edge-polish waiters run, then
+   summarize them with the edge-control columns.
+5. For the first finite-beta direct row after strict vacuum convergence,
+   pass `--virtual-casing-diagnostics --virtual-casing-pythonpath` and require
+   the finite-beta promotion block to report virtual-casing availability.
+
+### Completion percentages after M296
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row is near but flat above strict.
+- VMEC2000 robustness/reference lane: `99%`, active row is flat above its
+  current loose stage.
+- Resolution/edit robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `83%`, serialized projected-control
+  and edge-polish strict runs are queued behind active rows.
+- Finite-beta virtual-casing validation lane: `86%`, optional source-path hook
+  is implemented and tested; no finite-beta square-coil strict row has passed
+  it yet.
+- Strict convergence diagnostics lane: `100%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
+## M297 - CI API Repair Before Virtual-Casing Push
+
+### Steps taken
+
+- Checked PR #21 CI before pushing the virtual-casing path hook tranche.
+- Found two failing GitHub Actions checks on commit `4b794a93`:
+  - `Fast Tests (py3.11 core coverage: driver-solve-discrete)` failed on two
+    driver/API regressions;
+  - `Fast Tests (py3.11 core coverage: rest)` was cancelled by the runner at
+    about `77%` progress, with no assertion or collection failure in the log.
+- Reproduced the actionable driver failures locally:
+  - `FixedBoundaryRun` no longer exposed `solved_state`;
+  - `run_free_boundary(..., light_history=False)` forwarded an unsupported
+    keyword to `run_fixed_boundary`;
+  - the public API facade missed
+    `solve_fixed_boundary_state_implicit_vmec_residual`.
+- Added `FixedBoundarySolvedState` and `fixed_boundary_solved_state(run)` in
+  `vmec_jax.driver`, with a cheap JSON-friendly `as_diagnostics()` view based
+  on existing final-residual extraction helpers.
+- Re-exported the solved-state facade through `vmec_jax.api` and
+  `import vmec_jax as vj`.
+- Added `light_history: bool | None` to the public fixed-boundary driver and
+  routed it through the VMEC2000 staged-solve context, preserving the existing
+  direct-coil quiet default when the value is `None`.
+- Added the missing public/lazy export for
+  `solve_fixed_boundary_state_implicit_vmec_residual`.
+
+### Results obtained
+
+- The reproduced CI failures now pass locally.
+- Direct-coil free-boundary profiling can explicitly request full history by
+  passing `light_history=False` without breaking the performance default.
+- The public fixed-boundary run object again has a compact solved-state summary
+  useful for downstream CLI diagnostics, examples, and implicit-differentiation
+  workflows.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_driver_implicit_wave11_coverage.py::test_fixed_boundary_run_solved_state_summary_and_public_exports \
+  tests/test_driver_run_wave8_coverage.py::test_direct_coil_free_boundary_quiet_performance_path_uses_light_history \
+  tests/test_free_boundary_validation_unit.py \
+  tests/test_profile_square_coil_free_boundary.py
+```
+
+Result: `33 passed, 1 warning`.
+
+```bash
+python3 -m ruff check \
+  vmec_jax/solvers/free_boundary/validation.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tests/test_free_boundary_validation_unit.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  vmec_jax/driver.py \
+  vmec_jax/drivers/staging.py \
+  vmec_jax/api.py \
+  vmec_jax/__init__.py
+```
+
+Result: passed.
+
+```bash
+venv/bin/python -m py_compile \
+  vmec_jax/solvers/free_boundary/validation.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  vmec_jax/driver.py \
+  vmec_jax/drivers/staging.py \
+  vmec_jax/api.py \
+  vmec_jax/__init__.py
+```
+
+Result: passed.
+
+### File structure and best-practice adherence
+
+- Public run-summary behavior stays in `vmec_jax.driver`, next to
+  `FixedBoundaryRun`.
+- Staged-solver keyword routing stays in `vmec_jax.drivers.staging`, where
+  stage solve kwargs are assembled.
+- Public facade changes are limited to `vmec_jax.api` and `vmec_jax.__init__`.
+- No generated solver outputs, WOUTs, plots, or large artifacts were added.
+
+### Best next steps
+
+1. Commit and push the virtual-casing path hook plus API/CI repair tranche.
+2. Fast-forward the `office` edge-polish checkout and verify the new
+   `VMEC_JAX_VIRTUAL_CASING_JAX_PATH` hook there.
+3. Recheck PR CI after GitHub reruns on the new commit; treat the prior `rest`
+   shard as runner cancellation unless it fails again with a concrete log.
+4. Continue waiting for the active direct-GPU and VMEC2000 strict rows, then
+   summarize the queued projected-control and edge-polish rows when they run.
+
+### Completion percentages after M297
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row is near but flat above strict.
+- VMEC2000 robustness/reference lane: `99%`, active row is still the reference
+  strictness comparator.
+- Resolution/edit robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `83%`, queued strict rows are
+  serialized behind active runs.
+- Finite-beta virtual-casing validation lane: `87%`, source-path hook and
+  profiler plumbing are ready for the first strict finite-beta row.
+- CI/API health lane: `98%`, actionable local failures fixed; remote `rest`
+  shard needs rerun confirmation.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

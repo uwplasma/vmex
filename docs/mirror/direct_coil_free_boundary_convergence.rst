@@ -532,14 +532,22 @@ residual floors. Direct-coil rows produced with
 ``--virtual-casing-diagnostics`` also expose virtual-casing status,
 external-normal residuals, pressure-balance residuals, and required/target
 external-field RMS values in the same summary table.
+When ``virtual_casing_jax`` exists as a source checkout but is not installed in
+the active Python environment, pass
+``--virtual-casing-pythonpath /path/to/virtual_casing_jax`` to the profiler, or
+set ``VMEC_JAX_VIRTUAL_CASING_JAX_PATH``. This prepends that checkout for the
+postsolve diagnostic only; it does not make virtual casing a required
+dependency for vacuum rows or ordinary free-boundary solves.
 The summary helper also recognizes direct-GPU result folders named
 ``square_coil_direct_gpu_*``. This keeps active cached-JIT speed probes from
 collapsing to a generic ``launcher`` case name, and preserves ``MPOL``,
 ``NTOR``, ``NS``, ``NZETA``, and final-stage budget hints inferred from the
 folder name. Completed stalled direct rows that have not already used
-``freeb_jax_nestor_operator`` now recommend ``direct-gpu-jax-nestor`` as the
-next profile kind; rows that already used it fall back to the ordinary
-direct-GPU ``DELT``/stage-budget lane.
+the reduced edge-control projection now recommend ``direct-gpu-edge-polish`` as
+the next profile kind; rows that already used edge projection but have not used
+the JAX NESTOR operator recommend ``direct-gpu-edge-jax-nestor-polish``.
+Rows that already used both edge projection and the JAX NESTOR operator fall
+back to the ordinary direct-GPU ``DELT``/stage-budget lane.
 For staged solves, the same table now exposes ``stage_count``,
 ``stage_ns_array``, ``stage_niter_array``, ``stage_ftol_array``,
 ``stage_budget_total``, ``stage_budget_final``, ``current_stage_index``,
@@ -606,8 +614,9 @@ The table also emits ``recommended_followup_profile_kind`` and
 resolution, grid, and accepted-LCFS provider-parity evidence into the next
 profile family to run: wait for active rows, repair the resolution preflight,
 widen the VMEC2000 mgrid, run accepted-provider parity, or run a direct-GPU
-``DELT``/stage-budget probe. They are recommendations for the next diagnostic
-row, not a replacement for inspecting the residual tail and physics plots.
+``DELT``/stage-budget or edge-polish probe. They are recommendations for the
+next diagnostic row, not a replacement for inspecting the residual tail and
+physics plots.
 
 Finite-beta mirror validation should check the sign of the magnetic response,
 not only numerical convergence. Ideal MHD force balance gives the familiar

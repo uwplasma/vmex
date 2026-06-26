@@ -87,6 +87,7 @@ class Vmec2000StagedSolveContext:
     use_restart_triggers: Any
     vmecpp_restart: bool
     limit_update_rms: Any
+    light_history: Any
     external_field_provider_kind: Any
     external_field_provider_static: Any
     external_field_provider_params: Any
@@ -405,13 +406,17 @@ def _build_vmec2000_stage_solve_plan(
         else None
     )
     stage_light_history = (
-        True
-        if (
-            bool(ctx.performance_mode)
-            and (not bool(ctx.verbose))
-            and ((not bool(ctx.cfg.lfreeb)) or bool(ctx.direct_external_provider))
+        ctx.light_history
+        if ctx.light_history is not None
+        else (
+            True
+            if (
+                bool(ctx.performance_mode)
+                and (not bool(ctx.verbose))
+                and ((not bool(ctx.cfg.lfreeb)) or bool(ctx.direct_external_provider))
+            )
+            else None
         )
-        else None
     )
     stage_host_update_assembly = ctx.host_update_assembly_driver_default(
         cfg=static_i.cfg,

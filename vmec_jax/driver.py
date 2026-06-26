@@ -8,7 +8,7 @@ power users to drop down to lower-level APIs.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 import os
@@ -147,6 +147,42 @@ class ExampleData:
 
 
 @dataclass(frozen=True)
+class FixedBoundarySolvedState:
+    """Compact public summary of the state returned by a fixed-boundary run."""
+
+    state: Any = field(compare=False)
+    final_fsq: float
+    residuals: tuple[float, float, float]
+    n_iter: int
+    converged: bool
+    converged_strict: bool
+    ftol: float | None
+    solver_mode: str | None
+    use_scan: bool | None
+
+    def as_diagnostics(self) -> dict[str, Any]:
+        """Return the solved-state summary as JSON-friendly diagnostics."""
+
+        fsqr, fsqz, fsql = self.residuals
+        diagnostics: dict[str, Any] = {
+            "final_fsq": float(self.final_fsq),
+            "final_fsqr": float(fsqr),
+            "final_fsqz": float(fsqz),
+            "final_fsql": float(fsql),
+            "n_iter": int(self.n_iter),
+            "converged": bool(self.converged),
+            "converged_strict": bool(self.converged_strict),
+        }
+        if self.ftol is not None:
+            diagnostics["ftol"] = float(self.ftol)
+        if self.solver_mode is not None:
+            diagnostics["solver_mode"] = str(self.solver_mode)
+        if self.use_scan is not None:
+            diagnostics["use_scan"] = bool(self.use_scan)
+        return diagnostics
+
+
+@dataclass(frozen=True)
 class FixedBoundaryRun:
     """Container returned by ``run_fixed_boundary``."""
 
@@ -158,6 +194,46 @@ class FixedBoundaryRun:
     flux: any
     profiles: dict
     signgs: int
+
+    @property
+    def solved_state(self) -> FixedBoundarySolvedState:
+        """Return a compact summary of the solved VMEC state."""
+
+        return fixed_boundary_solved_state(self)
+
+
+def fixed_boundary_solved_state(run: FixedBoundaryRun) -> FixedBoundarySolvedState:
+    """Build a compact solved-state summary from a fixed-boundary run."""
+
+    result = run.result
+    diagnostics = getattr(result, "diagnostics", {}) or {}
+    final_fsq = float(_result_final_fsq(result))
+    residuals = _result_final_residuals(result)
+    if residuals is None:
+        residuals = (final_fsq, 0.0, 0.0)
+    ftol = diagnostics.get("ftol", diagnostics.get("requested_ftol", None))
+    if ftol is None:
+        try:
+            ftol = float(run.indata.get_float("FTOL", 1.0e-13))
+        except Exception:
+            ftol = None
+    converged = bool(diagnostics.get("converged", False))
+    if ftol is not None:
+        converged_strict = bool(_result_meets_requested_ftol(result, ftol=float(ftol)))
+    else:
+        converged_strict = bool(diagnostics.get("converged_strict", converged))
+    use_scan = diagnostics.get("use_scan", diagnostics.get("vmec2000_scan", None))
+    return FixedBoundarySolvedState(
+        state=run.state,
+        final_fsq=final_fsq,
+        residuals=tuple(float(val) for val in residuals),
+        n_iter=int(getattr(result, "n_iter", 0) or 0),
+        converged=converged,
+        converged_strict=converged_strict,
+        ftol=None if ftol is None else float(ftol),
+        solver_mode=None if diagnostics.get("solver_mode", None) is None else str(diagnostics["solver_mode"]),
+        use_scan=None if use_scan is None else bool(use_scan),
+    )
 
 
 @dataclass(frozen=True)
@@ -856,6 +932,7 @@ def _run_fixed_boundary_vmec2000_iter_solver_branch(
     use_restart_triggers: Any,
     vmecpp_restart: bool,
     limit_update_rms: Any,
+    light_history: bool | None,
     external_field_provider_kind: Any,
     external_field_provider_static_eff: Any,
     external_field_provider_params: Any,
@@ -1011,6 +1088,7 @@ def run_fixed_boundary(
     free_boundary_activate_fsq: float | None = None,
     free_boundary_edge_control_projection: Any = None,
     limit_update_rms: bool | None = None,
+    light_history: bool | None = None,
     _auto_cli_fixed_boundary_mode: bool = True,
     _solver_device_context_active: bool = False,
 ):
@@ -1341,6 +1419,7 @@ def run_fixed_boundary(
             use_restart_triggers=use_restart_triggers,
             vmecpp_restart=bool(vmecpp_restart),
             limit_update_rms=limit_update_rms,
+            light_history=light_history,
             external_field_provider_kind=external_field_provider_kind,
             external_field_provider_static_eff=external_field_provider_static_eff,
             external_field_provider_params=external_field_provider_params,
