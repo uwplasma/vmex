@@ -1155,6 +1155,14 @@ The remaining work is deliberately narrow:
    more than ``5`` times above that best value by iteration ``835``.  That is
    not a useful ``MAX_ITER`` extension candidate without rollback or a changed
    edge-control update.
+   A second opt-in robustness probe is ``--strict-backtracking``. It enables
+   the existing strict-loop trial residual check and backtracks full VMEC
+   updates when the fresh trial residual grows. This is a profiling tool for
+   hard ``FTOL=1e-12`` square-axis rows, not the default VMEC2000-parity
+   iteration. Use it only when a full-step direct-coil row has already shown a
+   clear early minimum followed by drift; record it from the profile JSON field
+   ``free_boundary_solver_overrides.strict_backtracking`` before comparing
+   against generated-mgrid or VMEC2000 rows.
 2. Re-run the square-coil beta ladder with per-beta checkpointing and the
    best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at
    ``1e-12``. Keep ``DELT=0.02``, ``NVACSKIP=1``,

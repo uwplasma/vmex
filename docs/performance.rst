@@ -192,6 +192,11 @@ read as a mixed result rather than a broad VMEC2000 speedup claim:
   to match the VMEC2000 step-accept path.  Using backtracking causes the
   adaptive step size to collapse to machine epsilon on stiff 3D geometries
   (e.g. QH stellarators), resulting in non-convergence.
+  The square-coil mirror-hybrid profiler has an explicit
+  ``--strict-backtracking`` option for one-off robustness studies when a
+  free-boundary direct-coil row drifts after an early residual minimum.  Keep
+  that profile result separate from the default performance tables; it is a
+  convergence diagnostic, not the production/parity default.
 
 **6. FFT-based spectral synthesis**
   ``vmec_jax`` uses FFT-based real-space synthesis (``vmec_tomnsp.py``) for
