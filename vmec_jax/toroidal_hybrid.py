@@ -95,6 +95,47 @@ class SquareAxisSplineControls:
 
 
 @dataclass(frozen=True)
+class SquareAxisControlBasis:
+    """Symmetry-reduced square-axis control basis.
+
+    ``matrix @ reduced_radius`` expands a compact control vector into the full
+    periodic spline-control radius vector.  This keeps production updates in a
+    symmetry-preserving low-dimensional basis before any projection to VMEC
+    Fourier coefficients.
+    """
+
+    controls: SquareAxisSplineControls
+    symmetry: str
+    labels: tuple[str, ...]
+    matrix: np.ndarray
+
+    def expand_radius(self, reduced_radius: Any) -> np.ndarray:
+        """Expand reduced radii into one radius per spline control node."""
+
+        values = np.asarray(reduced_radius, dtype=float).reshape(-1)
+        if values.size != len(self.labels):
+            raise ValueError("reduced_radius has the wrong length for this control basis")
+        return np.asarray(self.matrix @ values, dtype=float)
+
+    def project_radius(self, full_radius: Any) -> np.ndarray:
+        """Average a full control-radius vector into the reduced basis."""
+
+        values = np.asarray(full_radius, dtype=float).reshape(-1)
+        if values.size != np.asarray(self.controls.radius).size:
+            raise ValueError("full_radius has the wrong length for this control basis")
+        counts = np.sum(self.matrix, axis=0)
+        return np.asarray((self.matrix.T @ values) / counts, dtype=float)
+
+    def controls_from_reduced(self, reduced_radius: Any) -> SquareAxisSplineControls:
+        """Return validated spline controls from a reduced-radius vector."""
+
+        return SquareAxisSplineControls(
+            zeta=np.asarray(self.controls.zeta, dtype=float),
+            radius=self.expand_radius(reduced_radius),
+        ).validate()
+
+
+@dataclass(frozen=True)
 class SquareAxisControlFourierMatrix:
     """Linearized VMEC boundary coefficients for square-axis control radii."""
 
@@ -105,6 +146,88 @@ class SquareAxisControlFourierMatrix:
     R_sin: np.ndarray
     Z_cos: np.ndarray
     Z_sin: np.ndarray
+    control_basis: SquareAxisControlBasis | None = None
+
+
+def _periodic_angle_distance(a: Any, b: Any) -> np.ndarray:
+    return np.abs((np.asarray(a, dtype=float) - np.asarray(b, dtype=float) + np.pi) % (2.0 * np.pi) - np.pi)
+
+
+def _angle_match_index(nodes: np.ndarray, target: float, *, tol: float) -> int:
+    distances = _periodic_angle_distance(nodes, float(target))
+    index = int(np.argmin(distances))
+    if float(distances[index]) > float(tol):
+        raise ValueError("spline control nodes are missing a required symmetry counterpart")
+    return index
+
+
+def square_axis_spline_symmetric_control_basis(
+    controls: SquareAxisSplineControls | None = None,
+    *,
+    symmetry: str = "square",
+    angle_tol: float = 1.0e-10,
+) -> SquareAxisControlBasis:
+    """Return a symmetry-preserving reduced basis for square-axis controls.
+
+    ``symmetry="stellarator"`` enforces the usual even-radius condition
+    ``r(zeta) = r(-zeta)``.  ``symmetry="square"`` additionally groups nodes
+    related by quarter-turn rotations, which reduces the default eight
+    side/corner controls to two parameters.  The returned basis is a dense
+    expansion matrix, so it can be used directly in chain-rule and optimization
+    code without changing the current VMEC Fourier boundary interface.
+    """
+
+    validated = (
+        controls
+        if controls is not None
+        else SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.14)
+    ).validate()
+    symmetry_key = str(symmetry).strip().lower()
+    if symmetry_key in {"stellsym", "stellarator_symmetry"}:
+        symmetry_key = "stellarator"
+    if symmetry_key in {"fourfold", "dihedral", "d4"}:
+        symmetry_key = "square"
+    if symmetry_key not in {"stellarator", "square"}:
+        raise ValueError("symmetry must be 'stellarator' or 'square'")
+    if not np.isfinite(float(angle_tol)) or float(angle_tol) <= 0.0:
+        raise ValueError("angle_tol must be positive and finite")
+
+    zeta = np.asarray(validated.zeta, dtype=float)
+    n_control = int(zeta.size)
+    unused = set(range(n_control))
+    orbits: list[list[int]] = []
+    while unused:
+        seed = min(unused)
+        seed_angle = float(zeta[seed])
+        if symmetry_key == "stellarator":
+            targets = (seed_angle, -seed_angle)
+        else:
+            turns = 0.5 * np.pi * np.arange(4, dtype=float)
+            targets = tuple(seed_angle + turns) + tuple(-seed_angle + turns)
+        orbit = sorted({_angle_match_index(zeta, target, tol=float(angle_tol)) for target in targets})
+        orbits.append(orbit)
+        unused.difference_update(orbit)
+
+    matrix = np.zeros((n_control, len(orbits)), dtype=float)
+    labels: list[str] = []
+    for col, orbit in enumerate(orbits):
+        matrix[orbit, col] = 1.0
+        representative = float(np.min(np.mod(zeta[orbit], 2.0 * np.pi)))
+        if symmetry_key == "square" and np.isclose(np.mod(2.0 * representative, np.pi), 0.0, atol=angle_tol):
+            label = "side"
+        elif symmetry_key == "square" and np.isclose(
+            np.mod(2.0 * representative - 0.5 * np.pi, np.pi), 0.0, atol=angle_tol
+        ):
+            label = "corner"
+        else:
+            label = f"{symmetry_key}_orbit_{col}"
+        labels.append(label if label not in labels else f"{label}_{col}")
+    return SquareAxisControlBasis(
+        controls=validated,
+        symmetry=symmetry_key,
+        labels=tuple(labels),
+        matrix=matrix,
+    )
 
 
 def _periodic_cubic_hermite_interpolate(x_nodes: Any, y_nodes: Any, x_eval: Any) -> np.ndarray:
@@ -221,6 +344,7 @@ def square_axis_spline_radius_matrix(zeta: Any, controls: SquareAxisSplineContro
 def square_axis_spline_control_fourier_matrix(
     *,
     controls: SquareAxisSplineControls | None = None,
+    control_basis: SquareAxisControlBasis | None = None,
     nfp: int = 1,
     mpol: int = 5,
     ntor: int = 28,
@@ -237,14 +361,17 @@ def square_axis_spline_control_fourier_matrix(
     locations and fixed local cross-section shaping.
     """
 
-    controls = (
-        controls
-        if controls is not None
-        else SquareAxisSplineControls.rounded_square(
-            axis_half_width=float(sample_kwargs.get("axis_half_width", 1.5)),
-            corner_radius_factor=float(sample_kwargs.get("axis_spline_corner_radius_factor", np.sqrt(2.0))),
-        )
-    ).validate()
+    if control_basis is not None:
+        controls = control_basis.controls.validate()
+    else:
+        controls = (
+            controls
+            if controls is not None
+            else SquareAxisSplineControls.rounded_square(
+                axis_half_width=float(sample_kwargs.get("axis_half_width", 1.5)),
+                corner_radius_factor=float(sample_kwargs.get("axis_spline_corner_radius_factor", np.sqrt(2.0))),
+            )
+        ).validate()
     modes = vmec_mode_table(mpol=int(mpol), ntor=int(ntor))
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta_fit), endpoint=False)
     zeta = np.linspace(0.0, 2.0 * np.pi, int(nzeta_fit), endpoint=False)
@@ -270,11 +397,17 @@ def square_axis_spline_control_fourier_matrix(
         )
 
     base = np.asarray(controls.radius, dtype=float)
+    if control_basis is not None:
+        basis_matrix = np.asarray(control_basis.matrix, dtype=float)
+        reduced_base = control_basis.project_radius(base)
+        base = control_basis.expand_radius(reduced_base)
+        columns_in_radius_space = [basis_matrix[:, idx] for idx in range(basis_matrix.shape[1])]
+    else:
+        columns_in_radius_space = [np.eye(base.size, dtype=float)[idx] for idx in range(base.size)]
     base_coeffs = _project(base)
     columns = []
-    for idx in range(base.size):
-        perturbed = base.copy()
-        perturbed[idx] += 1.0
+    for radius_delta in columns_in_radius_space:
+        perturbed = base + np.asarray(radius_delta, dtype=float)
         columns.append(tuple(new - old for new, old in zip(_project(perturbed), base_coeffs, strict=True)))
 
     stacked = [np.stack([column[item] for column in columns], axis=-1) for item in range(4)]
@@ -286,6 +419,7 @@ def square_axis_spline_control_fourier_matrix(
         R_sin=stacked[1],
         Z_cos=stacked[2],
         Z_sin=stacked[3],
+        control_basis=control_basis,
     )
 
 

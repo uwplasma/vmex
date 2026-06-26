@@ -14,6 +14,7 @@ from vmec_jax.boundary import boundary_input_from_indata
 from vmec_jax.namelist import read_indata, write_indata
 import vmec_jax.toroidal_hybrid as toroidal_hybrid
 from vmec_jax.toroidal_hybrid import (
+    SquareAxisControlBasis,
     SquareAxisControlFourierMatrix,
     SquareAxisSplineControls,
     ToroidalHybridBoundarySamples,
@@ -25,6 +26,7 @@ from vmec_jax.toroidal_hybrid import (
     square_axis_spline_control_fourier_matrix,
     square_axis_spline_radius,
     square_axis_spline_radius_matrix,
+    square_axis_spline_symmetric_control_basis,
     square_axis_stellarator_mirror_hybrid_indata,
     square_axis_stellarator_mirror_hybrid_projection_error,
     toroidal_hybrid_cross_section_anisotropy,
@@ -96,11 +98,13 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
     assert indata.get_int("NTOR") == 8
     assert "RBS" not in indata.indexed
     assert "ZBC" not in indata.indexed
+    assert vj.SquareAxisControlBasis is SquareAxisControlBasis
     assert vj.SquareAxisControlFourierMatrix is SquareAxisControlFourierMatrix
     assert vj.SquareAxisSplineControls is SquareAxisSplineControls
     assert vj.square_axis_spline_control_fourier_matrix is square_axis_spline_control_fourier_matrix
     assert vj.square_axis_spline_radius is square_axis_spline_radius
     assert vj.square_axis_spline_radius_matrix is square_axis_spline_radius_matrix
+    assert vj.square_axis_spline_symmetric_control_basis is square_axis_spline_symmetric_control_basis
     assert vj.sample_square_axis_stellarator_mirror_hybrid_boundary is sample_square_axis_stellarator_mirror_hybrid_boundary
     assert vj.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
     assert (
@@ -108,11 +112,13 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
         is square_axis_stellarator_mirror_hybrid_projection_error
     )
     assert public_api.square_axis_stellarator_mirror_hybrid_indata is square_axis_stellarator_mirror_hybrid_indata
+    assert public_api.SquareAxisControlBasis is SquareAxisControlBasis
     assert public_api.SquareAxisControlFourierMatrix is SquareAxisControlFourierMatrix
     assert public_api.SquareAxisSplineControls is SquareAxisSplineControls
     assert public_api.square_axis_spline_control_fourier_matrix is square_axis_spline_control_fourier_matrix
     assert public_api.square_axis_spline_radius is square_axis_spline_radius
     assert public_api.square_axis_spline_radius_matrix is square_axis_spline_radius_matrix
+    assert public_api.square_axis_spline_symmetric_control_basis is square_axis_spline_symmetric_control_basis
     assert (
         public_api.square_axis_stellarator_mirror_hybrid_projection_error
         is square_axis_stellarator_mirror_hybrid_projection_error
@@ -208,6 +214,26 @@ def test_square_axis_spline_radius_matrix_reconstructs_control_radius():
     np.testing.assert_allclose(delta, perturb * matrix[..., 3], rtol=0.0, atol=1.0e-14)
 
 
+def test_square_axis_symmetric_control_basis_expands_default_side_corner_controls():
+    controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.14)
+    basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
+
+    assert isinstance(basis, SquareAxisControlBasis)
+    assert basis.symmetry == "square"
+    assert basis.labels == ("side", "corner")
+    assert basis.matrix.shape == (controls.radius.size, 2)
+    np.testing.assert_allclose(np.sum(basis.matrix, axis=1), np.ones(controls.radius.size), rtol=0.0, atol=0.0)
+
+    reduced = basis.project_radius(controls.radius)
+    np.testing.assert_allclose(reduced, np.array([1.5, 1.5 * 1.14]), rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(basis.expand_radius(reduced), controls.radius, rtol=0.0, atol=1.0e-14)
+    np.testing.assert_allclose(basis.controls_from_reduced(reduced).radius, controls.radius, rtol=0.0, atol=1.0e-14)
+
+    stellsym = square_axis_spline_symmetric_control_basis(controls, symmetry="stellarator")
+    assert stellsym.matrix.shape[1] == 5
+    np.testing.assert_allclose(stellsym.expand_radius(stellsym.project_radius(controls.radius)), controls.radius)
+
+
 def test_square_axis_spline_control_fourier_matrix_predicts_coefficients():
     controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
     kwargs = {
@@ -263,6 +289,60 @@ def test_square_axis_spline_control_fourier_matrix_predicts_coefficients():
     np.testing.assert_allclose(perturbed.R_sin - base.R_sin, matrix.R_sin @ delta, atol=1.0e-13)
     np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, matrix.Z_cos @ delta, atol=1.0e-13)
     np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, matrix.Z_sin @ delta, atol=1.0e-13)
+
+
+def test_square_axis_spline_control_fourier_matrix_accepts_reduced_basis():
+    controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
+    control_basis = square_axis_spline_symmetric_control_basis(controls, symmetry="square")
+    kwargs = {
+        "minor_radius": 0.03,
+        "side_elongation": 0.08,
+        "side_minor_modulation": 0.08,
+        "corner_ellipticity": 0.04,
+        "corner_amplitude": 0.004,
+        "corner_rotation": 0.30,
+    }
+    matrix = square_axis_spline_control_fourier_matrix(
+        control_basis=control_basis,
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        **kwargs,
+    )
+
+    assert matrix.control_basis is control_basis
+    assert matrix.R_cos.shape == (matrix.m.size, len(control_basis.labels))
+
+    reduced_delta = np.array([1.0e-3, -1.5e-3])
+    full_delta = control_basis.matrix @ reduced_delta
+    changed = SquareAxisSplineControls(zeta=controls.zeta, radius=controls.radius + full_delta)
+    base_indata = square_axis_stellarator_mirror_hybrid_indata(
+        axis_kind="control_spline",
+        axis_spline_controls=controls,
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        **kwargs,
+    )
+    changed_indata = square_axis_stellarator_mirror_hybrid_indata(
+        axis_kind="control_spline",
+        axis_spline_controls=changed,
+        mpol=4,
+        ntor=8,
+        ntheta_fit=32,
+        nzeta_fit=64,
+        **kwargs,
+    )
+    modes = toroidal_hybrid.vmec_mode_table(mpol=4, ntor=8)
+    base = boundary_input_from_indata(base_indata, modes)
+    perturbed = boundary_input_from_indata(changed_indata, modes)
+
+    np.testing.assert_allclose(perturbed.R_cos - base.R_cos, matrix.R_cos @ reduced_delta, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.R_sin - base.R_sin, matrix.R_sin @ reduced_delta, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_cos - base.Z_cos, matrix.Z_cos @ reduced_delta, atol=1.0e-13)
+    np.testing.assert_allclose(perturbed.Z_sin - base.Z_sin, matrix.Z_sin @ reduced_delta, atol=1.0e-13)
 
 
 @pytest.mark.parametrize(

@@ -460,6 +460,12 @@ boundary interface. The companion
 ``square_axis_spline_control_fourier_matrix`` helper gives the chain-rule map
 from those controls to projected VMEC boundary coefficients, which is the
 needed bridge before introducing a solver-native control-basis state vector.
+For square-coil production updates, pair it with
+``square_axis_spline_symmetric_control_basis``. The default square basis maps
+the eight side/corner control radii into two symmetry-preserving parameters,
+while the stellarator-symmetric basis keeps the usual ``r(zeta)=r(-zeta)``
+pairs. These reduced maps are the preferred diagnostic/optimization controls
+before increasing Fourier mode count further.
 The public helper
 ``square_axis_stellarator_mirror_hybrid_projection_error`` and the square-coil
 profiler's ``boundary_projection`` JSON block now report the Fourier truncation
@@ -607,11 +613,12 @@ The remaining work is deliberately narrow:
    stall above the strict ``1e-12`` component gate, move the square-axis hybrid
    into a solver-native spline-basis lane instead of only increasing Fourier
    modes. The current code already supports explicit periodic side/corner spline
-   controls through ``SquareAxisSplineControls``, but those controls are still
-   projected to Fourier coefficients before the solve. The next lane should keep
-   the same direct-coil/free-boundary diagnostics and move the nonlinear update
-   variables to those spline controls, projecting to Fourier only for VMEC2000
-   parity or WOUT export. This keeps the primary ``vmec_jax`` path closer to the
+   controls through ``SquareAxisSplineControls`` and a symmetry-reduced
+   ``SquareAxisControlBasis``, but those controls are still projected to Fourier
+   coefficients before the solve. The next lane should keep the same
+   direct-coil/free-boundary diagnostics and move the nonlinear update variables
+   to that reduced spline basis, projecting to Fourier only for VMEC2000 parity
+   or WOUT export. This keeps the primary ``vmec_jax`` path closer to the
    intended straight-side geometry while preserving a benchmarkable VMEC2000
    comparison.
 5. Keep the optional virtual-casing postsolve diagnostic
