@@ -60,6 +60,29 @@ class Vmec2000TimeControlRuntimeResult:
     restarted: bool
 
 
+@dataclass(frozen=True)
+class PreRestartTriggerCallbacks:
+    """Callbacks required by one host restart-trigger branch."""
+
+    host_update: Callable[..., Any]
+    host_branch_result: Callable[..., Any]
+    apply_restart_branch_result: Callable[..., Any]
+    controller_restart_update: Callable[..., Any]
+    print_compact_update_status: Callable[..., Any]
+    preconditioner_diag_floats: Callable[..., Any]
+    dump_xc_with_velocity_blocks: Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class PreRestartTriggerRuntimeResult:
+    """Scalar outputs from one optional pre-restart trigger branch."""
+
+    applied: bool
+    pre_restart_reason: str
+    time_step_iter: float
+    step_status: str
+
+
 def resolve_vmec2000_print_context(
     *,
     cfg: Any,
@@ -294,6 +317,96 @@ def run_vmec2000_time_control_runtime(
         time_step_value=float(time_step),
     )
     return Vmec2000TimeControlRuntimeResult(float(tc.fsq), float(tc.fsq0), str(tc.pre_restart_reason), True)
+
+
+def run_pre_restart_trigger_runtime(
+    *,
+    use_restart_triggers: bool,
+    pre_restart_reason: str,
+    huge_initial_forces: bool,
+    huge_force_restart_count: int,
+    time_step: float,
+    restart_badjac_factor: float,
+    restart_badprog_factor: float,
+    stage_transition_scale: float,
+    step_size: float,
+    ijacob: int,
+    bad_resets: int,
+    iter2: int,
+    compact_iter_idx: int,
+    fsq_prev_before: float,
+    fsq0_prev_before: float,
+    k_ndamp: int,
+    state_checkpoint: Any,
+    state_before_restart: Any,
+    velocity_blocks_before: Any,
+    static: Any,
+    prev_rz_fsq_before: float,
+    vmec2000_control: bool,
+    verbose: bool,
+    verbose_vmec2000_table: bool,
+    callbacks: PreRestartTriggerCallbacks,
+) -> PreRestartTriggerRuntimeResult:
+    """Apply VMEC-style optional restart triggers after residual diagnostics.
+
+    The residual loop owns timing and loop control.  This helper owns the
+    branch-local controller/update callbacks so the large loop body stays
+    readable while preserving VMEC2000 restart semantics.
+    """
+
+    if (not bool(use_restart_triggers)) or str(pre_restart_reason) == "none":
+        return PreRestartTriggerRuntimeResult(False, str(pre_restart_reason), float(time_step), "none")
+
+    pre_restart_update = callbacks.host_update(
+        pre_restart_reason=str(pre_restart_reason),
+        huge_initial_forces=bool(huge_initial_forces),
+        huge_force_restart_count=int(huge_force_restart_count),
+        time_step=float(time_step),
+        restart_badjac_factor=float(restart_badjac_factor),
+        restart_badprog_factor=float(restart_badprog_factor),
+        stage_transition_scale=float(stage_transition_scale),
+        step_size=float(step_size),
+        ijacob=int(ijacob),
+        bad_resets=int(bad_resets),
+        iter2=int(iter2),
+        fsq_prev_before=float(fsq_prev_before),
+        fsq0_prev_before=float(fsq0_prev_before),
+        k_ndamp=int(k_ndamp),
+    )
+    pre_restart_branch = callbacks.host_branch_result(
+        state_checkpoint=state_checkpoint,
+        pre_restart_update=pre_restart_update,
+        pre_restart_reason=str(pre_restart_reason),
+        prev_rz_fsq_before=prev_rz_fsq_before,
+        vmec2000_control=bool(vmec2000_control),
+    )
+    callbacks.apply_restart_branch_result(
+        pre_restart_branch,
+        callbacks.controller_restart_update,
+        time_step_value=pre_restart_branch.time_step_iter,
+    )
+    callbacks.print_compact_update_status(
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        precond_diag_floats=callbacks.preconditioner_diag_floats,
+        iter_idx=int(compact_iter_idx),
+        dt_eff=0.0,
+        update_rms=0.0,
+        step_status=pre_restart_branch.step_status,
+    )
+    callbacks.dump_xc_with_velocity_blocks(
+        state=state_before_restart,
+        velocities=velocity_blocks_before,
+        static=static,
+        iter_idx=int(iter2),
+    )
+    return PreRestartTriggerRuntimeResult(
+        True,
+        pre_restart_branch.pre_restart_reason,
+        float(pre_restart_branch.time_step_iter),
+        pre_restart_branch.step_status,
+    )
 
 
 def dump_residual_evolve_trace(
