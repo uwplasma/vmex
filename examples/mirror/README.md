@@ -529,6 +529,22 @@ The ``strict_gap`` column is ``final_max_component / requested_ftol`` and the
 for example, a flat tail above tolerance with no vacuum-grid overflow points to
 a ``DELT``/stage-budget scan, while a vacuum-grid overflow points first to a
 wider generated ``mgrid``.
+Treat VMEC2000 generated-``mgrid`` rows as backend/reference evidence for the
+same Fourier deck, not as a way to remove the square-axis Fourier bottleneck.
+On active high-mode ``MPOL=5, NTOR=28, NZETA=64`` profiling, direct ``vmec_jax``
+can reach a smaller current component gap than the active VMEC2000 reference,
+but both must still satisfy the same component-wise ``FTOL=1e-12`` gate before
+promotion. If a direct-coil row has already enabled reduced square edge
+controls and the JAX/NESTOR operator and still stalls above the strict gate, the
+summary recommendation changes to ``native-spline-control-prototype``. That is
+the cue to stop adding full-Fourier retries and promote the spline-control
+variables into the nonlinear solve.
+Reduced edge-control strict updates project the accepted LCFS delta through the
+spline-control Fourier map and scrub LCFS geometry velocity memory after each
+strict step, so uncontrolled Fourier edge momentum is not carried into the next
+iteration. This is still a bridge: the full VMEC Fourier residual is reported
+separately until solver-native spline/control coordinates replace the edge-only
+projection.
 To print the current strict VMEC2000 follow-up scan after such a plateau, use::
 
   python tools/diagnostics/square_coil_followup_commands.py
