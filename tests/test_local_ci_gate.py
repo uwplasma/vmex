@@ -28,7 +28,7 @@ def test_local_ci_gate_documents_required_local_lanes() -> None:
         "tools/diagnostics/repo_size_audit.py",
         "tools/diagnostics/source_health.py",
         "--max-function-lines-at",
-        "solve_fixed_boundary_residual_iter=2441",
+        "solve_fixed_boundary_residual_iter=2440",
         "run_fixed_boundary=420",
         "test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field",
         '"--max-total-mib"',

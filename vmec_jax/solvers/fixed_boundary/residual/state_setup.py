@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import numpy as np
 
@@ -18,6 +18,41 @@ from vmec_jax.solvers.fixed_boundary.optimization.constraints import (
 class ResidualStateSetup:
     """State and cached constants used by the host/JAX residual update paths."""
 
+    state: Any
+    precomputed_axis_mask_np: Any
+    jnp_state_dtype: Any
+    jnp_zero_m1_0: Any
+    jnp_zero_m1_1: Any
+    jnp_true_bool: Any
+    jnp_false_bool: Any
+    zeros_coeff_np: Any
+    zeros_dR_np: Any
+    delta_s: Any
+
+
+class ResidualIndexStateSetup(NamedTuple):
+    """Mode-transform and initial-state setup for residual iteration."""
+
+    mpol: int
+    ntor: int
+    nrange: int
+    ncoeff: int
+    setup_host_enforce: bool
+    mode_context: Any
+    m0_mask: Any
+    w_mode_mn: Any
+    w_mode_mn_np: Any
+    state0_dtype: Any
+    mn_cos_to_signed: Any
+    mn_sin_to_signed: Any
+    mn_cos_to_signed_physical: Any
+    mn_sin_to_signed_physical: Any
+    mn_sin_to_signed_physical_lambda: Any
+    mn_cos_to_signed_physical_lambda: Any
+    physical_delta_transforms: tuple[Any, Any, Any, Any]
+    internal_delta_transforms: tuple[Any, Any, Any, Any]
+    rz_norm_np: Any
+    rz_norm: Any
     state: Any
     precomputed_axis_mask_np: Any
     jnp_state_dtype: Any
@@ -142,4 +177,123 @@ def build_residual_state_setup(
     )
 
 
-__all__ = ["ResidualStateSetup", "build_residual_state_setup"]
+def prepare_residual_index_state_setup(
+    *,
+    static: Any,
+    state0: Any,
+    s: Any,
+    edge_Rcos: Any,
+    edge_Rsin: Any,
+    edge_Zcos: Any,
+    edge_Zsin: Any,
+    free_boundary_enabled: bool,
+    host_update_assembly: bool,
+    use_scan: bool,
+    state0_has_tracer: bool,
+    divide_by_scalxc_for_update: bool,
+    mode_diag_exponent: float,
+    idx00: int,
+    apply_lambda_axis_rules: Callable[[Any], Any],
+    vmec_scalxc_from_s_func: Callable[[Any], Any],
+    setup_host_enforce_env: str,
+    backend_name: str,
+    build_mode_transform_context_func: Callable[..., Any],
+    resolve_setup_host_enforce_func: Callable[..., bool],
+    tree_has_tracer_func: Callable[[Any], bool],
+    has_jax_func: Callable[[], bool] = has_jax,
+) -> ResidualIndexStateSetup:
+    """Build mode transforms and the constrained initial residual state."""
+
+    mpol = int(static.cfg.mpol)
+    ntor = int(static.cfg.ntor)
+    nrange = ntor + 1
+    ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
+    setup_host_enforce = resolve_setup_host_enforce_func(
+        setup_host_enforce_env=setup_host_enforce_env,
+        host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan),
+        state_has_tracer=state0_has_tracer,
+        backend_name=backend_name,
+    )
+    mode_context = build_mode_transform_context_func(
+        static=static,
+        state0=state0,
+        s=s,
+        host_update_assembly=bool(host_update_assembly),
+        setup_host_enforce=bool(setup_host_enforce),
+        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+        mode_diag_exponent=mode_diag_exponent,
+        tree_has_tracer=tree_has_tracer_func,
+        vmec_scalxc_from_s=vmec_scalxc_from_s_func,
+    )
+    state_setup = build_residual_state_setup(
+        state0=state0,
+        static=static,
+        s=s,
+        edge_Rcos=edge_Rcos,
+        edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos,
+        edge_Zsin=edge_Zsin,
+        free_boundary_enabled=bool(free_boundary_enabled),
+        host_update_assembly=bool(host_update_assembly),
+        setup_host_enforce=bool(setup_host_enforce),
+        idx00=idx00,
+        mpol=mpol,
+        nrange=nrange,
+        state0_dtype=mode_context.state0_dtype,
+        apply_lambda_axis_rules=apply_lambda_axis_rules,
+        tree_has_tracer=tree_has_tracer_func,
+        has_jax_func=has_jax_func,
+    )
+    physical_delta_transforms = (
+        mode_context.mn_cos_to_signed_physical,
+        mode_context.mn_sin_to_signed_physical,
+        mode_context.mn_cos_to_signed_physical_lambda,
+        mode_context.mn_sin_to_signed_physical_lambda,
+    )
+    internal_delta_transforms = (
+        mode_context.mn_cos_to_signed,
+        mode_context.mn_sin_to_signed,
+        mode_context.mn_cos_to_signed,
+        mode_context.mn_sin_to_signed,
+    )
+    return ResidualIndexStateSetup(
+        mpol=mpol,
+        ntor=ntor,
+        nrange=nrange,
+        ncoeff=ncoeff,
+        setup_host_enforce=bool(setup_host_enforce),
+        mode_context=mode_context,
+        m0_mask=mode_context.m0_mask,
+        w_mode_mn=mode_context.w_mode_mn,
+        w_mode_mn_np=mode_context.w_mode_mn_np,
+        state0_dtype=mode_context.state0_dtype,
+        mn_cos_to_signed=mode_context.mn_cos_to_signed,
+        mn_sin_to_signed=mode_context.mn_sin_to_signed,
+        mn_cos_to_signed_physical=mode_context.mn_cos_to_signed_physical,
+        mn_sin_to_signed_physical=mode_context.mn_sin_to_signed_physical,
+        mn_sin_to_signed_physical_lambda=mode_context.mn_sin_to_signed_physical_lambda,
+        mn_cos_to_signed_physical_lambda=mode_context.mn_cos_to_signed_physical_lambda,
+        physical_delta_transforms=physical_delta_transforms,
+        internal_delta_transforms=internal_delta_transforms,
+        rz_norm_np=mode_context.rz_norm_np,
+        rz_norm=mode_context.rz_norm,
+        state=state_setup.state,
+        precomputed_axis_mask_np=state_setup.precomputed_axis_mask_np,
+        jnp_state_dtype=state_setup.jnp_state_dtype,
+        jnp_zero_m1_0=state_setup.jnp_zero_m1_0,
+        jnp_zero_m1_1=state_setup.jnp_zero_m1_1,
+        jnp_true_bool=state_setup.jnp_true_bool,
+        jnp_false_bool=state_setup.jnp_false_bool,
+        zeros_coeff_np=state_setup.zeros_coeff_np,
+        zeros_dR_np=state_setup.zeros_dR_np,
+        delta_s=state_setup.delta_s,
+    )
+
+
+__all__ = [
+    "ResidualIndexStateSetup",
+    "ResidualStateSetup",
+    "build_residual_state_setup",
+    "prepare_residual_index_state_setup",
+]

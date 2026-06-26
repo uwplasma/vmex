@@ -84,7 +84,7 @@ from vmec_jax.solvers.fixed_boundary.residual.setup import (
     resolve_free_boundary_setup_policy as _resolve_free_boundary_setup_policy,
 )
 from vmec_jax.solvers.fixed_boundary.residual.state_setup import (
-    build_residual_state_setup as _build_residual_state_setup,
+    prepare_residual_index_state_setup as _prepare_residual_index_state_setup,
 )
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     finalize_residual_iter_from_namespace as _finalize_residual_iter_from_namespace,
@@ -584,41 +584,6 @@ class _ResidualFreeBoundarySetup(NamedTuple):
     attach_diag: Any
 
 
-class _ResidualIndexStateSetup(NamedTuple):
-    """Mode-transform and initial-state setup for residual iteration."""
-
-    mpol: int
-    ntor: int
-    nrange: int
-    ncoeff: int
-    setup_host_enforce: bool
-    mode_context: Any
-    m0_mask: Any
-    w_mode_mn: Any
-    w_mode_mn_np: Any
-    state0_dtype: Any
-    mn_cos_to_signed: Any
-    mn_sin_to_signed: Any
-    mn_cos_to_signed_physical: Any
-    mn_sin_to_signed_physical: Any
-    mn_sin_to_signed_physical_lambda: Any
-    mn_cos_to_signed_physical_lambda: Any
-    physical_delta_transforms: tuple[Any, Any, Any, Any]
-    internal_delta_transforms: tuple[Any, Any, Any, Any]
-    rz_norm_np: Any
-    rz_norm: Any
-    state: VMECState
-    precomputed_axis_mask_np: Any
-    jnp_state_dtype: Any
-    jnp_zero_m1_0: Any
-    jnp_zero_m1_1: Any
-    jnp_true_bool: Any
-    jnp_false_bool: Any
-    zeros_coeff_np: Any
-    zeros_dR_np: Any
-    delta_s: Any
-
-
 def _prepare_residual_free_boundary_setup(
     *,
     cfg: Any,
@@ -711,114 +676,6 @@ def _prepare_residual_boundary_setup(
         force_axis_reset=axis_reset_config.force_axis_reset,
         axis_reset_always_3d=axis_reset_config.axis_reset_always_3d,
         axis_reset_fsq_min=axis_reset_config.axis_reset_fsq_min,
-    )
-
-
-def _prepare_residual_index_state_setup(
-    *,
-    static: Any,
-    state0: VMECState,
-    s: Any,
-    edge_Rcos: Any,
-    edge_Rsin: Any,
-    edge_Zcos: Any,
-    edge_Zsin: Any,
-    free_boundary_enabled: bool,
-    host_update_assembly: bool,
-    use_scan: bool,
-    state0_has_tracer: bool,
-    divide_by_scalxc_for_update: bool,
-    mode_diag_exponent: float,
-    idx00: int,
-    apply_lambda_axis_rules: Any,
-    vmec_scalxc_from_s_func: Any,
-) -> _ResidualIndexStateSetup:
-    """Build mode transforms and initial residual state setup."""
-
-    mpol = int(static.cfg.mpol)
-    ntor = int(static.cfg.ntor)
-    nrange = ntor + 1
-    ncoeff = int(jnp.asarray(state0.Rcos).shape[1])
-    setup_host_enforce = _resolve_setup_host_enforce(
-        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"),
-        host_update_assembly=bool(host_update_assembly),
-        use_scan=bool(use_scan),
-        state_has_tracer=state0_has_tracer,
-        backend_name=_scan_backend_name(),
-    )
-    mode_context = _build_mode_transform_context(
-        static=static,
-        state0=state0,
-        s=s,
-        host_update_assembly=bool(host_update_assembly),
-        setup_host_enforce=bool(setup_host_enforce),
-        divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
-        mode_diag_exponent=mode_diag_exponent,
-        tree_has_tracer=_tree_has_tracer,
-        vmec_scalxc_from_s=vmec_scalxc_from_s_func,
-    )
-    state_setup = _build_residual_state_setup(
-        state0=state0,
-        static=static,
-        s=s,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        free_boundary_enabled=bool(free_boundary_enabled),
-        host_update_assembly=bool(host_update_assembly),
-        setup_host_enforce=bool(setup_host_enforce),
-        idx00=idx00,
-        mpol=mpol,
-        nrange=nrange,
-        state0_dtype=mode_context.state0_dtype,
-        apply_lambda_axis_rules=apply_lambda_axis_rules,
-        tree_has_tracer=_tree_has_tracer,
-        has_jax_func=has_jax,
-    )
-    physical_delta_transforms = (
-        mode_context.mn_cos_to_signed_physical,
-        mode_context.mn_sin_to_signed_physical,
-        mode_context.mn_cos_to_signed_physical_lambda,
-        mode_context.mn_sin_to_signed_physical_lambda,
-    )
-    internal_delta_transforms = (
-        mode_context.mn_cos_to_signed,
-        mode_context.mn_sin_to_signed,
-        mode_context.mn_cos_to_signed,
-        mode_context.mn_sin_to_signed,
-    )
-    return _ResidualIndexStateSetup(
-        mpol=mpol,
-        ntor=ntor,
-        nrange=nrange,
-        ncoeff=ncoeff,
-        setup_host_enforce=bool(setup_host_enforce),
-        mode_context=mode_context,
-        m0_mask=mode_context.m0_mask,
-        w_mode_mn=mode_context.w_mode_mn,
-        w_mode_mn_np=mode_context.w_mode_mn_np,
-        state0_dtype=mode_context.state0_dtype,
-        mn_cos_to_signed=mode_context.mn_cos_to_signed,
-        mn_sin_to_signed=mode_context.mn_sin_to_signed,
-        mn_cos_to_signed_physical=mode_context.mn_cos_to_signed_physical,
-        mn_sin_to_signed_physical=mode_context.mn_sin_to_signed_physical,
-        mn_sin_to_signed_physical_lambda=mode_context.mn_sin_to_signed_physical_lambda,
-        mn_cos_to_signed_physical_lambda=mode_context.mn_cos_to_signed_physical_lambda,
-        physical_delta_transforms=physical_delta_transforms,
-        internal_delta_transforms=internal_delta_transforms,
-        rz_norm_np=mode_context.rz_norm_np,
-        rz_norm=mode_context.rz_norm,
-        state=state_setup.state,
-        precomputed_axis_mask_np=state_setup.precomputed_axis_mask_np,
-        jnp_state_dtype=state_setup.jnp_state_dtype,
-        jnp_zero_m1_0=state_setup.jnp_zero_m1_0,
-        jnp_zero_m1_1=state_setup.jnp_zero_m1_1,
-        jnp_true_bool=state_setup.jnp_true_bool,
-        jnp_false_bool=state_setup.jnp_false_bool,
-        zeros_coeff_np=state_setup.zeros_coeff_np,
-        zeros_dR_np=state_setup.zeros_dR_np,
-        delta_s=state_setup.delta_s,
     )
 
 
@@ -1346,19 +1203,18 @@ def solve_fixed_boundary_residual_iter(
         static=static,
         state0=state0,
         s=s,
-        edge_Rcos=edge_Rcos,
-        edge_Rsin=edge_Rsin,
-        edge_Zcos=edge_Zcos,
-        edge_Zsin=edge_Zsin,
-        free_boundary_enabled=bool(free_boundary_enabled),
-        host_update_assembly=bool(host_update_assembly),
-        use_scan=bool(use_scan),
-        state0_has_tracer=bool(state0_has_tracer),
+        edge_Rcos=edge_Rcos, edge_Rsin=edge_Rsin,
+        edge_Zcos=edge_Zcos, edge_Zsin=edge_Zsin,
+        free_boundary_enabled=bool(free_boundary_enabled), host_update_assembly=bool(host_update_assembly),
+        use_scan=bool(use_scan), state0_has_tracer=bool(state0_has_tracer),
         divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
         mode_diag_exponent=mode_diag_exponent,
         idx00=idx00,
         apply_lambda_axis_rules=_apply_vmec_lambda_axis_rules,
         vmec_scalxc_from_s_func=vmec_scalxc_from_s,
+        setup_host_enforce_env=os.getenv("VMEC_JAX_HOST_SETUP_ENFORCE", "auto"), backend_name=_scan_backend_name(),
+        build_mode_transform_context_func=_build_mode_transform_context, resolve_setup_host_enforce_func=_resolve_setup_host_enforce,
+        tree_has_tracer_func=_tree_has_tracer, has_jax_func=has_jax,
     )
     mpol = index_state_setup.mpol
     ntor = index_state_setup.ntor
