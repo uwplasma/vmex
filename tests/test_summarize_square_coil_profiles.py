@@ -29,6 +29,7 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                     "solver_mode": "parity",
                     "side_power": 1.25,
                     "corner_power": 1.5,
+                    "max_boundary_projection_error": 1.0e-4,
                     "max_iter": 1000,
                     "ftol": 1.0e-6,
                 },
@@ -151,6 +152,7 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["recommended_nzeta"] == 32
     assert rows[1]["boundary_mode_count"] == 65
     assert rows[1]["boundary_recommended_nzeta"] == 32
+    assert rows[1]["max_boundary_projection_error"] == pytest.approx(1.0e-4)
     assert rows[1]["boundary_proj_max"] == pytest.approx(1.2e-4)
     assert rows[1]["boundary_proj_rel"] == pytest.approx(4.5e-4)
     assert rows[1]["dt_eff_last"] == pytest.approx(0.02)

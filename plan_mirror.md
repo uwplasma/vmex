@@ -5739,232 +5739,6 @@ Visual validation:
 No user input is needed.
 
 ---
-## 223. Square-Profile Shape-Metadata Guard
-
-### Steps taken
-
-- Added explicit ``--side-power`` and ``--corner-power`` arguments to
-  ``tools/diagnostics/profile_square_coil_free_boundary.py``.
-- Passed those values into the square-coil ``ExampleConfig`` used to build the
-  free-boundary input deck, so profile runs can intentionally select the
-  current first-order production shape or an older sharpened stress shape.
-- Persisted both values in the profile JSON configuration and printed them in
-  ``tools/diagnostics/summarize_square_coil_profiles.py`` beside ``MPOL``,
-  ``NTOR``, and ``NZETA``.
-- Updated the square-coil README and direct-coil convergence notes so local
-  strict-``FTOL=1e-12`` sweeps audit shape smoothing and Fourier resolution
-  together.
-
-### Results obtained
-
-- Future profile rows are no longer ambiguous about whether they used the
-  low-bandwidth first-order square-axis weights or the sharper ``1.4`` stress
-  geometry.
-- This closes a reproducibility gap that became important after the first-order
-  shape reduced the projected boundary-error ladder from the older
-  ``~1e-5``-level high-mode tail to the ``~1e-10`` to ``~1e-12`` range on the
-  ``MPOL=6, NTOR=23`` through ``MPOL=8, NTOR=32`` checks.
-- Existing long-running office jobs remain valid, but their profile JSON may
-  not contain these fields if they were launched before this guard landed.
-
-### How it was tested
-
-```bash
-venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
-venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py
-git diff --check
-```
-
-Results:
-
-- Profile and summary tests: ``17 passed``.
-- Py-compile checks passed.
-- Whitespace checks passed.
-
-### File structure and best-practice notes
-
-- The implementation stays in diagnostics and reporting code; no solver path
-  is changed by this metadata guard.
-- The profile script remains the single backend-comparison entry point for
-  direct coils, generated ``mgrid``, and VMEC2000.
-- The summary table remains the single audit surface for completed JSON,
-  active VMEC2000 sidecars, and active ``threed1`` files.
-
-### Best next steps
-
-1. Commit and push the metadata guard.
-2. Fast-forward ``office`` before any newly launched strict profile so its JSON
-   records ``side_power`` and ``corner_power``.
-3. Let the active sharpened-shape VMEC2000 ``8,32`` and direct ``6,23`` runs
-   finish, then prioritize first-order-shape reruns if they still plateau above
-   the strict per-component ``1e-12`` gate.
-4. If first-order Fourier ladders also plateau, move from the spline-smoothed
-   Fourier target to the true spline/control-basis lane instead of extending
-   the same iteration budget.
-
-### Completion percentages after M223
-
-- Square-coil strict ``FTOL=1e-12`` profiling lane: ``76%``.
-- VMEC2000 robustness/reference lane: ``85%``.
-- Direct-coil GPU/JIT parity lane: ``70%``.
-- Direct-provider profiling/instrumentation lane: ``94%``.
-- Square-axis spline-smoothed Fourier closure lane: ``87%``.
-- True spline/control-basis hybrid lane: ``15%`` planned, not yet implemented.
-- Documentation and diagnostics for active profiling: ``99%``.
-- Overall toroidal stellarator-mirror hybrid production-readiness: ``91%``
-  pending strict high-mode evidence.
-
-### User input needed
-
-No user input is needed.
-
----
-## 224. First-Order Square-Axis Weights
-
-### Steps taken
-
-- Audited the current square-axis spline target after the VMEC2000 ``7,28``
-  run showed a slow residual tail.
-- Scanned the production square-coil shape over side/corner localization
-  powers and found that ``side_power=corner_power=1.4`` was creating most of
-  the Fourier projection tail.
-- Changed the square-axis helper default and the square-coil free-boundary
-  example defaults to first-order weights:
-  ``SIDE_POWER = CORNER_POWER = 1.0``.
-- Added these parameters to the example's user-facing top parameter block,
-  sample kwargs, and metrics payload.
-- Kept the old ``1.4`` sharpened geometry available as a deliberate stress
-  case and updated projection-guard tests to use it when checking rejection.
-
-### Results obtained
-
-- For the production square-coil shape at ``MPOL=6, NTOR=23``, the max
-  component projection error dropped from about ``1.44e-5`` with the old
-  sharpened weights to about ``3.3e-10`` with first-order weights.
-- Projection spot checks for the first-order shape:
-  - ``5,12``: about ``5.60e-6``;
-  - ``6,16``: about ``1.36e-7``;
-  - ``6,20``: about ``1.78e-9``;
-  - ``6,23``: about ``3.32e-10``;
-  - ``7,28`` and ``8,32``: about ``3.5e-12``.
-- This means future strict profiles should first rerun the smoother
-  first-order geometry before spending more time on higher Fourier modes for
-  the old sharpened stress shape.
-
-### How it was tested
-
-```bash
-venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py
-venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
-```
-
-Results:
-
-- Toroidal-hybrid tests: ``39 passed``.
-- Py-compile checks passed.
-
-### File structure and best-practice notes
-
-- The change stays inside the existing toroidal-hybrid geometry helper and the
-  square-coil example parameter block; no new module or file split was needed.
-- This is still a VMEC Fourier projection path. It is a bandwidth-reduced
-  spline target, not a solver-native spline basis.
-- The old sharpened behavior remains accessible by setting
-  ``side_power=corner_power=1.4`` in ``ExampleConfig`` or in direct helper
-  calls.
-
-### Best next steps
-
-1. Queue a first-order-weight VMEC2000 ``6,23`` strict profile after the active
-   ``8,32`` sharpened run, so the old and new geometry choices are compared on
-   the same VMEC2000 generated-``mgrid`` backend.
-2. Queue a first-order-weight direct ``6,23`` cached-JIT profile after the
-   active direct Anderson run, so direct-coil performance and convergence are
-   measured on the lower-bandwidth geometry.
-3. If the first-order geometry still does not close at ``FTOL=1e-12``, then
-   start the deeper solver-native spline/control-basis reparameterization.
-
-### Completion percentages after M224
-
-- Square-coil strict ``FTOL=1e-12`` profiling lane: ``80%``.
-- VMEC2000 robustness/reference lane: ``88%``.
-- Direct-coil GPU/JIT parity lane: ``72%``.
-- Square-axis spline-smoothed Fourier closure lane: ``92%``.
-- True spline/control-basis hybrid lane: ``22%`` planned, partially de-risked
-  by the first-order target scan.
-
-### User input needed
-
-No user input is needed.
-
----
-## 223. VMEC2000 7,28 High-Mode Result
-
-### Steps taken
-
-- Fast-forwarded ``office`` to the latest profiling-summary tools.
-- Re-summarized the completed VMEC2000 generated-``mgrid`` high-mode run:
-  ``MPOL=7, NTOR=28, NZETA=64``, ``NS_ARRAY=9,13,17``,
-  ``NITER_ARRAY=4000,8000,24000``, ``FTOL_ARRAY=1e-8,1e-10,1e-12``.
-- Verified that the queued VMEC2000 ``MPOL=8, NTOR=32, NZETA=72`` run has
-  started and is writing a live ``_partial_vmec2000_payload.json`` sidecar.
-
-### Results obtained
-
-- VMEC2000 ``7,28`` completed with no vacuum-grid overflow:
-  - final iteration: ``24000``;
-  - final summed residual: ``1.541e-11``;
-  - final max component residual: ``6.36e-12``;
-  - strict per-component ``1e-12``: not met;
-  - wall time: about ``5238.49 s``.
-- The completed-row tail projection reports:
-  - per-iteration residual factor: about ``0.999939``;
-  - additional iterations to ``1e-12`` by current trend: about ``44711``.
-- This is better than the lower-mode VMEC2000 ``6,23`` row but still not a
-  production strict solve. The tail estimate argues against simply extending
-  the same ``7,28`` deck by a few thousand iterations.
-
-### How it was tested
-
-```bash
-python3 tools/diagnostics/summarize_square_coil_profiles.py \
-  results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_mgrid88x64x64_niter24k_fg \
-  results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol8_ntor32_nzeta72_mgrid104x72x72_niter24k_fg \
-  --markdown
-```
-
-The summary parsed the completed final JSON for ``7,28`` and the active
-sidecar for ``8,32``.
-
-### File structure and best-practice notes
-
-- The run output remains under ignored ``results/`` on ``office``.
-- No source files changed in this log entry.
-- The summary table now gives the reviewer-facing evidence without needing to
-  inspect raw ``threed1`` output manually.
-
-### Best next steps
-
-1. Let the active VMEC2000 ``8,32`` run progress far enough to show whether the
-   higher-resolution deck improves the residual floor.
-2. Let the active direct Anderson ``6,23`` run finish; then the queued direct
-   ``7,28`` cached-JIT run can start.
-3. If ``8,32`` also stalls above ``1e-12``, start the true spline/control-basis
-   square-hybrid lane instead of extending Fourier iteration budgets.
-
-### Completion percentages after M223
-
-- Square-coil strict ``FTOL=1e-12`` profiling lane: ``78%``.
-- VMEC2000 robustness/reference lane: ``88%``.
-- Direct-coil GPU/JIT parity lane: ``70%``.
-- Square-axis spline-smoothed Fourier closure lane: ``87%``.
-- True spline/control-basis hybrid lane: ``18%`` planned, gated on ``8,32``.
-
-### User input needed
-
-No user input is needed.
-
----
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -26990,6 +26764,313 @@ Results:
 - Direct-coil GPU/JIT parity lane: ``70%``.
 - Direct-provider profiling/instrumentation lane: ``92%``.
 - Documentation and diagnostics for active profiling: ``98%``.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 223. VMEC2000 7,28 High-Mode Result
+
+### Steps taken
+
+- Fast-forwarded ``office`` to the latest profiling-summary tools.
+- Re-summarized the completed VMEC2000 generated-``mgrid`` high-mode run:
+  ``MPOL=7, NTOR=28, NZETA=64``, ``NS_ARRAY=9,13,17``,
+  ``NITER_ARRAY=4000,8000,24000``, ``FTOL_ARRAY=1e-8,1e-10,1e-12``.
+- Verified that the queued VMEC2000 ``MPOL=8, NTOR=32, NZETA=72`` run has
+  started and is writing a live ``_partial_vmec2000_payload.json`` sidecar.
+
+### Results obtained
+
+- VMEC2000 ``7,28`` completed with no vacuum-grid overflow:
+  - final iteration: ``24000``;
+  - final summed residual: ``1.541e-11``;
+  - final max component residual: ``6.36e-12``;
+  - strict per-component ``1e-12``: not met;
+  - wall time: about ``5238.49 s``.
+- The completed-row tail projection reports:
+  - per-iteration residual factor: about ``0.999939``;
+  - additional iterations to ``1e-12`` by current trend: about ``44711``.
+- This is better than the lower-mode VMEC2000 ``6,23`` row but still not a
+  production strict solve. The tail estimate argues against simply extending
+  the same ``7,28`` deck by a few thousand iterations.
+
+### How it was tested
+
+```bash
+python3 tools/diagnostics/summarize_square_coil_profiles.py \
+  results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_mgrid88x64x64_niter24k_fg \
+  results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol8_ntor32_nzeta72_mgrid104x72x72_niter24k_fg \
+  --markdown
+```
+
+The summary parsed the completed final JSON for ``7,28`` and the active
+sidecar for ``8,32``.
+
+### File structure and best-practice notes
+
+- The run output remains under ignored ``results/`` on ``office``.
+- No source files changed in this log entry.
+- The summary table now gives the reviewer-facing evidence without needing to
+  inspect raw ``threed1`` output manually.
+
+### Best next steps
+
+1. Let the active VMEC2000 ``8,32`` run progress far enough to show whether the
+   higher-resolution deck improves the residual floor.
+2. Let the active direct Anderson ``6,23`` run finish; then the queued direct
+   ``7,28`` cached-JIT run can start.
+3. If ``8,32`` also stalls above ``1e-12``, start the true spline/control-basis
+   square-hybrid lane instead of extending Fourier iteration budgets.
+
+### Completion percentages after M223
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``78%``.
+- VMEC2000 robustness/reference lane: ``88%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Square-axis spline-smoothed Fourier closure lane: ``87%``.
+- True spline/control-basis hybrid lane: ``18%`` planned, gated on ``8,32``.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 224. First-Order Square-Axis Weights
+
+### Steps taken
+
+- Audited the current square-axis spline target after the VMEC2000 ``7,28``
+  run showed a slow residual tail.
+- Scanned the production square-coil shape over side/corner localization
+  powers and found that ``side_power=corner_power=1.4`` was creating most of
+  the Fourier projection tail.
+- Changed the square-axis helper default and the square-coil free-boundary
+  example defaults to first-order weights:
+  ``SIDE_POWER = CORNER_POWER = 1.0``.
+- Added these parameters to the example's user-facing top parameter block,
+  sample kwargs, and metrics payload.
+- Kept the old ``1.4`` sharpened geometry available as a deliberate stress
+  case and updated projection-guard tests to use it when checking rejection.
+
+### Results obtained
+
+- For the production square-coil shape at ``MPOL=6, NTOR=23``, the max
+  component projection error dropped from about ``1.44e-5`` with the old
+  sharpened weights to about ``3.3e-10`` with first-order weights.
+- Projection spot checks for the first-order shape:
+  - ``5,12``: about ``5.60e-6``;
+  - ``6,16``: about ``1.36e-7``;
+  - ``6,20``: about ``1.78e-9``;
+  - ``6,23``: about ``3.32e-10``;
+  - ``7,28`` and ``8,32``: about ``3.5e-12``.
+- This means future strict profiles should first rerun the smoother
+  first-order geometry before spending more time on higher Fourier modes for
+  the old sharpened stress shape.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py
+venv/bin/python -m py_compile vmec_jax/toroidal_hybrid.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py
+```
+
+Results:
+
+- Toroidal-hybrid tests: ``39 passed``.
+- Py-compile checks passed.
+
+### File structure and best-practice notes
+
+- The change stays inside the existing toroidal-hybrid geometry helper and the
+  square-coil example parameter block; no new module or file split was needed.
+- This is still a VMEC Fourier projection path. It is a bandwidth-reduced
+  spline target, not a solver-native spline basis.
+- The old sharpened behavior remains accessible by setting
+  ``side_power=corner_power=1.4`` in ``ExampleConfig`` or in direct helper
+  calls.
+
+### Best next steps
+
+1. Queue a first-order-weight VMEC2000 ``6,23`` strict profile after the active
+   ``8,32`` sharpened run, so the old and new geometry choices are compared on
+   the same VMEC2000 generated-``mgrid`` backend.
+2. Queue a first-order-weight direct ``6,23`` cached-JIT profile after the
+   active direct Anderson run, so direct-coil performance and convergence are
+   measured on the lower-bandwidth geometry.
+3. If the first-order geometry still does not close at ``FTOL=1e-12``, then
+   start the deeper solver-native spline/control-basis reparameterization.
+
+### Completion percentages after M224
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``80%``.
+- VMEC2000 robustness/reference lane: ``88%``.
+- Direct-coil GPU/JIT parity lane: ``72%``.
+- Square-axis spline-smoothed Fourier closure lane: ``92%``.
+- True spline/control-basis hybrid lane: ``22%`` planned, partially de-risked
+  by the first-order target scan.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 225. Square-Profile Shape-Metadata Guard
+
+### Steps taken
+
+- Added explicit ``--side-power`` and ``--corner-power`` arguments to
+  ``tools/diagnostics/profile_square_coil_free_boundary.py``.
+- Passed those values into the square-coil ``ExampleConfig`` used to build the
+  free-boundary input deck, so profile runs can intentionally select the
+  current first-order production shape or an older sharpened stress shape.
+- Persisted both values in the profile JSON configuration and printed them in
+  ``tools/diagnostics/summarize_square_coil_profiles.py`` beside ``MPOL``,
+  ``NTOR``, and ``NZETA``.
+- Updated the square-coil README and direct-coil convergence notes so local
+  strict-``FTOL=1e-12`` sweeps audit shape smoothing and Fourier resolution
+  together.
+
+### Results obtained
+
+- Future profile rows are no longer ambiguous about whether they used the
+  low-bandwidth first-order square-axis weights or the sharper ``1.4`` stress
+  geometry.
+- This closes a reproducibility gap that became important after the first-order
+  shape reduced the projected boundary-error ladder from the older
+  ``~1e-5``-level high-mode tail to the ``~1e-10`` to ``~1e-12`` range on the
+  ``MPOL=6, NTOR=23`` through ``MPOL=8, NTOR=32`` checks.
+- Existing long-running office jobs remain valid, but their profile JSON may
+  not contain these fields if they were launched before this guard landed.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py
+git diff --check
+```
+
+Results:
+
+- Profile and summary tests: ``17 passed``.
+- Py-compile checks passed.
+- Whitespace checks passed.
+
+### File structure and best-practice notes
+
+- The implementation stays in diagnostics and reporting code; no solver path
+  is changed by this metadata guard.
+- The profile script remains the single backend-comparison entry point for
+  direct coils, generated ``mgrid``, and VMEC2000.
+- The summary table remains the single audit surface for completed JSON,
+  active VMEC2000 sidecars, and active ``threed1`` files.
+
+### Best next steps
+
+1. Commit and push the metadata guard.
+2. Fast-forward ``office`` before any newly launched strict profile so its JSON
+   records ``side_power`` and ``corner_power``.
+3. Let the active sharpened-shape VMEC2000 ``8,32`` and direct ``6,23`` runs
+   finish, then prioritize first-order-shape reruns if they still plateau above
+   the strict per-component ``1e-12`` gate.
+4. If first-order Fourier ladders also plateau, move from the spline-smoothed
+   Fourier target to the true spline/control-basis lane instead of extending
+   the same iteration budget.
+
+### Completion percentages after M225
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``76%``.
+- VMEC2000 robustness/reference lane: ``85%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``94%``.
+- Square-axis spline-smoothed Fourier closure lane: ``87%``.
+- True spline/control-basis hybrid lane: ``15%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``99%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``91%``
+  pending strict high-mode evidence.
+
+### User input needed
+
+No user input is needed.
+
+---
+## 226. Production Boundary-Projection Gate For Square Profiles
+
+### Steps taken
+
+- Added ``--max-boundary-projection-error`` to
+  ``tools/diagnostics/profile_square_coil_free_boundary.py``.
+- The profiler now computes the square-hybrid Fourier projection payload once,
+  can fail before any backend solve if the observed max component projection
+  error exceeds the requested production gate, and still records the projection
+  payload in successful JSON reports.
+- The failure message mirrors the root example behavior: it reports the
+  observed projection error, the active ``MPOL``/``NTOR``/``NZETA`` deck, and a
+  suggested finite Fourier closure from
+  ``recommend_square_axis_stellarator_mirror_hybrid_resolution``.
+- Added ``max_boundary_projection_error`` to profile JSON and the summary
+  table so completed rows show both the requested projection gate and the
+  observed ``boundary_proj_max``.
+- Updated docs to recommend the gate for production strict-``FTOL=1e-12``
+  sweeps while keeping diagnostic underresolved profiles available by omitting
+  the flag or passing ``none``.
+
+### Results obtained
+
+- Changing ``MPOL``, ``NTOR``, or ``NZETA`` can now be guarded before a long
+  direct/VMEC2000 run starts. This directly addresses the robustness problem
+  where an underrepresented square-axis boundary could spend hours in the
+  nonlinear solve before the projection error was noticed.
+- The default profiler remains diagnostic-friendly and does not reject
+  underresolved decks unless the production gate is explicitly requested.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py
+git diff --check
+```
+
+Results:
+
+- Profile and summary tests: ``18 passed``.
+- Py-compile checks passed.
+- Whitespace checks passed.
+
+### File structure and best-practice notes
+
+- The gate is implemented in the backend profiler rather than solver internals
+  because it is a pre-solve input-quality check, not a force-balance algorithm.
+- The root example and profiler now share the same projection metric and
+  recommendation helper.
+- Generated numerical outputs remain under ignored ``results/`` directories.
+
+### Best next steps
+
+1. Commit and push the production projection gate.
+2. Use ``--max-boundary-projection-error 5e-5`` or tighter on newly launched
+   production square-profile sweeps.
+3. Let the active first-order VMEC2000 ``8,32`` and direct ``6,23`` profiles
+   finish; then compare strict per-component residuals against the projection
+   gate and tail estimates.
+4. If the first-order Fourier ladders still plateau above ``1e-12``, start the
+   true spline/control-basis lane rather than increasing iteration budgets on
+   the same Fourier representation.
+
+### Completion percentages after M226
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``78%``.
+- VMEC2000 robustness/reference lane: ``86%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``95%``.
+- Square-axis spline-smoothed Fourier closure lane: ``90%``.
+- True spline/control-basis hybrid lane: ``15%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``99%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``92%``
+  pending strict high-mode evidence.
 
 ### User input needed
 

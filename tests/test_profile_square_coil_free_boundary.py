@@ -266,17 +266,66 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
             "--skip-direct",
             "--skip-mgrid",
             "--skip-provider-parity",
+            "--max-boundary-projection-error",
+            "1.0",
         ]
     )
 
     report = outdir / "square_coil_free_boundary_backend_profile.json"
     data = json.loads(report.read_text())
+    assert data["configuration"]["max_boundary_projection_error"] == pytest.approx(1.0)
     projection = data["boundary_projection"]
     assert projection["mpol"] == 3
     assert projection["ntor"] == 4
     assert projection["recommended_nzeta"] == 16
     assert projection["mode_count"] > 0
     assert np.isfinite(float(projection["max_abs_error"]))
+
+
+def test_square_coil_profile_projection_gate_fails_before_backend_work(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        profile,
+        "_boundary_projection_payload",
+        lambda config: {
+            "max_abs_component_error": 2.0e-3,
+            "max_abs_error": 2.0e-3,
+        },
+    )
+    monkeypatch.setattr(
+        profile,
+        "recommend_square_axis_stellarator_mirror_hybrid_resolution",
+        lambda **kwargs: {
+            "recommended": {
+                "mpol": 6,
+                "ntor": 20,
+                "recommended_nzeta": 48,
+                "max_abs_component_error": 5.0e-5,
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="boundary projection error is too large"):
+        profile.main(
+            [
+                "--outdir",
+                str(tmp_path / "profile_projection_gate"),
+                "--mpol",
+                "3",
+                "--ntor",
+                "4",
+                "--ns",
+                "5",
+                "--nzeta",
+                "16",
+                "--max-iter",
+                "2",
+                "--max-boundary-projection-error",
+                "1e-4",
+                "--skip-direct",
+                "--skip-mgrid",
+                "--skip-provider-parity",
+            ]
+        )
 
 
 def test_square_coil_profile_defaults_nzeta_to_square_axis_recommendation(monkeypatch, tmp_path: Path):

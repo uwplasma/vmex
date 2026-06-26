@@ -25,6 +25,7 @@ from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary impo
     _boundary_projection_payload as _example_boundary_projection_payload,
     _case_label,
     _run_budget,
+    _square_axis_sample_kwargs,
     _stage_values,
     build_square_coils,
     make_free_boundary_indata,
@@ -35,6 +36,7 @@ from vmec_jax.free_boundary import _sample_external_boundary_arrays
 from vmec_jax.namelist import write_indata
 from vmec_jax.toroidal_hybrid import (
     evaluate_toroidal_hybrid_indata_boundary,
+    recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
 )
 from vmec_jax.vmec2000_exec import _parse_vmec2000_threed1, find_vmec2000_exec, run_xvmec2000
@@ -107,6 +109,15 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=ExampleConfig().corner_power,
         help="Square-axis corner localization power; values above 1.0 are sharper stress cases.",
+    )
+    p.add_argument(
+        "--max-boundary-projection-error",
+        type=_parse_optional_positive_float,
+        default=None,
+        help=(
+            "Optional production gate on the Fourier boundary projection max component error. "
+            "Use 'none' to keep diagnostic underresolved profiles runnable."
+        ),
     )
     p.add_argument("--enforce-recommended-nzeta", action="store_true")
     p.add_argument("--n-coils-per-side", type=int, default=4)
@@ -183,6 +194,16 @@ def _parse_optional_positive_int(raw: str) -> int | None:
     parsed = int(value)
     if parsed <= 0:
         return None
+    return parsed
+
+
+def _parse_optional_positive_float(raw: str) -> float | None:
+    value = str(raw).strip().lower()
+    if value in {"", "0", "auto", "none", "null", "false", "no"}:
+        return None
+    parsed = float(value)
+    if not np.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("value must be positive, finite, or 'none'")
     return parsed
 
 
@@ -887,6 +908,45 @@ def _boundary_projection_payload(config: ExampleConfig) -> dict[str, Any]:
     return _example_boundary_projection_payload(config)
 
 
+def _enforce_boundary_projection_gate(
+    *,
+    config: ExampleConfig,
+    projection: dict[str, Any],
+    limit: float | None,
+) -> None:
+    if limit is None:
+        return
+    observed = float(projection.get("max_abs_component_error", np.inf))
+    if not np.isfinite(observed):
+        raise ValueError("square-hybrid boundary projection error is not finite")
+    if observed <= float(limit):
+        return
+    recommendation = recommend_square_axis_stellarator_mirror_hybrid_resolution(
+        target_max_component_error=float(limit),
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        max_mpol=max(8, int(config.mpol) + 2),
+        max_ntor=max(32, int(config.ntor) + 8),
+        nfp=int(config.nfp),
+        ns_array=[int(value) for value in config.ns_array],
+        niter_array=[int(value) for value in config.niter_array],
+        ftol_array=[float(value) for value in config.ftol_array],
+        phiedge=float(config.phiedge),
+        **_square_axis_sample_kwargs(config),
+    )
+    suggested = recommendation["recommended"]
+    raise ValueError(
+        "square-hybrid boundary projection error is too large for this production profile: "
+        f"max_abs_component_error={observed:.3e} exceeds {float(limit):.3e} "
+        f"for MPOL={int(config.mpol)}, NTOR={int(config.ntor)}, NZETA={int(config.nzeta)}. "
+        "Suggested finite Fourier closure for the current spline-smoothed target: "
+        f"MPOL={int(suggested['mpol'])}, NTOR={int(suggested['ntor'])}, "
+        f"NZETA>={int(suggested['recommended_nzeta'])} "
+        f"(projection error {float(suggested['max_abs_component_error']):.3e}). "
+        "Increase MPOL/NTOR/NZETA or pass --max-boundary-projection-error none for a diagnostic-only run."
+    )
+
+
 def _vmec2000_row_payload(row: Any) -> dict[str, Any]:
     total = float(row.fsqr) + float(row.fsqz) + float(row.fsql)
     max_component = _vmec2000_max_component(row)
@@ -986,6 +1046,12 @@ def main(argv: list[str] | None = None) -> int:
         f"ns={ns_values}, nzeta={resolved_nzeta}, "
         f"side_power={float(args.side_power):g}, corner_power={float(args.corner_power):g}"
     )
+    boundary_projection = _boundary_projection_payload(config)
+    _enforce_boundary_projection_gate(
+        config=config,
+        projection=boundary_projection,
+        limit=args.max_boundary_projection_error,
+    )
     coils = build_square_coils(config)
     label = _case_label(float(args.beta_percent))
     direct_input = outdir / f"input.square_{label}_direct"
@@ -1054,6 +1120,9 @@ def main(argv: list[str] | None = None) -> int:
             "axis_corner_factor": float(args.axis_corner_factor),
             "side_power": float(args.side_power),
             "corner_power": float(args.corner_power),
+            "max_boundary_projection_error": None
+            if args.max_boundary_projection_error is None
+            else float(args.max_boundary_projection_error),
             "coil_chunk_size": None if args.coil_chunk_size is None else int(args.coil_chunk_size),
             "use_multigrid_schedule": bool(len(ns_array) > 1),
             "ns_array": ns_values,
@@ -1071,7 +1140,7 @@ def main(argv: list[str] | None = None) -> int:
             else int(512 if args.coil_chunk_size is None else args.coil_chunk_size),
             **bounds,
         },
-        "boundary_projection": _boundary_projection_payload(config),
+        "boundary_projection": boundary_projection,
         "provider_parity": None,
         "backends": {},
     }

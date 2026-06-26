@@ -234,6 +234,9 @@ The backend profiler records these choices as ``side_power`` and
 ``corner_power`` in its JSON configuration, and the summary table prints them
 next to ``MPOL``, ``NTOR``, and ``NZETA`` so strict-resolution sweeps are not
 mixed with shape-smoothing sweeps.
+For production backend sweeps, ``--max-boundary-projection-error`` can enforce
+the same kind of Fourier-closure gate used by the root example; omit it, or
+pass ``none``, for diagnostic underresolved profiles.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and

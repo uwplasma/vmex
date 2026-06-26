@@ -243,7 +243,10 @@ The production square-axis shape uses the first-order localization defaults
 ``--side-power 1.0 --corner-power 1.0``. Sharper values, such as the older
 ``1.4`` stress case, are useful for boundary-representation tests but require
 many more Fourier modes before strict ``FTOL=1e-12`` solver behavior is
-meaningful.
+meaningful. For production sweeps, add a projection gate such as
+``--max-boundary-projection-error 5e-5`` so underresolved
+``MPOL``/``NTOR``/``NZETA`` combinations fail before starting a long backend
+solve. Omit the flag, or pass ``none``, for diagnostic underresolved profiles.
 
 The report stays under ignored ``results/`` paths and records ``vmec_jax``
 direct-coil, ``vmec_jax`` generated-mgrid, and optional raw VMEC2000
@@ -306,7 +309,9 @@ comparison but is not sufficient for a per-component ``FTOL=1e-12`` claim.
 The table also includes ``nzeta_auto``, ``recommended_nzeta``,
 ``side_power``, ``corner_power``, ``boundary_mode_count``, and
 ``boundary_recommended_nzeta`` so ``MPOL``/``NTOR``/``NZETA`` and
-shape-smoothing edits can be audited with the residuals.
+shape-smoothing edits can be audited with the residuals. If a projection gate
+was used, ``max_boundary_projection_error`` is printed next to the observed
+``boundary_proj_max``.
 The free-boundary audit columns ``returned_best_scored_state``,
 ``final_residual_recomputed_on_accepted_state``,
 ``fresh_convergence_rechecks``, ``fresh_convergence_rejects``,
