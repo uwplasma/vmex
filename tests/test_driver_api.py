@@ -1084,7 +1084,7 @@ def test_public_api_reexports_run_free_boundary():
 
 
 def test_public_api_reexports_qi_promotion_helpers():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_promotion_score
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_promotion_score
     from vmec_jax.optimization_workflow import QuasiIsodynamicResidualCeiling
 
     assert api_module.QISeedSuitabilityTargets is QISeedSuitabilityTargets

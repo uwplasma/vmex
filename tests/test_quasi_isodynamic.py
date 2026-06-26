@@ -684,10 +684,8 @@ def test_qi_boozer_mode_residual_validates_shapes_and_resolution():
     pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
-    from vmec_jax.quasi_isodynamic import (
-        _nearest_half_mesh_indices,
-        quasi_isodynamic_residual_from_boozer_modes,
-    )
+    from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
+    from vmec_jax.quasi_isodynamic.objectives import _nearest_half_mesh_indices
 
     base = dict(
         bmnc_b=jnp.asarray([[1.0, 0.1]]),

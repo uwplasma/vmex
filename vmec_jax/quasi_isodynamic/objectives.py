@@ -25,7 +25,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-from ._compat import jax, jnp
+from .._compat import jax, jnp
 
 
 def _require_jax():
@@ -660,10 +660,10 @@ def max_elongation_penalty_from_state(
     if int(ntheta) < 4 or int(nphi) < 3:
         raise ValueError("elongation penalty requires ntheta >= 4 and nphi >= 3")
 
-    from .fourier import build_helical_basis, eval_fourier
-    from .grids import AngleGrid
-    from .state import VMECState
-    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from ..fourier import build_helical_basis, eval_fourier
+    from ..grids import AngleGrid
+    from ..state import VMECState
+    from ..vmec_parity import vmec_m1_internal_to_physical_signed
 
     nfp = int(static.cfg.nfp)
     # Keep the angular grid host-static. ``build_helical_basis`` intentionally
@@ -718,8 +718,8 @@ def max_elongation_penalty_from_state(
 
 def _state_with_physical_m1_modes(state, static):
     """Return a state whose m=1 modes use the public VMEC convention."""
-    from .state import VMECState
-    from .vmec_parity import vmec_m1_internal_to_physical_signed
+    from ..state import VMECState
+    from ..vmec_parity import vmec_m1_internal_to_physical_signed
 
     cfg = static.cfg
     lconm1 = bool(getattr(cfg, "lconm1", True))
@@ -793,12 +793,12 @@ def lgradb_from_state(
     if int(ntheta) < 4 or int(nphi) < 4:
         raise ValueError("LgradB requires ntheta >= 4 and nphi >= 4")
 
-    from .energy import flux_profiles_from_indata
-    from .field import b_cartesian_from_bsup, bsup_from_geom
-    from .fourier import build_helical_basis
-    from .geom import _eval_geom_jit
-    from .grids import AngleGrid
-    from .radial import d_ds_coeffs
+    from ..energy import flux_profiles_from_indata
+    from ..field import b_cartesian_from_bsup, bsup_from_geom
+    from ..fourier import build_helical_basis
+    from ..geom import _eval_geom_jit
+    from ..grids import AngleGrid
+    from ..radial import d_ds_coeffs
 
     nfp = int(static.cfg.nfp)
     theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta), endpoint=False, dtype=float)
@@ -1307,7 +1307,7 @@ def boozer_output_from_state(
             "Install it with `pip install booz_xform_jax` or from github.com/uwplasma/booz_xform_jax."
         ) from exc
 
-    from .booz_input import booz_xform_inputs_from_state
+    from ..booz_input import booz_xform_inputs_from_state
 
     surface_list = _as_surface_list(surfaces)
     surface_values = jnp.asarray(surface_list, dtype=jnp.float64)

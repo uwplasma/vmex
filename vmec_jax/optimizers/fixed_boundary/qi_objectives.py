@@ -11,13 +11,12 @@ from ..._compat import jnp
 from ...field import b_cartesian_from_state
 from ...modes import nyquist_mode_table_from_grid, vmec_mode_table
 from ...quasi_isodynamic import (
-    _smooth_reduce_max,
-    _smooth_reduce_min,
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
     mirror_ratio_penalty_from_state,
 )
+from ...quasi_isodynamic.objectives import _smooth_reduce_max, _smooth_reduce_min
 from .objective_terms import ObjectiveTerm
 from .objective_terms import QIObjectiveTerm
 from .objective_terms import StageContext

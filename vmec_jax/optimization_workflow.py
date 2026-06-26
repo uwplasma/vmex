@@ -55,10 +55,8 @@ from .optimizers.fixed_boundary.stage_policy import (
 from .optimizers.fixed_boundary.workflow_artifacts import FixedBoundaryOptimizationResult
 from .optimizers.fixed_boundary import workflow_outputs as _workflow_outputs
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
-from .quasi_isodynamic import (
-    _nearest_half_mesh_indices,
-    quasi_isodynamic_residual_from_state,
-)
+from .quasi_isodynamic import quasi_isodynamic_residual_from_state
+from .quasi_isodynamic.objectives import _nearest_half_mesh_indices
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
 from .static import build_static
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state

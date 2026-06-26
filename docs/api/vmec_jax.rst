@@ -43,10 +43,10 @@ Submodules
    vmec_jax.modes
    vmec_jax.namelist
    vmec_jax.optimization
-   vmec_jax.qi_optimization
+   vmec_jax.quasi_isodynamic.optimization
    vmec_jax.optimization_workflow
    vmec_jax.profiles
-   vmec_jax.qi_diagnostics
+   vmec_jax.quasi_isodynamic.diagnostics
    vmec_jax.quasi_isodynamic
    vmec_jax.quasisymmetry
    vmec_jax.radial

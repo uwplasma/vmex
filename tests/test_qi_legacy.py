@@ -20,7 +20,7 @@ def _booz_like(*, xm, xn, coeffs, iota=0.4, nfp=1):
 
 
 def test_legacy_qi_branch_shuffle_diagnostic_ranks_qi_before_qh():
-    from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+    from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 
     qi_like = _booz_like(xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.1])
     qh_like = _booz_like(xm=[0, 1], xn=[0, 1], coeffs=[1.0, 0.1])
@@ -49,7 +49,7 @@ def test_legacy_qi_branch_shuffle_diagnostic_ranks_qi_before_qh():
 
 
 def test_legacy_qi_branch_shuffle_diagnostic_supports_bmns_modes():
-    from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+    from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 
     booz = _booz_like(xm=[0, 0, 1], xn=[0, 1, 1], coeffs=[1.0, 0.1, 0.02])
     booz["bmns_b"] = np.asarray([[0.0, 0.02, -0.01]], dtype=float)
@@ -66,7 +66,7 @@ def test_legacy_qi_branch_shuffle_diagnostic_supports_bmns_modes():
 
 
 def test_legacy_branch_crossing_edge_cases_are_stable():
-    from vmec_jax.qi_legacy import _legacy_get_branches
+    from vmec_jax.quasi_isodynamic.legacy import _legacy_get_branches
 
     phi = np.linspace(0.0, 1.0, 6)
 
@@ -83,7 +83,7 @@ def test_legacy_branch_crossing_edge_cases_are_stable():
 
 
 def test_legacy_qi_branch_shuffle_diagnostic_rejects_invalid_inputs():
-    from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+    from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 
     valid = _booz_like(xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.1])
 
@@ -138,7 +138,7 @@ def test_smooth_qi_residual_preserves_legacy_synthetic_ranking():
     pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
-    from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+    from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
     from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_boozer_modes
 
     qi_like = _booz_like(xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.1])

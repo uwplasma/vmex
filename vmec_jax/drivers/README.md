@@ -8,7 +8,7 @@ modules used by that facade:
 - `policy.py`: user option normalization and run-policy decisions.
 - `runtime.py`: backend, device, timing, and runtime setup.
 - `solve.py`: calls into fixed/free-boundary solver APIs.
-- `output.py`, `results.py`, and `finish.py`: result assembly and finalization.
+- `output.py`, `results.py`, and `lifecycle.py`: result assembly and finalization.
 - `dynamic_scan.py`, `staging.py`, `flux.py`, and `debug.py`: specialized
   workflow helpers.
 

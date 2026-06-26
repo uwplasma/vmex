@@ -24,7 +24,7 @@ from .profiles import eval_profiles
 from .drivers import flux as _driver_flux_helpers
 from .drivers import debug as _driver_debug_helpers
 from .drivers import dynamic_scan as _driver_dynamic_scan_helpers
-from .drivers import finish as _driver_finish_helpers
+from .drivers import lifecycle as _driver_lifecycle_helpers
 from .drivers import interface as _driver_interface_helpers
 from .drivers import output as _driver_output_helpers
 from .drivers import policy as _driver_policy_helpers
@@ -1152,13 +1152,13 @@ def run_fixed_boundary(
             accelerated_cli_budgeted_stage_iters=_accelerated_cli_budgeted_stage_iters,
         )
 
-    def _finish_context() -> _driver_finish_helpers.FixedBoundaryFinishContext:
+    def _finish_context() -> _driver_lifecycle_helpers.FixedBoundaryFinishContext:
         _ = (
             input_path, cfg, indata, ftol_list_input, ns_list_input, niter_list_input, step_size,
             gn_damping, gn_cg_tol, use_restart_triggers, use_direct_fallback, jit_forces, jit_precompile, use_scan,
             scan_wout_corrector, stage_transition_heuristic, grid,
         )
-        return _driver_finish_helpers.FixedBoundaryFinishContext.from_namespace(
+        return _driver_lifecycle_helpers.FixedBoundaryFinishContext.from_namespace(
             locals(),
             solver_mode_eff=str(solver_mode_eff),
             accelerated_mode=bool(accelerated_mode),
@@ -1205,7 +1205,7 @@ def run_fixed_boundary(
         initial_policy: str,
         enabled: bool,
     ) -> FixedBoundaryRun:
-        return _driver_finish_helpers.maybe_finish_cli_fixed_boundary_run(
+        return _driver_lifecycle_helpers.maybe_finish_cli_fixed_boundary_run(
             run_in,
             initial_policy=initial_policy,
             enabled=bool(enabled),

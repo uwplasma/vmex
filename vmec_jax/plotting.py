@@ -1249,7 +1249,7 @@ def boozer_bmag_grid_from_state(
         ) from exc
 
     from .booz_input import booz_xform_inputs_from_state
-    from .quasi_isodynamic import _nearest_half_mesh_indices
+    from .quasi_isodynamic.objectives import _nearest_half_mesh_indices
 
     surface_values = tuple(float(s) for s in surfaces)
     if not surface_values:

@@ -47,13 +47,12 @@ Physics and geometry kernels:
   ``boundary.py``, ``init_guess.py``, ``coords.py``, ``geom.py``,
   ``field.py``, ``energy.py``, ``vmec_tomnsp.py``, ``vmec_bcovar.py``, and
   ``preconditioner_1d.py`` hold reusable VMEC data structures and kernels.
-- Objective/diagnostic modules such as ``quasisymmetry.py``,
-  ``quasi_isodynamic.py``, ``qi_diagnostics.py``, ``bootstrap_current.py``,
-  ``finite_beta.py``, and ``plotting.py`` expose higher-level physics
-  quantities used by examples, tests, and docs.  Keep these modules
-  pedagogical: public functions should have docstrings, implementation helpers
-  should stay private, and compatibility exports should be mechanically
-  checked when refactored.
+- Objective/diagnostic modules and packages such as ``quasisymmetry.py``,
+  ``quasi_isodynamic/``, ``bootstrap_current.py``, ``finite_beta.py``, and
+  ``plotting.py`` expose higher-level physics quantities used by examples,
+  tests, and docs.  Keep these surfaces pedagogical: public functions should
+  have docstrings, implementation helpers should stay private, and
+  compatibility exports should be mechanically checked when refactored.
 
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:

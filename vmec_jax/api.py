@@ -154,7 +154,7 @@ from .plotting import (
     zeta_grid,
     zeta_grid_field_period,
 )
-from .qi_diagnostics import (
+from .quasi_isodynamic.diagnostics import (
     QIDiagnosticOptions,
     QISeedSuitabilityTargets,
     annotate_qi_seed_suitability,
@@ -164,7 +164,7 @@ from .qi_diagnostics import (
     qi_promotion_score,
     rank_qi_seed_records,
 )
-from .qi_optimization import (
+from .quasi_isodynamic.optimization import (
     QIOptimizationContext,
     diagnostic_float,
     jsonable,

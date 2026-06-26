@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 import vmec_jax as vj
-import vmec_jax.qi_optimization as qio
+import vmec_jax.quasi_isodynamic.optimization as qio
 from vmec_jax.namelist import InData
 
 

@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.qi_optimization as qio
-from vmec_jax.qi_diagnostics import QIDiagnosticOptions
+import vmec_jax.quasi_isodynamic.optimization as qio
+from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions
 
 
 def _context_values(tmp_path: Path) -> dict[str, object]:

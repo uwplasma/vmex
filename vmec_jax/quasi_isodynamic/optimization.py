@@ -20,7 +20,7 @@ from vmec_jax.namelist import InData
 from vmec_jax.optimization import boundary_param_names, create_x_scale
 from vmec_jax.optimizers.fixed_boundary.workflow_outputs import json_safe as _jsonable
 from vmec_jax.optimizers.fixed_boundary.workflow_outputs import write_json_atomic as _write_json_atomic
-from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
+from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
 QI_ENGINEERING_ASPECT_MAX = 7.0
 

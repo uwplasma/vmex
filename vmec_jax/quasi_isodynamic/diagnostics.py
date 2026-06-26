@@ -13,15 +13,15 @@ from typing import Any, Iterable
 
 import numpy as np
 
-from .qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
-from .quasi_isodynamic import (
+from .legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from .objectives import (
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
-from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
+from ..wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 QI_DIAGNOSTIC_VERSION = "qi_diagnostics.v1"
 
