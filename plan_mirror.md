@@ -28815,3 +28815,78 @@ Documentation-only change.
 ### User input needed
 
 No user input is needed.
+---
+## 247. Observed VMEC2000 Final-Stage Recovery On The Strict Deck
+
+### Steps taken
+
+- Continued polling the active VMEC2000 strict-reference run on `office` without
+  launching competing workloads.
+- Parsed the live `_partial_vmec2000_payload.json` stage summaries after the
+  `NS=17`, `FTOL=1e-12` stage opened.
+- Estimated the current final-stage tail factor from the latest VMEC2000 force
+  rows.
+
+### Results obtained
+
+- The run advanced through all three stages instead of stopping at the
+  `FTOL=1e-10` stage:
+  - stage 1, `NS=9`, `FTOLV=1e-8`, ended at max component `1.33e-8`;
+  - stage 2, `NS=13`, `FTOLV=1e-10`, ended at max component `1.5e-10`;
+  - stage 3, `NS=17`, `FTOLV=1e-12`, opened with a residual jump but then
+    recovered into a decreasing tail.
+- Latest observed final-stage row:
+  - stage-3 iteration `857`;
+  - total residual `1.4264e-9`;
+  - max component `7.72e-10`;
+  - no vacuum-grid excursions.
+- The latest printed-row tail factor was about `0.99655`, giving a rough
+  projection of about `2100` more printed iterations to total residual
+  `1e-12` if the slope holds. This is not a convergence claim, but it is
+  plausible within the remaining final-stage budget, so the run should continue
+  rather than be killed.
+
+### How it was tested
+
+```bash
+ssh office "cd /home/rjorge/local/vmec_mirror && python3 - <<'PY'
+import json, pathlib, math
+p = pathlib.Path('results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1/_partial_vmec2000_payload.json')
+x = json.loads(p.read_text())
+print(x['stage_summaries'])
+PY"
+```
+
+No source tests were needed; this is a live-run observation.
+
+### File structure and best-practice notes
+
+- The evidence remains in ignored `results/` on `office`; no bulky outputs were
+  committed.
+- The plan records only compact residual/stage numbers needed to interpret the
+  next decision.
+
+### Best next steps
+
+1. Let the active VMEC2000 final stage continue.
+2. If the final-stage tail flattens again above `1e-12`, launch the focused
+   `DELT`/stage-budget scan.
+3. If it reaches strict per-component `1e-12`, pull the final report, summarize
+   it with the new plateau columns, then run matching `vmec_jax` mgrid/direct
+   comparisons.
+
+### Completion percentages after M247
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `95%`.
+- VMEC2000 robustness/reference lane: `96%`, with final-stage convergence now
+  plausible but not yet achieved.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `75%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- True spline/control-basis hybrid lane: `36%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
