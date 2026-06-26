@@ -8680,3 +8680,51 @@ Current lane percentages:
 - Docs/release hygiene: 100%.
 - Repository layout/navigation cleanup: 99.0%.
 - Overall: 99.9%.
+
+## 2026-06-26 Required CI Runtime Guard
+
+Steps taken:
+
+- Audited the last green required CI run after the layout/navigation refactor.
+  The slowest required shard was about ``505 s`` and the combined coverage gate
+  was about ``32 s``.
+- Tightened all required CI jobs to ``timeout-minutes: 10`` so the workflow
+  enforces the stated sub-ten-minute policy.  The only intentionally longer
+  timeout left in ``ci.yml`` is the manual/nightly ``physics-full`` lane.
+- Updated ``docs/testing_strategy.rst`` so it no longer says required coverage
+  can run longer than ten minutes.
+
+Results obtained:
+
+- Timeout audit passed: no required job has ``timeout-minutes`` greater than
+  ``10``.
+- Full Sphinx docs build passed with warnings as errors:
+  ``python -m sphinx -W -j auto -b html docs docs/_build/html_ci_timeout_refactor``.
+- ``git diff --check`` passed.
+
+Best next steps:
+
+1. Push the CI timeout guard and let the new run prove the timeout policy on
+   GitHub-hosted runners.
+2. If any shard exceeds the new 10-minute guard, split that shard rather than
+   relaxing the timeout.
+3. Treat the repository-layout objective as functionally complete once the
+   timeout-guarded CI run is green.
+
+User needs:
+
+- No input needed.
+
+Current lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.5%.
+- Free-boundary production differentiability: 97.7%.
+- Single-stage coil optimization: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 95.0%.
+- VMEC2000/VMEC++ parity and physics gates: 99.4%.
+- CI/runtime/coverage hygiene: 100%.
+- Docs/release hygiene: 100%.
+- Repository layout/navigation cleanup: 99.5%.
+- Overall: 99.92%.
