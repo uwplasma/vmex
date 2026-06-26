@@ -286,6 +286,10 @@ The summary helper also parses those live direct launcher logs, so
 ``python tools/diagnostics/summarize_square_coil_profiles.py <profile-dir> --markdown``
 reports running direct residuals, axis-repair status, and the vacuum-pressure
 turn-on iteration before the final JSON exists.
+With ``--verbose-solver``, free-boundary NESTOR timing lines are printed by
+default around vacuum updates and coupled force evaluations. Set
+``VMEC_JAX_FREEB_VERBOSE_TIMING=0`` to keep the VMEC-style residual rows without
+the extra timing markers.
 Use larger ``--nvacskip`` only as a speed experiment; for convergence review,
 ``--nvacskip 1`` avoids stale free-boundary residuals on this square-hybrid
 Fourier deck. For ``NS`` ladders above the initial surface, use a widened mgrid

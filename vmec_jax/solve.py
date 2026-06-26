@@ -5658,6 +5658,12 @@ def solve_fixed_boundary_residual_iter(
     jit_forces = dump_history_config.jit_forces
     light_history = dump_history_config.light_history
     track_history = dump_history_config.track_history
+    freeb_verbose_timing = os.getenv("VMEC_JAX_FREEB_VERBOSE_TIMING", "1").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
 
     def _pack_resume_state(base: dict[str, Any], heavy: dict[str, Any] | None = None):
         return _pack_resume_state_record(base=base, heavy=heavy, mode=resume_state_mode)
@@ -11411,6 +11417,18 @@ def solve_fixed_boundary_residual_iter(
                     # once control is active (`ivac >= 0`), with `vacuum.f`
                     # promoting ivac=0 -> 1 internally on first turn-on.
                     if int(freeb_ivac) >= 0:
+                        freeb_update_wall_start = (
+                            time.perf_counter()
+                            if bool(verbose and verbose_vmec2000_table and freeb_verbose_timing)
+                            else None
+                        )
+                        if freeb_update_wall_start is not None:
+                            print(
+                                "  FREEB VACUUM UPDATE START "
+                                f"ITER {int(iter2):4d} IVAC={int(freeb_ivac):2d} "
+                                f"IVACSKIP={int(freeb_ivacskip):2d} NVACSKIP={int(freeb_nvacskip):4d}",
+                                flush=True,
+                            )
                         nestor_res, freeb_nestor_runtime = nestor_external_only_step(
                             state=state,
                             static=static,
@@ -11454,6 +11472,26 @@ def solve_fixed_boundary_residual_iter(
                             freeb_nestor_bnormal_rms_history.append(float("nan"))
                             freeb_nestor_gsource_rms_history.append(float("nan"))
                             freeb_nestor_bsqvac_rms_history.append(float("nan"))
+                        if freeb_update_wall_start is not None:
+                            update_wall = time.perf_counter() - float(freeb_update_wall_start)
+                            bnormal_rms = (
+                                float(diag_nestor.get("bnormal_rms", float("nan")))
+                                if isinstance(diag_nestor, dict)
+                                else float("nan")
+                            )
+                            bsqvac_rms = (
+                                float(diag_nestor.get("bsqvac_rms", float("nan")))
+                                if isinstance(diag_nestor, dict)
+                                else float("nan")
+                            )
+                            print(
+                                "  FREEB VACUUM UPDATE DONE  "
+                                f"ITER {int(iter2):4d} WALL={update_wall:.3e}s "
+                                f"SAMPLE={freeb_sample_time:.3e}s SOLVE={freeb_solve_time:.3e}s "
+                                f"REUSE={int(bool(freeb_reused))} MODEL={freeb_last_model} "
+                                f"BN_RMS={bnormal_rms:.3e} BSQVAC_RMS={bsqvac_rms:.3e}",
+                                flush=True,
+                            )
                         bsqvac_edge = np.asarray(nestor_res.vac_total.bsqvac, dtype=float)
                         if (
                             bsqvac_edge.ndim == 2
@@ -11674,6 +11712,19 @@ def solve_fixed_boundary_residual_iter(
             if timing_enabled and t_iteration_prepare_start is not None:
                 timing_stats["iteration_prepare"] += time.perf_counter() - float(t_iteration_prepare_start)
             t_compute_start = time.perf_counter() if timing_enabled else None
+            freeb_force_log_start = None
+            if (
+                bool(verbose and verbose_vmec2000_table and freeb_verbose_timing)
+                and bool(free_boundary_enabled)
+                and int(freeb_ivac_effective) >= 1
+                and freeb_bsqvac_half_current is not None
+            ):
+                freeb_force_log_start = time.perf_counter()
+                print(
+                    "  FREEB COUPLED FORCE START "
+                    f"ITER {int(iter2):4d} IVAC={int(freeb_ivac_effective):2d}",
+                    flush=True,
+                )
             k, frzl, gcr2, gcz2, gcl2, rz_scale, l_scale, norms_current = _compute_forces_iter(
                 state,
                 include_edge=bool(include_edge),
@@ -11709,6 +11760,12 @@ def solve_fixed_boundary_residual_iter(
                         cache_constraint_zcon0 = jnp.asarray(k.constraint_zcon0)
             if timing_enabled:
                 _record_compute_force_timing("main", t_compute_start, gcr2)
+            if freeb_force_log_start is not None:
+                print(
+                    "  FREEB COUPLED FORCE DONE  "
+                    f"ITER {int(iter2):4d} WALL={time.perf_counter() - float(freeb_force_log_start):.3e}s",
+                    flush=True,
+                )
             t_residual_metrics_start = time.perf_counter() if timing_enabled else None
             use_cached_residual_norms = (
                 bool(vmec2000_control)
