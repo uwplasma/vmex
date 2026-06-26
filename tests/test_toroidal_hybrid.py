@@ -1264,6 +1264,12 @@ def test_square_coil_hybrid_example_flattens_edge_control_row_metrics():
                 "residual_rms": 9.0e-12,
                 "residual_rel": 0.25,
             },
+            "force_direction": {
+                "residual_linf": 2.0e-11,
+                "residual_rms": 8.0e-12,
+                "residual_rel": 0.2,
+                "captured_fraction": 0.8,
+            },
             "reduced_update_direction": {
                 "status": "measured",
                 "reduced_update_size": 2,
@@ -1273,6 +1279,14 @@ def test_square_coil_hybrid_example_flattens_edge_control_row_metrics():
                 "decoded_residual_linf": 3.0e-11,
                 "decoded_residual_rel": 0.25,
                 "captured_fraction": 0.75,
+            },
+            "reduced_force_direction": {
+                "status": "measured",
+                "reduced_update_size": 2,
+                "update_linf": 1.0e-5,
+                "decoded_residual_linf": 2.0e-11,
+                "decoded_residual_rel": 0.2,
+                "captured_fraction": 0.8,
             },
         }
     )
@@ -1286,10 +1300,14 @@ def test_square_coil_hybrid_example_flattens_edge_control_row_metrics():
     assert row["free_boundary_edge_control_projection_full_edge_size"] == 128
     assert row["free_boundary_edge_control_projection_unknown_reduction_fraction"] == pytest.approx(2 / 128)
     assert row["free_boundary_edge_control_projection_update_direction_rel"] == pytest.approx(0.25)
+    assert row["free_boundary_edge_control_projection_force_direction_rel"] == pytest.approx(0.2)
+    assert row["free_boundary_edge_control_projection_force_direction_captured_fraction"] == pytest.approx(0.8)
     assert row["free_boundary_edge_control_projection_reduced_update_by_label"] == (
         '{"corner":-5e-06,"side":1.5e-05}'
     )
     assert row["free_boundary_edge_control_projection_reduced_update_captured_fraction"] == pytest.approx(0.75)
+    assert row["free_boundary_edge_control_projection_reduced_force_linf"] == pytest.approx(1.0e-5)
+    assert row["free_boundary_edge_control_projection_reduced_force_captured_fraction"] == pytest.approx(0.8)
 
 
 def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: Path):
@@ -1388,6 +1406,8 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert "free_boundary_edge_control_projection_state_reconstruction_residual_rel" in rows[0]
     assert "free_boundary_edge_control_projection_reduced_unknown_size" in rows[0]
     assert "free_boundary_edge_control_projection_reduced_update_decoded_residual_rel" in rows[0]
+    assert "free_boundary_edge_control_projection_force_direction_captured_fraction" in rows[0]
+    assert "free_boundary_edge_control_projection_reduced_force_decoded_residual_rel" in rows[0]
     if rows[0]["free_boundary_bnormal_rms"] is not None:
         assert np.isfinite(float(rows[0]["free_boundary_bnormal_rms"]))
     assert rows[0]["boundary_condition_mode"] == "vacuum_coil_normal"
@@ -1413,6 +1433,8 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert "free_boundary_edge_control_projection_state_reconstruction_residual_rel" in csv_rows[0]
     assert "free_boundary_edge_control_projection_reduced_unknown_size" in csv_rows[0]
     assert "free_boundary_edge_control_projection_reduced_update_decoded_residual_rel" in csv_rows[0]
+    assert "free_boundary_edge_control_projection_force_direction_captured_fraction" in csv_rows[0]
+    assert "free_boundary_edge_control_projection_reduced_force_decoded_residual_rel" in csv_rows[0]
     assert "best_scored_component_max" in csv_rows[0]
     assert "virtual_casing_status" in csv_rows[0]
 

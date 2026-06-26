@@ -435,6 +435,8 @@ def _edge_control_row_metrics(edge_projection: dict[str, Any]) -> dict[str, Any]
     reduced_unknown = _dict_or_empty(edge_projection.get("reduced_unknown_vector"))
     update_direction = _dict_or_empty(edge_projection.get("update_direction"))
     reduced_update = _dict_or_empty(edge_projection.get("reduced_update_direction"))
+    force_direction = _dict_or_empty(edge_projection.get("force_direction")) or update_direction
+    reduced_force = _dict_or_empty(edge_projection.get("reduced_force_direction")) or reduced_update
     return {
         "free_boundary_edge_control_projection_state_residual_status": state_residual.get("status"),
         "free_boundary_edge_control_projection_state_residual_linf": _finite_float_or_none(
@@ -487,6 +489,18 @@ def _edge_control_row_metrics(edge_projection: dict[str, Any]) -> dict[str, Any]
         "free_boundary_edge_control_projection_update_direction_rel": _finite_float_or_none(
             update_direction.get("residual_rel")
         ),
+        "free_boundary_edge_control_projection_force_direction_linf": _finite_float_or_none(
+            force_direction.get("residual_linf")
+        ),
+        "free_boundary_edge_control_projection_force_direction_rms": _finite_float_or_none(
+            force_direction.get("residual_rms")
+        ),
+        "free_boundary_edge_control_projection_force_direction_rel": _finite_float_or_none(
+            force_direction.get("residual_rel")
+        ),
+        "free_boundary_edge_control_projection_force_direction_captured_fraction": _finite_float_or_none(
+            force_direction.get("captured_fraction")
+        ),
         "free_boundary_edge_control_projection_reduced_update_status": reduced_update.get("status"),
         "free_boundary_edge_control_projection_reduced_update_size": reduced_update.get(
             "reduced_update_size"
@@ -506,6 +520,22 @@ def _edge_control_row_metrics(edge_projection: dict[str, Any]) -> dict[str, Any]
         ),
         "free_boundary_edge_control_projection_reduced_update_captured_fraction": _finite_float_or_none(
             reduced_update.get("captured_fraction")
+        ),
+        "free_boundary_edge_control_projection_reduced_force_status": reduced_force.get("status"),
+        "free_boundary_edge_control_projection_reduced_force_size": reduced_force.get(
+            "reduced_update_size"
+        ),
+        "free_boundary_edge_control_projection_reduced_force_linf": _finite_float_or_none(
+            reduced_force.get("update_linf")
+        ),
+        "free_boundary_edge_control_projection_reduced_force_decoded_residual_linf": _finite_float_or_none(
+            reduced_force.get("decoded_residual_linf")
+        ),
+        "free_boundary_edge_control_projection_reduced_force_decoded_residual_rel": _finite_float_or_none(
+            reduced_force.get("decoded_residual_rel")
+        ),
+        "free_boundary_edge_control_projection_reduced_force_captured_fraction": _finite_float_or_none(
+            reduced_force.get("captured_fraction")
         ),
     }
 
@@ -1493,6 +1523,9 @@ def _run_one_beta(
     edge_update_diag = edge_projection_diag.get("update_direction")
     if not isinstance(edge_update_diag, dict):
         edge_update_diag = {}
+    edge_force_diag = edge_projection_diag.get("force_direction")
+    if not isinstance(edge_force_diag, dict):
+        edge_force_diag = edge_update_diag
     nestor = freeb.get("last_nestor_diagnostics", {}) if isinstance(freeb, dict) else {}
     w_stats = _history_stats([] if run.result is None else getattr(run.result, "w_history", []))
     bnormal_stats = _history_stats(diag.get("freeb_nestor_bnormal_rms_history", []) if isinstance(diag, dict) else [])
@@ -1560,6 +1593,9 @@ def _run_one_beta(
             "captured_fraction"
         ),
         "free_boundary_edge_control_projection_update_direction_captured_fraction": edge_update_diag.get(
+            "captured_fraction"
+        ),
+        "free_boundary_edge_control_projection_force_direction_captured_fraction": edge_force_diag.get(
             "captured_fraction"
         ),
         **_edge_control_row_metrics(edge_projection_diag),
@@ -1726,6 +1762,7 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_edge_control_projection_reason",
         "free_boundary_edge_control_projection_state_captured_fraction",
         "free_boundary_edge_control_projection_update_direction_captured_fraction",
+        "free_boundary_edge_control_projection_force_direction_captured_fraction",
         "free_boundary_edge_control_projection_state_residual_status",
         "free_boundary_edge_control_projection_state_residual_linf",
         "free_boundary_edge_control_projection_state_residual_rms",
@@ -1745,6 +1782,9 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_edge_control_projection_update_direction_linf",
         "free_boundary_edge_control_projection_update_direction_rms",
         "free_boundary_edge_control_projection_update_direction_rel",
+        "free_boundary_edge_control_projection_force_direction_linf",
+        "free_boundary_edge_control_projection_force_direction_rms",
+        "free_boundary_edge_control_projection_force_direction_rel",
         "free_boundary_edge_control_projection_reduced_update_status",
         "free_boundary_edge_control_projection_reduced_update_size",
         "free_boundary_edge_control_projection_full_update_size",
@@ -1753,6 +1793,12 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "free_boundary_edge_control_projection_reduced_update_decoded_residual_linf",
         "free_boundary_edge_control_projection_reduced_update_decoded_residual_rel",
         "free_boundary_edge_control_projection_reduced_update_captured_fraction",
+        "free_boundary_edge_control_projection_reduced_force_status",
+        "free_boundary_edge_control_projection_reduced_force_size",
+        "free_boundary_edge_control_projection_reduced_force_linf",
+        "free_boundary_edge_control_projection_reduced_force_decoded_residual_linf",
+        "free_boundary_edge_control_projection_reduced_force_decoded_residual_rel",
+        "free_boundary_edge_control_projection_reduced_force_captured_fraction",
         "converged",
         "converged_strict",
         "boundary_condition_mode",
