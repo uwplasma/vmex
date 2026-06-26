@@ -259,7 +259,7 @@ def _synthetic_direct_coil_trace(
 
 
 def _synthetic_same_branch_replay_report(trace0: dict, trace1: dict) -> dict:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_fingerprint,
         free_boundary_adjoint_trace_replay_diagnostics,
     )
@@ -316,7 +316,7 @@ def _assert_synthetic_physical_and_adaptive_gate_reports(
     trace0: dict,
     trace1: dict,
 ) -> None:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_same_branch_physical_scalar_gate_report,
     )
@@ -456,7 +456,7 @@ def _assert_synthetic_physical_and_adaptive_gate_reports(
 
 
 def _assert_direct_coil_trace_control_array_contracts(trace0: dict, trace1: dict, z: np.ndarray) -> None:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_array_controls_jax,
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
@@ -539,7 +539,7 @@ def _assert_direct_coil_trace_control_array_contracts(trace0: dict, trace1: dict
 
 
 def _assert_direct_coil_trace_replay_graph_contracts(trace0: dict, trace1: dict, z: np.ndarray) -> tuple[dict, dict]:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_controller_controls_jax,
         direct_coil_accepted_trace_replay_graph_metadata,
         direct_coil_accepted_trace_step_controls_jax,
@@ -616,7 +616,7 @@ def _assert_direct_coil_trace_replay_graph_contracts(trace0: dict, trace1: dict,
 
 
 def _assert_trace_fingerprint_status_and_replay_gate_contracts(trace0: dict, trace1: dict, trace2: dict):
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_branch_metadata,
         direct_coil_accepted_trace_controller_replay_plan,
         direct_coil_accepted_trace_controller_slot_fingerprint,
@@ -764,7 +764,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
         trace2,
     )
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         _block_until_ready_for_timing,
         _pytree_batched_directional_vdot_jax,
         direct_coil_accepted_trace_fingerprint,
@@ -871,7 +871,7 @@ def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatc
             replay_ad_mode="custom_vjp",
         )
 
-    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as freeb_adj
 
     replay_options_seen: list[dict[str, object]] = []
 
@@ -1203,7 +1203,7 @@ def _strict_accepted_step_from_trace(trace_payload, static, *, state_pre=None):
 
 def _lcfs_boundary_moment_from_state(state, static):
     from vmec_jax._compat import jnp
-    from vmec_jax.solvers.free_boundary.adjoint.facade import free_boundary_boundary_geometry_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import free_boundary_boundary_geometry_jax
 
     geometry = free_boundary_boundary_geometry_jax(state, static)
     R = jnp.asarray(geometry["R"])
@@ -1913,7 +1913,7 @@ def _native_rejected_adaptive_gate_report(
     *,
     scalar_keys: tuple[str, ...],
 ):
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_adaptive_full_loop_same_branch_gate_report
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_adaptive_full_loop_same_branch_gate_report
 
     return direct_coil_adaptive_full_loop_same_branch_gate_report(
         complete_report,
@@ -2030,7 +2030,7 @@ def _native_rejected_slot_scalars_report(
     replay_kwargs_extra: dict | None = None,
     solve_kwargs_extra: dict | None = None,
 ) -> dict:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
         direct_coil_same_branch_complete_solve_fd_report,
@@ -2094,7 +2094,7 @@ def _assert_same_branch_physical_and_adaptive_scalar_gates(
     scalar_keys: tuple[str, ...],
     base_fingerprint: dict,
 ):
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_same_branch_physical_scalar_gate_report,
     )
@@ -2319,7 +2319,7 @@ def _assert_single_controller_scalar_report_ok(
     rtol: float,
     atol: float,
 ) -> dict:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_same_branch_controller_scalar_custom_vjp_report
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_same_branch_controller_scalar_custom_vjp_report
 
     scalar_report = direct_coil_same_branch_controller_scalar_custom_vjp_report(
         complete_report,
@@ -2362,7 +2362,7 @@ def _assert_fixed_rejected_slot_gate(
     rejected_scalars_report: dict,
     scalar_keys: tuple[str, ...],
 ) -> dict:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_adaptive_full_loop_same_branch_gate_report
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_adaptive_full_loop_same_branch_gate_report
 
     rejected_slot_gate = direct_coil_adaptive_full_loop_same_branch_gate_report(
         complete_report,
@@ -2435,7 +2435,7 @@ def _production_scalar_rtol(scalar_keys: tuple[str, ...]) -> dict[str, float]:
 def _select_finite_direct_coil_replay_trace(init, base_params: CoilFieldParams, active_traces: list[dict]) -> SimpleNamespace:
     from vmec_jax._compat import jnp
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_boundary_bsqvac_jax,
         direct_coil_boundary_replay_context,
     )
@@ -2508,7 +2508,7 @@ def _select_finite_direct_coil_replay_trace(init, base_params: CoilFieldParams, 
 
 
 def _assert_selected_direct_coil_replay_matches_trace(selected: SimpleNamespace) -> None:
-    from vmec_jax.solvers.free_boundary.adjoint.facade import vacuum_boundary_fields_from_mode_coeffs_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import vacuum_boundary_fields_from_mode_coeffs_jax
 
     trace = selected.trace
     nestor_trace = selected.nestor_trace
@@ -2554,7 +2554,7 @@ def _assert_selected_direct_coil_replay_matches_trace(selected: SimpleNamespace)
 
 def _assert_trace_force_channels_and_step_replay(trace: dict, static):
     from vmec_jax.discrete_adjoint import preconditioned_force_channels_from_rz_output
-    from vmec_jax.solvers.free_boundary.adjoint.facade import accepted_trace_effective_state_pre
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import accepted_trace_effective_state_pre
     from vmec_jax.state import pack_state
     from vmec_jax.kernels.tomnsp import TomnspsRZL
 
@@ -2598,7 +2598,7 @@ def _assert_strict_update_coil_directional_derivative_matches_fd(
 ) -> None:
     from vmec_jax._compat import jnp
     from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
-    from vmec_jax.solvers.free_boundary.adjoint.facade import pytree_directional_derivative_check_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import pytree_directional_derivative_check_jax
     from vmec_jax.state import pack_state
 
     def objective(params: CoilFieldParams):
@@ -2643,7 +2643,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
 ) -> None:
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
@@ -3410,7 +3410,7 @@ def test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_p
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
 
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_preconditioner_controls_jax,
         direct_coil_accepted_trace_preconditioner_policy_segments,
         direct_coil_accepted_trace_replay_graph_metadata,
@@ -3609,7 +3609,7 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_an
     from vmec_jax._compat import jax, jnp
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
-    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_boundary_bnormal_rms_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_boundary_bnormal_rms_jax
 
     enable_x64(True)
     input_path = _write_tiny_direct_freeb_input(
@@ -3754,7 +3754,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax._compat import jax, jnp
     from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
     from vmec_jax.driver import run_free_boundary
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_controller_replay_objective_jax,
         direct_coil_accepted_trace_controller_replay_plan,
         accepted_trace_effective_state_pre,
@@ -4273,7 +4273,7 @@ def test_direct_coil_vacuum_field_override_replay_contract(monkeypatch: pytest.M
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as freeb_adj
 
     shape = (2, 2)
     base_trace = {
@@ -4390,7 +4390,7 @@ def test_jax_free_boundary_boundary_geometry_matches_host_sampler(
     from vmec_jax._compat import jax, jnp
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
-    from vmec_jax.solvers.free_boundary.adjoint.facade import free_boundary_boundary_geometry_jax
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import free_boundary_boundary_geometry_jax
     from vmec_jax.state import pack_state, unpack_state
 
     enable_x64(True)
@@ -4456,7 +4456,7 @@ def test_jax_nestor_operator_fixed_boundary_ad_matches_central_fd_for_coil_vars(
     from vmec_jax.driver import run_free_boundary
     from vmec_jax.external_fields import sample_coil_field_cylindrical
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         dense_vmec_nestor_mode_solve_jax,
         direct_coil_boundary_replay_context,
         vacuum_boundary_fields_from_cylindrical_jax,

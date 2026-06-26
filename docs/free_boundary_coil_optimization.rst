@@ -66,6 +66,56 @@ magnetic-grid bounds, and direct-coil provider wiring.  By default, outputs go
 under ``results/free_boundary_essos_mgrid_forward/`` and
 ``results/free_boundary_essos_direct_forward/``.
 
+Public branch-local derivative API
+----------------------------------
+
+The public derivative entry point is
+``vmec_jax.solvers.free_boundary.free_boundary_value_and_jvp``.  It returns
+complete-solve scalar values and same-branch branch-local derivatives for
+direct-coil parameters.  Supported public scalar names include ``aspect``,
+``mean_iota``, ``boundary_displacement`` (an LCFS boundary moment),
+``bnormal_rms``, and ``qs_residual``.  Use
+``validate_fd=True`` to add a complete-solve central-finite-difference check
+under the recorded branch fingerprint:
+
+.. code-block:: python
+
+   from vmec_jax.solvers.free_boundary import (
+       FreeBoundaryDerivativeOptions,
+       coil_direction,
+       free_boundary_value_and_jvp,
+   )
+
+   direction = coil_direction(coil_params, current=0.05, curve_dof=1e-3, curve_index=(0, 0, 2))
+   report = free_boundary_value_and_jvp(
+       "input.direct_coils",
+       coil_params,
+       direction_params=direction,
+       outputs=("aspect", "mean_iota", "boundary_displacement", "bnormal_rms", "qs_residual"),
+       options=FreeBoundaryDerivativeOptions(helicity_m=1, helicity_n=0),
+       solve_kwargs={"external_field_provider_kind": "direct_coils", "adjoint_trace": True},
+       validate_fd=True,
+   )
+
+Run the standalone derivative example with:
+
+.. code-block:: bash
+
+   JAX_ENABLE_X64=1 python examples/free_boundary_direct_coil_derivative.py --max-iter 2
+
+QA and QH coil-only examples are available as helicity presets around the
+shared direct-coil optimizer:
+
+.. code-block:: bash
+
+   python examples/optimization/free_boundary_QA_coil_optimization.py --smoke --provider circle
+   python examples/optimization/free_boundary_QH_coil_optimization.py --smoke --provider circle
+
+These examples do not differentiate arbitrary accepted/rejected adaptive
+branch changes.  They validate and use derivatives only when the complete-solve
+branch fingerprint is unchanged; every proposed optimizer step is still judged
+by a complete free-boundary solve.
+
 Current-only derivative proposal smoke
 --------------------------------------
 

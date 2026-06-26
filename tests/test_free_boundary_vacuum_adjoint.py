@@ -17,7 +17,7 @@ from vmec_jax.free_boundary import (
     VacuumBoundaryFields,
     vacuum_boundary_fields_from_cylindrical,
 )
-from vmec_jax.solvers.free_boundary.adjoint.facade import (
+from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
     dense_fixed_point_solve_jax,
     dense_mode_vacuum_solve_jax,
     dense_nonlinear_solve_jax,
@@ -301,7 +301,7 @@ def test_direct_coil_trace_directional_helpers_can_skip_finite_difference(monkey
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adjoint
+    import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as freeb_adjoint
 
     enable_x64(True)
 

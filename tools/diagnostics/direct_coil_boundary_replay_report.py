@@ -99,7 +99,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         _write_tiny_direct_freeb_input,
     )
     from vmec_jax._compat import enable_x64, jax, jnp
-    from vmec_jax.solvers.free_boundary.adjoint.facade import (
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_boundary_bsqvac_from_trace_jax,
         direct_coil_boundary_replay_context,
         free_boundary_boundary_geometry_jax,

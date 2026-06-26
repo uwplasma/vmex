@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.solvers.free_boundary.adjoint.facade as fba
+import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as fba
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
 from vmec_jax.solvers.free_boundary.adjoint import branch_local as branch_local_helpers
 from vmec_jax.solvers.free_boundary.adjoint import direct_coil_replay as direct_coil_replay_helpers
-from vmec_jax.solvers.free_boundary.adjoint import facade as facade_helpers
+from vmec_jax.solvers.free_boundary.adjoint import branch_local_derivatives as facade_helpers
 from vmec_jax.solvers.free_boundary.adjoint import pytrees as pytree_helpers
 from vmec_jax.solvers.free_boundary.adjoint import replay_plan as replay_plan_helpers
 from vmec_jax.solvers.free_boundary.adjoint import runtime as runtime_helpers

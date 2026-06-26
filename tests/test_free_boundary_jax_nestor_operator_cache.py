@@ -92,7 +92,7 @@ def test_jax_nestor_operator_guard_reports_shape_and_basis_contracts():
 
 def test_jitted_jax_nestor_operator_cache_batches_dense_operator(monkeypatch):
     from vmec_jax._compat import jax, jnp
-    import vmec_jax.solvers.free_boundary.adjoint.facade as adjoint
+    import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as adjoint
 
     enable_x64(True)
     jax.config.update("jax_disable_jit", False)
