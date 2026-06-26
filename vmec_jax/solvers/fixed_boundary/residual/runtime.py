@@ -48,6 +48,69 @@ class FreeBoundaryCouplingRuntime(NamedTuple):
     trial_bsqvac_half_for_state: Callable[..., Any]
 
 
+class FreeBoundaryLoopState(NamedTuple):
+    """Host loop state for VMEC free-boundary cadence and NESTOR reuse."""
+
+    ivac: int
+    ivacskip: int
+    nvacskip: int
+    nvskip0: int
+    nestor_runtime: Any
+    bsqvac_half_current: Any
+    nestor_trace_current: Any
+    last_model: str
+    last_diagnostics: dict[str, Any]
+    plascur: float
+
+
+def initial_free_boundary_loop_state(
+    *,
+    nvacskip: int,
+    nvskip0: int,
+    wout_like: Any,
+) -> FreeBoundaryLoopState:
+    """Create the initial host free-boundary runtime state for one solve."""
+
+    plascur = 0.0
+    try:
+        icurv_arr = np.asarray(getattr(wout_like, "icurv", np.asarray([0.0], dtype=float)), dtype=float)
+        if icurv_arr.size > 0:
+            plascur = float((2.0 * np.pi) * icurv_arr[-1])
+    except Exception:
+        plascur = 0.0
+    return FreeBoundaryLoopState(
+        ivac=-1,
+        ivacskip=0,
+        nvacskip=int(nvacskip),
+        nvskip0=int(nvskip0),
+        nestor_runtime=None,
+        bsqvac_half_current=None,
+        nestor_trace_current=None,
+        last_model="none",
+        last_diagnostics={},
+        plascur=float(plascur),
+    )
+
+
+def resume_free_boundary_loop_state(
+    state: FreeBoundaryLoopState,
+    *,
+    resume_state: dict[str, Any] | None,
+    free_boundary_enabled: bool,
+) -> FreeBoundaryLoopState:
+    """Apply persisted VMEC free-boundary cadence fields to loop state."""
+
+    if resume_state is None or not bool(free_boundary_enabled):
+        return state
+    return state._replace(
+        ivac=int(resume_state.get("freeb_ivac", state.ivac)),
+        ivacskip=int(resume_state.get("freeb_ivacskip", state.ivacskip)),
+        nvacskip=max(1, int(resume_state.get("freeb_nvacskip", state.nvacskip))),
+        nvskip0=max(1, int(resume_state.get("freeb_nvskip0", state.nvskip0))),
+        last_model=str(resume_state.get("freeb_model", state.last_model)),
+    )
+
+
 def resolve_free_boundary_iteration_controls(
     *,
     free_boundary_enabled: bool,
@@ -198,6 +261,50 @@ def resolve_free_boundary_coupling_runtime(
         controls_cached=coupling.controls_cached,
         trial_bsqvac_half_for_state=trial_bsqvac_half_for_state,
     )
+
+
+def trial_residual_total_runtime(
+    candidate_state: Any,
+    freeb_bsqvac_half_trial: Any,
+    *,
+    zero_m1_value: Any,
+    timing_label: str | None = None,
+    compute_forces_iter_func: Callable[..., Any],
+    include_edge: bool,
+    constraint_precond_diag: Any,
+    constraint_tcon: Any,
+    constraint_precond_active: Any,
+    constraint_tcon_active: Any,
+    iter2: int,
+    timing_detail_enabled: bool,
+    perf_counter: Callable[[], float],
+    record_compute_force_timing: Callable[..., Any],
+    residual_fsq_from_norms_func: Callable[..., Any],
+    numpy_module: Any = np,
+) -> float:
+    """Evaluate the physical residual for a candidate trial state."""
+
+    t_trial_force_start = perf_counter() if (timing_label and timing_detail_enabled) else None
+    _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = compute_forces_iter_func(
+        candidate_state,
+        include_edge=bool(include_edge),
+        zero_m1=zero_m1_value,
+        freeb_bsqvac_half=freeb_bsqvac_half_trial,
+        constraint_precond_diag=constraint_precond_diag,
+        constraint_tcon=constraint_tcon,
+        constraint_precond_active=constraint_precond_active,
+        constraint_tcon_active=constraint_tcon_active,
+        iter2=int(iter2),
+    )
+    if timing_label:
+        record_compute_force_timing(timing_label, t_trial_force_start, gcr2_t)
+    fsqr_t, fsqz_t, fsql_t = residual_fsq_from_norms_func(
+        norms_t,
+        gcr2=gcr2_t,
+        gcz2=gcz2_t,
+        gcl2=gcl2_t,
+    )
+    return float(numpy_module.asarray(fsqr_t + fsqz_t + fsql_t))
 
 
 def dump_xc_with_velocity_blocks(

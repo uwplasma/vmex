@@ -25,11 +25,14 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _setup_timer_start,
     _vmec_freeb_plascur_from_bcovar,
     dump_xc_with_velocity_blocks,
+    initial_free_boundary_loop_state,
     record_elapsed_timing,
     record_update_state_ready_timing,
     record_update_total_timing,
     resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window,
+    resume_free_boundary_loop_state,
+    trial_residual_total_runtime,
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import ResidualVelocityBlocks
 
@@ -598,6 +601,98 @@ def test_vmec_freeb_plascur_from_bcovar_uses_finite_value_or_fallback():
         wout=None,
         s=None,
     ) == 1.5
+
+
+def test_free_boundary_loop_state_initializes_and_resumes_vmec_cadence():
+    class WoutLike:
+        icurv = np.asarray([0.0, 2.0])
+
+    loop_state = initial_free_boundary_loop_state(nvacskip=3, nvskip0=4, wout_like=WoutLike())
+    assert loop_state.ivac == -1
+    assert loop_state.ivacskip == 0
+    assert loop_state.nvacskip == 3
+    assert loop_state.nvskip0 == 4
+    assert loop_state.last_model == "none"
+    assert loop_state.last_diagnostics == {}
+    assert loop_state.plascur == pytest.approx(4.0 * np.pi)
+
+    disabled_resume = resume_free_boundary_loop_state(
+        loop_state,
+        resume_state={"freeb_ivac": 9, "freeb_ivacskip": 8, "freeb_nvacskip": 0, "freeb_nvskip0": 0},
+        free_boundary_enabled=False,
+    )
+    assert disabled_resume == loop_state
+
+    resumed = resume_free_boundary_loop_state(
+        loop_state,
+        resume_state={
+            "freeb_ivac": 9,
+            "freeb_ivacskip": 8,
+            "freeb_nvacskip": 0,
+            "freeb_nvskip0": 0,
+            "freeb_model": "direct-coil",
+        },
+        free_boundary_enabled=True,
+    )
+    assert resumed.ivac == 9
+    assert resumed.ivacskip == 8
+    assert resumed.nvacskip == 1
+    assert resumed.nvskip0 == 1
+    assert resumed.last_model == "direct-coil"
+    assert resumed.plascur == loop_state.plascur
+
+
+def test_trial_residual_total_runtime_records_timing_and_sums_residuals():
+    force_calls = []
+    timing_calls = []
+
+    def compute_forces_iter(candidate_state, **kwargs):
+        force_calls.append((candidate_state, kwargs))
+        return None, None, np.asarray(1.0), np.asarray(2.0), np.asarray(3.0), None, None, "norms"
+
+    residual = trial_residual_total_runtime(
+        "candidate",
+        "bsqvac",
+        zero_m1_value="zero-m1",
+        timing_label="trial",
+        compute_forces_iter_func=compute_forces_iter,
+        include_edge=True,
+        constraint_precond_diag="diag",
+        constraint_tcon="tcon",
+        constraint_precond_active=True,
+        constraint_tcon_active=False,
+        iter2=7,
+        timing_detail_enabled=True,
+        perf_counter=lambda: 1.25,
+        record_compute_force_timing=lambda *args: timing_calls.append(args),
+        residual_fsq_from_norms_func=lambda norms, **kwargs: (
+            kwargs["gcr2"] + 10.0,
+            kwargs["gcz2"] + 20.0,
+            kwargs["gcl2"] + 30.0,
+        ),
+        numpy_module=np,
+    )
+
+    assert residual == pytest.approx(66.0)
+    assert force_calls == [
+        (
+            "candidate",
+            {
+                "include_edge": True,
+                "zero_m1": "zero-m1",
+                "freeb_bsqvac_half": "bsqvac",
+                "constraint_precond_diag": "diag",
+                "constraint_tcon": "tcon",
+                "constraint_precond_active": True,
+                "constraint_tcon_active": False,
+                "iter2": 7,
+            },
+        )
+    ]
+    assert len(timing_calls) == 1
+    assert timing_calls[0][0] == "trial"
+    assert timing_calls[0][1] == 1.25
+    np.testing.assert_allclose(timing_calls[0][2], np.asarray(1.0))
 
 
 def test_attach_free_boundary_external_field_diag_branches():

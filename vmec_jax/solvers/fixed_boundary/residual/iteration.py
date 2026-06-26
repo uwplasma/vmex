@@ -53,6 +53,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     _device_get_floats,
     _freeb_trial_bsqvac_half as _runtime_freeb_trial_bsqvac_half,
     _initial_setup_phase_timings,
+    initial_free_boundary_loop_state as _runtime_initial_free_boundary_loop_state,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
     _new_residual_iter_timing_stats as _runtime_new_residual_iter_timing_stats,
@@ -65,9 +66,11 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     record_elapsed_timing as _record_elapsed_timing,
     record_update_state_ready_timing as _record_update_state_ready_timing,
     record_update_total_timing as _record_update_total_timing,
+    resume_free_boundary_loop_state as _runtime_resume_free_boundary_loop_state,
     resolve_free_boundary_coupling_runtime as _runtime_resolve_free_boundary_coupling_runtime,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window as _resolve_residual_profile_window,
+    trial_residual_total_runtime as _runtime_trial_residual_total,
 )
 from vmec_jax.solvers.fixed_boundary.residual.accelerated_scan import (
     run_accelerated_residual_scan as _run_accelerated_residual_scan,
@@ -1178,20 +1181,21 @@ def solve_fixed_boundary_residual_iter(
     # Starting at -1 delays vacuum turn-on by one accepted iteration.
     # VMEC initializes ivac=-1 (reset_params.f), then promotes to 0/1/...
     # once free-boundary activation criteria are met.
-    freeb_ivac = -1
-    freeb_ivacskip = 0
-    freeb_nestor_runtime: NestorRuntimeState | None = None
-    freeb_bsqvac_half_current = None
-    freeb_nestor_trace_current = None
-    freeb_last_model = "none"
-    freeb_last_diagnostics: dict[str, Any] = {}
-    freeb_plascur = 0.0
-    try:
-        icurv_arr = np.asarray(getattr(wout_like, "icurv", np.asarray([0.0], dtype=float)), dtype=float)
-        if icurv_arr.size > 0:
-            freeb_plascur = float((2.0 * np.pi) * icurv_arr[-1])
-    except Exception:
-        freeb_plascur = 0.0
+    freeb_loop_state = _runtime_initial_free_boundary_loop_state(
+        nvacskip=int(freeb_nvacskip),
+        nvskip0=int(freeb_nvskip0),
+        wout_like=wout_like,
+    )
+    freeb_ivac = freeb_loop_state.ivac
+    freeb_ivacskip = freeb_loop_state.ivacskip
+    freeb_nvacskip = freeb_loop_state.nvacskip
+    freeb_nvskip0 = freeb_loop_state.nvskip0
+    freeb_nestor_runtime: NestorRuntimeState | None = freeb_loop_state.nestor_runtime
+    freeb_bsqvac_half_current = freeb_loop_state.bsqvac_half_current
+    freeb_nestor_trace_current = freeb_loop_state.nestor_trace_current
+    freeb_last_model = freeb_loop_state.last_model
+    freeb_last_diagnostics: dict[str, Any] = freeb_loop_state.last_diagnostics
+    freeb_plascur = freeb_loop_state.plascur
 
     _vmec_freeb_plascur_from_bcovar = partial(
         _runtime_vmec_freeb_plascur_from_bcovar,
@@ -1253,12 +1257,16 @@ def solve_fixed_boundary_residual_iter(
         precond_cache.update_from_resume_state(resume_state)
         cache_constraint_rcon0 = resume_state.get("cache_constraint_rcon0", cache_constraint_rcon0)
         cache_constraint_zcon0 = resume_state.get("cache_constraint_zcon0", cache_constraint_zcon0)
-        if free_boundary_enabled:
-            freeb_ivac = int(resume_state.get("freeb_ivac", freeb_ivac))
-            freeb_ivacskip = int(resume_state.get("freeb_ivacskip", freeb_ivacskip))
-            freeb_nvacskip = max(1, int(resume_state.get("freeb_nvacskip", freeb_nvacskip)))
-            freeb_nvskip0 = max(1, int(resume_state.get("freeb_nvskip0", freeb_nvskip0)))
-            freeb_last_model = str(resume_state.get("freeb_model", freeb_last_model))
+        freeb_loop_state = _runtime_resume_free_boundary_loop_state(
+            freeb_loop_state,
+            resume_state=resume_state,
+            free_boundary_enabled=bool(free_boundary_enabled),
+        )
+        freeb_ivac = freeb_loop_state.ivac
+        freeb_ivacskip = freeb_loop_state.ivacskip
+        freeb_nvacskip = freeb_loop_state.nvacskip
+        freeb_nvskip0 = freeb_loop_state.nvskip0
+        freeb_last_model = freeb_loop_state.last_model
 
     _apply_vmec_scale_m1_precond_rhs = partial(
         _scale_m1_precond_rhs_from_mats,
@@ -1570,34 +1578,21 @@ def solve_fixed_boundary_residual_iter(
             freeb_controls_cached = freeb_coupling.controls_cached
             _freeb_bsqvac_half_for_trial_state = freeb_coupling.trial_bsqvac_half_for_state
 
-            def _trial_residual_total(
-                candidate_state: VMECState,
-                freeb_bsqvac_half_trial,
-                *,
-                zero_m1_value,
-                timing_label: str | None = None,
-            ) -> float:
-                t_trial_force_start = time.perf_counter() if (timing_label and timing_detail_enabled) else None
-                _, _, gcr2_t, gcz2_t, gcl2_t, _, _, norms_t = _compute_forces_iter(
-                    candidate_state,
-                    include_edge=include_edge,
-                    zero_m1=zero_m1_value,
-                    freeb_bsqvac_half=freeb_bsqvac_half_trial,
-                    constraint_precond_diag=constraint_precond_diag,
-                    constraint_tcon=constraint_tcon_override,
-                    constraint_precond_active=constraint_precond_active,
-                    constraint_tcon_active=constraint_tcon_active,
-                    iter2=iter2,
-                )
-                if timing_label:
-                    _record_compute_force_timing(timing_label, t_trial_force_start, gcr2_t)
-                fsqr_t, fsqz_t, fsql_t = _residual_fsq_from_norms(
-                    norms_t,
-                    gcr2=gcr2_t,
-                    gcz2=gcz2_t,
-                    gcl2=gcl2_t,
-                )
-                return float(np.asarray(fsqr_t + fsqz_t + fsql_t))
+            _trial_residual_total = partial(
+                _runtime_trial_residual_total,
+                compute_forces_iter_func=_compute_forces_iter,
+                include_edge=bool(include_edge),
+                constraint_precond_diag=constraint_precond_diag,
+                constraint_tcon=constraint_tcon_override,
+                constraint_precond_active=constraint_precond_active,
+                constraint_tcon_active=constraint_tcon_active,
+                iter2=int(iter2),
+                timing_detail_enabled=bool(timing_detail_enabled),
+                perf_counter=time.perf_counter,
+                record_compute_force_timing=_record_compute_force_timing,
+                residual_fsq_from_norms_func=_residual_fsq_from_norms,
+                numpy_module=np,
+            )
 
             _candidate_state_from_deltas = partial(
                 _candidate_state_from_deltas_helper,
