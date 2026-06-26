@@ -50,10 +50,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--coil-chunk-size", type=int, default=512)
     p.add_argument(
         "--profile-kind",
-        choices=("vmec2000", "provider-parity", "full-backend", "direct-gpu"),
+        choices=("vmec2000", "resolution-preflight", "provider-parity", "full-backend", "direct-gpu"),
         default="vmec2000",
         help=(
             "vmec2000 keeps the existing generated-mgrid reference command. "
+            "resolution-preflight emits a cheap projection/NZETA/mgrid compatibility check. "
             "provider-parity runs JAX direct and generated-mgrid with initial and accepted-LCFS parity. "
             "full-backend adds VMEC2000 to that comparison. "
             "direct-gpu emits direct-only cached-JIT commands for GPU speed probes."
@@ -181,6 +182,9 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
     kind = str(args.profile_kind)
     if bool(args.freeb_anderson_pressure) and kind in {"provider-parity", "full-backend", "direct-gpu"}:
         command.append("--freeb-anderson-pressure")
+    if kind == "resolution-preflight":
+        command.append("--resolution-diagnostics-only")
+        return command
     if kind == "direct-gpu":
         command.extend(
             [

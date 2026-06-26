@@ -71,6 +71,33 @@ def test_square_coil_followup_commands_emit_accepted_provider_parity_scan(tmp_pa
     assert "provider_parity" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_resolution_preflight(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "resolution-preflight",
+            "--ntor",
+            "31",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    expected_nzeta = max(64, recommended_square_axis_nzeta(31))
+    assert "--resolution-diagnostics-only" in command
+    assert command[command.index("--nzeta") + 1] == str(expected_nzeta)
+    assert command[command.index("--mgrid-nphi") + 1] == str(expected_nzeta)
+    assert "--run-vmec2000" not in command
+    assert "--accepted-provider-parity" not in command
+    assert "--jit-forces" not in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "resolution_preflight" in outdir.name
+
+
 def test_square_coil_followup_commands_emit_full_backend_scan(tmp_path: Path):
     args = followup._parser().parse_args(
         [

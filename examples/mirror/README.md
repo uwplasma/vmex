@@ -463,6 +463,9 @@ By default this emits serial commands for the projection-gated
 ``DELT=0.015, 0.02, 0.025`` and a staged
 ``NITER_ARRAY=8000,16000,32000`` / ``FTOL_ARRAY=1e-8,1e-10,1e-12`` schedule.
 The helper only prints commands; it does not launch VMEC2000.
+Pass ``--profile-kind resolution-preflight`` to emit the cheap
+``--resolution-diagnostics-only`` command when a mode-deck edit should be
+checked before starting another equilibrium solve.
 The table also includes ``nzeta_auto``, ``recommended_nzeta``,
 ``side_power``, ``corner_power``, ``boundary_mode_count``, and
 ``boundary_recommended_nzeta`` so ``MPOL``/``NTOR``/``NZETA`` and

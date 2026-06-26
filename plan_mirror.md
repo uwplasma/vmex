@@ -31184,3 +31184,67 @@ whitespace checks passed. The no-solve example smoke wrote metrics under
 ### User input needed
 
 No user input is needed.
+
+---
+## 269. Added Runnable Resolution-Preflight Follow-Up Commands
+
+### Steps taken
+
+- Added `--profile-kind resolution-preflight` to
+  `tools/diagnostics/square_coil_followup_commands.py`.
+- The emitted command includes `--resolution-diagnostics-only` and skips
+  VMEC2000, accepted-provider parity, and direct-GPU solve flags.
+- Added a unit test that checks the emitted preflight command uses the resolved
+  recommended `NZETA` and writes to a `resolution_preflight` outdir.
+- Documented the new profile kind in the example README and convergence notes.
+
+### Results obtained
+
+- The summarizer's `recommended_followup_profile_kind=resolution-preflight`
+  is now directly runnable from the follow-up command helper.
+- Underresolved `MPOL`/`NTOR`/`NZETA` or `mgrid_nphi` edits can be checked with
+  a cheap JSON-only command before spending time on VMEC2000 or direct-coil
+  solves.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_square_coil_followup_commands.py
+ruff check tools/diagnostics/square_coil_followup_commands.py tests/test_square_coil_followup_commands.py
+venv/bin/python -m py_compile tools/diagnostics/square_coil_followup_commands.py
+git diff --check
+```
+
+Results: `7 passed`; ruff, py-compile, and whitespace checks passed.
+
+### File structure and best-practice notes
+
+- The command helper still only prints commands; it does not run VMEC or write
+  results.
+- The new mode reuses the existing profile script's `--resolution-diagnostics-only`
+  path instead of adding another diagnostics entry point.
+
+### Best next steps
+
+1. Run the focused validation commands above.
+2. Use `resolution-preflight` for any row classified as
+   `diagnostic_underresolved` before launching backend comparisons.
+3. Keep heavy full-backend profiles reserved for decks whose preflight is
+   production-ready.
+
+### Completion percentages after M269
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `82%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- Follow-up recommendation lane: `100%`.
+- Root-example resolution robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `64%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
