@@ -6031,16 +6031,45 @@ No user input is needed.
      spline map is well conditioned for that deck.
 - The reduced-control conditioning logic now lives in the source module instead
   of being duplicated in diagnostics scripts.
+- The production-ready matrix rows all reported a square two-control condition
+  number of `1` and a stellarator-symmetric five-control condition number of
+  about `1.81`, so the reduced spline maps themselves are not the current
+  conditioning bottleneck.
 
 ### How it was tested
 
 ```bash
 venv/bin/python -m pytest -q \
   tests/test_toroidal_hybrid.py::test_square_axis_control_fourier_map_status_reports_conditioning \
-  tests/test_square_coil_resolution_matrix.py
+  tests/test_toroidal_hybrid.py::test_square_axis_resolution_deck_status_classifies_projection_and_grid_gates \
+  tests/test_square_coil_resolution_matrix.py \
+  tests/test_profile_square_coil_free_boundary.py::test_square_coil_profile_records_boundary_projection_payload
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py \
+  tests/test_square_coil_resolution_matrix.py \
+  tests/test_square_coil_followup_commands.py \
+  tests/test_free_boundary_validation_unit.py
+ruff check \
+  vmec_jax/toroidal_hybrid.py \
+  vmec_jax/api.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/square_coil_resolution_matrix.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_toroidal_hybrid.py \
+  tests/test_square_coil_resolution_matrix.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+venv/bin/python tools/diagnostics/square_coil_resolution_matrix.py \
+  --decks 5:28:64,6:32:72,7:28:auto,8:32:auto \
+  --format markdown --include-control-map
 ```
 
-Additional focused and broader checks should be run before the next push.
+Result: focused tests `6 passed, 1 warning`; broader diagnostics suite
+`97 passed, 2 warnings`; Ruff passed.  The matrix reported all four listed
+decks as production-ready with well-conditioned square and stellarator reduced
+control maps.
 
 ### File structure and best-practice notes
 
