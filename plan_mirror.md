@@ -33887,3 +33887,130 @@ Result: passed.
 ### User input needed
 
 No user input is needed.
+
+## M299 - Literature Refresh And Small-DELT Direct Polish Queue
+
+### Steps taken
+
+- Rechecked the current PR and remote run state:
+  - local branch `codex/mirror-geometry` is clean at `66ea0f49`;
+  - PR #21 CI has the quick parity smoke, docs, build, console smoke, py3.10,
+    py3.12, free-boundary external, optimization-QI, and
+    wout/booz/plot/profile shards passing; long core/exact/physics shards were
+    still pending at the time of this entry.
+- Rechecked current literature and implementation guidance online:
+  - DESC stable free-boundary tutorial says finite-beta `BoundaryError` uses
+    virtual casing for the plasma field and that `VacuumBoundaryError` is the
+    efficient vacuum-only shortcut;
+  - recent DESC release notes call out batching/chunking for singular
+    integrals and magnetic-field computations in free-boundary solves;
+  - PPPL-4993 reiterates the virtual-casing jump-condition construction and
+    warns that the plasma/vacuum field split must be used carefully;
+  - STELLOPT/VMEC free-boundary documentation still starts from a generated
+    `mgrid` built by XGRID/MAKEGRID;
+  - VMEC++ documentation exposes an in-memory magnetic-field object for
+    free-boundary runs, consistent with the direct-provider path we are
+    building toward.
+- Re-summarized the active strict rows on `office`:
+  - direct-GPU hot restart is still active at iteration `3931/8000`, with
+    `final_fsqr=3.26e-11`, `final_fsqz=3.00e-11`,
+    `final_fsql=1.21e-11`, strict gap `32.6`, and an oscillatory tail;
+  - VMEC2000 generated-`mgrid` reference is still in the loose
+    `NS=9, FTOL=1e-8` stage at iteration `3861/8000`, with
+    `final_fsqr=6.0e-8`, `final_fsqz=4.54e-8`,
+    `final_fsql=6.91e-9`, strict gap `6` relative to the current loose stage,
+    and a monotone-decreasing tail.
+- Inspected the current square-axis spline-control bridge:
+  - the real-space target is spline/control based;
+  - VMEC state updates still use Fourier coefficients;
+  - the implemented edge-control projection constrains LCFS edge motion to a
+    square-axis spline-control subspace but is not yet a solver-native spline
+    state.
+- Added a new remote queued lane in
+  `/home/rjorge/local/vmec_mirror_delt_polish`:
+  - cloned the PR branch at `66ea0f49`;
+  - created
+    `results/square_coil_direct_gpu_small_delt_polish_queued/run_when_idle.sh`;
+  - the script waits behind active `profile_square_coil_free_boundary.py` and
+    `xvmec` processes, waits until the existing `run_when_idle` queues have
+    exited, and uses the shared `/tmp/vmec_mirror_freeb_queue.lock`;
+  - it skips itself if the current hot-restart report has already reached
+    strict component convergence;
+  - otherwise it runs a direct-coil cached-JIT polish row with `DELT=0.01`,
+    `NS_ARRAY=9,13,17`, `NITER_ARRAY=1000,2000,12000`,
+    `FTOL_ARRAY=1e-8,1e-10,1e-12`, Anderson pressure mixing, two 12k
+    hot-restart passes, and the newest hot-restart WOUT as seed if available.
+
+### Results obtained
+
+- The active direct row has improved from the earlier `~4.7e-11` component
+  floor to `3.26e-11`, but it is still not strict and remains oscillatory.
+- The active VMEC2000 row remains monotone and has not reached the strict
+  stage, so it is still the robustness reference rather than a final answer.
+- Existing projected-control and edge-polish queues remain first in line.
+- The new small-DELT queue is live as a waiting process and reports
+  `active=3`, `other_waiters=3`; it will not contend with current work.
+
+### How it was tested
+
+```bash
+gh pr checks 21 --repo uwplasma/vmec_jax
+```
+
+Result: quick checks described above passed; long shards were pending.
+
+```bash
+ssh office 'cd /home/rjorge/local/vmec_mirror_edge_polish && \
+  /home/rjorge/miniforge3/envs/qh-gpu/bin/python \
+  tools/diagnostics/summarize_square_coil_profiles.py --markdown \
+  /home/rjorge/local/vmec_mirror_hot_restart/results/square_coil_direct_gpu_hot_restart_from_anderson_ns17_mpol5_ntor28_nzeta64_niter8k_x2_control_spline \
+  /home/rjorge/local/vmec_mirror_vmec2000_scan/results/square_coil_freeb_backend_profile_vmec2000_immediate_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_delt0p015_niter32k_control_spline \
+  /home/rjorge/local/vmec_mirror_projected_control/results/square_coil_direct_gpu_projected_edge_square_ns17_mpol5_ntor28_nzeta64_niter8k_control_spline \
+  /home/rjorge/local/vmec_mirror_edge_polish/results/square_coil_direct_gpu_edge_polish_queued'
+```
+
+Result: produced the live strict-gap table summarized above.
+
+```bash
+ssh office 'grep -n "other_waiters" \
+  /home/rjorge/local/vmec_mirror_delt_polish/results/square_coil_direct_gpu_small_delt_polish_queued/run_when_idle.sh && \
+  tail -n 12 \
+  /home/rjorge/local/vmec_mirror_delt_polish/results/square_coil_direct_gpu_small_delt_polish_queued/queue.log'
+```
+
+Result: verified the waiter excludes its own PID and is waiting behind active
+solves plus the existing queues.
+
+### File structure and best-practice adherence
+
+- No generated WOUTs, figures, or solver outputs were committed.
+- The new small-DELT run is a remote scratch checkout/results lane, not source
+  tree bloat.
+- The queued script uses the same shared lock as the projected-control and
+  edge-polish queues so expensive jobs remain serialized.
+
+### Best next steps
+
+1. Let the current direct hot-restart and VMEC2000 reference rows continue.
+2. Let projected-control and edge-polish queues run first.
+3. Let the small-DELT row run only if strict convergence is still not achieved.
+4. If all three direct lanes remain above `1e-12`, start the solver-native
+   spline-control state tranche instead of adding more Fourier-projected
+   polish variants.
+
+### Completion percentages after M299
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row is closer but oscillatory.
+- VMEC2000 robustness/reference lane: `99%`, still in loose stage.
+- True spline/control-basis hybrid lane: `84%`, projected-control and
+  edge-polish rows are queued; solver-native spline state remains open.
+- DELT/stage-budget polish lane: `75%`, queued behind existing lanes.
+- Finite-beta virtual-casing validation lane: `87%`, source-path hook ready
+  but no strict finite-beta promotion row yet.
+- CI/API health lane: `99%`, quick checks pass and long shards are pending.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
