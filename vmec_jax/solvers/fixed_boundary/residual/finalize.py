@@ -202,6 +202,37 @@ def _edge_control_reduced_update_direction_payload(ns: Mapping[str, Any]) -> dic
         }
 
 
+def _edge_control_projection_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """Return compact reduced-edge diagnostics for the final solver state."""
+
+    force_direction = _edge_control_update_direction_payload(ns)
+    reduced_force_direction = _edge_control_reduced_update_direction_payload(ns)
+    return {
+        **dict(ns.get("freeb_edge_control_projection_info", {"enabled": False, "reason": "not_requested"})),
+        "apply_count": int(ns.get("freeb_edge_control_projection_apply_count", 0)),
+        "delta_projection_count": int(
+            ns.get(
+                "freeb_edge_control_projection_delta_projection_count",
+                getattr(ns.get("freeb_edge_control_projector"), "delta_projection_count", 0),
+            )
+        ),
+        "coordinate_update_count": int(
+            ns.get(
+                "freeb_edge_control_projection_coordinate_update_count",
+                getattr(ns.get("freeb_edge_control_projector"), "coordinate_update_count", 0),
+            )
+        ),
+        "zero_velocity_count": int(ns.get("freeb_edge_control_projection_zero_velocity_count", 0)),
+        "state_residual": _edge_control_state_residual_payload(ns),
+        "state_coordinates": _edge_control_state_coordinates_payload(ns),
+        "reduced_unknown_vector": _edge_control_reduced_unknown_payload(ns),
+        "force_direction": force_direction,
+        "reduced_force_direction": reduced_force_direction,
+        "update_direction": force_direction,
+        "reduced_update_direction": reduced_force_direction,
+    }
+
+
 def _optional_float(value: Any) -> float | None:
     """Materialize an optional scalar diagnostic without failing finalization."""
 
@@ -594,30 +625,7 @@ def finalize_residual_iter_from_namespace(
             "final_nestor_recompute_failed": bool(final_freeb["final_nestor_recompute_failed"]),
             "final_nestor_sample_time_s": float(final_freeb["final_nestor_sample_time_s"]),
             "final_nestor_solve_time_s": float(final_freeb["final_nestor_solve_time_s"]),
-            "edge_control_projection": {
-                **dict(ns.get("freeb_edge_control_projection_info", {"enabled": False, "reason": "not_requested"})),
-                "apply_count": int(ns.get("freeb_edge_control_projection_apply_count", 0)),
-                "delta_projection_count": int(
-                    ns.get(
-                        "freeb_edge_control_projection_delta_projection_count",
-                        getattr(ns.get("freeb_edge_control_projector"), "delta_projection_count", 0),
-                    )
-                ),
-                "coordinate_update_count": int(
-                    ns.get(
-                        "freeb_edge_control_projection_coordinate_update_count",
-                        getattr(ns.get("freeb_edge_control_projector"), "coordinate_update_count", 0),
-                    )
-                ),
-                "zero_velocity_count": int(ns.get("freeb_edge_control_projection_zero_velocity_count", 0)),
-                "state_residual": _edge_control_state_residual_payload(ns),
-                "state_coordinates": _edge_control_state_coordinates_payload(ns),
-                "reduced_unknown_vector": _edge_control_reduced_unknown_payload(ns),
-                "force_direction": _edge_control_update_direction_payload(ns),
-                "reduced_force_direction": _edge_control_reduced_update_direction_payload(ns),
-                "update_direction": _edge_control_update_direction_payload(ns),
-                "reduced_update_direction": _edge_control_reduced_update_direction_payload(ns),
-            },
+            "edge_control_projection": _edge_control_projection_payload(ns),
         },
     }
     diag = attach_residual_iter_timing_diagnostics(
