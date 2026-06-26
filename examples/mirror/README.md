@@ -279,7 +279,8 @@ the accepted LCFS moved from the initial prescribed boundary.
 For finite-beta direct-coil evidence, add ``--virtual-casing-diagnostics`` to
 write the optional virtual-casing external-normal and pressure-balance residual
 block. The profiler records a skipped status when ``virtual_casing_jax`` is not
-installed.
+installed. The summary table exposes these fields as ``virtual_casing_*``
+columns.
 Long VMEC2000 runs also refresh
 ``_partial_vmec2000_payload.json`` in the profile directory; use this sidecar
 to inspect the current stage, component residuals, and vacuum-grid warnings

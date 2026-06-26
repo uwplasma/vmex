@@ -5739,111 +5739,6 @@ Visual validation:
 No user input is needed.
 
 ---
-## 241. Added Direct-Coil Virtual-Casing Profile Diagnostics
-
-### Steps taken
-
-- Rechecked the live strict VMEC2000 run on `office`.
-- Compared the current `vmec_jax` free-boundary path against the DESC
-  finite-beta boundary formulation and VMEC2000 coupling convention:
-  - VMEC2000 remains the solve-control and `mgrid` robustness reference.
-  - DESC's finite-beta `BoundaryError` confirms that coil-only `B.n` is not a
-    finite-beta promotion criterion; the postsolve check must include the
-    virtual-casing plasma field and pressure-balance jump.
-- Moved reusable solved-surface sampling into
-  `vmec_jax.free_boundary_validation`:
-  - `sample_solved_boundary_field`;
-  - `surface_xyz_from_rz`;
-  - `edge_pressure_from_run` / `edge_pressure_from_indata`;
-  - `coil_external_b_on_surface`;
-  - `virtual_casing_diagnostics_from_run`.
-- Refactored the square-coil root example to use the new source helper instead
-  of carrying private copies of solved-surface and edge-pressure sampling.
-- Added `--virtual-casing-diagnostics` to
-  `tools/diagnostics/profile_square_coil_free_boundary.py`.
-- The profiler now writes a `virtual_casing` block for direct-coil backend rows
-  when the flag is enabled. It reuses cached direct-coil geometry when the
-  direct static-cache path is active and records a skipped status when
-  `virtual_casing_jax` is not installed.
-- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` so the
-  finite-beta promotion plan points to the shared helper and profile flag.
-
-### Results obtained
-
-- The active VMEC2000 strict-reference run is still running on the strict
-  `MPOL=5, NTOR=28, NZETA=64, NS=9 -> 13 -> 17` deck. At the latest poll it
-  was in the `FTOL=1e-10` stage at iteration `3759`, with total residual about
-  `2.308e-9`, max component about `1.05e-9`, no vacuum-grid excursions, and a
-  recent tail projection of about `8784` additional iterations to `1e-12`.
-  This is better than the direct JAX stall history, but it is not yet evidence
-  for `FTOL=1e-12`.
-- The profiler can now distinguish three things in future direct-coil rows:
-  VMEC force convergence, coil-only vacuum `B.n`, and DESC-style finite-beta
-  virtual-casing boundary residuals.
-- The root example lost duplicated virtual-casing helper code and now uses the
-  shared validation module, reducing the drift risk between examples and
-  diagnostics.
-- No result artifacts or figures were committed.
-
-### How it was tested
-
-```bash
-venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_toroidal_hybrid.py tests/test_free_boundary_validation_unit.py
-venv/bin/python -m py_compile vmec_jax/free_boundary_validation.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tools/diagnostics/profile_square_coil_free_boundary.py tests/test_profile_square_coil_free_boundary.py
-git diff --check
-ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square_coil_profiles.py results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 --markdown"
-```
-
-Targeted test result: `65 passed, 2 warnings`.
-
-### File structure and best-practice notes
-
-- Shared postsolve finite-beta diagnostics live in
-  `vmec_jax/free_boundary_validation.py`, which already owned validation
-  metrics and optional virtual-casing wrappers.
-- The profiler remains a CLI-only, ignored-output workflow; it does not affect
-  differentiable solver paths unless the user explicitly asks for those
-  diagnostics.
-- The root square-coil example keeps its top-of-file parameter block and now
-  delegates source-level validation work to `vmec_jax`.
-- The profile flag is opt-in so quick tests and routine profile runs do not pay
-  for the singular integral or require `virtual_casing_jax`.
-
-### Best next steps
-
-1. Let the active VMEC2000 strict row finish or time out, then parse its final
-   stage summaries.
-2. If the current `5,28,64` strict VMEC2000 row remains flat above `1e-12`,
-   run a focused VMEC2000 `DELT`/stage scan before launching another long
-   direct-coil JAX row.
-3. When CPU is free, run a short direct-coil profile with
-   `--virtual-casing-diagnostics` so the JSON contains VMEC residuals,
-   coil-only `B.n`, and finite-beta virtual-casing pressure-balance metrics on
-   the same accepted surface.
-4. Continue the solver-native spline/control-basis lane only after the strict
-   Fourier-deck evidence is complete; the current first-order spline Fourier
-   projection is already below the requested `FTOL=1e-12` scale.
-
-### Completion percentages after M241
-
-- Square-coil strict `FTOL=1e-12` profiling lane: `91%`.
-- VMEC2000 robustness/reference lane: `94%` while the strict row is running.
-- Direct-coil finite-beta diagnostic lane: `83%` with virtual-casing profile
-  support added.
-- Direct-coil GPU/JIT parity lane: `77%`.
-- `vmec_jax` generated-`mgrid` parity/performance lane: `72%`.
-- Square-axis spline-smoothed Fourier closure lane: `99%` for the VMEC Fourier
-  bridge.
-- True spline/control-basis hybrid lane: `36%`.
-- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`
-  pending strict VMEC2000 completion and direct-coil finite-beta postsolve
-  evidence.
-
-### User input needed
-
-No user input is needed.
-
----
 ## 56. 2026-06-17 M8w matrix-free block LSMR correction
 
 This lane converted the successful M8u/M8v block-dense split into a scalable
@@ -28451,6 +28346,183 @@ ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square
 - True spline/control-basis hybrid lane: ``36%``.
 - Overall toroidal stellarator-mirror hybrid production-readiness: ``95%``
   pending strict VMEC2000 completion and ``vmec_jax`` pressure-turn-on fixes.
+
+### User input needed
+
+No user input is needed.
+---
+## 241. Added Direct-Coil Virtual-Casing Profile Diagnostics
+
+### Steps taken
+
+- Rechecked the live strict VMEC2000 run on `office`.
+- Compared the current `vmec_jax` free-boundary path against the DESC
+  finite-beta boundary formulation and VMEC2000 coupling convention:
+  - VMEC2000 remains the solve-control and `mgrid` robustness reference.
+  - DESC's finite-beta `BoundaryError` confirms that coil-only `B.n` is not a
+    finite-beta promotion criterion; the postsolve check must include the
+    virtual-casing plasma field and pressure-balance jump.
+- Moved reusable solved-surface sampling into
+  `vmec_jax.free_boundary_validation`:
+  - `sample_solved_boundary_field`;
+  - `surface_xyz_from_rz`;
+  - `edge_pressure_from_run` / `edge_pressure_from_indata`;
+  - `coil_external_b_on_surface`;
+  - `virtual_casing_diagnostics_from_run`.
+- Refactored the square-coil root example to use the new source helper instead
+  of carrying private copies of solved-surface and edge-pressure sampling.
+- Added `--virtual-casing-diagnostics` to
+  `tools/diagnostics/profile_square_coil_free_boundary.py`.
+- The profiler now writes a `virtual_casing` block for direct-coil backend rows
+  when the flag is enabled. It reuses cached direct-coil geometry when the
+  direct static-cache path is active and records a skipped status when
+  `virtual_casing_jax` is not installed.
+- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` so the
+  finite-beta promotion plan points to the shared helper and profile flag.
+
+### Results obtained
+
+- The active VMEC2000 strict-reference run is still running on the strict
+  `MPOL=5, NTOR=28, NZETA=64, NS=9 -> 13 -> 17` deck. At the latest poll it
+  was in the `FTOL=1e-10` stage at iteration `3759`, with total residual about
+  `2.308e-9`, max component about `1.05e-9`, no vacuum-grid excursions, and a
+  recent tail projection of about `8784` additional iterations to `1e-12`.
+  This is better than the direct JAX stall history, but it is not yet evidence
+  for `FTOL=1e-12`.
+- The profiler can now distinguish three things in future direct-coil rows:
+  VMEC force convergence, coil-only vacuum `B.n`, and DESC-style finite-beta
+  virtual-casing boundary residuals.
+- The root example lost duplicated virtual-casing helper code and now uses the
+  shared validation module, reducing the drift risk between examples and
+  diagnostics.
+- No result artifacts or figures were committed.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_toroidal_hybrid.py tests/test_free_boundary_validation_unit.py
+venv/bin/python -m py_compile vmec_jax/free_boundary_validation.py examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py tools/diagnostics/profile_square_coil_free_boundary.py tests/test_profile_square_coil_free_boundary.py
+git diff --check
+ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square_coil_profiles.py results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 --markdown"
+```
+
+Targeted test result: `65 passed, 2 warnings`.
+
+### File structure and best-practice notes
+
+- Shared postsolve finite-beta diagnostics live in
+  `vmec_jax/free_boundary_validation.py`, which already owned validation
+  metrics and optional virtual-casing wrappers.
+- The profiler remains a CLI-only, ignored-output workflow; it does not affect
+  differentiable solver paths unless the user explicitly asks for those
+  diagnostics.
+- The root square-coil example keeps its top-of-file parameter block and now
+  delegates source-level validation work to `vmec_jax`.
+- The profile flag is opt-in so quick tests and routine profile runs do not pay
+  for the singular integral or require `virtual_casing_jax`.
+
+### Best next steps
+
+1. Let the active VMEC2000 strict row finish or time out, then parse its final
+   stage summaries.
+2. If the current `5,28,64` strict VMEC2000 row remains flat above `1e-12`,
+   run a focused VMEC2000 `DELT`/stage scan before launching another long
+   direct-coil JAX row.
+3. When CPU is free, run a short direct-coil profile with
+   `--virtual-casing-diagnostics` so the JSON contains VMEC residuals,
+   coil-only `B.n`, and finite-beta virtual-casing pressure-balance metrics on
+   the same accepted surface.
+4. Continue the solver-native spline/control-basis lane only after the strict
+   Fourier-deck evidence is complete; the current first-order spline Fourier
+   projection is already below the requested `FTOL=1e-12` scale.
+
+### Completion percentages after M241
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `91%`.
+- VMEC2000 robustness/reference lane: `94%` while the strict row is running.
+- Direct-coil finite-beta diagnostic lane: `83%` with virtual-casing profile
+  support added.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `72%`.
+- Square-axis spline-smoothed Fourier closure lane: `99%` for the VMEC Fourier
+  bridge.
+- True spline/control-basis hybrid lane: `36%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`
+  pending strict VMEC2000 completion and direct-coil finite-beta postsolve
+  evidence.
+
+### User input needed
+
+No user input is needed.
+---
+## 242. Surfaced Virtual-Casing Diagnostics In Square-Coil Summaries
+
+### Steps taken
+
+- Added virtual-casing summary columns to
+  `tools/diagnostics/summarize_square_coil_profiles.py`:
+  - `virtual_casing_status`;
+  - external-normal residual RMS/max;
+  - pressure-balance residual RMS/max;
+  - required and target external-field RMS;
+  - virtual-casing wall time.
+- Extended the square-coil summary tests with synthetic direct-coil rows that
+  include a computed virtual-casing block.
+- Added a markdown-output test so the new columns are visible in the standard
+  review table, not only through the Python row API.
+- Updated the mirror README and convergence plan page to say that
+  `--virtual-casing-diagnostics` results are exposed by the summary table.
+- Re-polled the active VMEC2000 strict run before launching any competing
+  heavy job.
+
+### Results obtained
+
+- Future direct-coil profile reports can now be reviewed from one table:
+  VMEC residuals, boundary motion, coil-only `B.n`, NESTOR timing, Anderson
+  pressure flags, residual-tail projection, and finite-beta virtual-casing
+  pressure-balance diagnostics.
+- The active VMEC2000 strict row is still running and improving in the
+  `FTOL=1e-10` stage. Latest observed partial row had `8809` parsed force
+  iterations, total residual `9.66e-10`, max component `4.36e-10`, and zero
+  vacuum-grid excursions. It remains incomplete for `FTOL=1e-12` evidence.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_summarize_square_coil_profiles.py tests/test_profile_square_coil_free_boundary.py
+venv/bin/python -m py_compile tools/diagnostics/summarize_square_coil_profiles.py tests/test_summarize_square_coil_profiles.py
+git diff --check
+```
+
+Targeted test result: `27 passed, 1 warning`.
+
+### File structure and best-practice notes
+
+- This is a reporting-only change; no solver behavior, generated inputs, or
+  profile JSON schema are changed.
+- The summary table remains the lightweight review surface for ignored
+  `results/` artifacts and active launcher/VMEC2000 sidecars.
+
+### Best next steps
+
+1. Let the active VMEC2000 run finish or clearly plateau.
+2. Once `office` CPU is free, launch the strict `DELT`/stage scan using the
+   same `5,28,64` first-order spline deck.
+3. Run a direct-coil profile with `--virtual-casing-diagnostics` on an
+   environment with `virtual_casing_jax` installed so the new summary columns
+   carry computed finite-beta diagnostics rather than skipped status.
+
+### Completion percentages after M242
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `91%`.
+- VMEC2000 robustness/reference lane: `94%`.
+- Direct-coil finite-beta diagnostic lane: `86%` with profile and summary
+  support added.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `73%`.
+- Square-axis spline-smoothed Fourier closure lane: `99%`.
+- True spline/control-basis hybrid lane: `36%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
 
 ### User input needed
 

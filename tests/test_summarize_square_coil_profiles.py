@@ -65,6 +65,16 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
                         "boundary_sample_displacement_rms": 0.03,
                         "boundary_sample_displacement_max": 0.07,
                         "boundary_sample_displacement_rel": 8.0e-3,
+                        "virtual_casing": {
+                            "status": "computed",
+                            "external_bnormal_residual_rms": 1.0e-8,
+                            "external_bnormal_residual_max": 3.0e-8,
+                            "pressure_balance_rms": 2.0e-6,
+                            "pressure_balance_max": 5.0e-6,
+                            "required_external_b_rms": 0.8,
+                            "target_external_b_rms": 0.82,
+                            "wall_s": 4.5,
+                        },
                         "history": {
                             "dt_eff_stats": {"last": 0.02, "min": 0.01},
                             "time_step_stats": {"last": 0.019},
@@ -196,9 +206,56 @@ def test_square_coil_profile_summary_reads_jax_and_vmec2000_rows(tmp_path: Path)
     assert rows[1]["bad_jacobian_count"] == pytest.approx(1.0)
     assert rows[1]["bnormal_rms_last"] == pytest.approx(4.0e-3)
     assert rows[1]["bnormal_rms_min"] == pytest.approx(3.0e-3)
+    assert rows[1]["virtual_casing_status"] == "computed"
+    assert rows[1]["virtual_casing_external_bnormal_residual_rms"] == pytest.approx(1.0e-8)
+    assert rows[1]["virtual_casing_external_bnormal_residual_max"] == pytest.approx(3.0e-8)
+    assert rows[1]["virtual_casing_pressure_balance_rms"] == pytest.approx(2.0e-6)
+    assert rows[1]["virtual_casing_pressure_balance_max"] == pytest.approx(5.0e-6)
+    assert rows[1]["virtual_casing_required_external_b_rms"] == pytest.approx(0.8)
+    assert rows[1]["virtual_casing_target_external_b_rms"] == pytest.approx(0.82)
+    assert rows[1]["virtual_casing_wall_s"] == pytest.approx(4.5)
     assert rows[1]["tail_decay_factor"] == pytest.approx(0.98)
     assert rows[1]["iters_to_1e-12_est"] == pytest.approx(1234)
     assert rows[0]["vacuum_grid_exceeded_count"] == 2
+
+
+def test_square_coil_profile_summary_markdown_includes_virtual_casing_columns(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_vc_case"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {"mpol": 5, "ntor": 28, "ns": 9, "nzeta": 64, "ftol": 1.0e-12},
+                "backends": {
+                    "vmec_jax_direct": {
+                        "status": "completed",
+                        "n_iter": 2,
+                        "final_fsqr": 1.0e-9,
+                        "final_fsqz": 2.0e-9,
+                        "final_fsql": 3.0e-9,
+                        "final_fsq_component_sum": 6.0e-9,
+                        "virtual_casing": {
+                            "status": "computed",
+                            "external_bnormal_residual_rms": 4.0e-8,
+                            "pressure_balance_rms": 5.0e-6,
+                        },
+                    }
+                },
+            }
+        )
+    )
+
+    assert summary.main([str(report), "--markdown"]) == 0
+    out = capsys.readouterr().out
+
+    assert "virtual_casing_status" in out
+    assert "virtual_casing_pressure_balance_rms" in out
+    assert "computed" in out
+    assert "5e-06" in out
 
 
 def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Path):

@@ -395,7 +395,10 @@ also records a compact geometric residual-tail projection for the summed VMEC
 force residual. The summary table exposes the tail decay factor and the
 estimated additional iterations to ``1e-12``; this is a diagnostic estimate,
 not a convergence claim, but it separates monotone under-budget runs from true
-residual floors.
+residual floors. Direct-coil rows produced with
+``--virtual-casing-diagnostics`` also expose virtual-casing status,
+external-normal residuals, pressure-balance residuals, and required/target
+external-field RMS values in the same summary table.
 
 The square-axis stellarator-mirror hybrid geometry now has a lower-bandwidth
 ``axis_kind="spline"`` option. It is still projected into VMEC Fourier boundary

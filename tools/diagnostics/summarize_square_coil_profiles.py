@@ -186,6 +186,11 @@ def _tail_projection(backend: dict[str, Any], key: str, *, target: float | None 
     return _finite_float(estimates.get(f"{float(target):.0e}"))
 
 
+def _virtual_casing_payload(backend: dict[str, Any]) -> dict[str, Any]:
+    payload = backend.get("virtual_casing")
+    return payload if isinstance(payload, dict) else {}
+
+
 def _vmec2000_tail_projection(rows: list[Any], *, length: int = 12) -> dict[str, Any]:
     """Estimate residual decay per VMEC2000 iteration from the current stage tail."""
 
@@ -401,6 +406,7 @@ def _summary_row(
     else:
         final_total, best_total, final_iter = _jax_total(backend)
         final_max_component = _jax_final_max_component(backend)
+    virtual_casing = _virtual_casing_payload(backend)
     return {
         "case": case,
         "backend": backend_name,
@@ -493,6 +499,18 @@ def _summary_row(
         "bad_jacobian_count": _stat(backend, "bad_jacobian_stats", "sum"),
         "bnormal_rms_last": _stat(backend, "freeb_nestor_bnormal_rms_stats", "last"),
         "bnormal_rms_min": _stat(backend, "freeb_nestor_bnormal_rms_stats", "min"),
+        "virtual_casing_status": virtual_casing.get("status"),
+        "virtual_casing_external_bnormal_residual_rms": _finite_float(
+            virtual_casing.get("external_bnormal_residual_rms")
+        ),
+        "virtual_casing_external_bnormal_residual_max": _finite_float(
+            virtual_casing.get("external_bnormal_residual_max")
+        ),
+        "virtual_casing_pressure_balance_rms": _finite_float(virtual_casing.get("pressure_balance_rms")),
+        "virtual_casing_pressure_balance_max": _finite_float(virtual_casing.get("pressure_balance_max")),
+        "virtual_casing_required_external_b_rms": _finite_float(virtual_casing.get("required_external_b_rms")),
+        "virtual_casing_target_external_b_rms": _finite_float(virtual_casing.get("target_external_b_rms")),
+        "virtual_casing_wall_s": _finite_float(virtual_casing.get("wall_s")),
         "tail_decay_factor": _tail_projection(backend_for_projection, "per_iter_factor"),
         "iters_to_1e-12_est": _tail_projection(backend_for_projection, "", target=1.0e-12),
         "wall_s": _finite_float(backend.get("wall_s")),
@@ -742,6 +760,14 @@ def main(argv: list[str] | None = None) -> int:
         "bad_jacobian_count",
         "bnormal_rms_last",
         "bnormal_rms_min",
+        "virtual_casing_status",
+        "virtual_casing_external_bnormal_residual_rms",
+        "virtual_casing_external_bnormal_residual_max",
+        "virtual_casing_pressure_balance_rms",
+        "virtual_casing_pressure_balance_max",
+        "virtual_casing_required_external_b_rms",
+        "virtual_casing_target_external_b_rms",
+        "virtual_casing_wall_s",
         "tail_decay_factor",
         "iters_to_1e-12_est",
         "wall_s",
