@@ -910,15 +910,17 @@ def attach_same_branch_derivative_proposal_summary(
     summary["same_branch_derivative_proposals"] = evaluated_proposals
 
 
-def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
+def load_direct_coil_provider_from_args(args: argparse.Namespace) -> tuple[CoilFieldParams, dict[str, Any]]:
+    """Load the direct-coil provider requested by the example arguments."""
+
     if args.provider == "essos":
-        base_params, provider_metadata = load_essos_provider(
+        return load_essos_provider(
             args.coils_json,
             chunk_size=256 if args.chunk_size is None else int(args.chunk_size),
             current_scale=float(args.current_scale),
         )
-    elif args.provider == "circle":
-        base_params, provider_metadata = make_circle_provider(
+    if args.provider == "circle":
+        return make_circle_provider(
             current_scale=float(args.current_scale),
             chunk_size=None if args.chunk_size is None else int(args.chunk_size),
             current=float(args.circle_current),
@@ -927,8 +929,13 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             nfp=int(args.circle_nfp),
             stellsym=bool(args.circle_stellsym),
         )
-    else:
-        raise ValueError(f"unknown provider {args.provider!r}")
+    raise ValueError(f"unknown provider {args.provider!r}")
+
+
+def build_direct_coil_qs_optimization_context(args: argparse.Namespace) -> SimpleNamespace:
+    """Build the VMEC input, selected variables, and summary metadata."""
+
+    base_params, provider_metadata = load_direct_coil_provider_from_args(args)
 
     x0, variables = select_coil_variables(
         base_params,
@@ -991,98 +998,151 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
         "history_json": outdir / "history.json",
         "best_wout": outdir / "wout_best_direct_coil_qs.nc",
     }
-    history: list[dict[str, Any]] = []
-    best: dict[str, Any] | None = None
-    if bool(args.dry_run):
-        summary = {**summary_base, "dry_run": True}
-        write_json(outdir / "summary.json", summary)
-        print("Flow: single-stage direct-coil/no-mgrid optimization; only coil variables are selected.")
-        print(f"Dry run: wrote {outdir / 'summary.json'} without running VMEC or the optimizer.")
-        return summary
+    return SimpleNamespace(
+        base_params=base_params,
+        provider_metadata=provider_metadata,
+        x0=x0,
+        variables=variables,
+        variable_manifest=variable_manifest,
+        outdir=outdir,
+        input_path=input_path,
+        objective_model=objective_model,
+        summary_base=summary_base,
+    )
 
-    def evaluate(x: np.ndarray) -> float:
-        nonlocal best
-        eval_id = len(history)
+
+class DirectCoilQSObjectiveEvaluator:
+    """Stateful complete-solve objective used by the small Powell example."""
+
+    def __init__(self, args: argparse.Namespace, context: SimpleNamespace) -> None:
+        self.args = args
+        self.context = context
+        self.history: list[dict[str, Any]] = []
+        self.best: dict[str, Any] | None = None
+
+    def __call__(self, x: np.ndarray) -> float:
+        eval_id = len(self.history)
         params = apply_coil_variables(
-            base_params,
+            self.context.base_params,
             x,
-            variables,
-            current_step=float(args.current_step),
-            dof_step=float(args.dof_step),
+            self.context.variables,
+            current_step=float(self.args.current_step),
+            dof_step=float(self.args.dof_step),
         )
-
         try:
-            run, wall_s = run_direct_free_boundary(
-                input_path,
-                params,
-                vmec_max_iter=int(args.vmec_max_iter),
-                activate_fsq=float(args.activate_fsq),
-                jit_forces=bool(args.jit_forces),
-            )
-            provisional = summarize_run(
-                run,
-                params,
-                objective=np.nan,
-                wall_s=wall_s,
-                target_aspect=float(args.target_aspect),
-                target_iota=float(args.target_iota),
-                helicity_m=int(args.helicity_m),
-                helicity_n=int(args.helicity_n),
-                qs_surfaces=parse_float_list(str(args.qs_surfaces)),
-                qs_ntheta=int(args.qs_ntheta),
-                qs_nphi=int(args.qs_nphi),
-            )
-            objective_terms = objective_terms_from_summary(
-                provisional,
-                residual_weight=float(args.residual_weight),
-                qs_weight=float(args.qs_weight),
-                aspect_weight=float(args.aspect_weight),
-                iota_weight=float(args.iota_weight),
-            )
-            objective = float(objective_terms["total"])
-            provisional["objective"] = objective
-            provisional["objective_terms"] = objective_terms
-            entry = {
-                "eval": eval_id,
-                "x": np.asarray(x, dtype=float).tolist(),
-                "variables": variable_manifest,
-                "coil_diagnostics": coil_diagnostics(params),
-                "summary": provisional,
-            }
-            if best is None or objective < float(best["summary"]["objective"]):
-                best = entry
-                write_wout_from_fixed_boundary_run(outdir / "wout_best_direct_coil_qs.nc", run, include_fsq=True)
-            print(
-                f"eval={eval_id:03d} objective={objective:.6e} "
-                f"residual={provisional['residual_proxy']:.3e} qs={provisional['qs_total']} "
-                f"aspect={provisional['aspect']} "
-                f"mean_iota={provisional['mean_iota']} "
-                f"residual_term={objective_terms['residual']['contribution']:.3e} "
-                f"qs_term={objective_terms['quasisymmetry']['contribution']:.3e} "
-                f"aspect_term={objective_terms['aspect']['contribution']:.3e} "
-                f"iota_term={objective_terms['mean_iota']['contribution']:.3e} wall_s={wall_s:.2f}",
-                flush=True,
-            )
+            entry, objective = self._successful_entry(eval_id, x, params)
         except Exception as exc:
-            objective = float(args.failure_objective)
-            entry = {
-                "eval": eval_id,
-                "x": np.asarray(x, dtype=float).tolist(),
-                "variables": variable_manifest,
-                "coil_diagnostics": coil_diagnostics(params),
-                "error": f"{type(exc).__name__}: {exc}",
-                "summary": {"objective": objective},
-            }
+            objective = float(self.args.failure_objective)
+            entry = self._failure_entry(eval_id, x, params, exc, objective)
             print(f"eval={eval_id:03d} failed with {entry['error']}; returning {objective:.3e}", flush=True)
-        history.append(entry)
-        write_json(outdir / "history.json", history)
+        self.history.append(entry)
+        write_json(self.context.outdir / "history.json", self.history)
         return objective
+
+    def _successful_entry(
+        self,
+        eval_id: int,
+        x: np.ndarray,
+        params: CoilFieldParams,
+    ) -> tuple[dict[str, Any], float]:
+        run, wall_s = run_direct_free_boundary(
+            self.context.input_path,
+            params,
+            vmec_max_iter=int(self.args.vmec_max_iter),
+            activate_fsq=float(self.args.activate_fsq),
+            jit_forces=bool(self.args.jit_forces),
+        )
+        provisional = summarize_run(
+            run,
+            params,
+            objective=np.nan,
+            wall_s=wall_s,
+            target_aspect=float(self.args.target_aspect),
+            target_iota=float(self.args.target_iota),
+            helicity_m=int(self.args.helicity_m),
+            helicity_n=int(self.args.helicity_n),
+            qs_surfaces=parse_float_list(str(self.args.qs_surfaces)),
+            qs_ntheta=int(self.args.qs_ntheta),
+            qs_nphi=int(self.args.qs_nphi),
+        )
+        objective_terms = objective_terms_from_summary(
+            provisional,
+            residual_weight=float(self.args.residual_weight),
+            qs_weight=float(self.args.qs_weight),
+            aspect_weight=float(self.args.aspect_weight),
+            iota_weight=float(self.args.iota_weight),
+        )
+        objective = float(objective_terms["total"])
+        provisional["objective"] = objective
+        provisional["objective_terms"] = objective_terms
+        entry = {
+            "eval": eval_id,
+            "x": np.asarray(x, dtype=float).tolist(),
+            "variables": self.context.variable_manifest,
+            "coil_diagnostics": coil_diagnostics(params),
+            "summary": provisional,
+        }
+        if self.best is None or objective < float(self.best["summary"]["objective"]):
+            self.best = entry
+            write_wout_from_fixed_boundary_run(self.context.outdir / "wout_best_direct_coil_qs.nc", run, include_fsq=True)
+        print_direct_coil_qs_evaluation(eval_id, objective, provisional, objective_terms, wall_s)
+        return entry, objective
+
+    def _failure_entry(
+        self,
+        eval_id: int,
+        x: np.ndarray,
+        params: CoilFieldParams,
+        exc: Exception,
+        objective: float,
+    ) -> dict[str, Any]:
+        return {
+            "eval": eval_id,
+            "x": np.asarray(x, dtype=float).tolist(),
+            "variables": self.context.variable_manifest,
+            "coil_diagnostics": coil_diagnostics(params),
+            "error": f"{type(exc).__name__}: {exc}",
+            "summary": {"objective": objective},
+        }
+
+
+def print_direct_coil_qs_evaluation(
+    eval_id: int,
+    objective: float,
+    provisional: dict[str, Any],
+    objective_terms: dict[str, Any],
+    wall_s: float,
+) -> None:
+    """Print one complete-solve objective evaluation in a stable compact form."""
+
+    print(
+        f"eval={eval_id:03d} objective={objective:.6e} "
+        f"residual={provisional['residual_proxy']:.3e} qs={provisional['qs_total']} "
+        f"aspect={provisional['aspect']} "
+        f"mean_iota={provisional['mean_iota']} "
+        f"residual_term={objective_terms['residual']['contribution']:.3e} "
+        f"qs_term={objective_terms['quasisymmetry']['contribution']:.3e} "
+        f"aspect_term={objective_terms['aspect']['contribution']:.3e} "
+        f"iota_term={objective_terms['mean_iota']['contribution']:.3e} wall_s={wall_s:.2f}",
+        flush=True,
+    )
+
+
+def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
+    context = build_direct_coil_qs_optimization_context(args)
+    if bool(args.dry_run):
+        summary = {**context.summary_base, "dry_run": True}
+        write_json(context.outdir / "summary.json", summary)
+        print("Flow: single-stage direct-coil/no-mgrid optimization; only coil variables are selected.")
+        print(f"Dry run: wrote {context.outdir / 'summary.json'} without running VMEC or the optimizer.")
+        return summary
 
     from scipy.optimize import minimize
 
+    evaluator = DirectCoilQSObjectiveEvaluator(args, context)
     optimizer_result = minimize(
-        evaluate,
-        x0,
+        evaluator,
+        context.x0,
         method="Powell",
         options={
             "maxiter": int(args.max_iter),
@@ -1094,7 +1154,7 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     summary = {
-        **summary_base,
+        **context.summary_base,
         "dry_run": False,
         "optimizer": {
             "method": "Powell",
@@ -1105,25 +1165,25 @@ def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
             "fun": float(optimizer_result.fun),
             "x": np.asarray(optimizer_result.x, dtype=float),
         },
-        "best": best,
+        "best": evaluator.best,
     }
     attach_same_branch_report_and_proposals(
         summary,
-        input_path=input_path,
-        base_params=base_params,
-        variables=variables,
+        input_path=context.input_path,
+        base_params=context.base_params,
+        variables=context.variables,
         args=args,
-        outdir=outdir,
-        objective_model=objective_model,
-        evaluate=evaluate,
-        get_best=lambda: best,
-        history=history,
+        outdir=context.outdir,
+        objective_model=context.objective_model,
+        evaluate=evaluator,
+        get_best=lambda: evaluator.best,
+        history=evaluator.history,
     )
-    summary["best"] = best
-    write_json(outdir / "summary.json", summary)
+    summary["best"] = evaluator.best
+    write_json(context.outdir / "summary.json", summary)
     print("Flow: single-stage direct-coil/no-mgrid optimization; every trial used a complete free-boundary solve.")
-    print(f"Wrote {outdir / 'history.json'}")
-    print(f"Wrote {outdir / 'summary.json'}")
+    print(f"Wrote {context.outdir / 'history.json'}")
+    print(f"Wrote {context.outdir / 'summary.json'}")
     return summary
 
 

@@ -6585,6 +6585,64 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
 
+### 2026-06-26: Split single-stage coil optimization orchestration
+
+Steps taken:
+
+- Split ``examples/optimization/free_boundary_QS_coil_optimization.py`` so the
+  public ``optimize_coils`` function is now a short orchestration routine.
+- Added ``load_direct_coil_provider_from_args`` for ESSOS/circle provider setup.
+- Added ``build_direct_coil_qs_optimization_context`` for VMEC input generation,
+  selected coil variables, objective metadata, and output-path bookkeeping.
+- Added ``DirectCoilQSObjectiveEvaluator`` to own complete-solve objective
+  evaluation, history writing, best-point tracking, and best-WOUT output.
+- Added ``print_direct_coil_qs_evaluation`` to keep terminal output stable while
+  removing print-formatting clutter from the optimization loop.
+
+Results obtained:
+
+- ``optimize_coils`` no longer appears in the ``source_health.py`` long-function
+  report.  The remaining example logic is organized around provider setup,
+  context assembly, objective evaluation, and orchestration.
+- ``python -m ruff check
+  examples/optimization/free_boundary_QS_coil_optimization.py`` passed.
+- ``PYTHONDONTWRITEBYTECODE=1 JAX_ENABLE_X64=1 python -m pytest -q
+  tests/test_free_boundary_qs_coil_optimization_smoke.py -q`` passed with the
+  existing expected skip.
+- ``PYTHONPATH=. python
+  examples/optimization/free_boundary_QS_coil_optimization.py --smoke --dry-run
+  --provider circle --outdir /tmp/vmec_jax_freeb_qs_dry_run_refactor`` passed
+  and wrote the dry-run summary.
+- The stricter exact ``source_health.py`` command passed with current
+  exemptions for ``solve_fixed_boundary_residual_iter`` and
+  ``run_fixed_boundary``.
+- ``git diff --check`` and ``repo_size_audit.py`` passed; tracked size remains
+  ``28.45 MiB``.
+
+Best next steps:
+
+1. Commit and push this example orchestration split.
+2. Check CI for the previous and new commits; fix only concrete failures.
+3. If another refactor/API pass is needed, target one of the remaining oversized
+   example renderers or production source functions, but avoid destabilizing the
+   validated same-branch report and public benchmark artifacts.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.2%.
+- Free-boundary production differentiability: 97.5%.
+- Single-stage coil optimization: 94.0%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 77.4%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
+
 ### 2026-06-26: Fix README AD-vs-FD evidence provenance gate
 
 Steps taken:
@@ -7139,9 +7197,9 @@ Updated lane percentages:
 - Performance benchmark/profiling harness: 100%.
 - Fixed-boundary production differentiability: 97.2%.
 - Free-boundary production differentiability: 97.5%.
-- Single-stage coil optimization: 93.6%.
+- Single-stage coil optimization: 94.0%.
 - CPU/GPU runtime and memory footprint: 99.2%.
-- Refactor/API/examples: 76.4%.
+- Refactor/API/examples: 77.4%.
 - VMEC2000/VMEC++ parity and physics gates: 99.3%.
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
