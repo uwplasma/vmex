@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
+    _namespace_with_best_scored_state,
     attach_residual_iter_timing_diagnostics,
     build_residual_iter_resume_state_from_namespace,
     build_residual_iter_resume_state_payload,
@@ -215,6 +216,59 @@ def test_finalize_residual_iter_result_attaches_free_boundary_and_force_payload(
     assert result.diagnostics["attached"] is True
     assert getattr(result, "_final_force_payload") is payload
     np.testing.assert_allclose(result.w_history, [0.0, 1.0, 2.0])
+
+
+def test_best_scored_namespace_restores_matching_free_boundary_bundle() -> None:
+    runtime = object()
+    bsqvac = np.asarray([[1.0, 2.0]])
+    namespace = {
+        "return_best_scored_state": True,
+        "state": "last-state",
+        "fsqr_f": 1.0,
+        "fsqz_f": 2.0,
+        "fsql_f": 3.0,
+        "prev_rz_fsq": 3.0,
+        "freeb_bsqvac_half_current": "last-bsqvac",
+        "freeb_nestor_runtime": "last-runtime",
+        "freeb_last_model": "last-model",
+        "freeb_last_diagnostics": {"last": True},
+        "freeb_ivac": 4,
+        "freeb_ivacskip": 5,
+        "freeb_nvacskip": 6,
+        "freeb_nvskip0": 7,
+        "freeb_plascur": 8.0,
+        "best_scored": {
+            "state": "best-state",
+            "fsqr": 1.0e-12,
+            "fsqz": 2.0e-12,
+            "fsql": 3.0e-12,
+            "freeb_bsqvac_half_current": bsqvac,
+            "freeb_nestor_runtime": runtime,
+            "freeb_last_model": "jax_nestor",
+            "freeb_last_diagnostics": {"bnormal_rms": 4.0e-6},
+            "freeb_ivac": 2,
+            "freeb_ivacskip": 0,
+            "freeb_nvacskip": 3,
+            "freeb_nvskip0": 3,
+            "freeb_plascur": 0.25,
+        },
+    }
+
+    restored, returned = _namespace_with_best_scored_state(namespace)
+
+    assert returned is True
+    assert restored["state"] == "best-state"
+    assert restored["fsqr_f"] == pytest.approx(1.0e-12)
+    assert restored["prev_rz_fsq"] == pytest.approx(3.0e-12)
+    assert restored["freeb_bsqvac_half_current"] is bsqvac
+    assert restored["freeb_nestor_runtime"] is runtime
+    assert restored["freeb_last_model"] == "jax_nestor"
+    assert restored["freeb_last_diagnostics"] == {"bnormal_rms": 4.0e-6}
+    assert restored["freeb_ivac"] == 2
+    assert restored["freeb_ivacskip"] == 0
+    assert restored["freeb_nvacskip"] == 3
+    assert restored["freeb_nvskip0"] == 3
+    assert restored["freeb_plascur"] == pytest.approx(0.25)
 
 
 def test_finalize_residual_iter_from_namespace_builds_diagnostics_and_result() -> None:

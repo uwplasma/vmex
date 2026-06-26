@@ -98,6 +98,14 @@ def test_best_scored_state_tracker_prefers_strict_component_max_and_counts_fresh
         free_boundary_enabled=True,
         freeb_ivacskip=1,
         freeb_reused=True,
+        freeb_bsqvac_half_current="best-bsqvac",
+        freeb_nestor_runtime={"runtime": "best"},
+        freeb_last_model="jax_nestor",
+        freeb_last_diagnostics={"bnormal_rms": 1.0e-6},
+        freeb_ivac=2,
+        freeb_nvacskip=5,
+        freeb_nvskip0=7,
+        freeb_plascur=0.125,
     )
     _record_best_scored_state(
         tracker,
@@ -116,6 +124,15 @@ def test_best_scored_state_tracker_prefers_strict_component_max_and_counts_fresh
     assert tracker["fsq"] == pytest.approx(9.0e-9)
     assert tracker["full_boundary_count"] == 1
     assert tracker["fresh_boundary_count"] == 1
+    assert tracker["freeb_bsqvac_half_current"] == "best-bsqvac"
+    assert tracker["freeb_nestor_runtime"] == {"runtime": "best"}
+    assert tracker["freeb_last_model"] == "jax_nestor"
+    assert tracker["freeb_last_diagnostics"] == {"bnormal_rms": 1.0e-6}
+    assert tracker["freeb_ivac"] == 2
+    assert tracker["freeb_ivacskip"] == 1
+    assert tracker["freeb_nvacskip"] == 5
+    assert tracker["freeb_nvskip0"] == 7
+    assert tracker["freeb_plascur"] == pytest.approx(0.125)
 
 
 def test_residual_iteration_control_sample_matches_vmec2000_edge_and_precond_rules() -> None:

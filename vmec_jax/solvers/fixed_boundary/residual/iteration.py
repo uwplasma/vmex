@@ -387,6 +387,15 @@ def _new_best_scored_state_tracker(enabled: bool) -> dict[str, Any]:
         "component_max": None,
         "full_boundary_count": 0,
         "fresh_boundary_count": 0,
+        "freeb_bsqvac_half_current": None,
+        "freeb_nestor_runtime": None,
+        "freeb_last_model": None,
+        "freeb_last_diagnostics": None,
+        "freeb_ivac": None,
+        "freeb_ivacskip": None,
+        "freeb_nvacskip": None,
+        "freeb_nvskip0": None,
+        "freeb_plascur": None,
     }
 
 
@@ -399,6 +408,14 @@ def _record_best_scored_state(
     free_boundary_enabled: bool,
     freeb_ivacskip: int,
     freeb_reused: bool,
+    freeb_bsqvac_half_current: Any = None,
+    freeb_nestor_runtime: Any = None,
+    freeb_last_model: str | None = None,
+    freeb_last_diagnostics: Mapping[str, Any] | None = None,
+    freeb_ivac: int | None = None,
+    freeb_nvacskip: int | None = None,
+    freeb_nvskip0: int | None = None,
+    freeb_plascur: float | None = None,
     skip: bool = False,
 ) -> None:
     if (not bool(tracker.get("enabled", False))) or bool(skip):
@@ -428,6 +445,22 @@ def _record_best_scored_state(
             "component_max": component_max,
         }
     )
+    if bool(free_boundary_enabled):
+        tracker.update(
+            {
+                "freeb_bsqvac_half_current": freeb_bsqvac_half_current,
+                "freeb_nestor_runtime": freeb_nestor_runtime,
+                "freeb_last_model": freeb_last_model,
+                "freeb_last_diagnostics": (
+                    dict(freeb_last_diagnostics) if isinstance(freeb_last_diagnostics, Mapping) else {}
+                ),
+                "freeb_ivac": None if freeb_ivac is None else int(freeb_ivac),
+                "freeb_ivacskip": int(freeb_ivacskip),
+                "freeb_nvacskip": None if freeb_nvacskip is None else int(freeb_nvacskip),
+                "freeb_nvskip0": None if freeb_nvskip0 is None else int(freeb_nvskip0),
+                "freeb_plascur": None if freeb_plascur is None else float(freeb_plascur),
+            }
+        )
 
 
 def _finalize_residual_iter_result_from_namespace(
@@ -2215,7 +2248,24 @@ def solve_fixed_boundary_residual_iter(
                 _apply_controller_update(_controller_state_after_free_boundary_turnon_restart_update, turnon_update)
                 freeb_turnon_applied = True
             fsq0_curr = fsqr_f + fsqz_f + fsql_f
-            _record_best_scored_state(best_scored, state=force_state_pre_current, iter2=iter2, fsq=(fsqr_f, fsqz_f, fsql_f), free_boundary_enabled=free_boundary_enabled, freeb_ivacskip=freeb_ivacskip, freeb_reused=freeb_reused, skip=freeb_turnon_applied)
+            _record_best_scored_state(
+                best_scored,
+                state=force_state_pre_current,
+                iter2=iter2,
+                fsq=(fsqr_f, fsqz_f, fsql_f),
+                free_boundary_enabled=free_boundary_enabled,
+                freeb_ivacskip=freeb_ivacskip,
+                freeb_reused=freeb_reused,
+                freeb_bsqvac_half_current=freeb_bsqvac_half_current,
+                freeb_nestor_runtime=freeb_nestor_runtime,
+                freeb_last_model=freeb_last_model,
+                freeb_last_diagnostics=freeb_last_diagnostics,
+                freeb_ivac=freeb_ivac,
+                freeb_nvacskip=freeb_nvacskip,
+                freeb_nvskip0=freeb_nvskip0,
+                freeb_plascur=freeb_plascur,
+                skip=freeb_turnon_applied,
+            )
             prev_rz_fsq_before = prev_rz_fsq
             prev_rz_fsq = _free_boundary_prev_rz_fsq_next(
                 prev_fsq_before=prev_rz_fsq_before,

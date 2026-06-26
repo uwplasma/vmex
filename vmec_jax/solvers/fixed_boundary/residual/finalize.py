@@ -166,10 +166,21 @@ def _namespace_with_best_scored_state(namespace: Mapping[str, Any]) -> tuple[Map
             "fsqz_f": fsqz,
             "fsql_f": fsql,
             "prev_rz_fsq": fsqr + fsqz,
-            "freeb_bsqvac_half_current": None,
-            "freeb_nestor_runtime": None,
         }
     )
+    for key in (
+        "freeb_bsqvac_half_current",
+        "freeb_nestor_runtime",
+        "freeb_last_model",
+        "freeb_last_diagnostics",
+        "freeb_ivac",
+        "freeb_ivacskip",
+        "freeb_nvacskip",
+        "freeb_nvskip0",
+        "freeb_plascur",
+    ):
+        if best.get(key) is not None:
+            ns[key] = best[key]
     return ns, True
 
 
