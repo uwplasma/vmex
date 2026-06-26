@@ -1411,7 +1411,7 @@ def jitted_jax_nestor_operator(
 
     try:
         from ..._compat import jax as _jax
-        from ...free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+        from .adjoint.facade import dense_vmec_nestor_mode_solve_jax
     except Exception:
         return None, False
     if _jax is None:
@@ -1532,7 +1532,7 @@ def solve_vmec_like_mode_with_jax_nestor_operator(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool, bool]:
     """Run the experimental dense JAX VMEC/NESTOR mode operator."""
 
-    from ...free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+    from .adjoint.facade import dense_vmec_nestor_mode_solve_jax
 
     R = np.asarray(sample.R, dtype=float)
     Z = np.asarray(sample.Z, dtype=float)

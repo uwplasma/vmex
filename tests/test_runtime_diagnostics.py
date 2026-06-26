@@ -138,7 +138,7 @@ def test_direct_coil_segmented_replay_report_synthetic_policy_helpers(monkeypatc
     assert traces[1]["preconditioner_use_lax_tridi"] is True
     assert mod._json_ready({"x": np.asarray([1.0]), "bad": float("nan")}) == {"x": [1.0], "bad": None}
 
-    from vmec_jax import free_boundary_adjoint
+    from vmec_jax.solvers.free_boundary.adjoint import facade as free_boundary_adjoint
 
     calls = []
 

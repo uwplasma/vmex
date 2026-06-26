@@ -17,7 +17,7 @@ from vmec_jax.free_boundary import (
     VacuumBoundaryFields,
     vacuum_boundary_fields_from_cylindrical,
 )
-from vmec_jax.free_boundary_adjoint import (
+from vmec_jax.solvers.free_boundary.adjoint.facade import (
     dense_fixed_point_solve_jax,
     dense_mode_vacuum_solve_jax,
     dense_nonlinear_solve_jax,
@@ -301,7 +301,7 @@ def test_direct_coil_trace_directional_helpers_can_skip_finite_difference(monkey
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    import vmec_jax.free_boundary_adjoint as freeb_adjoint
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adjoint
 
     enable_x64(True)
 
@@ -494,7 +494,7 @@ def test_jax_visible_masked_controller_keeps_final_state_and_gradient_stable():
 def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint_controller import _pytree_vdot_jax
+    from vmec_jax.solvers.free_boundary.adjoint.controller import _pytree_vdot_jax
 
     enable_x64(True)
 
@@ -723,7 +723,7 @@ def test_jax_visible_controller_plain_step_outputs_and_segment_validation():
 def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp, tree_util
-    from vmec_jax.free_boundary_adjoint_controller import _pytree_vdot_jax
+    from vmec_jax.solvers.free_boundary.adjoint.controller import _pytree_vdot_jax
 
     enable_x64(True)
     controls = {

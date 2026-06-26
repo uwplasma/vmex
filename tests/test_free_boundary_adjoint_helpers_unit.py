@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.free_boundary_adjoint as fba
+import vmec_jax.solvers.free_boundary.adjoint.facade as fba
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
 from vmec_jax.solvers.free_boundary.adjoint import branch_local as branch_local_helpers

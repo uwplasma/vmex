@@ -314,7 +314,7 @@ def test_same_branch_vector_key_defaults_are_narrowed_for_derivative_proposals()
 def test_branch_local_scalar_report_adapter_records_gate_evidence():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
     )
@@ -386,7 +386,7 @@ def test_branch_local_scalar_report_adapter_records_gate_evidence():
 def test_branch_local_scalar_report_adapter_records_failure_modes():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
@@ -534,7 +534,7 @@ def test_branch_local_scalar_report_adapter_records_failure_modes():
 def test_branch_mismatch_blocks_scalar_adaptive_and_proposal_promotion():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
@@ -634,7 +634,7 @@ def test_branch_mismatch_blocks_scalar_adaptive_and_proposal_promotion():
 def test_physical_and_adaptive_gates_reject_branch_local_top_level_ad_claim():
     pytest.importorskip("jax")
     from vmec_jax._compat import jnp
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_adaptive_full_loop_same_branch_gate_report,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
@@ -1270,7 +1270,7 @@ def test_same_branch_report_writer_uses_source_helper(tmp_path, monkeypatch):
             "primary_objective": "objective",
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     path = module.write_same_branch_validation_report(
@@ -1429,7 +1429,7 @@ def test_same_branch_report_writer_records_branch_local_scalar_gradient(tmp_path
             },
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
@@ -1753,7 +1753,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             },
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
@@ -1956,7 +1956,7 @@ def test_same_branch_report_writer_adds_requested_registry_scalars_to_complete_f
             "primary_objective": "objective",
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
 
@@ -2144,7 +2144,7 @@ def test_same_branch_report_profiles_nestor_and_rejected_slot(tmp_path, monkeypa
             },
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
@@ -2400,7 +2400,7 @@ def test_same_branch_report_profile_skips_above_mode_count_cap(tmp_path, monkeyp
             },
         }
 
-    import vmec_jax.free_boundary_adjoint as freeb_adj
+    import vmec_jax.solvers.free_boundary.adjoint.facade as freeb_adj
 
     monkeypatch.setattr(freeb_adj, "direct_coil_same_branch_complete_solve_fd_report", fake_report)
     monkeypatch.setattr(
