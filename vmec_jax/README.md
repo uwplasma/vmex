@@ -44,3 +44,24 @@ in domain folders with clear names.  QI-related implementation belongs under
   API.
 - Add a short README when creating a package folder that is not obvious from
   its name.
+
+## Status Language
+
+Terms such as `parity`, `validation`, and `debug` identify optional evidence
+and inspection paths, not placeholder solver implementations. The production
+fixed-boundary VMEC2000-style solver, WOUT writing, Boozer plotting,
+quasisymmetry/QI fixed-boundary optimizers, finite-beta diagnostics, direct-coil
+external fields, and mgrid-backed free-boundary solves are implemented.
+
+Known conservative limitations:
+
+- Free-boundary coil derivatives are validated for same-branch,
+  fingerprint-gated accepted traces. vmec_jax does not claim a smooth arbitrary
+  derivative through hard accepted/rejected branch changes in the adaptive host
+  controller.
+- Dense free-boundary adjoint kernels are validation-scale operators used to
+  prove transpose-solve and mode-space derivative contracts; high-resolution
+  production speedups remain a performance lane.
+- Residual-minimization fixed-boundary solvers are differentiable research
+  paths, not VMEC2000 trace-reproduction modes. Use the VMEC2000-style solver
+  for strict iteration parity.

@@ -51,11 +51,13 @@ class VmecHalfMeshJacobian:
     sqrtg: Any  # (ns, ntheta, nzeta)
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.r12, self.rs, self.zs, self.ru12, self.zu12, self.tau, self.sqrtg)
         return children, None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 

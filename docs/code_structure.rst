@@ -54,11 +54,19 @@ Physics and geometry kernels:
   have docstrings, implementation helpers should stay private, and
   compatibility exports should be mechanically checked when refactored.
 
+Public docstrings are now part of source-health: every public class, function,
+and method under ``vmec_jax/`` must explain its numerical or physics role.
+Private closures may remain undocumented when the surrounding function already
+explains the algorithm; add comments or docstrings there only when they clarify
+branch logic, VMEC staggering, JAX custom-derivative behavior, or physics
+normalization.
+
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:
 
 - ``tools/diagnostics/source_health.py``: report largest Python source files
-  and optionally fail above a line-count threshold for staged refactor ratchets.
+  and optionally fail above line-count or public-docstring thresholds for
+  staged refactor ratchets.
 - ``tools/diagnostics/vmec2000_exec_stage_trace_compare.py``: per-iteration
   VMEC2000 vs vmec_jax parity comparator.
 - ``tools/diagnostics/qh_vmec_vs_vmecjax.py``: QH comparison figures.

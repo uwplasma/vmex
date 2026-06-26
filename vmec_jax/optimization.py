@@ -135,6 +135,7 @@ class FixedBoundaryExactOptimizer:
         exact_path: str | None = None,
         freeze_initial_axis: bool = False,
     ) -> None:
+        """Evaluate this object for VMEC optimization residual assembly and solve orchestration."""
         self._solver_device_name = self._resolve_solver_device(solver_device)
         self._exact_path_request = self._resolve_exact_path_request(exact_path)
         self._inside_solver_device_context = False

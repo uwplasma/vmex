@@ -306,6 +306,7 @@ except Exception:
     class _TreeUtilFallback:
         @staticmethod
         def register_pytree_node_class(cls):
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             return cls
 
     tree_util = _TreeUtilFallback()

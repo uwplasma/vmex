@@ -1096,6 +1096,7 @@ class WoutMinimalVmecLike:
         s_full: np.ndarray,
         icurv_full_mesh_from_indata_func: Any,
     ) -> None:
+        """Evaluate this object for VMEC WOUT reading, writing, and derived diagnostics."""
         self.phipf = np.asarray(flux.phipf)
         self.phips = np.asarray(flux.phips)
         self.chipf = np.asarray(chipf)

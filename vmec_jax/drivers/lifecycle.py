@@ -34,6 +34,7 @@ class FinishAttemptLog:
         budget_i: int,
         mode_i: str,
     ) -> tuple[float, bool]:
+        """Record record for high-level VMEC driver orchestration."""
         trial_fsq = float(ctx.result_final_fsq(trial.result))
         trial_conv = bool(ctx.result_meets_requested_ftol(trial.result, ftol=float(requested_ftol)))
         self.budgets.append(int(budget_i))
@@ -51,12 +52,14 @@ class FinishBudgetTracker:
     used: int = 0
 
     def bounded(self, requested: int) -> int:
+        """Evaluate bounded for high-level VMEC driver orchestration."""
         if self.cap is None:
             return int(requested)
         remaining = int(self.cap) - int(self.used)
         return 0 if remaining <= 0 else min(int(requested), int(remaining))
 
     def add(self, budget: int) -> None:
+        """Add add for high-level VMEC driver orchestration."""
         self.used += int(budget)
 
 
@@ -75,6 +78,7 @@ class StagedFollowupDiagnostics:
 
     @classmethod
     def from_run(cls, run: Any, *, policy: str) -> "StagedFollowupDiagnostics":
+        """Construct from run for high-level VMEC driver orchestration."""
         diag = dict(run.result.diagnostics)
         return cls(
             used=True,
@@ -182,6 +186,7 @@ class FixedBoundaryFinishContext:
 
     @classmethod
     def from_namespace(cls, namespace: dict[str, Any], /, **overrides: Any) -> "FixedBoundaryFinishContext":
+        """Construct from namespace for high-level VMEC driver orchestration."""
         return _dataclass_from_namespace(cls, namespace, label="fixed-boundary finish", overrides=overrides)
 
 

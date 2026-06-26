@@ -1,4 +1,12 @@
-"""Finite-beta and MHD-profile objective wrappers for fixed-boundary solves."""
+"""Finite-beta, Mercier, Glasser, and profile objectives for optimization.
+
+The classes in this module turn differentiable VMEC diagnostics into
+least-squares terms: magnetic well, volume-averaged field, total beta, Mercier
+``D_Merc``, Glasser resistive-interchange ``D_R``, bootstrap-current mismatch,
+and profile-shape targets.  They are intentionally small adapters around the
+physics kernels in ``finite_beta.py`` and ``mercier.py`` so user scripts can
+assemble objectives by listing `(term, target, weight)` tuples.
+"""
 
 from __future__ import annotations
 
@@ -38,10 +46,12 @@ class MagneticWell:
     name = "magnetic_well"
 
     def __init__(self, *, minimum: float = 0.0, softness: float = 1.0e-3):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         self.minimum = float(minimum)
         self.softness = float(softness)
 
     def well(self, ctx: StageContext, state):
+        """Evaluate well for fixed-boundary VMEC solve and implicit differentiation."""
         scalars = finite_beta_scalars_from_state(
             state=state,
             static=ctx.static,
@@ -51,10 +61,12 @@ class MagneticWell:
         return magnetic_well_from_vp(scalars["vp"])
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         deficit = float(self.minimum) - self.well(ctx, state)
         return _smooth_positive_part(deficit, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("MagneticWell is a lower-bound penalty and requires target=0.")
         return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
@@ -66,6 +78,7 @@ class VolavgB:
     name = "volavgB"
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return finite_beta_scalars_from_state(
             state=state,
             static=ctx.static,
@@ -74,6 +87,7 @@ class VolavgB:
         )["volavgB"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
@@ -83,6 +97,7 @@ class BetaTotal:
     name = "betatotal"
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return finite_beta_scalars_from_state(
             state=state,
             static=ctx.static,
@@ -91,6 +106,7 @@ class BetaTotal:
         )["betatotal"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
@@ -107,12 +123,14 @@ class DMerc:
         mmax_force: int | None = None,
         nmax_force: int | None = None,
     ):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         self.minimum = float(minimum)
         self.softness = float(softness)
         self.mmax_force = None if mmax_force is None else int(mmax_force)
         self.nmax_force = None if nmax_force is None else int(nmax_force)
 
     def terms(self, ctx: StageContext, state):
+        """Evaluate terms for fixed-boundary VMEC solve and implicit differentiation."""
         return mercier_terms_from_state(
             state=state,
             static=ctx.static,
@@ -123,12 +141,14 @@ class DMerc:
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         dmerc = jnp.asarray(self.terms(ctx, state)["DMerc"], dtype=jnp.float64)
         active = dmerc[1:-1] if int(dmerc.shape[0]) > 2 else jnp.zeros((0,), dtype=dmerc.dtype)
         deficit = float(self.minimum) - active
         return _smooth_positive_part(deficit, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("DMerc is a lower-bound penalty and requires target=0.")
         return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
@@ -148,6 +168,7 @@ class GlasserResistiveInterchange:
         mmax_force: int | None = None,
         nmax_force: int | None = None,
     ):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         self.maximum = float(maximum)
         self.softness = float(softness)
         self.shear_epsilon = float(shear_epsilon)
@@ -155,6 +176,7 @@ class GlasserResistiveInterchange:
         self.nmax_force = None if nmax_force is None else int(nmax_force)
 
     def terms(self, ctx: StageContext, state):
+        """Evaluate terms for fixed-boundary VMEC solve and implicit differentiation."""
         terms = mercier_terms_from_state(
             state=state,
             static=ctx.static,
@@ -176,12 +198,14 @@ class GlasserResistiveInterchange:
         }
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         d_r = jnp.asarray(self.terms(ctx, state)["D_R"], dtype=jnp.float64)
         active = d_r[1:-1] if int(d_r.shape[0]) > 2 else jnp.zeros((0,), dtype=d_r.dtype)
         excess = active - float(self.maximum)
         return _smooth_positive_part(excess, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("GlasserResistiveInterchange is an upper-bound penalty and requires target=0.")
         return ObjectiveTerm(self.name, self.J, target=0.0, weight=residual_weight)
@@ -201,12 +225,14 @@ class _MercierProfileObjective:
         mmax_force: int | None = None,
         nmax_force: int | None = None,
     ):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         self.surfaces = None if surfaces is None else tuple(float(s) for s in surfaces)
         self.normalize = float(normalize)
         self.mmax_force = None if mmax_force is None else int(mmax_force)
         self.nmax_force = None if nmax_force is None else int(nmax_force)
 
     def terms(self, ctx: StageContext, state):
+        """Evaluate terms for fixed-boundary VMEC solve and implicit differentiation."""
         return mercier_terms_from_state(
             state=state,
             static=ctx.static,
@@ -225,11 +251,13 @@ class _MercierProfileObjective:
         return profile[jnp.asarray(indices, dtype=jnp.int32)]
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         profile = self.terms(ctx, state)[self.profile_key]
         values = self._select_profile(ctx, profile)
         return values / float(self.normalize)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
@@ -260,10 +288,12 @@ class BVector:
     name = "B_vector"
 
     def __init__(self, *, s_index: int = -1, normalize: float = 1.0):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         self.s_index = int(s_index)
         self.normalize = float(normalize)
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         field = b_cartesian_from_state(
             state,
             ctx.static,
@@ -274,6 +304,7 @@ class BVector:
         return jnp.ravel(jnp.asarray(field, dtype=jnp.float64)) / float(self.normalize)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
@@ -283,6 +314,7 @@ class JVector(_MercierProfileObjective):
     name = "J_vector"
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         terms = mercier_terms_from_state(
             state=state,
             static=ctx.static,
@@ -301,6 +333,7 @@ class JVector(_MercierProfileObjective):
         return jnp.ravel(values) / float(self.normalize)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(self.name, self.J, target=target, weight=residual_weight)
 
 
@@ -336,6 +369,7 @@ class RedlBootstrapMismatch(_MercierProfileObjective):
         mmax_force: int | None = None,
         nmax_force: int | None = None,
     ):
+        """Evaluate this object for fixed-boundary VMEC solve and implicit differentiation."""
         super().__init__(surfaces=surfaces, normalize=1.0, mmax_force=mmax_force, nmax_force=nmax_force)
         self.helicity_n = int(helicity_n)
         self.ne_coeffs = tuple(float(x) for x in np.ravel(np.asarray(ne_coeffs, dtype=float)))
@@ -365,12 +399,15 @@ class RedlBootstrapMismatch(_MercierProfileObjective):
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return self._evaluate(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for fixed-boundary VMEC solve and implicit differentiation."""
         return self._evaluate(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("RedlBootstrapMismatch is already normalized and requires target=0.")
         return ObjectiveTerm(

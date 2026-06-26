@@ -377,10 +377,12 @@ def apply_qi_example_cli_overrides(namespace: dict, argv: list[str] | None = Non
     args, _unknown = parser.parse_known_args(argv)
 
     def set_if(name: str, value) -> None:
+        """Set set if for quasi-isodynamic optimization and Boozer-field diagnostics."""
         if value is not None:
             namespace[name] = value
 
     def set_arg(name: str, attr: str, cast=None) -> None:
+        """Set set arg for quasi-isodynamic optimization and Boozer-field diagnostics."""
         value = getattr(args, attr)
         if value is not None:
             namespace[name] = cast(value) if cast is not None else value
@@ -486,6 +488,7 @@ def make_qi_optimization_context(
     values.update(overrides)
 
     def get(field: str):
+        """Return get for quasi-isodynamic optimization and Boozer-field diagnostics."""
         upper = _CONTEXT_FIELDS[field]
         if field in values:
             return values[field]
@@ -496,6 +499,7 @@ def make_qi_optimization_context(
         raise KeyError(upper)
 
     def get_optional(field: str, default=None):
+        """Return get optional for quasi-isodynamic optimization and Boozer-field diagnostics."""
         try:
             return get(field)
         except KeyError:
@@ -846,6 +850,7 @@ def basin_prefilter_score(metrics, targets, config):
 
 
 def make_basin_prefilter_options(config, *, ctx: QIOptimizationContext | None = None):
+    """Build make basin prefilter options for quasi-isodynamic optimization and Boozer-field diagnostics."""
     qi_options = _ctx(ctx, "qi_options")
     return vj.QIDiagnosticOptions(
         surfaces=_ctx(ctx, "surfaces"),
@@ -976,6 +981,7 @@ def qi_diagnostics_for_result(
     legacy_qi_max=None,
     ctx: QIOptimizationContext | None = None,
 ):
+    """Evaluate qi diagnostics for result for quasi-isodynamic optimization and Boozer-field diagnostics."""
     surfaces = _ctx(ctx, "surfaces")
     smooth_qi_max = _ctx(ctx, "qi_gate_smooth_max") if smooth_qi_max is None else float(smooth_qi_max)
     legacy_qi_max = _ctx(ctx, "qi_gate_legacy_max") if legacy_qi_max is None else float(legacy_qi_max)
@@ -1432,6 +1438,7 @@ def run_boundary_reference_preconditioner(input_file, output_dir, config, *, ctx
 
 
 def stage_modes_for(stage, *, ctx: QIOptimizationContext | None = None):
+    """Evaluate stage modes for for quasi-isodynamic optimization and Boozer-field diagnostics."""
     if "stage_mode_limits" in stage:
         return [vj.normalize_boundary_mode_limits(mode) for mode in stage["stage_mode_limits"]]
     if "stage_modes" in stage:

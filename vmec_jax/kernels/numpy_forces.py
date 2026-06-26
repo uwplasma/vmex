@@ -73,10 +73,12 @@ class _AtIndexer:
     __slots__ = ("_arr", "_idx")
 
     def __init__(self, arr: np.ndarray, idx):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         self._arr = arr
         self._idx = idx
 
     def set(self, val) -> np.ndarray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         out = self._arr.copy()
         out[self._idx] = np.asarray(val)
         return _wrap(out)
@@ -86,6 +88,7 @@ class _AtIndexer:
         # integer-array indices we must use np.add.at to correctly handle
         # duplicate indices (NumPy's buffered += only applies the last update
         # for duplicates, unlike JAX's .at[].add() which applies all of them).
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         idx = self._idx
         use_add_at = _idx_has_fancy(idx)
         if use_add_at:
@@ -101,6 +104,7 @@ class _AtAccessor:
     __slots__ = ("_arr",)
 
     def __init__(self, arr: np.ndarray):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         self._arr = arr
 
     def __getitem__(self, idx) -> _AtIndexer:
@@ -116,6 +120,7 @@ class _NpArray(np.ndarray):
 
     @property
     def at(self) -> _AtAccessor:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _AtAccessor(self)
 
     def __array_finalize__(self, obj):
@@ -150,6 +155,7 @@ class _NpModule:
 
     @staticmethod
     def asarray(x, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         if dtype is not None:
             # Fast path: already a _NpArray with the requested dtype — no copy.
             # This avoids repeated bool→float conversions for pre-converted mask
@@ -163,48 +169,59 @@ class _NpModule:
 
     @staticmethod
     def array(x, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         if dtype is not None:
             return _wrap(np.array(x, dtype=dtype))
         return _wrap(np.array(x))
 
     @staticmethod
     def zeros(shape, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.zeros(shape, dtype=dtype or np.float64))
 
     @staticmethod
     def zeros_like(x, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.zeros_like(x, dtype=dtype))
 
     @staticmethod
     def ones(shape, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.ones(shape, dtype=dtype or np.float64))
 
     @staticmethod
     def ones_like(x, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.ones_like(x, dtype=dtype))
 
     @staticmethod
     def empty_like(x, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.empty_like(x, dtype=dtype))
 
     @staticmethod
     def full(shape, fill_value, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.full(shape, fill_value, dtype=dtype))
 
     @staticmethod
     def full_like(x, fill_value, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.full_like(x, fill_value, dtype=dtype))
 
     @staticmethod
     def arange(*args, dtype=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.arange(*args, dtype=dtype))
 
     @staticmethod
     def linspace(*args, **kwargs) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.linspace(*args, **kwargs))
 
     @staticmethod
     def reshape(x, shape) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.reshape(x, shape))
 
     @staticmethod
@@ -218,6 +235,7 @@ class _NpModule:
         #
         # We validate cache entries with weakrefs so that Python id()-reuse
         # after garbage collection cannot produce stale (wrong) results.
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         arr_list = list(arrays)
         arr_np = [np.asarray(a) for a in arr_list]
         total_bytes = sum(int(a.size) * int(a.dtype.itemsize) for a in arr_np)
@@ -244,182 +262,226 @@ class _NpModule:
 
     @staticmethod
     def concatenate(arrays, axis=0) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.concatenate([np.asarray(a) for a in arrays], axis=axis))
 
     @staticmethod
     def where(cond, x=None, y=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         if x is None and y is None:
             return _wrap(np.where(np.asarray(cond)))
         return _wrap(np.where(np.asarray(cond), np.asarray(x), np.asarray(y)))
 
     @staticmethod
     def maximum(x, y) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.maximum(np.asarray(x), np.asarray(y)))
 
     @staticmethod
     def minimum(x, y) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.minimum(np.asarray(x), np.asarray(y)))
 
     @staticmethod
     def abs(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.abs(np.asarray(x)))
 
     @staticmethod
     def sqrt(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.sqrt(np.asarray(x)))
 
     @staticmethod
     def sum(x, axis=None, keepdims=False) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.sum(np.asarray(x), axis=axis, keepdims=keepdims))
 
     @staticmethod
     def all(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.all(np.asarray(x), axis=axis))
 
     @staticmethod
     def any(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.any(np.asarray(x), axis=axis))
 
     @staticmethod
     def isfinite(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.isfinite(np.asarray(x)))
 
     @staticmethod
     def isnan(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.isnan(np.asarray(x)))
 
     @staticmethod
     def isinf(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.isinf(np.asarray(x)))
 
     @staticmethod
     def mean(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.mean(np.asarray(x), axis=axis))
 
     @staticmethod
     def max(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.max(np.asarray(x), axis=axis))
 
     @staticmethod
     def min(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.min(np.asarray(x), axis=axis))
 
     @staticmethod
     def einsum(expr, *operands, precision=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.einsum(expr, *[np.asarray(op) for op in operands]))
 
     @staticmethod
     def take(arr, indices, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.take(np.asarray(arr), np.asarray(indices), axis=axis))
 
     @staticmethod
     def broadcast_to(arr, shape) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.broadcast_to(np.asarray(arr), shape))
 
     @staticmethod
     def moveaxis(arr, source, destination) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.moveaxis(np.asarray(arr), source, destination))
 
     @staticmethod
     def expand_dims(arr, axis) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.expand_dims(np.asarray(arr), axis=axis))
 
     @staticmethod
     def squeeze(arr, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         if axis is None:
             return _wrap(np.squeeze(np.asarray(arr)))
         return _wrap(np.squeeze(np.asarray(arr), axis=axis))
 
     @staticmethod
     def transpose(arr, axes=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.transpose(np.asarray(arr), axes=axes))
 
     @staticmethod
     def clip(x, a_min=None, a_max=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.clip(np.asarray(x), a_min=a_min, a_max=a_max))
 
     @staticmethod
     def sin(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.sin(np.asarray(x)))
 
     @staticmethod
     def cos(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.cos(np.asarray(x)))
 
     @staticmethod
     def exp(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.exp(np.asarray(x)))
 
     @staticmethod
     def log(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.log(np.asarray(x)))
 
     @staticmethod
     def sign(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.sign(np.asarray(x)))
 
     @staticmethod
     def dot(a, b) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.dot(np.asarray(a), np.asarray(b)))
 
     @staticmethod
     def matmul(a, b) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.matmul(np.asarray(a), np.asarray(b)))
 
     @staticmethod
     def vstack(arrays) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.vstack([np.asarray(a) for a in arrays]))
 
     @staticmethod
     def hstack(arrays) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.hstack([np.asarray(a) for a in arrays]))
 
     @staticmethod
     def roll(arr, shift, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.roll(np.asarray(arr), shift, axis=axis))
 
     @staticmethod
     def repeat(arr, repeats, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.repeat(np.asarray(arr), repeats, axis=axis))
 
     @staticmethod
     def pad(arr, pad_width, **kwargs) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.pad(np.asarray(arr), pad_width, **kwargs))
 
     @staticmethod
     def sort(arr, axis=-1) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.sort(np.asarray(arr), axis=axis))
 
     @staticmethod
     def argsort(arr, axis=-1) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.argsort(np.asarray(arr), axis=axis))
 
     @staticmethod
     def floor(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.floor(np.asarray(x)))
 
     @staticmethod
     def ceil(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.ceil(np.asarray(x)))
 
     @staticmethod
     def round(x, decimals=0) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.round(np.asarray(x), decimals=decimals))
 
     @staticmethod
     def prod(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.prod(np.asarray(x), axis=axis))
 
     @staticmethod
     def cumsum(x, axis=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.cumsum(np.asarray(x), axis=axis))
 
     @staticmethod
     def real(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.real(np.asarray(x)))
 
     @staticmethod
     def imag(x) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.imag(np.asarray(x)))
 
 
@@ -434,18 +496,22 @@ class _NpFftModule:
 
     @staticmethod
     def fft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.fft.fft(np.asarray(a), n=n, axis=axis, norm=norm))
 
     @staticmethod
     def ifft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.fft.ifft(np.asarray(a), n=n, axis=axis, norm=norm))
 
     @staticmethod
     def rfft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.fft.rfft(np.asarray(a), n=n, axis=axis, norm=norm))
 
     @staticmethod
     def irfft(a, n=None, axis=-1, norm=None) -> _NpArray:
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return _wrap(np.fft.irfft(np.asarray(a), n=n, axis=axis, norm=norm))
 
 
@@ -463,12 +529,14 @@ class _NumpyLaxShim:
 
     @staticmethod
     def cond(pred, true_fun, false_fun, operand=None):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         if bool(np.asarray(pred)):
             return true_fun(operand)
         return false_fun(operand)
 
     @staticmethod
     def dot_general(lhs, rhs, dimension_numbers, precision=None):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         (c_lhs, c_rhs), _ = dimension_numbers
         lhs_np = np.asarray(lhs)
         rhs_np = np.asarray(rhs)
@@ -476,12 +544,14 @@ class _NumpyLaxShim:
 
     @staticmethod
     def fori_loop(lower, upper, body_fun, init_val):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         value = init_val
         for i in range(int(lower), int(upper)):
             value = body_fun(i, value)
         return value
 
     class Precision:
+        """Represent Precision data for spectral VMEC force and residual assembly."""
         HIGHEST = None
 
 
@@ -492,21 +562,27 @@ class _NumpyJaxShim:
 
     @staticmethod
     def named_scope(name: str):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         from contextlib import nullcontext
         return nullcontext()
 
     class profiler:
+        """Represent profiler hooks for the NumPy-backed force shim."""
+
         @staticmethod
         def TraceAnnotation(name: str):
+            """Delegate array operations to the selected NumPy/JAX force backend."""
             from contextlib import nullcontext
             return nullcontext()
 
     @staticmethod
     def block_until_ready(x):
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return x
 
     @staticmethod
     def default_backend():
+        """Delegate array operations to the selected NumPy/JAX force backend."""
         return "cpu"
 
 

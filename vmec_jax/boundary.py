@@ -242,6 +242,7 @@ def boundary_input_from_indata(indata: InData, modes: ModeTable) -> BoundaryCoef
     key_to_k = {(int(m), int(n)): k for k, (m, n) in enumerate(zip(modes.m, modes.n))}
 
     def assign_from(src: Dict[Tuple[int, ...], float], dest: np.ndarray):
+        """Assign assign from for spectral geometry representation and differentiation."""
         for (n, m), val in src.items():
             k = key_to_k.get((int(m), int(n)))
             if k is not None:

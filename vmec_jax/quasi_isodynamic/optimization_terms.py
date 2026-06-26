@@ -1,4 +1,12 @@
-"""QI, Boozer, mirror-ratio, elongation, and L_grad_B objectives."""
+"""Optimization terms for QI, mirror ratio, elongation, and gradient-B size.
+
+These wrappers expose quasi-isodynamic field quality and engineering-shape
+metrics as SIMSOPT-style least-squares terms.  QI terms use Boozer-coordinate
+field samples and smooth penalties so JAX can differentiate through the same
+residuals used by the fixed-boundary optimizer.  Mirror ratio and elongation
+are intrinsic diagnostics of a VMEC state; they do not depend on QI options
+unless a caller explicitly chooses Boozer-based field sampling.
+"""
 
 from __future__ import annotations
 
@@ -95,12 +103,15 @@ class QuasiIsodynamicResidual:
     requires_qi_field = True
 
     def __init__(self, options: QuasiIsodynamicOptions):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.options = options
 
     def J(self, _ctx: StageContext, _state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         raise RuntimeError("QuasiIsodynamicResidual must be evaluated inside a QI solve.")
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return quasi_isodynamic_field_objective(weight=residual_weight, qi_options=self.options)
 
 
@@ -117,14 +128,17 @@ class QuasiIsodynamicResidualCeiling:
         smooth_penalty: float = 0.0,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.maximum = float(maximum)
         self.smooth_penalty = float(smooth_penalty)
         self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         raise RuntimeError("QuasiIsodynamicResidualCeiling must be evaluated inside a QI solve.")
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return qi_residual_ceiling_objective(
             maximum=self.maximum,
             weight=residual_weight,
@@ -155,6 +169,7 @@ class MirrorRatio:
         jit_booz: bool = True,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.threshold = float(threshold)
         self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
         self.mboz = int(mboz)
@@ -171,6 +186,7 @@ class MirrorRatio:
 
     @property
     def requires_qi_field(self) -> bool:
+        """Evaluate requires qi field for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return self.qi_options is not None
 
     def _selected_surfaces_and_weights(self) -> tuple[tuple[float, ...], list[float] | None]:
@@ -242,16 +258,19 @@ class MirrorRatio:
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         if self.qi_options is not None:
             raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
         return self._evaluate_state(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for quasi-isodynamic optimization and Boozer-field diagnostics."""
         if self.qi_options is not None:
             raise RuntimeError("MirrorRatio with qi_options must be evaluated inside a QI solve.")
         return self._evaluate_state(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("MirrorRatio is an upper-bound penalty and requires target=0.")
 
@@ -292,6 +311,7 @@ class MirrorRatio:
         )
 
     def to_constraint_term(self) -> ObjectiveTerm:
+        """Convert to constraint term for quasi-isodynamic optimization and Boozer-field diagnostics."""
         def _evaluate(ctx: StageContext, state, *, booz_constants=None, booz_grids=None):
             surfaces, weights = self._selected_surfaces_and_weights()
             mirror = mirror_ratio_penalty_from_state(
@@ -336,6 +356,7 @@ class MirrorRatio:
         return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0, prepare=_prepare)
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return qi_mirror_ratio_objective(
             threshold=self.threshold,
             weight=residual_weight,
@@ -350,6 +371,7 @@ class MirrorRatio:
         )
 
     def to_constraint_qi_term(self) -> QIObjectiveTerm:
+        """Convert to constraint qi term for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return qi_mirror_ratio_constraint(
             threshold=self.threshold,
             ntheta=self.ntheta,
@@ -381,6 +403,7 @@ class VMECMirrorRatio:
         normalize_surfaces: bool = True,
         bmag_floor: float = 1.0e-300,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.threshold = float(threshold)
         self.surfaces = tuple(float(value) for value in _as_sequence(surfaces))
         self.surface_index = None if surface_index is None else int(surface_index)
@@ -396,6 +419,7 @@ class VMECMirrorRatio:
 
     @property
     def requires_qi_field(self) -> bool:
+        """Evaluate requires qi field for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return False
 
     def _selected_surface_indices_and_weights(self, ctx: StageContext) -> tuple[list[int], jnp.ndarray]:
@@ -462,12 +486,15 @@ class VMECMirrorRatio:
         }
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return self._evaluate_state(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return self._evaluate_state(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("VMECMirrorRatio is an upper-bound penalty and requires target=0.")
         return ObjectiveTerm(
@@ -494,6 +521,7 @@ class BoozerBTarget:
         include_b00: bool = False,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.target_bmnc = np.asarray(target_bmnc, dtype=float)
         self.target_bmns = None if target_bmns is None else np.asarray(target_bmns, dtype=float)
         self.normalize = bool(normalize)
@@ -501,9 +529,11 @@ class BoozerBTarget:
         self.qi_options = qi_options
 
     def J(self, _ctx: StageContext, _state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         raise RuntimeError("BoozerBTarget must be evaluated inside a QI solve.")
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return qi_boozer_b_target_objective(
             target_bmnc=self.target_bmnc,
             target_bmns=self.target_bmns,
@@ -529,6 +559,7 @@ class MaxElongation:
         smooth_penalty: float = 0.0,
         qi_options: QuasiIsodynamicOptions | None = None,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.threshold = float(threshold)
         self.ntheta = int(ntheta)
         self.nphi = int(nphi)
@@ -538,6 +569,7 @@ class MaxElongation:
 
     @property
     def requires_qi_field(self) -> bool:
+        """Evaluate requires qi field for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return False
 
     def _evaluate_state(self, ctx: StageContext, state, *, smooth_penalty: float | None = None):
@@ -552,12 +584,15 @@ class MaxElongation:
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return self._evaluate_state(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return self._evaluate_state(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("MaxElongation is an upper-bound penalty and requires target=0.")
         return ObjectiveTerm(
@@ -569,6 +604,7 @@ class MaxElongation:
         )
 
     def to_constraint_term(self) -> ObjectiveTerm:
+        """Convert to constraint term for quasi-isodynamic optimization and Boozer-field diagnostics."""
         def _evaluate(ctx: StageContext, state):
             elongation = self._evaluate_state(ctx, state, smooth_penalty=0.0)
             return jnp.asarray([elongation["max_elongation"] - float(self.threshold)], dtype=jnp.float64)
@@ -576,6 +612,7 @@ class MaxElongation:
         return ObjectiveTerm(f"{self.name}_constraint", _evaluate, target=0.0, weight=1.0)
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return qi_max_elongation_objective(
             threshold=self.threshold,
             weight=residual_weight,
@@ -587,6 +624,7 @@ class MaxElongation:
         )
 
     def to_constraint_qi_term(self) -> QIObjectiveTerm:
+        """Convert to constraint qi term for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return qi_max_elongation_constraint(
             threshold=self.threshold,
             ntheta=self.ntheta,
@@ -610,6 +648,7 @@ class LgradB:
         nphi: int = 7,
         smooth_penalty: float = 0.0,
     ):
+        """Evaluate this object for quasi-isodynamic optimization and Boozer-field diagnostics."""
         self.threshold = float(threshold)
         self.s_index = int(s_index)
         self.ntheta = int(ntheta)
@@ -631,12 +670,15 @@ class LgradB:
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return self._evaluate(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for quasi-isodynamic optimization and Boozer-field diagnostics."""
         return self._evaluate(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("LgradB penalty objectives require target=0.")
         return ObjectiveTerm(
@@ -648,6 +690,7 @@ class LgradB:
         )
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         return qi_lgradb_objective(
             threshold=self.threshold,
             weight=residual_weight,

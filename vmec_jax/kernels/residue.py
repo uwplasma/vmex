@@ -87,11 +87,13 @@ class VmecForceNormsDynamic:
     vp: Any  # (ns,)
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.fnorm, self.fnormL, self.r1, self.r2, self.volume, self.wb, self.wp, self.vp)
         return children, None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 
@@ -105,16 +107,19 @@ class VmecForceNormsScalesDynamic:
     l_scale: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.norms, self.rz_scale, self.l_scale)
         return children, None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 
 @dataclass(frozen=True)
 class VmecFsqScalars:
+    """Represent VmecFsqScalars data for spectral VMEC force and residual assembly."""
     fsqr: float
     fsqz: float
     fsql: float

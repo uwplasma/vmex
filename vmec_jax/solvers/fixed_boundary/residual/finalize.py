@@ -450,6 +450,7 @@ def _empty_history_result(
 
 
 def precompile_only_residual_iter_result(*, result_type: type, state: Any) -> Any:
+    """Evaluate precompile only residual iter result for fixed-boundary VMEC solve and implicit differentiation."""
     return _empty_history_result(result_type=result_type, state=state, n_iter=0, diagnostics={"precompile_only": True})
 
 

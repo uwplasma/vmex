@@ -37,6 +37,7 @@ class WoutLikeVmecForces:
     chips_eff: Any | None = None
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.phipf,
             self.phips,
@@ -63,6 +64,7 @@ class WoutLikeVmecForces:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         (
             nfp,
             mpol,

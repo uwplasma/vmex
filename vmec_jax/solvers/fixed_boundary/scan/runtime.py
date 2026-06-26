@@ -123,6 +123,7 @@ def resolve_scan_runtime_hooks(
             from jax import profiler as _jax_profiler
 
             def scan_trace_context(label: str):  # type: ignore[misc]
+                """Evaluate scan trace context for fixed-boundary VMEC solve and implicit differentiation."""
                 return _jax_profiler.TraceAnnotation(label)
 
         except Exception:

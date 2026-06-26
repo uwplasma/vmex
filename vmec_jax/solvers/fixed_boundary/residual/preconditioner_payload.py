@@ -128,9 +128,11 @@ def residual_preconditioner_operators(
     """
 
     def apply_radial_tridi(a, alpha: float):
+        """Apply apply radial tridi for fixed-boundary VMEC solve and implicit differentiation."""
         return radial_tridi_smooth_dirichlet_func(a, alpha=alpha, skip_nonpositive=True)
 
     def apply_radial_tridi_batched(arrs, alpha: float):
+        """Apply apply radial tridi batched for fixed-boundary VMEC solve and implicit differentiation."""
         if alpha <= 0.0:
             return tuple(arrs)
         stack = jnp_module.stack(arrs, axis=1)
@@ -138,6 +140,7 @@ def residual_preconditioner_operators(
         return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
 
     def lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
+        """Evaluate lambda preconditioner for fixed-boundary VMEC solve and implicit differentiation."""
         lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
         if bool(use_numpy_preconditioner_apply) and not tree_has_tracer_func(bc):
             from vmec_jax.preconditioner_1d import lambda_preconditioner as build_lambda_np
@@ -171,6 +174,7 @@ def residual_preconditioner_operators(
         use_precomputed: bool | None = None,
         use_lax_tridi: bool | None = None,
     ):
+        """Evaluate rz preconditioner matrices for fixed-boundary VMEC solve and implicit differentiation."""
         if (
             bool(use_numpy_preconditioner_apply)
             and (not bool(getattr(cfg, "lasym", False)))
@@ -222,6 +226,7 @@ def residual_preconditioner_operators(
         use_precomputed: bool | None = None,
         use_lax_tridi: bool | None = None,
     ):
+        """Evaluate rz preconditioner apply for fixed-boundary VMEC solve and implicit differentiation."""
         if bool(use_numpy_preconditioner_apply) and not tree_has_tracer_func(frzl_in):
             from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_numpy
 
@@ -244,6 +249,7 @@ def residual_preconditioner_operators(
         )
 
     def rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
+        """Evaluate rz preconditioner for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax.preconditioner_1d_jax import rz_preconditioner as apply_rz_preconditioner
 
         return apply_rz_preconditioner(

@@ -104,6 +104,7 @@ class Vmec2000ScanPostprocessResult:
 
     @property
     def diagnostics(self) -> dict[str, Any]:
+        """Evaluate diagnostics for fixed-boundary VMEC solve and implicit differentiation."""
         return {
             "fsqr_full": self.fsqr_full_diag,
             "fsqz_full": self.fsqz_full_diag,
@@ -658,6 +659,7 @@ def unpack_vmec2000_scan_histories(
     scan_minimal: bool,
     scan_light: bool,
 ) -> Vmec2000ScanHistories:
+    """Unpack unpack vmec2000 scan histories for fixed-boundary VMEC solve and implicit differentiation."""
     if scan_minimal:
         fsqr_hist, fsqz_hist, fsql_hist = hist
         return Vmec2000ScanHistories(fsqr=fsqr_hist, fsqz=fsqz_hist, fsql=fsql_hist)
@@ -758,6 +760,7 @@ def postprocess_vmec2000_scan_result(
     iter_offset0: int,
     free_boundary_iter_controls: Callable[[int, int, int], tuple[int, int]],
 ) -> Vmec2000ScanPostprocessResult:
+    """Evaluate postprocess vmec2000 scan result for fixed-boundary VMEC solve and implicit differentiation."""
     fsqr_full = np.asarray(histories.fsqr)
     fsqz_full = np.asarray(histories.fsqz)
     fsql_full = np.asarray(histories.fsql)

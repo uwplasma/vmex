@@ -821,14 +821,17 @@ def build_restart_preconditioned_scan_payload(
 
 
 def current_scan_payload(**kwargs: Any) -> ScanForcePayload:
+    """Evaluate current scan payload for fixed-boundary VMEC solve and implicit differentiation."""
     return build_scan_force_payload(**kwargs)
 
 
 def restart_scan_payload(**kwargs: Any) -> ScanForcePayload:
+    """Evaluate restart scan payload for fixed-boundary VMEC solve and implicit differentiation."""
     return build_scan_force_payload(**kwargs)
 
 
 def mask_scan_restart_payload(*, payload: ScanForcePayload, do_restart: Any) -> ScanForcePayload:
+    """Evaluate mask scan restart payload for fixed-boundary VMEC solve and implicit differentiation."""
     masked_blocks, cache_valid = mask_scan_restart_force_payload(
         force_blocks=tuple(payload.blocks),
         cache_valid=payload.cache_valid,

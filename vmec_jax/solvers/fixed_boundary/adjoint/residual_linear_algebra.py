@@ -134,6 +134,7 @@ def solve_active_residual_tangent_linearized(
     active_is_square = tuple(stationarity_star_active.shape) == tuple(x_active_star.shape)
 
     def stationarity_jvp_active_damped(u_active):
+        """Evaluate stationarity jvp active damped for fixed-boundary VMEC solve and implicit differentiation."""
         return stationarity_jvp_active(u_active) + damping_arr * u_active
 
     if active_is_square and tangent_mode in ("auto", "lineax") and lineax_solve is not None:

@@ -531,6 +531,7 @@ def annotate_qi_seed_suitability(
     reasons: list[str] = []
 
     def require_gate(name: str, ok: bool, message: str) -> bool:
+        """Evaluate require gate for quasi-isodynamic optimization and Boozer-field diagnostics."""
         if not ok:
             failures.append(name)
             reasons.append(message)

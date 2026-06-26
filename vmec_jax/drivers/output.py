@@ -28,6 +28,7 @@ def residual_scalars_from_state(
         __slots__ = ("nfp", "mpol", "ntor", "lasym", "signgs")
 
         def __init__(self, *, nfp: int, mpol: int, ntor: int, lasym: bool, signgs: int):
+            """Evaluate this object for high-level VMEC driver orchestration."""
             self.nfp = int(nfp)
             self.mpol = int(mpol)
             self.ntor = int(ntor)

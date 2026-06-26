@@ -155,9 +155,11 @@ class InData:
     source_path: str | None = None
 
     def get(self, name: str, default: Value | None = None) -> Value | None:
+        """Return get for VMEC-JAX numerical workflow."""
         return self.scalars.get(name.upper(), default)
 
     def get_bool(self, name: str, default: bool = False) -> bool:
+        """Return get bool for VMEC-JAX numerical workflow."""
         v = self.get(name, default)
         if isinstance(v, bool):
             return v
@@ -166,6 +168,7 @@ class InData:
         return bool(v)
 
     def get_int(self, name: str, default: int = 0) -> int:
+        """Return get int for VMEC-JAX numerical workflow."""
         v = self.get(name, default)
         if isinstance(v, list):
             v = v[0] if v else default
@@ -175,6 +178,7 @@ class InData:
             return default
 
     def get_float(self, name: str, default: float = 0.0) -> float:
+        """Return get float for VMEC-JAX numerical workflow."""
         v = self.get(name, default)
         if isinstance(v, list):
             v = v[0] if v else default

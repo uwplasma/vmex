@@ -1,4 +1,4 @@
-"""VMEC Fourier transform conventions (`fixaray` + `tomnsps`) for parity work.
+"""VMEC Fourier transform conventions (`fixaray` + `tomnsps`) for solves.
 
 VMEC does not use a plain unweighted DFT for its force/residual transforms.
 Instead it uses:
@@ -15,9 +15,10 @@ This module implements the *core* pieces needed for parity diagnostics:
 
 Scope
 -----
-This is intended for diagnostics/regressions against VMEC2000 `wout` outputs.
-It currently implements the `lasym=False` and `lasym=True` tables, but the
-transform itself is primarily exercised for the parity kernel work.
+The same tables are used in production fixed-boundary force assembly and in
+VMEC2000 regression checks.  Keeping the transform explicit makes the
+staggering, endpoint weights, and stellarator-asymmetric (`lasym=True`) terms
+auditable when force parity or differentiability changes.
 """
 
 from __future__ import annotations
@@ -94,6 +95,7 @@ class VmecTrigTables:
     phase_stack_n: Any | None = None
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.mscale,
             self.nscale,
@@ -138,6 +140,7 @@ class VmecTrigTables:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         (
             ntheta1,
             ntheta2,
@@ -465,6 +468,7 @@ class TomnspsRZL:
     flss: Any | None = None  # (ns, mpol, ntor+1)
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.frcc,
             self.frss,
@@ -483,6 +487,7 @@ class TomnspsRZL:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 
@@ -590,6 +595,7 @@ def _theta_contract(arr, mat):
         acc = jnp.zeros((a, p, s, m, k), dtype=arr.dtype)
 
         def body(i, acc_i):
+            """Advance one loop body step for spectral VMEC force and residual assembly."""
             arr_i = arr[:, :, :, i, :]  # (a, p, s, k)
             mat_i = mat[i, :]  # (m,)
             return acc_i + arr_i[..., None, :] * mat_i[None, None, None, :, None]
@@ -626,6 +632,7 @@ def _zeta_contract(arr, mat):
         acc = jnp.zeros((p, s, m, n), dtype=arr.dtype)
 
         def body(k, acc_k):
+            """Advance one loop body step for spectral VMEC force and residual assembly."""
             arr_k = arr[:, :, :, k]  # (p, s, m)
             mat_k = mat[k, :]  # (n,)
             return acc_k + arr_k[..., None] * mat_k[None, None, None, :]

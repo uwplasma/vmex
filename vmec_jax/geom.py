@@ -41,6 +41,7 @@ if has_jax():
         from jax.tree_util import register_pytree_node_class as _register_pytree_node_class  # type: ignore
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 return _register_pytree_node_class(cls)
             except ValueError as e:
@@ -51,6 +52,7 @@ if has_jax():
         import jax.tree_util as _tu
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 _tu.register_pytree_node(
                     cls,
@@ -64,6 +66,7 @@ if has_jax():
 else:
 
     def register_pytree_node_class(cls):  # type: ignore
+        """Register this type as a JAX pytree for JIT and automatic differentiation."""
         return cls
 
 
@@ -98,6 +101,7 @@ class Geom:
     g_pp: any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.R,
             self.Z,
@@ -124,6 +128,7 @@ class Geom:
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         (
             R,
             Z,
@@ -172,38 +177,47 @@ class Geom:
 
     @property
     def R_s(self):
+        """Evaluate R s for spectral geometry representation and differentiation."""
         return self.Rs
 
     @property
     def Z_s(self):
+        """Evaluate Z s for spectral geometry representation and differentiation."""
         return self.Zs
 
     @property
     def L_s(self):
+        """Evaluate L s for spectral geometry representation and differentiation."""
         return self.Ls
 
     @property
     def R_theta(self):
+        """Evaluate R theta for spectral geometry representation and differentiation."""
         return self.Rt
 
     @property
     def Z_theta(self):
+        """Evaluate Z theta for spectral geometry representation and differentiation."""
         return self.Zt
 
     @property
     def L_theta(self):
+        """Evaluate L theta for spectral geometry representation and differentiation."""
         return self.Lt
 
     @property
     def R_phi(self):
+        """Evaluate R phi for spectral geometry representation and differentiation."""
         return self.Rp
 
     @property
     def Z_phi(self):
+        """Evaluate Z phi for spectral geometry representation and differentiation."""
         return self.Zp
 
     @property
     def L_phi(self):
+        """Evaluate L phi for spectral geometry representation and differentiation."""
         return self.Lp
 
 

@@ -1,4 +1,12 @@
-"""JAX-native quasisymmetry diagnostics from VMEC-JAX states."""
+"""JAX-native quasisymmetry metrics from VMEC states and Boozer-like spectra.
+
+The objective measures whether magnetic-field strength is dominated by modes
+with one target helicity, e.g. quasi-axisymmetry ``(M,N)=(1,0)`` or
+quasi-helical symmetry ``(M,N)=(1,-nfp)``.  The implementation keeps the
+sampling grids and trigonometric tables explicit so optimization callbacks can
+reuse them while JAX differentiates through the VMEC state and spectral field
+reconstruction.
+"""
 
 from __future__ import annotations
 

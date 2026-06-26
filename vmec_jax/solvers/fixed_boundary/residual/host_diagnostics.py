@@ -145,6 +145,7 @@ def resolve_vmec2000_print_context(
         w_mhd: float,
         z00: float | None = None,
     ) -> None:
+        """Evaluate print iter row for fixed-boundary VMEC solve and implicit differentiation."""
         del fsqr1, fsqz1, fsql1
         emit_iter_row(
             iter_idx=iter_idx,
@@ -168,6 +169,7 @@ def resolve_vmec2000_print_context(
         )
 
     def should_print(iter_idx: int, max_iter: int) -> bool:
+        """Evaluate should print for fixed-boundary VMEC solve and implicit differentiation."""
         return should_print_row(
             iter_idx=iter_idx,
             max_iter=max_iter,

@@ -45,11 +45,11 @@ def vmec_nonsingular_terms_from_bexni_jax(
     constants, while the boundary geometry and external normal-field source are
     differentiable JAX inputs.
 
-    The helper is intentionally explicit rather than performance-tuned.  It is
-    the validation bridge between the phase-1 dense mode-space adjoint scaffold
-    and the future production NESTOR operator: tests can now differentiate
-    through Green-kernel source assembly, mode projection, matrix assembly, and
-    the implicit dense solve without crossing to NumPy.
+    The helper is intentionally explicit rather than heavily fused.  It is the
+    validation bridge between dense linear-adjoint checks and the production
+    direct-coil replay reports: tests differentiate through Green-kernel source
+    assembly, mode projection, matrix assembly, and the implicit dense solve
+    without crossing to NumPy.
     """
 
     R2 = jnp.asarray(R)

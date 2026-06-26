@@ -1,4 +1,4 @@
-"""VMEC force/residue kernels for parity work.
+"""VMEC force/residue kernels for spectral equilibrium solves.
 
 This module implements a direct, array-based port of VMEC2000's ``forces`` core
 for the **R/Z** equations, operating on:
@@ -8,10 +8,11 @@ for the **R/Z** equations, operating on:
 
 Scope
 -----
-This is a parity/debug kernel used to validate the algebra and staggering.
-It is *not* yet the full VMEC solver pipeline (no vacuum/free boundary, no 2D
-preconditioner, and no full lambda residue parity), but it *does* include the
-VMEC constraint-force pipeline (`tcon` + `alias`) for fixed-boundary parity.
+These kernels are the R/Z force backbone used by the fixed-boundary solver and
+by VMEC2000 parity gates.  Free-boundary vacuum coupling, scan/non-scan control,
+fallback policies, and WOUT assembly live in higher-level solver packages; this
+module stays focused on differentiable spectral force assembly and VMEC
+staggering conventions.
 """
 
 from __future__ import annotations
@@ -238,6 +239,7 @@ class _WoutProfileProxy:
     __slots__ = ("_base", "_overrides")
 
     def __init__(self, base, overrides):
+        """Evaluate this object for spectral VMEC force and residual assembly."""
         self._base = base
         self._overrides = overrides
 
@@ -409,10 +411,12 @@ class VmecRZForceKernels:
     constraint_zcon0: Any | None = None  # (ns, ntheta, nzeta)
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         return tuple(getattr(self, field.name) for field in fields(self)), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 
@@ -1600,6 +1604,7 @@ def vmec_forces_rz_from_wout_reference_fields(
 
 @dataclass(frozen=True)
 class VmecRZResidualCoeffs:
+    """Represent VmecRZResidualCoeffs data for spectral VMEC force and residual assembly."""
     gcr_cos: Any  # (ns, K)
     gcr_sin: Any  # (ns, K)
     gcz_cos: Any  # (ns, K)
@@ -1960,6 +1965,7 @@ def vmec_residual_internal_from_kernels(
 
 @dataclass(frozen=True)
 class VmecRZResidualScalars:
+    """Represent VmecRZResidualScalars data for spectral VMEC force and residual assembly."""
     fsqr_like: float
     fsqz_like: float
 

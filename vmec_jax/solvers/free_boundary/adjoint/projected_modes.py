@@ -187,6 +187,7 @@ def direct_coil_projected_mode_fixed_point_directional_check_jax(
     """Validate projected-mode fixed-point coil gradients by central FD."""
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         solved = direct_coil_projected_mode_fixed_point_objective_jax(
             coil_params,
             initial_state,

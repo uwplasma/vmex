@@ -35,6 +35,7 @@ VECTOR_RESIDUAL_BLOCKS = (
 
 
 class ResidualObjectiveTerms(NamedTuple):
+    """Represent ResidualObjectiveTerms data for fixed-boundary VMEC solve and implicit differentiation."""
     frzl: TomnspsRZL
     norms: Any
     gcr2: Any

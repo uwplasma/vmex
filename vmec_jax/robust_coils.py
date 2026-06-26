@@ -33,6 +33,7 @@ class CoilPerturbationSample:
     centerline_dof_delta: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         return (
             self.current_factors,
             self.displacement_xyz,
@@ -42,6 +43,7 @@ class CoilPerturbationSample:
 
     @classmethod
     def tree_unflatten(cls, _aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         current_factors, displacement_xyz, toroidal_phase, centerline_dof_delta = children
         return cls(
             current_factors=current_factors,

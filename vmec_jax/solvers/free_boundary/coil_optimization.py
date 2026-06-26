@@ -543,12 +543,14 @@ def same_branch_scalar_function_registry(
     from vmec_jax.state import pack_state
 
     def lcfs_boundary_moment(state: Any, static: Any) -> Any:
+        """Evaluate lcfs boundary moment for direct-coil free-boundary solve and branch-local adjoint validation."""
         geometry = free_boundary_boundary_geometry_jax(state, static)
         r = jnp.asarray(geometry["R"])
         z = jnp.asarray(geometry["Z"])
         return jnp.mean((r - 1.0) * (r - 1.0) + z * z)
 
     def mean_iota_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate mean iota from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
             state=state,
             static=static,
@@ -559,6 +561,7 @@ def same_branch_scalar_function_registry(
         return jnp.mean(iota_arr[1:] if iota_arr.size > 1 else iota_arr)
 
     def accepted_bnormal_rms_from_payload(payload: dict[str, Any]) -> float:
+        """Evaluate accepted bnormal rms from payload for direct-coil free-boundary solve and branch-local adjoint validation."""
         values = [
             float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_nestor_trace"]["bnormal"], dtype=float)))))
             for trace in payload["traces"]
@@ -571,6 +574,7 @@ def same_branch_scalar_function_registry(
         return float(np.mean(values))
 
     def accepted_bnormal_rms_from_replay(replay: dict[str, Any]) -> Any:
+        """Evaluate accepted bnormal rms from replay for direct-coil free-boundary solve and branch-local adjoint validation."""
         bnormal = jnp.asarray(replay["history"]["bnormal_rms"])
         accepted = jnp.asarray(replay["history"]["accepted"], dtype=bnormal.dtype)
         active = jnp.asarray(replay["controls"]["has_active_freeb_replay"], dtype=bnormal.dtype)
@@ -579,6 +583,7 @@ def same_branch_scalar_function_registry(
         return jnp.sum(weights * bnormal) / denom
 
     def qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate qs total from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         qs = quasisymmetry_ratio_residual_from_state(
             state=state,
             static=static,
@@ -594,6 +599,7 @@ def same_branch_scalar_function_registry(
         return qs["total"]
 
     def boozer_qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate boozer qs total from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         field = boozer_output_from_state(
             state=state,
             static=static,
@@ -885,6 +891,7 @@ class SameBranchVectorRunner:
         replay_payload: dict[str, Any] | None,
         ad_mode: str,
     ) -> None:
+        """Evaluate this object for direct-coil free-boundary solve and branch-local adjoint validation."""
         self.base_params = base_params
         self.direction_params = direction_params
         self.report = report
@@ -1661,6 +1668,7 @@ def _same_branch_qs_angle_cache_factory(args: Any) -> Any:
     qs_angle_cache_by_key: dict[tuple[int, ...], dict[str, object]] = {}
 
     def qs_angle_cache_for_static(static: Any) -> dict[str, object]:
+        """Evaluate qs angle cache for static for direct-coil free-boundary solve and branch-local adjoint validation."""
         cfg = static.cfg
         key = (
             int(cfg.nfp),
@@ -1992,6 +2000,7 @@ def _same_branch_report_replay_sections(
     )
 
     def summarize_vector_result(vector: dict[str, Any], scalar_keys: tuple[str, ...]) -> dict[str, Any]:
+        """Evaluate summarize vector result for direct-coil free-boundary solve and branch-local adjoint validation."""
         return summarize_same_branch_vector_result(
             vector,
             scalar_keys,

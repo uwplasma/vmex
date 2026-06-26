@@ -441,6 +441,7 @@ def radial_tridi_smooth_dirichlet(
         dp0 = d[0] / b
 
         def fwd(carry, di):
+            """Run the forward rule for the custom derivative."""
             cp_prev, dp_prev = carry
             denom = b - a * cp_prev
             cp = c / denom
@@ -452,6 +453,7 @@ def radial_tridi_smooth_dirichlet(
         dp = jnp.concatenate([dp0[None, :], dp_rest], axis=0)
 
         def bwd(x_next, items):
+            """Run the transpose rule for the custom derivative."""
             cpi, dpi = items
             xi = dpi - cpi * x_next
             return xi, xi

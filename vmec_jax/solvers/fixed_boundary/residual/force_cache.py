@@ -122,6 +122,7 @@ def prepare_numpy_force_fast_path(
                 constraint_tcon_active: Any | None = None,
                 iter_idx: int | None = None,
             ):
+                """Compute compute forces np for fixed-boundary VMEC solve and implicit differentiation."""
                 return _cfn_helper(
                     compute_forces_impl,
                     state,

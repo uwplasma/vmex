@@ -373,8 +373,8 @@ Current boundary sampling uses edge-surface
 :math:`\phi = \zeta/NFP` for one field period, producing a diagnostic
 external-field summary (RMS and extrema).
 
-WP2 boundary-vacuum algebra scaffold
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Boundary-vacuum algebra
+~~~~~~~~~~~~~~~~~~~~~~~
 
 The next staged piece now computes VMEC-style surface field channels from the
 sampled external cylindrical field:
@@ -772,11 +772,12 @@ Lambda-only implicit solve
 For fixed geometry, ``solve_lambda_state_implicit`` applies the same
 implicit-function machinery to lambda-only solves.
 
-Experimental VMEC-residual solvers (not yet VMEC2000-parity)
-------------------------------------------------------------
+Differentiable residual-minimization solvers
+--------------------------------------------
 
-For end-to-end work we also provide *experimental* solvers that minimize a
-VMEC-style residual objective built from parity kernels:
+For end-to-end differentiation experiments we also provide solvers that
+minimize a VMEC-style residual objective built from the same audited spectral
+kernel family:
 
 .. math::
 
@@ -835,7 +836,7 @@ Remaining limitations are mostly *scope* rather than parity gaps:
   CLI/API path and are covered by bundled smoke/parity gates.  The remaining
   work is broader case coverage, performance tuning, and full VMEC2000 parity
   on larger free-boundary production decks.
-- Experimental optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
+- Residual-minimization optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
   not reproduce all iteration-dependent logic; they are intended for
   differentiable objectives and regression experiments.
 - **Implicit differentiation** is available for lambda-only and fixed-boundary

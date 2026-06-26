@@ -11,6 +11,7 @@ MATRIX_FREE_NONFINITE_RESIDUAL_PENALTY = 1.0e12
 
 
 def linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
+    """Evaluate linear operator vector arg for fixed-boundary VMEC solve and implicit differentiation."""
     arr = np.asarray(value, dtype=float).reshape(-1)
     if int(arr.size) != int(size):
         raise ValueError(f"{name} expected {int(size)} entries, got {int(arr.size)}.")
@@ -18,6 +19,7 @@ def linear_operator_vector_arg(value, *, size: int, name: str) -> np.ndarray:
 
 
 def linear_operator_matrix_arg(value, *, rows: int, name: str) -> np.ndarray:
+    """Evaluate linear operator matrix arg for fixed-boundary VMEC solve and implicit differentiation."""
     arr = np.asarray(value, dtype=float)
     rows = int(rows)
     if arr.ndim != 2:

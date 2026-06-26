@@ -25,6 +25,7 @@ class BoundaryParamSpec:
 
 
 def coeff_label(prefix: str, m: int, n: int) -> str:
+    """Evaluate coeff label for fixed-boundary VMEC solve and implicit differentiation."""
     n_str = f"{n:+d}".replace("+", "")
     return f"{prefix}{m}{n_str}"
 

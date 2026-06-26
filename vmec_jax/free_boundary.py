@@ -1879,11 +1879,12 @@ def sample_external_vacuum_diagnostics(
     extcur: tuple[float, ...] | None = None,
     plascur: float = 0.0,
 ) -> dict[str, Any]:
-    """Sample external mgrid field on plasma boundary and derive vacuum channels.
+    """Sample the external vacuum field on the plasma boundary.
 
-    This is a WP2 diagnostic scaffold: it computes boundary geometry and
-    VMEC-style surface field projections (`Bu/Bv/B^u/B^v/bsqvac`) using the
-    external field only. NESTOR scalar-potential coupling is still pending.
+    The returned channels are VMEC-style surface projections
+    (`Bu/Bv/B^u/B^v/bsqvac`) from the external field alone.  This diagnostic is
+    useful for mgrid/direct-coil validation and for distinguishing pure
+    external-field sampling from full NESTOR scalar-potential coupling.
     """
 
     out: dict[str, Any] = {

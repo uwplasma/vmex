@@ -148,6 +148,7 @@ def validate_lambda_gd_options(
     preconditioner: Any,
     precond_exponent: Any,
 ) -> LambdaGDOptions:
+    """Validate validate lambda gd options for fixed-boundary VMEC solve and implicit differentiation."""
     max_iter, max_backtracks, bt_factor = _validate_line_search_options(
         max_iter=max_iter,
         max_backtracks=max_backtracks,
@@ -175,6 +176,7 @@ def validate_fixed_boundary_gd_options(
     bt_factor: Any,
     gamma: Any,
 ) -> FixedBoundaryGDOptions:
+    """Validate validate fixed boundary gd options for fixed-boundary VMEC solve and implicit differentiation."""
     max_iter, max_backtracks, bt_factor = _validate_line_search_options(
         max_iter=max_iter,
         max_backtracks=max_backtracks,
@@ -196,6 +198,7 @@ def validate_fixed_boundary_lbfgs_options(
     bt_factor: Any,
     gamma: Any,
 ) -> FixedBoundaryLBFGSOptions:
+    """Validate validate fixed boundary lbfgs options for fixed-boundary VMEC solve and implicit differentiation."""
     history_size = _validate_history_size(history_size)
     max_iter, max_backtracks, bt_factor = _validate_line_search_options(
         max_iter=max_iter,
@@ -223,6 +226,7 @@ def validate_residual_lbfgs_options(
     max_backtracks: Any,
     bt_factor: Any,
 ) -> ResidualLBFGSOptions:
+    """Validate validate residual lbfgs options for fixed-boundary VMEC solve and implicit differentiation."""
     w_rz, w_l = _validate_residual_weights(w_rz=w_rz, w_l=w_l)
     objective_scale = _validate_objective_scale(objective_scale)
     scale_rz = float(scale_rz)
@@ -265,6 +269,7 @@ def validate_residual_gn_options(
     bt_factor: Any,
     objective_scale: Any | None,
 ) -> ResidualGNOptions:
+    """Validate validate residual gn options for fixed-boundary VMEC solve and implicit differentiation."""
     damping = None if damping is None else float(damping)
     if damping is not None and damping < 0.0:
         raise ValueError("damping must be nonnegative")
@@ -333,6 +338,7 @@ def validate_residual_iteration_options(
     jit_precompile: Any,
     use_scan: Any,
 ) -> ResidualIterationOptions:
+    """Validate validate residual iteration options for fixed-boundary VMEC solve and implicit differentiation."""
     max_iter = int(max_iter)
     precompile_only = bool(precompile_only)
     if max_iter < 1 and not precompile_only:

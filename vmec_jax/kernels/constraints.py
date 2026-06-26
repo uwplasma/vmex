@@ -35,6 +35,7 @@ from .tomnsp import VmecTrigTables
 
 @dataclass(frozen=True)
 class VmecConstraintTables:
+    """Represent VmecConstraintTables data for spectral VMEC force and residual assembly."""
     faccon: Any  # (mpol,)  m index is 0..mpol-1 (mpol1 in VMEC)
     tcon: Any  # (ns,)
 
@@ -63,11 +64,13 @@ def faccon_from_signgs(*, mpol: int, signgs: int, dtype=jnp.float64) -> Any:
 
 
 def tcon_from_tcon0_heuristic(*, tcon0: float, s, trig: VmecTrigTables, lasym: bool) -> Any:
-    """Heuristic `tcon(js)` profile (placeholder for VMEC's bcovar-derived `tcon`).
+    """Heuristic `tcon(js)` profile for lightweight constraint-force tests.
 
     VMEC's actual computation depends on preconditioner quantities (`ard/azd`)
-    and flux-surface norms of `ru0/zu0`. Until those kernels are ported, we use
-    a conservative, VMEC-shaped scaling with a constant radial factor.
+    and flux-surface norms of `ru0/zu0`. Production fixed-boundary solves use
+    the cached bcovar-derived ``tcon`` path when those channels are available;
+    this helper remains a conservative VMEC-shaped fallback for isolated kernel
+    tests and diagnostics.
 
     Note: VMEC's `bcovar.f` previously halved `tcon` for `lasym`, but the
     current STELLOPT/VMEC2000 source leaves that line commented out. We mirror

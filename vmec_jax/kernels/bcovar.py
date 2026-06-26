@@ -129,6 +129,7 @@ class VmecHalfMeshBcovar:
     lamscale: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.jac,
             self.guu,
@@ -176,6 +177,7 @@ class VmecHalfMeshBcovar:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 
@@ -215,6 +217,7 @@ class VmecForceBcovarPayload:
     lamscale: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.jac,
             self.guu,
@@ -245,6 +248,7 @@ class VmecForceBcovarPayload:
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 

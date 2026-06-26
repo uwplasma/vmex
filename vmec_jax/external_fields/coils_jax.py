@@ -65,6 +65,7 @@ class CoilFieldParams:
     chunk_size: int | None = None
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.base_curve_dofs, self.base_currents)
         aux = (
             int(self.n_segments),
@@ -78,6 +79,7 @@ class CoilFieldParams:
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         n_segments, nfp, stellsym, current_scale, regularization_epsilon, chunk_size = aux
         base_curve_dofs, base_currents = children
         return cls(
@@ -306,6 +308,7 @@ def biot_savart_xyz(
         )
 
     def one_point(point):
+        """Evaluate one point for external magnetic-field sampling for coils and mgrid data."""
         value = _biot_savart_xyz_vectorized(
             point[None, :],
             gamma,

@@ -1750,8 +1750,8 @@ def solve_fixed_boundary_residual_iter(
             constraint_precond_active = constraint_channels.precond_active
             constraint_tcon_active = constraint_channels.tcon_active
 
-            # Free-boundary WP2 scaffold: run/update the NESTOR-like external
-            # vacuum solve and couple bsqvac on the edge slice into bcovar.
+            # Free-boundary coupling: update the external/vacuum boundary
+            # response and couple bsqvac on the edge slice into bcovar.
             freeb_plascur_for_bsqvac = float(freeb_plascur)
             freeb_coupling = _runtime_resolve_free_boundary_coupling_runtime(
                 free_boundary_enabled=bool(free_boundary_enabled),

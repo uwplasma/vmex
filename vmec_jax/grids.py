@@ -30,10 +30,12 @@ class AngleGrid:
 
     @property
     def ntheta(self) -> int:
+        """Evaluate ntheta for VMEC-JAX numerical workflow."""
         return int(self.theta.size)
 
     @property
     def nzeta(self) -> int:
+        """Evaluate nzeta for VMEC-JAX numerical workflow."""
         return int(self.zeta.size)
 
 

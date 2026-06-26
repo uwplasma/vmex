@@ -71,6 +71,7 @@ if has_jax():
         from jax.tree_util import register_pytree_node_class as _register_pytree_node_class  # type: ignore
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 return _register_pytree_node_class(cls)
             except ValueError as e:
@@ -81,6 +82,7 @@ if has_jax():
         import jax.tree_util as _tu
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 _tu.register_pytree_node(
                     cls,
@@ -94,6 +96,7 @@ if has_jax():
 else:
 
     def register_pytree_node_class(cls):  # type: ignore
+        """Register this type as a JAX pytree for JIT and automatic differentiation."""
         return cls
 
 
@@ -111,12 +114,14 @@ class HelicalBasis:
 
     def tree_flatten(self):
         # Arrays are dynamic leaves; nfp is static auxiliary data.
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.cos_phase, self.sin_phase, self.phase_stack, self.m, self.n)
         aux = (int(self.nfp),)
         return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         (nfp,) = aux
         cos_phase, sin_phase, phase_stack, m, n = children
         return cls(cos_phase=cos_phase, sin_phase=sin_phase, phase_stack=phase_stack, m=m, n=n, nfp=int(nfp))

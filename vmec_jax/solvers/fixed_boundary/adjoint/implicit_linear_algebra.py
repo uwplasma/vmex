@@ -28,6 +28,7 @@ class ActiveAdjointModeSelection:
 
     @property
     def falls_back_to_cg(self) -> bool:
+        """Evaluate falls back to cg for fixed-boundary VMEC solve and implicit differentiation."""
         return not (self.use_chunked_active or self.use_lineax_active or self.use_direct_stellsym)
 
 
@@ -348,6 +349,7 @@ def make_damped_transpose_map(residual_vjp: Callable[[Any], Any], *, damping: An
     """Wrap a VJP/linear-transpose map as ``J^T v + damping * v``."""
 
     def matvec(v):
+        """Evaluate matvec for fixed-boundary VMEC solve and implicit differentiation."""
         v_arr = jnp.asarray(v)
         return first_transpose_result(residual_vjp(v_arr)) + jnp.asarray(damping, dtype=v_arr.dtype) * v_arr
 
@@ -363,6 +365,7 @@ def make_active_normal_map(
     """Build ``(J J^T + damping I) lam`` for active-coordinate least squares."""
 
     def matvec(lam):
+        """Evaluate matvec for fixed-boundary VMEC solve and implicit differentiation."""
         lam_arr = jnp.asarray(lam)
         jt_lam = first_transpose_result(residual_vjp_active(lam_arr))
         j_jt_lam = residual_jvp_active(jt_lam)
@@ -389,6 +392,7 @@ def make_full_normal_map(
     """Build the full-state matrix-free normal map used by the residual adjoint."""
 
     def matvec(u_flat):
+        """Evaluate matvec for fixed-boundary VMEC solve and implicit differentiation."""
         u_state = project_state(unpack_state(u_flat, layout))
         jv = residual_jvp(u_state)
         jt_jv = first_transpose_result(residual_vjp(jv))
