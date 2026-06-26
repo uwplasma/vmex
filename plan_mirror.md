@@ -5738,6 +5738,105 @@ Visual validation:
 
 No user input is needed.
 
+## M304. Queued edge-velocity scrub profile and fixed parity-smoke source gate
+
+### Steps taken
+
+- Created a fresh `office` checkout at
+  `/home/rjorge/local/vmec_mirror_edge_velocity_scrub` on PR #21.
+- Added a serialized waiter:
+  `results/square_coil_direct_gpu_edge_velocity_scrub_queued/run_when_idle.sh`.
+  It waits behind active `profile_square_coil_free_boundary.py`, `xvmec`, and
+  existing `run_when_idle` jobs, uses the shared
+  `/tmp/vmec_mirror_freeb_queue.lock`, and skips itself if the current
+  hot-restart report is already strict.
+- The queued profile uses the latest edge-control velocity scrub path with:
+  `MPOL=5`, `NTOR=28`, `NZETA=64`, `NS_ARRAY=9,13,17`,
+  `NITER_ARRAY=1000,2000,8000`, `FTOL_ARRAY=1e-8,1e-10,1e-12`,
+  `DELT=0.02`, direct-coil cached JIT, Anderson pressure mixing,
+  `--freeb-edge-control-projection square`, and two `8000`-iteration
+  free-boundary hot restarts.
+- Reproduced the latest GitHub `Parity Manifest Smoke` failure locally and
+  identified the true failure as the source-health gate:
+  `solve_fixed_boundary_residual_iter` was `2442` lines against the pinned
+  `2440` budget.
+- Removed the small nested velocity-scrub wrapper and called the projector
+  method directly, reducing the function to `2439` lines without changing
+  behavior.
+
+### Results obtained
+
+- The new velocity-scrub profile is queued as PID `560225` and was verified
+  waiting, not consuming compute.
+- The local live summary from the latest checkout reports the active direct row
+  as production-ready in representation but still stalled above strict:
+  about iteration `5171/8000`, max component `2.15e-11`, strict gap `21.5`.
+- The VMEC2000 generated-`mgrid` row remains in the loose `1e-8` stage at about
+  `1.41e-8` max component, also with a production-ready representation deck.
+- The parity-smoke CI command now passes locally.
+
+### How it was tested
+
+```bash
+venv/bin/python tools/diagnostics/parity_sweep_manifest.py \
+  --tier smoke --dry-run --vmec-exec /usr/bin/true
+venv/bin/python tools/diagnostics/source_health.py --top 20 \
+  --max-root-helper-prefix-files 2 \
+  --max-function-lines-at \
+  vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2440 \
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420
+```
+
+Result: both passed; source health reports the residual iteration function at
+`2439` lines.
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_free_boundary_wp0.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+ruff check ...
+git diff --check
+```
+
+Result: affected tests/lint passed.
+
+### File structure and best-practice adherence
+
+- No generated outputs were committed; local parity dry-run outputs remain
+  under ignored `outputs/`.
+- The remote queued profile lives in a scratch checkout and serializes with
+  existing solver lanes.
+- The CI fix reduces code inside the oversized residual-iteration function
+  instead of raising the source-health budget.
+
+### Best next steps
+
+1. Push the source-health fix and fast-forward the remote
+   `vmec_mirror_edge_velocity_scrub` checkout before its waiter starts.
+2. Recheck GitHub parity-smoke after the new push; logs from the failed run
+   were unavailable while the workflow was still active.
+3. Let the current direct and VMEC2000 rows finish before interpreting the
+   queued polish lanes.
+
+### Completion percentages after M304
+
+- Direct-coil GPU/JIT parity lane: `96%`, strict component closure still open.
+- Seeded hot-restart lane: `99%`, active row still running near strict but
+  above target.
+- VMEC2000 robustness/reference lane: `99%`, active generated-`mgrid` row still
+  running and not yet at the strict stage.
+- True spline/control-basis hybrid lane: `89%`, velocity-scrub projected-edge
+  profile is queued on the latest code.
+- DELT/stage-budget polish lane: `75%`, queued.
+- Finite-beta virtual-casing validation lane: `87%`.
+- CI/API health lane: `99%`, local parity-smoke/source-health gate fixed.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M303. Edge-control projection now clears stale LCFS geometry momentum
 
 ### Steps taken

@@ -1616,20 +1616,13 @@ def solve_fixed_boundary_residual_iter(
         nonlocal velocity_blocks
         velocity_blocks = _zero_primary_velocity_blocks_like(velocity_blocks)
 
-    def _zero_freeb_edge_velocity_blocks() -> None:
-        nonlocal velocity_blocks
-        velocity_blocks = freeb_edge_control_projector.scrub_velocity(
-            velocity_blocks,
-            host_update=bool(host_update_assembly),
-        )
-
     axis_reset_runtime_callbacks = _InitialAxisResetRuntimeCallbacks(
         _reset_axis_from_boundary, _host_axis_reset_update, _apply_controller_update, _controller_after_axis_reset,
         _zero_primary_velocity_blocks, lambda: axis_reset_coeffs, _print_scan_axis_guess,
     )
 
     def _apply_strict_step_branch(branch_result, *, after_catastrophic_restart: bool = False):
-        nonlocal state, step_status, restart_reason, huge_force_restart_count, restart_path, update_rms
+        nonlocal state, step_status, restart_reason, huge_force_restart_count, restart_path, update_rms, velocity_blocks
         nonlocal max_coeff_delta_rms, max_update_rms, freeb_controls_cached
 
         branch_application = _strict_step_branch_application(
@@ -1654,7 +1647,9 @@ def solve_fixed_boundary_residual_iter(
         if side_effects.zero_primary_velocity_blocks:
             _zero_primary_velocity_blocks()
         if bool(branch_result.accepted):
-            _zero_freeb_edge_velocity_blocks()
+            velocity_blocks = freeb_edge_control_projector.scrub_velocity(
+                velocity_blocks, host_update=bool(host_update_assembly)
+            )
         if side_effects.clear_freeb_controls_cached:
             freeb_controls_cached = None
         if side_effects.clear_precond_cache:
@@ -3083,7 +3078,9 @@ def solve_fixed_boundary_residual_iter(
             )
             state = non_strict_update.state
             velocity_blocks = non_strict_update.velocities
-            _zero_freeb_edge_velocity_blocks()
+            velocity_blocks = freeb_edge_control_projector.scrub_velocity(
+                velocity_blocks, host_update=bool(host_update_assembly)
+            )
             dt_eff = non_strict_update.dt_eff
             update_rms = non_strict_update.update_rms
             step_status = non_strict_update.step_status
