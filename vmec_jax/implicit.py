@@ -27,7 +27,7 @@ from typing import Any, Callable, Tuple
 import numpy as np
 
 from ._compat import has_jax, jax, jnp
-from .implicit_adjoint_helpers import (
+from .solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
     full_active_keep_indices,
     make_full_normal_map,
     pack_stellsym_feasible_state as _pack_stellsym_feasible_state,
@@ -42,7 +42,7 @@ from .implicit_adjoint_helpers import (
     update_stellsym_reduced_state as _update_stellsym_reduced_state,
     validate_full_adjoint_shapes,
 )
-from .implicit_residual_adjoint_helpers import (
+from .solvers.fixed_boundary.adjoint.residual_linear_algebra import (
     lineax_bicgstab_solve as _lineax_bicgstab_solve_impl,
     linear_map_jacobian_columns as _linear_map_jacobian_columns_impl,
     solve_active_residual_adjoint_linearized as _solve_active_residual_adjoint_linearized,

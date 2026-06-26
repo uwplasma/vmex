@@ -193,9 +193,9 @@ def _solve_from_scale(implicit, state0, static, jnp, scale, *, options):
 
 
 def test_implicit_adjoint_helpers_cover_shape_errors_and_dense_callback(monkeypatch):
-    import vmec_jax.implicit_adjoint_helpers as helpers
+    import vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra as helpers
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_adjoint_helpers import (
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
         default_jac_chunk_size,
         dense_adjoint_from_jacobian,
         first_transpose_result,
