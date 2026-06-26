@@ -324,7 +324,7 @@ The reviewer-facing status of this ladder is:
      - Complete
      - Dense custom-linear-solve vacuum problems validate implicit gradients
        with respect to coil current and geometry controls.
-     - None for the dense toy vacuum primitive.
+     - None for the dense validation-scale vacuum primitive.
    * - 3
      - Complete
      - Boundary-projection derivatives are checked with respect to sampled
@@ -419,7 +419,7 @@ radial preconditioner size across accepted steps, the controller replay keeps
 those preconditioner matrices branch-local instead of padding them into the
 scan payload; scalar controls and velocity histories remain scan-stacked.
 The reusable segmented accepted-controller primitive now validates the same
-split on a JAX-visible toy controller: segment boundaries are static Python
+split on a JAX-visible validation controller: segment boundaries are static Python
 structure, while each segment body is a differentiable ``lax.scan`` and the
 state/done carry is propagated across segments.  Production replay has not yet
 been switched to this segmented primitive by default, but
@@ -597,7 +597,7 @@ matched to ``~9e-11`` in objective value, and warm calls were below
 controller composition across steps and repeated boundary replay compilation,
 not the standalone strict update.
 The remaining phase-2 blocker is differentiating through the nonlinear
-``run_free_boundary`` iteration loop itself, rather than through the dense toy
+``run_free_boundary`` iteration loop itself, rather than through the dense validation-scale
 nonlinear primitive, fixed-boundary operator, complete finite-response proxy,
 or final fixed accepted-boundary replay. The combined
 JAX operator is also threaded into the free-boundary driver behind the opt-in
@@ -2112,7 +2112,7 @@ evidence. The default gates are CI-safe and cover:
   scaling;
 - direct-provider source refresh on reuse and trial-state vacuum-field refresh,
   so direct coils are not scored against stale pre-update source data;
-- dense toy vacuum-adjoint tests.
+- dense validation-scale vacuum-adjoint tests.
 - direct-coil to implicit dense-vacuum-chain finite-difference checks for one
   current scale and one Fourier geometry perturbation.
 - JAX boundary-field projection value parity with the current NumPy

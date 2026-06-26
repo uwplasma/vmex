@@ -144,7 +144,7 @@ def _freeb_physical_coefficients(*, state: Any, static: Any) -> tuple[np.ndarray
             np.asarray(state.Zcos),
         )
 
-    from .vmec_parity import vmec_m1_internal_to_physical_signed_host
+    from .kernels.parity import vmec_m1_internal_to_physical_signed_host
 
     return vmec_m1_internal_to_physical_signed_host(
         Rcos=np.asarray(state.Rcos),
@@ -258,7 +258,7 @@ def _freeb_synthesize_axis_pair(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fallback axis reconstruction from the axis Fourier coefficients."""
 
-    from .vmec_realspace import vmec_realspace_synthesis
+    from .kernels.realspace import vmec_realspace_synthesis
 
     axis_r = np.asarray(
         vmec_realspace_synthesis(
@@ -287,7 +287,7 @@ def _freeb_axis_from_vmec_pr1(*, state: Any, static: Any, trig: Any, axis_mode: 
     if bool(getattr(static.cfg, "lasym", False)) or axis_mode not in ("vmec_pr1", "pr1_vmec", "vmec"):
         return None
     try:
-        from .vmec_parity import signed_maps_from_modes, _signed_to_mn_cos_host, _signed_to_mn_sin_host
+        from .kernels.parity import signed_maps_from_modes, _signed_to_mn_cos_host, _signed_to_mn_sin_host
 
         maps = signed_maps_from_modes(static.modes)
         rcc, _rss = _signed_to_mn_cos_host(np.asarray(state.Rcos), maps=maps)
@@ -320,7 +320,7 @@ def _freeb_axis_from_parity(
     """Recover axis arrays from VMEC parity channels when requested."""
 
     try:
-        from .vmec_realspace import vmec_realspace_synthesis
+        from .kernels.realspace import vmec_realspace_synthesis
 
         axis_apply_scalxc = _env_truthy("VMEC_JAX_FREEB_AXIS_PARITY_SCALXC")
         coeff_cos = np.stack([np.asarray(Rcos_phys), np.asarray(Zcos_phys)], axis=0) * setup.even_m_mask
@@ -1879,11 +1879,12 @@ def sample_external_vacuum_diagnostics(
     extcur: tuple[float, ...] | None = None,
     plascur: float = 0.0,
 ) -> dict[str, Any]:
-    """Sample external mgrid field on plasma boundary and derive vacuum channels.
+    """Sample the external vacuum field on the plasma boundary.
 
-    This is a WP2 diagnostic scaffold: it computes boundary geometry and
-    VMEC-style surface field projections (`Bu/Bv/B^u/B^v/bsqvac`) using the
-    external field only. NESTOR scalar-potential coupling is still pending.
+    The returned channels are VMEC-style surface projections
+    (`Bu/Bv/B^u/B^v/bsqvac`) from the external field alone.  This diagnostic is
+    useful for mgrid/direct-coil validation and for distinguishing pure
+    external-field sampling from full NESTOR scalar-potential coupling.
     """
 
     out: dict[str, Any] = {

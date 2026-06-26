@@ -43,7 +43,7 @@ def _parse_lambdas(text: str) -> tuple[float, ...]:
 
 
 def _diagnose(vj: Any, run: Any, *, args: argparse.Namespace) -> dict[str, Any]:
-    from vmec_jax.qi_diagnostics import QIDiagnosticOptions, QISeedSuitabilityTargets, annotate_qi_seed_suitability
+    from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
     options = QIDiagnosticOptions(
         surfaces=np.asarray(args.surfaces, dtype=float),

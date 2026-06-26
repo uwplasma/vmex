@@ -19,7 +19,7 @@ from vmec_jax.plotting import (
 from vmec_jax.preconditioner_1d import lambda_preconditioner
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.static import build_static
-from vmec_jax.vmec_realspace import (
+from vmec_jax.kernels.realspace import (
     _PHASE_CACHE,
     _phase_cache_key,
     _phase_stack_from_trig,
@@ -27,7 +27,7 @@ from vmec_jax.vmec_realspace import (
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_multi,
 )
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _cfg(*, mpol=3, ntor=1, ns=4, nfp=2, lasym=False, lthreed=True, ntheta=8, nzeta=5):

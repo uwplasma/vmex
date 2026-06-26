@@ -82,7 +82,7 @@ def test_lasym_finite_beta_smoke_manifest_is_bounded_and_asset_backed() -> None:
     assert float(case.get("vmec_timeout", 0.0)) <= 120.0
 
     input_path = _resolve_repo_path(str(case["input"]))
-    reference_wout = REPO_ROOT / "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"
+    reference_wout = REPO_ROOT / "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc"
     assert input_path.exists()
     if not reference_wout.exists():
         pytest.skip("Optional LASYM finite-beta WOUT fixture is missing. Run tools/fetch_assets.py --bundle wout-fixtures.")

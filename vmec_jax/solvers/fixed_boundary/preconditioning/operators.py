@@ -11,7 +11,7 @@ import numpy as np
 
 from ...._compat import jax, jnp
 from ....state import VMECState
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.tomnsp import TomnspsRZL
 from ..optimization.constraints import scale_mode_slice_np
 
 
@@ -441,6 +441,7 @@ def radial_tridi_smooth_dirichlet(
         dp0 = d[0] / b
 
         def fwd(carry, di):
+            """Run the forward rule for the custom derivative."""
             cp_prev, dp_prev = carry
             denom = b - a * cp_prev
             cp = c / denom
@@ -452,6 +453,7 @@ def radial_tridi_smooth_dirichlet(
         dp = jnp.concatenate([dp0[None, :], dp_rest], axis=0)
 
         def bwd(x_next, items):
+            """Run the transpose rule for the custom derivative."""
             cpi, dpi = items
             xi = dpi - cpi * x_next
             return xi, xi
@@ -565,7 +567,7 @@ def metric_surface_precond_from_bcovar_jax(*, bc, trig, wint_from_trig_func=None
     """Return traced metric preconditioner scales from a bcovar payload."""
 
     if wint_from_trig_func is None:
-        from ....vmec_residue import vmec_wint_from_trig as wint_from_trig_func
+        from ....kernels.residue import vmec_wint_from_trig as wint_from_trig_func
     if scales_func is None:
         scales_func = metric_surface_precond_scales_jax
 
@@ -588,7 +590,7 @@ def metric_surface_precond_from_bcovar_np(
     """Return host metric preconditioner scales from a bcovar payload."""
 
     if wint_from_trig_func is None:
-        from ....vmec_residue import vmec_wint_from_trig as wint_from_trig_func
+        from ....kernels.residue import vmec_wint_from_trig as wint_from_trig_func
     if scales_func is None:
         scales_func = metric_surface_precond_scales_np
 

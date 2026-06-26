@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.optimization import boundary_param_names, create_x_scale
-from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
+from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
 
 from tools.diagnostics.qi_landscape_scan import (
     DEFAULT_SURFACES,

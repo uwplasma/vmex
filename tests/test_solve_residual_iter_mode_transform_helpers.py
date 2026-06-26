@@ -15,8 +15,8 @@ from vmec_jax.solvers.fixed_boundary.residual.mode_transform import (
     mode_diag_weights_mn_np,
     vmec_scalxc_from_s_np,
 )
-from vmec_jax.vmec_residue import vmec_scalxc_from_s
-from vmec_jax.vmec_parity import (
+from vmec_jax.kernels.residue import vmec_scalxc_from_s
+from vmec_jax.kernels.parity import (
     _mn_cos_to_signed_host,
     _mn_sin_to_signed_host,
     signed_maps_from_modes,

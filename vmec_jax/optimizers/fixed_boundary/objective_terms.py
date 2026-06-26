@@ -38,6 +38,7 @@ class ObjectiveTerm:
     prepare: Callable[[StageContext], "ObjectiveTerm"] | None = None
 
     def residual(self, ctx: StageContext, state) -> object:
+        """Evaluate residual for fixed-boundary VMEC solve and implicit differentiation."""
         value = as_vector(self.evaluate(ctx, state))
         target = jnp.asarray(self.target, dtype=jnp.float64)
         if int(target.ndim) == 0:
@@ -72,6 +73,7 @@ class QIObjectiveTerm:
     qi_options: "QuasiIsodynamicOptions | None" = None
 
     def residual_and_total(self, ctx: StageContext, state, field: dict) -> tuple[object, object]:
+        """Evaluate residual and total for fixed-boundary VMEC solve and implicit differentiation."""
         residuals, total = self.evaluate(ctx, state, field)
         return as_vector(residuals), total
 
@@ -89,6 +91,7 @@ def residuals_from_objectives(objectives: Sequence[ObjectiveTerm], ctx: StageCon
     bound_objectives = tuple(term.bind(ctx) for term in objectives)
 
     def residuals_from_state(state, *, ctx=ctx, objectives=bound_objectives):
+        """Evaluate residuals from state for fixed-boundary VMEC solve and implicit differentiation."""
         return jnp.concatenate([term.residual(ctx, state) for term in objectives])
 
     field_totals = tuple(term.total for term in bound_objectives if term.total is not None)
@@ -135,6 +138,7 @@ def attach_packed_state_autodiff_hooks(residuals_from_state: Callable) -> Callab
         return jnp.asarray(residuals_from_state(state), dtype=jnp.float64).reshape(-1)
 
     def state_cotangent_operator_from_packed(packed_state, layout):
+        """Evaluate state cotangent operator from packed for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax._compat import jax, jnp as _jnp
 
         packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
@@ -152,9 +156,11 @@ def attach_packed_state_autodiff_hooks(residuals_from_state: Callable) -> Callab
         return _apply
 
     def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
+        """Evaluate state cotangent from packed for fixed-boundary VMEC solve and implicit differentiation."""
         return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
 
     def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        """Evaluate state objective value and cotangent from packed for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax._compat import jax, jnp as _jnp
 
         packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)

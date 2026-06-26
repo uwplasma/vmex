@@ -44,8 +44,8 @@ CASES = (
     ),
     (
         "basic_non_stellsym_pressure_single_grid",
-        "examples_single_grid/data/input.basic_non_stellsym_pressure",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/input.basic_non_stellsym_pressure",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
         1.2e-2,
     ),
 )

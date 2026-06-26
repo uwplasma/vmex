@@ -134,3 +134,63 @@ def test_source_health_root_helper_prefix_gate_is_baseline_aware(tmp_path: Path)
     ]
     assert source_health.main([*common_args, "--max-root-helper-prefix-files", "2"]) == 0
     assert source_health.main([*common_args, "--max-root-helper-prefix-files", "1"]) == 1
+
+
+def test_source_health_collects_missing_public_docstrings(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text(
+        "\n".join(
+            [
+                "def documented():",
+                '    \"\"\"Return one.\"\"\"',
+                "    return 1",
+                "",
+                "def undocumented():",
+                "    return 2",
+                "",
+                "class PublicClass:",
+                "    def __call__(self):",
+                "        return 3",
+                "",
+                "class DocumentedClass:",
+                '    \"\"\"Container with a documented method.\"\"\"',
+                "    def method(self):",
+                '        \"\"\"Return four.\"\"\"',
+                "        return 4",
+                "",
+                "def _private_helper():",
+                "    return 5",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    missing = source_health.collect_missing_public_docstrings([source])
+
+    assert [(item.kind, item.qualified_name) for item in missing] == [
+        ("function", "undocumented"),
+        ("class", "PublicClass"),
+        ("function", "PublicClass.__call__"),
+    ]
+    report = source_health.format_public_docstring_report(missing)
+    assert "missing public docstrings: 3" in report
+    assert "PublicClass.__call__" in report
+
+
+def test_source_health_public_docstring_gate_is_opt_in(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("def undocumented():\n    return 1\n", encoding="utf-8")
+
+    assert source_health.main([str(source)]) == 0
+    assert (
+        source_health.main(
+            [
+                str(source),
+                "--require-public-docstrings",
+                "--public-docstring-root",
+                str(source),
+            ]
+        )
+        == 1
+    )

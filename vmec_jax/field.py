@@ -454,7 +454,7 @@ def b_cartesian_from_state(
     """
     from .energy import flux_profiles_from_indata
     from .profiles import eval_profiles
-    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+    from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
     from .wout import _icurv_full_mesh_from_indata
 
     if signgs is None:

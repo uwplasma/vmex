@@ -574,7 +574,7 @@ The staged QI example builds an explicit
 ``vj.make_qi_optimization_context(...)`` from the same top-level variables used
 to assemble the objective tuple list.  That context is passed to seed and
 checkpoint helpers so the driver remains editable while shared implementation
-details stay in ``vmec_jax.qi_optimization``.
+details stay in ``vmec_jax.quasi_isodynamic.optimization``.
 
 For QI cleanup work, rank solved candidates with the no-solve component report
 before promoting any scalar objective result.  Mirror-ratio cleanup must be
@@ -1709,7 +1709,7 @@ Source files
        JVP propagation (``checkpoint_tape_state_jvp_columns``).
    * - ``vmec_jax/quasisymmetry.py``
      - QS residuals (``quasisymmetry_ratio_residual_from_state``).
-   * - ``vmec_jax/quasi_isodynamic.py``
+   * - ``vmec_jax/quasi_isodynamic/``
      - Differentiable smooth Boozer-space QI residuals
        (``quasi_isodynamic_residual_from_state``), mirror-ratio penalty, and
        LCFS elongation and ``LgradB`` penalties.

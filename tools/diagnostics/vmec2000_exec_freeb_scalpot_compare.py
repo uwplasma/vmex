@@ -711,7 +711,7 @@ def _copy_input_and_mgrid(input_path: Path, workdir: Path) -> Path:
         if not mg_src.exists():
             search_roots = [
                 Path(__file__).resolve().parents[2] / "examples" / "data",
-                Path(__file__).resolve().parents[2] / "examples_single_grid" / "data",
+                Path(__file__).resolve().parents[2] / "examples/data/single_grid",
                 Path(__file__).resolve().parents[3] / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST",
                 Path(__file__).resolve().parents[3] / "external",
                 Path(__file__).resolve().parents[2] / "outputs",

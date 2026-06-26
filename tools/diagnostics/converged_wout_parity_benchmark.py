@@ -128,7 +128,7 @@ BENCHMARK_CASES = (
     ),
     BenchmarkCase(
         case="up_down_asymmetric_tokamak",
-        input_relpath="examples_single_grid/data/input.up_down_asymmetric_tokamak",
+        input_relpath="examples/data/single_grid/input.up_down_asymmetric_tokamak",
         updates={
             "NITER": "800",
             "NS_ARRAY": "17",
@@ -145,7 +145,7 @@ BENCHMARK_CASES = (
     ),
     BenchmarkCase(
         case="basic_non_stellsym_pressure",
-        input_relpath="examples_single_grid/data/input.basic_non_stellsym_pressure",
+        input_relpath="examples/data/single_grid/input.basic_non_stellsym_pressure",
         updates={
             "NITER": "1200",
             "NS_ARRAY": "25",
@@ -162,7 +162,7 @@ BENCHMARK_CASES = (
     ),
     BenchmarkCase(
         case="cth_like_free_bdy",
-        input_relpath="examples_single_grid/data/input.cth_like_free_bdy",
+        input_relpath="examples/data/single_grid/input.cth_like_free_bdy",
         updates={
             "NITER": "5000",
             "NITER_ARRAY": "5000",
@@ -172,7 +172,7 @@ BENCHMARK_CASES = (
         axisymmetric=False,
         lasym=False,
         multigrid=False,
-        mgrid_relpath="examples_single_grid/data/mgrid_cth_like.nc",
+        mgrid_relpath="examples/data/single_grid/mgrid_cth_like.nc",
         nightly=True,
         timeout_s=600.0,
     ),

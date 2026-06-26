@@ -1,4 +1,12 @@
-"""JAX-native quasisymmetry diagnostics from VMEC-JAX states."""
+"""JAX-native quasisymmetry metrics from VMEC states and Boozer-like spectra.
+
+The objective measures whether magnetic-field strength is dominated by modes
+with one target helicity, e.g. quasi-axisymmetry ``(M,N)=(1,0)`` or
+quasi-helical symmetry ``(M,N)=(1,-nfp)``.  The implementation keeps the
+sampling grids and trigonometric tables explicit so optimization callbacks can
+reuse them while JAX differentiates through the VMEC state and spectral field
+reconstruction.
+"""
 
 from __future__ import annotations
 
@@ -400,9 +408,9 @@ def quasisymmetry_diagnostics_from_state(
     from .modes import nyquist_mode_table_from_grid
     from .energy import flux_profiles_from_indata
     from .profiles import eval_profiles
-    from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-    from .vmec_lforbal import currents_from_bcovar
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+    from .kernels.lforbal import currents_from_bcovar
+    from .kernels.tomnsp import vmec_trig_tables
 
     if pressure_local is None:
         prof_seed = eval_profiles(indata, np.asarray(static.s))

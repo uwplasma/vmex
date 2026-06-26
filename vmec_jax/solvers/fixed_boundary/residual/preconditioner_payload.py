@@ -13,7 +13,7 @@ from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     preconditioner_output_blocks_jax,
     preconditioner_output_blocks_np,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _jax_available(has_jax_func=None) -> bool:
@@ -128,9 +128,11 @@ def residual_preconditioner_operators(
     """
 
     def apply_radial_tridi(a, alpha: float):
+        """Apply apply radial tridi for fixed-boundary VMEC solve and implicit differentiation."""
         return radial_tridi_smooth_dirichlet_func(a, alpha=alpha, skip_nonpositive=True)
 
     def apply_radial_tridi_batched(arrs, alpha: float):
+        """Apply apply radial tridi batched for fixed-boundary VMEC solve and implicit differentiation."""
         if alpha <= 0.0:
             return tuple(arrs)
         stack = jnp_module.stack(arrs, axis=1)
@@ -138,6 +140,7 @@ def residual_preconditioner_operators(
         return tuple(smooth[:, i] for i in range(int(smooth.shape[1])))
 
     def lambda_preconditioner(bc, *, return_faclam: bool = False, return_debug: bool = False):
+        """Evaluate lambda preconditioner for fixed-boundary VMEC solve and implicit differentiation."""
         lam_r0scale = float(getattr(trig, "r0scale", 1.0)) if trig is not None else 1.0
         if bool(use_numpy_preconditioner_apply) and not tree_has_tracer_func(bc):
             from vmec_jax.preconditioner_1d import lambda_preconditioner as build_lambda_np
@@ -171,6 +174,7 @@ def residual_preconditioner_operators(
         use_precomputed: bool | None = None,
         use_lax_tridi: bool | None = None,
     ):
+        """Evaluate rz preconditioner matrices for fixed-boundary VMEC solve and implicit differentiation."""
         if (
             bool(use_numpy_preconditioner_apply)
             and (not bool(getattr(cfg, "lasym", False)))
@@ -222,6 +226,7 @@ def residual_preconditioner_operators(
         use_precomputed: bool | None = None,
         use_lax_tridi: bool | None = None,
     ):
+        """Evaluate rz preconditioner apply for fixed-boundary VMEC solve and implicit differentiation."""
         if bool(use_numpy_preconditioner_apply) and not tree_has_tracer_func(frzl_in):
             from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply_numpy
 
@@ -244,6 +249,7 @@ def residual_preconditioner_operators(
         )
 
     def rz_preconditioner(frzl_in: TomnspsRZL, bc, k):
+        """Evaluate rz preconditioner for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax.preconditioner_1d_jax import rz_preconditioner as apply_rz_preconditioner
 
         return apply_rz_preconditioner(
@@ -511,7 +517,7 @@ def seed_preconditioner_cache_from_bcovar_update(
         cache.precond_diag = None
         cache.tcon = zero_tcon
     else:
-        from vmec_jax.vmec_constraints import precondn_diag_axd1_from_bcovar
+        from vmec_jax.kernels.constraints import precondn_diag_axd1_from_bcovar
 
         use_numpy_patch = (
             bool(host_update_assembly)
@@ -519,7 +525,7 @@ def seed_preconditioner_cache_from_bcovar_update(
             and (not tree_has_tracer(s))
         )
         if use_numpy_patch:
-            from vmec_jax.vmec_numpy_forces import _numpy_module_patch
+            from vmec_jax.kernels.numpy_forces import _numpy_module_patch
 
             with _numpy_module_patch():
                 ard1, azd1 = precondn_diag_axd1_from_bcovar(

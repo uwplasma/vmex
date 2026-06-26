@@ -13,8 +13,8 @@ from vmec_jax.finite_beta import FiniteBetaTargets
 from vmec_jax.modes import ModeTable
 from vmec_jax.namelist import InData
 from vmec_jax.optimization_workflow import DMerc, GlasserResistiveInterchange, StageContext
-from vmec_jax.vmec_realspace import vmec_realspace_synthesis_multi
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.realspace import vmec_realspace_synthesis_multi
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def test_s_half_from_static_matches_vmec_half_mesh_convention():

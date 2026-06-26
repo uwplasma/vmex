@@ -10,7 +10,7 @@ from vmec_jax._compat import has_jax, jnp
 from vmec_jax.config import VMECConfig
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.static import build_static
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="solve helpers require JAX array updates")

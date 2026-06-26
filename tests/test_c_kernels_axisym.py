@@ -8,8 +8,8 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 

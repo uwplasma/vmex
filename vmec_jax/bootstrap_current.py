@@ -530,6 +530,7 @@ def bootstrap_current_fixed_point(
             raise ValueError("ne_coeffs and Te_coeffs are required when diagnostics_fn is not provided")
 
         def diagnostics_fn(run, current_indata):
+            """Evaluate diagnostics fn for VMEC-JAX numerical workflow."""
             return _default_redl_diagnostics_fn(
                 run,
                 current_indata,

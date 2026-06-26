@@ -36,7 +36,6 @@ from .optimization import (
 from .optimizers.fixed_boundary import (
     finite_beta_objectives as _finite_beta_objectives,
     objective_terms as _objective_terms,
-    qi_objectives as _qi_objectives,
     seed_inputs as _seed_inputs,
     stage_policy as _stage_policy,
     workflow_artifacts as _workflow_artifacts,
@@ -46,7 +45,6 @@ from .optimizers.fixed_boundary.objective_terms import (
     as_vector, attach_packed_state_autodiff_hooks as _attach_packed_state_autodiff_hooks,
     residuals_from_objectives,
 )
-from .optimizers.fixed_boundary.qi_objectives import QuasiIsodynamicOptions
 from .optimizers.fixed_boundary.parameterization import rebuild_indata_with_resolution
 from .optimizers.fixed_boundary.seed_inputs import simple_omnigenity_seed_indata
 from .optimizers.fixed_boundary.stage_policy import (
@@ -55,10 +53,10 @@ from .optimizers.fixed_boundary.stage_policy import (
 from .optimizers.fixed_boundary.workflow_artifacts import FixedBoundaryOptimizationResult
 from .optimizers.fixed_boundary import workflow_outputs as _workflow_outputs
 from .modes import nyquist_mode_table_from_grid, vmec_mode_table
-from .quasi_isodynamic import (
-    _nearest_half_mesh_indices,
-    quasi_isodynamic_residual_from_state,
-)
+from .quasi_isodynamic import optimization_terms as _qi_objectives
+from .quasi_isodynamic.optimization_terms import QuasiIsodynamicOptions
+from .quasi_isodynamic import quasi_isodynamic_residual_from_state
+from .quasi_isodynamic.objectives import _nearest_half_mesh_indices
 from .quasisymmetry import quasisymmetry_ratio_residual_from_state
 from .static import build_static
 from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
@@ -181,6 +179,7 @@ class _LeastSquaresProblemAssembly:
     qi_options: QuasiIsodynamicOptions | None = None
 
     def add_tuple(self, fn: Callable, target: float | np.ndarray, weight: float) -> None:
+        """Add add tuple for VMEC optimization residual assembly and solve orchestration."""
         tuple_weight = float(weight)
         if not math.isfinite(tuple_weight) or tuple_weight < 0.0:
             raise ValueError("Least-squares tuple weights must be finite and non-negative.")
@@ -334,9 +333,11 @@ class AugmentedLagrangianConstraint:
 
     @property
     def requires_qi_field(self) -> bool:
+        """Evaluate requires qi field for VMEC optimization residual assembly and solve orchestration."""
         return bool(getattr(self.objective, "requires_qi_field", False))
 
     def J(self, _ctx: StageContext, _state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         raise RuntimeError("AugmentedLagrangianConstraint must be assembled through LeastSquaresProblem.")
 
     def updated(
@@ -374,6 +375,7 @@ class AugmentedLagrangianConstraint:
         return jnp.sqrt(jnp.asarray(penalty, dtype=jnp.float64)) * projected
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("AugmentedLagrangianConstraint objective tuples require target=0.")
         if hasattr(self.objective, "to_constraint_term"):
@@ -425,6 +427,7 @@ class AugmentedLagrangianConstraint:
         )
 
     def to_qi_term(self, residual_weight: float) -> QIObjectiveTerm:
+        """Convert this user-facing objective into a quasi-isodynamic residual term."""
         if hasattr(self.objective, "to_constraint_qi_term"):
             base = self.objective.to_constraint_qi_term()
         elif hasattr(self.objective, "to_qi_term"):
@@ -450,9 +453,11 @@ class AspectRatio:
     name = "aspect"
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return equilibrium_aspect_ratio_from_state(state=state, static=ctx.static)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(
             self.name,
             self.J,
@@ -468,9 +473,11 @@ class MeanIota:
     name = "iota"
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return mean_iota(ctx, state)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         return ObjectiveTerm(
             self.name,
             self.J,
@@ -487,13 +494,16 @@ class AbsMeanIotaFloor:
     name = "abs_iota_floor"
 
     def __init__(self, target: float, *, softness: float = 1.0e-3):
+        """Evaluate this object for VMEC optimization residual assembly and solve orchestration."""
         self.target = float(target)
         self.softness = float(softness)
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return smooth_min_abs_iota_residual(mean_iota(ctx, state), self.target, softness=self.softness)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         del target
         return ObjectiveTerm(
             self.name,
@@ -511,10 +521,12 @@ class AbsMeanIotaCeiling:
     name = "abs_iota_ceiling"
 
     def __init__(self, maximum: float, *, softness: float = 1.0e-3):
+        """Evaluate this object for VMEC optimization residual assembly and solve orchestration."""
         self.maximum = float(maximum)
         self.softness = float(softness)
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return abs_mean_iota_ceiling_objective(
             self.maximum,
             weight=1.0,
@@ -522,6 +534,7 @@ class AbsMeanIotaCeiling:
         ).evaluate(ctx, state)
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         del target
         term = abs_mean_iota_ceiling_objective(
             self.maximum,
@@ -544,6 +557,7 @@ class QuasisymmetryRatioResidual:
     name = "qs"
 
     def __init__(self, *, helicity_m: int, helicity_n: int, surfaces):
+        """Evaluate this object for VMEC optimization residual assembly and solve orchestration."""
         self.helicity_m = int(helicity_m)
         self.helicity_n = int(helicity_n)
         self.surfaces = surfaces
@@ -563,12 +577,15 @@ class QuasisymmetryRatioResidual:
         )
 
     def J(self, ctx: StageContext, state):
+        """Evaluate the scalar objective contribution for the current VMEC state."""
         return self._evaluate(ctx, state)["residuals1d"]
 
     def total(self, ctx: StageContext, state):
+        """Evaluate total for VMEC optimization residual assembly and solve orchestration."""
         return self._evaluate(ctx, state)["total"]
 
     def to_objective_term(self, *, target, residual_weight: float) -> ObjectiveTerm:
+        """Convert this user-facing objective into packed least-squares residuals."""
         if not _target_is_zero(target):
             raise ValueError("Quasisymmetry residual objectives require target=0.")
         return ObjectiveTerm(
@@ -1118,6 +1135,7 @@ def build_quasi_isodynamic_objective_stage(
     )
 
     def field_eval(state):
+        """Evaluate field eval for VMEC optimization residual assembly and solve orchestration."""
         return quasi_isodynamic_residual_from_state(
             state=state,
             static=static,
@@ -1157,6 +1175,7 @@ def build_quasi_isodynamic_objective_stage(
     bound_scalar_objectives = tuple(term.bind(ctx) for term in scalar_objectives)
 
     def residuals_from_state(state, *, ctx=ctx, scalar_objectives=bound_scalar_objectives):
+        """Evaluate residuals from state for VMEC optimization residual assembly and solve orchestration."""
         field = field_eval(state)
         scalar_parts = [term.residual(ctx, state) for term in scalar_objectives]
         qi_parts = [term.residual_and_total(ctx, state, field)[0] for term in qi_objectives]

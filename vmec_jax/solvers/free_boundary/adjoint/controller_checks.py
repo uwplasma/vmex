@@ -19,6 +19,7 @@ def controller_directional_check_jax(
     """Compare a controller objective's exact directional derivative to FD."""
 
     def objective(controller_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         return objective_from_run(controller_runner(controller_params))
 
     check = pytree_directional_derivative_check_jax(
@@ -54,6 +55,7 @@ def pytree_directional_derivative_check_jax(
         raise ValueError("eps must be positive.")
 
     def shifted(scale):
+        """Evaluate shifted for direct-coil free-boundary solve and branch-local adjoint validation."""
         return tree_util.tree_map(
             lambda value, delta: jnp.asarray(value) + float(scale) * jnp.asarray(delta),
             params,

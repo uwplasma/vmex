@@ -1781,7 +1781,7 @@ def _diagnose(
     abs_iota_min: float | None,
     mirror_threshold: float,
 ) -> dict[str, Any]:
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
     options = vj.QIDiagnosticOptions(
         surfaces=np.asarray(resolution.surfaces, dtype=float),

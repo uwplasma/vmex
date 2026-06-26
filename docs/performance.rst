@@ -1023,9 +1023,9 @@ The fixed-boundary raw-solve source path is:
 ``vmec_jax/solve.py::solve_fixed_boundary_residual_iter`` for the VMEC loop and
 ``_run_vmec2000_scan`` scan runner, ``vmec_jax/solve.py::_compute_forces`` for
 per-iteration force assembly and residual norms,
-``vmec_jax/vmec_forces.py::vmec_forces_rz_from_wout`` and
+``vmec_jax/kernels/forces.py::vmec_forces_rz_from_wout`` and
 ``vmec_residual_internal_from_kernels`` for bcovar/force/tomnsps assembly, and
-``vmec_jax/vmec_tomnsp.py::tomnsps_rzl`` for the Fourier transform hot kernel.
+``vmec_jax/kernels/tomnsp.py::tomnsps_rzl`` for the Fourier transform hot kernel.
 The fixed-boundary profiler now keeps any ``diagnostics.timing`` block in its
 JSON, and ``compare_profile_reports.py`` / ``gpu_cpu_performance_matrix.py``
 surface ``vmec_compute_forces_s``, ``vmec_preconditioner_s``, and
@@ -2535,7 +2535,7 @@ Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 .. code-block:: bash
 
    PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
-     --inputs-dir examples_single_grid/data \
+     --inputs-dir examples/data/single_grid \
      --kind fixed \
      --backend all \
      --warm-runs 1 \
@@ -2548,7 +2548,7 @@ Regenerate the current fixed-boundary plot and current-vs-main comparison with:
 
    cd /path/to/a/clean/origin-main/worktree
    PYTHONPATH=$PWD JAX_ENABLE_X64=1 python tools/diagnostics/example_runtime_memory_matrix.py \
-     --inputs-dir examples_single_grid/data \
+     --inputs-dir examples/data/single_grid \
      --kind fixed \
      --backend all \
      --warm-runs 1 \
@@ -2818,7 +2818,7 @@ Historical note: this April 2026 accelerated-branch snapshot is retained to
 explain why the optimized controller exists, but it is not the current public
 VMEC2000 comparison.  Use the docs-facing CSV/JSON in the previous section
 for current release claims.  This snapshot used NS=151 single-grid inputs
-(``examples_single_grid/data/``) and compared
+(``examples/data/single_grid/``) and compared
 ``solver_mode="accelerated"`` warm runtimes against VMEC2000.
 Results are in ``outputs/bench_accel_20260413/summary.json``.
 
@@ -3975,7 +3975,7 @@ when profiling the next cache tranche.
 Implementation map (performance-critical paths)
 ------------------------------------------------
 
-- ``vmec_jax/vmec_tomnsp.py``: VMEC ``fixaray`` tables + DFT-based ``tomnsps``.
+- ``vmec_jax/kernels/tomnsp.py``: VMEC ``fixaray`` tables + DFT-based ``tomnsps``.
 - ``vmec_jax/init_guess.py``: initial guess, axis blending, JAX boundary flip.
 - ``vmec_jax/boundary.py``: input boundary decomposition + cache.
 - ``vmec_jax/static.py``: cached grids, phase stacks, and per-solve constants.

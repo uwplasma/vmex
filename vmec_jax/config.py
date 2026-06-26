@@ -54,18 +54,22 @@ class VMECConfig:
 
     @property
     def lfreeb(self) -> bool:
+        """Evaluate lfreeb for VMEC-JAX numerical workflow."""
         return bool(self.free_boundary.enabled)
 
     @property
     def mgrid_file(self) -> str:
+        """Evaluate mgrid file for VMEC-JAX numerical workflow."""
         return str(self.free_boundary.mgrid_file)
 
     @property
     def extcur(self) -> tuple[float, ...]:
+        """Evaluate extcur for VMEC-JAX numerical workflow."""
         return tuple(self.free_boundary.extcur)
 
     @property
     def nvacskip(self) -> int:
+        """Evaluate nvacskip for VMEC-JAX numerical workflow."""
         return int(self.free_boundary.nvacskip)
 
 

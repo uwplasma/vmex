@@ -47,6 +47,7 @@ FREEB_JAX_NESTOR_OPERATOR_FN_CACHE: dict[tuple[Any, ...], Any] = {}
 
 
 def dense_lu_factor(matrix: np.ndarray) -> Any | None:
+    """Evaluate dense lu factor for direct-coil free-boundary solve and branch-local adjoint validation."""
     if _SCIPY_LU_FACTOR is None:
         return None
     try:
@@ -56,6 +57,7 @@ def dense_lu_factor(matrix: np.ndarray) -> Any | None:
 
 
 def dense_lu_solve(lu_fac: Any | None, matrix: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    """Evaluate dense lu solve for direct-coil free-boundary solve and branch-local adjoint validation."""
     rhs_arr = np.asarray(rhs, dtype=float)
     if lu_fac is not None and _SCIPY_LU_SOLVE is not None:
         try:
@@ -326,6 +328,7 @@ def build_vmec_like_cache(
 
 
 def solve_vmec_like_dense(rhs: np.ndarray, cache: NestorVmecLikeCache) -> np.ndarray:
+    """Solve solve vmec like dense for direct-coil free-boundary solve and branch-local adjoint validation."""
     rhs_flat = np.asarray(rhs, dtype=float).reshape(-1) * np.asarray(cache.rhs_scale, dtype=float)
     phi_flat = dense_lu_solve(cache.matrix_lu, np.asarray(cache.matrix, dtype=float), rhs_flat)
     phi = phi_flat.reshape(int(cache.ntheta), int(cache.nzeta))
@@ -1016,6 +1019,7 @@ def vmec_nonsingular_terms_from_bexni(
 
 
 def vmec_bvec_from_gsource(*, gsource: np.ndarray, basis: dict[str, Any]) -> np.ndarray:
+    """Evaluate vmec bvec from gsource for direct-coil free-boundary solve and branch-local adjoint validation."""
     src = vmec_source_from_gsource(gsource=gsource, basis=basis)
     sinmni = np.asarray(basis["sinmni"], dtype=float)
     bsin = sinmni.T @ src
@@ -1339,6 +1343,7 @@ def solve_vmec_like_mode_from_gsource(
     return np.asarray(phi, dtype=float), np.asarray(potvac, dtype=float), np.asarray(rhs_eff, dtype=float)
 
 def env_truthy(name: str, default: bool = False) -> bool:
+    """Evaluate env truthy for direct-coil free-boundary solve and branch-local adjoint validation."""
     raw = os.getenv(name)
     if raw is None:
         return bool(default)
@@ -1346,12 +1351,14 @@ def env_truthy(name: str, default: bool = False) -> bool:
 
 
 def digest_array_for_cache(value: Any) -> tuple[tuple[int, ...], str, str]:
+    """Evaluate digest array for cache for direct-coil free-boundary solve and branch-local adjoint validation."""
     arr = np.ascontiguousarray(np.asarray(value))
     digest = hashlib.blake2b(arr.view(np.uint8), digest_size=16).hexdigest()
     return tuple(int(i) for i in arr.shape), str(arr.dtype), digest
 
 
 def mapping_cache_signature(mapping: dict[str, Any], keys: tuple[str, ...] | None = None) -> tuple[Any, ...]:
+    """Evaluate mapping cache signature for direct-coil free-boundary solve and branch-local adjoint validation."""
     selected = tuple(sorted(mapping)) if keys is None else tuple(key for key in keys if key in mapping)
     signature: list[Any] = []
     for key in selected:
@@ -1363,6 +1370,7 @@ def mapping_cache_signature(mapping: dict[str, Any], keys: tuple[str, ...] | Non
 
 
 def compact_jax_nestor_basis(basis: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate compact jax nestor basis for direct-coil free-boundary solve and branch-local adjoint validation."""
     return {key: basis[key] for key in JAX_NESTOR_BASIS_KEYS if key in basis}
 
 
@@ -1376,6 +1384,7 @@ def jax_nestor_operator_cache_key(
     symmetric: bool,
     input_signature: tuple[Any, ...] = (),
 ) -> tuple[Any, ...]:
+    """Evaluate jax nestor operator cache key for direct-coil free-boundary solve and branch-local adjoint validation."""
     return (
         int(signgs),
         int(nvper),
@@ -1388,6 +1397,7 @@ def jax_nestor_operator_cache_key(
 
 
 def jax_nestor_input_signature(args: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Evaluate jax nestor input signature for direct-coil free-boundary solve and branch-local adjoint validation."""
     return tuple((tuple(int(i) for i in np.asarray(arg).shape), str(np.asarray(arg).dtype)) for arg in args)
 
 
@@ -1411,7 +1421,7 @@ def jitted_jax_nestor_operator(
 
     try:
         from ..._compat import jax as _jax
-        from ...free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+        from .adjoint.facade import dense_vmec_nestor_mode_solve_jax
     except Exception:
         return None, False
     if _jax is None:
@@ -1532,7 +1542,7 @@ def solve_vmec_like_mode_with_jax_nestor_operator(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool, bool]:
     """Run the experimental dense JAX VMEC/NESTOR mode operator."""
 
-    from ...free_boundary_adjoint import dense_vmec_nestor_mode_solve_jax
+    from .adjoint.facade import dense_vmec_nestor_mode_solve_jax
 
     R = np.asarray(sample.R, dtype=float)
     Z = np.asarray(sample.Z, dtype=float)

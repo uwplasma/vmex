@@ -11,7 +11,7 @@ pytestmark = pytest.mark.skipif(not has_jax(), reason="implicit adjoint helpers 
 
 def test_active_vjp_jvp_wrappers_route_diagonal_map():
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.implicit_adjoint_helpers import (
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
         active_normal_rhs,
         make_active_normal_map,
         make_damped_transpose_map,
@@ -49,7 +49,7 @@ def test_active_vjp_jvp_wrappers_route_diagonal_map():
 
 def test_full_normal_map_routes_identity_state_packers():
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.implicit_adjoint_helpers import make_full_normal_map
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import make_full_normal_map
 
     x0 = jnp.asarray([0.5, -1.0, 2.0])
     _residual_star, residual_jvp = jax.linearize(lambda x: x, x0)
@@ -76,7 +76,7 @@ def test_full_normal_map_routes_identity_state_packers():
 
 
 def test_active_mode_selection_preserves_solver_fallback_branches():
-    from vmec_jax.implicit_adjoint_helpers import select_active_adjoint_mode
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import select_active_adjoint_mode
 
     direct_square = select_active_adjoint_mode("direct", active_is_square=True)
     assert direct_square.use_direct_stellsym is True
@@ -105,7 +105,7 @@ def test_active_mode_selection_preserves_solver_fallback_branches():
 
 def test_dense_adjoint_from_jacobian_covers_dense_and_chunked_paths():
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_adjoint_helpers import dense_adjoint_from_jacobian
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import dense_adjoint_from_jacobian
 
     jac = jnp.asarray([[1.0, 0.0, 2.0], [0.5, -1.0, 0.25]])
     rhs = jnp.asarray([3.0, -2.0, 1.0])
@@ -143,7 +143,7 @@ def test_dense_adjoint_from_jacobian_covers_dense_and_chunked_paths():
 
 def test_active_packing_chunk_size_and_shape_checks():
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_adjoint_helpers import (
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
         default_jac_chunk_size,
         full_active_keep_indices,
         select_active_packing_strategy,

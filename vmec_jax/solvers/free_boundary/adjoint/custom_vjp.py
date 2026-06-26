@@ -15,12 +15,15 @@ def scalar_custom_vjp_value_jax(objective_fn: Any, params: Any) -> Any:
 
     @jax.custom_vjp
     def wrapped(coil_params):
+        """Evaluate wrapped for direct-coil free-boundary solve and branch-local adjoint validation."""
         return objective_fn(coil_params)
 
     def wrapped_fwd(coil_params):
+        """Evaluate wrapped fwd for direct-coil free-boundary solve and branch-local adjoint validation."""
         return objective_fn(coil_params), coil_params
 
     def wrapped_bwd(coil_params, cotangent):
+        """Evaluate wrapped bwd for direct-coil free-boundary solve and branch-local adjoint validation."""
         grad_params = jax.grad(objective_fn)(coil_params)
         scaled_grad = tree_util.tree_map(
             lambda value: jnp.asarray(cotangent) * jnp.asarray(value),
@@ -40,12 +43,15 @@ def vector_custom_vjp_value_jax(objective_fn: Any, params: Any) -> Any:
 
     @jax.custom_vjp
     def wrapped(coil_params):
+        """Evaluate wrapped for direct-coil free-boundary solve and branch-local adjoint validation."""
         return objective_fn(coil_params)
 
     def wrapped_fwd(coil_params):
+        """Evaluate wrapped fwd for direct-coil free-boundary solve and branch-local adjoint validation."""
         return objective_fn(coil_params), coil_params
 
     def wrapped_bwd(coil_params, cotangent):
+        """Evaluate wrapped bwd for direct-coil free-boundary solve and branch-local adjoint validation."""
         _, pullback = jax.vjp(objective_fn, coil_params)
         return pullback(jnp.asarray(cotangent))
 

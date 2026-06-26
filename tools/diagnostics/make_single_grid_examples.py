@@ -1,6 +1,6 @@
 """Generate single-grid VMEC inputs from bundled examples.
 
-This copies bundled inputs from `examples/data` into `examples_single_grid/data`
+This copies bundled inputs from `examples/data` into `examples/data/single_grid`
 and rewrites iteration controls to a single explicit grid request:
 
 - NS_ARRAY = 151
@@ -138,7 +138,7 @@ def main() -> int:
     p.add_argument(
         "--dst",
         type=Path,
-        default=REPO_ROOT / "examples_single_grid" / "data",
+        default=REPO_ROOT / "examples/data/single_grid",
         help="Destination data dir.",
     )
     p.add_argument("--ns", type=int, default=151)

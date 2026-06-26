@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 
 import vmec_jax.preconditioner_1d as p1d
-import vmec_jax.vmec_bcovar as vb
-import vmec_jax.vmec_forces as vf
+import vmec_jax.kernels.bcovar as vb
+import vmec_jax.kernels.forces as vf
 from vmec_jax.config import VMECConfig
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import VmecRZForceKernels
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+from vmec_jax.kernels.forces import VmecRZForceKernels
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
 
 def _cfg(*, ns=4, mpol=2, ntor=0, ntheta=8, nzeta=1, lasym=False, lthreed=False):

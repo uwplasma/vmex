@@ -333,12 +333,12 @@ def main() -> None:
     p.add_argument(
         "--axisym-input",
         type=str,
-        default=str(Path(__file__).resolve().parents[2] / "examples_single_grid/data/input.ITERModel"),
+        default=str(Path(__file__).resolve().parents[2] / "examples/data/single_grid/input.ITERModel"),
     )
     p.add_argument(
         "--stellarator-input",
         type=str,
-        default=str(Path(__file__).resolve().parents[2] / "examples_single_grid/data/input.LandremanPaul2021_QA_lowres"),
+        default=str(Path(__file__).resolve().parents[2] / "examples/data/single_grid/input.LandremanPaul2021_QA_lowres"),
     )
     p.add_argument(
         "--qh-input",

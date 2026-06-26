@@ -39,7 +39,7 @@ from vmec_jax.implicit import solve_fixed_boundary_state_implicit_vmec_residual
 from vmec_jax.init_guess import extract_axis_override_from_state, initial_guess_from_boundary
 from vmec_jax.solve import solve_fixed_boundary_residual_iter
 from vmec_jax.state import pack_state
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from vmec_jax._compat import jnp
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 def strict_update_velocity_block(
     *,
@@ -329,8 +329,8 @@ def raw_force_residual_from_state(
     """Rebuild the solver's raw VMEC residual blocks for one fixed-boundary step."""
     from dataclasses import replace as dc_replace
 
-    from vmec_jax.vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from vmec_jax.vmec_residue import vmec_apply_m1_constraints, vmec_apply_scalxc_to_tomnsps, vmec_zero_m1_zforce
+    from vmec_jax.kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from vmec_jax.kernels.residue import vmec_apply_m1_constraints, vmec_apply_scalxc_to_tomnsps, vmec_zero_m1_zforce
 
     k = vmec_forces_rz_from_wout(
         state=state,
@@ -612,8 +612,8 @@ def strict_update_velocity_state_advance(
     target for the discrete-adjoint refactor.
     """
     from vmec_jax.solve import _apply_vmec_lambda_axis_rules_to_state, _enforce_fixed_boundary_and_axis, _mode00_index
-    from vmec_jax.vmec_parity import _mn_cos_to_signed_cached, _mn_sin_to_signed_cached, signed_maps_from_modes
-    from vmec_jax.vmec_residue import vmec_scalxc_from_s
+    from vmec_jax.kernels.parity import _mn_cos_to_signed_cached, _mn_sin_to_signed_cached, signed_maps_from_modes
+    from vmec_jax.kernels.residue import vmec_scalxc_from_s
 
     dt_eff = jnp.asarray(dt_eff, dtype=jnp.asarray(state.Rcos).dtype)
     scalxc = vmec_scalxc_from_s(s=jnp.asarray(static.s), mpol=int(static.cfg.mpol)).astype(jnp.asarray(state.Rcos).dtype)

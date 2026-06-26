@@ -1,10 +1,18 @@
 # ruff: noqa: F401
-"""Adjoint scaffolding for free-boundary vacuum solves.
+"""Branch-local adjoint facade for direct-coil free-boundary solves.
 
-Phase 1 intentionally keeps this module small and explicit.  It validates the
-linear-solve differentiation contract that the production NESTOR replacement
-will need: solve the primal system in the forward pass and use transpose solves
-in the backward pass rather than differentiating through an iterative solver.
+This module collects the validated free-boundary differentiation seams: dense
+and mode-space NESTOR solves, direct-coil accepted-boundary replay, custom-VJP
+helpers, and fingerprint-gated same-branch reports.  The physics target is the
+free-boundary chain
+
+``coil parameters -> Biot-Savart field -> vacuum/NESTOR boundary response -> VMEC state -> scalar objective``.
+
+The current production claim is deliberately narrow and testable: values come
+from complete ``run_free_boundary`` solves, while derivatives are validated for
+the same accepted/rejected branch fingerprint.  Hard changes in the adaptive
+host controller are still nonsmooth events, so this facade does not claim an
+arbitrary custom VJP through branch selection.
 """
 
 from __future__ import annotations
@@ -216,11 +224,13 @@ class _ReplayScalarCallable:
     """Stable callable wrapper for one replay scalar and one replay payload."""
 
     def __init__(self, key: str, fn: Any, payload: Any) -> None:
+        """Evaluate this object for direct-coil free-boundary solve and branch-local adjoint validation."""
         self.key = str(key)
         self.fn = fn
         self.payload = payload
 
     def __call__(self, replay: Any) -> Any:
+        """Evaluate this callable objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         return self.fn(replay, self.payload)
 
 
@@ -1528,6 +1538,7 @@ def direct_coil_fixed_trace_custom_vjp_objective_jax(
         )["objective"]
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_replay_objective_jax(
             coil_params,
             initial_state,
@@ -1562,6 +1573,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
         )["objective"]
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
             initial_state,
@@ -1603,6 +1615,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_scalar_jax(
         return scalar_fn(replay)
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
             initial_state,
@@ -1641,6 +1654,7 @@ def direct_coil_accepted_trace_controller_custom_vjp_scalars_jax(
         return jnp.asarray([fn(replay) for fn in scalar_fn_seq])
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
             initial_state,
@@ -1674,6 +1688,7 @@ def direct_coil_accepted_trace_directional_check_jax(
     """
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_replay_objective_jax(
             coil_params,
             initial_state,
@@ -1722,6 +1737,7 @@ def direct_coil_accepted_trace_controller_directional_check_jax(
     """
 
     def objective(coil_params):
+        """Evaluate objective for direct-coil free-boundary solve and branch-local adjoint validation."""
         replay = direct_coil_accepted_trace_controller_replay_objective_jax(
             coil_params,
             initial_state,

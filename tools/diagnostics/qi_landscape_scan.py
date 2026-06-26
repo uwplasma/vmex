@@ -31,7 +31,7 @@ from vmec_jax.optimization_workflow import (
     build_fixed_boundary_objective_stage,
     rebuild_for_optimization_resolution,
 )
-from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
+from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
 
 
 enable_x64(True)

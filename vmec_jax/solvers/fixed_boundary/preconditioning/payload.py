@@ -11,8 +11,8 @@ from ..jit_cache import (
     jit_cache_put,
     strict_update_static_cache_key,
 )
-from ....vmec_residue import vmec_gcx2_from_tomnsps
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.residue import vmec_gcx2_from_tomnsps
+from ....kernels.tomnsp import TomnspsRZL
 from ..residual.force_norms import lambda_preconditioned_full_norm
 
 

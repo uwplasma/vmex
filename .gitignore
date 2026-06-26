@@ -91,7 +91,7 @@ examples/data/*_poloidal_plot.png
 examples/data/*reference*.nc
 examples/data/wout_*.nc
 examples/optimization/results/
-examples_single_grid/data/wout_*.nc
+examples/data/single_grid/wout_*.nc
 outputs/
 results/
 tmp/
@@ -241,7 +241,7 @@ __marimo__/
 .tmp/
 # Large netCDF assets are fetched on-demand (see tools/fetch_assets.py)
 examples/data/*.nc
-examples_single_grid/data/*.nc
+examples/data/single_grid/*.nc
 .assets_installed*
 
 # Root-level generated VMEC run artifacts

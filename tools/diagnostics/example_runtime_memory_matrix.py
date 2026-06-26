@@ -376,7 +376,7 @@ def _stage_input_with_mgrid(*, input_path: Path, dst_dir: Path) -> Path:
             return direct
         search_roots = [
             REPO_ROOT / "examples" / "data",
-            REPO_ROOT / "examples_single_grid" / "data",
+            REPO_ROOT / "examples/data/single_grid",
             REPO_ROOT.parent / "STELLOPT" / "BENCHMARKS" / "VMEC_TEST",
             REPO_ROOT.parent / "external",
             REPO_ROOT / "outputs",

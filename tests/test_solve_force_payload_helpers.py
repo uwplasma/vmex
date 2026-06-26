@@ -17,7 +17,7 @@ from vmec_jax.solvers.fixed_boundary.residual.payload_blocks import (
     zero_edge_rz_force_block,
     zero_edge_rz_force_blocks,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _blocks() -> TomnspsRZL:

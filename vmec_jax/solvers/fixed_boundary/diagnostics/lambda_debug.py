@@ -232,7 +232,7 @@ def maybe_dump_lulv(*, bc, static, iter_idx: int, state=None, trig=None) -> None
         data["n_modes"] = np.asarray(static.modes.n, dtype=int)
         if trig is not None:
             # Debug lambda odd-m synthesis inputs (physical odd pieces).
-            from ....vmec_realspace import vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
+            from ....kernels.realspace import vmec_realspace_synthesis_dtheta, vmec_realspace_synthesis_dzeta_phys
 
             m_modes = np.asarray(static.modes.m, dtype=int)
             mask_m1 = (m_modes == 1).astype(np.asarray(state.Lsin).dtype)

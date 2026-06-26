@@ -8,7 +8,7 @@ import pytest
 from vmec_jax import solve as solve_mod
 from vmec_jax._compat import has_jax, jax, jnp
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 pytestmark = pytest.mark.skipif(not has_jax(), reason="residual optimizers require JAX")
@@ -121,8 +121,8 @@ def _lasym_optional_only_residual(state: VMECState) -> TomnspsRZL:
 def _install_fake_physics(monkeypatch, residual_from_state, *, sqrtg_value: float = 1.0):
     import vmec_jax.boundary as boundary_mod
     import vmec_jax.energy as energy_mod
-    import vmec_jax.vmec_forces as forces_mod
-    import vmec_jax.vmec_residue as residue_mod
+    import vmec_jax.kernels.forces as forces_mod
+    import vmec_jax.kernels.residue as residue_mod
 
     monkeypatch.setattr(
         energy_mod,
@@ -209,7 +209,7 @@ def test_lbfgs_auto_scales_accepts_one_step_and_stops_on_nonfinite_trial(monkeyp
 
 
 def test_lbfgs_builds_missing_trig_jits_gradient_and_warns_on_negative_jacobian(monkeypatch, capsys):
-    import vmec_jax.vmec_tomnsp as tomnsp_mod
+    import vmec_jax.kernels.tomnsp as tomnsp_mod
 
     static = _tiny_static()
     static.trig_vmec = None

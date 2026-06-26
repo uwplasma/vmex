@@ -70,13 +70,13 @@ from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.namelist import InData
 from vmec_jax.optimization import rebuild_indata_with_resolution
 from vmec_jax.quasi_isodynamic import (
-    _nearest_half_mesh_indices,
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,
     mirror_ratio_penalty_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
-from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from vmec_jax.quasi_isodynamic.objectives import _nearest_half_mesh_indices
+from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_state
 from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 

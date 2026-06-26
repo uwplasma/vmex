@@ -21,7 +21,7 @@ def _data_dir() -> Path:
 
 
 def _single_grid_data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples_single_grid" / "data"
+    return Path(__file__).resolve().parents[1] / "examples/data/single_grid"
 
 
 def _full_and_half_mesh(ns: int) -> tuple[np.ndarray, np.ndarray]:
@@ -188,7 +188,7 @@ def test_small_wout_current_scalar_and_force_balance_gate(case_name: str, wout_n
         ),
         (
             "finite_beta_lasym",
-            "examples_single_grid",
+            "examples/data/single_grid",
             "input.basic_non_stellsym_pressure",
             "wout_basic_non_stellsym_pressure_reference.nc",
             5.0e-12,
@@ -209,7 +209,7 @@ def test_finite_beta_state_scalars_match_wout_energy_gate(
     pytest.importorskip("netCDF4")
     enable_x64(True)
 
-    data_dir = _single_grid_data_dir() if data_root == "examples_single_grid" else _data_dir()
+    data_dir = _single_grid_data_dir() if data_root == "examples/data/single_grid" else _data_dir()
     cfg, indata = load_config(str(data_dir / input_name))
     wout = read_wout(data_dir / wout_name)
     cfg = replace(

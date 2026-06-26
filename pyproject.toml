@@ -69,7 +69,7 @@ include = ["vmec_jax*"]
 exclude = ["tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"]
 
 [tool.setuptools.package-data]
-vmec_jax = ["data/input.nfp4_QH_warm_start", "mirror/validation/data/wham_coils.json"]
+vmec_jax = ["resources/input.nfp4_QH_warm_start", "mirror/validation/data/wham_coils.json"]
 
 [tool.pytest.ini_options]
 markers = [
@@ -132,10 +132,10 @@ module = [
   "vmec_jax.solve",
   "vmec_jax.driver",
   "vmec_jax.boundary",
-  "vmec_jax.vmec_forces",
+  "vmec_jax.kernels.forces",
   "vmec_jax.geom",
   "vmec_jax.wout",
-  "vmec_jax.vmec_parity",
+  "vmec_jax.kernels.parity",
   "vmec_jax.fourier",
   "vmec_jax.static",
   "vmec_jax.implicit",
@@ -143,7 +143,7 @@ module = [
   "vmec_jax.free_boundary",
   "vmec_jax.init_guess",
   "vmec_jax.booz_input",
-  "vmec_jax.vmec_residue",
-  "vmec_jax.vmec_tomnsp",
+  "vmec_jax.kernels.residue",
+  "vmec_jax.kernels.tomnsp",
 ]
 ignore_errors = true

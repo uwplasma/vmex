@@ -71,7 +71,7 @@ For derivative terms, VMEC uses ``cosnvn/sinnvn`` which already include the
 field-period scaling (:math:`n\,\mathrm{NFP}`); the same tables are used in
 ``vmec-jax``.
 
-The implementation in ``vmec_jax.vmec_tomnsp`` performs these two DFT stages as
+The implementation in ``vmec_jax.kernels.tomnsp`` performs these two DFT stages as
 batched ``dot_general`` calls (GEMM-friendly) to match VMEC2000 scaling while
 enabling XLA fusion. See References [4-6] for the VMEC2000 ``fixaray`` tables
 and the VMEC++ DFT/basis discussion.
@@ -373,8 +373,8 @@ Current boundary sampling uses edge-surface
 :math:`\phi = \zeta/NFP` for one field period, producing a diagnostic
 external-field summary (RMS and extrema).
 
-WP2 boundary-vacuum algebra scaffold
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Boundary-vacuum algebra
+~~~~~~~~~~~~~~~~~~~~~~~
 
 The next staged piece now computes VMEC-style surface field channels from the
 sampled external cylindrical field:
@@ -618,7 +618,7 @@ In VMEC2000 this is not done with a plain FFT. Instead the code uses:
 
 In ``vmec-jax`` these conventions are implemented in:
 
-- ``vmec_jax.vmec_tomnsp`` (``fixaray``-style trig/weight tables + a vectorized ``tomnsps`` core)
+- ``vmec_jax.kernels.tomnsp`` (``fixaray``-style trig/weight tables + a vectorized ``tomnsps`` core)
 
 Constraint pipeline (alias / gcon)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -662,7 +662,7 @@ additional surface-dependent scaling ``tcon(js)`` computed in VMEC's ``bcovar``.
 
 In ``vmec-jax`` we port the discrete ``alias`` operator in:
 
-- ``vmec_jax.vmec_constraints`` (``alias_gcon``).
+- ``vmec_jax.kernels.constraints`` (``alias_gcon``).
 
 For fixed-boundary parity, ``vmec-jax`` computes the constraint multiplier
 ``tcon(js)`` using the diagonal pieces of the VMEC preconditioner (matching the
@@ -772,11 +772,12 @@ Lambda-only implicit solve
 For fixed geometry, ``solve_lambda_state_implicit`` applies the same
 implicit-function machinery to lambda-only solves.
 
-Experimental VMEC-residual solvers (not yet VMEC2000-parity)
-------------------------------------------------------------
+Differentiable residual-minimization solvers
+--------------------------------------------
 
-For end-to-end work we also provide *experimental* solvers that minimize a
-VMEC-style residual objective built from parity kernels:
+For end-to-end differentiation experiments we also provide solvers that
+minimize a VMEC-style residual objective built from the same audited spectral
+kernel family:
 
 .. math::
 
@@ -835,7 +836,7 @@ Remaining limitations are mostly *scope* rather than parity gaps:
   CLI/API path and are covered by bundled smoke/parity gates.  The remaining
   work is broader case coverage, performance tuning, and full VMEC2000 parity
   on larger free-boundary production decks.
-- Experimental optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
+- Residual-minimization optimization solvers (GD/LBFGS/GN) are **not** VMEC2000 and do
   not reproduce all iteration-dependent logic; they are intended for
   differentiable objectives and regression experiments.
 - **Implicit differentiation** is available for lambda-only and fixed-boundary

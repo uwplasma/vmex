@@ -539,16 +539,18 @@ def same_branch_scalar_function_registry(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return production and replay scalar functions for same-branch reports."""
 
-    from vmec_jax.free_boundary_adjoint import free_boundary_boundary_geometry_jax
+    from vmec_jax.solvers.free_boundary.adjoint.facade import free_boundary_boundary_geometry_jax
     from vmec_jax.state import pack_state
 
     def lcfs_boundary_moment(state: Any, static: Any) -> Any:
+        """Evaluate lcfs boundary moment for direct-coil free-boundary solve and branch-local adjoint validation."""
         geometry = free_boundary_boundary_geometry_jax(state, static)
         r = jnp.asarray(geometry["R"])
         z = jnp.asarray(geometry["Z"])
         return jnp.mean((r - 1.0) * (r - 1.0) + z * z)
 
     def mean_iota_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate mean iota from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         _chips, iotas, _iotaf = equilibrium_iota_profiles_from_state(
             state=state,
             static=static,
@@ -559,6 +561,7 @@ def same_branch_scalar_function_registry(
         return jnp.mean(iota_arr[1:] if iota_arr.size > 1 else iota_arr)
 
     def accepted_bnormal_rms_from_payload(payload: dict[str, Any]) -> float:
+        """Evaluate accepted bnormal rms from payload for direct-coil free-boundary solve and branch-local adjoint validation."""
         values = [
             float(np.sqrt(np.mean(np.square(np.asarray(trace["freeb_nestor_trace"]["bnormal"], dtype=float)))))
             for trace in payload["traces"]
@@ -571,6 +574,7 @@ def same_branch_scalar_function_registry(
         return float(np.mean(values))
 
     def accepted_bnormal_rms_from_replay(replay: dict[str, Any]) -> Any:
+        """Evaluate accepted bnormal rms from replay for direct-coil free-boundary solve and branch-local adjoint validation."""
         bnormal = jnp.asarray(replay["history"]["bnormal_rms"])
         accepted = jnp.asarray(replay["history"]["accepted"], dtype=bnormal.dtype)
         active = jnp.asarray(replay["controls"]["has_active_freeb_replay"], dtype=bnormal.dtype)
@@ -579,6 +583,7 @@ def same_branch_scalar_function_registry(
         return jnp.sum(weights * bnormal) / denom
 
     def qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate qs total from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         qs = quasisymmetry_ratio_residual_from_state(
             state=state,
             static=static,
@@ -594,6 +599,7 @@ def same_branch_scalar_function_registry(
         return qs["total"]
 
     def boozer_qs_total_from_state(state: Any, static: Any, indata: Any, signgs: int) -> Any:
+        """Evaluate boozer qs total from state for direct-coil free-boundary solve and branch-local adjoint validation."""
         field = boozer_output_from_state(
             state=state,
             static=static,
@@ -641,7 +647,7 @@ def same_branch_replay_plan_cache(
 ) -> tuple[dict[str, Any] | None, dict[str, Any], float | None]:
     """Build an accepted-trace replay plan for repeated same-branch reports."""
 
-    from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_replay_plan
+    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_replay_plan
 
     try:
         t0 = time.perf_counter()
@@ -714,7 +720,7 @@ def _vector_jacobian_directional(jacobian: Any, direction: Any, n_outputs: int) 
 def _controller_slot_summary_from_result(result: dict[str, Any]) -> dict[str, Any]:
     """Return compact accepted/rejected slot metadata from a replay result."""
 
-    from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_slot_summary
+    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_slot_summary
 
     summary = result.get("controller_slot_summary")
     if isinstance(summary, dict) and summary:
@@ -885,6 +891,7 @@ class SameBranchVectorRunner:
         replay_payload: dict[str, Any] | None,
         ad_mode: str,
     ) -> None:
+        """Evaluate this object for direct-coil free-boundary solve and branch-local adjoint validation."""
         self.base_params = base_params
         self.direction_params = direction_params
         self.report = report
@@ -905,7 +912,7 @@ class SameBranchVectorRunner:
     ) -> dict[str, Any]:
         """Evaluate branch-local replay values and derivatives for scalar keys."""
 
-        from vmec_jax.free_boundary_adjoint import (
+        from vmec_jax.solvers.free_boundary.adjoint.facade import (
             direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
         )
 
@@ -969,7 +976,7 @@ def run_same_branch_scalar_report_section(
     if not enabled:
         return initial_summary
 
-    from vmec_jax.free_boundary_adjoint import direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax
+    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax
 
     scalar_replay_plan, scalar_plan_cache, scalar_plan_wall_s = same_branch_replay_plan_cache(
         report,
@@ -1033,7 +1040,7 @@ def run_same_branch_vector_report_section(
     if not enabled:
         return initial_vector_summary, initial_gate_summary, None, None
 
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_same_branch_physical_scalar_gate_report,
     )
@@ -1435,7 +1442,7 @@ def _rejected_slot_replay_plan(
     """Precompute a rejected-slot replay plan when metadata is available."""
 
     try:
-        from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_replay_plan
+        from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_replay_plan
 
         inherited_contexts = (
             {}
@@ -1661,6 +1668,7 @@ def _same_branch_qs_angle_cache_factory(args: Any) -> Any:
     qs_angle_cache_by_key: dict[tuple[int, ...], dict[str, object]] = {}
 
     def qs_angle_cache_for_static(static: Any) -> dict[str, object]:
+        """Evaluate qs angle cache for static for direct-coil free-boundary solve and branch-local adjoint validation."""
         cfg = static.cfg
         key = (
             int(cfg.nfp),
@@ -1733,7 +1741,7 @@ def _run_same_branch_complete_fd_report(
 ) -> dict[str, Any]:
     """Run and time the complete-solve finite-difference branch report."""
 
-    from vmec_jax.free_boundary_adjoint import (
+    from vmec_jax.solvers.free_boundary.adjoint.facade import (
         direct_coil_same_branch_complete_solve_fd_report,
     )
 
@@ -1992,6 +2000,7 @@ def _same_branch_report_replay_sections(
     )
 
     def summarize_vector_result(vector: dict[str, Any], scalar_keys: tuple[str, ...]) -> dict[str, Any]:
+        """Evaluate summarize vector result for direct-coil free-boundary solve and branch-local adjoint validation."""
         return summarize_same_branch_vector_result(
             vector,
             scalar_keys,

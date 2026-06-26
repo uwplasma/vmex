@@ -44,8 +44,8 @@ The current code already shows where the time goes:
   restarts, screen-cadence logic, and free-boundary cadence updates.
 - :mod:`vmec_jax.driver` uses conservative scan guards because the product
   contract today is VMEC2000 parity, not merely fast convergence.
-- :mod:`vmec_jax.vmec_tomnsp`, :mod:`vmec_jax.vmec_bcovar`,
-  :mod:`vmec_jax.vmec_forces`, and :mod:`vmec_jax.vmec_residue` still execute
+- :mod:`vmec_jax.kernels.tomnsp`, :mod:`vmec_jax.kernels.bcovar`,
+  :mod:`vmec_jax.kernels.forces`, and :mod:`vmec_jax.kernels.residue` still execute
   as several moderate-size float64 kernels with significant memory traffic.
 - :mod:`vmec_jax.free_boundary` adds dense vacuum coupling, edge-force terms,
   and iteration cadence logic that make the current GPU path especially

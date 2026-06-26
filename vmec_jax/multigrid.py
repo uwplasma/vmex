@@ -109,7 +109,7 @@ def interp_vmec_radial_coeffs(
     """
     if _should_use_numpy_interp((x_old, m)):
         try:
-            from .vmec_numpy_forces import _numpy_module_patch
+            from .kernels.numpy_forces import _numpy_module_patch
 
             with _numpy_module_patch():
                 return interp_vmec_radial_coeffs(x_old, m=m, ns_new=ns_new)
@@ -203,7 +203,7 @@ def interp_vmec_state(
     """Interpolate a VMECState to a new radial resolution (ns_new)."""
     if _should_use_numpy_interp((state_old, m, n)):
         try:
-            from .vmec_numpy_forces import _numpy_module_patch
+            from .kernels.numpy_forces import _numpy_module_patch
 
             with _numpy_module_patch():
                 return interp_vmec_state(
@@ -246,7 +246,7 @@ def interp_vmec_state(
         n_np = n_arr_np
         ns_old = int(state_old.layout.ns)
         from types import SimpleNamespace
-        from .vmec_parity import (
+        from .kernels.parity import (
             signed_maps_from_modes,
             _mn_cos_to_signed_cached as _mn_cos_to_signed_cached,
             _mn_sin_to_signed_cached as _mn_sin_to_signed_cached,

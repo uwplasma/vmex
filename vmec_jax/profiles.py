@@ -60,12 +60,15 @@ class Profile:
     """
 
     def __call__(self, s):
+        """Evaluate this callable objective for pressure, current, and MHD-stability profile diagnostics."""
         return self.f(s)
 
     def f(self, s):  # pragma: no cover - abstract helper.
+        """Evaluate f for pressure, current, and MHD-stability profile diagnostics."""
         raise NotImplementedError
 
     def dfds(self, s):  # pragma: no cover - abstract helper.
+        """Evaluate dfds for pressure, current, and MHD-stability profile diagnostics."""
         raise NotImplementedError
 
 
@@ -82,17 +85,21 @@ class ProfilePolynomial(Profile):
     coeffs: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         return (jnp.asarray(self.coeffs),), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         del aux_data
         return cls(children[0])
 
     def f(self, s):
+        """Evaluate f for pressure, current, and MHD-stability profile diagnostics."""
         return _power_series(self.coeffs, s)
 
     def dfds(self, s):
+        """Evaluate dfds for pressure, current, and MHD-stability profile diagnostics."""
         return _power_series(_polyder_coeffs(self.coeffs), s)
 
 
@@ -105,18 +112,22 @@ class ProfileScaled(Profile):
     scalefac: Any
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         return (self.base, jnp.asarray(self.scalefac)), None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         del aux_data
         base, scalefac = children
         return cls(base, scalefac)
 
     def f(self, s):
+        """Evaluate f for pressure, current, and MHD-stability profile diagnostics."""
         return jnp.asarray(self.scalefac) * self.base.f(s)
 
     def dfds(self, s):
+        """Evaluate dfds for pressure, current, and MHD-stability profile diagnostics."""
         return jnp.asarray(self.scalefac) * self.base.dfds(s)
 
 
@@ -138,6 +149,7 @@ class ProfilePressure(Profile):
     profiles: tuple[Profile, ...]
 
     def __init__(self, *profiles: Profile):
+        """Evaluate this object for pressure, current, and MHD-stability profile diagnostics."""
         if len(profiles) == 0:
             raise ValueError("ProfilePressure requires at least one density/temperature pair")
         if len(profiles) % 2:
@@ -145,14 +157,17 @@ class ProfilePressure(Profile):
         object.__setattr__(self, "profiles", tuple(profiles))
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         return self.profiles, None
 
     @classmethod
     def tree_unflatten(cls, aux_data, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         del aux_data
         return cls(*children)
 
     def f(self, s):
+        """Evaluate f for pressure, current, and MHD-stability profile diagnostics."""
         s = jnp.asarray(s)
         total = jnp.zeros_like(s, dtype=jnp.result_type(s, jnp.float64))
         for idx in range(0, len(self.profiles), 2):
@@ -160,6 +175,7 @@ class ProfilePressure(Profile):
         return total
 
     def dfds(self, s):
+        """Evaluate dfds for pressure, current, and MHD-stability profile diagnostics."""
         s = jnp.asarray(s)
         total = jnp.zeros_like(s, dtype=jnp.result_type(s, jnp.float64))
         for idx in range(0, len(self.profiles), 2):
@@ -184,18 +200,22 @@ class StandardFiniteBetaProfiles:
 
     @property
     def ne_coeffs(self):
+        """Evaluate ne coeffs for pressure, current, and MHD-stability profile diagnostics."""
         return self.ne.coeffs
 
     @property
     def Te_coeffs(self):
+        """Evaluate Te coeffs for pressure, current, and MHD-stability profile diagnostics."""
         return self.Te.coeffs
 
     @property
     def Ti_coeffs(self):
+        """Evaluate Ti coeffs for pressure, current, and MHD-stability profile diagnostics."""
         return self.Ti.coeffs
 
     @property
     def Zeff_coeffs(self):
+        """Evaluate Zeff coeffs for pressure, current, and MHD-stability profile diagnostics."""
         return self.Zeff.coeffs
 
 

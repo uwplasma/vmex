@@ -15,8 +15,8 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.static import build_static
 from vmec_jax.state import VMECState
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from vmec_jax.vmec_residue import vmec_force_norms_from_bcovar_dynamic
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.residue import vmec_force_norms_from_bcovar_dynamic
 from vmec_jax.wout import _compute_mercier, _vmec_wint_from_trig_jax
 
 

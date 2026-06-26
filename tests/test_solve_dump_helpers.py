@@ -35,7 +35,7 @@ from vmec_jax.solve import (
     _maybe_dump_xc,
 )
 from vmec_jax.state import StateLayout, VMECState
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _static(*, ns=2, mpol=2, ntor=1, lasym=False, lthreed=True, ntheta=2, nzeta=1):
@@ -644,7 +644,7 @@ def test_bsubs_and_precond_input_guard_branches(tmp_path, monkeypatch):
 
 def test_xc_and_lulv_dump_helpers_cover_asymmetric_payloads(tmp_path, monkeypatch):
     import vmec_jax.diagnostics as diagnostics
-    import vmec_jax.vmec_realspace as realspace
+    import vmec_jax.kernels.realspace as realspace
 
     monkeypatch.setenv("VMEC_JAX_DUMP_DIR", str(tmp_path))
     monkeypatch.setenv("VMEC_JAX_DUMP_ITER", "13")

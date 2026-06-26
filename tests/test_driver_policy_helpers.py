@@ -10,7 +10,7 @@ import pytest
 
 import vmec_jax.driver as driver
 from vmec_jax.drivers import flux as driver_flux
-from vmec_jax.drivers import io as driver_io
+from vmec_jax.drivers import interface as driver_interface
 from vmec_jax.drivers import runtime as driver_runtime
 from vmec_jax.drivers import solve as driver_solve
 from vmec_jax.drivers.policy import (
@@ -533,14 +533,14 @@ def test_run_fixed_boundary_optimizer_solver_dispatches_vmec_gn_with_initial_gue
     assert isinstance(calls[1][3]["indata"], _Input)
 
 
-def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:
+def test_driver_interface_helpers_print_concise_and_vmec_style_banners() -> None:
     lines: list[str] = []
 
     def collect(message="", **_kwargs):
         lines.append(str(message))
 
     cfg = SimpleNamespace(ns=7, mpol=3, ntor=1, nfp=2)
-    driver_io.print_fixed_boundary_intro(
+    driver_interface.print_fixed_boundary_intro(
         input_path="input.case",
         cfg=cfg,
         solver="gd",
@@ -558,7 +558,7 @@ def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:
     ]
 
     lines.clear()
-    driver_io.print_vmec2000_run_header(
+    driver_interface.print_vmec2000_run_header(
         input_path="input.case",
         version="test-version",
         now=datetime(2026, 6, 16, 1, 2, 3),
@@ -570,7 +570,7 @@ def test_driver_io_helpers_print_concise_and_vmec_style_banners() -> None:
 
     lines.clear()
     result = SimpleNamespace(n_iter=10, diagnostics={"converged": False, "ijacob": 3})
-    driver_io.print_vmec2000_run_summary(
+    driver_interface.print_vmec2000_run_summary(
         input_path="input.case",
         result=result,
         niter_stage=10,

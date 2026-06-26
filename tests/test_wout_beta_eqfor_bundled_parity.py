@@ -8,8 +8,8 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 from vmec_jax.wout import _compute_eqfor_beta, _vmec_wint_from_trig, read_wout, state_from_wout
 
 
@@ -26,8 +26,8 @@ BETA_CASES = (
     ),
     (
         "finite_beta_lasym_3d",
-        "examples_single_grid/data/input.basic_non_stellsym_pressure",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/input.basic_non_stellsym_pressure",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
     ),
 )
 

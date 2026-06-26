@@ -10,9 +10,10 @@ workflows while keeping required CI bounded by explicit job timeouts.
 Target State
 ------------
 
-- Required CI wall time: keep required test, docs, and build jobs within their
-  configured GitHub Actions timeouts on hosted CPU runners; the Python matrix
-  can currently run longer than ten minutes while the coverage leg completes.
+- Required CI wall time: keep required test, docs, build, bounded physics, and
+  coverage jobs below ten minutes on hosted CPU runners.  Required jobs use
+  explicit ``timeout-minutes: 10`` guards; manual/nightly full-physics jobs are
+  the only intentionally longer lane.
 - Routine local gate:
   ``JAX_ENABLE_X64=1 pytest -q -m "not full and not vmec2000 and not simsopt"``.
 - Local CI-equivalent coverage runs should record pass/skip/deselect counts,
@@ -20,9 +21,10 @@ Target State
   release notes or validation artifact for the candidate being checked.
 - Current coverage target: keep the required ``95%`` actual line coverage gate
   green with meaningful fast and bounded-physics tests while preserving
-  acceptable coverage runtime.  The current Python 3.11 required coverage gate
-  is ``95%``; the latest post-main-merge local CI-equivalent ratchet on the
-  free-boundary PR branch reached ``95.00%``.
+  sub-ten-minute required CI runtime.  The current Python 3.11 required
+  coverage gate is ``95%``; the latest green required CI run before the final
+  layout cleanup had a slowest shard of about ``505 s`` and a combined coverage
+  gate of about ``32 s``.
 - Nightly/manual coverage: larger VMEC2000, GPU, and full-resolution physics
   checks run outside the required PR gate.
 - Repository checkout size: keep the tracked source tree small enough that a

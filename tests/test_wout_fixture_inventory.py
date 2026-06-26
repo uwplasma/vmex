@@ -11,7 +11,7 @@ import pytest
 
 from vmec_jax.namelist import read_indata
 from vmec_jax.wout import read_wout
-from vmec_jax.io.wout.schema import assert_main_modes_match_wout
+from vmec_jax.io.wout_files.schema import assert_main_modes_match_wout
 
 
 @dataclass(frozen=True)
@@ -34,8 +34,8 @@ REQUIRED_WOUT_FIXTURES = (
     WoutInventoryCase("examples/data/wout_purely_toroidal_field.nc", "examples/data/input.purely_toroidal_field"),
     WoutInventoryCase("examples/data/wout_shaped_tokamak_pressure.nc", "examples/data/input.shaped_tokamak_pressure"),
     WoutInventoryCase(
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
-        "examples_single_grid/data/input.basic_non_stellsym_pressure",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/input.basic_non_stellsym_pressure",
     ),
 )
 
@@ -46,7 +46,7 @@ def _repo_root() -> Path:
 
 def _tracked_wout_fixtures(repo: Path) -> set[str]:
     output = subprocess.check_output(
-        ["git", "ls-files", "examples/data/wout*.nc", "examples_single_grid/data/wout*.nc"],
+        ["git", "ls-files", "examples/data/wout*.nc", "examples/data/single_grid/wout*.nc"],
         cwd=repo,
         text=True,
     )
@@ -77,7 +77,7 @@ def test_wout_fixture_asset_manifest_covers_required_cases() -> None:
     common_paths = set(fixture_bundle.common_paths)
 
     assert "examples/data/wout_*.nc" in common_paths
-    assert "examples_single_grid/data/wout_*.nc" in common_paths
+    assert "examples/data/single_grid/wout_*.nc" in common_paths
     assert declared
 
 

@@ -10,7 +10,7 @@ import pytest
 from vmec_jax.config import load_config
 from vmec_jax.integrals import dvds_from_sqrtg_zeta
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 

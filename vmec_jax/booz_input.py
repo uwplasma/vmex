@@ -13,10 +13,10 @@ from .energy import FluxProfiles, _iotaf_from_iotas, flux_profiles_from_indata
 from .field import lamscale_from_phips
 from .modes import vmec_mode_table, nyquist_mode_table_from_grid
 from .profiles import eval_profiles
-from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from .vmec_parity import vmec_m1_internal_to_physical_signed
-from .vmec_realspace import vmec_realspace_analysis
-from .vmec_tomnsp import vmec_trig_tables
+from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from .kernels.parity import vmec_m1_internal_to_physical_signed
+from .kernels.realspace import vmec_realspace_analysis
+from .kernels.tomnsp import vmec_trig_tables
 
 
 def _equilibrium_flux_profiles(
@@ -96,6 +96,7 @@ class BoozXformInputs:
     bsubvmns: Any | None = None
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.rmnc,
             self.zmns,
@@ -120,6 +121,7 @@ class BoozXformInputs:
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         (
             rmnc,
             zmns,
@@ -372,6 +374,7 @@ def _lambda_wout_from_full_jax(
         even_mask = (m_modes % 2) == 0
 
         def body(js, arr):
+            """Advance one loop body step for VMEC-JAX numerical workflow."""
             even_val = 0.5 * (arr[js, :] + arr[js - 1, :])
             odd_val = 0.5 * (sm_f[js + 1] * arr[js, :] + sp_f[js] * arr[js - 1, :])
             new_row = jnp.where(even_mask, even_val, odd_val)

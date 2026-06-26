@@ -43,7 +43,7 @@ def test_build_static_tomnsp_import_failure_keeps_fallback_fields(monkeypatch) -
     def fail_trig(**_kwargs):
         raise RuntimeError("synthetic trig failure")
 
-    monkeypatch.setattr("vmec_jax.vmec_tomnsp.vmec_trig_tables", fail_trig)
+    monkeypatch.setattr("vmec_jax.kernels.tomnsp.vmec_trig_tables", fail_trig)
 
     out = static_mod.build_static(_cfg(ns=3))
 
@@ -57,7 +57,7 @@ def test_build_static_signed_maps_failure_keeps_mode_arrays(monkeypatch) -> None
     def fail_signed_maps(_modes):
         raise RuntimeError("synthetic signed-map failure")
 
-    monkeypatch.setattr("vmec_jax.vmec_parity.signed_maps_from_modes", fail_signed_maps)
+    monkeypatch.setattr("vmec_jax.kernels.parity.signed_maps_from_modes", fail_signed_maps)
 
     out = static_mod.build_static(_cfg(ns=4, ntor=1))
 
@@ -77,7 +77,7 @@ def test_build_static_signed_maps_skip_missing_positive_modes(monkeypatch) -> No
         idx_neg = np.asarray([[0, -1], [1, -1]], dtype=np.int32)
         return SimpleNamespace(idx_pos=idx_pos, idx_neg=idx_neg)
 
-    monkeypatch.setattr("vmec_jax.vmec_parity.signed_maps_from_modes", sparse_signed_maps)
+    monkeypatch.setattr("vmec_jax.kernels.parity.signed_maps_from_modes", sparse_signed_maps)
 
     out = static_mod.build_static(_cfg(ns=4, ntor=1))
 

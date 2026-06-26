@@ -11,7 +11,7 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.optimizers.fixed_boundary import qi_objectives
+from vmec_jax.quasi_isodynamic import optimization_terms as qi_objectives
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -230,14 +230,14 @@ def test_primary_example_solve_calls_do_not_take_physics_shortcuts() -> None:
 def test_qi_example_uses_qi_problem_api() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
-    support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
+    support_text = (ROOT / "vmec_jax" / "quasi_isodynamic" / "optimization.py").read_text()
     compat_text = (ROOT / "examples" / "optimization" / "qi_optimization_support.py").read_text()
 
     assert "run_quasi_isodynamic_objective_optimization(" not in text
     assert "QI_CASES = {" in cases_text
     assert "from qi_optimization_cases import" not in text
     assert "import qi_optimization_support" not in text
-    assert "from vmec_jax.qi_optimization import *" in compat_text
+    assert "from vmec_jax.quasi_isodynamic.optimization import *" in compat_text
     assert "from tools.diagnostics" not in support_text.split("def _load_basin_prefilter_tools")[0]
     assert len(text.splitlines()) < 500
     assert "qis.configure(globals())" not in text
@@ -454,7 +454,7 @@ def test_qi_case_resolver_respects_editable_default_and_env(monkeypatch) -> None
 def test_qi_example_keeps_mirror_cleanup_guarded_by_qi_ceiling() -> None:
     text = (ROOT / "examples" / "optimization" / "QI_optimization.py").read_text()
     cases_text = (ROOT / "examples" / "optimization" / "qi_optimization_cases.py").read_text()
-    support_text = (ROOT / "vmec_jax" / "qi_optimization.py").read_text()
+    support_text = (ROOT / "vmec_jax" / "quasi_isodynamic" / "optimization.py").read_text()
 
     assert '"mirror_weight": 20.0' in cases_text
     assert '"qi_ceiling_weight": 0.0' in cases_text
@@ -1788,8 +1788,8 @@ def test_public_api_reexports_example_optimization_contract() -> None:
     import vmec_jax.booz as booz
     import vmec_jax.optimization_workflow as workflow
     import vmec_jax.plotting as plotting
-    import vmec_jax.qi_diagnostics as qi_diagnostics
-    import vmec_jax.qi_optimization as qi_optimization
+    import vmec_jax.quasi_isodynamic.diagnostics as qi_diagnostics
+    import vmec_jax.quasi_isodynamic.optimization as qi_optimization
     from vmec_jax import finite_beta
 
     workflow_names = (

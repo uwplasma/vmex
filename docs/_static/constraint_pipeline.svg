@@ -43,6 +43,6 @@
   <path d="M 270 148 L 310 148" class="arrow"/>
   <path d="M 610 148 L 650 148" class="arrow"/>
 
-  <text x="20" y="238" class="note">In vmec-jax this pathway is implemented in vmec_jax/vmec_constraints.py and vmec_jax/vmec_forces.py.</text>
+  <text x="20" y="238" class="note">In vmec-jax this pathway is implemented in vmec_jax/kernels/constraints.py and vmec_jax/kernels/forces.py.</text>
 </svg>
 

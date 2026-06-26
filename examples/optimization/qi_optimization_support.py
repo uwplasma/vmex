@@ -1,14 +1,14 @@
 """Compatibility re-exports for the staged QI optimization example.
 
-Reusable bounded-QI support now lives in :mod:`vmec_jax.qi_optimization`.
+Reusable bounded-QI support now lives in :mod:`vmec_jax.quasi_isodynamic.optimization`.
 Keep this module so existing example and test imports continue to work.
 """
 
 from __future__ import annotations
 
-import vmec_jax.qi_optimization as _qio
-from vmec_jax.qi_optimization import *  # noqa: F401,F403
-from vmec_jax.qi_optimization import (  # noqa: F401
+import vmec_jax.quasi_isodynamic.optimization as _qio
+from vmec_jax.quasi_isodynamic.optimization import *  # noqa: F401,F403
+from vmec_jax.quasi_isodynamic.optimization import (  # noqa: F401
     _diagnostic_float,
     _finite_or_inf,
     _finite_or_none,

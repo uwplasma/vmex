@@ -6,7 +6,7 @@ import numpy as np
 
 from vmec_jax._compat import enable_x64
 from vmec_jax.modes import vmec_mode_table
-from vmec_jax.vmec_realspace import (
+from vmec_jax.kernels.realspace import (
     vmec_realspace_analysis,
     vmec_realspace_geom_from_state,
     vmec_realspace_synthesis,
@@ -14,7 +14,7 @@ from vmec_jax.vmec_realspace import (
     vmec_realspace_synthesis_dzeta_phys,
     vmec_realspace_synthesis_multi,
 )
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _deterministic_coefficients(ns: int, nmodes: int) -> tuple[np.ndarray, np.ndarray]:

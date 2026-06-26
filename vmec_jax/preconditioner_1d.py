@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .vmec_tomnsp import TomnspsRZL
+from .kernels.tomnsp import TomnspsRZL
 
 
 def _sqrt_profiles_from_ns(ns: int) -> tuple[np.ndarray, np.ndarray]:
@@ -60,6 +60,7 @@ def _sm_sp_from_s(s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def wint_from_config(*, cfg) -> np.ndarray:
+    """Evaluate wint from config for VMEC-JAX numerical workflow."""
     ntheta = int(cfg.ntheta)
     nzeta = int(cfg.nzeta)
     lasym = bool(cfg.lasym)

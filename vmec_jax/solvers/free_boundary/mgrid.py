@@ -39,6 +39,7 @@ def validate_free_boundary_config(cfg: VMECConfig, *, strict: bool = False) -> N
 
 
 def normalize_extcur(extcur_in: tuple[float, ...], nextcur: int) -> tuple[float, ...]:
+    """Normalize normalize extcur for direct-coil free-boundary solve and branch-local adjoint validation."""
     if nextcur <= 0:
         return tuple()
     vals = list(float(v) for v in extcur_in)
@@ -50,6 +51,7 @@ def normalize_extcur(extcur_in: tuple[float, ...], nextcur: int) -> tuple[float,
 
 
 def broadcast_xyz(r: Any, z: Any, phi: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Evaluate broadcast xyz for direct-coil free-boundary solve and branch-local adjoint validation."""
     return np.broadcast_arrays(
         np.asarray(r, dtype=float),
         np.asarray(z, dtype=float),
@@ -191,6 +193,7 @@ def interpolate_mgrid_bfield(
 
 
 def decode_char_scalar(x: Any) -> str:
+    """Evaluate decode char scalar for direct-coil free-boundary solve and branch-local adjoint validation."""
     arr = np.asarray(x)
     if arr.dtype.kind == "S":
         if arr.ndim == 0:
@@ -206,6 +209,7 @@ def decode_char_scalar(x: Any) -> str:
 
 
 def decode_char_rows(x: Any) -> tuple[str, ...]:
+    """Evaluate decode char rows for direct-coil free-boundary solve and branch-local adjoint validation."""
     arr = np.asarray(x)
     if arr.ndim == 1:
         return (decode_char_scalar(arr),)

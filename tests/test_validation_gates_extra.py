@@ -39,7 +39,7 @@ MATERIALIZED_WOUT_CASES = (
     ),
     MaterializedWoutCase(
         "lasym_finite_beta",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
         expect_lasym=True,
         expect_finite_beta=True,
     ),
@@ -128,8 +128,8 @@ def test_lasym_finite_beta_reference_fixture_has_asymmetric_pressure_signal() ->
     pytest.importorskip("netCDF4")
 
     repo_root = _repo_root()
-    input_path = repo_root / "examples_single_grid/data/input.basic_non_stellsym_pressure"
-    wout_path = repo_root / "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"
+    input_path = repo_root / "examples/data/single_grid/input.basic_non_stellsym_pressure"
+    wout_path = repo_root / "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc"
     if not input_path.exists() or not wout_path.exists():
         pytest.skip("Missing bundled LASYM finite-beta reference input/wout")
 
@@ -170,7 +170,7 @@ def test_lasym_finite_beta_reference_fixture_has_asymmetric_pressure_signal() ->
     (
         ("examples/data/wout_shaped_tokamak_pressure.nc", 1.0e-7),
         ("examples/data/wout_li383_low_res.nc", 1.0e-2),
-        ("examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc", 1.0e-4),
+        ("examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc", 1.0e-4),
     ),
     ids=("axisymmetric_pressure", "three_d_finite_beta", "lasym_finite_beta"),
 )

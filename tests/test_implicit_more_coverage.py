@@ -76,10 +76,10 @@ def _install_residual_fakes(monkeypatch, implicit, jnp, state0: VMECState) -> No
     import vmec_jax.boundary as boundary_module
     import vmec_jax.init_guess as init_guess_module
     import vmec_jax.preconditioner_1d_jax as preconditioner_module
-    import vmec_jax.vmec_forces as forces_module
-    import vmec_jax.vmec_residue as residue_module
+    import vmec_jax.kernels.forces as forces_module
+    import vmec_jax.kernels.residue as residue_module
     from vmec_jax.boundary import BoundaryCoeffs
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     boundary = BoundaryCoeffs(
         R_cos=np.asarray([2.0]),
@@ -193,9 +193,9 @@ def _solve_from_scale(implicit, state0, static, jnp, scale, *, options):
 
 
 def test_implicit_adjoint_helpers_cover_shape_errors_and_dense_callback(monkeypatch):
-    import vmec_jax.implicit_adjoint_helpers as helpers
+    import vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra as helpers
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_adjoint_helpers import (
+    from vmec_jax.solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
         default_jac_chunk_size,
         dense_adjoint_from_jacobian,
         first_transpose_result,

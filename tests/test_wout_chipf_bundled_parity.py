@@ -22,7 +22,7 @@ CASES = (
     ("li383_finite_beta", "examples/data/wout_li383_low_res.nc"),
     (
         "lasym_finite_beta_single_grid",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
     ),
 )
 

@@ -54,8 +54,8 @@ PROFILE_CASES = (
     ),
     (
         "single_grid_lasym_pressure",
-        "examples_single_grid/data/input.basic_non_stellsym_pressure",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/input.basic_non_stellsym_pressure",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
         True,
     ),
 )
@@ -68,7 +68,7 @@ CURRENT_CASES = (
     ("finite_beta_3d", "examples/data/wout_li383_low_res.nc"),
     ("cth", "examples/data/wout_cth_like_fixed_bdy.nc"),
     ("lasym_3d", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
-    ("single_grid_lasym_pressure", "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"),
+    ("single_grid_lasym_pressure", "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc"),
 )
 
 CURRENT_DRIVEN_STATE_CASES = (

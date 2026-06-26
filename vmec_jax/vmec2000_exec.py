@@ -247,6 +247,7 @@ def _default_exec_candidates(root: Path, *, include_user_bin: bool = True) -> li
 
 
 def find_vmec2000_exec(*, root: Path | None = None) -> Path | None:
+    """Evaluate find vmec2000 exec for VMEC-JAX numerical workflow."""
     env_path = os.environ.get("VMEC2000_EXEC")
     if env_path:
         p = Path(env_path).expanduser()
@@ -374,6 +375,7 @@ def run_xvmec2000(
 
 
 def flatten_threed1(stages: Iterable[Vmec2000Threed1Stage]) -> list[Vmec2000Threed1Row]:
+    """Evaluate flatten threed1 for VMEC-JAX numerical workflow."""
     rows: list[Vmec2000Threed1Row] = []
     for stage in stages:
         rows.extend(stage.rows)
@@ -381,6 +383,7 @@ def flatten_threed1(stages: Iterable[Vmec2000Threed1Stage]) -> list[Vmec2000Thre
 
 
 def threed1_fsq_total(rows: Iterable[Vmec2000Threed1Row]) -> np.ndarray:
+    """Evaluate threed1 fsq total for VMEC-JAX numerical workflow."""
     r = list(rows)
     if not r:
         return np.asarray([], dtype=float)

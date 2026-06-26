@@ -82,7 +82,7 @@ from vmec_jax.solve import (
     solve_fixed_boundary_gn_vmec_residual,
     solve_fixed_boundary_lbfgs_vmec_residual,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 from vmec_jax.state import StateLayout, VMECState
 
 
@@ -1827,9 +1827,9 @@ def test_first_step_diagnostics_synthetic_default_and_axisymmetric_paths(monkeyp
     import vmec_jax.preconditioner_1d_jax as precond_mod
     import vmec_jax.solve as solve_mod
     import vmec_jax.static as static_mod
-    import vmec_jax.vmec_forces as forces_mod
-    import vmec_jax.vmec_residue as residue_mod
-    import vmec_jax.vmec_tomnsp as tomnsp_mod
+    import vmec_jax.kernels.forces as forces_mod
+    import vmec_jax.kernels.residue as residue_mod
+    import vmec_jax.kernels.tomnsp as tomnsp_mod
 
     s = np.array([0.0, 0.5, 1.0])
     modes = SimpleNamespace(m=np.array([0, 1]), n=np.array([0, 0]))

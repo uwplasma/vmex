@@ -36,7 +36,7 @@ from vmec_jax._compat import enable_x64
 from vmec_jax.config import config_from_indata
 from vmec_jax.energy import flux_profiles_from_indata
 from vmec_jax.namelist import read_indata
-from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
+from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
 from vmec_jax.static import build_static
 from vmec_jax.wout import (
     equilibrium_aspect_ratio_from_state,

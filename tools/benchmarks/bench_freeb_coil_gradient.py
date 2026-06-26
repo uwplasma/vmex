@@ -166,7 +166,7 @@ def _coil_gradient_case(points: int, segments: int, warm_repeats: int) -> dict[s
 
 def _dense_vacuum_adjoint_case(matrix_size: int, warm_repeats: int) -> dict[str, Any]:
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.free_boundary_adjoint import dense_vacuum_solve_jax
+    from vmec_jax.solvers.free_boundary.adjoint.facade import dense_vacuum_solve_jax
 
     n = max(2, int(matrix_size))
     idx = jnp.arange(n, dtype=float)

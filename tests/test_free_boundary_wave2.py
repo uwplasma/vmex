@@ -312,7 +312,7 @@ def test_sample_external_boundary_arrays_axis_fallback_paths(monkeypatch):
     with pytest.raises(ValueError, match="missing_mgrid_path"):
         _sample_external_boundary_arrays(state=state, static=empty_path_static)
 
-    import vmec_jax.vmec_parity as parity_module
+    import vmec_jax.kernels.parity as parity_module
 
     monkeypatch.setattr(parity_module, "signed_maps_from_modes", lambda modes: (_ for _ in ()).throw(RuntimeError("no maps")))
     monkeypatch.setenv("VMEC_JAX_FREEB_DISABLE_M1_CONVERSION", "1")

@@ -22,7 +22,7 @@ def _data_dir() -> Path:
 
 
 def test_qi_diagnostic_scalar_helpers_cover_unavailable_and_subset_branches() -> None:
-    from vmec_jax.qi_diagnostics import (
+    from vmec_jax.quasi_isodynamic.diagnostics import (
         QIDiagnosticOptions,
         _failure_message,
         _finite_float,
@@ -103,7 +103,7 @@ def test_qi_diagnostics_from_boozer_output_records_core_metrics():
     pytest.importorskip("jax")
 
     from vmec_jax import QI_DIAGNOSTIC_VERSION, QIDiagnosticOptions
-    from vmec_jax.qi_diagnostics import qi_diagnostics_from_boozer_output
+    from vmec_jax.quasi_isodynamic.diagnostics import qi_diagnostics_from_boozer_output
 
     booz = _booz_like(xm=[0, 0], xn=[0, 1], coeffs=[1.0, 0.1])
     options = QIDiagnosticOptions(
@@ -137,7 +137,7 @@ def test_qi_diagnostics_from_boozer_output_records_core_metrics():
 def test_boozer_qi_diagnostic_ranking_prefers_qi_and_flags_mirror_regressions():
     pytest.importorskip("jax")
 
-    from vmec_jax.qi_diagnostics import (
+    from vmec_jax.quasi_isodynamic.diagnostics import (
         QIDiagnosticOptions,
         QISeedSuitabilityTargets,
         qi_diagnostics_from_boozer_output,
@@ -208,7 +208,7 @@ def test_boozer_qi_diagnostic_ranking_prefers_qi_and_flags_mirror_regressions():
 def test_qi_diagnostics_records_legacy_failure_without_losing_smooth_metric(monkeypatch):
     pytest.importorskip("jax")
 
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     def fail_legacy(*_args, **_kwargs):
         raise RuntimeError("legacy unavailable")
@@ -229,7 +229,7 @@ def test_qi_diagnostics_records_legacy_failure_without_losing_smooth_metric(monk
 def test_qi_diagnostics_fail_on_error_raises_and_records_mirror_subset_error(monkeypatch):
     pytest.importorskip("jax")
 
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     booz = _booz_like(xm=[0, 0], xn=[0, 2], coeffs=[1.0, 0.1], nfp=2)
 
@@ -274,7 +274,7 @@ def test_qi_diagnostics_fail_on_error_raises_and_records_mirror_subset_error(mon
 
 
 def test_qi_diagnostics_from_boozer_output_records_fast_error_and_resolution_edges(monkeypatch):
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     mirror_calls = []
 
@@ -322,7 +322,7 @@ def test_qi_diagnostics_from_boozer_output_records_fast_error_and_resolution_edg
 
 
 def test_qi_diagnostics_negative_surface_subset_preserves_mismatched_weights(monkeypatch):
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     calls = {}
 
@@ -360,7 +360,7 @@ def test_qi_diagnostics_negative_surface_subset_preserves_mismatched_weights(mon
 
 
 def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monkeypatch):
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     calls = {}
     booz = {
@@ -486,7 +486,7 @@ def test_qi_diagnostics_from_state_wraps_existing_components_without_solves(monk
 
 
 def test_qi_diagnostics_from_state_requires_surfaces_and_records_component_errors(monkeypatch):
-    import vmec_jax.qi_diagnostics as qid
+    import vmec_jax.quasi_isodynamic.diagnostics as qid
 
     static = SimpleNamespace(cfg=SimpleNamespace(nfp=2))
 
@@ -550,7 +550,7 @@ def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
 
     from vmec_jax._compat import enable_x64
     from vmec_jax.config import load_config
-    from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
+    from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state
     from vmec_jax.static import build_static
     from vmec_jax.wout import read_wout, state_from_wout
 
@@ -612,7 +612,7 @@ def test_qi_diagnostics_from_bundled_solved_qi_seed_records_state_metrics():
 
 
 def test_qi_seed_suitability_annotation_reports_gate_failures():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -657,7 +657,7 @@ def test_qi_seed_suitability_annotation_reports_gate_failures():
 
 
 def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
-    from vmec_jax.qi_diagnostics import (
+    from vmec_jax.quasi_isodynamic.diagnostics import (
         QISeedSuitabilityTargets,
         annotate_qi_seed_suitability,
         qi_promotion_score,
@@ -756,7 +756,7 @@ def test_qi_seed_suitability_annotation_handles_disabled_and_missing_gates():
 
 
 def test_qi_seed_suitability_accepts_report_and_optimizer_aliases():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability, rank_qi_seed_records
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, annotate_qi_seed_suitability, rank_qi_seed_records
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -827,7 +827,7 @@ def test_qi_seed_suitability_accepts_report_and_optimizer_aliases():
 
 
 def test_qi_cleanup_candidate_promotes_only_seed_gate_safe_mirror_improvements():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -859,7 +859,7 @@ def test_qi_cleanup_candidate_promotes_only_seed_gate_safe_mirror_improvements()
 
 
 def test_qi_cleanup_candidate_rejects_mirror_gains_that_break_qi_gate():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -889,7 +889,7 @@ def test_qi_cleanup_candidate_rejects_mirror_gains_that_break_qi_gate():
 
 
 def test_qi_cleanup_candidate_rejects_worsening_mirror_stage():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -920,7 +920,7 @@ def test_qi_cleanup_candidate_rejects_worsening_mirror_stage():
 
 
 def test_qi_cleanup_candidate_can_require_engineering_gate():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -952,7 +952,7 @@ def test_qi_cleanup_candidate_can_require_engineering_gate():
 
 
 def test_qi_cleanup_candidate_reports_missing_mirror_inputs_without_rejecting_qi_core():
-    from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
+    from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_cleanup_candidate_promotable
 
     targets = QISeedSuitabilityTargets(
         smooth_qi_max=2.0e-3,
@@ -992,7 +992,7 @@ def test_qi_cleanup_candidate_reports_missing_mirror_inputs_without_rejecting_qi
 def test_qi_seed_ranking_tracks_legacy_goodman_order_on_synthetic_modes():
     pytest.importorskip("jax")
 
-    from vmec_jax.qi_diagnostics import (
+    from vmec_jax.quasi_isodynamic.diagnostics import (
         QIDiagnosticOptions,
         QISeedSuitabilityTargets,
         qi_diagnostics_from_boozer_output,

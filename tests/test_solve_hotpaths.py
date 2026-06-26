@@ -23,7 +23,7 @@ from vmec_jax.solve import (
 from vmec_jax.solvers.fixed_boundary.residual.ptau import state_tau_minmax_from_vmec_state
 from vmec_jax.state import StateLayout, VMECState, zeros_state
 from vmec_jax.static import build_static
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_angle_grid
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_angle_grid
 
 
 def test_zero_coeff_column_matches_masking():

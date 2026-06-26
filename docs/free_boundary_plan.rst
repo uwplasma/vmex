@@ -35,8 +35,8 @@ WP0 is implemented:
 - VMEC2000-aligned defaults:
   ``LFREEB=T`` with ``MGRID_FILE='NONE'`` disables free-boundary,
   ``NVACSKIP<=0`` falls back to ``NFP``,
-- typed free-boundary runtime state scaffold in ``VMECStatic``,
-- mgrid loader skeleton (metadata + optional BR/BP/BZ tensor loading),
+- typed free-boundary runtime state in ``VMECStatic``,
+- mgrid loader for metadata and optional BR/BP/BZ tensor loading,
 - trilinear mgrid field interpolation utility with periodic toroidal angle,
 - unit tests for parsing, normalization, and mgrid metadata loading.
 
@@ -54,7 +54,7 @@ WP1 is in place:
   emitted as ``free_boundary_external_field`` diagnostics.
 - VMEC2000-aligned dense vacuum coupling and comparator coverage are in place.
 
-WP2 now has an initial coupling scaffold plus a VMEC2000-like dense path:
+WP2 now has external-field boundary coupling plus a VMEC2000-like dense path:
 
 - boundary geometry/tangent metric terms are evaluated on the edge surface,
 - external cylindrical field is projected to ``Bu/Bv`` and inverted to

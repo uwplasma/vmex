@@ -106,6 +106,7 @@ def trace_fieldline_on_surface(
         raise ValueError("R,Z,bsupu,bsupv,Bmag must all have the same shape (ntheta,nzeta)")
 
     def rhs(theta: float, phi: float) -> float:
+        """Evaluate rhs for VMEC-JAX numerical workflow."""
         zeta = nfp * phi
         bth = _bilinear_periodic(bsupu, theta, zeta)
         bph = _bilinear_periodic(bsupv, theta, zeta)

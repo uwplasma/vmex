@@ -9,7 +9,7 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 from vmec_jax.wout import (
     read_wout,
     state_from_wout,
@@ -33,8 +33,8 @@ def up_down_lasym_reference_generation(tmp_path_factory: pytest.TempPathFactory)
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]
-    input_path = root / "examples_single_grid/data/input.up_down_asymmetric_tokamak"
-    wout_path = root / "examples_single_grid/data/wout_up_down_asymmetric_tokamak_reference.nc"
+    input_path = root / "examples/data/single_grid/input.up_down_asymmetric_tokamak"
+    wout_path = root / "examples/data/single_grid/wout_up_down_asymmetric_tokamak_reference.nc"
     if not input_path.exists() or not wout_path.exists():
         pytest.skip("Missing bundled up_down_asymmetric_tokamak VMEC2000 reference")
 
@@ -140,8 +140,8 @@ def basic_non_stellsym_pressure_reference_generation(
     pytest.importorskip("netCDF4")
 
     root = Path(__file__).resolve().parents[1]
-    input_path = root / "examples_single_grid/data/input.basic_non_stellsym_pressure"
-    wout_path = root / "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc"
+    input_path = root / "examples/data/single_grid/input.basic_non_stellsym_pressure"
+    wout_path = root / "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc"
     if not input_path.exists() or not wout_path.exists():
         pytest.skip("Missing bundled basic_non_stellsym_pressure VMEC2000 reference")
 

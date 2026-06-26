@@ -24,7 +24,7 @@ from vmec_jax.energy import FluxProfiles
 from vmec_jax.namelist import InData
 from vmec_jax.profiles import eval_profiles
 from vmec_jax.static import build_static
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 from vmec_jax.wout import _filter_bsubuv_jxbforce_parity, read_wout, state_from_wout
 from vmec_jax.config import load_config
 

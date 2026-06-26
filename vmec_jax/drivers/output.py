@@ -20,14 +20,15 @@ def residual_scalars_from_state(
 ):
     """Compute VMEC-style invariant residual scalars from a solved state."""
 
-    from ..vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from ..vmec_residue import vmec_force_norms_from_bcovar_dynamic, vmec_fsq_from_tomnsps_dynamic
-    from ..vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+    from ..kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from ..kernels.residue import vmec_force_norms_from_bcovar_dynamic, vmec_fsq_from_tomnsps_dynamic
+    from ..kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
     class _WoutLike:
         __slots__ = ("nfp", "mpol", "ntor", "lasym", "signgs")
 
         def __init__(self, *, nfp: int, mpol: int, ntor: int, lasym: bool, signgs: int):
+            """Evaluate this object for high-level VMEC driver orchestration."""
             self.nfp = int(nfp)
             self.mpol = int(mpol)
             self.ntor = int(ntor)

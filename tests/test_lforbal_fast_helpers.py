@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.vmec_lforbal import (
+from vmec_jax.kernels.lforbal import (
     MU0,
     TWOPI,
     VmecLforbalFactors,
@@ -18,7 +18,7 @@ from vmec_jax.vmec_lforbal import (
     lforbal_factors_from_state,
     plascur_edge_from_bcovar,
 )
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 def _synthetic_trig():

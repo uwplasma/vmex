@@ -10,8 +10,8 @@ def test_vmec_realspace_geom_shapes_and_finite():
 
     from vmec_jax.config import load_config
     from vmec_jax.static import build_static
-    from vmec_jax.vmec_tomnsp import vmec_trig_tables
-    from vmec_jax.vmec_realspace import vmec_realspace_geom_from_state
+    from vmec_jax.kernels.tomnsp import vmec_trig_tables
+    from vmec_jax.kernels.realspace import vmec_realspace_geom_from_state
     from vmec_jax.wout import read_wout, state_from_wout
 
     cfg, _ = load_config("examples/data/input.circular_tokamak")
@@ -41,8 +41,8 @@ def test_vmec_half_mesh_jacobian_shapes_and_finite():
 
     from vmec_jax.config import load_config
     from vmec_jax.static import build_static
-    from vmec_jax.vmec_jacobian import vmec_half_mesh_jacobian_from_state
-    from vmec_jax.vmec_tomnsp import vmec_trig_tables
+    from vmec_jax.kernels.jacobian import vmec_half_mesh_jacobian_from_state
+    from vmec_jax.kernels.tomnsp import vmec_trig_tables
     from vmec_jax.wout import read_wout, state_from_wout
 
     cfg, _ = load_config("examples/data/input.circular_tokamak")
@@ -73,8 +73,8 @@ def test_vmec_realspace_analysis_roundtrip():
     pytest.importorskip("jax")
 
     from vmec_jax.modes import vmec_mode_table
-    from vmec_jax.vmec_realspace import vmec_realspace_analysis, vmec_realspace_synthesis
-    from vmec_jax.vmec_tomnsp import vmec_trig_tables
+    from vmec_jax.kernels.realspace import vmec_realspace_analysis, vmec_realspace_synthesis
+    from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
     mpol = 4
     ntor = 3

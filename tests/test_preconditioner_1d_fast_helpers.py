@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from vmec_jax import preconditioner_1d as p1d
-from vmec_jax.vmec_tomnsp import TomnspsRZL
+from vmec_jax.kernels.tomnsp import TomnspsRZL
 
 
 def _cfg(*, mpol=2, ntor=1, ntheta=4, nzeta=2, nfp=1, lasym=False, lthreed=False):

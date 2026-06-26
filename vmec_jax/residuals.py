@@ -1,15 +1,18 @@
-"""Force/residual diagnostics.
+"""Compact force/residual diagnostics for lightweight workflows.
 
 VMEC reports scalar residual measures (e.g. ``fsqr/fsqz/fsql``) that track
 how close a state is to satisfying the equilibrium Euler-Lagrange equations.
 
-In vmec_jax we do not yet reproduce VMEC's full real-space force kernels, but we
-*can* provide a useful, differentiable proxy based on the gradient of the total
-objective. These diagnostics are meant to:
+The production VMEC residual/force path lives under
+``vmec_jax.solvers.fixed_boundary`` and ``vmec_jax.kernels``.  This root module
+keeps a compact differentiable proxy based on the gradient of the total
+objective for lightweight notebooks, regression tests, and quick diagnostics.
+These diagnostics are meant to:
 
 - support regression tests (consistency across refactors),
 - provide solver stopping criteria beyond just energy decrease,
-- and act as a stepping stone toward full VMEC ``residue/getfsq`` parity.
+- and provide a low-dependency residual measure when the full solver payload is
+  not needed.
 """
 
 from __future__ import annotations

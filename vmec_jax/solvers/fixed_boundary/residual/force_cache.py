@@ -105,7 +105,7 @@ def prepare_numpy_force_fast_path(
     use_numpy_force = bool(host_update_assembly) if use_numpy_force_fast_path is None else bool(use_numpy_force_fast_path)
     if bool(use_numpy_force) and has_jax_func():
         try:
-            from vmec_jax.vmec_numpy_forces import compute_forces_numpy as _cfn_helper
+            from vmec_jax.kernels.numpy_forces import compute_forces_numpy as _cfn_helper
 
             def compute_forces_np(
                 state,
@@ -122,6 +122,7 @@ def prepare_numpy_force_fast_path(
                 constraint_tcon_active: Any | None = None,
                 iter_idx: int | None = None,
             ):
+                """Compute compute forces np for fixed-boundary VMEC solve and implicit differentiation."""
                 return _cfn_helper(
                     compute_forces_impl,
                     state,
@@ -151,7 +152,7 @@ def prepare_numpy_force_fast_path(
     try:
         import dataclasses as _dc
         import numpy as _np_host
-        from vmec_jax.vmec_numpy_forces import _to_numpy_recursive as _tonp, _wrap as _np_wrap
+        from vmec_jax.kernels.numpy_forces import _to_numpy_recursive as _tonp, _wrap as _np_wrap
 
         trig = _tonp(trig)
         try:

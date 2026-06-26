@@ -60,7 +60,7 @@ def test_preconditioner_output_scaling_jit_matches_unfused_algebra():
     jnp = pytest.importorskip("jax.numpy")
 
     from vmec_jax.solve import _preconditioner_output_scaling_jit
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     shape = (2, 2, 2)
     base = np.arange(np.prod(shape), dtype=float).reshape(shape) / 10.0 + 0.1
@@ -349,7 +349,7 @@ def test_numpy_cached_rz_preconditioner_apply_matches_jax():
         rz_preconditioner_apply,
         rz_preconditioner_matrices,
     )
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     ns = 6
     ntheta = 6
@@ -432,8 +432,8 @@ def test_tcon_from_bcovar_precondn_diag_matches_reference_formula():
     pytest.importorskip("jax")
 
     from vmec_jax._compat import jnp
-    from vmec_jax.vmec_constraints import tcon_from_bcovar_precondn_diag
-    from vmec_jax.vmec_tomnsp import vmec_trig_tables
+    from vmec_jax.kernels.constraints import tcon_from_bcovar_precondn_diag
+    from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
     # Small synthetic problem with well-conditioned norms.
     ns = 6

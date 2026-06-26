@@ -124,9 +124,11 @@ class _DynamicBasepointScanRunner:
     from_state_tangents: Any
 
     def __call__(self, carry_tangents0, stacked_base_carries_in, stacked_traces_in):
+        """Evaluate this callable objective for fixed-boundary VMEC solve and implicit differentiation."""
         return self.from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
 
     def zero_aux(self, state_tangents0, stacked_base_carries_in, stacked_traces_in):
+        """Evaluate zero aux for fixed-boundary VMEC solve and implicit differentiation."""
         return self.from_state_tangents(state_tangents0, stacked_base_carries_in, stacked_traces_in)
 
 

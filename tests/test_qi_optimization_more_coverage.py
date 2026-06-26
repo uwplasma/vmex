@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import vmec_jax.qi_optimization as qio
+import vmec_jax.quasi_isodynamic.optimization as qio
 
 
 def test_load_basin_prefilter_tools_reports_source_checkout_requirement(monkeypatch: pytest.MonkeyPatch) -> None:

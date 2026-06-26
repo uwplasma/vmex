@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.driver import example_paths, load_example, run_fixed_boundary, save_npz
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from ._compat import jax, jnp, jit, has_jax
-from .vmec_tomnsp import TomnspsRZL
+from .kernels.tomnsp import TomnspsRZL
 
 _LAMBDA_PRECOND_JIT_CACHE: OrderedDict[tuple, Any] = OrderedDict()
 
@@ -218,7 +218,7 @@ def lambda_preconditioner(
     Parameters
     ----------
     bc:
-        :class:`~vmec_jax.vmec_bcovar.VmecHalfMeshBcovar` (or compatible) providing
+        :class:`~vmec_jax.kernels.bcovar.VmecHalfMeshBcovar` (or compatible) providing
         ``guu/guv/gvv`` and ``jac.sqrtg`` on the *half mesh* and scalar ``lamscale``.
     trig:
         Unused placeholder to keep parity-call signatures consistent with the
@@ -1245,6 +1245,7 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs, *, use_lax_tridi: bool = False) -> 
     x0 = rhs[0] / d0
 
     def fwd(carry, inp):
+        """Run the forward rule for the custom derivative."""
         a_prev, x_prev = carry
         aj, dj, bj, rj = inp
         denom = dj - a_prev * bj
@@ -1263,6 +1264,7 @@ def _tridi_solve_batched_jmin0(a, d, b, rhs, *, use_lax_tridi: bool = False) -> 
         x = jnp.concatenate([x0[None, ...], x_rest], axis=0)
 
     def bwd(carry, inp):
+        """Run the transpose rule for the custom derivative."""
         x_next = carry
         a_j, x_j = inp
         x_new = x_j - a_j * x_next
@@ -1293,6 +1295,7 @@ def _tridi_precompute_coeffs(a, d, b) -> tuple[Any, Any]:
     cp0 = a[0] * inv0
 
     def fwd(cp_prev, inp):
+        """Run the forward rule for the custom derivative."""
         aj, dj, bj = inp
         denom = dj - cp_prev * bj
         denom = jnp.where(denom != 0.0, denom, eps)
@@ -1379,6 +1382,7 @@ def _tridi_solve_precomputed(b, cp, inv, rhs) -> Any:
     dp0 = rhs[0] * inv[0]
 
     def fwd(dp_prev, inp):
+        """Run the forward rule for the custom derivative."""
         bj, invj, rj = inp
         dp = (rj - bj * dp_prev) * invj
         return dp, dp
@@ -1391,6 +1395,7 @@ def _tridi_solve_precomputed(b, cp, inv, rhs) -> Any:
         dp = jnp.concatenate([dp0[None, ...], dp_rest], axis=0)
 
     def bwd(x_next, inp):
+        """Run the transpose rule for the custom derivative."""
         cpj, dpj = inp
         x_new = dpj - cpj * x_next
         return x_new, x_new

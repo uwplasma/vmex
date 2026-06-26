@@ -30,7 +30,7 @@ from vmec_jax._compat import enable_x64
 from vmec_jax.config import config_from_indata
 from vmec_jax.energy import flux_profiles_from_indata
 from vmec_jax.namelist import read_indata
-from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from vmec_jax.quasi_isodynamic import (
     lgradb_penalty_from_state,
     max_elongation_penalty_from_state,

@@ -27,7 +27,7 @@ from typing import Any, Callable, Tuple
 import numpy as np
 
 from ._compat import has_jax, jax, jnp
-from .implicit_adjoint_helpers import (
+from .solvers.fixed_boundary.adjoint.implicit_linear_algebra import (
     full_active_keep_indices,
     make_full_normal_map,
     pack_stellsym_feasible_state as _pack_stellsym_feasible_state,
@@ -42,7 +42,7 @@ from .implicit_adjoint_helpers import (
     update_stellsym_reduced_state as _update_stellsym_reduced_state,
     validate_full_adjoint_shapes,
 )
-from .implicit_residual_adjoint_helpers import (
+from .solvers.fixed_boundary.adjoint.residual_linear_algebra import (
     lineax_bicgstab_solve as _lineax_bicgstab_solve_impl,
     linear_map_jacobian_columns as _linear_map_jacobian_columns_impl,
     solve_active_residual_adjoint_linearized as _solve_active_residual_adjoint_linearized,
@@ -346,7 +346,7 @@ def _build_vmec_residual_setup(*, state0_c: VMECState, static, indata, signgs_i:
     """Build profile, force, and structural residual metadata for implicit VMEC residual AD."""
     from .boundary import boundary_from_indata
     from .solvers.fixed_boundary.optimization.residual_context import prepare_residual_force_context
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.tomnsp import vmec_trig_tables
 
     context = prepare_residual_force_context(
         state0_c,
@@ -411,8 +411,8 @@ def _vmec_residual_vector_from_state(
     from .preconditioner_1d_jax import (
         lambda_preconditioner_cached,
     )
-    from .vmec_forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
-    from .vmec_residue import (
+    from .kernels.forces import vmec_forces_rz_from_wout, vmec_residual_internal_from_kernels
+    from .kernels.residue import (
         vmec_apply_m1_constraints,
         vmec_apply_scalxc_to_tomnsps,
         vmec_force_norms_from_bcovar_dynamic,
@@ -618,6 +618,7 @@ def _vmec_residual_state_tangent_from_boundary_tangent(
         x_active_star = jnp.take(x_active_star_full, active_keep_idx)
 
         def stationarity_fun_active(x_active):
+            """Evaluate stationarity fun active for fixed-boundary VMEC solve and implicit differentiation."""
             x_active_full = x_active_star_full.at[active_keep_idx].set(
                 x_active,
                 indices_are_sorted=True,
@@ -643,6 +644,7 @@ def _vmec_residual_state_tangent_from_boundary_tangent(
             return jnp.take(grad_active_full, active_keep_idx)
 
         def stationarity_params_active(a, b, c, d):
+            """Evaluate stationarity params active for fixed-boundary VMEC solve and implicit differentiation."""
             grad_state = stationarity_state_func(
                 st_star,
                 zero_m1_star,
@@ -670,6 +672,7 @@ def _vmec_residual_state_tangent_from_boundary_tangent(
         )
 
         def stationarity_fun_active(x_active):
+            """Evaluate stationarity fun active for fixed-boundary VMEC solve and implicit differentiation."""
             st_active = _update_stellsym_reduced_state(
                 st_active_ref,
                 x_active,
@@ -699,6 +702,7 @@ def _vmec_residual_state_tangent_from_boundary_tangent(
             )
 
         def stationarity_params_active(a, b, c, d):
+            """Evaluate stationarity params active for fixed-boundary VMEC solve and implicit differentiation."""
             grad_state = stationarity_state_func(
                 st_star,
                 zero_m1_star,
@@ -822,10 +826,12 @@ def _vmec_residual_boundary_cotangent_from_active_adjoint(
         active_full_size = int(np.shape(b_active_full)[0])
 
         def pack_grad_active(grad_state):
+            """Pack pack grad active for fixed-boundary VMEC solve and implicit differentiation."""
             grad_active_full = _pack_stellsym_feasible_state(grad_state, rz_idx=rz_idx, lam_idx=lam_idx)
             return jnp.take(grad_active_full, active_keep_idx)
 
         def stationarity_fun_active(x_active):
+            """Evaluate stationarity fun active for fixed-boundary VMEC solve and implicit differentiation."""
             x_active_full = x_active_star_full.at[active_keep_idx].set(
                 x_active,
                 indices_are_sorted=True,
@@ -875,6 +881,7 @@ def _vmec_residual_boundary_cotangent_from_active_adjoint(
         active_full_size = int(np.shape(b_active)[0])
 
         def pack_grad_active(grad_state):
+            """Pack pack grad active for fixed-boundary VMEC solve and implicit differentiation."""
             return _pack_stellsym_reduced_state(
                 grad_state,
                 rz_idx=rz_idx,
@@ -885,6 +892,7 @@ def _vmec_residual_boundary_cotangent_from_active_adjoint(
             )
 
         def stationarity_fun_active(x_active):
+            """Evaluate stationarity fun active for fixed-boundary VMEC solve and implicit differentiation."""
             st_active = _update_stellsym_reduced_state(
                 st_active_ref,
                 x_active,
@@ -916,9 +924,11 @@ def _vmec_residual_boundary_cotangent_from_active_adjoint(
     )
 
     def boundary_param_vjp_active(lam):
+        """Evaluate boundary param vjp active for fixed-boundary VMEC solve and implicit differentiation."""
         vjp_start = time.perf_counter()
 
         def G_params(eRcos, eRsin, eZcos, eZsin):
+            """Evaluate G params for fixed-boundary VMEC solve and implicit differentiation."""
             return pack_grad_active(
                 stationarity_state_func(
                     st_star,
@@ -1040,10 +1050,12 @@ def _cg_solve(
     max_iter = int(max_iter)
 
     def cond_fun(carry):
+        """Return the loop-continuation predicate for fixed-boundary VMEC solve and implicit differentiation."""
         i, x, r, p, rs = carry
         return jnp.logical_and(i < max_iter, rs > tol2)
 
     def body_fun(carry):
+        """Advance one loop body step for fixed-boundary VMEC solve and implicit differentiation."""
         i, x, r, p, rs = carry
         Ap = matvec(p)
         alpha = rs / jnp.dot(p, Ap)
@@ -1204,10 +1216,12 @@ def solve_lambda_state_implicit(
         return _solve(phipf, chipf, lamscale)
 
     def fwd(phipf, chipf, lamscale):
+        """Run the forward rule for the custom derivative."""
         st = _solve(phipf, chipf, lamscale)
         return st, (jnp.asarray(st.Lcos), jnp.asarray(st.Lsin), jnp.asarray(phipf), jnp.asarray(chipf), jnp.asarray(lamscale))
 
     def bwd(residual, ct_state):
+        """Run the transpose rule for the custom derivative."""
         Lcos_star, Lsin_star, phipf_star, chipf_star, lamscale_star = residual
         ns, K = Lcos_star.shape
 
@@ -1217,17 +1231,20 @@ def solve_lambda_state_implicit(
             mask = mask.at[:, int(idx00)].set(0.0)
 
         def grad_L_flat(Lcos, Lsin, phipf, chipf, lamscale):
+            """Evaluate grad L flat for fixed-boundary VMEC solve and implicit differentiation."""
             gcos, gsin = jax.grad(_wb_from_L, argnums=(0, 1))(Lcos, Lsin, phipf, chipf, lamscale)
             gcos = gcos * mask
             gsin = gsin * mask
             return _flatten_L(gcos, gsin)
 
         def Hvp(u_flat):
+            """Evaluate Hvp for fixed-boundary VMEC solve and implicit differentiation."""
             ucos, usin = _unflatten_L(u_flat, shape=(ns, K))
             ucos = ucos * mask
             usin = usin * mask
 
             def grad_pair(Lcos, Lsin):
+                """Evaluate grad pair for fixed-boundary VMEC solve and implicit differentiation."""
                 gcos, gsin = jax.grad(_wb_from_L, argnums=(0, 1))(Lcos, Lsin, phipf_star, chipf_star, lamscale_star)
                 gcos = gcos * mask
                 gsin = gsin * mask
@@ -1246,6 +1263,7 @@ def solve_lambda_state_implicit(
 
         # Gradient w.r.t. parameters: dL/dp = - v^T (∂/∂p grad_L).
         def F_params(phipf, chipf, lamscale):
+            """Evaluate F params for fixed-boundary VMEC solve and implicit differentiation."""
             return grad_L_flat(Lcos_star, Lsin_star, phipf, chipf, lamscale)
 
         (_out, vjp_fun) = jax.vjp(F_params, phipf_star, chipf_star, lamscale_star)
@@ -1418,6 +1436,7 @@ def solve_fixed_boundary_state_implicit(
         )[0]
 
     def fwd(phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+        """Run the forward rule for the custom derivative."""
         st, converged = _solve(
             phipf,
             chipf,
@@ -1443,6 +1462,7 @@ def solve_fixed_boundary_state_implicit(
         )
 
     def bwd(residual, ct_state):
+        """Run the transpose rule for the custom derivative."""
         (
             st_star,
             phipf_star,
@@ -1473,6 +1493,7 @@ def solve_fixed_boundary_state_implicit(
         b = pack_state(ct_state)
 
         def Hvp(u_flat):
+            """Evaluate Hvp for fixed-boundary VMEC solve and implicit differentiation."""
             u_state = unpack_state(u_flat, layout)
             u_state = _mask_grad_for_constraints(u_state, static, idx00=idx00)
             _, hvp = jax.jvp(
@@ -1495,6 +1516,7 @@ def solve_fixed_boundary_state_implicit(
         v = _cg_solve(Hvp, b, tol=float(implicit.cg_tol), max_iter=int(implicit.cg_max_iter))
 
         def F_params(phipf, chipf, pressure, lamscale, edge_Rcos, edge_Rsin, edge_Zcos, edge_Zsin):
+            """Evaluate F params for fixed-boundary VMEC solve and implicit differentiation."""
             return _grad_flat(
                 st_star,
                 phipf,
@@ -1735,6 +1757,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         return _solve(eRcos, eRsin, eZcos, eZsin)[0]
 
     def fwd(eRcos, eRsin, eZcos, eZsin):
+        """Run the forward rule for the custom derivative."""
         st, zero_m1 = _solve(eRcos, eRsin, eZcos, eZsin)
         return st, (
             _stop_gradient_tree(st),
@@ -1746,6 +1769,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
         )
 
     def bwd(residual, ct_state):
+        """Run the transpose rule for the custom derivative."""
         bwd_start = time.perf_counter()
         _vmec_backward_profile_log("bwd_start")
         st_star, zero_m1_star, eRcos_star, eRsin_star, eZcos_star, eZsin_star = residual
@@ -1798,6 +1822,7 @@ def solve_fixed_boundary_state_implicit_vmec_residual(
             vjp_start = time.perf_counter()
 
             def G_params(eRcos, eRsin, eZcos, eZsin):
+                """Evaluate G params for fixed-boundary VMEC solve and implicit differentiation."""
                 return pack_state(
                     _stationarity_state(st_star, zero_m1_star, eRcos, eRsin, eZcos, eZsin)
                 )

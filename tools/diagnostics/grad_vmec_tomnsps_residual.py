@@ -14,8 +14,8 @@ if str(REPO_ROOT) not in sys.path:
 from vmec_jax._compat import enable_x64, has_jax
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout_reference_fields, vmec_residual_internal_from_kernels
-from vmec_jax.vmec_tomnsp import vmec_angle_grid
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout_reference_fields, vmec_residual_internal_from_kernels
+from vmec_jax.kernels.tomnsp import vmec_angle_grid
 from vmec_jax.wout import read_wout, state_from_wout
 
 

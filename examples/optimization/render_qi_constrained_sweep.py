@@ -18,7 +18,7 @@ import re
 
 import numpy as np
 
-from vmec_jax.qi_diagnostics import QISeedSuitabilityTargets, qi_promotion_score
+from vmec_jax.quasi_isodynamic.diagnostics import QISeedSuitabilityTargets, qi_promotion_score
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent

@@ -160,6 +160,7 @@ class ScanConvergencePredicate:
     converged_func: Callable[..., Any]
 
     def __call__(self, fsqr, fsqz, fsql):
+        """Evaluate this callable objective for fixed-boundary VMEC solve and implicit differentiation."""
         return self.converged_func(
             fsqr,
             fsqz,
@@ -210,14 +211,17 @@ class Vmec2000ScanRuntimeSetup:
 
     @property
     def state_only_scan(self) -> bool:
+        """Evaluate state only scan for fixed-boundary VMEC solve and implicit differentiation."""
         return bool(self.setup.state_only_scan)
 
     @property
     def scan_fallback_enabled_run(self) -> bool:
+        """Evaluate scan fallback enabled run for fixed-boundary VMEC solve and implicit differentiation."""
         return bool(self.setup.scan_fallback_enabled_run)
 
     @property
     def force_chunked_scan_run(self) -> bool:
+        """Evaluate force chunked scan run for fixed-boundary VMEC solve and implicit differentiation."""
         return bool(self.setup.force_chunked_scan_run)
 
     def maybe_trace(self, label: str):

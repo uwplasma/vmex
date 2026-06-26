@@ -8,12 +8,12 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from vmec_jax.vmec_residue import (
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.residue import (
     vmec_force_norms_from_bcovar,
     vmec_force_norms_from_bcovar_dynamic,
 )
-from vmec_jax.vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 

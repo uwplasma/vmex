@@ -9,7 +9,7 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.free_boundary import prepare_mgrid_for_config
-from vmec_jax.io.wout.schema import assert_main_modes_match_wout
+from vmec_jax.io.wout_files.schema import assert_main_modes_match_wout
 from vmec_jax.namelist import read_indata
 from vmec_jax.wout import read_wout
 
@@ -52,8 +52,8 @@ CONVERGED_WOUT_MATRIX_CASES = (
     ),
     ConvergedWoutMatrixCase(
         case="fixed_axisym_lasym_single_updown",
-        input_path="examples_single_grid/data/input.up_down_asymmetric_tokamak",
-        wout_path="examples_single_grid/data/wout_up_down_asymmetric_tokamak_reference.nc",
+        input_path="examples/data/single_grid/input.up_down_asymmetric_tokamak",
+        wout_path="examples/data/single_grid/wout_up_down_asymmetric_tokamak_reference.nc",
         lfreeb=False,
         axisymmetric=True,
         lasym=True,
@@ -85,8 +85,8 @@ CONVERGED_WOUT_MATRIX_CASES = (
     ),
     ConvergedWoutMatrixCase(
         case="fixed_nonaxis_lasym_single_basic_non_stellsym_pressure",
-        input_path="examples_single_grid/data/input.basic_non_stellsym_pressure",
-        wout_path="examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        input_path="examples/data/single_grid/input.basic_non_stellsym_pressure",
+        wout_path="examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
         lfreeb=False,
         axisymmetric=False,
         lasym=True,
@@ -96,8 +96,8 @@ CONVERGED_WOUT_MATRIX_CASES = (
     ),
     ConvergedWoutMatrixCase(
         case="free_nonaxis_single_cth_like",
-        input_path="examples_single_grid/data/input.cth_like_free_bdy",
-        wout_path="examples_single_grid/data/wout_cth_like_free_bdy.nc",
+        input_path="examples/data/single_grid/input.cth_like_free_bdy",
+        wout_path="examples/data/single_grid/wout_cth_like_free_bdy.nc",
         lfreeb=True,
         axisymmetric=False,
         lasym=False,

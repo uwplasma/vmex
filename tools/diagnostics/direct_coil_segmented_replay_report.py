@@ -123,7 +123,7 @@ def _timed_replay(
     use_accepted_only_fast_path: bool,
     repeats: int,
 ) -> tuple[dict[str, Any], list[float]]:
-    from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_controller_replay_objective_jax
+    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_controller_replay_objective_jax
 
     timings: list[float] = []
     replay: dict[str, Any] | None = None
@@ -159,7 +159,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         _write_tiny_direct_freeb_input,
     )
     from vmec_jax._compat import enable_x64
-    from vmec_jax.free_boundary_adjoint import direct_coil_accepted_trace_preconditioner_policy_segment_summary
+    from vmec_jax.solvers.free_boundary.adjoint.facade import direct_coil_accepted_trace_preconditioner_policy_segment_summary
     from vmec_jax.state import pack_state
 
     enable_x64(True)

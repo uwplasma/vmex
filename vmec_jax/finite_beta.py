@@ -33,8 +33,8 @@ from .solvers.fixed_boundary.profiles import (
     _icurv_full_mesh_from_indata,
     _mass_half_mesh_from_indata,
 )
-from .vmec_bcovar import vmec_bcovar_half_mesh_from_wout
-from .vmec_residue import vmec_force_norms_from_bcovar_dynamic
+from .kernels.bcovar import vmec_bcovar_half_mesh_from_wout
+from .kernels.residue import vmec_force_norms_from_bcovar_dynamic
 from .wout import _chipf_from_chips, equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
 MU0 = 4e-7 * np.pi
@@ -83,7 +83,7 @@ def redl_bootstrap_geometry_from_state(
     nearest full-mesh surfaces, matching the other profile objective objects.
     """
 
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.tomnsp import vmec_trig_tables
     from .wout import _vmec_wint_from_trig_jax
 
     lasym = bool(getattr(static.cfg, "lasym", False))
@@ -296,9 +296,9 @@ def mercier_realspace_geometry_channels_from_state(
     VMEC-internal channels; physical fields are recovered as
     ``X_even + sqrt(s) * X_odd``.
     """
-    from .vmec_jacobian import _apply_vmec_axis_rules
-    from .vmec_parity import vmec_m1_internal_to_physical_signed
-    from .vmec_realspace import vmec_realspace_synthesis_multi
+    from .kernels.jacobian import _apply_vmec_axis_rules
+    from .kernels.parity import vmec_m1_internal_to_physical_signed
+    from .kernels.realspace import vmec_realspace_synthesis_multi
 
     s = jnp.asarray(s, dtype=jnp.float64)
     m_np = np.asarray(modes.m, dtype=int)
@@ -448,8 +448,8 @@ def mercier_bss_geometry_channels_from_state(
             phase_split=True,
         )
 
-    from .vmec_jacobian import _apply_vmec_axis_rules
-    from .vmec_realspace import vmec_realspace_synthesis_multi
+    from .kernels.jacobian import _apply_vmec_axis_rules
+    from .kernels.realspace import vmec_realspace_synthesis_multi
 
     s = jnp.asarray(s, dtype=jnp.float64)
     m_np = np.asarray(modes.m, dtype=int)
@@ -915,7 +915,7 @@ def mercier_terms_from_state(
     This state-level composition uses the JAX Mercier geometry and jxbforce
     derivative paths for both stellarator-symmetric and LASYM equilibria.
     """
-    from .vmec_tomnsp import vmec_trig_tables
+    from .kernels.tomnsp import vmec_trig_tables
     from .wout import _vmec_wint_from_trig_jax
 
     lasym = bool(getattr(static.cfg, "lasym", False))

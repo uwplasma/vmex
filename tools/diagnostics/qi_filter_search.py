@@ -47,7 +47,7 @@ from tools.diagnostics.qi_landscape_scan import (  # noqa: E402
 )
 from vmec_jax._compat import enable_x64  # noqa: E402
 from vmec_jax.optimization import boundary_param_names, create_x_scale  # noqa: E402
-from vmec_jax.qi_diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state  # noqa: E402
+from vmec_jax.quasi_isodynamic.diagnostics import QIDiagnosticOptions, qi_diagnostics_from_state  # noqa: E402
 
 
 enable_x64(True)

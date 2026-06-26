@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from vmec_jax.vmec_constraints import (
+from vmec_jax.kernels.constraints import (
     alias_gcon,
     faccon_from_signgs,
     precondn_diag_axd1_from_bcovar,
@@ -15,7 +15,7 @@ from vmec_jax.vmec_constraints import (
     tcon_from_precondn_axisym,
     tcon_from_tcon0_heuristic,
 )
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 
 
 Cfg = namedtuple("Cfg", "mpol ntor ntheta nzeta nfp lasym lthreed")

@@ -26,19 +26,23 @@ class ResidualHistoryPolicy:
     has_iota_callback: bool = False
 
     def has_qs_residual_block_metadata(self) -> bool:
+        """Return whether has qs residual block metadata holds for fixed-boundary VMEC solve and implicit differentiation."""
         if self.has_residual_block_metadata is not None:
             return bool(self.has_residual_block_metadata)
         return self.n_qs is not None or self.n_non_qs is not None
 
     def can_build_qs_from_residuals(self) -> bool:
+        """Evaluate can build qs from residuals for fixed-boundary VMEC solve and implicit differentiation."""
         return self.has_qs_residual_block_metadata()
 
     def can_build_aspect_from_residuals(self) -> bool:
+        """Evaluate can build aspect from residuals for fixed-boundary VMEC solve and implicit differentiation."""
         if self.aspect_target is None:
             return False
         return bool(np.isfinite(float(self.aspect_weight)) and float(self.aspect_weight) != 0.0)
 
     def can_build_history_from_residuals(self) -> bool:
+        """Evaluate can build history from residuals for fixed-boundary VMEC solve and implicit differentiation."""
         return (
             not bool(self.has_iota_callback)
             and self.can_build_aspect_from_residuals()

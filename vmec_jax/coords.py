@@ -34,6 +34,7 @@ if has_jax():
         from jax.tree_util import register_pytree_node_class as _register_pytree_node_class  # type: ignore
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 return _register_pytree_node_class(cls)
             except ValueError as e:
@@ -45,6 +46,7 @@ if has_jax():
         import jax.tree_util as _tu
 
         def register_pytree_node_class(cls):  # type: ignore
+            """Register this type as a JAX pytree for JIT and automatic differentiation."""
             try:
                 _tu.register_pytree_node(
                     cls,
@@ -58,6 +60,7 @@ if has_jax():
 else:
 
     def register_pytree_node_class(cls):  # type: ignore
+        """Register this type as a JAX pytree for JIT and automatic differentiation."""
         return cls
 
 
@@ -81,6 +84,7 @@ class Coords:
 
     # Make this a PyTree so `jit` can return it.
     def tree_flatten(self) -> Tuple[Tuple[Any, ...], None]:
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (
             self.R,
             self.Z,
@@ -96,6 +100,7 @@ class Coords:
 
     @classmethod
     def tree_unflatten(cls, aux_data: None, children: Tuple[Any, ...]) -> "Coords":
+        """Rebuild the object from JAX pytree metadata and leaves."""
         return cls(*children)
 
 

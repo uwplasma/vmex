@@ -31,7 +31,7 @@ from vmec_jax._compat import enable_x64, jnp
 from vmec_jax.field import signgs_from_sqrtg
 from vmec_jax.geom import eval_geom
 from vmec_jax.optimization import rebuild_indata_with_resolution
-from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 from vmec_jax.quasi_isodynamic import (
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,

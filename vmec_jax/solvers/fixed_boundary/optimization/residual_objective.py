@@ -7,12 +7,12 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ...._compat import jnp
-from ....vmec_residue import (
+from ....kernels.residue import (
     vmec_apply_m1_constraints,
     vmec_apply_scalxc_to_tomnsps,
     vmec_zero_m1_zforce,
 )
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.tomnsp import TomnspsRZL
 
 
 R_RESIDUAL_BLOCKS = ("frcc", "frss", "frsc", "frcs")
@@ -35,6 +35,7 @@ VECTOR_RESIDUAL_BLOCKS = (
 
 
 class ResidualObjectiveTerms(NamedTuple):
+    """Represent ResidualObjectiveTerms data for fixed-boundary VMEC solve and implicit differentiation."""
     frzl: TomnspsRZL
     norms: Any
     gcr2: Any

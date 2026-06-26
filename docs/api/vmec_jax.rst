@@ -32,21 +32,32 @@ Submodules
    vmec_jax.finite_beta
    vmec_jax.fourier
    vmec_jax.solvers.free_boundary.validation
-   vmec_jax.free_boundary_adjoint
-   vmec_jax.free_boundary_adjoint_controller
+   vmec_jax.solvers.free_boundary.adjoint.facade
+   vmec_jax.solvers.free_boundary.adjoint.controller
    vmec_jax.geom
    vmec_jax.grids
    vmec_jax.implicit
    vmec_jax.init_guess
    vmec_jax.integrals
+   vmec_jax.kernels
+   vmec_jax.kernels.bcovar
+   vmec_jax.kernels.constraints
+   vmec_jax.kernels.forces
+   vmec_jax.kernels.jacobian
+   vmec_jax.kernels.lforbal
+   vmec_jax.kernels.numpy_forces
+   vmec_jax.kernels.parity
+   vmec_jax.kernels.realspace
+   vmec_jax.kernels.residue
+   vmec_jax.kernels.tomnsp
    vmec_jax.mercier
    vmec_jax.modes
    vmec_jax.namelist
    vmec_jax.optimization
-   vmec_jax.qi_optimization
+   vmec_jax.quasi_isodynamic.optimization
    vmec_jax.optimization_workflow
    vmec_jax.profiles
-   vmec_jax.qi_diagnostics
+   vmec_jax.quasi_isodynamic.diagnostics
    vmec_jax.quasi_isodynamic
    vmec_jax.quasisymmetry
    vmec_jax.radial
@@ -57,11 +68,4 @@ Submodules
    vmec_jax.state
    vmec_jax.static
    vmec_jax.visualization
-   vmec_jax.vmec_constraints
-   vmec_jax.vmec_bcovar
-   vmec_jax.vmec_forces
-   vmec_jax.vmec_jacobian
-   vmec_jax.vmec_parity
-   vmec_jax.vmec_residue
-   vmec_jax.vmec_tomnsp
    vmec_jax.wout

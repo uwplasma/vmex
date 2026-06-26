@@ -8,10 +8,10 @@ import pytest
 from vmec_jax.config import VMECConfig
 from vmec_jax.namelist import InData
 from vmec_jax.static import build_static
-import vmec_jax.vmec_bcovar as vb
-import vmec_jax.vmec_forces as vf
-import vmec_jax.vmec_realspace as vr
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+import vmec_jax.kernels.bcovar as vb
+import vmec_jax.kernels.forces as vf
+import vmec_jax.kernels.realspace as vr
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 from vmec_jax.wout import equilibrium_iota_profiles_from_state
 
 

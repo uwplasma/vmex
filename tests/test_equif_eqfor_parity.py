@@ -8,9 +8,9 @@ import pytest
 
 from vmec_jax.config import load_config
 from vmec_jax.static import build_static
-from vmec_jax.vmec_forces import vmec_forces_rz_from_wout
-from vmec_jax.vmec_lforbal import _pwint_from_trig, equif_from_bcovar, plascur_edge_from_bcovar
-from vmec_jax.vmec_tomnsp import vmec_angle_grid, vmec_trig_tables
+from vmec_jax.kernels.forces import vmec_forces_rz_from_wout
+from vmec_jax.kernels.lforbal import _pwint_from_trig, equif_from_bcovar, plascur_edge_from_bcovar
+from vmec_jax.kernels.tomnsp import vmec_angle_grid, vmec_trig_tables
 from vmec_jax.wout import read_wout, state_from_wout
 pytestmark = pytest.mark.full
 
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.full
 def test_equif_matches_eqfor_normalization(input_rel: str, wout_rel: str):
     """Reproduce VMEC2000 `eqfor.f` normalization for the `equif` diagnostic.
 
-    `vmec_jax.vmec_lforbal.equif_from_bcovar` computes the *raw* `equif` from
+    `vmec_jax.kernels.lforbal.equif_from_bcovar` computes the *raw* `equif` from
     `fbal.f`. VMEC's netcdf `wout` output stores a *normalized* version computed
     in `eqfor.f`. This test checks that we match the netcdf `equif`.
     """

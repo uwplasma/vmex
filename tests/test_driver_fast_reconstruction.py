@@ -101,9 +101,9 @@ def test_solve_fixed_boundary_from_boundary_wires_solver_inputs(monkeypatch):
 
 
 def test_residual_scalars_from_state_runs_kernel_pipeline(monkeypatch):
-    import vmec_jax.vmec_forces as forces
-    import vmec_jax.vmec_residue as residue
-    import vmec_jax.vmec_tomnsp as tomnsp
+    import vmec_jax.kernels.forces as forces
+    import vmec_jax.kernels.residue as residue
+    import vmec_jax.kernels.tomnsp as tomnsp
 
     calls = {}
     state = object()
@@ -184,9 +184,9 @@ def test_residual_scalars_from_state_runs_kernel_pipeline(monkeypatch):
 
 
 def test_final_flux_profiles_from_state_recomputes_current_driven_iota(monkeypatch):
-    import vmec_jax.vmec_bcovar as bcovar
-    import vmec_jax.vmec_residue as residue
-    import vmec_jax.vmec_tomnsp as tomnsp
+    import vmec_jax.kernels.bcovar as bcovar
+    import vmec_jax.kernels.residue as residue
+    import vmec_jax.kernels.tomnsp as tomnsp
     import vmec_jax.wout as wout_module
 
     calls = {}
@@ -317,8 +317,8 @@ def test_final_flux_profiles_from_state_fast_exit_branches(monkeypatch):
 
 
 def test_final_flux_profiles_from_state_handles_no_jax_and_empty_axis(monkeypatch):
-    import vmec_jax.vmec_bcovar as bcovar
-    import vmec_jax.vmec_residue as residue
+    import vmec_jax.kernels.bcovar as bcovar
+    import vmec_jax.kernels.residue as residue
     import vmec_jax.wout as wout_module
 
     class _BadArray:

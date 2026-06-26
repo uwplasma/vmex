@@ -2,7 +2,7 @@
 """Run a fixed-boundary performance decomposition and write a roadmap report.
 
 This diagnostic is the first implementation artifact for
-``plan_research_grade_performance_differentiability.md`` milestones M1 and M2.
+``vmec_jax_plan/plan_research_grade_performance_differentiability.md`` milestones M1 and M2.
 It runs cold and warm ``vmec_jax`` profiler passes in separate subprocesses,
 optionally runs VMEC2000, and writes both machine-readable JSON and a compact
 Markdown report that maps VMEC2000/VMEC++ algorithmic buckets onto vmec_jax
@@ -62,8 +62,8 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/free_boundary/laplace_solver/laplace_solver.cc",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_tomnsp.py",
-            "vmec_jax/vmec_utils.py",
+            "vmec_jax/kernels/tomnsp.py",
+            "vmec_jax/kernels/realspace.py",
         ],
         "profiler_keys": [
             "compute_forces_s",
@@ -82,8 +82,8 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/vmec/thread_local_storage/thread_local_storage.h",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_bcovar.py",
-            "vmec_jax/vmec_forces.py",
+            "vmec_jax/kernels/bcovar.py",
+            "vmec_jax/kernels/forces.py",
         ],
         "profiler_keys": [
             "compute_forces_main_s",
@@ -103,7 +103,7 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/vmecpp/vmec/thread_local_storage/thread_local_storage.h",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/vmec_forces.py",
+            "vmec_jax/kernels/forces.py",
             "vmec_jax/solvers/fixed_boundary/residual/iteration.py",
         ],
         "profiler_keys": [
@@ -146,8 +146,8 @@ ALGORITHM_MAP: list[dict[str, Any]] = [
             "src/vmecpp/cpp/util/hdf5_io/hdf5_io.cc",
         ],
         "vmec_jax_sources": [
-            "vmec_jax/io/wout",
-            "vmec_jax/io/wout/mercier.py",
+            "vmec_jax/io/wout_files",
+            "vmec_jax/io/wout_files/mercier.py",
             "vmec_jax/wout.py",
         ],
         "profiler_keys": [

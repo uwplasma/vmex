@@ -14,6 +14,7 @@ from .trace_fingerprint import trace_pytree_shape_signature
 
 
 def stack_trace_control_field(trace_seq: tuple[dict[str, Any], ...], key: str, *, dtype: Any | None = None) -> Any:
+    """Stack stack trace control field for direct-coil free-boundary solve and branch-local adjoint validation."""
     if not trace_seq:
         raise ValueError("at least one accepted trace is required")
     arrays = []
@@ -28,6 +29,7 @@ def stack_trace_control_field(trace_seq: tuple[dict[str, Any], ...], key: str, *
 
 
 def stack_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key: str) -> Any:
+    """Stack stack trace pytree field for direct-coil free-boundary solve and branch-local adjoint validation."""
     if not trace_seq:
         raise ValueError("at least one accepted trace is required")
     values = []
@@ -51,6 +53,7 @@ def stack_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key: str) ->
 
 
 def stack_optional_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key: str) -> Any | None:
+    """Stack stack optional trace pytree field for direct-coil free-boundary solve and branch-local adjoint validation."""
     values = [trace.get(key) for trace in trace_seq]
     if all(value is None for value in values):
         return None
@@ -68,6 +71,7 @@ def stack_optional_trace_pytree_field(trace_seq: tuple[dict[str, Any], ...], key
 
 
 def trace_preconditioner_policy_value(trace: dict[str, Any], key: str) -> int:
+    """Evaluate trace preconditioner policy value for direct-coil free-boundary solve and branch-local adjoint validation."""
     value = trace.get(key, None)
     if value is None:
         return -1
@@ -111,6 +115,7 @@ def trace_static_value_shape_signature(value: Any) -> tuple[Any, ...]:
 
 
 def trace_optional_presence_signature(trace: dict[str, Any], keys: tuple[str, ...]) -> tuple[int, ...]:
+    """Evaluate trace optional presence signature for direct-coil free-boundary solve and branch-local adjoint validation."""
     return tuple(0 if trace.get(key) is None else 1 for key in keys)
 
 
@@ -118,6 +123,7 @@ _ACCEPTED_TRACE_NESTOR_AXIS_KEYS = ("br_axis", "bp_axis", "bz_axis")
 
 
 def stack_trace_nestor_axis_controls(trace_seq: tuple[dict[str, Any], ...]) -> dict[str, Any] | None:
+    """Stack stack trace nestor axis controls for direct-coil free-boundary solve and branch-local adjoint validation."""
     active_nestor = [
         trace.get("freeb_nestor_trace")
         if trace.get("freeb_bsqvac_half") is not None and isinstance(trace.get("freeb_nestor_trace"), dict)

@@ -135,6 +135,7 @@ class FixedBoundaryExactOptimizer:
         exact_path: str | None = None,
         freeze_initial_axis: bool = False,
     ) -> None:
+        """Evaluate this object for VMEC optimization residual assembly and solve orchestration."""
         self._solver_device_name = self._resolve_solver_device(solver_device)
         self._exact_path_request = self._resolve_exact_path_request(exact_path)
         self._inside_solver_device_context = False
@@ -541,7 +542,7 @@ class FixedBoundaryExactOptimizer:
     def _run_in_solver_device_context(self, fn, *args, **kwargs):
         if self._solver_device_name is None or self._inside_solver_device_context:
             return fn(*args, **kwargs)
-        from .vmec_tomnsp import tomnsps_fft_policy_override
+        from .kernels.tomnsp import tomnsps_fft_policy_override
 
         backend_name = str(self._solver_device_name).strip().lower()
         tomnsps_fft_override = (
@@ -1583,7 +1584,7 @@ class FixedBoundaryExactOptimizer:
         """
         from .preconditioner_1d_jax import clear_preconditioner_jit_caches
         from .discrete_adjoint import clear_replay_scan_caches
-        from .vmec_numpy_forces import clear_numpy_force_caches
+        from .kernels.numpy_forces import clear_numpy_force_caches
 
         if clear_compiled:
             clear_replay_scan_caches()

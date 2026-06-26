@@ -38,10 +38,10 @@ AXIS_MODE_CASES = (
     ("axisym", "examples/data/wout_circular_tokamak.nc"),
     ("nonaxis", "examples/data/wout_nfp4_QH_warm_start.nc"),
     ("lasym_nonaxis", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
-    ("single_grid_lasym_axisym", "examples_single_grid/data/wout_up_down_asymmetric_tokamak_reference.nc"),
+    ("single_grid_lasym_axisym", "examples/data/single_grid/wout_up_down_asymmetric_tokamak_reference.nc"),
     (
         "single_grid_lasym_nonaxis_finite_beta",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
     ),
 )
 
@@ -53,7 +53,7 @@ JACOBIAN_VOLUME_CASES = (
     ("lasym_nonaxis", "examples/data/wout_basic_non_stellsym_simsopt.nc"),
     (
         "single_grid_lasym_nonaxis_finite_beta",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
     ),
 )
 
@@ -63,7 +63,7 @@ def _data_dir() -> Path:
 
 
 def _single_grid_data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples_single_grid" / "data"
+    return Path(__file__).resolve().parents[1] / "examples/data/single_grid"
 
 
 def _repo_root() -> Path:

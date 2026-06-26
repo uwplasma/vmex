@@ -29,13 +29,13 @@ from .fourier import build_helical_basis, eval_fourier
 from .namelist import InData
 from .state import StateLayout, VMECState
 from .static import VMECStatic
-from .vmec_parity import internal_odd_from_physical_vmec_m1, vmec_m1_internal_to_physical_signed
-from .vmec_realspace import (
+from .kernels.parity import internal_odd_from_physical_vmec_m1, vmec_m1_internal_to_physical_signed
+from .kernels.realspace import (
     vmec_realspace_analysis,
     vmec_realspace_synthesis,
     vmec_realspace_synthesis_dtheta,
 )
-from .vmec_tomnsp import vmec_trig_tables
+from .kernels.tomnsp import vmec_trig_tables
 
 
 def _read_axis_coeffs(indata: InData) -> dict[str, float | list[float]]:

@@ -20,7 +20,8 @@ from vmec_jax.geom import eval_geom
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.modes import nyquist_mode_table_from_grid, vmec_mode_table
 from vmec_jax.optimization import rebuild_indata_with_resolution
-from vmec_jax.quasi_isodynamic import _nearest_half_mesh_indices, quasi_isodynamic_residual_from_state
+from vmec_jax.quasi_isodynamic import quasi_isodynamic_residual_from_state
+from vmec_jax.quasi_isodynamic.objectives import _nearest_half_mesh_indices
 
 try:
     from finite_beta_stage1_common import (

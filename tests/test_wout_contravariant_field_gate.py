@@ -12,7 +12,7 @@ from vmec_jax.fourier import eval_fourier
 from vmec_jax.grids import AngleGrid
 from vmec_jax.nyquist import nyquist_basis_from_wout
 from vmec_jax.static import build_static
-from vmec_jax.vmec_bcovar import vmec_bcovar_half_mesh_from_wout
+from vmec_jax.kernels.bcovar import vmec_bcovar_half_mesh_from_wout
 from vmec_jax.wout import read_wout, state_from_wout
 
 

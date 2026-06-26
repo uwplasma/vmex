@@ -23,7 +23,7 @@ def _load_module():
 
 def test_public_qi_optimization_module_and_compat_shim_share_api() -> None:
     import examples.optimization.qi_optimization_support as compat
-    import vmec_jax.qi_optimization as public
+    import vmec_jax.quasi_isodynamic.optimization as public
 
     assert compat.target_helicity_seed_terms is public.target_helicity_seed_terms
     assert compat.write_qi_stage_checkpoint is public.write_qi_stage_checkpoint

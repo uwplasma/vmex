@@ -90,6 +90,7 @@ def _register_pytree_node_class_safe(cls):
 
 @dataclass(frozen=True)
 class StateLayout:
+    """Represent StateLayout data for VMEC-JAX numerical workflow."""
     ns: int
     K: int
     lasym: bool
@@ -97,10 +98,12 @@ class StateLayout:
     @property
     def n_fields(self) -> int:
         # R, Z, L each have cos/sin blocks
+        """Evaluate n fields for VMEC-JAX numerical workflow."""
         return 6
 
     @property
     def size(self) -> int:
+        """Evaluate size for VMEC-JAX numerical workflow."""
         return self.ns * self.K * self.n_fields
 
     def split(self, x) -> Tuple[Any, ...]:
@@ -140,12 +143,14 @@ class VMECState:
 
     # --- JAX PyTree protocol ---
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.Rcos, self.Rsin, self.Zcos, self.Zsin, self.Lcos, self.Lsin)
         aux = (int(self.layout.ns), int(self.layout.K), bool(self.layout.lasym))
         return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         ns, K, lasym = aux
         layout = StateLayout(ns=int(ns), K=int(K), lasym=bool(lasym))
         Rcos, Rsin, Zcos, Zsin, Lcos, Lsin = children

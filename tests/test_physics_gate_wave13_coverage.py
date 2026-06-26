@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.modes import ModeTable
-from vmec_jax.vmec_parity import (
+from vmec_jax.kernels.parity import (
     _mn_cos_to_signed_host,
     _mn_sin_to_signed_host,
     _signed_to_mn_cos_host,
@@ -15,8 +15,8 @@ from vmec_jax.vmec_parity import (
     vmec_m1_internal_to_physical_signed,
     vmec_m1_physical_to_internal_signed,
 )
-from vmec_jax.vmec_residue import vmec_pwint_from_trig, vmec_scalxc_from_s, vmec_wint_from_trig
-from vmec_jax.vmec_tomnsp import vmec_trig_tables
+from vmec_jax.kernels.residue import vmec_pwint_from_trig, vmec_scalxc_from_s, vmec_wint_from_trig
+from vmec_jax.kernels.tomnsp import vmec_trig_tables
 from vmec_jax.wout import read_wout
 
 
@@ -27,7 +27,7 @@ WOUT_FLUX_CASES = (
     ("qi_fixed_resolution", "examples/data/wout_nfp3_QI_fixed_resolution_final.nc"),
     (
         "lasym_finite_beta",
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc",
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc",
     ),
 )
 

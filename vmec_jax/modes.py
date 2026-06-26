@@ -31,6 +31,7 @@ class ModeTable:
 
     @property
     def K(self) -> int:
+        """Evaluate K for VMEC-JAX numerical workflow."""
         return int(self.m.size)
 
 

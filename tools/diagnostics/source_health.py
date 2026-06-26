@@ -43,6 +43,16 @@ class RootNamespaceStat:
     helper_prefix_files: tuple[Path, ...]
 
 
+@dataclass(frozen=True)
+class PublicDocstringStat:
+    """Missing-docstring record for one public package symbol."""
+
+    path: Path
+    qualified_name: str
+    lineno: int
+    kind: str
+
+
 def count_source_lines(path: Path) -> int:
     """Return the number of physical lines in a Python source file."""
 
@@ -117,6 +127,68 @@ def collect_function_stats(roots: Iterable[Path]) -> list[FunctionStat]:
         visitor.visit(tree)
         stats.extend(visitor.stats)
     return sorted(stats, key=lambda item: (-item.lines, str(item.path), item.qualified_name))
+
+
+class _PublicDocstringVisitor(ast.NodeVisitor):
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._scope: list[str] = []
+        self.missing: list[PublicDocstringStat] = []
+
+    @staticmethod
+    def _is_public_callable_name(name: str) -> bool:
+        return not name.startswith("_") or name in {"__init__", "__call__", "__repr__", "__str__"}
+
+    def _record_if_missing(self, node: ast.ClassDef | ast.AsyncFunctionDef | ast.FunctionDef) -> None:
+        name = node.name
+        if isinstance(node, ast.ClassDef):
+            public = not name.startswith("_")
+            kind = "class"
+        else:
+            public = self._is_public_callable_name(name)
+            kind = "function"
+        if public and ast.get_docstring(node) is None:
+            self.missing.append(
+                PublicDocstringStat(
+                    path=self.path,
+                    qualified_name=".".join([*self._scope, name]),
+                    lineno=int(node.lineno),
+                    kind=kind,
+                )
+            )
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802 - ast API
+        self._record_if_missing(node)
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802 - ast API
+        self._record_if_missing(node)
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802 - ast API
+        self._record_if_missing(node)
+        self._scope.append(node.name)
+        self.generic_visit(node)
+        self._scope.pop()
+
+
+def collect_missing_public_docstrings(roots: Iterable[Path]) -> list[PublicDocstringStat]:
+    """Collect public package functions/classes missing docstrings."""
+
+    missing: list[PublicDocstringStat] = []
+    for path in iter_python_files(roots):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:
+            continue
+        visitor = _PublicDocstringVisitor(path)
+        visitor.visit(tree)
+        missing.extend(visitor.missing)
+    return sorted(missing, key=lambda item: (str(item.path), item.lineno, item.qualified_name))
 
 
 def function_stat_key(stat: FunctionStat) -> str:
@@ -242,6 +314,18 @@ def format_root_namespace_report(stat: RootNamespaceStat, *, max_helper_prefix_f
     return "\n".join(lines)
 
 
+def format_public_docstring_report(missing: Iterable[PublicDocstringStat]) -> str:
+    """Format public-docstring coverage for terminals and CI logs."""
+
+    rows = list(missing)
+    lines = ["", "Public docstring report", f"missing public docstrings: {len(rows)}"]
+    for item in rows[:100]:
+        lines.append(f"  {item.path}:{item.lineno}: {item.kind} {item.qualified_name}")
+    if len(rows) > 100:
+        lines.append(f"  ... {len(rows) - 100} additional missing public docstrings")
+    return "\n".join(lines)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -310,6 +394,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=-1,
         help="Exit nonzero if root-level Python files exceed this count. Disabled by default.",
     )
+    parser.add_argument(
+        "--require-public-docstrings",
+        action="store_true",
+        help="Exit nonzero if public functions/classes below --public-docstring-root lack docstrings.",
+    )
+    parser.add_argument(
+        "--public-docstring-root",
+        action="append",
+        default=None,
+        help="Package roots to scan for public docstring coverage. Defaults to vmec_jax.",
+    )
     return parser.parse_args(argv)
 
 
@@ -324,6 +419,9 @@ def main(argv: list[str] | None = None) -> int:
     namespace_stat = collect_root_namespace_stat(Path(args.root_namespace), helper_prefixes=helper_prefixes)
     helper_limit = None if args.max_root_helper_prefix_files < 0 else int(args.max_root_helper_prefix_files)
     print(format_root_namespace_report(namespace_stat, max_helper_prefix_files=helper_limit))
+    docstring_roots = [Path(root) for root in (args.public_docstring_root or ["vmec_jax"])]
+    missing_public_docstrings = collect_missing_public_docstrings(docstring_roots)
+    print(format_public_docstring_report(missing_public_docstrings))
 
     failed = False
     if args.fail_lines > 0 and any(item.lines >= args.fail_lines for item in stats):
@@ -346,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
         failed = failed or len(namespace_stat.helper_prefix_files) > int(args.max_root_helper_prefix_files)
     if args.max_root_python_files >= 0:
         failed = failed or namespace_stat.python_files > int(args.max_root_python_files)
+    if args.require_public_docstrings:
+        failed = failed or bool(missing_public_docstrings)
     return 1 if failed else 0
 
 

@@ -41,7 +41,7 @@ def initial_guess_with_optional_nojit(
     if use_numpy_init:
         try:
             if numpy_module_patch_func is None:
-                from ..vmec_numpy_forces import _numpy_module_patch as numpy_module_patch_func
+                from ..kernels.numpy_forces import _numpy_module_patch as numpy_module_patch_func
 
             with numpy_module_patch_func():
                 return initial_guess_from_boundary_func(
@@ -563,7 +563,7 @@ def maybe_run_fixed_boundary_in_solver_device_context(
     if not devices:
         return None
 
-    from ..vmec_tomnsp import tomnsps_fft_policy_override
+    from ..kernels.tomnsp import tomnsps_fft_policy_override
 
     tomnsps_fft_override = (
         str(solver_device_name).strip().lower() in ("gpu", "cuda", "rocm", "tpu")

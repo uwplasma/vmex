@@ -26,6 +26,7 @@ def _normalize_step_output(out: Any) -> tuple[Any, Any]:
 
 def _step_eval_from(step_fn: Any, params: Any, checkpoint_steps: bool) -> Any:
     def normalize_step(state, control):
+        """Normalize normalize step for direct-coil free-boundary solve and branch-local adjoint validation."""
         return _normalize_step_output(step_fn(state, params, control))
 
     return jax.checkpoint(normalize_step) if bool(checkpoint_steps) else normalize_step
@@ -522,6 +523,7 @@ def jax_visible_nonlinear_controller_directional_check_jax(
     """AD-vs-FD check for a fully JAX-visible nonlinear controller."""
 
     def run_controller(controller_params):
+        """Run run controller for direct-coil free-boundary solve and branch-local adjoint validation."""
         return jax_visible_nonlinear_controller_jax(
             step_fn,
             initial_state,
@@ -548,6 +550,7 @@ def jax_visible_masked_nonlinear_controller_directional_check_jax(
     """AD-vs-FD check for a JAX-visible masked nonlinear controller."""
 
     def run_controller(controller_params):
+        """Run run controller for direct-coil free-boundary solve and branch-local adjoint validation."""
         return jax_visible_masked_nonlinear_controller_jax(
             step_fn,
             converged_fn,
@@ -576,6 +579,7 @@ def jax_visible_accepted_nonlinear_controller_directional_check_jax(
     """AD-vs-FD check for accepted/rejected JAX-visible controllers."""
 
     def run_controller(controller_params):
+        """Run run controller for direct-coil free-boundary solve and branch-local adjoint validation."""
         return jax_visible_accepted_nonlinear_controller_jax(
             step_fn,
             accept_fn,

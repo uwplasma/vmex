@@ -36,12 +36,12 @@ FREE_BOUNDARY_ASSET_CASES = (
         expect_mgrid_mode="S",
     ),
     FreeBoundaryAssetCase(
-        "examples_single_grid/data/input.cth_like_free_bdy",
+        "examples/data/single_grid/input.cth_like_free_bdy",
         expect_lasym=False,
         expect_mgrid_mode="R",
     ),
     FreeBoundaryAssetCase(
-        "examples_single_grid/data/input.cth_like_free_bdy_lasym_small",
+        "examples/data/single_grid/input.cth_like_free_bdy_lasym_small",
         expect_lasym=True,
         expect_mgrid_mode="S",
     ),
@@ -52,7 +52,7 @@ ROUNDTRIP_CASES = (
     RoundtripCase("axisymmetric_vacuum", "examples/data/wout_circular_tokamak.nc", expect_lasym=False),
     RoundtripCase("stellarator_asymmetric", "examples/data/wout_basic_non_stellsym_simsopt.nc", expect_lasym=True),
     pytest.param(
-        RoundtripCase("free_boundary", "examples_single_grid/data/wout_cth_like_free_bdy.nc", expect_lasym=False),
+        RoundtripCase("free_boundary", "examples/data/single_grid/wout_cth_like_free_bdy.nc", expect_lasym=False),
         marks=pytest.mark.full,
     ),
 )

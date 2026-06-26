@@ -1,4 +1,11 @@
-"""Dense validation-scale adjoint primitives for free-boundary tests."""
+"""Dense validation-scale adjoint primitives for free-boundary operators.
+
+The dense path is intentionally small and mathematically transparent.  It
+checks the adjoint contract used by larger NESTOR/mode-space operators: solve
+the primal linear system in the forward pass, then apply the transpose solve in
+the reverse pass.  These helpers are validation kernels, not the fast production
+free-boundary path.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +15,7 @@ from vmec_jax._compat import jax, jnp, tree_util
 
 
 def dense_vacuum_solve_jax(A: Any, b: Any, *, symmetric: bool = False) -> Any:
-    """Solve a dense toy vacuum linear system with an implicit adjoint."""
+    """Solve a dense vacuum linear system with an implicit transpose adjoint."""
 
     A_arr = jnp.asarray(A)
     b_arr = jnp.asarray(b)
@@ -21,12 +28,15 @@ def dense_vacuum_solve_jax(A: Any, b: Any, *, symmetric: bool = False) -> Any:
         return jnp.linalg.solve(A_arr, b_arr)
 
     def matvec(x):
+        """Evaluate matvec for direct-coil free-boundary solve and branch-local adjoint validation."""
         return A_arr @ x
 
     def solve_fn(_matvec, rhs):
+        """Solve solve fn for direct-coil free-boundary solve and branch-local adjoint validation."""
         return jnp.linalg.solve(A_arr, rhs)
 
     def transpose_solve_fn(_matvec, rhs):
+        """Evaluate transpose solve fn for direct-coil free-boundary solve and branch-local adjoint validation."""
         matrix = A_arr if bool(symmetric) else A_arr.T
         return jnp.linalg.solve(matrix, rhs)
 
@@ -116,6 +126,7 @@ def dense_fixed_point_solve_jax(
     """Solve ``x = update_fn(x, params)`` with the nonlinear implicit adjoint."""
 
     def residual(state, prm):
+        """Evaluate residual for direct-coil free-boundary solve and branch-local adjoint validation."""
         state_arr = jnp.asarray(state)
         update = jnp.asarray(update_fn(state_arr, prm))
         if update.shape != state_arr.shape:

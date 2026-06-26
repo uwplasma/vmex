@@ -13,8 +13,8 @@ from .payload_blocks import (
     zero_edge_rz_force_blocks,
 )
 from .update import strict_step_branch_fingerprint, velocity_blocks_legacy_payload
-from ....vmec_residue import vmec_gcx2_from_tomnsps
-from ....vmec_tomnsp import TomnspsRZL
+from ....kernels.residue import vmec_gcx2_from_tomnsps
+from ....kernels.tomnsp import TomnspsRZL
 
 __all__ = [
     "ResidualForceKernelAux",
@@ -584,7 +584,7 @@ def residual_force_payload_from_kernels(
         include_edge_residual=include_edge_residual,
     )
     if residual_func is None:
-        from ....vmec_forces import vmec_residual_internal_from_kernels as residual_func
+        from ....kernels.forces import vmec_residual_internal_from_kernels as residual_func
 
     frzl_raw = residual_func(
         kernels,
@@ -698,14 +698,14 @@ def evaluate_residual_force_from_state(
     """
 
     if kernels_func is None:
-        from ....vmec_forces import vmec_forces_rz_from_wout as kernels_func
+        from ....kernels.forces import vmec_forces_rz_from_wout as kernels_func
 
     use_combined_norms_scales = norms_func is None and scale_func is None
     if norms_scales_func is None and use_combined_norms_scales:
-        from ....vmec_residue import vmec_force_norms_scales_from_bcovar_dynamic as norms_scales_func
+        from ....kernels.residue import vmec_force_norms_scales_from_bcovar_dynamic as norms_scales_func
 
     if norms_func is None and not use_combined_norms_scales:
-        from ....vmec_residue import vmec_force_norms_from_bcovar_dynamic as norms_func
+        from ....kernels.residue import vmec_force_norms_from_bcovar_dynamic as norms_func
 
     if scale_func is None and not use_combined_norms_scales:
         from ..preconditioning.operators import metric_surface_precond_from_bcovar_jax as scale_func

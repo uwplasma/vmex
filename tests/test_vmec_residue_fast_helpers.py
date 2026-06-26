@@ -7,7 +7,7 @@ import pytest
 
 from vmec_jax._compat import jax, jnp
 from vmec_jax.solvers.fixed_boundary.preconditioning.operators import metric_surface_precond_from_bcovar_jax
-from vmec_jax.vmec_residue import (
+from vmec_jax.kernels.residue import (
     VmecForceNormsDynamic,
     VmecForceNorms,
     _PWINT_CACHE,
@@ -32,7 +32,7 @@ from vmec_jax.vmec_residue import (
     vmec_wint_from_trig,
     vmec_zero_m1_zforce,
 )
-from vmec_jax.vmec_tomnsp import TomnspsRZL, vmec_trig_tables
+from vmec_jax.kernels.tomnsp import TomnspsRZL, vmec_trig_tables
 
 
 def _constant_tomnsps(*, ns: int = 3, mpol: int = 3, ntor1: int = 1) -> TomnspsRZL:

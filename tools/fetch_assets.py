@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import shutil
 import tarfile
 import urllib.request
 from dataclasses import dataclass
@@ -37,16 +38,20 @@ REFERENCE_ASSET_PATHS = (
     "examples/data/mgrid_cth_like.nc",
     "examples/data/mgrid_d3d_ef.nc",
     "examples/data/wout_*_reference.nc",
-    "examples_single_grid/data/mgrid_cth_like.nc",
-    "examples_single_grid/data/mgrid_d3d_ef.nc",
-    "examples_single_grid/data/wout_*_reference.nc",
+    "examples/data/single_grid/mgrid_cth_like.nc",
+    "examples/data/single_grid/mgrid_d3d_ef.nc",
+    "examples/data/single_grid/wout_*_reference.nc",
 )
 
 WOUT_FIXTURE_PATHS = (
     "examples/data/wout_*.nc",
-    "examples_single_grid/data/wout_*.nc",
+    "examples/data/single_grid/wout_*.nc",
     "docs/_static/readme_best_cases/*/wout_*.nc",
     "docs/_static/qi_readme_cases/*/wout_*.nc",
+)
+
+ASSET_PATH_REWRITES = (
+    ("examples_single_grid/data", "examples/data/single_grid"),
 )
 
 
@@ -106,6 +111,22 @@ def _print_bundle_info(bundles: Sequence[AssetBundle]) -> None:
             print(f"    {path}")
 
 
+def _migrate_release_asset_paths(dest: Path) -> None:
+    """Map files from older release tarball paths into the current layout."""
+    for old_rel, new_rel in ASSET_PATH_REWRITES:
+        old_dir = dest / old_rel
+        if not old_dir.exists():
+            continue
+        new_dir = dest / new_rel
+        new_dir.mkdir(parents=True, exist_ok=True)
+        for old_path in old_dir.iterdir():
+            if not old_path.is_file():
+                continue
+            new_path = new_dir / old_path.name
+            if not new_path.exists():
+                shutil.copy2(old_path, new_path)
+
+
 def _selected_default_bundles(names: Sequence[str] | None) -> tuple[AssetBundle, ...]:
     if not names or "all" in names:
         return DEFAULT_BUNDLES
@@ -123,6 +144,7 @@ def _download_and_extract_bundle(bundle: AssetBundle, *, dest: Path, force: bool
     marker = dest / bundle.marker_name
     if marker.exists() and not force:
         print(f"Assets already installed for bundle {bundle.name!r} at {dest}. Use --force to re-download.")
+        _migrate_release_asset_paths(dest)
         return
 
     print(f"Downloading {bundle.name} assets from: {bundle.url}")
@@ -137,6 +159,7 @@ def _download_and_extract_bundle(bundle: AssetBundle, *, dest: Path, force: bool
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
         _safe_extract(tf, dest)
 
+    _migrate_release_asset_paths(dest)
     marker.write_text(f"{bundle.url}\n{digest}\n")
 
 
@@ -177,6 +200,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     dest = Path(args.dest).expanduser().resolve()
     for bundle in bundles:
         _download_and_extract_bundle(bundle, dest=dest, force=bool(args.force))
+    _migrate_release_asset_paths(dest)
     print("Assets installed.")
     return 0
 

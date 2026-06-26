@@ -241,6 +241,7 @@ def make_qs_residuals_fn(
         )
 
     def residuals_from_state(state: VMECState) -> jnp.ndarray:
+        """Evaluate residuals from state for fixed-boundary VMEC solve and implicit differentiation."""
         parts: list[jnp.ndarray] = []
 
         if target_aspect is not None:
@@ -272,6 +273,7 @@ def make_qs_residuals_fn(
         return jnp.concatenate(parts)
 
     def state_cotangent_operator_from_packed(packed_state, layout):
+        """Evaluate state cotangent operator from packed for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax._compat import jax, jnp as _jnp
         from vmec_jax.state import unpack_state
 
@@ -352,9 +354,11 @@ def make_qs_residuals_fn(
         return _apply
 
     def state_cotangent_from_packed(packed_state, layout, residual_cotangent):
+        """Evaluate state cotangent from packed for fixed-boundary VMEC solve and implicit differentiation."""
         return state_cotangent_operator_from_packed(packed_state, layout)(residual_cotangent)
 
     def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        """Evaluate state objective value and cotangent from packed for fixed-boundary VMEC solve and implicit differentiation."""
         from vmec_jax._compat import jax, jnp as _jnp
         from vmec_jax.state import unpack_state
 

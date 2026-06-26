@@ -31,8 +31,8 @@ PHYSICS_SMOKE_TESTS = (
         "tests/test_wout_bfield_bundled_parity.py::"
         "test_bundled_wout_stored_bsup_cartesian_magnitude_matches_bmnc"
         "[basic_non_stellsym_pressure_single_grid-"
-        "examples_single_grid/data/input.basic_non_stellsym_pressure-"
-        "examples_single_grid/data/wout_basic_non_stellsym_pressure_reference.nc-0.012]"
+        "examples/data/single_grid/input.basic_non_stellsym_pressure-"
+        "examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc-0.012]"
     ),
     (
         "tests/test_wout_profiles_currents_bundled_parity.py::"
@@ -116,6 +116,9 @@ def _stages(cli_outdir: Path) -> tuple[Stage, ...]:
                     "20",
                     "--max-root-helper-prefix-files",
                     "2",
+                    "--require-public-docstrings",
+                    "--public-docstring-root",
+                    "vmec_jax",
                     "--max-function-lines-at",
                     (
                         "vmec_jax/solvers/fixed_boundary/residual/iteration.py:"

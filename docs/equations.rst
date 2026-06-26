@@ -517,10 +517,10 @@ Implementation mapping (``vmec_jax``)
 Key modules that directly implement the equations above:
 
 - ``vmec_jax/geom.py``: geometry, metric, Jacobian.
-- ``vmec_jax/vmec_bcovar.py``: contravariant/covariant field components.
-- ``vmec_jax/vmec_forces.py``: real-space force kernels (``A,B,C`` blocks).
-- ``vmec_jax/vmec_tomnsp.py``: VMEC-style Fourier transforms of forces.
-- ``vmec_jax/vmec_residue.py``: VMEC scalar residuals (FSQR/FSQZ/FSQL).
+- ``vmec_jax/kernels/bcovar.py``: contravariant/covariant field components.
+- ``vmec_jax/kernels/forces.py``: real-space force kernels (``A,B,C`` blocks).
+- ``vmec_jax/kernels/tomnsp.py``: VMEC-style Fourier transforms of forces.
+- ``vmec_jax/kernels/residue.py``: VMEC scalar residuals (FSQR/FSQZ/FSQL).
 - ``vmec_jax/solve.py``: fixed-boundary iteration loop (VMEC2000 parity path).
 
 References (local)

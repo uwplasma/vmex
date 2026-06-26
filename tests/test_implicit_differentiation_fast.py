@@ -409,10 +409,10 @@ def _install_residual_fakes(monkeypatch, implicit, jnp, state0):
     import vmec_jax.boundary as boundary_module
     import vmec_jax.init_guess as init_guess_module
     import vmec_jax.preconditioner_1d_jax as preconditioner_module
-    import vmec_jax.vmec_forces as forces_module
-    import vmec_jax.vmec_residue as residue_module
+    import vmec_jax.kernels.forces as forces_module
+    import vmec_jax.kernels.residue as residue_module
     from vmec_jax.boundary import BoundaryCoeffs
-    from vmec_jax.vmec_tomnsp import TomnspsRZL
+    from vmec_jax.kernels.tomnsp import TomnspsRZL
 
     boundary = BoundaryCoeffs(
         R_cos=np.asarray([2.0]),

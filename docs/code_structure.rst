@@ -41,7 +41,7 @@ Numerical domains:
   ``solvers/free_boundary/``.
 - ``vmec_jax/external_fields/`` contains differentiable coil and ``mgrid``
   field providers.
-- ``vmec_jax/io/wout/`` contains persisted-WOUT schema, netCDF I/O, flux
+- ``vmec_jax/io/wout_files/`` contains persisted-WOUT schema, netCDF I/O, flux
   conventions, JXBFORCE/Mercier reducers, ``DMerc``/Glasser ``D_R``
   diagnostics, and compatibility helpers.
 - ``vmec_jax/optimizers/fixed_boundary/`` contains objective terms, exact
@@ -54,19 +54,26 @@ Physics and geometry kernels:
   ``boundary.py``, ``init_guess.py``, ``coords.py``, ``geom.py``,
   ``field.py``, ``energy.py``, ``vmec_tomnsp.py``, ``vmec_bcovar.py``, and
   ``preconditioner_1d.py`` hold reusable VMEC data structures and kernels.
-- Objective/diagnostic modules such as ``quasisymmetry.py``,
-  ``quasi_isodynamic.py``, ``qi_diagnostics.py``, ``bootstrap_current.py``,
-  ``finite_beta.py``, and ``plotting.py`` expose higher-level physics
-  quantities used by examples, tests, and docs.  Keep these modules
-  pedagogical: public functions should have docstrings, implementation helpers
-  should stay private, and compatibility exports should be mechanically
-  checked when refactored.
+- Objective/diagnostic modules and packages such as ``quasisymmetry.py``,
+  ``quasi_isodynamic/``, ``bootstrap_current.py``, ``finite_beta.py``, and
+  ``plotting.py`` expose higher-level physics quantities used by examples,
+  tests, and docs.  Keep these surfaces pedagogical: public functions should
+  have docstrings, implementation helpers should stay private, and
+  compatibility exports should be mechanically checked when refactored.
+
+Public docstrings are now part of source-health: every public class, function,
+and method under ``vmec_jax/`` must explain its numerical or physics role.
+Private closures may remain undocumented when the surrounding function already
+explains the algorithm; add comments or docstrings there only when they clarify
+branch logic, VMEC staggering, JAX custom-derivative behavior, or physics
+normalization.
 
 The ``examples/`` folder contains user-facing scripts and curated parity demos.
 Developer-only diagnostics and research utilities live under ``tools/``:
 
 - ``tools/diagnostics/source_health.py``: report largest Python source files
-  and optionally fail above a line-count threshold for staged refactor ratchets.
+  and optionally fail above line-count or public-docstring thresholds for
+  staged refactor ratchets.
 - ``tools/diagnostics/vmec2000_exec_stage_trace_compare.py``: per-iteration
   VMEC2000 vs vmec_jax parity comparator.
 - ``tools/diagnostics/qh_vmec_vs_vmecjax.py``: QH comparison figures.
@@ -102,7 +109,7 @@ Use this map before adding files or changing public behavior:
   are part of the documented example workflow.  Keep example scripts
   SIMSOPT-like: editable top-level parameters, visible objective tuples, then
   a solve call and explicit result inspection/plotting.
-- WOUT, Mercier, JXB, and profile diagnostics: use ``vmec_jax/io/wout/`` and
+- WOUT, Mercier, JXB, and profile diagnostics: use ``vmec_jax/io/wout_files/`` and
   ``vmec_jax/finite_beta.py``.  Preserve VMEC2000 storage conventions unless a
   documented diagnostic intentionally exposes a smoother differentiable proxy.
 - Parity and physics gates: put cheap required tests under ``tests/`` with no
@@ -119,12 +126,15 @@ Refactoring direction
 
 The current code intentionally preserves VMEC2000 semantics, but several
 translation-era modules are now too large for long-term research development.
-Use ``plan_differentiability.md`` as the active single source of truth for the
-staged differentiability/refactor plan.  ``plan_freeb.md`` is now a closed
-free-boundary evidence summary, not a parallel work plan. ``plan.md`` and
-``discrete_adjoint_2506_plan.md`` are compact historical pointers. New status
-updates should be summarized in ``plan_differentiability.md`` only. Before
-starting a large extraction, run:
+Use ``vmec_jax_plan/plan_research_grade_performance_differentiability.md`` as
+the active single source of truth for the staged performance,
+differentiability, validation, and refactor plan.
+``vmec_jax_plan/plan_freeb.md`` is now a closed free-boundary evidence summary,
+not a parallel work plan. ``vmec_jax_plan/plan.md``,
+``vmec_jax_plan/plan_differentiability.md``, and
+``vmec_jax_plan/discrete_adjoint_2506_plan.md`` are compact historical
+pointers. New status updates should be summarized in the umbrella plan only.
+Before starting a large extraction, run:
 
 .. code-block:: bash
 

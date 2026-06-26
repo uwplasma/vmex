@@ -528,7 +528,7 @@ def _dynamic_fsq1_from_force_channels(
     vmec2000_control: bool,
     frzl_pre,
 ):
-    from vmec_jax.vmec_residue import vmec_gcx2_from_tomnsps, vmec_rz_norm_from_state
+    from vmec_jax.kernels.residue import vmec_gcx2_from_tomnsps, vmec_rz_norm_from_state
 
     s = jnp.asarray(static.s)
     gcr2_p, gcz2_p, gcl2_p = vmec_gcx2_from_tomnsps(

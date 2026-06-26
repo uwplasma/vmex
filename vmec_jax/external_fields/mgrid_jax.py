@@ -37,6 +37,7 @@ class MGridFieldParams:
     use_vmec_kv: bool = False
 
     def tree_flatten(self):
+        """Return JAX pytree leaves and static metadata for transformations."""
         children = (self.br, self.bphi, self.bz, self.extcur)
         aux = (
             float(self.rmin),
@@ -50,6 +51,7 @@ class MGridFieldParams:
 
     @classmethod
     def tree_unflatten(cls, aux, children):
+        """Rebuild the object from JAX pytree metadata and leaves."""
         rmin, rmax, zmin, zmax, nfp, use_vmec_kv = aux
         br, bphi, bz, extcur = children
         return cls(
@@ -186,6 +188,7 @@ def interpolate_mgrid_bfield_jax(
     cur = jnp.reshape(jnp.asarray(extcur), (-1, 1))
 
     def interp_one(field):
+        """Evaluate interp one for external magnetic-field sampling for coils and mgrid data."""
         v000, v001, v010, v011, v100, v101, v110, v111 = _corner_values(field, k0, k1, j0, j1, i0, i1)
         c00 = v000 * w0r + v001 * wr
         c01 = v010 * w0r + v011 * wr

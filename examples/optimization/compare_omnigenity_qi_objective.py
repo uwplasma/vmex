@@ -47,7 +47,7 @@ from vmec_jax.quasi_isodynamic import (
     quasi_isodynamic_residual_from_boozer_output,
     quasi_isodynamic_residual_from_state,
 )
-from vmec_jax.qi_legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
+from vmec_jax.quasi_isodynamic.legacy import legacy_qi_branch_shuffle_diagnostic_from_boozer_output
 
 
 enable_x64(True)

@@ -578,9 +578,11 @@ def direct_coil_accepted_trace_controller_replay_objective_jax(
     context_cache: dict[tuple[int, int], dict[str, Any]] = dict(replay_plan.get("boundary_replay_contexts_by_shape", {}))
 
     def accept_fn(_state, _proposed_state, _params, control, _aux):
+        """Evaluate accept fn for direct-coil free-boundary solve and branch-local adjoint validation."""
         return control["accept"]
 
     def converged_fn(_accepted_state, _params, control, _aux):
+        """Evaluate converged fn for direct-coil free-boundary solve and branch-local adjoint validation."""
         return control["done"]
 
     segment_preconditioner_controls_stacked: tuple[bool, ...] = ()
