@@ -6770,6 +6770,54 @@ Updated lane percentages:
 - Docs/release hygiene: 100%.
 - Overall: 99.6%.
 
+### 2026-06-26: Refresh README benchmark and derivative evidence panels
+
+Steps taken:
+
+- Rerendered ``docs/_static/figures/readme_runtime_compare.png`` and its
+  CSV/JSON provenance from
+  ``outputs/pr20_full_matrix_current_cpu_sg_fulljit/summary.json`` using the
+  runtime-only README plot mode.
+- Rerendered ``docs/_static/figures/readme_ad_fd_evidence.png`` and its
+  CSV/JSON provenance from the branch-local direct-coil free-boundary report in
+  ``outputs/pr20_ad_fd/qs_same_branch/same_branch_complete_solve_report.json``.
+- Rebuilt the docs with warnings as errors after the refresh.
+
+Results obtained:
+
+- The README runtime artifact contains ``16`` fixed-boundary matrix rows.
+- The AD-vs-central-FD evidence artifact contains ``10`` rows and all pass the
+  documented ``1e-9`` derivative tolerance; the maximum absolute error is
+  ``4.40e-10``.
+- ``LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs
+  docs/_build/html_final_tranche`` passed.
+- ``git diff --check`` and ``repo_size_audit.py`` passed after rerendering; the
+  repository remains below the ``50 MiB`` tracked-size gate.
+
+Best next steps:
+
+1. Push the refreshed public artifacts with the residual-runtime refactor
+   lineage.
+2. Let CI validate the current ``main`` tip before release/review decisions.
+3. Do not rerun expensive VMEC2000/VMEC++/optimization sweeps unless a future
+   numerical or performance-path change invalidates these artifacts.
+
+User needs:
+
+- No immediate input needed.
+
+Updated lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.1%.
+- Free-boundary production differentiability: 97.4%.
+- Single-stage coil optimization: 92.9%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 74.5%.
+- VMEC2000/VMEC++ parity and physics gates: 99.3%.
+- Docs/release hygiene: 100%.
+- Overall: 99.6%.
+
 ### 2026-06-26: Add function-size regression gate for residual-loop refactor
 
 Steps taken:

@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "branch_local_report": "outputs/final_tranche_adfd_evidence/same_branch_complete_solve_report.json",
+    "branch_local_report": "outputs/pr20_ad_fd/qs_same_branch/same_branch_complete_solve_report.json",
     "contract": "AD-vs-central-FD evidence; free-boundary rows are same-branch/fingerprint-gated only"
   },
   "records": [
@@ -77,49 +77,49 @@
       "tolerance": 1e-09
     },
     {
-      "abs_error": 1.1958286750036824e-11,
-      "ad_slope": 1.364389545465055e-12,
-      "fd_slope": 1.3322676295501878e-11,
+      "abs_error": 2.912763730510614e-11,
+      "ad_slope": 1.9586073843982447e-12,
+      "fd_slope": 3.108624468950438e-11,
       "method": "branch-local replay JVP",
       "note": "same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation",
       "passed": true,
-      "rel_error": 1.1958286750036824e-11,
+      "rel_error": 2.912763730510614e-11,
       "scalar": "free-boundary aspect",
       "scope": "direct-coil free-boundary",
       "tolerance": 1e-09
     },
     {
-      "abs_error": 2.4699782640598176e-11,
-      "ad_slope": 2.748760988447319e-13,
-      "fd_slope": -2.4424906541753444e-11,
+      "abs_error": 2.5706008076291616e-10,
+      "ad_slope": 5.116609501201561e-13,
+      "fd_slope": 2.575717417130363e-10,
       "method": "branch-local replay JVP",
       "note": "same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation",
       "passed": true,
-      "rel_error": 2.4699782640598176e-11,
+      "rel_error": 2.5706008076291616e-10,
       "scalar": "free-boundary qs_total",
       "scope": "direct-coil free-boundary",
       "tolerance": 1e-09
     },
     {
-      "abs_error": 1.0265230226646885e-12,
-      "ad_slope": -1.93855754195821e-13,
-      "fd_slope": 8.326672684688674e-13,
+      "abs_error": 1.3297991507804756e-12,
+      "ad_slope": -6.651328465928526e-13,
+      "fd_slope": -1.994931997373328e-12,
       "method": "branch-local replay JVP",
       "note": "same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation",
       "passed": true,
-      "rel_error": 1.0265230226646885e-12,
+      "rel_error": 1.3297991507804756e-12,
       "scalar": "free-boundary mean_iota",
       "scope": "direct-coil free-boundary",
       "tolerance": 1e-09
     },
     {
-      "abs_error": 1.937487952071486e-14,
-      "ad_slope": -1.937487952071486e-14,
-      "fd_slope": 0.0,
+      "abs_error": 2.6962821494977244e-13,
+      "ad_slope": -6.146139783255556e-14,
+      "fd_slope": 2.0816681711721685e-13,
       "method": "branch-local replay JVP",
       "note": "same-branch/fingerprint-gated; not arbitrary adaptive branch differentiation",
       "passed": true,
-      "rel_error": 1.937487952071486e-14,
+      "rel_error": 2.6962821494977244e-13,
       "scalar": "free-boundary lcfs_boundary_moment",
       "scope": "direct-coil free-boundary",
       "tolerance": 1e-09
