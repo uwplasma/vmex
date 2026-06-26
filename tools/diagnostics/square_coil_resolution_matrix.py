@@ -1,0 +1,339 @@
+#!/usr/bin/env python
+"""Classify square-coil resolution decks before launching long solves."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import shlex
+import sys
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary import (
+    ExampleConfig,
+    _boundary_fit_grid,
+    _square_axis_sample_kwargs,
+)
+from vmec_jax.toroidal_hybrid import (
+    recommended_square_axis_nzeta,
+    square_axis_resolution_deck_status,
+    square_axis_stellarator_mirror_hybrid_projection_error,
+)
+
+
+DEFAULT_DECKS = "5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto"
+DEFAULT_VMEC2000_EXEC = "/home/rjorge/miniforge3/envs/qh-gpu/bin/xvmec"
+
+
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        "--decks",
+        default=DEFAULT_DECKS,
+        help=(
+            "Comma-separated MPOL:NTOR[:NZETA[:MGRID_NPHI]] rows. "
+            "Use 'auto' for NZETA or MGRID_NPHI."
+        ),
+    )
+    p.add_argument("--format", choices=("markdown", "tsv", "json"), default="markdown")
+    p.add_argument("--target-error", default=f"{ExampleConfig().max_boundary_projection_error:.0e}")
+    p.add_argument("--ns-array", default="9,13,17")
+    p.add_argument("--niter-array", default="4000,8000,24000")
+    p.add_argument("--ftol-array", default="1e-8,1e-10,1e-12")
+    p.add_argument("--axis-kind", default=ExampleConfig().plasma_axis_kind)
+    p.add_argument("--axis-corner-factor", type=float, default=ExampleConfig().plasma_axis_spline_corner_radius_factor)
+    p.add_argument("--side-power", type=float, default=ExampleConfig().side_power)
+    p.add_argument("--corner-power", type=float, default=ExampleConfig().corner_power)
+    p.add_argument("--mgrid-nr", type=int, default=88)
+    p.add_argument("--mgrid-nz", type=int, default=64)
+    p.add_argument("--mgrid-padding-fraction", type=float, default=1.2)
+    p.add_argument("--mgrid-min-padding", type=float, default=0.5)
+    p.add_argument("--delt", type=float, default=ExampleConfig().delt)
+    p.add_argument("--coil-segments", type=int, default=64)
+    p.add_argument("--coil-chunk-size", type=int, default=512)
+    p.add_argument("--python", default="python3")
+    p.add_argument("--profile-script", default="tools/diagnostics/profile_square_coil_free_boundary.py")
+    p.add_argument("--outdir-root", type=Path, default=Path("results"))
+    p.add_argument("--vmec2000-exec", default=DEFAULT_VMEC2000_EXEC)
+    p.add_argument("--vmec2000-timeout", type=int, default=21600)
+    p.add_argument("--print-preflight-commands", action="store_true")
+    p.add_argument("--print-vmec2000-commands", action="store_true")
+    return p
+
+
+def _parse_optional_float(raw: str) -> float | None:
+    key = str(raw).strip().lower()
+    if key in {"", "none", "null", "false", "no", "0"}:
+        return None
+    return float(key)
+
+
+def _parse_int_list(raw: str) -> tuple[int, ...]:
+    values = tuple(int(tok.strip()) for tok in str(raw).replace(";", ",").split(",") if tok.strip())
+    if not values:
+        raise ValueError("expected at least one integer value")
+    return values
+
+
+def _parse_float_list(raw: str) -> tuple[float, ...]:
+    values = tuple(float(tok.strip()) for tok in str(raw).replace(";", ",").split(",") if tok.strip())
+    if not values:
+        raise ValueError("expected at least one float value")
+    return values
+
+
+def _parse_deck_token(raw: str) -> dict[str, int | None]:
+    parts = [part.strip().lower() for part in str(raw).split(":")]
+    if len(parts) not in {2, 3, 4}:
+        raise ValueError("deck rows must be MPOL:NTOR[:NZETA[:MGRID_NPHI]]")
+    mpol = int(parts[0])
+    ntor = int(parts[1])
+
+    def _optional_int(part: str | None) -> int | None:
+        if part is None or part in {"", "auto", "none", "null"}:
+            return None
+        return int(part)
+
+    nzeta = _optional_int(parts[2] if len(parts) >= 3 else None)
+    mgrid_nphi = _optional_int(parts[3] if len(parts) >= 4 else None)
+    return {"mpol": mpol, "ntor": ntor, "nzeta": nzeta, "mgrid_nphi": mgrid_nphi}
+
+
+def _parse_decks(raw: str) -> list[dict[str, int | None]]:
+    decks = [_parse_deck_token(tok) for tok in str(raw).replace(";", ",").split(",") if tok.strip()]
+    if not decks:
+        raise ValueError("expected at least one deck")
+    return decks
+
+
+def _case_label(row: dict[str, Any], args: argparse.Namespace) -> str:
+    return (
+        f"mpol{int(row['mpol'])}_ntor{int(row['ntor'])}_nzeta{int(row['nzeta'])}"
+        f"_mgrid{int(args.mgrid_nr)}x{int(args.mgrid_nz)}x{int(row['mgrid_nphi'])}"
+    )
+
+
+def _profile_command(
+    row: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    resolution_only: bool,
+    vmec2000: bool,
+) -> list[str]:
+    ns_array = tuple(int(value) for value in row["ns_array"])
+    niter_array = tuple(int(value) for value in row["niter_array"])
+    ftol_array = tuple(float(value) for value in row["ftol_array"])
+    command = [
+        str(args.python),
+        str(args.profile_script),
+        "--outdir",
+        str(Path(args.outdir_root) / f"square_coil_resolution_{_case_label(row, args)}"),
+        "--beta-percent",
+        "0",
+        "--mpol",
+        str(int(row["mpol"])),
+        "--ntor",
+        str(int(row["ntor"])),
+        "--ns",
+        str(int(ns_array[-1])),
+        "--nzeta",
+        str(int(row["nzeta"])),
+        "--ns-array",
+        ",".join(str(value) for value in ns_array),
+        "--niter-array",
+        ",".join(str(value) for value in niter_array),
+        "--ftol-array",
+        ",".join(f"{value:.0e}" for value in ftol_array),
+        "--max-iter",
+        str(int(niter_array[-1])),
+        "--ftol",
+        f"{float(ftol_array[-1]):.0e}",
+        "--phiedge",
+        f"{ExampleConfig().phiedge:.16g}",
+        "--delt",
+        f"{float(args.delt):.16g}",
+        "--activate-fsq",
+        f"{ExampleConfig().free_boundary_activate_fsq:.0e}",
+        "--nvacskip",
+        str(int(ExampleConfig().nvacskip)),
+        "--nstep",
+        "1",
+        "--axis-kind",
+        str(args.axis_kind),
+        "--axis-corner-factor",
+        f"{float(args.axis_corner_factor):.16g}",
+        "--side-power",
+        f"{float(args.side_power):.16g}",
+        "--corner-power",
+        f"{float(args.corner_power):.16g}",
+        "--n-coils-per-side",
+        str(int(ExampleConfig().n_coils_per_side)),
+        "--coil-segments",
+        str(int(args.coil_segments)),
+        "--coil-chunk-size",
+        str(int(args.coil_chunk_size)),
+        "--mgrid-nr",
+        str(int(args.mgrid_nr)),
+        "--mgrid-nz",
+        str(int(args.mgrid_nz)),
+        "--mgrid-nphi",
+        str(int(row["mgrid_nphi"])),
+        "--mgrid-padding-fraction",
+        f"{float(args.mgrid_padding_fraction):.16g}",
+        "--mgrid-min-padding",
+        f"{float(args.mgrid_min_padding):.16g}",
+        "--max-boundary-projection-error",
+        "none" if row["projection_target_max_component_error"] is None else f"{float(row['projection_target_max_component_error']):.0e}",
+        "--solver-mode",
+        "parity",
+    ]
+    if resolution_only:
+        command.append("--resolution-diagnostics-only")
+    if vmec2000:
+        command.extend(
+            [
+                "--skip-direct",
+                "--skip-mgrid",
+                "--skip-provider-parity",
+                "--run-vmec2000",
+                "--vmec2000-exec",
+                str(args.vmec2000_exec),
+                "--vmec2000-timeout",
+                str(int(args.vmec2000_timeout)),
+            ]
+        )
+    return command
+
+
+def _shell_join(command: list[str]) -> str:
+    return " ".join(shlex.quote(part) for part in command)
+
+
+def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Return one cheap resolution status row per requested deck."""
+
+    ns_array = _parse_int_list(args.ns_array)
+    niter_array = _parse_int_list(args.niter_array)
+    ftol_array = _parse_float_list(args.ftol_array)
+    if not (len(ns_array) == len(niter_array) == len(ftol_array)):
+        raise ValueError("ns-array, niter-array, and ftol-array must have matching lengths")
+    target_error = _parse_optional_float(args.target_error)
+    rows: list[dict[str, Any]] = []
+    for deck in _parse_decks(args.decks):
+        mpol = int(deck["mpol"])
+        ntor = int(deck["ntor"])
+        nzeta = int(deck["nzeta"] or max(64, recommended_square_axis_nzeta(ntor)))
+        mgrid_nphi = int(deck["mgrid_nphi"] or nzeta)
+        config = ExampleConfig(
+            mpol=mpol,
+            ntor=ntor,
+            ns=int(ns_array[-1]),
+            ns_array=ns_array,
+            niter_array=niter_array,
+            ftol_array=ftol_array,
+            max_iter=int(niter_array[-1]),
+            ftol=float(ftol_array[-1]),
+            nzeta=nzeta,
+            plasma_axis_kind=str(args.axis_kind),
+            plasma_axis_spline_corner_radius_factor=float(args.axis_corner_factor),
+            side_power=float(args.side_power),
+            corner_power=float(args.corner_power),
+            write_plots=False,
+        )
+        projection = square_axis_stellarator_mirror_hybrid_projection_error(
+            nfp=int(config.nfp),
+            mpol=mpol,
+            ntor=ntor,
+            **_boundary_fit_grid(config),
+            ns_array=list(ns_array),
+            niter_array=list(niter_array),
+            ftol_array=list(ftol_array),
+            phiedge=float(config.phiedge),
+            **_square_axis_sample_kwargs(config),
+        )
+        status = square_axis_resolution_deck_status(
+            projection=projection,
+            mpol=mpol,
+            ntor=ntor,
+            ns=int(ns_array[-1]),
+            nzeta=nzeta,
+            mgrid_nphi=mgrid_nphi,
+            target_max_component_error=target_error,
+        )
+        row = {
+            **status,
+            "ns_array": ns_array,
+            "niter_array": niter_array,
+            "ftol_array": ftol_array,
+            "axis_kind": str(args.axis_kind),
+            "side_power": float(args.side_power),
+            "corner_power": float(args.corner_power),
+            "projection_max_abs_error": float(projection["max_abs_error"]),
+            "projection_max_abs_error_rel": float(projection["max_abs_error_rel"]),
+            "projection_max_abs_component_error_rel": float(projection["max_abs_component_error_rel"]),
+        }
+        if bool(args.print_preflight_commands):
+            row["preflight_command"] = _shell_join(_profile_command(row, args, resolution_only=True, vmec2000=False))
+        if bool(args.print_vmec2000_commands):
+            row["vmec2000_command"] = _shell_join(_profile_command(row, args, resolution_only=False, vmec2000=True))
+        rows.append(row)
+    return rows
+
+
+def _format_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    if isinstance(value, (list, tuple)):
+        return ",".join(str(item) for item in value)
+    return str(value)
+
+
+def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
+    keys = [
+        "mpol",
+        "ntor",
+        "nzeta",
+        "recommended_nzeta",
+        "mgrid_nphi",
+        "status",
+        "reasons",
+        "mode_count",
+        "projection_max_abs_component_error",
+        "projection_target_max_component_error",
+    ]
+    if any("preflight_command" in row for row in rows):
+        keys.append("preflight_command")
+    if any("vmec2000_command" in row for row in rows):
+        keys.append("vmec2000_command")
+    sep = " | " if markdown else "\t"
+    if markdown:
+        print("| " + sep.join(keys) + " |")
+        print("| " + sep.join("---" for _ in keys) + " |")
+        for row in rows:
+            print("| " + sep.join(_format_value(row.get(key)) for key in keys) + " |")
+        return
+    print(sep.join(keys))
+    for row in rows:
+        print(sep.join(_format_value(row.get(key)) for key in keys))
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    rows = build_rows(args)
+    if args.format == "json":
+        print(json.dumps(rows, indent=2, sort_keys=True, allow_nan=False))
+    else:
+        _print_table(rows, markdown=args.format == "markdown")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

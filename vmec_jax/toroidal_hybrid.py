@@ -1102,6 +1102,94 @@ def square_axis_stellarator_mirror_hybrid_projection_error(
     }
 
 
+def square_axis_resolution_deck_status(
+    *,
+    projection: dict[str, Any],
+    mpol: int,
+    ntor: int,
+    nzeta: int,
+    mgrid_nphi: int | None = None,
+    ns: int | None = None,
+    target_max_component_error: float | None = None,
+) -> dict[str, Any]:
+    """Classify whether a square-axis Fourier deck is ready for a strict solve.
+
+    This is a cheap pre-solve gate.  It checks only representation and grid
+    compatibility: boundary projection error, the recommended toroidal VMEC
+    grid size, and generated-mgrid plane compatibility.  It deliberately does
+    not claim nonlinear VMEC convergence.
+    """
+
+    mpol_i = int(mpol)
+    ntor_i = int(ntor)
+    nzeta_i = int(nzeta)
+    if mpol_i < 0:
+        raise ValueError("mpol must be nonnegative")
+    if ntor_i < 0:
+        raise ValueError("ntor must be nonnegative")
+    if nzeta_i <= 0:
+        raise ValueError("nzeta must be positive")
+    mgrid_nphi_i = int(nzeta_i if mgrid_nphi is None else mgrid_nphi)
+    if mgrid_nphi_i <= 0:
+        raise ValueError("mgrid_nphi must be positive")
+
+    recommended_nzeta = recommended_square_axis_nzeta(ntor_i)
+
+    def _finite_float(value: Any) -> float | None:
+        try:
+            out = float(value)
+        except Exception:
+            return None
+        return out if np.isfinite(out) else None
+
+    max_component_error = _finite_float(projection.get("max_abs_component_error"))
+    rms_error = _finite_float(projection.get("rms_error"))
+    nzeta_underrecommended = bool(nzeta_i < int(recommended_nzeta))
+    mgrid_nphi_multiple = bool(mgrid_nphi_i % max(1, nzeta_i) == 0)
+    projection_meets_gate = (
+        None
+        if target_max_component_error is None or max_component_error is None
+        else bool(max_component_error <= float(target_max_component_error))
+    )
+
+    reasons: list[str] = []
+    if target_max_component_error is None:
+        reasons.append("projection_gate_disabled")
+    elif not bool(projection_meets_gate):
+        reasons.append("projection_error_exceeds_gate")
+    if nzeta_underrecommended:
+        reasons.append("nzeta_below_square_axis_recommendation")
+    if not mgrid_nphi_multiple:
+        reasons.append("mgrid_nphi_not_multiple_of_nzeta")
+
+    if not reasons:
+        status = "production_ready"
+    elif reasons == ["projection_gate_disabled"]:
+        status = "diagnostic_gate_disabled"
+    else:
+        status = "diagnostic_underresolved"
+
+    return {
+        "status": status,
+        "reasons": reasons,
+        "mpol": mpol_i,
+        "ntor": ntor_i,
+        "ns": None if ns is None else int(ns),
+        "nzeta": nzeta_i,
+        "recommended_nzeta": int(recommended_nzeta),
+        "nzeta_underrecommended": nzeta_underrecommended,
+        "mgrid_nphi": mgrid_nphi_i,
+        "mgrid_nphi_multiple_of_nzeta": mgrid_nphi_multiple,
+        "mode_count": int(projection.get("mode_count", -1)),
+        "projection_target_max_component_error": (
+            None if target_max_component_error is None else float(target_max_component_error)
+        ),
+        "projection_max_abs_component_error": max_component_error,
+        "projection_rms_error": rms_error,
+        "projection_meets_gate": projection_meets_gate,
+    }
+
+
 def toroidal_stellarator_mirror_hybrid_metrics(samples: ToroidalHybridBoundarySamples) -> dict[str, float]:
     """Return lightweight geometry checks for a sampled hybrid boundary."""
     theta_reflect = (-np.arange(samples.theta.size)) % samples.theta.size

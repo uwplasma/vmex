@@ -560,6 +560,21 @@ the threshold to ``None`` or pass ``--max-boundary-projection-error none`` so
 the report explicitly labels them as underresolved experiments. This guard
 keeps Fourier boundary underfitting separate from nonlinear-solver or
 direct-coil provider failures.
+The same classification is now available without launching the backend
+profiler:
+
+.. code-block:: bash
+
+   python tools/diagnostics/square_coil_resolution_matrix.py \
+     --decks 5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto \
+     --print-preflight-commands
+
+The matrix command uses the public
+``vmec_jax.square_axis_resolution_deck_status`` helper, so scripts and
+notebooks can apply the same projection/``NZETA``/``mgrid_nphi`` gate before
+starting a strict ``FTOL=1e-12`` run.  Add
+``--print-vmec2000-commands`` to emit generated-``mgrid`` VMEC2000 reference
+commands for only the rows you want to run.
 After the strict-deck gate update, a finite
 ``--max-boundary-projection-error`` requires the whole ``resolution_deck`` to
 be production-ready before any backend solve starts. Passing the projection

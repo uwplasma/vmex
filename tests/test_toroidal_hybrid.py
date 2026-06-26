@@ -24,6 +24,7 @@ from vmec_jax.toroidal_hybrid import (
     recommended_square_axis_nzeta,
     sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
+    square_axis_resolution_deck_status,
     square_axis_spline_control_fourier_matrix,
     square_axis_spline_radius,
     square_axis_spline_radius_matrix,
@@ -131,6 +132,7 @@ def test_square_axis_toroidal_hybrid_boundary_and_indata_are_public():
         is recommend_square_axis_stellarator_mirror_hybrid_resolution
     )
     assert public_api.recommended_square_axis_nzeta is recommended_square_axis_nzeta
+    assert public_api.square_axis_resolution_deck_status is square_axis_resolution_deck_status
 
 
 def test_square_axis_control_spline_samples_and_projects_to_vmec_boundary():
@@ -610,6 +612,51 @@ def test_square_axis_resolution_recommendation_reports_finite_fourier_closure():
     assert suggested["recommended_nzeta"] == recommended_square_axis_nzeta(12)
     assert suggested["mode_count"] > 0
     assert suggested["max_abs_component_error"] < 2.0e-4
+
+
+def test_square_axis_resolution_deck_status_classifies_projection_and_grid_gates():
+    projection = {
+        "mode_count": 3,
+        "max_abs_component_error": 1.0e-13,
+        "rms_error": 1.0e-14,
+    }
+
+    ready = square_axis_resolution_deck_status(
+        projection=projection,
+        mpol=5,
+        ntor=28,
+        ns=17,
+        nzeta=64,
+        mgrid_nphi=64,
+        target_max_component_error=5.0e-12,
+    )
+    assert ready["status"] == "production_ready"
+    assert ready["reasons"] == []
+    assert ready["projection_meets_gate"] is True
+    assert ready["recommended_nzeta"] == recommended_square_axis_nzeta(28)
+
+    underresolved = square_axis_resolution_deck_status(
+        projection=projection,
+        mpol=5,
+        ntor=28,
+        ns=17,
+        nzeta=48,
+        mgrid_nphi=80,
+        target_max_component_error=5.0e-12,
+    )
+    assert underresolved["status"] == "diagnostic_underresolved"
+    assert "nzeta_below_square_axis_recommendation" in underresolved["reasons"]
+    assert "mgrid_nphi_not_multiple_of_nzeta" in underresolved["reasons"]
+
+    diagnostic = square_axis_resolution_deck_status(
+        projection=projection,
+        mpol=5,
+        ntor=28,
+        nzeta=64,
+        target_max_component_error=None,
+    )
+    assert diagnostic["status"] == "diagnostic_gate_disabled"
+    assert diagnostic["reasons"] == ["projection_gate_disabled"]
 
 
 def test_square_axis_projection_error_rejects_sampler_grid_aliases():

@@ -45,6 +45,7 @@ from vmec_jax.toroidal_hybrid import (
     evaluate_toroidal_hybrid_indata_boundary,
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
+    square_axis_resolution_deck_status,
     square_axis_spline_control_fourier_matrix,
     square_axis_spline_symmetric_control_basis,
 )
@@ -1355,14 +1356,6 @@ def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
     return payload
 
 
-def _finite_float(value: Any) -> float | None:
-    try:
-        out = float(value)
-    except Exception:
-        return None
-    return out if np.isfinite(out) else None
-
-
 def _resolution_deck_payload(
     *,
     config: ExampleConfig,
@@ -1373,52 +1366,16 @@ def _resolution_deck_payload(
 ) -> dict[str, Any]:
     """Summarize cheap pre-solve checks for a square-hybrid Fourier deck."""
 
-    recommended_nzeta = recommended_square_axis_nzeta(int(config.ntor))
-    max_component_error = _finite_float(projection.get("max_abs_component_error"))
-    rms_error = _finite_float(projection.get("rms_error"))
-    nzeta_underrecommended = bool(int(config.nzeta) < int(recommended_nzeta))
-    mgrid_nphi_multiple = bool(int(mgrid_nphi) % max(1, int(config.nzeta)) == 0)
-    projection_meets_gate = (
-        None
-        if target_error is None or max_component_error is None
-        else bool(max_component_error <= float(target_error))
+    payload = square_axis_resolution_deck_status(
+        projection=projection,
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ns=int(config.ns),
+        nzeta=int(config.nzeta),
+        mgrid_nphi=int(mgrid_nphi),
+        target_max_component_error=target_error,
     )
-
-    reasons: list[str] = []
-    if target_error is None:
-        reasons.append("projection_gate_disabled")
-    elif not bool(projection_meets_gate):
-        reasons.append("projection_error_exceeds_gate")
-    if nzeta_underrecommended:
-        reasons.append("nzeta_below_square_axis_recommendation")
-    if not mgrid_nphi_multiple:
-        reasons.append("mgrid_nphi_not_multiple_of_nzeta")
-
-    if not reasons:
-        status = "production_ready"
-    elif reasons == ["projection_gate_disabled"]:
-        status = "diagnostic_gate_disabled"
-    else:
-        status = "diagnostic_underresolved"
-
-    payload: dict[str, Any] = {
-        "status": status,
-        "reasons": reasons,
-        "mpol": int(config.mpol),
-        "ntor": int(config.ntor),
-        "ns": int(config.ns),
-        "nzeta": int(config.nzeta),
-        "recommended_nzeta": int(recommended_nzeta),
-        "nzeta_underrecommended": nzeta_underrecommended,
-        "mgrid_nphi": int(mgrid_nphi),
-        "mgrid_nphi_multiple_of_nzeta": mgrid_nphi_multiple,
-        "mode_count": int(projection.get("mode_count", -1)),
-        "projection_target_max_component_error": None if target_error is None else float(target_error),
-        "projection_max_abs_component_error": max_component_error,
-        "projection_rms_error": rms_error,
-        "projection_meets_gate": projection_meets_gate,
-    }
-    if include_recommendation and target_error is not None and projection_meets_gate is False:
+    if include_recommendation and target_error is not None and payload.get("projection_meets_gate") is False:
         recommendation = recommend_square_axis_stellarator_mirror_hybrid_resolution(
             target_max_component_error=float(target_error),
             mpol=int(config.mpol),

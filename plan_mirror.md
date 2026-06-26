@@ -5922,6 +5922,91 @@ No user input is needed.
 
 No user input is needed.
 
+---
+
+## 269. Added A Square-Coil Resolution Matrix Gate
+
+### Steps taken
+
+- Added the public helper
+  `vmec_jax.square_axis_resolution_deck_status(...)`.
+- Rewired the square-coil backend profiler to use that source helper for its
+  `resolution_deck` payload.
+- Added `tools/diagnostics/square_coil_resolution_matrix.py`, a cheap preflight
+  matrix command for `MPOL`/`NTOR`/`NZETA`/`mgrid_nphi` edits.
+- Documented the matrix command in the direct-coil convergence notes and mirror
+  examples README.
+
+### Results obtained
+
+- Changing `MPOL`, `NTOR`, `NZETA`, or generated-`mgrid` toroidal planes can now
+  be checked before writing coils, mgrid files, WOUT files, or figures.
+- The local matrix confirms the current first-order control-spline target:
+  - `MPOL=5, NTOR=20, NZETA=48` is diagnostic-only because the Fourier
+    projection error exceeds `5e-12`;
+  - `MPOL=5, NTOR=28, NZETA=48` is diagnostic-only because `NZETA` is below the
+    recommendation;
+  - `MPOL=5, NTOR=28, NZETA=64`, `MPOL=6, NTOR=32, NZETA=72`, and
+    `MPOL=7, NTOR=28, NZETA=64` pass the representation/grid gate.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_toroidal_hybrid.py::test_square_axis_resolution_deck_status_classifies_projection_and_grid_gates \
+  tests/test_profile_square_coil_free_boundary.py::test_square_coil_profile_records_boundary_projection_payload \
+  tests/test_square_coil_resolution_matrix.py
+ruff check \
+  vmec_jax/toroidal_hybrid.py \
+  vmec_jax/api.py \
+  tools/diagnostics/profile_square_coil_free_boundary.py \
+  tools/diagnostics/square_coil_resolution_matrix.py \
+  tests/test_toroidal_hybrid.py \
+  tests/test_square_coil_resolution_matrix.py
+venv/bin/python tools/diagnostics/square_coil_resolution_matrix.py \
+  --decks 5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto \
+  --format markdown --print-preflight-commands
+```
+
+Result: focused tests `5 passed, 1 warning`; Ruff passed; the matrix command
+printed the expected production-ready and diagnostic-only classifications.
+
+### File structure and best-practice notes
+
+- The scientific gate lives in `vmec_jax/toroidal_hybrid.py`.
+- The backend profiler delegates to the source helper instead of owning a
+  separate gate implementation.
+- The new diagnostics file only formats matrix rows and commands; it does not
+  run VMEC or create heavy artifacts.
+- No generated WOUT, mgrid, figure, or result directories were tracked.
+
+### Best next steps
+
+1. Use the matrix to choose the next VMEC2000/generated-`mgrid` reference rows
+   after the active strict row finishes.
+2. Keep `axis_kind="control_spline"` for square-coil strict work; it is the
+   current spline/control bridge that avoids the worst Fourier fit to straight
+   sides.
+3. Move from postsolve reduced-control projection to an opt-in solver-native
+   reduced-control boundary update only after real profile rows show good
+   capture in the square or stellarator-symmetric basis.
+
+### Completion percentages after M269
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `90%`.
+- Direct-coil GPU/JIT parity lane: `81%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `79%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `76%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
 ## 265. Project Accepted Square-Coil LCFS Motion Onto Reduced Controls
 
 ### Steps taken

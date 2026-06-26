@@ -334,6 +334,18 @@ The latest control-spline square-axis preflight matrix is:
 | ``MPOL=6, NTOR=32, NZETA=72`` | production-ready | strict gate passes |
 | ``MPOL=5, NTOR=28, NZETA=64, mgrid_nphi=96`` | diagnostic-only | mgrid/``NZETA`` mismatch |
 
+To regenerate that classification locally without writing coils, mgrid files,
+WOUT files, or figures, run:
+
+```bash
+python tools/diagnostics/square_coil_resolution_matrix.py \
+  --decks 5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto \
+  --print-preflight-commands
+```
+
+Add `--print-vmec2000-commands` when you want exact generated-mgrid VMEC2000
+reference commands for selected rows.
+
 The report stays under ignored ``results/`` paths and records ``vmec_jax``
 direct-coil, ``vmec_jax`` generated-mgrid, and optional raw VMEC2000
 generated-mgrid residuals for the same square-coil field. To profile a staged
