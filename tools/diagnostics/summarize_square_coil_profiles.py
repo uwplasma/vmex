@@ -969,6 +969,16 @@ def _summary_row(
     freeb_jax_nestor_jit_operator = solver_overrides.get(
         "freeb_jax_nestor_jit_operator", cfg.get("freeb_jax_nestor_jit_operator")
     )
+    hot_restart = backend.get("hot_restart")
+    hot_restart = hot_restart if isinstance(hot_restart, dict) else {}
+    hot_restart_stages = hot_restart.get("stages")
+    hot_restart_last_stage = (
+        hot_restart_stages[-1]
+        if isinstance(hot_restart_stages, list)
+        and hot_restart_stages
+        and isinstance(hot_restart_stages[-1], dict)
+        else {}
+    )
     strict_met = _strict_components_met(final_max_component, requested_ftol)
     strict_gap = _strict_gap(final_max_component, requested_ftol)
     promotion = _promotion_payload(
@@ -1057,6 +1067,24 @@ def _summary_row(
         "recommended_nzeta": cfg.get("recommended_nzeta"),
         "nvacskip": cfg.get("nvacskip"),
         "solver_mode": cfg.get("solver_mode"),
+        "jax_hot_restart_requested_count": solver_overrides.get(
+            "jax_hot_restart_count", cfg.get("jax_hot_restart_count")
+        ),
+        "jax_hot_restart_executed_count": hot_restart.get("executed_count"),
+        "jax_hot_restart_iters": solver_overrides.get(
+            "jax_hot_restart_iters", cfg.get("jax_hot_restart_iters")
+        ),
+        "jax_hot_restart_policy": solver_overrides.get(
+            "jax_hot_restart_policy", cfg.get("jax_hot_restart_policy")
+        ),
+        "jax_hot_restart_always": solver_overrides.get(
+            "jax_hot_restart_always", cfg.get("jax_hot_restart_always")
+        ),
+        "jax_hot_restart_stopped_after_strict": hot_restart.get("stopped_after_strict_convergence"),
+        "jax_hot_restart_last_status": hot_restart_last_stage.get("strict_status"),
+        "jax_hot_restart_last_component_max": _finite_float(
+            hot_restart_last_stage.get("component_max")
+        ),
         "freeb_jax_nestor_operator": freeb_jax_nestor_operator,
         "freeb_jax_nestor_jit_operator": freeb_jax_nestor_jit_operator,
         "free_boundary_jax_nestor_operator_applied": backend.get(
@@ -1406,6 +1434,14 @@ def main(argv: list[str] | None = None) -> int:
         "recommended_nzeta",
         "nvacskip",
         "solver_mode",
+        "jax_hot_restart_requested_count",
+        "jax_hot_restart_executed_count",
+        "jax_hot_restart_iters",
+        "jax_hot_restart_policy",
+        "jax_hot_restart_always",
+        "jax_hot_restart_stopped_after_strict",
+        "jax_hot_restart_last_status",
+        "jax_hot_restart_last_component_max",
         "freeb_jax_nestor_operator",
         "freeb_jax_nestor_jit_operator",
         "free_boundary_jax_nestor_operator_applied",

@@ -352,7 +352,17 @@ def test_square_coil_profile_summary_recommends_provider_parity_when_missing(
     report.write_text(
         json.dumps(
             {
-                "configuration": {"mpol": 5, "ntor": 28, "ns": 17, "nzeta": 64, "ftol": 1e-12},
+                "configuration": {
+                    "mpol": 5,
+                    "ntor": 28,
+                    "ns": 17,
+                    "nzeta": 64,
+                    "ftol": 1e-12,
+                    "jax_hot_restart_count": 2,
+                    "jax_hot_restart_iters": 4000,
+                    "jax_hot_restart_policy": "freeb",
+                    "jax_hot_restart_always": False,
+                },
                 "resolution_deck": {
                     "status": "production_ready",
                     "reasons": [],
@@ -525,6 +535,19 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
                         "free_boundary_solver_overrides": {
                             "freeb_jax_nestor_operator": True,
                             "freeb_jax_nestor_jit_operator": False,
+                            "jax_hot_restart_count": 2,
+                            "jax_hot_restart_iters": 4000,
+                            "jax_hot_restart_policy": "freeb",
+                            "jax_hot_restart_always": False,
+                        },
+                        "hot_restart": {
+                            "requested_count": 2,
+                            "executed_count": 1,
+                            "stopped_after_strict_convergence": False,
+                            "stages": [
+                                {"strict_status": "underconverged", "component_max": 3.0e-9},
+                                {"strict_status": "stalled_above_strict_ftol", "component_max": 3.0e-9},
+                            ],
                         },
                         "free_boundary_jax_nestor_operator_applied": True,
                         "free_boundary_jax_nestor_operator_reason": "applied",
@@ -541,6 +564,14 @@ def test_square_coil_profile_summary_recommends_direct_gpu_after_jax_nestor_prob
 
     assert row["freeb_jax_nestor_operator"] is True
     assert row["freeb_jax_nestor_jit_operator"] is False
+    assert row["jax_hot_restart_requested_count"] == 2
+    assert row["jax_hot_restart_executed_count"] == 1
+    assert row["jax_hot_restart_iters"] == 4000
+    assert row["jax_hot_restart_policy"] == "freeb"
+    assert row["jax_hot_restart_always"] is False
+    assert row["jax_hot_restart_stopped_after_strict"] is False
+    assert row["jax_hot_restart_last_status"] == "stalled_above_strict_ftol"
+    assert row["jax_hot_restart_last_component_max"] == pytest.approx(3.0e-9)
     assert row["free_boundary_jax_nestor_operator_applied"] is True
     assert row["free_boundary_jax_nestor_operator_reason"] == "applied"
     assert row["free_boundary_jax_nestor_operator_jitted"] is False

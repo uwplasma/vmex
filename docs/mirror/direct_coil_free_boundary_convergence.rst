@@ -787,6 +787,15 @@ The remaining work is deliberately narrow:
    ambient shell environment cannot contaminate a robustness comparison. The
    direct-GPU follow-up commands include ``--verbose-solver`` so active rows can
    be summarized from ``launcher.log`` before final JSON is written.
+   When a staged vmec_jax row reaches a loose residual floor but misses the
+   strict ``1e-12`` component target, add a controlled final-grid hot-restart
+   lane before only increasing Fourier mode count.  The profiler accepts
+   ``--jax-hot-restart-count``, ``--jax-hot-restart-iters``, and
+   ``--jax-hot-restart-policy state|freeb|full``.  The default ``freeb`` policy
+   restarts from the accepted state and carries only the VMEC/NESTOR
+   free-boundary cadence/runtime fields, not the full nonlinear time-step
+   controller.  This mirrors the VMEC++ hot-restart idea while keeping the
+   experiment opt-in and auditable in the backend ``hot_restart`` JSON block.
 2. Re-run the square-coil beta ladder with per-beta checkpointing and the
    best-scored diagnostic fallback using the staged ``FTOL_ARRAY`` ending at
    ``1e-12``. Keep ``DELT=0.02``, ``NVACSKIP=1``,

@@ -202,6 +202,35 @@ def _parser() -> argparse.ArgumentParser:
         help="Return the lowest fresh free-boundary residual state if max_iter is exhausted.",
     )
     p.add_argument(
+        "--jax-hot-restart-count",
+        type=int,
+        default=0,
+        help=(
+            "Number of final-grid vmec_jax hot-restart passes to run after the initial solve "
+            "if strict 1e-12 force components are not reached."
+        ),
+    )
+    p.add_argument(
+        "--jax-hot-restart-iters",
+        type=_parse_optional_positive_int,
+        default=None,
+        help="Per-pass hot-restart iteration budget. Omit/auto to reuse the final-grid NITER.",
+    )
+    p.add_argument(
+        "--jax-hot-restart-policy",
+        choices=("state", "freeb", "full"),
+        default="freeb",
+        help=(
+            "State carried into hot restarts: accepted state only, accepted state plus free-boundary "
+            "cadence/runtime state, or the full nonlinear controller resume state."
+        ),
+    )
+    p.add_argument(
+        "--jax-hot-restart-always",
+        action="store_true",
+        help="Run every requested hot-restart pass even if an earlier pass satisfies strict convergence.",
+    )
+    p.add_argument(
         "--freeb-anderson-pressure",
         action="store_true",
         help="Enable opt-in Anderson(1) mixing for free-boundary vacuum pressure in vmec_jax backends.",
@@ -1232,6 +1261,86 @@ def _restore_backend_env(previous: dict[str, str | None]) -> None:
             os.environ[name] = value
 
 
+_FREEB_HOT_RESTART_RESUME_KEYS = (
+    "freeb_ivac",
+    "freeb_ivacskip",
+    "freeb_nvacskip",
+    "freeb_nvskip0",
+    "freeb_last_model",
+    "freeb_nestor_runtime",
+    "prev_rz_fsq",
+)
+
+
+def _run_diagnostics(run: Any) -> dict[str, Any]:
+    result = None if run is None else getattr(run, "result", None)
+    diagnostics = None if result is None else getattr(result, "diagnostics", None)
+    return diagnostics if isinstance(diagnostics, dict) else {}
+
+
+def _jax_hot_restart_solver_state(run: Any, *, policy: str) -> dict[str, Any] | None:
+    """Return the optional resume-state payload for a final-grid hot restart."""
+
+    policy_key = str(policy).strip().lower()
+    if policy_key == "state":
+        return None
+    resume = _run_diagnostics(run).get("resume_state")
+    if not isinstance(resume, dict):
+        return None
+    if policy_key == "full":
+        return dict(resume)
+    if policy_key != "freeb":
+        raise ValueError(f"unknown hot-restart policy {policy!r}")
+    out = {key: resume[key] for key in _FREEB_HOT_RESTART_RESUME_KEYS if key in resume}
+    return out or None
+
+
+def _strict_residual_met(residuals: dict[str, Any]) -> bool:
+    strict = residuals.get("strict_convergence")
+    if isinstance(strict, dict) and strict.get("strict_components_met") is not None:
+        return bool(strict.get("strict_components_met"))
+    return bool(residuals.get("converged_strict", False))
+
+
+def _jax_hot_restart_stage_payload(
+    *,
+    stage_index: int,
+    kind: str,
+    budget: int,
+    restart_policy: str | None,
+    run: Any,
+    residuals: dict[str, Any],
+) -> dict[str, Any]:
+    """Return compact per-stage convergence data for hot-restart profiling."""
+
+    strict = residuals.get("strict_convergence")
+    strict = strict if isinstance(strict, dict) else {}
+    return {
+        "stage_index": int(stage_index),
+        "kind": str(kind),
+        "budget": int(budget),
+        "restart_policy": None if restart_policy is None else str(restart_policy),
+        "n_iter": residuals.get("n_iter"),
+        "converged": bool(residuals.get("converged", False)),
+        "converged_strict": bool(residuals.get("converged_strict", False)),
+        "strict_status": strict.get("status"),
+        "strict_components_met": strict.get("strict_components_met"),
+        "component_max": strict.get("component_max"),
+        "component_sum": strict.get("component_sum"),
+        "component_max_over_strict_target": strict.get("component_max_over_strict_target"),
+        "final_fsq_component_sum": residuals.get("final_fsq_component_sum"),
+        "final_residual_recomputed_on_accepted_state": residuals.get(
+            "final_residual_recomputed_on_accepted_state"
+        ),
+        "free_boundary_last_ivac": residuals.get("free_boundary_last_ivac"),
+        "free_boundary_last_ivacskip": residuals.get("free_boundary_last_ivacskip"),
+        "free_boundary_last_nvacskip": residuals.get("free_boundary_last_nvacskip"),
+        "returned_best_scored_state": residuals.get("returned_best_scored_state"),
+        "best_scored_iter": residuals.get("best_scored_iter"),
+        "history_length": None if getattr(run, "result", None) is None else int(getattr(run.result, "n_iter", -1)),
+    }
+
+
 def _run_jax_backend(
     *,
     input_path: Path,
@@ -1251,6 +1360,10 @@ def _run_jax_backend(
     direct_static_cache: bool = True,
     jit_direct_sampler: bool = False,
     direct_trial_bsqvac_resample: bool = True,
+    jax_hot_restart_count: int = 0,
+    jax_hot_restart_iters: int | None = None,
+    jax_hot_restart_policy: str = "freeb",
+    jax_hot_restart_always: bool = False,
     verbose_solver: bool = False,
     virtual_casing_diagnostics: bool = False,
     virtual_casing_quad_factor: int = 2,
@@ -1280,6 +1393,14 @@ def _run_jax_backend(
                 "jit_sampler": bool(jit_direct_sampler),
                 "resample_trial_bsqvac": bool(direct_trial_bsqvac_resample),
             }
+    hot_restart_count = max(0, int(jax_hot_restart_count))
+    hot_restart_iters_eff = (
+        int(jax_hot_restart_iters) if jax_hot_restart_iters is not None else int(config.max_iter)
+    )
+    hot_restart_policy = str(jax_hot_restart_policy).strip().lower()
+    if hot_restart_policy not in {"state", "freeb", "full"}:
+        raise ValueError(f"unknown --jax-hot-restart-policy value: {jax_hot_restart_policy!r}")
+
     t0 = time.perf_counter()
     env_overrides: dict[str, str | None] = {
         "VMEC_JAX_RETURN_BEST_SCORED_STATE": _bool_env(return_best_scored_state),
@@ -1297,24 +1418,80 @@ def _run_jax_backend(
         env_overrides["VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC"] = _bool_env(freeb_add_analytic_bvec)
     previous_env = _set_backend_env(env_overrides)
     try:
-        run = run_free_boundary(
-            input_path,
-            max_iter=_run_budget(config, restart_state=None),
+        def _run_solver_pass(
+            *,
+            max_iter: int,
+            restart_state: Any | None,
+            restart_solver_state: dict[str, Any] | None,
+            multigrid: bool,
+        ) -> Any:
+            pass_kwargs = dict(kwargs)
+            if restart_state is not None:
+                pass_kwargs["restart_state"] = restart_state
+            if restart_solver_state is not None:
+                pass_kwargs["restart_solver_state"] = restart_solver_state
+            return run_free_boundary(
+                input_path,
+                max_iter=int(max_iter),
+                multigrid=bool(multigrid),
+                multigrid_use_input_niter=True,
+                verbose=bool(verbose_solver),
+                jit_forces=config.jit_forces,
+                solver_mode=solver_mode,
+                free_boundary_activate_fsq=None
+                if config.free_boundary_activate_fsq is None
+                else float(config.free_boundary_activate_fsq),
+                **pass_kwargs,
+            )
+
+        initial_budget = _run_budget(config, restart_state=None)
+        run = _run_solver_pass(
+            max_iter=initial_budget,
+            restart_state=None,
+            restart_solver_state=None,
             multigrid=bool(config.use_multigrid_schedule),
-            multigrid_use_input_niter=True,
-            verbose=bool(verbose_solver),
-            jit_forces=config.jit_forces,
-            solver_mode=solver_mode,
-            free_boundary_activate_fsq=None
-            if config.free_boundary_activate_fsq is None
-            else float(config.free_boundary_activate_fsq),
-            **kwargs,
         )
+        residuals = _final_residuals(run, config=config)
+        hot_restart_stages = [
+            _jax_hot_restart_stage_payload(
+                stage_index=0,
+                kind="initial",
+                budget=int(initial_budget),
+                restart_policy=None,
+                run=run,
+                residuals=residuals,
+            )
+        ]
+        for restart_index in range(1, hot_restart_count + 1):
+            if _strict_residual_met(residuals) and not bool(jax_hot_restart_always):
+                break
+            _log_step(
+                "running vmec_jax hot restart "
+                f"{restart_index}/{hot_restart_count} "
+                f"(policy={hot_restart_policy}, niter={hot_restart_iters_eff})"
+            )
+            restart_solver_state = _jax_hot_restart_solver_state(run, policy=hot_restart_policy)
+            run = _run_solver_pass(
+                max_iter=int(hot_restart_iters_eff),
+                restart_state=run.state,
+                restart_solver_state=restart_solver_state,
+                multigrid=False,
+            )
+            residuals = _final_residuals(run, config=config)
+            hot_restart_stages.append(
+                _jax_hot_restart_stage_payload(
+                    stage_index=int(restart_index),
+                    kind="hot_restart",
+                    budget=int(hot_restart_iters_eff),
+                    restart_policy=hot_restart_policy,
+                    run=run,
+                    residuals=residuals,
+                )
+            )
     finally:
         _restore_backend_env(previous_env)
     wall_s = time.perf_counter() - t0
     write_wout_from_fixed_boundary_run(wout_path, run, include_fsq=True)
-    residuals = _final_residuals(run, config=config)
     accepted_parity = (
         _accepted_provider_parity_payload(
             run=run,
@@ -1359,6 +1536,25 @@ def _run_jax_backend(
             "freeb_add_analytic_bvec": None
             if freeb_add_analytic_bvec is None
             else bool(freeb_add_analytic_bvec),
+            "jax_hot_restart_count": int(hot_restart_count),
+            "jax_hot_restart_iters": int(hot_restart_iters_eff),
+            "jax_hot_restart_policy": str(hot_restart_policy),
+            "jax_hot_restart_always": bool(jax_hot_restart_always),
+        },
+        "hot_restart": {
+            "enabled": bool(hot_restart_count > 0),
+            "requested_count": int(hot_restart_count),
+            "executed_count": max(0, len(hot_restart_stages) - 1),
+            "iters_per_restart": int(hot_restart_iters_eff),
+            "resume_policy": str(hot_restart_policy),
+            "always": bool(jax_hot_restart_always),
+            "stopped_after_strict_convergence": bool(
+                hot_restart_count > 0
+                and len(hot_restart_stages) <= hot_restart_count
+                and _strict_residual_met(residuals)
+                and not bool(jax_hot_restart_always)
+            ),
+            "stages": hot_restart_stages,
         },
         "accepted_provider_parity": accepted_parity,
         "virtual_casing": vc_payload,
@@ -2126,6 +2322,12 @@ def main(argv: list[str] | None = None) -> int:
                 "freeb_add_analytic_bvec": None
                 if args.freeb_add_analytic_bvec is None
                 else bool(args.freeb_add_analytic_bvec),
+                "jax_hot_restart_count": int(args.jax_hot_restart_count),
+                "jax_hot_restart_iters": None
+                if args.jax_hot_restart_iters is None
+                else int(args.jax_hot_restart_iters),
+                "jax_hot_restart_policy": str(args.jax_hot_restart_policy),
+                "jax_hot_restart_always": bool(args.jax_hot_restart_always),
                 "virtual_casing_quad_factor": int(args.virtual_casing_quad_factor),
                 "virtual_casing_chunk_size": args.virtual_casing_chunk_size,
                 "virtual_casing_target_chunk_size": args.virtual_casing_target_chunk_size,
@@ -2225,6 +2427,12 @@ def main(argv: list[str] | None = None) -> int:
             "freeb_add_analytic_bvec": None
             if args.freeb_add_analytic_bvec is None
             else bool(args.freeb_add_analytic_bvec),
+            "jax_hot_restart_count": int(args.jax_hot_restart_count),
+            "jax_hot_restart_iters": None
+            if args.jax_hot_restart_iters is None
+            else int(args.jax_hot_restart_iters),
+            "jax_hot_restart_policy": str(args.jax_hot_restart_policy),
+            "jax_hot_restart_always": bool(args.jax_hot_restart_always),
             "direct_static_cache": bool(args.direct_static_cache),
             "jit_direct_sampler": bool(args.jit_direct_sampler),
             "direct_trial_bsqvac_resample": bool(args.direct_trial_bsqvac_resample),
@@ -2300,6 +2508,10 @@ def main(argv: list[str] | None = None) -> int:
             direct_static_cache=bool(args.direct_static_cache),
             jit_direct_sampler=bool(args.jit_direct_sampler),
             direct_trial_bsqvac_resample=bool(args.direct_trial_bsqvac_resample),
+            jax_hot_restart_count=int(args.jax_hot_restart_count),
+            jax_hot_restart_iters=args.jax_hot_restart_iters,
+            jax_hot_restart_policy=str(args.jax_hot_restart_policy),
+            jax_hot_restart_always=bool(args.jax_hot_restart_always),
             verbose_solver=bool(args.verbose_solver),
             virtual_casing_diagnostics=bool(args.virtual_casing_diagnostics),
             virtual_casing_quad_factor=int(args.virtual_casing_quad_factor),
@@ -2329,6 +2541,10 @@ def main(argv: list[str] | None = None) -> int:
             freeb_dense_solve_mode=args.freeb_dense_solve_mode,
             freeb_experimental_fouri_matrix=args.freeb_experimental_fouri_matrix,
             freeb_add_analytic_bvec=args.freeb_add_analytic_bvec,
+            jax_hot_restart_count=int(args.jax_hot_restart_count),
+            jax_hot_restart_iters=args.jax_hot_restart_iters,
+            jax_hot_restart_policy=str(args.jax_hot_restart_policy),
+            jax_hot_restart_always=bool(args.jax_hot_restart_always),
             verbose_solver=bool(args.verbose_solver),
             virtual_casing_diagnostics=False,
             accepted_provider_parity=bool(args.accepted_provider_parity),

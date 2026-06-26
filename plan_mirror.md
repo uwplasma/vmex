@@ -5739,6 +5739,121 @@ Visual validation:
 No user input is needed.
 
 ---
+## M287 - Final-Grid Hot-Restart Profiler Lane For Strict `1e-12`
+
+### Steps taken
+
+- Reviewed the current branch, draft PR, active `office` jobs, and completed
+  direct-GPU result directories.
+- Rechecked the relevant free-boundary references and source paths before
+  changing code:
+  - DESC free-boundary formulation: finite beta requires both normal-field and
+    magnetic-pressure/virtual-casing diagnostics, not only coil-field `B.n`.
+  - STELLOPT/VMEC free-boundary documentation and VMEC2000 source: generated
+    `mgrid`/NESTOR remains the mature reference path and couples `NZETA` to the
+    mgrid toroidal grid.
+  - VMEC++ documentation/source: hot restart is an explicit convergence tool
+    for nearby equilibria, with free-boundary restarts initialized near the
+    vacuum-pressure state.
+- Summarized the completed direct-GPU strict rows on `office`:
+  - Anderson row finished with final total `8.29768e-10` and max component
+    `4.23813e-10`.
+  - Baseline row finished with final total `1.41337e-9` and max component
+    `7.42050e-10`.
+  - Both used `FTOL=1e-12`, `NS_ARRAY=9,13,17`, `NITER_ARRAY=1000,2000,8000`,
+    `MPOL=5`, `NTOR=28`, `NZETA=64`, and the control-spline square axis.
+- Added opt-in final-grid hot restarts to
+  `tools/diagnostics/profile_square_coil_free_boundary.py`:
+  - `--jax-hot-restart-count`;
+  - `--jax-hot-restart-iters`;
+  - `--jax-hot-restart-policy state|freeb|full`;
+  - `--jax-hot-restart-always`.
+- The default `freeb` hot-restart policy restarts from the accepted state and
+  carries only the VMEC/NESTOR free-boundary cadence/runtime fields
+  (`ivac`, `ivacskip`, `nvacskip`, `freeb_nestor_runtime`, and the previous
+  R/Z activation residual), not the full nonlinear time-step controller.
+- Added a backend `hot_restart` JSON block with per-stage strict residual
+  status, component max/sum, final accepted-state recomputation status, and
+  free-boundary cadence scalars.
+- Exposed hot-restart metadata in
+  `tools/diagnostics/summarize_square_coil_profiles.py` so CSV/Markdown rows
+  show requested/executed restart count, per-pass budget, policy, stop reason,
+  and final hot-restart strict status.
+- Updated `docs/mirror/direct_coil_free_boundary_convergence.rst` with the new
+  strict-stall hot-restart lane.
+
+### Results obtained
+
+- The direct-GPU evidence is now clear: the best current row is Anderson, but
+  it remains about `4.2e2` above the strict per-component `1e-12` target.
+- The completed direct rows did not show bad-Jacobian limits, vacuum-grid
+  problems, or missing accepted-state recomputation; the next useful test is
+  therefore restart/schedule behavior rather than another identical 8k pass.
+- The already-launched JAX-NESTOR queued row started from pushed commit
+  `4dfcc7c1`; it does not include this hot-restart lane, which keeps it a clean
+  solver-kernel A/B against the completed direct rows.
+- The VMEC2000 `DELT=0.015/0.02/0.025` waiter remains queued behind the
+  JAX-NESTOR row and is still the reference robustness benchmark.
+
+### How it was tested
+
+- Ran:
+  `venv/bin/python -m pytest -q tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
+- Result: `47 passed`, with the existing JAX deprecation warning only.
+- Ran:
+  `ruff check tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py tests/test_profile_square_coil_free_boundary.py tests/test_summarize_square_coil_profiles.py`.
+- Ran:
+  `venv/bin/python -m py_compile tools/diagnostics/profile_square_coil_free_boundary.py tools/diagnostics/summarize_square_coil_profiles.py`.
+
+### File structure and best-practice notes
+
+- The hot-restart experiment stays in the existing profiling tool; no new
+  solver default or heavyweight example was added.
+- The core solver already supported `restart_state`/`restart_solver_state`; the
+  profiler now uses that public hook in a controlled, auditable way.
+- Summary/reporting logic remains in the existing summarizer instead of being
+  duplicated across scripts.
+- The spline path remains correctly documented as an input/control-spline to
+  Fourier bridge. It reduces and smooths the target boundary but is not yet a
+  solver-native spline/control-basis update. If strict rows keep stalling, the
+  next implementation lane should move nonlinear update variables into that
+  reduced basis rather than only raising `MPOL`/`NTOR`.
+- No WOUT, mgrid, figure, or launcher-log outputs were added to the repository.
+
+### Best next steps
+
+1. Commit and push the hot-restart profiler lane.
+2. Queue a direct-GPU hot-restart row on `office`, starting from the current
+   best Anderson settings:
+   `--freeb-anderson-pressure --jax-hot-restart-count 2
+   --jax-hot-restart-iters 8000 --jax-hot-restart-policy freeb`.
+3. Let the already-running JAX-NESTOR row finish, then summarize it against the
+   completed baseline/Anderson rows.
+4. Let the VMEC2000 `DELT` scan run and compare strict gaps, runtime, memory,
+   and any mgrid/NZETA sensitivity.
+5. If JAX-NESTOR, VMEC2000, and hot restart all remain above `1e-12`, start the
+   solver-native reduced spline/control-basis nonlinear-update prototype for
+   the square stellarator-mirror hybrid.
+
+### Completion percentages after M287
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `99%`.
+- Direct-coil GPU/JIT parity lane: `95%`, baseline/Anderson rows complete,
+  hot-restart row next.
+- Experimental JAX NESTOR operator profiling lane: `82%`, running from the
+  previous pushed commit.
+- VMEC2000 robustness/reference lane: `99%`, strict `DELT` scan queued.
+- Hot-restart profiler lane: `100%` implemented, remote production row still
+  to run.
+- True spline/control-basis hybrid lane: `67%`, planned but gated on the
+  strict-stall evidence above.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.
+
+---
 ## M283 - Stage-Budget Summary for Strict Direct Rows
 
 ### Steps taken

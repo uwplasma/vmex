@@ -34,6 +34,13 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "--virtual-casing-target-chunk-size",
             "none",
             "--accepted-provider-parity",
+            "--jax-hot-restart-count",
+            "2",
+            "--jax-hot-restart-iters",
+            "500",
+            "--jax-hot-restart-policy",
+            "freeb",
+            "--jax-hot-restart-always",
             "--freeb-jax-nestor-operator",
             "--no-freeb-jax-nestor-jit-operator",
             "--freeb-include-edge",
@@ -54,6 +61,10 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.virtual_casing_chunk_size == 128
     assert args.virtual_casing_target_chunk_size is None
     assert args.accepted_provider_parity is True
+    assert args.jax_hot_restart_count == 2
+    assert args.jax_hot_restart_iters == 500
+    assert args.jax_hot_restart_policy == "freeb"
+    assert args.jax_hot_restart_always is True
     assert args.freeb_jax_nestor_operator is True
     assert args.freeb_jax_nestor_jit_operator is False
     assert args.freeb_include_edge is True
@@ -310,6 +321,34 @@ def test_square_coil_profile_boundary_motion_payload_measures_edge_displacement(
     assert payload["boundary_sample_displacement_rms"] == pytest.approx(0.1)
     assert payload["boundary_sample_displacement_max"] == pytest.approx(0.1)
     assert payload["boundary_sample_displacement_rel"] == pytest.approx(0.1 / 3.0)
+
+
+def test_square_coil_profile_hot_restart_solver_state_filters_freeb_resume_keys():
+    resume_state = {
+        "time_step": 0.02,
+        "freeb_ivac": 4,
+        "freeb_ivacskip": 0,
+        "freeb_nvacskip": 7,
+        "freeb_nvskip0": 1,
+        "freeb_last_model": "vmec2000_like_dense_integral",
+        "freeb_nestor_runtime": "runtime",
+        "prev_rz_fsq": 1.0e-9,
+    }
+    run = SimpleNamespace(result=SimpleNamespace(diagnostics={"resume_state": resume_state}))
+
+    assert profile._jax_hot_restart_solver_state(run, policy="state") is None
+    freeb = profile._jax_hot_restart_solver_state(run, policy="freeb")
+    assert freeb == {
+        "freeb_ivac": 4,
+        "freeb_ivacskip": 0,
+        "freeb_nvacskip": 7,
+        "freeb_nvskip0": 1,
+        "freeb_last_model": "vmec2000_like_dense_integral",
+        "freeb_nestor_runtime": "runtime",
+        "prev_rz_fsq": pytest.approx(1.0e-9),
+    }
+    assert "time_step" not in freeb
+    assert profile._jax_hot_restart_solver_state(run, policy="full") == resume_state
 
 
 def test_square_coil_profile_boundary_reduced_control_projection_payload(monkeypatch):
@@ -1126,3 +1165,104 @@ def test_square_coil_profile_run_jax_backend_uses_static_direct_sampler(monkeypa
     assert captured["env"]["VMEC_JAX_FREEB_ADD_ANALYTIC_BVEC"] == "1"
     for name in env_names:
         assert os.environ.get(name) == f"previous_{name}"
+
+
+def test_square_coil_profile_run_jax_backend_hot_restarts_from_freeb_state(
+    monkeypatch, tmp_path: Path
+):
+    calls = []
+    written = {}
+    states = [SimpleNamespace(name="initial"), SimpleNamespace(name="restart")]
+
+    monkeypatch.setattr(
+        profile,
+        "write_wout_from_fixed_boundary_run",
+        lambda path, run, **kwargs: written.update({"path": path, "state": run.state, "kwargs": kwargs}),
+    )
+
+    def fake_result(*, fsqr: float, fsqz: float, fsql: float, n_iter: int):
+        return SimpleNamespace(
+            n_iter=n_iter,
+            diagnostics={
+                "requested_ftol": 1.0e-12,
+                "final_fsqr": fsqr,
+                "final_fsqz": fsqz,
+                "final_fsql": fsql,
+                "final_residual_recomputed_on_accepted_state": True,
+                "resume_state": {
+                    "time_step": 0.02,
+                    "freeb_ivac": 4,
+                    "freeb_ivacskip": 0,
+                    "freeb_nvacskip": 5,
+                    "freeb_nvskip0": 1,
+                    "freeb_last_model": "vmec2000_like_dense_integral",
+                    "prev_rz_fsq": fsqr + fsqz,
+                },
+                "free_boundary": {
+                    "nestor_model": "vmec2000_like_dense_integral",
+                    "ivac": 4,
+                    "ivacskip": 0,
+                    "nvacskip": 5,
+                },
+            },
+            w_history=[],
+            fsqr2_history=[],
+            fsqz2_history=[],
+            fsql2_history=[],
+        )
+
+    def fake_run_free_boundary(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        if len(calls) == 1:
+            return SimpleNamespace(
+                result=fake_result(fsqr=2.0e-9, fsqz=1.0e-9, fsql=5.0e-10, n_iter=100),
+                state=states[0],
+            )
+        return SimpleNamespace(
+            result=fake_result(fsqr=2.0e-13, fsqz=3.0e-13, fsql=4.0e-13, n_iter=5),
+            state=states[1],
+        )
+
+    monkeypatch.setattr(profile, "run_free_boundary", fake_run_free_boundary)
+    config = SimpleNamespace(
+        use_multigrid_schedule=True,
+        max_iter=8000,
+        niter_array=[1000, 2000, 8000],
+        jit_forces=True,
+        free_boundary_activate_fsq=1.0e-3,
+    )
+
+    out = profile._run_jax_backend(
+        input_path=tmp_path / "input.case",
+        wout_path=tmp_path / "wout_case.nc",
+        config=config,
+        direct_params=None,
+        solver_mode="parity",
+        return_best_scored_state=True,
+        jax_hot_restart_count=2,
+        jax_hot_restart_iters=5,
+        jax_hot_restart_policy="freeb",
+    )
+
+    assert len(calls) == 2
+    assert calls[0]["kwargs"]["max_iter"] == 11000
+    assert calls[0]["kwargs"]["multigrid"] is True
+    assert "restart_state" not in calls[0]["kwargs"]
+    assert calls[1]["kwargs"]["max_iter"] == 5
+    assert calls[1]["kwargs"]["multigrid"] is False
+    assert calls[1]["kwargs"]["restart_state"] is states[0]
+    restart_solver_state = calls[1]["kwargs"]["restart_solver_state"]
+    assert restart_solver_state["freeb_ivac"] == 4
+    assert restart_solver_state["freeb_nvacskip"] == 5
+    assert "time_step" not in restart_solver_state
+    assert out["strict_convergence"]["strict_components_met"] is True
+    assert out["hot_restart"]["requested_count"] == 2
+    assert out["hot_restart"]["executed_count"] == 1
+    assert out["hot_restart"]["resume_policy"] == "freeb"
+    assert out["hot_restart"]["stopped_after_strict_convergence"] is True
+    assert out["hot_restart"]["stages"][0]["strict_status"] == "loose_only_above_strict"
+    assert out["hot_restart"]["stages"][1]["strict_status"] == "strict_components_met"
+    assert out["free_boundary_solver_overrides"]["jax_hot_restart_count"] == 2
+    assert out["free_boundary_solver_overrides"]["jax_hot_restart_iters"] == 5
+    assert out["free_boundary_solver_overrides"]["jax_hot_restart_policy"] == "freeb"
+    assert written["state"] is states[1]
