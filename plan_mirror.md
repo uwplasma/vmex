@@ -27517,3 +27517,89 @@ Results:
 ### User input needed
 
 No user input is needed.
+
+---
+## 232. Launched NSTEP=1 First-Order VMEC2000 5,28 Profile
+
+### Steps taken
+
+- Fast-forwarded ``office`` to commit ``325d8f7``.
+- Stopped the old VMEC2000 processes and waiting VMEC2000 launchers that were
+  created before explicit ``NSTEP`` support:
+  - old ``8,32`` VMEC2000 profile and its ``xvmec`` child;
+  - old waiting smooth ``6,23`` launcher;
+  - old waiting first-order ``5,28`` launcher.
+- Left the active direct-coil GPU Anderson ``6,23`` run and the waiting direct
+  ``7,28`` launcher running.
+- Launched a fresh VMEC2000 generated-``mgrid`` profile:
+  - ``MPOL=5, NTOR=28, NZETA=64``;
+  - ``NS_ARRAY=9,13,17``;
+  - ``NITER_ARRAY=4000,8000,24000``;
+  - ``FTOL_ARRAY=1e-8,1e-10,1e-12``;
+  - ``NSTEP=1``, ``NVACSKIP=1``, ``DELT=0.02``;
+  - first-order square-axis spline weights;
+  - ``88 x 64 x 64`` generated ``mgrid``;
+  - projection gate ``--max-boundary-projection-error 5e-12``.
+
+### Results obtained
+
+- New active profile directory:
+  ``results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1``.
+- The row entered ``progress_phase=force_iterations`` quickly, unlike the
+  stopped ``8,32`` startup-cost run.
+- The live VMEC2000 row had force iterations through at least iteration ``111``
+  in the first stage when checked.
+- The current live row is not a strict result yet; it is still running and the
+  current stage is a coarse ``FTOL=1e-8`` phase.
+- ``vacuum_grid_exceeded_count`` was ``0`` at the live check.
+
+### How it was tested
+
+```bash
+ssh office "cd ~/local/vmec_mirror && git pull --ff-only"
+ssh office "cd ~/local/vmec_mirror && python3 tools/diagnostics/summarize_square_coil_profiles.py results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 --markdown"
+ssh office "cd ~/local/vmec_mirror/results/square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64_mgrid88x64x64_niter24k_firstorder_nstep1 && tail -80 vmec2000_mgrid/threed1.square_beta_00p000_mgrid"
+ssh office "ps -p 514451,514698,504339 -o pid,ppid,etime,stat,%cpu,%mem,rss,vsz,command"
+```
+
+Results:
+
+- ``office`` is on ``325d8f7``.
+- ``NSTEP=1`` profile sidecar parsed live force rows.
+- VMEC2000 ``5,28`` is active with no vacuum-grid overflow reported so far.
+
+### File structure and best-practice notes
+
+- The new profile output lives under ignored ``results/`` and is not committed.
+- The only committed follow-up from this launch is this plan log.
+- The new row is a lower-bandwidth first-order spline profile, not a sharper
+  stress-shape row; this keeps the Fourier representation closer to the current
+  production target while testing strict nonlinear convergence.
+
+### Best next steps
+
+1. Let the ``5,28_nstep1`` VMEC2000 row continue until completion or a clear
+   residual floor.
+2. Re-summarize after it reaches the final ``NS=17`` / ``FTOL=1e-12`` stage.
+3. Let the direct ``6,23`` Anderson row finish, then compare direct and
+   VMEC2000 residual tails before changing the mixer.
+4. If ``5,28`` stalls above per-component ``1e-12``, run the matching
+   first-order ``7,28`` row with ``NSTEP=1`` before returning to ``8,32``.
+5. If ``5,28`` and ``7,28`` both fail, start the true spline/control-basis lane
+   instead of further increasing Fourier mode count.
+
+### Completion percentages after M232
+
+- Square-coil strict ``FTOL=1e-12`` profiling lane: ``84%``.
+- VMEC2000 robustness/reference lane: ``90%``.
+- Direct-coil GPU/JIT parity lane: ``70%``.
+- Direct-provider profiling/instrumentation lane: ``99%``.
+- Square-axis spline-smoothed Fourier closure lane: ``94%``.
+- True spline/control-basis hybrid lane: ``20%`` planned, not yet implemented.
+- Documentation and diagnostics for active profiling: ``100%``.
+- Overall toroidal stellarator-mirror hybrid production-readiness: ``94%``
+  pending strict ``5,28``/``7,28`` convergence evidence.
+
+### User input needed
+
+No user input is needed.
