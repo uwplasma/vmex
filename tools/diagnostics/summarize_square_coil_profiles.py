@@ -1610,6 +1610,12 @@ def _summary_row(
         "freeb_edge_control_projection_rcond": _finite_float(
             freeb_edge_control_projection.get("rcond")
         ),
+        "freeb_edge_control_projection_ridge": _finite_float(
+            freeb_edge_control_projection.get("ridge")
+        ),
+        "freeb_edge_control_projection_trust_radius": _finite_float(
+            freeb_edge_control_projection.get("trust_radius")
+        ),
         "freeb_edge_control_projection_update_mode": freeb_edge_control_projection.get("update_mode"),
         "freeb_edge_control_projection_apply_count": freeb_edge_control_runtime.get("apply_count"),
         "freeb_edge_control_projection_delta_projection_count": freeb_edge_control_runtime.get(
@@ -1686,6 +1692,9 @@ def _summary_row(
         ),
         "freeb_edge_control_projection_update_direction_captured_fraction": _finite_float(
             freeb_edge_control_update_direction.get("captured_fraction")
+        ),
+        "freeb_edge_control_projection_update_direction_trust_scale": _finite_float(
+            freeb_edge_control_update_direction.get("trust_scale")
         ),
         "freeb_edge_control_projection_reduced_update_status": freeb_edge_control_reduced_update_direction.get(
             "status"
@@ -2186,6 +2195,8 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_basis",
         "freeb_edge_control_projection_control_count",
         "freeb_edge_control_projection_rcond",
+        "freeb_edge_control_projection_ridge",
+        "freeb_edge_control_projection_trust_radius",
         "freeb_edge_control_projection_update_mode",
         "freeb_edge_control_projection_apply_count",
         "freeb_edge_control_projection_delta_projection_count",
@@ -2213,6 +2224,7 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_update_direction_rms",
         "freeb_edge_control_projection_update_direction_rel",
         "freeb_edge_control_projection_update_direction_captured_fraction",
+        "freeb_edge_control_projection_update_direction_trust_scale",
         "freeb_edge_control_projection_reduced_update_status",
         "freeb_edge_control_projection_reduced_update_size",
         "freeb_edge_control_projection_full_update_size",

@@ -237,7 +237,9 @@ def test_square_coil_followup_commands_emit_direct_gpu_edge_polish(tmp_path: Pat
     assert "--freeb-anderson-pressure" in command
     assert command[command.index("--freeb-edge-control-projection") + 1] == "square"
     assert command[command.index("--freeb-edge-control-rcond") + 1] == "1e-12"
+    assert command[command.index("--freeb-edge-control-ridge") + 1] == "0"
     assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
+    assert "--freeb-edge-control-trust-radius" not in command
     assert command[command.index("--jax-hot-restart-count") + 1] == "2"
     assert command[command.index("--jax-hot-restart-iters") + 1] == "32000"
     assert command[command.index("--jax-hot-restart-policy") + 1] == "freeb"
@@ -273,6 +275,10 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
             "1",
             "--jax-hot-restart-iters",
             "8000",
+            "--freeb-edge-control-ridge",
+            "1e-10",
+            "--freeb-edge-control-trust-radius",
+            "1e-7",
         ]
     )
 
@@ -284,6 +290,8 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
     assert command[command.index("--nzeta") + 1] == "64"
     assert command[command.index("--phiedge") + 1] == "-0.002507885639125676"
     assert command[command.index("--freeb-edge-control-projection") + 1] == "square"
+    assert command[command.index("--freeb-edge-control-ridge") + 1] == "1e-10"
+    assert command[command.index("--freeb-edge-control-trust-radius") + 1] == "1e-07"
     assert command[command.index("--freeb-edge-control-update-mode") + 1] == "coordinate"
     assert command[command.index("--jax-hot-restart-count") + 1] == "1"
     assert command[command.index("--jax-hot-restart-iters") + 1] == "8000"
@@ -297,6 +305,8 @@ def test_square_coil_followup_commands_emit_scaled_edge_polish_probe(tmp_path: P
     assert "nzeta64" in outdir.name
     assert "phiedgem0p00250789" in outdir.name
     assert "edge_square_coordinate" in outdir.name
+    assert "ridge1em10" in outdir.name
+    assert "trust1em07" in outdir.name
 
 
 def test_square_coil_followup_commands_reject_underrecommended_ntheta(tmp_path: Path):

@@ -152,6 +152,24 @@ def _parser() -> argparse.ArgumentParser:
         help="Pseudo-inverse cutoff for the reduced edge-control projection.",
     )
     p.add_argument(
+        "--freeb-edge-control-ridge",
+        type=float,
+        default=0.0,
+        help=(
+            "Nonnegative ridge weight for reduced edge-control least-squares "
+            "updates. Zero preserves the pseudo-inverse/default behavior."
+        ),
+    )
+    p.add_argument(
+        "--freeb-edge-control-trust-radius",
+        type=float,
+        default=None,
+        help=(
+            "Optional Euclidean trust radius for each reduced edge-control "
+            "update. Omit for an unbounded reduced update."
+        ),
+    )
+    p.add_argument(
         "--freeb-edge-control-update-mode",
         choices=("projected_delta", "coordinate"),
         default=None,
@@ -229,6 +247,16 @@ def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi
         if edge in {None, "none"}
         else f"_edge_{edge}_{_edge_control_update_mode(args)}"
     )
+    ridge_label = (
+        ""
+        if edge in {None, "none"} or float(args.freeb_edge_control_ridge) == 0.0
+        else f"_ridge{_float_label(float(args.freeb_edge_control_ridge))}"
+    )
+    trust_label = (
+        ""
+        if edge in {None, "none"} or args.freeb_edge_control_trust_radius is None
+        else f"_trust{_float_label(float(args.freeb_edge_control_trust_radius))}"
+    )
     ntheta_label = "" if args.ntheta is None else f"_ntheta{int(args.ntheta)}"
     default_phiedge = float(ExampleConfig().phiedge)
     phiedge_label = (
@@ -247,6 +275,8 @@ def _outdir_for(args: argparse.Namespace, *, delt: float, nzeta: int, mgrid_nphi
         f"_niter{_iter_label(_last_int(args.niter_array))}"
         f"_{str(args.axis_kind)}"
         f"{edge_label}"
+        f"{ridge_label}"
+        f"{trust_label}"
     )
 
 
@@ -362,10 +392,19 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
                 str(edge_projection),
                 "--freeb-edge-control-rcond",
                 f"{float(args.freeb_edge_control_rcond):.16g}",
+                "--freeb-edge-control-ridge",
+                f"{float(args.freeb_edge_control_ridge):.16g}",
                 "--freeb-edge-control-update-mode",
                 str(edge_update_mode),
             ]
         )
+        if args.freeb_edge_control_trust_radius is not None:
+            command.extend(
+                [
+                    "--freeb-edge-control-trust-radius",
+                    f"{float(args.freeb_edge_control_trust_radius):.16g}",
+                ]
+            )
     if (bool(args.freeb_anderson_pressure) or _is_polish_kind(kind)) and jax_kind:
         command.append("--freeb-anderson-pressure")
     hot_restart_count = _hot_restart_count(args) if jax_kind else 0
