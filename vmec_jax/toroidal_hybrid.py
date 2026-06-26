@@ -94,6 +94,19 @@ class SquareAxisSplineControls:
         return SquareAxisSplineControls(zeta=zeta_sorted, radius=radius_sorted)
 
 
+@dataclass(frozen=True)
+class SquareAxisControlFourierMatrix:
+    """Linearized VMEC boundary coefficients for square-axis control radii."""
+
+    controls: SquareAxisSplineControls
+    m: np.ndarray
+    n: np.ndarray
+    R_cos: np.ndarray
+    R_sin: np.ndarray
+    Z_cos: np.ndarray
+    Z_sin: np.ndarray
+
+
 def _periodic_cubic_hermite_interpolate(x_nodes: Any, y_nodes: Any, x_eval: Any) -> np.ndarray:
     """Evaluate a periodic cubic Hermite interpolant on a full-period grid."""
 
@@ -203,6 +216,77 @@ def square_axis_spline_radius_matrix(zeta: Any, controls: SquareAxisSplineContro
         columns.append(square_axis_spline_radius(flat_zeta, perturbed) - baseline_values)
     matrix = np.stack(columns, axis=-1)
     return matrix.reshape(zeta_arr.shape + (n_control,))
+
+
+def square_axis_spline_control_fourier_matrix(
+    *,
+    controls: SquareAxisSplineControls | None = None,
+    nfp: int = 1,
+    mpol: int = 5,
+    ntor: int = 28,
+    ntheta_fit: int = 64,
+    nzeta_fit: int = 224,
+    **sample_kwargs: Any,
+) -> SquareAxisControlFourierMatrix:
+    """Return the chain-rule map from axis controls to VMEC boundary modes.
+
+    The active solver path still stores the boundary as VMEC Fourier
+    coefficients.  This helper makes the preceding control layer explicit by
+    differentiating the projected coefficients with respect to the
+    low-dimensional square-axis radii.  It is linear for fixed control
+    locations and fixed local cross-section shaping.
+    """
+
+    controls = (
+        controls
+        if controls is not None
+        else SquareAxisSplineControls.rounded_square(
+            axis_half_width=float(sample_kwargs.get("axis_half_width", 1.5)),
+            corner_radius_factor=float(sample_kwargs.get("axis_spline_corner_radius_factor", np.sqrt(2.0))),
+        )
+    ).validate()
+    modes = vmec_mode_table(mpol=int(mpol), ntor=int(ntor))
+    theta = np.linspace(0.0, 2.0 * np.pi, int(ntheta_fit), endpoint=False)
+    zeta = np.linspace(0.0, 2.0 * np.pi, int(nzeta_fit), endpoint=False)
+    grid = AngleGrid(theta=theta, zeta=zeta, nfp=int(nfp))
+    basis = build_helical_basis(modes, grid)
+
+    def _project(control_radii: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        local_controls = SquareAxisSplineControls(zeta=controls.zeta, radius=np.asarray(control_radii, dtype=float))
+        samples = sample_square_axis_stellarator_mirror_hybrid_boundary(
+            ntheta=int(ntheta_fit),
+            nzeta=int(nzeta_fit),
+            axis_kind="control_spline",
+            axis_spline_controls=local_controls,
+            **sample_kwargs,
+        )
+        r_cos, r_sin = project_to_modes(samples.R, basis)
+        z_cos, z_sin = project_to_modes(samples.Z, basis)
+        return (
+            np.asarray(r_cos, dtype=float),
+            np.asarray(r_sin, dtype=float),
+            np.asarray(z_cos, dtype=float),
+            np.asarray(z_sin, dtype=float),
+        )
+
+    base = np.asarray(controls.radius, dtype=float)
+    base_coeffs = _project(base)
+    columns = []
+    for idx in range(base.size):
+        perturbed = base.copy()
+        perturbed[idx] += 1.0
+        columns.append(tuple(new - old for new, old in zip(_project(perturbed), base_coeffs, strict=True)))
+
+    stacked = [np.stack([column[item] for column in columns], axis=-1) for item in range(4)]
+    return SquareAxisControlFourierMatrix(
+        controls=controls,
+        m=np.asarray(modes.m, dtype=int),
+        n=np.asarray(modes.n, dtype=int),
+        R_cos=stacked[0],
+        R_sin=stacked[1],
+        Z_cos=stacked[2],
+        Z_sin=stacked[3],
+    )
 
 
 def recommended_square_axis_nzeta(ntor: int, *, margin: int = 8, block: int = 8) -> int:

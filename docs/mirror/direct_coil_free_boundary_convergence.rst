@@ -456,7 +456,11 @@ solver reparameterization. The public
 few square-axis control radii to sampled radius values for fixed control
 locations. This gives differentiable studies a compact control vector today,
 while keeping the active VMEC/JAX and VMEC2000 comparison on the same Fourier
-boundary interface. The public helper
+boundary interface. The companion
+``square_axis_spline_control_fourier_matrix`` helper gives the chain-rule map
+from those controls to projected VMEC boundary coefficients, which is the
+needed bridge before introducing a solver-native control-basis state vector.
+The public helper
 ``square_axis_stellarator_mirror_hybrid_projection_error`` and the square-coil
 profiler's ``boundary_projection`` JSON block now report the Fourier truncation
 error, mode count, and recommended ``NZETA`` for the selected

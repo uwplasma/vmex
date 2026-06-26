@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from .namelist import minimal_fixed_boundary_indata, read_indata, write_indata
 from .toroidal_hybrid import (
+    SquareAxisControlFourierMatrix,
     SquareAxisSplineControls,
     ToroidalHybridBoundarySamples,
     evaluate_toroidal_hybrid_indata_boundary,
@@ -22,6 +23,7 @@ from .toroidal_hybrid import (
     sample_square_axis_stellarator_mirror_hybrid_boundary,
     sample_toroidal_stellarator_mirror_hybrid_boundary,
     square_axis_spline_radius,
+    square_axis_spline_control_fourier_matrix,
     square_axis_spline_radius_matrix,
     square_axis_stellarator_mirror_hybrid_indata,
     square_axis_stellarator_mirror_hybrid_projection_error,
@@ -220,6 +222,7 @@ __all__ = [
     "read_indata",
     "write_indata",
     "minimal_fixed_boundary_indata",
+    "SquareAxisControlFourierMatrix",
     "SquareAxisSplineControls",
     "ToroidalHybridBoundarySamples",
     "evaluate_toroidal_hybrid_indata_boundary",
@@ -228,6 +231,7 @@ __all__ = [
     "sample_square_axis_stellarator_mirror_hybrid_boundary",
     "sample_toroidal_stellarator_mirror_hybrid_boundary",
     "square_axis_spline_radius",
+    "square_axis_spline_control_fourier_matrix",
     "square_axis_spline_radius_matrix",
     "square_axis_stellarator_mirror_hybrid_indata",
     "square_axis_stellarator_mirror_hybrid_projection_error",

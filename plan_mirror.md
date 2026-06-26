@@ -29710,3 +29710,71 @@ Focused result: `82 passed, 2 warnings`.
 ### User input needed
 
 No user input is needed.
+---
+## 258. Added Control-Radius To Fourier-Coefficient Chain Rule
+
+### Steps taken
+
+- Added `SquareAxisControlFourierMatrix` and
+  `square_axis_spline_control_fourier_matrix` in `vmec_jax/toroidal_hybrid.py`.
+- Re-exported the dataclass and helper through `vmec_jax` and `vmec_jax.api`.
+- Added a regression test that compares the helper's predicted Fourier
+  coefficient change against a direct symmetry-preserving control perturbation
+  followed by the normal `square_axis_stellarator_mirror_hybrid_indata`
+  projection path.
+- Updated the README and convergence notes to distinguish:
+  - `square_axis_spline_radius_matrix`: controls to sampled axis radius;
+  - `square_axis_spline_control_fourier_matrix`: controls to VMEC boundary
+    Fourier coefficients.
+
+### Results obtained
+
+- The square-axis control lane now has both pieces needed for a conservative
+  chain-rule optimization path while still using the existing Fourier VMEC
+  state:
+  - a sampled-radius control map;
+  - a projected-Fourier coefficient control map.
+- The test also clarified a useful physics constraint: arbitrary single-point
+  control perturbations can break stellarator symmetry, so production control
+  updates should either enforce symmetry pairs or explicitly use asymmetric
+  boundary handling.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py
+```
+
+Result: `46 passed, 2 warnings`.
+
+### File structure and best-practice notes
+
+- The helper stays next to the existing square-axis spline helpers in
+  `vmec_jax/toroidal_hybrid.py`.
+- The helper is a small dense control map, not a new solver or output format.
+- Tests remain in `tests/test_toroidal_hybrid.py` beside the other
+  square-hybrid geometry tests.
+
+### Best next steps
+
+1. Use the Fourier coefficient map to prototype a constrained control-radius
+   update before changing the VMEC nonlinear state vector.
+2. Keep symmetry-paired controls for stellarator-symmetric production runs.
+3. Continue letting the active VMEC2000 strict row run as the main convergence
+   reference.
+
+### Completion percentages after M258
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `96%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `79%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `76%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- Strict production deck gating lane: `100%`.
+- True spline/control-basis hybrid lane: `49%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
