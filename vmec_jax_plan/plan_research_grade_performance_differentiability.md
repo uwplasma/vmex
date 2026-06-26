@@ -8472,3 +8472,62 @@ Current lane percentages:
 - VMEC2000/VMEC++ parity and physics gates: 99.4%.
 - Docs/release hygiene: 100%.
 - Overall: 99.8%.
+
+## 2026-06-26 CI Repair After Layout/QI Package Refactor
+
+Steps taken:
+
+- Inspected the post-refactor GitHub Actions failures after commits
+  ``f41d984f`` and ``5baf2c58``.
+- Identified the bounded physics smoke failure as an asset-layout mismatch:
+  the published WOUT fixture tarball still extracts the LASYM finite-beta
+  single-grid WOUT under ``examples_single_grid/data`` while CI now tests the
+  canonical ``examples/data/single_grid`` path.
+- Added a narrow release-asset migration shim in ``tools/fetch_assets.py`` that
+  copies files from older tarball paths into the current layout after download
+  or when an existing marker is present. This keeps source/tests/docs on the new
+  layout while preserving compatibility with already-published asset bundles.
+- Updated the Boozer plotting fast-helper test to monkeypatch
+  ``vmec_jax.quasi_isodynamic.objectives`` directly after the QI package
+  consolidation.
+
+Results obtained:
+
+- ``python -m ruff check tools/fetch_assets.py tests/test_plotting_fast_helpers.py``
+  passed.
+- A clean temporary asset fetch of the WOUT fixture bundle created both the
+  old tarball path and the required current path:
+  ``examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc``.
+- The previously failing plotting helper test passed.
+- The previously failing local subset for WOUT/Boozer/plot/profile coverage
+  passed: ``49 passed in 6.18s``.
+- The exact bounded physics smoke shard passed locally:
+  ``9 passed in 89.06s``.
+
+Best next steps:
+
+1. Push the CI repair commit and let the new CI run replace the failed
+   post-refactor run.
+2. If CI still fails, inspect only concrete failures from the new run; the
+   known asset-layout and private-helper failures have local reproductions
+   passing.
+3. Continue the remaining repository-structure cleanup only in larger tranches:
+   further solver decomposition, optimization workflow simplification, and
+   docs/examples alignment.
+
+User needs:
+
+- No input needed for this repair.
+
+Current lane percentages:
+
+- Performance benchmark/profiling harness: 100%.
+- Fixed-boundary production differentiability: 97.5%.
+- Free-boundary production differentiability: 97.7%.
+- Single-stage coil optimization: 94.2%.
+- CPU/GPU runtime and memory footprint: 99.2%.
+- Refactor/API/examples: 90.0%.
+- VMEC2000/VMEC++ parity and physics gates: 99.4%.
+- Docs/release hygiene: 100%.
+- Repository layout/navigation cleanup: 93.0%.
+- Overall: 99.85%.

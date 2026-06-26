@@ -377,7 +377,7 @@ def test_plot_wrappers_default_outdir_without_rendering(monkeypatch, tmp_path) -
 def test_boozer_bmag_grid_validates_and_synthesizes_optional_sine_modes(monkeypatch) -> None:
     import sys
     import vmec_jax.booz_input as booz_input
-    import vmec_jax.quasi_isodynamic as qi
+    import vmec_jax.quasi_isodynamic.objectives as qi_objectives
 
     calls = []
 
@@ -404,7 +404,7 @@ def test_boozer_bmag_grid_validates_and_synthesizes_optional_sine_modes(monkeypa
         "booz_xform_inputs_from_state",
         lambda **_kwargs: SimpleNamespace(rmnc=np.zeros((4, 1))),
     )
-    monkeypatch.setattr(qi, "_nearest_half_mesh_indices", lambda surfaces, n_half: np.asarray([0, n_half - 1]))
+    monkeypatch.setattr(qi_objectives, "_nearest_half_mesh_indices", lambda surfaces, n_half: np.asarray([0, n_half - 1]))
     static = SimpleNamespace(cfg=SimpleNamespace(lasym=False, nfp=5))
 
     with pytest.raises(ValueError, match="surfaces must contain at least one value"):
