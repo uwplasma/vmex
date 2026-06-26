@@ -618,6 +618,12 @@ The differentiable forward map is also public as
 ``ReducedControlMap.decode_jax(...)``. It performs only
 ``initial + jacobian @ control_delta``, so its Jacobian with respect to the
 reduced controls is exactly the supplied control matrix.
+The matching public pullback is
+``vmec_jax.reduced_control_pullback(jacobian, full_values)`` and
+``ReducedControlMap.pullback_jax(...)``. It applies ``jacobian.T`` to a full
+coefficient residual, gradient, or adjoint vector, which is the chain-rule
+primitive needed for a solver-native reduced-control residual and for implicit
+or adjoint differentiation through that reduced state.
 The same map now underlies the accepted-state ``state_coordinates`` diagnostics
 for edge-projected free-boundary solves.
 ``SquareAxisControlFourierMatrix`` now exposes the same affine state map through

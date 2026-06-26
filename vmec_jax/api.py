@@ -26,6 +26,7 @@ from .solvers.free_boundary import (
     ReducedControlStep,
     reduced_control_decode,
     reduced_control_least_squares_step,
+    reduced_control_pullback,
 )
 from .toroidal_hybrid import (
     SquareAxisControlBasis,

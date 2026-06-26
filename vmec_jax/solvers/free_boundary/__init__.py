@@ -14,6 +14,7 @@ from .reduced_controls import (
     ReducedControlStep,
     reduced_control_decode,
     reduced_control_least_squares_step,
+    reduced_control_pullback,
 )
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "free_boundary_value_and_jvp",
     "reduced_control_decode",
     "reduced_control_least_squares_step",
+    "reduced_control_pullback",
 ]

@@ -138,6 +138,21 @@ class ReducedControlMap:
 
         return reduced_control_decode(self.initial, self.jacobian, control_delta)
 
+    def pullback(self, full_values: Any) -> np.ndarray:
+        """Map a full coefficient vector back to reduced-control coordinates."""
+
+        values = np.asarray(full_values, dtype=float).reshape(-1)
+        if values.size != self.full_size:
+            raise ValueError("full_values size must match this reduced-control map")
+        if not np.all(np.isfinite(values)):
+            raise ValueError("full_values must be finite")
+        return np.asarray(self.jacobian.T @ values, dtype=float)
+
+    def pullback_jax(self, full_values: Any):
+        """Return the reduced-control pullback with JAX-compatible operations."""
+
+        return reduced_control_pullback(self.jacobian, full_values)
+
     def project(
         self,
         full_values: Any,
@@ -288,3 +303,22 @@ def reduced_control_decode(initial: Any, jacobian: Any, control_delta: Any):
     if int(jacobian_arr.shape[1]) != int(control_arr.shape[0]):
         raise ValueError("control_delta size must match the number of control columns")
     return initial_arr + jacobian_arr @ control_arr
+
+
+def reduced_control_pullback(jacobian: Any, full_values: Any):
+    """Pull a full coefficient residual/adjoint into reduced controls.
+
+    For the affine map ``full = initial + J @ control``, the reduced gradient or
+    residual is ``J.T @ full_values``.  This primitive is deliberately tiny and
+    JAX-compatible so native reduced-coordinate solves, implicit
+    differentiation, and adjoint diagnostics can share the same chain-rule
+    convention.
+    """
+
+    full_arr = jnp.asarray(full_values).reshape((-1,))
+    jacobian_arr = jnp.asarray(jacobian, dtype=full_arr.dtype)
+    if jacobian_arr.ndim != 2:
+        raise ValueError("jacobian must be two-dimensional")
+    if int(jacobian_arr.shape[0]) != int(full_arr.shape[0]):
+        raise ValueError("jacobian row count must match full_values size")
+    return jacobian_arr.T @ full_arr

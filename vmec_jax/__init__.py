@@ -269,6 +269,7 @@ _LAZY_ATTRS = {
     "ReducedControlStep": ".solvers.free_boundary",
     "reduced_control_decode": ".solvers.free_boundary",
     "reduced_control_least_squares_step": ".solvers.free_boundary",
+    "reduced_control_pullback": ".solvers.free_boundary",
     "SquareAxisControlBasis": ".toroidal_hybrid",
     "SquareAxisControlFourierMatrix": ".toroidal_hybrid",
     "SquareAxisControlProjection": ".toroidal_hybrid",
