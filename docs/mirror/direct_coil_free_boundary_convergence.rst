@@ -235,6 +235,14 @@ recommendation; diagnostic profiling can still run underresolved grids and
 records ``nzeta_auto`` and ``nzeta_underrecommended`` in the JSON report.
 The example metrics JSON now also carries a ``resolution_deck`` block with the
 same projection/``NZETA`` gate used by the profiler.
+The repo-root square-coil example also writes
+``square_coil_hybrid_preflight.json`` before starting heavy solves. That
+preflight records the requested component-wise ``FTOL=1e-12`` target, the full
+staged ``NS_ARRAY``/``NITER_ARRAY``/``FTOL_ARRAY`` budget, the
+projection/``NZETA`` deck status, spline-control map conditioning, and a
+``spline_bridge`` block stating that the current control-spline path is still a
+projection bridge into VMEC Fourier coefficients rather than a solver-native
+spline-control update.
 The profiler also rejects generated-mgrid plane counts that are not multiples
 of ``NZETA`` because the VMEC-plane mgrid sampler intentionally uses the
 discrete VMEC zeta planes without toroidal interpolation.

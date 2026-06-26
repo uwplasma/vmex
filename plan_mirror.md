@@ -32237,3 +32237,101 @@ No user input is needed.
 ### User input needed
 
 No user input is needed.
+
+---
+## M285 - Root Example Strict Preflight And Spline-Bridge Audit
+
+### Steps taken
+
+- Rechecked the active `office` strict direct-GPU rows before launching any new
+  work. Both rows are still running on the `MPOL=5`, `NTOR=28`, `NZETA=64`,
+  `NS_ARRAY=9,13,17`, `FTOL_ARRAY=1e-8,1e-10,1e-12` `control_spline` deck.
+- Kept the queued JAX-NESTOR and VMEC2000 waiters intact; no additional heavy
+  solve was launched on top of the active rows.
+- Ran the local square-coil resolution matrix for representative edited decks:
+  `5:20:48`, `5:28:48`, `5:28:64`, `6:32:72`, `7:28:auto`, and `8:32:auto`.
+- Added a root-example preflight JSON writer to
+  `examples/toroidal_stellarator_mirror_hybrid_square_coils_free_boundary.py`.
+  The preflight is written before coils or beta solves are run.
+- Added tests that pin the new preflight schema, strict final `FTOL=1e-12`
+  target, production-deck classification, and explicit statement that the
+  current `control_spline` path is not yet solver-native.
+- Updated the convergence notes to document the root-example preflight artifact.
+
+### Results obtained
+
+- The local matrix classified:
+  - `MPOL=5`, `NTOR=20`, `NZETA=48`: diagnostic only; projection error
+    `1.76e-9` exceeds the `5e-12` gate.
+  - `MPOL=5`, `NTOR=28`, `NZETA=48`: diagnostic only; `NZETA` is below the
+    square-axis recommendation.
+  - `MPOL=5`, `NTOR=28`, `NZETA=64`: production-ready for representation.
+  - `MPOL=6`, `NTOR=32`, `NZETA=72`: production-ready for representation.
+  - `MPOL=7`, `NTOR=28`, `NZETA=64`: production-ready for representation.
+  - `MPOL=8`, `NTOR=32`, `NZETA=72`: production-ready for representation.
+- The root example now writes `square_coil_hybrid_preflight.json` with:
+  - `strict_schedule.componentwise_target_ftol = 1e-12`;
+  - resolved `NZETA` and recommended `NZETA`;
+  - projection and resolution-deck status;
+  - square and stellarator reduced-control map conditioning;
+  - `spline_bridge.solver_native_spline_controls = false`.
+- This makes the answer to "can splines help?" explicit:
+  `control_spline` helps by smoothing/reducing the input geometry before Fourier
+  projection, but it does not yet reduce the nonlinear VMEC solve variables.
+  A true convergence improvement from splines requires the planned
+  solver-native reduced spline/control-basis update lane.
+- Current active direct-GPU rows are improving but remain above strict target:
+  latest tails are near `3.5e-9/3.1e-9/2.2e-10` for the baseline row and
+  `3.1e-9/2.8e-9/2.2e-10` for the Anderson row.
+
+### How it was tested
+
+- Ran the cheap deck matrix:
+  `venv/bin/python tools/diagnostics/square_coil_resolution_matrix.py --decks '5:20:48,5:28:48,5:28:64,6:32:72,7:28:auto,8:32:auto' --target-error 5e-12 --include-control-map --format markdown`.
+- Ran py-compile on the touched example and diagnostic entry points.
+- Ran focused tests:
+  `venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py::test_square_axis_recommended_nzeta_and_example_guard tests/test_toroidal_hybrid.py::test_square_coil_hybrid_free_boundary_example_runs_without_plots`.
+- Ran the broader regression set:
+  `venv/bin/python -m pytest -q tests/test_toroidal_hybrid.py::test_square_axis_recommended_nzeta_and_example_guard tests/test_toroidal_hybrid.py::test_square_coil_hybrid_free_boundary_example_runs_without_plots tests/test_square_coil_resolution_matrix.py tests/test_square_coil_followup_commands.py`.
+- Result: `13 passed`.
+- `py_compile`, global `ruff check`, and `git diff --check` passed.
+
+### File structure and best-practice notes
+
+- The new preflight logic stays in the repo-root example because it documents
+  the user-facing controls for that self-contained script.
+- Reusable spline-control mathematics remains in `vmec_jax/toroidal_hybrid.py`;
+  the example only calls the existing public diagnostics.
+- Generated preflight JSON is written under the ignored run output directory,
+  so the repository remains light.
+- The implementation preserves the requested no-parser style for the example:
+  users still edit constants at the top and run the file directly.
+
+### Best next steps
+
+1. Let the two active direct-GPU rows finish naturally.
+2. Let the queued JAX-NESTOR row run after them and check whether the
+   experimental NESTOR operator lowers the residual floor.
+3. Let the queued VMEC2000 `DELT=0.015/0.02/0.025` scan run after the JAX-NESTOR
+   row and compare strict component residuals.
+4. Use the new root-example preflight JSON whenever editing `MPOL`, `NTOR`, or
+   `NZETA`; do not interpret underresolved rows as strict convergence evidence.
+5. If the production-ready Fourier decks and VMEC2000 reference still stall
+   above `1e-12`, start the solver-native reduced spline/control-basis
+   nonlinear-update prototype.
+
+### Completion percentages after M285
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `98%`.
+- VMEC2000 robustness/reference lane: `99%`, strict `DELT` scan queued.
+- Direct-coil GPU/JIT parity lane: `92%`, active rows still running.
+- Experimental JAX NESTOR operator profiling lane: `79%`, queued.
+- Root-example robustness/preflight lane: `100%`.
+- Strict spline-bridge diagnostics lane: `100%`.
+- True spline/control-basis hybrid lane: `66%`, still a solver-native prototype
+  lane rather than a completed solve path.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `96%`.
+
+### User input needed
+
+No user input is needed.

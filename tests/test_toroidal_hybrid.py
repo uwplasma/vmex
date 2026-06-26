@@ -488,6 +488,17 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     deck = module._resolution_deck_payload(module.ExampleConfig())
     assert deck["status"] == "production_ready"
     assert deck["nzeta"] == max(64, recommended_square_axis_nzeta(module.ExampleConfig().ntor))
+    preflight = module._preflight_payload(module.ExampleConfig())
+    assert preflight["schema"] == "square_coil_hybrid_preflight"
+    assert preflight["production_ready_for_strict_profile"] is True
+    assert preflight["strict_schedule"]["requested_final_ftol"] == pytest.approx(1.0e-12)
+    assert preflight["strict_schedule"]["requested_final_ftol_meets_target"] is True
+    assert preflight["resolution_deck"]["status"] == "production_ready"
+    assert preflight["control_fourier_map"]["square"]["control_count"] == 2
+    assert preflight["control_fourier_map"]["stellarator"]["control_count"] == 5
+    assert preflight["spline_bridge"]["solver_native_spline_controls"] is False
+    assert preflight["spline_bridge"]["can_reduce_input_shape_dofs"] is True
+    assert preflight["spline_bridge"]["can_reduce_nonlinear_solver_dofs"] is False
     controls = SquareAxisSplineControls.rounded_square(axis_half_width=1.5, corner_radius_factor=1.12)
     spline_config = module.ExampleConfig(
         plasma_axis_kind="control_spline",
@@ -967,6 +978,10 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert metrics["plasma_axis_control_symmetry"] == "square"
     assert metrics["plasma_axis_reduced_radii"] is None
     assert metrics["plasma_axis_spline_controls"]["radius"][0] == pytest.approx(1.5)
+    assert Path(metrics["preflight_json"]).exists()
+    assert metrics["preflight"]["schema"] == "square_coil_hybrid_preflight"
+    assert metrics["preflight"]["strict_schedule"]["requested_final_ftol_meets_target"] is False
+    assert metrics["preflight"]["spline_bridge"]["solver_native_spline_controls"] is False
     assert metrics["betas_percent"] == [0.0]
     assert metrics["figures"] == {}
     assert Path(metrics["coils_json"]).exists()

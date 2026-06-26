@@ -47,6 +47,7 @@ from vmec_jax.toroidal_hybrid import (
     recommend_square_axis_stellarator_mirror_hybrid_resolution,
     recommended_square_axis_nzeta,
     square_axis_resolution_deck_status,
+    square_axis_spline_control_fourier_map_status,
     square_axis_spline_symmetric_control_basis,
     square_axis_stellarator_mirror_hybrid_indata,
     square_axis_stellarator_mirror_hybrid_projection_error,
@@ -121,6 +122,7 @@ FIELD_LINE_TURNS = 1.25
 
 SCHEMA = "toroidal_stellarator_mirror_hybrid_square_coils_free_boundary_solve"
 SCHEMA_VERSION = "0.4"
+STRICT_COMPONENT_FTOL_TARGET = 1.0e-12
 
 
 @dataclass(frozen=True)
@@ -583,6 +585,147 @@ def _resolution_deck_payload(config: ExampleConfig) -> dict[str, Any]:
         nzeta=_resolved_nzeta(config),
         target_max_component_error=config.max_boundary_projection_error,
     )
+
+
+def _strict_schedule_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Summarize whether the requested schedule is strict enough for claims."""
+
+    ns_values, niter_values, ftol_values = _stage_values(config)
+    ftol_list = ftol_values if isinstance(ftol_values, list) else [float(ftol_values)]
+    niter_list = niter_values if isinstance(niter_values, list) else [int(niter_values)]
+    ns_list = ns_values if isinstance(ns_values, list) else [int(ns_values)]
+    final_ftol = float(ftol_list[-1])
+    return {
+        "componentwise_target_ftol": STRICT_COMPONENT_FTOL_TARGET,
+        "requested_final_ftol": final_ftol,
+        "requested_final_ftol_meets_target": bool(final_ftol <= STRICT_COMPONENT_FTOL_TARGET),
+        "ns_array": [int(value) for value in ns_list],
+        "niter_array": [int(value) for value in niter_list],
+        "ftol_array": [float(value) for value in ftol_list],
+        "total_iteration_budget": int(sum(int(value) for value in niter_list)),
+        "claim_requires_converged_strict": True,
+        "claim_requires_fresh_final_residual": True,
+        "claim_requires_virtual_casing_for_finite_beta": bool(any(float(beta) != 0.0 for beta in config.betas_percent)),
+    }
+
+
+def _control_fourier_map_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return spline-control to Fourier-map diagnostics for this deck."""
+
+    controls = _resolved_axis_spline_controls(config)
+    if controls is None:
+        return {
+            "status": "not_applicable_for_axis_kind",
+            "axis_kind": str(config.plasma_axis_kind),
+        }
+    sample_kwargs = _square_axis_sample_kwargs(config)
+    sample_kwargs.pop("axis_kind", None)
+    sample_kwargs.pop("axis_spline_controls", None)
+    payload: dict[str, Any] = {
+        "status": "available",
+        "axis_kind": str(config.plasma_axis_kind),
+    }
+    for symmetry in ("square", "stellarator"):
+        try:
+            status = square_axis_spline_control_fourier_map_status(
+                controls=controls,
+                symmetry=symmetry,
+                nfp=int(config.nfp),
+                mpol=int(config.mpol),
+                ntor=int(config.ntor),
+                **_boundary_fit_grid(config),
+                **sample_kwargs,
+            )
+        except Exception as exc:
+            payload[symmetry] = {
+                "status": f"failed:{type(exc).__name__}",
+                "error": repr(exc),
+            }
+            continue
+        payload[symmetry] = {
+            "status": status.get("status"),
+            "labels": status.get("labels"),
+            "control_count": status.get("control_count"),
+            "mode_count": status.get("mode_count"),
+            "condition_number": status.get("condition_number"),
+            "jacobian_shape": status.get("jacobian_shape"),
+        }
+    return payload
+
+
+def _spline_bridge_payload(config: ExampleConfig, *, resolution_deck: dict[str, Any]) -> dict[str, Any]:
+    """State what the spline controls can and cannot do in the current solver."""
+
+    controls = _resolved_axis_spline_controls(config)
+    uses_controls = controls is not None
+    return {
+        "real_space_axis_basis": "periodic_spline_controls" if uses_controls else "sampled_fourier_target",
+        "nonlinear_solver_boundary_basis": "vmec_fourier_coefficients",
+        "solver_native_spline_controls": False,
+        "requires_fourier_projection": True,
+        "can_reduce_input_shape_dofs": bool(uses_controls),
+        "can_reduce_nonlinear_solver_dofs": False,
+        "recommended_next_action": (
+            "prototype_solver_native_spline_control_update"
+            if resolution_deck.get("status") == "production_ready"
+            else "repair_projection_or_zeta_deck_before_solver_profiling"
+        ),
+        "interpretation": (
+            "The control-spline path smooths and reduces the input target before projection. "
+            "The active VMEC solve still moves Fourier coefficients, so lower nonlinear "
+            "dimension requires a new reduced-control boundary update path."
+        ),
+    }
+
+
+def _preflight_payload(config: ExampleConfig) -> dict[str, Any]:
+    """Return cheap checks that should pass before a long square-coil solve."""
+
+    projection = _boundary_projection_payload(config)
+    resolution_deck = square_axis_resolution_deck_status(
+        projection=projection,
+        mpol=int(config.mpol),
+        ntor=int(config.ntor),
+        ns=int(config.ns),
+        nzeta=_resolved_nzeta(config),
+        target_max_component_error=config.max_boundary_projection_error,
+    )
+    schedule = _strict_schedule_payload(config)
+    production_ready = bool(
+        resolution_deck.get("status") == "production_ready"
+        and schedule.get("requested_final_ftol_meets_target")
+    )
+    return {
+        "schema": "square_coil_hybrid_preflight",
+        "schema_version": 1,
+        "status": "production_ready" if production_ready else "diagnostic_only",
+        "production_ready_for_strict_profile": production_ready,
+        "configuration": {
+            "mpol": int(config.mpol),
+            "ntor": int(config.ntor),
+            "nzeta": _resolved_nzeta(config),
+            "recommended_nzeta": int(recommended_square_axis_nzeta(int(config.ntor))),
+            "axis_kind": str(config.plasma_axis_kind),
+            "side_power": float(config.side_power),
+            "corner_power": float(config.corner_power),
+            "max_boundary_projection_error": (
+                None if config.max_boundary_projection_error is None else float(config.max_boundary_projection_error)
+            ),
+        },
+        "strict_schedule": schedule,
+        "boundary_projection": projection,
+        "resolution_deck": resolution_deck,
+        "control_fourier_map": _control_fourier_map_payload(config),
+        "spline_bridge": _spline_bridge_payload(config, resolution_deck=resolution_deck),
+    }
+
+
+def _write_preflight_report(path: Path, config: ExampleConfig) -> tuple[Path, dict[str, Any]]:
+    """Write pre-solve resolution and strict-target diagnostics."""
+
+    payload = _preflight_payload(config)
+    path.write_text(json.dumps(_json_sanitize(payload), indent=2, allow_nan=False) + "\n")
+    return path, payload
 
 
 def _solved_surface_and_field(run: Any, config: ExampleConfig) -> tuple[np.ndarray, ...]:
@@ -1253,6 +1396,8 @@ def _metrics_payload(
     config: ExampleConfig,
     coils: SquareCoilSet,
     coils_json: Path,
+    preflight_json: Path,
+    preflight: dict[str, Any],
     summary_csv: Path,
     rows: list[dict[str, Any]],
     figures: dict[str, str],
@@ -1294,6 +1439,8 @@ def _metrics_payload(
         "toroidal_current": float(config.toroidal_current),
         "boundary_projection": _boundary_projection_payload(config),
         "resolution_deck": _resolution_deck_payload(config),
+        "preflight_json": str(preflight_json),
+        "preflight": preflight,
         "delt": None if config.delt is None else float(config.delt),
         "ns": int(config.ns),
         "ns_array": [int(value) for value in config.ns_array],
@@ -1336,6 +1483,7 @@ def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
     _validate_example_config(config)
     outdir = Path(config.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    preflight_json, preflight = _write_preflight_report(outdir / "square_coil_hybrid_preflight.json", config)
     coils = build_square_coils(config)
     coils_json = _write_coils_json(outdir / "square_mirror_hybrid_coils.json", coils, config)
     cases = []
@@ -1359,6 +1507,8 @@ def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
                 config=config,
                 coils=coils,
                 coils_json=coils_json,
+                preflight_json=preflight_json,
+                preflight=preflight,
                 summary_csv=summary_csv,
                 rows=rows,
                 figures={},
@@ -1367,11 +1517,13 @@ def run_example(config: ExampleConfig = ExampleConfig()) -> Path:
             metrics_path.write_text(json.dumps(_json_sanitize(metrics), indent=2, allow_nan=False) + "\n")
     rows = [case.row for case in cases]
     _write_csv(summary_csv, rows)
-    figures = _write_plots(outdir, coils, cases, config) if bool(config.write_plots) else {}
+    figures = _write_plots(outdir, coils, cases, config) if bool(config.write_plots) and cases else {}
     metrics = _metrics_payload(
         config=config,
         coils=coils,
         coils_json=coils_json,
+        preflight_json=preflight_json,
+        preflight=preflight,
         summary_csv=summary_csv,
         rows=rows,
         figures=figures,
