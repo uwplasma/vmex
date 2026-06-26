@@ -352,6 +352,36 @@ def test_square_coil_profile_summary_reports_vmec2000_tail_plateau_from_sidecar(
     assert row["tail_plateau_window"] == 4
     assert row["tail_last_over_min"] == pytest.approx(5.63e-10 / 5.60e-10)
     assert row["tail_total_rel_span"] == pytest.approx((5.63e-10 - 5.60e-10) / 5.60e-10)
+    assert row["strict_gap"] == pytest.approx(2.53)
+    assert row["next_action"] == "let_current_run_finish_then_scan_delt_or_stage_budget"
+
+
+def test_square_coil_profile_summary_prioritizes_vacuum_grid_over_tail(tmp_path: Path):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_grid_exceeded_ns17_niter24k"
+    case_dir.mkdir()
+    partial = case_dir / "_partial_vmec2000_payload.json"
+    partial.write_text(
+        json.dumps(
+            {
+                "status": "running_partial",
+                "progress_phase": "force_iterations",
+                "force_rows_started": True,
+                "vacuum_grid_exceeded_count": 2,
+                "stage_summaries": [{"ns": 17, "ftolv": 1.0e-12}],
+                "last_row": {"it": 40, "fsqr": 2.0e-10, "fsqz": 1.0e-10, "fsql": 1.0e-11},
+                "tail_rows": [
+                    {"it": 38, "total": 3.0e-10, "max_component": 2.0e-10},
+                    {"it": 39, "total": 3.1e-10, "max_component": 2.0e-10},
+                    {"it": 40, "total": 3.2e-10, "max_component": 2.0e-10},
+                ],
+            }
+        )
+    )
+
+    row = summary.rows_from_source(partial)[0]
+
+    assert row["vacuum_grid_exceeded_count"] == 2
+    assert row["next_action"] == "widen_mgrid_before_interpreting_residual"
 
 
 def test_square_coil_profile_summary_labels_vmec2000_startup_before_force_rows(tmp_path: Path):

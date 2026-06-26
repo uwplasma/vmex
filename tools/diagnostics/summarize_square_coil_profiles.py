@@ -133,6 +133,74 @@ def _strict_components_met(final_max_component: float | None, requested_ftol: fl
     return bool(float(final_max_component) <= float(requested_ftol))
 
 
+def _strict_gap(final_max_component: float | None, requested_ftol: float | None) -> float | None:
+    if final_max_component is None or requested_ftol is None:
+        return None
+    requested = float(requested_ftol)
+    if not np.isfinite(requested) or requested <= 0.0:
+        return None
+    return float(float(final_max_component) / requested)
+
+
+def _remaining_iterations(max_iter: Any, final_iter: Any) -> int | None:
+    try:
+        max_iter_i = int(max_iter)
+        final_iter_i = int(final_iter)
+    except Exception:
+        return None
+    if max_iter_i < 0 or final_iter_i < 0:
+        return None
+    return max(0, max_iter_i - final_iter_i)
+
+
+def _recommended_next_action(
+    *,
+    status: Any,
+    progress_phase: Any,
+    force_rows_started: Any,
+    strict_components_met: bool | None,
+    tail_plateau_status: Any,
+    iters_to_target: float | None,
+    remaining_iterations: int | None,
+    vacuum_grid_exceeded_count: Any,
+) -> str:
+    """Classify the next convergence action from compact summary evidence."""
+
+    if strict_components_met is True:
+        return "strict_converged"
+    if force_rows_started is False or progress_phase in {
+        "startup_or_pre_iteration_output",
+        "axis_repair_or_pre_iteration_output",
+        "waiting_for_threed1",
+    }:
+        return "wait_for_force_rows"
+    try:
+        grid_exceeded = int(vacuum_grid_exceeded_count or 0)
+    except Exception:
+        grid_exceeded = 0
+    if grid_exceeded > 0:
+        return "widen_mgrid_before_interpreting_residual"
+
+    tail_status = "" if tail_plateau_status is None else str(tail_plateau_status)
+    running = str(status or "").startswith("running")
+    if tail_status == "flat_above_stage_ftol":
+        return "let_current_run_finish_then_scan_delt_or_stage_budget" if running else "scan_delt_or_stage_budget"
+    if tail_status == "oscillatory":
+        return "scan_delt_stage_budget_or_pressure_acceleration"
+    if iters_to_target is not None:
+        try:
+            estimate = float(iters_to_target)
+        except Exception:
+            estimate = np.nan
+        if np.isfinite(estimate):
+            if remaining_iterations is not None and estimate <= float(remaining_iterations):
+                return "continue_current_schedule"
+            return "increase_final_stage_budget_or_change_schedule"
+    if tail_status == "monotone_decreasing":
+        return "continue_or_extend_if_budget_exhausts"
+    return "inspect_tail_and_solver_diagnostics"
+
+
 def _case_name(path: Path) -> str:
     for parent in (path.parent, path.parent.parent):
         name = parent.name
@@ -501,6 +569,22 @@ def _summary_row(
         final_total, best_total, final_iter = _jax_total(backend)
         final_max_component = _jax_final_max_component(backend)
     virtual_casing = _virtual_casing_payload(backend)
+    strict_met = _strict_components_met(final_max_component, requested_ftol)
+    strict_gap = _strict_gap(final_max_component, requested_ftol)
+    iters_to_target = _tail_projection(backend_for_projection, "", target=1.0e-12)
+    max_iter = cfg.get("max_iter")
+    remaining_iterations = _remaining_iterations(max_iter, final_iter)
+    vacuum_grid_exceeded_count = backend.get("vacuum_grid_exceeded_count")
+    next_action = _recommended_next_action(
+        status=status if status is not None else backend.get("status"),
+        progress_phase=backend.get("progress_phase"),
+        force_rows_started=backend.get("force_rows_started"),
+        strict_components_met=strict_met,
+        tail_plateau_status=tail_plateau.get("status"),
+        iters_to_target=iters_to_target,
+        remaining_iterations=remaining_iterations,
+        vacuum_grid_exceeded_count=vacuum_grid_exceeded_count,
+    )
     return {
         "case": case,
         "backend": backend_name,
@@ -523,8 +607,11 @@ def _summary_row(
         "solver_mode": cfg.get("solver_mode"),
         "side_power": cfg.get("side_power"),
         "corner_power": cfg.get("corner_power"),
-        "max_iter": cfg.get("max_iter"),
+        "max_iter": max_iter,
         "requested_ftol": requested_ftol,
+        "strict_gap": strict_gap,
+        "remaining_iterations": remaining_iterations,
+        "next_action": next_action,
         "boundary_mode_count": projection.get("mode_count"),
         "boundary_recommended_nzeta": projection.get("recommended_nzeta"),
         "max_boundary_projection_error": cfg.get("max_boundary_projection_error"),
@@ -545,7 +632,7 @@ def _summary_row(
         "final_iter": final_iter,
         "final_total": final_total,
         "final_max_component": final_max_component,
-        "strict_components_met": _strict_components_met(final_max_component, requested_ftol),
+        "strict_components_met": strict_met,
         "best_total": best_total,
         "returned_best_scored_state": backend.get("returned_best_scored_state"),
         "best_scored_full_boundary_count": backend.get("best_scored_full_boundary_count"),
@@ -606,13 +693,13 @@ def _summary_row(
         "virtual_casing_target_external_b_rms": _finite_float(virtual_casing.get("target_external_b_rms")),
         "virtual_casing_wall_s": _finite_float(virtual_casing.get("wall_s")),
         "tail_decay_factor": _tail_projection(backend_for_projection, "per_iter_factor"),
-        "iters_to_1e-12_est": _tail_projection(backend_for_projection, "", target=1.0e-12),
+        "iters_to_1e-12_est": iters_to_target,
         "tail_plateau_status": tail_plateau.get("status"),
         "tail_plateau_window": tail_plateau.get("window"),
         "tail_total_rel_span": _finite_float(tail_plateau.get("total_rel_span")),
         "tail_last_over_min": _finite_float(tail_plateau.get("total_last_over_min")),
         "wall_s": _finite_float(backend.get("wall_s")),
-        "vacuum_grid_exceeded_count": backend.get("vacuum_grid_exceeded_count"),
+        "vacuum_grid_exceeded_count": vacuum_grid_exceeded_count,
     }
 
 
@@ -806,6 +893,9 @@ def main(argv: list[str] | None = None) -> int:
         "corner_power",
         "max_iter",
         "requested_ftol",
+        "strict_gap",
+        "remaining_iterations",
+        "next_action",
         "boundary_mode_count",
         "boundary_recommended_nzeta",
         "max_boundary_projection_error",

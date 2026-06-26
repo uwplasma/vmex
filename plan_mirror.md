@@ -5739,6 +5739,91 @@ Visual validation:
 No user input is needed.
 
 ---
+## 251. Added Reproducible Next-Action Classification For Strict Profile Rows
+
+### Steps taken
+
+- Continued polling the active VMEC2000 ``MPOL=5, NTOR=28, NZETA=64`` strict
+  reference run without launching a competing office workload.
+- Rechecked current DESC documentation and source around free-boundary
+  residuals:
+  - ``VacuumBoundaryError`` is explicitly limited to vacuum/zero-current rows.
+  - ``BoundaryError`` uses virtual casing for finite-beta residuals and includes
+    normal-field plus pressure-jump conditions.
+  - DESC's proximal projection wrapper re-solves the equilibrium after outer
+    boundary/objective updates, reinforcing that a free-boundary optimization
+    should not be judged from stale fixed-boundary or coil-only residuals.
+- Added compact decision fields to the square-coil summary table:
+  ``strict_gap``, ``remaining_iterations``, and ``next_action``.
+- Added tests for plateau-above-tolerance and vacuum-grid-overflow decisions.
+
+### Results obtained
+
+- The live VMEC2000 sidecar now summarizes to:
+  - ``strict_gap`` about ``48`` at the latest poll;
+  - ``tail_plateau_status = flat_above_stage_ftol``;
+  - ``vacuum_grid_exceeded_count = 0``;
+  - ``next_action = let_current_run_finish_then_scan_delt_or_stage_budget``.
+- This makes the current decision reproducible: if the run exits without
+  reaching per-component ``1e-12``, the next heavy job should be a focused
+  ``DELT``/stage-budget scan on the same strict deck, not another blind
+  extension or a higher-mode jump.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q tests/test_summarize_square_coil_profiles.py
+```
+
+Result: `12 passed`.
+
+```bash
+git diff --check
+```
+
+Result: passed.
+
+The active VMEC2000 sidecar was also summarized locally with:
+
+```bash
+venv/bin/python tools/diagnostics/summarize_square_coil_profiles.py \
+  /tmp/square_coil_freeb_backend_profile_active_vmec2000_ns9_13_17_mpol5_ntor28_nzeta64/_partial_vmec2000_payload.json \
+  --markdown
+```
+
+### File structure and best-practice notes
+
+- The logic lives in the summary tool because it interprets run artifacts; the
+  solver and profiler output formats remain backward compatible.
+- The added fields are scalar CSV/Markdown metadata, not bulky result files.
+- The README now tells reviewers how to use ``strict_gap`` and ``next_action``
+  together with the existing strict component gate.
+
+### Best next steps
+
+1. Let the active VMEC2000 row finish cleanly.
+2. If it exits above per-component ``1e-12``, launch the focused
+   ``DELT``/stage-budget scan that the summary now recommends.
+3. Once a VMEC2000 schedule clears or fails decisively, run the matching
+   ``vmec_jax`` generated-``mgrid`` and direct-coil profiles with virtual-casing
+   diagnostics enabled for finite-beta rows.
+
+### Completion percentages after M251
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`.
+- Direct-coil finite-beta diagnostic lane: `88%`.
+- Direct-coil GPU/JIT parity lane: `77%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `77%`.
+- Square-axis spline-smoothed Fourier closure lane: `100%`.
+- True spline/control-basis hybrid lane: `42%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
+
+---
 ## 250. Aligned The Profiler `DELT` Default With The Strict Example
 
 ### Steps taken

@@ -374,6 +374,11 @@ The summary table reports both ``final_total`` and ``final_max_component``.
 Use ``final_max_component <= requested_ftol`` / ``strict_components_met`` for
 the production convergence gate; ``final_total`` is useful for trend
 comparison but is not sufficient for a per-component ``FTOL=1e-12`` claim.
+The ``strict_gap`` column is ``final_max_component / requested_ftol`` and the
+``next_action`` column turns the compact residual evidence into a run decision:
+for example, a flat tail above tolerance with no vacuum-grid overflow points to
+a ``DELT``/stage-budget scan, while a vacuum-grid overflow points first to a
+wider generated ``mgrid``.
 The table also includes ``nzeta_auto``, ``recommended_nzeta``,
 ``side_power``, ``corner_power``, ``boundary_mode_count``, and
 ``boundary_recommended_nzeta`` so ``MPOL``/``NTOR``/``NZETA`` and
