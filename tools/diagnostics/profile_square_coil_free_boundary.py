@@ -66,6 +66,18 @@ LOOSE_COMPONENT_FTOL = 1.0e-8
 def _json_ready(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
+    if value.__class__.__name__ == "NestorRuntimeState":
+        operator_cache = getattr(value, "operator_cache", None)
+        return {
+            "type": "NestorRuntimeState",
+            "mode": str(getattr(value, "mode", "")),
+            "update_count": int(getattr(value, "update_count", 0)),
+            "reuse_count": int(getattr(value, "reuse_count", 0)),
+            "source_cache_iter": int(getattr(value, "source_cache_iter", -1)),
+            "phi_shape": list(np.shape(getattr(value, "phi", ()))),
+            "bsqvac_shape": list(np.shape(getattr(value, "bsqvac", ()))),
+            "operator_cache_type": None if operator_cache is None else operator_cache.__class__.__name__,
+        }
     if isinstance(value, dict):
         return {str(k): _json_ready(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -1511,7 +1523,7 @@ _FREEB_HOT_RESTART_RESUME_KEYS = (
     "freeb_ivacskip",
     "freeb_nvacskip",
     "freeb_nvskip0",
-    "freeb_last_model",
+    "freeb_model",
     "freeb_nestor_runtime",
     "prev_rz_fsq",
 )
@@ -1537,6 +1549,8 @@ def _jax_hot_restart_solver_state(run: Any, *, policy: str) -> dict[str, Any] | 
     if policy_key != "freeb":
         raise ValueError(f"unknown hot-restart policy {policy!r}")
     out = {key: resume[key] for key in _FREEB_HOT_RESTART_RESUME_KEYS if key in resume}
+    if "freeb_model" not in out and "freeb_last_model" in resume:
+        out["freeb_model"] = resume["freeb_last_model"]
     return out or None
 
 

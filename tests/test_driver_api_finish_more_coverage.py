@@ -12,7 +12,7 @@ from vmec_jax.namelist import InData
 from vmec_jax.solve import SolveVmecResidualResult
 
 
-def _cfg(*, ns: int = 5, lasym: bool = False, lthreed: bool = False) -> VMECConfig:
+def _cfg(*, ns: int = 5, lasym: bool = False, lthreed: bool = False, lfreeb: bool = False) -> VMECConfig:
     return VMECConfig(
         mpol=2,
         ntor=1 if lthreed else 0,
@@ -24,7 +24,7 @@ def _cfg(*, ns: int = 5, lasym: bool = False, lthreed: bool = False) -> VMECConf
         ntheta=4,
         nzeta=2 if (lasym or lthreed) else 1,
         free_boundary=FreeBoundaryConfig(
-            enabled=False,
+            enabled=bool(lfreeb),
             mgrid_file="NONE",
             extcur=(),
             nvacskip=1,
@@ -589,3 +589,70 @@ def test_scan_abort_guard_exceptions_and_resume_sanitization_are_nonfatal(
     assert calls[1]["resume_state"]["time_step"] == pytest.approx(0.25)
     assert calls[1]["resume_state"]["iter_offset"] == 0
     assert run.result.diagnostics["converged"] is True
+
+
+def test_free_boundary_multigrid_resumes_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    calls: list[dict] = []
+
+    def fake_solver(state, static, **kwargs):
+        del state
+        idx = len(calls)
+        calls.append(
+            {
+                "ns": int(static.cfg.ns),
+                "resume_state": kwargs.get("resume_state"),
+            }
+        )
+        return _result(
+            _state(static.cfg.ns, f"stage-{idx}"),
+            max_iter=int(kwargs["max_iter"]),
+            fsq=1.0e-9 if idx == 0 else 1.0e-12,
+            converged=idx > 0,
+            diagnostics={
+                "ftol": float(kwargs["ftol"]),
+                "resume_state": {
+                    "time_step": 0.5,
+                    "flip_sign": -1.0,
+                    "iter_offset": 9,
+                    "prev_rz_fsq": 2.5e-10,
+                    "freeb_ivac": 3,
+                    "freeb_ivacskip": 0,
+                    "freeb_nvacskip": 4,
+                    "freeb_nvskip0": 1,
+                    "freeb_model": "direct-coil",
+                    "freeb_nestor_runtime": {"runtime": "accepted"},
+                },
+            },
+        )
+
+    _install_light_driver(
+        monkeypatch,
+        cfg=_cfg(ns=5, lfreeb=True),
+        indata=_indata(LFREEB=True, NITER=2, FTOL=1.0e-8, NS_ARRAY=[3, 5], NITER_ARRAY=[1, 1]),
+        solver=fake_solver,
+    )
+
+    driver.run_fixed_boundary(
+        tmp_path / "input.freeb_multigrid_resume",
+        solver="vmec2000_iter",
+        solver_mode="default",
+        verbose=False,
+        multigrid=True,
+        use_scan=False,
+        jit_forces=True,
+        grid=object(),
+        _auto_cli_fixed_boundary_mode=False,
+    )
+
+    assert calls[0] == {"ns": 3, "resume_state": None}
+    assert calls[1]["ns"] == 5
+    resume = calls[1]["resume_state"]
+    assert resume["time_step"] == pytest.approx(0.25)
+    assert resume["iter_offset"] == 0
+    assert resume["prev_rz_fsq"] == pytest.approx(2.5e-10)
+    assert resume["freeb_ivac"] == 3
+    assert resume["freeb_model"] == "direct-coil"
+    assert resume["freeb_nestor_runtime"] == {"runtime": "accepted"}

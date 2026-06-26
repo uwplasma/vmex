@@ -338,14 +338,15 @@ The current strict profiling answer to whether VMEC2000 is more robust is:
 VMEC2000 remains the fastest and most useful generated-``mgrid`` robustness
 reference, but it has not yet proven the requested component-wise
 ``FTOL=1e-12`` for the square-axis deck.  The active direct-GPU hot-restart row
-on ``MPOL=5, NTOR=28, NZETA=64`` was still running at iteration ``2811`` with a
-max component about ``5.61e-11`` and a monotone tail estimate of about another
-``1039`` iterations to ``1e-12``.  The active VMEC2000 row at
-``DELT=0.015`` was still in its first ``NS=9, FTOL=1e-8`` stage at iteration
-``2601`` with max component about ``5.73e-7`` and no vacuum-grid overflow.  It
-is therefore premature to replace the direct research lane by VMEC2000; use
-VMEC2000 as the mgrid reference while the direct lane tests projection,
-pressure-coupling, and JAX-NESTOR kernels.
+on ``MPOL=5, NTOR=28, NZETA=64`` was still running at final-grid iteration
+``3026`` with max component about ``9.65e-12``.  The active VMEC2000 row at
+``DELT=0.015`` was still in its ``NS=13, FTOL=1e-10`` stage at iteration
+``5677`` with max component about ``3.97e-10`` and no vacuum-grid overflow.
+Both rows were launched before the free-boundary resume-state fix described
+below, so they remain useful plateau evidence but are not the final comparison
+for corrected staged/hot-restart behavior. It is premature to replace the
+direct research lane by VMEC2000; use VMEC2000 as the mgrid reference while the
+direct lane tests projection, pressure-coupling, and JAX-NESTOR kernels.
 The follow-up command helper now exposes two finite strict-polish lanes for the
 direct research path:
 
@@ -427,6 +428,15 @@ the ``NS=13 -> 17`` or later ``NS=17 -> 25`` transitions create residual bumps.
 These are solver-control and numerical-kernel changes, not geometry changes;
 they should be tested against the existing VMEC2000 generated-mgrid reports
 before being trusted for direct-coil production claims.
+
+The VMEC++ multigrid-state lesson now has a concrete ``vmec_jax`` patch:
+free-boundary staged solves resume by default across radial ``NS_ARRAY`` stages
+unless ``VMEC_JAX_MULTIGRID_RESUME=0`` is set, and same-process hot restarts
+carry the accepted NESTOR runtime object instead of only its update/reuse
+counts. The resume sanitizers still drop unrelated cached arrays on grid
+changes, but retain the VMEC free-boundary cadence, ``prev_rz_fsq``, and
+NESTOR runtime. This should be treated as the next strict-profile baseline;
+older running rows did not have this state transfer.
 
 The Anderson(1) pressure lane is now implemented as an opt-in diagnostic path
 for ``vmec_jax``. Set ``VMEC_JAX_FREEB_ANDERSON_PRESSURE=1`` or pass
@@ -901,8 +911,8 @@ The remaining work is deliberately narrow:
    ``--jax-hot-restart-count``, ``--jax-hot-restart-iters``, and
    ``--jax-hot-restart-policy state|freeb|full``.  The default ``freeb`` policy
    restarts from the accepted state and carries only the VMEC/NESTOR
-   free-boundary cadence/runtime fields, not the full nonlinear time-step
-   controller.  This mirrors the VMEC++ hot-restart idea while keeping the
+   free-boundary cadence/runtime fields, not unrelated cached arrays.  This
+   mirrors the VMEC++ hot-restart idea while keeping the
    experiment opt-in and auditable in the backend ``hot_restart`` JSON block.
    Use ``--jax-initial-restart-wout <wout_*.nc>`` when a completed strict-deck
    row already exists; this seeds the first final-grid pass from that WOUT and

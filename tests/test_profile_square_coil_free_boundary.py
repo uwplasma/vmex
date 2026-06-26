@@ -12,6 +12,7 @@ import pytest
 
 from tools.diagnostics import profile_square_coil_free_boundary as profile
 from vmec_jax.config import VMECConfig
+from vmec_jax.solvers.free_boundary.types import NestorRuntimeState
 from vmec_jax.namelist import InData
 from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.static import build_static
@@ -511,12 +512,38 @@ def test_square_coil_profile_hot_restart_solver_state_filters_freeb_resume_keys(
         "freeb_ivacskip": 0,
         "freeb_nvacskip": 7,
         "freeb_nvskip0": 1,
-        "freeb_last_model": "vmec2000_like_dense_integral",
+        "freeb_model": "vmec2000_like_dense_integral",
         "freeb_nestor_runtime": "runtime",
         "prev_rz_fsq": pytest.approx(1.0e-9),
     }
     assert "time_step" not in freeb
     assert profile._jax_hot_restart_solver_state(run, policy="full") == resume_state
+
+
+def test_square_coil_profile_json_ready_summarizes_nestor_runtime():
+    runtime = NestorRuntimeState(
+        operator_cache=SimpleNamespace(tag="cache"),
+        phi=np.zeros((2, 3)),
+        bsqvac=np.zeros((4, 5)),
+        mode="dense",
+        update_count=6,
+        reuse_count=7,
+        source_cache_iter=8,
+    )
+
+    payload = profile._json_ready({"resume_state": {"freeb_nestor_runtime": runtime}})
+
+    summary = payload["resume_state"]["freeb_nestor_runtime"]
+    assert summary == {
+        "type": "NestorRuntimeState",
+        "mode": "dense",
+        "update_count": 6,
+        "reuse_count": 7,
+        "source_cache_iter": 8,
+        "phi_shape": [2, 3],
+        "bsqvac_shape": [4, 5],
+        "operator_cache_type": "SimpleNamespace",
+    }
 
 
 def test_square_coil_profile_boundary_reduced_control_projection_payload(monkeypatch):

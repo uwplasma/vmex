@@ -551,7 +551,10 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
     resume_state_stage = ctx.restart_solver_state
     multigrid_resume = False
     if ctx.multigrid:
-        env_resume = ctx.getenv("VMEC_JAX_MULTIGRID_RESUME", "0")
+        # Free-boundary VMEC/NESTOR state is angular-grid based, so it is safe
+        # and useful to carry it across radial multigrid stages by default.
+        env_default = "1" if bool(getattr(ctx.cfg, "lfreeb", False)) else "0"
+        env_resume = ctx.getenv("VMEC_JAX_MULTIGRID_RESUME", env_default)
         multigrid_resume = env_resume.strip().lower() not in ("", "0", "false", "no")
 
     prev_stage_fsq = None

@@ -1061,6 +1061,22 @@ def test_resume_state_sanitizers_drop_unsafe_payloads_and_clamp_step():
         "iter_offset": 17,
         "flip_sign": -1,
         "vmec2000_cache_valid": True,
+        "fsq_prev": 3.0,
+        "fsq0_prev": 4.0,
+        "iter1": 5,
+        "ijacob": 6,
+        "bad_resets": 7,
+        "res0": 8.0,
+        "res1": 9.0,
+        "prev_rz_fsq": 1.0e-9,
+        "bad_growth_streak": 10,
+        "huge_force_restart_count": 11,
+        "freeb_ivac": 4,
+        "freeb_ivacskip": 0,
+        "freeb_nvacskip": 7,
+        "freeb_nvskip0": 1,
+        "freeb_model": "direct-coil",
+        "freeb_nestor_runtime": {"runtime": "accepted"},
         "cached_arrays": object(),
     }
 
@@ -1072,12 +1088,30 @@ def test_resume_state_sanitizers_drop_unsafe_payloads_and_clamp_step():
     assert cross_grid["iter_offset"] == 0
     assert cross_grid["flip_sign"] == -1.0
     assert cross_grid["vmec2000_cache_valid"] is False
+    assert cross_grid["prev_rz_fsq"] == pytest.approx(1.0e-9)
+    assert cross_grid["freeb_ivac"] == 4
+    assert cross_grid["freeb_nvacskip"] == 7
+    assert cross_grid["freeb_model"] == "direct-coil"
+    assert cross_grid["freeb_nestor_runtime"] == {"runtime": "accepted"}
+    assert "fsq_prev" not in cross_grid
     assert "cached_arrays" not in cross_grid
 
     assert same_grid["time_step"] == pytest.approx(0.1)
     assert same_grid["inv_tau"] == [1.0, 2.0]
     assert same_grid["iter_offset"] == 17
     assert same_grid["vmec2000_cache_valid"] is False
+    assert same_grid["fsq_prev"] == pytest.approx(3.0)
+    assert same_grid["fsq0_prev"] == pytest.approx(4.0)
+    assert same_grid["iter1"] == 5
+    assert same_grid["ijacob"] == 6
+    assert same_grid["bad_resets"] == 7
+    assert same_grid["res0"] == pytest.approx(8.0)
+    assert same_grid["res1"] == pytest.approx(9.0)
+    assert same_grid["prev_rz_fsq"] == pytest.approx(1.0e-9)
+    assert same_grid["bad_growth_streak"] == 10
+    assert same_grid["huge_force_restart_count"] == 11
+    assert same_grid["freeb_ivac"] == 4
+    assert same_grid["freeb_nestor_runtime"] == {"runtime": "accepted"}
     assert "cached_arrays" not in same_grid
     assert driver._sanitize_resume_state_for_grid_change({}, step_size=0.1) is None
     assert driver._sanitize_resume_state_for_same_grid(None, step_size=0.1) is None

@@ -631,6 +631,7 @@ def test_free_boundary_loop_state_initializes_and_resumes_vmec_cadence():
             "freeb_nvacskip": 0,
             "freeb_nvskip0": 0,
             "freeb_model": "direct-coil",
+            "freeb_nestor_runtime": {"runtime": "accepted"},
         },
         free_boundary_enabled=True,
     )
@@ -639,7 +640,15 @@ def test_free_boundary_loop_state_initializes_and_resumes_vmec_cadence():
     assert resumed.nvacskip == 1
     assert resumed.nvskip0 == 1
     assert resumed.last_model == "direct-coil"
+    assert resumed.nestor_runtime == {"runtime": "accepted"}
     assert resumed.plascur == loop_state.plascur
+
+    legacy_model = resume_free_boundary_loop_state(
+        loop_state,
+        resume_state={"freeb_last_model": "legacy-direct-coil"},
+        free_boundary_enabled=True,
+    )
+    assert legacy_model.last_model == "legacy-direct-coil"
 
 
 def test_trial_residual_total_runtime_records_timing_and_sums_residuals():
@@ -945,6 +954,7 @@ def test_build_resume_state_base_counts_optional_free_boundary_runtime():
     assert base["time_step"] == 0.25
     assert base["iter_offset"] == 9
     assert base["freeb_model"] == "nestor"
+    assert isinstance(base["freeb_nestor_runtime"], Runtime)
     assert base["freeb_nestor_update_count"] == 5
     assert base["freeb_nestor_reuse_count"] == 6
 

@@ -102,12 +102,17 @@ def resume_free_boundary_loop_state(
 
     if resume_state is None or not bool(free_boundary_enabled):
         return state
+    last_model = resume_state.get(
+        "freeb_model",
+        resume_state.get("freeb_last_model", state.last_model),
+    )
     return state._replace(
         ivac=int(resume_state.get("freeb_ivac", state.ivac)),
         ivacskip=int(resume_state.get("freeb_ivacskip", state.ivacskip)),
         nvacskip=max(1, int(resume_state.get("freeb_nvacskip", state.nvacskip))),
         nvskip0=max(1, int(resume_state.get("freeb_nvskip0", state.nvskip0))),
-        last_model=str(resume_state.get("freeb_model", state.last_model)),
+        nestor_runtime=resume_state.get("freeb_nestor_runtime", state.nestor_runtime),
+        last_model=str(last_model),
     )
 
 
@@ -1294,6 +1299,7 @@ def _build_resume_state_base(
         "freeb_nvacskip": int(freeb_nvacskip),
         "freeb_nvskip0": int(freeb_nvskip0),
         "freeb_model": str(freeb_last_model),
+        "freeb_nestor_runtime": freeb_nestor_runtime,
         "freeb_nestor_update_count": (
             0 if freeb_nestor_runtime is None else int(getattr(freeb_nestor_runtime, "update_count", 0))
         ),

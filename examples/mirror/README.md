@@ -441,6 +441,11 @@ iteration windows.
 For long ``vmec_jax`` direct-coil rows, add ``--verbose-solver`` so VMEC-style
 iteration rows are written to the launcher log instead of waiting until the
 backend exits before any residual evidence appears.
+Free-boundary staged ``vmec_jax`` rows now preserve the VMEC/NESTOR
+free-boundary resume state across radial ``NS_ARRAY`` stages by default, and
+same-process ``--jax-hot-restart-policy freeb`` carries the accepted NESTOR
+runtime object. Set ``VMEC_JAX_MULTIGRID_RESUME=0`` only when deliberately
+testing a cold stage transition for parity debugging.
 The summary helper also parses those live direct launcher logs, so
 ``python tools/diagnostics/summarize_square_coil_profiles.py <profile-dir> --markdown``
 reports running direct residuals, axis-repair status, and the vacuum-pressure

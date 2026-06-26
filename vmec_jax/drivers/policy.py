@@ -1006,6 +1006,38 @@ def distribute_stage_iters(*, iters: int, nstep: int) -> list[int]:
     return [base + (1 if i < rem else 0) for i in range(nstep)]
 
 
+_FREE_BOUNDARY_RESUME_KEYS = (
+    "freeb_ivac",
+    "freeb_ivacskip",
+    "freeb_nvacskip",
+    "freeb_nvskip0",
+    "freeb_model",
+    "freeb_last_model",
+    "freeb_nestor_runtime",
+    "prev_rz_fsq",
+)
+
+_SAME_GRID_SCALAR_RESUME_KEYS = (
+    "fsq_prev",
+    "fsq0_prev",
+    "iter1",
+    "ijacob",
+    "bad_resets",
+    "res0",
+    "res1",
+    "bad_growth_streak",
+    "huge_force_restart_count",
+)
+
+
+def _copy_available_resume_fields(out, resume_state, keys):
+    """Copy scalar/runtime resume fields that are safe for continuation."""
+
+    for key in keys:
+        if key in resume_state:
+            out[key] = resume_state[key]
+
+
 def sanitize_resume_state_for_grid_change(resume_state, *, step_size: float):
     """Keep only resume-state fields that remain valid after a grid change."""
 
@@ -1025,6 +1057,7 @@ def sanitize_resume_state_for_grid_change(resume_state, *, step_size: float):
     }
     if "flip_sign" in resume_state:
         out["flip_sign"] = float(resume_state["flip_sign"])
+    _copy_available_resume_fields(out, resume_state, _FREE_BOUNDARY_RESUME_KEYS)
     out["iter_offset"] = 0
     out["vmec2000_cache_valid"] = False
     return out
@@ -1050,6 +1083,8 @@ def sanitize_resume_state_for_same_grid(resume_state, *, step_size: float):
     }
     if "flip_sign" in resume_state:
         out["flip_sign"] = float(resume_state["flip_sign"])
+    _copy_available_resume_fields(out, resume_state, _SAME_GRID_SCALAR_RESUME_KEYS)
+    _copy_available_resume_fields(out, resume_state, _FREE_BOUNDARY_RESUME_KEYS)
     return out
 
 
@@ -1076,6 +1111,7 @@ def sanitize_minimal_resume_state_for_finish(resume_state):
             out["flip_sign"] = float(resume_state["flip_sign"])
         except Exception:
             pass
+    _copy_available_resume_fields(out, resume_state, _FREE_BOUNDARY_RESUME_KEYS)
     return out
 
 
