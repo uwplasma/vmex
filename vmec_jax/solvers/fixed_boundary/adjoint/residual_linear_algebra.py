@@ -12,8 +12,8 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ._compat import jax, jnp
-from .implicit_adjoint_helpers import (
+from ...._compat import jax, jnp
+from .implicit_linear_algebra import (
     active_normal_rhs,
     default_jac_chunk_size,
     dense_adjoint_from_jacobian,

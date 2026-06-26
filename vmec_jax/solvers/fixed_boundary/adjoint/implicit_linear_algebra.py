@@ -12,8 +12,8 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ._compat import jax, jnp
-from .state import VMECState
+from ...._compat import jax, jnp
+from ....state import VMECState
 
 
 @dataclass(frozen=True)

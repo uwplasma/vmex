@@ -25,7 +25,7 @@ def _not_traced(*_args):
 
 def test_linear_map_jacobian_columns_chunks_rectangular_map():
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import linear_map_jacobian_columns
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import linear_map_jacobian_columns
 
     matrix = jnp.asarray([[1.0, -2.0, 0.5], [0.25, 3.0, -1.5]])
     jac = linear_map_jacobian_columns(
@@ -43,7 +43,7 @@ def test_linear_map_jacobian_columns_chunks_rectangular_map():
 
 def test_lineax_bicgstab_wrapper_marks_missing_and_host_read_failure(monkeypatch):
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import lineax_bicgstab_solve
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import lineax_bicgstab_solve
 
     value, success, stats = lineax_bicgstab_solve(lambda x: x, jnp.ones(2), tol=1e-8, max_iter=3)
     assert value is None
@@ -96,7 +96,7 @@ def test_lineax_bicgstab_wrapper_marks_missing_and_host_read_failure(monkeypatch
 
 def test_active_residual_adjoint_routes_dense_chunked_path():
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import solve_active_residual_adjoint_linearized
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import solve_active_residual_adjoint_linearized
 
     matrix = jnp.asarray([[1.0, 0.0, 2.0], [0.5, -1.0, 0.25]])
     x0 = jnp.asarray([0.1, -0.2, 0.3])
@@ -127,7 +127,7 @@ def test_active_residual_adjoint_routes_dense_chunked_path():
 
 def test_active_residual_adjoint_routes_bicgstab_and_lineax_successes():
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import solve_active_residual_adjoint_linearized
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import solve_active_residual_adjoint_linearized
 
     diag = jnp.asarray([2.0, -3.0])
     x0 = jnp.asarray([0.1, -0.2])
@@ -188,7 +188,7 @@ def test_active_residual_adjoint_routes_bicgstab_and_lineax_successes():
 
 def test_active_residual_adjoint_falls_back_to_cg_after_failed_square_solvers():
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import solve_active_residual_adjoint_linearized
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import solve_active_residual_adjoint_linearized
 
     diag = jnp.asarray([2.0, 3.0])
     x0 = jnp.asarray([0.1, -0.2])
@@ -225,7 +225,7 @@ def test_active_residual_adjoint_falls_back_to_cg_after_failed_square_solvers():
 
 def test_full_residual_adjoint_routes_matrix_free_cg_and_jvp():
     from vmec_jax._compat import jnp
-    from vmec_jax.implicit_residual_adjoint_helpers import solve_full_residual_adjoint_linearized
+    from vmec_jax.solvers.fixed_boundary.adjoint.residual_linear_algebra import solve_full_residual_adjoint_linearized
 
     calls = {}
     st_star = SimpleNamespace(layout="layout-token")
