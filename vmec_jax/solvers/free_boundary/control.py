@@ -283,10 +283,10 @@ def _project_freeb_edge_control_state(
     if bool(host_update):
         scale = np.asarray(projection["mode_scale_np"], dtype=float)
         initial = {name: np.asarray(value, dtype=float) for name, value in projection["initial_np"].items()}
-        Rcos = np.array(state.Rcos, dtype=float, copy=True)
-        Rsin = np.array(state.Rsin, dtype=float, copy=True)
-        Zcos = np.array(state.Zcos, dtype=float, copy=True)
-        Zsin = np.array(state.Zsin, dtype=float, copy=True)
+        Rcos = np.asarray(state.Rcos, dtype=float)
+        Rsin = np.asarray(state.Rsin, dtype=float)
+        Zcos = np.asarray(state.Zcos, dtype=float)
+        Zsin = np.asarray(state.Zsin, dtype=float)
         target = np.concatenate(
             [
                 Rcos[-1] * scale - initial["R_cos"],
@@ -297,19 +297,16 @@ def _project_freeb_edge_control_state(
             axis=0,
         )
         projected = _freeb_edge_control_project_vector_np(target, projection).predicted_delta
-        Rcos[-1] = (initial["R_cos"] + projected[0:k]) / scale
-        Rsin[-1] = (initial["R_sin"] + projected[k : 2 * k]) / scale
-        Zcos[-1] = (initial["Z_cos"] + projected[2 * k : 3 * k]) / scale
-        Zsin[-1] = (initial["Z_sin"] + projected[3 * k : 4 * k]) / scale
-        return VMECState(
-            layout=state.layout,
-            Rcos=Rcos,
-            Rsin=Rsin,
-            Zcos=Zcos,
-            Zsin=Zsin,
-            Lcos=state.Lcos,
-            Lsin=state.Lsin,
+        edge_values = np.concatenate(
+            [
+                initial["R_cos"] + projected[0:k],
+                initial["R_sin"] + projected[k : 2 * k],
+                initial["Z_cos"] + projected[2 * k : 3 * k],
+                initial["Z_sin"] + projected[3 * k : 4 * k],
+            ],
+            axis=0,
         )
+        return _freeb_edge_control_state_from_edge_values(state, projection, edge_values, host_update=True)
 
     dtype = jnp.asarray(state.Rcos).dtype
     scale = jnp.asarray(projection["mode_scale_np"], dtype=dtype)
@@ -330,10 +327,64 @@ def _project_freeb_edge_control_state(
         axis=0,
     )
     projected = jacobian @ (pinv @ target)
-    Rcos = Rcos.at[-1, :].set((initial["R_cos"] + projected[0:k]) / scale)
-    Rsin = Rsin.at[-1, :].set((initial["R_sin"] + projected[k : 2 * k]) / scale)
-    Zcos = Zcos.at[-1, :].set((initial["Z_cos"] + projected[2 * k : 3 * k]) / scale)
-    Zsin = Zsin.at[-1, :].set((initial["Z_sin"] + projected[3 * k : 4 * k]) / scale)
+    edge_values = jnp.concatenate(
+        [
+            initial["R_cos"] + projected[0:k],
+            initial["R_sin"] + projected[k : 2 * k],
+            initial["Z_cos"] + projected[2 * k : 3 * k],
+            initial["Z_sin"] + projected[3 * k : 4 * k],
+        ],
+        axis=0,
+    )
+    return _freeb_edge_control_state_from_edge_values(state, projection, edge_values, host_update=False)
+
+
+def _freeb_edge_control_state_from_edge_values(
+    state: VMECState,
+    projection: dict[str, Any],
+    edge_values: Any,
+    *,
+    host_update: bool,
+) -> VMECState:
+    """Return ``state`` with its physical LCFS edge row replaced."""
+
+    k = int(projection["mode_count"])
+    if bool(host_update):
+        edge = np.asarray(edge_values, dtype=float).reshape(-1)
+        if edge.size != 4 * k:
+            raise ValueError("edge_values has the wrong size for the edge-control projection")
+        scale = np.asarray(projection["mode_scale_np"], dtype=float)
+        Rcos = np.array(state.Rcos, dtype=float, copy=True)
+        Rsin = np.array(state.Rsin, dtype=float, copy=True)
+        Zcos = np.array(state.Zcos, dtype=float, copy=True)
+        Zsin = np.array(state.Zsin, dtype=float, copy=True)
+        Rcos[-1] = edge[0:k] / scale
+        Rsin[-1] = edge[k : 2 * k] / scale
+        Zcos[-1] = edge[2 * k : 3 * k] / scale
+        Zsin[-1] = edge[3 * k : 4 * k] / scale
+        return VMECState(
+            layout=state.layout,
+            Rcos=Rcos,
+            Rsin=Rsin,
+            Zcos=Zcos,
+            Zsin=Zsin,
+            Lcos=state.Lcos,
+            Lsin=state.Lsin,
+        )
+
+    dtype = jnp.asarray(state.Rcos).dtype
+    edge = jnp.asarray(edge_values, dtype=dtype).reshape((-1,))
+    if int(edge.shape[0]) != 4 * k:
+        raise ValueError("edge_values has the wrong size for the edge-control projection")
+    scale = jnp.asarray(projection["mode_scale_np"], dtype=dtype)
+    Rcos = jnp.asarray(state.Rcos)
+    Rsin = jnp.asarray(state.Rsin)
+    Zcos = jnp.asarray(state.Zcos)
+    Zsin = jnp.asarray(state.Zsin)
+    Rcos = Rcos.at[-1, :].set(edge[0:k] / scale)
+    Rsin = Rsin.at[-1, :].set(edge[k : 2 * k] / scale)
+    Zcos = Zcos.at[-1, :].set(edge[2 * k : 3 * k] / scale)
+    Zsin = Zsin.at[-1, :].set(edge[3 * k : 4 * k] / scale)
     return VMECState(
         layout=state.layout,
         Rcos=Rcos,
@@ -343,6 +394,37 @@ def _project_freeb_edge_control_state(
         Lcos=state.Lcos,
         Lsin=state.Lsin,
     )
+
+
+def _freeb_edge_control_state_from_coordinates(
+    state: VMECState,
+    projection: dict[str, Any],
+    control_delta: Any,
+    *,
+    host_update: bool,
+) -> VMECState:
+    """Decode reduced edge-control coordinates into the LCFS edge row."""
+
+    if not bool(projection.get("enabled", False)):
+        return state
+    if bool(host_update):
+        edge_values = _freeb_edge_control_reduced_map(projection).decode(control_delta)
+        return _freeb_edge_control_state_from_edge_values(state, projection, edge_values, host_update=True)
+
+    dtype = jnp.asarray(state.Rcos).dtype
+    controls = jnp.asarray(control_delta, dtype=dtype).reshape((-1,))
+    jacobian = jnp.asarray(projection["jacobian_np"], dtype=dtype)
+    initial = jnp.concatenate(
+        [
+            jnp.asarray(projection["initial_np"]["R_cos"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["R_sin"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["Z_cos"], dtype=dtype),
+            jnp.asarray(projection["initial_np"]["Z_sin"], dtype=dtype),
+        ],
+        axis=0,
+    )
+    edge_values = initial + jacobian @ controls
+    return _freeb_edge_control_state_from_edge_values(state, projection, edge_values, host_update=False)
 
 
 def _freeb_edge_control_project_vector_np(

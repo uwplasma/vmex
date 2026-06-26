@@ -369,6 +369,7 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     from vmec_jax.solve import (
         _freeb_edge_control_delta_tuple_projection_metrics,
         _freeb_edge_control_reduced_map,
+        _freeb_edge_control_state_from_coordinates,
         _freeb_edge_control_state_coordinates,
         _freeb_edge_control_state_residual_metrics,
         _prepare_freeb_edge_control_projection,
@@ -448,6 +449,18 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     raw_coordinates = _freeb_edge_control_state_coordinates(trial, projection)
     projected_metrics = _freeb_edge_control_state_residual_metrics(projected, projection)
     projected_coordinates = _freeb_edge_control_state_coordinates(projected, projection)
+    decoded_projected = _freeb_edge_control_state_from_coordinates(
+        trial,
+        projection,
+        [0.2],
+        host_update=True,
+    )
+    decoded_projected_jax = _freeb_edge_control_state_from_coordinates(
+        trial,
+        projection,
+        [0.2],
+        host_update=False,
+    )
     control_map = _freeb_edge_control_reduced_map(projection)
     scale = np.asarray(projection["mode_scale_np"], dtype=float)
     projected_edge_values = np.concatenate(
@@ -491,6 +504,10 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert np.asarray(projected.Rcos)[-1, 0] == pytest.approx(3.2)
     assert np.asarray(projected.Rcos)[-1, 1] == pytest.approx(0.0)
     assert np.asarray(projected.Zsin)[-1, 1] == pytest.approx(0.0)
+    np.testing.assert_allclose(np.asarray(decoded_projected.Rcos), np.asarray(projected.Rcos))
+    np.testing.assert_allclose(np.asarray(decoded_projected.Zsin), np.asarray(projected.Zsin))
+    np.testing.assert_allclose(np.asarray(decoded_projected_jax.Rcos), np.asarray(projected.Rcos))
+    np.testing.assert_allclose(np.asarray(decoded_projected_jax.Zsin), np.asarray(projected.Zsin))
     assert raw_metrics["status"] == "measured"
     assert raw_metrics["residual_linf"] > 0.1
     assert raw_metrics["control_delta_by_label"]["R00"] == pytest.approx(0.2)

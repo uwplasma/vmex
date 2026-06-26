@@ -570,6 +570,9 @@ primitive with ``reduced_control_map(...)``, ``encode_boundary(...)``,
 full ``BoundaryCoeffs`` states around an initial LCFS. Use those methods for
 prototype notebooks and diagnostics before promoting side/corner spline
 controls into the nonlinear solve itself.
+The free-boundary edge-control bridge now mirrors this direction internally by
+decoding explicit reduced coordinates into a ``VMECState`` LCFS edge row in
+both host and JAX-array modes.
 Edge-projected free-boundary solves now also write
 ``free_boundary.edge_control_projection.state_coordinates`` in their solver
 diagnostics. That compact block reports the accepted LCFS edge in the same
