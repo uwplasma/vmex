@@ -19,6 +19,7 @@ from vmec_jax._compat import jax, jnp
 from vmec_jax.finite_beta import finite_beta_scalars_from_state
 from vmec_jax.quasi_isodynamic import boozer_output_from_state
 from vmec_jax.quasisymmetry import (
+    quasisymmetry_angle_cache_from_static,
     quasisymmetry_boozer_mode_residual_from_boozer_output,
     quasisymmetry_ratio_residual_from_state,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "DEFAULT_DERIVATIVE_PROPOSAL_VECTOR_KEYS",
     "DEFAULT_SAME_BRANCH_VECTOR_KEYS", "STATE_ONLY_SAME_BRANCH_KEYS", "SUPPORTED_SAME_BRANCH_VECTOR_KEYS",
     "SINGLE_STAGE_LIMITATIONS",
+    "SameBranchVectorRunner",
     "direct_coil_optimization_workflow_metadata",
     "direct_coil_qs_summary_configs",
     "nestor_profile_policy_from_results",
@@ -57,6 +59,8 @@ __all__ = [
     "same_branch_scalar_result_summary",
     "same_branch_scalar_function_registry",
     "same_branch_vector_result_summary",
+    "summarize_same_branch_vector_result",
+    "write_same_branch_validation_report_core",
 ]
 
 
@@ -802,6 +806,82 @@ def same_branch_vector_result_summary(
     }
 
 
+class SameBranchVectorRunner:
+    """Callable branch-local vector/JVP replay runner for same-branch reports."""
+
+    def __init__(
+        self,
+        *,
+        base_params: CoilFieldParams,
+        direction_params: CoilFieldParams,
+        report: dict[str, Any],
+        report_base_values: dict[str, float],
+        scalar_value_fns: dict[str, Any],
+        scalar_replay_fns: dict[str, Any],
+        replay_payload: dict[str, Any] | None,
+        ad_mode: str,
+    ) -> None:
+        self.base_params = base_params
+        self.direction_params = direction_params
+        self.report = report
+        self.report_base_values = report_base_values
+        self.scalar_value_fns = scalar_value_fns
+        self.scalar_replay_fns = scalar_replay_fns
+        self.replay_payload = replay_payload
+        self.ad_mode = str(ad_mode)
+        self.current_only_coil_geometry: tuple[Any, Any] | None = None
+
+    def __call__(
+        self,
+        scalar_keys: tuple[str, ...],
+        replay_kwargs_for_call: dict[str, Any],
+        *,
+        include_replay_graph_metadata: bool = False,
+        replay_plan_for_call: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate branch-local replay values and derivatives for scalar keys."""
+
+        from vmec_jax.free_boundary_adjoint import (
+            direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
+        )
+
+        return direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax(
+            params=self.base_params,
+            direction_params=self.direction_params if self.ad_mode == "direct" else None,
+            current_only_coil_geometry=self.current_only_coil_geometry,
+            complete_payload=self.report["base"],
+            scalar_keys=scalar_keys,
+            production_values={key: self.report_base_values[key] for key in scalar_keys},
+            replay_payload=self.replay_payload,
+            scalar_fn=lambda payload: {key: self.scalar_value_fns[key](payload) for key in scalar_keys},
+            replay_scalar_fns=self.scalar_replay_fns,
+            replay_plan=replay_plan_for_call,
+            replay_kwargs=replay_kwargs_for_call,
+            replay_ad_mode=self.ad_mode,
+            include_trace_replay_diagnostics=False,
+            include_payload=False,
+            include_replay_graph_metadata=include_replay_graph_metadata,
+        )
+
+
+def summarize_same_branch_vector_result(
+    vector: dict[str, Any],
+    scalar_keys: tuple[str, ...],
+    *,
+    report: dict[str, Any],
+    direction_params: CoilFieldParams,
+) -> dict[str, Any]:
+    """Summarize a branch-local vector/JVP result in the promoted report schema."""
+
+    return same_branch_vector_result_summary(
+        vector,
+        scalar_keys,
+        report=report,
+        direction_params=direction_params,
+        state_only_keys=STATE_ONLY_SAME_BRANCH_KEYS,
+    )
+
+
 def run_same_branch_scalar_report_section(
     *,
     enabled: bool,
@@ -1403,6 +1483,380 @@ def same_branch_rejected_slot_gate_from_vector_replay(
         "scalars": rejected_summary["scalars"],
         "wall_s": wall_s,
     }, wall_s
+
+
+def _same_branch_qs_angle_cache_factory(args: Any) -> Any:
+    """Return a small per-static QS angle-cache callback for report scalars."""
+
+    qs_angle_cache_by_key: dict[tuple[int, ...], dict[str, object]] = {}
+
+    def qs_angle_cache_for_static(static: Any) -> dict[str, object]:
+        cfg = static.cfg
+        key = (
+            int(cfg.nfp),
+            int(cfg.mpol),
+            int(cfg.ntor),
+            int(cfg.ntheta),
+            int(cfg.nzeta),
+            int(args.qs_ntheta),
+            int(args.qs_nphi),
+        )
+        if key not in qs_angle_cache_by_key:
+            qs_angle_cache_by_key[key] = quasisymmetry_angle_cache_from_static(
+                static,
+                ntheta=int(args.qs_ntheta),
+                nphi=int(args.qs_nphi),
+            )
+        return qs_angle_cache_by_key[key]
+
+    return qs_angle_cache_for_static
+
+
+def _initial_same_branch_report_sections(
+    *,
+    mode: str,
+    ad_mode: str,
+    same_branch: bool,
+    vector_keys: tuple[str, ...],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Return default scalar/vector/gate summaries before optional replays."""
+
+    branch_scope = "fixed accepted branch only; does not differentiate adaptive host branch selection"
+    branch_local_scalar = {
+        "available": False,
+        "scope": branch_scope,
+        "mode": mode,
+        "replay_ad_mode": ad_mode,
+        "same_branch": same_branch,
+        "reason": "not requested"
+        if mode != "scalar"
+        else "branch fingerprint is not same-branch compatible",
+    }
+    branch_local_vector = {
+        "available": False,
+        "scope": branch_scope,
+        "mode": mode,
+        "replay_ad_mode": ad_mode,
+        "same_branch": same_branch,
+        "scalar_keys": list(vector_keys),
+        "reason": "not requested"
+        if mode != "vector"
+        else "branch fingerprint is not same-branch compatible",
+    }
+    branch_local_vector_gate = {
+        "available": False,
+        "passed": False,
+        "scope": "same-branch production-forward vector/JVP physical-scalar gate",
+        "reason": "requires an available branch-local vector report",
+    }
+    return branch_local_scalar, branch_local_vector, branch_local_vector_gate
+
+
+def _run_same_branch_complete_fd_report(
+    *,
+    input_path: Any,
+    base_params: CoilFieldParams,
+    params_for: Any,
+    objective_fn: Any,
+    args: Any,
+    timings: dict[str, float],
+) -> dict[str, Any]:
+    """Run and time the complete-solve finite-difference branch report."""
+
+    from vmec_jax.free_boundary_adjoint import (
+        direct_coil_same_branch_complete_solve_fd_report,
+    )
+
+    t0 = time.perf_counter()
+    report = direct_coil_same_branch_complete_solve_fd_report(
+        input_path,
+        base_params,
+        params_for=params_for,
+        objective_fn=objective_fn,
+        eps=float(args.same_branch_report_eps),
+        solve_kwargs={
+            "max_iter": int(args.same_branch_report_max_iter or args.vmec_max_iter),
+            "ftol": float(args.ftol),
+            "vmec2000_control": True,
+            "auto_flip_force": False,
+            "use_direct_fallback": True,
+            "verbose": False,
+            "verbose_vmec2000_table": False,
+            "jit_forces": bool(args.jit_forces),
+            "use_scan": False,
+            "host_update_assembly": False,
+            "adjoint_trace": True,
+            "adjoint_trace_mode": "branch",
+            "external_field_provider_kind": "direct_coils",
+            "free_boundary_activate_fsq": float(args.activate_fsq),
+        },
+    )
+    timings["complete_solve_fd_wall_s"] = float(time.perf_counter() - t0)
+    return report
+
+
+def _same_branch_report_mode_and_keys(args: Any) -> tuple[str, str, tuple[str, ...], str, set[str]]:
+    """Validate report mode options and return the scalar keys to record."""
+
+    mode = str(getattr(args, "same_branch_report_mode", "none")).strip().lower()
+    ad_mode = str(getattr(args, "same_branch_report_ad_mode", "direct")).strip().lower()
+    if mode not in {"none", "scalar", "vector"}:
+        raise ValueError("--same-branch-report-mode must be one of none, scalar, vector")
+    if ad_mode not in {"direct", "custom_vjp"}:
+        raise ValueError("--same-branch-report-ad-mode must be one of direct, custom_vjp")
+    vector_keys = same_branch_report_vector_keys_from_args(args)
+    scalar_key = str(getattr(args, "same_branch_report_scalar_key", "qs_total"))
+    requested_report_keys = (
+        {scalar_key}
+        if mode == "scalar"
+        else set(vector_keys)
+        if mode == "vector"
+        else set()
+    )
+    return mode, ad_mode, vector_keys, scalar_key, requested_report_keys
+
+
+def write_same_branch_validation_report_core(
+    *,
+    input_path: Any,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: Any,
+    outdir: Any,
+    report_anchor: str = "initial",
+    direction_from_variables_fn: Any,
+    coil_param_direction_from_variables_fn: Any,
+    params_for_scale_fn: Any,
+    objective_values_callback_fn: Any,
+    variable_records_fn: Any,
+    scalar_function_registry_fn: Any,
+    write_json_fn: Any,
+    json_safe_payload_fn: Any,
+) -> Any:
+    """Write the complete-solve same-branch FD plus branch-local replay report.
+
+    The report orchestration is generic to direct-coil free-boundary examples:
+    it builds one central finite-difference complete-solve report, optionally
+    replays a fixed accepted branch for scalar/vector AD evidence, and writes a
+    compact JSON artifact.  Example scripts provide only their optimizer-vector
+    packing and objective callbacks.
+    """
+
+    requested_direction_policy, effective_direction_policy, direction_policy_reason = (
+        same_branch_report_direction_policy(args, variables)
+    )
+    direction_x = direction_from_variables_fn(variables, policy=effective_direction_policy)
+    direction_params = coil_param_direction_from_variables_fn(
+        base_params,
+        direction_x,
+        variables,
+        current_step=float(args.current_step),
+        dof_step=float(args.dof_step),
+    )
+    qs_surfaces = parse_float_list(str(args.qs_surfaces))
+    qs_angle_cache_for_static = _same_branch_qs_angle_cache_factory(args)
+    mode, ad_mode, vector_keys, scalar_key, requested_report_keys = _same_branch_report_mode_and_keys(args)
+    scalar_value_fns, scalar_replay_fns = scalar_function_registry_fn(
+        args=args,
+        qs_surfaces=qs_surfaces,
+        qs_angle_cache_for_static=qs_angle_cache_for_static,
+    )
+    params_for = params_for_scale_fn(base_params, direction_x, variables, args)
+    objective_fn = objective_values_callback_fn(
+        args=args,
+        qs_surfaces=qs_surfaces,
+        scalar_value_fns=scalar_value_fns,
+        requested_report_keys=requested_report_keys,
+    )
+
+    timings: dict[str, float] = {}
+    report = _run_same_branch_complete_fd_report(
+        input_path=input_path,
+        base_params=base_params,
+        params_for=params_for,
+        objective_fn=objective_fn,
+        args=args,
+        timings=timings,
+    )
+    variable_manifest = variable_records_fn(
+        variables,
+        base_params,
+        current_step=float(args.current_step),
+        dof_step=float(args.dof_step),
+    )
+    direction_variables = [
+        manifest
+        for active, manifest in zip(direction_x != 0.0, variable_manifest, strict=True)
+        if bool(active)
+    ]
+    compact_report = same_branch_complete_fd_report_metadata(
+        input_path=input_path,
+        report_anchor=report_anchor,
+        eps=float(args.same_branch_report_eps),
+        direction_policy=(
+            requested_direction_policy,
+            effective_direction_policy,
+            direction_policy_reason,
+        ),
+        direction_x=direction_x,
+        direction_variables=direction_variables,
+        report=report,
+    )
+    same_branch = bool(report["branch_compatibility"]["same_branch"])
+    compact_report["current_only_coil_geometry_cache"] = {
+        "available": False,
+        "reason": "not requested",
+        "scope": "current-only branch-local vector/profile replays",
+    }
+    branch_local_scalar, branch_local_vector, branch_local_vector_gate = (
+        _initial_same_branch_report_sections(
+            mode=mode,
+            ad_mode=ad_mode,
+            same_branch=same_branch,
+            vector_keys=vector_keys,
+        )
+    )
+    report_base_values = {
+        str(key): float(values["base"])
+        for key, values in report["objective_values"].items()
+        if isinstance(values, dict) and "base" in values
+    }
+    replay_payload = (
+        {"init": report["base"]["init"]}
+        if isinstance(report.get("base"), dict) and "init" in report["base"]
+        else None
+    )
+    scalar_uses_state_only_replay = scalar_key in STATE_ONLY_SAME_BRANCH_KEYS
+    vector_uses_state_only_replay = all(key in STATE_ONLY_SAME_BRANCH_KEYS for key in vector_keys)
+    replay_kwargs = same_branch_replay_options_from_args(args)
+    mode_count = same_branch_report_mode_count(report)
+    compact_report["mode_count"] = int(mode_count)
+    replay_max_mode_count = int(getattr(args, "same_branch_report_replay_max_mode_count", 220))
+    replay_mode_count_guard_triggered, replay_mode_count_guard_reason, replay_guard = (
+        same_branch_replay_mode_count_guard(mode_count, replay_max_mode_count)
+    )
+    compact_report["same_branch_replay_mode_count_guard"] = replay_guard
+    run_branch_local_vector = SameBranchVectorRunner(
+        base_params=base_params,
+        direction_params=direction_params,
+        report=report,
+        report_base_values=report_base_values,
+        scalar_value_fns=scalar_value_fns,
+        scalar_replay_fns=scalar_replay_fns,
+        replay_payload=replay_payload,
+        ad_mode=ad_mode,
+    )
+
+    def summarize_vector_result(vector: dict[str, Any], scalar_keys: tuple[str, ...]) -> dict[str, Any]:
+        return summarize_same_branch_vector_result(
+            vector,
+            scalar_keys,
+            report=report,
+            direction_params=direction_params,
+        )
+
+    if mode in {"scalar", "vector"} and replay_mode_count_guard_triggered:
+        branch_local_scalar["reason"] = replay_mode_count_guard_reason
+        branch_local_vector["reason"] = replay_mode_count_guard_reason
+    run_scalar_report = (
+        same_branch
+        and not replay_mode_count_guard_triggered
+        and mode == "scalar"
+        and "base" in report
+        and scalar_key in report["objective_values"]
+    )
+    branch_local_scalar = run_same_branch_scalar_report_section(
+        enabled=run_scalar_report,
+        scalar_key=scalar_key,
+        scalar_uses_state_only_replay=scalar_uses_state_only_replay,
+        base_params=base_params,
+        report=report,
+        report_base_values=report_base_values,
+        replay_payload=replay_payload,
+        replay_kwargs=replay_kwargs,
+        ad_mode=ad_mode,
+        scalar_value_fns=scalar_value_fns,
+        scalar_replay_fns=scalar_replay_fns,
+        direction_params=direction_params,
+        compact_report=compact_report,
+        timings=timings,
+        initial_summary=branch_local_scalar,
+    )
+    missing_vector_keys = tuple(key for key in vector_keys if key not in report["objective_values"])
+    if mode == "vector" and missing_vector_keys:
+        branch_local_vector["reason"] = f"missing complete-solve objective value(s): {missing_vector_keys}"
+    main_vector_summary: dict[str, Any] | None = None
+    main_vector_replay_plan: dict[str, Any] | None = None
+    run_vector_report = (
+        same_branch
+        and not replay_mode_count_guard_triggered
+        and mode == "vector"
+        and "base" in report
+        and not missing_vector_keys
+    )
+    branch_local_vector, branch_local_vector_gate, main_vector_summary, main_vector_replay_plan = (
+        run_same_branch_vector_report_section(
+            enabled=run_vector_report,
+            vector_keys=vector_keys,
+            vector_uses_state_only_replay=vector_uses_state_only_replay,
+            base_params=base_params,
+            direction_params=direction_params,
+            report=report,
+            replay_kwargs=replay_kwargs,
+            run_branch_local_vector=run_branch_local_vector,
+            compact_report=compact_report,
+            timings=timings,
+            json_safe_payload_fn=json_safe_payload_fn,
+            initial_vector_summary=branch_local_vector,
+            initial_gate_summary=branch_local_vector_gate,
+            cache_probe=bool(getattr(args, "same_branch_report_current_jvp_cache_probe", False)),
+        )
+    )
+    rejected_slot_gate, rejected_slot_wall_s = same_branch_rejected_slot_gate_from_vector_replay(
+        requested=bool(getattr(args, "same_branch_report_rejected_slot_gate", False)),
+        same_branch=same_branch,
+        replay_mode_count_guard_triggered=bool(replay_mode_count_guard_triggered),
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        mode=mode,
+        report=report,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=vector_keys,
+        replay_kwargs=replay_kwargs,
+        run_branch_local_vector=run_branch_local_vector,
+        summarize_vector_result=summarize_vector_result,
+        main_vector_replay_plan=main_vector_replay_plan,
+        gate_mode=str(getattr(args, "same_branch_report_rejected_slot_mode", "replay")),
+    )
+    if rejected_slot_wall_s is not None:
+        timings["branch_local_rejected_slot_wall_s"] = rejected_slot_wall_s
+    nestor_profile = same_branch_nestor_profile_from_vector_replay(
+        args=args,
+        same_branch=same_branch,
+        mode=mode,
+        report=report,
+        mode_count=mode_count,
+        replay_mode_count_guard_triggered=replay_mode_count_guard_triggered,
+        replay_mode_count_guard_reason=replay_mode_count_guard_reason,
+        replay_max_mode_count=replay_max_mode_count,
+        missing_vector_keys=missing_vector_keys,
+        vector_keys=vector_keys,
+        replay_kwargs=replay_kwargs,
+        vector_uses_state_only_replay=vector_uses_state_only_replay,
+        main_vector_summary=main_vector_summary,
+        main_vector_replay_plan=main_vector_replay_plan,
+        timings=timings,
+        run_branch_local_vector=run_branch_local_vector,
+        summarize_vector_result=summarize_vector_result,
+    )
+    compact_report["branch_local_scalar_gradient"] = branch_local_scalar
+    compact_report["branch_local_vector_jacobian"] = branch_local_vector
+    compact_report["branch_local_vector_gate"] = branch_local_vector_gate
+    compact_report["accepted_rejected_controller_slot_gate"] = rejected_slot_gate
+    compact_report["nestor_replay_profile"] = nestor_profile
+    compact_report["timings"] = timings
+    path = outdir / "same_branch_complete_solve_report.json"
+    write_json_fn(path, compact_report)
+    return path
 
 
 def same_branch_derivative_proposal_from_report(
