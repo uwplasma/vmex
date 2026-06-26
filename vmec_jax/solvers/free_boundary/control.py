@@ -346,25 +346,19 @@ def _project_freeb_edge_control_state(
     )
 
 
-def _freeb_edge_control_state_residual_metrics(state: VMECState, projection: dict[str, Any]) -> dict[str, Any]:
-    """Measure how far the LCFS edge row sits outside reduced controls."""
+def _freeb_edge_control_vector_projection_metrics(
+    target: Any,
+    projection: dict[str, Any],
+    *,
+    status: str,
+) -> dict[str, Any]:
+    """Project one stacked physical edge vector onto reduced controls."""
 
-    if not bool(projection.get("enabled", False)):
-        return {"enabled": False, "status": "disabled"}
-    k = int(projection["mode_count"])
-    scale = np.asarray(projection["mode_scale_np"], dtype=float)
-    initial = {name: np.asarray(value, dtype=float) for name, value in projection["initial_np"].items()}
+    target = np.asarray(target, dtype=float).reshape(-1)
     jacobian = np.asarray(projection["jacobian_np"], dtype=float)
     pinv = np.asarray(projection["pinv_np"], dtype=float)
-    target = np.concatenate(
-        [
-            np.asarray(state.Rcos, dtype=float)[-1] * scale - initial["R_cos"],
-            np.asarray(state.Rsin, dtype=float)[-1] * scale - initial["R_sin"],
-            np.asarray(state.Zcos, dtype=float)[-1] * scale - initial["Z_cos"],
-            np.asarray(state.Zsin, dtype=float)[-1] * scale - initial["Z_sin"],
-        ],
-        axis=0,
-    )
+    if target.size != jacobian.shape[0]:
+        raise ValueError("edge-control target and Jacobian have incompatible sizes")
     control_delta = pinv @ target
     projected = jacobian @ control_delta
     residual = target - projected
@@ -378,9 +372,9 @@ def _freeb_edge_control_state_residual_metrics(state: VMECState, projection: dic
     labels = list(dict(projection.get("info", {})).get("labels", []))
     return {
         "enabled": True,
-        "status": "measured",
+        "status": str(status),
         "mode": "edge_delta_least_squares",
-        "mode_count": int(k),
+        "mode_count": int(projection["mode_count"]),
         "control_count": int(jacobian.shape[1]),
         "target_l2": target_l2,
         "projected_l2": projected_l2,
@@ -394,6 +388,48 @@ def _freeb_edge_control_state_residual_metrics(state: VMECState, projection: dic
             str(label): float(value) for label, value in zip(labels, control_delta, strict=False)
         },
     }
+
+
+def _freeb_edge_control_delta_tuple_projection_metrics(deltas: Any, projection: dict[str, Any]) -> dict[str, Any]:
+    """Measure how much an edge update direction lies outside controls."""
+
+    if not bool(projection.get("enabled", False)):
+        return {"enabled": False, "status": "disabled"}
+    k = int(projection["mode_count"])
+    scale = np.asarray(projection["mode_scale_np"], dtype=float)
+    dR, dR_sin, dZ_cos, dZ, _dL_cos, _dL = deltas
+    target = np.concatenate(
+        [
+            np.asarray(dR, dtype=float)[-1] * scale,
+            np.asarray(dR_sin, dtype=float)[-1] * scale,
+            np.asarray(dZ_cos, dtype=float)[-1] * scale,
+            np.asarray(dZ, dtype=float)[-1] * scale,
+        ],
+        axis=0,
+    )
+    return _freeb_edge_control_vector_projection_metrics(target, projection, status="measured")
+
+
+def _freeb_edge_control_state_residual_metrics(state: VMECState, projection: dict[str, Any]) -> dict[str, Any]:
+    """Measure how far the LCFS edge row sits outside reduced controls."""
+
+    if not bool(projection.get("enabled", False)):
+        return {"enabled": False, "status": "disabled"}
+    k = int(projection["mode_count"])
+    scale = np.asarray(projection["mode_scale_np"], dtype=float)
+    initial = {name: np.asarray(value, dtype=float) for name, value in projection["initial_np"].items()}
+    target = np.concatenate(
+        [
+            np.asarray(state.Rcos, dtype=float)[-1] * scale - initial["R_cos"],
+            np.asarray(state.Rsin, dtype=float)[-1] * scale - initial["R_sin"],
+            np.asarray(state.Zcos, dtype=float)[-1] * scale - initial["Z_cos"],
+            np.asarray(state.Zsin, dtype=float)[-1] * scale - initial["Z_sin"],
+        ],
+        axis=0,
+    )
+    if target.size != 4 * k:
+        raise ValueError("state edge row has the wrong size for the edge-control projection")
+    return _freeb_edge_control_vector_projection_metrics(target, projection, status="measured")
 
 
 def _zero_freeb_edge_control_velocity_blocks(

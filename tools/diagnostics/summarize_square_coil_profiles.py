@@ -1200,6 +1200,9 @@ def _summary_row(
     freeb_edge_control_state_residual = freeb_edge_control_runtime.get("state_residual")
     if not isinstance(freeb_edge_control_state_residual, dict):
         freeb_edge_control_state_residual = {}
+    freeb_edge_control_update_direction = freeb_edge_control_runtime.get("update_direction")
+    if not isinstance(freeb_edge_control_update_direction, dict):
+        freeb_edge_control_update_direction = {}
     hot_restart = backend.get("hot_restart")
     hot_restart = hot_restart if isinstance(hot_restart, dict) else {}
     hot_restart_stages = hot_restart.get("stages")
@@ -1346,6 +1349,18 @@ def _summary_row(
         ),
         "freeb_edge_control_projection_state_residual_rel": _finite_float(
             freeb_edge_control_state_residual.get("residual_rel")
+        ),
+        "freeb_edge_control_projection_update_direction_status": freeb_edge_control_update_direction.get(
+            "status"
+        ),
+        "freeb_edge_control_projection_update_direction_linf": _finite_float(
+            freeb_edge_control_update_direction.get("residual_linf")
+        ),
+        "freeb_edge_control_projection_update_direction_rms": _finite_float(
+            freeb_edge_control_update_direction.get("residual_rms")
+        ),
+        "freeb_edge_control_projection_update_direction_rel": _finite_float(
+            freeb_edge_control_update_direction.get("residual_rel")
         ),
         "free_boundary_jax_nestor_operator_applied": backend.get(
             "free_boundary_jax_nestor_operator_applied"
@@ -1743,6 +1758,10 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_state_residual_linf",
         "freeb_edge_control_projection_state_residual_rms",
         "freeb_edge_control_projection_state_residual_rel",
+        "freeb_edge_control_projection_update_direction_status",
+        "freeb_edge_control_projection_update_direction_linf",
+        "freeb_edge_control_projection_update_direction_rms",
+        "freeb_edge_control_projection_update_direction_rel",
         "free_boundary_jax_nestor_operator_applied",
         "free_boundary_jax_nestor_operator_reason",
         "free_boundary_jax_nestor_operator_jitted",

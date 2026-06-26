@@ -5738,6 +5738,99 @@ Visual validation:
 
 No user input is needed.
 
+## M308. Control-space update-direction diagnostics for spline LCFS solves
+
+### Steps taken
+
+- Added a second reduced-control diagnostic for the final preconditioned
+  edge-update direction.
+- Reused the existing VMEC physical update transform and the reduced
+  square-axis control Jacobian, then reported how much of that update direction
+  lies outside the allowed spline-control tangent space.
+- Exposed the new summarizer fields:
+  - `freeb_edge_control_projection_update_direction_status`;
+  - `freeb_edge_control_projection_update_direction_linf`;
+  - `freeb_edge_control_projection_update_direction_rms`;
+  - `freeb_edge_control_projection_update_direction_rel`.
+
+### Results obtained
+
+- Strict square-coil profiles will now report both:
+  - whether the final LCFS edge state stayed in the reduced spline-control
+    subspace; and
+  - whether the final edge update direction is mostly active reduced-control
+    motion or mostly discarded Fourier motion.
+- This is the diagnostic needed before changing the strict convergence gate:
+  if the state residual is small but the full force residual remains above
+  `1e-12`, the update-direction residual tells us whether a solver-native
+  reduced-control convergence criterion is justified.
+
+### How it was tested
+
+```bash
+venv/bin/python -m pytest -q \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py \
+  tests/test_free_boundary_wp0.py::test_free_boundary_edge_control_zeroes_only_lcfs_geometry_velocity_rows \
+  tests/test_toroidal_hybrid.py::test_square_axis_free_boundary_edge_control_projection_payload \
+  tests/test_toroidal_hybrid.py::test_square_axis_control_fourier_map_status_reports_conditioning
+```
+
+Result: `58 passed`, with one pre-existing JAX deprecation warning.
+
+```bash
+ruff check vmec_jax/solvers/free_boundary/control.py \
+  vmec_jax/solvers/fixed_boundary/residual/finalize.py \
+  tools/diagnostics/summarize_square_coil_profiles.py \
+  tests/test_profile_square_coil_free_boundary.py \
+  tests/test_summarize_square_coil_profiles.py
+venv/bin/python -m py_compile \
+  vmec_jax/solvers/free_boundary/control.py \
+  vmec_jax/solvers/fixed_boundary/residual/finalize.py \
+  tools/diagnostics/summarize_square_coil_profiles.py
+venv/bin/python tools/diagnostics/source_health.py --top 20 \
+  --max-root-helper-prefix-files 2 \
+  --max-function-lines-at vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2440 \
+  --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=420
+git diff --check
+```
+
+Result: all passed; source-health ratchets remained unchanged.
+
+### File structure and best-practice adherence
+
+- Projection math remains in `vmec_jax/solvers/free_boundary/control.py`.
+- Final diagnostic assembly remains in
+  `vmec_jax/solvers/fixed_boundary/residual/finalize.py`.
+- The large residual iteration loop was not touched.
+- Summary/reporting changes are confined to
+  `tools/diagnostics/summarize_square_coil_profiles.py`.
+- No generated solver artifacts were tracked.
+
+### Best next steps
+
+1. Commit and push this diagnostic tranche.
+2. Sync only waiting `office` scratch checkouts.
+3. Let the active strict runs finish; use their state-residual and
+   update-direction fields to decide whether the next solver change is a
+   projected-control convergence gate or a deeper nonlinear controller change.
+
+### Completion percentages after M308
+
+- Direct-coil GPU/JIT parity lane: `96%`.
+- Seeded hot-restart lane: `99%`, strict row still flat above `1e-12`.
+- VMEC2000 robustness/reference lane: `99%`, strict stages still pending.
+- Resolution/edit robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `90%`, the key reduced-control
+  diagnostics are now present; solver-native reduced state remains open.
+- DELT/stage-budget polish lane: `78%`.
+- Finite-beta virtual-casing validation lane: `87%`.
+- CI/API health lane: `99%`.
+
+### User input needed
+
+No user input is needed.
+
 ## M307. Reduced-control LCFS residual diagnostics for strict square-coil runs
 
 ### Steps taken

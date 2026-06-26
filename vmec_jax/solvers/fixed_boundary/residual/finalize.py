@@ -8,13 +8,20 @@ import time
 import numpy as np
 
 from ..diagnostics.io import _pack_resume_state_record
-from ...free_boundary.control import _freeb_edge_control_state_residual_metrics
+from ...free_boundary.control import (
+    _freeb_edge_control_delta_tuple_projection_metrics,
+    _freeb_edge_control_state_residual_metrics,
+)
 from .runtime import (
     _build_residual_iter_timing_report,
     _build_resume_state_base,
     _format_residual_iter_timing_message,
 )
-from .update import velocity_blocks_legacy_payload
+from .update import (
+    delta_tuple_from_blocks,
+    velocity_blocks_from_force_blocks,
+    velocity_blocks_legacy_payload,
+)
 
 _EMPTY_HISTORY_KEYS = ("w_history", "fsqr2_history", "fsqz2_history", "fsql2_history", "grad_rms_history", "step_history")
 _RESUME_BASE_KEYS = (
@@ -91,6 +98,33 @@ def _edge_control_state_residual_payload(ns: Mapping[str, Any]) -> dict[str, Any
     try:
         projection = ns.get("freeb_edge_control_projection", {"enabled": False})
         return _freeb_edge_control_state_residual_metrics(ns["state"], projection)
+    except Exception as exc:
+        return {
+            "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
+            "status": "failed",
+            "error": repr(exc),
+        }
+
+
+def _edge_control_update_direction_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """Return reduced-edge projection residuals for the final update direction."""
+
+    try:
+        projection = ns.get("freeb_edge_control_projection", {"enabled": False})
+        if not bool(projection.get("enabled", False)):
+            return {"enabled": False, "status": "disabled"}
+        update_force_blocks = ns.get("update_force_blocks")
+        transforms = ns.get("_physical_delta_transforms")
+        if update_force_blocks is None or transforms is None:
+            return {"enabled": True, "status": "unavailable"}
+        force_blocks = velocity_blocks_from_force_blocks(update_force_blocks)
+        deltas = delta_tuple_from_blocks(
+            1.0,
+            transforms,
+            *force_blocks,
+            lasym=bool(getattr(ns.get("cfg"), "lasym", False)),
+        )
+        return _freeb_edge_control_delta_tuple_projection_metrics(deltas, projection)
     except Exception as exc:
         return {
             "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
@@ -418,6 +452,7 @@ def finalize_residual_iter_from_namespace(
                 "apply_count": int(ns.get("freeb_edge_control_projection_apply_count", 0)),
                 "zero_velocity_count": int(ns.get("freeb_edge_control_projection_zero_velocity_count", 0)),
                 "state_residual": _edge_control_state_residual_payload(ns),
+                "update_direction": _edge_control_update_direction_payload(ns),
             },
         },
     }
