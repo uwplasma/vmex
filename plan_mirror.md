@@ -31248,3 +31248,72 @@ Results: `7 passed`; ruff, py-compile, and whitespace checks passed.
 ### User input needed
 
 No user input is needed.
+
+---
+## 270. Polled Active Strict Profile Progress After Command Fixes
+
+### Steps taken
+
+- Checked local branch status after pushing the latest command-helper tranche.
+- Polled the active `office` VMEC2000 and direct-GPU processes without
+  modifying their worktrees.
+- Read only compact sidecar/log data for residual progress.
+
+### Results obtained
+
+- VMEC2000 generated-`mgrid` reference row is still running after about
+  `5:24` wall time. It is at iteration `11117/24000`, total residual
+  `2.259e-11`, max component `1.03e-11`, best total `2.124e-11`, with no
+  vacuum-grid overflow. It remains about `10.3x` above the strict component
+  gate of `1e-12`.
+- Direct-GPU baseline row is still running after about `2:30` wall time. It is
+  at iteration `420/8000`, total residual `2.3464e-7`, max component
+  `1.25e-7`.
+- Direct-GPU Anderson-pressure row is still running after about `2:30` wall
+  time. It is at iteration `416/8000`, total residual `2.293e-7`, max
+  component `1.24e-7`.
+- Current evidence still says VMEC2000 is more robust on this strict deck, but
+  it has not reached `FTOL=1e-12`; direct-GPU is improving from the early
+  `1e-6` scale but remains much farther from strict tolerance.
+
+### How it was tested
+
+Read-only `ssh office` polling:
+
+```bash
+ps -p 514451,514698,530365,530366 -o pid,etime,stat,pcpu,pmem,cmd
+```
+
+and compact parsing of the VMEC2000 partial JSON plus direct-GPU launcher logs.
+
+### File structure and best-practice notes
+
+- No generated `results/` artifacts were copied into the repository.
+- The active remote worktrees were not updated, killed, or relaunched.
+
+### Best next steps
+
+1. Let all three active rows continue.
+2. If VMEC2000 remains flat near `2e-11` when it exhausts its stage budget,
+   run a narrow `DELT`/stage-budget scan and accepted-provider parity before
+   increasing Fourier modes.
+3. If direct-GPU reaches a new floor well above VMEC2000, use the accepted-LCFS
+   provider-parity lane to separate direct-provider error from nonlinear solver
+   behavior.
+
+### Completion percentages after M270
+
+- Square-coil strict `FTOL=1e-12` profiling lane: `97%`.
+- VMEC2000 robustness/reference lane: `97%`, active row still running.
+- Direct-coil GPU/JIT parity lane: `83%`.
+- `vmec_jax` generated-`mgrid` parity/performance lane: `80%`.
+- Accepted-boundary provider-parity lane: `100%`.
+- Follow-up command reproducibility lane: `100%`.
+- Follow-up recommendation lane: `100%`.
+- Root-example resolution robustness lane: `100%`.
+- True spline/control-basis hybrid lane: `64%`.
+- Overall toroidal stellarator-mirror hybrid production-readiness: `95%`.
+
+### User input needed
+
+No user input is needed.
