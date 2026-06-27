@@ -265,6 +265,7 @@ _LAZY_ATTRS = {
     "contract_free_boundary_vjp": ".solvers.free_boundary.derivatives",
     "free_boundary_value_and_jacobian": ".solvers.free_boundary.derivatives",
     "free_boundary_value_and_jvp": ".solvers.free_boundary.derivatives",
+    "FreeBoundaryNativeSplineState": ".solvers.free_boundary",
     "FreeBoundaryReducedEdgeState": ".solvers.free_boundary",
     "free_boundary_reduced_edge_state_from_vmec_state": ".solvers.free_boundary",
     "free_boundary_reduced_edge_state_to_vmec_state": ".solvers.free_boundary",

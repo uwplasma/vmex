@@ -123,6 +123,117 @@ class FreeBoundaryReducedEdgeState:
         return payload
 
 
+@dataclass(frozen=True)
+class FreeBoundaryNativeSplineState:
+    """VMEC state adapter with the LCFS edge stored in spline controls.
+
+    The interior R/Z rows and lambda rows remain in the usual VMEC state.  The
+    LCFS edge row is stored as a reduced-control state and decoded to VMEC
+    Fourier coefficients only when force kernels need a full ``VMECState``.
+    """
+
+    template_state: VMECState
+    edge_state: FreeBoundaryReducedEdgeState
+    projection: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.template_state, VMECState):
+            raise TypeError("template_state must be a VMECState")
+        if not isinstance(self.edge_state, FreeBoundaryReducedEdgeState):
+            raise TypeError("edge_state must be a FreeBoundaryReducedEdgeState")
+        if not bool(self.projection.get("enabled", False)):
+            raise ValueError("projection must be an enabled edge-control projection")
+
+    @classmethod
+    def from_vmec_state(
+        cls,
+        state: VMECState,
+        projection: dict[str, Any],
+        *,
+        ridge: float = 0.0,
+        trust_radius: float | None = None,
+    ) -> "FreeBoundaryNativeSplineState":
+        """Encode ``state`` with its LCFS edge in reduced spline controls."""
+
+        return cls(
+            template_state=state,
+            edge_state=free_boundary_reduced_edge_state_from_vmec_state(
+                state,
+                projection,
+                ridge=ridge,
+                trust_radius=trust_radius,
+            ),
+            projection=projection,
+        )
+
+    @property
+    def control_delta(self) -> np.ndarray:
+        """Reduced LCFS spline-control coordinates."""
+
+        return self.edge_state.control_delta
+
+    @property
+    def control_delta_by_label(self) -> dict[str, float]:
+        """Reduced coordinates keyed by the projection labels."""
+
+        return self.edge_state.control_delta_by_label
+
+    def with_template_state(self, state: VMECState) -> "FreeBoundaryNativeSplineState":
+        """Return this native state with a new interior/template VMEC state."""
+
+        return FreeBoundaryNativeSplineState(
+            template_state=state,
+            edge_state=self.edge_state,
+            projection=self.projection,
+        )
+
+    def update_edge(self, control_update: Any) -> "FreeBoundaryNativeSplineState":
+        """Return a new native state after updating reduced edge controls."""
+
+        return FreeBoundaryNativeSplineState(
+            template_state=self.template_state,
+            edge_state=self.edge_state.update(control_update),
+            projection=self.projection,
+        )
+
+    def to_vmec_state(self, *, host_update: bool) -> VMECState:
+        """Decode to a full VMEC state for force evaluation or output."""
+
+        return free_boundary_reduced_edge_state_to_vmec_state(
+            self.edge_state,
+            self.template_state,
+            self.projection,
+            host_update=bool(host_update),
+        )
+
+    def pullback_edge_values(self, full_edge_values: Any) -> np.ndarray:
+        """Pull a physical LCFS edge vector into native spline controls."""
+
+        return self.edge_state.pullback(full_edge_values)
+
+    def pullback_delta_tuple(self, deltas: Any) -> np.ndarray:
+        """Pull the LCFS part of a VMEC delta tuple into native controls."""
+
+        return self.edge_state.pullback(_freeb_edge_control_delta_tuple_target(deltas, self.projection))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-friendly native spline-state diagnostics."""
+
+        edge_payload = self.edge_state.to_dict()
+        return {
+            "mode": "free_boundary_native_spline_state",
+            "nonlinear_boundary_basis": "reduced_lcfs_spline_controls",
+            "force_evaluation_boundary_basis": "vmec_fourier_coefficients",
+            "edge_state": edge_payload,
+            "full_edge_size": edge_payload.get("full_size"),
+            "reduced_unknown_size": edge_payload.get("reduced_unknown_size"),
+            "unknown_l2": edge_payload.get("unknown_l2"),
+            "unknown_linf": edge_payload.get("unknown_linf"),
+            "fit_residual_linf": edge_payload.get("fit_residual_linf"),
+            "fit_residual_rel": edge_payload.get("fit_residual_rel"),
+        }
+
+
 def free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
     """Return the reduced legacy ``(ivac, ivacskip)`` free-boundary cadence."""
 

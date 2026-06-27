@@ -5,6 +5,7 @@ import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary import (
+    FreeBoundaryNativeSplineState,
     FreeBoundaryReducedEdgeState,
     ReducedControlMap,
     ReducedControlState,
@@ -27,9 +28,11 @@ def test_reduced_control_least_squares_step_is_public() -> None:
 
     assert vj.ReducedControlMap is ReducedControlMap
     assert vj.ReducedControlState is ReducedControlState
+    assert vj.FreeBoundaryNativeSplineState is FreeBoundaryNativeSplineState
     assert vj.FreeBoundaryReducedEdgeState is FreeBoundaryReducedEdgeState
     assert public_api.ReducedControlMap is ReducedControlMap
     assert public_api.ReducedControlState is ReducedControlState
+    assert public_api.FreeBoundaryNativeSplineState is FreeBoundaryNativeSplineState
     assert public_api.FreeBoundaryReducedEdgeState is FreeBoundaryReducedEdgeState
     assert (
         vj.free_boundary_reduced_edge_state_from_vmec_state
@@ -221,6 +224,7 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
     )
 
     reduced_edge = free_boundary_reduced_edge_state_from_vmec_state(state, projection)
+    native_spline_state = FreeBoundaryNativeSplineState.from_vmec_state(state, projection)
     decoded_state = free_boundary_reduced_edge_state_to_vmec_state(
         reduced_edge,
         state,
@@ -239,6 +243,19 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
         projection,
         host_update=True,
     )
+    native_decoded_state = native_spline_state.to_vmec_state(host_update=True)
+    native_decoded_state_jax = native_spline_state.to_vmec_state(host_update=False)
+    native_updated_state = native_spline_state.update_edge([0.5]).to_vmec_state(host_update=True)
+    force_dR = zeros.copy()
+    force_dR[-1, 0] = 2.0
+    force_deltas = (
+        force_dR,
+        zeros.copy(),
+        zeros.copy(),
+        zeros.copy(),
+        zeros.copy(),
+        zeros.copy(),
+    )
     full_adjoint = jnp.asarray([2.0, 7.0, *([0.0] * (4 * static.modes.K - 2))])
     _decoded, vjp_fun = jax.vjp(
         lambda values: reduced_edge.control_state.control_map.decode_jax(values),
@@ -246,6 +263,9 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
     )
 
     assert projection["enabled"] is True
+    assert native_spline_state.control_delta_by_label == {"R00": pytest.approx(0.25)}
+    assert native_spline_state.to_dict()["mode"] == "free_boundary_native_spline_state"
+    assert native_spline_state.to_dict()["full_edge_size"] == 4 * static.modes.K
     assert reduced_edge.control_delta_by_label == {"R00": pytest.approx(0.25)}
     assert reduced_edge.fit_residual_linf > 0.0
     assert reduced_edge.to_dict()["mode"] == "native_reduced_lcfs_edge_state"
@@ -255,6 +275,13 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
     assert np.asarray(decoded_state.Rcos)[-1, 1] == pytest.approx(0.0)
     np.testing.assert_allclose(np.asarray(decoded_state_jax.Rcos), np.asarray(decoded_state.Rcos))
     assert np.asarray(updated_state.Rcos)[-1, 0] == pytest.approx(3.75)
+    np.testing.assert_allclose(np.asarray(native_decoded_state.Rcos), np.asarray(decoded_state.Rcos))
+    np.testing.assert_allclose(
+        np.asarray(native_decoded_state_jax.Rcos),
+        np.asarray(decoded_state.Rcos),
+    )
+    assert np.asarray(native_updated_state.Rcos)[-1, 0] == pytest.approx(3.75)
+    np.testing.assert_allclose(native_spline_state.pullback_delta_tuple(force_deltas), [2.0])
     np.testing.assert_allclose(
         np.asarray(reduced_edge.pullback_jax(full_adjoint)),
         np.asarray(vjp_fun(full_adjoint)[0]),

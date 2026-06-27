@@ -18,6 +18,7 @@ from .reduced_controls import (
     reduced_control_pullback,
 )
 from .control import (
+    FreeBoundaryNativeSplineState,
     FreeBoundaryReducedEdgeState,
     free_boundary_reduced_edge_state_from_vmec_state,
     free_boundary_reduced_edge_state_to_vmec_state,
@@ -26,6 +27,7 @@ from .control import (
 __all__ = [
     "DEFAULT_FREE_BOUNDARY_DERIVATIVE_OUTPUTS",
     "FreeBoundaryDerivativeOptions",
+    "FreeBoundaryNativeSplineState",
     "FreeBoundaryReducedEdgeState",
     "ReducedControlMap",
     "ReducedControlState",
