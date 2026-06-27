@@ -606,9 +606,12 @@ the no-solve ``native-spline-control-prototype`` readiness report.
 Reduced edge-control strict updates can now run in three modes:
 ``projected_delta`` projects the full Fourier delta, ``coordinate`` rebuilds
 the accepted LCFS edge through reduced coordinates, and ``native_coordinate``
-pulls the edge force back with the reduced-control Jacobian transpose while
-carrying reduced edge velocity memory. The full VMEC Fourier residual is still
-reported separately for every mode.
+pulls the edge force into reduced controls while carrying reduced edge velocity
+memory. The full VMEC Fourier residual is still reported separately for every
+mode. Native-coordinate rows default to the Jacobian-transpose pullback; add
+``--freeb-edge-control-native-force-metric least_squares`` to map the physical
+edge-force direction through the reduced-control pseudo-inverse/ridged operator
+instead.
 Use ``--strict-trial-heartbeat`` only for diagnosing long strict rows that seem
 stuck inside a coupled trial; it prints opt-in ``[strict-trial]`` lines around
 trial vacuum sampling, force evaluation, and backtracking.
@@ -639,6 +642,8 @@ The ``native_coordinate`` strict-loop mode uses this operation each iteration
 after pulling the current edge force into reduced controls, and now carries the
 reduced control vector itself between iterations instead of re-encoding the LCFS
 edge from Fourier coefficients after every accepted step.
+This remains an edge-control update metric, not a smaller global VMEC unknown
+vector: interior R/Z and lambda still follow the existing VMEC residual loop.
 Solver diagnostics include
 ``free_boundary.edge_control_projection.reduced_update_direction`` to compare
 the current full Fourier update direction against that reduced update vector.

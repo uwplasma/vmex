@@ -405,6 +405,16 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--freeb-edge-control-native-force-metric",
+        choices=("pullback", "least_squares"),
+        default="pullback",
+        help=(
+            "Force metric for --freeb-edge-control-update-mode native_coordinate. "
+            "'pullback' uses J.T f; 'least_squares' maps the physical edge force through the reduced "
+            "control operator used by coordinate updates."
+        ),
+    )
+    p.add_argument(
         "--verbose-solver",
         action="store_true",
         help="Print VMEC-style vmec_jax iteration progress for long direct/mgrid backend profiles.",
@@ -1910,6 +1920,7 @@ def _run_jax_backend(
     freeb_edge_control_ridge: float = 0.0,
     freeb_edge_control_trust_radius: float | None = None,
     freeb_edge_control_update_mode: str = "projected_delta",
+    freeb_edge_control_native_force_metric: str = "pullback",
     direct_static_cache: bool = True,
     jit_direct_sampler: bool = False,
     direct_trial_bsqvac_resample: bool = True,
@@ -1954,6 +1965,7 @@ def _run_jax_backend(
         ridge=float(freeb_edge_control_ridge),
         trust_radius=freeb_edge_control_trust_radius,
         update_mode=str(freeb_edge_control_update_mode),
+        native_force_metric=str(freeb_edge_control_native_force_metric),
     )
     edge_control_projection_summary = _freeb_edge_control_projection_summary(
         edge_control_projection_payload,
@@ -2494,6 +2506,7 @@ def _freeb_edge_control_projection_solver_payload(
     ridge: float = 0.0,
     trust_radius: float | None = None,
     update_mode: str = "projected_delta",
+    native_force_metric: str = "pullback",
 ) -> dict[str, Any] | None:
     """Return the generic solver payload for square-axis edge controls."""
 
@@ -2515,6 +2528,7 @@ def _freeb_edge_control_projection_solver_payload(
         rcond=float(rcond),
         ridge=float(ridge),
         trust_radius=trust_radius,
+        native_force_metric=str(native_force_metric),
         source="profile_square_coil_free_boundary",
         nfp=int(config.nfp),
         mpol=int(config.mpol),
@@ -2553,6 +2567,7 @@ def _freeb_edge_control_projection_summary(payload: dict[str, Any] | None, *, re
         "ridge": float(payload.get("ridge", 0.0)),
         "trust_radius": payload.get("trust_radius"),
         "update_mode": str(payload.get("update_mode", "projected_delta")),
+        "native_force_metric": str(payload.get("native_force_metric", "pullback")),
         "rank": payload.get("rank"),
         "rank_deficient": payload.get("rank_deficient"),
         "condition_number": payload.get("condition_number"),
@@ -3326,6 +3341,7 @@ def main(argv: list[str] | None = None) -> int:
             ridge=float(args.freeb_edge_control_ridge),
             trust_radius=args.freeb_edge_control_trust_radius,
             update_mode=str(args.freeb_edge_control_update_mode),
+            native_force_metric=str(args.freeb_edge_control_native_force_metric),
         ),
         requested=str(args.freeb_edge_control_projection),
     )
@@ -3427,6 +3443,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.freeb_edge_control_trust_radius is None
                 else float(args.freeb_edge_control_trust_radius),
                 "freeb_edge_control_update_mode": str(args.freeb_edge_control_update_mode),
+                "freeb_edge_control_native_force_metric": str(args.freeb_edge_control_native_force_metric),
                 "freeb_drift_restart": bool(args.freeb_drift_restart),
                 "freeb_drift_restart_factor": float(args.freeb_drift_restart_factor),
                 "freeb_drift_restart_step_factor": float(args.freeb_drift_restart_step_factor),
@@ -3599,6 +3616,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.freeb_edge_control_trust_radius is None
             else float(args.freeb_edge_control_trust_radius),
             "freeb_edge_control_update_mode": str(args.freeb_edge_control_update_mode),
+            "freeb_edge_control_native_force_metric": str(args.freeb_edge_control_native_force_metric),
             "jax_hot_restart_count": int(args.jax_hot_restart_count),
             "jax_hot_restart_iters": None
             if args.jax_hot_restart_iters is None
@@ -3700,6 +3718,7 @@ def main(argv: list[str] | None = None) -> int:
             freeb_edge_control_ridge=float(args.freeb_edge_control_ridge),
             freeb_edge_control_trust_radius=args.freeb_edge_control_trust_radius,
             freeb_edge_control_update_mode=str(args.freeb_edge_control_update_mode),
+            freeb_edge_control_native_force_metric=str(args.freeb_edge_control_native_force_metric),
             direct_static_cache=bool(args.direct_static_cache),
             jit_direct_sampler=bool(args.jit_direct_sampler),
             direct_trial_bsqvac_resample=bool(args.direct_trial_bsqvac_resample),
@@ -3750,6 +3769,7 @@ def main(argv: list[str] | None = None) -> int:
             freeb_edge_control_ridge=float(args.freeb_edge_control_ridge),
             freeb_edge_control_trust_radius=args.freeb_edge_control_trust_radius,
             freeb_edge_control_update_mode=str(args.freeb_edge_control_update_mode),
+            freeb_edge_control_native_force_metric=str(args.freeb_edge_control_native_force_metric),
             jax_hot_restart_count=int(args.jax_hot_restart_count),
             jax_hot_restart_iters=args.jax_hot_restart_iters,
             jax_hot_restart_policy=str(args.jax_hot_restart_policy),

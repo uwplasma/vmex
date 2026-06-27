@@ -1350,6 +1350,7 @@ class _FreeBoundaryEdgeControlProjector:
         self.native_control_coordinates = step.control_coordinates
         self.native_control_last_step = {
             "status": "applied",
+            "force_metric": str(step.force_metric),
             "target_l2": float(step.target_l2),
             "control_force_l2": float(step.control_force_l2),
             "control_coordinate_l2": float(np.linalg.norm(step.control_coordinates)),

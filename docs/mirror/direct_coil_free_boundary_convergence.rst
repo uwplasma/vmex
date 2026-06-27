@@ -242,7 +242,12 @@ full solver-native spline-coordinate VMEC solve: the equilibrium state is still
 represented by VMEC Fourier coefficients. It does, however, constrain
 free-boundary edge motion to the low-dimensional square-axis spline-control
 subspace and can now apply the LCFS edge through native reduced-control force
-pullback with ``--freeb-edge-control-update-mode native_coordinate``.
+pullback with ``--freeb-edge-control-update-mode native_coordinate``.  Native
+coordinate rows default to the Jacobian-transpose force pullback, and can also
+probe a better-conditioned reduced-coordinate force with
+``--freeb-edge-control-native-force-metric least_squares``.  That option maps
+the physical edge-force direction through the same pseudo-inverse/ridged
+control operator used by coordinate updates.
 The repo-root square-coil example now uses the same projection path by default
 through ``FREE_BOUNDARY_EDGE_CONTROL_PROJECTION = "square"`` and records the
 requested basis, control count, mode count, and solver apply count in both its
@@ -754,12 +759,15 @@ The strict residual loop now exposes two reduced-coordinate application modes.
 ``--freeb-edge-control-update-mode coordinate`` forms the full Fourier delta
 and rebuilds the accepted trial LCFS edge through reduced spline controls.
 ``--freeb-edge-control-update-mode native_coordinate`` pulls the current edge
-force back with the reduced-control Jacobian transpose, carries reduced edge
-velocity memory, decodes the reduced update to the LCFS edge, and leaves
-interior R/Z and lambda on the existing VMEC preconditioned path. This is still
-not a smaller global VMEC unknown vector, but it is the first force-pullback
-solver-loop step away from fragile full-Fourier edge application for long
-straight square-axis segments. Solver diagnostics and summary CSV rows report
+force into reduced controls, carries reduced edge velocity memory, decodes the
+reduced update to the LCFS edge, and leaves interior R/Z and lambda on the
+existing VMEC preconditioned path.  The default force metric is the
+Jacobian-transpose pullback; ``--freeb-edge-control-native-force-metric
+least_squares`` instead applies the reduced-control least-squares operator to
+the physical edge-force direction. This is still not a smaller global VMEC
+unknown vector, but it is the first force-metric solver-loop step away from
+fragile full-Fourier edge application for long straight square-axis segments.
+Solver diagnostics and summary CSV rows report
 ``edge_control_update_mode``, ``coordinate_update_count``,
 ``native_coordinate_update_count``, ``native_resync_count``, and native reduced
 force/update norms. ``native_resync_count`` increments when strict trial

@@ -520,6 +520,7 @@ def test_square_axis_free_boundary_edge_control_projection_payload():
         rcond=1.0e-11,
         ridge=1.0e-6,
         trust_radius=0.25,
+        native_force_metric="least_squares",
         source="unit_test",
         mpol=4,
         ntor=8,
@@ -543,6 +544,7 @@ def test_square_axis_free_boundary_edge_control_projection_payload():
     assert payload["rcond"] == pytest.approx(1.0e-11)
     assert payload["ridge"] == pytest.approx(1.0e-6)
     assert payload["trust_radius"] == pytest.approx(0.25)
+    assert payload["native_force_metric"] == "least_squares"
     assert payload["rank"] == 2
     assert payload["rank_deficient"] is False
     assert payload["native_reduced_solver_ready"] is True
@@ -560,6 +562,8 @@ def test_square_axis_free_boundary_edge_control_projection_payload():
         square_axis_free_boundary_edge_control_projection_payload(symmetry="square", ridge=-1.0)
     with pytest.raises(ValueError, match="trust_radius"):
         square_axis_free_boundary_edge_control_projection_payload(symmetry="square", trust_radius=0.0)
+    with pytest.raises(ValueError, match="native_force_metric"):
+        square_axis_free_boundary_edge_control_projection_payload(symmetry="square", native_force_metric="bad")
 
 
 @pytest.mark.parametrize(

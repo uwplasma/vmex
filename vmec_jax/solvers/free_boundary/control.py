@@ -37,6 +37,7 @@ class FreeBoundaryNativeControlStep(NamedTuple):
     control_velocity_l2: float
     control_update_l2: float
     trust_scale: float
+    force_metric: str
 
 
 def free_boundary_iter_controls(iter2: int, iter1: int, nvacskip: int) -> tuple[int, int]:
@@ -276,6 +277,16 @@ def _prepare_freeb_edge_control_projection(
     if trust_radius is not None and (not np.isfinite(trust_radius) or trust_radius <= 0.0):
         info.update({"reason": "invalid_trust_radius"})
         return {"enabled": False, "info": info}
+    force_metric_raw = str(
+        payload.get("native_force_metric", payload.get("control_force_metric", "pullback"))
+    ).strip().lower()
+    if force_metric_raw in {"", "default", "pullback", "adjoint", "gradient", "jtf", "j.t"}:
+        native_force_metric = "pullback"
+    elif force_metric_raw in {"least_squares", "least-squares", "ls", "coordinate", "pinv", "pseudoinverse"}:
+        native_force_metric = "least_squares"
+    else:
+        info.update({"reason": "invalid_native_force_metric", "native_force_metric": force_metric_raw})
+        return {"enabled": False, "info": info}
 
     try:
         pinv = np.linalg.pinv(jacobian, rcond=rcond)
@@ -315,6 +326,7 @@ def _prepare_freeb_edge_control_projection(
             "rcond": float(rcond),
             "ridge": float(ridge),
             "trust_radius": None if trust_radius is None else float(trust_radius),
+            "native_force_metric": native_force_metric,
             "singular_values": [float(value) for value in singular_values],
             "condition_number": condition_number,
             "initial_boundary_source": initial_source,
@@ -332,6 +344,7 @@ def _prepare_freeb_edge_control_projection(
         "control_operator_np": np.asarray(control_operator, dtype=float),
         "ridge": float(ridge),
         "trust_radius": trust_radius,
+        "native_force_metric": native_force_metric,
         "mode_scale_np": mode_scale,
         "initial_np": initial,
     }
@@ -604,6 +617,21 @@ def _freeb_edge_control_pullback_force_np(force_deltas: Any, projection: dict[st
     return np.asarray(jacobian.T @ target, dtype=float), target
 
 
+def _freeb_edge_control_native_force_np(force_deltas: Any, projection: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, str]:
+    """Map one physical LCFS edge force/update direction into native controls."""
+
+    target = _freeb_edge_control_delta_tuple_target(force_deltas, projection)
+    jacobian = np.asarray(projection["jacobian_np"], dtype=float)
+    if target.size != jacobian.shape[0]:
+        raise ValueError("force_deltas and edge-control Jacobian have incompatible sizes")
+
+    metric = str(projection.get("native_force_metric", "pullback")).strip().lower()
+    if metric == "least_squares":
+        operator = np.asarray(projection.get("control_operator_np", projection["pinv_np"]), dtype=float)
+        return np.asarray(operator @ target, dtype=float), target, metric
+    return np.asarray(jacobian.T @ target, dtype=float), target, "pullback"
+
+
 def _freeb_edge_control_scale_control_np(control: Any, projection: dict[str, Any]) -> tuple[np.ndarray, float]:
     """Apply the optional control trust radius to a host control vector."""
 
@@ -678,7 +706,7 @@ def _freeb_edge_control_native_coordinate_step(
 ) -> FreeBoundaryNativeControlStep:
     """Advance the LCFS edge in solver-native reduced-control coordinates."""
 
-    control_force, target = _freeb_edge_control_pullback_force_np(force_deltas, projection)
+    control_force, target, force_metric = _freeb_edge_control_native_force_np(force_deltas, projection)
     previous = (
         np.zeros_like(control_force)
         if control_velocity is None
@@ -730,6 +758,7 @@ def _freeb_edge_control_native_coordinate_step(
         control_velocity_l2=float(np.linalg.norm(next_velocity)),
         control_update_l2=float(np.linalg.norm(control_update)),
         trust_scale=float(trust_scale),
+        force_metric=str(force_metric),
     )
 
 

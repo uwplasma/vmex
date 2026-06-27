@@ -77,6 +77,8 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "0.25",
             "--freeb-edge-control-update-mode",
             "coordinate",
+            "--freeb-edge-control-native-force-metric",
+            "least_squares",
             "--strict-trial-heartbeat",
             "--resolution-diagnostics-only",
             "--native-spline-control-prototype",
@@ -116,6 +118,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.freeb_edge_control_ridge == pytest.approx(1.0e-6)
     assert args.freeb_edge_control_trust_radius == pytest.approx(0.25)
     assert args.freeb_edge_control_update_mode == "coordinate"
+    assert args.freeb_edge_control_native_force_metric == "least_squares"
     assert args.strict_trial_heartbeat is True
     assert args.resolution_diagnostics_only is True
     assert args.native_spline_control_prototype is True
@@ -523,6 +526,7 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     assert projection["enabled"] is True
     assert projection["info"]["control_count"] == 1
     assert projection["info"]["initial_boundary_source"] == "indata"
+    assert projection["info"]["native_force_metric"] == "pullback"
 
     anchor_rcos = zeros.copy()
     anchor_rcos[-1, 0] = 4.0
@@ -642,10 +646,73 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
         flip_sign=1.0,
         host_update=True,
     )
+    metric_jacobian = np.zeros((4 * static.modes.K, 1), dtype=float)
+    metric_jacobian[0, 0] = 2.0
+    least_squares_projection = _prepare_freeb_edge_control_projection(
+        {
+            "enabled": True,
+            "basis_symmetry": "test",
+            "labels": ["R00"],
+            "control_jacobian": metric_jacobian,
+            "native_force_metric": "least_squares",
+        },
+        indata=indata,
+        static=static,
+        state0=state0,
+        free_boundary_enabled=True,
+    )
+    pullback_metric_projection = _prepare_freeb_edge_control_projection(
+        {
+            "enabled": True,
+            "basis_symmetry": "test",
+            "labels": ["R00"],
+            "control_jacobian": metric_jacobian,
+            "native_force_metric": "pullback",
+        },
+        indata=indata,
+        static=static,
+        state0=state0,
+        free_boundary_enabled=True,
+    )
+    native_least_squares = _freeb_edge_control_native_coordinate_step(
+        state_current=trial,
+        state_candidate=candidate,
+        update_deltas=update_deltas,
+        force_deltas=force_deltas,
+        projection=least_squares_projection,
+        control_velocity=None,
+        control_coordinates=None,
+        dt_eff=1.0,
+        b1=0.0,
+        fac=1.0,
+        force_scale=1.0,
+        flip_sign=1.0,
+        host_update=True,
+    )
+    native_pullback_metric = _freeb_edge_control_native_coordinate_step(
+        state_current=trial,
+        state_candidate=candidate,
+        update_deltas=update_deltas,
+        force_deltas=force_deltas,
+        projection=pullback_metric_projection,
+        control_velocity=None,
+        control_coordinates=None,
+        dt_eff=1.0,
+        b1=0.0,
+        fac=1.0,
+        force_scale=1.0,
+        flip_sign=1.0,
+        host_update=True,
+    )
     np.testing.assert_allclose(native.control_force, [2.0])
     np.testing.assert_allclose(native.control_velocity, [1.0])
     np.testing.assert_allclose(native.control_update, [0.5])
     np.testing.assert_allclose(native.control_coordinates, [0.7])
+    assert native.force_metric == "pullback"
+    assert least_squares_projection["info"]["native_force_metric"] == "least_squares"
+    np.testing.assert_allclose(native_least_squares.control_force, [1.0])
+    np.testing.assert_allclose(native_pullback_metric.control_force, [4.0])
+    assert native_least_squares.force_metric == "least_squares"
     np.testing.assert_allclose(native.state.Rcos[-1, 0], trial.Rcos[-1, 0] + 0.5)
     np.testing.assert_allclose(native.state.Rcos[0, 0], candidate.Rcos[0, 0])
     np.testing.assert_allclose(native.update_deltas[0][-1, 0], 0.5)
@@ -2144,11 +2211,18 @@ def test_square_coil_profile_run_jax_backend_passes_edge_control_projection(
     monkeypatch.setattr(
         profile,
         "_freeb_edge_control_projection_solver_payload",
-        lambda config, *, symmetry, rcond, ridge=0.0, trust_radius=None, update_mode="projected_delta": {
+        lambda config, *,
+        symmetry,
+        rcond,
+        ridge=0.0,
+        trust_radius=None,
+        update_mode="projected_delta",
+        native_force_metric="pullback": {
             **projection_payload,
             "update_mode": update_mode,
             "ridge": ridge,
             "trust_radius": trust_radius,
+            "native_force_metric": native_force_metric,
         },
     )
     monkeypatch.setattr(profile, "write_wout_from_fixed_boundary_run", lambda *args, **kwargs: None)
@@ -2209,14 +2283,17 @@ def test_square_coil_profile_run_jax_backend_passes_edge_control_projection(
         freeb_edge_control_ridge=1.0e-6,
         freeb_edge_control_trust_radius=0.25,
         freeb_edge_control_update_mode="coordinate",
+        freeb_edge_control_native_force_metric="least_squares",
     )
 
     assert captured["free_boundary_edge_control_projection"]["update_mode"] == "coordinate"
+    assert captured["free_boundary_edge_control_projection"]["native_force_metric"] == "least_squares"
     summary = out["free_boundary_solver_overrides"]["freeb_edge_control_projection"]
     assert summary["status"] == "enabled"
     assert summary["basis_symmetry"] == "square"
     assert summary["control_count"] == 2
     assert summary["update_mode"] == "coordinate"
+    assert summary["native_force_metric"] == "least_squares"
     assert summary["ridge"] == pytest.approx(1.0e-6)
     assert summary["trust_radius"] == pytest.approx(0.25)
     assert out["free_boundary_edge_control_projection"]["apply_count"] == 3

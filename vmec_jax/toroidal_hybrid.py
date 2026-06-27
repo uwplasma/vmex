@@ -463,6 +463,7 @@ def square_axis_free_boundary_edge_control_projection_payload(
     rcond: float = 1.0e-12,
     ridge: float = 0.0,
     trust_radius: float | None = None,
+    native_force_metric: str = "pullback",
     source: str = "square_axis_free_boundary_edge_control_projection",
     nfp: int = 1,
     mpol: int = 5,
@@ -492,6 +493,13 @@ def square_axis_free_boundary_edge_control_projection_payload(
     trust_value = None if trust_radius is None else float(trust_radius)
     if trust_value is not None and (not np.isfinite(trust_value) or trust_value <= 0.0):
         raise ValueError("trust_radius must be positive and finite when supplied")
+    force_metric = str(native_force_metric).strip().lower()
+    if force_metric in {"", "default", "pullback", "adjoint", "gradient", "jtf", "j.t"}:
+        force_metric = "pullback"
+    elif force_metric in {"least_squares", "least-squares", "ls", "coordinate", "pinv", "pseudoinverse"}:
+        force_metric = "least_squares"
+    else:
+        raise ValueError("native_force_metric must be 'pullback' or 'least_squares'")
     basis = square_axis_spline_symmetric_control_basis(controls, symmetry=symmetry_key)
     matrix = square_axis_spline_control_fourier_matrix(
         control_basis=basis,
@@ -517,6 +525,7 @@ def square_axis_free_boundary_edge_control_projection_payload(
         "rcond": rcond_value,
         "ridge": ridge_value,
         "trust_radius": trust_value,
+        "native_force_metric": force_metric,
         "rank": operator["rank"],
         "rank_deficient": operator["rank_deficient"],
         "condition_number": operator["condition_number"],
