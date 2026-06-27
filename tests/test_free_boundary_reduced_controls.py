@@ -6,6 +6,7 @@ import pytest
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary import (
     FreeBoundaryNativeSplineState,
+    FreeBoundaryNativeSplineUpdate,
     FreeBoundaryReducedEdgeState,
     ReducedControlMap,
     ReducedControlState,
@@ -29,10 +30,12 @@ def test_reduced_control_least_squares_step_is_public() -> None:
     assert vj.ReducedControlMap is ReducedControlMap
     assert vj.ReducedControlState is ReducedControlState
     assert vj.FreeBoundaryNativeSplineState is FreeBoundaryNativeSplineState
+    assert vj.FreeBoundaryNativeSplineUpdate is FreeBoundaryNativeSplineUpdate
     assert vj.FreeBoundaryReducedEdgeState is FreeBoundaryReducedEdgeState
     assert public_api.ReducedControlMap is ReducedControlMap
     assert public_api.ReducedControlState is ReducedControlState
     assert public_api.FreeBoundaryNativeSplineState is FreeBoundaryNativeSplineState
+    assert public_api.FreeBoundaryNativeSplineUpdate is FreeBoundaryNativeSplineUpdate
     assert public_api.FreeBoundaryReducedEdgeState is FreeBoundaryReducedEdgeState
     assert (
         vj.free_boundary_reduced_edge_state_from_vmec_state
@@ -256,6 +259,11 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
         zeros.copy(),
         zeros.copy(),
     )
+    native_update = native_spline_state.apply_edge_control_update(
+        [0.5],
+        update_deltas=force_deltas,
+        host_update=True,
+    )
     full_adjoint = jnp.asarray([2.0, 7.0, *([0.0] * (4 * static.modes.K - 2))])
     _decoded, vjp_fun = jax.vjp(
         lambda values: reduced_edge.control_state.control_map.decode_jax(values),
@@ -281,6 +289,17 @@ def test_free_boundary_reduced_edge_state_encodes_vmec_lcfs_edge_and_pullback() 
         np.asarray(decoded_state.Rcos),
     )
     assert np.asarray(native_updated_state.Rcos)[-1, 0] == pytest.approx(3.75)
+    assert isinstance(native_update, FreeBoundaryNativeSplineUpdate)
+    assert np.asarray(native_update.state.Rcos)[-1, 0] == pytest.approx(3.75)
+    assert np.asarray(native_update.update_deltas[0])[-1, 0] == pytest.approx(0.5)
+    assert native_update.native_state.control_delta_by_label == {"R00": pytest.approx(0.75)}
+    assert native_update.decoded_edge_update_l2 == pytest.approx(0.5)
+    assert native_update.source_edge_update_l2 == pytest.approx(2.0)
+    assert native_update.source_update_residual_l2 == pytest.approx(1.5)
+    assert native_update.source_update_residual_linf == pytest.approx(1.5)
+    assert native_update.source_update_residual_rel == pytest.approx(0.75)
+    assert native_update.source_update_captured_fraction == pytest.approx(0.25)
+    assert native_update.to_dict()["mode"] == "free_boundary_native_spline_update"
     np.testing.assert_allclose(native_spline_state.pullback_delta_tuple(force_deltas), [2.0])
     np.testing.assert_allclose(
         np.asarray(reduced_edge.pullback_jax(full_adjoint)),

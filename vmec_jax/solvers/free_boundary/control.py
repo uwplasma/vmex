@@ -42,6 +42,40 @@ class FreeBoundaryNativeControlStep(NamedTuple):
     force_metric: str
 
 
+class FreeBoundaryNativeSplineUpdate(NamedTuple):
+    """A reduced LCFS edge update decoded for VMEC force kernels."""
+
+    native_state: FreeBoundaryNativeSplineState
+    state: VMECState
+    update_deltas: Any
+    control_update: np.ndarray
+    decoded_edge_update: np.ndarray
+    decoded_edge_update_l2: float
+    decoded_edge_update_linf: float
+    source_edge_update_l2: float | None
+    source_update_residual_l2: float | None
+    source_update_residual_linf: float | None
+    source_update_residual_rel: float | None
+    source_update_captured_fraction: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return compact JSON-friendly update diagnostics."""
+
+        return {
+            "mode": "free_boundary_native_spline_update",
+            "reduced_update_size": int(self.control_update.size),
+            "control_update_l2": float(np.linalg.norm(self.control_update)),
+            "control_update_linf": float(np.max(np.abs(self.control_update))) if self.control_update.size else 0.0,
+            "decoded_edge_update_l2": float(self.decoded_edge_update_l2),
+            "decoded_edge_update_linf": float(self.decoded_edge_update_linf),
+            "source_edge_update_l2": self.source_edge_update_l2,
+            "source_update_residual_l2": self.source_update_residual_l2,
+            "source_update_residual_linf": self.source_update_residual_linf,
+            "source_update_residual_rel": self.source_update_residual_rel,
+            "source_update_captured_fraction": self.source_update_captured_fraction,
+        }
+
+
 @dataclass(frozen=True)
 class FreeBoundaryReducedEdgeState:
     """LCFS edge row represented in reduced free-boundary controls.
@@ -195,6 +229,71 @@ class FreeBoundaryNativeSplineState:
             template_state=self.template_state,
             edge_state=self.edge_state.update(control_update),
             projection=self.projection,
+        )
+
+    def apply_edge_control_update(
+        self,
+        control_update: Any,
+        *,
+        update_deltas: Any | None = None,
+        host_update: bool,
+    ) -> FreeBoundaryNativeSplineUpdate:
+        """Decode one reduced edge update into a VMEC state and delta tuple.
+
+        This is the small operation the full reduced-state solver needs:
+        advance the native spline controls, decode only the LCFS edge row back
+        to VMEC Fourier coefficients, and optionally replace the edge part of a
+        VMEC update tuple with the same decoded control update.
+        """
+
+        control = np.asarray(control_update, dtype=float).reshape(-1)
+        if control.size != int(self.edge_state.control_state.control_map.control_count):
+            raise ValueError("control_update size must match the native spline edge control count")
+        if not np.all(np.isfinite(control)):
+            raise ValueError("control_update must be finite")
+        decoded = np.asarray(self.projection["jacobian_np"], dtype=float) @ control
+        finite_decoded = decoded[np.isfinite(decoded)]
+        decoded_linf = float(np.max(np.abs(finite_decoded))) if finite_decoded.size else 0.0
+
+        next_state = self.update_edge(control)
+        vmec_state = next_state.to_vmec_state(host_update=bool(host_update))
+        update_deltas_out = _freeb_edge_control_delta_tuple_from_control_update(
+            update_deltas,
+            self.projection,
+            control,
+            host_update=bool(host_update),
+        )
+
+        source_l2 = None
+        residual_l2 = None
+        residual_linf = None
+        residual_rel = None
+        captured_fraction = None
+        if update_deltas is not None:
+            source = _freeb_edge_control_delta_tuple_target(update_deltas, self.projection)
+            residual = source - decoded
+            finite_residual = residual[np.isfinite(residual)]
+            source_l2 = float(np.linalg.norm(source))
+            residual_l2 = float(np.linalg.norm(finite_residual)) if finite_residual.size else 0.0
+            residual_linf = float(np.max(np.abs(finite_residual))) if finite_residual.size else 0.0
+            residual_rel = None if source_l2 <= np.finfo(float).tiny else float(residual_l2 / source_l2)
+            captured_fraction = (
+                None if source_l2 <= np.finfo(float).tiny else float(np.linalg.norm(decoded) / source_l2)
+            )
+
+        return FreeBoundaryNativeSplineUpdate(
+            native_state=next_state,
+            state=vmec_state,
+            update_deltas=update_deltas_out,
+            control_update=control,
+            decoded_edge_update=decoded,
+            decoded_edge_update_l2=float(np.linalg.norm(decoded)),
+            decoded_edge_update_linf=decoded_linf,
+            source_edge_update_l2=source_l2,
+            source_update_residual_l2=residual_l2,
+            source_update_residual_linf=residual_linf,
+            source_update_residual_rel=residual_rel,
+            source_update_captured_fraction=captured_fraction,
         )
 
     def to_vmec_state(self, *, host_update: bool) -> VMECState:
@@ -983,25 +1082,22 @@ def _freeb_edge_control_native_coordinate_step(
         if edge_state is None
         else edge_state
     )
-    next_edge_state = current_edge_state.update(control_update)
-    next_native_state = FreeBoundaryNativeSplineState(
+    current_native_state = FreeBoundaryNativeSplineState(
         template_state=state_candidate,
-        edge_state=next_edge_state,
+        edge_state=current_edge_state,
         projection=projection,
     )
-    state_out = next_native_state.to_vmec_state(host_update=bool(host_update))
-    update_deltas_out = _freeb_edge_control_delta_tuple_from_control_update(
-        update_deltas,
-        projection,
+    native_update = current_native_state.apply_edge_control_update(
         control_update,
+        update_deltas=update_deltas,
         host_update=bool(host_update),
     )
     return FreeBoundaryNativeControlStep(
-        state=state_out,
-        update_deltas=update_deltas_out,
+        state=native_update.state,
+        update_deltas=native_update.update_deltas,
         control_velocity=np.asarray(next_velocity, dtype=float),
-        native_state=next_native_state,
-        edge_state=next_edge_state,
+        native_state=native_update.native_state,
+        edge_state=native_update.native_state.edge_state,
         control_update=np.asarray(control_update, dtype=float),
         control_force=np.asarray(control_force, dtype=float),
         target_l2=float(np.linalg.norm(target)),
