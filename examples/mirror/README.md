@@ -727,6 +727,10 @@ Use ``--native-spline-actual-force-line-search-max-iter``,
 ``--native-spline-actual-force-line-search-ftol``, and
 ``--native-spline-actual-force-line-search-max-backtracks`` to turn that
 preflight into a longer native residual study without editing the script.
+Use ``--native-spline-actual-force-matrix-damping``,
+``--native-spline-actual-force-linear-tol``, and
+``--native-spline-actual-force-linear-maxiter`` to profile the damped
+normal-equation CG solve itself before spending time on long strict runs.
 Use ``--native-spline-actual-force-vacuum-mode jax_replay`` when you want the
 native residual to recompute direct-coil ``bsqvac`` from the decoded boundary
 through the existing JAX-NESTOR replay path. This is the differentiable

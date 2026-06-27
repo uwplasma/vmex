@@ -2301,6 +2301,15 @@ def _summary_row(
         "native_spline_actual_force_step_profile_matrix_free_step_wall_s": _finite_float(
             native_actual_force_profile.get("matrix_free_step_wall_s")
         ),
+        "native_spline_actual_force_step_profile_matrix_free_damping": _finite_float(
+            native_actual_force_profile.get("matrix_free_damping")
+        ),
+        "native_spline_actual_force_step_profile_matrix_free_linear_tol": _finite_float(
+            native_actual_force_profile.get("matrix_free_linear_tol")
+        ),
+        "native_spline_actual_force_step_profile_matrix_free_linear_maxiter": native_actual_force_profile.get(
+            "matrix_free_linear_maxiter"
+        ),
         "native_spline_actual_force_step_profile_residual_reduction_factor": _finite_float(
             native_actual_force_profile.get("projected_residual_reduction_factor")
         ),
@@ -3032,6 +3041,9 @@ def main(argv: list[str] | None = None) -> int:
         "native_spline_actual_force_step_profile_full_vmec_size",
         "native_spline_actual_force_step_profile_force_eval_wall_s",
         "native_spline_actual_force_step_profile_matrix_free_step_wall_s",
+        "native_spline_actual_force_step_profile_matrix_free_damping",
+        "native_spline_actual_force_step_profile_matrix_free_linear_tol",
+        "native_spline_actual_force_step_profile_matrix_free_linear_maxiter",
         "native_spline_actual_force_step_profile_residual_reduction_factor",
         "native_spline_actual_force_step_profile_projected_l2_before",
         "native_spline_actual_force_step_profile_projected_l2_after",

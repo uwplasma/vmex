@@ -93,6 +93,12 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "1e-13",
             "--native-spline-actual-force-line-search-max-backtracks",
             "6",
+            "--native-spline-actual-force-matrix-damping",
+            "1e-7",
+            "--native-spline-actual-force-linear-tol",
+            "1e-11",
+            "--native-spline-actual-force-linear-maxiter",
+            "12",
             "--native-spline-actual-force-vacuum-mode",
             "jax_replay",
         ]
@@ -141,6 +147,9 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.native_spline_actual_force_line_search_max_iter == 5
     assert args.native_spline_actual_force_line_search_ftol == pytest.approx(1.0e-13)
     assert args.native_spline_actual_force_line_search_max_backtracks == 6
+    assert args.native_spline_actual_force_matrix_damping == pytest.approx(1.0e-7)
+    assert args.native_spline_actual_force_linear_tol == pytest.approx(1.0e-11)
+    assert args.native_spline_actual_force_linear_maxiter == 12
     assert args.native_spline_actual_force_vacuum_mode == "jax_replay"
 
 
@@ -1679,6 +1688,9 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     assert native["projected_residual_l2_before_step"] > 0.0
     assert native["projected_residual_l2_after_step"] >= 0.0
     assert native["matrix_free_step_l2"] >= 0.0
+    assert native["matrix_free_damping"] == pytest.approx(1.0e-8)
+    assert native["matrix_free_linear_tol"] == pytest.approx(1.0e-10)
+    assert native["matrix_free_linear_maxiter"] == 8
     line_search = native["matrix_free_line_search_solve"]
     assert line_search["status"] == "completed"
     assert line_search["method"] == "matrix_free_normal_step_with_residual_line_search"
@@ -1776,6 +1788,15 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     assert row["native_spline_actual_force_step_profile_projected_l2_before"] == pytest.approx(
         native["projected_residual_l2_before_step"]
     )
+    assert row[
+        "native_spline_actual_force_step_profile_matrix_free_damping"
+    ] == pytest.approx(native["matrix_free_damping"])
+    assert row[
+        "native_spline_actual_force_step_profile_matrix_free_linear_tol"
+    ] == pytest.approx(native["matrix_free_linear_tol"])
+    assert row[
+        "native_spline_actual_force_step_profile_matrix_free_linear_maxiter"
+    ] == native["matrix_free_linear_maxiter"]
     assert row["native_spline_actual_force_step_profile_line_search_status"] == "completed"
     assert row["native_spline_actual_force_step_profile_line_search_n_iter"] == line_search[
         "n_iter"

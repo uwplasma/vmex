@@ -364,6 +364,9 @@ def native_spline_actual_force_step_profile_payload(
     line_search_max_iter: int = 2,
     line_search_ftol: float = 1.0e-12,
     line_search_max_backtracks: int = 8,
+    matrix_damping: float = 1.0e-8,
+    linear_tol: float = 1.0e-10,
+    linear_maxiter: int | None = 8,
     vacuum_mode: str = "frozen_initial",
 ) -> dict[str, Any]:
     """Profile one native matrix-free step using VMEC force blocks.
@@ -622,9 +625,9 @@ def native_spline_actual_force_step_profile_payload(
         edge_metric="pullback",
     )
     projected_residual, projected_s = _time_call(lambda: problem.residual(vector))
-    damping = 1.0e-8
-    linear_tol = 1.0e-10
-    linear_maxiter = 8
+    damping = float(matrix_damping)
+    linear_tol = float(linear_tol)
+    linear_maxiter = None if linear_maxiter is None else int(linear_maxiter)
     step, step_s = _time_call(
         lambda: free_boundary_native_spline_matrix_free_normal_step_jax(
             problem,

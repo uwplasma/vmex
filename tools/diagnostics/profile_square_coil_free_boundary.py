@@ -529,6 +529,24 @@ def _parser() -> argparse.ArgumentParser:
         help="Maximum backtracks per native actual-force line-search iteration.",
     )
     p.add_argument(
+        "--native-spline-actual-force-matrix-damping",
+        type=float,
+        default=1.0e-8,
+        help="Damping added to J.T J in the native actual-force matrix-free normal step.",
+    )
+    p.add_argument(
+        "--native-spline-actual-force-linear-tol",
+        type=float,
+        default=1.0e-10,
+        help="CG tolerance for the native actual-force matrix-free normal step.",
+    )
+    p.add_argument(
+        "--native-spline-actual-force-linear-maxiter",
+        type=_parse_optional_positive_int,
+        default=8,
+        help="CG max iterations for the native actual-force normal step. Use 'none' for the solver default.",
+    )
+    p.add_argument(
         "--native-spline-actual-force-vacuum-mode",
         choices=("frozen_initial", "jax_replay"),
         default="frozen_initial",
@@ -3588,6 +3606,9 @@ def main(argv: list[str] | None = None) -> int:
                 line_search_max_backtracks=int(
                     args.native_spline_actual_force_line_search_max_backtracks
                 ),
+                matrix_damping=float(args.native_spline_actual_force_matrix_damping),
+                linear_tol=float(args.native_spline_actual_force_linear_tol),
+                linear_maxiter=args.native_spline_actual_force_linear_maxiter,
                 vacuum_mode=str(args.native_spline_actual_force_vacuum_mode),
             )
             if bool(args.native_spline_actual_force_step_profile)
@@ -3657,6 +3678,17 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "native_spline_actual_force_line_search_max_backtracks": int(
                     args.native_spline_actual_force_line_search_max_backtracks
+                ),
+                "native_spline_actual_force_matrix_damping": float(
+                    args.native_spline_actual_force_matrix_damping
+                ),
+                "native_spline_actual_force_linear_tol": float(
+                    args.native_spline_actual_force_linear_tol
+                ),
+                "native_spline_actual_force_linear_maxiter": (
+                    None
+                    if args.native_spline_actual_force_linear_maxiter is None
+                    else int(args.native_spline_actual_force_linear_maxiter)
                 ),
                 "native_spline_actual_force_vacuum_mode": str(
                     args.native_spline_actual_force_vacuum_mode
