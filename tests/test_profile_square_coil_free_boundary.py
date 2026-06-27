@@ -1284,8 +1284,9 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert spline_bridge["requires_fourier_projection"] is True
     assert spline_bridge["reduced_square_control_count"] == 3
     assert spline_bridge["can_reduce_input_shape_dofs"] is True
-    assert spline_bridge["can_project_free_boundary_edge_updates"] is True
-    assert spline_bridge["can_reduce_free_boundary_edge_dofs"] is True
+    assert spline_bridge["solver_edge_control_projection_enabled"] is False
+    assert spline_bridge["can_project_free_boundary_edge_updates"] is False
+    assert spline_bridge["can_reduce_free_boundary_edge_dofs"] is False
     assert spline_bridge["can_reduce_nonlinear_solver_dofs"] is False
     assert spline_bridge["requires_native_spline_state_for_reduced_nonlinear_dofs"] is True
     assessment = data["strict_convergence_assessment"]
@@ -1302,6 +1303,32 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert deck["projection_meets_gate"] is True
     assert deck["mgrid_nphi_multiple_of_nzeta"] is True
     assert data["vmec_free_boundary_scale"]["status"] == "skipped_all_backends_disabled"
+
+
+def test_square_coil_profile_spline_bridge_marks_native_edge_control_scope() -> None:
+    bridge = profile._spline_bridge_payload(
+        config=profile.ExampleConfig(plasma_axis_kind="control_spline"),
+        projection={"mode_count": 10},
+        resolution_deck={"status": "production_ready", "mode_count": 10},
+        control_basis={
+            "bases": {
+                "square": {"reduced_count": 3},
+                "stellarator": {"reduced_count": 9},
+            }
+        },
+        control_fourier_map={"status": "available", "mode_count": 10},
+        edge_control_requested=True,
+        edge_control_update_mode="native_coordinate",
+    )
+
+    assert bridge["solver_native_spline_controls"] is True
+    assert bridge["solver_native_spline_scope"] == "lcfs_edge_only"
+    assert bridge["solver_edge_control_projection_enabled"] is True
+    assert bridge["solver_edge_control_update_mode"] == "native_coordinate"
+    assert bridge["nonlinear_solver_boundary_basis"] == "reduced_spline_edge_controls_with_vmec_fourier_decode"
+    assert bridge["can_reduce_nonlinear_solver_dofs"] is True
+    assert bridge["requires_native_spline_state_for_reduced_nonlinear_dofs"] is False
+    assert bridge["recommended_next_action"] == "profile_native_spline_edge_control_strict_convergence"
 
 
 def test_square_coil_profile_resolution_diagnostics_only_reports_incompatible_mgrid(tmp_path: Path):

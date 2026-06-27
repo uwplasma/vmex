@@ -713,13 +713,15 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     assert preflight["configuration"]["axis_spline_control_count"] == 16
     assert preflight["control_fourier_map"]["square"]["control_count"] == 3
     assert preflight["control_fourier_map"]["stellarator"]["control_count"] == 9
-    assert preflight["spline_bridge"]["solver_native_spline_controls"] is False
+    assert preflight["spline_bridge"]["solver_native_spline_controls"] is True
+    assert preflight["spline_bridge"]["solver_native_spline_scope"] == "lcfs_edge_only"
     assert preflight["spline_bridge"]["can_reduce_input_shape_dofs"] is True
     assert preflight["spline_bridge"]["solver_edge_control_projection_enabled"] is True
+    assert preflight["spline_bridge"]["solver_edge_control_update_mode"] == "native_coordinate"
     assert preflight["spline_bridge"]["can_project_free_boundary_edge_updates"] is True
     assert preflight["spline_bridge"]["can_reduce_free_boundary_edge_dofs"] is True
-    assert preflight["spline_bridge"]["can_reduce_nonlinear_solver_dofs"] is False
-    assert preflight["spline_bridge"]["requires_native_spline_state_for_reduced_nonlinear_dofs"] is True
+    assert preflight["spline_bridge"]["can_reduce_nonlinear_solver_dofs"] is True
+    assert preflight["spline_bridge"]["requires_native_spline_state_for_reduced_nonlinear_dofs"] is False
     assert preflight["edge_control_projection"]["enabled"] is True
     assert preflight["edge_control_projection"]["basis_symmetry"] == "square"
     assert preflight["edge_control_projection"]["control_count"] == 3
@@ -1404,8 +1406,10 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
         == "blocked_by_preflight"
     )
     assert "final_ftol_above_strict_target" in metrics["preflight"]["strict_convergence_assessment"]["blockers"]
-    assert metrics["preflight"]["spline_bridge"]["solver_native_spline_controls"] is False
+    assert metrics["preflight"]["spline_bridge"]["solver_native_spline_controls"] is True
+    assert metrics["preflight"]["spline_bridge"]["solver_native_spline_scope"] == "lcfs_edge_only"
     assert metrics["preflight"]["spline_bridge"]["solver_edge_control_projection_enabled"] is True
+    assert metrics["preflight"]["spline_bridge"]["solver_edge_control_update_mode"] == "native_coordinate"
     assert metrics["preflight"]["edge_control_projection"]["enabled"] is True
     assert metrics["preflight"]["edge_control_projection"]["update_mode"] == "native_coordinate"
     assert metrics["preflight"]["edge_control_projection"]["ridge"] == pytest.approx(0.0)

@@ -682,6 +682,11 @@ pre-solve deck report plus ``native_spline_control_prototype`` metadata and
 exits before coils, ``mgrid``, VMEC, or VMEC2000 are run. It is a design/readiness
 gate: it reports the reduced basis, control count, full Fourier edge size, and
 the remaining solver changes beyond the current native-coordinate edge update.
+Rows that use ``--freeb-edge-control-update-mode native_coordinate`` mark
+``spline_bridge.solver_native_spline_controls`` as true with scope
+``lcfs_edge_only``. That means the LCFS edge update is native reduced-spline
+state, decoded back to VMEC Fourier coefficients for force evaluation; the
+interior VMEC state is still the standard radial/Fourier representation.
 The table also includes ``nzeta_auto``, ``recommended_nzeta``,
 ``side_power``, ``corner_power``, ``boundary_mode_count``, and
 ``boundary_recommended_nzeta`` so ``MPOL``/``NTOR``/``NZETA`` and

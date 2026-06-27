@@ -504,6 +504,12 @@ preferred reduced basis, the number of spline controls, the full Fourier LCFS
 edge size, the reduction fraction, and the remaining source-code work beyond
 the current native-coordinate edge update. It does not claim an equilibrium or
 convergence result.
+Rows using ``--freeb-edge-control-update-mode native_coordinate`` now mark the
+``spline_bridge`` as ``solver_native_spline_controls=True`` with
+``solver_native_spline_scope="lcfs_edge_only"``. This is the current production
+scope: the LCFS edge is advanced in reduced spline coordinates and decoded to
+VMEC Fourier coefficients for force evaluation, while the interior
+``R``/``Z``/``lambda`` state remains on the existing VMEC radial/Fourier basis.
 The public helper
 ``vmec_jax.recommend_square_axis_stellarator_mirror_hybrid_resolution`` scans a
 small finite ``MPOL``/``NTOR`` ladder for the current spline-smoothed target and

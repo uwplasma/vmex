@@ -2639,6 +2639,8 @@ def _spline_bridge_payload(
     resolution_deck: dict[str, Any],
     control_basis: dict[str, Any],
     control_fourier_map: dict[str, Any],
+    edge_control_requested: bool = False,
+    edge_control_update_mode: str = "projected_delta",
 ) -> dict[str, Any]:
     """State whether the square-axis spline controls are solver-native."""
 
@@ -2657,8 +2659,13 @@ def _spline_bridge_payload(
     square_count = square_basis.get("reduced_count")
     stellarator_count = stellarator_basis.get("reduced_count")
     status = "spline_control_to_fourier_bridge" if uses_controls else "fourier_boundary_only"
+    edge_enabled = bool(edge_control_requested and uses_controls)
+    edge_update_mode = str(edge_control_update_mode).strip().lower()
+    native_edge_controls = bool(edge_enabled and edge_update_mode == "native_coordinate")
     next_action = (
-        "profile_freeb_edge_control_projection"
+        "profile_native_spline_edge_control_strict_convergence"
+        if native_edge_controls and resolution_deck.get("status") == "production_ready"
+        else "profile_freeb_edge_control_projection"
         if resolution_deck.get("status") == "production_ready"
         else "repair_projection_or_zeta_deck_before_solver_profiling"
     )
@@ -2666,9 +2673,16 @@ def _spline_bridge_payload(
         "status": status,
         "axis_kind": axis_kind,
         "real_space_axis_basis": "periodic_spline_controls" if uses_controls else "sampled_fourier_target",
-        "nonlinear_solver_boundary_basis": "vmec_fourier_coefficients",
-        "solver_native_spline_controls": False,
+        "nonlinear_solver_boundary_basis": (
+            "reduced_spline_edge_controls_with_vmec_fourier_decode"
+            if native_edge_controls
+            else "vmec_fourier_coefficients"
+        ),
+        "solver_native_spline_controls": native_edge_controls,
+        "solver_native_spline_scope": "lcfs_edge_only" if native_edge_controls else None,
         "optional_solver_edge_control_projection": uses_controls,
+        "solver_edge_control_projection_enabled": edge_enabled,
+        "solver_edge_control_update_mode": edge_update_mode,
         "requires_fourier_projection": True,
         "reduced_square_control_count": None if square_count is None else int(square_count),
         "reduced_stellarator_control_count": None if stellarator_count is None else int(stellarator_count),
@@ -2679,15 +2693,16 @@ def _spline_bridge_payload(
         "projection_target_max_component_error": resolution_deck.get("projection_target_max_component_error"),
         "control_map_status": control_fourier_map.get("status") if isinstance(control_fourier_map, dict) else None,
         "can_reduce_input_shape_dofs": uses_controls,
-        "can_project_free_boundary_edge_updates": uses_controls,
-        "can_reduce_free_boundary_edge_dofs": uses_controls,
-        "can_reduce_nonlinear_solver_dofs": False,
-        "requires_native_spline_state_for_reduced_nonlinear_dofs": uses_controls,
+        "can_project_free_boundary_edge_updates": edge_enabled,
+        "can_reduce_free_boundary_edge_dofs": edge_enabled,
+        "can_reduce_nonlinear_solver_dofs": native_edge_controls,
+        "requires_native_spline_state_for_reduced_nonlinear_dofs": bool(uses_controls and not native_edge_controls),
         "recommended_next_action": next_action,
         "interpretation": (
-            "The square-axis spline path still enters VMEC through Fourier coefficients, but the vmec_jax "
-            "free-boundary edge update can now be constrained to a reduced spline-control subspace for "
-            "A/B convergence profiles."
+            "The square-axis spline path still evaluates VMEC forces through Fourier coefficients. "
+            "When native-coordinate edge updates are enabled, the accepted LCFS edge is advanced in "
+            "reduced spline-control coordinates and decoded to VMEC Fourier coefficients for force "
+            "evaluation; the interior R/Z/lambda state remains on the existing VMEC basis."
         ),
     }
 
@@ -3272,19 +3287,21 @@ def main(argv: list[str] | None = None) -> int:
         target_error=args.max_boundary_projection_error,
         include_recommendation=bool(args.resolution_diagnostics_only),
     )
-    spline_bridge = _spline_bridge_payload(
-        config=config,
-        projection=boundary_projection,
-        resolution_deck=resolution_deck,
-        control_basis=control_basis,
-        control_fourier_map=control_fourier_map,
-    )
     edge_control_requested = str(args.freeb_edge_control_projection).strip().lower() not in {
         "",
         "none",
         "off",
         "false",
     }
+    spline_bridge = _spline_bridge_payload(
+        config=config,
+        projection=boundary_projection,
+        resolution_deck=resolution_deck,
+        control_basis=control_basis,
+        control_fourier_map=control_fourier_map,
+        edge_control_requested=bool(edge_control_requested),
+        edge_control_update_mode=str(args.freeb_edge_control_update_mode),
+    )
     strict_convergence_assessment = square_axis_strict_convergence_assessment(
         resolution_deck=resolution_deck,
         strict_schedule=strict_schedule,

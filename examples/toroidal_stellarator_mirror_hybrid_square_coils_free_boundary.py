@@ -1311,27 +1311,38 @@ def _spline_bridge_payload(config: ExampleConfig, *, resolution_deck: dict[str, 
     uses_controls = controls is not None
     edge_control = _edge_control_projection_summary(config)
     edge_enabled = bool(edge_control.get("enabled"))
+    edge_update_mode = str(config.free_boundary_edge_control_update_mode).strip().lower()
+    native_edge_controls = bool(uses_controls and edge_enabled and edge_update_mode == "native_coordinate")
     return {
         "real_space_axis_basis": "periodic_spline_controls" if uses_controls else "sampled_fourier_target",
-        "nonlinear_solver_boundary_basis": "vmec_fourier_coefficients",
-        "solver_native_spline_controls": False,
+        "nonlinear_solver_boundary_basis": (
+            "reduced_spline_edge_controls_with_vmec_fourier_decode"
+            if native_edge_controls
+            else "vmec_fourier_coefficients"
+        ),
+        "solver_native_spline_controls": native_edge_controls,
+        "solver_native_spline_scope": "lcfs_edge_only" if native_edge_controls else None,
         "solver_edge_control_projection_enabled": edge_enabled,
+        "solver_edge_control_update_mode": edge_update_mode,
         "solver_edge_control_projection": edge_control,
         "requires_fourier_projection": True,
         "can_reduce_input_shape_dofs": bool(uses_controls),
         "can_project_free_boundary_edge_updates": edge_enabled,
         "can_reduce_free_boundary_edge_dofs": edge_enabled,
-        "can_reduce_nonlinear_solver_dofs": False,
-        "requires_native_spline_state_for_reduced_nonlinear_dofs": bool(uses_controls),
+        "can_reduce_nonlinear_solver_dofs": native_edge_controls,
+        "requires_native_spline_state_for_reduced_nonlinear_dofs": bool(uses_controls and not native_edge_controls),
         "recommended_next_action": (
-            "profile_projected_edge_control_strict_convergence"
+            "profile_native_spline_edge_control_strict_convergence"
+            if native_edge_controls and resolution_deck.get("status") == "production_ready"
+            else "profile_projected_edge_control_strict_convergence"
             if edge_enabled and resolution_deck.get("status") == "production_ready"
             else "repair_projection_or_zeta_deck_before_solver_profiling"
         ),
         "interpretation": (
             "The control-spline path smooths and reduces the input target before projection. "
-            "The VMEC state still stores Fourier coefficients, but free-boundary LCFS edge "
-            "updates can be projected to the reduced square-axis control subspace."
+            "With native-coordinate edge updates, the LCFS edge is advanced in reduced spline "
+            "coordinates and decoded to VMEC Fourier coefficients for force evaluation; the "
+            "interior VMEC state remains on the existing Fourier/radial basis."
         ),
     }
 
