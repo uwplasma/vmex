@@ -490,6 +490,60 @@ def test_square_coil_followup_commands_emit_native_spline_control_prototype(tmp_
     assert "edge_stellarator_coordinate" in outdir.name
 
 
+def test_square_coil_followup_commands_emit_native_actual_force_profile(tmp_path: Path):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "native-spline-actual-force-profile",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert "--native-spline-actual-force-step-profile" in command
+    assert "--native-spline-actual-force-preconditioner" not in command
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "full"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "native_coordinate"
+    assert command[command.index("--native-spline-actual-force-linear-maxiter") + 1] == "32"
+    assert "--skip-mgrid" in command
+    assert "--run-vmec2000" not in command
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "native_spline_actual_force_profile" in outdir.name
+    assert "edge_full_native_coordinate" in outdir.name
+
+
+def test_square_coil_followup_commands_emit_preconditioned_native_actual_force_profile(
+    tmp_path: Path,
+):
+    args = followup._parser().parse_args(
+        [
+            "--outdir-root",
+            str(tmp_path),
+            "--delt-values",
+            "0.02",
+            "--profile-kind",
+            "native-spline-actual-force-preconditioned",
+            "--native-spline-actual-force-preconditioner-probes",
+            "2",
+        ]
+    )
+
+    command = followup.build_commands(args)[0]
+
+    assert "--native-spline-actual-force-step-profile" in command
+    assert command[command.index("--native-spline-actual-force-preconditioner") + 1] == "hutchinson_diag"
+    assert command[command.index("--native-spline-actual-force-preconditioner-probes") + 1] == "2"
+    assert command[command.index("--freeb-edge-control-projection") + 1] == "full"
+    assert command[command.index("--freeb-edge-control-update-mode") + 1] == "native_coordinate"
+    outdir = Path(command[command.index("--outdir") + 1])
+    assert "native_spline_actual_force_preconditioned" in outdir.name
+    assert "edge_full_native_coordinate" in outdir.name
+
+
 def test_square_coil_followup_commands_default_nzeta_tracks_ntor(tmp_path: Path):
     ntor = 31
     args = followup._parser().parse_args(

@@ -89,6 +89,8 @@ def _parser() -> argparse.ArgumentParser:
             "direct-gpu-edge-stellarator-jax-nestor-polish",
             "direct-gpu-edge-full-jax-nestor-polish",
             "native-spline-control-prototype",
+            "native-spline-actual-force-profile",
+            "native-spline-actual-force-preconditioned",
         ),
         default="vmec2000",
         help=(
@@ -105,7 +107,10 @@ def _parser() -> argparse.ArgumentParser:
             "The native-polish variants pull LCFS edge forces into reduced "
             "spline-control coordinates and keep reduced edge velocity memory. The JAX-NESTOR polish variants add the experimental JAX NESTOR "
             "operator too. native-spline-control-prototype emits the no-solve reduced spline-control "
-            "readiness report used after both edge bases underfit the force direction."
+            "readiness report used after both edge bases underfit the force direction. "
+            "native-spline-actual-force-profile emits the no-solve VMEC force-block matrix-free "
+            "native residual profile, and native-spline-actual-force-preconditioned adds the "
+            "Hutchinson/Jacobi CG preconditioner."
         ),
     )
     p.add_argument(
@@ -208,6 +213,12 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--freeb-edge-control-native-force-metric",
+        choices=("pullback", "least_squares"),
+        default="least_squares",
+        help="Native-coordinate reduced edge-force metric used by emitted native-control commands.",
+    )
+    p.add_argument(
         "--jax-hot-restart-count",
         type=int,
         default=None,
@@ -236,6 +247,13 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional existing final-grid wout_*.nc used to seed the JAX command.",
     )
+    p.add_argument("--native-spline-actual-force-line-search-max-iter", type=int, default=2)
+    p.add_argument("--native-spline-actual-force-line-search-ftol", type=float, default=1.0e-12)
+    p.add_argument("--native-spline-actual-force-matrix-damping", type=float, default=1.0e-10)
+    p.add_argument("--native-spline-actual-force-linear-tol", type=float, default=1.0e-11)
+    p.add_argument("--native-spline-actual-force-linear-maxiter", type=int, default=32)
+    p.add_argument("--native-spline-actual-force-preconditioner-probes", type=int, default=1)
+    p.add_argument("--native-spline-actual-force-preconditioner-floor", type=float, default=1.0e-12)
     return p
 
 
@@ -358,10 +376,19 @@ def _is_native_spline_prototype_kind(kind: str) -> bool:
     return str(kind) == "native-spline-control-prototype"
 
 
+def _is_native_actual_force_kind(kind: str) -> bool:
+    return str(kind) in {
+        "native-spline-actual-force-profile",
+        "native-spline-actual-force-preconditioned",
+    }
+
+
 def _edge_control_projection(args: argparse.Namespace) -> str | None:
     requested = args.freeb_edge_control_projection
     if requested is not None:
         return str(requested)
+    if _is_native_actual_force_kind(str(args.profile_kind)):
+        return "full"
     if _is_native_spline_prototype_kind(str(args.profile_kind)):
         return "stellarator"
     if str(args.profile_kind) in {
@@ -383,6 +410,8 @@ def _edge_control_update_mode(args: argparse.Namespace) -> str:
     requested = args.freeb_edge_control_update_mode
     if requested is not None:
         return str(requested)
+    if _is_native_actual_force_kind(str(args.profile_kind)):
+        return "native_coordinate"
     if _is_native_coordinate_kind(str(args.profile_kind)):
         return "native_coordinate"
     return (
@@ -471,7 +500,7 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
         "--solver-mode",
         "parity",
     ]
-    if _is_native_spline_prototype_kind(kind):
+    if _is_native_spline_prototype_kind(kind) or _is_native_actual_force_kind(kind):
         if edge_projection not in {None, "none"}:
             command.extend(
                 [
@@ -483,6 +512,8 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
                     f"{float(args.freeb_edge_control_ridge):.16g}",
                     "--freeb-edge-control-update-mode",
                     str(edge_update_mode),
+                    "--freeb-edge-control-native-force-metric",
+                    str(args.freeb_edge_control_native_force_metric),
                 ]
             )
             if args.freeb_edge_control_trust_radius is not None:
@@ -492,6 +523,38 @@ def _command_for(args: argparse.Namespace, *, delt: float) -> list[str]:
                         f"{float(args.freeb_edge_control_trust_radius):.16g}",
                     ]
                 )
+        if _is_native_actual_force_kind(kind):
+            command.extend(
+                [
+                    "--skip-mgrid",
+                    "--skip-provider-parity",
+                    "--coil-chunk-size",
+                    str(int(args.coil_chunk_size)),
+                    "--native-spline-actual-force-step-profile",
+                    "--native-spline-actual-force-line-search-max-iter",
+                    str(int(args.native_spline_actual_force_line_search_max_iter)),
+                    "--native-spline-actual-force-line-search-ftol",
+                    f"{float(args.native_spline_actual_force_line_search_ftol):.0e}",
+                    "--native-spline-actual-force-matrix-damping",
+                    f"{float(args.native_spline_actual_force_matrix_damping):.0e}",
+                    "--native-spline-actual-force-linear-tol",
+                    f"{float(args.native_spline_actual_force_linear_tol):.0e}",
+                    "--native-spline-actual-force-linear-maxiter",
+                    str(int(args.native_spline_actual_force_linear_maxiter)),
+                ]
+            )
+            if kind == "native-spline-actual-force-preconditioned":
+                command.extend(
+                    [
+                        "--native-spline-actual-force-preconditioner",
+                        "hutchinson_diag",
+                        "--native-spline-actual-force-preconditioner-probes",
+                        str(int(args.native_spline_actual_force_preconditioner_probes)),
+                        "--native-spline-actual-force-preconditioner-floor",
+                        f"{float(args.native_spline_actual_force_preconditioner_floor):.0e}",
+                    ]
+                )
+            return command
         command.extend(["--resolution-diagnostics-only", "--native-spline-control-prototype"])
         return command
     jax_kind = kind in {"provider-parity", "full-backend"} or _is_direct_jax_kind(kind)
