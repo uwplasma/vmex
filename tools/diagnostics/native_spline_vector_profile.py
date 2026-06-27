@@ -9,6 +9,7 @@ import numpy as np
 
 from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary import (
     ExampleConfig,
+    build_square_coils,
     make_free_boundary_indata,
 )
 from vmec_jax.boundary import boundary_from_indata
@@ -171,6 +172,92 @@ def _edge_only_update_residual_payload(
         "projected_residual_linf_after_step": norm["linf"],
         "projected_residual_reduction_factor": reduction,
     }
+
+
+def _initial_free_boundary_vacuum_pressure(
+    *,
+    config: ExampleConfig,
+    state: VMECState,
+    static: Any,
+    indata: Any,
+) -> tuple[dict[str, Any], np.ndarray | None, float | None]:
+    """Sample initial edge vacuum pressure for native free-boundary diagnostics."""
+
+    try:
+        from vmec_jax.external_fields import build_coil_field_geometry
+        from vmec_jax.free_boundary import nestor_external_only_step
+        from vmec_jax.solvers.fixed_boundary.residual.runtime import edge_bsqvac_from_nestor
+        from vmec_jax.solvers.fixed_boundary.residual.setup import free_boundary_pressure_edge_scale
+    except Exception as exc:  # pragma: no cover - dependencies are expected in this repo.
+        return {
+            "status": "blocked",
+            "reason": "free_boundary_vacuum_dependencies_unavailable",
+            "error": repr(exc),
+        }, None, None
+
+    try:
+        coils = build_square_coils(config)
+        provider_static = {
+            "coil_geometry": build_coil_field_geometry(coils.params),
+            "regularization_epsilon": float(getattr(coils.params, "regularization_epsilon", 0.0)),
+            "chunk_size": getattr(coils.params, "chunk_size", None),
+            "cache_scope": "native_spline_actual_force_step_profile",
+            "jit_sampler": False,
+            "resample_trial_bsqvac": True,
+        }
+        (nestor_result, _runtime), wall_s = _time_call(
+            lambda: nestor_external_only_step(
+                state=state,
+                static=static,
+                ivac=1,
+                ivacskip=0,
+                iter_idx=0,
+                runtime=None,
+                extcur=tuple(getattr(static, "free_boundary_extcur", ()) or ()),
+                plascur=0.0,
+                external_field_provider_kind="direct_coils",
+                external_field_provider_static=provider_static,
+                external_field_provider_params=coils.params,
+                collect_trace_arrays=False,
+            )
+        )
+        bsqvac = np.asarray(edge_bsqvac_from_nestor(nestor_result, static), dtype=float)
+        pres_scale = free_boundary_pressure_edge_scale(
+            free_boundary_enabled=True,
+            indata=indata,
+            s=np.asarray(static.s, dtype=float),
+        )
+        bsq_norms = _norms(bsqvac)
+        diagnostics = getattr(nestor_result, "diagnostics", None)
+        diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+        return {
+            "status": "included",
+            "mode": "direct_coils_nestor_external_only_frozen_initial_edge",
+            "provider": "direct_coils",
+            "coil_count": int(np.asarray(coils.centers).shape[0]),
+            "coil_segments": int(config.coil_segments),
+            "trial_vacuum_pressure_resampled": False,
+            "differentiable_vacuum_pressure": False,
+            "wall_s": float(wall_s),
+            "bsqvac_shape": [int(value) for value in bsqvac.shape],
+            "bsqvac_l2": bsq_norms["l2"],
+            "bsqvac_linf": bsq_norms["linf"],
+            "pressure_edge_scale": None if pres_scale is None else float(pres_scale),
+            "nestor_reused": bool(getattr(nestor_result, "reused", False)),
+            "nestor_model": str(getattr(nestor_result, "model", "")),
+            "nestor_solve_time_s": float(getattr(nestor_result, "solve_time_s", 0.0)),
+            "nestor_sample_time_s": float(getattr(nestor_result, "sample_time_s", 0.0)),
+            "nestor_bnormal_rms": _json_scalar(diagnostics.get("bnormal_rms")),
+            "nestor_bsqvac_rms": _json_scalar(diagnostics.get("bsqvac_rms")),
+            "next_action": "replace_frozen_bsqvac_with_differentiable_jax_nestor_or_adjoint_replay",
+        }, bsqvac, None if pres_scale is None else float(pres_scale)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "mode": "direct_coils_nestor_external_only_frozen_initial_edge",
+            "error": repr(exc),
+            "next_action": "repair_direct_coil_nestor_sampling_for_native_residual",
+        }, None, None
 
 
 def _mode00_index(modes: Any) -> int:
@@ -368,6 +455,13 @@ def native_spline_actual_force_step_profile_payload(
         tree_has_tracer=lambda _value: False,
         vmec_scalxc_from_s=vmec_scalxc_from_s,
     )
+    vacuum_pressure, freeb_bsqvac_half, freeb_pres_scale = _initial_free_boundary_vacuum_pressure(
+        config=config,
+        state=state,
+        static=static,
+        indata=indata,
+    )
+    vacuum_pressure_included = freeb_bsqvac_half is not None
     unknowns, encode_s = _time_call(
         lambda: free_boundary_native_spline_unknown_vector_from_vmec_state(state, projection)
     )
@@ -382,13 +476,13 @@ def native_spline_actual_force_step_profile_payload(
             s=s,
             signgs=signgs,
             constraint_tcon0=None,
-            freeb_pres_scale=None,
+            freeb_pres_scale=freeb_pres_scale,
             apply_lforbal=False,
             apply_m1_constraints=True,
             include_edge=True,
             include_edge_residual=True,
             zero_m1=True,
-            freeb_bsqvac_half=None,
+            freeb_bsqvac_half=freeb_bsqvac_half,
             iter_idx=None,
             scan_debug_force_enabled=False,
             dump_hlo_force_tomnsps=False,
@@ -591,8 +685,13 @@ def native_spline_actual_force_step_profile_payload(
     return {
         "status": "completed",
         "equilibrium_solve_performed": False,
-        "force_scope": "internal_vmec_force_blocks_only",
-        "free_boundary_vacuum_pressure_included": False,
+        "force_scope": (
+            "vmec_force_blocks_with_frozen_initial_free_boundary_vacuum_pressure"
+            if vacuum_pressure_included
+            else "internal_vmec_force_blocks_only"
+        ),
+        "free_boundary_vacuum_pressure_included": bool(vacuum_pressure_included),
+        "free_boundary_vacuum_pressure": vacuum_pressure,
         "edge_control_projection_requested": str(edge_control_requested),
         "edge_control_projection": info,
         "native_state_schema": "FreeBoundaryNativeSplineUnknownVector.v1",

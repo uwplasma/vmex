@@ -1757,6 +1757,9 @@ def _summary_row(
     native_actual_force_mapping = native_actual_force_profile.get("force_block_mapping_audit")
     if not isinstance(native_actual_force_mapping, dict):
         native_actual_force_mapping = {}
+    native_actual_vacuum_pressure = native_actual_force_profile.get("free_boundary_vacuum_pressure")
+    if not isinstance(native_actual_vacuum_pressure, dict):
+        native_actual_vacuum_pressure = {}
     return {
         "case": case,
         "backend": backend_name,
@@ -2258,6 +2261,21 @@ def _summary_row(
         ),
         "native_spline_actual_force_step_profile_force_scope": native_actual_force_profile.get(
             "force_scope"
+        ),
+        "native_spline_actual_force_step_profile_vacuum_pressure_included": native_actual_force_profile.get(
+            "free_boundary_vacuum_pressure_included"
+        ),
+        "native_spline_actual_force_step_profile_vacuum_pressure_status": native_actual_vacuum_pressure.get(
+            "status"
+        ),
+        "native_spline_actual_force_step_profile_vacuum_pressure_mode": native_actual_vacuum_pressure.get(
+            "mode"
+        ),
+        "native_spline_actual_force_step_profile_vacuum_pressure_bsqvac_linf": _finite_float(
+            native_actual_vacuum_pressure.get("bsqvac_linf")
+        ),
+        "native_spline_actual_force_step_profile_vacuum_pressure_wall_s": _finite_float(
+            native_actual_vacuum_pressure.get("wall_s")
         ),
         "native_spline_actual_force_step_profile_native_unknown_size": native_actual_force_profile.get(
             "native_unknown_size"
@@ -2972,6 +2990,11 @@ def main(argv: list[str] | None = None) -> int:
         "native_spline_vector_residual_profile_next_action",
         "native_spline_actual_force_step_profile_status",
         "native_spline_actual_force_step_profile_force_scope",
+        "native_spline_actual_force_step_profile_vacuum_pressure_included",
+        "native_spline_actual_force_step_profile_vacuum_pressure_status",
+        "native_spline_actual_force_step_profile_vacuum_pressure_mode",
+        "native_spline_actual_force_step_profile_vacuum_pressure_bsqvac_linf",
+        "native_spline_actual_force_step_profile_vacuum_pressure_wall_s",
         "native_spline_actual_force_step_profile_native_unknown_size",
         "native_spline_actual_force_step_profile_full_vmec_size",
         "native_spline_actual_force_step_profile_force_eval_wall_s",

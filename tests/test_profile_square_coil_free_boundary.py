@@ -1647,8 +1647,17 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     native = data["native_spline_actual_force_step_profile"]
     assert native["status"] == "completed"
     assert native["equilibrium_solve_performed"] is False
-    assert native["force_scope"] == "internal_vmec_force_blocks_only"
-    assert native["free_boundary_vacuum_pressure_included"] is False
+    assert native["force_scope"] == "vmec_force_blocks_with_frozen_initial_free_boundary_vacuum_pressure"
+    assert native["free_boundary_vacuum_pressure_included"] is True
+    vacuum = native["free_boundary_vacuum_pressure"]
+    assert vacuum["status"] == "included"
+    assert vacuum["mode"] == "direct_coils_nestor_external_only_frozen_initial_edge"
+    assert vacuum["provider"] == "direct_coils"
+    assert vacuum["coil_count"] == 16
+    assert vacuum["coil_segments"] == 96
+    assert vacuum["trial_vacuum_pressure_resampled"] is False
+    assert vacuum["differentiable_vacuum_pressure"] is False
+    assert vacuum["bsqvac_linf"] > 0.0
     assert native["native_unknown_size"] < native["full_vmec_size"]
     assert native["removed_fourier_edge_dofs"] > 0
     assert native["force_eval_wall_s"] >= 0.0
@@ -1713,8 +1722,17 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     assert row["native_spline_actual_force_step_profile_status"] == "completed"
     assert (
         row["native_spline_actual_force_step_profile_force_scope"]
-        == "internal_vmec_force_blocks_only"
+        == "vmec_force_blocks_with_frozen_initial_free_boundary_vacuum_pressure"
     )
+    assert row["native_spline_actual_force_step_profile_vacuum_pressure_included"] is True
+    assert row["native_spline_actual_force_step_profile_vacuum_pressure_status"] == "included"
+    assert (
+        row["native_spline_actual_force_step_profile_vacuum_pressure_mode"]
+        == "direct_coils_nestor_external_only_frozen_initial_edge"
+    )
+    assert row[
+        "native_spline_actual_force_step_profile_vacuum_pressure_bsqvac_linf"
+    ] == pytest.approx(vacuum["bsqvac_linf"])
     assert row["native_spline_actual_force_step_profile_native_unknown_size"] == native[
         "native_unknown_size"
     ]

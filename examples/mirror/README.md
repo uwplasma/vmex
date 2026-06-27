@@ -700,18 +700,23 @@ preflight: it evaluates internal VMEC force blocks on the initial state, maps
 them into the native residual basis, and takes one matrix-free normal step. It
 does not yet include NESTOR/free-boundary vacuum pressure, so it is bridge
 evidence rather than a free-boundary equilibrium solve.
-The same preflight now also compares that matrix-free step with the existing
-edge-only native-coordinate bridge. On the tiny ``MPOL=3, NTOR=4, NS=5``
-deck, the internal-force matrix-free normal step reduces the projected residual
-by about ``0.71`` in one step. The force-block adapter matches VMEC's
+The same preflight now also samples the initial direct-coil NESTOR edge vacuum
+pressure and passes the frozen ``0.5 |B|^2`` edge data into the force blocks.
+It then compares that matrix-free step with the existing edge-only
+native-coordinate bridge. On the tiny ``MPOL=3, NTOR=4, NS=5`` deck, the
+vacuum-coupled matrix-free normal step reduces the projected residual by about
+``0.711`` in one step. The force-block adapter matches VMEC's
 ``delta_tuple_from_blocks`` mapping to roundoff, so the adapter itself is not
 the sign/normalization mismatch. The VMEC ``DELT``-scaled edge bridge is
 anti-aligned with the matrix-free edge increment and about ``6.6e2`` times too
 large on the tiny deck. When normalized to the matrix-free edge-step norm, the
 opposite-sign edge-only bridge only reduces the residual by about ``0.987``.
 Treat this as evidence that strict native convergence needs the full
-matrix-free native residual solve with free-boundary vacuum pressure and a line
-search, not further tuning of the edge-only momentum bridge.
+matrix-free native residual solve with differentiable or adjoint-replayed
+free-boundary vacuum pressure and a line search, not further tuning of the
+edge-only momentum bridge. The current preflight freezes the vacuum pressure at
+the initial state so JAX can linearize the VMEC residual; trial-state NESTOR
+resampling remains the next production solver step.
 Use ``free_boundary_native_spline_matrix_free_normal_*`` for the next prototype
 step: it applies ``J`` and ``J.T`` through JAX JVP/VJP products and solves the
 damped normal equations by conjugate gradient.
