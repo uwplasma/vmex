@@ -156,6 +156,7 @@ from vmec_jax.solvers.free_boundary.control import (
     _freeb_edge_control_control_delta_jax,
     _freeb_edge_control_native_coordinate_step,
     _freeb_edge_control_project_vector_np,
+    _freeb_edge_control_reduced_state_from_state,
     _prepare_freeb_edge_control_projection,
     _project_freeb_edge_control_delta_tuple,
     _project_freeb_edge_control_state,
@@ -1237,6 +1238,7 @@ class _FreeBoundaryEdgeControlProjector:
         self.native_control_velocity = None
         self.native_control_coordinates = None
         self.native_control_last_step = {}
+        self.native_control_resync_count = 0
         self.use_scan = bool(use_scan)
         self.jit_strict_update_enabled = bool(jit_strict_update_enabled)
         mode = "projected_delta"
@@ -1356,6 +1358,36 @@ class _FreeBoundaryEdgeControlProjector:
             "trust_scale": float(step.trust_scale),
         }
         return step.state, step.update_deltas
+
+    def sync_native_control_from_accepted_state(
+        self,
+        state_in: VMECState,
+        *,
+        velocity_scale: float = 1.0,
+    ) -> None:
+        """Synchronize tracked reduced controls after strict trial scaling."""
+
+        if not self.enabled or self.update_mode != "native_coordinate":
+            return
+        reduced_state = _freeb_edge_control_reduced_state_from_state(state_in, self.projection)
+        self.native_control_coordinates = np.asarray(reduced_state.control_delta, dtype=float)
+        scale = float(velocity_scale)
+        if self.native_control_velocity is not None and np.isfinite(scale):
+            self.native_control_velocity = scale * np.asarray(self.native_control_velocity, dtype=float)
+        self.native_control_resync_count += 1
+        self.native_control_last_step.update(
+            {
+                "accepted_state_resync": True,
+                "backtracking_alpha": scale if np.isfinite(scale) else None,
+                "control_coordinate_l2": float(np.linalg.norm(self.native_control_coordinates)),
+                "control_coordinate_linf": float(np.max(np.abs(self.native_control_coordinates)))
+                if self.native_control_coordinates.size
+                else 0.0,
+                "control_velocity_l2": float(np.linalg.norm(np.asarray(self.native_control_velocity, dtype=float)))
+                if self.native_control_velocity is not None
+                else 0.0,
+            }
+        )
 
     def apply_coordinate_update_from_delta_tuple(
         self,
@@ -3699,9 +3731,11 @@ def solve_fixed_boundary_residual_iter(
                 w_try = trial_eval.w_try
                 w_try_ratio = trial_eval.w_try_ratio
                 probe_bad_jacobian = trial_eval.probe_bad_jacobian
+                trial_alpha = trial_eval.alpha
             else:
                 w_try = w_curr
                 w_try_ratio = 1.0
+                trial_alpha = 1.0
 
             # Require (near) monotone improvement; otherwise fall back to the
             # restart/timestep control path.
@@ -3749,6 +3783,11 @@ def solve_fixed_boundary_residual_iter(
                     )
                     if adjoint_trace and branch_result.fallback_direct_dt is not None:
                         trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
+            if branch_result.accepted and branch_result.restart_path == "momentum_accept":
+                freeb_edge_control_projector.sync_native_control_from_accepted_state(
+                    branch_result.state,
+                    velocity_scale=float(trial_alpha),
+                )
             branch_application = _apply_strict_step_branch(branch_result)
             if not branch_result.accepted:
                 catastrophic_restart = branch_result.catastrophic_restart
@@ -3948,6 +3987,7 @@ def solve_fixed_boundary_residual_iter(
     )
     freeb_edge_control_projection_native_last_step = dict(freeb_edge_control_projector.native_control_last_step)
     freeb_edge_control_projection_zero_velocity_count = freeb_edge_control_projector.zero_velocity_count
+    freeb_edge_control_projection_native_resync_count = freeb_edge_control_projector.native_control_resync_count
     return _finalize_residual_iter_result_from_namespace(
         locals(),
         return_final_force_payload=bool(return_final_force_payload),

@@ -1766,6 +1766,7 @@ def _summary_row(
         "freeb_edge_control_projection_native_velocity_reset_count": freeb_edge_control_runtime.get(
             "native_velocity_reset_count"
         ),
+        "freeb_edge_control_projection_native_resync_count": freeb_edge_control_runtime.get("native_resync_count"),
         "freeb_edge_control_projection_native_force_l2": _finite_float(
             freeb_edge_control_native_last_step.get("control_force_l2")
         ),
@@ -2410,6 +2411,7 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_coordinate_update_count",
         "freeb_edge_control_projection_native_coordinate_update_count",
         "freeb_edge_control_projection_native_velocity_reset_count",
+        "freeb_edge_control_projection_native_resync_count",
         "freeb_edge_control_projection_native_force_l2",
         "freeb_edge_control_projection_native_velocity_l2",
         "freeb_edge_control_projection_native_update_l2",

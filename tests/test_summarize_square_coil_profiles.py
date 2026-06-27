@@ -723,6 +723,7 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
                             "coordinate_update_count": 5,
                             "native_coordinate_update_count": 4,
                             "native_velocity_reset_count": 1,
+                            "native_resync_count": 2,
                             "native_last_step": {
                                 "control_force_l2": 1.2e-4,
                                 "control_velocity_l2": 3.4e-5,
@@ -804,6 +805,7 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_coordinate_update_count"] == 5
     assert row["freeb_edge_control_projection_native_coordinate_update_count"] == 4
     assert row["freeb_edge_control_projection_native_velocity_reset_count"] == 1
+    assert row["freeb_edge_control_projection_native_resync_count"] == 2
     assert row["freeb_edge_control_projection_native_force_l2"] == pytest.approx(1.2e-4)
     assert row["freeb_edge_control_projection_native_velocity_l2"] == pytest.approx(3.4e-5)
     assert row["freeb_edge_control_projection_native_update_l2"] == pytest.approx(5.6e-6)

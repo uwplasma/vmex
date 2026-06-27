@@ -754,7 +754,10 @@ not a smaller global VMEC unknown vector, but it is the first force-pullback
 solver-loop step away from fragile full-Fourier edge application for long
 straight square-axis segments. Solver diagnostics and summary CSV rows report
 ``edge_control_update_mode``, ``coordinate_update_count``,
-``native_coordinate_update_count``, and native reduced force/update norms.
+``native_coordinate_update_count``, ``native_resync_count``, and native reduced
+force/update norms. ``native_resync_count`` increments when strict trial
+backtracking accepts a fractional native-coordinate edge step and the tracked
+reduced edge state is reconciled with the accepted LCFS.
 Final diagnostics also report
 ``free_boundary.edge_control_projection.reduced_update_direction`` for the
 current full Fourier update direction. It gives the fitted reduced update

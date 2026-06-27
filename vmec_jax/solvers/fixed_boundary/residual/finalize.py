@@ -276,6 +276,12 @@ def _edge_control_projection_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
                 getattr(ns.get("freeb_edge_control_projector"), "native_velocity_reset_count", 0),
             )
         ),
+        "native_resync_count": int(
+            ns.get(
+                "freeb_edge_control_projection_native_resync_count",
+                getattr(ns.get("freeb_edge_control_projector"), "native_control_resync_count", 0),
+            )
+        ),
         "native_last_step": dict(ns.get("freeb_edge_control_projection_native_last_step", {})),
         "zero_velocity_count": int(ns.get("freeb_edge_control_projection_zero_velocity_count", 0)),
         "state_residual": _edge_control_state_residual_payload(ns),

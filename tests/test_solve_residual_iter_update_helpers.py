@@ -345,6 +345,63 @@ def test_free_boundary_edge_coordinate_mode_applies_reduced_update_once(monkeypa
     assert callable(projected.delta_tuple_projector())
 
 
+def test_free_boundary_native_projector_resyncs_fractional_backtracking(monkeypatch) -> None:
+    def fake_prepare(payload, **_kwargs):
+        return {
+            "enabled": True,
+            "info": {
+                "enabled": True,
+                "basis_symmetry": "square",
+                "labels": ["R00"],
+                "rcond": 1.0e-12,
+            },
+            "mode_count": 1,
+            "mode_scale_np": np.ones(1),
+            "initial_np": {
+                "R_cos": np.asarray([1.0]),
+                "R_sin": np.zeros(1),
+                "Z_cos": np.zeros(1),
+                "Z_sin": np.zeros(1),
+            },
+            "jacobian_np": np.asarray([[1.0], [0.0], [0.0], [0.0]]),
+            "pinv_np": np.asarray([[1.0, 0.0, 0.0, 0.0]]),
+        }
+
+    monkeypatch.setattr(
+        "vmec_jax.solvers.fixed_boundary.residual.iteration._prepare_freeb_edge_control_projection",
+        fake_prepare,
+    )
+
+    projector = _FreeBoundaryEdgeControlProjector(
+        {"update_mode": "native_coordinate"},
+        indata=object(),
+        static=object(),
+        state0=object(),
+        free_boundary_enabled=True,
+        use_scan=False,
+        jit_strict_update_enabled=True,
+    )
+    projector.native_control_velocity = np.asarray([4.0])
+    projector.native_control_coordinates = np.asarray([5.0])
+    projector.native_control_last_step = {"status": "applied", "control_update_l2": 2.0}
+    accepted_state = SimpleNamespace(
+        Rcos=np.asarray([[1.0], [2.0]]),
+        Rsin=np.zeros((2, 1)),
+        Zcos=np.zeros((2, 1)),
+        Zsin=np.zeros((2, 1)),
+    )
+
+    projector.sync_native_control_from_accepted_state(accepted_state, velocity_scale=0.25)
+
+    np.testing.assert_allclose(projector.native_control_coordinates, [1.0])
+    np.testing.assert_allclose(projector.native_control_velocity, [1.0])
+    assert projector.native_control_resync_count == 1
+    assert projector.native_control_last_step["accepted_state_resync"] is True
+    assert projector.native_control_last_step["backtracking_alpha"] == pytest.approx(0.25)
+    assert projector.native_control_last_step["control_coordinate_l2"] == pytest.approx(1.0)
+    assert projector.native_control_last_step["control_velocity_l2"] == pytest.approx(1.0)
+
+
 def test_residual_iteration_control_sample_matches_vmec2000_edge_and_precond_rules() -> None:
     initial = resolve_residual_iteration_control_sample(
         iter2=1,

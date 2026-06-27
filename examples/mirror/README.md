@@ -652,7 +652,10 @@ check before replacing the full Fourier LCFS edge with native side/corner
 controls.
 When ``native_coordinate`` is active, diagnostics also include
 ``free_boundary.edge_control_projection.native_control_state`` with the tracked
-reduced unknown vector used by the strict update.
+reduced unknown vector used by the strict update. Summary rows include
+``native_resync_count`` when strict backtracking accepts a fractional native
+edge-control step and the tracked reduced state is reconciled with the accepted
+LCFS.
 The root square-coil beta-scan example mirrors the same evidence in its
 ``square_coil_hybrid_free_boundary_solve_summary.csv`` rows, including state
 reconstruction residuals, reduced-unknown size, reduced-update size, and decoded
