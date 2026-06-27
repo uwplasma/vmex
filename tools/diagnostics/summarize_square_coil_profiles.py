@@ -1823,6 +1823,27 @@ def _summary_row(
         "freeb_edge_control_projection_native_trust_scale": _finite_float(
             freeb_edge_control_native_last_step.get("trust_scale")
         ),
+        "freeb_edge_control_projection_native_decoded_edge_update_l2": _finite_float(
+            freeb_edge_control_native_last_step.get("decoded_edge_update_l2")
+        ),
+        "freeb_edge_control_projection_native_decoded_edge_update_linf": _finite_float(
+            freeb_edge_control_native_last_step.get("decoded_edge_update_linf")
+        ),
+        "freeb_edge_control_projection_native_source_update_l2": _finite_float(
+            freeb_edge_control_native_last_step.get("source_edge_update_l2")
+        ),
+        "freeb_edge_control_projection_native_source_update_residual_l2": _finite_float(
+            freeb_edge_control_native_last_step.get("source_update_residual_l2")
+        ),
+        "freeb_edge_control_projection_native_source_update_residual_linf": _finite_float(
+            freeb_edge_control_native_last_step.get("source_update_residual_linf")
+        ),
+        "freeb_edge_control_projection_native_source_update_residual_rel": _finite_float(
+            freeb_edge_control_native_last_step.get("source_update_residual_rel")
+        ),
+        "freeb_edge_control_projection_native_source_update_captured_fraction": _finite_float(
+            freeb_edge_control_native_last_step.get("source_update_captured_fraction")
+        ),
         "freeb_edge_control_projection_native_state_status": freeb_edge_control_native_state.get(
             "status"
         ),
@@ -2571,6 +2592,13 @@ def main(argv: list[str] | None = None) -> int:
         "freeb_edge_control_projection_native_velocity_l2",
         "freeb_edge_control_projection_native_update_l2",
         "freeb_edge_control_projection_native_trust_scale",
+        "freeb_edge_control_projection_native_decoded_edge_update_l2",
+        "freeb_edge_control_projection_native_decoded_edge_update_linf",
+        "freeb_edge_control_projection_native_source_update_l2",
+        "freeb_edge_control_projection_native_source_update_residual_l2",
+        "freeb_edge_control_projection_native_source_update_residual_linf",
+        "freeb_edge_control_projection_native_source_update_residual_rel",
+        "freeb_edge_control_projection_native_source_update_captured_fraction",
         "freeb_edge_control_projection_native_state_status",
         "freeb_edge_control_projection_native_state_schema",
         "freeb_edge_control_projection_native_state_mode",

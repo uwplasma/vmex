@@ -40,6 +40,7 @@ class FreeBoundaryNativeControlStep(NamedTuple):
     control_update_l2: float
     trust_scale: float
     force_metric: str
+    native_update: FreeBoundaryNativeSplineUpdate
 
 
 class FreeBoundaryNativeSplineUpdate(NamedTuple):
@@ -1106,6 +1107,7 @@ def _freeb_edge_control_native_coordinate_step(
         control_update_l2=float(np.linalg.norm(control_update)),
         trust_scale=float(trust_scale),
         force_metric=str(force_metric),
+        native_update=native_update,
     )
 
 

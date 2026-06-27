@@ -1387,6 +1387,13 @@ class _FreeBoundaryEdgeControlProjector:
             "control_velocity_l2": float(step.control_velocity_l2),
             "control_update_l2": float(step.control_update_l2),
             "trust_scale": float(step.trust_scale),
+            "decoded_edge_update_l2": float(step.native_update.decoded_edge_update_l2),
+            "decoded_edge_update_linf": float(step.native_update.decoded_edge_update_linf),
+            "source_edge_update_l2": step.native_update.source_edge_update_l2,
+            "source_update_residual_l2": step.native_update.source_update_residual_l2,
+            "source_update_residual_linf": step.native_update.source_update_residual_linf,
+            "source_update_residual_rel": step.native_update.source_update_residual_rel,
+            "source_update_captured_fraction": step.native_update.source_update_captured_fraction,
         }
         return step.state, step.update_deltas
 

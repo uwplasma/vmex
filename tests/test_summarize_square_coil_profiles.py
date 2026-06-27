@@ -821,6 +821,13 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
                                 "control_velocity_l2": 3.4e-5,
                                 "control_update_l2": 5.6e-6,
                                 "trust_scale": 0.75,
+                                "decoded_edge_update_l2": 4.5e-6,
+                                "decoded_edge_update_linf": 2.5e-6,
+                                "source_edge_update_l2": 6.0e-6,
+                                "source_update_residual_l2": 1.5e-6,
+                                "source_update_residual_linf": 8.0e-7,
+                                "source_update_residual_rel": 0.25,
+                                "source_update_captured_fraction": 0.75,
                             },
                             "native_control_state": {
                                 "status": "tracked",
@@ -920,6 +927,13 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_native_velocity_l2"] == pytest.approx(3.4e-5)
     assert row["freeb_edge_control_projection_native_update_l2"] == pytest.approx(5.6e-6)
     assert row["freeb_edge_control_projection_native_trust_scale"] == pytest.approx(0.75)
+    assert row["freeb_edge_control_projection_native_decoded_edge_update_l2"] == pytest.approx(4.5e-6)
+    assert row["freeb_edge_control_projection_native_decoded_edge_update_linf"] == pytest.approx(2.5e-6)
+    assert row["freeb_edge_control_projection_native_source_update_l2"] == pytest.approx(6.0e-6)
+    assert row["freeb_edge_control_projection_native_source_update_residual_l2"] == pytest.approx(1.5e-6)
+    assert row["freeb_edge_control_projection_native_source_update_residual_linf"] == pytest.approx(8.0e-7)
+    assert row["freeb_edge_control_projection_native_source_update_residual_rel"] == pytest.approx(0.25)
+    assert row["freeb_edge_control_projection_native_source_update_captured_fraction"] == pytest.approx(0.75)
     assert row["freeb_edge_control_projection_native_state_status"] == "tracked"
     assert (
         row["freeb_edge_control_projection_native_state_schema"]
