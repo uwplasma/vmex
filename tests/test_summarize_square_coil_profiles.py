@@ -1444,6 +1444,75 @@ def test_square_coil_profile_summary_markdown_includes_virtual_casing_columns(
     assert "5e-06" in out
 
 
+def test_square_coil_profile_summary_strict_field_set_is_compact(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    case_dir = tmp_path / "square_coil_freeb_backend_profile_vmec2000_strict_plateau"
+    case_dir.mkdir()
+    report = case_dir / "square_coil_free_boundary_backend_profile.json"
+    report.write_text(
+        json.dumps(
+            {
+                "configuration": {
+                    "mpol": 5,
+                    "ntor": 28,
+                    "ns": 17,
+                    "nzeta": 64,
+                    "ftol": 1.0e-12,
+                    "max_iter": 32000,
+                },
+                "resolution_deck": {
+                    "status": "production_ready",
+                    "reasons": [],
+                    "mgrid_nphi_multiple_of_nzeta": True,
+                },
+                "backends": {
+                    "vmec2000_mgrid": {
+                        "status": "failed",
+                        "last_row": {
+                            "it": 14251,
+                            "fsqr": 9.95e-12,
+                            "fsqz": 6.88e-12,
+                            "fsql": 3.52e-12,
+                            "total": 2.035e-11,
+                            "max_component": 9.95e-12,
+                        },
+                        "tail_plateau": {
+                            "status": "flat_above_stage_ftol",
+                            "total_rel_span": 0.00295,
+                            "total_last_over_min": 1.00049,
+                        },
+                        "stage_summaries": [
+                            {"ns": 9, "niter": 8000, "ftolv": 1.0e-8},
+                            {"ns": 13, "niter": 16000, "ftolv": 1.0e-10},
+                            {"ns": 17, "niter": 32000, "ftolv": 1.0e-12},
+                        ],
+                        "vacuum_grid_exceeded_count": 0,
+                    }
+                },
+            }
+        )
+    )
+
+    assert summary.main([str(report), "--field-set", "strict"]) == 0
+    out = capsys.readouterr().out
+    header = out.splitlines()[0].split("\t")
+
+    assert "strict_gap" in header
+    assert "tail_plateau_status" in header
+    assert "native_spline_vector_residual_profile_status" not in header
+    assert "vmec2000_strict_plateau" in out
+    assert "stalled_above_strict_ftol" in out
+    assert "9.95e-12" in out
+
+    csv_path = tmp_path / "strict.csv"
+    assert summary.main([str(report), "--field-set", "strict", "--csv", str(csv_path)]) == 0
+    csv_text = csv_path.read_text()
+    assert "strict_gap" in csv_text
+    assert "native_spline_vector_residual_profile_status" not in csv_text
+
+
 def test_square_coil_profile_summary_reads_active_vmec2000_threed1(tmp_path: Path):
     case_dir = tmp_path / "square_coil_freeb_backend_profile_vmec2000_ns9_13_17_mpol7_ntor28_nzeta64_niter24k_fg"
     workdir = case_dir / "vmec2000_mgrid"
@@ -1518,6 +1587,33 @@ def test_square_coil_profile_summary_prefers_active_partial_sidecar(tmp_path: Pa
     assert row["requested_ftol"] == pytest.approx(1.0e-12)
     assert row["final_max_component"] == pytest.approx(9.0e-13)
     assert row["strict_components_met"] is True
+
+
+def test_square_coil_profile_summary_finds_nested_live_sidecars_from_root(tmp_path: Path):
+    final_case = tmp_path / "square_coil_freeb_backend_profile_completed"
+    final_case.mkdir()
+    (final_case / "square_coil_free_boundary_backend_profile.json").write_text(
+        json.dumps({"configuration": {}, "backends": {}})
+    )
+    stale_partial = final_case / "_partial_vmec2000_payload.json"
+    stale_partial.write_text(json.dumps({"stage_summaries": []}))
+
+    live_case = tmp_path / "square_coil_freeb_backend_profile_live_nested"
+    live_case.mkdir()
+    live_partial = live_case / "_partial_vmec2000_payload.json"
+    live_partial.write_text(
+        json.dumps(
+            {
+                "stage_summaries": [{"ns": 17, "niter": 24000, "ftolv": 1.0e-12}],
+                "last_row": {"it": 600, "fsqr": 8.0e-13, "fsqz": 9.0e-13, "fsql": 7.0e-13},
+            }
+        )
+    )
+
+    paths = summary._profile_paths([tmp_path])
+
+    assert live_partial in paths
+    assert stale_partial not in paths
 
 
 def test_square_coil_profile_summary_accepts_renamed_copied_sidecar(tmp_path: Path):

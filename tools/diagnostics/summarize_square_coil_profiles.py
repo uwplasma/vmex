@@ -64,6 +64,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--csv", type=Path, default=None, help="Optional CSV output path.")
     parser.add_argument("--markdown", action="store_true", help="Print a Markdown table instead of TSV.")
+    parser.add_argument(
+        "--field-set",
+        choices=("all", "strict"),
+        default="all",
+        help="Use 'strict' for a compact convergence/profiling table.",
+    )
     return parser
 
 
@@ -89,7 +95,24 @@ def _profile_paths(paths: list[Path]) -> list[Path]:
             if launcher_log.exists():
                 out.append(launcher_log)
                 continue
-            out.extend(sorted(path.glob(f"**/{FINAL_REPORT_NAME}")))
+            final_reports = sorted(path.glob(f"**/{FINAL_REPORT_NAME}"))
+            out.extend(final_reports)
+            final_report_dirs = {report.parent for report in final_reports}
+            out.extend(
+                partial
+                for partial in sorted(path.glob(f"**/{PARTIAL_VMEC2000_NAME}"))
+                if partial.parent not in final_report_dirs
+            )
+            out.extend(
+                threed1
+                for threed1 in sorted(path.glob("**/vmec2000_mgrid/threed1*"))
+                if threed1.parent.parent not in final_report_dirs
+            )
+            out.extend(
+                log
+                for log in sorted(path.glob(f"**/{LAUNCHER_LOG_NAME}"))
+                if log.parent not in final_report_dirs
+            )
         elif path.exists():
             out.append(path)
     return sorted(dict.fromkeys(out))
@@ -2666,7 +2689,7 @@ def _format_value(value: Any) -> str:
 def _write_csv(path: Path, rows: list[dict[str, Any]], fields: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -2681,6 +2704,62 @@ def _print_rows(rows: list[dict[str, Any]], *, markdown: bool, fields: list[str]
     print("\t".join(fields))
     for row in rows:
         print("\t".join(_format_value(row.get(field)) for field in fields))
+
+
+def _strict_summary_fields() -> list[str]:
+    """Return the compact field list for strict convergence comparisons."""
+
+    return [
+        "case",
+        "backend",
+        "backend_role",
+        "status",
+        "strict_evidence_status",
+        "strict_evidence_blockers",
+        "mpol",
+        "ntor",
+        "ns",
+        "nzeta",
+        "requested_ftol",
+        "strict_components_met",
+        "strict_gap",
+        "final_iter",
+        "final_max_component",
+        "final_total",
+        "final_fsqr",
+        "final_fsqz",
+        "final_fsql",
+        "limiting_component",
+        "best_total",
+        "current_stage_ftol",
+        "current_stage_last_iter",
+        "current_stage_niter",
+        "remaining_stage_budget",
+        "stage_ns_array",
+        "stage_niter_array",
+        "stage_ftol_array",
+        "tail_plateau_status",
+        "tail_total_rel_span",
+        "tail_last_over_min",
+        "strict_tail_projection_status",
+        "strict_tail_component_statuses",
+        "strict_tail_limiting_component",
+        "strict_tail_limiting_component_status",
+        "strict_tail_limiting_component_factor",
+        "strict_tail_limiting_iters_to_1e-12_est",
+        "next_action",
+        "recommended_followup_profile_kind",
+        "recommended_followup_reason",
+        "resolution_deck_status",
+        "resolution_deck_reasons",
+        "freeb_edge_control_projection_basis",
+        "freeb_edge_control_projection_update_mode",
+        "freeb_edge_control_projection_force_capture_status",
+        "freeb_jax_nestor_operator",
+        "accepted_provider_parity_status",
+        "wall_s",
+        "vacuum_grid_exceeded_count",
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3073,6 +3152,8 @@ def main(argv: list[str] | None = None) -> int:
         "wall_s",
         "vacuum_grid_exceeded_count",
     ]
+    if args.field_set == "strict":
+        fields = _strict_summary_fields()
     if args.csv is not None:
         _write_csv(args.csv, rows, fields)
     _print_rows(rows, markdown=bool(args.markdown), fields=fields)

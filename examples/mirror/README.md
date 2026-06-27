@@ -574,6 +574,10 @@ Summarize one or more reports with::
   python tools/diagnostics/summarize_square_coil_profiles.py \
     results/square_coil_freeb_backend_profile_* --markdown
 
+For the small convergence table used to compare ``FTOL=1e-12`` stalls, add
+``--field-set strict``. The same option works with ``--csv`` and intentionally
+prints only convergence, grid, edge-control, and follow-up fields.
+
 The summary command accepts completed profile JSON files, completed profile
 directories, and active VMEC2000 profile directories. For active VMEC2000
 folders it reads ``_partial_vmec2000_payload.json`` when present, otherwise it
@@ -743,11 +747,15 @@ The root square-coil beta-scan example mirrors the same evidence in its
 reconstruction residuals, reduced-unknown size, reduced-update size, and decoded
 residuals, so local example runs can be reviewed without a second
 profile-summary pass.
-As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the direct
-JAX hot-restart row is closer to the requested ``1e-12`` component target than
-the active VMEC2000 generated-``mgrid`` row, while VMEC2000 is flat above its
-``1e-10`` stage. Treat this as a current profiling observation, not a permanent
-backend ranking; both paths still require a component-wise ``1e-12`` pass.
+As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the best
+completed direct JAX row reaches ``final_max_component=7.38e-12`` and the best
+completed VMEC2000 generated-``mgrid`` control-spline row reaches
+``final_max_component=9.95e-12`` after its ``1e-12`` stage, with a flat tail
+above the target. VMEC2000 is more robust at reaching the ``1e-8`` and
+``1e-10`` stages on this Fourier deck, but it still does not remove the final
+square-axis Fourier/control bottleneck. Treat this as current profiling
+evidence, not a permanent backend ranking; both paths still require a
+component-wise ``1e-12`` pass.
 To print the current strict VMEC2000 follow-up scan after such a plateau, use::
 
   python tools/diagnostics/square_coil_followup_commands.py
