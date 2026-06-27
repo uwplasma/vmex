@@ -710,7 +710,9 @@ def test_free_boundary_edge_control_projection_removes_uncontrolled_edge_modes()
     np.testing.assert_allclose(native.control_force, [2.0])
     np.testing.assert_allclose(native.control_velocity, [1.0])
     np.testing.assert_allclose(native.control_update, [0.5])
+    assert native.native_state.to_dict()["mode"] == "free_boundary_native_spline_state"
     np.testing.assert_allclose(native.edge_state.control_delta, [0.7])
+    np.testing.assert_allclose(native.native_state.control_delta, [0.7])
     assert native.force_metric == "pullback"
     assert least_squares_projection["info"]["native_force_metric"] == "least_squares"
     np.testing.assert_allclose(native_least_squares.control_force, [1.0])

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax.state import StateLayout, VMECState
 from vmec_jax.solvers.fixed_boundary.residual.iteration_control import (
     constraint_preconditioner_channels,
     resolve_residual_iteration_control_sample,
@@ -386,11 +387,15 @@ def test_free_boundary_native_projector_resyncs_fractional_backtracking(monkeypa
     projector.native_control_velocity = np.asarray([4.0])
     projector.native_control_coordinates = np.asarray([5.0])
     projector.native_control_last_step = {"status": "applied", "control_update_l2": 2.0}
-    accepted_state = SimpleNamespace(
+    layout = StateLayout(ns=2, K=1, lasym=False)
+    accepted_state = VMECState(
+        layout=layout,
         Rcos=np.asarray([[1.0], [2.0]]),
         Rsin=np.zeros((2, 1)),
         Zcos=np.zeros((2, 1)),
         Zsin=np.zeros((2, 1)),
+        Lcos=np.zeros((2, 1)),
+        Lsin=np.zeros((2, 1)),
     )
 
     projector.sync_native_control_from_accepted_state(accepted_state, velocity_scale=0.25)

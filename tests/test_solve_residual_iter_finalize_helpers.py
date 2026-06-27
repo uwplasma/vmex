@@ -7,6 +7,7 @@ import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     _edge_control_native_control_state_payload,
+    _edge_control_native_spline_state_payload,
     _namespace_with_best_scored_state,
     attach_residual_iter_timing_diagnostics,
     build_residual_iter_resume_state_from_namespace,
@@ -17,7 +18,9 @@ from vmec_jax.solvers.fixed_boundary.residual.finalize import (
     vmec2000_state_only_scan_result,
     vmec2000_traced_scan_result,
 )
+from vmec_jax.solvers.free_boundary import FreeBoundaryNativeSplineState
 from vmec_jax.solvers.fixed_boundary.results import SolveVmecResidualResult
+from vmec_jax.state import StateLayout, VMECState
 
 
 def _timing_stats() -> dict[str, float]:
@@ -256,6 +259,55 @@ def test_edge_control_native_state_payload_uses_reduced_edge_state_schema() -> N
     assert payload["reduction_fraction"] == pytest.approx(0.25)
     assert payload["unknown_by_label"] == {"R00": pytest.approx(0.25)}
     assert payload["decoded_edge_linf"] == pytest.approx(3.25)
+
+
+def test_edge_control_native_spline_state_payload_reports_adapter_schema() -> None:
+    projection = {
+        "enabled": True,
+        "mode_count": 1,
+        "mode_scale_np": np.asarray([1.0]),
+        "jacobian_np": np.asarray([[1.0], [0.0], [0.0], [0.0]]),
+        "initial_np": {
+            "R_cos": np.asarray([3.0]),
+            "R_sin": np.asarray([0.0]),
+            "Z_cos": np.asarray([0.0]),
+            "Z_sin": np.asarray([0.0]),
+        },
+        "info": {
+            "enabled": True,
+            "labels": ["R00"],
+            "rcond": 1.0e-12,
+        },
+    }
+    layout = StateLayout(ns=2, K=1, lasym=False)
+    zeros = np.zeros((2, 1))
+    state = VMECState(
+        layout=layout,
+        Rcos=np.asarray([[3.0], [3.25]]),
+        Rsin=zeros.copy(),
+        Zcos=zeros.copy(),
+        Zsin=zeros.copy(),
+        Lcos=zeros.copy(),
+        Lsin=zeros.copy(),
+    )
+    native_state = FreeBoundaryNativeSplineState.from_vmec_state(state, projection)
+    ns = {
+        "freeb_edge_control_projection_enabled": True,
+        "freeb_edge_control_projection": projection,
+        "freeb_edge_control_projection_native_spline_state": native_state,
+    }
+
+    payload = _edge_control_native_spline_state_payload(ns)
+
+    assert payload["enabled"] is True
+    assert payload["status"] == "tracked"
+    assert payload["native_state_schema"] == "FreeBoundaryNativeSplineState.v1"
+    assert payload["mode"] == "free_boundary_native_spline_state"
+    assert payload["nonlinear_boundary_basis"] == "reduced_lcfs_spline_controls"
+    assert payload["force_evaluation_boundary_basis"] == "vmec_fourier_coefficients"
+    assert payload["full_edge_size"] == 4
+    assert payload["reduced_unknown_size"] == 1
+    assert payload["unknown_linf"] == pytest.approx(0.25)
 
 
 def test_best_scored_namespace_restores_matching_free_boundary_bundle() -> None:

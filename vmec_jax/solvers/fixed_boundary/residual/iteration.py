@@ -153,6 +153,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     zero_velocity_blocks_like as _zero_velocity_blocks_like,
 )
 from vmec_jax.solvers.free_boundary.control import (
+    FreeBoundaryNativeSplineState,
     _freeb_edge_control_apply_coordinate_update,
     _freeb_edge_control_control_delta_jax,
     _freeb_edge_control_native_coordinate_step,
@@ -162,7 +163,6 @@ from vmec_jax.solvers.free_boundary.control import (
     _project_freeb_edge_control_delta_tuple,
     _project_freeb_edge_control_state,
     _zero_freeb_edge_control_velocity_blocks,
-    free_boundary_reduced_edge_state_from_vmec_state,
 )
 from vmec_jax.field import TWOPI
 from vmec_jax.solvers.fixed_boundary.jit_cache import (
@@ -1243,6 +1243,7 @@ class _FreeBoundaryEdgeControlProjector:
         self.zero_velocity_count = 0
         self.native_control_velocity = None
         self.native_reduced_edge_state = None
+        self.native_spline_state = None
         self.native_control_last_step = {}
         self.native_control_resync_count = 0
         self.use_scan = bool(use_scan)
@@ -1280,6 +1281,7 @@ class _FreeBoundaryEdgeControlProjector:
 
     @native_control_coordinates.setter
     def native_control_coordinates(self, coordinates) -> None:
+        self.native_spline_state = None
         if coordinates is None:
             self.native_reduced_edge_state = None
             return
@@ -1334,6 +1336,7 @@ class _FreeBoundaryEdgeControlProjector:
             return
         self.native_control_velocity = None
         self.native_reduced_edge_state = None
+        self.native_spline_state = None
         self.native_velocity_reset_count += 1
 
     def apply_native_coordinate_update_from_force_tuple(
@@ -1369,6 +1372,7 @@ class _FreeBoundaryEdgeControlProjector:
             host_update=bool(host_update),
         )
         self.native_control_velocity = step.control_velocity
+        self.native_spline_state = step.native_state
         self.native_reduced_edge_state = step.edge_state
         control_coordinates = np.asarray(step.edge_state.control_delta, dtype=float)
         self.native_control_last_step = {
@@ -1396,10 +1400,11 @@ class _FreeBoundaryEdgeControlProjector:
 
         if not self.enabled or self.update_mode != "native_coordinate":
             return
-        self.native_reduced_edge_state = free_boundary_reduced_edge_state_from_vmec_state(
+        self.native_spline_state = FreeBoundaryNativeSplineState.from_vmec_state(
             state_in,
             self.projection,
         )
+        self.native_reduced_edge_state = self.native_spline_state.edge_state
         control_coordinates = np.asarray(self.native_reduced_edge_state.control_delta, dtype=float)
         scale = float(velocity_scale)
         if self.native_control_velocity is not None and np.isfinite(scale):
@@ -4006,6 +4011,7 @@ def solve_fixed_boundary_residual_iter(
     freeb_edge_control_projection_native_reduced_edge_state = (
         freeb_edge_control_projector.native_reduced_edge_state
     )
+    freeb_edge_control_projection_native_spline_state = freeb_edge_control_projector.native_spline_state
     freeb_edge_control_projection_zero_velocity_count = freeb_edge_control_projector.zero_velocity_count
     freeb_edge_control_projection_native_resync_count = freeb_edge_control_projector.native_control_resync_count
     return _finalize_residual_iter_result_from_namespace(

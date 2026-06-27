@@ -9,6 +9,7 @@ import numpy as np
 
 from ..diagnostics.io import _pack_resume_state_record
 from ...free_boundary.control import (
+    FreeBoundaryNativeSplineState,
     FreeBoundaryReducedEdgeState,
     _freeb_edge_control_delta_tuple_projection_metrics,
     _freeb_edge_control_reduced_map,
@@ -200,6 +201,43 @@ def _edge_control_native_control_state_payload(ns: Mapping[str, Any]) -> dict[st
         }
 
 
+def _edge_control_native_spline_state_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
+    """Return compact native spline-state diagnostics when tracked."""
+
+    try:
+        projection = ns.get("freeb_edge_control_projection", {"enabled": False})
+        if not bool(projection.get("enabled", False)):
+            return {"enabled": False, "status": "disabled"}
+        projector = ns.get("freeb_edge_control_projector")
+        native_state = ns.get(
+            "freeb_edge_control_projection_native_spline_state",
+            getattr(projector, "native_spline_state", None),
+        )
+        if native_state is None:
+            return {"enabled": True, "status": "unavailable"}
+        if not isinstance(native_state, FreeBoundaryNativeSplineState):
+            return {
+                "enabled": True,
+                "status": "invalid_type",
+                "type": type(native_state).__name__,
+            }
+        payload = native_state.to_dict()
+        payload.update(
+            {
+                "enabled": True,
+                "status": "tracked",
+                "native_state_schema": "FreeBoundaryNativeSplineState.v1",
+            }
+        )
+        return payload
+    except Exception as exc:
+        return {
+            "enabled": bool(ns.get("freeb_edge_control_projection_enabled", False)),
+            "status": "failed",
+            "error": repr(exc),
+        }
+
+
 def _edge_control_update_direction_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
     """Return reduced-edge projection residuals for the final force direction.
 
@@ -309,6 +347,7 @@ def _edge_control_projection_payload(ns: Mapping[str, Any]) -> dict[str, Any]:
         "state_coordinates": _edge_control_state_coordinates_payload(ns),
         "reduced_unknown_vector": _edge_control_reduced_unknown_payload(ns),
         "native_control_state": _edge_control_native_control_state_payload(ns),
+        "native_spline_state": _edge_control_native_spline_state_payload(ns),
         "force_direction": force_direction,
         "reduced_force_direction": reduced_force_direction,
         "update_direction": force_direction,

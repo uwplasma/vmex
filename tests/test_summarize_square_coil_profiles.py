@@ -832,6 +832,14 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
                                 "fit_residual_linf": 2.0e-14,
                                 "fit_residual_rel": 4.0e-13,
                             },
+                            "native_spline_state": {
+                                "status": "tracked",
+                                "mode": "free_boundary_native_spline_state",
+                                "native_state_schema": "FreeBoundaryNativeSplineState.v1",
+                                "full_edge_size": 128,
+                                "reduced_unknown_size": 9,
+                                "unknown_linf": 1.0e-5,
+                            },
                             "zero_velocity_count": 6,
                             "state_residual": {
                                 "status": "measured",
@@ -926,6 +934,18 @@ def test_square_coil_profile_summary_recommends_edge_jax_nestor_for_stalled_edge
     assert row["freeb_edge_control_projection_native_state_decoded_edge_linf"] == pytest.approx(3.25)
     assert row["freeb_edge_control_projection_native_state_fit_residual_linf"] == pytest.approx(2.0e-14)
     assert row["freeb_edge_control_projection_native_state_fit_residual_rel"] == pytest.approx(4.0e-13)
+    assert row["freeb_edge_control_projection_native_spline_state_status"] == "tracked"
+    assert (
+        row["freeb_edge_control_projection_native_spline_state_schema"]
+        == "FreeBoundaryNativeSplineState.v1"
+    )
+    assert (
+        row["freeb_edge_control_projection_native_spline_state_mode"]
+        == "free_boundary_native_spline_state"
+    )
+    assert row["freeb_edge_control_projection_native_spline_state_full_edge_size"] == 128
+    assert row["freeb_edge_control_projection_native_spline_state_reduced_unknown_size"] == 9
+    assert row["freeb_edge_control_projection_native_spline_state_unknown_linf"] == pytest.approx(1.0e-5)
     assert row["freeb_edge_control_projection_zero_velocity_count"] == 6
     assert row["freeb_edge_control_projection_state_residual_status"] == "measured"
     assert row["freeb_edge_control_projection_state_residual_linf"] == pytest.approx(2.5e-14)

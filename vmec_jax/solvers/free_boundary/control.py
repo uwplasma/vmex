@@ -30,6 +30,7 @@ class FreeBoundaryNativeControlStep(NamedTuple):
     state: VMECState
     update_deltas: Any
     control_velocity: np.ndarray
+    native_state: FreeBoundaryNativeSplineState
     edge_state: FreeBoundaryReducedEdgeState
     control_update: np.ndarray
     control_force: np.ndarray
@@ -983,12 +984,12 @@ def _freeb_edge_control_native_coordinate_step(
         else edge_state
     )
     next_edge_state = current_edge_state.update(control_update)
-    state_out = free_boundary_reduced_edge_state_to_vmec_state(
-        next_edge_state,
-        state_candidate,
-        projection,
-        host_update=bool(host_update),
+    next_native_state = FreeBoundaryNativeSplineState(
+        template_state=state_candidate,
+        edge_state=next_edge_state,
+        projection=projection,
     )
+    state_out = next_native_state.to_vmec_state(host_update=bool(host_update))
     update_deltas_out = _freeb_edge_control_delta_tuple_from_control_update(
         update_deltas,
         projection,
@@ -999,6 +1000,7 @@ def _freeb_edge_control_native_coordinate_step(
         state=state_out,
         update_deltas=update_deltas_out,
         control_velocity=np.asarray(next_velocity, dtype=float),
+        native_state=next_native_state,
         edge_state=next_edge_state,
         control_update=np.asarray(control_update, dtype=float),
         control_force=np.asarray(control_force, dtype=float),
