@@ -521,9 +521,11 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             "strict_solver_native_spline_edge_controls": strict_assessment.get(
                 "solver_native_spline_edge_controls"
             ),
+            "strict_solver_native_spline_scope": strict_assessment.get("solver_native_spline_scope"),
             "strict_full_native_spline_state_required": strict_assessment.get(
                 "full_native_spline_state_required_for_less_fourier_pressure"
             ),
+            "strict_vmec2000_reference_role": strict_assessment.get("vmec2000_reference_role"),
             "strict_vmec2000_expected_to_fix_fourier_bottleneck": strict_assessment.get(
                 "vmec2000_expected_to_fix_fourier_bottleneck"
             ),
@@ -596,7 +598,9 @@ def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
         "strict_reduced_control_status",
         "strict_solver_native_spline_status",
         "strict_solver_native_spline_edge_controls",
+        "strict_solver_native_spline_scope",
         "strict_full_native_spline_state_required",
+        "strict_vmec2000_reference_role",
         "strict_vmec2000_expected_to_fix_fourier_bottleneck",
         "strict_assessment_blockers",
     ]

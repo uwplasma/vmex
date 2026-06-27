@@ -430,15 +430,18 @@ basis underfits the preconditioned force direction, rerun the polish profile
 with ``--profile-kind direct-gpu-edge-stellarator-polish``; if the
 stellarator basis still underfits, rerun the executable native-coordinate
 profile with ``--profile-kind direct-gpu-edge-stellarator-native-polish``.
-The latest control-spline square-axis preflight matrix is:
+The latest control-spline square-axis preflight matrix, regenerated with the
+strict ``FTOL_ARRAY = 1e-8, 1e-10, 1e-12`` schedule and
+``MAX_BOUNDARY_PROJECTION_ERROR = 5e-12``, is:
 
 | deck | status | reason |
 | --- | --- | --- |
+| ``MPOL=4, NTOR=16, NZETA=40`` | auto-promotes to production deck | requested projection error exceeds gate |
 | ``MPOL=5, NTOR=20, NZETA=48`` | auto-promotes to production deck | requested projection error exceeds gate |
 | ``MPOL=5, NTOR=28, NZETA=48`` | auto-promotes to production deck | requested ``NZETA`` below recommendation |
 | ``MPOL=5, NTOR=28, NZETA=64`` | production-ready | strict gate passes |
+| ``MPOL=6, NTOR=23, NZETA=64`` | auto-promotes to production deck | requested projection error exceeds gate |
 | ``MPOL=6, NTOR=32, NZETA=72`` | production-ready | strict gate passes |
-| ``MPOL=7, NTOR=28, NZETA=64`` | production-ready | strict gate passes |
 | ``MPOL=8, NTOR=32, NZETA=72`` | production-ready | strict gate passes |
 | ``MPOL=5, NTOR=28, NZETA=64, mgrid_nphi=96`` | diagnostic-only | mgrid/``NZETA`` mismatch |
 
@@ -806,15 +809,20 @@ The root square-coil beta-scan example mirrors the same evidence in its
 reconstruction residuals, reduced-unknown size, reduced-update size, and decoded
 residuals, so local example runs can be reviewed without a second
 profile-summary pass.
-As of the active strict ``MPOL=5, NTOR=28, NZETA=64`` comparison, the best
-completed direct JAX row reaches ``final_max_component=7.38e-12`` and the best
-completed VMEC2000 generated-``mgrid`` control-spline row reaches
-``final_max_component=9.95e-12`` after its ``1e-12`` stage, with a flat tail
-above the target. VMEC2000 is more robust at reaching the ``1e-8`` and
-``1e-10`` stages on this Fourier deck, but it still does not remove the final
-square-axis Fourier/control bottleneck. Treat this as current profiling
-evidence, not a permanent backend ranking; both paths still require a
-component-wise ``1e-12`` pass.
+As of the active strict comparison, VMEC2000 is a useful generated-``mgrid``
+NESTOR reference but not a replacement for the square-axis parameterization
+work. A local ``MPOL=6, NTOR=23, NZETA=64, NS=17`` VMEC2000 row with a
+``9,13,17`` staged grid and 24k final-stage iterations reached
+``final_max_component=1.04e-11`` against the ``1e-12`` component target, with
+an oscillatory tail. This is close enough to validate the backend path, but it
+still misses the requested strict tolerance by about a factor of 10. The source
+audit is consistent with that result: VMEC2000, VMEC++, and DESC's NESTOR path
+all work with a Fourier plasma boundary plus an external field or ``mgrid``
+vacuum response, so they cannot remove Fourier representation pressure from a
+linear-axis square target. The next research-grade lane is a full solver-native
+spline/control nonlinear state; the current native-coordinate edge update is
+only an LCFS-edge bridge decoded back to VMEC Fourier coefficients for force
+evaluation.
 To print the current strict VMEC2000 follow-up scan after such a plateau, use::
 
   python tools/diagnostics/square_coil_followup_commands.py

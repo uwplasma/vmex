@@ -399,6 +399,19 @@ although it was still slowly trending downward and had no vacuum-grid overflow.
 This evidence does not support replacing the direct research lane by VMEC2000.
 Use VMEC2000 as the mgrid reference while the direct lane tests projection,
 pressure-coupling, JAX-NESTOR kernels, and reduced spline/control edge updates.
+The completed follow-up is consistent with that interpretation: the
+``MPOL=6, NTOR=23, NZETA=64, NS=9->13->17`` VMEC2000 generated-``mgrid`` row
+with a 24k final-stage budget finished with max force component about
+``1.04e-11`` against the ``1e-12`` target.  This validates the NESTOR/mgrid
+backend and the sign/scale choices, but it still misses the requested strict
+tolerance by about one decade and has an oscillatory tail.  The square-axis
+resolution matrix also shows that several edited decks, including
+``MPOL=4, NTOR=16, NZETA=40`` and ``MPOL=6, NTOR=23, NZETA=64``, are
+production-ready only after auto-promotion to the effective
+``MPOL=5, NTOR=28, NZETA=64`` control-spline deck.  The finite-resolution
+conclusion is therefore unchanged: VMEC2000 is the reference backend, while the
+research lane must promote the spline/control representation into the nonlinear
+solver state rather than rely on a Fourier-only LCFS edge bridge.
 Edited square-axis decks are now treated as production only after the effective
 ``MPOL/NTOR/NZETA`` closure has been checked.  For example,
 ``MPOL=4, NTOR=12, NZETA=16`` and ``MPOL=5, NTOR=28, NZETA=32`` both preflight

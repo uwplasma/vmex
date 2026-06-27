@@ -33,7 +33,9 @@ def test_square_coil_resolution_matrix_classifies_small_decks(tmp_path: Path):
     assert rows[0]["edge_control_projection"] == "stellarator"
     assert rows[0]["strict_solver_native_spline_status"] == "edge_only_bridge"
     assert rows[0]["strict_solver_native_spline_edge_controls"] is True
+    assert rows[0]["strict_solver_native_spline_scope"] == "lcfs_edge_only"
     assert rows[0]["strict_full_native_spline_state_required"] is True
+    assert "generated-mgrid VMEC2000 is a backend" in rows[0]["strict_vmec2000_reference_role"]
     assert rows[1]["status"] == "diagnostic_underresolved"
     assert "nzeta_below_square_axis_recommendation" in rows[1]["reasons"]
 
