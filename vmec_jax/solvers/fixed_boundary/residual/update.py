@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -692,6 +693,29 @@ class StrictTrialBaseline(NamedTuple):
     w_curr: float
     stale_w_curr: float
     ratio_to_stale: float
+
+
+class StrictTrialRun(NamedTuple):
+    """Strict trial result plus the current merit used for acceptance."""
+
+    state: Any
+    velocities: ResidualVelocityBlocks
+    dt_eff: float
+    update_rms: float | None
+    w_curr: float
+    w_try: float
+    w_try_ratio: float
+    probe_bad_jacobian: bool
+    alpha: float
+
+
+class NativeCoordinateStrictUpdate(NamedTuple):
+    """State and update-delta bookkeeping after native edge-control projection."""
+
+    state: Any
+    update_deltas: tuple[Any, ...] | None
+    update_delta_rms_j: Any
+    update_delta_rms: float | None
 
 
 class StrictStepAcceptanceDecision(NamedTuple):
@@ -1419,6 +1443,145 @@ def strict_trial_current_residual_baseline(
             ratio_to_stale=float(ratio),
         )
     return StrictTrialBaseline(w_curr=float(w_curr), stale_w_curr=float(stale_w_curr), ratio_to_stale=float(ratio))
+
+
+def strict_trial_heartbeat_event(enabled: bool, iter_idx: int, event: str, **fields) -> None:
+    """Emit one opt-in strict-trial progress line."""
+
+    if not bool(enabled):
+        return
+    parts = []
+    for key, value in fields.items():
+        if isinstance(value, (float, np.floating)):
+            parts.append(f"{key}={float(value):.6e}")
+        else:
+            parts.append(f"{key}={value}")
+    suffix = "" if not parts else " " + " ".join(parts)
+    print(f"[strict-trial] iter={int(iter_idx)} event={event}{suffix}", flush=True)
+
+
+def strict_trial_evaluation_with_current_baseline(
+    *,
+    iter2: int,
+    heartbeat_enabled: bool,
+    state: Any,
+    state_try: Any,
+    velocities: ResidualVelocityBlocks,
+    update_deltas: tuple[Any, ...] | None,
+    update_rms: float | None,
+    dt_eff: float,
+    w_curr: float,
+    backtracking: bool,
+    free_boundary_enabled: bool,
+    reference_mode: bool,
+    host_update_assembly: bool,
+    zero_m1_value: Any,
+    zero_m1_host: float,
+    zero_m1_probe_value: Any,
+    candidate_state_from_delta_tuple: Any,
+    freeb_bsqvac_half_for_trial_state: Any,
+    trial_residual_total: Any,
+) -> StrictTrialRun:
+    """Run strict trial evaluation against a fresh free-boundary baseline."""
+
+    heartbeat = (
+        partial(strict_trial_heartbeat_event, True, int(iter2))
+        if bool(heartbeat_enabled)
+        else None
+    )
+    w_curr_for_trial = float(w_curr)
+    if bool(backtracking) and bool(free_boundary_enabled):
+        baseline = strict_trial_current_residual_baseline(
+            state=state,
+            stale_w_curr=float(w_curr),
+            freeb_bsqvac_half_for_trial_state=freeb_bsqvac_half_for_trial_state,
+            trial_residual_total=trial_residual_total,
+            zero_m1_value=zero_m1_value,
+            heartbeat=heartbeat,
+        )
+        w_curr_for_trial = float(baseline.w_curr)
+
+    trial_eval = strict_trial_evaluation(
+        state_try=state_try,
+        velocities=velocities,
+        update_deltas=update_deltas,
+        update_rms=update_rms,
+        dt_eff=float(dt_eff),
+        w_curr=float(w_curr_for_trial),
+        backtracking=bool(backtracking),
+        reference_mode=bool(reference_mode),
+        host_update_assembly=bool(host_update_assembly),
+        zero_m1_value=zero_m1_value,
+        zero_m1_host=float(zero_m1_host),
+        zero_m1_probe_value=zero_m1_probe_value,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+        freeb_bsqvac_half_for_trial_state=freeb_bsqvac_half_for_trial_state,
+        trial_residual_total=trial_residual_total,
+        heartbeat=heartbeat,
+    )
+    return StrictTrialRun(
+        state=trial_eval.state,
+        velocities=trial_eval.velocities,
+        dt_eff=float(trial_eval.dt_eff),
+        update_rms=trial_eval.update_rms,
+        w_curr=float(w_curr_for_trial),
+        w_try=float(trial_eval.w_try),
+        w_try_ratio=float(trial_eval.w_try_ratio),
+        probe_bad_jacobian=bool(trial_eval.probe_bad_jacobian),
+        alpha=float(trial_eval.alpha),
+    )
+
+
+def apply_native_coordinate_strict_update(
+    *,
+    edge_control_projector: Any,
+    state: Any,
+    state_try: Any,
+    update_deltas: tuple[Any, ...] | None,
+    update_delta_rms_j: Any,
+    update_delta_rms: float | None,
+    force_blocks: Any,
+    physical_delta_transforms: Any,
+    dt_eff: float,
+    b1: float,
+    fac: float,
+    force_scale: float,
+    flip_sign: float,
+    host_update_assembly: bool,
+    need_update_rms: bool,
+    materialize_update_rms: bool,
+    delta_tuple_from_blocks: Any,
+    delta_tuple_rms: Any,
+) -> NativeCoordinateStrictUpdate:
+    """Apply the reduced native-coordinate edge-control update when requested."""
+
+    if edge_control_projector.update_mode != "native_coordinate" or update_deltas is None:
+        return NativeCoordinateStrictUpdate(state_try, update_deltas, update_delta_rms_j, update_delta_rms)
+
+    force_deltas = delta_tuple_from_blocks(
+        1.0,
+        physical_delta_transforms,
+        *force_blocks,
+        use_numpy_lasym_zeros=bool(host_update_assembly),
+    )
+    state_try, update_deltas = edge_control_projector.apply_native_coordinate_update_from_force_tuple(
+        state,
+        state_try,
+        update_deltas,
+        force_deltas,
+        dt_eff=float(dt_eff),
+        b1=float(b1),
+        fac=float(fac),
+        force_scale=float(force_scale),
+        flip_sign=float(flip_sign),
+        host_update=bool(host_update_assembly),
+    )
+    if bool(need_update_rms):
+        update_delta_rms_j = delta_tuple_rms(*update_deltas)
+        update_delta_rms = (
+            float(np.asarray(update_delta_rms_j)) if bool(materialize_update_rms) else None
+        )
+    return NativeCoordinateStrictUpdate(state_try, update_deltas, update_delta_rms_j, update_delta_rms)
 
 
 def host_catastrophic_restart_update(

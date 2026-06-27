@@ -109,6 +109,7 @@ from vmec_jax.solvers.fixed_boundary.residual.force_payload import (
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState as _ResidualControllerState,
     apply_controller_state_update as _apply_controller_state_update,
+    apply_native_coordinate_strict_update as _apply_native_coordinate_strict_update,
     backtracking_momentum_search as _backtracking_momentum_search,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
@@ -138,14 +139,13 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     initial_residual_velocity_state as _initial_residual_velocity_state,
     jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
-    strict_trial_current_residual_baseline as _strict_trial_current_residual_baseline,
     strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_step_branch_application as _strict_step_branch_application,
     strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
     strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
     strict_step_acceptance_decision as _strict_step_acceptance_decision,
-    strict_trial_evaluation as _strict_trial_evaluation,
+    strict_trial_evaluation_with_current_baseline as _strict_trial_evaluation_with_current_baseline,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
     velocity_blocks_from_resume_state as _velocity_blocks_from_resume_state,
     zero_all_velocity_blocks_like as _zero_all_velocity_blocks_like,
@@ -2364,18 +2364,6 @@ def solve_fixed_boundary_residual_iter(
     )
     runtime_env = _residual_iter_runtime_env()
 
-    def _strict_trial_heartbeat_event(iter_idx: int, event: str, **fields) -> None:
-        if not bool(runtime_env.strict_trial_heartbeat):
-            return
-        parts = []
-        for key, value in fields.items():
-            if isinstance(value, (float, np.floating)):
-                parts.append(f"{key}={float(value):.6e}")
-            else:
-                parts.append(f"{key}={value}")
-        suffix = "" if not parts else " " + " ".join(parts)
-        print(f"[strict-trial] iter={int(iter_idx)} event={event}{suffix}", flush=True)
-
     def _refresh_preconditioner_cache(k, *, iter2: int):
         return _precond_payload_facade.refresh_preconditioner_cache_state_runtime(
             k,
@@ -3690,30 +3678,18 @@ def solve_fixed_boundary_residual_iter(
             scl = update_proposal.scale
             update_deltas = update_proposal.update_deltas
             state_try = update_proposal.state
-            if freeb_edge_control_projector.update_mode == "native_coordinate" and update_deltas is not None:
-                force_deltas = _delta_tuple_from_blocks(
-                    1.0,
-                    _physical_delta_transforms,
-                    *force_blocks,
-                    use_numpy_lasym_zeros=bool(host_update_assembly),
-                )
-                state_try, update_deltas = freeb_edge_control_projector.apply_native_coordinate_update_from_force_tuple(
-                    state,
-                    state_try,
-                    update_deltas,
-                    force_deltas,
-                    dt_eff=float(dt_eff),
-                    b1=float(b1),
-                    fac=float(fac),
-                    force_scale=float(force_scale),
-                    flip_sign=float(flip_sign),
-                    host_update=bool(host_update_assembly),
-                )
-                if bool(need_update_rms):
-                    update_delta_rms_j = _delta_tuple_rms(*update_deltas)
-                    update_delta_rms = (
-                        float(np.asarray(update_delta_rms_j)) if bool(materialize_update_rms) else None
-                    )
+            native_update = _apply_native_coordinate_strict_update(
+                edge_control_projector=freeb_edge_control_projector, state=state, state_try=state_try,
+                update_deltas=update_deltas, update_delta_rms_j=update_delta_rms_j,
+                update_delta_rms=update_delta_rms, force_blocks=force_blocks,
+                physical_delta_transforms=_physical_delta_transforms, dt_eff=float(dt_eff),
+                b1=float(b1), fac=float(fac), force_scale=float(force_scale), flip_sign=float(flip_sign),
+                host_update_assembly=bool(host_update_assembly), need_update_rms=bool(need_update_rms),
+                materialize_update_rms=bool(materialize_update_rms),
+                delta_tuple_from_blocks=_delta_tuple_from_blocks, delta_tuple_rms=_delta_tuple_rms,
+            )
+            state_try, update_deltas = native_update.state, native_update.update_deltas
+            update_delta_rms_j, update_delta_rms = native_update.update_delta_rms_j, native_update.update_delta_rms
             state_try = freeb_edge_control_projector.apply_coordinate_update_from_delta_tuple(
                 state,
                 update_deltas,
@@ -3722,41 +3698,20 @@ def solve_fixed_boundary_residual_iter(
             )
             probe_bad_jacobian = False
             if need_trial_eval:
-                trial_heartbeat = (
-                    partial(_strict_trial_heartbeat_event, int(iter2))
-                    if bool(runtime_env.strict_trial_heartbeat)
-                    else None
-                )
-                w_curr_for_trial = float(w_curr)
-                if bool(backtracking) and bool(free_boundary_enabled):
-                    baseline = _strict_trial_current_residual_baseline(
-                        state=state,
-                        stale_w_curr=float(w_curr),
-                        freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
-                        trial_residual_total=_trial_residual_total,
-                        zero_m1_value=zero_m1,
-                        heartbeat=trial_heartbeat,
-                    )
-                    w_curr_for_trial = float(baseline.w_curr)
-                trial_eval = _strict_trial_evaluation(
-                    state_try=state_try,
-                    velocities=velocity_blocks,
-                    update_deltas=update_deltas,
-                    update_rms=update_rms,
-                    dt_eff=float(dt_eff),
-                    w_curr=float(w_curr_for_trial),
-                    backtracking=bool(backtracking),
-                    reference_mode=bool(reference_mode),
-                    host_update_assembly=bool(host_update_assembly),
-                    zero_m1_value=zero_m1,
+                trial_eval = _strict_trial_evaluation_with_current_baseline(
+                    iter2=int(iter2), heartbeat_enabled=bool(runtime_env.strict_trial_heartbeat),
+                    state=state, state_try=state_try, velocities=velocity_blocks,
+                    update_deltas=update_deltas, update_rms=update_rms, dt_eff=float(dt_eff),
+                    w_curr=float(w_curr), backtracking=bool(backtracking),
+                    free_boundary_enabled=bool(free_boundary_enabled), reference_mode=bool(reference_mode),
+                    host_update_assembly=bool(host_update_assembly), zero_m1_value=zero_m1,
                     zero_m1_host=float(np.asarray(zero_m1)),
                     zero_m1_probe_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
                     candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
                     freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
                     trial_residual_total=_trial_residual_total,
-                    heartbeat=trial_heartbeat,
                 )
-                w_curr = float(w_curr_for_trial)
+                w_curr = float(trial_eval.w_curr)
                 state_try = trial_eval.state
                 velocity_blocks = trial_eval.velocities
                 dt_eff = trial_eval.dt_eff
