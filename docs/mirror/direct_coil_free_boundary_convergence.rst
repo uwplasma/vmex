@@ -493,7 +493,10 @@ around trial vacuum sampling, force evaluation, and backtracking attempts.
 Free-boundary strict backtracking compares trial states against a current-state
 baseline evaluated through the same fresh trial-vacuum path; otherwise the
 ``alpha -> 0`` trial can be rejected only because its vacuum pressure was
-resampled while the reference residual was stale.
+resampled while the reference residual was stale. The default strict
+acceptance ratio remains ``1.001`` for compatibility with earlier diagnostics;
+use ``--strict-backtracking-accept-ratio 1.0`` when a monotone fresh-merit
+profile is needed for ``FTOL=1e-12`` studies.
 The summary table now reports the edge-control projection status, requested
 basis, control count, pseudo-inverse cutoff, update mode, coordinate-update
 count, native-update count, reduced native force/velocity/update norms,

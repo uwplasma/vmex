@@ -618,7 +618,8 @@ trial vacuum sampling, force evaluation, and backtracking.
 For free-boundary strict backtracking, vmec_jax compares trial states against a
 current-state baseline evaluated with the same fresh trial-vacuum path. This
 keeps the ``alpha -> 0`` backtracking limit comparable after vacuum-pressure
-turn-on.
+turn-on. The default strict acceptance ratio is ``1.001``; set
+``--strict-backtracking-accept-ratio 1.0`` for monotone fresh-merit profiles.
 ``vmec_jax.solvers.free_boundary.ReducedControlMap`` is the public host-side
 encode/decode primitive for that next lane: it maps full Fourier edge vectors
 to reduced controls and back without changing the current solve path.

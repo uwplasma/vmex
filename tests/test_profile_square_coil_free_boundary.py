@@ -80,6 +80,8 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "--freeb-edge-control-native-force-metric",
             "least_squares",
             "--strict-trial-heartbeat",
+            "--strict-backtracking-accept-ratio",
+            "1.0",
             "--resolution-diagnostics-only",
             "--native-spline-control-prototype",
         ]
@@ -120,6 +122,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.freeb_edge_control_update_mode == "coordinate"
     assert args.freeb_edge_control_native_force_metric == "least_squares"
     assert args.strict_trial_heartbeat is True
+    assert args.strict_backtracking_accept_ratio == pytest.approx(1.0)
     assert args.resolution_diagnostics_only is True
     assert args.native_spline_control_prototype is True
 

@@ -806,6 +806,7 @@ class _ResidualIterRuntimeEnv(NamedTuple):
     freeb_drift_restart_max_restarts: int
     return_best_scored_requested: bool
     strict_trial_heartbeat: bool
+    strict_backtracking_accept_ratio: float
 
 
 def _residual_iter_runtime_env() -> _ResidualIterRuntimeEnv:
@@ -834,6 +835,7 @@ def _residual_iter_runtime_env() -> _ResidualIterRuntimeEnv:
         freeb_drift_restart_max_restarts=_runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_MAX_RESTARTS", 4),
         return_best_scored_requested=_runtime_env_enabled(os.getenv("VMEC_JAX_RETURN_BEST_SCORED_STATE", "0")),
         strict_trial_heartbeat=_runtime_env_enabled(os.getenv("VMEC_JAX_STRICT_TRIAL_HEARTBEAT", "0")),
+        strict_backtracking_accept_ratio=max(0.0, _runtime_env_float("VMEC_JAX_STRICT_BACKTRACKING_ACCEPT_RATIO", 1.001)),
     )
 
 
@@ -3711,6 +3713,7 @@ def solve_fixed_boundary_residual_iter(
                     candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
                     freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
                     trial_residual_total=_trial_residual_total,
+                    accept_ratio=float(runtime_env.strict_backtracking_accept_ratio),
                 )
                 w_curr = float(trial_eval.w_curr)
                 state_try = trial_eval.state
@@ -3732,6 +3735,7 @@ def solve_fixed_boundary_residual_iter(
                 w_try=float(w_try),
                 w_curr=float(w_curr),
                 backtracking=bool(backtracking),
+                accept_ratio=float(runtime_env.strict_backtracking_accept_ratio),
             )
             branch_result = _strict_step_branch_result(
                 acceptance=step_acceptance,

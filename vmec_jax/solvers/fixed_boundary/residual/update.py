@@ -1326,6 +1326,7 @@ def strict_trial_evaluation(
     heartbeat: Any | None = None,
     max_backtracks: int = 8,
     probe_growth_factor: float = 1.0e2,
+    accept_ratio: float | None = None,
 ) -> StrictTrialEvaluation:
     """Evaluate and optionally backtrack one strict momentum trial state."""
 
@@ -1360,7 +1361,7 @@ def strict_trial_evaluation(
             w_try_ratio = float("inf")
 
     alpha = 1.0
-    accept_ratio = 1.001 if bool(backtracking) else float("inf")
+    accept_ratio = float(1.001 if accept_ratio is None else accept_ratio) if bool(backtracking) else float("inf")
     if np.isfinite(w_try) and (w_try > accept_ratio * max(float(w_curr), 1.0e-30)):
         for backtrack_index in range(int(max_backtracks)):
             alpha *= 0.5
@@ -1481,6 +1482,7 @@ def strict_trial_evaluation_with_current_baseline(
     candidate_state_from_delta_tuple: Any,
     freeb_bsqvac_half_for_trial_state: Any,
     trial_residual_total: Any,
+    accept_ratio: float = 1.001,
 ) -> StrictTrialRun:
     """Run strict trial evaluation against a fresh free-boundary baseline."""
 
@@ -1518,6 +1520,7 @@ def strict_trial_evaluation_with_current_baseline(
         freeb_bsqvac_half_for_trial_state=freeb_bsqvac_half_for_trial_state,
         trial_residual_total=trial_residual_total,
         heartbeat=heartbeat,
+        accept_ratio=float(accept_ratio),
     )
     return StrictTrialRun(
         state=trial_eval.state,
@@ -1705,6 +1708,7 @@ def strict_step_acceptance_decision(
     w_try: float,
     w_curr: float,
     backtracking: bool,
+    accept_ratio: float | None = None,
 ) -> StrictStepAcceptanceDecision:
     """Decide whether a strict trial residual step is acceptable.
 
@@ -1713,7 +1717,7 @@ def strict_step_acceptance_decision(
     future fingerprint gates can reason about the branch decision explicitly.
     """
 
-    accept_ratio = 1.001 if bool(backtracking) else float("inf")
+    accept_ratio = float(1.001 if accept_ratio is None else accept_ratio) if bool(backtracking) else float("inf")
     accepted = bool(np.isfinite(w_try) and (float(w_try) <= accept_ratio * max(float(w_curr), 1.0e-30)))
     return StrictStepAcceptanceDecision(accepted=accepted, accept_ratio=float(accept_ratio))
 

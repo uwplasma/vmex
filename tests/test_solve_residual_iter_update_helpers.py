@@ -868,12 +868,20 @@ def test_free_boundary_turnon_restart_update_can_preserve_restart_marker() -> No
 def test_strict_step_acceptance_decision_covers_accept_reject_and_nonfinite_paths() -> None:
     accepted = strict_step_acceptance_decision(w_try=1.0005, w_curr=1.0, backtracking=True)
     rejected = strict_step_acceptance_decision(w_try=1.01, w_curr=1.0, backtracking=True)
+    monotone_rejected = strict_step_acceptance_decision(
+        w_try=1.0005,
+        w_curr=1.0,
+        backtracking=True,
+        accept_ratio=1.0,
+    )
     nonfinite = strict_step_acceptance_decision(w_try=np.nan, w_curr=1.0, backtracking=False)
     no_backtracking = strict_step_acceptance_decision(w_try=10.0, w_curr=1.0, backtracking=False)
 
     assert accepted.accepted
     assert accepted.accept_ratio == pytest.approx(1.001)
     assert not rejected.accepted
+    assert not monotone_rejected.accepted
+    assert monotone_rejected.accept_ratio == pytest.approx(1.0)
     assert not nonfinite.accepted
     assert no_backtracking.accepted
     assert np.isinf(no_backtracking.accept_ratio)
@@ -2047,6 +2055,60 @@ def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> N
     ]
     assert heartbeat_events[-1][1]["alpha"] == pytest.approx(0.5)
     assert heartbeat_events[-1][1]["w_try"] == pytest.approx(0.9)
+
+
+def test_strict_trial_evaluation_custom_accept_ratio_can_require_monotone_step() -> None:
+    velocities = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+
+    def candidate_state_from_delta_tuple(_deltas, *, scale, **_kwargs):
+        return float(scale)
+
+    def trial_residual_total(state, _bsqvac, **_kwargs):
+        return 1.0005 if float(state) > 0.25 else 0.999
+
+    default = strict_trial_evaluation(
+        state_try=1.0,
+        velocities=velocities,
+        update_deltas=tuple(np.ones((2, 3)) for _ in range(6)),
+        update_rms=0.4,
+        dt_eff=0.2,
+        w_curr=1.0,
+        backtracking=True,
+        reference_mode=False,
+        host_update_assembly=False,
+        zero_m1_value=1.0,
+        zero_m1_host=1.0,
+        zero_m1_probe_value=0.0,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+        freeb_bsqvac_half_for_trial_state=lambda state: None,
+        trial_residual_total=trial_residual_total,
+    )
+    monotone = strict_trial_evaluation(
+        state_try=1.0,
+        velocities=velocities,
+        update_deltas=tuple(np.ones((2, 3)) for _ in range(6)),
+        update_rms=0.4,
+        dt_eff=0.2,
+        w_curr=1.0,
+        backtracking=True,
+        reference_mode=False,
+        host_update_assembly=False,
+        zero_m1_value=1.0,
+        zero_m1_host=1.0,
+        zero_m1_probe_value=0.0,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+        freeb_bsqvac_half_for_trial_state=lambda state: None,
+        trial_residual_total=trial_residual_total,
+        accept_ratio=1.0,
+    )
+
+    assert default.alpha == pytest.approx(1.0)
+    assert default.w_try == pytest.approx(1.0005)
+    assert monotone.alpha == pytest.approx(0.25)
+    assert monotone.w_try == pytest.approx(0.999)
+    assert monotone.dt_eff == pytest.approx(0.05)
+    for block_name in ("rcc", "rss", "zsc", "zcs", "lsc", "lcs"):
+        np.testing.assert_allclose(getattr(monotone.velocities, block_name), 0.25)
 
 
 def test_strict_trial_current_baseline_uses_fresh_trial_vacuum_metric() -> None:

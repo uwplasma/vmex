@@ -272,6 +272,15 @@ def _parser() -> argparse.ArgumentParser:
         help="Print opt-in strict trial/backtracking heartbeat lines during long vmec_jax profiles.",
     )
     p.add_argument(
+        "--strict-backtracking-accept-ratio",
+        type=float,
+        default=1.001,
+        help=(
+            "Accepted trial/current residual ratio for --strict-backtracking. "
+            "Use 1.0 for monotone fresh-merit studies."
+        ),
+    )
+    p.add_argument(
         "--freeb-drift-restart",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1902,6 +1911,7 @@ def _run_jax_backend(
     return_best_scored_state: bool,
     strict_backtracking: bool = False,
     strict_trial_heartbeat: bool = False,
+    strict_backtracking_accept_ratio: float = 1.001,
     freeb_drift_restart: bool = False,
     freeb_drift_restart_factor: float = 3.0,
     freeb_drift_restart_step_factor: float = 0.5,
@@ -1984,6 +1994,7 @@ def _run_jax_backend(
         "VMEC_JAX_RETURN_BEST_SCORED_STATE": _bool_env(return_best_scored_state),
         "VMEC_JAX_STRICT_BACKTRACKING": _bool_env(strict_backtracking),
         "VMEC_JAX_STRICT_TRIAL_HEARTBEAT": _bool_env(strict_trial_heartbeat),
+        "VMEC_JAX_STRICT_BACKTRACKING_ACCEPT_RATIO": f"{float(strict_backtracking_accept_ratio):.17g}",
         "VMEC_JAX_FREEB_DRIFT_RESTART": _bool_env(freeb_drift_restart),
         "VMEC_JAX_FREEB_DRIFT_RESTART_FACTOR": f"{float(freeb_drift_restart_factor):.17g}",
         "VMEC_JAX_FREEB_DRIFT_RESTART_STEP_FACTOR": f"{float(freeb_drift_restart_step_factor):.17g}",
@@ -2128,6 +2139,7 @@ def _run_jax_backend(
             "return_best_scored_state": bool(return_best_scored_state),
             "strict_backtracking": bool(strict_backtracking),
             "strict_trial_heartbeat": bool(strict_trial_heartbeat),
+            "strict_backtracking_accept_ratio": float(strict_backtracking_accept_ratio),
             "freeb_drift_restart": bool(freeb_drift_restart),
             "freeb_drift_restart_factor": float(freeb_drift_restart_factor),
             "freeb_drift_restart_step_factor": float(freeb_drift_restart_step_factor),
@@ -3590,6 +3602,7 @@ def main(argv: list[str] | None = None) -> int:
             "return_best_scored_state": bool(args.return_best_scored_state),
             "strict_backtracking": bool(args.strict_backtracking),
             "strict_trial_heartbeat": bool(args.strict_trial_heartbeat),
+            "strict_backtracking_accept_ratio": float(args.strict_backtracking_accept_ratio),
             "freeb_drift_restart": bool(args.freeb_drift_restart),
             "freeb_drift_restart_factor": float(args.freeb_drift_restart_factor),
             "freeb_drift_restart_step_factor": float(args.freeb_drift_restart_step_factor),
@@ -3700,6 +3713,7 @@ def main(argv: list[str] | None = None) -> int:
             return_best_scored_state=bool(args.return_best_scored_state),
             strict_backtracking=bool(args.strict_backtracking),
             strict_trial_heartbeat=bool(args.strict_trial_heartbeat),
+            strict_backtracking_accept_ratio=float(args.strict_backtracking_accept_ratio),
             freeb_drift_restart=bool(args.freeb_drift_restart),
             freeb_drift_restart_factor=float(args.freeb_drift_restart_factor),
             freeb_drift_restart_step_factor=float(args.freeb_drift_restart_step_factor),
@@ -3751,6 +3765,7 @@ def main(argv: list[str] | None = None) -> int:
             return_best_scored_state=bool(args.return_best_scored_state),
             strict_backtracking=bool(args.strict_backtracking),
             strict_trial_heartbeat=bool(args.strict_trial_heartbeat),
+            strict_backtracking_accept_ratio=float(args.strict_backtracking_accept_ratio),
             freeb_drift_restart=bool(args.freeb_drift_restart),
             freeb_drift_restart_factor=float(args.freeb_drift_restart_factor),
             freeb_drift_restart_step_factor=float(args.freeb_drift_restart_step_factor),
