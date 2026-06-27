@@ -1080,6 +1080,26 @@ def test_square_axis_strict_convergence_assessment_separates_fourier_and_spline_
     assert assessment["edge_control_update_mode"] == "projected_delta"
     assert assessment["solver_native_spline_status"] == "not_implemented"
     assert assessment["vmec2000_expected_to_fix_fourier_bottleneck"] is False
+    assert assessment["strict_target_policy"]["component_ftol"] == pytest.approx(1.0e-12)
+    assert assessment["strict_target_policy"]["ftol_1e_minus_8_status"] == "diagnostic_only_for_this_square_hybrid_lane"
+    assert assessment["recommended_primary_solver_lane"] == "vmec_jax_fourier_strict_profile"
+    assert assessment["fast_cli_reference_lane"] == "vmec2000_generated_mgrid"
+    assert (
+        assessment["differentiable_solver_lane"]
+        == "vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives"
+    )
+    assert (
+        assessment["solver_method_recommendation"]["vmec2000_robustness_assessment"]
+        == "use_as_fast_reference_and_mgrid_parity_backend_not_as_the_reduced_geometry_solver"
+    )
+    assert assessment["solver_method_recommendation"]["native_actual_force_profile_sequence"] == [
+        "frozen_initial_vacuum_pressure_for_native_matrix_free_mechanics",
+        "jax_replay_vacuum_pressure_before_claiming_free_boundary_native_residual",
+        "full_native_spline_state_nonlinear_loop_before_claiming_less_fourier_pressure",
+    ]
+    assert assessment["derivative_method_priority"][0] == (
+        "implicit_or_adjoint_differentiation_of_the_converged_native_residual"
+    )
     assert "promote_native_spline_control_state_if_full_fourier_and_vmec2000_stall_above_target" in assessment[
         "recommended_next_steps"
     ]
@@ -1113,6 +1133,22 @@ def test_square_axis_strict_convergence_assessment_separates_fourier_and_spline_
     assert native_assessment["solver_native_spline_controls"] is False
     assert native_assessment["solver_native_spline_edge_controls"] is True
     assert native_assessment["full_native_spline_state_required_for_less_fourier_pressure"] is True
+    assert native_assessment["recommended_primary_solver_lane"] == "vmec_jax_edge_native_spline_bridge"
+    assert (
+        native_assessment["native_spline_recommendation"]
+        == "promote_full_native_spline_state_after_edge_bridge_or_vmec2000_stalls"
+    )
+
+    full_native = square_axis_strict_convergence_assessment(
+        resolution_deck=deck,
+        strict_schedule=schedule,
+        edge_control_projection_enabled=True,
+        edge_control_update_mode="native_coordinate",
+        solver_native_spline_controls=True,
+    )
+    assert full_native["solver_native_spline_status"] == "available"
+    assert full_native["recommended_primary_solver_lane"] == "vmec_jax_full_native_spline_state"
+    assert full_native["native_spline_recommendation"] == "full_native_spline_state_available"
 
 
 def test_square_axis_projection_error_rejects_sampler_grid_aliases():

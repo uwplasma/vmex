@@ -675,6 +675,14 @@ mode counts for the sharpened stress shape.
 Physics And Algorithm Findings
 ------------------------------
 
+The strict square-hybrid lane treats ``ftol=1e-8`` as diagnostic-only.  A
+production claim for this geometry requires the final stage to request
+``ftol=1e-12`` and the final accepted state to satisfy the component-wise
+``fsqr``, ``fsqz``, and ``fsql`` checks at that target.  The preflight
+``strict_convergence_assessment`` block now records this as
+``strict_target_policy`` so active staged VMEC2000 sidecars cannot be mistaken
+for a final strict result while they are still in an earlier ``1e-8`` stage.
+
 VMEC2000 remains the solve-side reference. Its free-boundary path delays vacuum
 coupling until the interior ``R/Z`` force residual is already small, forces full
 NESTOR updates for the first vacuum iterations, then uses ``NVACSKIP`` to
@@ -683,6 +691,35 @@ edge force through the dedicated ``bsqvac``/``rbsq`` path, not by enabling
 generic fixed-boundary edge rows. VMEC documentation and the SIMSOPT VMEC
 interface also make clear that strict production runs usually need large
 final-grid iteration budgets, often thousands of iterations.
+The current best completed generated-``mgrid`` VMEC2000 references are close
+but still not strict: the ``MPOL=5, NTOR=28, NZETA=64`` row ended near
+``1.12e-11`` in its limiting component, and the ``MPOL=7, NTOR=28, NZETA=64``
+row ended near ``6.36e-12`` after a 24k final-stage budget.  That makes
+VMEC2000 the fast CLI/reference backend for sign, scale, mgrid, and NESTOR
+parity, but not a replacement for changing the square-hybrid nonlinear state
+basis.
+
+The strict assessment now exposes this split through
+``solver_method_recommendation``.  ``fast_cli_reference_lane`` is
+``vmec2000_generated_mgrid``; ``differentiable_solver_lane`` is
+``vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives``.
+The active production bridge with
+``--freeb-edge-control-update-mode native_coordinate`` is intentionally marked
+``solver_native_spline_scope="lcfs_edge_only"``.  It reduces and stabilizes
+LCFS edge updates, but the interior state and force kernels are still the
+ordinary VMEC Fourier/radial state.  Therefore the next research-grade solver
+milestone is a full native spline nonlinear state whose residual is evaluated
+by decoding to VMEC coefficients only at the force-kernel boundary.
+
+The derivative strategy follows the same separation.  Local kernel checks can
+still use forward/reverse autodiff, dense Jacobians, or finite differences on
+small decks.  Production derivatives should use implicit or adjoint
+differentiation of the converged reduced residual, with custom linear-solve
+rules for reusable vacuum/NESTOR or Laplace operators.  The existing native
+actual-force profile already supports the staging sequence recorded in
+``solver_method_recommendation``: first use frozen initial vacuum pressure for
+native matrix-free mechanics, then run the ``jax_replay`` vacuum-pressure mode
+before claiming a real free-boundary native residual.
 
 VMEC++ source review gives three concrete follow-up candidates for the
 ``vmec_jax`` direct-coil path if the high-mode staged profiles still plateau

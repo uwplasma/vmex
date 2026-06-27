@@ -529,6 +529,11 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             "strict_vmec2000_expected_to_fix_fourier_bottleneck": strict_assessment.get(
                 "vmec2000_expected_to_fix_fourier_bottleneck"
             ),
+            "strict_recommended_primary_solver_lane": strict_assessment.get("recommended_primary_solver_lane"),
+            "strict_fast_cli_reference_lane": strict_assessment.get("fast_cli_reference_lane"),
+            "strict_differentiable_solver_lane": strict_assessment.get("differentiable_solver_lane"),
+            "strict_native_spline_recommendation": strict_assessment.get("native_spline_recommendation"),
+            "strict_derivative_method_priority": strict_assessment.get("derivative_method_priority"),
             "strict_assessment_blockers": strict_assessment.get("blockers"),
             "strict_assessment_next_steps": strict_assessment.get("recommended_next_steps"),
         }
@@ -602,6 +607,11 @@ def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
         "strict_full_native_spline_state_required",
         "strict_vmec2000_reference_role",
         "strict_vmec2000_expected_to_fix_fourier_bottleneck",
+        "strict_recommended_primary_solver_lane",
+        "strict_fast_cli_reference_lane",
+        "strict_differentiable_solver_lane",
+        "strict_native_spline_recommendation",
+        "strict_derivative_method_priority",
         "strict_assessment_blockers",
     ]
     if any("preflight_command" in row for row in rows):

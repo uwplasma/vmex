@@ -458,6 +458,13 @@ through the effective deck selected by the preflight. This is intentional:
 manual ``MPOL``/``NTOR``/``NZETA`` changes are supported, but lowering the
 Fourier or collocation resolution below the square-axis recommendation is a
 diagnostic input unless the script can auto-promote it before the solve.
+The same matrix now prints the solver-method lane.  For current native-edge
+profiles this should read ``strict_recommended_primary_solver_lane`` as
+``vmec_jax_edge_native_spline_bridge``, ``strict_fast_cli_reference_lane`` as
+``vmec2000_generated_mgrid``, and ``strict_differentiable_solver_lane`` as
+``vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives``.
+Treat ``ftol=1e-8`` rows as diagnostics only; the strict square-hybrid target
+is the final component-wise ``ftol=1e-12`` stage.
 
 To regenerate that classification locally without writing coils, mgrid files,
 WOUT files, or figures, run:

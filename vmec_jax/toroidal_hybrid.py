@@ -1645,9 +1645,38 @@ def square_axis_strict_convergence_assessment(
     if full_fourier_ready and reduced_enabled and not native_spline:
         next_steps.append("promote_native_spline_control_state_if_full_fourier_and_vmec2000_stall_above_target")
 
+    primary_lane = (
+        "vmec_jax_full_native_spline_state"
+        if native_spline
+        else "vmec_jax_edge_native_spline_bridge"
+        if native_edge_controls
+        else "vmec_jax_fourier_strict_profile"
+        if full_fourier_ready
+        else "repair_preflight_before_strict_solve"
+    )
+    derivative_priority = [
+        "implicit_or_adjoint_differentiation_of_the_converged_native_residual",
+        "custom_linear_solve_for_the_vacuum_response_when_the_operator_is_reused",
+        "jax_linearize_vjp_matrix_free_newton_krylov_for_solver_prototypes",
+        "forward_or_reverse_autodiff_only_for_local_kernel_validation_or_small_dof_smokes",
+    ]
+    native_recommendation = (
+        "full_native_spline_state_available"
+        if native_spline
+        else "promote_full_native_spline_state_after_edge_bridge_or_vmec2000_stalls"
+        if native_edge_controls
+        else "enable_native_coordinate_edge_bridge_then_promote_full_native_spline_state"
+    )
+
     return {
         "schema": "square_axis_strict_convergence_assessment.v1",
         "target_component_ftol": target,
+        "strict_target_policy": {
+            "component_ftol": target,
+            "ftol_1e_minus_8_status": "diagnostic_only_for_this_square_hybrid_lane",
+            "final_stage_must_request_target": True,
+            "claim_requires_componentwise_final_residual": True,
+        },
         "resolution_deck_status": resolution_status,
         "strict_schedule_status": schedule_status,
         "full_fourier_strict_profile_status": "ready_to_attempt" if full_fourier_ready else "blocked_by_preflight",
@@ -1698,6 +1727,26 @@ def square_axis_strict_convergence_assessment(
             "it cannot remove Fourier representation error from a linear-axis square target"
         ),
         "vmec2000_expected_to_fix_fourier_bottleneck": False,
+        "solver_method_recommendation": {
+            "primary_lane": primary_lane,
+            "fast_cli_reference_lane": "vmec2000_generated_mgrid",
+            "differentiable_solver_lane": "vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives",
+            "vmec2000_robustness_assessment": (
+                "use_as_fast_reference_and_mgrid_parity_backend_not_as_the_reduced_geometry_solver"
+            ),
+            "native_spline_recommendation": native_recommendation,
+            "native_actual_force_profile_sequence": [
+                "frozen_initial_vacuum_pressure_for_native_matrix_free_mechanics",
+                "jax_replay_vacuum_pressure_before_claiming_free_boundary_native_residual",
+                "full_native_spline_state_nonlinear_loop_before_claiming_less_fourier_pressure",
+            ],
+            "derivative_method_priority": derivative_priority,
+        },
+        "recommended_primary_solver_lane": primary_lane,
+        "fast_cli_reference_lane": "vmec2000_generated_mgrid",
+        "differentiable_solver_lane": "vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives",
+        "native_spline_recommendation": native_recommendation,
+        "derivative_method_priority": derivative_priority,
         "blockers": list(dict.fromkeys(blockers)),
         "recommended_next_steps": list(dict.fromkeys(next_steps)),
     }

@@ -36,6 +36,19 @@ def test_square_coil_resolution_matrix_classifies_small_decks(tmp_path: Path):
     assert rows[0]["strict_solver_native_spline_scope"] == "lcfs_edge_only"
     assert rows[0]["strict_full_native_spline_state_required"] is True
     assert "generated-mgrid VMEC2000 is a backend" in rows[0]["strict_vmec2000_reference_role"]
+    assert rows[0]["strict_recommended_primary_solver_lane"] == "vmec_jax_edge_native_spline_bridge"
+    assert rows[0]["strict_fast_cli_reference_lane"] == "vmec2000_generated_mgrid"
+    assert (
+        rows[0]["strict_differentiable_solver_lane"]
+        == "vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives"
+    )
+    assert (
+        rows[0]["strict_native_spline_recommendation"]
+        == "promote_full_native_spline_state_after_edge_bridge_or_vmec2000_stalls"
+    )
+    assert rows[0]["strict_derivative_method_priority"][0] == (
+        "implicit_or_adjoint_differentiation_of_the_converged_native_residual"
+    )
     assert rows[1]["status"] == "diagnostic_underresolved"
     assert "nzeta_below_square_axis_recommendation" in rows[1]["reasons"]
 

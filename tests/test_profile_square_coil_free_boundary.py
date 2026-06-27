@@ -1448,6 +1448,16 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert assessment["reduced_control_profile_status"] == "not_enabled"
     assert assessment["solver_native_spline_status"] == "not_implemented"
     assert assessment["vmec2000_expected_to_fix_fourier_bottleneck"] is False
+    assert assessment["strict_target_policy"]["component_ftol"] == pytest.approx(1.0e-12)
+    assert assessment["recommended_primary_solver_lane"] == "vmec_jax_fourier_strict_profile"
+    assert assessment["fast_cli_reference_lane"] == "vmec2000_generated_mgrid"
+    assert (
+        assessment["differentiable_solver_lane"]
+        == "vmec_jax_full_native_spline_state_with_implicit_or_adjoint_derivatives"
+    )
+    assert assessment["derivative_method_priority"][0] == (
+        "implicit_or_adjoint_differentiation_of_the_converged_native_residual"
+    )
     assert "spline_control_updates_not_enabled" in assessment["blockers"]
     closure = data["strict_deck_closure"]
     assert closure["schema"] == "square_coil_hybrid_strict_deck_closure.v1"
