@@ -602,6 +602,10 @@ directories, and active VMEC2000 profile directories. For active VMEC2000
 folders it reads ``_partial_vmec2000_payload.json`` when present, otherwise it
 parses ``vmec2000_mgrid/threed1*`` directly and labels the row
 ``running_partial``.
+The live VMEC2000 sidecar separates ``parsed_latest_stage_ftol`` from
+``requested_final_ftol``.  A staged run can therefore still be judged against
+the requested ``FTOL_ARRAY[-1]=1e-12`` target even while VMEC2000 is printing
+the current coarse-stage ``FTOLV=1e-8`` rows.
 Copied VMEC2000 sidecars can also be summarized locally after transfer from a
 remote machine, even if the filename is no longer
 ``_partial_vmec2000_payload.json``.

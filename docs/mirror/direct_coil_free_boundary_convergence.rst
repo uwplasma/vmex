@@ -313,6 +313,10 @@ During long VMEC2000 runs the profiler writes
 vacuum-grid overflow before ``xvmec`` exits. The summary tool also accepts an
 active VMEC2000 profile directory and will read that sidecar, or parse
 ``vmec2000_mgrid/threed1*`` directly when the sidecar is not present.
+The sidecar records both ``parsed_latest_stage_ftol`` and
+``requested_final_ftol``.  Strict convergence is judged against the latter when
+the profiler launched a staged ladder, so an active coarse stage printed with
+``FTOLV=1e-8`` is not mistaken for the requested final ``1e-12`` solve.
 Rows with no parsed force iterations now include ``progress_phase``. A value
 of ``startup_or_pre_iteration_output`` means VMEC2000 has opened ``threed1``
 but has not yet printed the force table; it is not a strict residual result.

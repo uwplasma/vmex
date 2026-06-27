@@ -1105,6 +1105,35 @@ def test_square_coil_profile_partial_vmec2000_payload_reads_timeout_rows(tmp_pat
     assert payload["vacuum_grid_exceeded_count"] == 1
 
 
+def test_square_coil_profile_partial_vmec2000_payload_uses_requested_final_ftol(tmp_path: Path):
+    workdir = tmp_path / "vmec2000_mgrid"
+    workdir.mkdir()
+    (workdir / "threed1.case").write_text(
+        "\n".join(
+            [
+                " NS =    9 NO. FOURIER MODES =  113 FTOLV =  1.000E-08 NITER =   5000",
+                " ITER    FSQR      FSQZ      FSQL      fsqr      fsqz      fsql      DELT",
+                "  200   4.00E-06  2.00E-06  1.00E-06  1.00E-08  2.00E-08  3.00E-08  2.00E-02",
+            ]
+        )
+        + "\n"
+    )
+
+    payload = profile._partial_vmec2000_payload(
+        workdir,
+        requested_ftol=1.0e-12,
+        ftol_array=(1.0e-8, 1.0e-10, 1.0e-12),
+    )
+
+    assert payload["parsed_latest_stage_ftol"] == pytest.approx(1.0e-8)
+    assert payload["requested_final_ftol"] == pytest.approx(1.0e-12)
+    assert payload["ftol_array"] == pytest.approx([1.0e-8, 1.0e-10, 1.0e-12])
+    assert payload["strict_convergence"]["requested_ftol"] == pytest.approx(1.0e-12)
+    assert payload["strict_convergence"]["status"] == "underconverged"
+    assert "requested_ftol_above_1e-12" not in payload["strict_convergence"]["blockers"]
+    assert "component_max_above_requested_ftol" in payload["strict_convergence"]["blockers"]
+
+
 def test_square_coil_profile_writes_partial_vmec2000_sidecar(tmp_path: Path):
     workdir = tmp_path / "vmec2000_mgrid"
     workdir.mkdir()
@@ -1420,6 +1449,13 @@ def test_square_coil_profile_records_boundary_projection_payload(monkeypatch, tm
     assert assessment["solver_native_spline_status"] == "not_implemented"
     assert assessment["vmec2000_expected_to_fix_fourier_bottleneck"] is False
     assert "spline_control_updates_not_enabled" in assessment["blockers"]
+    closure = data["strict_deck_closure"]
+    assert closure["schema"] == "square_coil_hybrid_strict_deck_closure.v1"
+    assert closure["status"] == "strict_profile_ready"
+    assert closure["requested_final_ftol"] == pytest.approx(1.0e-12)
+    assert closure["strict_final_ftol_requested"] is True
+    assert closure["solver_state_basis"] == "vmec_fourier_coefficients"
+    assert closure["vmec2000_expected_to_fix_fourier_bottleneck"] is False
     deck = data["resolution_deck"]
     assert deck["status"] == "production_ready"
     assert deck["ntheta"] == profile.recommended_square_axis_ntheta(3)

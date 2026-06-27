@@ -28,6 +28,7 @@ from examples.toroidal_stellarator_mirror_hybrid_square_coils_free_boundary impo
     _run_budget,
     _square_axis_sample_kwargs,
     _stage_values,
+    _strict_deck_closure_payload as _example_strict_deck_closure_payload,
     build_square_coils,
     make_free_boundary_indata,
 )
@@ -793,7 +794,12 @@ def _file_status_payload(path: Path | None, *, prefix: str) -> dict[str, Any]:
     return {f"{prefix}_size_bytes": int(stat.st_size), f"{prefix}_mtime_unix_s": float(stat.st_mtime)}
 
 
-def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
+def _partial_vmec2000_payload(
+    workdir: Path,
+    *,
+    requested_ftol: float | None = None,
+    ftol_array: Any = None,
+) -> dict[str, Any]:
     matches = sorted(Path(workdir).glob("threed1*"))
     threed1 = matches[0] if matches else None
     stages = []
@@ -807,8 +813,13 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
             rows = []
     totals = [float(row.fsqr) + float(row.fsqz) + float(row.fsql) for row in rows]
     last = rows[-1] if rows else None
-    final_ftol = float(stages[-1].ftolv) if stages else None
-    tail_plateau = _vmec2000_tail_plateau_payload(rows, stage_ftol=final_ftol)
+    parsed_latest_stage_ftol = float(stages[-1].ftolv) if stages else None
+    ftol_values = _as_float_list(ftol_array)
+    requested_final_ftol = _finite_float_or_none(requested_ftol)
+    if requested_final_ftol is None and ftol_values:
+        requested_final_ftol = _finite_float_or_none(ftol_values[-1])
+    strict_ftol = requested_final_ftol if requested_final_ftol is not None else parsed_latest_stage_ftol
+    tail_plateau = _vmec2000_tail_plateau_payload(rows, stage_ftol=parsed_latest_stage_ftol)
     progress_phase = (
         "waiting_for_threed1"
         if threed1 is None
@@ -824,19 +835,22 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
         "threed1_tail": _tail_lines(threed1, lines=80),
         "iteration_row_count": len(rows),
         "stage_summaries": [_vmec2000_stage_payload(stage) for stage in stages],
+        "parsed_latest_stage_ftol": parsed_latest_stage_ftol,
+        "requested_final_ftol": requested_final_ftol,
+        "ftol_array": ftol_values or None,
         "history": _vmec2000_tail_history_payload(rows),
         "tail_rows": [_vmec2000_row_payload(row) for row in rows[-12:]],
         "last_row": None if last is None else _vmec2000_row_payload(last),
         "min_total": None if not totals else float(np.nanmin(np.asarray(totals, dtype=float))),
         "final_max_component": None if last is None else _vmec2000_max_component(last),
-        "strict_components_met": None if last is None else _vmec2000_strict_components_met(last, final_ftol),
+        "strict_components_met": None if last is None else _vmec2000_strict_components_met(last, strict_ftol),
         "strict_convergence": _strict_convergence_verdict(
             components=(
                 None if last is None else float(last.fsqr),
                 None if last is None else float(last.fsqz),
                 None if last is None else float(last.fsql),
             ),
-            requested_ftol=final_ftol,
+            requested_ftol=strict_ftol,
             free_boundary_active=True if rows else None,
             final_residual_recomputed=True if rows else None,
             tail_plateau_status=tail_plateau.get("status"),
@@ -847,12 +861,22 @@ def _partial_vmec2000_payload(workdir: Path) -> dict[str, Any]:
     }
 
 
-def _write_partial_vmec2000_payload(*, outdir: Path, workdir: Path) -> Path:
+def _write_partial_vmec2000_payload(
+    *,
+    outdir: Path,
+    workdir: Path,
+    requested_ftol: float | None = None,
+    ftol_array: Any = None,
+) -> Path:
     """Write a live VMEC2000 progress report using an atomic file replace."""
 
     path = Path(outdir) / "_partial_vmec2000_payload.json"
     tmp = path.with_suffix(path.suffix + ".tmp")
-    payload = _partial_vmec2000_payload(Path(workdir))
+    payload = _partial_vmec2000_payload(
+        Path(workdir),
+        requested_ftol=requested_ftol,
+        ftol_array=ftol_array,
+    )
     tmp.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True, allow_nan=False) + "\n")
     tmp.replace(path)
     return path
@@ -862,6 +886,8 @@ def _start_vmec2000_progress_monitor(
     *,
     outdir: Path,
     workdir: Path,
+    requested_ftol: float | None = None,
+    ftol_array: Any = None,
     interval_s: float = 30.0,
 ) -> tuple[threading.Event, threading.Thread]:
     """Refresh partial VMEC2000 progress while the external executable runs."""
@@ -873,7 +899,12 @@ def _start_vmec2000_progress_monitor(
     def _monitor() -> None:
         while not stop.wait(max(0.1, float(interval_s))):
             try:
-                _write_partial_vmec2000_payload(outdir=outdir, workdir=workdir)
+                _write_partial_vmec2000_payload(
+                    outdir=outdir,
+                    workdir=workdir,
+                    requested_ftol=requested_ftol,
+                    ftol_array=ftol_array,
+                )
             except Exception:
                 # Progress monitoring must never affect the VMEC2000 solve.
                 continue
@@ -969,6 +1000,25 @@ def _finite_float_or_none(value: Any) -> float | None:
     except Exception:
         return None
     return out if np.isfinite(out) else None
+
+
+def _as_float_list(value: Any) -> list[float]:
+    """Return finite scalar/list tolerances as plain floats for JSON payloads."""
+
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        raw_values = value.reshape(-1).tolist()
+    elif isinstance(value, (list, tuple)):
+        raw_values = list(value)
+    else:
+        raw_values = [value]
+    out: list[float] = []
+    for raw in raw_values:
+        parsed = _finite_float_or_none(raw)
+        if parsed is not None:
+            out.append(float(parsed))
+    return out
 
 
 def _strict_convergence_verdict(
@@ -3564,6 +3614,12 @@ def main(argv: list[str] | None = None) -> int:
         solver_native_spline_controls=bool(spline_bridge.get("solver_native_spline_controls", False)),
         target_ftol=STRICT_COMPONENT_FTOL,
     )
+    strict_deck_closure = _example_strict_deck_closure_payload(
+        requested_config,
+        resolution_deck=resolution_deck,
+        strict_schedule=strict_schedule,
+        spline_bridge=spline_bridge,
+    )
     edge_control_projection_payload_for_summary = _freeb_edge_control_projection_solver_payload(
         config,
         symmetry=str(args.freeb_edge_control_projection),
@@ -3781,6 +3837,7 @@ def main(argv: list[str] | None = None) -> int:
             "native_spline_vector_residual_profile": native_vector_profile_payload,
             "native_spline_actual_force_step_profile": native_actual_force_step_payload,
             "strict_schedule": strict_schedule,
+            "strict_deck_closure": strict_deck_closure,
             "strict_convergence_assessment": strict_convergence_assessment,
             "resolution_deck": resolution_deck,
             "resolution_guardrail": resolution_guardrail,
@@ -3981,6 +4038,7 @@ def main(argv: list[str] | None = None) -> int:
         "edge_control_projection": edge_control_projection_summary,
         "spline_bridge": spline_bridge,
         "strict_schedule": strict_schedule,
+        "strict_deck_closure": strict_deck_closure,
         "strict_convergence_assessment": strict_convergence_assessment,
         "resolution_deck": resolution_deck,
         "resolution_guardrail": resolution_guardrail,
@@ -4107,6 +4165,8 @@ def main(argv: list[str] | None = None) -> int:
             monitor_stop, monitor_thread = _start_vmec2000_progress_monitor(
                 outdir=outdir,
                 workdir=vmec2000_workdir,
+                requested_ftol=float(config.ftol),
+                ftol_array=ftol_values,
             )
             try:
                 run = run_xvmec2000(
@@ -4137,6 +4197,9 @@ def main(argv: list[str] | None = None) -> int:
                     "threed1_tail": _tail_lines(run.threed1_path, lines=80),
                     "vacuum_grid_exceeded_count": _vacuum_grid_exceeded_count(run.threed1_path),
                     "stage_summaries": [_vmec2000_stage_payload(stage) for stage in run.stages],
+                    "parsed_latest_stage_ftol": stage_ftol,
+                    "requested_final_ftol": float(config.ftol),
+                    "ftol_array": ftol_values,
                     "iteration_row_count": len(rows),
                     "first_rows": [_vmec2000_row_payload(row) for row in rows[:8]],
                     "tail_rows": [_vmec2000_row_payload(row) for row in rows[-12:]],
@@ -4169,13 +4232,22 @@ def main(argv: list[str] | None = None) -> int:
                 payload["backends"]["vmec2000_mgrid"] = {
                     "status": "failed",
                     "error": repr(exc),
-                    **_partial_vmec2000_payload(vmec2000_workdir),
+                    **_partial_vmec2000_payload(
+                        vmec2000_workdir,
+                        requested_ftol=float(config.ftol),
+                        ftol_array=ftol_values,
+                    ),
                 }
             finally:
                 monitor_stop.set()
                 monitor_thread.join(timeout=2.0)
                 try:
-                    _write_partial_vmec2000_payload(outdir=outdir, workdir=vmec2000_workdir)
+                    _write_partial_vmec2000_payload(
+                        outdir=outdir,
+                        workdir=vmec2000_workdir,
+                        requested_ftol=float(config.ftol),
+                        ftol_array=ftol_values,
+                    )
                 except Exception:
                     pass
 
