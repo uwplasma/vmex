@@ -279,6 +279,12 @@ projection/``NZETA`` deck status, spline-control map conditioning, and a
 ``spline_bridge`` block stating that the current control-spline path is still a
 projection bridge into VMEC Fourier coefficients rather than a solver-native
 spline-control update.
+The same preflight and final metrics include ``strict_deck_closure``. This is
+the compact source of truth for edited decks: it records requested and effective
+``MPOL``/``NTOR``/``NTHETA``/``NZETA``, the final requested component ``FTOL``,
+the total stage iteration budget, any production blockers, the current spline
+solver scope, and the fact that VMEC2000 is a same-Fourier-deck mgrid/NESTOR
+reference rather than a fix for Fourier representation pressure.
 Set the example's top-level ``PREFLIGHT_ONLY = True`` after editing
 ``MPOL``, ``NTOR``, ``NTHETA``, or ``NZETA`` to write those checks, the coils
 JSON, and an empty summary CSV without launching any beta solves. This keeps

@@ -285,7 +285,15 @@ convergence status, force components, free-boundary ``B.n`` diagnostics, WOUT
 paths, beta scan rows, solver objective-history extrema, bad-Jacobian/reset
 counts, best fresh free-boundary residuals including
 ``best_scored_component_max`` in schema version ``0.5``, accepted-LCFS motion
-relative to the input boundary, and a stall classification. Current
+relative to the input boundary, and a stall classification. The same metrics
+also include ``strict_deck_closure``, a compact requested-versus-effective deck
+block that records auto-promoted ``MPOL``/``NTOR``/``NTHETA``/``NZETA``,
+the final requested component ``FTOL``, total iteration budget, remaining
+preflight blockers, and the current spline scope. It is the first field to
+check after editing mode counts or grids: ``status="strict_profile_ready"``
+means the run asked for a strict ``1e-12`` profile on a represented deck, while
+``status="diagnostic_only"`` means the result should not be promoted even if it
+finishes. Current
 direct-coil square-hybrid runs are therefore treated as explicit convergence
 diagnostics: if the final recomputed force components miss the requested
 ``FTOL``, the run is labelled as ``not_converged_or_max_iter`` rather than being

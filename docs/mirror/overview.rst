@@ -276,7 +276,10 @@ those controls into a smaller global nonlinear state.
 Direct-coil convergence
 candidates are gated by a fresh residual recompute using the current
 plasma-current normalization, and the square-coil example schema ``0.5`` records
-``best_scored_component_max`` for component-wise strict triage. It also records near-axis
+``best_scored_component_max`` for component-wise strict triage. It also records
+``strict_deck_closure``, which reports requested and effective mode/grid counts,
+the final requested component ``FTOL``, total iteration budget, and whether the
+run is a strict profile or diagnostic-only after any auto-promotion. It also records near-axis
 ``|B|`` and mirror-ratio response plots for comparison with the expected
 finite-beta diamagnetic field-depression and effective mirror-ratio increase in
 linear mirror traps.

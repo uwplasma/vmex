@@ -716,6 +716,30 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
     preflight = module._preflight_payload(module.ExampleConfig())
     assert preflight["schema"] == "square_coil_hybrid_preflight"
     assert preflight["production_ready_for_strict_profile"] is True
+    assert preflight["strict_deck_closure"]["schema"] == "square_coil_hybrid_strict_deck_closure.v1"
+    assert preflight["strict_deck_closure"]["status"] == "strict_profile_ready"
+    assert preflight["strict_deck_closure"]["production_ready_for_strict_profile"] is True
+    assert preflight["strict_deck_closure"]["blockers"] == []
+    assert preflight["strict_deck_closure"]["requested_mpol"] == module.ExampleConfig().mpol
+    assert preflight["strict_deck_closure"]["requested_ntor"] == module.ExampleConfig().ntor
+    assert preflight["strict_deck_closure"]["effective_mpol"] == module.ExampleConfig().mpol
+    assert preflight["strict_deck_closure"]["effective_ntor"] == module.ExampleConfig().ntor
+    assert preflight["strict_deck_closure"]["effective_nzeta"] == max(
+        64, recommended_square_axis_nzeta(module.ExampleConfig().ntor)
+    )
+    assert preflight["strict_deck_closure"]["target_component_ftol"] == pytest.approx(1.0e-12)
+    assert preflight["strict_deck_closure"]["requested_final_ftol"] == pytest.approx(1.0e-12)
+    assert preflight["strict_deck_closure"]["strict_final_ftol_requested"] is True
+    assert preflight["strict_deck_closure"]["solver_state_basis"] == (
+        "edge_reduced_spline_controls_decoded_to_vmec_fourier"
+    )
+    assert preflight["strict_deck_closure"]["native_spline_solver_scope"] == "lcfs_edge_only"
+    assert preflight["strict_deck_closure"]["full_native_spline_state_available"] is False
+    assert (
+        preflight["strict_deck_closure"]["full_native_spline_state_required_for_less_fourier_pressure"]
+        is True
+    )
+    assert preflight["strict_deck_closure"]["vmec2000_expected_to_fix_fourier_bottleneck"] is False
     assert preflight["effective_mode_deck"]["mode_deck_auto_bumped_to_recommended"] is False
     assert preflight["configuration"]["requested_mpol"] == module.ExampleConfig().mpol
     assert preflight["configuration"]["requested_ntor"] == module.ExampleConfig().ntor
@@ -846,6 +870,19 @@ def test_square_axis_recommended_nzeta_and_example_guard(tmp_path: Path):
                 write_plots=False,
             )
         )
+    loose_preflight = module._preflight_payload(
+        module.ExampleConfig(
+            ftol_array=(1.0e-8,),
+            niter_array=(10,),
+            ns_array=(9,),
+            ftol=1.0e-8,
+            write_plots=False,
+        )
+    )
+    assert loose_preflight["status"] == "diagnostic_only"
+    assert loose_preflight["strict_deck_closure"]["status"] == "diagnostic_only"
+    assert "final_ftol_above_strict_target" in loose_preflight["strict_deck_closure"]["blockers"]
+    assert loose_preflight["strict_deck_closure"]["strict_final_ftol_requested"] is False
 
 
 def test_square_axis_spline_option_reduces_low_mode_projection_error():
@@ -1443,6 +1480,11 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert Path(metrics["preflight_json"]).exists()
     assert metrics["preflight"]["schema"] == "square_coil_hybrid_preflight"
     assert metrics["preflight"]["strict_schedule"]["requested_final_ftol_meets_target"] is False
+    assert metrics["strict_deck_closure"]["status"] == "diagnostic_only"
+    assert "final_ftol_above_strict_target" in metrics["strict_deck_closure"]["blockers"]
+    assert metrics["strict_deck_closure"]["strict_final_ftol_requested"] is False
+    assert metrics["strict_deck_closure"]["full_native_spline_state_available"] is False
+    assert metrics["preflight"]["strict_deck_closure"]["status"] == "diagnostic_only"
     assert (
         metrics["preflight"]["strict_convergence_assessment"]["full_fourier_strict_profile_status"]
         == "blocked_by_preflight"
@@ -1468,6 +1510,13 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert rows[0]["ntor"] == 4
     assert rows[0]["ntheta"] == metrics["ntheta"]
     assert rows[0]["nzeta"] == metrics["nzeta"]
+    assert rows[0]["strict_deck_closure_status"] == "diagnostic_only"
+    assert "final_ftol_above_strict_target" in rows[0]["strict_deck_blockers"]
+    assert rows[0]["strict_final_ftol_requested"] is False
+    assert rows[0]["strict_solver_state_basis"] == "edge_reduced_spline_controls_decoded_to_vmec_fourier"
+    assert rows[0]["strict_native_spline_solver_scope"] == "lcfs_edge_only"
+    assert rows[0]["strict_full_native_spline_state_available"] is False
+    assert rows[0]["strict_vmec2000_expected_to_fix_fourier_bottleneck"] is False
     assert np.isfinite(float(rows[0]["final_fsqr"]))
     assert np.isfinite(float(rows[0]["final_fsqz"]))
     assert np.isfinite(float(rows[0]["final_fsql"]))
@@ -1504,6 +1553,10 @@ def test_square_coil_hybrid_free_boundary_example_runs_without_plots(tmp_path: P
     assert csv_rows[0]["ntor"] == "4"
     assert csv_rows[0]["ntheta"] == str(metrics["ntheta"])
     assert csv_rows[0]["nzeta"] == str(metrics["nzeta"])
+    assert csv_rows[0]["strict_deck_closure_status"] == "diagnostic_only"
+    assert "final_ftol_above_strict_target" in csv_rows[0]["strict_deck_blockers"]
+    assert csv_rows[0]["strict_final_ftol_requested"] == "False"
+    assert csv_rows[0]["strict_native_spline_solver_scope"] == "lcfs_edge_only"
     assert csv_rows[0]["free_boundary_edge_control_projection_requested"] == "square"
     assert csv_rows[0]["free_boundary_edge_control_update_mode"] == "native_coordinate"
     assert csv_rows[0]["free_boundary_edge_control_projection_enabled"] == "True"
@@ -1551,6 +1604,9 @@ def test_square_coil_hybrid_example_preflight_only_writes_deck_artifacts(tmp_pat
     assert metrics["preflight"]["schema"] == "square_coil_hybrid_preflight"
     assert metrics["effective_resolution"]["effective_nzeta"] >= metrics["recommended_nzeta"]
     assert metrics["effective_resolution"]["nzeta_auto_bumped_to_recommended"] is True
+    assert metrics["strict_deck_closure"]["mode_deck_auto_bumped_to_recommended"] is True
+    assert metrics["strict_deck_closure"]["effective_nzeta"] >= metrics["strict_deck_closure"]["recommended_nzeta"]
+    assert metrics["preflight"]["strict_deck_closure"]["strict_final_ftol_requested"] is True
 
 
 def test_square_coil_hybrid_free_boundary_example_writes_nonblank_plots(tmp_path: Path):

@@ -1353,6 +1353,90 @@ def _spline_bridge_payload(config: ExampleConfig, *, resolution_deck: dict[str, 
     }
 
 
+def _strict_deck_closure_payload(
+    config: ExampleConfig,
+    *,
+    resolution_deck: dict[str, Any] | None = None,
+    strict_schedule: dict[str, Any] | None = None,
+    spline_bridge: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return one compact status block for edited square-hybrid decks."""
+
+    mode_deck = _effective_square_axis_mode_deck(config)
+    solve_config = _effective_solve_config(config)
+    resolution = _effective_square_axis_resolution(solve_config)
+    resolution_deck = _resolution_deck_payload(config) if resolution_deck is None else resolution_deck
+    strict_schedule = _strict_schedule_payload(config) if strict_schedule is None else strict_schedule
+    spline_bridge = (
+        _spline_bridge_payload(solve_config, resolution_deck=resolution_deck)
+        if spline_bridge is None
+        else spline_bridge
+    )
+    blockers: list[str] = []
+    if resolution_deck.get("status") != "production_ready":
+        blockers.append(f"resolution_deck_{resolution_deck.get('status', 'unknown')}")
+        blockers.extend(str(reason) for reason in resolution_deck.get("reasons", []) or [])
+    if not bool(strict_schedule.get("requested_final_ftol_meets_target")):
+        blockers.append("final_ftol_above_strict_target")
+        blockers.extend(str(reason) for reason in strict_schedule.get("reasons", []) or [])
+    if bool(resolution.ntheta_underrecommended):
+        blockers.append("ntheta_below_square_axis_recommendation")
+    if bool(resolution.nzeta_underrecommended):
+        blockers.append("nzeta_below_square_axis_recommendation")
+
+    ready = bool(not blockers)
+    native_scope = spline_bridge.get("solver_native_spline_scope")
+    return {
+        "schema": "square_coil_hybrid_strict_deck_closure.v1",
+        "status": "strict_profile_ready" if ready else "diagnostic_only",
+        "production_ready_for_strict_profile": ready,
+        "blockers": list(dict.fromkeys(blockers)),
+        "requested_mpol": int(mode_deck.requested_mpol),
+        "requested_ntor": int(mode_deck.requested_ntor),
+        "effective_mpol": int(mode_deck.effective_mpol),
+        "effective_ntor": int(mode_deck.effective_ntor),
+        "mode_deck_auto_bumped_to_recommended": bool(mode_deck.mode_deck_auto_bumped_to_recommended),
+        "requested_projection_max_abs_component_error": float(
+            mode_deck.requested_projection_max_abs_component_error
+        ),
+        "effective_projection_max_abs_component_error": float(
+            mode_deck.effective_projection_max_abs_component_error
+        ),
+        "projection_target_max_component_error": mode_deck.target_max_component_error,
+        "projection_gate_met": bool(mode_deck.effective_projection_meets_target),
+        "requested_ntheta": resolution.requested_ntheta,
+        "effective_ntheta": int(resolution.effective_ntheta),
+        "recommended_ntheta": int(resolution.recommended_ntheta),
+        "ntheta_auto_bumped_to_recommended": bool(resolution.ntheta_auto_bumped_to_recommended),
+        "requested_nzeta": resolution.requested_nzeta,
+        "effective_nzeta": int(resolution.effective_nzeta),
+        "recommended_nzeta": int(resolution.recommended_nzeta),
+        "nzeta_auto_bumped_to_recommended": bool(resolution.nzeta_auto_bumped_to_recommended),
+        "ns_array": [int(value) for value in strict_schedule.get("ns_array", [])],
+        "niter_array": [int(value) for value in strict_schedule.get("niter_array", [])],
+        "ftol_array": [float(value) for value in strict_schedule.get("ftol_array", [])],
+        "total_iteration_budget": int(strict_schedule.get("total_iteration_budget", 0)),
+        "target_component_ftol": float(strict_schedule.get("componentwise_target_ftol", STRICT_COMPONENT_FTOL_TARGET)),
+        "requested_final_ftol": strict_schedule.get("requested_final_ftol"),
+        "strict_final_ftol_requested": bool(strict_schedule.get("requested_final_ftol_meets_target")),
+        "resolution_deck_status": resolution_deck.get("status"),
+        "strict_schedule_status": strict_schedule.get("status"),
+        "solver_state_basis": str(spline_bridge.get("nonlinear_solver_boundary_basis")),
+        "native_spline_solver_scope": native_scope,
+        "full_native_spline_state_available": bool(
+            spline_bridge.get("solver_native_spline_controls", False)
+            and native_scope == "full_nonlinear_state"
+        ),
+        "full_native_spline_state_required_for_less_fourier_pressure": bool(
+            spline_bridge.get("requires_native_spline_state_for_reduced_nonlinear_dofs", False)
+        ),
+        "vmec2000_reference_role": (
+            "backend_mgrid_nestor_reference_for_the_same_fourier_deck"
+        ),
+        "vmec2000_expected_to_fix_fourier_bottleneck": False,
+    }
+
+
 def _preflight_payload(config: ExampleConfig) -> dict[str, Any]:
     """Return cheap checks that should pass before a long square-coil solve."""
 
@@ -1376,6 +1460,12 @@ def _preflight_payload(config: ExampleConfig) -> dict[str, Any]:
     )
     edge_control = _edge_control_projection_summary(config)
     spline_bridge = _spline_bridge_payload(config, resolution_deck=resolution_deck)
+    strict_deck_closure = _strict_deck_closure_payload(
+        config,
+        resolution_deck=resolution_deck,
+        strict_schedule=schedule,
+        spline_bridge=spline_bridge,
+    )
     convergence_assessment = square_axis_strict_convergence_assessment(
         resolution_deck=resolution_deck,
         strict_schedule=schedule,
@@ -1389,6 +1479,7 @@ def _preflight_payload(config: ExampleConfig) -> dict[str, Any]:
         "schema_version": 1,
         "status": "production_ready" if production_ready else "diagnostic_only",
         "production_ready_for_strict_profile": production_ready,
+        "strict_deck_closure": strict_deck_closure,
         "configuration": {
             "requested_mpol": int(mode_deck.requested_mpol),
             "requested_ntor": int(mode_deck.requested_ntor),
@@ -1645,6 +1736,7 @@ def _run_one_beta(
     except Exception:
         mean_iota = None
     resolution = _effective_square_axis_resolution(solve_config)
+    strict_deck = _strict_deck_closure_payload(config)
     row = {
         "beta_percent": float(beta_percent),
         "input": str(input_path),
@@ -1663,6 +1755,16 @@ def _run_one_beta(
         "requested_nzeta": resolution.requested_nzeta,
         "recommended_nzeta": resolution.recommended_nzeta,
         "nzeta_auto_bumped_to_recommended": resolution.nzeta_auto_bumped_to_recommended,
+        "strict_deck_closure_status": strict_deck["status"],
+        "strict_deck_blockers": ",".join(str(item) for item in strict_deck["blockers"]),
+        "strict_final_ftol_requested": bool(strict_deck["strict_final_ftol_requested"]),
+        "strict_total_iteration_budget": int(strict_deck["total_iteration_budget"]),
+        "strict_solver_state_basis": strict_deck["solver_state_basis"],
+        "strict_native_spline_solver_scope": strict_deck["native_spline_solver_scope"],
+        "strict_full_native_spline_state_available": bool(strict_deck["full_native_spline_state_available"]),
+        "strict_vmec2000_expected_to_fix_fourier_bottleneck": bool(
+            strict_deck["vmec2000_expected_to_fix_fourier_bottleneck"]
+        ),
         "n_iter": None if run.result is None else int(getattr(run.result, "n_iter", -1)),
         "run_budget": int(run_budget),
         "used_multigrid_schedule": bool(use_multigrid),
@@ -1866,6 +1968,14 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> Path:
         "requested_nzeta",
         "recommended_nzeta",
         "nzeta_auto_bumped_to_recommended",
+        "strict_deck_closure_status",
+        "strict_deck_blockers",
+        "strict_final_ftol_requested",
+        "strict_total_iteration_budget",
+        "strict_solver_state_basis",
+        "strict_native_spline_solver_scope",
+        "strict_full_native_spline_state_available",
+        "strict_vmec2000_expected_to_fix_fourier_bottleneck",
         "n_iter",
         "run_budget",
         "used_multigrid_schedule",
@@ -2332,6 +2442,7 @@ def _metrics_payload(
     solve_config = _effective_solve_config(config)
     resolved_controls = _resolved_axis_spline_controls(solve_config)
     resolution = _effective_square_axis_resolution(solve_config)
+    strict_deck = _strict_deck_closure_payload(config)
     reduced_radii = (
         None
         if config.plasma_axis_reduced_radii is None
@@ -2397,6 +2508,7 @@ def _metrics_payload(
         "requested_nzeta": resolution.requested_nzeta,
         "nzeta_resolution": resolution.nzeta_payload(),
         "nzeta_underrecommended": resolution.nzeta_underrecommended,
+        "strict_deck_closure": strict_deck,
         "max_iter": int(solve_config.max_iter),
         "ftol": float(solve_config.ftol),
         "niter_array": [int(value) for value in solve_config.niter_array],
