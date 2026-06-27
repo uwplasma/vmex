@@ -1713,6 +1713,9 @@ def _summary_row(
         if isinstance(native_spline_vector_residual_profile, dict)
         else {}
     )
+    native_matrix_free_profile = native_vector_profile.get("matrix_free_normal_step_profile")
+    if not isinstance(native_matrix_free_profile, dict):
+        native_matrix_free_profile = {}
     return {
         "case": case,
         "backend": backend_name,
@@ -2178,6 +2181,33 @@ def _summary_row(
         ),
         "native_spline_vector_residual_profile_jvp_linf": _finite_float(
             native_vector_profile.get("jvp_linf")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_status": (
+            native_matrix_free_profile.get("status")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_method": (
+            native_matrix_free_profile.get("method")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_vjp_wall_s": _finite_float(
+            native_matrix_free_profile.get("vjp_wall_s")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_normal_matvec_wall_s": _finite_float(
+            native_matrix_free_profile.get("normal_matvec_wall_s")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_cg_step_wall_s": _finite_float(
+            native_matrix_free_profile.get("cg_step_wall_s")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_linear_maxiter": (
+            native_matrix_free_profile.get("linear_maxiter")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_residual_reduction_factor": _finite_float(
+            native_matrix_free_profile.get("residual_reduction_factor")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_step_l2": _finite_float(
+            native_matrix_free_profile.get("step_l2")
+        ),
+        "native_spline_vector_residual_profile_matrix_free_next_action": (
+            native_matrix_free_profile.get("next_action")
         ),
         "native_spline_vector_residual_profile_next_action": native_vector_profile.get(
             "next_action"
@@ -2651,6 +2681,7 @@ def main(argv: list[str] | None = None) -> int:
         "recommended_nzeta",
         "nvacskip",
         "solver_mode",
+        "strict_backtracking",
         "jax_hot_restart_requested_count",
         "jax_hot_restart_executed_count",
         "jax_hot_restart_iters",
@@ -2733,6 +2764,15 @@ def main(argv: list[str] | None = None) -> int:
         "native_spline_vector_residual_profile_projected_residual_parity_rel",
         "native_spline_vector_residual_profile_projected_residual_jvp_wall_s",
         "native_spline_vector_residual_profile_jvp_linf",
+        "native_spline_vector_residual_profile_matrix_free_status",
+        "native_spline_vector_residual_profile_matrix_free_method",
+        "native_spline_vector_residual_profile_matrix_free_vjp_wall_s",
+        "native_spline_vector_residual_profile_matrix_free_normal_matvec_wall_s",
+        "native_spline_vector_residual_profile_matrix_free_cg_step_wall_s",
+        "native_spline_vector_residual_profile_matrix_free_linear_maxiter",
+        "native_spline_vector_residual_profile_matrix_free_residual_reduction_factor",
+        "native_spline_vector_residual_profile_matrix_free_step_l2",
+        "native_spline_vector_residual_profile_matrix_free_next_action",
         "native_spline_vector_residual_profile_next_action",
         "freeb_edge_control_projection_zero_velocity_count",
         "freeb_edge_control_projection_state_residual_status",
@@ -2901,6 +2941,17 @@ def main(argv: list[str] | None = None) -> int:
         "dt_eff_last",
         "dt_eff_min",
         "time_step_last",
+        "trial_ratio_last",
+        "trial_ratio_min",
+        "trial_ratio_max",
+        "trial_ratio_mean",
+        "step_status_counts",
+        "step_momentum_count",
+        "step_rejected_count",
+        "step_restart_count",
+        "restart_path_counts",
+        "restart_path_trial_rejected_count",
+        "restart_path_momentum_accept_count",
         "freeb_full_update_count",
         "nestor_reuse_count",
         "nestor_reuse_last",

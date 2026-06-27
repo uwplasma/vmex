@@ -674,9 +674,15 @@ CSV/Markdown rows show the native unknown size, removed edge Fourier DOFs,
 reduction fraction, and edge reconstruction residual directly.
 Use ``--native-spline-vector-residual-profile`` with
 ``--freeb-edge-control-projection full`` to measure native-vector
-encode/decode/projected-residual/JVP cost on the selected deck without
-launching an equilibrium solve. The same summary table exposes the resulting
-``native_spline_vector_residual_profile_*`` columns.
+encode/decode/projected-residual/JVP/VJP/normal-step cost on the selected deck
+without launching an equilibrium solve. The same summary table exposes the
+resulting ``native_spline_vector_residual_profile_*`` columns. On the
+production-shaped ``MPOL=5, NTOR=28, NS=17, NZETA=64`` deck, the no-solve
+profile reports ``25202`` native unknowns versus ``26214`` full VMEC unknowns,
+``1012`` removed Fourier LCFS edge DOFs, about ``0.166`` s for the
+projected-residual JVP, about ``0.597`` s for the VJP, about ``0.323`` s for a
+normal matvec, and about ``0.369`` s for the profiled eight-iteration damped CG
+normal step on the local CPU.
 ``FreeBoundaryNativeSplineResidualProblem`` plus the dense
 ``free_boundary_native_spline_dense_gauss_newton_*`` helpers provide a
 manufactured/tiny-case packed-native solve prototype. They form dense

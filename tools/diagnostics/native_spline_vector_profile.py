@@ -15,6 +15,8 @@ from vmec_jax.boundary import boundary_from_indata
 from vmec_jax.config import config_from_indata
 from vmec_jax.init_guess import initial_guess_from_boundary
 from vmec_jax.solvers.free_boundary import (
+    FreeBoundaryNativeSplineResidualProblem,
+    free_boundary_native_spline_matrix_free_normal_step_jax,
     free_boundary_native_spline_unknown_vector_from_vmec_state,
     free_boundary_native_spline_vector_projected_residual_jax,
     free_boundary_native_spline_vector_to_vmec_state_jax,
@@ -73,6 +75,111 @@ def _norms(values: Any) -> dict[str, float]:
     return {
         "l2": float(np.linalg.norm(finite)),
         "linf": float(np.max(np.abs(finite))),
+    }
+
+
+def _json_scalar(value: Any) -> float | int | str | None:
+    """Return a compact JSON-safe scalar from an optional JAX/NumPy value."""
+
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return str(value)
+    if arr.shape == ():
+        item = arr.item()
+        if isinstance(item, (bool, int, np.integer)):
+            return int(item)
+        if isinstance(item, (float, np.floating)):
+            return float(item) if np.isfinite(float(item)) else None
+        return str(item)
+    return str(value)
+
+
+def _native_matrix_free_profile(
+    *,
+    vector: Any,
+    direction: Any,
+    template_state: VMECState,
+    projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Time JVP/VJP/CG pieces for a native spline-vector normal step."""
+
+    import jax
+
+    residual_fn = lambda values: free_boundary_native_spline_vector_projected_residual_jax(
+        values,
+        template_state,
+        projection,
+        _state_delta,
+        edge_metric="pullback",
+    )
+
+    (vjp_residual, vjp_pullback), vjp_s = _time_call(
+        lambda: (
+            lambda residual_value, vjp_fun: (residual_value, vjp_fun(residual_value)[0])
+        )(*jax.vjp(residual_fn, vector))
+    )
+
+    def apply_normal_matvec() -> Any:
+        _residual_value, jvp_fun = jax.linearize(residual_fn, vector)
+        _residual_for_vjp, vjp_fun = jax.vjp(residual_fn, vector)
+        return vjp_fun(jvp_fun(direction))[0]
+
+    normal_matvec, normal_matvec_s = _time_call(apply_normal_matvec)
+
+    problem = FreeBoundaryNativeSplineResidualProblem(
+        template_state=template_state,
+        projection=projection,
+        residual_fn=_state_delta,
+        edge_metric="pullback",
+    )
+    damping = 1.0e-10
+    linear_tol = 1.0e-10
+    linear_maxiter = 8
+    step, cg_step_s = _time_call(
+        lambda: free_boundary_native_spline_matrix_free_normal_step_jax(
+            problem,
+            vector,
+            damping=damping,
+            tol=linear_tol,
+            maxiter=linear_maxiter,
+        )
+    )
+    next_residual, next_residual_s = _time_call(lambda: problem.residual(step.next_vector))
+    residual_l2 = float(step.residual_l2)
+    next_residual_norm = _norms(np.asarray(next_residual, dtype=float))
+    reduction = (
+        None
+        if residual_l2 <= np.finfo(float).tiny
+        else float(next_residual_norm["l2"] / residual_l2)
+    )
+
+    return {
+        "status": "completed",
+        "method": "jax.linearize_vjp_cg_damped_normal_equations",
+        "strict_target_ftol": 1.0e-12,
+        "dense_jacobian_formed": False,
+        "damping": damping,
+        "linear_tol": linear_tol,
+        "linear_maxiter": linear_maxiter,
+        "vjp_wall_s": float(vjp_s),
+        "normal_matvec_wall_s": float(normal_matvec_s),
+        "cg_step_wall_s": float(cg_step_s),
+        "post_step_residual_wall_s": float(next_residual_s),
+        "vjp_residual_l2": _norms(np.asarray(vjp_residual, dtype=float))["l2"],
+        "vjp_pullback_l2": _norms(np.asarray(vjp_pullback, dtype=float))["l2"],
+        "normal_matvec_l2": _norms(np.asarray(normal_matvec, dtype=float))["l2"],
+        "normal_matvec_linf": _norms(np.asarray(normal_matvec, dtype=float))["linf"],
+        "step_l2": float(step.step_l2),
+        "residual_l2_before_step": residual_l2,
+        "residual_l2_after_step": next_residual_norm["l2"],
+        "residual_linf_after_step": next_residual_norm["linf"],
+        "residual_reduction_factor": reduction,
+        "cg_info": _json_scalar(step.cg_info),
+        "recommended_solver_lane": "matrix_free_native_spline_normal_or_adjoint_solve",
+        "next_action": "feed_real_vmec_force_residual_into_native_matrix_free_loop",
     }
 
 
@@ -198,6 +305,12 @@ def native_spline_vector_residual_profile_payload(
         )
     )
     jvp_norm = _norms(np.asarray(jvp, dtype=float))
+    matrix_free_profile = _native_matrix_free_profile(
+        vector=vector,
+        direction=direction,
+        template_state=state,
+        projection=projection,
+    )
     full_vmec_size = int(unknowns.full_vmec_size)
     native_unknown_size = int(unknowns.native_unknown_size)
     bytes_per_float = int(np.asarray(unknowns.vector).dtype.itemsize)
@@ -230,5 +343,6 @@ def native_spline_vector_residual_profile_payload(
         "jvp_l2": jvp_norm["l2"],
         "jvp_linf": jvp_norm["linf"],
         "autodiff_method_profiled": "jax.jvp_forward_mode",
+        "matrix_free_normal_step_profile": matrix_free_profile,
         "next_action": "promote_packed_native_vector_into_opt_in_solver_loop",
     }

@@ -573,7 +573,17 @@ pullback by default. The square-coil profiler exposes this path through
 ``--native-spline-vector-residual-profile``; pair it with
 ``--freeb-edge-control-projection full`` to write a no-solve JSON/CSV row with
 native/full vector sizes, decode parity, projected-residual parity, and JVP
-timing for the selected ``MPOL``/``NTOR``/``NZETA`` deck.
+timing for the selected ``MPOL``/``NTOR``/``NZETA`` deck. The same row now also
+times the scalable matrix-free pieces: one VJP, one normal-operator matvec, and
+an eight-iteration damped CG normal step. On the production-shaped
+``MPOL=5, NTOR=28, NS=17, NZETA=64`` deck this reports ``25202`` native
+unknowns versus ``26214`` full VMEC unknowns, removes ``1012`` Fourier LCFS
+edge DOFs, measures about ``0.166`` s for the projected-residual JVP, about
+``0.597`` s for the VJP, about ``0.323`` s for a normal matvec, and about
+``0.369`` s for the profiled CG step on the local CPU. The residual is a
+deterministic surrogate and no equilibrium solve is performed; the next real
+solver step is to feed the actual VMEC force residual through this native
+matrix-free loop.
 ``FreeBoundaryNativeSplineResidualProblem`` and the dense
 ``free_boundary_native_spline_dense_gauss_newton_*`` helpers are the first
 opt-in packed-native nonlinear-state prototype. They intentionally form dense

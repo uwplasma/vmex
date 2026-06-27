@@ -1568,6 +1568,18 @@ def test_square_coil_profile_native_spline_vector_residual_profile_is_no_solve(t
     assert native["projected_residual_l2"] > 0.0
     assert native["jvp_l2"] > 0.0
     assert native["autodiff_method_profiled"] == "jax.jvp_forward_mode"
+    matrix_free = native["matrix_free_normal_step_profile"]
+    assert matrix_free["status"] == "completed"
+    assert matrix_free["method"] == "jax.linearize_vjp_cg_damped_normal_equations"
+    assert matrix_free["strict_target_ftol"] == pytest.approx(1.0e-12)
+    assert matrix_free["dense_jacobian_formed"] is False
+    assert matrix_free["linear_maxiter"] == 8
+    assert matrix_free["vjp_wall_s"] >= 0.0
+    assert matrix_free["normal_matvec_wall_s"] >= 0.0
+    assert matrix_free["cg_step_wall_s"] >= 0.0
+    assert matrix_free["step_l2"] > 0.0
+    assert matrix_free["residual_l2_after_step"] >= 0.0
+    assert matrix_free["recommended_solver_lane"] == "matrix_free_native_spline_normal_or_adjoint_solve"
     assert native["next_action"] == "promote_packed_native_vector_into_opt_in_solver_loop"
     row = summary.rows_from_profile(outdir / "square_coil_free_boundary_backend_profile.json")[0]
     assert row["native_spline_vector_residual_profile_status"] == "completed"
@@ -1578,6 +1590,15 @@ def test_square_coil_profile_native_spline_vector_residual_profile_is_no_solve(t
     assert row["native_spline_vector_residual_profile_projected_residual_parity_linf"] == pytest.approx(
         0.0,
         abs=1.0e-12,
+    )
+    assert row["native_spline_vector_residual_profile_matrix_free_status"] == "completed"
+    assert (
+        row["native_spline_vector_residual_profile_matrix_free_method"]
+        == "jax.linearize_vjp_cg_damped_normal_equations"
+    )
+    assert row["native_spline_vector_residual_profile_matrix_free_linear_maxiter"] == 8
+    assert row["native_spline_vector_residual_profile_matrix_free_step_l2"] == pytest.approx(
+        matrix_free["step_l2"]
     )
     assert (
         row["native_spline_vector_residual_profile_next_action"]
