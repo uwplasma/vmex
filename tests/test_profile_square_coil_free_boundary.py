@@ -1656,7 +1656,31 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     assert native["projected_residual_l2_before_step"] > 0.0
     assert native["projected_residual_l2_after_step"] >= 0.0
     assert native["matrix_free_step_l2"] >= 0.0
-    assert native["next_action"] == "compare_actual_force_native_step_against_edge_bridge_on_tiny_deck"
+    bridge = native["edge_bridge_comparison"]
+    assert bridge["status"] == "completed"
+    assert bridge["method"] == "free_boundary_native_spline_vector_edge_step"
+    assert bridge["interpretation"] == "edge_only_vmec_momentum_style_update_not_newton_step"
+    assert bridge["force_metric"] in {"pullback", "least_squares"}
+    assert bridge["wall_s"] >= 0.0
+    assert bridge["post_step_residual_wall_s"] >= 0.0
+    assert bridge["control_update_l2"] >= 0.0
+    assert bridge["matrix_free_edge_update_l2"] >= 0.0
+    assert bridge["bridge_edge_update_l2"] >= 0.0
+    assert bridge["projected_residual_l2_after_step"] >= 0.0
+    cosine = bridge["edge_update_cosine_to_matrix_free"]
+    assert cosine is None or -1.0 <= cosine <= 1.0
+    opposite = bridge["opposite_flip_sign_comparison"]
+    assert opposite["flip_sign"] == pytest.approx(-bridge["flip_sign"])
+    assert opposite["wall_s"] >= 0.0
+    assert opposite["post_step_residual_wall_s"] >= 0.0
+    opposite_cosine = opposite["edge_update_cosine_to_matrix_free"]
+    assert opposite_cosine is None or -1.0 <= opposite_cosine <= 1.0
+    assert bridge["sign_alignment_status"] in {
+        "undetermined_zero_edge_update",
+        "opposite_flip_sign_better_matches_matrix_free_edge_update",
+        "vmec_flip_sign_better_matches_matrix_free_edge_update",
+    }
+    assert native["next_action"] == "resolve_native_force_sign_and_add_free_boundary_vacuum_pressure"
 
     row = summary.rows_from_profile(outdir / "square_coil_free_boundary_backend_profile.json")[0]
     assert row["native_spline_actual_force_step_profile_status"] == "completed"
@@ -1672,8 +1696,21 @@ def test_square_coil_profile_native_spline_actual_force_step_profile_is_no_solve
     )
     assert (
         row["native_spline_actual_force_step_profile_next_action"]
-        == "compare_actual_force_native_step_against_edge_bridge_on_tiny_deck"
+        == "resolve_native_force_sign_and_add_free_boundary_vacuum_pressure"
     )
+    assert row["native_spline_actual_force_step_profile_edge_bridge_status"] == "completed"
+    assert row["native_spline_actual_force_step_profile_edge_bridge_force_metric"] == bridge[
+        "force_metric"
+    ]
+    assert row["native_spline_actual_force_step_profile_edge_bridge_control_update_l2"] == pytest.approx(
+        bridge["control_update_l2"]
+    )
+    assert row[
+        "native_spline_actual_force_step_profile_edge_bridge_residual_reduction_factor"
+    ] == pytest.approx(bridge["projected_residual_reduction_factor"])
+    assert row[
+        "native_spline_actual_force_step_profile_edge_bridge_sign_alignment_status"
+    ] == bridge["sign_alignment_status"]
 
 
 def test_square_coil_profile_projection_gate_fails_before_backend_work(monkeypatch, tmp_path: Path):

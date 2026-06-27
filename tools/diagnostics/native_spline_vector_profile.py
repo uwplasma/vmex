@@ -19,6 +19,7 @@ from vmec_jax.solvers.free_boundary import (
     free_boundary_native_spline_force_blocks_to_state_residual,
     free_boundary_native_spline_matrix_free_normal_step_jax,
     free_boundary_native_spline_unknown_vector_from_vmec_state,
+    free_boundary_native_spline_vector_edge_step,
     free_boundary_native_spline_vector_projected_residual_jax,
     free_boundary_native_spline_vector_to_vmec_state_jax,
 )
@@ -77,6 +78,24 @@ def _norms(values: Any) -> dict[str, float]:
         "l2": float(np.linalg.norm(finite)),
         "linf": float(np.max(np.abs(finite))),
     }
+
+
+def _cosine(a: Any, b: Any) -> float | None:
+    """Return the cosine between two finite vectors, or ``None`` for zero vectors."""
+
+    left = np.asarray(a, dtype=float).reshape(-1)
+    right = np.asarray(b, dtype=float).reshape(-1)
+    if left.size != right.size or left.size == 0:
+        return None
+    mask = np.isfinite(left) & np.isfinite(right)
+    if not np.any(mask):
+        return None
+    left = left[mask]
+    right = right[mask]
+    denom = float(np.linalg.norm(left) * np.linalg.norm(right))
+    if denom <= np.finfo(float).tiny:
+        return None
+    return float(np.dot(left, right) / denom)
 
 
 def _json_scalar(value: Any) -> float | int | str | None:
@@ -357,6 +376,74 @@ def native_spline_actual_force_step_profile_payload(
         if before_norm["l2"] <= np.finfo(float).tiny
         else float(after_norm["l2"] / before_norm["l2"])
     )
+    bridge_dt_eff = 1.0 if config.delt is None else float(config.delt)
+    bridge_b1 = 0.0
+    bridge_fac = 1.0
+    bridge_force_scale = 1.0
+    bridge_flip_sign = 1.0
+    bridge_step, bridge_s = _time_call(
+        lambda: free_boundary_native_spline_vector_edge_step(
+            state_current=state,
+            state_candidate=state,
+            update_deltas=residual_state,
+            force_deltas=residual_state,
+            projection=projection,
+            unknowns=unknowns,
+            control_velocity=None,
+            dt_eff=bridge_dt_eff,
+            b1=bridge_b1,
+            fac=bridge_fac,
+            force_scale=bridge_force_scale,
+            flip_sign=bridge_flip_sign,
+        )
+    )
+    bridge_residual, bridge_residual_s = _time_call(
+        lambda: problem.residual(jnp.asarray(bridge_step.unknowns.vector))
+    )
+    bridge_norm = _norms(np.asarray(bridge_residual, dtype=float))
+    bridge_reduction = (
+        None
+        if before_norm["l2"] <= np.finfo(float).tiny
+        else float(bridge_norm["l2"] / before_norm["l2"])
+    )
+    edge_count = int(unknowns.edge_control_size)
+    matrix_free_edge_update = np.asarray(step.step, dtype=float).reshape(-1)[-edge_count:]
+    bridge_edge_update = np.asarray(bridge_step.control_update, dtype=float).reshape(-1)
+    opposite_bridge_flip_sign = -bridge_flip_sign
+    opposite_bridge_step, opposite_bridge_s = _time_call(
+        lambda: free_boundary_native_spline_vector_edge_step(
+            state_current=state,
+            state_candidate=state,
+            update_deltas=residual_state,
+            force_deltas=residual_state,
+            projection=projection,
+            unknowns=unknowns,
+            control_velocity=None,
+            dt_eff=bridge_dt_eff,
+            b1=bridge_b1,
+            fac=bridge_fac,
+            force_scale=bridge_force_scale,
+            flip_sign=opposite_bridge_flip_sign,
+        )
+    )
+    opposite_bridge_residual, opposite_bridge_residual_s = _time_call(
+        lambda: problem.residual(jnp.asarray(opposite_bridge_step.unknowns.vector))
+    )
+    opposite_bridge_norm = _norms(np.asarray(opposite_bridge_residual, dtype=float))
+    opposite_bridge_reduction = (
+        None
+        if before_norm["l2"] <= np.finfo(float).tiny
+        else float(opposite_bridge_norm["l2"] / before_norm["l2"])
+    )
+    opposite_bridge_edge_update = np.asarray(opposite_bridge_step.control_update, dtype=float).reshape(-1)
+    bridge_cosine = _cosine(bridge_edge_update, matrix_free_edge_update)
+    opposite_bridge_cosine = _cosine(opposite_bridge_edge_update, matrix_free_edge_update)
+    if bridge_cosine is None and opposite_bridge_cosine is None:
+        sign_alignment = "undetermined_zero_edge_update"
+    elif opposite_bridge_cosine is not None and (bridge_cosine is None or opposite_bridge_cosine > bridge_cosine):
+        sign_alignment = "opposite_flip_sign_better_matches_matrix_free_edge_update"
+    else:
+        sign_alignment = "vmec_flip_sign_better_matches_matrix_free_edge_update"
     force_norms = {
         "gcr2": float(np.asarray(force_result.gcr2)),
         "gcz2": float(np.asarray(force_result.gcz2)),
@@ -403,7 +490,43 @@ def native_spline_actual_force_step_profile_payload(
         "matrix_free_linear_maxiter": linear_maxiter,
         "matrix_free_step_l2": float(step.step_l2),
         "matrix_free_cg_info": _json_scalar(step.cg_info),
-        "next_action": "compare_actual_force_native_step_against_edge_bridge_on_tiny_deck",
+        "edge_bridge_comparison": {
+            "status": "completed",
+            "method": "free_boundary_native_spline_vector_edge_step",
+            "interpretation": "edge_only_vmec_momentum_style_update_not_newton_step",
+            "force_metric": str(bridge_step.force_metric),
+            "dt_eff": bridge_dt_eff,
+            "b1": bridge_b1,
+            "fac": bridge_fac,
+            "force_scale": bridge_force_scale,
+            "flip_sign": bridge_flip_sign,
+            "wall_s": float(bridge_s),
+            "post_step_residual_wall_s": float(bridge_residual_s),
+            "target_l2": float(bridge_step.target_l2),
+            "control_force_l2": float(bridge_step.control_force_l2),
+            "control_velocity_l2": float(bridge_step.control_velocity_l2),
+            "control_update_l2": float(bridge_step.control_update_l2),
+            "trust_scale": float(bridge_step.trust_scale),
+            "native_update_vector_l2": _norms(np.asarray(bridge_step.native_update_vector, dtype=float))["l2"],
+            "matrix_free_edge_update_l2": _norms(matrix_free_edge_update)["l2"],
+            "bridge_edge_update_l2": _norms(bridge_edge_update)["l2"],
+            "edge_update_cosine_to_matrix_free": bridge_cosine,
+            "projected_residual_l2_after_step": bridge_norm["l2"],
+            "projected_residual_linf_after_step": bridge_norm["linf"],
+            "projected_residual_reduction_factor": bridge_reduction,
+            "opposite_flip_sign_comparison": {
+                "flip_sign": opposite_bridge_flip_sign,
+                "wall_s": float(opposite_bridge_s),
+                "post_step_residual_wall_s": float(opposite_bridge_residual_s),
+                "control_update_l2": float(opposite_bridge_step.control_update_l2),
+                "edge_update_cosine_to_matrix_free": opposite_bridge_cosine,
+                "projected_residual_l2_after_step": opposite_bridge_norm["l2"],
+                "projected_residual_linf_after_step": opposite_bridge_norm["linf"],
+                "projected_residual_reduction_factor": opposite_bridge_reduction,
+            },
+            "sign_alignment_status": sign_alignment,
+        },
+        "next_action": "resolve_native_force_sign_and_add_free_boundary_vacuum_pressure",
     }
 
 

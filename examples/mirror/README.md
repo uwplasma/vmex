@@ -700,6 +700,14 @@ preflight: it evaluates internal VMEC force blocks on the initial state, maps
 them into the native residual basis, and takes one matrix-free normal step. It
 does not yet include NESTOR/free-boundary vacuum pressure, so it is bridge
 evidence rather than a free-boundary equilibrium solve.
+The same preflight now also compares that matrix-free step with the existing
+edge-only native-coordinate bridge. On the tiny ``MPOL=3, NTOR=4, NS=5``
+deck, the internal-force matrix-free normal step reduces the projected residual
+by about ``0.71`` in one step, while the VMEC ``DELT``-scaled edge bridge is
+anti-aligned with the matrix-free edge increment; the opposite force sign
+aligns the edge direction but still overshoots. Treat this as evidence that the
+native bridge needs force-sign/normalization and trust-scaling work before it
+can become the strict native nonlinear solve.
 Use ``free_boundary_native_spline_matrix_free_normal_*`` for the next prototype
 step: it applies ``J`` and ``J.T`` through JAX JVP/VJP products and solves the
 damped normal equations by conjugate gradient.
