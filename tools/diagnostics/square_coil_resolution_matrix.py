@@ -94,6 +94,9 @@ def _parser() -> argparse.ArgumentParser:
         default="native_coordinate",
         help="Reduced edge-control update mode used by --print-jax-commands and strict readiness diagnostics.",
     )
+    p.add_argument("--edge-control-rcond", type=float, default=1.0e-12)
+    p.add_argument("--edge-control-ridge", type=float, default=0.0)
+    p.add_argument("--edge-control-trust-radius", type=float, default=None)
     p.add_argument(
         "--edge-control-native-force-metric",
         choices=("pullback", "least_squares"),
@@ -302,15 +305,22 @@ def _profile_command(
                     "--freeb-edge-control-projection",
                     edge_projection,
                     "--freeb-edge-control-rcond",
-                    "1e-12",
+                    f"{float(args.edge_control_rcond):.16g}",
                     "--freeb-edge-control-ridge",
-                    "0",
+                    f"{float(args.edge_control_ridge):.16g}",
                     "--freeb-edge-control-update-mode",
                     str(args.edge_control_update_mode),
                     "--freeb-edge-control-native-force-metric",
                     str(args.edge_control_native_force_metric),
                 ]
             )
+            if args.edge_control_trust_radius is not None:
+                command.extend(
+                    [
+                        "--freeb-edge-control-trust-radius",
+                        f"{float(args.edge_control_trust_radius):.16g}",
+                    ]
+                )
     return command
 
 
@@ -498,6 +508,11 @@ def build_rows(args: argparse.Namespace) -> list[dict[str, Any]]:
             "requested_final_ftol_meets_target": strict_schedule.get("requested_final_ftol_meets_target"),
             "total_iteration_budget": strict_schedule.get("total_iteration_budget"),
             "edge_control_projection": edge_projection,
+            "edge_control_rcond": float(args.edge_control_rcond),
+            "edge_control_ridge": float(args.edge_control_ridge),
+            "edge_control_trust_radius": (
+                None if args.edge_control_trust_radius is None else float(args.edge_control_trust_radius)
+            ),
             "edge_control_update_mode": str(args.edge_control_update_mode),
             "edge_control_native_force_metric": str(args.edge_control_native_force_metric),
             "strict_full_fourier_status": strict_assessment.get("full_fourier_strict_profile_status"),
@@ -572,6 +587,9 @@ def _print_table(rows: list[dict[str, Any]], *, markdown: bool) -> None:
         "requested_final_ftol_meets_target",
         "total_iteration_budget",
         "edge_control_projection",
+        "edge_control_rcond",
+        "edge_control_ridge",
+        "edge_control_trust_radius",
         "edge_control_update_mode",
         "edge_control_native_force_metric",
         "strict_full_fourier_status",

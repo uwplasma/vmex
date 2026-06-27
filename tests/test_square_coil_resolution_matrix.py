@@ -52,6 +52,10 @@ def test_square_coil_resolution_matrix_auto_nzeta_and_commands(tmp_path: Path):
             "--print-vmec2000-commands",
             "--print-jax-commands",
             "--include-control-map",
+            "--edge-control-ridge",
+            "1e-10",
+            "--edge-control-trust-radius",
+            "1e-7",
             "--vmec2000-exec",
             "/opt/xvmec",
         ]
@@ -76,6 +80,8 @@ def test_square_coil_resolution_matrix_auto_nzeta_and_commands(tmp_path: Path):
     assert "--freeb-edge-control-projection stellarator" in rows[0]["jax_command"]
     assert "--freeb-edge-control-update-mode native_coordinate" in rows[0]["jax_command"]
     assert "--freeb-edge-control-native-force-metric least_squares" in rows[0]["jax_command"]
+    assert "--freeb-edge-control-ridge 1e-10" in rows[0]["jax_command"]
+    assert "--freeb-edge-control-trust-radius 1e-07" in rows[0]["jax_command"]
     assert "--strict-backtracking-accept-ratio 1" in rows[0]["jax_command"]
     assert "square_coil_resolution_mpol5_ntor28_nzeta64" in rows[0]["preflight_command"]
     assert rows[1]["status"] == "diagnostic_underresolved"
