@@ -482,6 +482,9 @@ Completed JAX profile JSON now also stores compact trial-step diagnostics:
 ``restart_path_*`` columns, so a strict-backtracking row can be classified as
 accepted-step limited, trial-rejection limited, or restart limited without
 shipping full histories in the repository.
+For live diagnosis of rows that appear stuck inside the first coupled trial,
+add ``--strict-trial-heartbeat``. It prints opt-in ``[strict-trial]`` lines
+around trial vacuum sampling, force evaluation, and backtracking attempts.
 The summary table now reports the edge-control projection status, requested
 basis, control count, pseudo-inverse cutoff, update mode, coordinate-update
 count, native-update count, reduced native force/velocity/update norms,

@@ -1291,12 +1291,17 @@ def strict_trial_evaluation(
     candidate_state_from_delta_tuple: Any,
     freeb_bsqvac_half_for_trial_state: Any,
     trial_residual_total: Any,
+    heartbeat: Any | None = None,
     max_backtracks: int = 8,
     probe_growth_factor: float = 1.0e2,
 ) -> StrictTrialEvaluation:
     """Evaluate and optionally backtrack one strict momentum trial state."""
 
+    if heartbeat is not None:
+        heartbeat("trial_bsqvac_start", alpha=1.0)
     freeb_bsqvac_half_trial = freeb_bsqvac_half_for_trial_state(state_try)
+    if heartbeat is not None:
+        heartbeat("trial_force_start", alpha=1.0)
     w_try = trial_residual_total(
         state_try,
         freeb_bsqvac_half_trial,
@@ -1304,13 +1309,19 @@ def strict_trial_evaluation(
         timing_label="trial",
     )
     w_try_ratio = float(w_try) / max(float(w_curr), 1.0e-30) if np.isfinite(w_try) else float("inf")
+    if heartbeat is not None:
+        heartbeat("trial_force_done", alpha=1.0, w_try=float(w_try), w_try_ratio=float(w_try_ratio))
     probe_bad_jacobian = False
     if bool(reference_mode) and float(zero_m1_host) > 0.5:
+        if heartbeat is not None:
+            heartbeat("trial_probe_force_start", alpha=1.0)
         w_probe = trial_residual_total(
             state_try,
             freeb_bsqvac_half_trial,
             zero_m1_value=zero_m1_probe_value,
         )
+        if heartbeat is not None:
+            heartbeat("trial_probe_force_done", alpha=1.0, w_probe=float(w_probe))
         if (not np.isfinite(w_probe)) or (w_probe > float(probe_growth_factor) * max(float(w_curr), 1.0e-30)):
             probe_bad_jacobian = True
             w_try = float("inf")
@@ -1319,15 +1330,21 @@ def strict_trial_evaluation(
     alpha = 1.0
     accept_ratio = 1.001 if bool(backtracking) else float("inf")
     if np.isfinite(w_try) and (w_try > accept_ratio * max(float(w_curr), 1.0e-30)):
-        for _ in range(int(max_backtracks)):
+        for backtrack_index in range(int(max_backtracks)):
             alpha *= 0.5
+            if heartbeat is not None:
+                heartbeat("backtrack_state_start", alpha=float(alpha), backtrack_index=int(backtrack_index))
             state_try = candidate_state_from_delta_tuple(
                 update_deltas,
                 scale=alpha,
                 use_numpy_arrays=False,
                 use_numpy_enforce=bool(host_update_assembly),
             )
+            if heartbeat is not None:
+                heartbeat("backtrack_bsqvac_start", alpha=float(alpha), backtrack_index=int(backtrack_index))
             freeb_bsqvac_half_trial = freeb_bsqvac_half_for_trial_state(state_try)
+            if heartbeat is not None:
+                heartbeat("backtrack_force_start", alpha=float(alpha), backtrack_index=int(backtrack_index))
             w_try = trial_residual_total(
                 state_try,
                 freeb_bsqvac_half_trial,
@@ -1335,6 +1352,14 @@ def strict_trial_evaluation(
                 timing_label="trial",
             )
             w_try_ratio = float(w_try) / max(float(w_curr), 1.0e-30) if np.isfinite(w_try) else float("inf")
+            if heartbeat is not None:
+                heartbeat(
+                    "backtrack_force_done",
+                    alpha=float(alpha),
+                    backtrack_index=int(backtrack_index),
+                    w_try=float(w_try),
+                    w_try_ratio=float(w_try_ratio),
+                )
             if np.isfinite(w_try) and (w_try <= accept_ratio * max(float(w_curr), 1.0e-30)):
                 velocities = scale_primary_velocity_blocks(alpha, velocities)
                 if update_rms is not None:

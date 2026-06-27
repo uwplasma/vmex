@@ -77,6 +77,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
             "0.25",
             "--freeb-edge-control-update-mode",
             "coordinate",
+            "--strict-trial-heartbeat",
             "--resolution-diagnostics-only",
             "--native-spline-control-prototype",
         ]
@@ -115,6 +116,7 @@ def test_square_coil_profile_parser_accepts_control_spline_axis_kind(tmp_path: P
     assert args.freeb_edge_control_ridge == pytest.approx(1.0e-6)
     assert args.freeb_edge_control_trust_radius == pytest.approx(0.25)
     assert args.freeb_edge_control_update_mode == "coordinate"
+    assert args.strict_trial_heartbeat is True
     assert args.resolution_diagnostics_only is True
     assert args.native_spline_control_prototype is True
 

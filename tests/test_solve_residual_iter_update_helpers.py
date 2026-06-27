@@ -1995,12 +1995,16 @@ def test_direct_force_fallback_trial_caps_step_and_reports_residual() -> None:
 
 def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> None:
     velocities = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+    heartbeat_events = []
 
     def candidate_state_from_delta_tuple(_deltas, *, scale, **_kwargs):
         return float(scale)
 
     def trial_residual_total(state, _bsqvac, **_kwargs):
         return 2.0 if float(state) > 0.75 else 0.9
+
+    def heartbeat(event, **fields):
+        heartbeat_events.append((event, fields))
 
     result = strict_trial_evaluation(
         state_try=1.0,
@@ -2018,6 +2022,7 @@ def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> N
         candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
         freeb_bsqvac_half_for_trial_state=lambda state: None,
         trial_residual_total=trial_residual_total,
+        heartbeat=heartbeat,
     )
 
     assert result.alpha == pytest.approx(0.5)
@@ -2030,6 +2035,17 @@ def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> N
         np.testing.assert_allclose(getattr(result.velocities, block_name), 0.5)
     for block_name in ("rsc", "rcs", "zcc", "zss", "lcc", "lss"):
         np.testing.assert_allclose(getattr(result.velocities, block_name), 1.0)
+    assert [event for event, _fields in heartbeat_events] == [
+        "trial_bsqvac_start",
+        "trial_force_start",
+        "trial_force_done",
+        "backtrack_state_start",
+        "backtrack_bsqvac_start",
+        "backtrack_force_start",
+        "backtrack_force_done",
+    ]
+    assert heartbeat_events[-1][1]["alpha"] == pytest.approx(0.5)
+    assert heartbeat_events[-1][1]["w_try"] == pytest.approx(0.9)
 
 
 def test_free_boundary_control_module_reexports_velocity_helpers() -> None:

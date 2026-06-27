@@ -609,6 +609,9 @@ the accepted LCFS edge through reduced coordinates, and ``native_coordinate``
 pulls the edge force back with the reduced-control Jacobian transpose while
 carrying reduced edge velocity memory. The full VMEC Fourier residual is still
 reported separately for every mode.
+Use ``--strict-trial-heartbeat`` only for diagnosing long strict rows that seem
+stuck inside a coupled trial; it prints opt-in ``[strict-trial]`` lines around
+trial vacuum sampling, force evaluation, and backtracking.
 ``vmec_jax.solvers.free_boundary.ReducedControlMap`` is the public host-side
 encode/decode primitive for that next lane: it maps full Fourier edge vectors
 to reduced controls and back without changing the current solve path.

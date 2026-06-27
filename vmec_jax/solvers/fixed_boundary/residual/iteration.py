@@ -804,6 +804,7 @@ class _ResidualIterRuntimeEnv(NamedTuple):
     freeb_drift_restart_streak: int
     freeb_drift_restart_max_restarts: int
     return_best_scored_requested: bool
+    strict_trial_heartbeat: bool
 
 
 def _residual_iter_runtime_env() -> _ResidualIterRuntimeEnv:
@@ -831,6 +832,7 @@ def _residual_iter_runtime_env() -> _ResidualIterRuntimeEnv:
         freeb_drift_restart_streak=max(1, _runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_STREAK", 10)),
         freeb_drift_restart_max_restarts=_runtime_env_int("VMEC_JAX_FREEB_DRIFT_RESTART_MAX_RESTARTS", 4),
         return_best_scored_requested=_runtime_env_enabled(os.getenv("VMEC_JAX_RETURN_BEST_SCORED_STATE", "0")),
+        strict_trial_heartbeat=_runtime_env_enabled(os.getenv("VMEC_JAX_STRICT_TRIAL_HEARTBEAT", "0")),
     )
 
 
@@ -2361,6 +2363,18 @@ def solve_fixed_boundary_residual_iter(
     )
     runtime_env = _residual_iter_runtime_env()
 
+    def _strict_trial_heartbeat_event(iter_idx: int, event: str, **fields) -> None:
+        if not bool(runtime_env.strict_trial_heartbeat):
+            return
+        parts = []
+        for key, value in fields.items():
+            if isinstance(value, (float, np.floating)):
+                parts.append(f"{key}={float(value):.6e}")
+            else:
+                parts.append(f"{key}={value}")
+        suffix = "" if not parts else " " + " ".join(parts)
+        print(f"[strict-trial] iter={int(iter_idx)} event={event}{suffix}", flush=True)
+
     def _refresh_preconditioner_cache(k, *, iter2: int):
         return _precond_payload_facade.refresh_preconditioner_cache_state_runtime(
             k,
@@ -3723,6 +3737,9 @@ def solve_fixed_boundary_residual_iter(
                     candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
                     freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
                     trial_residual_total=_trial_residual_total,
+                    heartbeat=partial(_strict_trial_heartbeat_event, int(iter2))
+                    if bool(runtime_env.strict_trial_heartbeat)
+                    else None,
                 )
                 state_try = trial_eval.state
                 velocity_blocks = trial_eval.velocities
