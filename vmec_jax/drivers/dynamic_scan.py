@@ -168,6 +168,7 @@ def maybe_select_dynamic_scan_mode(
 def maybe_disable_scan_by_parity_guard(
     *,
     accelerated_mode: bool,
+    performance_mode: bool,
     scan_mode: bool,
     niter: int,
     state_stage_start: Any,
@@ -190,14 +191,17 @@ def maybe_disable_scan_by_parity_guard(
 ) -> bool:
     """Optionally disable scan when a short parity probe diverges.
 
-    This guard is deliberately conservative and only runs when explicitly
-    enabled through ``VMEC_JAX_SCAN_PARITY_GUARD``. It compares a short scan and
-    non-scan VMEC2000-style prefix and returns ``False`` if the histories differ
-    or if the probe itself fails.
+    In ``auto`` mode this guard runs only for performance scan paths.  It
+    compares a short scan and non-scan VMEC2000-style prefix and keeps scan only
+    when the residual histories agree.  Reference/parity solves skip the probe
+    because they already choose the VMEC-control branch for accuracy.
     """
 
-    scan_guard_env = getenv("VMEC_JAX_SCAN_PARITY_GUARD", "0").strip().lower()
-    scan_guard_enabled = scan_guard_env not in ("", "0", "false", "no")
+    scan_guard_env = getenv("VMEC_JAX_SCAN_PARITY_GUARD", "auto").strip().lower()
+    if scan_guard_env in ("", "auto", "default"):
+        scan_guard_enabled = bool(performance_mode)
+    else:
+        scan_guard_enabled = scan_guard_env not in ("0", "false", "no", "off")
     if bool(accelerated_mode) or (not bool(scan_mode)) or (not bool(scan_guard_enabled)) or int(niter) < 3:
         return bool(scan_mode)
 

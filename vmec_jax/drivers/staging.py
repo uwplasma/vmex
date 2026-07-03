@@ -601,6 +601,7 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
                 scan_mode = True
         scan_mode = ctx.maybe_disable_scan_by_parity_guard(
             accelerated_mode=bool(ctx.accelerated_mode),
+            performance_mode=bool(ctx.performance_mode),
             scan_mode=bool(scan_mode),
             niter=int(niter_i),
             state_stage_start=state,

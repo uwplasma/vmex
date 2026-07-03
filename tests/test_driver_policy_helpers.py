@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 import vmec_jax.driver as driver
+from vmec_jax.namelist import read_indata
 from vmec_jax.drivers import flux as driver_flux
 from vmec_jax.drivers import interface as driver_interface
 from vmec_jax.drivers import runtime as driver_runtime
@@ -590,14 +592,54 @@ def test_driver_interface_helpers_print_concise_and_vmec_style_banners() -> None
         ("gpu", _Input(LFREEB=True, NS_ARRAY=[5, 9]), ("default", True)),
         ("gpu", _Input(NS_ARRAY=[5, 9]), ("parity", False)),
         ("gpu", _Input(NS_ARRAY=[9]), ("accelerated", True)),
+        ("gpu", _Input(NS_ARRAY=[9], AM=[1.0]), ("parity", False)),
         ("cpu", _Input(LASYM=True), ("accelerated", True)),
+        ("cpu", _Input(LASYM=True, AM=[1.0]), ("parity", False)),
         ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9], NITER_ARRAY=[10, 20]), ("accelerated", True)),
+        ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9], NITER_ARRAY=[10, 20], AC=[1.0]), ("parity", False)),
         ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9]), ("parity", False)),
+        ("cpu", _Input(MPOL=5, NTOR=5, NS_ARRAY=[45]), ("default", True)),
+        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45]), ("accelerated", True)),
+        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AM=[1.0]), ("parity", False)),
+        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AC=[1.0]), ("parity", False)),
         ("cpu", _Input(), ("default", True)),
     ],
 )
 def test_default_non_autodiff_solver_policy_for_backend_uses_input_structure(backend, indata, expected):
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, backend) == expected
+
+
+def test_default_cpu_policy_can_force_accelerated_high_mode_inputs(monkeypatch):
+    """Advanced users can still profile high-mode accelerated CPU runs."""
+
+    monkeypatch.setenv("VMEC_JAX_CPU_AUTO_PARITY_MODE_LIMIT", "0")
+    monkeypatch.setenv("VMEC_JAX_CPU_AUTO_PARITY_WORK_LIMIT", "0")
+    indata = _Input(MPOL=7, NTOR=7, NS_ARRAY=[45])
+    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("default", True)
+
+
+def test_default_cpu_policy_routes_serial2500170_fixture_to_accelerated():
+    """Vacuum high-mode inputs use the fast path; zero-current diagnostics are ignored."""
+
+    path = Path(__file__).resolve().parents[1] / "examples/data/input.serial2500170_surface_points_mpol12_ntor12"
+    indata = read_indata(path)
+    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("accelerated", True)
+
+
+def test_default_cpu_policy_routes_high_work_finite_beta_to_parity():
+    """Finite pressure/current keeps reference control when high-work policy triggers."""
+
+    indata = _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AM=[1.0], PRES_SCALE=1.0)
+    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("parity", False)
+
+
+def test_default_cpu_policy_routes_finite_beta_fixture_to_parity():
+    """Finite-beta/current outputs such as DMerc and currents require VMEC parity."""
+
+    path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_finite_beta"
+    indata = read_indata(path)
+    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("parity", False)
+    assert driver._default_use_scan_for_backend(indata, "cpu", "parity") is False
 
 
 def test_resolve_initial_fixed_boundary_policy_preserves_interactive_cpu_cli_defaults():

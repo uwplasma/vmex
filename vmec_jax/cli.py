@@ -16,6 +16,7 @@ from .driver import (
     run_fixed_boundary,
     write_wout_from_fixed_boundary_run,
 )
+from .drivers.policy import fixed_boundary_indata_has_finite_beta_or_current
 from .namelist import read_indata
 
 _TEST_INPUT_NAME = "input.nfp4_QH_warm_start"
@@ -477,8 +478,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     solver_mode = args.solver_mode
     default_policy = solver_mode is None and (not bool(args.parity)) and (not bool(args.fast))
+    fast_auto_policy = solver_mode is None and bool(args.fast) and (not bool(args.parity))
     default_policy_backend = None
-    if default_policy:
+    if default_policy or fast_auto_policy:
         solver_device_arg = "" if args.solver_device is None else str(args.solver_device).strip().lower()
         if solver_device_arg == "cpu":
             default_policy_backend = "cpu"
@@ -548,7 +550,7 @@ def main(argv: list[str] | None = None) -> int:
             cli_fixed_boundary_mode=True,
             finish_policy=str(args.finish_policy),
         )
-        if default_policy:
+        if default_policy or fast_auto_policy:
             if default_policy_backend is None:
                 try:
                     import jax
@@ -561,7 +563,19 @@ def main(argv: list[str] | None = None) -> int:
                 str(default_policy_backend),
                 str(solver_mode),
             )
-            if str(default_policy_backend).strip().lower() == "cpu":
+            # CPU default runs still use the host loop by default.  Auto-selected
+            # accelerated CPU solves may use scan when the workload is large
+            # enough for the backend-aware selector to prefer it.
+            if (
+                str(default_policy_backend).strip().lower() == "cpu"
+                and str(solver_mode).strip().lower() == "default"
+            ):
+                use_scan_default = False
+            if (
+                str(default_policy_backend).strip().lower() == "cpu"
+                and str(solver_mode).strip().lower() == "accelerated"
+                and fixed_boundary_indata_has_finite_beta_or_current(indata)
+            ):
                 use_scan_default = False
             run_kwargs["use_scan"] = bool(use_scan_default)
         if max_iter_arg is not None:

@@ -615,11 +615,106 @@ def as_list_like(value):
         return None
 
 
+def _numeric_profile_values(value) -> np.ndarray:
+    """Return numeric entries from a scalar/list VMEC profile assignment."""
+
+    values = as_list_like(value)
+    if values is None:
+        values = [] if value is None else [value]
+    out: list[float] = []
+    for item in values:
+        try:
+            out.append(float(item))
+        except Exception:
+            continue
+    return np.asarray(out, dtype=float)
+
+
+def _profile_assignment_nonzero(indata, names: tuple[str, ...]) -> bool:
+    """Return whether any named VMEC profile assignment contains nonzero data."""
+
+    for name in names:
+        values = _numeric_profile_values(indata.get(name, None))
+        if values.size and bool(np.any(values != 0.0)):
+            return True
+    return False
+
+
+def fixed_boundary_indata_has_finite_beta_or_current(indata) -> bool:
+    """Return whether pressure/current profile channels are physically active."""
+
+    try:
+        pres_scale = float(indata.get_float("PRES_SCALE", 1.0))
+    except Exception:
+        pres_scale = 1.0
+    finite_pressure = (pres_scale != 0.0) and _profile_assignment_nonzero(
+        indata,
+        ("AM", "AM_AUX_F"),
+    )
+    finite_current = _profile_assignment_nonzero(
+        indata,
+        ("AC", "AC_AUX_F", "CURTOR"),
+    )
+    return bool(finite_pressure or finite_current)
+
+
+def _fixed_boundary_cpu_auto_is_high_work(indata) -> bool:
+    """Return whether a fixed-boundary CPU input is large enough to need policy routing."""
+
+    try:
+        mode_limit = int(os.getenv("VMEC_JAX_CPU_AUTO_PARITY_MODE_LIMIT", "64"))
+    except Exception:
+        mode_limit = 64
+    try:
+        work_limit = int(os.getenv("VMEC_JAX_CPU_AUTO_PARITY_WORK_LIMIT", "4096"))
+    except Exception:
+        work_limit = 4096
+    if mode_limit <= 0 and work_limit <= 0:
+        return False
+
+    def _get_int(name: str, default: int) -> int:
+        try:
+            return int(indata.get_int(name, default))
+        except Exception:
+            try:
+                return int(indata.get(name, default))
+            except Exception:
+                return int(default)
+
+    mpol = max(1, _get_int("MPOL", 1))
+    ntor = max(0, _get_int("NTOR", 0))
+    signed_mode_count = mpol * (2 * ntor + 1) - ntor if ntor > 0 else mpol
+    ns_values = as_list_like(indata.get("NS_ARRAY", None))
+    ns_max = max([_get_int("NS", 0), *[int(v) for v in (ns_values or []) if v is not None]], default=0)
+    radial_spectral_work = int(max(1, ns_max)) * int(max(1, signed_mode_count))
+    return (mode_limit > 0 and signed_mode_count > mode_limit) or (
+        work_limit > 0 and radial_spectral_work > work_limit
+    )
+
+
+def _fixed_boundary_cpu_auto_needs_reference_control(indata) -> bool:
+    """Return ``True`` when CPU auto-policy should prefer VMEC control.
+
+    High-work finite-beta/current inputs keep the reference controller because
+    Mercier, current, and stability channels are physically meaningful there.
+    Vacuum high-mode inputs are allowed to use the fast branch because
+    zero-pressure/current diagnostics are not promotion gates for those
+    equilibria.
+    """
+
+    return bool(
+        _fixed_boundary_cpu_auto_is_high_work(indata)
+        and fixed_boundary_indata_has_finite_beta_or_current(indata)
+    )
+
+
 def default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tuple[str, bool]:
     """Choose default fixed-boundary solver mode and performance flag."""
 
     if bool(indata.get_bool("LFREEB", False)):
         return "default", True
+    if fixed_boundary_indata_has_finite_beta_or_current(indata):
+        return "parity", False
     ns_array = as_list_like(indata.get("NS_ARRAY", None))
     niter_array = as_list_like(indata.get("NITER_ARRAY", None))
     if (ns_array is not None) and (len(ns_array) > 1) and (niter_array is None):
@@ -634,6 +729,10 @@ def default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tupl
         ncurr = int(indata.get_int("NCURR", 0))
         if ncurr == 1 and (ns_array is not None) and (len(ns_array) > 1):
             return "accelerated", True
+        if _fixed_boundary_cpu_auto_needs_reference_control(indata):
+            return "parity", False
+        if _fixed_boundary_cpu_auto_is_high_work(indata):
+            return "accelerated", True
         return "default", True
     return "accelerated", True
 
@@ -646,6 +745,8 @@ def default_use_scan_for_backend(indata, backend: str, solver_mode: str | None) 
     if backend_l in ("gpu", "cuda", "rocm"):
         return True
     if backend_l != "cpu":
+        return False
+    if fixed_boundary_indata_has_finite_beta_or_current(indata):
         return False
 
     def _get_int(name: str, default: int) -> int:

@@ -508,7 +508,7 @@ def test_cli_cpu_default_keeps_host_loop_when_scan_policy_is_true(monkeypatch, t
     monkeypatch.setattr(
         cli,
         "_default_non_autodiff_solver_policy_for_backend",
-        lambda _indata, backend: ("accelerated", True) if backend == "cpu" else ("default", False),
+        lambda _indata, backend: ("default", True) if backend == "cpu" else ("default", False),
     )
     monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
 
@@ -526,6 +526,114 @@ def test_cli_cpu_default_keeps_host_loop_when_scan_policy_is_true(monkeypatch, t
     assert cli.main([str(input_path), "--solver-device", "cpu", "--quiet"]) == 0
     assert calls["kwargs"]["verbose"] is False
     assert calls["kwargs"]["use_scan"] is False
+
+
+def test_cli_cpu_accelerated_default_can_use_scan_when_policy_selects_it(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 12\n/\n")
+    indata = InData(scalars={"NITER": 12}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("accelerated", True) if backend == "cpu" else ("default", False),
+    )
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--solver-device", "cpu"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "accelerated"
+    assert calls["kwargs"]["performance_mode"] is True
+    assert calls["kwargs"]["use_scan"] is True
+
+
+def test_cli_cpu_accelerated_finite_current_auto_policy_keeps_host_loop(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 12\n  AC = 1.0\n/\n")
+    indata = InData(scalars={"NITER": 12, "AC": [1.0]}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("accelerated", True) if backend == "cpu" else ("default", False),
+    )
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--solver-device", "cpu"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "accelerated"
+    assert calls["kwargs"]["performance_mode"] is True
+    assert calls["kwargs"]["use_scan"] is False
+
+
+def test_cli_cpu_parity_default_allows_high_work_scan_policy(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 12\n/\n")
+    indata = InData(scalars={"NITER": 12}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("parity", False) if backend == "cpu" else ("default", False),
+    )
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--solver-device", "cpu"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "parity"
+    assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["use_scan"] is True
+
+
+def test_cli_fast_uses_backend_auto_policy_for_high_work_inputs(monkeypatch, tmp_path: Path) -> None:
+    input_path = tmp_path / "input.case"
+    input_path.write_text("&INDATA\n  NITER = 12\n/\n")
+    indata = InData(scalars={"NITER": 12}, indexed={})
+    calls = {}
+
+    monkeypatch.setattr(cli, "read_indata", lambda path: indata)
+    monkeypatch.setattr(
+        cli,
+        "_default_non_autodiff_solver_policy_for_backend",
+        lambda _indata, backend: ("parity", False) if backend == "cpu" else ("accelerated", True),
+    )
+    monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
+
+    def fake_run_fixed_boundary(path: str, **kwargs):
+        calls["kwargs"] = kwargs
+        return SimpleNamespace(state=SimpleNamespace(Rcos=0.0))
+
+    monkeypatch.setattr(cli, "run_fixed_boundary", fake_run_fixed_boundary)
+    monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
+
+    assert cli.main([str(input_path), "--solver-device", "cpu", "--fast"]) == 0
+    assert calls["kwargs"]["solver_mode"] == "parity"
+    assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["use_scan"] is True
 
 
 def test_cli_joins_wout_warmup_best_effort(monkeypatch, tmp_path: Path) -> None:

@@ -189,10 +189,11 @@ direct loop near the lower part of ``vmec_jax/solve.py``:
   state (``_ScanCarry``), with restart decisions represented by ``lax.cond``.
 
 This path is invoked by setting ``use_scan=True`` or using the fast solver
-aliases (``vmec2000_iter_fast``/``vmec2000_scan``).  A parity guard can probe
-the first few iterations and automatically fall back to the non-scan path when
-the scan loop diverges from the VMEC2000 ordering (see
-``VMEC_JAX_SCAN_PARITY_GUARD`` in ``vmec_jax/driver.py``).
+aliases (``vmec2000_iter_fast``/``vmec2000_scan``).  For performance scan
+paths, vmec_jax runs a short parity guard by default: it compares the first few
+scan and non-scan VMEC-control iterations and disables scan when their residual
+histories diverge.  Advanced users can force or disable the probe with
+``VMEC_JAX_SCAN_PARITY_GUARD=1`` or ``VMEC_JAX_SCAN_PARITY_GUARD=0``.
 
 Mathematically, the scan path performs:
 
