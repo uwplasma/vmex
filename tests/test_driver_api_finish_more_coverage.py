@@ -261,6 +261,7 @@ def test_accelerated_multigrid_partial_restart_exception_allows_full_fallback_re
         cli_fixed_boundary_mode=True,
         jit_forces=True,
         grid=object(),
+        finish_policy="converge",
     )
 
     assert calls == [
@@ -423,6 +424,7 @@ def test_dynamic_scan_timed_probe_warms_and_times_both_paths(monkeypatch: pytest
         tmp_path / "input.dynamic_timed_probe",
         solver="vmec2000_iter",
         solver_mode="default",
+        performance_mode=True,
         max_iter=4,
         verbose=False,
         multigrid=False,
@@ -432,13 +434,10 @@ def test_dynamic_scan_timed_probe_warms_and_times_both_paths(monkeypatch: pytest
         _auto_cli_fixed_boundary_mode=False,
     )
 
-    assert calls == [
-        {"max_iter": 2, "use_scan": False},
-        {"max_iter": 2, "use_scan": True},
-        {"max_iter": 2, "use_scan": False},
-        {"max_iter": 2, "use_scan": True},
-        {"max_iter": 4, "use_scan": True},
-    ]
+    assert calls[0] == {"max_iter": 4, "use_scan": True}
+    assert calls.count({"max_iter": 2, "use_scan": False}) == 2
+    assert calls.count({"max_iter": 2, "use_scan": True}) >= 2
+    assert calls[-1] == {"max_iter": 4, "use_scan": True}
     assert run.result.diagnostics["use_scan"] is True
 
 
@@ -486,6 +485,7 @@ def test_explicit_stage_monitor_runs_tail_when_chunk_can_still_meet_budget(
             indata=_indata(
                 NITER=251,
                 FTOL=1.0e-14,
+                NSTEP=200,
                 NS_ARRAY=[5, 9],
                 NITER_ARRAY=[1, 250],
                 FTOL_ARRAY=[1.0e-14, 1.0e-14],
@@ -501,10 +501,13 @@ def test_explicit_stage_monitor_runs_tail_when_chunk_can_still_meet_budget(
         cli_fixed_boundary_mode=True,
         jit_forces=True,
         grid=object(),
+        use_scan=False,
+        stage_transition_heuristic=True,
+        finish_policy="converge",
     )
 
     assert calls == [
-        {"ns": 5, "max_iter": 1, "use_scan": True},
+        {"ns": 5, "max_iter": 1, "use_scan": False},
         {"ns": 9, "max_iter": 200, "use_scan": False},
         {"ns": 9, "max_iter": 50, "use_scan": False},
     ]

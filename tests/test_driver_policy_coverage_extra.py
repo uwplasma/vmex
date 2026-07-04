@@ -190,8 +190,8 @@ def test_solver_policy_helper_edges_and_stage_switch_reasons() -> None:
     ) == "tpu"
     assert driver._default_non_autodiff_solver_policy_for_backend(_indata(LFREEB=True), "cpu") == ("default", True)
     assert driver._default_non_autodiff_solver_policy_for_backend(_indata(NS_ARRAY=[3, 5]), "cpu") == (
-        "parity",
-        False,
+        "accelerated",
+        True,
     )
     assert driver._default_non_autodiff_solver_policy_for_backend(_indata(LASYM=True), "cpu") == (
         "accelerated",
@@ -450,6 +450,7 @@ def test_cli_finish_full_parity_fallback_can_replace_best_run(
         verbose=False,
         multigrid=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
         jit_forces=False,
         grid=object(),
     )

@@ -212,6 +212,7 @@ def test_cli_staged_followup_records_policy_and_beats_single_grid(monkeypatch, t
         verbose=False,
         jit_forces=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     diag = run.result.diagnostics
@@ -247,6 +248,7 @@ def test_staged_cli_full_parity_fallback_diagnostics_when_followup_does_not_impr
         jit_forces=False,
         cli_fixed_boundary_mode=True,
         use_scan=False,
+        finish_policy="converge",
     )
 
     diag = run.result.diagnostics

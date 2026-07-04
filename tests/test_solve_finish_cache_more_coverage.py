@@ -282,12 +282,20 @@ def _python_cond(pred, true_fun, false_fun, *operands, operand=_COND_SENTINEL):
 
 
 def _python_scan(fn, carry, xs, reverse=False):
-    values = list(np.asarray(xs))
+    if isinstance(xs, tuple):
+        arrays = tuple(np.asarray(x) for x in xs)
+        values = list(zip(*arrays, strict=True))
+    else:
+        values = list(np.asarray(xs))
     if reverse:
         values = list(reversed(values))
     ys = []
     for value in values:
-        carry, y = fn(carry, jnp.asarray(value, dtype=getattr(xs, "dtype", jnp.int32)))
+        if isinstance(value, tuple):
+            value_i = tuple(jnp.asarray(v, dtype=getattr(v, "dtype", None)) for v in value)
+        else:
+            value_i = jnp.asarray(value, dtype=getattr(xs, "dtype", jnp.int32))
+        carry, y = fn(carry, value_i)
         ys.append(y)
     if not ys:
         return carry, ()

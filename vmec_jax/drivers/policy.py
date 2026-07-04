@@ -708,7 +708,10 @@ def default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tupl
 def default_use_scan_for_backend(indata, backend: str, solver_mode: str | None) -> bool:
     """Choose the fused scan loop when the selected backend can execute it."""
 
-    _ = (indata, normalize_solver_mode(solver_mode=solver_mode, performance_mode=True))
+    mode = normalize_solver_mode(solver_mode=solver_mode, performance_mode=True)
+    if mode == "parity" and str(backend).strip().lower() == "cpu":
+        return False
+    _ = indata
     backend_l = str(backend).strip().lower()
     if backend_l == "cpu":
         profile_decision = profile_guided_scan_decision_for_indata(indata)

@@ -674,6 +674,7 @@ def test_driver_cli_finisher_strict_result_without_converged_flag_skips_attempts
         verbose=False,
         cli_fixed_boundary_mode=True,
         jit_forces=False,
+        finish_policy="converge",
     )
 
     assert len(calls) == 1
@@ -701,6 +702,7 @@ def test_driver_cli_finisher_budget_cap_exhausts_before_parity_attempt(monkeypat
         verbose=False,
         cli_fixed_boundary_mode=True,
         jit_forces=False,
+        finish_policy="converge",
     )
 
     diag = run.result.diagnostics

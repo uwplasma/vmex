@@ -205,6 +205,7 @@ def test_cli_finisher_sanitizes_minimal_resume_and_resolves_finish_jit(monkeypat
         verbose=False,
         cli_fixed_boundary_mode=True,
         jit_forces="definitely-on",
+        finish_policy="converge",
     )
 
     assert [call["jit_forces"] for call in calls] == [True, True]

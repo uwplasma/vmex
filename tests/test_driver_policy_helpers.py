@@ -137,7 +137,7 @@ def test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics():
     assert forced_scan.use_scan is True
 
 
-def test_profile_guided_scan_decision_uses_measured_profile_without_size_thresholds(tmp_path):
+def test_profile_guided_scan_decision_uses_measured_profile_without_size_thresholds(tmp_path, monkeypatch):
     profile = tmp_path / "scan_profile.json"
     profile.write_text(
         """
@@ -159,7 +159,9 @@ def test_profile_guided_scan_decision_uses_measured_profile_without_size_thresho
     getenv = lambda key, default="": str(profile) if key == "VMEC_JAX_ACCELERATED_SCAN_PROFILE" else default
 
     assert profile_guided_scan_decision_for_indata(indata, getenv=getenv) is False
-    assert default_use_scan_for_backend(indata, "cpu", "accelerated") is True
+    monkeypatch.setenv("VMEC_JAX_ACCELERATED_SCAN_PROFILE", str(profile))
+    assert default_use_scan_for_backend(indata, "cpu", "accelerated") is False
+    assert default_use_scan_for_backend(indata, "gpu", "accelerated") is True
 
 
 def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
