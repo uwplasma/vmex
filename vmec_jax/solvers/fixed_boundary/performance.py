@@ -12,7 +12,7 @@ from typing import Any, Mapping
 import numpy as np
 
 
-SCAN_CACHE_KEY_FIELDS: tuple[str, ...] = (
+SCAN_CACHE_KEY_FIELDS_V5: tuple[str, ...] = (
     "schema",
     "static_key",
     "wout_key",
@@ -45,9 +45,76 @@ SCAN_CACHE_KEY_FIELDS: tuple[str, ...] = (
     "scan_fallback_fsq_abs",
 )
 
+SCAN_CACHE_KEY_FIELDS_V6: tuple[str, ...] = (
+    "schema",
+    "static_key",
+    "wout_key",
+    "edge_signature_key",
+    "tomnsps_policy_key",
+    "max_iter_tail",
+    "preflight_iters",
+    "iter_offset0",
+    "step_size",
+    "initial_flip_sign",
+    "lambda_update_scale",
+    "ftol",
+    "fsq_total_target",
+    "nstep_screen",
+    "use_restart_triggers",
+    "vmecpp_restart",
+    "scan_use_precomputed",
+    "scan_use_lax_tridi",
+    "scan_use_restart_payload",
+    "stage_prev_fsq",
+    "stage_transition_factor",
+    "stage_transition_scale",
+    "jit_forces_scan",
+    "state_only_scan",
+    "scan_light",
+    "scan_minimal",
+    "scan_fallback_iters",
+    "scan_fallback_accept_frac",
+    "scan_fallback_fsq_factor",
+    "scan_fallback_badjac_limit",
+    "scan_fallback_fsq_abs",
+)
+
+SCAN_CACHE_KEY_FIELDS: tuple[str, ...] = (
+    "schema",
+    "static_key",
+    "wout_key",
+    "edge_signature_key",
+    "tomnsps_policy_key",
+    "max_iter_tail",
+    "preflight_iters",
+    "iter_offset0",
+    "step_size",
+    "initial_flip_sign",
+    "lambda_update_scale",
+    "has_fsq_total_target",
+    "nstep_screen",
+    "use_restart_triggers",
+    "vmecpp_restart",
+    "scan_use_precomputed",
+    "scan_use_lax_tridi",
+    "scan_use_restart_payload",
+    "stage_prev_fsq",
+    "stage_transition_factor",
+    "stage_transition_scale",
+    "jit_forces_scan",
+    "state_only_scan",
+    "scan_light",
+    "scan_minimal",
+    "scan_fallback_iters",
+    "scan_fallback_accept_frac",
+    "scan_fallback_fsq_factor",
+    "scan_fallback_badjac_limit",
+    "scan_fallback_fsq_abs",
+)
+
 SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN: tuple[str, ...] = SCAN_CACHE_KEY_FIELDS + ("seq_len",)
 
-SCAN_FAST_CACHE_KEY_FIELDS: tuple[str, ...] = (
+SCAN_FAST_CACHE_KEY_FIELDS_V1: tuple[str, ...] = (
     "schema",
     "static_key",
     "wout_key",
@@ -56,6 +123,19 @@ SCAN_FAST_CACHE_KEY_FIELDS: tuple[str, ...] = (
     "step_size",
     "initial_flip_sign",
     "lambda_update_scale",
+    "precond_radial_alpha",
+    "precond_lambda_alpha",
+    "apply_m1_constraints",
+    "jit_forces",
+)
+
+SCAN_FAST_CACHE_KEY_FIELDS: tuple[str, ...] = (
+    "schema",
+    "static_key",
+    "wout_key",
+    "edge_value_key",
+    "max_iter",
+    "has_fsq_total_target",
     "precond_radial_alpha",
     "precond_lambda_alpha",
     "apply_m1_constraints",
@@ -85,7 +165,7 @@ SCAN_CACHE_KEY_CATEGORIES: dict[str, str] = {
     "step_size": "iteration_update",
     "initial_flip_sign": "initial_state",
     "lambda_update_scale": "iteration_update",
-    "ftol": "tolerance",
+    "has_fsq_total_target": "tolerance",
     "nstep_screen": "iteration_budget",
     "use_restart_triggers": "restart_policy",
     "vmecpp_restart": "restart_policy",
@@ -164,7 +244,7 @@ def scan_cache_key_delta_summary(
     before_key: tuple[Any, ...],
     after_key: tuple[Any, ...],
     *,
-    field_names: tuple[str, ...] = SCAN_CACHE_KEY_FIELDS,
+    field_names: tuple[str, ...] | None = None,
     field_categories: Mapping[str, str] = SCAN_CACHE_KEY_CATEGORIES,
 ) -> dict[str, Any]:
     """Return stable scan-cache miss categories for two cache keys.
@@ -174,6 +254,8 @@ def scan_cache_key_delta_summary(
     persisted in profiler JSON without depending on tuple offsets.
     """
 
+    if field_names is None:
+        field_names = scan_cache_key_field_names(before_key if before_key else after_key)
     deltas = explain_scan_cache_key_delta(before_key, after_key, field_names=field_names)
     categories: dict[str, list[str]] = {}
     for delta in deltas:
@@ -193,10 +275,18 @@ def scan_cache_key_field_names(key: tuple[Any, ...]) -> tuple[str, ...]:
 
     schema = str(key[0]) if key else ""
     if schema == "vmec2000_scan_v5":
+        return SCAN_CACHE_KEY_FIELDS_V5
+    if schema == "vmec2000_scan_v6":
+        if len(key) == len(SCAN_CACHE_KEY_FIELDS_V6) + 1:
+            return SCAN_CACHE_KEY_FIELDS_V6 + ("seq_len",)
+        return SCAN_CACHE_KEY_FIELDS_V6
+    if schema == "vmec2000_scan_v7":
         if len(key) == len(SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN):
             return SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN
         return SCAN_CACHE_KEY_FIELDS
     if schema == "scan_v1":
+        return SCAN_FAST_CACHE_KEY_FIELDS_V1
+    if schema == "scan_v2":
         return SCAN_FAST_CACHE_KEY_FIELDS
     return tuple(f"field_{index}" for index in range(len(key)))
 
@@ -310,9 +400,12 @@ def _profile_count(profile: Mapping[str, Mapping[str, Any]], *names: str) -> int
 __all__ = [
     "CacheKeyDelta",
     "SCAN_CACHE_KEY_CATEGORIES",
+    "SCAN_CACHE_KEY_FIELDS_V5",
+    "SCAN_CACHE_KEY_FIELDS_V6",
     "SCAN_CACHE_KEY_FIELDS_WITH_SEQ_LEN",
     "SCAN_CACHE_KEY_FIELDS",
     "SCAN_FAST_CACHE_KEY_FIELDS",
+    "SCAN_FAST_CACHE_KEY_FIELDS_V1",
     "accumulate_scan_device_ready_timing",
     "exact_parameter_cache_key",
     "exact_parameter_cache_key_fingerprint",

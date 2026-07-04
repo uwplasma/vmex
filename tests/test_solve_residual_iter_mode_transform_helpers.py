@@ -131,6 +131,11 @@ def _state(ns: int, k: int):
 
 def test_mode_transform_context_builds_host_transforms_and_weights() -> None:
     static = _static(mpol=3, ntor=2, nfp=2, lasym=True)
+    static.signed_maps = signed_maps_from_modes(static.modes)
+    static.mode_transform_host_projection = build_mode_transform_host_projection(
+        static.signed_maps,
+        ncoeff=static.modes.m.size,
+    )
     state0 = _state(ns=3, k=static.modes.m.size)
     context = build_mode_transform_context(
         static=static,
@@ -148,6 +153,7 @@ def test_mode_transform_context_builds_host_transforms_and_weights() -> None:
     assert context.ntor == 2
     assert context.nrange == 3
     assert context.ncoeff == static.modes.m.size
+    assert context.host_projection is static.mode_transform_host_projection
     assert context.scalxc_mn_np is not None
     assert context.w_mode_mn_np is not None
     np.testing.assert_allclose(context.m0_mask, np.asarray(static.modes.m) == 0)
@@ -158,6 +164,25 @@ def test_mode_transform_context_builds_host_transforms_and_weights() -> None:
     direct = context.mn_sin_to_signed_physical(sc, cs)
     batched = context.mn_sin_to_signed_physical_batch(sc[None, ...], cs[None, ...])[0]
     np.testing.assert_allclose(np.asarray(batched), np.asarray(direct), rtol=1.0e-13, atol=1.0e-13)
+
+
+def test_mode_transform_context_zero_exponent_uses_unit_weights() -> None:
+    static = _static(mpol=4, ntor=3, nfp=2, lasym=False)
+    state0 = _state(ns=3, k=static.modes.m.size)
+    context = build_mode_transform_context(
+        static=static,
+        state0=state0,
+        s=np.asarray([0.0, 0.25, 1.0]),
+        host_update_assembly=False,
+        setup_host_enforce=False,
+        divide_by_scalxc_for_update=False,
+        mode_diag_exponent=0.0,
+        tree_has_tracer=lambda _value: False,
+        vmec_scalxc_from_s=vmec_scalxc_from_s,
+    )
+
+    np.testing.assert_allclose(np.asarray(context.w_mode_mn), np.ones((4, 4)))
+    assert context.w_mode_mn_np is None
 
 
 def test_mode_transform_context_rz_norm_jax_matches_numpy_with_static_indices() -> None:

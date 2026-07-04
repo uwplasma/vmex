@@ -17,6 +17,8 @@ from vmec_jax.drivers import runtime as driver_runtime
 from vmec_jax.drivers import solve as driver_solve
 from vmec_jax.drivers.policy import (
     dynamic_scan_probe_settings,
+    default_use_scan_for_backend,
+    profile_guided_scan_decision_for_indata,
     resolve_fixed_boundary_solver_dispatch,
     resolve_fixed_boundary_stage_policy,
     resolve_driver_signgs,
@@ -133,6 +135,31 @@ def test_resolve_fixed_boundary_solver_dispatch_preserves_scan_semantics():
     )
     assert forced_scan.solver == "vmec2000_iter"
     assert forced_scan.use_scan is True
+
+
+def test_profile_guided_scan_decision_uses_measured_profile_without_size_thresholds(tmp_path):
+    profile = tmp_path / "scan_profile.json"
+    profile.write_text(
+        """
+        {
+          "records": [
+            {
+              "case_id": "tiny_case",
+              "backend": "vmec_jax",
+              "recommended_use_scan": false,
+              "classification": "classified:cold_scan_compile_amortization"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    indata = _Input()
+    indata.source_path = str(tmp_path / "input.tiny_case")
+    getenv = lambda key, default="": str(profile) if key == "VMEC_JAX_ACCELERATED_SCAN_PROFILE" else default
+
+    assert profile_guided_scan_decision_for_indata(indata, getenv=getenv) is False
+    assert default_use_scan_for_backend(indata, "cpu", "accelerated") is True
 
 
 def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
@@ -590,56 +617,53 @@ def test_driver_interface_helpers_print_concise_and_vmec_style_banners() -> None
     ("backend", "indata", "expected"),
     [
         ("gpu", _Input(LFREEB=True, NS_ARRAY=[5, 9]), ("default", True)),
-        ("gpu", _Input(NS_ARRAY=[5, 9]), ("parity", False)),
+        ("gpu", _Input(NS_ARRAY=[5, 9]), ("accelerated", True)),
         ("gpu", _Input(NS_ARRAY=[9]), ("accelerated", True)),
-        ("gpu", _Input(NS_ARRAY=[9], AM=[1.0]), ("parity", False)),
+        ("gpu", _Input(NS_ARRAY=[9], AM=[1.0]), ("accelerated", True)),
         ("cpu", _Input(LASYM=True), ("accelerated", True)),
-        ("cpu", _Input(LASYM=True, AM=[1.0]), ("parity", False)),
+        ("cpu", _Input(LASYM=True, AM=[1.0]), ("accelerated", True)),
         ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9], NITER_ARRAY=[10, 20]), ("accelerated", True)),
-        ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9], NITER_ARRAY=[10, 20], AC=[1.0]), ("parity", False)),
-        ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9]), ("parity", False)),
-        ("cpu", _Input(MPOL=5, NTOR=5, NS_ARRAY=[45]), ("default", True)),
+        ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9], NITER_ARRAY=[10, 20], AC=[1.0]), ("accelerated", True)),
+        ("cpu", _Input(NCURR=1, NS_ARRAY=[5, 9]), ("accelerated", True)),
+        ("cpu", _Input(MPOL=5, NTOR=5, NS_ARRAY=[45]), ("accelerated", True)),
         ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45]), ("accelerated", True)),
-        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AM=[1.0]), ("parity", False)),
-        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AC=[1.0]), ("parity", False)),
-        ("cpu", _Input(), ("default", True)),
+        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AM=[1.0]), ("accelerated", True)),
+        ("cpu", _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AC=[1.0]), ("accelerated", True)),
+        ("cpu", _Input(), ("accelerated", True)),
     ],
 )
-def test_default_non_autodiff_solver_policy_for_backend_uses_input_structure(backend, indata, expected):
+def test_default_non_autodiff_solver_policy_for_backend_is_fast_first_for_fixed_boundary(backend, indata, expected):
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, backend) == expected
 
 
-def test_default_cpu_policy_can_force_accelerated_high_mode_inputs(monkeypatch):
-    """Advanced users can still profile high-mode accelerated CPU runs."""
+def test_default_cpu_policy_is_not_profile_or_size_classified():
+    """Default routing starts fast; residual monitors decide any fallback."""
 
-    monkeypatch.setenv("VMEC_JAX_CPU_AUTO_PARITY_MODE_LIMIT", "0")
-    monkeypatch.setenv("VMEC_JAX_CPU_AUTO_PARITY_WORK_LIMIT", "0")
-    indata = _Input(MPOL=7, NTOR=7, NS_ARRAY=[45])
-    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("default", True)
+    assert driver._default_non_autodiff_solver_policy_for_backend(_Input(MPOL=1, NTOR=0), "cpu") == (
+        "accelerated",
+        True,
+    )
+    assert driver._default_non_autodiff_solver_policy_for_backend(
+        _Input(MPOL=12, NTOR=12, NS_ARRAY=[201], AM=[1.0], AC=[1.0]),
+        "cpu",
+    ) == ("accelerated", True)
 
 
 def test_default_cpu_policy_routes_serial2500170_fixture_to_accelerated():
-    """Vacuum high-mode inputs use the fast path; zero-current diagnostics are ignored."""
+    """The serial2500170 regression fixture starts on the fast path."""
 
     path = Path(__file__).resolve().parents[1] / "examples/data/input.serial2500170_surface_points_mpol12_ntor12"
     indata = read_indata(path)
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("accelerated", True)
 
 
-def test_default_cpu_policy_routes_high_work_finite_beta_to_parity():
-    """Finite pressure/current keeps reference control when high-work policy triggers."""
-
-    indata = _Input(MPOL=7, NTOR=7, NS_ARRAY=[45], AM=[1.0], PRES_SCALE=1.0)
-    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("parity", False)
-
-
-def test_default_cpu_policy_routes_finite_beta_fixture_to_parity():
-    """Finite-beta/current outputs such as DMerc and currents require VMEC parity."""
+def test_default_cpu_policy_routes_finite_beta_fixture_to_fast_with_dynamic_scan():
+    """Finite-beta/current cases also start fast; convergence monitors own safety."""
 
     path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_finite_beta"
     indata = read_indata(path)
-    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("parity", False)
-    assert driver._default_use_scan_for_backend(indata, "cpu", "parity") is False
+    assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("accelerated", True)
+    assert driver._default_use_scan_for_backend(indata, "cpu", "accelerated") is True
 
 
 def test_resolve_initial_fixed_boundary_policy_preserves_interactive_cpu_cli_defaults():
@@ -659,10 +683,10 @@ def test_resolve_initial_fixed_boundary_policy_preserves_interactive_cpu_cli_def
     )
 
     assert policy.solver_mode_explicit is False
-    assert policy.solver_mode_eff == "default"
+    assert policy.solver_mode_eff == "accelerated"
     assert policy.performance_mode is True
-    assert policy.accelerated_mode is False
-    assert policy.use_scan is False
+    assert policy.accelerated_mode is True
+    assert policy.use_scan is True
     assert policy.cli_fixed_boundary_mode is True
 
 

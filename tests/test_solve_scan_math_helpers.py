@@ -334,3 +334,51 @@ def test_restart_updates_zero_all_velocity_blocks_including_lasym_and_no_restart
     preserved = _no_restart_updates(carry)
     np.testing.assert_allclose(np.asarray(preserved.vRsc), np.asarray(carry.vRsc))
     assert not bool(np.asarray(preserved.force_bcovar_update))
+
+
+def test_restart_updates_preserve_compact_inactive_asym_velocity_shapes():
+    carry = _carry()
+    compact = SimpleNamespace(
+        **{
+            **carry.__dict__,
+            "vRsc": np.asarray(0.0),
+            "vRcs": np.asarray(0.0),
+            "vZcc": np.asarray(0.0),
+            "vZss": np.asarray(0.0),
+            "vLcc": np.asarray(0.0),
+            "vLss": np.asarray(0.0),
+        }
+    )
+
+    def transition_fn(**_kwargs):
+        return SimpleNamespace(
+            time_step=np.asarray(0.5),
+            damping_time_step=np.asarray(0.25),
+            iter_offset=np.asarray(20),
+            iter1=np.asarray(21),
+            ijacob=np.asarray(22),
+            bad_resets=np.asarray(23),
+            bad_growth=np.asarray(0),
+            force_bcovar_update=np.asarray(True),
+        )
+
+    updated = _restart_updates(
+        carry_adv=compact,
+        state_checkpoint="checkpoint",
+        fsq_prev_before=np.asarray(99.0),
+        iter2=np.asarray(3),
+        restart_reason=np.asarray(1),
+        vmec2000_control=True,
+        restart_badjac_factor=0.9,
+        restart_badprog_factor=1.03,
+        stage_transition_scale=0.5,
+        step_size=0.1,
+        k_ndamp=3,
+        dtype=jnp.float64,
+        scan_restart_transition_fn=transition_fn,
+    )
+
+    for block in (updated.vRsc, updated.vRcs, updated.vZcc, updated.vZss, updated.vLcc, updated.vLss):
+        value = np.asarray(block)
+        assert value.shape == ()
+        assert float(value) == pytest.approx(0.0)

@@ -133,6 +133,7 @@ class FixedBoundaryFinishContext:
     cfg: Any
     indata: Any
     solver_mode_eff: str
+    finish_policy_eff: str
     accelerated_mode: bool
     ftol_list_input: Any
     ns_list_input: Any
@@ -681,6 +682,23 @@ def maybe_finish_cli_fixed_boundary_run(
     fallback_used = False
     partial_fallback_used = False
     staged_followup_diag = StagedFollowupDiagnostics()
+
+    if str(ctx.finish_policy_eff) != "converge":
+        return _finish_run_with_diagnostics(
+            FinishDiagnosticInputs(
+                ctx=ctx,
+                best_run=best_run,
+                requested_ftol=float(request.requested_ftol),
+                target_fsq=float(request.target_fsq),
+                base_diag=request.base_diag,
+                initial_policy=str(initial_policy),
+                partial_fallback_used=False,
+                fallback_used=False,
+                staged_followup=staged_followup_diag,
+                attempt_log=attempt_log,
+                finish_budget=FinishBudgetTracker(cap=None),
+            )
+        )
 
     best_run, best_fsq, staged_followup_diag = _maybe_apply_input_staged_followup(
         ctx,

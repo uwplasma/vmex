@@ -16,7 +16,6 @@ from .driver import (
     run_fixed_boundary,
     write_wout_from_fixed_boundary_run,
 )
-from .drivers.policy import fixed_boundary_indata_has_finite_beta_or_current
 from .namelist import read_indata
 
 _TEST_INPUT_NAME = "input.nfp4_QH_warm_start"
@@ -204,8 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         choices=("auto", "none", "bounded", "converge"),
         help=(
-            "Fixed-boundary post-solve policy: auto preserves default converged CLI behavior; "
-            "none/bounded runs only the requested budget; converge forces the VMEC-style finish stage."
+            "Fixed-boundary post-solve policy: auto writes the requested-budget result with "
+            "finish diagnostics; none/bounded disables finish diagnostics; converge forces "
+            "VMEC-style post-budget finish attempts."
         ),
     )
     p.add_argument(
@@ -569,12 +569,6 @@ def main(argv: list[str] | None = None) -> int:
             if (
                 str(default_policy_backend).strip().lower() == "cpu"
                 and str(solver_mode).strip().lower() == "default"
-            ):
-                use_scan_default = False
-            if (
-                str(default_policy_backend).strip().lower() == "cpu"
-                and str(solver_mode).strip().lower() == "accelerated"
-                and fixed_boundary_indata_has_finite_beta_or_current(indata)
             ):
                 use_scan_default = False
             run_kwargs["use_scan"] = bool(use_scan_default)

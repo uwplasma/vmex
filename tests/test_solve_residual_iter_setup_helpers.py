@@ -37,6 +37,7 @@ from vmec_jax.solvers.fixed_boundary.residual.ptau import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.policy import vmec2000_time_control_decision
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
+    ScanConvergenceControls,
     ScanConvergencePredicate,
     ScanDeviceRuntime,
     ScanTimeControlDumper,
@@ -999,6 +1000,8 @@ def test_scan_adapter_contexts_delegate_runtime_and_scan_contracts() -> None:
     )
     assert predicate(1.0e-4, 2.0e-4, 3.0e-4)
     assert not predicate(1.0e-3, 2.0e-3, 3.0e-3)
+    runtime_controls = ScanConvergenceControls(ftol=1.0e-2, fsq_total_target=None)
+    assert predicate(1.0e-3, 2.0e-3, 3.0e-3, runtime_controls)
 
     call_args = {}
     assert (

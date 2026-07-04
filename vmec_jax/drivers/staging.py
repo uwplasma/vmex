@@ -240,13 +240,9 @@ def run_stage_with_optional_explicit_monitor(
         chunk_state = state
         chunk_resume_state = resume_state_stage
         stage_switch_reason = None
+        stage_monitor_warning_reason = None
         stage_monitor_used = True
-        stage_monitor_scan = bool(scan_mode) and str(policy_backend).lower() in (
-            "gpu",
-            "cuda",
-            "rocm",
-            "tpu",
-        )
+        stage_monitor_scan = bool(scan_mode)
         remaining_budget = int(niter)
         stage_first_chunk = True
 
@@ -289,6 +285,12 @@ def run_stage_with_optional_explicit_monitor(
                     )
             except Exception:
                 stage_switch_reason = None
+        if stage_switch_reason is not None and str(stage_switch_reason) != "nonfinite_total_fsq":
+            # A budget projection is diagnostic information, not proof that a
+            # slower controller will improve the final accepted state. Keep the
+            # fast path unless the residual state is numerically invalid.
+            stage_monitor_warning_reason = str(stage_switch_reason)
+            stage_switch_reason = None
 
         if (stage_switch_reason is None) and (not bool(strict_chunk)) and int(remaining_budget) > 0:
             tail_kwargs = dict(solve_kwargs)
@@ -308,8 +310,6 @@ def run_stage_with_optional_explicit_monitor(
                 jit_forces=bool(explicit_stage_monitor_jit_forces),
             )
             chunk_results.append(res_tail)
-        elif (stage_switch_reason is None) and (not bool(strict_chunk)):
-            stage_switch_reason = "budget_exhausted"
 
         if stage_switch_reason is not None:
             if bool(verbose):
@@ -349,7 +349,20 @@ def run_stage_with_optional_explicit_monitor(
                 accelerated_stage_effective_mode="parity",
             )
             return result, "parity"
-        return merge_stage_chunk_results(chunk_results, mode_i=effective_mode), effective_mode
+        result = merge_stage_chunk_results(chunk_results, mode_i=effective_mode)
+        if stage_monitor_warning_reason is not None:
+            result = result_with_diag(
+                result,
+                accelerated_stage_chunked=bool(stage_monitor_used or len(chunk_results) > 0),
+                accelerated_stage_early_switch=False,
+                accelerated_stage_switch_reason=str(stage_monitor_warning_reason),
+                accelerated_stage_probe_chunk_iters=np.asarray(
+                    [int(r.n_iter) + 1 for r in chunk_results[:1]],
+                    dtype=int,
+                ),
+                accelerated_stage_effective_mode=str(effective_mode),
+            )
+        return result, effective_mode
 
     result = run_stage_solve(
         state=state,
@@ -507,13 +520,15 @@ def _build_vmec2000_stage_solve_plan(
         solve_kwargs=solve_kwargs,
         solve_fixed_boundary_residual_iter_func=ctx.solve_fixed_boundary_residual_iter,
     )
+    monitor_cadence = int(ctx.indata.get_int("NSTEP", 0))
     explicit_stage_monitor = (
         bool(stage_accelerated_mode)
-        and (ctx.niter_stages_input is not None)
-        and int(nstep) > 1
-        and int(stage_index) > 0
+        and bool(ctx.performance_mode)
+        and (not bool(scan_mode))
+        and int(monitor_cadence) > 0
+        and int(niter) > int(monitor_cadence)
     )
-    explicit_stage_chunk = min(int(niter), max(int(ctx.indata.get_int("NSTEP", 1)), 200))
+    explicit_stage_chunk = min(int(niter), max(1, int(monitor_cadence))) if monitor_cadence > 0 else int(niter)
     explicit_stage_target = ctx.accelerated_fsq_total_target_from_ftol(float(ftol))
     return Vmec2000StageSolvePlan(
         scan_mode=bool(scan_mode),
@@ -718,7 +733,7 @@ def run_vmec2000_staged_solve(ctx: Vmec2000StagedSolveContext) -> Vmec2000Staged
             merge_stage_chunk_results=ctx.merge_stage_chunk_results,
             result_with_diag=ctx.result_with_diag,
             maybe_rerun_scan_abort_stage=ctx.maybe_rerun_scan_abort_stage,
-            scan_abort_fallback_enabled=(not ctx.accelerated_mode) and bool(ctx.performance_mode) and bool(stage_plan.scan_mode),
+            scan_abort_fallback_enabled=bool(ctx.performance_mode) and bool(stage_plan.scan_mode),
             verbose=bool(ctx.verbose),
         )
         stage_mode_history[-1] = str(stage_mode_i)

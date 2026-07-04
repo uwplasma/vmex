@@ -614,18 +614,18 @@ def test_driver_scalar_list_and_ftol_helpers():
     assert driver_module._requested_final_ftol(indata=_Input(), ftol_list_input=None) == 1.0e-9
 
 
-def test_default_non_autodiff_solver_policy_matches_fixed_boundary_defaults(tmp_path, monkeypatch):
+def test_default_non_autodiff_solver_policy_matches_fast_first_fixed_boundary_default(tmp_path, monkeypatch):
     monkeypatch.setattr(driver_module, "_default_backend_name", lambda: "cpu")
     simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
     _cfg_simple, indata_simple = load_config(simple_input)
-    assert driver_module.default_non_autodiff_solver_policy(indata_simple) == ("default", True)
+    assert driver_module.default_non_autodiff_solver_policy(indata_simple) == ("accelerated", True)
 
     staged_input = _write_staged_no_niter_input(tmp_path)
     _cfg_staged, indata_staged = load_config(staged_input)
-    assert driver_module.default_non_autodiff_solver_policy(indata_staged) == ("parity", False)
+    assert driver_module.default_non_autodiff_solver_policy(indata_staged) == ("accelerated", True)
 
 
-def test_default_use_scan_policy_is_backend_and_input_aware():
+def test_default_use_scan_policy_uses_backend_capability_not_input_class():
     simple_input = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
     _cfg_simple, indata_simple = load_config(simple_input)
     lasym_input = Path(__file__).resolve().parents[1] / "examples/data/input.up_down_asymmetric_tokamak"
@@ -633,9 +633,9 @@ def test_default_use_scan_policy_is_backend_and_input_aware():
     finite_beta_input = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_finite_beta"
     _cfg_finite_beta, indata_finite_beta = load_config(finite_beta_input)
 
-    assert driver_module._default_use_scan_for_backend(indata_simple, "cpu", "default") is False
+    assert driver_module._default_use_scan_for_backend(indata_simple, "cpu", "default") is True
     assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "accelerated") is True
-    assert driver_module._default_use_scan_for_backend(indata_lasym, "cpu", "accelerated") is False
+    assert driver_module._default_use_scan_for_backend(indata_lasym, "cpu", "accelerated") is True
     assert driver_module._default_use_scan_for_backend(indata_simple, "gpu", "parity") is True
     assert driver_module._default_use_scan_for_backend(indata_finite_beta, "cpu", "accelerated") is True
 
@@ -1261,7 +1261,7 @@ def test_cli_passes_public_finish_policy(monkeypatch, tmp_path):
     assert captured["finish_policy"] == "none"
 
 
-def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_path):
+def test_cli_defaults_to_cpu_accelerated_on_simple_fixed_boundary(monkeypatch, tmp_path):
     input_path = Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
     captured = {}
 
@@ -1280,12 +1280,12 @@ def test_cli_defaults_to_cpu_default_on_simple_fixed_boundary(monkeypatch, tmp_p
 
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
-    assert captured["solver_mode"] == "default"
+    assert captured["solver_mode"] == "accelerated"
     assert captured["performance_mode"] is True
-    assert captured["use_scan"] is False
+    assert captured["use_scan"] is True
 
 
-def test_cli_defaults_to_cpu_default_on_staged_fixed_boundary_with_niter_array(monkeypatch, tmp_path):
+def test_cli_defaults_to_cpu_accelerated_on_staged_fixed_boundary_with_niter_array(monkeypatch, tmp_path):
     input_path = _write_staged_with_niter_input(tmp_path)
     captured = {}
 
@@ -1304,12 +1304,12 @@ def test_cli_defaults_to_cpu_default_on_staged_fixed_boundary_with_niter_array(m
 
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
-    assert captured["solver_mode"] == "default"
+    assert captured["solver_mode"] == "accelerated"
     assert captured["performance_mode"] is True
-    assert captured["use_scan"] is False
+    assert captured["use_scan"] is True
 
 
-def test_cli_solver_device_cpu_uses_cpu_default_policy(monkeypatch, tmp_path):
+def test_cli_solver_device_cpu_uses_cpu_accelerated_policy(monkeypatch, tmp_path):
     input_path = Path(__file__).resolve().parents[1] / "examples/data/input.nfp4_QH_warm_start"
     captured = {}
 
@@ -1337,9 +1337,9 @@ def test_cli_solver_device_cpu_uses_cpu_default_policy(monkeypatch, tmp_path):
         ]
     )
     assert rc == 0
-    assert captured["solver_mode"] == "default"
+    assert captured["solver_mode"] == "accelerated"
     assert captured["solver_device"] == "cpu"
-    assert captured["use_scan"] is False
+    assert captured["use_scan"] is True
 
 
 def test_cli_solver_device_gpu_uses_gpu_performance_policy(monkeypatch, tmp_path):
@@ -1375,7 +1375,7 @@ def test_cli_solver_device_gpu_uses_gpu_performance_policy(monkeypatch, tmp_path
     assert captured["use_scan"] is True
 
 
-def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):
+def test_cli_defaults_to_accelerated_on_staged_fixed_boundary_without_niter_array(monkeypatch, tmp_path):
     input_path = _write_staged_no_niter_input(tmp_path)
     captured = {}
 
@@ -1394,8 +1394,9 @@ def test_cli_defaults_to_parity_on_staged_fixed_boundary_without_niter_array(mon
 
     rc = cli_module.main([str(input_path), "--output", str(tmp_path / "wout_test.nc"), "--quiet"])
     assert rc == 0
-    assert captured["solver_mode"] == "parity"
-    assert captured["performance_mode"] is False
+    assert captured["solver_mode"] == "accelerated"
+    assert captured["performance_mode"] is True
+    assert captured["use_scan"] is True
 
 
 def test_run_fixed_boundary_accelerated_mode_uses_scan():
@@ -1467,6 +1468,7 @@ def test_run_fixed_boundary_cli_budgeted_multigrid_path(monkeypatch, tmp_path):
         solver_mode="accelerated",
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls] == [5, 9, 13, 13]
@@ -1545,6 +1547,7 @@ def test_run_fixed_boundary_cli_parity_finisher_uses_state_only_blocks(monkeypat
         solver_mode="parity",
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls[:3]] == [5, 9, 13]
@@ -1615,6 +1618,7 @@ def test_run_fixed_boundary_cli_parity_finisher_caps_explicit_max_iter(monkeypat
         max_iter=100,
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls[:3]] == [5, 9, 13]
@@ -1674,6 +1678,7 @@ def test_run_fixed_boundary_cli_single_grid_uses_accelerated_finish_first(monkey
         solver_mode="accelerated",
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
@@ -1741,6 +1746,7 @@ def test_run_fixed_boundary_cli_accelerated_finish_respects_use_scan_false(monke
         use_scan=False,
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
@@ -1795,6 +1801,7 @@ def test_run_fixed_boundary_cli_accelerated_finish_caps_explicit_max_iter(monkey
         use_scan=False,
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert [call["ns"] for call in calls] == [13, 13, 13]
@@ -1808,7 +1815,7 @@ def test_run_fixed_boundary_cli_accelerated_finish_caps_explicit_max_iter(monkey
     assert diag["converged"] is False
 
 
-def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tmp_path):
+def test_run_fixed_boundary_cli_single_grid_auto_does_not_spend_hidden_finish_budget(monkeypatch, tmp_path):
     input_path = _write_single_stage_input(tmp_path)
     calls = []
     residuals = [
@@ -1859,19 +1866,13 @@ def test_run_fixed_boundary_cli_single_grid_requires_strict_ftol(monkeypatch, tm
         cli_fixed_boundary_mode=True,
     )
 
-    assert [call["ns"] for call in calls] == [13, 13, 13]
-    assert [call["max_iter"] for call in calls] == [100, 100, 100]
+    assert [call["ns"] for call in calls] == [13]
+    assert [call["max_iter"] for call in calls] == [100]
     # Scan is now the default for CLI CPU runs (faster with warm JAX disk cache).
-    assert [call["use_scan"] for call in calls] == [True, True, True]
+    assert [call["use_scan"] for call in calls] == [True]
     diag = run.result.diagnostics
-    assert np.asarray(diag["cli_fixed_boundary_finish_budgets"]).tolist() == [100, 100]
-    assert np.asarray(diag["cli_fixed_boundary_finish_modes"]).tolist() == ["accelerated", "accelerated"]
-    assert np.asarray(diag["cli_fixed_boundary_finish_converged"]).tolist() == [False, True]
-    assert diag["converged"] is True
-    assert diag["converged_strict"] is True
-    assert float(diag["final_fsqr"]) <= 1.0e-14
-    assert float(diag["final_fsqz"]) <= 1.0e-14
-    assert float(diag["final_fsql"]) <= 1.0e-14
+    assert diag["converged"] is False
+    assert float(diag["final_fsqr"]) == pytest.approx(2.50e-14)
 
 
 @pytest.mark.py311_slow_coverage

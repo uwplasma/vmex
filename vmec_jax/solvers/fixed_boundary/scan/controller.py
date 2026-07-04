@@ -84,6 +84,7 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     scan_trace_context_or_null as _scan_trace_context_or_null,
 )
 from vmec_jax.solvers.fixed_boundary.residual.scan_adapters import (
+    ScanConvergenceControls,
     build_vmec2000_scan_runtime_setup as _build_vmec2000_scan_runtime_setup,
     scan_m1_preconditioner_rhs as _scan_m1_preconditioner_rhs,
 )
@@ -105,6 +106,70 @@ def _scan_tree_select(cond, t_true, t_false):
     return jnp.where(cond, jnp.asarray(t_true), jnp.asarray(t_false))
 
 
+def _scan_iteration_input_sequence(
+    start: int,
+    stop: int,
+    *,
+    dtype: Any,
+    convergence_controls: ScanConvergenceControls,
+) -> Any:
+    """Build scan iteration inputs with dynamic convergence tolerances."""
+
+    it_seq = jnp.arange(int(start), int(stop), dtype=jnp.int32)
+    ftol_seq = jnp.full(it_seq.shape, convergence_controls.ftol, dtype=dtype)
+    if convergence_controls.fsq_total_target is None:
+        return it_seq, ftol_seq
+    target_seq = jnp.full(it_seq.shape, convergence_controls.fsq_total_target, dtype=dtype)
+    return it_seq, ftol_seq, target_seq
+
+
+def _scan_step_iteration_and_controls(
+    step_ctx: "ScanStepContext",
+    it: Any,
+) -> tuple[Any, ScanConvergenceControls]:
+    """Unpack one scan input into the iteration index and convergence controls."""
+
+    if isinstance(it, tuple):
+        if len(it) == 2:
+            iter_index, ftol = it
+            return iter_index, ScanConvergenceControls(ftol=ftol, fsq_total_target=None)
+        if len(it) == 3:
+            iter_index, ftol, fsq_total_target = it
+            return iter_index, ScanConvergenceControls(ftol=ftol, fsq_total_target=fsq_total_target)
+    return it, step_ctx.convergence_controls
+
+
+def _select_initial_rz_norm_func(
+    *,
+    state_init: Any,
+    rz_norm_func: Any,
+    rz_norm_np_func: Any,
+    tree_has_tracer: Any,
+    dtype: Any,
+):
+    """Use host R/Z normalization for non-traced initial scan-cache setup.
+
+    The initial VMEC2000 scan cache is built before the steady scan runner is
+    launched. In normal CLI/profile solves the initial state is not traced, so
+    the pure-NumPy normalization avoids several tiny JAX compilations. When the
+    solve is traced for differentiation, the selector keeps the JAX path so the
+    derivative graph remains valid.
+    """
+
+    if tree_has_tracer(state_init):
+        return rz_norm_func
+
+    def initial_rz_norm_func(state):
+        """Return a JAX scalar after computing the non-traced norm on host."""
+
+        try:
+            return jnp.asarray(float(rz_norm_np_func(state)), dtype=dtype)
+        except Exception:
+            return rz_norm_func(state)
+
+    return initial_rz_norm_func
+
+
 @dataclass(slots=True)
 class Vmec2000ScanControllerContext:
     """Closed-over solver state needed by the VMEC2000-style scan controller."""
@@ -124,6 +189,7 @@ class Vmec2000ScanControllerContext:
     _reset_axis_from_boundary: Any
     _runtime_env_enabled: Any
     _rz_norm: Any
+    _rz_norm_np: Any
     _scan_backend_name: Any
     _scan_chunk_settings: Any
     _tree_has_tracer: Any
@@ -226,6 +292,7 @@ class ScanDispatchFinalizeInputs:
     state_init: VMECState
     carry0: Any
     scan_step: Any
+    convergence_controls: ScanConvergenceControls
     scan_runtime_plan: Any
     scan_timing_enabled: bool
     scan_timing_stats: dict[str, float]
@@ -295,6 +362,7 @@ class ScanStepContext:
     dtype: Any
     compute_forces_scan: Any
     scan_converged: Any
+    convergence_controls: ScanConvergenceControls
     scale_m1_precond_rhs: Any
     jmax0: int
     max_iter: int
@@ -426,6 +494,7 @@ def _prepare_vmec2000_scan_step_payload(
     step_ctx: ScanStepContext,
     carry_adv: _ScanCarry,
     it: Any,
+    convergence_controls: ScanConvergenceControls,
 ) -> ScanStepPreparedPayload:
     """Prepare force, residual, and bad-Jacobian inputs for one scan step."""
 
@@ -444,6 +513,7 @@ def _prepare_vmec2000_scan_step_payload(
         zero_tcon=ctx.zero_tcon,
         compute_forces_scan=step_ctx.compute_forces_scan,
         scan_converged=step_ctx.scan_converged,
+        convergence_controls=convergence_controls,
         tree_select=_scan_tree_select,
         cond=jax.lax.cond,
         trace_context=lambda: scan_runtime.maybe_trace("scan/compute_forces"),
@@ -561,7 +631,12 @@ def _prepare_vmec2000_scan_step_payload(
     )
 
 
-def _advance_vmec2000_scan_step(step_ctx: ScanStepContext, carry_adv: _ScanCarry, it: Any) -> Any:
+def _advance_vmec2000_scan_step(
+    step_ctx: ScanStepContext,
+    carry_adv: _ScanCarry,
+    it: Any,
+    convergence_controls: ScanConvergenceControls,
+) -> Any:
     """Advance one active VMEC2000 scan step."""
 
     ctx = step_ctx.ctx
@@ -571,7 +646,7 @@ def _advance_vmec2000_scan_step(step_ctx: ScanStepContext, carry_adv: _ScanCarry
     scan_options = step_ctx.scan_options
     constants = step_ctx.controller_constants
     fallback_controls = step_ctx.fallback_controls
-    prepared = _prepare_vmec2000_scan_step_payload(step_ctx, carry_adv, it)
+    prepared = _prepare_vmec2000_scan_step_payload(step_ctx, carry_adv, it, convergence_controls)
     force_eval = prepared.force_eval
     current_payload_pre = prepared.current_payload
     tau_decision = prepared.tau_decision
@@ -812,12 +887,13 @@ def _advance_vmec2000_scan_step(step_ctx: ScanStepContext, carry_adv: _ScanCarry
 def _vmec2000_scan_step(step_ctx: ScanStepContext, carry: _ScanCarry, it: Any) -> Any:
     """Dispatch one scan iteration to hold or active advancement."""
 
-    iter2_hold = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
+    iter_index, convergence_controls = _scan_step_iteration_and_controls(step_ctx, it)
+    iter2_hold = jnp.asarray(iter_index + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
     hold_cond = carry.converged | carry.abort_scan | (iter2_hold > jnp.asarray(int(step_ctx.max_iter), dtype=jnp.int32))
     return jax.lax.cond(
         hold_cond,
         lambda c: _hold_vmec2000_scan_step(step_ctx, c),
-        lambda c: _advance_vmec2000_scan_step(step_ctx, c, it),
+        lambda c: _advance_vmec2000_scan_step(step_ctx, c, iter_index, convergence_controls),
         operand=carry,
     )
 
@@ -1008,6 +1084,11 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
         "iter_offset0": int(iter_offset0),
         "get_scan_runner": _get_scan_runner,
         "scan_step": inputs.scan_step,
+        "build_scan_it_seq": partial(
+            _scan_iteration_input_sequence,
+            dtype=inputs.dtype,
+            convergence_controls=inputs.convergence_controls,
+        ),
         "scan_timing_enabled": scan_timing_enabled,
         "scan_timing_stats": scan_timing_stats,
         "scan_device_runtime": inputs.scan_device_runtime,
@@ -1106,6 +1187,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     _lambda_preconditioner = ctx._lambda_preconditioner
     _runtime_env_enabled = ctx._runtime_env_enabled
     _rz_norm = ctx._rz_norm
+    _rz_norm_np = ctx._rz_norm_np
     _scan_backend_name = ctx._scan_backend_name
     _tree_has_tracer = ctx._tree_has_tracer
     axis_reset_coeffs = ctx.axis_reset_coeffs
@@ -1233,6 +1315,13 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
     rz_scale0 = initial_force.rz_scale
     l_scale0 = initial_force.l_scale
     norms0 = initial_force.norms
+    initial_rz_norm_func = _select_initial_rz_norm_func(
+        state_init=state_init,
+        rz_norm_func=_rz_norm,
+        rz_norm_np_func=_rz_norm_np,
+        tree_has_tracer=_tree_has_tracer,
+        dtype=dtype,
+    )
     scan_run_setup_start = time.perf_counter() if scan_timing_enabled else None
     initial_cache = _build_initial_preconditioner_cache(
         state_init=state_init,
@@ -1250,7 +1339,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         scan_use_precomputed=bool(scan_use_precomputed),
         scan_use_lax_tridi=bool(scan_use_lax_tridi),
         lambda_preconditioner_func=_lambda_preconditioner,
-        rz_norm_func=_rz_norm,
+        rz_norm_func=initial_rz_norm_func,
         resume_state=resume_state,
     )
     cache_precond_diag0 = initial_cache.precond_diag
@@ -1267,6 +1356,10 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
 
     scan_fallback_controls = _scan_fallback_control_arrays(ctx=ctx, dtype=dtype)
     scan_debug = _scan_debug_selection_from_env()
+    convergence_controls = ScanConvergenceControls(
+        ftol=scan_converged.ftol,
+        fsq_total_target=scan_converged.fsq_total_target,
+    )
 
     step_context = ScanStepContext(
         ctx=ctx,
@@ -1278,6 +1371,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         dtype=dtype,
         compute_forces_scan=_compute_forces_scan,
         scan_converged=scan_converged,
+        convergence_controls=convergence_controls,
         scale_m1_precond_rhs=scale_m1_precond_rhs,
         jmax0=jmax0,
         max_iter=int(max_iter),
@@ -1312,6 +1406,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         edge_Rsin=ctx.edge_Rsin,
         edge_Zcos=ctx.edge_Zcos,
         edge_Zsin=ctx.edge_Zsin,
+        use_numpy_defaults=not bool(scan_differentiated),
     )
 
     scan_runtime_plan = _resolve_scan_iteration_runtime_plan(
@@ -1328,6 +1423,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         initial_flip_sign=float(initial_flip_sign),
         lambda_update_scale=float(lambda_update_scale),
         ftol=float(ftol),
+        fsq_total_target=None if fsq_total_target is None else float(fsq_total_target),
         nstep_screen=int(nstep_screen),
         use_restart_triggers=bool(use_restart_triggers),
         vmecpp_restart=bool(vmecpp_restart),
@@ -1356,6 +1452,7 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
             state_init=state_init,
             carry0=carry0,
             scan_step=scan_step,
+            convergence_controls=convergence_controls,
             scan_runtime_plan=scan_runtime_plan,
             scan_timing_enabled=bool(scan_timing_enabled),
             scan_timing_stats=scan_timing_stats,

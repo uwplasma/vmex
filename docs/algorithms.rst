@@ -188,12 +188,14 @@ direct loop near the lower part of ``vmec_jax/solve.py``:
 - Applies the same update formulas, but encodes control flow in a pure carry
   state (``_ScanCarry``), with restart decisions represented by ``lax.cond``.
 
-This path is invoked by setting ``use_scan=True`` or using the fast solver
-aliases (``vmec2000_iter_fast``/``vmec2000_scan``).  For performance scan
-paths, vmec_jax runs a short parity guard by default: it compares the first few
-scan and non-scan VMEC-control iterations and disables scan when their residual
-histories diverge.  Advanced users can force or disable the probe with
-``VMEC_JAX_SCAN_PARITY_GUARD=1`` or ``VMEC_JAX_SCAN_PARITY_GUARD=0``.
+This path is invoked by setting ``use_scan=True`` or using the fixed-boundary
+fast/default policy.  The production default is deliberately fast-first: it
+starts from the accelerated scan loop and only moves to a conservative path
+when the solver observes an actual numerical trigger, such as a scan abort or
+nonfinite residual state.  It does not classify inputs by vacuum/finite-beta
+status, number of modes, or number of radial surfaces.  Advanced users can
+force the reference VMEC-control loop with ``--parity`` or API
+``solver_mode="parity"``.
 
 Mathematically, the scan path performs:
 
@@ -226,9 +228,10 @@ still win but must be validated for parity (especially when ``ns`` or
    # Performance-focused run (JAX scan loop)
    vj.run_fixed_boundary(path, solver="vmec2000_iter", use_scan=True, performance_mode=True)
 
-For reproducibility against VMEC2000, prefer the non-scan path.  For fast
-parameter sweeps on validated inputs, the scan path can offer significant
-speedups while preserving differentiability.
+For strict iteration-by-iteration reproducibility against VMEC2000, prefer the
+non-scan/parity path.  For ordinary fixed-boundary solves and parameter sweeps,
+the scan path is the default because it is usually faster and remains
+differentiable.
 
 Worked comparison against VMEC2000
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

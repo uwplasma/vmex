@@ -1011,6 +1011,7 @@ def test_accelerated_multigrid_miss_uses_partial_and_full_parity_fallback(monkey
         solver_mode="accelerated",
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert calls[:4] == [
@@ -1091,6 +1092,7 @@ def test_cli_finisher_records_budget_exhaustion_after_accelerated_and_parity_att
         multigrid=False,
         cli_fixed_boundary_mode=True,
         grid=_small_grid(),
+        finish_policy="converge",
     )
 
     assert calls == [
@@ -1215,6 +1217,7 @@ def test_accelerated_single_grid_runs_explicit_staged_followup(monkeypatch, tmp_
         verbose=False,
         multigrid=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert calls == [
@@ -1285,6 +1288,7 @@ def test_accelerated_staged_followup_skips_zero_budget_stage(monkeypatch, tmp_pa
         verbose=False,
         multigrid=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert calls == [
@@ -1299,7 +1303,7 @@ def test_accelerated_staged_followup_skips_zero_budget_stage(monkeypatch, tmp_pa
     assert diag["converged"] is True
 
 
-def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_path) -> None:
+def test_accelerated_explicit_stage_monitor_records_budget_miss_without_parity_rerun(monkeypatch, tmp_path) -> None:
     input_path = _write_input(
         tmp_path,
         "input.stage_monitor",
@@ -1314,6 +1318,7 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
   NS_ARRAY = 5 9
   NITER_ARRAY = 1 250
   FTOL_ARRAY = 1e-14 1e-14
+  NSTEP = 200
   PHIEDGE = 1.0
   RBC(0,0) = 1.0
   ZBS(1,0) = 0.1
@@ -1354,21 +1359,23 @@ def test_accelerated_explicit_stage_monitor_switches_to_parity(monkeypatch, tmp_
         input_path,
         solver="vmec2000_iter",
         solver_mode="accelerated",
+        use_scan=False,
         verbose=False,
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
     )
 
     assert calls == [
-        {"ns": 5, "max_iter": 1, "use_scan": True},
+        {"ns": 5, "max_iter": 1, "use_scan": False},
         {"ns": 9, "max_iter": 200, "use_scan": False},
-        {"ns": 9, "max_iter": 250, "use_scan": False},
+        {"ns": 9, "max_iter": 50, "use_scan": False},
     ]
     diag = run.result.diagnostics
-    assert diag["accelerated_stage_early_switch"] is True
+    assert diag["accelerated_stage_early_switch"] is False
     assert str(diag["accelerated_stage_switch_reason"]).startswith("projected_budget_miss:")
-    assert diag["accelerated_stage_effective_mode"] == "parity"
+    assert diag["accelerated_stage_effective_mode"] == "accelerated"
     np.testing.assert_array_equal(diag["accelerated_stage_probe_chunk_iters"], [200])
-    assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["accelerated", "parity"]
+    assert np.asarray(diag["multigrid_stage_modes"]).tolist() == ["accelerated", "accelerated"]
     assert np.asarray(diag["multigrid_stage_wall_s"]).shape == (2,)
     assert np.all(np.asarray(diag["multigrid_stage_wall_s"]) >= 0.0)
     assert np.asarray(diag["multigrid_stage_solve_total_s"]).shape == (2,)
@@ -1429,6 +1436,7 @@ def test_dynamic_scan_probe_mismatch_selects_non_scan_stage(monkeypatch, tmp_pat
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN", "1")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "0")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "2")
+    monkeypatch.setenv("VMEC_JAX_SCAN_PARITY_GUARD", "0")
     monkeypatch.setenv("VMEC_JAX_LASYM_USE_SCAN", "1")
     _patch_lightweight_driver_core(monkeypatch)
     monkeypatch.setattr(driver, "solve_fixed_boundary_residual_iter", fake_solver)
@@ -1442,6 +1450,7 @@ def test_dynamic_scan_probe_mismatch_selects_non_scan_stage(monkeypatch, tmp_pat
         verbose=True,
         multigrid=False,
         grid=_small_grid(lasym=True),
+        cli_fixed_boundary_mode=True,
     )
 
     out = capsys.readouterr().out

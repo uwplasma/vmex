@@ -39,25 +39,27 @@ def _accelerated_scan_cache_key(
     wout_key: Any,
     edge_value_key: Any,
     max_iter: int,
-    step_size: float,
-    initial_flip_sign: float,
-    lambda_update_scale: float,
+    has_fsq_total_target: bool,
     precond_radial_alpha: float,
     precond_lambda_alpha: float,
     apply_m1_constraints: bool,
     jit_forces: bool,
 ) -> tuple[Any, ...]:
-    """Return the cache key for the compiled accelerated scan runner."""
+    """Return the structural cache key for the compiled accelerated scan runner.
+
+    Numerical scalar controls such as time step, flip sign, lambda scaling, and
+    convergence tolerances are runtime operands of the compiled runner.  Keeping
+    them out of this key lets same-shape solves reuse one executable instead of
+    compiling again for routine optimizer or input-deck tolerance changes.
+    """
 
     return (
-        "scan_v1",
+        "scan_v2",
         static_key,
         wout_key,
         edge_value_key,
         int(max_iter),
-        float(step_size),
-        float(initial_flip_sign),
-        float(lambda_update_scale),
+        bool(has_fsq_total_target),
         float(precond_radial_alpha),
         float(precond_lambda_alpha),
         bool(apply_m1_constraints),
@@ -79,7 +81,6 @@ def _accelerated_scan_weighted_blocks(
     w_mode_mn: Any,
     precond_radial_alpha: float,
     precond_lambda_alpha: float,
-    lambda_update_scale: float,
     lambda_update_scale_j: Any,
     apply_radial_tridi_batched: Any,
     jnp_module: Any,
@@ -126,21 +127,20 @@ def _accelerated_scan_weighted_blocks(
         flcc=_weighted_optional_scan_block(frzl=frzl, name="flcc", like=flsc_u, w_mode_mn=w_mode_mn, jnp_module=jnp_module),
         flss=_weighted_optional_scan_block(frzl=frzl, name="flss", like=flsc_u, w_mode_mn=w_mode_mn, jnp_module=jnp_module),
     )
-    if lambda_update_scale == 1.0:
-        return blocks
+    lambda_scale = jnp_module.asarray(lambda_update_scale_j, dtype=blocks.flsc.dtype)
     return AcceleratedScanWeightedBlocks(
         frcc=blocks.frcc,
         frss=blocks.frss,
         fzsc=blocks.fzsc,
         fzcs=blocks.fzcs,
-        flsc=blocks.flsc * lambda_update_scale_j,
-        flcs=blocks.flcs * lambda_update_scale_j,
+        flsc=blocks.flsc * lambda_scale,
+        flcs=blocks.flcs * lambda_scale,
         frsc=blocks.frsc,
         frcs=blocks.frcs,
         fzcc=blocks.fzcc,
         fzss=blocks.fzss,
-        flcc=blocks.flcc * lambda_update_scale_j,
-        flss=blocks.flss * lambda_update_scale_j,
+        flcc=blocks.flcc * lambda_scale,
+        flss=blocks.flss * lambda_scale,
     )
 
 
@@ -282,14 +282,12 @@ def run_accelerated_residual_scan(
     dtype = jnp_module.asarray(state0.Rcos).dtype
     time_step_j = jnp_module.asarray(float(step_size), dtype=dtype)
     flip_sign_j = jnp_module.asarray(float(initial_flip_sign), dtype=dtype)
+    lambda_update_scale_j = jnp_module.asarray(lambda_update_scale_j, dtype=dtype)
     ftol_j = jnp_module.asarray(float(ftol), dtype=dtype)
-    fsq_total_target_j = None
-    if fsq_total_target is not None:
-        fsq_total_target_j = jnp_module.asarray(float(fsq_total_target), dtype=dtype)
-    scan_converged = ScanConvergencePredicate(
-        ftol=ftol_j,
-        fsq_total_target=fsq_total_target_j,
-        converged_func=converged_residuals_func,
+    has_fsq_total_target = fsq_total_target is not None
+    fsq_total_target_j = jnp_module.asarray(
+        float(fsq_total_target) if has_fsq_total_target else float("inf"),
+        dtype=dtype,
     )
 
     include_edge_scan = False
@@ -299,9 +297,7 @@ def run_accelerated_residual_scan(
         wout_key=wout_key,
         edge_value_key=edge_value_key,
         max_iter=int(max_iter),
-        step_size=float(step_size),
-        initial_flip_sign=float(initial_flip_sign),
-        lambda_update_scale=float(lambda_update_scale),
+        has_fsq_total_target=bool(has_fsq_total_target),
         precond_radial_alpha=float(precond_radial_alpha),
         precond_lambda_alpha=float(precond_lambda_alpha),
         apply_m1_constraints=bool(apply_m1_constraints),
@@ -310,7 +306,8 @@ def run_accelerated_residual_scan(
     if scan_timing_enabled and scan_total_start is not None:
         scan_timing_stats["scan_setup_s"] += perf_counter() - float(scan_total_start)
 
-    def _scan_step(carry, it):
+    def _scan_step(carry, it_and_controls):
+        it, time_step_dyn, flip_sign_dyn, lambda_update_scale_dyn, ftol_dyn, fsq_total_target_dyn = it_and_controls
         state_i, converged, converged_iter, last_fsqr, last_fsqz, last_fsql = carry
         it = jnp_module.asarray(it, dtype=jnp_module.int32)
 
@@ -338,8 +335,7 @@ def run_accelerated_residual_scan(
                 w_mode_mn=w_mode_mn,
                 precond_radial_alpha=float(precond_radial_alpha),
                 precond_lambda_alpha=float(precond_lambda_alpha),
-                lambda_update_scale=float(lambda_update_scale),
-                lambda_update_scale_j=lambda_update_scale_j,
+                lambda_update_scale_j=lambda_update_scale_dyn,
                 apply_radial_tridi_batched=apply_radial_tridi_batched,
                 jnp_module=jnp_module,
             )
@@ -348,8 +344,8 @@ def run_accelerated_residual_scan(
                 static=static,
                 cfg=cfg,
                 blocks=blocks,
-                time_step_j=time_step_j,
-                flip_sign_j=flip_sign_j,
+                time_step_j=time_step_dyn,
+                flip_sign_j=flip_sign_dyn,
                 free_boundary_enabled=bool(free_boundary_enabled),
                 edge_Rcos=edge_Rcos,
                 edge_Rsin=edge_Rsin,
@@ -363,6 +359,11 @@ def run_accelerated_residual_scan(
                 enforce_fixed_boundary_and_axis=enforce_fixed_boundary_and_axis,
                 apply_vmec_lambda_axis_rules=apply_vmec_lambda_axis_rules,
                 jnp_module=jnp_module,
+            )
+            scan_converged = ScanConvergencePredicate(
+                ftol=ftol_dyn,
+                fsq_total_target=fsq_total_target_dyn if has_fsq_total_target else None,
+                converged_func=converged_residuals_func,
             )
             conv_now = scan_converged(fsqr, fsqz, fsql)
             conv_iter_new = jnp_module.where(
@@ -382,7 +383,14 @@ def run_accelerated_residual_scan(
 
         return jax_module.lax.cond(converged, _hold_step, _advance_step, operand=None)
 
-    def _run_scan(state_init):
+    def _run_scan(
+        state_init,
+        time_step_dyn,
+        flip_sign_dyn,
+        lambda_update_scale_dyn,
+        ftol_dyn,
+        fsq_total_target_dyn,
+    ):
         carry0 = (
             state_init,
             jnp_module.asarray(False),
@@ -391,7 +399,15 @@ def run_accelerated_residual_scan(
             jnp_module.asarray(jnp_module.inf, dtype=dtype),
             jnp_module.asarray(jnp_module.inf, dtype=dtype),
         )
-        return jax_module.lax.scan(_scan_step, carry0, jnp_module.arange(max_iter, dtype=jnp_module.int32))
+        controls = (
+            jnp_module.arange(max_iter, dtype=jnp_module.int32),
+            jnp_module.broadcast_to(time_step_dyn, (max_iter,)),
+            jnp_module.broadcast_to(flip_sign_dyn, (max_iter,)),
+            jnp_module.broadcast_to(lambda_update_scale_dyn, (max_iter,)),
+            jnp_module.broadcast_to(ftol_dyn, (max_iter,)),
+            jnp_module.broadcast_to(fsq_total_target_dyn, (max_iter,)),
+        )
+        return jax_module.lax.scan(_scan_step, carry0, controls)
 
     scan_run_setup_start = perf_counter() if scan_timing_enabled else None
     run_scan, scan_runner_cache_status = get_or_build_scan_runner_func(
@@ -411,7 +427,14 @@ def run_accelerated_residual_scan(
         scan_timing_stats["scan_run_setup_s"] += perf_counter() - float(scan_run_setup_start)
 
     scan_device_start = perf_counter() if scan_timing_enabled else None
-    carry_final, hist = run_scan(state)
+    carry_final, hist = run_scan(
+        state,
+        time_step_j,
+        flip_sign_j,
+        lambda_update_scale_j,
+        ftol_j,
+        fsq_total_target_j,
+    )
     if scan_timing_enabled and scan_device_start is not None:
         carry_final, hist = scan_device_runtime.ready(
             scan_device_start,

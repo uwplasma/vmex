@@ -8,6 +8,7 @@ paths are resolved here so the large solver routine does not own that plumbing.
 from __future__ import annotations
 
 from contextlib import nullcontext
+import os
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple
 
@@ -252,6 +253,228 @@ def get_or_build_scan_runner(
     return cached_runner, "miss"
 
 
+def scan_explicit_compile_enabled(env_value: str | None = None) -> bool:
+    """Return whether scan-runner explicit compile attribution is enabled."""
+
+    value = os.getenv("VMEC_JAX_SCAN_EXPLICIT_COMPILE", "") if env_value is None else str(env_value)
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def scan_hlo_summary_enabled(env_value: str | None = None) -> bool:
+    """Return whether explicit scan-runner HLO size attribution is enabled."""
+
+    value = os.getenv("VMEC_JAX_SCAN_HLO_SUMMARY", "") if env_value is None else str(env_value)
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _hlo_text_from_lowered(lowered) -> str | None:
+    """Return HLO text from a lowered JAX object when available."""
+
+    try:
+        hlo_ir = lowered.compiler_ir(dialect="hlo")
+    except Exception:
+        return None
+    try:
+        if hasattr(hlo_ir, "as_hlo_text"):
+            return str(hlo_ir.as_hlo_text())
+        if hasattr(hlo_ir, "as_text"):
+            return str(hlo_ir.as_text())
+    except Exception:
+        return None
+    try:
+        return str(hlo_ir)
+    except Exception:
+        return None
+
+
+def summarize_scan_runner_hlo_text(hlo_text: str) -> dict[str, int]:
+    """Return stable line/instruction/op counts for lowered scan HLO text."""
+
+    lines = [line.strip() for line in str(hlo_text).splitlines() if line.strip()]
+    instruction_lines = [line for line in lines if "=" in line and not line.startswith("HloModule")]
+    summary: dict[str, int] = {
+        "scan_runner_explicit_hlo_line_count": int(len(lines)),
+        "scan_runner_explicit_hlo_instruction_count": int(len(instruction_lines)),
+    }
+    for line in instruction_lines:
+        op_name = _hlo_instruction_op_name(line)
+        if op_name is None:
+            continue
+        key = f"scan_runner_explicit_hlo_op_{op_name}_count"
+        summary[key] = int(summary.get(key, 0)) + 1
+    return summary
+
+
+def _hlo_instruction_op_name(line: str) -> str | None:
+    """Extract an HLO opcode from one assignment line without regex fragility."""
+
+    if "=" not in line or "(" not in line:
+        return None
+    rhs = line.split("=", 1)[1].strip()
+    before_args = rhs.split("(", 1)[0].strip()
+    if not before_args:
+        return None
+    op = before_args.split()[-1].strip()
+    if not op or not op[0].isalpha():
+        return None
+    return op.lower().replace("-", "_")
+
+
+def maybe_record_scan_runner_hlo_summary(
+    lowered,
+    *,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    env_value: str | None = None,
+) -> None:
+    """Optionally record lowered scan HLO size metrics into timing stats."""
+
+    if not bool(scan_timing_enabled) or not scan_hlo_summary_enabled(env_value):
+        return
+    hlo_text = _hlo_text_from_lowered(lowered)
+    if hlo_text is None:
+        scan_timing_stats["scan_runner_explicit_hlo_failure_count"] = (
+            int(scan_timing_stats.get("scan_runner_explicit_hlo_failure_count", 0)) + 1
+        )
+        return
+    for key, value in summarize_scan_runner_hlo_text(hlo_text).items():
+        scan_timing_stats[key] = int(scan_timing_stats.get(key, 0)) + int(value)
+
+
+def _scan_runner_arg_path_leaves(value, path: tuple[str, ...] = ()):
+    """Yield ``(path, leaf)`` pairs from scan-runner pytrees."""
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            yield from _scan_runner_arg_path_leaves(item, (*path, str(key)))
+        return
+    if isinstance(value, tuple) and hasattr(value, "_fields"):
+        for field, item in zip(value._fields, value, strict=True):
+            yield from _scan_runner_arg_path_leaves(item, (*path, str(field)))
+        return
+    if isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            yield from _scan_runner_arg_path_leaves(item, (*path, str(index)))
+        return
+    yield path, value
+
+
+def _scan_arg_group_key(path: tuple[str, ...], *, depth: int = 2) -> str:
+    """Return a stable key for grouping scan-runner argument leaves."""
+
+    parts = path[: max(1, int(depth))]
+    text = "_".join(parts) if parts else "root"
+    return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_") or "root"
+
+
+def record_scan_runner_arg_summary(
+    args: tuple[Any, ...],
+    *,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+) -> None:
+    """Record scan-runner argument breadth for compile-time diagnostics."""
+
+    if not bool(scan_timing_enabled):
+        return
+    leaf_count = 0
+    array_leaf_count = 0
+    scalar_leaf_count = 0
+    array_nbytes = 0
+    group_counts: dict[str, int] = {}
+    group_array_counts: dict[str, int] = {}
+    group_nbytes: dict[str, int] = {}
+    for index, arg in enumerate(args):
+        for path, leaf in _scan_runner_arg_path_leaves(arg, (f"arg{index}",)):
+            group_key = _scan_arg_group_key(path)
+            group_counts[group_key] = int(group_counts.get(group_key, 0)) + 1
+            leaf_count += 1
+            shape = getattr(leaf, "shape", None)
+            nbytes = getattr(leaf, "nbytes", None)
+            if shape is not None:
+                array_leaf_count += 1
+                group_array_counts[group_key] = int(group_array_counts.get(group_key, 0)) + 1
+                try:
+                    nbytes_int = int(nbytes)
+                except Exception:
+                    nbytes_int = 0
+                array_nbytes += nbytes_int
+                group_nbytes[group_key] = int(group_nbytes.get(group_key, 0)) + nbytes_int
+            else:
+                scalar_leaf_count += 1
+    scan_timing_stats["scan_runner_arg_leaf_count"] = int(leaf_count)
+    scan_timing_stats["scan_runner_arg_array_leaf_count"] = int(array_leaf_count)
+    scan_timing_stats["scan_runner_arg_scalar_leaf_count"] = int(scalar_leaf_count)
+    scan_timing_stats["scan_runner_arg_array_nbytes"] = int(array_nbytes)
+    for group_key, count in group_counts.items():
+        prefix = f"scan_runner_arg_path_{group_key}"
+        scan_timing_stats[f"{prefix}_leaf_count"] = int(count)
+        scan_timing_stats[f"{prefix}_array_leaf_count"] = int(group_array_counts.get(group_key, 0))
+        scan_timing_stats[f"{prefix}_array_nbytes"] = int(group_nbytes.get(group_key, 0))
+
+
+def maybe_explicit_compile_scan_runner(
+    runner,
+    args: tuple[Any, ...],
+    *,
+    cache_status: str | None,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    perf_counter: Callable[[], float],
+    env_value: str | None = None,
+):
+    """Optionally lower/compile a scan runner before dispatch for attribution.
+
+    Normal solves leave JAX compilation lazy.  When
+    ``VMEC_JAX_SCAN_EXPLICIT_COMPILE`` is enabled, this helper moves lowering
+    and compilation into explicit timing buckets and returns the compiled
+    executable for the immediate call.  It is diagnostic-only and intentionally
+    leaves cache keys and default production behavior unchanged.
+    """
+
+    if not scan_explicit_compile_enabled(env_value):
+        return runner
+    record_scan_runner_arg_summary(
+        args,
+        scan_timing_enabled=bool(scan_timing_enabled),
+        scan_timing_stats=scan_timing_stats,
+    )
+    lowered = None
+    try:
+        t_lower = perf_counter() if bool(scan_timing_enabled) else None
+        lowered = runner.lower(*args)
+        if bool(scan_timing_enabled) and t_lower is not None:
+            scan_timing_stats["scan_runner_explicit_lower_s"] = float(
+                scan_timing_stats.get("scan_runner_explicit_lower_s", 0.0)
+            ) + (perf_counter() - float(t_lower))
+        maybe_record_scan_runner_hlo_summary(
+            lowered,
+            scan_timing_enabled=bool(scan_timing_enabled),
+            scan_timing_stats=scan_timing_stats,
+        )
+
+        t_compile = perf_counter() if bool(scan_timing_enabled) else None
+        compiled = lowered.compile()
+        if bool(scan_timing_enabled):
+            if t_compile is not None:
+                scan_timing_stats["scan_runner_explicit_compile_s"] = float(
+                    scan_timing_stats.get("scan_runner_explicit_compile_s", 0.0)
+                ) + (perf_counter() - float(t_compile))
+            scan_timing_stats["scan_runner_explicit_compile_count"] = (
+                int(scan_timing_stats.get("scan_runner_explicit_compile_count", 0)) + 1
+            )
+            status = str(cache_status or "unknown").strip().lower() or "unknown"
+            status_key = f"scan_runner_explicit_compile_{status}_count"
+            scan_timing_stats[status_key] = int(scan_timing_stats.get(status_key, 0)) + 1
+        return compiled
+    except Exception:
+        if bool(scan_timing_enabled):
+            scan_timing_stats["scan_runner_explicit_compile_failure_count"] = (
+                int(scan_timing_stats.get("scan_runner_explicit_compile_failure_count", 0)) + 1
+            )
+        return runner
+
+
 def run_scan_preflight_step(
     carry,
     *,
@@ -259,6 +482,7 @@ def run_scan_preflight_step(
     jit_preflight: bool,
     get_scan_runner: Callable[[int], tuple[Any, str]],
     scan_step: Callable[[Any, Any], tuple[Any, Any]],
+    build_scan_it_seq: Callable[[int, int], Any] | None = None,
     scan_timing_enabled: bool,
     scan_timing_stats: dict[str, Any],
     block_scan_value: Callable[[Any], Any],
@@ -273,20 +497,53 @@ def run_scan_preflight_step(
         carry = carry._replace(iter_offset=jnp_module.asarray(iter_offset_preflight, dtype=jnp_module.int32))
     if bool(jit_preflight):
         preflight_runner, _preflight_cache_status = get_scan_runner(1)
-        carry, hist_pre_seq = preflight_runner(carry, jnp_module.asarray([0], dtype=jnp_module.int32))
+        it_seq = _scan_iteration_sequence(0, 1, jnp_module=jnp_module, build_scan_it_seq=build_scan_it_seq)
+        carry, hist_pre_seq = preflight_runner(carry, it_seq)
         hist_pre = jax_module.tree_util.tree_map(lambda a: a[0], hist_pre_seq)
     else:
+        it0 = _scan_iteration_item(0, jnp_module=jnp_module, jax_module=jax_module, build_scan_it_seq=build_scan_it_seq)
         try:
             with jax_module.disable_jit():
-                carry, hist_pre = scan_step(carry, jnp_module.asarray(0, dtype=jnp_module.int32))
+                carry, hist_pre = scan_step(carry, it0)
         except Exception:
-            carry, hist_pre = scan_step(carry, jnp_module.asarray(0, dtype=jnp_module.int32))
+            carry, hist_pre = scan_step(carry, it0)
     if bool(scan_timing_enabled) and preflight_start is not None:
         carry, hist_pre = block_scan_value((carry, hist_pre))
         scan_timing_stats["scan_preflight_s"] = float(scan_timing_stats.get("scan_preflight_s", 0.0)) + (
             perf_counter() - float(preflight_start)
         )
     return ScanPreflightStepResult(carry=carry, history_row=hist_pre)
+
+
+def _scan_iteration_sequence(
+    start: int,
+    stop: int,
+    *,
+    jnp_module,
+    build_scan_it_seq: Callable[[int, int], Any] | None,
+) -> Any:
+    """Return scan iteration inputs, optionally enriched with runtime controls."""
+
+    if build_scan_it_seq is not None:
+        return build_scan_it_seq(int(start), int(stop))
+    if not hasattr(jnp_module, "arange"):
+        return jnp_module.asarray(list(range(int(start), int(stop))), dtype=jnp_module.int32)
+    return jnp_module.arange(int(start), int(stop), dtype=jnp_module.int32)
+
+
+def _scan_iteration_item(
+    index: int,
+    *,
+    jnp_module,
+    jax_module,
+    build_scan_it_seq: Callable[[int, int], Any] | None,
+) -> Any:
+    """Return one scan-step input matching the full scan-input structure."""
+
+    if build_scan_it_seq is None:
+        return jnp_module.asarray(int(index), dtype=jnp_module.int32)
+    seq = _scan_iteration_sequence(index, index + 1, jnp_module=jnp_module, build_scan_it_seq=build_scan_it_seq)
+    return jax_module.tree_util.tree_map(lambda value: value[0], seq)
 
 
 def run_chunked_scan(
@@ -309,6 +566,7 @@ def run_chunked_scan(
     iter_offset0: int,
     get_scan_runner: Callable[[int], tuple[Any, str]],
     scan_step: Callable[[Any, Any], tuple[Any, Any]],
+    build_scan_it_seq: Callable[[int, int], Any] | None = None,
     scan_timing_enabled: bool,
     scan_timing_stats: dict[str, Any],
     scan_device_runtime: Any,
@@ -350,6 +608,7 @@ def run_chunked_scan(
             jit_preflight=bool(jit_preflight),
             get_scan_runner=get_scan_runner,
             scan_step=scan_step,
+            build_scan_it_seq=build_scan_it_seq,
             scan_timing_enabled=bool(scan_timing_enabled),
             scan_timing_stats=scan_timing_stats,
             block_scan_value=scan_device_runtime.block_value,
@@ -379,8 +638,21 @@ def run_chunked_scan(
         if remaining <= 0:
             break
         chunk_len = min(int(chunk_size), int(remaining)) if chunk_cap_remaining else int(chunk_size)
-        it_seq = jnp_module.arange(start_idx, start_idx + int(chunk_len), dtype=jnp_module.int32)
+        it_seq = _scan_iteration_sequence(
+            start_idx,
+            start_idx + int(chunk_len),
+            jnp_module=jnp_module,
+            build_scan_it_seq=build_scan_it_seq,
+        )
         runner, cache_status = get_scan_runner(int(chunk_len))
+        runner = maybe_explicit_compile_scan_runner(
+            runner,
+            (carry, it_seq),
+            cache_status=cache_status,
+            scan_timing_enabled=bool(scan_timing_enabled),
+            scan_timing_stats=scan_timing_stats,
+            perf_counter=perf_counter,
+        )
         t_device = perf_counter() if bool(scan_timing_enabled) else None
         carry, hist_chunk = runner(carry, it_seq)
         if bool(scan_timing_enabled) and t_device is not None:
@@ -457,6 +729,7 @@ def run_nonchunked_scan(
     iter_offset0: int,
     get_scan_runner: Callable[[int], tuple[Any, str]],
     scan_step: Callable[[Any, Any], tuple[Any, Any]],
+    build_scan_it_seq: Callable[[int, int], Any] | None = None,
     scan_jit_preflight_enabled_func: Callable[..., bool],
     scan_jit_preflight_env: str | None,
     backend_name: str,
@@ -488,6 +761,7 @@ def run_nonchunked_scan(
             jit_preflight=bool(jit_preflight),
             get_scan_runner=get_scan_runner,
             scan_step=scan_step,
+            build_scan_it_seq=build_scan_it_seq,
             scan_timing_enabled=bool(scan_timing_enabled),
             scan_timing_stats=scan_timing_stats,
             block_scan_value=scan_device_runtime.block_value,
@@ -504,11 +778,24 @@ def run_nonchunked_scan(
         ):
             carry_pre = carry_pre._replace(fallback_active=jnp_module.asarray(False))
         if int(max_iter_tail) > 0:
-            it_seq = jnp_module.arange(preflight_iters, int(max_iter_scan), dtype=jnp_module.int32)
+            it_seq = _scan_iteration_sequence(
+                preflight_iters,
+                int(max_iter_scan),
+                jnp_module=jnp_module,
+                build_scan_it_seq=build_scan_it_seq,
+            )
             if bool(axis_reset_repeat):
                 carry_pre = carry_pre._replace(iter_offset=jnp_module.asarray(iter_offset0, dtype=jnp_module.int32))
+            runner_call = maybe_explicit_compile_scan_runner(
+                runner,
+                (carry_pre, it_seq),
+                cache_status=cache_status,
+                scan_timing_enabled=bool(scan_timing_enabled),
+                scan_timing_stats=scan_timing_stats,
+                perf_counter=perf_counter,
+            )
             t_device = perf_counter() if bool(scan_timing_enabled) else None
-            carry_final, hist_tail = runner(carry_pre, it_seq)
+            carry_final, hist_tail = runner_call(carry_pre, it_seq)
             if bool(scan_timing_enabled) and t_device is not None:
                 carry_final, hist_tail = scan_device_runtime.ready(
                     t_device,
@@ -527,9 +814,22 @@ def run_nonchunked_scan(
             carry_final = carry_pre
             hist = None if bool(state_only_scan) else jax_module.tree_util.tree_map(lambda a: a[None], hist_pre)
     else:
-        it_seq = jnp_module.arange(int(max_iter_scan), dtype=jnp_module.int32)
+        it_seq = _scan_iteration_sequence(
+            0,
+            int(max_iter_scan),
+            jnp_module=jnp_module,
+            build_scan_it_seq=build_scan_it_seq,
+        )
+        runner_call = maybe_explicit_compile_scan_runner(
+            runner,
+            (carry_init, it_seq),
+            cache_status=cache_status,
+            scan_timing_enabled=bool(scan_timing_enabled),
+            scan_timing_stats=scan_timing_stats,
+            perf_counter=perf_counter,
+        )
         t_device = perf_counter() if bool(scan_timing_enabled) else None
-        carry_final, hist = runner(carry_init, it_seq)
+        carry_final, hist = runner_call(carry_init, it_seq)
         if bool(scan_timing_enabled) and t_device is not None:
             carry_final, hist = scan_device_runtime.ready(
                 t_device,

@@ -233,6 +233,7 @@ def test_cli_single_grid_finish_attempt_promotes_strict_accelerated_result(
         jit_forces=False,
         grid=object(),
         cli_fixed_boundary_mode=True,
+        finish_policy="converge",
         _auto_cli_fixed_boundary_mode=False,
     )
 

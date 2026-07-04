@@ -40,7 +40,7 @@ def maybe_select_dynamic_scan_mode(
     from the driver so this helper stays a pure orchestration seam.
     """
 
-    dynamic_scan_default = "1" if bool(cfg.lasym) else "0"
+    dynamic_scan_default = "1" if bool(performance_mode) else "0"
     dynamic_scan_env = getenv("VMEC_JAX_DYNAMIC_SCAN", dynamic_scan_default).strip().lower()
     dynamic_scan = dynamic_scan_env not in ("", "0", "false", "no")
     if not (

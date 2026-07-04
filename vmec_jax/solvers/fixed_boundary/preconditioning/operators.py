@@ -654,6 +654,11 @@ def sm_sp_from_s_np(s_arr) -> tuple[np.ndarray, np.ndarray]:
 def vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[Any, Any]:
     """Return VMEC ``scale_m1_par`` R/Z factors from cached preconditioner data."""
 
+    fac_r = mats.get("m1_fac_r")
+    fac_z = mats.get("m1_fac_z")
+    if fac_r is not None and fac_z is not None:
+        return jnp.asarray(fac_r), jnp.asarray(fac_z)
+
     ard = mats.get("ard_parity")
     brd = mats.get("brd_parity")
     azd = mats.get("azd_parity")
@@ -689,6 +694,11 @@ def vmec_scale_m1_factors_from_mats(mats: dict[str, Any]) -> tuple[Any, Any]:
 
 def vmec_scale_m1_factors_from_mats_np(mats: dict) -> tuple[np.ndarray, np.ndarray]:
     """NumPy version of :func:`vmec_scale_m1_factors_from_mats`."""
+
+    fac_r = mats.get("m1_fac_r")
+    fac_z = mats.get("m1_fac_z")
+    if fac_r is not None and fac_z is not None:
+        return np.asarray(fac_r), np.asarray(fac_z)
 
     ard = mats.get("ard_parity")
     brd = mats.get("brd_parity")

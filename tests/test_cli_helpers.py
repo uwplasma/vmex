@@ -302,7 +302,7 @@ def test_cli_set_test_input_ftol_inserts_after_niter_when_missing(tmp_path: Path
     ("flag", "expected_solver_mode", "expected_performance"),
     [
         ("--parity", "parity", False),
-        ("--fast", "default", True),
+        ("--fast", "accelerated", True),
     ],
 )
 def test_cli_test_mode_forwards_parity_and_fast_flags(
@@ -555,7 +555,7 @@ def test_cli_cpu_accelerated_default_can_use_scan_when_policy_selects_it(monkeyp
     assert calls["kwargs"]["use_scan"] is True
 
 
-def test_cli_cpu_accelerated_finite_current_auto_policy_keeps_host_loop(monkeypatch, tmp_path: Path) -> None:
+def test_cli_cpu_accelerated_finite_current_auto_policy_starts_fast(monkeypatch, tmp_path: Path) -> None:
     input_path = tmp_path / "input.case"
     input_path.write_text("&INDATA\n  NITER = 12\n  AC = 1.0\n/\n")
     indata = InData(scalars={"NITER": 12, "AC": [1.0]}, indexed={})
@@ -579,7 +579,7 @@ def test_cli_cpu_accelerated_finite_current_auto_policy_keeps_host_loop(monkeypa
     assert cli.main([str(input_path), "--solver-device", "cpu"]) == 0
     assert calls["kwargs"]["solver_mode"] == "accelerated"
     assert calls["kwargs"]["performance_mode"] is True
-    assert calls["kwargs"]["use_scan"] is False
+    assert calls["kwargs"]["use_scan"] is True
 
 
 def test_cli_cpu_parity_default_allows_high_work_scan_policy(monkeypatch, tmp_path: Path) -> None:
@@ -619,7 +619,7 @@ def test_cli_fast_uses_backend_auto_policy_for_high_work_inputs(monkeypatch, tmp
     monkeypatch.setattr(
         cli,
         "_default_non_autodiff_solver_policy_for_backend",
-        lambda _indata, backend: ("parity", False) if backend == "cpu" else ("accelerated", True),
+        lambda _indata, backend: ("accelerated", True),
     )
     monkeypatch.setattr(cli, "_default_use_scan_for_backend", lambda _indata, _backend, _mode: True)
 
@@ -631,8 +631,8 @@ def test_cli_fast_uses_backend_auto_policy_for_high_work_inputs(monkeypatch, tmp
     monkeypatch.setattr(cli, "write_wout_from_fixed_boundary_run", lambda path, run, *, include_fsq: path.write_text("wout"))
 
     assert cli.main([str(input_path), "--solver-device", "cpu", "--fast"]) == 0
-    assert calls["kwargs"]["solver_mode"] == "parity"
-    assert calls["kwargs"]["performance_mode"] is False
+    assert calls["kwargs"]["solver_mode"] == "accelerated"
+    assert calls["kwargs"]["performance_mode"] is True
     assert calls["kwargs"]["use_scan"] is True
 
 
@@ -705,7 +705,7 @@ def test_cli_run_mode_explicit_solver_flags_and_vmecpp_restart(monkeypatch, tmp_
     assert calls["kwargs"]["vmecpp_restart"] is True
 
     assert cli.main([str(input_path), "--fast", "--no-vmecpp-restart"]) == 0
-    assert calls["kwargs"]["solver_mode"] == "default"
+    assert calls["kwargs"]["solver_mode"] == "accelerated"
     assert calls["kwargs"]["performance_mode"] is True
     assert calls["kwargs"]["vmecpp_restart"] is False
 

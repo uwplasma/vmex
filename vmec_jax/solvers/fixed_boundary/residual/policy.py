@@ -1148,11 +1148,14 @@ def vmec2000_scan_options_from_env(
         if tridi_precompute_env_l:
             scan_use_precomputed = _solve_runtime._runtime_env_enabled(tridi_precompute_env_l)
         else:
-            # VMEC2000 scan parity is most robust when the Thomas coefficients
-            # are materialized once outside the loop.  This is required for
-            # converged finite-beta CPU scan solves and is also the fast GPU
-            # path; explicit env overrides remain available for bisection.
-            scan_use_precomputed = True
+            # CPU profiling shows direct Thomas coefficients reduce cold
+            # scan-runner compile cost and preserve residual parity for the
+            # representative QH, finite-beta, and high-mode short gates.  Keep
+            # precomputed coefficients as the accelerator default because that
+            # path remains the intended GPU/TPU batched solve policy. Explicit
+            # env/API overrides remain authoritative for parity bisection.
+            backend_l = str(backend_name).strip().lower()
+            scan_use_precomputed = backend_l in ("gpu", "cuda", "rocm", "tpu")
     scan_lax_env_l = str(scan_lax_env).strip().lower()
     if scan_lax_env_l:
         scan_use_lax_tridi = _solve_runtime._runtime_env_enabled(scan_lax_env_l)

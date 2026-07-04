@@ -236,7 +236,7 @@ def _dynamic_scan_probe_settings(niter_i: int) -> tuple[int, bool, str]:
 
 
 def default_non_autodiff_solver_policy(indata) -> tuple[str, bool]:
-    """Choose the ordinary non-autodiff solver policy from input structure."""
+    """Choose the ordinary non-autodiff solver policy from boundary type only."""
 
     return _default_non_autodiff_solver_policy_for_backend(indata, _default_backend_name())
 
@@ -1156,11 +1156,12 @@ def run_fixed_boundary(
         _ = (
             input_path, cfg, indata, ftol_list_input, ns_list_input, niter_list_input, step_size,
             gn_damping, gn_cg_tol, use_restart_triggers, use_direct_fallback, jit_forces, jit_precompile, use_scan,
-            scan_wout_corrector, stage_transition_heuristic, grid,
+            scan_wout_corrector, stage_transition_heuristic, finish_policy_eff, grid,
         )
         return _driver_lifecycle_helpers.FixedBoundaryFinishContext.from_namespace(
             locals(),
             solver_mode_eff=str(solver_mode_eff),
+            finish_policy_eff=str(finish_policy_eff),
             accelerated_mode=bool(accelerated_mode),
             deferred_staged_current_driven_3d_cli=bool(deferred_staged_current_driven_3d_cli),
             max_iter=int(max_iter),

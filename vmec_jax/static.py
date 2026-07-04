@@ -73,6 +73,7 @@ class VMECStatic:
     mn_idx_kp: np.ndarray | None = None
     mn_idx_kn: np.ndarray | None = None
     mn_has_kn: np.ndarray | None = None
+    mode_transform_host_projection: any | None = None
     mode_scale_internal: any | None = None
     free_boundary_state0: FreeBoundaryRuntimeState | None = None
     mgrid_metadata: MGridMetadata | None = None
@@ -212,6 +213,7 @@ def build_static(
     mn_idx_kp = None
     mn_idx_kn = None
     mn_has_kn = None
+    mode_transform_host_projection = None
     try:
         nrange = int(cfg.ntor) + 1
         m0_n_index = -np.ones((nrange,), dtype=int)
@@ -246,6 +248,12 @@ def build_static(
         mn_idx_kp = np.asarray(kp_idx_list, dtype=np.int32)
         mn_idx_kn = np.asarray(kn_idx_list, dtype=np.int32)
         mn_has_kn = mn_idx_kn >= 0
+        try:
+            from .solvers.fixed_boundary.residual.mode_transform import build_mode_transform_host_projection
+
+            mode_transform_host_projection = build_mode_transform_host_projection(signed_maps, ncoeff=int(m_np.size))
+        except Exception:
+            mode_transform_host_projection = None
     except Exception:
         signed_maps = None
     lambda_axis_copy_mask = (m_np == 0) & (n_np > 0)
@@ -274,6 +282,7 @@ def build_static(
         mn_idx_kp=mn_idx_kp,
         mn_idx_kn=mn_idx_kn,
         mn_has_kn=mn_has_kn,
+        mode_transform_host_projection=mode_transform_host_projection,
         mode_scale_internal=(
             None
             if trig_vmec is None

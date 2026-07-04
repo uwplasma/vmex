@@ -9,7 +9,9 @@ workflow so they can be unit-tested without importing the whole driver stack.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
+from pathlib import Path
 
 import numpy as np
 
@@ -172,10 +174,11 @@ def normalize_solver_mode(*, solver_mode: str | None, performance_mode: bool) ->
 def normalize_fixed_boundary_finish_policy(finish_policy: str | None) -> str:
     """Normalize fixed-boundary post-solve finish policy aliases.
 
-    ``"auto"`` preserves the historical CLI/API behavior. ``"none"`` runs only
-    the requested iteration budget, which is useful for profiling, benchmarking,
-    and exact finite-step parity checks. ``"converge"`` explicitly enables the
-    existing VMEC-style finish stage for fixed-boundary ``vmec2000_iter`` runs.
+    ``"auto"`` records finish diagnostics but does not spend hidden extra
+    iteration budgets after the input deck has been exhausted. ``"none"``
+    disables even that diagnostic finisher, which is useful for exact-budget
+    profiling. ``"converge"`` explicitly enables VMEC-style finish attempts for
+    fixed-boundary ``vmec2000_iter`` runs.
     """
 
     if finish_policy is None:
@@ -267,10 +270,6 @@ def resolve_initial_fixed_boundary_policy(
             use_scan_eff = True
         else:
             use_scan_eff = default_use_scan_func(indata, policy_backend, solver_mode_eff)
-            if bool(verbose) and str(policy_backend).strip().lower() == "cpu":
-                # Interactive CPU CLI runs favor host-visible VMEC progress
-                # rows. Quiet API calls can still use scan when policy selects it.
-                use_scan_eff = False
     else:
         use_scan_eff = bool(use_scan)
 
@@ -615,161 +614,107 @@ def as_list_like(value):
         return None
 
 
-def _numeric_profile_values(value) -> np.ndarray:
-    """Return numeric entries from a scalar/list VMEC profile assignment."""
+def profile_guided_scan_decision_for_indata(indata, *, getenv=os.getenv) -> bool | None:
+    """Return an opt-in scan decision from measured benchmark provenance.
 
-    values = as_list_like(value)
-    if values is None:
-        values = [] if value is None else [value]
-    out: list[float] = []
-    for item in values:
-        try:
-            out.append(float(item))
-        except Exception:
-            continue
-    return np.asarray(out, dtype=float)
-
-
-def _profile_assignment_nonzero(indata, names: tuple[str, ...]) -> bool:
-    """Return whether any named VMEC profile assignment contains nonzero data."""
-
-    for name in names:
-        values = _numeric_profile_values(indata.get(name, None))
-        if values.size and bool(np.any(values != 0.0)):
-            return True
-    return False
-
-
-def fixed_boundary_indata_has_finite_beta_or_current(indata) -> bool:
-    """Return whether pressure/current profile channels are physically active."""
-
-    try:
-        pres_scale = float(indata.get_float("PRES_SCALE", 1.0))
-    except Exception:
-        pres_scale = 1.0
-    finite_pressure = (pres_scale != 0.0) and _profile_assignment_nonzero(
-        indata,
-        ("AM", "AM_AUX_F"),
-    )
-    finite_current = _profile_assignment_nonzero(
-        indata,
-        ("AC", "AC_AUX_F", "CURTOR"),
-    )
-    return bool(finite_pressure or finite_current)
-
-
-def _fixed_boundary_cpu_auto_is_high_work(indata) -> bool:
-    """Return whether a fixed-boundary CPU input is large enough to need policy routing."""
-
-    try:
-        mode_limit = int(os.getenv("VMEC_JAX_CPU_AUTO_PARITY_MODE_LIMIT", "64"))
-    except Exception:
-        mode_limit = 64
-    try:
-        work_limit = int(os.getenv("VMEC_JAX_CPU_AUTO_PARITY_WORK_LIMIT", "4096"))
-    except Exception:
-        work_limit = 4096
-    if mode_limit <= 0 and work_limit <= 0:
-        return False
-
-    def _get_int(name: str, default: int) -> int:
-        try:
-            return int(indata.get_int(name, default))
-        except Exception:
-            try:
-                return int(indata.get(name, default))
-            except Exception:
-                return int(default)
-
-    mpol = max(1, _get_int("MPOL", 1))
-    ntor = max(0, _get_int("NTOR", 0))
-    signed_mode_count = mpol * (2 * ntor + 1) - ntor if ntor > 0 else mpol
-    ns_values = as_list_like(indata.get("NS_ARRAY", None))
-    ns_max = max([_get_int("NS", 0), *[int(v) for v in (ns_values or []) if v is not None]], default=0)
-    radial_spectral_work = int(max(1, ns_max)) * int(max(1, signed_mode_count))
-    return (mode_limit > 0 and signed_mode_count > mode_limit) or (
-        work_limit > 0 and radial_spectral_work > work_limit
-    )
-
-
-def _fixed_boundary_cpu_auto_needs_reference_control(indata) -> bool:
-    """Return ``True`` when CPU auto-policy should prefer VMEC control.
-
-    High-work finite-beta/current inputs keep the reference controller because
-    Mercier, current, and stability channels are physically meaningful there.
-    Vacuum high-mode inputs are allowed to use the fast branch because
-    zero-pressure/current diagnostics are not promotion gates for those
-    equilibria.
+    This is the no-probe dynamic selector hook for accelerated fixed-boundary
+    solves.  It does not inspect pressure, current, spectral size, or radial
+    grid size.  Instead, a deployment can set
+    ``VMEC_JAX_ACCELERATED_SCAN_PROFILE`` to a benchmark/provenance JSON with
+    per-case ``recommended_use_scan`` or ``prefer_use_scan`` values.  That keeps
+    cold-short-row policy decisions measured and reproducible without spending
+    more time probing than solving.
     """
 
-    return bool(
-        _fixed_boundary_cpu_auto_is_high_work(indata)
-        and fixed_boundary_indata_has_finite_beta_or_current(indata)
-    )
+    profile_path = str(getenv("VMEC_JAX_ACCELERATED_SCAN_PROFILE", "")).strip()
+    if not profile_path:
+        return None
+    candidate_ids = _profile_candidate_case_ids(getattr(indata, "source_path", None))
+    if not candidate_ids:
+        return None
+    try:
+        payload = json.loads(Path(profile_path).expanduser().read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    for record in _iter_profile_records(payload):
+        case_id = str(record.get("case_id", record.get("id", ""))).strip()
+        if case_id not in candidate_ids:
+            continue
+        backend = str(record.get("backend", "vmec_jax")).strip().lower()
+        if backend not in ("", "vmec_jax", "cpu"):
+            continue
+        decision = _profile_record_scan_decision(record)
+        if decision is not None:
+            return bool(decision)
+    return None
+
+
+def _profile_candidate_case_ids(source_path) -> set[str]:
+    """Return benchmark-style case ids for one VMEC input path."""
+
+    if source_path is None:
+        return set()
+    path = Path(str(source_path))
+    names = {path.name, path.stem}
+    if path.name.startswith("input."):
+        names.add(path.name[len("input."):])
+    if path.stem.startswith("input."):
+        names.add(path.stem[len("input."):])
+    return {name for name in names if name}
+
+
+def _iter_profile_records(payload):
+    """Yield records from benchmark summaries or classification sidecars."""
+
+    if isinstance(payload, dict):
+        for key in ("records", "results", "overrides"):
+            records = payload.get(key)
+            if isinstance(records, list):
+                yield from (record for record in records if isinstance(record, dict))
+                return
+            if isinstance(records, dict):
+                for case_id, record in records.items():
+                    if not isinstance(record, dict):
+                        continue
+                    item = dict(record)
+                    item.setdefault("case_id", str(case_id).split("|", 1)[0])
+                    yield item
+                return
+    elif isinstance(payload, list):
+        yield from (record for record in payload if isinstance(record, dict))
+
+
+def _profile_record_scan_decision(record: dict) -> bool | None:
+    """Extract an explicit scan recommendation from one profile record."""
+
+    for key in ("recommended_use_scan", "prefer_use_scan", "use_scan"):
+        if key in record:
+            return bool(record[key])
+    classification = str(record.get("classification", "")).lower()
+    if "cold_scan_compile_amortization" in classification and bool(record.get("cold_latency_prefer_noscan", False)):
+        return False
+    return None
 
 
 def default_non_autodiff_solver_policy_for_backend(indata, backend: str) -> tuple[str, bool]:
-    """Choose default fixed-boundary solver mode and performance flag."""
+    """Choose the fast-first default without classifying input physics or size."""
 
     if bool(indata.get_bool("LFREEB", False)):
         return "default", True
-    if fixed_boundary_indata_has_finite_beta_or_current(indata):
-        return "parity", False
-    ns_array = as_list_like(indata.get("NS_ARRAY", None))
-    niter_array = as_list_like(indata.get("NITER_ARRAY", None))
-    if (ns_array is not None) and (len(ns_array) > 1) and (niter_array is None):
-        return "parity", False
-
-    if str(backend).strip().lower() == "cpu":
-        # LASYM and current-driven multigrid inputs still use the accelerated
-        # solver mode for stricter finish behavior, but the backend-aware scan
-        # selector keeps auto-selected CPU solves on the VMEC-control loop.
-        if bool(indata.get_bool("LASYM", False)):
-            return "accelerated", True
-        ncurr = int(indata.get_int("NCURR", 0))
-        if ncurr == 1 and (ns_array is not None) and (len(ns_array) > 1):
-            return "accelerated", True
-        if _fixed_boundary_cpu_auto_needs_reference_control(indata):
-            return "parity", False
-        if _fixed_boundary_cpu_auto_is_high_work(indata):
-            return "accelerated", True
-        return "default", True
+    _ = backend
     return "accelerated", True
 
 
 def default_use_scan_for_backend(indata, backend: str, solver_mode: str | None) -> bool:
-    """Choose the public fixed-boundary iteration loop for ordinary runs."""
+    """Choose the fused scan loop when the selected backend can execute it."""
 
     _ = (indata, normalize_solver_mode(solver_mode=solver_mode, performance_mode=True))
     backend_l = str(backend).strip().lower()
-    if backend_l in ("gpu", "cuda", "rocm"):
-        return True
-    if backend_l != "cpu":
-        return False
-    if fixed_boundary_indata_has_finite_beta_or_current(indata):
-        return False
-
-    def _get_int(name: str, default: int) -> int:
-        try:
-            return int(indata.get_int(name, default))
-        except Exception:
-            try:
-                return int(indata.get(name, default))
-            except Exception:
-                return int(default)
-
-    ns_values = as_list_like(getattr(indata, "get", lambda *_args: None)("NS_ARRAY", None))
-    niter_values = as_list_like(getattr(indata, "get", lambda *_args: None)("NITER_ARRAY", None))
-    ns_max = max([_get_int("NS", 0), *[int(v) for v in (ns_values or []) if v is not None]], default=0)
-    niter_max = max(
-        [_get_int("NITER", 0), *[int(v) for v in (niter_values or []) if v is not None]],
-        default=0,
-    )
-    mpol = max(1, _get_int("MPOL", 1))
-    ntor = max(0, _get_int("NTOR", 0))
-    signed_mode_count = mpol * (2 * ntor + 1) - ntor if ntor > 0 else mpol
-    work = int(ns_max) * int(niter_max) * int(max(1, signed_mode_count))
-    return bool(work >= 2_000_000)
+    if backend_l == "cpu":
+        profile_decision = profile_guided_scan_decision_for_indata(indata)
+        if profile_decision is not None:
+            return bool(profile_decision)
+    return backend_l in ("cpu", "gpu", "cuda", "rocm", "tpu")
 
 
 def resolve_jit_forces_auto_policy(flag: bool | str, static_i, niter_i: int) -> bool:

@@ -174,6 +174,7 @@ def test_cli_finisher_records_budget_cap_exhaustion_after_accelerated_and_parity
         verbose=False,
         cli_fixed_boundary_mode=True,
         use_scan=False,
+        finish_policy="converge",
     )
 
     assert [call["max_iter"] for call in calls] == [1, 1, 1]

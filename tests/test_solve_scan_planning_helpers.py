@@ -1,8 +1,12 @@
 from collections import OrderedDict, namedtuple
+from types import SimpleNamespace
 
 import pytest
 
+from vmec_jax._compat import jnp
 from vmec_jax.solvers.fixed_boundary.residual.policy import vmec2000_scan_options_from_env
+from vmec_jax.solvers.fixed_boundary.residual.accelerated_scan import _accelerated_scan_cache_key
+from vmec_jax.solvers.fixed_boundary.scan.controller import _select_initial_rz_norm_func
 from vmec_jax.solvers.fixed_boundary.scan.planning import (
     SCAN_TIMING_COUNT_KEYS,
     SCAN_TIMING_KEYS,
@@ -25,10 +29,16 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
 )
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     get_or_build_scan_runner,
+    maybe_explicit_compile_scan_runner,
+    maybe_record_scan_runner_hlo_summary,
+    record_scan_runner_arg_summary,
     resolve_scan_runtime_hooks,
     resolve_scan_runtime_hooks_from_env,
     run_scan_preflight_step,
+    scan_explicit_compile_enabled,
+    scan_hlo_summary_enabled,
     scan_trace_context_or_null,
+    summarize_scan_runner_hlo_text,
 )
 
 
@@ -75,6 +85,7 @@ def _cache_key(**overrides):
         initial_flip_sign=-1.0,
         lambda_update_scale=0.5,
         ftol=1.0e-12,
+        fsq_total_target=None,
         nstep_screen=25,
         use_restart_triggers=True,
         vmecpp_restart=False,
@@ -98,6 +109,28 @@ def _cache_key(**overrides):
     return build_vmec2000_scan_cache_key(**params)
 
 
+def test_accelerated_scan_cache_key_excludes_dynamic_scalar_controls():
+    base = dict(
+        static_key=("static", 16, 4, 4),
+        wout_key=("wout", "float64"),
+        edge_value_key=("edge", (4,)),
+        max_iter=50,
+        has_fsq_total_target=False,
+        precond_radial_alpha=0.5,
+        precond_lambda_alpha=0.25,
+        apply_m1_constraints=True,
+        jit_forces=True,
+    )
+
+    key1 = _accelerated_scan_cache_key(**base)
+    key2 = _accelerated_scan_cache_key(**base)
+    key3 = _accelerated_scan_cache_key(**{**base, "has_fsq_total_target": True})
+
+    assert key1 == key2
+    assert key1 != key3
+    assert "scan_v2" in key1
+
+
 @pytest.mark.parametrize("value", ["", "0", "false", "no", " FALSE "])
 def test_scan_timing_disabled_tokens(value):
     assert not scan_timing_enabled(value)
@@ -118,6 +151,20 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
     stats["scan_runner_cache_miss_device_run_s"] = 0.6
     stats["scan_runner_cache_miss_ready_s"] = 0.2
     stats["scan_runner_cache_build_s"] = 0.1
+    stats["scan_runner_explicit_lower_s"] = 0.3
+    stats["scan_runner_explicit_compile_s"] = 0.4
+    stats["scan_runner_explicit_compile_count"] = 1
+    stats["scan_runner_explicit_compile_miss_count"] = 1
+    stats["scan_runner_explicit_hlo_line_count"] = 20
+    stats["scan_runner_explicit_hlo_instruction_count"] = 10
+    stats["scan_runner_explicit_hlo_op_add_count"] = 2
+    stats["scan_runner_arg_leaf_count"] = 5
+    stats["scan_runner_arg_array_leaf_count"] = 3
+    stats["scan_runner_arg_scalar_leaf_count"] = 2
+    stats["scan_runner_arg_array_nbytes"] = 96
+    stats["scan_runner_arg_path_arg0_state_leaf_count"] = 4
+    stats["scan_runner_arg_path_arg0_state_array_leaf_count"] = 4
+    stats["scan_runner_arg_path_arg0_state_array_nbytes"] = 80
     stats["scan_postprocess_s"] = 2.0
     stats["scan_runner_cache_hit_count"] = 3
     stats["scan_runner_cache_miss_category_iteration_budget_count"] = 2
@@ -126,12 +173,26 @@ def test_timing_report_math_excludes_dispatch_breakdown_from_leaf_total():
 
     assert report["iterations"] == 7
     assert report["scan_total_s"] == 5.9
-    assert report["scan_unattributed_s"] == pytest.approx(1.0)
+    assert report["scan_unattributed_s"] == pytest.approx(0.3)
     assert report["scan_device_dispatch_s"] == pytest.approx(0.25)
     assert report["scan_device_ready_s"] == pytest.approx(0.75)
     assert report["scan_runner_cache_hit_count"] == 3
     assert report["scan_runner_cache_miss_count"] == 0
     assert report["scan_runner_cache_miss_category_iteration_budget_count"] == 2
+    assert report["scan_runner_explicit_lower_s"] == pytest.approx(0.3)
+    assert report["scan_runner_explicit_compile_s"] == pytest.approx(0.4)
+    assert report["scan_runner_explicit_compile_count"] == 1
+    assert report["scan_runner_explicit_compile_miss_count"] == 1
+    assert report["scan_runner_explicit_hlo_line_count"] == 20
+    assert report["scan_runner_explicit_hlo_instruction_count"] == 10
+    assert report["scan_runner_explicit_hlo_op_add_count"] == 2
+    assert report["scan_runner_arg_leaf_count"] == 5
+    assert report["scan_runner_arg_array_leaf_count"] == 3
+    assert report["scan_runner_arg_scalar_leaf_count"] == 2
+    assert report["scan_runner_arg_array_nbytes"] == 96
+    assert report["scan_runner_arg_path_arg0_state_leaf_count"] == 4
+    assert report["scan_runner_arg_path_arg0_state_array_leaf_count"] == 4
+    assert report["scan_runner_arg_path_arg0_state_array_nbytes"] == 80
     assert report["scan_cold_cache_miss_s"] == pytest.approx(0.6)
     assert report["scan_cold_cache_miss_ready_s"] == pytest.approx(0.2)
     assert report["scan_cache_build_wrapper_s"] == pytest.approx(0.1)
@@ -299,7 +360,249 @@ def test_get_or_build_scan_runner_records_miss_hit_and_bypass_paths():
     assert stats["scan_runner_cache_hit_count"] == 1
     assert stats["scan_runner_cache_bypass_count"] == 1
     assert stats["scan_runner_cache_miss_category_test_count"] == 1
-    assert miss_records == [(("case", 1), ())]
+
+
+def test_scan_explicit_compile_enabled_tokens():
+    assert not scan_explicit_compile_enabled("")
+    assert not scan_explicit_compile_enabled("off")
+    assert scan_explicit_compile_enabled("1")
+    assert scan_explicit_compile_enabled("diagnostic")
+
+
+def test_scan_hlo_summary_enabled_tokens():
+    assert not scan_hlo_summary_enabled("")
+    assert not scan_hlo_summary_enabled("no")
+    assert scan_hlo_summary_enabled("1")
+    assert scan_hlo_summary_enabled("summary")
+
+
+def test_summarize_scan_runner_hlo_text_counts_lines_instructions_and_ops():
+    text = """
+HloModule jit_scan
+ENTRY main {
+  %a = f64[2]{0} parameter(0)
+  %b = f64[2]{0} parameter(1)
+  %c = f64[2]{0} add(%a, %b)
+  ROOT %d = f64[2]{0} multiply(%c, %b)
+}
+"""
+
+    summary = summarize_scan_runner_hlo_text(text)
+
+    assert summary["scan_runner_explicit_hlo_line_count"] == 7
+    assert summary["scan_runner_explicit_hlo_instruction_count"] == 4
+    assert summary["scan_runner_explicit_hlo_op_parameter_count"] == 2
+    assert summary["scan_runner_explicit_hlo_op_add_count"] == 1
+    assert summary["scan_runner_explicit_hlo_op_multiply_count"] == 1
+
+
+def test_maybe_record_scan_runner_hlo_summary_records_or_reports_failure():
+    class Hlo:
+        def as_hlo_text(self):
+            return "%a = f64[] parameter(0)\nROOT %b = f64[] negate(%a)\n"
+
+    class Lowered:
+        def compiler_ir(self, *, dialect):
+            assert dialect == "hlo"
+            return Hlo()
+
+    stats = {}
+    maybe_record_scan_runner_hlo_summary(
+        Lowered(),
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        env_value="1",
+    )
+    assert stats["scan_runner_explicit_hlo_line_count"] == 2
+    assert stats["scan_runner_explicit_hlo_instruction_count"] == 2
+    assert stats["scan_runner_explicit_hlo_op_parameter_count"] == 1
+    assert stats["scan_runner_explicit_hlo_op_negate_count"] == 1
+
+    class BadLowered:
+        def compiler_ir(self, *, dialect):
+            raise RuntimeError("no hlo")
+
+    maybe_record_scan_runner_hlo_summary(
+        BadLowered(),
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        env_value="1",
+    )
+    assert stats["scan_runner_explicit_hlo_failure_count"] == 1
+
+
+def test_record_scan_runner_arg_summary_counts_leaves_and_array_bytes():
+    pair = namedtuple("Pair", "left right")
+    arr = jnp.ones((2, 3), dtype=jnp.float64)
+    small = jnp.zeros((1,), dtype=jnp.float64)
+    stats = {}
+
+    record_scan_runner_arg_summary(
+        (pair(left=arr, right={"scalar": 3}), [small]),
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+    )
+
+    assert stats["scan_runner_arg_leaf_count"] == 3
+    assert stats["scan_runner_arg_array_leaf_count"] == 2
+    assert stats["scan_runner_arg_scalar_leaf_count"] == 1
+    assert stats["scan_runner_arg_array_nbytes"] == arr.nbytes + small.nbytes
+    assert stats["scan_runner_arg_path_arg0_left_leaf_count"] == 1
+    assert stats["scan_runner_arg_path_arg0_left_array_leaf_count"] == 1
+    assert stats["scan_runner_arg_path_arg0_left_array_nbytes"] == arr.nbytes
+    assert stats["scan_runner_arg_path_arg0_right_leaf_count"] == 1
+    assert stats["scan_runner_arg_path_arg0_right_array_leaf_count"] == 0
+    assert stats["scan_runner_arg_path_arg0_right_array_nbytes"] == 0
+    assert stats["scan_runner_arg_path_arg1_0_leaf_count"] == 1
+    assert stats["scan_runner_arg_path_arg1_0_array_nbytes"] == small.nbytes
+
+
+def test_maybe_explicit_compile_scan_runner_records_success_and_returns_compiled():
+    events = []
+    stats = {
+        "scan_runner_explicit_lower_s": 0.0,
+        "scan_runner_explicit_compile_s": 0.0,
+        "scan_runner_explicit_compile_count": 0,
+        "scan_runner_explicit_compile_failure_count": 0,
+    }
+    times = iter([1.0, 1.25, 2.0, 2.75])
+
+    class Lowered:
+        def compile(self):
+            events.append("compile")
+
+            def compiled(*args):
+                events.append(("compiled", args))
+                return "compiled-result"
+
+            return compiled
+
+    class Runner:
+        def lower(self, *args):
+            events.append(("lower", args))
+            return Lowered()
+
+        def __call__(self, *args):
+            events.append(("runner", args))
+            return "runner-result"
+
+    compiled = maybe_explicit_compile_scan_runner(
+        Runner(),
+        ("carry", "it"),
+        cache_status="miss",
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        perf_counter=lambda: next(times),
+        env_value="1",
+    )
+
+    assert compiled("carry", "it") == "compiled-result"
+    assert events == [("lower", ("carry", "it")), "compile", ("compiled", ("carry", "it"))]
+    assert stats["scan_runner_explicit_lower_s"] == pytest.approx(0.25)
+    assert stats["scan_runner_explicit_compile_s"] == pytest.approx(0.75)
+    assert stats["scan_runner_explicit_compile_count"] == 1
+    assert stats["scan_runner_explicit_compile_miss_count"] == 1
+
+
+def test_maybe_explicit_compile_scan_runner_is_noop_or_safe_on_failure():
+    stats = {"scan_runner_explicit_compile_failure_count": 0}
+
+    class Runner:
+        def lower(self, *_args):
+            raise RuntimeError("cannot lower")
+
+        def __call__(self, *args):
+            return ("runner", args)
+
+    runner = Runner()
+    assert (
+        maybe_explicit_compile_scan_runner(
+            runner,
+            ("carry",),
+            cache_status="miss",
+            scan_timing_enabled=True,
+            scan_timing_stats=stats,
+            perf_counter=lambda: 1.0,
+            env_value="0",
+        )
+        is runner
+    )
+    assert (
+        maybe_explicit_compile_scan_runner(
+            runner,
+            ("carry",),
+            cache_status="miss",
+            scan_timing_enabled=True,
+            scan_timing_stats=stats,
+            perf_counter=lambda: 1.0,
+            env_value="1",
+        )
+        is runner
+    )
+    assert stats["scan_runner_explicit_compile_failure_count"] == 1
+
+
+def test_select_initial_rz_norm_func_uses_host_for_nontraced_state() -> None:
+    state = SimpleNamespace(kind="state")
+    calls = {"host": 0, "jax": 0}
+
+    def host_norm(arg):
+        assert arg is state
+        calls["host"] += 1
+        return 7.0
+
+    def jax_norm(_arg):
+        calls["jax"] += 1
+        return jnp.asarray(9.0)
+
+    selected = _select_initial_rz_norm_func(
+        state_init=state,
+        rz_norm_func=jax_norm,
+        rz_norm_np_func=host_norm,
+        tree_has_tracer=lambda _value: False,
+        dtype=jnp.float64,
+    )
+
+    assert float(selected(state)) == pytest.approx(7.0)
+    assert calls == {"host": 1, "jax": 0}
+
+
+def test_select_initial_rz_norm_func_keeps_jax_for_traced_state() -> None:
+    state = SimpleNamespace(kind="state")
+
+    def jax_norm(_arg):
+        return jnp.asarray(11.0)
+
+    selected = _select_initial_rz_norm_func(
+        state_init=state,
+        rz_norm_func=jax_norm,
+        rz_norm_np_func=lambda _arg: 7.0,
+        tree_has_tracer=lambda _value: True,
+        dtype=jnp.float64,
+    )
+
+    assert selected is jax_norm
+    assert float(selected(state)) == pytest.approx(11.0)
+
+
+def test_select_initial_rz_norm_func_falls_back_to_jax_on_host_failure() -> None:
+    state = SimpleNamespace(kind="state")
+
+    def host_norm(_arg):
+        raise RuntimeError("synthetic host norm failure")
+
+    def jax_norm(_arg):
+        return jnp.asarray(13.0)
+
+    selected = _select_initial_rz_norm_func(
+        state_init=state,
+        rz_norm_func=jax_norm,
+        rz_norm_np_func=host_norm,
+        tree_has_tracer=lambda _value: False,
+        dtype=jnp.float64,
+    )
+
+    assert float(selected(state)) == pytest.approx(13.0)
 
 
 def test_run_scan_preflight_step_handles_nojit_and_offset_with_timing():
@@ -514,7 +817,7 @@ def test_scan_options_explicit_backend_and_print_branches():
     default_gpu_lax = _scan_options(backend_name="gpu", scan_lax_env="", tridi_solve_env="")
     assert not default_cpu_lax.scan_use_lax_tridi
     assert not default_gpu_lax.scan_use_lax_tridi
-    assert default_cpu_lax.scan_use_precomputed
+    assert not default_cpu_lax.scan_use_precomputed
     assert default_gpu_lax.scan_use_precomputed
 
     precompute = _scan_options(scan_precompute_env="yes", tridi_precompute_env="0")
@@ -548,7 +851,7 @@ def test_scan_jit_forces_and_preflight_env_branches():
     assert not scan_jit_forces_enabled(env_value="0", jit_forces=True)
     assert scan_jit_forces_enabled(env_value="yes", jit_forces=False)
     assert scan_jit_preflight_enabled(env_value=None, backend_name="gpu", scan_differentiated=False)
-    assert not scan_jit_preflight_enabled(env_value=None, backend_name="cpu", scan_differentiated=False)
+    assert scan_jit_preflight_enabled(env_value=None, backend_name="cpu", scan_differentiated=False)
     assert not scan_jit_preflight_enabled(env_value=None, backend_name="cuda", scan_differentiated=True)
     assert not scan_jit_preflight_enabled(env_value="0", backend_name="gpu", scan_differentiated=False)
     assert scan_jit_preflight_enabled(env_value="yes", backend_name="cpu", scan_differentiated=True)
@@ -709,6 +1012,7 @@ def test_scan_chunk_settings_match_quiet_and_printing_modes():
 
 def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     base = _cache_key()
+    assert base[0] == "vmec2000_scan_v7"
     equivalent = _cache_key(
         max_iter_tail=9.0,
         preflight_iters=True,
@@ -746,6 +1050,7 @@ def test_scan_iteration_runtime_plan_resolves_offsets_and_cache_key():
         initial_flip_sign=-1.0,
         lambda_update_scale=0.5,
         ftol=1.0e-12,
+        fsq_total_target=None,
         nstep_screen=25,
         use_restart_triggers=True,
         vmecpp_restart=False,

@@ -17,6 +17,8 @@ SCAN_TIMING_KEYS: tuple[str, ...] = (
     "scan_run_setup_s",
     "scan_runner_cache_lookup_s",
     "scan_runner_cache_build_s",
+    "scan_runner_explicit_lower_s",
+    "scan_runner_explicit_compile_s",
     "scan_preflight_s",
     "scan_device_run_s",
     "scan_device_dispatch_s",
@@ -38,6 +40,15 @@ SCAN_TIMING_COUNT_KEYS: tuple[str, ...] = (
     "scan_runner_cache_hit_count",
     "scan_runner_cache_miss_count",
     "scan_runner_cache_bypass_count",
+    "scan_runner_explicit_compile_count",
+    "scan_runner_explicit_compile_failure_count",
+    "scan_runner_explicit_hlo_line_count",
+    "scan_runner_explicit_hlo_instruction_count",
+    "scan_runner_explicit_hlo_failure_count",
+    "scan_runner_arg_leaf_count",
+    "scan_runner_arg_array_leaf_count",
+    "scan_runner_arg_scalar_leaf_count",
+    "scan_runner_arg_array_nbytes",
 )
 
 
@@ -142,6 +153,22 @@ def build_scan_timing_report(
         for key, value in stats.items()
         if str(key).startswith("scan_runner_cache_miss_category_") and str(key).endswith("_count")
     }
+    dynamic_counts.update(
+        {
+            key: int(value)
+            for key, value in stats.items()
+            if (
+                str(key).startswith("scan_runner_explicit_compile_")
+                or str(key).startswith("scan_runner_explicit_hlo_op_")
+                or str(key).startswith("scan_runner_arg_path_")
+            )
+            and (
+                str(key).endswith("_count")
+                or str(key).endswith("_array_nbytes")
+            )
+            and key not in SCAN_TIMING_COUNT_KEYS
+        }
+    )
     scan_leaf_total_s = sum(
         value
         for key, value in normalized.items()
@@ -318,8 +345,13 @@ def scan_jit_preflight_enabled(
 
     if env_value is not None:
         return str(env_value).strip().lower() not in ("", "0", "false", "no")
-    backend = str(backend_name).strip().lower()
-    return backend not in ("", "cpu") and (not bool(scan_differentiated))
+    # Preflight is only executed for special controller states, such as an
+    # initial-axis reset repeat.  Running that step eagerly on CPU can dominate
+    # cold solves for high-mode LASYM cases because it evaluates the full scan
+    # step outside the compiled runner.  Use the same cached one-step runner on
+    # all ordinary backends, but keep traced/differentiated scans out of this
+    # host cache path.
+    return not bool(scan_differentiated)
 
 
 def resolve_scan_preflight_iters(
@@ -411,6 +443,7 @@ def build_vmec2000_scan_cache_key(
     initial_flip_sign: float,
     lambda_update_scale: float,
     ftol: float,
+    fsq_total_target: float | None,
     nstep_screen: int,
     use_restart_triggers: bool,
     vmecpp_restart: bool,
@@ -432,7 +465,7 @@ def build_vmec2000_scan_cache_key(
 ) -> tuple[Any, ...]:
     """Construct the JIT-cache key for the VMEC2000 scan runner."""
     return (
-        "vmec2000_scan_v5",
+        "vmec2000_scan_v7",
         static_key,
         wout_key,
         edge_signature_key,
@@ -443,7 +476,7 @@ def build_vmec2000_scan_cache_key(
         float(step_size),
         float(initial_flip_sign),
         float(lambda_update_scale),
-        float(ftol),
+        fsq_total_target is not None,
         int(nstep_screen),
         bool(use_restart_triggers),
         bool(vmecpp_restart),
@@ -480,6 +513,7 @@ def resolve_scan_iteration_runtime_plan(
     initial_flip_sign: float,
     lambda_update_scale: float,
     ftol: float,
+    fsq_total_target: float | None,
     nstep_screen: int,
     use_restart_triggers: bool,
     vmecpp_restart: bool,
@@ -535,6 +569,7 @@ def resolve_scan_iteration_runtime_plan(
         initial_flip_sign=float(initial_flip_sign),
         lambda_update_scale=float(lambda_update_scale),
         ftol=float(ftol),
+        fsq_total_target=fsq_total_target,
         nstep_screen=int(nstep_screen),
         use_restart_triggers=bool(use_restart_triggers),
         vmecpp_restart=bool(vmecpp_restart),

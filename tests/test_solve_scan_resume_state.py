@@ -25,7 +25,16 @@ _VELOCITY_NAMES = (
 )
 
 
-def _init(resume_state, *, checkpoint="checkpoint", time_step=0.2, flip_sign=1.0, shape=(2, 2, 1)):
+def _init(
+    resume_state,
+    *,
+    checkpoint="checkpoint",
+    time_step=0.2,
+    flip_sign=1.0,
+    shape=(2, 2, 1),
+    use_numpy_defaults=False,
+    compact_inactive_asym_velocity=False,
+):
     return _initialize_scan_resume_state(
         resume_state,
         dtype=jnp.float32,
@@ -34,6 +43,8 @@ def _init(resume_state, *, checkpoint="checkpoint", time_step=0.2, flip_sign=1.0
         time_step_default=jnp.asarray(time_step, dtype=jnp.float32),
         flip_sign_default=jnp.asarray(flip_sign, dtype=jnp.float32),
         state_checkpoint_default=checkpoint,
+        use_numpy_defaults=use_numpy_defaults,
+        compact_inactive_asym_velocity=compact_inactive_asym_velocity,
     )
 
 
@@ -205,6 +216,46 @@ def test_initialize_scan_resume_state_optional_payloads_default_and_override():
     assert _scalar(out.w_mhd_prev) == pytest.approx(3.75)
 
 
+def test_initialize_scan_resume_state_numpy_defaults_for_cold_scan_setup():
+    out = _init({}, use_numpy_defaults=True)
+
+    assert isinstance(out.time_step, np.ndarray)
+    assert isinstance(out.inv_tau, np.ndarray)
+    assert isinstance(out.iter1, np.ndarray)
+    assert out.time_step.dtype == np.float32
+    assert out.iter1.dtype == np.int32
+    np.testing.assert_allclose(out.inv_tau, np.full((10,), 0.15 / 0.2, dtype=np.float32))
+
+
+def test_initialize_scan_resume_state_default_keeps_jax_defaults():
+    out = _init({})
+
+    assert not isinstance(out.time_step, np.ndarray)
+    assert not isinstance(out.inv_tau, np.ndarray)
+    assert not isinstance(out.iter1, np.ndarray)
+
+
+def test_initialize_scan_resume_state_can_compact_inactive_stellsym_velocities():
+    shape = (2, 3, 4)
+    out = _init({}, shape=shape, compact_inactive_asym_velocity=True)
+
+    for name in ("vRcc", "vRss", "vZsc", "vZcs", "vLsc", "vLcs"):
+        assert np.asarray(getattr(out, name)).shape == shape
+    for name in ("vRsc", "vRcs", "vZcc", "vZss", "vLcc", "vLss"):
+        value = np.asarray(getattr(out, name))
+        assert value.shape == ()
+        assert float(value) == pytest.approx(0.0)
+
+
+def test_initialize_scan_resume_state_resume_payload_overrides_compact_inactive_velocities():
+    shape = (2, 2, 1)
+    payload = {"vRcc": np.ones(shape), "vRsc": np.full(shape, 3.0)}
+    out = _init(payload, shape=shape, compact_inactive_asym_velocity=True)
+
+    np.testing.assert_allclose(np.asarray(out.vRcc), np.ones(shape))
+    np.testing.assert_allclose(np.asarray(out.vRsc), np.full(shape, 3.0))
+
+
 def test_build_initial_scan_carry_uses_resume_fields_cache_and_edges():
     shape = (2, 2, 1)
     state = object()
@@ -259,3 +310,40 @@ def test_build_initial_scan_carry_uses_resume_fields_cache_and_edges():
     assert bool(np.asarray(carry.converged)) is False
     np.testing.assert_allclose(np.asarray(carry.fsqr_prev_phys), 2.0)
     np.testing.assert_allclose(np.asarray(carry.edge_Zsin), np.asarray([7.0, 8.0], dtype=np.float32))
+
+
+def test_build_initial_scan_carry_numpy_defaults_for_cold_scan_setup():
+    shape = (2, 2, 1)
+    state = object()
+    resume = _init({}, shape=shape, use_numpy_defaults=True)
+
+    carry = build_initial_scan_carry(
+        state_init=state,
+        resume_fields=resume,
+        dtype=jnp.float32,
+        iter_offset0=7,
+        cache_valid=np.asarray(True),
+        cache_precond_diag=("diag",),
+        cache_tcon=("tcon",),
+        cache_norms=("norms",),
+        cache_rz_scale="rz-scale",
+        cache_l_scale="l-scale",
+        cache_rz_norm=np.asarray(4.0, dtype=np.float32),
+        cache_f_norm1=np.asarray(0.25, dtype=np.float32),
+        cache_rz_mats=("mats",),
+        cache_lam_prec=np.asarray([1.0], dtype=np.float32),
+        edge_Rcos=np.asarray([1.0, 2.0]),
+        edge_Rsin=np.asarray([3.0, 4.0]),
+        edge_Zcos=np.asarray([5.0, 6.0]),
+        edge_Zsin=np.asarray([7.0, 8.0]),
+        use_numpy_defaults=True,
+    )
+
+    assert isinstance(carry.accepted_count, np.ndarray)
+    assert isinstance(carry.iter_offset, np.ndarray)
+    assert isinstance(carry.fsqr_prev_phys, np.ndarray)
+    assert isinstance(carry.edge_Rcos, np.ndarray)
+    assert carry.accepted_count.dtype == np.int32
+    assert carry.fsqr_prev_phys.dtype == np.float32
+    assert _int_scalar(carry.iter_offset) == 7
+    np.testing.assert_allclose(carry.edge_Rcos, np.asarray([1.0, 2.0], dtype=np.float32))

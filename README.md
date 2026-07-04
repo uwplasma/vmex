@@ -20,8 +20,10 @@ remain in development.
 
 This full bundled single-grid fixed-boundary matrix compares VMEC2000,
 `vmec_jax` cold/warm CPU runs, and VMEC++ where VMEC++ converges cleanly.
-The detailed CSV/JSON provenance, current-vs-main regression report, and memory
-columns are kept in the performance docs rather than in this README figure.
+The performance docs keep the detailed CSV/JSON provenance, WOUT-parity rows,
+memory columns, and current-vs-main regression classifications. In short,
+warm `vmec_jax` is faster than VMEC2000 on most bundled rows, while cold tiny
+rows still pay Python/JAX/XLA setup cost.
 
 ## Differentiation Evidence
 

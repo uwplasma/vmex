@@ -934,6 +934,30 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
     json.dumps(fixed_tool._json_safe(summary))
 
 
+def test_fixed_boundary_profiler_compile_summary_extracts_jax_rows():
+    fixed_tool = _load_fixed_tool()
+
+    class Stats:
+        stats = {
+            ("/pkg/jax/_src/interpreters/pxla.py", 2486, "compile"): (7, 7, 0.01, 0.70, {}),
+            ("/pkg/jax/_src/compiler.py", 396, "compile_or_get_cached"): (5, 5, 0.02, 0.60, {}),
+            ("/pkg/jax/_src/compiler.py", 736, "_compile_and_write_cache"): (5, 5, 0.03, 0.55, {}),
+            ("/pkg/jax/_src/compiler.py", 312, "backend_compile_and_load"): (5, 5, 0.50, 0.50, {}),
+            ("/usr/lib/python3.11/re.py", 10, "compile"): (99, 99, 9.0, 9.0, {}),
+        }
+
+    summary = fixed_tool._compile_summary_from_pstats(Stats(), source="synthetic.prof")
+
+    assert summary["source"] == "synthetic.prof"
+    assert summary["pxla_compile_call_count"] == 7
+    assert summary["compile_or_get_cached_call_count"] == 5
+    assert summary["compile_and_write_cache_call_count"] == 5
+    assert summary["backend_compile_and_load_call_count"] == 5
+    assert summary["backend_compile_and_load_cumulative_s"] == pytest.approx(0.5)
+    assert summary["top_compile_call_sites"][0]["function"] == "compile"
+    json.dumps(fixed_tool._json_safe(summary))
+
+
 def test_fixed_boundary_profiler_prints_host_update_and_scan_timing(capsys):
     fixed_tool = _load_fixed_tool()
     args = _fixed_profiler_args(fixed_tool, use_scan=True)

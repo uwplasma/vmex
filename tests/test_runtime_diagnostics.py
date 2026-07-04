@@ -110,6 +110,60 @@ def test_runtime_compare_exports_vmec2000_vmec_jax_and_vmecpp_rows(tmp_path):
     assert figure_path.exists()
 
 
+def test_runtime_memory_comparator_applies_classification_sidecar(tmp_path):
+    mod = _load_tool("compare_runtime_memory_matrix")
+    current = {
+        "results": [
+            {
+                "case_id": "short_case",
+                "backend": "vmec_jax",
+                "ok": True,
+                "runtime_cold_s": 2.0,
+                "runtime_warm_s": 0.2,
+                "peak_footprint_bytes": 230,
+            }
+        ]
+    }
+    baseline = {
+        "results": [
+            {
+                "case_id": "short_case",
+                "backend": "vmec_jax",
+                "ok": True,
+                "runtime_cold_s": 1.0,
+                "runtime_warm_s": 1.0,
+                "peak_footprint_bytes": 100,
+            }
+        ]
+    }
+    overrides = {
+        "overrides": [
+            {
+                "case_id": "short_case",
+                "backend": "vmec_jax",
+                "regression": True,
+                "requires_action": False,
+                "classification": "classified:cold_scan_compile_amortization",
+                "note": "Measured cold setup tradeoff; warm runtime improves.",
+            }
+        ]
+    }
+    current_path = tmp_path / "current.json"
+    baseline_path = tmp_path / "baseline.json"
+    override_path = tmp_path / "overrides.json"
+    current_path.write_text(json.dumps(current), encoding="utf-8")
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    override_path.write_text(json.dumps(overrides), encoding="utf-8")
+
+    rows = mod.compare(current_path, baseline_path, classification_overrides=override_path)
+
+    assert len(rows) == 1
+    assert rows[0].regression is True
+    assert rows[0].requires_action is False
+    assert rows[0].classification == "classified:cold_scan_compile_amortization"
+    assert rows[0].note == "Measured cold setup tradeoff; warm runtime improves."
+
+
 def test_direct_coil_segmented_replay_report_synthetic_policy_helpers(monkeypatch):
     mod = _load_tool("direct_coil_segmented_replay_report")
     traces = [

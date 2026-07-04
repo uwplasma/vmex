@@ -8,6 +8,7 @@ import pytest
 
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.fixed_boundary.residual.policy import new_residual_iter_histories
+from vmec_jax.solvers.fixed_boundary.scan.payload import compact_scan_rz_mats_for_carry
 import vmec_jax.solve as solve_module
 from vmec_jax.solve import (
     _can_reassemble_precond_mats,
@@ -178,7 +179,7 @@ def test_vmec2000_scan_options_env_overrides_preconditioner_and_restart_flags():
     default_gpu_lax = _scan_options(backend_name="gpu", scan_lax_env="", tridi_solve_env="")
     assert not default_cpu_lax.scan_use_lax_tridi
     assert not default_gpu_lax.scan_use_lax_tridi
-    assert default_cpu_lax.scan_use_precomputed
+    assert not default_cpu_lax.scan_use_precomputed
     assert default_gpu_lax.scan_use_precomputed
 
     opts = _scan_options(
@@ -1078,6 +1079,18 @@ def test_vmec_scale_m1_factors_jax_and_reassembly_contract():
     np.testing.assert_allclose(np.asarray(fac_r), np.array([0.25, 1.0]))
     np.testing.assert_allclose(np.asarray(fac_z), np.array([0.75, 1.0]))
 
+    explicit_m1_mats = {
+        "m1_fac_r": np.array([0.4, 1.0]),
+        "m1_fac_z": np.array([0.6, 1.0]),
+        "ard_parity": np.array([[1.0, 99.0], [1.0, 0.0]]),
+        "brd_parity": np.array([[1.0, 99.0], [1.0, 0.0]]),
+        "azd_parity": np.array([[1.0, 1.0], [1.0, 0.0]]),
+        "bzd_parity": np.array([[1.0, 1.0], [1.0, 0.0]]),
+    }
+    fac_r, fac_z = _vmec_scale_m1_factors_from_mats(explicit_m1_mats)
+    np.testing.assert_allclose(np.asarray(fac_r), np.array([0.4, 1.0]))
+    np.testing.assert_allclose(np.asarray(fac_z), np.array([0.6, 1.0]))
+
     assert not _can_reassemble_precond_mats(None)
     complete = {key: object() for key in (
         "arm_parity",
@@ -1092,6 +1105,28 @@ def test_vmec_scale_m1_factors_jax_and_reassembly_contract():
         "delta_s",
     )}
     assert _can_reassemble_precond_mats(complete)
+
+
+def test_compact_scan_rz_mats_for_carry_preserves_apply_channels_and_m1_factors():
+    mats = {
+        "ar": jnp.ones((2, 2, 1)),
+        "br": jnp.ones((2, 2, 1)) * 2.0,
+        "dr": -jnp.array([[[1.0], [3.0]], [[1.0], [0.0]]]),
+        "az": jnp.ones((2, 2, 1)) * 4.0,
+        "bz": jnp.ones((2, 2, 1)) * 5.0,
+        "dz": -jnp.array([[[1.0], [9.0]], [[1.0], [0.0]]]),
+        "ard_parity": jnp.array([[1.0, 2.0], [1.0, 0.0]]),
+        "brd_parity": jnp.array([[1.0, 4.0], [1.0, 0.0]]),
+        "azd_parity": jnp.array([[1.0, 6.0], [1.0, 0.0]]),
+        "bzd_parity": jnp.array([[1.0, 8.0], [1.0, 0.0]]),
+        "delta_s": jnp.asarray(0.5),
+    }
+    compact = compact_scan_rz_mats_for_carry(mats)
+    assert set(compact) == {"ar", "br", "dr", "az", "bz", "dz", "m1_fac_r", "m1_fac_z"}
+    fac_r, fac_z = _vmec_scale_m1_factors_from_mats(compact)
+    np.testing.assert_allclose(np.asarray(fac_r), np.array([6.0 / 20.0, 1.0]))
+    np.testing.assert_allclose(np.asarray(fac_z), np.array([14.0 / 20.0, 1.0]))
+    assert not _can_reassemble_precond_mats(compact)
 
 
 def test_safe_dt_from_force_blocks_limits_finite_forces_and_preserves_bad_rms_nominal():

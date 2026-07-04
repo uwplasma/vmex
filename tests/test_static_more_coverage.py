@@ -86,6 +86,13 @@ def test_build_static_signed_maps_skip_missing_positive_modes(monkeypatch) -> No
     assert (0, 0) in set(zip(np.asarray(out.mn_idx_m), np.asarray(out.mn_idx_n)))
 
 
+def test_build_static_caches_mode_transform_host_projection() -> None:
+    out = static_mod.build_static(_cfg(ns=4, ntor=1))
+
+    assert out.mode_transform_host_projection is not None
+    assert out.mode_transform_host_projection.ncoeff == out.modes.m.size
+
+
 def test_build_static_can_disable_vmec_phase_cache(monkeypatch) -> None:
     monkeypatch.setenv("VMEC_JAX_CACHE_VMEC_PHASE", "0")
 

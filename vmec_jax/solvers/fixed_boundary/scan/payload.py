@@ -123,6 +123,53 @@ class ScanSelectedPayloadStep(NamedTuple):
     fsq1: Any
 
 
+_SCAN_RZ_APPLY_MAT_KEYS = (
+    "ar",
+    "br",
+    "dr",
+    "az",
+    "bz",
+    "dz",
+    "cr",
+    "ir",
+    "cz",
+    "iz",
+    "dlr_t",
+    "dr_t",
+    "dur_t",
+    "dlz_t",
+    "dz_t",
+    "duz_t",
+)
+
+
+def compact_scan_rz_mats_for_carry(mats: Any) -> Any:
+    """Keep only R/Z preconditioner data needed inside a fixed-grid scan carry.
+
+    The full matrix dictionary also contains parity/reassembly coefficients.
+    Those are useful to host-side resume and non-scan preconditioner paths, but
+    fixed-grid scan iterations only apply the current tridiagonal matrices and
+    VMEC's m=1 scale factors.  Storing the derived m=1 factors explicitly lets
+    the scan carry drop the parity coefficients without changing residual
+    algebra.
+    """
+
+    if not isinstance(mats, dict):
+        return mats
+    compact = {key: mats[key] for key in _SCAN_RZ_APPLY_MAT_KEYS if key in mats}
+    if "m1_fac_r" in mats and "m1_fac_z" in mats:
+        compact["m1_fac_r"] = mats["m1_fac_r"]
+        compact["m1_fac_z"] = mats["m1_fac_z"]
+        return compact
+
+    from vmec_jax.solvers.fixed_boundary.preconditioning.operators import vmec_scale_m1_factors_from_mats
+
+    fac_r, fac_z = vmec_scale_m1_factors_from_mats(mats)
+    compact["m1_fac_r"] = fac_r
+    compact["m1_fac_z"] = fac_z
+    return compact
+
+
 def build_initial_preconditioner_cache(
     *,
     state_init: Any,
@@ -221,6 +268,7 @@ def build_initial_preconditioner_cache(
             cache_rz_mats = resume_state.get("cache_prec_rz_mats", cache_rz_mats)
         if "cache_prec_lam_prec" in resume_state:
             cache_lam_prec = resume_state.get("cache_prec_lam_prec", cache_lam_prec)
+    cache_rz_mats = compact_scan_rz_mats_for_carry(cache_rz_mats)
 
     return ScanInitialCache(
         precond_diag=cache_precond_diag,
@@ -442,6 +490,7 @@ def evaluate_scan_step_force(
     scan_converged: Callable[..., Any],
     tree_select: Callable[[Any, Any, Any], Any],
     cond: Callable[..., Any],
+    convergence_controls: Any | None = None,
     trace_context: Callable[[], Any] | None = None,
     scan_debug_force_enabled: bool = False,
     scan_debug_iter: int = -1,
@@ -528,7 +577,10 @@ def evaluate_scan_step_force(
             jnp_module=jnp,
             cond=cond,
         )
-    conv_now = scan_converged(fsqr, fsqz, fsql)
+    if convergence_controls is None:
+        conv_now = scan_converged(fsqr, fsqz, fsql)
+    else:
+        conv_now = scan_converged(fsqr, fsqz, fsql, convergence_controls)
     return ScanStepForceEvaluation(
         iter2=iter2,
         fsq_prev_before=fsq_prev_before,
@@ -627,6 +679,7 @@ def build_current_preconditioned_scan_payload(
             use_precomputed=bool(scan_use_precomputed),
             use_lax_tridi=bool(scan_use_lax_tridi),
         )
+        mats = compact_scan_rz_mats_for_carry(mats)
         return (
             cache_precond_diag,
             cache_tcon,
@@ -784,6 +837,7 @@ def build_restart_preconditioned_scan_payload(
         use_precomputed=bool(scan_use_precomputed),
         use_lax_tridi=bool(scan_use_lax_tridi),
     )
+    mats_r = compact_scan_rz_mats_for_carry(mats_r)
     frzl_rhs_r = scale_m1_precond_rhs_func(frzl_r, mats_r)
     from vmec_jax.preconditioner_1d_jax import rz_preconditioner_apply
 
@@ -930,24 +984,30 @@ def build_scan_step_fields(
         force_scale = time_step_post
         vRcc = fac * (b1 * vRcc_post + force_scale * (flip_sign * blocks.frcc))
         vRss = fac * (b1 * vRss_post + force_scale * (flip_sign * blocks.frss))
-        vRsc = fac * (b1 * vRsc_post + force_scale * (flip_sign * blocks.frsc))
-        vRcs = fac * (b1 * vRcs_post + force_scale * (flip_sign * blocks.frcs))
         vZsc = fac * (b1 * vZsc_post + force_scale * (flip_sign * blocks.fzsc))
         vZcs = fac * (b1 * vZcs_post + force_scale * (flip_sign * blocks.fzcs))
-        vZcc = fac * (b1 * vZcc_post + force_scale * (flip_sign * blocks.fzcc))
-        vZss = fac * (b1 * vZss_post + force_scale * (flip_sign * blocks.fzss))
         vLsc = fac * (b1 * vLsc_post + force_scale * (flip_sign * blocks.flsc))
         vLcs = fac * (b1 * vLcs_post + force_scale * (flip_sign * blocks.flcs))
-        vLcc = fac * (b1 * vLcc_post + force_scale * (flip_sign * blocks.flcc))
-        vLss = fac * (b1 * vLss_post + force_scale * (flip_sign * blocks.flss))
         dR = time_step_post * mn_cos_to_signed_physical(vRcc, vRss)
         dZ = time_step_post * mn_sin_to_signed_physical(vZsc, vZcs)
         dL = time_step_post * mn_sin_to_signed_physical_lambda(vLsc, vLcs)
         if bool(lasym):
+            vRsc = fac * (b1 * vRsc_post + force_scale * (flip_sign * blocks.frsc))
+            vRcs = fac * (b1 * vRcs_post + force_scale * (flip_sign * blocks.frcs))
+            vZcc = fac * (b1 * vZcc_post + force_scale * (flip_sign * blocks.fzcc))
+            vZss = fac * (b1 * vZss_post + force_scale * (flip_sign * blocks.fzss))
+            vLcc = fac * (b1 * vLcc_post + force_scale * (flip_sign * blocks.flcc))
+            vLss = fac * (b1 * vLss_post + force_scale * (flip_sign * blocks.flss))
             dR_sin = time_step_post * mn_sin_to_signed_physical(vRsc, vRcs)
             dZ_cos = time_step_post * mn_cos_to_signed_physical(vZcc, vZss)
             dL_cos = time_step_post * mn_cos_to_signed_physical_lambda(vLcc, vLss)
         else:
+            vRsc = vRsc_post
+            vRcs = vRcs_post
+            vZcc = vZcc_post
+            vZss = vZss_post
+            vLcc = vLcc_post
+            vLss = vLss_post
             dR_sin = jnp.zeros_like(dR)
             dZ_cos = jnp.zeros_like(dR)
             dL_cos = jnp.zeros_like(dR)

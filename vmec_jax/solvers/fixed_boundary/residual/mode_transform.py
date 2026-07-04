@@ -338,7 +338,9 @@ def build_mode_transform_context(
     )
     idx_pos = np.asarray(signed_maps.idx_pos, dtype=np.int32)
     idx_neg = np.asarray(signed_maps.idx_neg, dtype=np.int32)
-    host_projection = build_mode_transform_host_projection(signed_maps, ncoeff=ncoeff)
+    host_projection = getattr(static, "mode_transform_host_projection", None)
+    if host_projection is None or int(getattr(host_projection, "ncoeff", -1)) != int(ncoeff):
+        host_projection = build_mode_transform_host_projection(signed_maps, ncoeff=ncoeff)
 
     if getattr(static, "mn_idx_m", None) is not None:
         m_idx_np = np.asarray(static.mn_idx_m, dtype=np.int32)
@@ -388,7 +390,17 @@ def build_mode_transform_context(
             else None
         )
 
-    if bool(host_update_assembly) and (not tree_has_tracer(state0.Rcos)):
+    if float(mode_diag_exponent) == 0.0:
+        w_mode_mn_np = np.ones((mpol, nrange), dtype=state0_dtype)
+        w_mode_mn = jnp.asarray(w_mode_mn_np)
+        if (not bool(host_update_assembly)) or tree_has_tracer(state0.Rcos):
+            w_mode_mn = jnp.ones((mpol, nrange), dtype=jnp.asarray(state0.Rcos).dtype)
+            w_mode_mn_np = (
+                np.asarray(w_mode_mn)
+                if bool(host_update_assembly) and (not tree_has_tracer(w_mode_mn))
+                else None
+            )
+    elif bool(host_update_assembly) and (not tree_has_tracer(state0.Rcos)):
         w_mode_mn_np = mode_diag_weights_mn_np(
             mpol=mpol,
             nrange=nrange,

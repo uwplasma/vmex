@@ -27,6 +27,7 @@ def _scan_cache_key(**overrides):
         initial_flip_sign=-1.0,
         lambda_update_scale=0.5,
         ftol=1.0e-12,
+        fsq_total_target=None,
         nstep_screen=25,
         use_restart_triggers=True,
         vmecpp_restart=False,
@@ -102,23 +103,20 @@ def test_scan_cache_key_delta_summary_groups_cache_miss_causes():
     summary = scan_cache_key_delta_summary(base, changed)
 
     assert summary["changed"] is True
-    assert summary["n_changed"] == 5
+    assert summary["n_changed"] == 4
     assert summary["fields"] == (
         "max_iter_tail",
-        "ftol",
         "scan_use_precomputed",
         "stage_transition_scale",
         "scan_fallback_iters",
     )
     assert summary["categories"] == (
         "iteration_budget",
-        "tolerance",
         "scan_policy",
         "stage_transition",
         "fallback_policy",
     )
     assert summary["category_fields"]["iteration_budget"] == ("max_iter_tail",)
-    assert summary["category_fields"]["tolerance"] == ("ftol",)
     assert summary["category_fields"]["scan_policy"] == ("scan_use_precomputed",)
     assert summary["category_fields"]["stage_transition"] == ("stage_transition_scale",)
     assert summary["category_fields"]["fallback_policy"] == ("scan_fallback_iters",)
@@ -131,6 +129,46 @@ def test_scan_cache_key_delta_summary_groups_cache_miss_causes():
         "categories": (),
         "category_fields": {},
     }
+
+
+def test_vmec2000_scan_key_keeps_only_structural_scalar_controls_after_operand_refactor():
+    base = _scan_cache_key()
+
+    for field, overrides in {
+        "step_size": {"step_size": 0.4},
+        "initial_flip_sign": {"initial_flip_sign": 1.0},
+        "lambda_update_scale": {"lambda_update_scale": 0.8},
+        "has_fsq_total_target": {"fsq_total_target": 5.0e-11},
+        "stage_prev_fsq": {"stage_prev_fsq": 2.0e-4},
+        "stage_transition_scale": {"stage_transition_scale": 0.25},
+    }.items():
+        summary = scan_cache_key_delta_summary(base, _scan_cache_key(**overrides))
+
+        assert summary["changed"] is True
+        assert field in summary["fields"]
+    assert _scan_cache_key(ftol=1.0e-10) == base
+    assert _scan_cache_key(fsq_total_target=5.0e-11) == _scan_cache_key(fsq_total_target=6.0e-11)
+
+
+def test_accelerated_scan_v2_cache_key_labels_runtime_target_policy():
+    base = ("scan_v2", ("static",), ("wout",), ("edge",), 25, False, 0.5, 0.25, True, True)
+    changed = ("scan_v2", ("static",), ("wout",), ("edge",), 25, True, 0.5, 0.25, True, True)
+
+    assert scan_cache_key_field_names(base) == (
+        "schema",
+        "static_key",
+        "wout_key",
+        "edge_value_key",
+        "max_iter",
+        "has_fsq_total_target",
+        "precond_radial_alpha",
+        "precond_lambda_alpha",
+        "apply_m1_constraints",
+        "jit_forces",
+    )
+    assert scan_cache_key_delta_summary(base, changed)["category_fields"]["tolerance"] == (
+        "has_fsq_total_target",
+    )
 
 
 def test_scan_cache_miss_category_counts_identifies_nearest_cached_key():
@@ -147,7 +185,7 @@ def test_scan_cache_miss_category_counts_identifies_nearest_cached_key():
 
     counts = scan_cache_miss_category_counts(requested, [unrelated, base])
 
-    assert counts == {"iteration_budget": 1, "tolerance": 1}
+    assert counts == {"iteration_budget": 1}
 
 
 def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():

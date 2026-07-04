@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import partial
 import os
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
+
+import numpy as np
 
 from vmec_jax.solvers.fixed_boundary.diagnostics.io import _should_print_vmec2000_row
 from vmec_jax.solvers.fixed_boundary.scan.debug import (
@@ -151,6 +153,13 @@ class ScanTimeControlDumper:
         )
 
 
+class ScanConvergenceControls(NamedTuple):
+    """Runtime residual tolerances for one VMEC scan convergence check."""
+
+    ftol: Any
+    fsq_total_target: Any | None
+
+
 @dataclass(frozen=True)
 class ScanConvergencePredicate:
     """Callable residual convergence predicate with fixed scan tolerances."""
@@ -159,14 +168,19 @@ class ScanConvergencePredicate:
     fsq_total_target: Any | None
     converged_func: Callable[..., Any]
 
-    def __call__(self, fsqr, fsqz, fsql):
-        """Evaluate this callable objective for fixed-boundary VMEC solve and implicit differentiation."""
+    def __call__(self, fsqr, fsqz, fsql, controls: ScanConvergenceControls | None = None):
+        """Evaluate residual convergence with fixed or caller-supplied controls."""
+        ftol = self.ftol
+        fsq_total_target = self.fsq_total_target
+        if controls is not None:
+            ftol = controls.ftol
+            fsq_total_target = controls.fsq_total_target
         return self.converged_func(
             fsqr,
             fsqz,
             fsql,
-            ftol=self.ftol,
-            fsq_total_target=self.fsq_total_target,
+            ftol=ftol,
+            fsq_total_target=fsq_total_target,
         )
 
 
@@ -399,7 +413,11 @@ def build_vmec2000_scan_runtime_setup(
         verbose_vmec2000_table=bool(verbose_vmec2000_table),
     )
 
-    dtype = jnp_module.asarray(state_init.Rcos).dtype
+    use_numpy_defaults = not bool(scan_differentiated)
+    if use_numpy_defaults:
+        dtype = np.asarray(state_init.Rcos).dtype
+    else:
+        dtype = jnp_module.asarray(state_init.Rcos).dtype
     scan_timecontrol_dumper = ScanTimeControlDumper(
         enabled=bool(scan_hooks.dump_timecontrol_scan),
         timecontrol_callback=scan_hooks.timecontrol_callback,
@@ -407,12 +425,13 @@ def build_vmec2000_scan_runtime_setup(
         jax_module=jax_module,
         jnp_module=jnp_module,
     )
-    time_step0 = jnp_module.asarray(float(step_size), dtype=dtype)
-    flip_sign0 = jnp_module.asarray(float(initial_flip_sign), dtype=dtype)
-    ftol_j = jnp_module.asarray(float(ftol), dtype=dtype)
+    default_array = np.asarray if use_numpy_defaults else jnp_module.asarray
+    time_step0 = default_array(float(step_size), dtype=dtype)
+    flip_sign0 = default_array(float(initial_flip_sign), dtype=dtype)
+    ftol_j = default_array(float(ftol), dtype=dtype)
     fsq_total_target_j = None
     if fsq_total_target is not None:
-        fsq_total_target_j = jnp_module.asarray(float(fsq_total_target), dtype=dtype)
+        fsq_total_target_j = default_array(float(fsq_total_target), dtype=dtype)
 
     scan_converged = ScanConvergencePredicate(
         ftol=ftol_j,
@@ -427,6 +446,8 @@ def build_vmec2000_scan_runtime_setup(
         time_step_default=time_step0,
         flip_sign_default=flip_sign0,
         state_checkpoint_default=state_init,
+        use_numpy_defaults=use_numpy_defaults,
+        compact_inactive_asym_velocity=(not bool(cfg.lasym)) and (not bool(scan_differentiated)),
     )
     flip_sign0 = scan_resume0.flip_sign
     scale_m1_precond_rhs = partial(
