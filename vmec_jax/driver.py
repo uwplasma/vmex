@@ -1120,7 +1120,6 @@ def run_fixed_boundary(
     )
     stage_results: list[SolveVmecResidualResult] = []
     stage_statics: list[VMECStatic] = []
-
     def _run_cli_explicit_staged_followup(**kwargs) -> FixedBoundaryRun:
         return _driver_staging_helpers.run_cli_explicit_staged_followup(
             _stage_runner_context(),

@@ -108,6 +108,7 @@ def _params_for_direction(base_params: CoilFieldParams, direction_params: CoilFi
     """Return a central-FD callback along one coil-parameter direction."""
 
     def params_for(scale: float) -> CoilFieldParams:
+        """Return coil parameters displaced by ``scale`` along the test direction."""
         return base_params.with_arrays(
             base_curve_dofs=jnp.asarray(base_params.base_curve_dofs)
             + float(scale) * jnp.asarray(direction_params.base_curve_dofs),
@@ -124,6 +125,7 @@ def _qs_angle_cache_factory(args: Any):
     cache: dict[tuple[int, ...], dict[str, object]] = {}
 
     def qs_angle_cache_for_static(static: Any) -> dict[str, object]:
+        """Return or build the Boozer-angle quadrature cache for this VMEC grid."""
         cfg = static.cfg
         key = (
             int(cfg.nfp),
@@ -466,6 +468,7 @@ def contract_free_boundary_vjp(jacobian: Any, cotangent: Sequence[float]) -> Any
     n_outputs = int(weights.size)
 
     def contract_leaf(leaf: Any) -> Any:
+        """Contract one Jacobian pytree leaf over its leading output axis."""
         array = jnp.asarray(leaf)
         return jnp.tensordot(weights, jnp.reshape(array, (n_outputs, -1)), axes=(0, 0)).reshape(array.shape[1:])
 
