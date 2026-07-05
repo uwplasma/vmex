@@ -95,6 +95,7 @@ def _run_ready_scalar_optimizer() -> FixedBoundaryExactOptimizer:
     opt._last_jacobian_residual = None
     opt._indata = InData(scalars={"LASYM": False}, indexed={})
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
+    opt._layout = SimpleNamespace(size=2)
     opt._objective_family = "qs"
     opt._helicity_m = 1
     opt._helicity_n = 0
@@ -103,8 +104,11 @@ def _run_ready_scalar_optimizer() -> FixedBoundaryExactOptimizer:
     opt._inner_ftol = 1.0e-9
     opt._trial_max_iter = 1
     opt._trial_ftol = 1.0e-6
+    opt._exact_solver_kwargs = {"use_scan": False, "light_history": True, "resume_state_mode": "none"}
+    opt._trial_solver_kwargs = {"use_scan": False, "light_history": True, "resume_state_mode": "none"}
     opt._post_jacobian_clear = lambda *args, **kwargs: None
     opt._profile_dump = lambda: {}
+    opt._profile_add = lambda *args, **kwargs: None
     opt._exact_cache_key = lambda params: np.asarray(params, dtype=float).round(12).reshape(-1).tobytes()
     opt._base_params_vector = lambda: np.zeros(1)
     opt._aspect_target = 7.0
@@ -112,7 +116,13 @@ def _run_ready_scalar_optimizer() -> FixedBoundaryExactOptimizer:
     opt._n_non_qs = 1
     opt._n_qs = None
     opt._has_residual_block_metadata = True
+    opt._last_residual_size = residual0.size
+    opt._last_jacobian_shape = None
+    opt._last_jacobian_source = "exact_tape_replay"
+    opt._last_scalar_gradient_source = None
+    opt._last_scalar_cost_only_trials = None
     opt._qs_total_from_state_fn = None
+    opt._residuals_fn = SimpleNamespace(_residual_block_summary=None)
     opt._evaluate_residuals_from_state = lambda _state: residual0.copy()
     opt._solve_forward = lambda _params, trial=True: state0
     opt.forward_residual_fun = lambda _params: residual0.copy()
@@ -158,3 +168,4 @@ def test_scalar_trust_run_records_auto_scalar_production_defaults(method, expect
     assert result["method"] == "scalar_trust"
     assert result["method_auto_reason"] == expected_reason
     assert result["_history_dump"]["scalar_cost_only_trials"] is expected_cost_only
+    assert result["_history_dump"]["exact_callback_metadata"]["scalar_cost_only_trials"] is expected_cost_only

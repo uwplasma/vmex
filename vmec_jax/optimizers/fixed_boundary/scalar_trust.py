@@ -153,6 +153,7 @@ def run_scalar_trust_exact_optimizer(
     armijo_c1 = 1.0e-4
     backtrack_factor = 0.1
     cost_only_trials = scalar_cost_only_trials_enabled(owner, scalar_cost_only_trials)
+    owner._last_scalar_cost_only_trials = bool(cost_only_trials)
 
     while not success_result and eval_count < max_scalar_evals:
         grad_norm_2 = float(np.linalg.norm(grad_y))
@@ -268,4 +269,3 @@ def run_scalar_trust_exact_optimizer(
         },
         bool(cost_only_trials),
     )
-

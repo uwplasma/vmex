@@ -33,7 +33,9 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
         "_state_objective_value_and_cotangent_from_packed",
         None,
     )
+    cotangent_source = "residual_vjp"
     if objective_cotangent_factory is not None:
+        cotangent_source = "objective_cotangent_factory"
         helper_key = (
             "objective_value_and_cotangent",
             int(owner._layout.size),
@@ -75,6 +77,7 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
             None,
         )
         if state_cotangent_operator_factory is not None:
+            cotangent_source = "state_cotangent_operator"
             final_cotangent = state_cotangent_operator_factory(packed_final, owner._layout)(residuals)
         else:
             _, residual_vjp = jax.vjp(_residuals_from_packed, packed_final)
@@ -106,6 +109,7 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
         cache_key = None
         initial_tangents = None
     if initial_tangents is not None:
+        initial_projection_source = "initial_tangents_cache"
         owner._profile_add("gradient_initial_tangents_cache_hit", 0.0)
         grad = _jnp.tensordot(
             _jnp.asarray(initial_tangents, dtype=_jnp.float64),
@@ -114,6 +118,7 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
         )
         owner._profile_add("gradient_initial_projection", time.perf_counter() - t_initial)
     elif owner._scalar_gradient_initial_tangents_enabled(int(params.size)):
+        initial_projection_source = "initial_tangent_columns"
         owner._profile_add("gradient_initial_tangents_precompute", 0.0)
         initial_tangents = owner._initial_tangent_columns(
             params,
@@ -132,8 +137,10 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
             owner._discrete_jacobian_helper_cache.get(initial_vjp_key) if initial_vjp_key is not None else None
         )
         if initial_vjp is not None:
+            initial_projection_source = "initial_vjp_cache"
             owner._profile_add("gradient_initial_vjp_cache_hit", 0.0)
         else:
+            initial_projection_source = "initial_vjp"
             axis_override = {key: _jnp.asarray(value, dtype=params.dtype) for key, value in axis_override.items()}
             _, initial_vjp = jax.vjp(
                 lambda p: owner._solver_initial_state_packed_from_params(p, axis_override),
@@ -143,6 +150,9 @@ def exact_objective_and_gradient(owner: Any, params) -> tuple[float, np.ndarray]
                 owner._discrete_jacobian_helper_cache[initial_vjp_key] = initial_vjp
         grad = initial_vjp(_jnp.asarray(initial_cotangent, dtype=_jnp.float64))[0]
         owner._profile_add("gradient_initial_vjp", time.perf_counter() - t_initial)
+    owner._last_scalar_gradient_source = {
+        "cotangent": cotangent_source,
+        "initial_projection": initial_projection_source,
+    }
     owner._profile_add("gradient_total", time.perf_counter() - t_total)
     return float(np.asarray(cost, dtype=float)), np.asarray(grad, dtype=float)
-

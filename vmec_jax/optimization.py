@@ -259,6 +259,8 @@ class FixedBoundaryExactOptimizer:
         self._last_residual_size: int | None = None
         self._last_jacobian_shape: tuple[int, int] | None = None
         self._last_jacobian_source = "exact_tape_replay"
+        self._last_scalar_gradient_source: dict[str, str] | None = None
+        self._last_scalar_cost_only_trials: bool | None = None
         self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
         self._trial_residual_cache_max = 8
         self._profile: dict[str, dict[str, float | int]] = {}
@@ -898,6 +900,8 @@ class FixedBoundaryExactOptimizer:
             "jacobian_shape": self._last_jacobian_shape,
             "residual_blocks": residual_blocks,
             "last_jacobian_source": self._last_jacobian_source,
+            "last_scalar_gradient_source": self._last_scalar_gradient_source,
+            "scalar_cost_only_trials": self._last_scalar_cost_only_trials,
             "scan_exact_path": str(self._scan_exact_path),
             "exact_solver_use_scan": exact_solver_use_scan,
             "exact_solver_light_history": bool(self._exact_solver_kwargs.get("light_history", False)),
@@ -2057,6 +2061,7 @@ class FixedBoundaryExactOptimizer:
         ``"_history_dump"`` payload for :meth:`save_history`.
         """
         self._reset_run_state(trace_callbacks=trace_callbacks, iota_fn=iota_fn)
+        self._last_scalar_cost_only_trials = None
 
         params0_arr = np.asarray(params0, dtype=float)
         scalar_cost_only_trials_used: bool | None = None

@@ -1061,6 +1061,10 @@ def test_objective_and_gradient_uses_residual_vjp_and_cotangent_factory(monkeypa
     cost, grad = opt.objective_and_gradient_fun(np.asarray([0.0, 0.0]))
     assert cost == pytest.approx(32.0)
     np.testing.assert_allclose(grad, [8.0, 16.0])
+    assert opt._last_scalar_gradient_source == {
+        "cotangent": "residual_vjp",
+        "initial_projection": "initial_vjp",
+    }
 
     def residuals_with_factory(_state):
         return jnp.asarray([99.0], dtype=jnp.float64)
@@ -1073,6 +1077,10 @@ def test_objective_and_gradient_uses_residual_vjp_and_cotangent_factory(monkeypa
     assert cost == pytest.approx(5.0)
     np.testing.assert_allclose(grad, [0.5, 0.5])
     assert opt._profile["gradient_initial_vjp_cache_hit"]["count"] == 1
+    assert opt._last_scalar_gradient_source == {
+        "cotangent": "objective_cotangent_factory",
+        "initial_projection": "initial_vjp_cache",
+    }
 
 
 def test_residual_linear_operator_products_use_tape_and_residual_transposes(monkeypatch) -> None:
