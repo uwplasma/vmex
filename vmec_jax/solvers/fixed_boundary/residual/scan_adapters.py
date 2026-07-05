@@ -615,6 +615,7 @@ def _dispatch_accelerated_residual_scan(
         edge_Rsin=namespace["edge_Rsin"],
         edge_Zcos=namespace["edge_Zcos"],
         edge_Zsin=namespace["edge_Zsin"],
+        state_only=bool(namespace["state_only"]),
         idx00=int(namespace["idx00"]),
         w_mode_mn=namespace["w_mode_mn"],
         mode_context=namespace["_mode_context"],

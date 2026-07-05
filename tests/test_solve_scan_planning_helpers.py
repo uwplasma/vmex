@@ -117,6 +117,7 @@ def test_accelerated_scan_cache_key_excludes_dynamic_scalar_controls():
         wout_key=("wout", "float64"),
         edge_signature_key=("edge", (4,)),
         max_iter=50,
+        state_only=False,
         has_fsq_total_target=False,
         precond_radial_alpha=0.5,
         precond_lambda_alpha=0.25,
@@ -127,9 +128,11 @@ def test_accelerated_scan_cache_key_excludes_dynamic_scalar_controls():
     key1 = _accelerated_scan_cache_key(**base)
     key2 = _accelerated_scan_cache_key(**base)
     key3 = _accelerated_scan_cache_key(**{**base, "has_fsq_total_target": True})
+    key4 = _accelerated_scan_cache_key(**{**base, "state_only": True})
 
     assert key1 == key2
     assert key1 != key3
+    assert key1 != key4
     assert "scan_v2" in key1
 
 
@@ -139,6 +142,7 @@ def test_accelerated_scan_cache_key_excludes_dynamic_edge_values():
         wout_key=("wout", "float64"),
         edge_signature_key=(((4,), "float64"),),
         max_iter=50,
+        state_only=False,
         has_fsq_total_target=False,
         precond_radial_alpha=0.5,
         precond_lambda_alpha=0.25,

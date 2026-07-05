@@ -39,6 +39,7 @@ def _accelerated_scan_cache_key(
     wout_key: Any,
     edge_signature_key: Any,
     max_iter: int,
+    state_only: bool,
     has_fsq_total_target: bool,
     precond_radial_alpha: float,
     precond_lambda_alpha: float,
@@ -59,6 +60,7 @@ def _accelerated_scan_cache_key(
         wout_key,
         edge_signature_key,
         int(max_iter),
+        bool(state_only),
         bool(has_fsq_total_target),
         float(precond_radial_alpha),
         float(precond_lambda_alpha),
@@ -232,6 +234,7 @@ def run_accelerated_residual_scan(
     edge_Rsin: Any,
     edge_Zcos: Any,
     edge_Zsin: Any,
+    state_only: bool,
     idx00: int,
     w_mode_mn: Any,
     mode_context: Any,
@@ -297,6 +300,7 @@ def run_accelerated_residual_scan(
         wout_key=wout_key,
         edge_signature_key=edge_signature_key,
         max_iter=int(max_iter),
+        state_only=bool(state_only),
         has_fsq_total_target=bool(has_fsq_total_target),
         precond_radial_alpha=float(precond_radial_alpha),
         precond_lambda_alpha=float(precond_lambda_alpha),
@@ -322,8 +326,13 @@ def run_accelerated_residual_scan(
         ) = carry
         it = jnp_module.asarray(it, dtype=jnp_module.int32)
 
+        def _history_row(fsqr, fsqz, fsql):
+            if bool(state_only):
+                return ()
+            return (fsqr, fsqz, fsql)
+
         def _hold_step(_):
-            return carry, (last_fsqr, last_fsqz, last_fsql)
+            return carry, _history_row(last_fsqr, last_fsqz, last_fsql)
 
         def _advance_step(_):
             iter_since_restart = it + 1
@@ -394,7 +403,7 @@ def run_accelerated_residual_scan(
                 edge_Zcos_dyn,
                 edge_Zsin_dyn,
             )
-            return carry_new, (fsqr, fsqz, fsql)
+            return carry_new, _history_row(fsqr, fsqz, fsql)
 
         return jax_module.lax.cond(converged, _hold_step, _advance_step, operand=None)
 
@@ -469,16 +478,25 @@ def run_accelerated_residual_scan(
             cache_status=scan_runner_cache_status,
         )
     scan_materialize_start = perf_counter() if scan_timing_enabled else None
-    state_final, converged_final, converged_iter_final, _, _, _, *_edge = carry_final
-    fsqr_hist, fsqz_hist, fsql_hist = hist
-    w_hist = fsqr_hist + fsqz_hist + fsql_hist
-    w_hist_np = np.asarray(w_hist)
-    fsqr_hist_np = np.asarray(fsqr_hist)
-    fsqz_hist_np = np.asarray(fsqz_hist)
-    fsql_hist_np = np.asarray(fsql_hist)
+    state_final, converged_final, converged_iter_final, last_fsqr, last_fsqz, last_fsql, *_edge = carry_final
+    if bool(state_only):
+        w_hist_np = np.asarray([], dtype=float)
+        fsqr_hist_np = np.asarray([], dtype=float)
+        fsqz_hist_np = np.asarray([], dtype=float)
+        fsql_hist_np = np.asarray([], dtype=float)
+    else:
+        fsqr_hist, fsqz_hist, fsql_hist = hist
+        w_hist = fsqr_hist + fsqz_hist + fsql_hist
+        w_hist_np = np.asarray(w_hist)
+        fsqr_hist_np = np.asarray(fsqr_hist)
+        fsqz_hist_np = np.asarray(fsqz_hist)
+        fsql_hist_np = np.asarray(fsql_hist)
     converged_host = bool(np.asarray(converged_final))
     converged_iter_host = int(np.asarray(converged_iter_final)) if converged_host else -1
     n_iter_host = int(converged_iter_host) if converged_host else int(max_iter)
+    final_fsqr = float(np.asarray(last_fsqr))
+    final_fsqz = float(np.asarray(last_fsqz))
+    final_fsql = float(np.asarray(last_fsql))
     if scan_timing_enabled and scan_materialize_start is not None:
         scan_timing_stats["scan_host_materialize_s"] += perf_counter() - float(scan_materialize_start)
     scan_timing_report = None
@@ -506,9 +524,14 @@ def run_accelerated_residual_scan(
             "use_scan": True,
             "accelerated_scan": True,
             "scan_path": "accelerated",
+            "state_only": bool(state_only),
             "fsq_total_target": fsq_total_target,
             "converged": converged_host,
             "converged_iter": converged_iter_host,
+            "final_fsqr": final_fsqr,
+            "final_fsqz": final_fsqz,
+            "final_fsql": final_fsql,
+            "final_fsq_total": final_fsqr + final_fsqz + final_fsql,
             **({"timing": scan_timing_report} if scan_timing_report is not None else {}),
         },
     )
