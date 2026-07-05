@@ -1248,7 +1248,10 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
 
     def _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in):
         carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
-        (_carry_base, carry_tangents), _ = jax.lax.scan(_step_scan, (carry0, carry_tangents0), stacked_traces_in)
+        return _scan_from_initial_carry(carry_tangents0, carry0, stacked_traces_in)
+
+    def _scan_from_initial_carry(carry_tangents0, carry0_in, stacked_traces_in):
+        (_carry_base, carry_tangents), _ = jax.lax.scan(_step_scan, (carry0_in, carry_tangents0), stacked_traces_in)
         return carry_tangents
 
     @jax.jit
@@ -1256,14 +1259,25 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
         return _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
 
     @jax.jit
+    def _run_scan_initial(carry_tangents0, carry0_in, stacked_traces_in):
+        return _scan_from_initial_carry(carry_tangents0, carry0_in, stacked_traces_in)
+
+    @jax.jit
     def _run_scan_zero_aux(state_tangents0, stacked_base_carries_in, stacked_traces_in):
         carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
         carry_tangents0 = _carry_tangents_with_zero_aux(state_tangents0, carry0)
         return _scan_from_carry(carry_tangents0, stacked_base_carries_in, stacked_traces_in)
 
+    @jax.jit
+    def _run_scan_zero_aux_initial(state_tangents0, carry0_in, stacked_traces_in):
+        carry_tangents0 = _carry_tangents_with_zero_aux(state_tangents0, carry0_in)
+        return _scan_from_initial_carry(carry_tangents0, carry0_in, stacked_traces_in)
+
     runner = _DynamicBasepointScanRunner(
         from_carry=_run_scan,
         from_state_tangents=_run_scan_zero_aux,
+        from_initial_carry=_run_scan_initial,
+        from_state_tangents_initial=_run_scan_zero_aux_initial,
     )
     return _put_replay_scan_runner(
         "dynamic_basepoint",
@@ -1275,6 +1289,10 @@ def _checkpoint_tape_dynamic_basepoint_scan_runner(*, static, stacked, stacked_b
 
 
 def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_base_carries, stacked):
+    run_zero_aux_initial = getattr(run_scan, "zero_aux_initial", None)
+    if run_zero_aux_initial is not None:
+        carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
+        return run_zero_aux_initial(state_tangents, carry0, stacked)
     run_zero_aux = getattr(run_scan, "zero_aux", None)
     if run_zero_aux is not None:
         return run_zero_aux(state_tangents, stacked_base_carries, stacked)

@@ -122,6 +122,8 @@ _REPLAY_SCAN_CACHE_DIAGNOSTICS.update(
 class _DynamicBasepointScanRunner:
     from_carry: Any
     from_state_tangents: Any
+    from_initial_carry: Any | None = None
+    from_state_tangents_initial: Any | None = None
 
     def __call__(self, carry_tangents0, stacked_base_carries_in, stacked_traces_in):
         """Evaluate this callable objective for fixed-boundary VMEC solve and implicit differentiation."""
@@ -130,6 +132,18 @@ class _DynamicBasepointScanRunner:
     def zero_aux(self, state_tangents0, stacked_base_carries_in, stacked_traces_in):
         """Evaluate zero aux for fixed-boundary VMEC solve and implicit differentiation."""
         return self.from_state_tangents(state_tangents0, stacked_base_carries_in, stacked_traces_in)
+
+    def initial_carry(self, carry_tangents0, carry0_in, stacked_traces_in):
+        """Replay from one initial base carry, avoiding full base-history inputs."""
+        if self.from_initial_carry is None:
+            raise AttributeError("initial-carry replay is not available")
+        return self.from_initial_carry(carry_tangents0, carry0_in, stacked_traces_in)
+
+    def zero_aux_initial(self, state_tangents0, carry0_in, stacked_traces_in):
+        """Replay zero auxiliary tangents from one initial base carry."""
+        if self.from_state_tangents_initial is None:
+            raise AttributeError("initial-carry zero-aux replay is not available")
+        return self.from_state_tangents_initial(state_tangents0, carry0_in, stacked_traces_in)
 
 
 _DIRECT_TAPE_TIMING_KEYS = (
