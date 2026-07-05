@@ -465,7 +465,7 @@ def build_vmec2000_scan_cache_key(
 ) -> tuple[Any, ...]:
     """Construct the JIT-cache key for the VMEC2000 scan runner."""
     return (
-        "vmec2000_scan_v9",
+        "vmec2000_scan_v10",
         static_key,
         wout_key,
         edge_signature_key,
@@ -484,8 +484,6 @@ def build_vmec2000_scan_cache_key(
         bool(scan_use_lax_tridi),
         bool(scan_use_restart_payload),
         stage_prev_fsq is not None,
-        float(stage_transition_factor),
-        float(stage_transition_scale),
         bool(jit_forces_scan),
         bool(state_only_scan),
         bool(scan_light),

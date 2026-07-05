@@ -83,8 +83,8 @@ def test_scan_cache_key_delta_labels_behavioral_toggles():
         (15, "scan_use_precomputed"),
         (16, "scan_use_lax_tridi"),
         (18, "has_stage_prev_fsq"),
-        (23, "scan_light"),
-        (24, "scan_minimal"),
+        (21, "scan_light"),
+        (22, "scan_minimal"),
     ]
     assert deltas[3].before is False
     assert deltas[3].after is True
@@ -103,22 +103,19 @@ def test_scan_cache_key_delta_summary_groups_cache_miss_causes():
     summary = scan_cache_key_delta_summary(base, changed)
 
     assert summary["changed"] is True
-    assert summary["n_changed"] == 4
+    assert summary["n_changed"] == 3
     assert summary["fields"] == (
         "max_iter_tail",
         "scan_use_precomputed",
-        "stage_transition_scale",
         "scan_fallback_iters",
     )
     assert summary["categories"] == (
         "iteration_budget",
         "scan_policy",
-        "stage_transition",
         "fallback_policy",
     )
     assert summary["category_fields"]["iteration_budget"] == ("max_iter_tail",)
     assert summary["category_fields"]["scan_policy"] == ("scan_use_precomputed",)
-    assert summary["category_fields"]["stage_transition"] == ("stage_transition_scale",)
     assert summary["category_fields"]["fallback_policy"] == ("scan_fallback_iters",)
 
     unchanged = scan_cache_key_delta_summary(base, base)
@@ -140,7 +137,6 @@ def test_vmec2000_scan_key_keeps_only_structural_scalar_controls_after_operand_r
         "lambda_update_scale": {"lambda_update_scale": 0.8},
         "has_fsq_total_target": {"fsq_total_target": 5.0e-11},
         "has_stage_prev_fsq": {"stage_prev_fsq": 2.0e-4},
-        "stage_transition_scale": {"stage_transition_scale": 0.25},
     }.items():
         summary = scan_cache_key_delta_summary(base, _scan_cache_key(**overrides))
 
@@ -149,6 +145,8 @@ def test_vmec2000_scan_key_keeps_only_structural_scalar_controls_after_operand_r
     assert _scan_cache_key(ftol=1.0e-10) == base
     assert _scan_cache_key(fsq_total_target=5.0e-11) == _scan_cache_key(fsq_total_target=6.0e-11)
     assert _scan_cache_key(stage_prev_fsq=2.0e-4) == _scan_cache_key(stage_prev_fsq=3.0e-4)
+    assert _scan_cache_key(stage_transition_factor=20.0) == base
+    assert _scan_cache_key(stage_transition_scale=0.25) == base
     assert _scan_cache_key(scan_fallback_accept_frac=0.25) == base
     assert _scan_cache_key(scan_fallback_fsq_factor=10.0) == base
     assert _scan_cache_key(scan_fallback_fsq_abs=1.0e-4) == base

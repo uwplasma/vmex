@@ -67,9 +67,10 @@ def test_stage_prev_fsq_cache_key_probe_keeps_numeric_value_dynamic() -> None:
     probe = reuse._stage_prev_fsq_cache_key_probe()
 
     assert probe["passed"] is True
-    assert probe["schema"] == "vmec2000_scan_v9"
+    assert probe["schema"] == "vmec2000_scan_v10"
     assert probe["inactive_to_active_delta"]["fields"] == ("has_stage_prev_fsq",)
     assert probe["active_value_delta"]["changed"] is False
+    assert probe["active_stage_tuning_delta"]["changed"] is False
 
 
 def test_cache_counts_missing_timing_defaults_to_zero() -> None:

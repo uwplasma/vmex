@@ -142,6 +142,12 @@ def _scan_runtime_controls_args(
     stage_prev_fsq = controls.stage_prev_fsq
     if stage_prev_fsq is None:
         stage_prev_fsq = jnp.asarray(jnp.nan, dtype=dtype)
+    stage_transition_factor = controls.stage_transition_factor
+    if stage_transition_factor is None:
+        stage_transition_factor = jnp.asarray(50.0, dtype=dtype)
+    stage_transition_scale = controls.stage_transition_scale
+    if stage_transition_scale is None:
+        stage_transition_scale = jnp.asarray(0.5, dtype=dtype)
     accept_frac = controls.scan_fallback_accept_frac
     if accept_frac is None:
         accept_frac = jnp.asarray(jnp.nan, dtype=dtype)
@@ -158,6 +164,8 @@ def _scan_runtime_controls_args(
         jnp.asarray(controls.ftol, dtype=dtype),
         jnp.asarray(target, dtype=dtype),
         jnp.asarray(stage_prev_fsq, dtype=dtype),
+        jnp.asarray(stage_transition_factor, dtype=dtype),
+        jnp.asarray(stage_transition_scale, dtype=dtype),
         jnp.asarray(accept_frac, dtype=dtype),
         jnp.asarray(fsq_factor, dtype=dtype),
         jnp.asarray(fsq_abs, dtype=dtype),
@@ -177,6 +185,8 @@ def _scan_controls_with_runtime_tolerances(
         ftol=ftol,
         fsq_total_target=fsq_total_target,
         stage_prev_fsq=base.stage_prev_fsq,
+        stage_transition_factor=base.stage_transition_factor,
+        stage_transition_scale=base.stage_transition_scale,
         scan_fallback_accept_frac=base.scan_fallback_accept_frac,
         scan_fallback_fsq_factor=base.scan_fallback_fsq_factor,
         scan_fallback_fsq_abs=base.scan_fallback_fsq_abs,
@@ -215,6 +225,8 @@ def _scan_step_with_runtime_controls(
     ftol: Any,
     fsq_total_target_value: Any,
     stage_prev_fsq_value: Any,
+    stage_transition_factor: Any,
+    stage_transition_scale: Any,
     scan_fallback_accept_frac: Any,
     scan_fallback_fsq_factor: Any,
     scan_fallback_fsq_abs: Any,
@@ -228,6 +240,8 @@ def _scan_step_with_runtime_controls(
         ftol=ftol,
         fsq_total_target=fsq_total_target_value if has_target else None,
         stage_prev_fsq=stage_prev_fsq_value if has_stage_reset else None,
+        stage_transition_factor=stage_transition_factor,
+        stage_transition_scale=stage_transition_scale,
         scan_fallback_accept_frac=scan_fallback_accept_frac,
         scan_fallback_fsq_factor=scan_fallback_fsq_factor,
         scan_fallback_fsq_abs=scan_fallback_fsq_abs,
@@ -811,10 +825,10 @@ def _advance_vmec2000_scan_step(
         vmecpp_restart=bool(ctx.vmecpp_restart),
         k_preconditioner_update_interval=constants.preconditioner_update_interval,
         stage_prev_fsq=convergence_controls.stage_prev_fsq,
-        stage_transition_factor=ctx.stage_transition_factor,
+        stage_transition_factor=convergence_controls.stage_transition_factor,
         restart_badjac_factor=constants.restart_badjac_factor,
         restart_badprog_factor=constants.restart_badprog_factor,
-        stage_transition_scale=ctx.stage_transition_scale,
+        stage_transition_scale=convergence_controls.stage_transition_scale,
         step_size=ctx.step_size,
         k_ndamp=constants.ndamp,
         dtype=dtype,
@@ -1156,6 +1170,8 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
         ftol_dyn,
         fsq_total_target_dyn,
         stage_prev_fsq_dyn,
+        stage_transition_factor_dyn,
+        stage_transition_scale_dyn,
         fallback_accept_frac_dyn,
         fallback_fsq_factor_dyn,
         fallback_fsq_abs_dyn,
@@ -1169,6 +1185,8 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
                 ftol_dyn,
                 fsq_total_target_dyn,
                 stage_prev_fsq_dyn,
+                stage_transition_factor_dyn,
+                stage_transition_scale_dyn,
                 fallback_accept_frac_dyn,
                 fallback_fsq_factor_dyn,
                 fallback_fsq_abs_dyn,
@@ -1496,6 +1514,8 @@ def run_vmec2000_scan(ctx: Vmec2000ScanControllerContext, state_init: VMECState)
         ftol=scan_converged.ftol,
         fsq_total_target=scan_converged.fsq_total_target,
         stage_prev_fsq=ctx.stage_prev_fsq_j,
+        stage_transition_factor=jnp.asarray(float(stage_transition_factor), dtype=dtype),
+        stage_transition_scale=jnp.asarray(float(stage_transition_scale), dtype=dtype),
         scan_fallback_accept_frac=scan_fallback_controls.accept_frac,
         scan_fallback_fsq_factor=scan_fallback_controls.fsq_factor,
         scan_fallback_fsq_abs=scan_fallback_controls.fsq_abs,
