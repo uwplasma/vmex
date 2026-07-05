@@ -486,7 +486,18 @@ def test_exact_callback_payload_exposes_common_timing_aliases():
         args=args,
         specs_count=3,
         solver_device_resolved="cpu",
-        samples=[{"repeat": 0, "wall_time_s": 2.5}],
+        samples=[
+            {
+                "repeat": 0,
+                "wall_time_s": 2.5,
+                "exact_callback_metadata": {
+                    "exact_replay_policy": {
+                        "backend": "cpu",
+                        "n_parameters": 3,
+                    }
+                },
+            }
+        ],
         profile=profile,
         cache_before={"total_entries": 0},
         cache_after={"total_entries": 0},
@@ -506,6 +517,7 @@ def test_exact_callback_payload_exposes_common_timing_aliases():
     assert payload["phase_timing"]["jax_devices_s"] == 0.04
     assert payload["timing"]["jacobian_total"] == 1.25
     assert payload["timing"]["trial_solver_scan_runner_cache_hit_count"] == 2
+    assert payload["exact_callback_metadata"]["exact_replay_policy"]["n_parameters"] == 3
     json.dumps(exact_tool._json_safe(payload))
 
 
