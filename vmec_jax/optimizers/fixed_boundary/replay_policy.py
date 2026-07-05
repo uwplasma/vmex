@@ -116,17 +116,17 @@ def projected_replay_residuals_enabled(optimizer, n_params: int | None = None) -
             return False
     else:
         backend = optimizer_backend_name(solver_device_name)
-    if backend not in ("cpu", "gpu", "cuda", "rocm"):
+    if backend not in ("gpu", "cuda", "rocm"):
         return False
     if n_params is None:
         return False
     static = getattr(optimizer, "_static", None)
     if bool(getattr(getattr(static, "cfg", None), "lasym", False)):
         return False
-    # Projected replay only pays off for larger non-LASYM dense Jacobians.
-    # CPU profiling on the QA/QH/QP max_mode=3 exact-callback shards showed a
-    # clear QA win and neutral QH/QP behavior, so use the same conservative
-    # size threshold as the GPU path rather than asking users to set an env var.
+    # Projected replay only pays off for larger non-LASYM dense Jacobians on
+    # accelerator backends.  Current CPU profile shards are neutral to slightly
+    # faster on the simpler standard replay path, so leave CPU opt-in through
+    # VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS instead of widening the default.
     return int(n_params) >= 48
 
 

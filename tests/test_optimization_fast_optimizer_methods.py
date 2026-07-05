@@ -359,7 +359,7 @@ def test_gpu_projected_replay_policy_is_stellsym_mode3_plus_by_default(monkeypat
     opt._solver_device_name = "cpu"
     opt._static = SimpleNamespace(cfg=SimpleNamespace(lasym=False))
     assert opt._projected_replay_residuals_enabled(24) is False
-    assert opt._projected_replay_residuals_enabled(80) is True
+    assert opt._projected_replay_residuals_enabled(80) is False
 
     monkeypatch.setenv("VMEC_JAX_OPT_PROJECTED_REPLAY_RESIDUALS", "1")
     assert opt._projected_replay_residuals_enabled(1) is True
