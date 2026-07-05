@@ -364,10 +364,16 @@ def _replay_column_chunk_default(*, tape, tangents) -> int | None:
             total += int(arr.size) * max(1, int(arr.dtype.itemsize))
         return total
 
-    bytes_per_col = max(
-        _tree_nbytes(getattr(tape, "dynamic_initial_carry", None)),
-        _tree_nbytes(getattr(tape, "dynamic_base_carries_stacked", None)),
-    )
+    if bool(getattr(tape, "jvp_only", False)):
+        # JVP-only dynamic-basepoint replay now passes a single initial carry to
+        # the JIT entry point.  Sizing chunks from the full saved base-history
+        # tree is therefore over-conservative and can add needless replay calls.
+        bytes_per_col = _tree_nbytes(getattr(tape, "dynamic_initial_carry", None))
+    else:
+        bytes_per_col = max(
+            _tree_nbytes(getattr(tape, "dynamic_initial_carry", None)),
+            _tree_nbytes(getattr(tape, "dynamic_base_carries_stacked", None)),
+        )
     if bytes_per_col <= 0:
         return None
 

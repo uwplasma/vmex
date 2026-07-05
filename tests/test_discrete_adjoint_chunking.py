@@ -188,6 +188,20 @@ def test_replay_column_chunk_default_uses_module_default(monkeypatch):
     assert chunk == 1
 
 
+def test_replay_column_chunk_default_uses_initial_carry_for_jvp_only(monkeypatch):
+    monkeypatch.setenv("VMEC_JAX_REPLAY_COLUMN_TARGET_MB", "0.001")
+    tape = SimpleNamespace(
+        dynamic_initial_carry=(np.zeros(128, dtype=np.uint8),),
+        dynamic_base_carries_stacked=(np.zeros(4096, dtype=np.uint8),),
+        jvp_only=True,
+    )
+    tangents = np.zeros((10, 1), dtype=float)
+
+    chunk = da._replay_column_chunk_default(tape=tape, tangents=tangents)
+
+    assert chunk == 8
+
+
 def test_replay_column_target_default_is_relaxed_after_memory_fix():
     assert da._DEFAULT_REPLAY_COLUMN_TARGET_MB == 4096.0
 
