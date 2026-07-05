@@ -36,10 +36,10 @@ def test_radial_smoothing_metric_scales_and_scan_restart_payload_edges():
 
     rhs3 = np.arange(12.0).reshape(3, 2, 2)
     assert np.asarray(solve._radial_tridi_smooth_dirichlet(rhs3, alpha=0.25)).shape == rhs3.shape
+    rhs4 = np.arange(12.0).reshape(3, 2, 2, 1)
+    assert np.asarray(solve._radial_tridi_smooth_dirichlet(rhs4, alpha=0.25)).shape == rhs4.shape
     with pytest.raises(ValueError, match="ndim>=2"):
         solve._radial_tridi_smooth_dirichlet(np.ones(3), alpha=1.0)
-    with pytest.raises(ValueError, match=r"expected \(ns,K\) or \(ns,M,N\)"):
-        solve._radial_tridi_smooth_dirichlet(np.ones((3, 2, 2, 1)), alpha=1.0)
     with pytest.raises(ValueError, match="ndim>=2"):
         solve._radial_tridi_smooth_dirichlet(np.ones((3, 2, 2)), alpha=1.0, allow_3d=False)
 

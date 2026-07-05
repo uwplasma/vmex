@@ -775,8 +775,9 @@ def test_radial_tridi_smoothing_matches_dense_dirichlet_reference():
     assert _radial_tridi_smooth_dirichlet(rhs, alpha=0.0, skip_nonpositive=True) is rhs
     with pytest.raises(ValueError, match="ndim>=2"):
         _radial_tridi_smooth_dirichlet(np.arange(3.0), alpha=alpha)
-    with pytest.raises(ValueError, match="expected \\(ns,K\\) or \\(ns,M,N\\)"):
-        _radial_tridi_smooth_dirichlet(np.zeros((3, 1, 1, 1)), alpha=alpha)
+    rhs4 = rhs.reshape(4, 2, 1, 1)
+    smoothed4 = _radial_tridi_smooth_dirichlet(rhs4, alpha=alpha)
+    np.testing.assert_allclose(np.asarray(smoothed4), expected.reshape(4, 2, 1, 1))
 
 
 def test_first_step_metric_mesh_and_adjoint_trace_helper_branches():

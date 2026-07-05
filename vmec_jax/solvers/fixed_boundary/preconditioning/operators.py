@@ -401,7 +401,13 @@ def radial_tridi_smooth_dirichlet(
     skip_nonpositive: bool = False,
     allow_3d: bool = True,
 ):
-    """Solve the Dirichlet tri-diagonal smoothing system along the radial axis."""
+    """Smooth one or more spectral blocks along the VMEC radial axis.
+
+    VMEC preconditioning applies the same scalar Dirichlet tri-diagonal solve
+    independently to every non-radial coefficient column.  Accepting any
+    ``(ns, ...)`` tensor keeps accelerated scan batches from needing ad-hoc
+    reshapes before they can use the same smoother as the scalar/block paths.
+    """
 
     if skip_nonpositive and alpha <= 0.0:
         return rhs
@@ -411,12 +417,12 @@ def radial_tridi_smooth_dirichlet(
         orig_shape = None
     elif rhs.ndim < 2:
         raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
-    elif allow_3d and rhs.ndim == 3:
+    elif allow_3d and rhs.ndim >= 3:
         ns = int(rhs.shape[0])
         rhs2 = rhs.reshape(ns, -1)
         orig_shape = rhs.shape
     elif allow_3d:
-        raise ValueError(f"expected (ns,K) or (ns,M,N), got {rhs.shape}")
+        raise ValueError(f"expected (ns,K) or (ns,...), got {rhs.shape}")
     else:
         raise ValueError(f"expected (ns,...) with ndim>=2, got {rhs.shape}")
     ns = int(rhs2.shape[0])

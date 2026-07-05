@@ -944,8 +944,8 @@ def test_radial_mesh_and_axis_reset_helpers_cover_small_mesh_edges():
 
     with pytest.raises(ValueError, match="ndim>=2"):
         solve._radial_tridi_smooth_dirichlet(np.asarray([1.0]), alpha=1.0)
-    with pytest.raises(ValueError, match=r"\(ns,K\) or \(ns,M,N\)"):
-        solve._radial_tridi_smooth_dirichlet(np.ones((3, 1, 1, 1)), alpha=1.0)
+    smoothed_4d = solve._radial_tridi_smooth_dirichlet(np.ones((3, 1, 1, 1)), alpha=1.0)
+    assert np.asarray(smoothed_4d).shape == (3, 1, 1, 1)
     with pytest.raises(ValueError, match="ndim>=2"):
         solve._radial_tridi_smooth_dirichlet(np.ones((3, 1, 1)), alpha=1.0, allow_3d=False)
 
