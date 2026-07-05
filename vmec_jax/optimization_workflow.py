@@ -1228,6 +1228,13 @@ def build_quasi_isodynamic_objective_stage(
     residuals_from_state._qs_total_from_state = _qs_total_from_state
     residuals_from_state._objective_family = "qi"
     _attach_packed_state_autodiff_hooks(residuals_from_state)
+    _objective_terms.attach_qi_block_summed_objective_cotangent_hook(
+        residuals_from_state,
+        bound_scalar_objectives,
+        tuple(qi_objectives),
+        ctx,
+        field_eval,
+    )
 
     optimizer = FixedBoundaryExactOptimizer(
         static,

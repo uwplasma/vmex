@@ -271,10 +271,57 @@ def attach_block_summed_objective_cotangent_hook(
     return residuals_from_state
 
 
+def attach_qi_block_summed_objective_cotangent_hook(
+    residuals_from_state: Callable,
+    scalar_objectives: Sequence[ObjectiveTerm],
+    qi_objectives: Sequence[QIObjectiveTerm],
+    ctx: StageContext,
+    field_eval: Callable[[object], dict],
+) -> Callable:
+    """Attach a scalar QI objective cotangent hook with one shared field solve.
+
+    QI optimization residuals combine inexpensive scalar terms with expensive
+    Boozer/QI field terms.  Scalar-adjoint optimizer routes only need
+    ``0.5 * sum_i ||r_i||^2`` and its state cotangent, so this hook evaluates
+    the shared QI field once and sums block costs directly instead of building
+    one large concatenated residual vector.
+    """
+
+    def state_objective_value_and_cotangent_from_packed(packed_state, layout):
+        """Evaluate the QI block-summed scalar objective and state cotangent."""
+        from vmec_jax._compat import jax, jnp as _jnp
+        from vmec_jax.state import unpack_state
+
+        packed_state = _jnp.asarray(packed_state, dtype=_jnp.float64)
+
+        def _objective(packed):
+            state = unpack_state(packed, layout)
+            field = field_eval(state)
+            total = _jnp.asarray(0.0, dtype=_jnp.float64)
+            for term in scalar_objectives:
+                residual = _jnp.asarray(term.residual(ctx, state), dtype=_jnp.float64).reshape(-1)
+                total = total + 0.5 * _jnp.vdot(residual, residual)
+            for term in qi_objectives:
+                residual = _jnp.asarray(term.residual_and_total(ctx, state, field)[0], dtype=_jnp.float64).reshape(-1)
+                total = total + 0.5 * _jnp.vdot(residual, residual)
+            return total
+
+        value, cotangent = jax.value_and_grad(_objective)(packed_state)
+        cotangent = _jnp.nan_to_num(cotangent, nan=0.0, posinf=0.0, neginf=0.0)
+        return value, cotangent
+
+    state_objective_value_and_cotangent_from_packed._vmec_jax_cotangent_source = "qi_objective_block_sum"
+    residuals_from_state._state_objective_value_and_cotangent_from_packed = (
+        state_objective_value_and_cotangent_from_packed
+    )
+    return residuals_from_state
+
+
 __all__ = [
     "FixedBoundaryObjectiveStage",
     "ObjectiveTerm",
     "QIObjectiveTerm",
+    "attach_qi_block_summed_objective_cotangent_hook",
     "StageContext",
     "attach_block_summed_objective_cotangent_hook",
     "objective_block_summary",

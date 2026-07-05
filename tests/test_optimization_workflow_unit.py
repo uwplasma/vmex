@@ -638,6 +638,11 @@ def test_build_quasi_isodynamic_stage_wires_shared_field_residuals(monkeypatch) 
         },
     )
     assert captured["residuals_from_state"]._qs_total_from_state("state") == 11.0
+    assert (
+        captured["residuals_from_state"]._state_objective_value_and_cotangent_from_packed
+        ._vmec_jax_cotangent_source
+        == "qi_objective_block_sum"
+    )
     assert captured["field_kwargs"]["state"] == "state"
     assert captured["field_kwargs"]["surfaces"] == [0.25, 0.75]
     assert captured["field_kwargs"]["booz_constants"] == "constants"

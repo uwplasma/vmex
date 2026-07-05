@@ -1331,6 +1331,88 @@ def test_workflow_residuals_attach_packed_state_cotangent_hooks() -> None:
     )
 
 
+def test_qi_block_summed_objective_cotangent_matches_full_residual() -> None:
+    pytest.importorskip("jax")
+    import jax
+    import jax.numpy as jnp
+    from vmec_jax.optimizers.fixed_boundary.objective_terms import (
+        ObjectiveTerm,
+        QIObjectiveTerm,
+        attach_packed_state_autodiff_hooks,
+        attach_qi_block_summed_objective_cotangent_hook,
+    )
+    from vmec_jax.state import unpack_state
+
+    state = _state_from_coeffs(r=2.0, z=3.0)
+    packed = pack_state(state)
+    ctx = SimpleNamespace()
+
+    scalar = ObjectiveTerm(
+        "aspect",
+        lambda _ctx, st: jnp.asarray([st.Rcos[0, 0] + 2.0 * st.Zcos[0, 0]], dtype=jnp.float64),
+        target=1.0,
+        weight=0.5,
+    )
+
+    def field_eval(st):
+        return {
+            "product": st.Rcos[0, 0] * st.Zcos[0, 0],
+            "shift": st.Rcos[0, 0] - 1.0,
+        }
+
+    qi_term = QIObjectiveTerm(
+        "qi",
+        lambda _ctx, st, field: (
+            jnp.asarray(
+                [field["product"], st.Zcos[0, 0] - field["shift"]],
+                dtype=jnp.float64,
+            ),
+            0.0,
+        ),
+    )
+
+    def residuals_from_state(st):
+        field = field_eval(st)
+        return jnp.concatenate(
+            [
+                scalar.residual(ctx, st),
+                qi_term.residual_and_total(ctx, st, field)[0],
+            ]
+        )
+
+    residuals_from_state = attach_packed_state_autodiff_hooks(residuals_from_state)
+    attach_qi_block_summed_objective_cotangent_hook(
+        residuals_from_state,
+        (scalar,),
+        (qi_term,),
+        ctx,
+        field_eval,
+    )
+    assert (
+        residuals_from_state._state_objective_value_and_cotangent_from_packed
+        ._vmec_jax_cotangent_source
+        == "qi_objective_block_sum"
+    )
+
+    def full_residual_objective(packed_arg):
+        residual = residuals_from_state(unpack_state(packed_arg, state.layout))
+        return 0.5 * jnp.vdot(residual, residual)
+
+    expected_value, expected_cotangent = jax.value_and_grad(full_residual_objective)(packed)
+    value, cotangent = residuals_from_state._state_objective_value_and_cotangent_from_packed(
+        packed,
+        state.layout,
+    )
+
+    assert float(value) == pytest.approx(float(expected_value))
+    np.testing.assert_allclose(
+        np.asarray(cotangent),
+        np.asarray(expected_cotangent),
+        rtol=1e-12,
+        atol=1e-12,
+    )
+
+
 def test_qh_and_qs_residual_cotangent_operator_factories(monkeypatch) -> None:
     import jax.numpy as jnp
     import vmec_jax.modes as modes_module
