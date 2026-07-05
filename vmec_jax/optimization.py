@@ -254,6 +254,7 @@ class FixedBoundaryExactOptimizer:
         self._initial_state_packed_helper = None
         self._initial_tangent_cache: dict = {}
         self._initial_tangent_direction_cache: dict = {}
+        self._initial_tangent_jacfwd_helper_cache: dict = {}
         self._last_jacobian_residual: np.ndarray | None = None
         self._last_jacobian_source = "exact_tape_replay"
         self._trial_residual_cache: OrderedDict[bytes, np.ndarray] = OrderedDict()
@@ -956,6 +957,69 @@ class FixedBoundaryExactOptimizer:
     _jvp_only_exact_tape_enabled = jvp_only_exact_tape_enabled
     _jvp_only_basepoint_carries_enabled = jvp_only_basepoint_carries_enabled
 
+    @staticmethod
+    def _initial_tangent_jacfwd_enabled(n_params: int) -> bool:
+        """Return True when dense initial tangents should use the JAX Jacobian helper.
+
+        For one-dimensional parameter spaces a single JVP has the least overhead.
+        For multi-parameter optimization, the shape-stable ``jacfwd`` helper
+        avoids rebuilding a Python-side linearization plus identity-direction
+        vmap for every branch-local cache miss.  Users can set
+        ``VMEC_JAX_OPT_INITIAL_TANGENTS_JACFWD=0`` for before/after profiling.
+        """
+
+        if int(n_params) <= 1:
+            return False
+        flag = os.environ.get("VMEC_JAX_OPT_INITIAL_TANGENTS_JACFWD", "1").strip().lower()
+        return flag not in ("0", "false", "no")
+
+    def _initial_tangent_jacfwd_helper(self, params, axis_override: dict, cache_key):
+        """Return a cached JIT helper for branch-local initial-state tangents."""
+
+        if not hasattr(self, "_initial_tangent_jacfwd_helper_cache"):
+            self._initial_tangent_jacfwd_helper_cache = {}
+        params = jnp.asarray(params, dtype=jnp.float64)
+        axis_items = tuple(
+            (str(name), jnp.asarray(value, dtype=params.dtype))
+            for name, value in sorted(axis_override.items())
+        )
+        axis_signature = tuple(
+            (name, tuple(value.shape), str(value.dtype))
+            for name, value in axis_items
+        )
+        if isinstance(cache_key, tuple) and len(cache_key) >= 6:
+            # Keep the helper shape/static-key branch-local but do not include
+            # lflip.  The compiled JAX graph evaluates the sign branch from the
+            # dynamic parameters; the result cache remains lflip-sensitive.
+            base_key = (int(cache_key[0]), bool(cache_key[2]), bool(cache_key[3]), int(cache_key[4]), int(cache_key[5]))
+        else:
+            base_key = (int(params.size), "fallback")
+        helper_key = (
+            "initial_tangent_jacfwd_v1",
+            base_key,
+            axis_signature,
+            str(params.dtype),
+            _optimizer_backend_name(getattr(self, "_solver_device_name", None)),
+        )
+        helper = self._initial_tangent_jacfwd_helper_cache.get(helper_key)
+        if helper is not None:
+            return helper, True, tuple(name for name, _value in axis_items), tuple(value for _name, value in axis_items)
+
+        axis_names = tuple(name for name, _value in axis_items)
+
+        def _packed_initial_state(p, *axis_values):
+            local_axis = {name: value for name, value in zip(axis_names, axis_values)}
+            return self._solver_initial_state_packed_from_params(p, local_axis)
+
+        jac_fun = jax.jacfwd(_packed_initial_state, argnums=0)
+
+        def _helper(p, *axis_values):
+            return jnp.swapaxes(jac_fun(p, *axis_values), 0, 1)
+
+        helper = jax.jit(_helper)
+        self._initial_tangent_jacfwd_helper_cache[helper_key] = helper
+        return helper, False, axis_names, tuple(value for _name, value in axis_items)
+
     def _profile_initial_tangent_cache_branch(self, profile_prefix: str, cache_key, *, event: str | None = None) -> None:
         """Record bounded branch metadata for initial-state tangent cache use.
 
@@ -1021,32 +1085,50 @@ class FixedBoundaryExactOptimizer:
                 key: jnp.asarray(value, dtype=params.dtype) for key, value in axis_override.items()
             }
 
-            t_linearize = time.perf_counter()
-            _, initial_state_linear = jax.linearize(
-                lambda p: self._solver_initial_state_packed_from_params(p, axis_override),
-                params,
-            )
-            self._profile_add(
-                f"{profile_prefix}_initial_tangents_linearize",
-                time.perf_counter() - t_linearize,
-            )
-            if int(params.size) == 1:
-                t_jvp = time.perf_counter()
-                initial_tangents = initial_state_linear(jnp.ones_like(params))[None, :]
+            if self._initial_tangent_jacfwd_enabled(int(params.size)):
+                helper, cache_hit, _axis_names, axis_values = self._initial_tangent_jacfwd_helper(
+                    params,
+                    axis_override,
+                    cache_key,
+                )
+                self._profile_add(
+                    f"{profile_prefix}_initial_tangents_jacfwd_helper_cache_{'hit' if cache_hit else 'miss'}",
+                    0.0,
+                )
+                t_jacfwd = time.perf_counter()
+                initial_tangents = helper(params, *axis_values)
                 initial_tangents = self._profile_async_phase(
-                    f"{profile_prefix}_initial_tangents_single_jvp",
-                    t_jvp,
+                    f"{profile_prefix}_initial_tangents_jacfwd",
+                    t_jacfwd,
                     initial_tangents,
                 )
             else:
-                directions = self._initial_tangent_directions(params, profile_prefix=profile_prefix)
-                t_vmap = time.perf_counter()
-                initial_tangents = jax.vmap(initial_state_linear)(directions)
-                initial_tangents = self._profile_async_phase(
-                    f"{profile_prefix}_initial_tangents_vmap",
-                    t_vmap,
-                    initial_tangents,
+                t_linearize = time.perf_counter()
+                _, initial_state_linear = jax.linearize(
+                    lambda p: self._solver_initial_state_packed_from_params(p, axis_override),
+                    params,
                 )
+                self._profile_add(
+                    f"{profile_prefix}_initial_tangents_linearize",
+                    time.perf_counter() - t_linearize,
+                )
+                if int(params.size) == 1:
+                    t_jvp = time.perf_counter()
+                    initial_tangents = initial_state_linear(jnp.ones_like(params))[None, :]
+                    initial_tangents = self._profile_async_phase(
+                        f"{profile_prefix}_initial_tangents_single_jvp",
+                        t_jvp,
+                        initial_tangents,
+                    )
+                else:
+                    directions = self._initial_tangent_directions(params, profile_prefix=profile_prefix)
+                    t_vmap = time.perf_counter()
+                    initial_tangents = jax.vmap(initial_state_linear)(directions)
+                    initial_tangents = self._profile_async_phase(
+                        f"{profile_prefix}_initial_tangents_vmap",
+                        t_vmap,
+                        initial_tangents,
+                    )
             if cache_key is not None:
                 t_store = time.perf_counter()
                 self._initial_tangent_cache[cache_key] = initial_tangents

@@ -589,6 +589,7 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
             "exact_tape_build_unattributed": {"count": 1, "wall_time_s": 0.7},
             "exact_tape_solver_iteration_loop_unattributed": {"count": 1, "wall_time_s": 0.6},
             "jacobian_initial_tangents": {"count": 1, "wall_time_s": 1.4},
+            "jacobian_initial_tangents_jacfwd": {"count": 1, "wall_time_s": 0.25},
             "jacobian_initial_tangents_linearize": {"count": 1, "wall_time_s": 0.3},
             "jacobian_initial_tangents_vmap_dispatch": {"count": 1, "wall_time_s": 0.2},
             "jacobian_initial_tangents_vmap_ready": {"count": 1, "wall_time_s": 0.9},
@@ -639,6 +640,7 @@ def test_exact_callback_summary_preserves_cold_tangent_replay_and_scan_trial_buc
     assert metrics["accepted_replay_dispatch_s"] == pytest.approx(0.6)
     assert metrics["accepted_replay_ready_s"] == 1.9
     assert metrics["initial_tangents_s"] == 1.4
+    assert metrics["initial_tangents_jacfwd_s"] == 0.25
     assert metrics["initial_tangents_linearize_s"] == 0.3
     assert metrics["initial_tangents_vmap_dispatch_s"] == 0.2
     assert metrics["initial_tangents_vmap_ready_s"] == 0.9
@@ -691,6 +693,7 @@ def test_performance_matrix_loaded_summary_adds_scan_cache_and_jvp_sections(tmp_
                 "profile": {
                     "exact_solve_with_tape_jvp_only_total": {"count": 1, "wall_time_s": 5.0},
                     "exact_tape_build_jvp_only": {"count": 1, "wall_time_s": 4.5},
+                    "jacobian_initial_tangents_jacfwd": {"count": 1, "wall_time_s": 0.25},
                     "jacobian_initial_tangents_vmap_dispatch": {"count": 1, "wall_time_s": 0.4},
                     "jacobian_initial_tangents_vmap_ready": {"count": 1, "wall_time_s": 0.8},
                     "jacobian_initial_tangents_cache_miss_lflip_false": {"count": 1, "wall_time_s": 0.0},
@@ -731,6 +734,7 @@ def test_performance_matrix_loaded_summary_adds_scan_cache_and_jvp_sections(tmp_
     assert projected_jvp["jvp"]["basepoint_carries"] is True
     assert projected_jvp["jvp"]["exact_solve_with_tape_s"] == 5.0
     assert projected_jvp["jvp"]["tape_build_s"] == 4.5
+    assert projected_jvp["jvp"]["initial_tangents_jacfwd_s"] == 0.25
     assert projected_jvp["initial_tangent_cache"]["miss_lflip_false"] == 1
     assert projected_jvp["initial_tangent_cache"]["miss_lflip_true"] == 2
     assert projected_jvp["initial_tangent_cache"]["hit_lflip_false"] == 3

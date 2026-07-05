@@ -105,6 +105,56 @@ def test_initial_tangent_cache_branch_profile_is_bounded() -> None:
         assert opt._profile[key]["count"] >= 1
 
 
+def test_initial_tangent_columns_use_jitted_jacfwd_helper(monkeypatch) -> None:
+    import jax.numpy as jnp
+
+    opt = _bare_optimizer_for_state_ops()
+    opt._initial_tangent_jacfwd_helper_cache = {}
+    opt._layout = SimpleNamespace(size=2)
+    opt._initial_tangent_cache_key = lambda _params: (2, False, True, False, 1, 1)
+    opt._solver_initial_state_packed_from_params = lambda p, axis: jnp.asarray(
+        [p[0] + 3.0 * p[1] + axis["shift"][0], 2.0 * p[0] - p[1]],
+        dtype=jnp.float64,
+    )
+    monkeypatch.delenv("VMEC_JAX_OPT_INITIAL_TANGENTS_JACFWD", raising=False)
+
+    tangents = opt._initial_tangent_columns(
+        np.asarray([1.0, 2.0]),
+        {"shift": jnp.asarray([0.5], dtype=jnp.float64)},
+        profile_prefix="jacobian",
+    )
+
+    np.testing.assert_allclose(np.asarray(tangents), [[1.0, 2.0], [3.0, -1.0]])
+    assert opt._profile["jacobian_initial_tangents_jacfwd_helper_cache_miss"]["count"] == 1
+    assert opt._profile["jacobian_initial_tangents_jacfwd"]["count"] == 1
+    assert "jacobian_initial_tangents_linearize" not in opt._profile
+
+
+def test_initial_tangent_columns_can_disable_jacfwd_helper(monkeypatch) -> None:
+    import jax.numpy as jnp
+
+    opt = _bare_optimizer_for_state_ops()
+    opt._initial_tangent_jacfwd_helper_cache = {}
+    opt._layout = SimpleNamespace(size=2)
+    opt._initial_tangent_cache_key = lambda _params: (2, False, True, False, 1, 1)
+    opt._solver_initial_state_packed_from_params = lambda p, axis: jnp.asarray(
+        [p[0] + axis["shift"][0], p[1] - axis["shift"][0]],
+        dtype=jnp.float64,
+    )
+    monkeypatch.setenv("VMEC_JAX_OPT_INITIAL_TANGENTS_JACFWD", "0")
+
+    tangents = opt._initial_tangent_columns(
+        np.asarray([1.0, 2.0]),
+        {"shift": jnp.asarray([0.5], dtype=jnp.float64)},
+        profile_prefix="jacobian",
+    )
+
+    np.testing.assert_allclose(np.asarray(tangents), [[1.0, 0.0], [0.0, 1.0]])
+    assert opt._profile["jacobian_initial_tangents_linearize"]["count"] == 1
+    assert opt._profile["jacobian_initial_tangents_vmap"]["count"] == 1
+    assert "jacobian_initial_tangents_jacfwd" not in opt._profile
+
+
 def test_initial_state_from_params_uses_jit_helper_and_cache(monkeypatch) -> None:
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._initial_state_cache = OrderedDict()

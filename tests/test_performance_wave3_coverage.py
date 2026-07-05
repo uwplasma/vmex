@@ -38,6 +38,7 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
                         "accepted_replay_dispatch_s": 0.2,
                         "accepted_replay_ready_s": 2.0,
                         "initial_tangents_s": 1.5,
+                        "initial_tangents_jacfwd_s": 0.35,
                         "residual_tangents_s": 0.7,
                         "projected_replay_total_s": 1.1,
                         "projected_replay_dispatch_s": 0.2,
@@ -105,6 +106,7 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
     assert "Projected replay / JVP details:" in output
     assert "jvp_tape" in output
     assert "base_carries" in output
+    assert "init_jacfwd_s" in output
     assert "init_miss_lflip_f" in output
     assert "init_miss_lflip_t" in output
     assert "proj_replay_s" in output
