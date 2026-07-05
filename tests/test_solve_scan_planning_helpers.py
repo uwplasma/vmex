@@ -1089,6 +1089,22 @@ def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     assert _cache_key(stage_prev_fsq=3) == _cache_key(stage_prev_fsq=4)
     assert _cache_key(stage_transition_factor=20.0) == base
     assert _cache_key(stage_transition_scale=0.25) == base
+    state_only = _cache_key(
+        state_only_scan=True,
+        scan_light=False,
+        scan_minimal=True,
+        scan_fallback_iters=7,
+        scan_fallback_badjac_limit=2,
+    )
+    state_only_tuned = _cache_key(
+        state_only_scan=True,
+        scan_light=False,
+        scan_minimal=True,
+        scan_fallback_iters=99,
+        scan_fallback_badjac_limit=50,
+    )
+    assert state_only == state_only_tuned
+    assert state_only[-2:] == (0, 0)
 
 
 def test_scan_iteration_runtime_plan_resolves_offsets_and_cache_key():

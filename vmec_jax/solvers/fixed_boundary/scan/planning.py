@@ -464,6 +464,17 @@ def build_vmec2000_scan_cache_key(
     scan_fallback_fsq_abs: float,
 ) -> tuple[Any, ...]:
     """Construct the JIT-cache key for the VMEC2000 scan runner."""
+    # State-only scan runners are used for residual-only trial solves.  The
+    # fallback probe is disabled for that path by ``resolve_scan_run_flags``, so
+    # the fallback integer gates must not fragment the cache.  Normal scan
+    # runners keep these fields structural because they affect abort/fallback
+    # semantics and VMEC2000-parity diagnostics.
+    fallback_iters_key = 0 if bool(state_only_scan) else int(scan_fallback_iters)
+    fallback_badjac_key = (
+        0
+        if bool(state_only_scan) or int(fallback_iters_key) <= 0
+        else int(scan_fallback_badjac_limit)
+    )
     return (
         "vmec2000_scan_v10",
         static_key,
@@ -488,8 +499,8 @@ def build_vmec2000_scan_cache_key(
         bool(state_only_scan),
         bool(scan_light),
         bool(scan_minimal),
-        int(scan_fallback_iters),
-        int(scan_fallback_badjac_limit),
+        int(fallback_iters_key),
+        int(fallback_badjac_key),
     )
 
 

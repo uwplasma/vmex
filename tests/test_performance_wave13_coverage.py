@@ -152,6 +152,26 @@ def test_vmec2000_scan_key_keeps_only_structural_scalar_controls_after_operand_r
     assert _scan_cache_key(scan_fallback_fsq_abs=1.0e-4) == base
 
 
+def test_state_only_scan_key_ignores_disabled_fallback_integer_policy():
+    base = _scan_cache_key(state_only_scan=True, scan_light=False, scan_minimal=True)
+
+    assert _scan_cache_key(
+        state_only_scan=True,
+        scan_light=False,
+        scan_minimal=True,
+        scan_fallback_iters=1,
+        scan_fallback_badjac_limit=1,
+    ) == base
+    assert _scan_cache_key(
+        state_only_scan=True,
+        scan_light=False,
+        scan_minimal=True,
+        scan_fallback_iters=200,
+        scan_fallback_badjac_limit=99,
+    ) == base
+    assert _scan_cache_key(scan_fallback_iters=21) != _scan_cache_key(scan_fallback_iters=22)
+
+
 def test_accelerated_scan_v2_cache_key_labels_runtime_target_policy():
     base = ("scan_v2", ("static",), ("wout",), ("edge",), 25, False, 0.5, 0.25, True, True)
     changed = ("scan_v2", ("static",), ("wout",), ("edge",), 25, True, 0.5, 0.25, True, True)
