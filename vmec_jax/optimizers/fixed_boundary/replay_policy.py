@@ -120,7 +120,8 @@ def projected_replay_residuals_enabled(optimizer, n_params: int | None = None) -
         return False
     if n_params is None:
         return False
-    if bool(getattr(getattr(optimizer._static, "cfg", None), "lasym", False)):
+    static = getattr(optimizer, "_static", None)
+    if bool(getattr(getattr(static, "cfg", None), "lasym", False)):
         return False
     # Projected replay only pays off for larger non-LASYM dense Jacobians.
     # CPU profiling on the QA/QH/QP max_mode=3 exact-callback shards showed a
