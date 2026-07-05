@@ -445,10 +445,15 @@ def test_solver_device_context_and_trial_scan_env_branches(monkeypatch) -> None:
     assert opt._use_scan_for_trial_solves() is True
     monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN")
     opt._objective_family = "qs"
+    opt._helicity_m = 1
+    opt._helicity_n = 0
     opt._solver_device_name = "gpu"
     assert opt._use_scan_for_trial_solves() is True
     opt._solver_device_name = "cpu"
     assert opt._use_scan_for_trial_solves() is True
+    opt._helicity_m = 0
+    opt._helicity_n = 1
+    assert opt._use_scan_for_trial_solves() is False
     opt._objective_family = "qi"
     assert opt._use_scan_for_trial_solves() is False
 

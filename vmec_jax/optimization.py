@@ -456,17 +456,28 @@ class FixedBoundaryExactOptimizer:
 
         Exact-optimizer trial residuals are short VMEC solves called repeatedly
         by SciPy's trust-region line search.  They do not need an adjoint tape.
-        Same-shape QA/QH/QP mode-4 probes showed the VMEC2000-compatible scan
-        path now reuses compiled runners across boundary updates and is modestly
-        faster than the Python loop with identical trial metrics.  Environment
-        overrides always win so regressions can be isolated per machine/problem.
+        Same-shape QA/QH probes show the VMEC2000-compatible scan path reuses
+        compiled runners across boundary updates.  QP/QI high-DOF probes still
+        spend more time in cold scan-runner setup than they save in the device
+        loop, so those families use conservative loop trials unless explicitly
+        overridden.  Environment overrides always win so regressions can be
+        isolated per machine/problem.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
             return True
         if forced in ("0", "false", "no", "off", "loop", "none"):
             return False
-        if str(getattr(self, "_objective_family", "")).strip().lower() == "qi":
+        family = str(getattr(self, "_objective_family", "")).strip().lower()
+        if family == "qi":
+            return False
+        try:
+            helicity_m = None if self._helicity_m is None else int(self._helicity_m)
+            helicity_n = None if self._helicity_n is None else int(self._helicity_n)
+        except Exception:
+            helicity_m = None
+            helicity_n = None
+        if family == "qs" and helicity_m == 0 and helicity_n not in (None, 0):
             return False
         return self._exact_tape_backend_name() in ("cpu", "gpu", "cuda", "tpu", "rocm")
 

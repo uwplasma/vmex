@@ -2054,12 +2054,18 @@ def test_fixed_boundary_optimizer_trial_scan_default_and_env_override(monkeypatc
     opt = object.__new__(FixedBoundaryExactOptimizer)
     opt._solver_device_name = "cpu"
     opt._objective_family = "qs"
+    opt._helicity_m = 1
+    opt._helicity_n = 0
 
     monkeypatch.delenv("VMEC_JAX_OPT_TRIAL_SCAN", raising=False)
     assert opt._use_scan_for_trial_solves() is True
 
     opt._solver_device_name = "gpu"
     assert opt._use_scan_for_trial_solves() is True
+
+    opt._helicity_m = 0
+    opt._helicity_n = -1
+    assert opt._use_scan_for_trial_solves() is False
 
     opt._objective_family = "qi"
     assert opt._use_scan_for_trial_solves() is False
