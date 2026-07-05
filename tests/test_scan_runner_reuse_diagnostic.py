@@ -116,6 +116,19 @@ def test_scan_timing_snapshot_extracts_hit_miss_dispatch_fields() -> None:
                 "scan_runner_cache_hit_ready_s": 0.0,
                 "scan_runner_cache_miss_dispatch_s": 1.99,
                 "scan_runner_cache_miss_ready_s": 0.01,
+                "scan_runner_arg_leaf_count": 44,
+                "scan_runner_arg_array_leaf_count": 40,
+                "scan_runner_arg_scalar_leaf_count": 4,
+                "scan_runner_arg_array_nbytes": 4096,
+                "scan_runner_arg_path_arg0_state_array_nbytes": 2048,
+                "scan_runner_arg_path_arg0_cache_prec_rz_mats_array_nbytes": 1024,
+                "scan_runner_arg_path_arg0_state_leaf_count": 20,
+                "scan_runner_arg_path_arg0_cache_prec_rz_mats_leaf_count": 8,
+                "scan_runner_explicit_compile_count": 1,
+                "scan_runner_explicit_hlo_instruction_count": 99,
+                "scan_runner_explicit_hlo_op_multiply_count": 12,
+                "scan_runner_explicit_hlo_op_add_count": 8,
+                "scan_runner_explicit_lower_s": 0.3,
             }
         }
     )
@@ -126,6 +139,25 @@ def test_scan_timing_snapshot_extracts_hit_miss_dispatch_fields() -> None:
     assert timing["scan_runner_cache_lookup_s"] == 0.001
     assert timing["scan_runner_cache_miss_dispatch_s"] == 1.99
     assert timing["scan_runner_cache_miss_ready_s"] == 0.01
+    assert timing["scan_runner_arg_leaf_count"] == 44
+    assert timing["scan_runner_arg_array_leaf_count"] == 40
+    assert timing["scan_runner_arg_scalar_leaf_count"] == 4
+    assert timing["scan_runner_arg_array_nbytes"] == 4096
+    assert timing["scan_runner_explicit_compile_count"] == 1
+    assert timing["scan_runner_explicit_hlo_instruction_count"] == 99
+    assert timing["scan_runner_explicit_lower_s"] == 0.3
+    assert timing["scan_runner_arg_top_leaf_paths"] == [
+        {"path": "arg0_state", "value": 20},
+        {"path": "arg0_cache_prec_rz_mats", "value": 8},
+    ]
+    assert timing["scan_runner_arg_top_nbytes_paths"] == [
+        {"path": "arg0_state", "value": 2048},
+        {"path": "arg0_cache_prec_rz_mats", "value": 1024},
+    ]
+    assert timing["scan_runner_explicit_hlo_top_ops"] == [
+        {"op": "multiply", "value": 12},
+        {"op": "add", "value": 8},
+    ]
 
 
 def test_scan_timing_snapshot_missing_or_bad_values_default_to_zero() -> None:
