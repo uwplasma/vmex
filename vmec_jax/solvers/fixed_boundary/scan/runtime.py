@@ -267,6 +267,13 @@ def scan_hlo_summary_enabled(env_value: str | None = None) -> bool:
     return value.strip().lower() not in ("", "0", "false", "no", "off")
 
 
+def scan_arg_summary_enabled(env_value: str | None = None) -> bool:
+    """Return whether scan-runner input-tree size diagnostics are enabled."""
+
+    value = os.getenv("VMEC_JAX_SCAN_ARG_SUMMARY", "") if env_value is None else str(env_value)
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+
 def _hlo_text_from_lowered(lowered) -> str | None:
     """Return HLO text from a lowered JAX object when available."""
 
@@ -413,6 +420,30 @@ def record_scan_runner_arg_summary(
         scan_timing_stats[f"{prefix}_array_nbytes"] = int(group_nbytes.get(group_key, 0))
 
 
+def maybe_record_scan_runner_arg_summary(
+    args: tuple[Any, ...],
+    *,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+    env_value: str | None = None,
+) -> None:
+    """Optionally record scan-runner argument breadth without forcing compile.
+
+    This is a cheap profiling seam for classifying scan graph breadth.  It is
+    deliberately separate from explicit lowering/compile attribution so routine
+    benchmark runs can inspect the runner input tree without changing JAX's
+    lazy compilation behavior.
+    """
+
+    if not scan_arg_summary_enabled(env_value):
+        return
+    record_scan_runner_arg_summary(
+        args,
+        scan_timing_enabled=bool(scan_timing_enabled),
+        scan_timing_stats=scan_timing_stats,
+    )
+
+
 def maybe_explicit_compile_scan_runner(
     runner,
     args: tuple[Any, ...],
@@ -422,6 +453,7 @@ def maybe_explicit_compile_scan_runner(
     scan_timing_stats: dict[str, Any],
     perf_counter: Callable[[], float],
     env_value: str | None = None,
+    arg_summary_env_value: str | None = None,
 ):
     """Optionally lower/compile a scan runner before dispatch for attribution.
 
@@ -432,13 +464,16 @@ def maybe_explicit_compile_scan_runner(
     leaves cache keys and default production behavior unchanged.
     """
 
-    if not scan_explicit_compile_enabled(env_value):
+    explicit_compile = scan_explicit_compile_enabled(env_value)
+    if explicit_compile or scan_arg_summary_enabled(arg_summary_env_value):
+        record_scan_runner_arg_summary(
+            args,
+            scan_timing_enabled=bool(scan_timing_enabled),
+            scan_timing_stats=scan_timing_stats,
+        )
+
+    if not explicit_compile:
         return runner
-    record_scan_runner_arg_summary(
-        args,
-        scan_timing_enabled=bool(scan_timing_enabled),
-        scan_timing_stats=scan_timing_stats,
-    )
     lowered = None
     try:
         t_lower = perf_counter() if bool(scan_timing_enabled) else None

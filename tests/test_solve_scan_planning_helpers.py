@@ -32,11 +32,13 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     get_or_build_scan_runner,
     maybe_explicit_compile_scan_runner,
     maybe_record_scan_runner_hlo_summary,
+    maybe_record_scan_runner_arg_summary,
     record_scan_runner_arg_summary,
     resolve_scan_runtime_hooks,
     resolve_scan_runtime_hooks_from_env,
     run_scan_preflight_step,
     run_nonchunked_scan,
+    scan_arg_summary_enabled,
     scan_explicit_compile_enabled,
     scan_hlo_summary_enabled,
     scan_trace_context_or_null,
@@ -483,6 +485,32 @@ def test_record_scan_runner_arg_summary_counts_leaves_and_array_bytes():
     assert stats["scan_runner_arg_path_arg1_0_array_nbytes"] == small.nbytes
 
 
+def test_scan_arg_summary_is_independent_from_explicit_compile():
+    stats = {}
+    arr = jnp.ones((4,), dtype=jnp.float64)
+
+    assert not scan_arg_summary_enabled("0")
+    assert scan_arg_summary_enabled("1")
+
+    maybe_record_scan_runner_arg_summary(
+        (arr,),
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        env_value="0",
+    )
+    assert "scan_runner_arg_leaf_count" not in stats
+
+    maybe_record_scan_runner_arg_summary(
+        (arr,),
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        env_value="1",
+    )
+    assert stats["scan_runner_arg_leaf_count"] == 1
+    assert stats["scan_runner_arg_array_leaf_count"] == 1
+    assert stats["scan_runner_arg_array_nbytes"] == arr.nbytes
+
+
 def test_maybe_explicit_compile_scan_runner_records_success_and_returns_compiled():
     events = []
     stats = {
@@ -528,6 +556,40 @@ def test_maybe_explicit_compile_scan_runner_records_success_and_returns_compiled
     assert stats["scan_runner_explicit_compile_s"] == pytest.approx(0.75)
     assert stats["scan_runner_explicit_compile_count"] == 1
     assert stats["scan_runner_explicit_compile_miss_count"] == 1
+
+
+def test_maybe_explicit_compile_scan_runner_can_record_args_without_compiling():
+    events = []
+    stats = {}
+    arr = jnp.ones((2,), dtype=jnp.float64)
+
+    class Runner:
+        def lower(self, *_args):
+            events.append("lower")
+            raise AssertionError("lower should not run")
+
+        def __call__(self, *args):
+            events.append(("runner", args))
+            return "runner-result"
+
+    runner = Runner()
+    returned = maybe_explicit_compile_scan_runner(
+        runner,
+        (arr,),
+        cache_status="hit",
+        scan_timing_enabled=True,
+        scan_timing_stats=stats,
+        perf_counter=lambda: 1.0,
+        env_value="0",
+        arg_summary_env_value="1",
+    )
+
+    assert returned is runner
+    assert returned(arr) == "runner-result"
+    assert events == [("runner", (arr,))]
+    assert stats["scan_runner_arg_leaf_count"] == 1
+    assert stats["scan_runner_arg_array_leaf_count"] == 1
+    assert "scan_runner_explicit_compile_count" not in stats
 
 
 def test_maybe_explicit_compile_scan_runner_is_noop_or_safe_on_failure():
