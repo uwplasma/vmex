@@ -357,13 +357,14 @@ class FixedBoundaryExactOptimizer:
         """Resolve optimizer method aliases and the opt-in automatic policy.
 
         ``method="auto"`` is intentionally conservative and device-preserving:
-        it chooses the matrix-free trust-region path for profiled high-mode,
-        stellarator-symmetric QS CPU/default-backend lanes where cold-process
-        and memory-pressure profiles motivated the option. QI currently stays
-        on dense SciPy unless matrix-free is requested explicitly because QI
-        Boozer/bounce residual JVPs can be non-finite in cleanup stages. It does
-        not guarantee the fastest warm wall time for every run, and it never
-        moves work between CPU and GPU; explicit device choices are preserved.
+        it keeps the dense SciPy trust-region path unless the user explicitly
+        requests a specialized method. Short-route CPU profiling on QA/QH/QP
+        showed that the matrix-free SciPy interface can spend more time in
+        repeated VJPs than it saves by avoiding dense Jacobian materialization.
+        The matrix-free path remains available through
+        ``method="scipy_matrix_free"`` for memory-constrained experiments, while
+        ``method="auto_scalar"`` selects the scalar-trust route for high-mode
+        differentiable production studies.
         """
 
         method_key = str(method).strip().lower().replace("-", "_")
@@ -390,9 +391,6 @@ class FixedBoundaryExactOptimizer:
                 return "scalar_trust", scipy_lsmr_maxiter, f"auto_scalar:{suffix}high-mode-scalar-trust"
             if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
                 return "scipy", scipy_lsmr_maxiter, f"auto:dense-preserves-{backend}"
-            if self._objective_family == "qi":
-                return "scipy", scipy_lsmr_maxiter, "auto:qi-dense-default"
-            lsmr_maxiter = 4 if scipy_lsmr_maxiter is None else scipy_lsmr_maxiter
             if helicity_m == 1 and helicity_n == 0:
                 family = "qa"
             elif helicity_m == 0 and helicity_n not in (None, 0):
@@ -400,8 +398,8 @@ class FixedBoundaryExactOptimizer:
             elif helicity_m == 1 and helicity_n not in (None, 0):
                 family = "qh"
             else:
-                family = "qs"
-            return "scipy_matrix_free", lsmr_maxiter, f"auto:{family}-high-mode-matrix-free"
+                family = str(self._objective_family or "qs")
+            return "scipy", scipy_lsmr_maxiter, f"auto:{family}-dense-default"
 
         if backend in ("gpu", "cuda", "rocm", "tpu", "metal"):
             prefix = "auto_scalar" if scalar_auto_requested else "auto"

@@ -201,13 +201,13 @@ def test_fixed_boundary_exact_optimizer_init_uses_profiled_gpu_trial_loop_policy
     assert opt_forced_scan._exact_solver_kwargs["use_scan"] is False
 
 
-def test_auto_method_resolver_uses_matrix_free_for_high_mode_stellsym_cpu_cases(monkeypatch):
+def test_auto_method_resolver_keeps_dense_for_high_mode_cpu_cases(monkeypatch):
     opt = _run_ready_optimizer()
 
     assert opt._resolve_optimizer_method("auto", None) == (
-        "scipy_matrix_free",
-        4,
-        "auto:qa-high-mode-matrix-free",
+        "scipy",
+        None,
+        "auto:qa-dense-default",
     )
 
     opt._solver_device_name = "gpu"
@@ -227,17 +227,17 @@ def test_auto_method_resolver_uses_matrix_free_for_high_mode_stellsym_cpu_cases(
     opt._solver_device_name = None
     opt._helicity_n = -1
     assert opt._resolve_optimizer_method("auto", 7) == (
-        "scipy_matrix_free",
+        "scipy",
         7,
-        "auto:qh-high-mode-matrix-free",
+        "auto:qh-dense-default",
     )
 
     opt._helicity_m = 0
     opt._helicity_n = 1
     assert opt._resolve_optimizer_method("auto", None) == (
-        "scipy_matrix_free",
-        4,
-        "auto:qp-high-mode-matrix-free",
+        "scipy",
+        None,
+        "auto:qp-dense-default",
     )
 
     opt._objective_family = "qi"
@@ -753,36 +753,19 @@ def test_run_scipy_path_scales_callbacks_and_records_trace(monkeypatch):
     assert result["_history_dump"]["callback_trace"]["summary"]["jacobian:exact_tape_replay"]["count"] == 1
 
 
-def test_run_auto_method_records_resolved_matrix_free_policy(monkeypatch):
+def test_run_auto_method_records_resolved_dense_policy(monkeypatch):
     pytest.importorskip("scipy.optimize")
     import scipy.optimize
 
-    operator_calls = {}
-
-    class FakeOperator:
-        shape = (3, 1)
-
-        def matvec(self, vector):
-            operator_calls["matvec"] = np.asarray(vector, dtype=float).copy()
-            return np.asarray([vector[0], 2.0 * vector[0], 3.0 * vector[0]], dtype=float)
-
-        def matmat(self, matrix):
-            operator_calls["matmat"] = np.asarray(matrix, dtype=float).copy()
-            return np.vstack([matrix[0], 2.0 * matrix[0], 3.0 * matrix[0]])
-
-        def rmatvec(self, vector):
-            operator_calls["rmatvec"] = np.asarray(vector, dtype=float).copy()
-            return np.asarray([np.sum(vector)], dtype=float)
+    jacobian_calls = {}
 
     def fake_least_squares(residuals, y0, *, jac, method, tr_solver, tr_options, max_nfev, ftol, gtol, xtol, verbose):
         np.testing.assert_allclose(residuals(y0), [0.5, 3.0, 4.0])
-        op = jac(y0)
-        np.testing.assert_allclose(op.matvec(np.asarray([4.0])), [8.0, 16.0, 24.0])
-        np.testing.assert_allclose(op.matmat(np.asarray([[4.0, 5.0]])), [[8.0, 10.0], [16.0, 20.0], [24.0, 30.0]])
-        np.testing.assert_allclose(op.rmatvec(np.asarray([1.0, 2.0, 3.0])), [12.0])
+        jacobian_calls["dense"] = jac(y0)
+        np.testing.assert_allclose(jacobian_calls["dense"], [[2.0], [4.0], [6.0]])
         assert method == "trf"
         assert tr_solver == "lsmr"
-        assert tr_options == {"maxiter": 4}
+        assert tr_options == {}
         return SimpleNamespace(
             x=np.asarray([0.2]),
             cost=0.25,
@@ -790,12 +773,12 @@ def test_run_auto_method_records_resolved_matrix_free_policy(monkeypatch):
             njev=1,
             success=True,
             status=1,
-            message="synthetic matrix-free",
+            message="synthetic dense auto",
         )
 
     monkeypatch.setattr(scipy.optimize, "least_squares", fake_least_squares)
     opt = _run_ready_optimizer()
-    opt.residual_linear_operator = lambda _x: FakeOperator()
+    opt._jacobian_fun_tracked = lambda _x: np.asarray([[1.0], [2.0], [3.0]], dtype=float)
 
     result = opt.run(
         np.asarray([0.0]),
@@ -805,15 +788,13 @@ def test_run_auto_method_records_resolved_matrix_free_policy(monkeypatch):
         verbose=0,
     )
 
-    np.testing.assert_allclose(operator_calls["matvec"], [8.0])
-    np.testing.assert_allclose(operator_calls["matmat"], [[8.0, 10.0]])
-    np.testing.assert_allclose(operator_calls["rmatvec"], [1.0, 2.0, 3.0])
-    np.testing.assert_allclose(result["x"], [0.3])
-    assert result["_history_dump"]["method"] == "scipy_matrix_free"
+    np.testing.assert_allclose(jacobian_calls["dense"], [[2.0], [4.0], [6.0]])
+    np.testing.assert_allclose(result["x"], [0.0])
+    assert result["_history_dump"]["method"] == "scipy"
     assert result["_history_dump"]["method_requested"] == "auto"
-    assert result["_history_dump"]["method_auto_reason"] == "auto:qa-high-mode-matrix-free"
+    assert result["_history_dump"]["method_auto_reason"] == "auto:qa-dense-default"
     assert result["_history_dump"]["scipy_tr_solver"] == "lsmr"
-    assert opt._profile["method_auto_scipy_matrix_free"]["count"] == 1
+    assert opt._profile["method_auto_scipy"]["count"] == 1
 
 
 def test_run_scipy_matrix_free_scales_multi_parameter_linear_operator(monkeypatch):
