@@ -180,6 +180,9 @@ PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
 `QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The public
+QA/QH/QP scripts default to `MAX_MODE = 4`; set the commented `MAX_MODE = 5`
+line near the top of those scripts for a richer high-mode audit after the
+mode-4 route is working for your case.
 simple QI examples are `QI_optimization_nfp1.py` through
 `QI_optimization_nfp4.py`; each file exposes the seed, objective tuples, QP
 stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is retained as a diagnostic stress
