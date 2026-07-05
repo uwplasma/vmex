@@ -386,6 +386,60 @@ def replay_timing_breakdown(
     }
 
 
+def fixed_boundary_execution_classification(diagnostics: Mapping[str, Any]) -> str:
+    """Classify one fixed-boundary run by execution path, not input physics.
+
+    The classifier is intentionally diagnostic-only.  It reads the same public
+    fields that profiling and benchmark tools persist, then labels whether the
+    run used the fused scan runner, a non-scan VMEC2000 loop, or a
+    differentiated cache-bypass path.  This gives performance reports a stable
+    explanation without adding vacuum/finite-beta or input-size thresholds to
+    the solver itself.
+    """
+
+    timing = diagnostics.get("timing")
+    timing = timing if isinstance(timing, Mapping) else {}
+    source = str(diagnostics.get("use_scan_policy_source", "") or "").strip().lower()
+    detail = str(diagnostics.get("use_scan_policy_detail", "") or "").strip().lower()
+    policy_text = f"{source}:{detail}"
+    dynamic_prefix = "dynamic_" if ("dynamic" in policy_text or "probe" in policy_text) else ""
+
+    uses_scan = bool(
+        diagnostics.get("use_scan")
+        or diagnostics.get("vmec2000_scan")
+        or diagnostics.get("accelerated_scan")
+    )
+    if not uses_scan:
+        if source == "profile":
+            return f"{dynamic_prefix}loop_profile_selected"
+        if source == "solver_mode" and "parity" in detail:
+            return f"{dynamic_prefix}loop_parity"
+        if source == "explicit":
+            return f"{dynamic_prefix}loop_explicit"
+        if dynamic_prefix:
+            return "dynamic_loop_selected"
+        return "loop_default"
+
+    bypass = int(timing.get("scan_runner_cache_bypass_count", 0) or 0)
+    hit = int(timing.get("scan_runner_cache_hit_count", 0) or 0)
+    miss = int(timing.get("scan_runner_cache_miss_count", 0) or 0)
+    if bypass > 0:
+        return f"{dynamic_prefix}scan_cache_bypass"
+    if miss > 0 and hit > 0:
+        return f"{dynamic_prefix}scan_mixed_cache"
+    if miss > 0:
+        return f"{dynamic_prefix}scan_cold_compile"
+    if hit > 0:
+        return f"{dynamic_prefix}scan_cache_hit"
+    if source == "explicit":
+        return f"{dynamic_prefix}scan_explicit"
+    if source == "profile":
+        return f"{dynamic_prefix}scan_profile_selected"
+    if dynamic_prefix:
+        return "dynamic_scan_selected"
+    return "scan_default"
+
+
 def accumulate_scan_device_ready_timing(
     stats: dict[str, float],
     *,
@@ -440,6 +494,7 @@ __all__ = [
     "exact_parameter_cache_key",
     "exact_parameter_cache_key_fingerprint",
     "explain_scan_cache_key_delta",
+    "fixed_boundary_execution_classification",
     "replay_timing_breakdown",
     "scan_cache_key_field_names",
     "scan_cache_miss_category_counts",

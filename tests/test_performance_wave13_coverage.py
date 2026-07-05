@@ -6,6 +6,7 @@ from vmec_jax.solvers.fixed_boundary.performance import (
     exact_parameter_cache_key,
     exact_parameter_cache_key_fingerprint,
     explain_scan_cache_key_delta,
+    fixed_boundary_execution_classification,
     replay_timing_breakdown,
     scan_cache_miss_category_counts,
     scan_cache_key_delta_summary,
@@ -238,6 +239,68 @@ def test_replay_timing_breakdown_prefers_total_and_falls_back_to_split():
         "state_tangent_tape_replay_ready": {"count": 1, "wall_time_s": 0.75},
     }
     assert replay_timing_breakdown(split_only, prefix="state_tangent")["total_s"] == pytest.approx(1.0)
+
+
+def test_fixed_boundary_execution_classification_uses_public_diagnostics():
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "use_scan": True,
+                "timing": {"scan_runner_cache_miss_count": 1},
+                "use_scan_policy_source": "backend_default",
+            }
+        )
+        == "scan_cold_compile"
+    )
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "vmec2000_scan": True,
+                "timing": {"scan_runner_cache_hit_count": 3},
+                "use_scan_policy_source": "profile",
+            }
+        )
+        == "scan_cache_hit"
+    )
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "accelerated_scan": True,
+                "timing": {"scan_runner_cache_miss_count": 1, "scan_runner_cache_hit_count": 1},
+            }
+        )
+        == "scan_mixed_cache"
+    )
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "use_scan": True,
+                "timing": {"scan_runner_cache_bypass_count": 1},
+                "use_scan_policy_detail": "dynamic_probe",
+            }
+        )
+        == "dynamic_scan_cache_bypass"
+    )
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "use_scan": False,
+                "use_scan_policy_source": "solver_mode",
+                "use_scan_policy_detail": "cpu_parity_uses_loop",
+            }
+        )
+        == "loop_parity"
+    )
+    assert (
+        fixed_boundary_execution_classification(
+            {
+                "use_scan": False,
+                "use_scan_policy_source": "profile",
+                "use_scan_policy_detail": "bundled:case:cold_latency_prefer_noscan",
+            }
+        )
+        == "loop_profile_selected"
+    )
 
 
 def test_accumulate_scan_device_ready_timing_is_safe_for_missing_start():

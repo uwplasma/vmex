@@ -38,6 +38,9 @@ from .solve import (
     solve_fixed_boundary_lbfgs,
     solve_fixed_boundary_residual_iter,
 )
+from .solvers.fixed_boundary.performance import (
+    fixed_boundary_execution_classification as _fixed_boundary_execution_classification,
+)
 from .static import VMECStatic, build_static
 from .wout import WoutData, read_wout, state_from_wout
 
@@ -683,6 +686,15 @@ def _finalize_fixed_boundary_solver_run(
         signgs=signgs,
     )
     if run_out.result is not None:
+        diag_for_classification = dict(getattr(run_out.result, "diagnostics", {}) or {})
+        diag_for_classification.update(
+            {
+                "fixed_boundary_finish_policy": str(finish_policy_eff),
+                "cli_fixed_boundary_finish_enabled": bool(cli_fixed_boundary_finish_enabled),
+                "use_scan_policy_source": str(use_scan_policy_source),
+                "use_scan_policy_detail": str(use_scan_policy_detail),
+            }
+        )
         run_out = replace(
             run_out,
             result=_result_with_diag(
@@ -691,6 +703,9 @@ def _finalize_fixed_boundary_solver_run(
                 cli_fixed_boundary_finish_enabled=bool(cli_fixed_boundary_finish_enabled),
                 use_scan_policy_source=str(use_scan_policy_source),
                 use_scan_policy_detail=str(use_scan_policy_detail),
+                fixed_boundary_execution_classification=_fixed_boundary_execution_classification(
+                    diag_for_classification
+                ),
             ),
         )
     cli_initial_policy = "multigrid" if bool(multigrid) and (len(ns_stages) > 1) else "single_grid"

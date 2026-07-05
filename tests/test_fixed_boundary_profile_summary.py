@@ -70,6 +70,7 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
                 "diagnostics": {
                     "use_scan_policy_source": "profile",
                     "use_scan_policy_detail": "bundled:short_case",
+                    "fixed_boundary_execution_classification": "scan_cache_hit",
                 },
                 "result": {"final_residual": 1.25e-3},
             }
@@ -106,6 +107,7 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
     assert row["scan_runner_arg_preconditioner_rz_mats_compact_ok_count"] == 1.0
     assert row["use_scan_policy_source"] == "profile"
     assert row["use_scan_policy_detail"] == "bundled:short_case"
+    assert row["fixed_boundary_execution_classification"] == "scan_cache_hit"
     assert row["scan_runner_arg_top_leaf_paths"].startswith("arg0_state:20")
     assert "arg0_cache_prec_rz_mats:8" in row["scan_runner_arg_top_leaf_paths"]
     assert row["scan_runner_arg_top_nbytes_paths"].startswith("arg0_state:2048")
@@ -173,6 +175,7 @@ def test_render_markdown_includes_blank_missing_values() -> None:
                 "scan_runner_arg_preconditioner_rz_mats_compact_ok_count": None,
                 "use_scan_policy_source": "",
                 "use_scan_policy_detail": "",
+                "fixed_boundary_execution_classification": "",
                 "scan_runner_arg_top_leaf_paths": "",
                 "scan_runner_arg_top_nbytes_paths": "",
                 "scan_runner_cache_hit_count": None,
