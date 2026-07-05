@@ -91,12 +91,13 @@ def scalar_gradient_initial_tangents_enabled(optimizer, n_params: int) -> bool:
     if flag is not None:
         return flag.strip().lower() not in ("", "0", "false", "no", "off")
     backend = optimizer_backend_name(getattr(optimizer, "_solver_device_name", None))
-    if backend not in ("gpu", "cuda", "rocm", "tpu", "metal"):
+    if backend not in ("cpu", "gpu", "cuda", "rocm", "tpu", "metal"):
         return False
     if optimizer._has_stellarator_asymmetric_configuration():
         return False
     min_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MIN_DOFS", "24"))
-    max_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MAX_DOFS", "256"))
+    default_max_dofs = "128" if backend == "cpu" else "256"
+    max_dofs = int(os.getenv("VMEC_JAX_OPT_SCALAR_GRADIENT_INITIAL_TANGENT_MAX_DOFS", default_max_dofs))
     return min_dofs <= int(n_params) <= max_dofs
 
 

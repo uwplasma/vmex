@@ -65,7 +65,8 @@ def test_gpu_scalar_gradient_initial_tangent_projection_policy(monkeypatch):
     assert not opt._scalar_gradient_initial_tangents_enabled(23)
 
     opt._solver_device_name = "cpu"
-    assert not opt._scalar_gradient_initial_tangents_enabled(80)
+    assert opt._scalar_gradient_initial_tangents_enabled(80)
+    assert not opt._scalar_gradient_initial_tangents_enabled(129)
 
     opt._solver_device_name = "gpu"
     opt._indata = InData(scalars={"LASYM": True}, indexed={})
