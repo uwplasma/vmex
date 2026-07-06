@@ -1075,6 +1075,26 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
     json.dumps(fixed_tool._json_safe(summary))
 
 
+def test_fixed_boundary_profiler_prints_scan_hlo_summary(capsys):
+    fixed_tool = _load_fixed_tool()
+
+    fixed_tool._print_scan_hlo_summary(
+        {
+            "scan_runner_explicit_hlo_line_count": 120,
+            "scan_runner_explicit_hlo_instruction_count": 90,
+            "scan_runner_explicit_hlo_op_add_count": 12,
+            "scan_runner_explicit_hlo_op_broadcast_count": 30,
+            "scan_runner_explicit_hlo_op_slice_count": 18,
+        }
+    )
+
+    output = capsys.readouterr().out
+    assert "[profile_fixed_boundary] scan_hlo" in output
+    assert "lines=120" in output
+    assert "instructions=90" in output
+    assert "top_ops=broadcast:30,slice:18,add:12" in output
+
+
 def test_fixed_boundary_profiler_scan_payload_budget_status_flags_exceeded():
     fixed_tool = _load_fixed_tool()
     args = _fixed_profiler_args(
