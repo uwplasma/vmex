@@ -523,9 +523,15 @@ After regeneration, the source table snapshot is written to
 ``docs/_static/figures/readme_qi_optimization_cases.csv``. In that generated
 CSV, ``validation_status=case-gated`` records case-specific QI gate status from
 the renderer and should not be read as global seed-robustness evidence beyond
-the listed minimal-seed policy.
+the listed minimal-seed policy.  The checked-in QI NFP panel is a reviewed
+historical artifact: rerendering it requires the matching ignored final WOUTs
+under ``docs/_static/qi_readme_cases/<case>/``.  If those final WOUTs are not
+present in the fetched asset bundle, regenerate them with the per-NFP
+``QI_optimization_nfp*.py`` scripts or restore them from the reviewed artifact
+archive before running the renderer.
 
-Regenerate these lightweight artifacts with:
+Regenerate these lightweight artifacts after the matching initial/final WOUTs
+are present with:
 
 .. code-block:: bash
 

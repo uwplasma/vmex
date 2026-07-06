@@ -21,9 +21,10 @@ remain in development.
 This full bundled single-grid fixed-boundary matrix compares VMEC2000,
 `vmec_jax` cold/warm CPU runs, and VMEC++ where VMEC++ converges cleanly.
 The performance docs keep the detailed CSV/JSON provenance, WOUT-parity rows,
-memory columns, and current-vs-main regression classifications. In short,
-warm `vmec_jax` is faster than VMEC2000 on most bundled rows, while cold tiny
-rows still pay Python/JAX/XLA setup cost.
+memory columns, and regression classifications. In the 2026-07-06 local CPU
+refresh, warm `vmec_jax` was faster than VMEC2000 on 27 of 36 rows with both
+successful timings; cold tiny rows still pay Python/JAX/XLA setup cost, and
+the high-mode QHS stress row remains an explicit timeout/outlier.
 
 ## Differentiation Evidence
 
@@ -175,7 +176,6 @@ PYTHONPATH=. JAX_PLATFORMS=cuda python3 examples/optimization/generate_minimal_s
   --max-nfev 70 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
   --trial-max-iter 550 --trial-ftol 1e-10 --ess-alpha 1.2 --case-timeout-s 7200 --rerun
 PYTHONPATH=. python examples/optimization/render_minimal_seed_showcase.py --publication-matrix
-PYTHONPATH=. python examples/optimization/render_qi_readme_cases.py
 ```
 
 Run individual editable examples with `python examples/optimization/QA_optimization.py`,
@@ -183,10 +183,13 @@ Run individual editable examples with `python examples/optimization/QA_optimizat
 QA/QH/QP scripts default to `MAX_MODE = 4`; set the commented `MAX_MODE = 5`
 line near the top of those scripts for a richer high-mode audit after the
 mode-4 route is working for your case.
-simple QI examples are `QI_optimization_nfp1.py` through
+Simple QI examples are `QI_optimization_nfp1.py` through
 `QI_optimization_nfp4.py`; each file exposes the seed, objective tuples, QP
 stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is retained as a diagnostic stress
-case, not a README promotion row.
+case, not a README promotion row. The checked-in QI NFP panel is a reviewed
+historical artifact; rerendering it requires the corresponding final WOUTs
+under `docs/_static/qi_readme_cases/`, so regenerate or restore those artifacts
+before running `python examples/optimization/render_qi_readme_cases.py`.
 Full provenance and artifact-promotion rules live in the docs:
 `docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
 
