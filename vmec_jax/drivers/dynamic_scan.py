@@ -76,9 +76,11 @@ def maybe_select_dynamic_scan_mode(
             "verbose_vmec2000_table": False,
             "jit_warmup_iters": 0,
             "jit_precompile": False,
-            # Keep full histories in the probe so we compare traces, not just
-            # one terminal residual scalar.
-            "scan_minimal_default": False,
+            # The selector only compares residual traces.  Minimal scan
+            # histories keep those traces while avoiding full controller
+            # diagnostic rows in the probe graph.
+            "light_history": True,
+            "scan_minimal_default": True,
         }
     )
 
