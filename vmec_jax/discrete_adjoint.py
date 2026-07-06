@@ -737,6 +737,7 @@ def checkpoint_tape_state_vjp(
             stacked_base_carries=tape.dynamic_base_carries_stacked,
             static_flags=tape.step_trace_static_flags,
         )
+        _record_dynamic_basepoint_initial_carry_size(carry0)
         initial_carry_cotangents = run_scan(
             final_carry_cotangents,
             tape.dynamic_base_carries_stacked,
