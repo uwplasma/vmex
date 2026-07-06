@@ -42,6 +42,7 @@ from vmec_jax.solvers.fixed_boundary.adjoint.replay_policy import (
     _lru_cache_get,  # noqa: F401 - private compatibility facade
     _lru_cache_put,  # noqa: F401 - private compatibility facade
     _put_replay_scan_runner,
+    _record_dynamic_basepoint_initial_carry_size,
     _record_replay_jvp_columns_chunking,
     _record_replay_jvp_columns_path,
     _replay_column_chunk_override,
@@ -1292,12 +1293,14 @@ def _run_dynamic_basepoint_scan_zero_aux(*, run_scan, state_tangents, stacked_ba
     run_zero_aux_initial = getattr(run_scan, "zero_aux_initial", None)
     if run_zero_aux_initial is not None:
         carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
+        _record_dynamic_basepoint_initial_carry_size(carry0)
         return run_zero_aux_initial(state_tangents, carry0, stacked)
     run_zero_aux = getattr(run_scan, "zero_aux", None)
     if run_zero_aux is not None:
         return run_zero_aux(state_tangents, stacked_base_carries, stacked)
 
     carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries)
+    _record_dynamic_basepoint_initial_carry_size(carry0)
     carry_tangents0 = _carry_tangents_with_zero_aux(state_tangents, carry0)
     return run_scan(carry_tangents0, stacked_base_carries, stacked)
 

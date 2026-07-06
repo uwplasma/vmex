@@ -8,6 +8,8 @@ import os
 import time
 from typing import Any
 
+import numpy as np
+
 from vmec_jax._compat import jax, jnp
 
 _REPLAY_STEP_TRACE_KEYS = (
@@ -114,6 +116,9 @@ _REPLAY_SCAN_CACHE_DIAGNOSTICS.update(
         "replay_jvp_columns_chunked_call_count": 0,
         "replay_jvp_columns_chunk_count": 0,
         "replay_jvp_columns_last_chunk_size": 0,
+        "replay_dynamic_basepoint_initial_carry_array_leaf_count": 0,
+        "replay_dynamic_basepoint_initial_carry_none_slot_count": 0,
+        "replay_dynamic_basepoint_initial_carry_nbytes": 0,
     }
 )
 
@@ -268,6 +273,43 @@ def _record_replay_jvp_columns_chunking(*, n_chunks: int, chunk_size: int) -> No
     _add_replay_diag("replay_jvp_columns_chunked_call_count")
     _add_replay_diag("replay_jvp_columns_chunk_count", n_chunks)
     _REPLAY_SCAN_CACHE_DIAGNOSTICS["replay_jvp_columns_last_chunk_size"] = max(0, int(chunk_size))
+
+
+def _record_dynamic_basepoint_initial_carry_size(carry0) -> None:
+    """Record compact dynamic-basepoint carry size without materializing data."""
+
+    if not _replay_scan_cache_diagnostics_enabled():
+        return
+
+    array_count = 0
+    none_count = 0
+    nbytes = 0
+
+    def _visit(node) -> None:
+        nonlocal array_count, none_count, nbytes
+        if node is None:
+            none_count += 1
+            return
+        if isinstance(node, dict):
+            for value in node.values():
+                _visit(value)
+            return
+        if isinstance(node, (tuple, list)):
+            for value in node:
+                _visit(value)
+            return
+        try:
+            arr = jnp.asarray(node)
+            dtype = np.dtype(arr.dtype)
+            nbytes += int(arr.size) * int(dtype.itemsize)
+            array_count += 1
+        except Exception:
+            return
+
+    _visit(carry0)
+    _add_replay_diag("replay_dynamic_basepoint_initial_carry_array_leaf_count", array_count)
+    _add_replay_diag("replay_dynamic_basepoint_initial_carry_none_slot_count", none_count)
+    _add_replay_diag("replay_dynamic_basepoint_initial_carry_nbytes", nbytes)
 
 
 def clear_replay_scan_caches() -> None:
