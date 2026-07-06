@@ -494,7 +494,7 @@ class FixedBoundaryExactOptimizer:
             helicity_m = None
             helicity_n = None
         if family == "qs" and helicity_m == 0 and helicity_n not in (None, 0):
-            if self._spec_max_mode() <= 3:
+            if getattr(self, "_specs", None) is not None and self._spec_max_mode() <= 3:
                 return True, "objective_family", "quasi_poloidal_low_mode_vmec2000_trial_scan_default"
             return False, "objective_family", "quasi_poloidal_high_mode_trial_loop_default"
         backend = self._exact_tape_backend_name()
