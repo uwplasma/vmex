@@ -416,6 +416,7 @@ def test_dynamic_scan_timed_probe_warms_and_times_both_paths(monkeypatch: pytest
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN", "1")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "1")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "2")
+    monkeypatch.setenv("VMEC_JAX_SCAN_PARITY_GUARD", "0")
     monkeypatch.setenv("VMEC_JAX_LASYM_USE_SCAN", "1")
     monkeypatch.setattr(driver.time, "perf_counter", fake_perf_counter)
     _install_light_driver(monkeypatch, cfg=_cfg(ns=5, lasym=True), indata=_indata(NITER=4, LASYM=True), solver=fake_solver)
@@ -434,9 +435,12 @@ def test_dynamic_scan_timed_probe_warms_and_times_both_paths(monkeypatch: pytest
         _auto_cli_fixed_boundary_mode=False,
     )
 
-    assert calls[0] == {"max_iter": 4, "use_scan": True}
-    assert calls.count({"max_iter": 1, "use_scan": False}) == 2
-    assert calls.count({"max_iter": 1, "use_scan": True}) >= 2
+    assert calls[:4] == [
+        {"max_iter": 1, "use_scan": False},
+        {"max_iter": 1, "use_scan": True},
+        {"max_iter": 1, "use_scan": False},
+        {"max_iter": 1, "use_scan": True},
+    ]
     assert calls[-1] == {"max_iter": 4, "use_scan": True}
     assert run.result.diagnostics["use_scan"] is True
 

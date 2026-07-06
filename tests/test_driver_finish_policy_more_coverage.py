@@ -341,8 +341,8 @@ def test_scan_parity_guard_keeps_scan_when_probe_histories_match(
     )
 
     assert calls == [
-        {"max_iter": 4, "use_scan": True},
-        {"max_iter": 4, "use_scan": False},
+        {"max_iter": 2, "use_scan": True},
+        {"max_iter": 2, "use_scan": False},
         {"max_iter": 4, "use_scan": True},
     ]
     assert run.result.diagnostics["use_scan"] is True
@@ -387,7 +387,7 @@ def test_scan_parity_guard_probe_exception_falls_back_to_non_scan(
     )
 
     assert calls == [
-        {"max_iter": 3, "use_scan": True},
+        {"max_iter": 1, "use_scan": True},
         {"max_iter": 3, "use_scan": False},
     ]
     assert "scan parity guard probe failed (RuntimeError); using non-scan" in capsys.readouterr().out
