@@ -1319,6 +1319,32 @@ def test_dynamic_initial_carry_zero_fills_missing_lasym_asymmetric_velocities():
         assert np.asarray(carry[idx]).shape == np.asarray(carry[3]).shape
 
 
+def test_cotangent_like_output_preserves_compacted_none_slots():
+    output = (
+        np.ones((2,), dtype=float),
+        None,
+        {"active": np.ones((1,), dtype=float), "inactive": None},
+    )
+    cotangent = (
+        np.asarray([3.0, 4.0]),
+        None,
+        {"active": np.asarray([5.0]), "inactive": None},
+    )
+
+    padded = da._cotangent_like_output(cotangent, output)
+
+    np.testing.assert_allclose(np.asarray(padded[0]), [3.0, 4.0])
+    assert padded[1] is None
+    np.testing.assert_allclose(np.asarray(padded[2]["active"]), [5.0])
+    assert padded[2]["inactive"] is None
+
+    missing = da._cotangent_like_output((), output)
+    np.testing.assert_allclose(np.asarray(missing[0]), [0.0, 0.0])
+    assert missing[1] is None
+    np.testing.assert_allclose(np.asarray(missing[2]["active"]), [0.0])
+    assert missing[2]["inactive"] is None
+
+
 def test_dynamic_safe_dt_from_force_arrays_limits_only_finite_nonzero_forces():
     z = np.zeros((2, 2), dtype=float)
     ones = np.ones((2, 2), dtype=float)

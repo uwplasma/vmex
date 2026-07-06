@@ -592,6 +592,8 @@ def _carry_cotangents_with_zero_aux(final_cotangent, carry0):
 def _cotangent_like_output(cotangent, output):
     """Pad auxiliary cotangent dictionaries to match replay output structure."""
 
+    if output is None:
+        return None
     if isinstance(output, tuple):
         cotangent_tuple = cotangent if isinstance(cotangent, tuple) else ()
         return tuple(
