@@ -265,6 +265,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
             "--budget-action",
             "warn",
             "--vmec-timing-detail",
+            "--scan-arg-summary",
             "--sync-replay-timing",
             "--jvp-only-exact-tape",
             "--jvp-only-basepoint-carries",
@@ -289,6 +290,7 @@ def test_exact_optimizer_profile_parser_accepts_cache_budget_args() -> None:
     assert args.budget_accepted_replays == 2
     assert args.budget_action == "warn"
     assert args.vmec_timing_detail is True
+    assert args.scan_arg_summary is True
     assert args.sync_replay_timing is True
     assert args.jvp_only_exact_tape is True
     assert args.jvp_only_basepoint_carries is True
