@@ -33,6 +33,7 @@ from vmec_jax.solvers.fixed_boundary.scan.runtime import (
     maybe_explicit_compile_scan_runner,
     maybe_record_scan_runner_hlo_summary,
     maybe_record_scan_runner_arg_summary,
+    record_scan_history_summary,
     record_scan_runner_arg_summary,
     resolve_scan_runtime_hooks,
     resolve_scan_runtime_hooks_from_env,
@@ -545,6 +546,40 @@ def test_record_scan_runner_arg_summary_flags_reassembly_rz_preconditioner_carry
     assert stats["scan_runner_arg_preconditioner_rz_mats_unexpected_key_count"] == 1
     assert stats["scan_runner_arg_preconditioner_rz_mats_missing_mandatory_key_count"] == 1
     assert stats["scan_runner_arg_preconditioner_rz_mats_compact_ok_count"] == 0
+
+
+def test_record_scan_history_summary_counts_materialized_history_bytes():
+    """Scan history diagnostics should separate output rows from carry inputs."""
+
+    hist = (
+        jnp.ones((4,), dtype=jnp.float64),
+        2 * jnp.ones((4,), dtype=jnp.float64),
+        {"accepted": jnp.ones((4,), dtype=bool), "label": "light"},
+    )
+    stats = {}
+
+    record_scan_history_summary(hist, scan_timing_enabled=True, scan_timing_stats=stats)
+
+    assert stats["scan_history_none"] == 0
+    assert stats["scan_history_leaf_count"] == 4
+    assert stats["scan_history_array_leaf_count"] == 3
+    assert stats["scan_history_scalar_leaf_count"] == 1
+    assert stats["scan_history_array_nbytes"] == (
+        hist[0].nbytes + hist[1].nbytes + hist[2]["accepted"].nbytes
+    )
+
+
+def test_record_scan_history_summary_reports_state_only_history():
+    """State-only scans should report that no history tree was materialized."""
+
+    stats = {}
+
+    record_scan_history_summary(None, scan_timing_enabled=True, scan_timing_stats=stats)
+
+    assert stats["scan_history_none"] == 1
+    assert stats["scan_history_leaf_count"] == 0
+    assert stats["scan_history_array_leaf_count"] == 0
+    assert stats["scan_history_array_nbytes"] == 0
 
 
 def test_scan_arg_summary_is_independent_from_explicit_compile():

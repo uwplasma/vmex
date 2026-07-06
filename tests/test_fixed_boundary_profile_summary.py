@@ -49,6 +49,11 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
                     "scan_runner_arg_category_state_array_nbytes": 2048,
                     "scan_runner_arg_category_preconditioner_leaf_count": 8,
                     "scan_runner_arg_category_preconditioner_array_nbytes": 1024,
+                    "scan_history_none": 0,
+                    "scan_history_leaf_count": 9,
+                    "scan_history_array_leaf_count": 9,
+                    "scan_history_scalar_leaf_count": 0,
+                    "scan_history_array_nbytes": 288,
                     "scan_runner_cache_hit_count": 3,
                     "scan_runner_cache_miss_count": 1,
                     "scan_runner_cache_bypass_count": 0,
@@ -105,6 +110,11 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
     assert row["scan_runner_arg_preconditioner_rz_mats_unexpected_key_count"] == 0.0
     assert row["scan_runner_arg_preconditioner_rz_mats_missing_mandatory_key_count"] == 0.0
     assert row["scan_runner_arg_preconditioner_rz_mats_compact_ok_count"] == 1.0
+    assert row["scan_history_none"] == 0.0
+    assert row["scan_history_leaf_count"] == 9.0
+    assert row["scan_history_array_leaf_count"] == 9.0
+    assert row["scan_history_scalar_leaf_count"] == 0.0
+    assert row["scan_history_array_nbytes"] == 288.0
     assert row["use_scan_policy_source"] == "profile"
     assert row["use_scan_policy_detail"] == "bundled:short_case"
     assert row["fixed_boundary_execution_classification"] == "scan_cache_hit"
@@ -173,6 +183,11 @@ def test_render_markdown_includes_blank_missing_values() -> None:
                 "scan_runner_arg_preconditioner_rz_mats_unexpected_key_count": None,
                 "scan_runner_arg_preconditioner_rz_mats_missing_mandatory_key_count": None,
                 "scan_runner_arg_preconditioner_rz_mats_compact_ok_count": None,
+                "scan_history_none": None,
+                "scan_history_leaf_count": None,
+                "scan_history_array_leaf_count": None,
+                "scan_history_scalar_leaf_count": None,
+                "scan_history_array_nbytes": None,
                 "use_scan_policy_source": "",
                 "use_scan_policy_detail": "",
                 "fixed_boundary_execution_classification": "",

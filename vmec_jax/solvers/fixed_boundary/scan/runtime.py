@@ -574,6 +574,55 @@ def record_scan_runner_arg_summary(
         )
 
 
+def record_scan_history_summary(
+    history: Any,
+    *,
+    scan_timing_enabled: bool,
+    scan_timing_stats: dict[str, Any],
+) -> None:
+    """Record scan-output history breadth for compile and memory diagnostics.
+
+    The VMEC2000-compatible scan path has two independent graph-width costs:
+    the carry passed into the scan body and the per-iteration history row
+    emitted by the scan.  Argument summaries classify the former; this helper
+    classifies the latter so performance probes can distinguish a wide
+    momentum/preconditioner carry from expensive history materialization.
+    """
+
+    if not bool(scan_timing_enabled):
+        return
+    prefix = "scan_history"
+    if history is None:
+        scan_timing_stats[f"{prefix}_none"] = 1
+        scan_timing_stats[f"{prefix}_leaf_count"] = 0
+        scan_timing_stats[f"{prefix}_array_leaf_count"] = 0
+        scan_timing_stats[f"{prefix}_scalar_leaf_count"] = 0
+        scan_timing_stats[f"{prefix}_array_nbytes"] = 0
+        return
+
+    leaf_count = 0
+    array_leaf_count = 0
+    scalar_leaf_count = 0
+    array_nbytes = 0
+    for _path, leaf in _scan_runner_arg_path_leaves(history, ("history",)):
+        leaf_count += 1
+        shape = getattr(leaf, "shape", None)
+        nbytes = getattr(leaf, "nbytes", None)
+        if shape is not None:
+            array_leaf_count += 1
+            try:
+                array_nbytes += int(nbytes)
+            except Exception:
+                pass
+        else:
+            scalar_leaf_count += 1
+    scan_timing_stats[f"{prefix}_none"] = 0
+    scan_timing_stats[f"{prefix}_leaf_count"] = int(leaf_count)
+    scan_timing_stats[f"{prefix}_array_leaf_count"] = int(array_leaf_count)
+    scan_timing_stats[f"{prefix}_scalar_leaf_count"] = int(scalar_leaf_count)
+    scan_timing_stats[f"{prefix}_array_nbytes"] = int(array_nbytes)
+
+
 def maybe_record_scan_runner_arg_summary(
     args: tuple[Any, ...],
     *,
@@ -907,6 +956,11 @@ def run_chunked_scan(
     carry_final = carry
     if abort_scan_host:
         carry_final = carry_final._replace(abort_scan=jnp_module.asarray(True))
+    record_scan_history_summary(
+        hist,
+        scan_timing_enabled=bool(scan_timing_enabled),
+        scan_timing_stats=scan_timing_stats,
+    )
     return ChunkedScanRunResult(carry_final=carry_final, history=hist)
 
 
@@ -1032,6 +1086,11 @@ def run_nonchunked_scan(
             )
         if bool(state_only_scan):
             hist = None
+    record_scan_history_summary(
+        hist,
+        scan_timing_enabled=bool(scan_timing_enabled),
+        scan_timing_stats=scan_timing_stats,
+    )
     return NonChunkedScanRunResult(carry_final=carry_final, history=hist)
 
 

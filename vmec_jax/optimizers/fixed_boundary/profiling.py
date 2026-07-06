@@ -33,6 +33,8 @@ def _is_dynamic_scan_counter_key(key: str) -> bool:
         return True
     if key.startswith("scan_runner_explicit_hlo_") and key.endswith("_count"):
         return True
+    if key.startswith("scan_history_"):
+        return key.endswith("_count") or key.endswith("_array_nbytes") or key == "scan_history_none"
     if not key.startswith("scan_runner_arg_"):
         return False
     return key.endswith("_count") or key.endswith("_array_nbytes")
@@ -236,6 +238,11 @@ def profile_solver_timing(
             "scan_runner_arg_preconditioner_rz_mats_compact_ok_count",
             "scan_runner_arg_preconditioner_rz_mats_compact_ok_count",
         ),
+        ("scan_history_none", "scan_history_none"),
+        ("scan_history_leaf_count", "scan_history_leaf_count"),
+        ("scan_history_array_leaf_count", "scan_history_array_leaf_count"),
+        ("scan_history_scalar_leaf_count", "scan_history_scalar_leaf_count"),
+        ("scan_history_array_nbytes", "scan_history_array_nbytes"),
     )
     outer_solver_total_keys = {"setup_total_s", "iteration_loop_s", "finalize_s", "scan_total_s"}
     fallback_solver_total_keys = {"compute_forces_s", "preconditioner_s", "update_s", "scan_total_s"}
