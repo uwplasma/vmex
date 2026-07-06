@@ -21,10 +21,11 @@ remain in development.
 This full bundled single-grid fixed-boundary matrix compares VMEC2000,
 `vmec_jax` cold/warm CPU runs, and VMEC++ where VMEC++ converges cleanly.
 The performance docs keep the detailed CSV/JSON provenance, WOUT-parity rows,
-memory columns, and regression classifications. In the 2026-07-06 local CPU
-refresh, warm `vmec_jax` was faster than VMEC2000 on 27 of 36 rows with both
-successful timings; cold tiny rows still pay Python/JAX/XLA setup cost, and
-the high-mode QHS stress row remains an explicit timeout/outlier.
+and regression classifications. In the 2026-07-06 local CPU refresh, warm
+`vmec_jax` was faster than VMEC2000 on 29 of 36 rows with both successful
+timings using the default CLI policy; cold tiny rows still pay Python/JAX/XLA
+setup cost, and the high-mode QHS stress row remains an explicit
+timeout/outlier.
 
 ## Differentiation Evidence
 

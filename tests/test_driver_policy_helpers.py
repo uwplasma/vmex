@@ -178,12 +178,13 @@ def test_profile_guided_scan_decision_uses_bundled_profile_and_opt_out(monkeypat
     indata.source_path = "input.LandremanSengupta2019_section5.4_B2_A80"
 
     monkeypatch.delenv("VMEC_JAX_ACCELERATED_SCAN_PROFILE", raising=False)
-    assert profile_guided_scan_decision_for_indata(indata) is False
+    assert profile_guided_scan_decision_for_indata(indata) is True
     bundled = profile_guided_scan_decision_with_detail_for_indata(indata)
     assert bundled is not None
     assert bundled.source == "profile"
     assert bundled.detail.startswith("bundled:")
-    assert default_use_scan_for_backend(indata, "cpu", "accelerated") is False
+    assert "warm_scan_throughput" in bundled.detail
+    assert default_use_scan_for_backend(indata, "cpu", "accelerated") is True
 
     monkeypatch.setenv("VMEC_JAX_ACCELERATED_SCAN_PROFILE", "off")
     assert profile_guided_scan_decision_for_indata(indata) is None
@@ -687,16 +688,17 @@ def test_default_cpu_policy_is_not_profile_or_size_classified():
 
 
 def test_default_cpu_policy_routes_serial2500170_fixture_to_accelerated():
-    """The serial2500170 fixture stays fast but avoids measured cold scan loss."""
+    """The serial2500170 fixture uses scan for warm throughput."""
 
     path = Path(__file__).resolve().parents[1] / "examples/data/input.serial2500170_surface_points_mpol12_ntor12"
     indata = read_indata(path)
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("accelerated", True)
-    assert driver._default_use_scan_for_backend(indata, "cpu", "accelerated") is False
+    assert driver._default_use_scan_for_backend(indata, "cpu", "accelerated") is True
     decision = driver._default_scan_decision_for_backend(indata, "cpu", "accelerated")
     assert decision.source == "profile"
     assert "serial2500170_surface_points_mpol12_ntor12" in decision.detail
     assert "cold_scan_compile_amortization" in decision.detail
+    assert "warm_scan_throughput" in decision.detail
 
 
 def test_default_cpu_policy_routes_finite_beta_fixture_to_fast_with_dynamic_scan():
