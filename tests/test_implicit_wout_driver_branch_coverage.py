@@ -463,11 +463,11 @@ def test_driver_small_policy_and_serialization_helpers(monkeypatch, tmp_path):
     monkeypatch.setattr(driver, "_default_backend_name", lambda: "gpu")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "1")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "99")
-    assert driver._dynamic_scan_probe_settings(5) == (4, True, "gpu")
+    assert driver._dynamic_scan_probe_settings(5) == (1, True, "gpu")
 
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "off")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "bad")
-    assert driver._dynamic_scan_probe_settings(5) == (3, False, "gpu")
+    assert driver._dynamic_scan_probe_settings(5) == (2, False, "gpu")
 
     assert driver._normalize_solver_mode(solver_mode=None, performance_mode=True) == "default"
     assert driver._normalize_solver_mode(solver_mode=None, performance_mode=False) == "parity"

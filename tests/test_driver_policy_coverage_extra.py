@@ -673,11 +673,11 @@ def test_dynamic_scan_invalid_env_values_fall_back_and_keep_scan_when_histories_
     )
 
     assert calls == [
-        {"max_iter": 3, "use_scan": True},
-        {"max_iter": 3, "use_scan": False},
+        {"max_iter": 2, "use_scan": True},
+        {"max_iter": 2, "use_scan": False},
         {"max_iter": 4, "use_scan": True},
     ]
-    assert "dynamic scan parity probe: backend=cpu iters=3 fsq_ok=True -> use_scan=True" in capsys.readouterr().out
+    assert "dynamic scan parity probe: backend=cpu iters=2 fsq_ok=True -> use_scan=True" in capsys.readouterr().out
     assert run.result.diagnostics["use_scan"] is True
 
 

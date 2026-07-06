@@ -48,7 +48,7 @@ def test_dynamic_scan_probe_settings_parses_env_and_clamps_to_available_iteratio
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "yes")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "bad-int")
 
-    assert driver._dynamic_scan_probe_settings(5) == (4, True, "gpu")
+    assert driver._dynamic_scan_probe_settings(5) == (1, True, "gpu")
 
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "maybe")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "0")

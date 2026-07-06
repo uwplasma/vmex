@@ -552,7 +552,7 @@ def test_dynamic_scan_probe_settings_env_override(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "1")
 
     pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(5)
-    assert pre_iters == 4
+    assert pre_iters == 1
     assert timed_probe is True
     assert backend == "gpu"
 
@@ -572,7 +572,7 @@ def test_default_backend_and_dynamic_scan_env_fallbacks(monkeypatch):
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_ITERS", "not-an-int")
     monkeypatch.setenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "maybe")
     pre_iters, timed_probe, backend = driver_module._dynamic_scan_probe_settings(4)
-    assert pre_iters == 3
+    assert pre_iters == 1
     assert timed_probe is True
     assert backend == "cpu"
 

@@ -199,6 +199,13 @@ def test_dynamic_scan_probe_settings_helper_uses_backend_and_env_dict():
         5,
         backend_name_func=lambda: "gpu",
         getenv=lambda key, default="": env.get(key, default),
+    ) == (1, True, "gpu")
+
+    env["VMEC_JAX_DYNAMIC_SCAN_MAX_SOLVE_FRACTION"] = "4"
+    assert dynamic_scan_probe_settings(
+        5,
+        backend_name_func=lambda: "gpu",
+        getenv=lambda key, default="": env.get(key, default),
     ) == (4, True, "gpu")
 
     env = {"VMEC_JAX_DYNAMIC_SCAN_ITERS": "bad", "VMEC_JAX_DYNAMIC_SCAN_TIMED": "off"}

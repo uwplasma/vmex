@@ -898,7 +898,15 @@ def dynamic_scan_probe_settings(
     backend_name_func,
     getenv=os.getenv,
 ) -> tuple[int, bool, str]:
-    """Resolve dynamic scan-probe budget and timing mode for one stage."""
+    """Resolve dynamic scan-probe budget and timing mode for one stage.
+
+    Timed probes run four short prefixes (warm loop, warm scan, timed loop,
+    timed scan), while parity-only probes run two.  The default cap keeps the
+    total prefix-iteration budget no larger than the production stage budget so
+    dynamic selection cannot cost more iterations than the solve it is trying
+    to accelerate.  ``VMEC_JAX_DYNAMIC_SCAN_MAX_SOLVE_FRACTION`` can relax this
+    for explicit diagnostics without adding physics- or input-size thresholds.
+    """
 
     backend = str(backend_name_func()).strip().lower() or "cpu"
     timed_env = str(getenv("VMEC_JAX_DYNAMIC_SCAN_TIMED", "")).strip().lower()
@@ -916,6 +924,13 @@ def dynamic_scan_probe_settings(
     except Exception:
         pre_iters = default_probe_iters
 
+    try:
+        max_fraction = max(0.0, float(str(getenv("VMEC_JAX_DYNAMIC_SCAN_MAX_SOLVE_FRACTION", "1.0")).strip()))
+    except Exception:
+        max_fraction = 1.0
+    probe_runs = 4 if bool(timed_probe) else 2
+    max_probe_iters = max(1, int((max(1, int(niter_i)) * max_fraction) // probe_runs))
+    pre_iters = min(int(pre_iters), int(max_probe_iters))
     if pre_iters >= int(niter_i):
         pre_iters = max(1, int(niter_i) - 1)
     return pre_iters, timed_probe, backend

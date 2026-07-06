@@ -435,8 +435,8 @@ def test_dynamic_scan_timed_probe_warms_and_times_both_paths(monkeypatch: pytest
     )
 
     assert calls[0] == {"max_iter": 4, "use_scan": True}
-    assert calls.count({"max_iter": 2, "use_scan": False}) == 2
-    assert calls.count({"max_iter": 2, "use_scan": True}) >= 2
+    assert calls.count({"max_iter": 1, "use_scan": False}) == 2
+    assert calls.count({"max_iter": 1, "use_scan": True}) >= 2
     assert calls[-1] == {"max_iter": 4, "use_scan": True}
     assert run.result.diagnostics["use_scan"] is True
 
