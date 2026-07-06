@@ -310,8 +310,15 @@ def run_accelerated_residual_scan(
     if scan_timing_enabled and scan_total_start is not None:
         scan_timing_stats["scan_setup_s"] += perf_counter() - float(scan_total_start)
 
-    def _scan_step(carry, it_and_controls):
-        it, time_step_dyn, flip_sign_dyn, lambda_update_scale_dyn, ftol_dyn, fsq_total_target_dyn = it_and_controls
+    def _scan_step_impl(
+        carry,
+        it,
+        time_step_dyn,
+        flip_sign_dyn,
+        lambda_update_scale_dyn,
+        ftol_dyn,
+        fsq_total_target_dyn,
+    ):
         (
             state_i,
             converged,
@@ -431,15 +438,21 @@ def run_accelerated_residual_scan(
             edge_Zcos_dyn,
             edge_Zsin_dyn,
         )
-        controls = (
-            jnp_module.arange(max_iter, dtype=jnp_module.int32),
-            jnp_module.broadcast_to(time_step_dyn, (max_iter,)),
-            jnp_module.broadcast_to(flip_sign_dyn, (max_iter,)),
-            jnp_module.broadcast_to(lambda_update_scale_dyn, (max_iter,)),
-            jnp_module.broadcast_to(ftol_dyn, (max_iter,)),
-            jnp_module.broadcast_to(fsq_total_target_dyn, (max_iter,)),
-        )
-        return jax_module.lax.scan(_scan_step, carry0, controls)
+        # Scalar controls are runtime operands to the compiled scan runner, not
+        # per-iteration scan payload.  Closing over them here avoids carrying
+        # five broadcast arrays through the scan input tree for every solve.
+        def _step(carry, it):
+            return _scan_step_impl(
+                carry,
+                it,
+                time_step_dyn,
+                flip_sign_dyn,
+                lambda_update_scale_dyn,
+                ftol_dyn,
+                fsq_total_target_dyn,
+            )
+
+        return jax_module.lax.scan(_step, carry0, jnp_module.arange(max_iter, dtype=jnp_module.int32))
 
     scan_run_setup_start = perf_counter() if scan_timing_enabled else None
     run_scan, scan_runner_cache_status = get_or_build_scan_runner_func(

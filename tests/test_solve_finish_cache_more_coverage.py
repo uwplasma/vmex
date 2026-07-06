@@ -528,7 +528,13 @@ def test_accelerated_scan_runner_cache_reports_timing_hit_and_miss(monkeypatch) 
     monkeypatch.setenv("VMEC_JAX_TIMING", "1")
     monkeypatch.setattr(solve, "jit", lambda fn, *args, **kwargs: fn)
     monkeypatch.setattr(solve.jax.lax, "cond", _python_cond)
-    monkeypatch.setattr(solve.jax.lax, "scan", _python_scan)
+    scan_xs_are_tuple = []
+
+    def record_scan_xs(fn, carry, xs, reverse=False):
+        scan_xs_are_tuple.append(isinstance(xs, tuple))
+        return _python_scan(fn, carry, xs, reverse=reverse)
+
+    monkeypatch.setattr(solve.jax.lax, "scan", record_scan_xs)
     monkeypatch.setattr(solve.jax, "block_until_ready", lambda value: value)
     solve._SCAN_RUNNER_CACHE.clear()
 
@@ -569,6 +575,7 @@ def test_accelerated_scan_runner_cache_reports_timing_hit_and_miss(monkeypatch) 
     assert first.diagnostics["timing"]["scan_runner_cache_hit_count"] == 0
     assert second.diagnostics["timing"]["scan_runner_cache_miss_count"] == 0
     assert second.diagnostics["timing"]["scan_runner_cache_hit_count"] == 1
+    assert scan_xs_are_tuple == [False, False]
     assert len(solve._SCAN_RUNNER_CACHE) == 1
 
 
