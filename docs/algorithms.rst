@@ -230,8 +230,10 @@ still win but must be validated for parity (especially when ``ns`` or
 
 For strict iteration-by-iteration reproducibility against VMEC2000, prefer the
 non-scan/parity path.  For ordinary fixed-boundary solves and parameter sweeps,
-the scan path is the default because it is usually faster and remains
-differentiable.
+the accelerated policy is the default, but CPU dispatch can follow measured
+profile provenance for known cold-regression rows instead of always forcing the
+scan path.  Use explicit ``use_scan=True``/``False`` only for profiling or
+case-specific validation.
 
 Worked comparison against VMEC2000
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

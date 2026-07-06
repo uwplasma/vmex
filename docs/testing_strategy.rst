@@ -483,12 +483,12 @@ Optimization gates:
   checks.  The bundled solved-seed gate intentionally uses a tiny grid; it is a
   metadata and sign/range regression, not a replacement for
   publication-resolution Boozer contour review.
-- GPU optimization tests should assert the device-aware defaults separately:
+- Optimization tests should assert the device-aware defaults separately:
   accepted-point exact callbacks default to the tape path on CPU and GPU, CPU
   keeps full tapes, GPU/CUDA/ROCm uses JVP-only exact tapes with basepoint
-  carries when exact-tape env vars are unset, and relaxed trial residuals
-  default to the VMEC-control loop on CPU and to scan on GPU/CUDA/ROCm unless
-  ``VMEC_JAX_OPT_TRIAL_SCAN`` explicitly forces either path.
+  carries when exact-tape env vars are unset, and relaxed trial residuals keep
+  the VMEC-control loop as the production baseline unless
+  ``VMEC_JAX_OPT_TRIAL_SCAN`` explicitly forces a scan profiling path.
 - Exact optimizer tests should preserve final-output correctness: when trial
   solves and exact accepted-point replays disagree, histories and saved outputs
   must select the best finite exact accepted point rather than an unreplayed
