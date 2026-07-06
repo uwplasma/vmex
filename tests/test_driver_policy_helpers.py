@@ -687,11 +687,16 @@ def test_default_cpu_policy_is_not_profile_or_size_classified():
 
 
 def test_default_cpu_policy_routes_serial2500170_fixture_to_accelerated():
-    """The serial2500170 regression fixture starts on the fast path."""
+    """The serial2500170 fixture stays fast but avoids measured cold scan loss."""
 
     path = Path(__file__).resolve().parents[1] / "examples/data/input.serial2500170_surface_points_mpol12_ntor12"
     indata = read_indata(path)
     assert driver._default_non_autodiff_solver_policy_for_backend(indata, "cpu") == ("accelerated", True)
+    assert driver._default_use_scan_for_backend(indata, "cpu", "accelerated") is False
+    decision = driver._default_scan_decision_for_backend(indata, "cpu", "accelerated")
+    assert decision.source == "profile"
+    assert "serial2500170_surface_points_mpol12_ntor12" in decision.detail
+    assert "cold_scan_compile_amortization" in decision.detail
 
 
 def test_default_cpu_policy_routes_finite_beta_fixture_to_fast_with_dynamic_scan():

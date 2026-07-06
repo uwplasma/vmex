@@ -14,6 +14,16 @@
       "cold_latency_prefer_noscan": true,
       "classification": "classified:cold_scan_compile_amortization,peak_xla_executable_memory",
       "note": "Focused profile: scan cold 3.08 s vs non-scan cold 1.11 s with matching convergence; warm runtime is much faster with scan once the runner is cached."
+    },
+    {
+      "case_id": "serial2500170_surface_points_mpol12_ntor12",
+      "backend": "vmec_jax",
+      "regression": true,
+      "requires_action": false,
+      "recommended_use_scan": false,
+      "cold_latency_prefer_noscan": true,
+      "classification": "classified:cold_scan_compile_amortization",
+      "note": "Focused high-mode profile with three requested iterations: explicit accelerated scan wall time 3.62 s versus explicit accelerated loop 1.78 s, with the scan path cold-compile dominated. Keep the fast accelerated policy but use the non-scan loop for this bundled regression fixture."
     }
   ]
 }
