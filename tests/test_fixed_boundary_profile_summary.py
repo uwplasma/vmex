@@ -47,8 +47,12 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
                     "scan_runner_arg_path_arg0_cache_prec_rz_mats_array_nbytes": 1024,
                     "scan_runner_arg_category_state_leaf_count": 20,
                     "scan_runner_arg_category_state_array_nbytes": 2048,
+                    "scan_runner_arg_category_velocity_leaf_count": 6,
+                    "scan_runner_arg_category_velocity_array_nbytes": 1536,
                     "scan_runner_arg_category_preconditioner_leaf_count": 8,
                     "scan_runner_arg_category_preconditioner_array_nbytes": 1024,
+                    "scan_runner_arg_subcategory_preconditioner_rz_apply_array_nbytes": 512,
+                    "scan_runner_arg_subcategory_state_checkpoint_array_nbytes": 256,
                     "scan_history_none": 0,
                     "scan_history_leaf_count": 9,
                     "scan_history_array_leaf_count": 9,
@@ -78,6 +82,16 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
                     "fixed_boundary_execution_classification": "scan_cache_hit",
                 },
                 "result": {"final_residual": 1.25e-3},
+                "scan_payload_leaders": {
+                    "largest_category": "velocity",
+                    "largest_category_array_nbytes": 1536,
+                    "largest_subcategory": "preconditioner_rz_apply",
+                    "largest_subcategory_array_nbytes": 512,
+                    "velocity_array_nbytes": 1536,
+                    "preconditioner_array_nbytes": 1024,
+                    "preconditioner_rz_apply_array_nbytes": 512,
+                    "state_checkpoint_array_nbytes": 256,
+                },
             }
         ),
         encoding="utf-8",
@@ -106,6 +120,14 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
     assert row["scan_runner_arg_array_leaf_count"] == 35.0
     assert row["scan_runner_arg_scalar_leaf_count"] == 5.0
     assert row["scan_runner_arg_array_nbytes"] == 4096.0
+    assert row["scan_payload_largest_category"] == "velocity"
+    assert row["scan_payload_largest_category_array_nbytes"] == 1536.0
+    assert row["scan_payload_largest_subcategory"] == "preconditioner_rz_apply"
+    assert row["scan_payload_largest_subcategory_array_nbytes"] == 512.0
+    assert row["scan_payload_velocity_array_nbytes"] == 1536.0
+    assert row["scan_payload_preconditioner_array_nbytes"] == 1024.0
+    assert row["scan_payload_preconditioner_rz_apply_array_nbytes"] == 512.0
+    assert row["scan_payload_state_checkpoint_array_nbytes"] == 256.0
     assert row["scan_runner_arg_preconditioner_rz_mats_key_count"] == 8.0
     assert row["scan_runner_arg_preconditioner_rz_mats_unexpected_key_count"] == 0.0
     assert row["scan_runner_arg_preconditioner_rz_mats_missing_mandatory_key_count"] == 0.0
@@ -138,6 +160,36 @@ def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
     assert row["scan_runner_cache_miss_categories"] == "cold_empty:1,iteration_budget:2"
     assert row["backend_compile_count"] == 90.0
     assert row["final_residual"] == 1.25e-3
+
+
+def test_summarize_profile_reconstructs_scan_payload_fields_from_legacy_timing(tmp_path) -> None:
+    """Older profile JSON without scan_payload_leaders should still summarize."""
+
+    path = tmp_path / "profile.json"
+    path.write_text(
+        json.dumps(
+            {
+                "timing": {
+                    "scan_runner_arg_category_velocity_array_nbytes": 480,
+                    "scan_runner_arg_category_preconditioner_array_nbytes": 160,
+                    "scan_runner_arg_subcategory_preconditioner_rz_apply_array_nbytes": 96,
+                    "scan_runner_arg_subcategory_state_checkpoint_array_nbytes": 64,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    row = summary.summarize_profile("case", path)
+
+    assert row["scan_payload_largest_category"] == "velocity"
+    assert row["scan_payload_largest_category_array_nbytes"] == 480
+    assert row["scan_payload_largest_subcategory"] == "preconditioner_rz_apply"
+    assert row["scan_payload_largest_subcategory_array_nbytes"] == 96
+    assert row["scan_payload_velocity_array_nbytes"] == 480.0
+    assert row["scan_payload_preconditioner_array_nbytes"] == 160.0
+    assert row["scan_payload_preconditioner_rz_apply_array_nbytes"] == 96.0
+    assert row["scan_payload_state_checkpoint_array_nbytes"] == 64.0
 
 
 def test_summarize_profile_uses_final_w_when_final_residual_is_absent(tmp_path) -> None:
