@@ -71,6 +71,11 @@ def _fixed_profiler_args(fixed_tool, **overrides):
         "auto_cli_policy": False,
         "dynamic_scan": False,
         "scan_arg_summary": False,
+        "budget_scan_arg_nbytes": 0,
+        "budget_scan_velocity_nbytes": 0,
+        "budget_scan_preconditioner_nbytes": 0,
+        "budget_scan_history_nbytes": 0,
+        "budget_action": "fail",
         "require_scan": False,
         "require_no_scan": False,
         "phase_timing": {},
@@ -302,6 +307,37 @@ def test_fixed_boundary_profiler_scan_policy_is_tristate(monkeypatch):
     assert default.use_scan is None
     assert forced_scan.use_scan is True
     assert forced_nonscan.use_scan is False
+
+
+def test_fixed_boundary_profiler_accepts_scan_payload_budget_args(monkeypatch):
+    fixed_tool = _load_fixed_tool()
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "profile_fixed_boundary.py",
+            "--input",
+            "input.test",
+            "--budget-scan-arg-nbytes",
+            "1000",
+            "--budget-scan-velocity-nbytes",
+            "800",
+            "--budget-scan-preconditioner-nbytes",
+            "400",
+            "--budget-scan-history-nbytes",
+            "64",
+            "--budget-action",
+            "warn",
+        ],
+    )
+    args = fixed_tool._parse_args()
+
+    assert args.budget_scan_arg_nbytes == 1000
+    assert args.budget_scan_velocity_nbytes == 800
+    assert args.budget_scan_preconditioner_nbytes == 400
+    assert args.budget_scan_history_nbytes == 64
+    assert args.budget_action == "warn"
 
 
 def test_fixed_boundary_profiler_prefers_checkout_source():
@@ -1022,6 +1058,37 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
     }
     assert summary["args"]["use_scan"] is True
     json.dumps(fixed_tool._json_safe(summary))
+
+
+def test_fixed_boundary_profiler_scan_payload_budget_status_flags_exceeded():
+    fixed_tool = _load_fixed_tool()
+    args = _fixed_profiler_args(
+        fixed_tool,
+        budget_scan_arg_nbytes=600,
+        budget_scan_velocity_nbytes=500,
+        budget_scan_preconditioner_nbytes=200,
+        budget_scan_history_nbytes=128,
+        budget_action="warn",
+    )
+    summary = {
+        "scan_payload_leaders": {
+            "total_array_nbytes": 700,
+            "velocity_array_nbytes": 480,
+            "preconditioner_array_nbytes": 160,
+            "history_array_nbytes": 288,
+        }
+    }
+
+    status = fixed_tool._scan_payload_budget_status(args, summary)
+
+    assert status["enabled"] is True
+    assert status["ok"] is False
+    assert status["action"] == "warn"
+    assert status["measurements"]["scan_arg_nbytes"] == 700
+    assert {item["name"] for item in status["exceeded"]} == {
+        "scan_arg_nbytes",
+        "scan_history_nbytes",
+    }
 
 
 def test_fixed_boundary_profiler_scan_arg_category_summary_handles_empty_timing():
