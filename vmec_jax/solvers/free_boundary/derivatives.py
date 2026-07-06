@@ -254,6 +254,66 @@ def _cotangent_directional_check(
     }
 
 
+def _fd_validation_summary(
+    *,
+    scalar_report: Mapping[str, Any] | None,
+    complete_report: Mapping[str, Any] | None,
+    cotangent_check: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a compact pass/fail summary for public derivative provenance.
+
+    Detailed scalar and complete-solve reports can be large.  This summary is
+    deliberately small enough for README/docs provenance tables while retaining
+    the two facts users need: whether the finite-difference perturbation stayed
+    on the same accepted branch, and whether every requested derivative passed.
+    """
+
+    scalar_report = scalar_report or {}
+    complete_report = complete_report or {}
+    branch = complete_report.get("branch_compatibility") or {}
+    scalars = scalar_report.get("scalars") or {}
+    scalar_passed = bool(scalar_report.get("passed", False)) if scalar_report else None
+    scalar_passes = [
+        bool(record.get("passed", scalar_passed))
+        for record in scalars.values()
+        if isinstance(record, Mapping)
+    ]
+    abs_errors = [
+        float(record["abs_error"])
+        for record in scalars.values()
+        if isinstance(record, Mapping) and record.get("abs_error") is not None
+    ]
+    rel_errors = [
+        float(record["rel_error"])
+        for record in scalars.values()
+        if isinstance(record, Mapping) and record.get("rel_error") is not None
+    ]
+    cotangent_available = bool((cotangent_check or {}).get("available", False))
+    cotangent_fd_available = bool((cotangent_check or {}).get("fd_available", False))
+    cotangent_passed = None
+    if cotangent_available and cotangent_fd_available:
+        cotangent_passed = bool((cotangent_check or {}).get("passed", False))
+    branch_same = branch.get("same_branch")
+    all_terms: list[bool] = []
+    if branch_same is not None:
+        all_terms.append(bool(branch_same))
+    if scalar_passed is not None:
+        all_terms.append(bool(scalar_passed))
+    if cotangent_passed is not None:
+        all_terms.append(bool(cotangent_passed))
+    return {
+        "available": bool(scalar_report),
+        "same_branch": None if branch_same is None else bool(branch_same),
+        "scalar_passed": scalar_passed,
+        "cotangent_passed": cotangent_passed,
+        "all_passed": bool(all_terms and all(all_terms)),
+        "n_scalars": int(len(scalars)),
+        "n_scalar_passes": int(sum(scalar_passes)),
+        "max_abs_error": None if not abs_errors else float(max(abs_errors)),
+        "max_rel_error": None if not rel_errors else float(max(rel_errors)),
+    }
+
+
 def free_boundary_value_and_jvp(
     input_path: Any,
     params: CoilFieldParams,
@@ -371,6 +431,7 @@ def free_boundary_value_and_jvp(
         "derivative_mode": branch_local.get("derivative_mode"),
         "branch_local_report": branch_local,
         "fd_validation": None,
+        "validation_summary": None,
         "cotangent_vjp_fd_check": _cotangent_directional_check(
             cotangent_by_key=cotangent_by_key,
             branch_local=branch_local,
@@ -414,6 +475,11 @@ def free_boundary_value_and_jvp(
             cotangent_by_key=cotangent_by_key,
             branch_local=branch_local,
             complete_report=complete_report,
+        )
+        result["validation_summary"] = _fd_validation_summary(
+            scalar_report=scalar_report,
+            complete_report=complete_report,
+            cotangent_check=result["cotangent_vjp_fd_check"],
         )
 
     return result

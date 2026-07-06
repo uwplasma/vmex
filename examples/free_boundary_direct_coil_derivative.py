@@ -71,6 +71,7 @@ def _compact_report(report: dict[str, Any]) -> dict[str, Any]:
         "values": report["values"],
         "directional_derivatives": report["directional_derivatives"],
         "base_abs_delta": report["base_abs_delta"],
+        "validation_summary": report.get("validation_summary"),
         "fd_passed": scalar_report.get("passed"),
         "fd_scalars": public_scalar_report,
         "cotangent_vjp_fd_check": report.get("cotangent_vjp_fd_check"),
@@ -195,6 +196,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {name:22s} value={float(np.asarray(value)): .6e}  jvp={float(np.asarray(deriv)): .6e}")
     if compact["fd_passed"] is not None:
         print(f"  complete-solve FD validation passed: {compact['fd_passed']}")
+    summary = compact.get("validation_summary") or {}
+    if summary.get("available"):
+        print(
+            "  validation summary: "
+            f"same_branch={summary.get('same_branch')} "
+            f"all_passed={summary.get('all_passed')} "
+            f"max_abs_error={summary.get('max_abs_error')}"
+        )
     cotangent_check = compact.get("cotangent_vjp_fd_check") or {}
     if cotangent_check.get("available") and cotangent_check.get("fd_available"):
         print(

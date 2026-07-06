@@ -181,6 +181,17 @@ def test_free_boundary_value_and_jvp_can_attach_complete_solve_fd_validation(mon
 
     assert report["fd_validation"]["scalar_report"]["passed"] is True
     assert report["fd_validation"]["public_scalar_report"]["qs_residual"]["abs_error"] == 0.0
+    assert report["validation_summary"] == {
+        "available": True,
+        "same_branch": True,
+        "scalar_passed": True,
+        "cotangent_passed": True,
+        "all_passed": True,
+        "n_scalars": 2,
+        "n_scalar_passes": 2,
+        "max_abs_error": 0.0,
+        "max_rel_error": None,
+    }
     cotangent_check = report["cotangent_vjp_fd_check"]
     assert cotangent_check["passed"] is True
     assert cotangent_check["ad_cotangent_directional"] == 2.0 * 0.2 + (-1.0) * (-0.6)
