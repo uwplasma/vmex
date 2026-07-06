@@ -972,6 +972,9 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
         "scan_runner_arg_category_preconditioner_leaf_count": 4,
         "scan_runner_arg_category_preconditioner_array_leaf_count": 3,
         "scan_runner_arg_category_preconditioner_array_nbytes": 160,
+        "scan_runner_arg_subcategory_preconditioner_rz_apply_leaf_count": 2,
+        "scan_runner_arg_subcategory_preconditioner_rz_apply_array_leaf_count": 2,
+        "scan_runner_arg_subcategory_preconditioner_rz_apply_array_nbytes": 96,
         "scan_runner_arg_category_controller_leaf_count": 5,
         "scan_runner_arg_category_controller_array_leaf_count": 1,
         "scan_runner_arg_category_controller_array_nbytes": 60,
@@ -1002,6 +1005,10 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
     assert summary["scan_arg_categories"]["categories"]["preconditioner"]["array_leaf_count"] == 3
     assert summary["scan_arg_subcategories"]["largest_subcategory"] == "velocity_R"
     assert summary["scan_arg_subcategories"]["largest_subcategory_array_nbytes"] == 240
+    assert summary["scan_payload_leaders"]["velocity_array_nbytes"] == 480
+    assert summary["scan_payload_leaders"]["preconditioner_array_nbytes"] == 160
+    assert summary["scan_payload_leaders"]["preconditioner_rz_apply_array_nbytes"] == 96
+    assert summary["scan_payload_leaders"]["history_array_nbytes"] == 288
     assert summary["scan_arg_subcategories"]["subcategories"]["velocity_lambda"]["array_nbytes"] == 80
     assert summary["scan_cache_miss_categories"]["total_count"] == 3
     assert summary["scan_cache_miss_categories"]["largest_category"] == "iteration_budget"
