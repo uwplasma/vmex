@@ -491,6 +491,7 @@ def build_vmec2000_scan_cache_key(
     # screen-output scalar sampling and history materialization in
     # ``apply_state_only_scan_options``, so display/history settings must not
     # split the compiled runner cache for optimizer trial solves.
+    max_iter_tail_key = 0 if state_only_key else int(max_iter_tail)
     nstep_screen_key = 0 if state_only_key else int(nstep_screen)
     scan_light_key = False if state_only_key else bool(scan_light)
     scan_minimal_key = True if state_only_key else bool(scan_minimal)
@@ -500,7 +501,7 @@ def build_vmec2000_scan_cache_key(
         wout_key,
         edge_signature_key,
         tomnsps_policy_key,
-        int(max_iter_tail),
+        int(max_iter_tail_key),
         int(preflight_iters),
         int(iter_offset0),
         float(step_size),
@@ -521,6 +522,39 @@ def build_vmec2000_scan_cache_key(
         int(fallback_iters_key),
         int(fallback_badjac_key),
     )
+
+
+def state_only_scan_runner_bucket_size(env_value: str | None, default: int = 32) -> int:
+    """Return the iteration-count bucket used by state-only trial scan runners.
+
+    State-only runners are used by optimization and residual-only probes.  They
+    return only the final state, so padding the scan length with held iterations
+    is numerically equivalent but lets nearby trial budgets share one compiled
+    scan body.  A non-positive value disables bucketing.
+    """
+
+    value = "" if env_value is None else str(env_value).strip()
+    if not value:
+        return int(default)
+    try:
+        return max(0, int(value))
+    except Exception:
+        return int(default)
+
+
+def bucket_state_only_scan_runner_seq_len(
+    seq_len: int,
+    *,
+    bucket_size: int,
+    state_only_scan: bool,
+) -> int:
+    """Bucket a state-only scan runner length without affecting full scans."""
+
+    seq_len_int = max(0, int(seq_len))
+    bucket = int(bucket_size)
+    if (not bool(state_only_scan)) or bucket <= 1 or seq_len_int <= 1:
+        return seq_len_int
+    return ((seq_len_int + bucket - 1) // bucket) * bucket
 
 
 def resolve_scan_iteration_runtime_plan(

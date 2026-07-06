@@ -12,6 +12,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     SCAN_TIMING_COUNT_KEYS,
     SCAN_TIMING_KEYS,
     apply_state_only_scan_options,
+    bucket_state_only_scan_runner_seq_len,
     build_scan_timing_report,
     build_vmec2000_scan_cache_key,
     default_vmec2000_controller_constants,
@@ -26,6 +27,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     scan_jit_forces_enabled,
     scan_jit_preflight_enabled,
     scan_timing_enabled,
+    state_only_scan_runner_bucket_size,
     validate_vmec2000_scan_guards,
 )
 from vmec_jax.solvers.fixed_boundary.scan.runtime import (
@@ -1000,6 +1002,66 @@ def test_run_nonchunked_scan_passes_compact_iteration_sequence_and_scalar_contro
     assert np.isnan(float(target))
 
 
+def test_run_nonchunked_scan_buckets_state_only_runner_length_without_history():
+    calls = []
+
+    class Runtime:
+        @staticmethod
+        def ready(*_args, **_kwargs):
+            pytest.fail("timing disabled should not synchronize device values")
+
+    def get_scan_runner(seq_len):
+        assert seq_len == 8
+
+        def runner(carry, it_seq):
+            calls.append(tuple(np.asarray(it_seq)))
+            return carry + ("advanced",), ()
+
+        return runner, "miss"
+
+    result = run_nonchunked_scan(
+        ("carry",),
+        max_iter_scan=5,
+        max_iter_tail=5,
+        preflight_iters=0,
+        iter_offset_preflight=0,
+        axis_reset_repeat=False,
+        iter_offset0=0,
+        get_scan_runner=get_scan_runner,
+        scan_runner_seq_len_func=lambda seq_len: 8,
+        scan_step=lambda *_args: pytest.fail("no preflight should not call scan_step directly"),
+        runtime_scan_args=(),
+        scan_jit_preflight_enabled_func=lambda **_kwargs: pytest.fail("no preflight should not probe jit policy"),
+        scan_jit_preflight_env=None,
+        backend_name="cpu",
+        scan_differentiated=False,
+        scan_collect_print=False,
+        scan_timing_enabled=False,
+        scan_timing_stats={},
+        scan_device_runtime=Runtime(),
+        perf_counter=lambda: pytest.fail("timing disabled should not request time"),
+        state_only_scan=True,
+        scan_fallback_enabled_run=False,
+        scan_fallback_iters=0,
+        jnp_module=jnp,
+        jax_module=SimpleNamespace(tree_util=None),
+    )
+
+    assert result.carry_final == ("carry", "advanced")
+    assert result.history is None
+    assert calls == [(0, 1, 2, 3, 4, 5, 6, 7)]
+
+
+def test_state_only_scan_runner_bucket_helpers_keep_full_scans_exact():
+    assert state_only_scan_runner_bucket_size("", default=32) == 32
+    assert state_only_scan_runner_bucket_size("0", default=32) == 0
+    assert state_only_scan_runner_bucket_size("7", default=32) == 7
+    assert state_only_scan_runner_bucket_size("bad", default=32) == 32
+    assert bucket_state_only_scan_runner_seq_len(5, bucket_size=4, state_only_scan=True) == 8
+    assert bucket_state_only_scan_runner_seq_len(5, bucket_size=4, state_only_scan=False) == 5
+    assert bucket_state_only_scan_runner_seq_len(5, bucket_size=0, state_only_scan=True) == 5
+
+
 def test_run_flags_disable_fallback_for_state_only_and_chunking_for_traced_scan():
     normal = resolve_scan_run_flags(
         state_only=False,
@@ -1340,6 +1402,8 @@ def test_scan_cache_key_is_stable_and_tracks_behavioral_toggles():
     )
     assert state_only == state_only_tuned
     assert state_only == _cache_key(state_only_scan=True, scan_light=True, scan_minimal=False)
+    assert state_only == _cache_key(state_only_scan=True, max_iter_tail=99)
+    assert _cache_key(max_iter_tail=9) != _cache_key(max_iter_tail=99)
     assert state_only[-2:] == (0, 0)
     assert state_only[12] == 0
     assert state_only[20:23] == (True, False, True)

@@ -409,7 +409,7 @@ def sample_vmec2000_scan_scalars(
     *,
     carry_adv: Any,
     iter2: Any,
-    max_iter: int,
+    max_iter: Any,
     nstep_screen: int,
     scan_collect_scalars: bool,
     force_sample: Any,
@@ -422,7 +422,8 @@ def sample_vmec2000_scan_scalars(
 ) -> tuple[Any, Any, Any, Any]:
     """Sample scalar quantities used by VMEC2000 scan screen output."""
 
-    sample_vmec = (iter2 <= 1) | (iter2 >= int(max_iter)) | ((iter2 % int(nstep_screen)) == 0) | force_sample
+    max_iter_j = jnp.asarray(max_iter, dtype=jnp.asarray(iter2).dtype)
+    sample_vmec = (iter2 <= 1) | (iter2 >= max_iter_j) | ((iter2 % int(nstep_screen)) == 0) | force_sample
     sample_vmec = sample_vmec & jnp.asarray(bool(scan_collect_scalars), dtype=bool)
 
     def _compute_scalars(_):

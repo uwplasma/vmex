@@ -63,6 +63,7 @@ from vmec_jax.solvers.fixed_boundary.scan.payload import (
 )
 from vmec_jax.solvers.fixed_boundary.scan.planning import (
     build_scan_timing_report as _build_scan_timing_report,
+    bucket_state_only_scan_runner_seq_len as _bucket_state_only_scan_runner_seq_len,
     default_vmec2000_controller_constants as _default_vmec2000_controller_constants,
     new_scan_timing_stats as _new_scan_timing_stats,
     resolve_scan_iteration_runtime_plan as _resolve_scan_iteration_runtime_plan,
@@ -70,6 +71,7 @@ from vmec_jax.solvers.fixed_boundary.scan.planning import (
     scan_jit_forces_enabled as _scan_jit_forces_enabled,
     scan_jit_preflight_enabled as _scan_jit_preflight_enabled,
     scan_timing_enabled as _scan_timing_enabled,
+    state_only_scan_runner_bucket_size as _state_only_scan_runner_bucket_size,
     validate_vmec2000_scan_guards as _validate_vmec2000_scan_guards,
 )
 from vmec_jax.solvers.fixed_boundary.scan.resume import (
@@ -231,6 +233,7 @@ def _scan_step_with_runtime_controls(
     scan_fallback_fsq_factor: Any,
     scan_fallback_fsq_abs: Any,
     scan_fallback_improve: Any,
+    max_iter_runtime: Any,
 ) -> Any:
     """Dispatch one scan step using scalar runtime convergence controls."""
 
@@ -248,11 +251,11 @@ def _scan_step_with_runtime_controls(
         scan_fallback_improve=scan_fallback_improve,
     )
     iter2_hold = jnp.asarray(it + 1, dtype=jnp.int32) + jnp.asarray(carry.iter_offset, dtype=jnp.int32)
-    hold_cond = carry.converged | carry.abort_scan | (iter2_hold > jnp.asarray(int(step_ctx.max_iter), dtype=jnp.int32))
+    hold_cond = carry.converged | carry.abort_scan | (iter2_hold > jnp.asarray(max_iter_runtime, dtype=jnp.int32))
     return jax.lax.cond(
         hold_cond,
         lambda c: _hold_vmec2000_scan_step(step_ctx, c),
-        lambda c: _advance_vmec2000_scan_step(step_ctx, c, it, controls),
+        lambda c: _advance_vmec2000_scan_step(step_ctx, c, it, controls, max_iter_runtime),
         operand=carry,
     )
 
@@ -614,6 +617,7 @@ def _prepare_vmec2000_scan_step_payload(
     carry_adv: _ScanCarry,
     it: Any,
     convergence_controls: ScanConvergenceControls,
+    max_iter_runtime: Any,
 ) -> ScanStepPreparedPayload:
     """Prepare force, residual, and bad-Jacobian inputs for one scan step."""
 
@@ -663,7 +667,7 @@ def _prepare_vmec2000_scan_step_payload(
     sample_vmec, r00_j, z00_j, w_mhd = _sample_vmec2000_scan_scalars(
         carry_adv=carry_adv,
         iter2=iter2,
-        max_iter=int(step_ctx.max_iter),
+        max_iter=max_iter_runtime,
         nstep_screen=int(step_ctx.nstep_screen),
         scan_collect_scalars=bool(scan_options.scan_collect_scalars),
         force_sample=conv_now,
@@ -755,6 +759,7 @@ def _advance_vmec2000_scan_step(
     carry_adv: _ScanCarry,
     it: Any,
     convergence_controls: ScanConvergenceControls,
+    max_iter_runtime: Any,
 ) -> Any:
     """Advance one active VMEC2000 scan step."""
 
@@ -772,7 +777,7 @@ def _advance_vmec2000_scan_step(
         fsq_abs=convergence_controls.scan_fallback_fsq_abs,
         improve=convergence_controls.scan_fallback_improve,
     )
-    prepared = _prepare_vmec2000_scan_step_payload(step_ctx, carry_adv, it, convergence_controls)
+    prepared = _prepare_vmec2000_scan_step_payload(step_ctx, carry_adv, it, convergence_controls, max_iter_runtime)
     force_eval = prepared.force_eval
     current_payload_pre = prepared.current_payload
     tau_decision = prepared.tau_decision
@@ -1176,6 +1181,7 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
         fallback_fsq_factor_dyn,
         fallback_fsq_abs_dyn,
         fallback_improve_dyn,
+        max_iter_runtime_dyn,
     ):
         def _step(carry, it):
             return _scan_step_with_runtime_controls(
@@ -1191,6 +1197,7 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
                 fallback_fsq_factor_dyn,
                 fallback_fsq_abs_dyn,
                 fallback_improve_dyn,
+                max_iter_runtime_dyn,
             )
 
         return jax.lax.scan(_step, carry_init, it_seq)
@@ -1227,6 +1234,15 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
     if scan_timing_enabled and scan_run_setup_start is not None:
         scan_timing_stats["scan_run_setup_s"] += time.perf_counter() - float(scan_run_setup_start)
     carry_init = inputs.carry0._replace(state=inputs.state_init, state_checkpoint=inputs.state_init)
+    state_only_bucket_size = _state_only_scan_runner_bucket_size(os.getenv("VMEC_JAX_STATE_ONLY_SCAN_BUCKET"))
+
+    def _scan_runner_seq_len(seq_len: int) -> int:
+        return _bucket_state_only_scan_runner_seq_len(
+            int(seq_len),
+            bucket_size=int(state_only_bucket_size),
+            state_only_scan=bool(inputs.state_only_scan) and (not bool(inputs.scan_differentiated)),
+        )
+
     scan_dispatch_common = {
         "scan_jit_preflight_enabled_func": _scan_jit_preflight_enabled,
         "scan_jit_preflight_env": os.getenv("VMEC_JAX_SCAN_JIT_PREFLIGHT"),
@@ -1239,9 +1255,12 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
         "get_scan_runner": _get_scan_runner,
         "scan_step": inputs.scan_step,
         "build_scan_it_seq": _scan_iteration_sequence_only,
-        "runtime_scan_args": _scan_runtime_controls_args(
-            inputs.convergence_controls,
-            dtype=inputs.dtype,
+        "runtime_scan_args": (
+            *_scan_runtime_controls_args(
+                inputs.convergence_controls,
+                dtype=inputs.dtype,
+            ),
+            jnp.asarray(int(inputs.max_iter), dtype=jnp.int32),
         ),
         "scan_timing_enabled": scan_timing_enabled,
         "scan_timing_stats": scan_timing_stats,
@@ -1276,6 +1295,7 @@ def _run_scan_dispatch_and_finalize(inputs: ScanDispatchFinalizeInputs) -> Solve
             **scan_dispatch_common,
             "max_iter_scan": int(scan_runtime_plan.max_iter_scan),
             "max_iter_tail": int(scan_runtime_plan.max_iter_tail),
+            "scan_runner_seq_len_func": _scan_runner_seq_len,
             "scan_collect_print": bool(inputs.scan_collect_print),
         },
     )

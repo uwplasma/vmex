@@ -1038,6 +1038,7 @@ def run_nonchunked_scan(
     axis_reset_repeat: bool,
     iter_offset0: int,
     get_scan_runner: Callable[[int], tuple[Any, str]],
+    scan_runner_seq_len_func: Callable[[int], int] | None = None,
     scan_step: Callable[[Any, Any], tuple[Any, Any]],
     build_scan_it_seq: Callable[[int, int], Any] | None = None,
     runtime_scan_args: tuple[Any, ...] = (),
@@ -1058,7 +1059,11 @@ def run_nonchunked_scan(
 ) -> NonChunkedScanRunResult:
     """Run a VMEC scan with one cached runner and optional one-step preflight."""
 
-    runner, cache_status = get_scan_runner(int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan))
+    requested_seq_len = int(max_iter_tail) if int(max_iter_tail) > 0 else int(max_iter_scan)
+    runner_seq_len = int(requested_seq_len)
+    if scan_runner_seq_len_func is not None:
+        runner_seq_len = int(scan_runner_seq_len_func(int(requested_seq_len)))
+    runner, cache_status = get_scan_runner(int(runner_seq_len))
     if int(preflight_iters) > 0:
         carry_pre = carry_init
         jit_preflight = scan_jit_preflight_enabled_func(
@@ -1092,7 +1097,7 @@ def run_nonchunked_scan(
         if int(max_iter_tail) > 0:
             it_seq = _scan_iteration_sequence(
                 preflight_iters,
-                int(max_iter_scan),
+                int(preflight_iters + runner_seq_len),
                 jnp_module=jnp_module,
                 build_scan_it_seq=build_scan_it_seq,
             )
@@ -1128,7 +1133,7 @@ def run_nonchunked_scan(
     else:
         it_seq = _scan_iteration_sequence(
             0,
-            int(max_iter_scan),
+            int(runner_seq_len),
             jnp_module=jnp_module,
             build_scan_it_seq=build_scan_it_seq,
         )
