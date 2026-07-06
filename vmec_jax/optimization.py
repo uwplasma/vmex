@@ -469,11 +469,13 @@ class FixedBoundaryExactOptimizer:
         accepted trust-region trajectory by changing trial convergence details.
         CPU QA/QH probes through max_nfev=6 were equal or slower than the
         VMEC-control loop, or reached a weaker endpoint, so CPU defaults to the
-        loop.  QP mode-3 probes at max_nfev=4 and max_nfev=8 showed a
-        VMEC2000-compatible scan speed win with objective parity, so QP uses
-        scan while retaining the VMEC2000 control law.  QI remains on the loop
-        because scan changed the short-probe basin.  Environment overrides
-        always win so regressions can be isolated per machine/problem.
+        loop.  QP mode-3-and-below probes at max_nfev=4 and max_nfev=8
+        showed a VMEC2000-compatible scan speed win with objective parity, so
+        low-mode QP uses scan while retaining the VMEC2000 control law.
+        Higher-mode QP remains opt-in until complete-solve quality evidence is
+        available.  QI remains on the loop because scan changed the
+        short-probe basin.  Environment overrides always win so regressions
+        can be isolated per machine/problem.
         """
         forced = os.getenv("VMEC_JAX_OPT_TRIAL_SCAN", "").strip().lower()
         if forced in ("1", "true", "yes", "on", "scan"):
@@ -492,7 +494,9 @@ class FixedBoundaryExactOptimizer:
             helicity_m = None
             helicity_n = None
         if family == "qs" and helicity_m == 0 and helicity_n not in (None, 0):
-            return True, "objective_family", "quasi_poloidal_vmec2000_trial_scan_default"
+            if self._spec_max_mode() <= 3:
+                return True, "objective_family", "quasi_poloidal_low_mode_vmec2000_trial_scan_default"
+            return False, "objective_family", "quasi_poloidal_high_mode_trial_loop_default"
         backend = self._exact_tape_backend_name()
         use_scan = backend in ("gpu", "cuda", "tpu", "rocm")
         detail = f"{backend}_trial_{'scan' if use_scan else 'loop'}_default"
