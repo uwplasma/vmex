@@ -947,6 +947,7 @@ class FixedBoundaryExactOptimizer:
             "trial_solver_state_only": bool(self._trial_solver_kwargs.get("state_only", trial_solver_use_scan)),
             "trial_solver_light_history": bool(self._trial_solver_kwargs.get("light_history", False)),
             "trial_solver_resume_state_mode": str(self._trial_solver_kwargs.get("resume_state_mode", "full")),
+            "trial_solver_vmec2000_control": bool(self._trial_solver_kwargs.get("vmec2000_control", True)),
             "exact_replay_policy": exact_replay_policy_metadata(
                 self,
                 int(len(getattr(self, "_specs", ()))),

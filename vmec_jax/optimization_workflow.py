@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import sys
-from typing import Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
@@ -808,6 +808,7 @@ def build_fixed_boundary_objective_stage(
     solver_device: str | None = None,
     exact_path: str | None = None,
     freeze_initial_axis: bool = False,
+    _trial_solver_overrides: Mapping[str, Any] | None = None,
 ) -> FixedBoundaryObjectiveStage:
     """Build one VMEC/JAX optimization stage from an objective list."""
 
@@ -876,6 +877,8 @@ def build_fixed_boundary_objective_stage(
         exact_path=exact_path,
         freeze_initial_axis=freeze_initial_axis,
     )
+    if _trial_solver_overrides:
+        optimizer._trial_solver_kwargs.update(dict(_trial_solver_overrides))
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),
         ctx=ctx,
@@ -924,6 +927,7 @@ def run_fixed_boundary_objective_optimization(
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
     save_final_outputs: bool = True,
+    _trial_solver_overrides: Mapping[str, Any] | None = None,
 ) -> FixedBoundaryOptimizationResult:
     """Run a fixed-boundary objective list through one or more mode stages."""
 
@@ -951,6 +955,7 @@ def run_fixed_boundary_objective_optimization(
             trial_ftol=trial_ftol,
             solver_device=solver_device,
             exact_path=exact_path,
+            _trial_solver_overrides=_trial_solver_overrides,
         )
         iota_fn = (
             (lambda state, ctx=stage.ctx: float(mean_iota(ctx, state)))
@@ -1080,6 +1085,7 @@ def build_quasi_isodynamic_objective_stage(
     solver_device: str | None = None,
     exact_path: str | None = None,
     freeze_initial_axis: bool = True,
+    _trial_solver_overrides: Mapping[str, Any] | None = None,
 ) -> FixedBoundaryObjectiveStage:
     """Build one QI stage while sharing one Boozer transform across QI terms."""
 
@@ -1251,6 +1257,8 @@ def build_quasi_isodynamic_objective_stage(
         exact_path=exact_path,
         freeze_initial_axis=freeze_initial_axis,
     )
+    if _trial_solver_overrides:
+        optimizer._trial_solver_kwargs.update(dict(_trial_solver_overrides))
     return FixedBoundaryObjectiveStage(
         mode=int(stage_mode),
         ctx=ctx,
@@ -1321,6 +1329,7 @@ def run_quasi_isodynamic_objective_optimization(
     save_stage_inputs: bool = True,
     save_stage_wouts: bool = False,
     save_final_outputs: bool = True,
+    _trial_solver_overrides: Mapping[str, Any] | None = None,
 ) -> FixedBoundaryOptimizationResult:
     """Run a QI objective list through repeated or direct mode stages."""
 
@@ -1372,6 +1381,7 @@ def run_quasi_isodynamic_objective_optimization(
             trial_ftol=trial_ftol,
             solver_device=solver_device,
             exact_path=exact_path,
+            _trial_solver_overrides=_trial_solver_overrides,
         )
         iota_fn = (
             (lambda state, ctx=stage.ctx: float(mean_iota(ctx, state)))
@@ -1494,6 +1504,7 @@ def least_squares_solve(
     save_stage_wouts: bool = False,
     save_rerun_wouts: bool = False,
     save_final_outputs: bool = True,
+    _trial_solver_overrides: Mapping[str, Any] | None = None,
 ) -> FixedBoundaryOptimizationResult:
     """Solve a SIMSOPT-style fixed-boundary least-squares problem.
 
@@ -1557,6 +1568,7 @@ def least_squares_solve(
             save_stage_inputs=save_stage_inputs,
             save_stage_wouts=save_stage_wouts,
             save_final_outputs=save_final_outputs,
+            _trial_solver_overrides=_trial_solver_overrides,
         )
 
     return run_fixed_boundary_objective_optimization(
@@ -1597,6 +1609,7 @@ def least_squares_solve(
         save_stage_wouts=save_stage_wouts,
         save_rerun_wouts=save_rerun_wouts,
         save_final_outputs=save_final_outputs,
+        _trial_solver_overrides=_trial_solver_overrides,
     )
 
 
