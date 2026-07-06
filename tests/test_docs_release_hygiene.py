@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 import subprocess
@@ -126,6 +127,29 @@ def test_public_wout_parity_summary_keeps_promoted_rows_and_tolerances() -> None
         assert abs(case["vmec_jax"]["aspect"] - case["vmec2000"]["aspect"]) < 1.0e-10
         assert required_rel_rms <= set(case["rel_rms"])
         assert max(float(value) for value in case["rel_rms"].values()) < 5.0e-5
+
+
+def test_readme_runtime_matrix_uses_normalized_single_grid_inputs() -> None:
+    from vmec_jax.namelist import read_indata
+
+    csv_path = ROOT / "docs" / "_static" / "figures" / "readme_runtime_compare.csv"
+    json_path = ROOT / "docs" / "_static" / "figures" / "readme_runtime_compare.json"
+    metadata = json.loads(json_path.read_text())["metadata"]
+    rows = list(csv.DictReader(csv_path.open()))
+
+    assert metadata["plot_mode"] == "runtime"
+    assert metadata["figure_kind"] == "fixed"
+    assert metadata["cpu_summary_paths"] == ["outputs/readme_runtime_single_grid_151_20260706/summary.json"]
+    assert rows
+
+    for row in rows:
+        input_path = ROOT / "examples" / "data" / "single_grid" / f"input.{row['case_id']}"
+        assert input_path.exists()
+        indata = read_indata(input_path)
+        assert indata.scalars["NS_ARRAY"] == 151
+        assert indata.scalars["FTOL_ARRAY"] == 1.0e-14
+        assert indata.scalars["NITER_ARRAY"] == 5000
+        assert indata.scalars["NITER"] == 5000
 
 
 def test_qi_case_specific_artifacts_are_not_documented_as_aspect5_promotions() -> None:
