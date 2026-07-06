@@ -899,7 +899,14 @@ def test_fixed_boundary_profiler_compacts_timing_diagnostics():
 
 def test_fixed_boundary_profiler_summary_exposes_wall_and_host_update_timing():
     fixed_tool = _load_fixed_tool()
-    args = _fixed_profiler_args(fixed_tool, use_scan=False)
+    args = _fixed_profiler_args(fixed_tool, use_scan=False, dynamic_scan=True)
+    args.dynamic_scan_probe_settings = {
+        "enabled": True,
+        "probe_iters": 1,
+        "timed_probe": True,
+        "backend": "cpu",
+        "max_solve_fraction": "1.0",
+    }
     timing = {
         "iterations": 3,
         "solve_total_s": 2.0,
@@ -924,6 +931,8 @@ def test_fixed_boundary_profiler_summary_exposes_wall_and_host_update_timing():
     assert summary["timing"]["update_state_s"] == 0.25
     assert summary["diagnostics"]["timing"]["update_state_s"] == 0.25
     assert summary["args"]["use_scan"] is False
+    assert summary["args"]["dynamic_scan_probe"]["probe_iters"] == 1
+    assert summary["args"]["dynamic_scan_probe"]["timed_probe"] is True
     json.dumps(fixed_tool._json_safe(summary))
 
 
