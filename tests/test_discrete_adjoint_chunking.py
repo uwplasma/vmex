@@ -1787,6 +1787,25 @@ def test_compact_tape_diagnostics_skips_scalar_conversion_errors():
     assert out == {"converged_iter": 2}
 
 
+def test_dynamic_replay_trace_summary_counts_cache_update_flags():
+    traces = (
+        {"constraint_cache_update": True},
+        {"constraint_cache_update": False, "precond_cache_update": True},
+        {"constraint_cache_update": False, "precond_cache_update": False},
+    )
+
+    out = da._dynamic_replay_trace_summary(traces, supported=True)
+
+    assert out["step_count"] == 3
+    assert out["supported"] is True
+    assert out["constraint_cache_update_true_count"] == 1
+    assert out["constraint_cache_update_false_count"] == 2
+    assert out["precond_cache_update_true_count"] == 2
+    assert out["precond_cache_update_false_count"] == 1
+    assert out["all_precond_cache_updates"] is False
+    assert out["any_precond_cache_updates"] is True
+
+
 def test_fallback_state_jvp_and_vjp_apply_linearized_step(monkeypatch):
     trace = _fake_dynamic_trace()
 

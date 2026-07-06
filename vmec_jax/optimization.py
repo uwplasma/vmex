@@ -879,6 +879,8 @@ class FixedBoundaryExactOptimizer:
         if cache_key in self._exact_cache:
             self._profile_add("exact_cache_hit", 0.0)
             state, payload = self._exact_cache[cache_key]
+            tape = payload.get("tape") if isinstance(payload, dict) else None
+            self._last_exact_tape_diagnostics = getattr(tape, "diagnostics", None)
             self._remember_exact_state(cache_key, state)
             return (state, payload) if return_payload else state
 
@@ -904,6 +906,7 @@ class FixedBoundaryExactOptimizer:
             store_full_step_traces=False,
             jvp_only=bool(jvp_only),
         )
+        self._last_exact_tape_diagnostics = getattr(tape, "diagnostics", None)
         tape_build_wall_s = time.perf_counter() - t_tape
         self._profile_add("exact_tape_build", tape_build_wall_s)
         if jvp_only:
@@ -978,6 +981,9 @@ class FixedBoundaryExactOptimizer:
                 self,
                 int(len(getattr(self, "_specs", ()))),
             ),
+            "exact_tape_dynamic_replay": (
+                getattr(self, "_last_exact_tape_diagnostics", {}) or {}
+            ).get("dynamic_replay_trace_summary"),
             "lasym": bool(getattr(getattr(getattr(self, "_static", None), "cfg", None), "lasym", False)),
         }
 

@@ -337,6 +337,55 @@ def _compact_tape_diagnostics(diagnostics: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _dynamic_replay_trace_summary(step_traces: tuple[dict[str, Any], ...], *, supported: bool) -> dict[str, Any]:
+    """Summarize compact replay branch flags without retaining trace arrays."""
+
+    traces = tuple(_trace_with_replay_defaults(trace) for trace in step_traces)
+    if not traces:
+        return {
+            "step_count": 0,
+            "supported": bool(supported),
+            "precond_cache_update_true_count": 0,
+            "precond_cache_update_false_count": 0,
+            "constraint_cache_update_true_count": 0,
+            "constraint_cache_update_false_count": 0,
+            "all_precond_cache_updates": False,
+            "all_constraint_cache_updates": False,
+            "any_precond_cache_updates": False,
+            "any_constraint_cache_updates": False,
+        }
+
+    def _bools(key: str, default_key: str | None = None) -> list[bool]:
+        values: list[bool] = []
+        for trace in traces:
+            if key in trace:
+                value = trace[key]
+            elif default_key is not None and default_key in trace:
+                value = trace[default_key]
+            else:
+                value = False
+            values.append(bool(value))
+        return values
+
+    constraint_updates = _bools("constraint_cache_update")
+    precond_updates = _bools("precond_cache_update", default_key="constraint_cache_update")
+    precond_true = sum(1 for value in precond_updates if value)
+    constraint_true = sum(1 for value in constraint_updates if value)
+    step_count = len(traces)
+    return {
+        "step_count": int(step_count),
+        "supported": bool(supported),
+        "precond_cache_update_true_count": int(precond_true),
+        "precond_cache_update_false_count": int(step_count - precond_true),
+        "constraint_cache_update_true_count": int(constraint_true),
+        "constraint_cache_update_false_count": int(step_count - constraint_true),
+        "all_precond_cache_updates": bool(precond_true == step_count),
+        "all_constraint_cache_updates": bool(constraint_true == step_count),
+        "any_precond_cache_updates": bool(precond_true > 0),
+        "any_constraint_cache_updates": bool(constraint_true > 0),
+    }
+
+
 def concat_residual_iteration_traces(traces: list[ResidualIterationTrace]) -> ResidualIterationTrace:
     """Concatenate per-call residual traces into one longer trace."""
     if not traces:
@@ -499,7 +548,12 @@ def build_residual_checkpoint_tape_direct(
             step_trace_static_flags=step_trace_static_flags,
             dynamic_base_carries_stacked=dynamic_base_carries_stacked,
         )
-        if _dynamic_replay_supported(tape=tentative_tape, rebuild_preconditioner=True):
+        dynamic_supported = _dynamic_replay_supported(tape=tentative_tape, rebuild_preconditioner=True)
+        compact_diagnostics["dynamic_replay_trace_summary"] = _dynamic_replay_trace_summary(
+            step_traces,
+            supported=dynamic_supported,
+        )
+        if dynamic_supported:
             dynamic_payload_start = time.perf_counter()
             dynamic_stacked, dynamic_static_flags, dynamic_initial_carry, dynamic_base_carries_stacked = _build_dynamic_replay_payload(
                 step_traces,
@@ -525,6 +579,10 @@ def build_residual_checkpoint_tape_direct(
                 solve_kwargs_full["adjoint_trace_mode"] = "full"
                 result = _solve_with_timing(solve_kwargs_full)
                 final_packed_state, step_traces, compact_diagnostics, trace = _extract_result_payload(result)
+                compact_diagnostics["dynamic_replay_trace_summary"] = _dynamic_replay_trace_summary(
+                    step_traces,
+                    supported=False,
+                )
             trace_stack_start = time.perf_counter()
             stacked_step_traces, step_trace_static_flags = _stack_replay_step_traces(step_traces)
             _record_timing("tape_trace_stack_s", trace_stack_start)

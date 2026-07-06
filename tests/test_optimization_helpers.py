@@ -1265,6 +1265,7 @@ def test_fixed_boundary_optimizer_exact_callback_metadata_reports_shapes():
             "jvp_only_basepoint_carries": False,
             "accelerator_backend": False,
         },
+        "exact_tape_dynamic_replay": None,
         "lasym": True,
     }
 
