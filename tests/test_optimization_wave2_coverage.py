@@ -684,6 +684,8 @@ def test_exact_replay_policy_metadata_is_side_effect_free(monkeypatch) -> None:
         "VMEC_JAX_OPT_CHUNKED_PROJECTED_REPLAY_PROJECTION",
         "VMEC_JAX_OPT_JVP_ONLY_EXACT_TAPE",
         "VMEC_JAX_JVP_ONLY_EXACT_TAPE_BASEPOINT_CARRIES",
+        "VMEC_JAX_DYNAMIC_REPLAY_BUCKET",
+        "VMEC_JAX_DYNAMIC_REPLAY_MODE",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -696,6 +698,8 @@ def test_exact_replay_policy_metadata_is_side_effect_free(monkeypatch) -> None:
     assert meta["fused_projected_replay"] is False
     assert meta["column_chunk"] == 40
     assert meta["chunked_projected_replay_projection"] is True
+    assert meta["dynamic_replay_mode"] == "basepoint"
+    assert meta["dynamic_replay_bucket"] == 128
     assert meta["scalar_gradient_initial_tangents"] is True
     assert meta["linear_operator_initial_tangents"] is False
     assert meta["jvp_only_exact_tape"] is True
@@ -712,8 +716,16 @@ def test_exact_replay_policy_metadata_is_side_effect_free(monkeypatch) -> None:
     assert meta["projected_replay"] is False
     assert meta["column_chunk"] == 8
     assert meta["chunked_projected_replay_projection"] is False
+    assert meta["dynamic_replay_mode"] == "basepoint"
+    assert meta["dynamic_replay_bucket"] == 32
     assert meta["scalar_gradient_initial_tangents"] is False
     assert meta["jvp_only_exact_tape"] is False
+
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", "96")
+    monkeypatch.setenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", "whole_scan")
+    meta = exact_replay_policy_metadata(opt, 64)
+    assert meta["dynamic_replay_mode"] == "whole_scan"
+    assert meta["dynamic_replay_bucket"] == 96
 
 
 def test_projected_replay_jacobian_path_projects_without_intermediate_sync(monkeypatch) -> None:

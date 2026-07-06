@@ -14,6 +14,19 @@ def _env_flag(name: str) -> bool | None:
     return value.strip().lower() not in ("", "0", "false", "no", "off")
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    """Return a positive integer environment setting or a safe default."""
+
+    value = os.getenv(name)
+    if value is None:
+        return int(default)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return parsed if parsed > 0 else int(default)
+
+
 def optimizer_backend_name(solver_device_name: str | None) -> str:
     """Return the active optimizer backend name without changing device policy."""
 
@@ -26,6 +39,36 @@ def optimizer_backend_name(solver_device_name: str | None) -> str:
         return str(_jax.default_backend()).strip().lower() if _jax is not None else "cpu"
     except Exception:
         return "cpu"
+
+
+def _backend_is_accelerator(backend: str) -> bool:
+    """Return true for JAX accelerator backends that favor coarse replay buckets."""
+
+    normalized = str(backend).strip().lower()
+    return normalized in {"gpu", "cuda", "rocm"} or normalized.startswith(("gpu:", "cuda:", "rocm:"))
+
+
+def dynamic_replay_bucket_for_backend(backend: str) -> int:
+    """Return the dynamic replay bucket used for optimizer provenance.
+
+    The replay implementation defaults to coarser buckets on accelerators and
+    smaller buckets on CPU.  This helper mirrors that policy while respecting an
+    explicit optimizer device selection, so diagnostics remain meaningful even
+    when the outer Python process default backend differs from the callback
+    backend.
+    """
+
+    default = 128 if _backend_is_accelerator(backend) else 32
+    return _positive_int_env("VMEC_JAX_DYNAMIC_REPLAY_BUCKET", default)
+
+
+def dynamic_replay_mode_from_env() -> str:
+    """Return the configured dynamic replay linearization strategy."""
+
+    mode = os.getenv("VMEC_JAX_DYNAMIC_REPLAY_MODE", "basepoint").strip().lower()
+    if mode in ("whole_scan", "scan", "full_scan"):
+        return "whole_scan"
+    return "basepoint"
 
 
 def _optimizer_lasym(optimizer) -> bool:
@@ -248,6 +291,8 @@ def exact_replay_policy_metadata(optimizer, n_params: int | None = None) -> dict
         "fused_projected_replay": fused_projected_replay_enabled(),
         "column_chunk": None if column_chunk is None else int(column_chunk),
         "chunked_projected_replay_projection": bool(chunked_projection),
+        "dynamic_replay_mode": dynamic_replay_mode_from_env(),
+        "dynamic_replay_bucket": dynamic_replay_bucket_for_backend(backend),
         "scalar_gradient_initial_tangents": bool(scalar_initial_tangents),
         "linear_operator_initial_tangents": bool(linear_operator_initial_tangents),
         "jvp_only_exact_tape": bool(gpu_like if jvp_only_override is None else jvp_only_override),
