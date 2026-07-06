@@ -1473,20 +1473,31 @@ class FixedBoundaryExactOptimizer:
         )
 
         @jax.jit
-        def _fused_project(initial_tangents, packed_state, stacked_base_carries_in, stacked_traces_in):
+        def _fused_project(initial_tangents, packed_state, carry0_in, stacked_traces_in):
             tangents = jnp.asarray(initial_tangents)
-            if hasattr(run_scan, "zero_aux"):
+            if hasattr(run_scan, "zero_aux_initial"):
+                final_carry_tangents = run_scan.zero_aux_initial(
+                    tangents,
+                    carry0_in,
+                    stacked_traces_in,
+                )
+            elif hasattr(run_scan, "zero_aux"):
                 final_carry_tangents = run_scan.zero_aux(
                     tangents,
-                    stacked_base_carries_in,
+                    jax.tree_util.tree_map(
+                        lambda leaf: jnp.expand_dims(leaf, axis=0),
+                        carry0_in,
+                    ),
                     stacked_traces_in,
                 )
             else:
-                carry0 = jax.tree_util.tree_map(lambda x: x[0], stacked_base_carries_in)
-                carry_tangents0 = _carry_tangents_with_zero_aux(tangents, carry0)
+                carry_tangents0 = _carry_tangents_with_zero_aux(tangents, carry0_in)
                 final_carry_tangents = run_scan(
                     carry_tangents0,
-                    stacked_base_carries_in,
+                    jax.tree_util.tree_map(
+                        lambda leaf: jnp.expand_dims(leaf, axis=0),
+                        carry0_in,
+                    ),
                     stacked_traces_in,
                 )
             residuals, residual_linear = jax.linearize(residuals_from_packed, packed_state)
@@ -1542,10 +1553,14 @@ class FixedBoundaryExactOptimizer:
         )
         if fused_helper is not None:
             t_replay = time.perf_counter()
+            dynamic_carry0 = jax.tree_util.tree_map(
+                lambda leaf: leaf[0],
+                payload["tape"].dynamic_base_carries_stacked,
+            )
             residuals, jac = fused_helper["fused_project"](
                 initial_tangents,
                 packed_final,
-                payload["tape"].dynamic_base_carries_stacked,
+                dynamic_carry0,
                 payload["tape"].stacked_step_traces,
             )
             residuals, jac = self._profile_blocking_phase(

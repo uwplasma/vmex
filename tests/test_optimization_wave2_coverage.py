@@ -833,10 +833,17 @@ def test_projected_replay_jacobian_path_can_fuse_dynamic_basepoint(monkeypatch) 
     opt._remember_exact_jacobian = lambda key, jac, residual: remembered.update({"jacobian": (key, jac, residual)})
 
     def fake_runner(*, static, stacked, stacked_base_carries, static_flags):
-        def run_scan(carry_tangents0, _stacked_base_carries_in, _stacked_traces_in):
-            return (carry_tangents0[0] + 2.0,) + tuple(carry_tangents0[1:])
+        class Runner:
+            def __call__(self, carry_tangents0, _stacked_base_carries_in, _stacked_traces_in):
+                return (carry_tangents0[0] + 100.0,) + tuple(carry_tangents0[1:])
 
-        return run_scan
+            def zero_aux(self, state_tangents0, _stacked_base_carries_in, _stacked_traces_in):
+                return (state_tangents0 + 50.0,)
+
+            def zero_aux_initial(self, state_tangents0, _carry0_in, _stacked_traces_in):
+                return (state_tangents0 + 2.0,)
+
+        return Runner()
 
     monkeypatch.setattr(adjoint_module, "_checkpoint_tape_dynamic_basepoint_scan_runner", fake_runner)
     monkeypatch.setattr(adjoint_module, "_dynamic_basepoint_payload_shapes_match", lambda *_args: True)
