@@ -71,10 +71,12 @@ def _fixed_profiler_args(fixed_tool, **overrides):
         "auto_cli_policy": False,
         "dynamic_scan": False,
         "scan_arg_summary": False,
+        "scan_hlo_summary": False,
         "budget_scan_arg_nbytes": 0,
         "budget_scan_velocity_nbytes": 0,
         "budget_scan_preconditioner_nbytes": 0,
         "budget_scan_history_nbytes": 0,
+        "budget_scan_hlo_instructions": 0,
         "budget_action": "fail",
         "require_scan": False,
         "require_no_scan": False,
@@ -228,6 +230,7 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
             "--use-input-niter",
             "--vmec-timing-detail",
             "--scan-arg-summary",
+            "--scan-hlo-summary",
             "--budget-scan-arg-nbytes",
             "200000",
             "--budget-scan-velocity-nbytes",
@@ -236,6 +239,8 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
             "80000",
             "--budget-scan-history-nbytes",
             "1024",
+            "--budget-scan-hlo-instructions",
+            "12000",
             "--budget-action",
             "warn",
         ]
@@ -263,10 +268,12 @@ def test_performance_matrix_fixed_command_uses_backend_solver_device(tmp_path):
     assert "--no-multigrid" in command
     assert "--vmec-timing-detail" in command
     assert "--scan-arg-summary" in command
+    assert "--scan-hlo-summary" in command
     assert command[command.index("--budget-scan-arg-nbytes") + 1] == "200000"
     assert command[command.index("--budget-scan-velocity-nbytes") + 1] == "125000"
     assert command[command.index("--budget-scan-preconditioner-nbytes") + 1] == "80000"
     assert command[command.index("--budget-scan-history-nbytes") + 1] == "1024"
+    assert command[command.index("--budget-scan-hlo-instructions") + 1] == "12000"
     assert command[command.index("--budget-action") + 1] == "warn"
 
 
@@ -342,6 +349,8 @@ def test_fixed_boundary_profiler_accepts_scan_payload_budget_args(monkeypatch):
             "400",
             "--budget-scan-history-nbytes",
             "64",
+            "--budget-scan-hlo-instructions",
+            "9000",
             "--budget-action",
             "warn",
         ],
@@ -352,6 +361,7 @@ def test_fixed_boundary_profiler_accepts_scan_payload_budget_args(monkeypatch):
     assert args.budget_scan_velocity_nbytes == 800
     assert args.budget_scan_preconditioner_nbytes == 400
     assert args.budget_scan_history_nbytes == 64
+    assert args.budget_scan_hlo_instructions == 9000
     assert args.budget_action == "warn"
 
 
@@ -1034,6 +1044,7 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
         "scan_history_array_leaf_count": 9,
         "scan_history_scalar_leaf_count": 0,
         "scan_history_array_nbytes": 288,
+        "scan_runner_explicit_hlo_instruction_count": 90,
     }
 
     summary = fixed_tool._summarize_run(
@@ -1072,6 +1083,7 @@ def test_fixed_boundary_profiler_summary_exposes_scan_timing_fields():
         "array_nbytes": 288,
     }
     assert summary["args"]["use_scan"] is True
+    assert summary["args"]["scan_hlo_summary"] is False
     json.dumps(fixed_tool._json_safe(summary))
 
 
@@ -1103,9 +1115,11 @@ def test_fixed_boundary_profiler_scan_payload_budget_status_flags_exceeded():
         budget_scan_velocity_nbytes=500,
         budget_scan_preconditioner_nbytes=200,
         budget_scan_history_nbytes=128,
+        budget_scan_hlo_instructions=80,
         budget_action="warn",
     )
     summary = {
+        "timing": {"scan_runner_explicit_hlo_instruction_count": 90},
         "scan_payload_leaders": {
             "total_array_nbytes": 700,
             "velocity_array_nbytes": 480,
@@ -1120,9 +1134,11 @@ def test_fixed_boundary_profiler_scan_payload_budget_status_flags_exceeded():
     assert status["ok"] is False
     assert status["action"] == "warn"
     assert status["measurements"]["scan_arg_nbytes"] == 700
+    assert status["measurements"]["scan_hlo_instructions"] == 90
     assert {item["name"] for item in status["exceeded"]} == {
         "scan_arg_nbytes",
         "scan_history_nbytes",
+        "scan_hlo_instructions",
     }
 
 

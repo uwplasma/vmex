@@ -91,10 +91,14 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
                     "budget_status": {
                         "ok": True,
                         "action": "warn",
+                        "measurements": {
+                            "scan_hlo_instructions": 512,
+                        },
                         "limits": {
                             "scan_velocity_nbytes": 4096,
                             "scan_preconditioner_nbytes": 2048,
                             "scan_history_nbytes": 256,
+                            "scan_hlo_instructions": 1024,
                         },
                     },
                 },
@@ -123,6 +127,8 @@ def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
     assert "replay_misses" in output
     assert "Scan payload:" in output
     assert "velocity_B" in output
+    assert "hlo_instr" in output
+    assert "hlo_budget" in output
     assert "preconditioner_rz_apply" in output
     assert "budget_ok" in output
     assert "Projected replay / JVP details:" in output
