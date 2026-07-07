@@ -3266,13 +3266,13 @@ def test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_f
 
 
 @pytest.mark.py311_coverage_only
-def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd(
+def test_direct_coil_native_rejected_slot_directional_jvp_matches_complete_solve_fd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Geometry-only rejected-slot JVP is valid under an unchanged branch."""
+    """Geometry and mixed-control rejected-slot JVPs are valid on one fingerprinted branch."""
 
-    reports = _native_rejected_slot_case_report(
+    geometry_reports = _native_rejected_slot_case_report(
         tmp_path,
         monkeypatch,
         "input.direct_native_rejected_slot_geometry",
@@ -3284,36 +3284,28 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
         atol=_ASPECT_STATE_QS_ATOL,
         base_value_atol=_ASPECT_STATE_QS_BASE_ATOL,
     )
-    branch_local = reports["branch_local"]
+    branch_local = geometry_reports["branch_local"]
     assert branch_local["uses_production_forward"] is True
     assert branch_local["derivative_mode"] == "directional_jvp"
     assert branch_local["replay_option_flags"]["directional_jvp_fast_path"] == "none"
     assert branch_local["replay_option_flags"]["directional_uses_fixed_coil_geometry"] is False
 
-
-@pytest.mark.py311_coverage_only
-def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matches_complete_solve_fd(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Production-style mixed current/geometry JVP matches FD on one branch."""
-
-    scalar_keys = ("aspect", "qs_total", "lcfs_boundary_moment")
-    reports = _native_rejected_slot_case_report(
+    mixed_keys = ("aspect", "qs_total", "lcfs_boundary_moment")
+    mixed_reports = _native_rejected_slot_case_report(
         tmp_path,
         monkeypatch,
         "input.direct_native_rejected_slot_mixed_state_only",
         coil_kwargs={"current_fraction": 0.002, "dof_index": (0, 0, 2), "dof_step": 1.0e-3},
         scalar_map=_aspect_qs_boundary_scalar_map,
         replay_scalar_fns=_aspect_qs_boundary_replay_scalar_fns(),
-        scalar_keys=scalar_keys,
+        scalar_keys=mixed_keys,
         rtol={"aspect": 5.0e-3, "qs_total": 2.0e-2, "lcfs_boundary_moment": 5.0e-3},
         atol={"aspect": 5.0e-8, "qs_total": 1.0e-8, "lcfs_boundary_moment": 5.0e-8},
         base_value_atol={"aspect": 2.0e-3, "qs_total": 2.0e-3, "lcfs_boundary_moment": 2.0e-3},
         replay_kwargs_extra={"state_only_replay": True},
         solve_kwargs_extra={"adjoint_trace_mode": "branch"},
     )
-    branch_local = reports["branch_local"]
+    branch_local = mixed_reports["branch_local"]
     assert branch_local["uses_production_forward"] is True
     assert branch_local["derivative_mode"] == "directional_jvp"
     assert branch_local["replay_option_flags"]["state_only_replay"] is True
