@@ -1,15 +1,16 @@
-"""Fixed-boundary solvers.
+"""VMEC2000-style fixed-boundary residual iteration.
 
-The first solver milestone is a robust "inner solve" for the VMEC ``lambda`` field
-with R/Z held fixed. This is useful for:
+This module owns the production fixed-boundary update loop used by the public
+driver and by exact optimization callbacks.  Each iteration evaluates the VMEC
+force residuals, applies the radial/lambda preconditioner, samples VMEC2000-like
+restart and time-step control branches, optionally couples to free-boundary
+vacuum fields, and records the history/timing payload used for parity gates and
+accepted-point differentiation.
 
-- validating the magnetic energy objective against VMEC2000 `wout` files,
-- building toward a full fixed-boundary equilibrium solve.
-
-Notes
------
-This module intentionally avoids optional dependencies (e.g. jaxopt). The current
-implementation uses gradient descent with a simple backtracking line search.
+The surrounding ``residual`` package contains extracted setup, force, update,
+scan, and finalization helpers.  The remaining large function is intentionally
+being split only along branch-stable seams so VMEC2000 parity, JAX cache keys,
+and convergence behavior are not changed by refactoring.
 """
 
 from __future__ import annotations
