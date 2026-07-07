@@ -49,6 +49,7 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
+    append_terminal_history_and_promote_free_boundary as _runtime_append_terminal_history_and_promote_free_boundary,
     _attach_free_boundary_external_field_diag as _runtime_attach_free_boundary_external_field_diag,
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
     _device_get_floats,
@@ -58,7 +59,6 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     initialize_residual_setup_timing as _runtime_initialize_residual_setup_timing,
     _maybe_dump_ptau as _runtime_maybe_dump_ptau,
     _maybe_print_nonscan_state_debug,
-    promote_free_boundary_vacuum_turnon_if_needed as _runtime_promote_free_boundary_vacuum_turnon_if_needed,
     _vmec_freeb_plascur_from_bcovar as _runtime_vmec_freeb_plascur_from_bcovar,
     dump_xc_with_velocity_blocks as _dump_xc_with_velocity_blocks,
     edge_bsqvac_from_nestor as _edge_bsqvac_from_nestor,
@@ -3075,7 +3075,8 @@ def solve_fixed_boundary_residual_iter(
             w_mhd=float(w_vmec_last),
             step_status=step_status,
         )
-        history_lists.append_terminal(
+        freeb_ivac = _runtime_append_terminal_history_and_promote_free_boundary(
+            history_lists=history_lists,
             track_history=bool(track_history),
             step_status=step_status,
             restart_reason=restart_reason,
@@ -3096,13 +3097,6 @@ def solve_fixed_boundary_residual_iter(
             freeb_reused=freeb_reused,
             freeb_solve_time=freeb_solve_time,
             freeb_sample_time=freeb_sample_time,
-        )
-        # VMEC eqsolve behavior: when `ivac==1`, print turn-on and promote to
-        # `ivac=2` for subsequent iterations.
-        freeb_ivac = _runtime_promote_free_boundary_vacuum_turnon_if_needed(
-            free_boundary_enabled=bool(free_boundary_enabled),
-            freeb_ivac=int(freeb_ivac),
-            iter2=int(iter2),
             verbose=bool(verbose),
             verbose_vmec2000_table=bool(verbose_vmec2000_table),
         )

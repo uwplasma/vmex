@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
+    append_terminal_history_and_promote_free_boundary,
     _attach_free_boundary_external_field_diag,
     _build_residual_iter_timing_report,
     _build_resume_state_base,
@@ -1054,3 +1055,49 @@ def test_promote_free_boundary_vacuum_turnon_prints_once():
     assert promoted == 2
     assert "VACUUM PRESSURE TURNED ON AT    8 ITERATIONS" in messages[0][0][0]
     assert messages[0][1]["flush"] is True
+
+
+def test_append_terminal_history_and_promote_free_boundary_preserves_payload():
+    class FakeHistory:
+        calls = []
+
+        @classmethod
+        def append_terminal(cls, **kwargs):
+            cls.calls.append(kwargs)
+            return True
+
+    messages = []
+    promoted = append_terminal_history_and_promote_free_boundary(
+        history_lists=FakeHistory,
+        track_history=True,
+        step_status="accepted",
+        restart_reason="none",
+        pre_restart_reason="bad_progress",
+        time_step=0.25,
+        res0=1.0,
+        res1=2.0,
+        fsq_prev=3.0,
+        bad_growth_streak=4,
+        iter1=5,
+        iter2=6,
+        fsqr=0.1,
+        fsqz=0.2,
+        fsql=0.3,
+        free_boundary_enabled=True,
+        freeb_ivac=1,
+        freeb_ivacskip=7,
+        freeb_reused=False,
+        freeb_solve_time=0.04,
+        freeb_sample_time=0.05,
+        verbose=True,
+        verbose_vmec2000_table=True,
+        print_fn=lambda *args, **kwargs: messages.append((args, kwargs)),
+    )
+
+    assert promoted == 2
+    assert len(FakeHistory.calls) == 1
+    assert FakeHistory.calls[0]["step_status"] == "accepted"
+    assert FakeHistory.calls[0]["freeb_ivac"] == 1
+    assert FakeHistory.calls[0]["freeb_ivacskip"] == 7
+    assert FakeHistory.calls[0]["freeb_solve_time"] == 0.04
+    assert "VACUUM PRESSURE TURNED ON AT    6 ITERATIONS" in messages[0][0][0]

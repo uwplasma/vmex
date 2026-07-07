@@ -578,6 +578,67 @@ def promote_free_boundary_vacuum_turnon_if_needed(
     return int(freeb_ivac) + 1
 
 
+def append_terminal_history_and_promote_free_boundary(
+    *,
+    history_lists: Any,
+    track_history: bool,
+    step_status: str,
+    restart_reason: str,
+    pre_restart_reason: str,
+    time_step: float,
+    res0: float,
+    res1: float,
+    fsq_prev: float,
+    bad_growth_streak: int,
+    iter1: int,
+    iter2: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    free_boundary_enabled: bool,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    freeb_reused: bool,
+    freeb_solve_time: float,
+    freeb_sample_time: float,
+    verbose: bool,
+    verbose_vmec2000_table: bool,
+    print_fn: Callable[..., Any] = print,
+) -> int:
+    """Record terminal iteration history and apply VMEC free-boundary turn-on."""
+
+    history_lists.append_terminal(
+        track_history=bool(track_history),
+        step_status=step_status,
+        restart_reason=restart_reason,
+        pre_restart_reason=pre_restart_reason,
+        time_step=float(time_step),
+        res0=float(res0),
+        res1=float(res1),
+        fsq_prev=float(fsq_prev),
+        bad_growth_streak=int(bad_growth_streak),
+        iter1=int(iter1),
+        iter2=int(iter2),
+        fsqr=float(fsqr),
+        fsqz=float(fsqz),
+        fsql=float(fsql),
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_ivac=int(freeb_ivac),
+        freeb_ivacskip=int(freeb_ivacskip),
+        freeb_reused=bool(freeb_reused),
+        freeb_solve_time=float(freeb_solve_time),
+        freeb_sample_time=float(freeb_sample_time),
+    )
+    return promote_free_boundary_vacuum_turnon_if_needed(
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_ivac=int(freeb_ivac),
+        iter2=int(iter2),
+        verbose=bool(verbose),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        print_fn=print_fn,
+    )
+
+
 def _device_get_floats(*vals: Any, jax_module: Any | None = None) -> tuple[float, ...]:
     """Batch host materialization for scalar diagnostics."""
 
