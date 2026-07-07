@@ -414,6 +414,44 @@ def _budget_matrix_row(problem, budget_label, objective_final, solve_wall_time_s
     }
 
 
+def _qs_matrix_options(**overrides) -> SimpleNamespace:
+    """Return common QS/QI diagnostics matrix options with case-specific overrides."""
+
+    defaults = {
+        "max_nfev": 3,
+        "preseed_nfev": None,
+        "continuation_nfev": 0,
+        "inner_max_iter": 80,
+        "trial_max_iter": 80,
+        "inner_ftol": 1.0e-8,
+        "trial_ftol": 1.0e-8,
+        "ftol": 1.0e-5,
+        "gtol": 1.0e-5,
+        "xtol": 1.0e-6,
+        "solver_device": "auto",
+        "max_mode": 2,
+        "min_vmec_mode": 4,
+        "method": "auto",
+        "scipy_tr_solver": "lsmr",
+        "scipy_lsmr_maxiter": None,
+        "scan_timing": True,
+        "scan_arg_summary": True,
+        "use_ess": True,
+        "use_simple_seed": True,
+        "use_mode_continuation": False,
+        "save_result_files": False,
+        "target_helicity_seed": False,
+        "policy": "loop",
+        "budget": "60:1e-8",
+        "chunk_size": 8,
+        "fused_projected_replay": "auto",
+        "replay_column_chunk": None,
+        "chunked_projected_replay_projection": "auto",
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
 def test_qs_budget_probe_compacts_profile_scan_and_cache_buckets() -> None:
     from tools.diagnostics.optimization import qs_budget_probe
 
@@ -669,29 +707,20 @@ def test_qs_budget_probe_reports_exact_callback_metadata() -> None:
 def test_qs_trial_policy_matrix_builds_policy_commands(tmp_path) -> None:
     from tools.diagnostics.optimization import qs_trial_policy_matrix
 
-    options = SimpleNamespace(
+    options = _qs_matrix_options(
         max_nfev=7,
         preseed_nfev=2,
-        continuation_nfev=0,
         inner_max_iter=90,
         trial_max_iter=80,
-        inner_ftol=1.0e-8,
         trial_ftol=2.0e-8,
-        ftol=1.0e-5,
         gtol=2.0e-5,
         xtol=3.0e-6,
         solver_device="cpu",
         max_mode=4,
         min_vmec_mode=6,
-        method="auto",
         scipy_tr_solver="exact",
         scipy_lsmr_maxiter=5,
-        scan_timing=True,
         scan_arg_summary=False,
-        use_ess=True,
-        use_simple_seed=True,
-        use_mode_continuation=False,
-        save_result_files=False,
         target_helicity_seed=True,
     )
 
@@ -1006,30 +1035,12 @@ def test_qs_budget_matrix_builds_budget_commands_and_recommendations(tmp_path) -
     assert explicit["trial_max_iter"] == 40
     assert explicit["trial_ftol"] == pytest.approx(1.0e-7)
 
-    options = SimpleNamespace(
-        max_nfev=3,
-        continuation_nfev=0,
-        preseed_nfev=None,
-        max_mode=2,
-        min_vmec_mode=4,
-        method="auto",
-        scipy_tr_solver="lsmr",
+    options = _qs_matrix_options(
         scipy_lsmr_maxiter=4,
         fused_projected_replay="on",
         replay_column_chunk="8",
         chunked_projected_replay_projection="off",
-        ftol=1e-5,
-        gtol=1e-5,
-        xtol=1e-6,
-        solver_device="auto",
-        scan_timing=True,
-        scan_arg_summary=True,
-        use_ess=True,
-        use_simple_seed=True,
-        use_mode_continuation=False,
-        save_result_files=False,
         target_helicity_seed=True,
-        policy="loop",
     )
     command = qs_budget_matrix.build_probe_command(
         problem="qa",
@@ -1326,28 +1337,7 @@ def test_qs_replay_route_matrix_builds_route_commands_and_recommendations(tmp_pa
         "replay_column_chunk"
     ] == "8"
 
-    options = SimpleNamespace(
-        budget="60:1e-8",
-        chunk_size=8,
-        max_nfev=3,
-        continuation_nfev=0,
-        preseed_nfev=None,
-        max_mode=2,
-        min_vmec_mode=4,
-        method="auto",
-        scipy_tr_solver="lsmr",
-        scipy_lsmr_maxiter=None,
-        ftol=1e-5,
-        gtol=1e-5,
-        xtol=1e-6,
-        solver_device="auto",
-        scan_timing=True,
-        scan_arg_summary=True,
-        use_ess=True,
-        use_simple_seed=True,
-        use_mode_continuation=False,
-        save_result_files=False,
-        target_helicity_seed=False,
+    options = _qs_matrix_options(
         policy="scan-vmec2000",
     )
     command = qs_replay_route_matrix.build_probe_command(
