@@ -1850,18 +1850,18 @@ def test_qi_nfp4_case_is_explicit_nonpassing_stress_fixture() -> None:
     assert "nfp4_qh_warm_to_qi" in docs
 
 
-def test_qi_seed_robustness_optional_mirror_cleanup_contract_keeps_qi_guard() -> None:
-    text = (ROOT / "tools" / "diagnostics" / "qi" / "QI_seed_robustness.py").read_text()
+def test_qi_seed_optimization_preset_delegates_with_reference_and_cleanup_guards() -> None:
+    text = QI_SEED_OPTIMIZATION_SCRIPT.read_text()
 
-    assert "VMEC_JAX_QI_SEED_INPUT" in text
-    assert "VMEC_JAX_QI_SEED_OUTPUT_DIR" in text
-    assert "VMEC_JAX_QI_SEED_MAX_NFEV" in text
-    assert "QI seed robustness policy:" in text
-    assert "# Optional engineering cleanup.  Mirror/elongation can be included after the" in text
-    assert "# qi_ceiling = vj.QuasiIsodynamicResidualCeiling(" in text
-    assert "#     (qi_ceiling.J, 0.0, 100.0)," in text
-    assert "#     (mirror.J, 0.0, MIRROR_WEIGHT)," in text
-    assert text.index("# qi_ceiling = vj.QuasiIsodynamicResidualCeiling(") < text.index("#     (mirror.J, 0.0, MIRROR_WEIGHT),")
+    assert "INPUT_FILE = DATA_DIR / \"input.QI_stel_seed_3127\"" in text
+    assert "REFERENCE_INPUT_FILE = DATA_DIR / \"input.nfp3_QI_fixed_resolution_final\"" in text
+    assert "boundary_reference_config()" in text
+    assert "mirror_ramp_stages_config()" in text
+    assert "\"--boundary-reference-json\"" in text
+    assert "\"--mirror-ramp-stages-json\"" in text
+    assert "\"--accept-boundary-reference-baseline\"" in text
+    assert "DRY_RUN = False" in text
+    assert "VMEC_JAX_QI_SEED_INPUT" not in text
 
 
 def test_qi_objective_comparison_is_top_level_diagnostic() -> None:
