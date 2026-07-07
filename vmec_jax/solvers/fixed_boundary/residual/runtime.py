@@ -90,6 +90,14 @@ class FreeBoundaryLoopState(NamedTuple):
     plascur: float
 
 
+class BadJacobianIterationRuntime(NamedTuple):
+    """Bad-Jacobian branch decision and tau extrema for one VMEC iteration."""
+
+    bad_jacobian: bool
+    min_tau: float
+    max_tau: float
+
+
 def initial_free_boundary_loop_state(
     *,
     nvacskip: int,
@@ -376,6 +384,75 @@ def record_elapsed_timing(
         return False
     timing_stats[str(key)] += perf_counter() - float(start)
     return True
+
+
+def run_bad_jacobian_iteration_runtime(
+    *,
+    enabled: bool,
+    selection_kwargs: dict[str, Any],
+    resolve_bad_jacobian_tau_selection_func: Callable[..., Any],
+    maybe_dump_ptau_func: Callable[..., Any],
+    history_lists: Any,
+    track_history: bool,
+    iter_idx: int,
+    dump_badjac_env: str,
+    dump_dir_env: str,
+    numpy_module: Any = np,
+) -> BadJacobianIterationRuntime:
+    """Resolve and record VMEC's bad-Jacobian restart diagnostic.
+
+    VMEC2000 uses the sign/range of the half-mesh Jacobian proxy ``tau`` to
+    decide whether an iteration should restart with a smaller step or an
+    improved magnetic-axis guess.  This helper keeps the branch selection,
+    ptau/state diagnostics, history append, and optional debug-file side effect
+    together so the main residual loop exposes one explicit phase seam.
+    """
+
+    if not bool(enabled):
+        history_lists.append_bad_jacobian(track_history, float("nan"), float("nan"), False)
+        return BadJacobianIterationRuntime(
+            bad_jacobian=False,
+            min_tau=float("nan"),
+            max_tau=float("nan"),
+        )
+
+    selection = resolve_bad_jacobian_tau_selection_func(**selection_kwargs)
+    bad_jacobian = bool(selection.bad_jacobian)
+    min_tau = float(selection.min_tau)
+    max_tau = float(selection.max_tau)
+
+    maybe_dump_ptau_func(
+        iter_idx=int(iter_idx),
+        ptau_min=float(selection.min_tau_ptau if selection.min_tau_ptau is not None else float("nan")),
+        ptau_max=float(selection.max_tau_ptau if selection.max_tau_ptau is not None else float("nan")),
+        tau_min_state=selection.min_tau_state if numpy_module.isfinite(selection.min_tau_state) else None,
+        tau_max_state=selection.max_tau_state if numpy_module.isfinite(selection.max_tau_state) else None,
+        badjac_ptau=selection.bad_jacobian_ptau,
+        badjac_state=bool(selection.bad_jacobian_state),
+        badjac_used=bad_jacobian,
+        mode=selection_kwargs["startup_policy"].badjac_mode,
+        label="iter",
+    )
+
+    if numpy_module.isfinite(min_tau) and numpy_module.isfinite(max_tau):
+        history_lists.append_bad_jacobian(track_history, min_tau, max_tau, bad_jacobian)
+        if bad_jacobian and str(dump_badjac_env) not in ("", "0"):
+            dump_dir = str(dump_dir_env)
+            if dump_dir:
+                try:
+                    path = Path(dump_dir) / "bad_jacobian.log"
+                    with path.open("a", encoding="utf-8") as handle:
+                        handle.write(f"iter={int(iter_idx)} min_tau={min_tau:.6e} max_tau={max_tau:.6e}\n")
+                except Exception:
+                    pass
+    else:
+        history_lists.append_bad_jacobian(track_history, float("nan"), float("nan"), False)
+
+    return BadJacobianIterationRuntime(
+        bad_jacobian=bad_jacobian,
+        min_tau=min_tau,
+        max_tau=max_tau,
+    )
 
 
 def record_update_state_ready_timing(

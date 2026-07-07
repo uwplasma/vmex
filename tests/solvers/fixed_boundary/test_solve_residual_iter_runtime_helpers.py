@@ -34,6 +34,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window,
     resume_free_boundary_loop_state,
+    run_bad_jacobian_iteration_runtime,
     run_post_update_diagnostics_and_history,
     stop_residual_profile_trace_if_window_completed,
     trial_residual_total_runtime,
@@ -112,6 +113,66 @@ def test_record_elapsed_timing_accumulates_named_bucket_without_touching_disable
     assert not record_elapsed_timing(False, stats, "bucket", 2.0, lambda: pytest.fail("disabled timing"))
     assert not record_elapsed_timing(True, stats, "bucket", None, lambda: pytest.fail("missing start"))
     assert stats["bucket"] == pytest.approx(1.75)
+
+
+def test_bad_jacobian_iteration_runtime_records_history_and_debug_log(tmp_path) -> None:
+    class Histories:
+        def __init__(self):
+            self.calls = []
+
+        def append_bad_jacobian(self, track_history, min_tau, max_tau, bad_flag):
+            self.calls.append((bool(track_history), float(min_tau), float(max_tau), bool(bad_flag)))
+
+    class Selection:
+        bad_jacobian = True
+        min_tau = -0.2
+        max_tau = 1.4
+        min_tau_ptau = -0.2
+        max_tau_ptau = 1.4
+        min_tau_state = -0.1
+        max_tau_state = 1.3
+        bad_jacobian_ptau = True
+        bad_jacobian_state = False
+
+    class StartupPolicy:
+        badjac_mode = "auto"
+
+    histories = Histories()
+    dumps = []
+
+    disabled = run_bad_jacobian_iteration_runtime(
+        enabled=False,
+        selection_kwargs={},
+        resolve_bad_jacobian_tau_selection_func=lambda **_kwargs: pytest.fail("disabled path should not select"),
+        maybe_dump_ptau_func=lambda **_kwargs: pytest.fail("disabled path should not dump"),
+        history_lists=histories,
+        track_history=True,
+        iter_idx=3,
+        dump_badjac_env="1",
+        dump_dir_env=str(tmp_path),
+    )
+    assert disabled.bad_jacobian is False
+    assert np.isnan(histories.calls[-1][1])
+    assert histories.calls[-1][3] is False
+
+    enabled = run_bad_jacobian_iteration_runtime(
+        enabled=True,
+        selection_kwargs={"startup_policy": StartupPolicy()},
+        resolve_bad_jacobian_tau_selection_func=lambda **kwargs: Selection(),
+        maybe_dump_ptau_func=lambda **kwargs: dumps.append(kwargs),
+        history_lists=histories,
+        track_history=True,
+        iter_idx=4,
+        dump_badjac_env="1",
+        dump_dir_env=str(tmp_path),
+    )
+
+    assert enabled.bad_jacobian is True
+    assert enabled.min_tau == pytest.approx(-0.2)
+    assert histories.calls[-1] == (True, pytest.approx(-0.2), pytest.approx(1.4), True)
+    assert dumps[-1]["badjac_used"] is True
+    assert dumps[-1]["mode"] == "auto"
+    assert "iter=4 min_tau=-2.000000e-01 max_tau=1.400000e+00" in (tmp_path / "bad_jacobian.log").read_text()
 
 
 def test_new_residual_iter_timing_stats_preserves_setup_phase_values():
