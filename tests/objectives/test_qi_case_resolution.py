@@ -7,7 +7,7 @@ import sys
 import pytest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "examples" / "optimization" / "qi_optimization_cases.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "examples" / "optimization" / "qi_optimization_cases.py"
 
 
 def _load_cases_module(name: str = "qi_optimization_cases_test"):

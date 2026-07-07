@@ -116,10 +116,10 @@ The focused derivative tests used for this evidence include:
 .. code-block:: bash
 
    JAX_ENABLE_X64=1 pytest -q \
-     tests/test_glasser_resistive_interchange.py \
-     tests/test_quasisymmetry.py::test_quasisymmetry_wout_residual_gradient_matches_finite_difference \
-     tests/test_quasisymmetry.py::test_quasisymmetry_wout_residual_jvp_and_vjp_match_finite_difference \
-     tests/test_quasi_isodynamic.py::test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable \
+     tests/objectives/test_glasser_resistive_interchange.py \
+     tests/objectives/test_quasisymmetry.py::test_quasisymmetry_wout_residual_gradient_matches_finite_difference \
+     tests/objectives/test_quasisymmetry.py::test_quasisymmetry_wout_residual_jvp_and_vjp_match_finite_difference \
+     tests/objectives/test_quasi_isodynamic.py::test_qi_weighted_shuffle_profile_residual_is_finite_and_differentiable \
      tests/free_boundary/test_qs_coil_optimization_smoke.py::test_branch_local_scalar_report_adapter_records_gate_evidence \
      tests/free_boundary/test_qs_coil_optimization_smoke.py::test_branch_local_scalar_report_adapter_records_failure_modes
 
@@ -274,7 +274,7 @@ possible seed.  The fast local QI gate is:
 
 .. code-block:: bash
 
-   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/diagnostics/qi/test_qi_seed_suitability_audit.py tests/postprocessing/test_booz_input.py
+   pytest -q tests/objectives/test_quasi_isodynamic.py tests/objectives/test_qi_legacy.py tests/objectives/test_qi_diagnostics.py tests/objectives/test_qi_objective_component_report.py tests/diagnostics/qi/test_qi_seed_suitability_audit.py tests/postprocessing/test_booz_input.py
 
 This gate covers smooth Boozer-space QI residuals, the legacy branch/shuffle
 diagnostic used for ranking, mirror-ratio and elongation records, Boozer input

@@ -7,7 +7,7 @@ import re
 import sys
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "validation" / "qi_seed_robustness_plan.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "validation" / "qi_seed_robustness_plan.py"
 REPO_ROOT = SCRIPT.parents[1]
 
 
@@ -93,7 +93,7 @@ def test_optional_parity_commands_are_concrete_and_bounded():
         assert command["env"], command["command_id"]
         assert command["bounded_by"], command["command_id"]
         assert command["validates"], command["command_id"]
-        assert "pytest -q tests/test_" in command["command"]
+        assert "pytest -q tests/" in command["command"]
         assert "-m vmec2000" not in command["command"]
 
     assert commands["simsopt-qs-family-formula"]["env"] == ["RUN_SIMSOPT_VALIDATION=1"]
@@ -132,7 +132,9 @@ def test_optional_parity_commands_are_concrete_and_bounded():
 
 def test_optional_vmec2000_commands_preserve_timeout_and_iteration_bounds():
     mod = _load_module()
-    vmec_tests = _load_test_module(REPO_ROOT / "tests" / "test_vmec2000_exec_fast_validation.py")
+    vmec_tests = _load_test_module(
+        REPO_ROOT / "tests" / "parity" / "test_vmec2000_exec_fast_validation.py"
+    )
 
     plan = mod.build_plan()
     commands = {command["command_id"]: command for command in plan["optional_parity_commands"]}

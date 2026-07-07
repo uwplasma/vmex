@@ -8,7 +8,7 @@ import pytest
 
 
 def _optional_wout_path(filename: str) -> str:
-    root = os.path.dirname(os.path.dirname(__file__))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     path = os.path.join(root, "examples", "data", filename)
     if not os.path.exists(path):
         pytest.skip(f"Optional WOUT fixture is missing: {filename}. Run tools/fetch_assets.py --bundle wout-fixtures.")
@@ -692,7 +692,7 @@ def test_accepted_wout_output_preserves_qs_metric_against_bundled_vmec2000(tmp_p
     from vmec_jax.quasisymmetry import quasisymmetry_ratio_residual_from_wout
     from vmec_jax.wout import state_from_wout
 
-    root = os.path.dirname(os.path.dirname(__file__))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     input_path = os.path.join(root, "examples", "data", "input.LandremanPaul2021_QA_lowres")
     wout_path = os.path.join(root, "examples", "data", "wout_LandremanPaul2021_QA_lowres.nc")
     if not os.path.exists(input_path) or not os.path.exists(wout_path):

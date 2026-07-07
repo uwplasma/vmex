@@ -18,7 +18,7 @@ def _booz_like(*, xm, xn, coeffs, iota=0.4, nfp=1):
 
 
 def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples" / "data"
+    return Path(__file__).resolve().parents[2] / "examples" / "data"
 
 
 def test_qi_diagnostic_scalar_helpers_cover_unavailable_and_subset_branches() -> None:

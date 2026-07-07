@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_runner():
@@ -17,6 +17,9 @@ def _load_runner():
     spec = importlib.util.spec_from_file_location("qi_staged_runner_test", script)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
+    optimization_dir = str(script.parent)
+    if optimization_dir not in sys.path:
+        sys.path.insert(0, optimization_dir)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module

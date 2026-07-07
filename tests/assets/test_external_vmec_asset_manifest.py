@@ -11,7 +11,7 @@ else:  # pragma: no cover
     import tomli as tomllib
 
 
-MANIFEST = Path(__file__).resolve().parents[1] / "validation" / "external_vmec_asset_manifest.toml"
+MANIFEST = Path(__file__).resolve().parents[2] / "validation" / "external_vmec_asset_manifest.toml"
 
 
 def _load_manifest() -> dict:

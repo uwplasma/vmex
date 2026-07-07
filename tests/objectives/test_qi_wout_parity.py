@@ -24,7 +24,7 @@ def test_qi_wout_parity_smoke(tmp_path, ns):
     if os.getenv("VMEC_JAX_RUN_QI_PARITY", "") not in ("1", "true", "TRUE"):
         pytest.skip("Set VMEC_JAX_RUN_QI_PARITY=1 to run external VMEC2000 QI parity checks.")
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     input_path = root / "examples" / "data" / "input.nfp2_QI"
     if not input_path.exists():
         pytest.skip("Missing examples/data/input.nfp2_QI")

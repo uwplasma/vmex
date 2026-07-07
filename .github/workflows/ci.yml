@@ -91,10 +91,10 @@ jobs:
             tests/test_namelist.py \
             tests/test_config_edges.py \
             tests/test_boundary_eval.py \
-            tests/test_quasisymmetry.py \
-            tests/test_quasi_isodynamic.py \
-            tests/test_external_fields_coils_jax.py \
-            tests/test_external_fields_mgrid_jax.py \
+            tests/objectives/test_quasisymmetry.py \
+            tests/objectives/test_quasi_isodynamic.py \
+            tests/external_fields/test_external_fields_coils_jax.py \
+            tests/external_fields/test_external_fields_mgrid_jax.py \
             --durations=50
 
   test-py311-core:

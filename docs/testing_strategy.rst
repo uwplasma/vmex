@@ -250,7 +250,7 @@ the recommended local escalation path.
      - After changing objective tuple construction, examples, or sweep
        rendering docs.
    * - QI objective checks
-     - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/postprocessing/test_booz_input.py``
+     - ``pytest -q tests/objectives/test_quasi_isodynamic.py tests/objectives/test_qi_legacy.py tests/objectives/test_qi_diagnostics.py tests/postprocessing/test_booz_input.py``
      - After changing QI diagnostics, Boozer input handling (including LASYM
        geometry/magnetic channels), smooth-QI residual settings, or first-class
        QI diagnostic record fields.  This includes a low-resolution
@@ -258,7 +258,7 @@ the recommended local escalation path.
        ``input.QI_stel_seed_3127`` solved seed when optional Boozer dependencies
        are installed.
    * - QI ranking/report smoke
-     - ``pytest -q tests/test_qi_objective_component_report.py tests/diagnostics/qi/test_qi_seed_suitability_audit.py tests/diagnostics/optimization/test_qs_ess_render_smoke.py``
+     - ``pytest -q tests/objectives/test_qi_objective_component_report.py tests/diagnostics/qi/test_qi_seed_suitability_audit.py tests/diagnostics/optimization/test_qs_ess_render_smoke.py``
      - After changing QI branch-ranking metrics, seed audit/prefine manifests,
        sweep summary fields, or renderer selection rules.
    * - Optional validation plan helper
@@ -473,7 +473,7 @@ Optimization gates:
   optional ``BoozerBTarget`` homotopy terms for far seeds, rejection of invalid
   nonzero QI targets, and compatibility of smooth QI metrics with the legacy
   branch-ranking diagnostics.  The cheap synthetic Boozer ranking guard is
-  ``pytest -q tests/test_qi_objective_component_report.py``; it must stay fast
+  ``pytest -q tests/objectives/test_qi_objective_component_report.py``; it must stay fast
   enough to run in ordinary PR checks.
 - QI diagnostic-record tests should keep smooth/raw/legacy QI totals,
   mirror-ratio, elongation, optional ``LgradB``, resolution metadata, and
