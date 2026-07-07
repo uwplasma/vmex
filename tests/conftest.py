@@ -8,6 +8,7 @@ Allows running tests directly from the repo without requiring an editable instal
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import os
@@ -119,6 +120,120 @@ def off_axis_circular_coil_params(
         out_of_plane=out_of_plane,
         nfp=nfp,
         stellsym=stellsym,
+    )
+
+
+def tiny_direct_freeb_input(
+    path: Path,
+    *,
+    lasym: bool = False,
+    niter: int = 4,
+    mpol: int = 4,
+    ntheta: int = 8,
+) -> Path:
+    """Write a tiny finite-pressure direct-coil free-boundary VMEC input.
+
+    The deck is intentionally small but physically active: pressure is nonzero,
+    the vacuum field comes from the direct-coil provider, and the VMEC free-
+    boundary cadence is active from the first iteration.  Tests use it for
+    branch-local derivative and NESTOR replay gates without relying on large
+    external mgrid files.
+    """
+
+    lasym_flag = "T" if bool(lasym) else "F"
+    path.write_text(
+        f"""
+&INDATA
+  LFREEB = T
+  MGRID_FILE = 'DIRECT_COILS'
+  EXTCUR = 1.0
+  LASYM = {lasym_flag}
+  NFP = 1
+  MPOL = {int(mpol)}
+  NTOR = 0
+  NS = 7
+  NZETA = 2
+  NTHETA = {int(ntheta)}
+  NS_ARRAY = 7
+  FTOL_ARRAY = 1.0E-8
+  NITER_ARRAY = {int(niter)}
+  NITER = {int(niter)}
+  FTOL = 1.0E-8
+  NSTEP = 20
+  NVACSKIP = 1
+  GAMMA = 0.0
+  PHIEDGE = 1.0
+  CURTOR = 0.0
+  SPRES_PED = 1.0
+  NCURR = 0
+  PRES_SCALE = 1.0E4
+  AM = 1.0 -1.0
+  AI = 0.4 0.0
+  AC = 0.0
+  RAXIS = 1.0
+  ZAXIS = 0.0
+  RBC(0,0) = 1.0  ZBS(0,0) = 0.0
+  RBC(0,1) = 0.25 ZBS(0,1) = 0.25
+  RBC(0,2) = 0.03 ZBS(0,2) = 0.00
+/
+""".lstrip()
+    )
+    return path
+
+
+def direct_free_boundary_initial_guess(input_path: Path, params: Any):
+    """Run only VMEC's initial free-boundary state for direct-coil tests."""
+
+    from vmec_jax.driver import run_free_boundary
+
+    return run_free_boundary(
+        input_path,
+        use_initial_guess=True,
+        verbose=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
+    )
+
+
+def direct_free_boundary_solve(input_path: Path, params: Any):
+    """Run a tiny direct-coil free-boundary solve in VMEC2000-parity mode."""
+
+    from vmec_jax.driver import run_free_boundary
+
+    return run_free_boundary(
+        input_path,
+        solver="vmec2000_iter",
+        solver_mode="parity",
+        multigrid_use_input_niter=True,
+        verbose=False,
+        jit_forces=False,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
+    )
+
+
+def direct_nestor_step(
+    run: Any,
+    params: Any,
+    *,
+    ivac: int = 1,
+    ivacskip: int = 0,
+    iter_idx: int = 1,
+    runtime: Any = None,
+):
+    """Evaluate one direct-coil NESTOR/free-boundary sampling step."""
+
+    from vmec_jax.free_boundary import nestor_external_only_step
+
+    return nestor_external_only_step(
+        state=run.state,
+        static=run.static,
+        ivac=int(ivac),
+        ivacskip=int(ivacskip),
+        iter_idx=int(iter_idx),
+        runtime=runtime,
+        external_field_provider_kind="direct_coils",
+        external_field_provider_params=params,
     )
 
 
