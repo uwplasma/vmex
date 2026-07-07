@@ -108,6 +108,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState as _ResidualControllerState,
     apply_controller_state_update as _apply_controller_state_update,
     backtracking_momentum_search as _backtracking_momentum_search,
+    build_strict_momentum_proposal_from_policy as _build_strict_momentum_proposal_from_policy,
     candidate_state_from_deltas as _candidate_state_from_deltas_helper,
     candidate_state_from_delta_tuple as _candidate_state_from_delta_tuple_helper,
     controller_state_after_catastrophic_restart_update as _controller_state_after_catastrophic_restart_update,
@@ -133,10 +134,8 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     host_vmec2000_time_control_restart_update as _host_vmec2000_time_control_restart_update,
     initial_residual_controller_state as _initial_residual_controller_state,
     initial_residual_velocity_state as _initial_residual_velocity_state,
-    jit_strict_momentum_update_proposal as _jit_strict_momentum_update_proposal,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     resolve_strict_update_control_policy as _resolve_strict_update_control_policy,
-    strict_momentum_update_proposal as _strict_momentum_update_proposal,
     strict_step_branch_application as _strict_step_branch_application,
     strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
@@ -2796,45 +2795,30 @@ def solve_fixed_boundary_residual_iter(
             force_scale = strict_update_policy.force_scale
             need_update_rms = strict_update_policy.need_update_rms
             need_trial_eval = strict_update_policy.need_trial_eval
-            if strict_update_policy.use_jit_step:
-                update_proposal = _jit_strict_momentum_update_proposal(
-                    state=state,
-                    static=static,
-                    velocities=velocity_blocks,
-                    forces=force_blocks,
-                    dt_eff=float(dt_eff),
-                    b1=float(b1),
-                    fac=float(fac),
-                    force_scale=float(force_scale),
-                    flip_sign=float(flip_sign),
-                    max_update_rms=float(max_update_rms),
-                    need_update_rms=bool(need_update_rms),
-                    divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
-                    free_boundary_enabled=bool(free_boundary_enabled),
-                    strict_update_step_jit_func=_strict_update_step_jit,
-                )
-            else:
-                update_proposal = _strict_momentum_update_proposal(
-                    velocities=velocity_blocks,
-                    forces=force_blocks,
-                    host_update_assembly=bool(host_update_assembly),
-                    need_update_rms=bool(need_update_rms),
-                    materialize_update_rms=(
-                        bool(limit_update_rms)
-                        or bool(backtracking)
-                        or (bool(adjoint_trace) and adjoint_trace_mode == "full")
-                    ),
-                    limit_update_rms=bool(limit_update_rms),
-                    max_update_rms=float(max_update_rms),
-                    b1=float(b1),
-                    fac=float(fac),
-                    force_scale=float(force_scale),
-                    flip_sign=float(flip_sign),
-                    dt_eff=float(dt_eff),
-                    delta_transforms=_physical_delta_transforms,
-                    delta_tuple_from_blocks=_delta_tuple_from_blocks,
-                    candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
-                )
+            update_proposal = _build_strict_momentum_proposal_from_policy(
+                policy=strict_update_policy,
+                state=state,
+                static=static,
+                velocities=velocity_blocks,
+                forces=force_blocks,
+                max_update_rms=float(max_update_rms),
+                b1=float(b1),
+                fac=float(fac),
+                flip_sign=float(flip_sign),
+                divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+                free_boundary_enabled=bool(free_boundary_enabled),
+                strict_update_step_jit_func=_strict_update_step_jit,
+                host_update_assembly=bool(host_update_assembly),
+                materialize_update_rms=(
+                    bool(limit_update_rms)
+                    or bool(backtracking)
+                    or (bool(adjoint_trace) and adjoint_trace_mode == "full")
+                ),
+                limit_update_rms=bool(limit_update_rms),
+                delta_transforms=_physical_delta_transforms,
+                delta_tuple_from_blocks=_delta_tuple_from_blocks,
+                candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
+            )
             velocity_blocks = update_proposal.velocities
             update_rms_j = update_proposal.update_rms_j
             update_rms = update_proposal.update_rms

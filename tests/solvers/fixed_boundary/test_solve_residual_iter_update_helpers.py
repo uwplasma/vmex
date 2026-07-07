@@ -15,9 +15,11 @@ from vmec_jax.solvers.fixed_boundary.residual.iteration_metrics import (
 )
 from vmec_jax.solvers.fixed_boundary.residual.update import (
     ResidualControllerState,
+    StrictUpdateControlPolicy,
     ResidualVelocityBlocks,
     apply_controller_state_update,
     backtracking_momentum_search,
+    build_strict_momentum_proposal_from_policy,
     controller_state_after_catastrophic_restart_update,
     controller_state_after_free_boundary_turnon_restart_update,
     controller_state_after_host_restart_decision_sample,
@@ -1432,6 +1434,48 @@ def test_strict_momentum_update_proposal_builds_candidate_and_reports_rms() -> N
         np.testing.assert_allclose(block, 0.2)
     assert result.update_rms == pytest.approx(0.02)
     assert float(np.asarray(result.update_rms_j)) == pytest.approx(result.update_rms)
+
+
+def test_build_strict_momentum_proposal_from_policy_uses_nonjit_update_path() -> None:
+    velocities = ResidualVelocityBlocks(*(np.zeros((2, 3)) for _ in range(12)))
+    forces = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+    policy = StrictUpdateControlPolicy(
+        dt_eff=0.1,
+        force_scale=0.2,
+        need_update_rms=True,
+        need_trial_eval=False,
+        use_jit_step=False,
+    )
+
+    def delta_tuple_from_blocks(dt, transforms, *blocks, **_kwargs):
+        return tuple(float(dt) * np.asarray(block) for block in blocks)
+
+    def candidate_state_from_delta_tuple(deltas, **_kwargs):
+        return float(np.mean(deltas[0]))
+
+    result = build_strict_momentum_proposal_from_policy(
+        policy=policy,
+        state="unused-state",
+        static="unused-static",
+        velocities=velocities,
+        forces=forces,
+        max_update_rms=1.0,
+        b1=0.0,
+        fac=1.0,
+        flip_sign=1.0,
+        divide_by_scalxc_for_update=False,
+        free_boundary_enabled=False,
+        strict_update_step_jit_func=None,
+        host_update_assembly=True,
+        materialize_update_rms=True,
+        limit_update_rms=False,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+    )
+
+    assert result.state == pytest.approx(0.02)
+    assert result.update_rms == pytest.approx(0.02)
 
 
 def test_jit_strict_momentum_update_proposal_preserves_vmec_channel_order() -> None:

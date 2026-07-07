@@ -1297,6 +1297,65 @@ def resolve_strict_update_control_policy(
     )
 
 
+def build_strict_momentum_proposal_from_policy(
+    *,
+    policy: StrictUpdateControlPolicy,
+    state: Any,
+    static: Any,
+    velocities: ResidualVelocityBlocks,
+    forces: ResidualVelocityBlocks,
+    max_update_rms: float,
+    b1: float,
+    fac: float,
+    flip_sign: float,
+    divide_by_scalxc_for_update: bool,
+    free_boundary_enabled: bool,
+    strict_update_step_jit_func: Any,
+    host_update_assembly: bool,
+    materialize_update_rms: bool,
+    limit_update_rms: bool,
+    delta_transforms: tuple,
+    delta_tuple_from_blocks: Any,
+    candidate_state_from_delta_tuple: Any,
+) -> StrictMomentumProposal:
+    """Build the strict momentum proposal selected by ``policy``."""
+
+    if bool(policy.use_jit_step):
+        return jit_strict_momentum_update_proposal(
+            state=state,
+            static=static,
+            velocities=velocities,
+            forces=forces,
+            dt_eff=float(policy.dt_eff),
+            b1=float(b1),
+            fac=float(fac),
+            force_scale=float(policy.force_scale),
+            flip_sign=float(flip_sign),
+            max_update_rms=float(max_update_rms),
+            need_update_rms=bool(policy.need_update_rms),
+            divide_by_scalxc_for_update=bool(divide_by_scalxc_for_update),
+            free_boundary_enabled=bool(free_boundary_enabled),
+            strict_update_step_jit_func=strict_update_step_jit_func,
+        )
+    return strict_momentum_update_proposal(
+        velocities=velocities,
+        forces=forces,
+        host_update_assembly=bool(host_update_assembly),
+        need_update_rms=bool(policy.need_update_rms),
+        materialize_update_rms=bool(materialize_update_rms),
+        limit_update_rms=bool(limit_update_rms),
+        max_update_rms=float(max_update_rms),
+        b1=float(b1),
+        fac=float(fac),
+        force_scale=float(policy.force_scale),
+        flip_sign=float(flip_sign),
+        dt_eff=float(policy.dt_eff),
+        delta_transforms=delta_transforms,
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+    )
+
+
 def scale_primary_velocity_blocks(scale: float, velocities: ResidualVelocityBlocks) -> ResidualVelocityBlocks:
     """Scale VMEC's primary symmetric velocity memory used by backtracking."""
 
