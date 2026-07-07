@@ -97,7 +97,7 @@ def test_vmec2000_sign_probe_updates_flip_phiedge_and_extcur(tmp_path: Path) -> 
 
 
 def test_w7x_generated_mgrid_fixture_input_patch_sets_vmec2000_free_boundary_controls(tmp_path: Path) -> None:
-    from tools.diagnostics.vmec2000_generated_mgrid_w7x_fixture import write_w7x_generated_mgrid_input
+    from tools.diagnostics.free_boundary.vmec2000_generated_mgrid_w7x_fixture import write_w7x_generated_mgrid_input
 
     input_path = write_w7x_generated_mgrid_input(
         tmp_path / "input.w7x_generated_mgrid_freeb",
@@ -847,7 +847,7 @@ def test_vmec2000_w7x_generated_mgrid_fixture_reaches_active_vacuum_and_finite_w
     if exe is None:
         pytest.skip("xvmec2000 executable not found")
 
-    from tools.diagnostics.vmec2000_generated_mgrid_w7x_fixture import (
+    from tools.diagnostics.free_boundary.vmec2000_generated_mgrid_w7x_fixture import (
         run_w7x_generated_mgrid_vmec2000_fixture,
     )
 

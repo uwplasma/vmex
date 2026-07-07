@@ -553,7 +553,7 @@ development:
      ``simsopt/examples/2_Intermediate/free_boundary_vmec.py``
    - notes: generates mgrid from coils, then runs VMEC free-boundary.
    - vmec-jax optional promotion fixture:
-     ``tools/diagnostics/vmec2000_generated_mgrid_w7x_fixture.py``
+     ``tools/diagnostics/free_boundary/vmec2000_generated_mgrid_w7x_fixture.py``
      regenerates the bounded W7-X generated-``mgrid`` workflow at runtime and
      requires raw VMEC2000 to reach active vacuum and write finite positive
      WOUT geometry before the row is promoted.

@@ -731,7 +731,7 @@ fixture follows the documented SIMSOPT free-boundary workflow: generate
 .. code-block:: bash
 
    VMEC2000_EXEC=~/bin/xvmec2000 \
-   python tools/diagnostics/vmec2000_generated_mgrid_w7x_fixture.py \
+   python tools/diagnostics/free_boundary/vmec2000_generated_mgrid_w7x_fixture.py \
      --workdir /tmp/vmec_jax_w7x_generated_mgrid_fixture \
      --out results/vmec2000_w7x_generated_mgrid_fixture.json \
      --strict
