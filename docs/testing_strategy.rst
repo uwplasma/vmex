@@ -226,13 +226,13 @@ the recommended local escalation path.
      - Before pushing ordinary code or docs-adjacent changes that touch tested
        APIs.
    * - Released WOUT parity gate
-     - ``python tools/fetch_assets.py --bundle wout-fixtures && JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_physics_parity_helper_gates.py tests/test_vmec2000_exec_threed1.py``
+     - ``python tools/fetch_assets.py --bundle wout-fixtures && JAX_ENABLE_X64=1 pytest -q tests/test_residue_getfsq_parity.py tests/test_wout_profiles_currents_bundled_parity.py tests/test_physics_parity_helper_gates.py tests/diagnostics/parity/test_vmec2000_exec_threed1.py``
      - Required no-executable physics gate: recompute VMEC2000 ``fsqr/fsqz/fsql``,
        verify flux/pressure/iota/current wout-field invariants, protect small
        Mercier/JXBFORCE/Boozer helper identities, and cover the VMEC2000 trace
        parser against released fixtures.
    * - Parity manifest guard
-     - ``pytest -q tests/test_parity_sweep_manifest_thresholds.py``
+     - ``pytest -q tests/diagnostics/parity/test_parity_sweep_manifest_thresholds.py``
      - Cheap schema and fixture-path check for the fixed/free-boundary parity
        sweep manifest.  It does not launch VMEC2000; it protects the bounded
        optional sweep matrix from stale local inputs, unbounded compare-mode
@@ -392,7 +392,7 @@ VMEC2000 parity gates:
   to the values stored by VMEC2000.  It is not a smoke test: it fails on force
   normalization, Fourier convention, or residual assembly drift while avoiding
   a full solve.
-- Required CI also includes ``tests/test_vmec2000_exec_threed1.py`` so the
+- Required CI also includes ``tests/diagnostics/parity/test_vmec2000_exec_threed1.py`` so the
   ``threed1`` parser used by executable-backed diagnostics is covered by a
   bundled fixture even when ``xvmec2000`` is unavailable.
 - Required CI includes ``tests/test_wout_profiles_currents_bundled_parity.py``.

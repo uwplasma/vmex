@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from tools.diagnostics import converged_wout_parity_benchmark as bench
+from tools.diagnostics.parity import converged_wout_parity_benchmark as bench
 
 
 def test_field_mode_hotspots_reports_largest_relative_mode_errors() -> None:

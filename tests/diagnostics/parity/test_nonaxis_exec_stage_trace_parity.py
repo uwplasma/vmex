@@ -19,7 +19,7 @@ def test_nonaxis_stage_trace_parity_first_iters():
     if exe is None:
         pytest.skip("xvmec2000 executable not found")
 
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     script = repo_root / "tools" / "diagnostics" / "vmec2000_exec_stage_trace_compare.py"
     simsopt_root = repo_root.parent / "simsopt" / "tests" / "test_files"
     cases = [

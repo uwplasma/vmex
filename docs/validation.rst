@@ -138,15 +138,15 @@ Required CI includes a no-executable residual parity gate:
      tests/test_wout_physics_gates.py \
      tests/test_converged_wout_matrix_parity.py \
      tests/test_wout_fixture_inventory.py \
-     tests/test_vmec2000_exec_threed1.py \
-     tests/test_parity_sweep_manifest_thresholds.py
+     tests/diagnostics/parity/test_vmec2000_exec_threed1.py \
+     tests/diagnostics/parity/test_parity_sweep_manifest_thresholds.py
 
 ``tests/test_residue_getfsq_parity.py`` reads released VMEC2000 ``wout``
 files, reconstructs the solved state, recomputes the
 ``bcovar -> forces -> tomnsps -> getfsq`` scalar-residual path, and compares
 ``fsqr``, ``fsqz``, and ``fsql`` to the VMEC2000-stored values.  It currently
 covers ``circular_tokamak`` and ``shaped_tokamak_pressure`` without running
-VMEC2000 or a full ``vmec_jax`` solve.  ``tests/test_vmec2000_exec_threed1.py``
+VMEC2000 or a full ``vmec_jax`` solve.  ``tests/diagnostics/parity/test_vmec2000_exec_threed1.py``
 keeps the executable trace parser covered with a bundled ``threed1`` fixture
 when ``xvmec2000`` is absent from CI.
 

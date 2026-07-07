@@ -8,7 +8,7 @@ from tools.diagnostics.parity.vmec2000_exec_stage_trace_compare import _parse_vm
 
 
 def test_parse_bundled_threed1_trace_compares_physical_and_preconditioned_fsq() -> None:
-    fixture = Path(__file__).resolve().parent / "fixtures" / "vmec2000_threed1_short_trace.txt"
+    fixture = Path(__file__).resolve().parents[2] / "fixtures" / "vmec2000_threed1_short_trace.txt"
     stages = _parse_vmec2000_threed1(fixture)
 
     assert [stage.ns for stage in stages] == [13, 25]
