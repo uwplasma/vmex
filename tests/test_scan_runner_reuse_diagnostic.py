@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.diagnostics import check_scan_runner_reuse as reuse
+from tools.diagnostics.performance import check_scan_runner_reuse as reuse
 
 
 def test_replace_ftol_prefers_ftol_array_and_preserves_comment() -> None:

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from tools.diagnostics import accelerated_scan_cache_probe as probe
+from tools.diagnostics.performance import accelerated_scan_cache_probe as probe
 from vmec_jax.state import StateLayout, VMECState
 
 

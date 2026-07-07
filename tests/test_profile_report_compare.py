@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.diagnostics import compare_profile_reports as compare_tool
+from tools.diagnostics.performance import compare_profile_reports as compare_tool
 
 
 MIB = 1024 * 1024

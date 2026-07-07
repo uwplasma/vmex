@@ -10,7 +10,7 @@ import pytest
 
 import vmec_jax.optimization as opt_module
 from vmec_jax.optimization import FixedBoundaryExactOptimizer, gauss_newton_least_squares
-from tools.diagnostics import profile_exact_optimizer as exact_profile_tool
+from tools.diagnostics.performance import profile_exact_optimizer as exact_profile_tool
 
 
 def _bare_optimizer() -> FixedBoundaryExactOptimizer:

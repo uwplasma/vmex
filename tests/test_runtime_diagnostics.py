@@ -26,10 +26,16 @@ def _load_tool(name: str):
         "vmec2000_exec_stage_trace_compare",
         "vmec2000_exec_freeb_scalpot_compare",
     }
+    performance_tools = {
+        "compare_runtime_memory_matrix",
+        "example_runtime_memory_matrix",
+    }
     if name in docs_artifact_tools:
         path = ROOT / "tools" / "diagnostics" / "docs_artifacts" / f"{name}.py"
     elif name in parity_tools:
         path = ROOT / "tools" / "diagnostics" / "parity" / f"{name}.py"
+    elif name in performance_tools:
+        path = ROOT / "tools" / "diagnostics" / "performance" / f"{name}.py"
     else:
         path = ROOT / "tools" / "diagnostics" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(name, path)

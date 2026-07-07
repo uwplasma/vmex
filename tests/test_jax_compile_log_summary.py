@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.diagnostics import summarize_jax_compile_log as summary
+from tools.diagnostics.performance import summarize_jax_compile_log as summary
 
 
 def test_compile_name_counts_extracts_jit_names() -> None:

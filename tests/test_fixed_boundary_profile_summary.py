@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from tools.diagnostics import summarize_fixed_boundary_profiles as summary
+from tools.diagnostics.performance import summarize_fixed_boundary_profiles as summary
 
 
 def test_summarize_profile_extracts_compile_and_scan_metrics(tmp_path) -> None:
