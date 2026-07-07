@@ -120,7 +120,7 @@ def test_generate_trial_directions_is_deterministic() -> None:
 
 
 def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
-    input_file = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.QI_stel_seed_3127"
+    input_file = Path(__file__).resolve().parents[3] / "examples" / "data" / "input.QI_stel_seed_3127"
     if not input_file.exists():
         pytest.skip("Bundled QI seed input is unavailable")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 SCRIPT = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[3]
     / "tools"
     / "diagnostics"
     / "qi"

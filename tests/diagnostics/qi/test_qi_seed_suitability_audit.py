@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "tools/diagnostics/qi/audit_qi_seed_suitability.py"
+SCRIPT = Path(__file__).resolve().parents[3] / "tools/diagnostics/qi/audit_qi_seed_suitability.py"
 
 
 def _load_module():

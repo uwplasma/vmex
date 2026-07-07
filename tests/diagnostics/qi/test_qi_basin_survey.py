@@ -108,7 +108,7 @@ def test_rank_candidate_records_sorts_failures_last() -> None:
 
 
 def test_cli_dry_run_writes_candidate_plan(tmp_path: Path) -> None:
-    input_file = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.QI_stel_seed_3127"
+    input_file = Path(__file__).resolve().parents[3] / "examples" / "data" / "input.QI_stel_seed_3127"
     if not input_file.exists():
         pytest.skip("Bundled QI seed input is unavailable")
 

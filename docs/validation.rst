@@ -274,7 +274,7 @@ possible seed.  The fast local QI gate is:
 
 .. code-block:: bash
 
-   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/test_qi_seed_suitability_audit.py tests/test_booz_input.py
+   pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_qi_objective_component_report.py tests/diagnostics/qi/test_qi_seed_suitability_audit.py tests/test_booz_input.py
 
 This gate covers smooth Boozer-space QI residuals, the legacy branch/shuffle
 diagnostic used for ranking, mirror-ratio and elongation records, Boozer input
