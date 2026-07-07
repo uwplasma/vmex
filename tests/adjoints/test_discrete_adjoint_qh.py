@@ -55,6 +55,68 @@ def _qh_solver_kwargs(indata, signgs: int, **overrides):
     return kwargs
 
 
+def _qh_checkpoint_tape(
+    build_residual_checkpoint_tape,
+    state_guess,
+    static,
+    indata,
+    signgs: int,
+    solver_kwargs,
+    *,
+    max_iter: int,
+    light_history: bool = True,
+    resume_state_mode: str | None = None,
+    **store_options,
+):
+    """Build the common QH replay tape while keeping per-test storage options visible."""
+
+    if resume_state_mode is None:
+        resume_state_mode = str(solver_kwargs.get("resume_state_mode", "minimal"))
+    return build_residual_checkpoint_tape(
+        state_guess,
+        static,
+        max_iter=max_iter,
+        solver_kwargs=solver_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(solver_kwargs.get("ftol", indata.get_float("FTOL", 1e-14))),
+        step_size=float(solver_kwargs.get("step_size", indata.get_float("DELT", 1.0))),
+        light_history=light_history,
+        resume_state_mode=resume_state_mode,
+        **store_options,
+    )
+
+
+def _qh_direct_checkpoint_tape(
+    build_residual_checkpoint_tape_direct,
+    state_guess,
+    static,
+    indata,
+    signgs: int,
+    solver_kwargs,
+    *,
+    max_iter: int,
+    light_history: bool = True,
+    store_trace: bool = False,
+    **store_options,
+):
+    """Build the common direct QH tape used by dynamic replay tests."""
+
+    return build_residual_checkpoint_tape_direct(
+        state_guess,
+        static,
+        max_iter=max_iter,
+        solver_kwargs=solver_kwargs,
+        indata=indata,
+        signgs=signgs,
+        ftol=float(solver_kwargs.get("ftol", indata.get_float("FTOL", 1e-14))),
+        step_size=float(solver_kwargs.get("step_size", indata.get_float("DELT", 1.0))),
+        light_history=light_history,
+        store_trace=store_trace,
+        **store_options,
+    )
+
+
 def test_replay_tridi_policy_helpers_and_static_flags():
     import vmec_jax.discrete_adjoint as da
 
@@ -391,17 +453,14 @@ def test_residual_checkpoint_tape_matches_direct_one_step_qh(load_case_qh_warm_s
         max_iter=1,
         **common_kwargs,
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=1,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="minimal",
+        solver_kwargs=common_kwargs,
+        max_iter=1,
     )
 
     assert tape.packed_states.shape[0] == 1
@@ -432,17 +491,14 @@ def test_residual_checkpoint_tape_can_skip_debug_storage_qh(load_case_qh_warm_st
         max_iter=1,
         **common_kwargs,
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=1,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="minimal",
+        solver_kwargs=common_kwargs,
+        max_iter=1,
         store_packed_states=False,
         store_trace=False,
         store_resume_states=False,
@@ -471,32 +527,26 @@ def test_residual_checkpoint_tape_direct_matches_two_step_qh(load_case_qh_warm_s
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
 
-    replay_tape = build_residual_checkpoint_tape(
+    replay_tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
         store_packed_states=False,
         store_trace=False,
         store_resume_states=False,
     )
-    direct_tape = build_residual_checkpoint_tape_direct(
+    direct_tape = _qh_direct_checkpoint_tape(
+        build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
 
     assert np.asarray(direct_tape.final_packed_state) == pytest.approx(
@@ -520,29 +570,23 @@ def test_residual_checkpoint_tape_direct_dynamic_only_matches_two_step_qh(load_c
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
 
-    direct_full = build_residual_checkpoint_tape_direct(
+    direct_full = _qh_direct_checkpoint_tape(
+        build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
-    direct_lean = build_residual_checkpoint_tape_direct(
+    direct_lean = _qh_direct_checkpoint_tape(
+        build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=2,
         store_full_step_traces=False,
     )
 
@@ -580,30 +624,24 @@ def test_residual_checkpoint_tape_direct_buckets_dynamic_shapes_for_nearby_lengt
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
 
-    tape2 = build_residual_checkpoint_tape_direct(
+    tape2 = _qh_direct_checkpoint_tape(
+        build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=2,
         store_full_step_traces=False,
     )
-    tape3 = build_residual_checkpoint_tape_direct(
+    tape3 = _qh_direct_checkpoint_tape(
+        build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=3,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=3,
         store_full_step_traces=False,
     )
 
@@ -639,17 +677,15 @@ def test_residual_checkpoint_tape_matches_direct_two_step_qh(load_case_qh_warm_s
         max_iter=2,
         **common_kwargs,
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
+        solver_kwargs=common_kwargs,
+        max_iter=2,
         light_history=False,
-        resume_state_mode="minimal",
     )
 
     assert tape.packed_states.shape[0] == 2
@@ -675,17 +711,14 @@ def test_checkpoint_tape_state_vjp_matches_direct_two_step_qh(load_case_qh_warm_
 
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
     assert len(tape.step_traces) == 2
 
@@ -751,17 +784,14 @@ def test_checkpoint_tape_state_jvp_matches_direct_two_step_qh(load_case_qh_warm_
 
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
     assert len(tape.step_traces) == 2
 
@@ -830,17 +860,14 @@ def test_checkpoint_tape_state_jvp_columns_matches_single_column_qh(load_case_qh
 
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
     assert len(tape.step_traces) == 2
 
@@ -890,17 +917,14 @@ def test_checkpoint_tape_state_jvp_columns_matches_single_column_qh_rebuild_prec
 
     indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
     common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
     assert len(tape.step_traces) == 2
 
@@ -940,43 +964,19 @@ def test_dynamic_replay_scan_matches_primal_qh_full_inner(load_case_qh_warm_star
 
     import vmec_jax.discrete_adjoint as da
     from vmec_jax._compat import enable_x64
-    from vmec_jax.field import signgs_from_sqrtg
-    from vmec_jax.geom import eval_geom
-    from vmec_jax.init_guess import initial_guess_from_boundary
 
     enable_x64(True)
 
-    _cfg, indata, static, boundary, _state0 = load_case_qh_warm_start
-    state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
-    signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
-    common_kwargs = dict(
-        indata=indata,
-        signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        vmec2000_control=True,
-        reference_mode=False,
-        backtracking=True,
-        limit_dt_from_force=True,
-        limit_update_rms=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces="auto",
-        use_scan=False,
-        light_history=True,
-        resume_state_mode="full",
-    )
-    tape = da.build_residual_checkpoint_tape_direct(
+    indata, static, _boundary, state_guess, signgs = _qh_setup(load_case_qh_warm_start)
+    common_kwargs = _qh_solver_kwargs(indata, signgs, resume_state_mode="full")
+    tape = _qh_direct_checkpoint_tape(
+        da.build_residual_checkpoint_tape_direct,
         state_guess,
         static,
-        max_iter=20,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        store_trace=False,
+        solver_kwargs=common_kwargs,
+        max_iter=20,
     )
     assert da._dynamic_replay_supported(tape=tape, rebuild_preconditioner=True)
     carry0 = da._dynamic_replay_initial_carry(tape.step_traces[0])
@@ -1010,34 +1010,15 @@ def test_checkpoint_tape_state_jvp_columns_matches_single_column_circular(load_c
     _cfg, indata, static, boundary, _state0 = load_case_circular_tokamak
     state_guess = initial_guess_from_boundary(static, boundary, indata, vmec_project=True)
     signgs = int(signgs_from_sqrtg(np.asarray(eval_geom(state_guess, static).sqrtg), axis_index=1))
-    common_kwargs = dict(
-        indata=indata,
-        signgs=signgs,
-        ftol=1.0e-10,
-        step_size=1.0,
-        vmec2000_control=True,
-        reference_mode=False,
-        backtracking=True,
-        limit_dt_from_force=True,
-        limit_update_rms=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces="auto",
-        use_scan=False,
-        light_history=True,
-        resume_state_mode="full",
-    )
-    tape = build_residual_checkpoint_tape(
+    common_kwargs = _qh_solver_kwargs(indata, signgs, ftol=1.0e-10, step_size=1.0, resume_state_mode="full")
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=1,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=1.0e-10,
-        step_size=1.0,
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=1,
     )
     assert len(tape.step_traces) == 1
 
@@ -1106,17 +1087,14 @@ def test_checkpoint_tape_param_vjp_matches_direct_two_step_qh(load_case_qh_warm_
         light_history=True,
         resume_state_mode="full",
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
 
     specs = boundary_param_specs(
@@ -1227,17 +1205,14 @@ def test_checkpoint_tape_param_jvp_matches_two_step_aspect_direction_qh(load_cas
         light_history=True,
         resume_state_mode="full",
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
 
     specs = boundary_param_specs(
@@ -1364,17 +1339,14 @@ def test_checkpoint_tape_param_vjp_matches_two_step_aspect_gradient_qh(load_case
         light_history=True,
         resume_state_mode="full",
     )
-    tape = build_residual_checkpoint_tape(
+    tape = _qh_checkpoint_tape(
+        build_residual_checkpoint_tape,
         state_guess,
         static,
-        max_iter=2,
-        solver_kwargs=common_kwargs,
         indata=indata,
         signgs=signgs,
-        ftol=float(indata.get_float("FTOL", 1e-14)),
-        step_size=float(indata.get_float("DELT", 1.0)),
-        light_history=True,
-        resume_state_mode="full",
+        solver_kwargs=common_kwargs,
+        max_iter=2,
     )
 
     specs = boundary_param_specs(
