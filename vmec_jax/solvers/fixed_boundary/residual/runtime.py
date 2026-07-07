@@ -98,6 +98,13 @@ class BadJacobianIterationRuntime(NamedTuple):
     max_tau: float
 
 
+class ConvergedPhysicalIterationExit(NamedTuple):
+    """Loop-control result for a physical-residual convergence exit."""
+
+    converged: bool
+    iteration_control_start: float | None
+
+
 def initial_free_boundary_loop_state(
     *,
     nvacskip: int,
@@ -452,6 +459,87 @@ def run_bad_jacobian_iteration_runtime(
         bad_jacobian=bad_jacobian,
         min_tau=min_tau,
         max_tau=max_tau,
+    )
+
+
+def run_converged_physical_iteration_exit(
+    *,
+    append_zero_update_history_func: Callable[..., Any],
+    print_compact_converged_status_func: Callable[..., Any],
+    record_timing: Callable[[str, float | None], bool],
+    print_residual_iteration_update_status_func: Callable[..., Any],
+    verbose: bool,
+    vmec2000_control: bool,
+    verbose_vmec2000_table: bool,
+    should_print_vmec2000: Callable[..., Any],
+    print_vmec2000_iter_row: Callable[..., Any],
+    precond_diag_floats: Callable[[], tuple[float, float, float]],
+    iter_idx: int,
+    max_iter: int,
+    compact_iter_idx: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    target: float,
+    time_step: float,
+    r00: float,
+    z00: float,
+    w_mhd: float,
+    iteration_control_start: float | None,
+) -> ConvergedPhysicalIterationExit:
+    """Append and print the VMEC row for a converged physical residual.
+
+    The fixed-boundary loop computes preconditioned diagnostics even on the
+    convergence row so history channels stay length-aligned.  Once those
+    channels are ready, this helper performs the remaining host side effects:
+    append the zero-update record, print the VMEC-style convergence/status rows,
+    and close the iteration-control timing bucket.
+    """
+
+    append_zero_update_history_func(
+        restart_path="converged",
+        step_status="converged",
+        restart_reason="none",
+        pre_restart_reason="none",
+        time_step_value=time_step,
+    )
+    print_compact_converged_status_func(
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        target=target,
+    )
+    if record_timing("iteration_control", iteration_control_start):
+        iteration_control_start = None
+    print_residual_iteration_update_status_func(
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        should_print_vmec2000=should_print_vmec2000,
+        print_vmec2000_iter_row=print_vmec2000_iter_row,
+        precond_diag_floats=precond_diag_floats,
+        iter_idx=int(iter_idx),
+        max_iter=int(max_iter),
+        compact_iter_idx=int(compact_iter_idx),
+        fsqr=fsqr,
+        fsqz=fsqz,
+        fsql=fsql,
+        dt_eff=0.0,
+        update_rms=0.0,
+        time_step=float(time_step),
+        r00=float(r00),
+        z00=float(z00),
+        w_mhd=float(w_mhd),
+        step_status="converged",
+        force_vmec2000_row=True,
+        compact_status=False,
+    )
+    return ConvergedPhysicalIterationExit(
+        converged=True,
+        iteration_control_start=iteration_control_start,
     )
 
 
