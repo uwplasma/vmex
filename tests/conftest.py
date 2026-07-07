@@ -36,6 +36,92 @@ def require_slow() -> None:
         pytest.skip("Set RUN_SLOW=1 to run slow gradient/implicit tests")
 
 
+def circular_coil_dofs(
+    *,
+    radius: float,
+    major_offset: float = 0.0,
+    out_of_plane: float = 0.0,
+    order: int = 1,
+):
+    """Return Fourier dofs for one circular direct-coil test fixture.
+
+    The coefficient layout follows the ESSOS-compatible ``CoilFieldParams``
+    convention: ``x`` gets the first cosine coefficient, ``y`` the first sine
+    coefficient, and optional constant offsets move the coil center or add a
+    vertical displacement for non-axisymmetric free-boundary tests.
+    """
+
+    from vmec_jax._compat import jnp
+
+    if order < 1:
+        raise ValueError("circular_coil_dofs requires order >= 1")
+    dofs = jnp.zeros((1, 3, 2 * int(order) + 1), dtype=float)
+    if major_offset != 0.0:
+        dofs = dofs.at[0, 0, 0].set(float(major_offset))
+    dofs = dofs.at[0, 0, 2].set(float(radius))
+    dofs = dofs.at[0, 1, 1].set(float(radius))
+    if out_of_plane != 0.0:
+        dofs = dofs.at[0, 2, 0].set(float(out_of_plane))
+    return dofs
+
+
+def circular_coil_params(
+    *,
+    current: float,
+    radius: float,
+    n_segments: int,
+    major_offset: float = 0.0,
+    out_of_plane: float = 0.0,
+    nfp: int = 1,
+    stellsym: bool = False,
+    current_scale: float = 1.0,
+    regularization_epsilon: float = 0.0,
+    chunk_size: int | None = None,
+):
+    """Build one circular Fourier coil as a differentiable test parameter set."""
+
+    from vmec_jax._compat import jnp
+    from vmec_jax.external_fields import CoilFieldParams
+
+    return CoilFieldParams(
+        base_curve_dofs=circular_coil_dofs(
+            radius=radius,
+            major_offset=major_offset,
+            out_of_plane=out_of_plane,
+        ),
+        base_currents=jnp.asarray([current], dtype=float),
+        n_segments=int(n_segments),
+        nfp=int(nfp),
+        stellsym=bool(stellsym),
+        current_scale=float(current_scale),
+        regularization_epsilon=float(regularization_epsilon),
+        chunk_size=None if chunk_size is None else int(chunk_size),
+    )
+
+
+def off_axis_circular_coil_params(
+    *,
+    current: float = 2.1e5,
+    radius: float = 0.22,
+    major_offset: float = 1.65,
+    out_of_plane: float = 0.08,
+    n_segments: int = 96,
+    nfp: int = 1,
+    stellsym: bool = False,
+):
+    """Return an off-axis circular coil for mgrid/direct-provider parity tests."""
+
+    return circular_coil_params(
+        current=current,
+        radius=radius,
+        n_segments=n_segments,
+        major_offset=major_offset,
+        out_of_plane=out_of_plane,
+        nfp=nfp,
+        stellsym=stellsym,
+    )
+
+
 
 _ASSET_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak_reference.nc"
 _WOUT_FIXTURE_SENTINEL = _ROOT / "examples" / "data" / "wout_circular_tokamak.nc"

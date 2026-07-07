@@ -6,6 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import (
+    circular_coil_params as _shared_circular_coil_params,
+    off_axis_circular_coil_params,
+)
 from vmec_jax._compat import enable_x64
 from vmec_jax.external_fields import (
     CoilFieldParams,
@@ -23,35 +27,13 @@ LPQA_UNIT_FREE_BOUNDARY_PHIEDGE = -0.025
 
 
 def _circle_coil_params() -> CoilFieldParams:
-    from vmec_jax._compat import jnp
-
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(1.4)
-    dofs = dofs.at[0, 1, 1].set(1.4)
-    return CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.0]),
-        n_segments=96,
-    )
+    return _shared_circular_coil_params(current=2.0, radius=1.4, n_segments=96)
 
 
 def _off_axis_coil_params() -> CoilFieldParams:
-    from vmec_jax._compat import jnp
-
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
     # Off-axis displacement makes the field toroidally varying, so this checks
     # that the mgrid and direct-coil provider paths use the same phi convention.
-    dofs = dofs.at[0, 0, 0].set(1.65)
-    dofs = dofs.at[0, 0, 2].set(0.22)
-    dofs = dofs.at[0, 1, 1].set(0.22)
-    dofs = dofs.at[0, 2, 0].set(0.08)
-    return CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.1e5]),
-        n_segments=96,
-        nfp=1,
-        stellsym=False,
-    )
+    return off_axis_circular_coil_params()
 
 
 def _mgrid_from_direct_coil_nodes(coil_params: CoilFieldParams):

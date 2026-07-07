@@ -3,8 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from conftest import circular_coil_params as _shared_circular_coil_params
 from vmec_jax._compat import enable_x64
-from vmec_jax.external_fields import CoilFieldParams, sample_coil_field_cylindrical
+from vmec_jax.external_fields import sample_coil_field_cylindrical
 from vmec_jax.free_boundary import (
     _build_vmec_mode_basis,
     _ensure_vmec_nonsingular_kernel_tables,
@@ -71,20 +72,14 @@ def _single_circular_coil_params(
     current,
     n_segments: int,
     out_of_plane: float = 0.0,
-) -> CoilFieldParams:
+):
     """Build the one-coil circular Fourier fixture used by adjoint gates."""
 
-    from vmec_jax._compat import jnp
-
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    if out_of_plane != 0.0:
-        dofs = dofs.at[0, 2, 0].set(out_of_plane)
-    return CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([current], dtype=float),
+    return _shared_circular_coil_params(
+        current=current,
+        radius=radius,
         n_segments=n_segments,
+        out_of_plane=out_of_plane,
         regularization_epsilon=1.0e-9,
     )
 

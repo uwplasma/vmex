@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vmec_jax._compat import jnp
+from conftest import circular_coil_params
 from vmec_jax.external_fields import CoilFieldParams
 
 
@@ -39,12 +39,9 @@ class _FakeEssosCoils:
 
 
 def _simple_coil_params() -> CoilFieldParams:
-    dofs = np.zeros((1, 3, 3), dtype=float)
-    dofs[0, 0, 2] = 1.5
-    dofs[0, 1, 1] = 1.5
-    return CoilFieldParams(
-        base_curve_dofs=jnp.asarray(dofs),
-        base_currents=jnp.asarray([1.0e6]),
+    return circular_coil_params(
+        current=1.0e6,
+        radius=1.5,
         n_segments=12,
         nfp=2,
         stellsym=True,

@@ -3,20 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from conftest import circular_coil_params
 from vmec_jax._compat import jnp
 from vmec_jax.external_fields import CoilFieldParams
 from vmec_jax.solvers.free_boundary import derivatives
 
 
 def _params() -> CoilFieldParams:
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(1.2)
-    dofs = dofs.at[0, 1, 1].set(1.2)
-    return CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.0]),
-        n_segments=8,
-    )
+    return circular_coil_params(current=2.0, radius=1.2, n_segments=8)
 
 
 def _fake_registry(*, args, qs_surfaces, qs_angle_cache_for_static):

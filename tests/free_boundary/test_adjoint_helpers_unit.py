@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from conftest import circular_coil_params
 import vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives as fba
 from vmec_jax._compat import jnp
 from vmec_jax.solvers.free_boundary.adjoint import objectives as objective_helpers
@@ -23,17 +24,13 @@ from vmec_jax.solvers.free_boundary.adjoint import trace_stack
 def test_current_only_coil_geometry_helper_expands_currents_without_resampling_curves() -> None:
     pytest.importorskip("jax")
     from vmec_jax.external_fields import (
-        CoilFieldParams,
         apply_stellarator_symmetry_to_currents,
         build_coil_field_geometry,
     )
 
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(1.3)
-    dofs = dofs.at[0, 1, 1].set(1.3)
-    params = CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([2.0]),
+    params = circular_coil_params(
+        current=2.0,
+        radius=1.3,
         n_segments=12,
         nfp=2,
         stellsym=True,

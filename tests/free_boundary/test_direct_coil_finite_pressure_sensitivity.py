@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from conftest import circular_coil_params as _shared_circular_coil_params
 from vmec_jax._compat import enable_x64, has_jax
 from vmec_jax.external_fields import CoilFieldParams, from_essos_coils
 from vmec_jax.free_boundary import nestor_external_only_step
@@ -91,18 +92,7 @@ def _assert_nonnegative_timings(report: dict, *keys: str) -> None:
 
 
 def _circle_coil_params(*, current: float = 3.0e7, radius: float = 1.8, n_segments: int = 96) -> CoilFieldParams:
-    from vmec_jax._compat import jnp
-
-    dofs = jnp.zeros((1, 3, 3), dtype=float)
-    dofs = dofs.at[0, 0, 2].set(radius)
-    dofs = dofs.at[0, 1, 1].set(radius)
-    return CoilFieldParams(
-        base_curve_dofs=dofs,
-        base_currents=jnp.asarray([current], dtype=float),
-        n_segments=int(n_segments),
-        nfp=1,
-        stellsym=False,
-    )
+    return _shared_circular_coil_params(current=current, radius=radius, n_segments=n_segments)
 
 
 def _write_tiny_direct_freeb_input(
