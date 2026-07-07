@@ -1749,6 +1749,73 @@ def _set_same_branch_custom_vjp_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(key, value)
 
 
+def _tiny_direct_same_branch_input(
+    tmp_path: Path,
+    name: str,
+    *,
+    lasym: bool = False,
+    niter: int = 3,
+    mpol: int = 3,
+    ntheta: int = 4,
+) -> Path:
+    return _write_tiny_direct_freeb_input(
+        tmp_path / name,
+        lasym=lasym,
+        niter=niter,
+        mpol=mpol,
+        ntheta=ntheta,
+    )
+
+
+def _coil_direction_case(
+    *,
+    current: float,
+    n_segments: int = 24,
+    current_fraction: float = 0.0,
+    dof_index: tuple[int, int, int] | None = None,
+    dof_step: float = 0.0,
+) -> tuple[CoilFieldParams, CoilFieldParams, object]:
+    from vmec_jax._compat import jnp
+
+    base_params = _circle_coil_params(current=current, n_segments=n_segments)
+    base_dofs = jnp.asarray(base_params.base_curve_dofs)
+    base_currents = jnp.asarray(base_params.base_currents)
+    curve_direction = jnp.zeros_like(base_dofs)
+    if dof_index is not None and dof_step != 0.0:
+        curve_direction = curve_direction.at[dof_index].set(dof_step)
+    current_direction = (
+        base_currents * float(current_fraction)
+        if current_fraction != 0.0
+        else jnp.zeros_like(base_currents)
+    )
+    direction = base_params.with_arrays(
+        base_curve_dofs=curve_direction,
+        base_currents=current_direction,
+    )
+
+    def params_for(scale: float) -> CoilFieldParams:
+        scaled_dofs = base_dofs
+        if dof_index is not None and dof_step != 0.0:
+            scaled_dofs = base_dofs.at[dof_index].add(dof_step * float(scale))
+        scaled_currents = (
+            base_currents * (1.0 + float(current_fraction) * float(scale))
+            if current_fraction != 0.0
+            else base_currents
+        )
+        return base_params.with_arrays(
+            base_curve_dofs=scaled_dofs,
+            base_currents=scaled_currents,
+        )
+
+    return base_params, direction, params_for
+
+
+_ASPECT_STATE_QS_KEYS = ("aspect", "state_norm", "qs_total")
+_ASPECT_STATE_QS_RTOL = {"aspect": 5.0e-3, "state_norm": 5.0e-3, "qs_total": 2.0e-2}
+_ASPECT_STATE_QS_ATOL = {"aspect": 5.0e-8, "state_norm": 5.0e-8, "qs_total": 1.0e-8}
+_ASPECT_STATE_QS_BASE_ATOL = {"aspect": 2.0e-3, "state_norm": 2.0e-3, "qs_total": 2.0e-3}
+
+
 def _assert_native_rejected_slot_branch(
     complete_report: dict,
     *,
@@ -2505,6 +2572,72 @@ def _assert_strict_update_coil_directional_derivative_matches_fd(
     np.testing.assert_allclose(exact, fd, rtol=3.0e-3, atol=1.0e-10)
 
 
+def _directional_grad(objective, base_params: CoilFieldParams, direction: CoilFieldParams):
+    from vmec_jax._compat import jax, jnp
+
+    grad = jax.grad(objective)(base_params)
+    return sum(
+        jnp.vdot(grad_leaf, direction_leaf)
+        for grad_leaf, direction_leaf in zip(
+            jax.tree_util.tree_leaves(grad),
+            jax.tree_util.tree_leaves(direction),
+            strict=True,
+        )
+    )
+
+
+def _state_norm_trace_objective(
+    params: CoilFieldParams,
+    *,
+    base_init,
+    base_traces,
+    controller: bool,
+    segmented: bool = False,
+):
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
+        direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
+        direct_coil_fixed_trace_custom_vjp_objective_jax,
+    )
+
+    objective_fn = (
+        direct_coil_accepted_trace_controller_custom_vjp_objective_jax
+        if controller
+        else direct_coil_fixed_trace_custom_vjp_objective_jax
+    )
+    kwargs = {
+        "static": base_init.static,
+        "traces": base_traces,
+        "signgs": int(base_init.signgs),
+        "state_weight": 1.0,
+        "bsqvac_weight": 0.0,
+        "force_weight": 0.0,
+        "enforce_edge": False,
+    }
+    if segmented:
+        kwargs["use_preconditioner_policy_segments"] = True
+    return objective_fn(params, base_traces[0]["state_pre"], **kwargs)
+
+
+def _assert_trace_objective_directional_matches_fd(
+    *,
+    base_params: CoilFieldParams,
+    direction: CoilFieldParams,
+    objective,
+    base_complete: float,
+    complete_fd: float,
+    reference_exact=None,
+):
+    exact = _directional_grad(objective, base_params, direction)
+    base_trace = float(np.asarray(objective(base_params)))
+    assert abs(base_trace - base_complete) < 2.0e-3
+    assert np.isfinite(float(np.asarray(exact)))
+    assert np.isfinite(float(complete_fd))
+    np.testing.assert_allclose(exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
+    if reference_exact is not None:
+        np.testing.assert_allclose(exact, reference_exact, rtol=2.0e-3, atol=1.0e-8)
+    return exact
+
+
 def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     *,
     input_path: Path,
@@ -2526,14 +2659,12 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
-        direct_coil_accepted_trace_controller_custom_vjp_objective_jax,
         direct_coil_branch_local_scalars_report_from_complete_fd,
         direct_coil_run_free_boundary_branch_local_scalar_value_and_grad_jax,
         direct_coil_run_free_boundary_branch_local_scalars_value_and_jacobian_jax,
         direct_coil_same_branch_controller_scalars_custom_vjp_report,
         direct_coil_same_branch_complete_solve_fd_report,
         direct_coil_same_branch_replay_gate_report,
-        direct_coil_fixed_trace_custom_vjp_objective_jax,
     )
     from vmec_jax.wout import equilibrium_aspect_ratio_from_state
 
@@ -2591,82 +2722,54 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     assert set(complete_report["objective_values"]) == expected_objective_value_keys
     complete_fd = float(complete_report["values"]["central_fd_directional"])
 
-    def directional_grad(objective):
-        grad = jax.grad(objective)(base_params)
-        return sum(
-            jnp.vdot(grad_leaf, direction_leaf)
-            for grad_leaf, direction_leaf in zip(
-                jax.tree_util.tree_leaves(grad),
-                jax.tree_util.tree_leaves(direction),
-                strict=True,
-            )
-        )
-
     def custom_objective(params: CoilFieldParams):
-        return direct_coil_fixed_trace_custom_vjp_objective_jax(
-            params,
-            base_traces[0]["state_pre"],
-            static=base_init.static,
-            traces=base_traces,
-            signgs=int(base_init.signgs),
-            state_weight=1.0,
-            bsqvac_weight=0.0,
-            force_weight=0.0,
-            enforce_edge=False,
+        return _state_norm_trace_objective(
+            params, base_init=base_init, base_traces=base_traces, controller=False
         )
 
-    exact = directional_grad(custom_objective)
     base_complete = _state_norm_from_state(base_result.state)
-    base_fixed_trace = float(np.asarray(custom_objective(base_params)))
-    assert abs(base_fixed_trace - base_complete) < 2.0e-3
-    assert np.isfinite(float(np.asarray(exact)))
-    assert np.isfinite(float(complete_fd))
-    np.testing.assert_allclose(exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
+    exact = _assert_trace_objective_directional_matches_fd(
+        base_params=base_params,
+        direction=direction,
+        objective=custom_objective,
+        base_complete=base_complete,
+        complete_fd=complete_fd,
+    )
 
     controller_exact = None
     if check_controller:
         def controller_custom_objective(params: CoilFieldParams):
-            return direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
-                params,
-                base_traces[0]["state_pre"],
-                static=base_init.static,
-                traces=base_traces,
-                signgs=int(base_init.signgs),
-                state_weight=1.0,
-                bsqvac_weight=0.0,
-                force_weight=0.0,
-                enforce_edge=False,
+            return _state_norm_trace_objective(
+                params, base_init=base_init, base_traces=base_traces, controller=True
             )
 
-        controller_exact = directional_grad(controller_custom_objective)
-        base_controller_trace = float(np.asarray(controller_custom_objective(base_params)))
-        assert abs(base_controller_trace - base_complete) < 2.0e-3
-        np.testing.assert_allclose(controller_exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
-        np.testing.assert_allclose(controller_exact, exact, rtol=2.0e-3, atol=1.0e-8)
+        controller_exact = _assert_trace_objective_directional_matches_fd(
+            base_params=base_params,
+            direction=direction,
+            objective=controller_custom_objective,
+            base_complete=base_complete,
+            complete_fd=complete_fd,
+            reference_exact=exact,
+        )
 
     if check_segmented_controller:
         def segmented_controller_custom_objective(params: CoilFieldParams):
-            return direct_coil_accepted_trace_controller_custom_vjp_objective_jax(
+            return _state_norm_trace_objective(
                 params,
-                base_traces[0]["state_pre"],
-                static=base_init.static,
-                traces=base_traces,
-                signgs=int(base_init.signgs),
-                state_weight=1.0,
-                bsqvac_weight=0.0,
-                force_weight=0.0,
-                enforce_edge=False,
-                use_preconditioner_policy_segments=True,
+                base_init=base_init,
+                base_traces=base_traces,
+                controller=True,
+                segmented=True,
             )
 
-        segmented_controller_exact = directional_grad(segmented_controller_custom_objective)
-        base_segmented_controller_trace = float(np.asarray(segmented_controller_custom_objective(base_params)))
-        assert abs(base_segmented_controller_trace - base_complete) < 2.0e-3
-        np.testing.assert_allclose(segmented_controller_exact, complete_fd, rtol=2.0e-3, atol=1.0e-8)
-        if controller_exact is not None:
-            np.testing.assert_allclose(segmented_controller_exact, controller_exact, rtol=2.0e-3, atol=1.0e-8)
-        else:
-            np.testing.assert_allclose(segmented_controller_exact, exact, rtol=2.0e-3, atol=1.0e-8)
+        _assert_trace_objective_directional_matches_fd(
+            base_params=base_params,
+            direction=direction,
+            objective=segmented_controller_custom_objective,
+            base_complete=base_complete,
+            complete_fd=complete_fd,
+            reference_exact=controller_exact if controller_exact is not None else exact,
+        )
 
     def aspect_objective_from_state(state) -> float:
         return float(np.asarray(equilibrium_aspect_ratio_from_state(state=state, static=base_init.static)))
@@ -2972,38 +3075,65 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
 
 
 @pytest.mark.py311_coverage_only
-def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd(
+@pytest.mark.parametrize(
+    ("input_name", "input_kwargs", "coil_kwargs", "assert_kwargs"),
+    [
+        pytest.param(
+            "input.direct_current_only_same_branch_custom_vjp",
+            {"niter": 1},
+            {"current": 3.0e7, "current_fraction": 0.02},
+            {
+                "check_axis_R_scalar": True,
+                "check_qs_total_scalar": True,
+                "check_accepted_bnormal_rms_scalar": True,
+                "check_accepted_bsqvac_rms_scalar": True,
+                "check_production_branch_local_scalar": True,
+                "check_fixed_rejected_controller_mask_gate": True,
+            },
+            id="current-only",
+        ),
+        pytest.param(
+            "input.direct_fourier_only_same_branch_custom_vjp",
+            {"niter": 2},
+            {"current": 3.0e7, "dof_index": (0, 0, 2), "dof_step": 5.0e-3},
+            {
+                "check_boundary_moment_scalar": True,
+                "check_accepted_bnormal_rms_scalar": True,
+                "check_accepted_bsqvac_rms_scalar": True,
+                "require_positive_accepted_vacuum_scalar_slope": False,
+                "check_production_branch_local_scalar": True,
+            },
+            id="fourier-only",
+        ),
+        pytest.param(
+            "input.direct_same_branch_custom_vjp",
+            {"lasym": True, "niter": 2},
+            {
+                "current": 3.0e7,
+                "current_fraction": 0.02,
+                "dof_index": (0, 0, 2),
+                "dof_step": 5.0e-3,
+            },
+            {"check_boundary_moment_scalar": True},
+            id="lasym-mixed",
+        ),
+    ],
+)
+def test_direct_coil_same_branch_custom_vjp_matches_complete_solve_fd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    input_name: str,
+    input_kwargs: dict,
+    coil_kwargs: dict,
+    assert_kwargs: dict,
 ) -> None:
-    """Current-only custom VJP matches complete-solve FD on one accepted branch."""
+    """Custom VJP branches match complete-solve FD for current, geometry, and LASYM controls."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_current_only_same_branch_custom_vjp",
-        lasym=False,
-        niter=1,
-        mpol=3,
-        ntheta=4,
-    )
-    base_params = _circle_coil_params(current=3.0e7, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs),
-        base_currents=base_currents * 0.02,
-    )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs,
-            base_currents=base_currents * (1.0 + 0.02 * float(scale)),
-        )
-
+    input_path = _tiny_direct_same_branch_input(tmp_path, input_name, **input_kwargs)
+    base_params, direction, params_for = _coil_direction_case(**coil_kwargs)
     _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
         input_path=input_path,
         base_params=base_params,
@@ -3012,13 +3142,7 @@ def test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_
         check_controller=False,
         check_segmented_controller=False,
         check_aspect_scalar=True,
-        check_axis_R_scalar=True,
-        check_boundary_moment_scalar=False,
-        check_qs_total_scalar=True,
-        check_accepted_bnormal_rms_scalar=True,
-        check_accepted_bsqvac_rms_scalar=True,
-        check_production_branch_local_scalar=True,
-        check_fixed_rejected_controller_mask_gate=True,
+        **assert_kwargs,
     )
 
 
@@ -3030,32 +3154,14 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
     """Native restart/rejected slots can be validated under an unchanged branch."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_native_rejected_slot",
-        lasym=False,
-        niter=3,
-        mpol=3,
-        ntheta=4,
-    )
-    base_params = _circle_coil_params(current=3.0e8, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs),
-        base_currents=base_currents * 0.002,
+    input_path = _tiny_direct_same_branch_input(tmp_path, "input.direct_native_rejected_slot")
+    base_params, direction, params_for = _coil_direction_case(
+        current=3.0e8,
+        current_fraction=0.002,
     )
 
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs,
-            base_currents=base_currents * (1.0 + 0.002 * float(scale)),
-        )
-
-    scalar_keys = ("aspect", "state_norm", "qs_total")
     reports = _native_rejected_slot_scalars_report(
         input_path=input_path,
         base_params=base_params,
@@ -3063,10 +3169,10 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
         params_for=params_for,
         scalar_map=_aspect_state_norm_qs_scalar_map,
         replay_scalar_fns=_aspect_state_norm_qs_replay_scalar_fns(),
-        scalar_keys=scalar_keys,
-        rtol={"aspect": 5.0e-3, "state_norm": 5.0e-3, "qs_total": 2.0e-2},
-        atol={"aspect": 5.0e-8, "state_norm": 5.0e-8, "qs_total": 1.0e-8},
-        base_value_atol={"aspect": 2.0e-3, "state_norm": 2.0e-3, "qs_total": 2.0e-3},
+        scalar_keys=_ASPECT_STATE_QS_KEYS,
+        rtol=_ASPECT_STATE_QS_RTOL,
+        atol=_ASPECT_STATE_QS_ATOL,
+        base_value_atol=_ASPECT_STATE_QS_BASE_ATOL,
     )
     complete_report = reports["complete_report"]
     scalars_report = reports["scalars_report"]
@@ -3084,7 +3190,7 @@ def test_direct_coil_native_rejected_slot_same_branch_jvp_matches_complete_solve
     changed_branch_gate = _native_rejected_adaptive_gate_report(
         changed_branch_report,
         scalars_report,
-        scalar_keys=scalar_keys,
+        scalar_keys=_ASPECT_STATE_QS_KEYS,
     )
     assert changed_branch_gate["passed"] is False
     assert changed_branch_gate["same_branch"] is False
@@ -3100,32 +3206,15 @@ def test_direct_coil_native_rejected_slot_betatotal_jvp_matches_complete_solve_f
     """Finite-beta scalar JVP is branch-local and fingerprint-gated."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
     from vmec_jax.finite_beta import finite_beta_scalars_from_state
 
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_native_rejected_slot_betatotal",
-        lasym=False,
-        niter=3,
-        mpol=3,
-        ntheta=4,
+    input_path = _tiny_direct_same_branch_input(tmp_path, "input.direct_native_rejected_slot_betatotal")
+    base_params, direction, params_for = _coil_direction_case(
+        current=3.0e8,
+        current_fraction=0.002,
     )
-    base_params = _circle_coil_params(current=3.0e8, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    current_fraction = 0.002
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs),
-        base_currents=base_currents * current_fraction,
-    )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs,
-            base_currents=base_currents * (1.0 + current_fraction * float(scale)),
-        )
 
     def betatotal_from_state(state, payload):
         return finite_beta_scalars_from_state(
@@ -3175,34 +3264,15 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
     """Geometry-only rejected-slot JVP is valid under an unchanged branch."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_native_rejected_slot_geometry",
-        lasym=False,
-        niter=3,
-        mpol=3,
-        ntheta=4,
-    )
-    base_params = _circle_coil_params(current=3.0e8, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    dof_index = (0, 0, 2)
-    dof_step = 1.0e-3
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs).at[dof_index].set(dof_step),
-        base_currents=jnp.zeros_like(base_currents),
+    input_path = _tiny_direct_same_branch_input(tmp_path, "input.direct_native_rejected_slot_geometry")
+    base_params, direction, params_for = _coil_direction_case(
+        current=3.0e8,
+        dof_index=(0, 0, 2),
+        dof_step=1.0e-3,
     )
 
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs.at[dof_index].add(dof_step * float(scale)),
-            base_currents=base_currents,
-        )
-
-    scalar_keys = ("aspect", "state_norm", "qs_total")
     reports = _native_rejected_slot_scalars_report(
         input_path=input_path,
         base_params=base_params,
@@ -3210,10 +3280,10 @@ def test_direct_coil_native_rejected_slot_geometry_jvp_matches_complete_solve_fd
         params_for=params_for,
         scalar_map=_aspect_state_norm_qs_scalar_map,
         replay_scalar_fns=_aspect_state_norm_qs_replay_scalar_fns(),
-        scalar_keys=scalar_keys,
-        rtol={"aspect": 5.0e-3, "state_norm": 5.0e-3, "qs_total": 2.0e-2},
-        atol={"aspect": 5.0e-8, "state_norm": 5.0e-8, "qs_total": 1.0e-8},
-        base_value_atol={"aspect": 2.0e-3, "state_norm": 2.0e-3, "qs_total": 2.0e-3},
+        scalar_keys=_ASPECT_STATE_QS_KEYS,
+        rtol=_ASPECT_STATE_QS_RTOL,
+        atol=_ASPECT_STATE_QS_ATOL,
+        base_value_atol=_ASPECT_STATE_QS_BASE_ATOL,
     )
     branch_local = reports["branch_local"]
     assert branch_local["uses_production_forward"] is True
@@ -3230,33 +3300,15 @@ def test_direct_coil_native_rejected_slot_mixed_state_only_branch_trace_jvp_matc
     """Production-style mixed current/geometry JVP matches FD on one branch."""
 
     pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
     enable_x64(True)
     _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_native_rejected_slot_mixed_state_only",
-        lasym=False,
-        niter=3,
-        mpol=3,
-        ntheta=4,
+    input_path = _tiny_direct_same_branch_input(tmp_path, "input.direct_native_rejected_slot_mixed_state_only")
+    base_params, direction, params_for = _coil_direction_case(
+        current=3.0e8,
+        current_fraction=0.002,
+        dof_index=(0, 0, 2),
+        dof_step=1.0e-3,
     )
-    base_params = _circle_coil_params(current=3.0e8, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    dof_index = (0, 0, 2)
-    dof_step = 1.0e-3
-    current_fraction = 0.002
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs).at[dof_index].set(dof_step),
-        base_currents=base_currents * current_fraction,
-    )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs.at[dof_index].add(dof_step * float(scale)),
-            base_currents=base_currents * (1.0 + current_fraction * float(scale)),
-        )
 
     scalar_keys = ("aspect", "qs_total", "lcfs_boundary_moment")
     reports = _native_rejected_slot_scalars_report(
@@ -3371,107 +3423,6 @@ def test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_p
     assert diagnostics["replay_diagnostics"]["scalar_controls_stackable"] is True
     assert diagnostics["replay_diagnostics"]["array_controls_stackable"] is True
     assert diagnostics["replay_diagnostics"]["preconditioner_policy_n_segments"] >= 1
-
-
-@pytest.mark.py311_coverage_only
-def test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fourier-coefficient custom VJP matches complete-solve FD on one branch."""
-
-    pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
-    enable_x64(True)
-    _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_fourier_only_same_branch_custom_vjp",
-        lasym=False,
-        niter=2,
-        mpol=3,
-        ntheta=4,
-    )
-    base_params = _circle_coil_params(current=3.0e7, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    dof_index = (0, 0, 2)
-    dof_step = 5.0e-3
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs).at[dof_index].set(dof_step),
-        base_currents=jnp.zeros_like(base_currents),
-    )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs.at[dof_index].add(dof_step * float(scale)),
-            base_currents=base_currents,
-        )
-
-    _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
-        input_path=input_path,
-        base_params=base_params,
-        direction=direction,
-        params_for=params_for,
-        check_controller=False,
-        check_segmented_controller=False,
-        check_aspect_scalar=True,
-        check_boundary_moment_scalar=True,
-        check_accepted_bnormal_rms_scalar=True,
-        check_accepted_bsqvac_rms_scalar=True,
-        require_positive_accepted_vacuum_scalar_slope=False,
-        check_production_branch_local_scalar=True,
-    )
-
-
-@pytest.mark.py311_coverage_only
-def test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """LASYM fixed-trace custom VJP matches complete-solve FD on one branch.
-
-    Current-only and Fourier-only stellsym controls are covered by the
-    preceding same-branch gates.  This retained mixed-direction case keeps the
-    asymmetric branch represented without duplicating the stellsym solve triplet.
-    """
-
-    pytest.importorskip("jax")
-    from vmec_jax._compat import jnp
-
-    enable_x64(True)
-    _set_same_branch_custom_vjp_env(monkeypatch)
-    input_path = _write_tiny_direct_freeb_input(
-        tmp_path / "input.direct_same_branch_custom_vjp",
-        lasym=True,
-        niter=2,
-        mpol=3,
-        ntheta=4,
-    )
-    base_params = _circle_coil_params(current=3.0e7, n_segments=24)
-    base_dofs = jnp.asarray(base_params.base_curve_dofs)
-    base_currents = jnp.asarray(base_params.base_currents)
-    direction = base_params.with_arrays(
-        base_curve_dofs=jnp.zeros_like(base_dofs).at[0, 0, 2].set(5.0e-3),
-        base_currents=base_currents * 0.02,
-    )
-
-    def params_for(scale: float) -> CoilFieldParams:
-        return base_params.with_arrays(
-            base_curve_dofs=base_dofs.at[0, 0, 2].add(5.0e-3 * float(scale)),
-            base_currents=base_currents * (1.0 + 0.02 * float(scale)),
-        )
-
-    _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
-        input_path=input_path,
-        base_params=base_params,
-        direction=direction,
-        params_for=params_for,
-        check_controller=False,
-        check_segmented_controller=False,
-        check_aspect_scalar=True,
-        check_boundary_moment_scalar=True,
-    )
 
 
 @pytest.mark.py311_coverage_only
