@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from vmec_jax._compat import has_jax, jax, jnp
+from vmec_jax.namelist import InData
 from vmec_jax.io.wout_files.netcdf import (
     NYQUIST_FOURIER_FIELD_NAMES,
     read_mode_table,
@@ -17,6 +19,7 @@ from vmec_jax.io.wout_files.netcdf import (
     write_int_variable,
     write_nyquist_fourier_fields,
 )
+from vmec_jax.wout import _chipf_from_chips, _icurv_full_mesh_from_indata, read_wout, write_wout
 
 
 class _FakeReadVar:
@@ -141,3 +144,112 @@ def test_write_nyquist_fourier_fields_writes_expected_group() -> None:
         assert ds.variables[name].dtype == "f8"
         assert ds.variables[name].dims == ("radius", "mn_mode_nyq")
         np.testing.assert_array_equal(ds.variables[name].value, np.full((2, 3), i, dtype=float))
+
+
+def test_icurv_full_mesh_is_jit_safe_for_current_driven_profile():
+    if not has_jax():
+        return
+
+    indata = InData(
+        scalars={
+            "NCURR": 1,
+            "CURTOR": 2.0,
+            "PCURR_TYPE": "power_series",
+            "AC": [1.0, 0.0],
+        },
+        indexed={},
+    )
+    s = jnp.linspace(0.0, 1.0, 5)
+
+    @jax.jit
+    def _eval(s_grid):
+        return _icurv_full_mesh_from_indata(indata=indata, s_full=s_grid, signgs=-1)
+
+    out = np.asarray(_eval(s))
+
+    assert out.shape == (5,)
+    assert out[0] == 0.0
+    assert np.all(np.isfinite(out))
+    assert np.any(np.abs(out[1:]) > 0.0)
+
+
+@pytest.mark.full
+def test_write_wout_is_vmecplot2_compatible(tmp_path: Path) -> None:
+    pytest.importorskip("netCDF4")
+    pytest.importorskip("scipy")
+
+    ref = Path(__file__).resolve().parents[3] / "examples" / "data" / "wout_circular_tokamak_reference.nc"
+    if not ref.exists():
+        pytest.skip("Reference wout not found")
+
+    wout = read_wout(ref)
+    out = tmp_path / "wout_test.nc"
+    write_wout(out, wout, overwrite=True)
+
+    from scipy.io import netcdf
+
+    f = netcdf.netcdf_file(out, "r", mmap=False)
+    try:
+        required = [
+            "phi",
+            "iotaf",
+            "presf",
+            "iotas",
+            "pres",
+            "ns",
+            "nfp",
+            "xn",
+            "xm",
+            "xn_nyq",
+            "xm_nyq",
+            "rmnc",
+            "zmns",
+            "bmnc",
+            "raxis_cc",
+            "zaxis_cs",
+            "buco",
+            "bvco",
+            "jcuru",
+            "jcurv",
+            "lasym__logical__",
+            "ac_aux_s",
+            "ac_aux_f",
+            "pcurr_type",
+            "Aminor_p",
+            "Rmajor_p",
+            "aspect",
+            "betatotal",
+            "betapol",
+            "betator",
+            "betaxis",
+            "ctor",
+            "DMerc",
+        ]
+        for name in required:
+            assert name in f.variables
+    finally:
+        f.close()
+
+
+def test_write_wout_mode_tables_use_float_storage(tmp_path: Path) -> None:
+    netCDF4 = pytest.importorskip("netCDF4")
+
+    ref = Path(__file__).resolve().parents[3] / "examples" / "data" / "wout_circular_tokamak.nc"
+    if not ref.exists():
+        pytest.skip("Reference wout not found")
+
+    wout = read_wout(ref)
+    out = tmp_path / "wout_mode_dtype.nc"
+    write_wout(out, wout, overwrite=True)
+
+    with netCDF4.Dataset(out) as ds:
+        for name in ("xm", "xn", "xm_nyq", "xn_nyq"):
+            assert ds.variables[name].dtype == np.dtype("float64")
+        for name in ("mnmax", "mnmax_nyq", "mpol_nyq", "ntor_nyq"):
+            assert ds.variables[name].dtype == np.dtype("int32")
+
+
+def test_chipf_from_chips_is_jittable():
+    chips = jnp.asarray([0.0, 1.0, 2.0, 3.0], dtype=jnp.float64)
+    chipf = jax.jit(_chipf_from_chips)(chips)
+    np.testing.assert_allclose(np.asarray(chipf), np.array([0.5, 1.5, 2.5, 3.5]))
