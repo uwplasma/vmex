@@ -315,7 +315,7 @@ The heavier optimization comparison script is local-only by default:
 
 .. code-block:: bash
 
-   python examples/optimization/compare_omnigenity_qs_mode1.py
+   python tools/diagnostics/optimization/compare_omnigenity_qs_mode1.py
 
 That script writes summaries under its configured output directory and catches
 SIMSOPT-side failures into a failure JSON so the vmec_jax leg can still be
