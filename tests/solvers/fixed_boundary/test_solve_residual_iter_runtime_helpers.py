@@ -37,6 +37,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     run_bad_jacobian_iteration_runtime,
     run_converged_physical_iteration_exit,
     run_post_update_diagnostics_and_history,
+    run_preconditioned_residual_bookkeeping_and_convergence,
     stop_residual_profile_trace_if_window_completed,
     trial_residual_total_runtime,
 )
@@ -223,6 +224,85 @@ def test_converged_physical_iteration_exit_appends_prints_and_closes_timing() ->
     assert update_rows[0]["step_status"] == "converged"
     assert update_rows[0]["force_vmec2000_row"] is True
     assert update_rows[0]["dt_eff"] == pytest.approx(0.0)
+
+
+def test_preconditioned_bookkeeping_appends_history_and_optional_convergence_exit() -> None:
+    class Histories:
+        def __init__(self):
+            self.preconditioned = []
+
+        def append_preconditioned(self, **kwargs):
+            self.preconditioned.append(kwargs)
+            return True
+
+    histories = Histories()
+    common = dict(
+        history_lists=histories,
+        track_history=True,
+        rz_norm=1.0,
+        f_norm1=2.0,
+        gcr2_p=3.0,
+        gcz2_p=4.0,
+        gcl2_p=5.0,
+        fsq1=6.0,
+        fsqr1_safe=7.0,
+        fsqz1_safe=8.0,
+        fsql1_safe=9.0,
+        print_compact_converged_status_func=lambda **kwargs: pytest.fail("not converged"),
+        record_timing=lambda key, start: pytest.fail("not converged"),
+        print_residual_iteration_update_status_func=lambda **kwargs: pytest.fail("not converged"),
+        verbose=True,
+        vmec2000_control=True,
+        verbose_vmec2000_table=True,
+        should_print_vmec2000=lambda **kwargs: True,
+        print_vmec2000_iter_row=lambda **kwargs: None,
+        precond_diag_floats=lambda: (7.0, 8.0, 9.0),
+        iter_idx=5,
+        max_iter=10,
+        compact_iter_idx=4,
+        fsqr=1.0e-9,
+        fsqz=2.0e-9,
+        fsql=3.0e-9,
+        target=1.0e-8,
+        time_step=0.75,
+        r00=1.1,
+        z00=-0.2,
+        w_mhd=0.33,
+        iteration_control_start=4.0,
+    )
+
+    nonconverged = run_preconditioned_residual_bookkeeping_and_convergence(
+        **common,
+        converged_physical=False,
+        append_zero_update_history_func=lambda **kwargs: pytest.fail("not converged"),
+    )
+
+    assert nonconverged.converged is False
+    assert nonconverged.iteration_control_start == pytest.approx(4.0)
+    assert histories.preconditioned[-1]["fsq1"] == pytest.approx(6.0)
+
+    zero_rows = []
+    compact_rows = []
+    update_rows = []
+    timing_calls = []
+    converged = run_preconditioned_residual_bookkeeping_and_convergence(
+        **{
+            **common,
+            "print_compact_converged_status_func": lambda **kwargs: compact_rows.append(kwargs),
+            "record_timing": lambda key, start: timing_calls.append((key, start)) or True,
+            "print_residual_iteration_update_status_func": lambda **kwargs: update_rows.append(kwargs),
+        },
+        converged_physical=True,
+        append_zero_update_history_func=lambda **kwargs: zero_rows.append(kwargs),
+    )
+
+    assert converged.converged is True
+    assert converged.iteration_control_start is None
+    assert len(histories.preconditioned) == 2
+    assert zero_rows[0]["step_status"] == "converged"
+    assert compact_rows[0]["target"] == pytest.approx(1.0e-8)
+    assert timing_calls == [("iteration_control", 4.0)]
+    assert update_rows[0]["step_status"] == "converged"
 
 
 def test_new_residual_iter_timing_stats_preserves_setup_phase_values():

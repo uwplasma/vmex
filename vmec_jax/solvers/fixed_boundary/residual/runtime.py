@@ -105,6 +105,13 @@ class ConvergedPhysicalIterationExit(NamedTuple):
     iteration_control_start: float | None
 
 
+class PreconditionedResidualBookkeeping(NamedTuple):
+    """History and loop-control result after preconditioned residual checks."""
+
+    converged: bool
+    iteration_control_start: float | None
+
+
 def initial_free_boundary_loop_state(
     *,
     nvacskip: int,
@@ -540,6 +547,96 @@ def run_converged_physical_iteration_exit(
     return ConvergedPhysicalIterationExit(
         converged=True,
         iteration_control_start=iteration_control_start,
+    )
+
+
+def run_preconditioned_residual_bookkeeping_and_convergence(
+    *,
+    history_lists: Any,
+    track_history: bool,
+    rz_norm: Any,
+    f_norm1: Any,
+    gcr2_p: Any,
+    gcz2_p: Any,
+    gcl2_p: Any,
+    fsq1: Any,
+    fsqr1_safe: Any,
+    fsqz1_safe: Any,
+    fsql1_safe: Any,
+    converged_physical: bool,
+    append_zero_update_history_func: Callable[..., Any],
+    print_compact_converged_status_func: Callable[..., Any],
+    record_timing: Callable[[str, float | None], bool],
+    print_residual_iteration_update_status_func: Callable[..., Any],
+    verbose: bool,
+    vmec2000_control: bool,
+    verbose_vmec2000_table: bool,
+    should_print_vmec2000: Callable[..., Any],
+    print_vmec2000_iter_row: Callable[..., Any],
+    precond_diag_floats: Callable[[], tuple[float, float, float]],
+    iter_idx: int,
+    max_iter: int,
+    compact_iter_idx: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    target: float,
+    time_step: float,
+    r00: float,
+    z00: float,
+    w_mhd: float,
+    iteration_control_start: float | None,
+) -> PreconditionedResidualBookkeeping:
+    """Record preconditioned residuals and stop cleanly if VMEC converged.
+
+    The preconditioned residual channels are part of the accepted iteration
+    history even when the physical residual already satisfies the requested
+    tolerance.  Keeping this side effect in one helper makes the main solver
+    loop read as VMEC phases: compute forces, record residuals, branch, update.
+    """
+
+    history_lists.append_preconditioned(
+        track_history=bool(track_history),
+        rz_norm=rz_norm,
+        f_norm1=f_norm1,
+        gcr2_p=gcr2_p,
+        gcz2_p=gcz2_p,
+        gcl2_p=gcl2_p,
+        fsq1=fsq1,
+        fsqr1_safe=fsqr1_safe,
+        fsqz1_safe=fsqz1_safe,
+        fsql1_safe=fsql1_safe,
+    )
+    if not bool(converged_physical):
+        return PreconditionedResidualBookkeeping(False, iteration_control_start)
+
+    convergence_exit = run_converged_physical_iteration_exit(
+        append_zero_update_history_func=append_zero_update_history_func,
+        print_compact_converged_status_func=print_compact_converged_status_func,
+        record_timing=record_timing,
+        print_residual_iteration_update_status_func=print_residual_iteration_update_status_func,
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        should_print_vmec2000=should_print_vmec2000,
+        print_vmec2000_iter_row=print_vmec2000_iter_row,
+        precond_diag_floats=precond_diag_floats,
+        iter_idx=int(iter_idx),
+        max_iter=int(max_iter),
+        compact_iter_idx=int(compact_iter_idx),
+        fsqr=float(fsqr),
+        fsqz=float(fsqz),
+        fsql=float(fsql),
+        target=float(target),
+        time_step=float(time_step),
+        r00=float(r00),
+        z00=float(z00),
+        w_mhd=float(w_mhd),
+        iteration_control_start=iteration_control_start,
+    )
+    return PreconditionedResidualBookkeeping(
+        bool(convergence_exit.converged),
+        convergence_exit.iteration_control_start,
     )
 
 

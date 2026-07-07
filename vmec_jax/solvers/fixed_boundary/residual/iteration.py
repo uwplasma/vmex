@@ -67,9 +67,9 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     resume_free_boundary_loop_state as _runtime_resume_free_boundary_loop_state,
     resolve_free_boundary_coupling_runtime as _runtime_resolve_free_boundary_coupling_runtime,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
-    run_converged_physical_iteration_exit as _runtime_run_converged_physical_iteration_exit,
     run_post_update_diagnostics_and_history as _runtime_run_post_update_diagnostics_and_history,
     run_bad_jacobian_iteration_runtime as _runtime_run_bad_jacobian_iteration_runtime,
+    run_preconditioned_residual_bookkeeping_and_convergence as _runtime_run_preconditioned_residual_bookkeeping_and_convergence,
     stop_residual_profile_trace_if_window_completed as _runtime_stop_residual_profile_trace_if_window_completed,
     trial_residual_total_runtime as _runtime_trial_residual_total,
 )
@@ -2407,7 +2407,8 @@ def solve_fixed_boundary_residual_iter(
                 prev_rz_fsq = branch.prev_rz_fsq
                 skip_time_control = branch.skip_time_control
 
-            history_lists.append_preconditioned(
+            preconditioned_runtime = _runtime_run_preconditioned_residual_bookkeeping_and_convergence(
+                history_lists=history_lists,
                 track_history=bool(track_history),
                 rz_norm=rz_norm,
                 f_norm1=f_norm1,
@@ -2418,38 +2419,33 @@ def solve_fixed_boundary_residual_iter(
                 fsqr1_safe=fsqr1_safe,
                 fsqz1_safe=fsqz1_safe,
                 fsql1_safe=fsql1_safe,
+                converged_physical=bool(converged_physical),
+                append_zero_update_history_func=_append_current_zero_update_history,
+                print_compact_converged_status_func=_print_compact_converged_status,
+                record_timing=_record_timing,
+                print_residual_iteration_update_status_func=_print_residual_iteration_update_status,
+                verbose=bool(verbose),
+                vmec2000_control=bool(vmec2000_control),
+                verbose_vmec2000_table=bool(verbose_vmec2000_table),
+                should_print_vmec2000=_should_print_vmec2000,
+                print_vmec2000_iter_row=_print_vmec2000_iter_row,
+                precond_diag_floats=_precond_diag_floats,
+                iter_idx=int(iter2),
+                max_iter=int(max_iter),
+                compact_iter_idx=int(it),
+                fsqr=fsqr_f,
+                fsqz=fsqz_f,
+                fsql=fsql_f,
+                target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
+                time_step=float(time_step),
+                r00=float(r00_last),
+                z00=float(z00_last),
+                w_mhd=float(w_vmec_last),
+                iteration_control_start=t_iteration_control_start,
             )
-
-            if converged_physical:
-                # Keep per-iteration history channels length-aligned with
-                # fsqr/fsqz/fsql when convergence happens before the update
-                # block. VMEC's table still reports DELT on this row.
-                convergence_exit = _runtime_run_converged_physical_iteration_exit(
-                    append_zero_update_history_func=_append_current_zero_update_history,
-                    print_compact_converged_status_func=_print_compact_converged_status,
-                    record_timing=_record_timing,
-                    print_residual_iteration_update_status_func=_print_residual_iteration_update_status,
-                    verbose=bool(verbose),
-                    vmec2000_control=bool(vmec2000_control),
-                    verbose_vmec2000_table=bool(verbose_vmec2000_table),
-                    should_print_vmec2000=_should_print_vmec2000,
-                    print_vmec2000_iter_row=_print_vmec2000_iter_row,
-                    precond_diag_floats=_precond_diag_floats,
-                    iter_idx=int(iter2),
-                    max_iter=int(max_iter),
-                    compact_iter_idx=int(it),
-                    fsqr=fsqr_f,
-                    fsqz=fsqz_f,
-                    fsql=fsql_f,
-                    target=float(fsq_total_target) if fsq_total_target is not None else float(ftol),
-                    time_step=float(time_step),
-                    r00=float(r00_last),
-                    z00=float(z00_last),
-                    w_mhd=float(w_vmec_last),
-                    iteration_control_start=t_iteration_control_start,
-                )
-                converged = convergence_exit.converged
-                t_iteration_control_start = convergence_exit.iteration_control_start
+            if preconditioned_runtime.converged:
+                converged = preconditioned_runtime.converged
+                t_iteration_control_start = preconditioned_runtime.iteration_control_start
                 break
 
             # Jacobian sign-change check (VMEC jacobian.f sets irst=2).
