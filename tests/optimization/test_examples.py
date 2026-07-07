@@ -378,6 +378,42 @@ def _qs_budget_probe_synthetic_history() -> dict[str, dict[str, dict[str, float 
     return {"profile": {key: _profile_counter(count, wall, mean) for key, count, wall, mean in entries}}
 
 
+def _policy_matrix_row(
+    problem, policy, objective_initial, objective_final, solve_wall_time_s, trial_forward_total_s, reduction=None
+):
+    """Build one synthetic trial-policy row for classification tests."""
+
+    row: dict[str, float | str | bool] = {
+        "problem": problem,
+        "policy": policy,
+        "ok": True,
+        "objective_initial": float(objective_initial),
+        "objective_final": float(objective_final),
+        "solve_wall_time_s": float(solve_wall_time_s),
+        "trial_forward_total_s": float(trial_forward_total_s),
+    }
+    if reduction is not None:
+        row["objective_reduction_fraction"] = float(reduction)
+    return row
+
+
+def _budget_matrix_row(problem, budget_label, objective_final, solve_wall_time_s, inner_max_iter, inner_ftol, **extra):
+    """Build one synthetic optimizer-budget row with VMEC trial settings."""
+
+    return {
+        "problem": problem,
+        "budget_label": budget_label,
+        "ok": True,
+        "objective_final": float(objective_final),
+        "solve_wall_time_s": float(solve_wall_time_s),
+        "inner_max_iter": int(inner_max_iter),
+        "trial_max_iter": int(inner_max_iter),
+        "inner_ftol": float(inner_ftol),
+        "trial_ftol": float(inner_ftol),
+        **extra,
+    }
+
+
 def test_qs_budget_probe_compacts_profile_scan_and_cache_buckets() -> None:
     from tools.diagnostics.optimization import qs_budget_probe
 
@@ -892,43 +928,12 @@ def test_qs_trial_policy_matrix_builds_policy_commands(tmp_path) -> None:
 
     annotated = qs_trial_policy_matrix._annotate_policy_comparisons(
         [
-            {
-                "problem": "qp",
-                "policy": "loop",
-                "ok": True,
-                "objective_initial": 500.0,
-                "objective_final": 432.0,
-                "objective_reduction_fraction": (500.0 - 432.0) / 500.0,
-                "solve_wall_time_s": 40.0,
-                "trial_forward_total_s": 10.0,
-            },
-            {
-                "problem": "qp",
-                "policy": "scan-vmec2000",
-                "ok": True,
-                "objective_initial": 500.0,
-                "objective_final": 432.0001,
-                "solve_wall_time_s": 34.0,
-                "trial_forward_total_s": 8.0,
-            },
-            {
-                "problem": "qp",
-                "policy": "scan-accelerated",
-                "ok": True,
-                "objective_initial": 500.0,
-                "objective_final": 600.0,
-                "solve_wall_time_s": 20.0,
-                "trial_forward_total_s": 2.0,
-            },
-            {
-                "problem": "qp",
-                "policy": "slow-scan",
-                "ok": True,
-                "objective_initial": 500.0,
-                "objective_final": 432.0,
-                "solve_wall_time_s": 45.0,
-                "trial_forward_total_s": 11.0,
-            },
+            _policy_matrix_row(
+                "qp", "loop", 500.0, 432.0, 40.0, 10.0, (500.0 - 432.0) / 500.0
+            ),
+            _policy_matrix_row("qp", "scan-vmec2000", 500.0, 432.0001, 34.0, 8.0),
+            _policy_matrix_row("qp", "scan-accelerated", 500.0, 600.0, 20.0, 2.0),
+            _policy_matrix_row("qp", "slow-scan", 500.0, 432.0, 45.0, 11.0),
         ],
     )
     by_policy = {row["policy"]: row for row in annotated}
@@ -950,26 +955,12 @@ def test_qs_trial_policy_matrix_builds_policy_commands(tmp_path) -> None:
 
     no_progress = qs_trial_policy_matrix._annotate_policy_comparisons(
         [
-            {
-                "problem": "qa",
-                "policy": "loop",
-                "ok": True,
-                "objective_initial": 1681.0,
-                "objective_final": 1681.0,
-                "objective_reduction_fraction": 0.0,
-                "solve_wall_time_s": 15.0,
-                "trial_forward_total_s": 5.0,
-            },
-            {
-                "problem": "qa",
-                "policy": "scan-accelerated",
-                "ok": True,
-                "objective_initial": 1681.0,
-                "objective_final": 1681.0,
-                "objective_reduction_fraction": 0.0,
-                "solve_wall_time_s": 10.0,
-                "trial_forward_total_s": 2.0,
-            },
+            _policy_matrix_row(
+                "qa", "loop", 1681.0, 1681.0, 15.0, 5.0, 0.0
+            ),
+            _policy_matrix_row(
+                "qa", "scan-accelerated", 1681.0, 1681.0, 10.0, 2.0, 0.0
+            ),
         ],
     )
     by_policy = {row["policy"]: row for row in no_progress}
@@ -1161,69 +1152,64 @@ def test_qs_budget_matrix_builds_budget_commands_and_recommendations(tmp_path) -
     assert flattened["last_jacobian_source"] == "exact_tape_projected_replay"
 
     rows = [
-        {
-            "problem": "qa",
-            "budget_label": "60:1e-8",
-            "ok": True,
-            "objective_final": 1.01,
-            "solve_wall_time_s": 6.0,
-            "max_mode": 4,
-            "method": "auto",
-            "fused_projected_replay": "on",
-            "replay_column_chunk": "8",
-            "chunked_projected_replay_projection": "off",
-            "use_ess": True,
-            "target_helicity_seed": True,
-            "inner_max_iter": 60,
-            "trial_max_iter": 60,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-            "trial_scan_arg_array_leaf_count": 83,
-            "trial_scan_arg_array_nbytes": 36322,
-            "trial_scan_arg_velocity_array_nbytes": 20208,
-            "trial_scan_arg_velocity_r_array_nbytes": 6800,
-            "trial_scan_arg_velocity_z_array_nbytes": 6700,
-            "trial_scan_arg_velocity_lambda_array_nbytes": 6708,
-            "trial_scan_arg_preconditioner_array_nbytes": 15128,
-            "trial_scan_arg_preconditioner_rz_apply_array_nbytes": 11200,
-            "trial_scan_arg_preconditioner_rz_derived_array_nbytes": 600,
-            "trial_scan_arg_state_checkpoint_array_nbytes": 128,
-            "trial_scan_history_none": True,
-        },
-        {
-            "problem": "qa",
-            "budget_label": "80:1e-8",
-            "ok": True,
-            "objective_final": 1.0,
-            "solve_wall_time_s": 8.0,
-            "inner_max_iter": 80,
-            "trial_max_iter": 80,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-            "trial_scan_arg_array_leaf_count": 90,
-            "trial_scan_arg_array_nbytes": 40000,
-            "trial_scan_arg_velocity_array_nbytes": 21000,
-            "trial_scan_arg_velocity_r_array_nbytes": 7000,
-            "trial_scan_arg_velocity_z_array_nbytes": 7000,
-            "trial_scan_arg_velocity_lambda_array_nbytes": 7000,
-            "trial_scan_arg_preconditioner_array_nbytes": 16000,
-            "trial_scan_arg_preconditioner_rz_apply_array_nbytes": 12000,
-            "trial_scan_arg_preconditioner_rz_derived_array_nbytes": 700,
-            "trial_scan_arg_state_checkpoint_array_nbytes": 256,
-            "trial_scan_history_none": False,
-        },
-        {
-            "problem": "qa",
-            "budget_label": "120:1e-9",
-            "ok": True,
-            "objective_final": 1.0,
-            "solve_wall_time_s": 12.0,
-            "inner_max_iter": 120,
-            "trial_max_iter": 120,
-            "inner_ftol": 1.0e-9,
-            "trial_ftol": 1.0e-9,
-            "trial_scan_history_none": True,
-        },
+        _budget_matrix_row(
+            "qa",
+            "60:1e-8",
+            1.01,
+            6.0,
+            60,
+            1.0e-8,
+            **{
+                "max_mode": 4,
+                "method": "auto",
+                "fused_projected_replay": "on",
+                "replay_column_chunk": "8",
+                "chunked_projected_replay_projection": "off",
+                "use_ess": True,
+                "target_helicity_seed": True,
+                "trial_scan_arg_array_leaf_count": 83,
+                "trial_scan_arg_array_nbytes": 36322,
+                "trial_scan_arg_velocity_array_nbytes": 20208,
+                "trial_scan_arg_velocity_r_array_nbytes": 6800,
+                "trial_scan_arg_velocity_z_array_nbytes": 6700,
+                "trial_scan_arg_velocity_lambda_array_nbytes": 6708,
+                "trial_scan_arg_preconditioner_array_nbytes": 15128,
+                "trial_scan_arg_preconditioner_rz_apply_array_nbytes": 11200,
+                "trial_scan_arg_preconditioner_rz_derived_array_nbytes": 600,
+                "trial_scan_arg_state_checkpoint_array_nbytes": 128,
+                "trial_scan_history_none": True,
+            },
+        ),
+        _budget_matrix_row(
+            "qa",
+            "80:1e-8",
+            1.0,
+            8.0,
+            80,
+            1.0e-8,
+            **{
+                "trial_scan_arg_array_leaf_count": 90,
+                "trial_scan_arg_array_nbytes": 40000,
+                "trial_scan_arg_velocity_array_nbytes": 21000,
+                "trial_scan_arg_velocity_r_array_nbytes": 7000,
+                "trial_scan_arg_velocity_z_array_nbytes": 7000,
+                "trial_scan_arg_velocity_lambda_array_nbytes": 7000,
+                "trial_scan_arg_preconditioner_array_nbytes": 16000,
+                "trial_scan_arg_preconditioner_rz_apply_array_nbytes": 12000,
+                "trial_scan_arg_preconditioner_rz_derived_array_nbytes": 700,
+                "trial_scan_arg_state_checkpoint_array_nbytes": 256,
+                "trial_scan_history_none": False,
+            },
+        ),
+        _budget_matrix_row(
+            "qa",
+            "120:1e-9",
+            1.0,
+            12.0,
+            120,
+            1.0e-9,
+            **{"trial_scan_history_none": True},
+        ),
     ]
     annotated = qs_budget_matrix.annotate_budget_comparisons(
         rows,
@@ -1256,34 +1242,24 @@ def test_qs_budget_matrix_builds_budget_commands_and_recommendations(tmp_path) -
     ]
 
     diag_rows = [
-        {
-            "problem": "qh",
-            "budget_label": "60:1e-8",
-            "ok": True,
-            "objective_final": 1.0,
-            "aspect_final": 5.2,
-            "iota_final": 0.41,
-            "qs_final": 0.01,
-            "solve_wall_time_s": 4.0,
-            "inner_max_iter": 60,
-            "trial_max_iter": 60,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-        },
-        {
-            "problem": "qh",
-            "budget_label": "120:1e-9",
-            "ok": True,
-            "objective_final": 1.0,
-            "aspect_final": 5.0,
-            "iota_final": 0.41,
-            "qs_final": 0.01,
-            "solve_wall_time_s": 8.0,
-            "inner_max_iter": 120,
-            "trial_max_iter": 120,
-            "inner_ftol": 1.0e-9,
-            "trial_ftol": 1.0e-9,
-        },
+        _budget_matrix_row(
+            "qh",
+            "60:1e-8",
+            1.0,
+            4.0,
+            60,
+            1.0e-8,
+            **{"aspect_final": 5.2, "iota_final": 0.41, "qs_final": 0.01},
+        ),
+        _budget_matrix_row(
+            "qh",
+            "120:1e-9",
+            1.0,
+            8.0,
+            120,
+            1.0e-9,
+            **{"aspect_final": 5.0, "iota_final": 0.41, "qs_final": 0.01},
+        ),
     ]
     diag_annotated = qs_budget_matrix.annotate_budget_comparisons(
         diag_rows,
@@ -1298,34 +1274,24 @@ def test_qs_budget_matrix_builds_budget_commands_and_recommendations(tmp_path) -
     assert diag_annotated[0]["budget_classification_vs_reference"] == "objective_regression"
 
     floor_rows = [
-        {
-            "problem": "qh",
-            "budget_label": "60:1e-8",
-            "ok": True,
-            "objective_final": 0.34,
-            "aspect_final": 5.08,
-            "iota_final": -0.71,
-            "qs_final": 0.33,
-            "solve_wall_time_s": 4.0,
-            "inner_max_iter": 60,
-            "trial_max_iter": 60,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-        },
-        {
-            "problem": "qh",
-            "budget_label": "80:1e-8",
-            "ok": True,
-            "objective_final": 1.15,
-            "aspect_final": 5.41,
-            "iota_final": -0.411,
-            "qs_final": 0.98,
-            "solve_wall_time_s": 8.0,
-            "inner_max_iter": 80,
-            "trial_max_iter": 80,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-        },
+        _budget_matrix_row(
+            "qh",
+            "60:1e-8",
+            0.34,
+            4.0,
+            60,
+            1.0e-8,
+            **{"aspect_final": 5.08, "iota_final": -0.71, "qs_final": 0.33},
+        ),
+        _budget_matrix_row(
+            "qh",
+            "80:1e-8",
+            1.15,
+            8.0,
+            80,
+            1.0e-8,
+            **{"aspect_final": 5.41, "iota_final": -0.411, "qs_final": 0.98},
+        ),
     ]
     floor_annotated = qs_budget_matrix.annotate_budget_comparisons(
         floor_rows,
@@ -1466,38 +1432,36 @@ def test_qs_replay_route_matrix_builds_route_commands_and_recommendations(tmp_pa
     assert summary["speed_wins"] == [{"problem": "qh", "budget": "fused"}]
 
     shape_rows = [
-        {
-            "problem": "qp",
-            "budget_label": "60:1e-8",
-            "ok": True,
-            "objective_final": 1.0,
-            "aspect_final": 5.0,
-            "iota_final": 0.41,
-            "qs_final": 0.01,
-            "mirror_final": 0.36,
-            "elongation_final": 6.2,
-            "solve_wall_time_s": 4.0,
-            "inner_max_iter": 60,
-            "trial_max_iter": 60,
-            "inner_ftol": 1.0e-8,
-            "trial_ftol": 1.0e-8,
-        },
-        {
-            "problem": "qp",
-            "budget_label": "120:1e-9",
-            "ok": True,
-            "objective_final": 1.0,
-            "aspect_final": 5.0,
-            "iota_final": 0.41,
-            "qs_final": 0.01,
-            "mirror_final": 0.30,
-            "elongation_final": 6.25,
-            "solve_wall_time_s": 8.0,
-            "inner_max_iter": 120,
-            "trial_max_iter": 120,
-            "inner_ftol": 1.0e-9,
-            "trial_ftol": 1.0e-9,
-        },
+        _budget_matrix_row(
+            "qp",
+            "60:1e-8",
+            1.0,
+            4.0,
+            60,
+            1.0e-8,
+            **{
+                "aspect_final": 5.0,
+                "iota_final": 0.41,
+                "qs_final": 0.01,
+                "mirror_final": 0.36,
+                "elongation_final": 6.2,
+            },
+        ),
+        _budget_matrix_row(
+            "qp",
+            "120:1e-9",
+            1.0,
+            8.0,
+            120,
+            1.0e-9,
+            **{
+                "aspect_final": 5.0,
+                "iota_final": 0.41,
+                "qs_final": 0.01,
+                "mirror_final": 0.30,
+                "elongation_final": 6.25,
+            },
+        ),
     ]
     shape_annotated = qs_budget_matrix.annotate_budget_comparisons(
         shape_rows,
