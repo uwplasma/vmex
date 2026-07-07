@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -9,18 +8,15 @@ from types import ModuleType, SimpleNamespace
 import numpy as np
 import pytest
 
+from conftest import load_python_module
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = ROOT / "examples" / "optimization" / "free_boundary_QS_coil_optimization.py"
 
 
 def _load_example_module():
-    spec = importlib.util.spec_from_file_location("free_boundary_qs_coil_optimization_example", SCRIPT_PATH)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(SCRIPT_PATH, name="free_boundary_qs_coil_optimization_example", register=False)
 
 
 def _same_branch_replay_gate_stub() -> dict[str, object]:

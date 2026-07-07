@@ -1,4 +1,3 @@
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -6,6 +5,7 @@ import sys
 
 import pytest
 
+from conftest import load_python_module
 import vmec_jax.discrete_adjoint as da
 
 
@@ -18,43 +18,23 @@ EXACT_TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "performance" / "profile
 
 
 def _load_tool():
-    spec = importlib.util.spec_from_file_location("gpu_cpu_performance_matrix", TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(TOOL_PATH, name="gpu_cpu_performance_matrix", register=False)
 
 
 def _load_fixed_tool():
-    spec = importlib.util.spec_from_file_location("profile_fixed_boundary", FIXED_TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(FIXED_TOOL_PATH, name="profile_fixed_boundary", register=False)
 
 
 def _load_qi_tool():
-    spec = importlib.util.spec_from_file_location("profile_qi_boozer_gpu", QI_TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(QI_TOOL_PATH, name="profile_qi_boozer_gpu", register=False)
 
 
 def _load_compare_tool():
-    spec = importlib.util.spec_from_file_location("compare_profile_reports", COMPARE_TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(COMPARE_TOOL_PATH, name="compare_profile_reports", register=False)
 
 
 def _load_exact_tool():
-    spec = importlib.util.spec_from_file_location("profile_exact_optimizer", EXACT_TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(EXACT_TOOL_PATH, name="profile_exact_optimizer", register=False)
 
 
 def _fixed_profiler_args(fixed_tool, **overrides):

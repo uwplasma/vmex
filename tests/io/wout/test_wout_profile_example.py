@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+
+from conftest import load_python_module
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -13,11 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def _load_example_module():
     script = ROOT / "examples" / "diagnostics" / "load_save_wout_profiles.py"
-    spec = importlib.util.spec_from_file_location("load_save_wout_profiles_test", script)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(script, name="load_save_wout_profiles_test", register=False)
 
 
 def _toy_wout(ns: int = 4):

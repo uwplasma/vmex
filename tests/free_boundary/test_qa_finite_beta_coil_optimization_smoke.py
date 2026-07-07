@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -8,18 +7,15 @@ import sys
 
 import pytest
 
+from conftest import load_python_module
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = ROOT / "examples" / "optimization" / "free_boundary_QA_finite_beta_coil_optimization.py"
 
 
 def _load_example_module():
-    spec = importlib.util.spec_from_file_location("free_boundary_qa_finite_beta_coil_optimization", SCRIPT_PATH)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(SCRIPT_PATH, name="free_boundary_qa_finite_beta_coil_optimization", register=False)
 
 
 def test_qa_finite_beta_wrapper_defaults_to_direct_coil_complete_solve_contract() -> None:

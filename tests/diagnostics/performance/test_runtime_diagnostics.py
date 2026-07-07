@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+
+from conftest import load_python_module
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -45,13 +45,7 @@ def _load_tool(name: str):
         path = ROOT / "tools" / "diagnostics" / "free_boundary" / f"{name}.py"
     else:
         path = ROOT / "tools" / "diagnostics" / f"{name}.py"
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(path, name=name)
 
 
 def test_readme_fsq_trace_parser_handles_vmec_and_vmecpp_tables():

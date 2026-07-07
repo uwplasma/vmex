@@ -1,6 +1,7 @@
-import importlib.util
 import json
 from pathlib import Path
+
+from conftest import load_python_module
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -8,11 +9,7 @@ TOOL_PATH = REPO_ROOT / "tools" / "diagnostics" / "performance" / "gpu_cpu_perfo
 
 
 def _load_tool():
-    spec = importlib.util.spec_from_file_location("gpu_cpu_performance_matrix_wave3", TOOL_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+    return load_python_module(TOOL_PATH, name="gpu_cpu_performance_matrix_wave3", register=False)
 
 
 def test_matrix_report_surfaces_cold_exact_callback_buckets(capsys):
