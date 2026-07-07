@@ -9,6 +9,7 @@ from typing import Any, Callable, NamedTuple
 import numpy as np
 
 from ...._compat import jax as _jax
+from .host_diagnostics import residual_update_rms_for_print
 
 
 class ResidualProfileWindow(NamedTuple):
@@ -637,6 +638,142 @@ def append_terminal_history_and_promote_free_boundary(
         verbose_vmec2000_table=bool(verbose_vmec2000_table),
         print_fn=print_fn,
     )
+
+
+def run_post_update_diagnostics_and_history(
+    *,
+    timing_enabled: bool,
+    record_timing: Callable[[str, float | None], bool],
+    perf_counter: Callable[[], float],
+    dump_residual_evolve_trace_func: Callable[..., Any],
+    dump_evolve_trace: Callable[..., Any],
+    dump_xc: Callable[..., Any],
+    print_residual_iteration_update_status_func: Callable[..., bool],
+    history_lists: Any,
+    track_history: bool,
+    strict_update: bool,
+    update_rms_j: Any,
+    update_rms: Any,
+    verbose: bool,
+    vmec2000_control: bool,
+    verbose_vmec2000_table: bool,
+    should_print_vmec2000: Callable[[int, int], bool],
+    print_vmec2000_iter_row: Callable[..., None],
+    precond_diag_floats: Callable[[], tuple[float, float, float]],
+    iter_idx: int,
+    iter1: int,
+    max_iter: int,
+    compact_iter_idx: int,
+    fsqr: float,
+    fsqz: float,
+    fsql: float,
+    fsq1: float,
+    fsq_prev_before: float,
+    dt_eff: float,
+    dtau: float,
+    b1: float,
+    fac: float,
+    time_step: float,
+    r00: float,
+    z00: float,
+    w_mhd: float,
+    step_status: str,
+    restart_reason: str,
+    pre_restart_reason: str,
+    res0: float,
+    res1: float,
+    fsq_prev: float,
+    bad_growth_streak: int,
+    state: Any,
+    velocities: Any,
+    forces: Any,
+    static: Any,
+    free_boundary_enabled: bool,
+    freeb_ivac: int,
+    freeb_ivacskip: int,
+    freeb_reused: bool,
+    freeb_solve_time: float,
+    freeb_sample_time: float,
+) -> int:
+    """Run post-update dumps, printing, terminal history, and free-boundary promotion."""
+
+    start = perf_counter() if bool(timing_enabled) else None
+    dump_residual_evolve_trace_func(
+        dump_evolve_trace=dump_evolve_trace,
+        iter2=int(iter_idx),
+        iter1=int(iter1),
+        stage="post",
+        fsq1=float(fsq1),
+        fsq_prev=float(fsq_prev_before),
+        time_step=float(time_step),
+        dtau=float(dtau),
+        b1=float(b1),
+        fac=float(fac),
+        state=state,
+        velocities=velocities,
+        forces=forces,
+    )
+    dump_xc_with_velocity_blocks(
+        dump_xc=dump_xc,
+        state=state,
+        velocities=velocities,
+        static=static,
+        iter_idx=int(iter_idx),
+    )
+    update_rms_print = residual_update_rms_for_print(
+        verbose=bool(verbose),
+        strict_update=bool(strict_update),
+        update_rms_j=update_rms_j if bool(strict_update) else None,
+        update_rms=update_rms,
+    )
+    print_residual_iteration_update_status_func(
+        verbose=bool(verbose),
+        vmec2000_control=bool(vmec2000_control),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+        should_print_vmec2000=should_print_vmec2000,
+        print_vmec2000_iter_row=print_vmec2000_iter_row,
+        precond_diag_floats=precond_diag_floats,
+        iter_idx=int(iter_idx),
+        max_iter=int(max_iter),
+        compact_iter_idx=int(compact_iter_idx),
+        fsqr=float(fsqr),
+        fsqz=float(fsqz),
+        fsql=float(fsql),
+        dt_eff=float(dt_eff),
+        update_rms=float(update_rms_print),
+        time_step=float(time_step),
+        r00=float(r00),
+        z00=float(z00),
+        w_mhd=float(w_mhd),
+        step_status=str(step_status),
+    )
+    freeb_ivac_next = append_terminal_history_and_promote_free_boundary(
+        history_lists=history_lists,
+        track_history=bool(track_history),
+        step_status=str(step_status),
+        restart_reason=str(restart_reason),
+        pre_restart_reason=str(pre_restart_reason),
+        time_step=float(time_step),
+        res0=float(res0),
+        res1=float(res1),
+        fsq_prev=float(fsq_prev),
+        bad_growth_streak=int(bad_growth_streak),
+        iter1=int(iter1),
+        iter2=int(iter_idx),
+        fsqr=float(fsqr),
+        fsqz=float(fsqz),
+        fsql=float(fsql),
+        free_boundary_enabled=bool(free_boundary_enabled),
+        freeb_ivac=int(freeb_ivac),
+        freeb_ivacskip=int(freeb_ivacskip),
+        freeb_reused=bool(freeb_reused),
+        freeb_solve_time=float(freeb_solve_time),
+        freeb_sample_time=float(freeb_sample_time),
+        verbose=bool(verbose),
+        verbose_vmec2000_table=bool(verbose_vmec2000_table),
+    )
+    record_timing("iteration_post_update", start)
+    return int(freeb_ivac_next)
 
 
 def _device_get_floats(*vals: Any, jax_module: Any | None = None) -> tuple[float, ...]:

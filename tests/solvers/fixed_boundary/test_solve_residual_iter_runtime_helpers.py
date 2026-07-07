@@ -34,6 +34,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     resolve_free_boundary_iteration_controls,
     resolve_residual_profile_window,
     resume_free_boundary_loop_state,
+    run_post_update_diagnostics_and_history,
     stop_residual_profile_trace_if_window_completed,
     trial_residual_total_runtime,
 )
@@ -1101,3 +1102,95 @@ def test_append_terminal_history_and_promote_free_boundary_preserves_payload():
     assert FakeHistory.calls[0]["freeb_ivacskip"] == 7
     assert FakeHistory.calls[0]["freeb_solve_time"] == 0.04
     assert "VACUUM PRESSURE TURNED ON AT    6 ITERATIONS" in messages[0][0][0]
+
+
+def test_run_post_update_diagnostics_and_history_runs_dumps_print_and_terminal_history():
+    class FakeHistory:
+        calls = []
+
+        @classmethod
+        def append_terminal(cls, **kwargs):
+            cls.calls.append(kwargs)
+            return True
+
+    velocities = ResidualVelocityBlocks(*(np.full((2,), idx, dtype=float) for idx in range(12)))
+    calls = {"timing": [], "evolve": [], "xc": [], "print": []}
+
+    def fake_record_timing(name, start):
+        calls["timing"].append((name, start))
+        return True
+
+    def fake_dump_evolve(**kwargs):
+        calls["evolve"].append(kwargs)
+
+    def fake_dump_xc(**kwargs):
+        calls["xc"].append(kwargs)
+
+    def fake_print_status(**kwargs):
+        calls["print"].append(kwargs)
+        return True
+
+    promoted = run_post_update_diagnostics_and_history(
+        timing_enabled=True,
+        record_timing=fake_record_timing,
+        perf_counter=lambda: 12.5,
+        dump_residual_evolve_trace_func=fake_dump_evolve,
+        dump_evolve_trace="dump-evolve-callback",
+        dump_xc=fake_dump_xc,
+        print_residual_iteration_update_status_func=fake_print_status,
+        history_lists=FakeHistory,
+        track_history=True,
+        strict_update=True,
+        update_rms_j=np.asarray(0.125),
+        update_rms=9.0,
+        verbose=True,
+        vmec2000_control=False,
+        verbose_vmec2000_table=False,
+        should_print_vmec2000=lambda _iter, _max_iter: True,
+        print_vmec2000_iter_row=lambda **_kwargs: None,
+        precond_diag_floats=lambda: (1.0, 2.0, 3.0),
+        iter_idx=6,
+        iter1=5,
+        max_iter=10,
+        compact_iter_idx=4,
+        fsqr=0.1,
+        fsqz=0.2,
+        fsql=0.3,
+        fsq1=0.6,
+        fsq_prev_before=0.7,
+        dt_eff=0.25,
+        dtau=0.8,
+        b1=0.9,
+        fac=1.1,
+        time_step=0.25,
+        r00=1.2,
+        z00=1.3,
+        w_mhd=1.4,
+        step_status="momentum",
+        restart_reason="none",
+        pre_restart_reason="none",
+        res0=1.5,
+        res1=1.6,
+        fsq_prev=1.7,
+        bad_growth_streak=2,
+        state="state",
+        velocities=velocities,
+        forces=velocities,
+        static="static",
+        free_boundary_enabled=False,
+        freeb_ivac=1,
+        freeb_ivacskip=3,
+        freeb_reused=True,
+        freeb_solve_time=0.04,
+        freeb_sample_time=0.05,
+    )
+
+    assert promoted == 1
+    assert calls["timing"] == [("iteration_post_update", 12.5)]
+    assert calls["evolve"][0]["stage"] == "post"
+    assert calls["evolve"][0]["dump_evolve_trace"] == "dump-evolve-callback"
+    assert calls["xc"][0]["vRcc"] is velocities.rcc
+    assert calls["xc"][0]["static"] == "static"
+    assert calls["print"][0]["update_rms"] == pytest.approx(0.125)
+    assert FakeHistory.calls[0]["step_status"] == "momentum"
+    assert FakeHistory.calls[0]["freeb_reused"] is True

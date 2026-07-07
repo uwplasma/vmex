@@ -50,7 +50,6 @@ from vmec_jax.solvers.fixed_boundary.residual.policy import (
     vmec2000_time_control_decision as _vmec2000_time_control_decision,
 )
 from vmec_jax.solvers.fixed_boundary.residual.runtime import (
-    append_terminal_history_and_promote_free_boundary as _runtime_append_terminal_history_and_promote_free_boundary,
     _attach_free_boundary_external_field_diag as _runtime_attach_free_boundary_external_field_diag,
     _converged_residuals_scan_fast as _runtime_converged_residuals_scan_fast,
     _device_get_floats,
@@ -68,6 +67,7 @@ from vmec_jax.solvers.fixed_boundary.residual.runtime import (
     resume_free_boundary_loop_state as _runtime_resume_free_boundary_loop_state,
     resolve_free_boundary_coupling_runtime as _runtime_resolve_free_boundary_coupling_runtime,
     resolve_free_boundary_iteration_controls as _runtime_resolve_free_boundary_iteration_controls,
+    run_post_update_diagnostics_and_history as _runtime_run_post_update_diagnostics_and_history,
     stop_residual_profile_trace_if_window_completed as _runtime_stop_residual_profile_trace_if_window_completed,
     trial_residual_total_runtime as _runtime_trial_residual_total,
 )
@@ -205,7 +205,6 @@ from vmec_jax.solvers.fixed_boundary.residual.host_diagnostics import (
     print_compact_physical_residual_status as _print_compact_physical_residual_status,
     print_compact_residual_iteration_update_status as _print_compact_residual_iteration_update_status,
     print_residual_iteration_update_status as _print_residual_iteration_update_status,
-    residual_update_rms_for_print as _residual_update_rms_for_print,
     resolve_vmec2000_print_context as _resolve_vmec2000_print_context,
     run_pre_restart_trigger_runtime as _run_pre_restart_trigger_runtime,
     run_vmec2000_time_control_runtime as _run_vmec2000_time_control_runtime,
@@ -2972,36 +2971,19 @@ def solve_fixed_boundary_residual_iter(
             w_try_ratio=float(w_try_ratio),
             restart_path=str(restart_path),
         )
-        t_iteration_post_update_start = time.perf_counter() if timing_enabled else None
-        _dump_residual_evolve_trace(
+        freeb_ivac = _runtime_run_post_update_diagnostics_and_history(
+            timing_enabled=bool(timing_enabled),
+            record_timing=_record_timing,
+            perf_counter=time.perf_counter,
+            dump_residual_evolve_trace_func=_dump_residual_evolve_trace,
             dump_evolve_trace=_dump_evolve_trace,
-            iter2=int(iter2),
-            iter1=int(iter1),
-            stage="post",
-            fsq1=float(fsq1),
-            fsq_prev=float(fsq_prev_before),
-            time_step=float(time_step),
-            dtau=float(dtau),
-            b1=float(b1),
-            fac=float(fac),
-            state=state,
-            velocities=velocity_blocks,
-            forces=force_blocks,
-        )
-        _dump_xc_with_velocity_blocks(
             dump_xc=_maybe_dump_xc,
-            state=state,
-            velocities=velocity_blocks,
-            static=static,
-            iter_idx=int(iter2),
-        )
-        update_rms_print = _residual_update_rms_for_print(
-            verbose=bool(verbose),
+            print_residual_iteration_update_status_func=_print_residual_iteration_update_status,
+            history_lists=history_lists,
+            track_history=bool(track_history),
             strict_update=bool(strict_update),
-            update_rms_j=update_rms_j if bool(strict_update) else None,
+            update_rms_j=update_rms_j,
             update_rms=update_rms,
-        )
-        _print_residual_iteration_update_status(
             verbose=bool(verbose),
             vmec2000_control=bool(vmec2000_control),
             verbose_vmec2000_table=bool(verbose_vmec2000_table),
@@ -3009,46 +2991,41 @@ def solve_fixed_boundary_residual_iter(
             print_vmec2000_iter_row=_print_vmec2000_iter_row,
             precond_diag_floats=_precond_diag_floats,
             iter_idx=int(iter2),
+            iter1=int(iter1),
             max_iter=int(max_iter),
             compact_iter_idx=int(it),
             fsqr=fsqr_f,
             fsqz=fsqz_f,
             fsql=fsql_f,
+            fsq1=float(fsq1),
+            fsq_prev_before=float(fsq_prev_before),
             dt_eff=float(dt_eff),
-            update_rms=update_rms_print,
+            dtau=float(dtau),
+            b1=float(b1),
+            fac=float(fac),
             time_step=float(time_step),
             r00=float(r00_last),
             z00=float(z00_last),
             w_mhd=float(w_vmec_last),
             step_status=step_status,
-        )
-        freeb_ivac = _runtime_append_terminal_history_and_promote_free_boundary(
-            history_lists=history_lists,
-            track_history=bool(track_history),
-            step_status=step_status,
             restart_reason=restart_reason,
             pre_restart_reason=pre_restart_reason,
-            time_step=float(time_step),
             res0=float(res0),
             res1=float(res1),
             fsq_prev=float(fsq_prev),
             bad_growth_streak=int(bad_growth_streak),
-            iter1=int(iter1),
-            iter2=int(iter2),
-            fsqr=fsqr_f,
-            fsqz=fsqz_f,
-            fsql=fsql_f,
+            state=state,
+            velocities=velocity_blocks,
+            forces=force_blocks,
+            static=static,
             free_boundary_enabled=bool(free_boundary_enabled),
             freeb_ivac=freeb_ivac,
             freeb_ivacskip=freeb_ivacskip,
             freeb_reused=freeb_reused,
             freeb_solve_time=freeb_solve_time,
             freeb_sample_time=freeb_sample_time,
-            verbose=bool(verbose),
-            verbose_vmec2000_table=bool(verbose_vmec2000_table),
         )
         skip_time_control = False
-        _record_timing("iteration_post_update", t_iteration_post_update_start)
 
     return _finalize_residual_iter_from_namespace(
         locals(),
