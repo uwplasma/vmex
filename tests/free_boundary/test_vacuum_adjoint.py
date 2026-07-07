@@ -3550,8 +3550,10 @@ def _toy_coil_projected_vacuum_response(*, current_scale: float = 0.0, radius_sh
 
     from vmec_jax._compat import jnp
 
-    params = _regularized_circular_coil_params(
-        radius=1.45 + 0.03 * radius_shift,
+    params = _regularized_circular_coil_params_with_radius_shift(
+        radius=1.45,
+        radius_shift=radius_shift,
+        radius_shift_scale=0.03,
         current=2.5e7 * (1.0 + 0.02 * current_scale),
         n_segments=128,
     )
@@ -3599,8 +3601,10 @@ def _toy_coil_projected_mode_vacuum_response(*, current_scale: float = 0.0, radi
 
     from vmec_jax._compat import jnp
 
-    params = _regularized_circular_coil_params(
-        radius=1.45 + 0.03 * radius_shift,
+    params = _regularized_circular_coil_params_with_radius_shift(
+        radius=1.45,
+        radius_shift=radius_shift,
+        radius_shift_scale=0.03,
         current=2.5e7 * (1.0 + 0.02 * current_scale),
         n_segments=128,
     )
@@ -3659,75 +3663,33 @@ def _toy_coil_projected_mode_vacuum_response(*, current_scale: float = 0.0, radi
     )
 
 
-def test_dense_vacuum_adjoint_chain_through_projection_wrt_current_matches_finite_difference():
-    """Validate the next rung in the coil-to-vacuum adjoint chain."""
+@pytest.mark.parametrize(
+    ("response_fn", "control", "rtol"),
+    [
+        pytest.param(_toy_coil_projected_vacuum_response, "current", 3.0e-6, id="dense-current"),
+        pytest.param(_toy_coil_projected_vacuum_response, "geometry", 3.0e-6, id="dense-geometry"),
+        pytest.param(_toy_coil_projected_mode_vacuum_response, "current", 4.0e-6, id="mode-current"),
+        pytest.param(_toy_coil_projected_mode_vacuum_response, "geometry", 4.0e-6, id="mode-geometry"),
+    ],
+)
+def test_direct_coil_projected_vacuum_chain_ad_matches_finite_difference(response_fn, control, rtol):
+    """Validate projected direct-coil vacuum derivatives for current and shape controls."""
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jax
 
     enable_x64(True)
 
-    exact = jax.grad(lambda scale: _toy_coil_projected_vacuum_response(current_scale=scale))(0.0)
+    kwargs = {"current_scale": 0.0, "radius_shift": 0.0}
+
+    def objective(scale):
+        local_kwargs = dict(kwargs)
+        local_kwargs["current_scale" if control == "current" else "radius_shift"] = scale
+        return response_fn(**local_kwargs)
+
+    exact = jax.grad(objective)(0.0)
     eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_vacuum_response(current_scale=eps) - _toy_coil_projected_vacuum_response(current_scale=-eps)
-    ) / (2.0 * eps)
+    fd = (objective(eps) - objective(-eps)) / (2.0 * eps)
 
     assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=3.0e-6, atol=1.0e-10)
-
-
-def test_dense_vacuum_adjoint_chain_through_projection_wrt_geometry_matches_finite_difference():
-    """Validate projected vacuum sensitivity to one coil Fourier coefficient."""
-
-    pytest.importorskip("jax")
-    from vmec_jax._compat import jax
-
-    enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_projected_vacuum_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_vacuum_response(radius_shift=eps) - _toy_coil_projected_vacuum_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=3.0e-6, atol=1.0e-10)
-
-
-def test_dense_mode_vacuum_chain_through_projection_wrt_current_matches_finite_difference():
-    """Validate the mode-space scaffold in a direct-coil projected chain."""
-
-    pytest.importorskip("jax")
-    from vmec_jax._compat import jax
-
-    enable_x64(True)
-
-    exact = jax.grad(lambda scale: _toy_coil_projected_mode_vacuum_response(current_scale=scale))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_mode_vacuum_response(current_scale=eps)
-        - _toy_coil_projected_mode_vacuum_response(current_scale=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=4.0e-6, atol=1.0e-10)
-
-
-def test_dense_mode_vacuum_chain_through_projection_wrt_geometry_matches_finite_difference():
-    """Validate the mode-space scaffold for a coil Fourier perturbation."""
-
-    pytest.importorskip("jax")
-    from vmec_jax._compat import jax
-
-    enable_x64(True)
-
-    exact = jax.grad(lambda shift: _toy_coil_projected_mode_vacuum_response(radius_shift=shift))(0.0)
-    eps = 1.0e-4
-    fd = (
-        _toy_coil_projected_mode_vacuum_response(radius_shift=eps)
-        - _toy_coil_projected_mode_vacuum_response(radius_shift=-eps)
-    ) / (2.0 * eps)
-
-    assert abs(float(exact)) > 1.0e-8
-    np.testing.assert_allclose(exact, fd, rtol=4.0e-6, atol=1.0e-10)
+    np.testing.assert_allclose(exact, fd, rtol=rtol, atol=1.0e-10)
