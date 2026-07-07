@@ -52,6 +52,7 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     resolve_strict_update_control_policy,
     scale_velocity_blocks,
     DirectForceFallbackTrial,
+    select_strict_trial_branch_result,
     strict_step_branch_application,
     strict_step_branch_side_effects,
     strict_step_branch_fingerprint,
@@ -1836,6 +1837,145 @@ def test_strict_trial_evaluation_backtracks_and_scales_primary_velocities() -> N
         np.testing.assert_allclose(getattr(result.velocities, block_name), 0.5)
     for block_name in ("rsc", "rcs", "zcc", "zss", "lcc", "lss"):
         np.testing.assert_allclose(getattr(result.velocities, block_name), 1.0)
+
+
+def test_select_strict_trial_branch_result_accepts_no_trial_policy() -> None:
+    velocities = ResidualVelocityBlocks(*(np.zeros((2, 3)) for _ in range(12)))
+    forces = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+    policy = StrictUpdateControlPolicy(
+        dt_eff=0.1,
+        force_scale=0.2,
+        need_update_rms=True,
+        need_trial_eval=False,
+        use_jit_step=False,
+    )
+
+    def delta_tuple_from_blocks(dt, transforms, *blocks, **_kwargs):
+        return tuple(float(dt) * np.asarray(block) for block in blocks)
+
+    proposal = strict_momentum_update_proposal(
+        velocities=velocities,
+        forces=forces,
+        host_update_assembly=True,
+        need_update_rms=True,
+        materialize_update_rms=True,
+        limit_update_rms=False,
+        max_update_rms=1.0,
+        b1=0.0,
+        fac=1.0,
+        force_scale=policy.force_scale,
+        flip_sign=1.0,
+        dt_eff=policy.dt_eff,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        candidate_state_from_delta_tuple=lambda deltas, **_kwargs: float(np.mean(deltas[0])),
+    )
+
+    result = select_strict_trial_branch_result(
+        policy=policy,
+        proposal=proposal,
+        state_backup=-1.0,
+        w_curr=1.0,
+        backtracking=False,
+        reference_mode=False,
+        host_update_assembly=True,
+        zero_m1_value=1.0,
+        zero_m1_host=1.0,
+        zero_m1_probe_value=0.0,
+        candidate_state_from_delta_tuple=lambda deltas, **_kwargs: float(np.mean(deltas[0])),
+        freeb_bsqvac_half_for_trial_state=lambda state: None,
+        trial_residual_total=lambda _state, _freeb, **_kwargs: 99.0,
+        use_direct_fallback=False,
+        forces=forces,
+        max_update_rms=1.0,
+        flip_sign=1.0,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        vmec2000_control=True,
+        huge_force_restart_count=4,
+    )
+
+    assert result.branch_result.accepted
+    assert result.branch_result.restart_path == "momentum_accept"
+    assert result.branch_result.state == pytest.approx(proposal.state)
+    assert result.dt_eff == pytest.approx(policy.dt_eff)
+    assert result.update_rms == pytest.approx(proposal.update_rms)
+    assert result.w_try == pytest.approx(1.0)
+    assert result.w_try_ratio == pytest.approx(1.0)
+    assert not result.probe_bad_jacobian
+
+
+def test_select_strict_trial_branch_result_uses_direct_fallback_after_reject() -> None:
+    velocities = ResidualVelocityBlocks(*(np.zeros((2, 3)) for _ in range(12)))
+    forces = ResidualVelocityBlocks(*(np.ones((2, 3)) for _ in range(12)))
+    policy = StrictUpdateControlPolicy(
+        dt_eff=0.2,
+        force_scale=0.2,
+        need_update_rms=True,
+        need_trial_eval=True,
+        use_jit_step=False,
+    )
+
+    def delta_tuple_from_blocks(dt, transforms, *blocks, **_kwargs):
+        return tuple(float(dt) * np.asarray(block) for block in blocks)
+
+    proposal = strict_momentum_update_proposal(
+        velocities=velocities,
+        forces=forces,
+        host_update_assembly=False,
+        need_update_rms=True,
+        materialize_update_rms=True,
+        limit_update_rms=False,
+        max_update_rms=1.0,
+        b1=0.0,
+        fac=1.0,
+        force_scale=policy.force_scale,
+        flip_sign=1.0,
+        dt_eff=policy.dt_eff,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        candidate_state_from_delta_tuple=lambda deltas, **_kwargs: float(np.mean(deltas[0])),
+    )
+
+    def trial_residual_total(state, _freeb, **kwargs):
+        return 3.0 if kwargs.get("timing_label") == "trial" else 0.8 + 0.0 * float(state)
+
+    result = select_strict_trial_branch_result(
+        policy=policy,
+        proposal=proposal,
+        state_backup=-1.0,
+        w_curr=1.0,
+        backtracking=True,
+        reference_mode=False,
+        host_update_assembly=False,
+        zero_m1_value=1.0,
+        zero_m1_host=1.0,
+        zero_m1_probe_value=0.0,
+        candidate_state_from_delta_tuple=lambda deltas, **_kwargs: float(np.mean(deltas[0])),
+        freeb_bsqvac_half_for_trial_state=lambda state: ("freeb", state),
+        trial_residual_total=trial_residual_total,
+        use_direct_fallback=True,
+        forces=forces,
+        max_update_rms=1.0,
+        flip_sign=1.0,
+        delta_transforms=(),
+        delta_tuple_from_blocks=delta_tuple_from_blocks,
+        vmec2000_control=True,
+        huge_force_restart_count=4,
+    )
+
+    assert result.branch_result.accepted
+    assert result.branch_result.restart_path == "fallback_direct"
+    assert result.branch_result.fallback_direct_dt is not None
+    assert result.branch_result.fallback_direct_dt < policy.dt_eff
+    assert result.branch_result.update_rms == pytest.approx(
+        host_force_update_rms(result.branch_result.fallback_direct_dt, *forces)
+    )
+    assert result.branch_result.update_rms < result.update_rms
+    assert result.w_try == pytest.approx(3.0)
+    assert result.w_try_ratio == pytest.approx(3.0)
+    assert result.dt_eff == pytest.approx(policy.dt_eff)
+    assert not result.probe_bad_jacobian
 
 
 def test_free_boundary_control_module_reexports_velocity_helpers() -> None:

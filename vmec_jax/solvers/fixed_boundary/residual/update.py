@@ -684,6 +684,18 @@ class StrictTrialEvaluation(NamedTuple):
     alpha: float
 
 
+class StrictTrialBranchSelection(NamedTuple):
+    """Branch result and host scalars after strict trial/fallback selection."""
+
+    branch_result: "StrictStepBranchResult"
+    velocities: ResidualVelocityBlocks
+    dt_eff: float
+    update_rms: float | None
+    w_try: float
+    w_try_ratio: float
+    probe_bad_jacobian: bool
+
+
 class StrictUpdateControlPolicy(NamedTuple):
     """Host policy flags that select one strict residual update implementation."""
 
@@ -1880,6 +1892,117 @@ def direct_force_fallback_acceptance_decision(
         and (float(residual) <= float(accept_ratio) * max(float(current_residual), 1.0e-30))
     )
     return DirectForceFallbackAcceptanceDecision(accepted=accepted, accept_ratio=float(accept_ratio))
+
+
+def select_strict_trial_branch_result(
+    *,
+    policy: StrictUpdateControlPolicy,
+    proposal: StrictMomentumProposal,
+    state_backup: Any,
+    w_curr: float,
+    backtracking: bool,
+    reference_mode: bool,
+    host_update_assembly: bool,
+    zero_m1_value: Any,
+    zero_m1_host: float,
+    zero_m1_probe_value: Any,
+    candidate_state_from_delta_tuple: Any,
+    freeb_bsqvac_half_for_trial_state: Any,
+    trial_residual_total: Any,
+    use_direct_fallback: bool,
+    forces: ResidualVelocityBlocks,
+    max_update_rms: float,
+    flip_sign: float,
+    delta_transforms: tuple,
+    delta_tuple_from_blocks: Any,
+    vmec2000_control: bool,
+    huge_force_restart_count: int,
+) -> StrictTrialBranchSelection:
+    """Select the strict accept/reject branch after optional trial/fallback work."""
+
+    state_try = proposal.state
+    velocities = proposal.velocities
+    dt_eff = float(policy.dt_eff)
+    update_rms = proposal.update_rms
+    probe_bad_jacobian = False
+    if bool(policy.need_trial_eval):
+        trial_eval = strict_trial_evaluation(
+            state_try=state_try,
+            velocities=velocities,
+            update_deltas=proposal.update_deltas,
+            update_rms=update_rms,
+            dt_eff=float(dt_eff),
+            w_curr=float(w_curr),
+            backtracking=bool(backtracking),
+            reference_mode=bool(reference_mode),
+            host_update_assembly=bool(host_update_assembly),
+            zero_m1_value=zero_m1_value,
+            zero_m1_host=float(zero_m1_host),
+            zero_m1_probe_value=zero_m1_probe_value,
+            candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+            freeb_bsqvac_half_for_trial_state=freeb_bsqvac_half_for_trial_state,
+            trial_residual_total=trial_residual_total,
+        )
+        state_try = trial_eval.state
+        velocities = trial_eval.velocities
+        dt_eff = trial_eval.dt_eff
+        update_rms = trial_eval.update_rms
+        w_try = trial_eval.w_try
+        w_try_ratio = trial_eval.w_try_ratio
+        probe_bad_jacobian = trial_eval.probe_bad_jacobian
+    else:
+        w_try = float(w_curr)
+        w_try_ratio = 1.0
+
+    step_acceptance = strict_step_acceptance_decision(
+        w_try=float(w_try),
+        w_curr=float(w_curr),
+        backtracking=bool(backtracking),
+    )
+    branch_result = strict_step_branch_result(
+        acceptance=step_acceptance,
+        state_try=state_try,
+        state_backup=state_backup,
+        update_rms=update_rms,
+        vmec2000_control=bool(vmec2000_control),
+        huge_force_restart_count=int(huge_force_restart_count),
+    )
+    if (not branch_result.accepted) and bool(use_direct_fallback):
+        fallback_trial = direct_force_fallback_trial(
+            forces=forces,
+            dt_eff=float(dt_eff),
+            max_update_rms=float(max_update_rms),
+            flip_sign=float(flip_sign),
+            delta_transforms=delta_transforms,
+            delta_tuple_from_blocks=delta_tuple_from_blocks,
+            candidate_state_from_delta_tuple=candidate_state_from_delta_tuple,
+            freeb_bsqvac_half_for_trial_state=freeb_bsqvac_half_for_trial_state,
+            trial_residual_total=lambda candidate_state, freeb_bsqvac_half_trial: trial_residual_total(
+                candidate_state,
+                freeb_bsqvac_half_trial,
+                zero_m1_value=zero_m1_value,
+            ),
+        )
+        fallback_acceptance = direct_force_fallback_acceptance_decision(
+            residual=float(fallback_trial.residual),
+            current_residual=float(w_curr),
+        )
+        branch_result = strict_step_branch_result_after_direct_fallback(
+            branch=branch_result,
+            fallback_trial=fallback_trial,
+            acceptance=fallback_acceptance,
+            clear_cache_after_rejected=bool(vmec2000_control),
+        )
+
+    return StrictTrialBranchSelection(
+        branch_result=branch_result,
+        velocities=velocities,
+        dt_eff=float(dt_eff),
+        update_rms=update_rms,
+        w_try=float(w_try),
+        w_try_ratio=float(w_try_ratio),
+        probe_bad_jacobian=bool(probe_bad_jacobian),
+    )
 
 
 _ResidualVelocityBlocks = ResidualVelocityBlocks

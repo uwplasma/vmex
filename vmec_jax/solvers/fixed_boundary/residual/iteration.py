@@ -123,8 +123,6 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     controller_state_from_resume_state as _controller_state_from_resume_state,
     controller_state_legacy_values as _controller_state_legacy_values,
     delta_tuple_from_blocks as _delta_tuple_from_blocks_helper,
-    direct_force_fallback_acceptance_decision as _direct_force_fallback_acceptance_decision,
-    direct_force_fallback_trial as _direct_force_fallback_trial,
     host_catastrophic_restart_update as _host_catastrophic_restart_update,
     host_free_boundary_turnon_restart_update as _host_free_boundary_turnon_restart_update,
     host_initial_axis_reset_update as _host_axis_reset_update,
@@ -136,12 +134,9 @@ from vmec_jax.solvers.fixed_boundary.residual.update import (
     initial_residual_velocity_state as _initial_residual_velocity_state,
     residual_evolve_coefficients as _residual_evolve_coefficients,
     resolve_strict_update_control_policy as _resolve_strict_update_control_policy,
+    select_strict_trial_branch_result as _select_strict_trial_branch_result,
     strict_step_branch_application as _strict_step_branch_application,
-    strict_step_branch_result as _strict_step_branch_result,
     strict_step_branch_result_after_catastrophic_restart as _strict_step_branch_result_after_catastrophic_restart,
-    strict_step_branch_result_after_direct_fallback as _strict_step_branch_result_after_direct_fallback,
-    strict_step_acceptance_decision as _strict_step_acceptance_decision,
-    strict_trial_evaluation as _strict_trial_evaluation,
     velocity_blocks_from_force_blocks as _velocity_blocks_from_force_blocks,
     velocity_blocks_from_resume_state as _velocity_blocks_from_resume_state,
     zero_all_velocity_blocks_like as _zero_all_velocity_blocks_like,
@@ -2825,83 +2820,38 @@ def solve_fixed_boundary_residual_iter(
             update_rms_preclip = update_proposal.update_rms_preclip
             scl = update_proposal.scale
             update_deltas = update_proposal.update_deltas
-            state_try = update_proposal.state
-            probe_bad_jacobian = False
-            if need_trial_eval:
-                trial_eval = _strict_trial_evaluation(
-                    state_try=state_try,
-                    velocities=velocity_blocks,
-                    update_deltas=update_deltas,
-                    update_rms=update_rms,
-                    dt_eff=float(dt_eff),
-                    w_curr=float(w_curr),
-                    backtracking=bool(backtracking),
-                    reference_mode=bool(reference_mode),
-                    host_update_assembly=bool(host_update_assembly),
-                    zero_m1_value=zero_m1,
-                    zero_m1_host=float(np.asarray(zero_m1)),
-                    zero_m1_probe_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
-                    candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
-                    freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
-                    trial_residual_total=_trial_residual_total,
-                )
-                state_try = trial_eval.state
-                velocity_blocks = trial_eval.velocities
-                dt_eff = trial_eval.dt_eff
-                update_rms = trial_eval.update_rms
-                w_try = trial_eval.w_try
-                w_try_ratio = trial_eval.w_try_ratio
-                probe_bad_jacobian = trial_eval.probe_bad_jacobian
-            else:
-                w_try = w_curr
-                w_try_ratio = 1.0
-
-            # Require (near) monotone improvement; otherwise fall back to the
-            # restart/timestep control path.
-            step_acceptance = _strict_step_acceptance_decision(
-                w_try=float(w_try),
+            branch_selection = _select_strict_trial_branch_result(
+                policy=strict_update_policy,
+                proposal=update_proposal,
+                state_backup=state_backup,
                 w_curr=float(w_curr),
                 backtracking=bool(backtracking),
-            )
-            branch_result = _strict_step_branch_result(
-                acceptance=step_acceptance,
-                state_try=state_try,
-                state_backup=state_backup,
-                update_rms=update_rms,
+                reference_mode=bool(reference_mode),
+                host_update_assembly=bool(host_update_assembly),
+                zero_m1_value=zero_m1,
+                zero_m1_host=float(np.asarray(zero_m1)),
+                zero_m1_probe_value=jnp.asarray(0.0, dtype=zero_m1.dtype),
+                candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
+                freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
+                trial_residual_total=_trial_residual_total,
+                use_direct_fallback=bool(use_direct_fallback),
+                forces=force_blocks,
+                max_update_rms=float(max_update_rms),
+                flip_sign=float(flip_sign),
+                delta_transforms=_internal_delta_transforms,
+                delta_tuple_from_blocks=_delta_tuple_from_blocks,
                 vmec2000_control=bool(vmec2000_control),
                 huge_force_restart_count=int(huge_force_restart_count),
             )
-            if not branch_result.accepted:
-                if use_direct_fallback:
-                    # Try a small direct-force step (no momentum memory) before
-                    # a full restart. This is an experimental parity path.
-                    fallback_trial = _direct_force_fallback_trial(
-                        forces=force_blocks,
-                        dt_eff=float(dt_eff),
-                        max_update_rms=float(max_update_rms),
-                        flip_sign=float(flip_sign),
-                        delta_transforms=_internal_delta_transforms,
-                        delta_tuple_from_blocks=_delta_tuple_from_blocks,
-                        candidate_state_from_delta_tuple=_candidate_state_from_delta_tuple,
-                        freeb_bsqvac_half_for_trial_state=_freeb_bsqvac_half_for_trial_state,
-                        trial_residual_total=lambda candidate_state, freeb_bsqvac_half_trial: _trial_residual_total(
-                            candidate_state,
-                            freeb_bsqvac_half_trial,
-                            zero_m1_value=zero_m1,
-                        ),
-                    )
-                    fallback_acceptance = _direct_force_fallback_acceptance_decision(
-                        residual=float(fallback_trial.residual),
-                        current_residual=float(w_curr),
-                    )
-                    branch_result = _strict_step_branch_result_after_direct_fallback(
-                        branch=branch_result,
-                        fallback_trial=fallback_trial,
-                        acceptance=fallback_acceptance,
-                        clear_cache_after_rejected=bool(vmec2000_control),
-                    )
-                    if adjoint_trace and branch_result.fallback_direct_dt is not None:
-                        trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
+            branch_result = branch_selection.branch_result
+            velocity_blocks = branch_selection.velocities
+            dt_eff = branch_selection.dt_eff
+            update_rms = branch_selection.update_rms
+            w_try = branch_selection.w_try
+            w_try_ratio = branch_selection.w_try_ratio
+            probe_bad_jacobian = branch_selection.probe_bad_jacobian
+            if adjoint_trace and branch_result.fallback_direct_dt is not None:
+                trace_entry["fallback_direct_dt"] = float(branch_result.fallback_direct_dt)
             branch_application = _apply_strict_step_branch(branch_result)
             if not branch_result.accepted:
                 catastrophic_restart = branch_result.catastrophic_restart
