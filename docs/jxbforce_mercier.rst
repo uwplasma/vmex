@@ -66,7 +66,7 @@ SIMSOPT when SIMSOPT is installed:
 
 .. code-block:: bash
 
-   RUN_SIMSOPT_VALIDATION=1 python -m pytest tests/test_redl_bootstrap_simsopt_parity.py -q
+   RUN_SIMSOPT_VALIDATION=1 python -m pytest tests/postprocessing/test_redl_bootstrap_simsopt_parity.py -q
 
 That test uses the committed shaped-tokamak pressure fixture and compares both
 the strict shared-geometry residual and the public vmec_jax state-geometry

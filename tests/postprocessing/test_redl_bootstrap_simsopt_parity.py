@@ -27,7 +27,7 @@ def test_redl_bootstrap_mismatch_matches_simsopt_redlgeomvmec_on_shaped_tokamak(
     simsopt_profiles = pytest.importorskip("simsopt.mhd.profiles")
     simsopt_vmec = pytest.importorskip("simsopt.mhd.vmec")
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     input_path = root / "examples" / "data" / "input.shaped_tokamak_pressure"
     wout_path = root / "examples" / "data" / "wout_shaped_tokamak_pressure.nc"
     cfg, indata = vj.load_config(str(input_path))

@@ -67,7 +67,7 @@ BOOZ_INPUT_PARITY_CASES = (
 
 
 def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples" / "data"
+    return Path(__file__).resolve().parents[2] / "examples" / "data"
 
 
 def _relative_rms(a: np.ndarray, b: np.ndarray) -> float:

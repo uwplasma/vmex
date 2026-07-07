@@ -6,7 +6,7 @@ import sys
 
 
 def test_bootstrap_current_example_is_explicit_user_workflow() -> None:
-    text = (Path(__file__).resolve().parents[1] / "examples" / "bootstrap_current_fixed_point.py").read_text()
+    text = (Path(__file__).resolve().parents[2] / "examples" / "bootstrap_current_fixed_point.py").read_text()
 
     assert "FIXED_POINT_OPTIONS = vj.BootstrapCurrentOptions" in text
     assert "VMEC_RUN_KWARGS = {" in text
@@ -17,7 +17,7 @@ def test_bootstrap_current_example_is_explicit_user_workflow() -> None:
 
 
 def test_bootstrap_current_example_help_does_not_run_workflow() -> None:
-    script = Path(__file__).resolve().parents[1] / "examples" / "bootstrap_current_fixed_point.py"
+    script = Path(__file__).resolve().parents[2] / "examples" / "bootstrap_current_fixed_point.py"
 
     result = subprocess.run(
         [sys.executable, str(script), "--help"],

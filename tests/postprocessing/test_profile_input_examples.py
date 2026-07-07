@@ -9,7 +9,7 @@ from vmec_jax.namelist import read_indata
 from vmec_jax.profiles import eval_profiles
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE_PATH = ROOT / "examples" / "profile_input_examples.py"
 
 

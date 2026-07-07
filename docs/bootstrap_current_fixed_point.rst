@@ -84,7 +84,7 @@ checks that a bounded finite-beta tokamak Picard loop reduces the Redl mismatch:
 .. code-block:: bash
 
    RUN_BOOTSTRAP_CURRENT_INTEGRATION=1 \
-     pytest -q tests/test_bootstrap_current_fixed_point_integration_optional.py
+     pytest -q tests/postprocessing/test_bootstrap_current_fixed_point_integration_optional.py
 
 This gate is not part of default CI because it launches multiple VMEC solves.
 

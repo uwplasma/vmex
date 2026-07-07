@@ -25,7 +25,7 @@ pytestmark = pytest.mark.full
 def test_plotting_surface_helpers_shapes():
     pytest.importorskip("netCDF4")
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     wout_path = root / "examples/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc"
     wout = read_wout(wout_path)
 
@@ -48,7 +48,7 @@ def test_plotting_surface_helpers_shapes():
 def test_plotting_physical_matches_field_period():
     pytest.importorskip("netCDF4")
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     wout_path = root / "examples/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc"
     wout = read_wout(wout_path)
 
@@ -69,7 +69,7 @@ def test_plotting_physical_matches_field_period():
 def test_plotting_state_surface_matches_wout():
     pytest.importorskip("netCDF4")
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     wout_path = root / "examples/data/wout_LandremanPaul2021_QH_reactorScale_lowres_reference.nc"
     wout = read_wout(wout_path)
     state = state_from_wout(wout)

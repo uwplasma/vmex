@@ -19,7 +19,7 @@ def test_bootstrap_current_fixed_point_reduces_redl_mismatch_on_finite_beta_toka
     is the finite-beta physics gate for the Redl-current profile feedback path.
     """
 
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     indata = vj.read_indata(root / "examples" / "data" / "input.shaped_tokamak_pressure")
     profiles = vj.standard_finite_beta_profiles(1.0)
     indata = vj.with_pressure_profile(indata, profiles.pressure_pa, pres_scale=1.0)

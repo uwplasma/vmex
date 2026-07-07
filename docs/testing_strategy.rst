@@ -250,7 +250,7 @@ the recommended local escalation path.
      - After changing objective tuple construction, examples, or sweep
        rendering docs.
    * - QI objective checks
-     - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py``
+     - ``pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/postprocessing/test_booz_input.py``
      - After changing QI diagnostics, Boozer input handling (including LASYM
        geometry/magnetic channels), smooth-QI residual settings, or first-class
        QI diagnostic record fields.  This includes a low-resolution
@@ -291,7 +291,7 @@ the recommended local escalation path.
        ``tests/parity/test_vmec2000_exec_fast_validation.py::test_fast_vmec2000_stage_trace_validation_cases``
        for deliberate short-trace regressions.
    * - External SIMSOPT tier
-     - ``RUN_SIMSOPT_VALIDATION=1 JAX_ENABLE_X64=1 pytest -q -m simsopt tests/test_simsopt_optional_validation.py tests/test_redl_bootstrap_simsopt_parity.py``
+     - ``RUN_SIMSOPT_VALIDATION=1 JAX_ENABLE_X64=1 pytest -q -m simsopt tests/test_simsopt_optional_validation.py tests/postprocessing/test_redl_bootstrap_simsopt_parity.py``
      - Optional SIMSOPT diagnostic parity on bundled converged ``wout``
        fixtures: QS formula parity, state-derived QS diagnostics, and Redl
        bootstrap mismatch normalization.

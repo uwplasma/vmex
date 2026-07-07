@@ -38,7 +38,7 @@ from vmec_jax.wout import read_wout, state_from_wout
 
 
 def _data_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "examples" / "data"
+    return Path(__file__).resolve().parents[2] / "examples" / "data"
 
 
 def _small_circular_state_static():
