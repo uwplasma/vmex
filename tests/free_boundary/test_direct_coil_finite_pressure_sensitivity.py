@@ -127,6 +127,52 @@ def _write_lpqa_direct_freeb_input(path: Path, *, niter: int = 3) -> Path:
     return path
 
 
+def _run_forced_active_direct_solve(input_path: Path, params: CoilFieldParams, *, max_iter: int, **overrides):
+    """Run a tiny direct-coil solve with free-boundary updates active from iteration one."""
+
+    from vmec_jax.driver import run_free_boundary
+
+    kwargs = {
+        "max_iter": int(max_iter),
+        "multigrid": False,
+        "verbose": False,
+        "jit_forces": False,
+        "external_field_provider_kind": "direct_coils",
+        "external_field_provider_params": params,
+        "free_boundary_activate_fsq": 1.0e99,
+    }
+    kwargs.update(overrides)
+    return run_free_boundary(input_path, **kwargs)
+
+
+def _solve_direct_residual_iter(init, params: CoilFieldParams, *, max_iter: int, **overrides):
+    """Advance a tiny direct-coil state through the VMEC2000-style residual loop."""
+
+    from vmec_jax.solve import solve_fixed_boundary_residual_iter
+
+    kwargs = {
+        "max_iter": int(max_iter),
+        "ftol": 1.0e-8,
+        "vmec2000_control": True,
+        "auto_flip_force": False,
+        "use_direct_fallback": True,
+        "verbose": False,
+        "verbose_vmec2000_table": False,
+        "jit_forces": False,
+        "external_field_provider_kind": "direct_coils",
+        "external_field_provider_params": params,
+        "free_boundary_activate_fsq": 1.0e99,
+    }
+    kwargs.update(overrides)
+    return solve_fixed_boundary_residual_iter(
+        init.state,
+        init.static,
+        indata=init.indata,
+        signgs=init.signgs,
+        **kwargs,
+    )
+
+
 def _synthetic_direct_coil_trace(
     z: np.ndarray,
     *,
@@ -1385,20 +1431,14 @@ def test_forced_active_direct_coil_finite_pressure_solve_has_physics_diagnostics
     """A tiny active direct-coil finite-pressure solve exposes active NESTOR diagnostics."""
 
     enable_x64(True)
-    from vmec_jax.driver import run_free_boundary
     from vmec_jax.wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
 
     params = _circle_coil_params(current=3.0e7)
     input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_provider_forced_active")
-    run = run_free_boundary(
+    run = _run_forced_active_direct_solve(
         input_path,
+        params,
         max_iter=4,
-        multigrid=False,
-        verbose=False,
-        jit_forces=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-        free_boundary_activate_fsq=1.0e99,
     )
 
     diag = run.result.diagnostics
@@ -1447,8 +1487,6 @@ def test_active_direct_coil_adjoint_trace_records_vacuum_forcing_and_pressure_sc
     """Accepted active free-boundary steps must carry vacuum forcing into replay traces."""
 
     enable_x64(True)
-    from vmec_jax.driver import run_free_boundary
-    from vmec_jax.solve import solve_fixed_boundary_residual_iter
 
     params = _circle_coil_params(current=3.0e7, n_segments=32)
     input_path = _write_tiny_direct_freeb_input(
@@ -1457,30 +1495,12 @@ def test_active_direct_coil_adjoint_trace_records_vacuum_forcing_and_pressure_sc
         mpol=3,
         ntheta=6,
     )
-    init = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
-    result = solve_fixed_boundary_residual_iter(
-        init.state,
-        init.static,
-        indata=init.indata,
-        signgs=init.signgs,
+    init = _run_direct_initial_guess(input_path, params)
+    result = _solve_direct_residual_iter(
+        init,
+        params,
         max_iter=2,
-        ftol=1.0e-8,
-        vmec2000_control=True,
-        auto_flip_force=False,
-        use_direct_fallback=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces=False,
         adjoint_trace=True,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-        free_boundary_activate_fsq=1.0e99,
     )
 
     freeb = result.diagnostics["free_boundary"]
@@ -1505,7 +1525,6 @@ def test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path(
     """Full replay traces must include raw preconditioned forces on fused backends."""
 
     enable_x64(True)
-    from vmec_jax.driver import run_free_boundary
     import vmec_jax.solve as solve_mod
 
     params = _circle_coil_params(current=3.0e7, n_segments=24)
@@ -1515,35 +1534,17 @@ def test_full_adjoint_trace_records_raw_preconditioner_on_fused_payload_path(
         mpol=3,
         ntheta=6,
     )
-    init = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
+    init = _run_direct_initial_guess(input_path, params)
 
     monkeypatch.setattr(solve_mod.jax, "default_backend", lambda: "gpu")
-    result = solve_mod.solve_fixed_boundary_residual_iter(
-        init.state,
-        init.static,
-        indata=init.indata,
-        signgs=init.signgs,
+    result = _solve_direct_residual_iter(
+        init,
+        params,
         max_iter=2,
-        ftol=1.0e-8,
-        vmec2000_control=True,
-        auto_flip_force=False,
-        use_direct_fallback=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces=False,
         use_scan=False,
         host_update_assembly=False,
         adjoint_trace=True,
         adjoint_trace_mode="full",
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-        free_boundary_activate_fsq=1.0e99,
     )
 
     traces = result.diagnostics.get("adjoint_step_trace", [])
@@ -1560,35 +1561,15 @@ def test_direct_coil_trial_nestor_timing_records_solver_trial_calls(tmp_path: Pa
     """Solver-level trial scoring should record rejected NESTOR sample timings."""
 
     enable_x64(True)
-    from vmec_jax.driver import run_free_boundary
-    from vmec_jax.solve import solve_fixed_boundary_residual_iter
 
     params = _circle_coil_params(current=3.0e7)
     input_path = _write_tiny_direct_freeb_input(tmp_path / "input.direct_trial_timing")
-    init = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
-    result = solve_fixed_boundary_residual_iter(
-        init.state,
-        init.static,
-        indata=init.indata,
-        signgs=init.signgs,
+    init = _run_direct_initial_guess(input_path, params)
+    result = _solve_direct_residual_iter(
+        init,
+        params,
         max_iter=4,
-        ftol=1.0e-8,
-        vmec2000_control=True,
-        auto_flip_force=False,
-        use_direct_fallback=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces=False,
         use_scan=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-        free_boundary_activate_fsq=1.0e99,
     )
 
     trial_samples = np.asarray(result.diagnostics["freeb_nestor_trial_sample_time_history"], dtype=float)
@@ -1710,7 +1691,6 @@ def test_jax_nestor_operator_complete_solve_fd_slope_for_mixed_coil_direction(
 
     enable_x64(True)
     from vmec_jax._compat import jnp
-    from vmec_jax.driver import run_free_boundary
 
     input_path = _write_tiny_direct_freeb_input(
         tmp_path / "input.direct_symmetric_jax_nestor_fd",
@@ -1723,15 +1703,10 @@ def test_jax_nestor_operator_complete_solve_fd_slope_for_mixed_coil_direction(
     monkeypatch.setenv("VMEC_JAX_FREEB_JAX_NESTOR_OPERATOR", "1")
 
     def metric(params: CoilFieldParams) -> float:
-        run = run_free_boundary(
+        run = _run_forced_active_direct_solve(
             input_path,
+            params,
             max_iter=2,
-            multigrid=False,
-            verbose=False,
-            jit_forces=False,
-            external_field_provider_kind="direct_coils",
-            external_field_provider_params=params,
-            free_boundary_activate_fsq=1.0e99,
         )
         freeb = run.result.diagnostics["free_boundary"]
         assert freeb["vacuum_stub"] is False
@@ -3514,7 +3489,6 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_an
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import direct_coil_boundary_bnormal_rms_jax
 
@@ -3538,15 +3512,10 @@ def test_jax_nestor_operator_accepted_solve_ad_matches_central_fd_for_current_an
             base_currents=base_currents * (1.0 + 0.02 * current_scale),
         )
 
-    run = run_free_boundary(
+    run = _run_forced_active_direct_solve(
         input_path,
+        base_params,
         max_iter=2,
-        multigrid=False,
-        verbose=False,
-        jit_forces=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-        free_boundary_activate_fsq=1.0e99,
     )
     freeb = run.result.diagnostics["free_boundary"]
     assert freeb["vacuum_stub"] is False
@@ -3660,7 +3629,6 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
     from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
-    from vmec_jax.driver import run_free_boundary
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_controller_replay_objective_jax,
         direct_coil_accepted_trace_controller_replay_plan,
@@ -3674,7 +3642,6 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         direct_coil_boundary_replay_context,
         free_boundary_boundary_geometry_jax,
     )
-    from vmec_jax.solve import solve_fixed_boundary_residual_iter
     from vmec_jax.state import pack_state, unpack_state
 
     enable_x64(True)
@@ -3688,33 +3655,15 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         ntheta=4,
     )
     base_params = _circle_coil_params(current=3.0e7, n_segments=16)
-    init = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-    )
-    result = solve_fixed_boundary_residual_iter(
-        init.state,
-        init.static,
-        indata=init.indata,
-        signgs=init.signgs,
+    init = _run_direct_initial_guess(input_path, base_params)
+    result = _solve_direct_residual_iter(
+        init,
+        base_params,
         max_iter=3,
-        ftol=1.0e-8,
-        vmec2000_control=True,
-        auto_flip_force=False,
-        use_direct_fallback=True,
-        verbose=False,
-        verbose_vmec2000_table=False,
-        jit_forces=False,
         use_scan=False,
         host_update_assembly=False,
         adjoint_trace=True,
         adjoint_trace_mode="full",
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-        free_boundary_activate_fsq=1.0e99,
     )
     traces = result.diagnostics.get("adjoint_step_trace", [])
     active_traces = [trace for trace in traces if trace.get("freeb_bsqvac_half") is not None]
@@ -4295,7 +4244,6 @@ def test_jax_free_boundary_boundary_geometry_matches_host_sampler(
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.driver import run_free_boundary
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import free_boundary_boundary_geometry_jax
     from vmec_jax.state import pack_state, unpack_state
@@ -4309,13 +4257,7 @@ def test_jax_free_boundary_boundary_geometry_matches_host_sampler(
         ntheta=6,
     )
     params = _circle_coil_params(current=3.0e7, n_segments=64)
-    run = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=params,
-    )
+    run = _run_direct_initial_guess(input_path, params)
     host = _sample_external_boundary_arrays(
         state=run.state,
         static=run.static,
@@ -4360,7 +4302,6 @@ def test_jax_nestor_operator_fixed_boundary_ad_matches_central_fd_for_coil_vars(
 
     pytest.importorskip("jax")
     from vmec_jax._compat import jax, jnp
-    from vmec_jax.driver import run_free_boundary
     from vmec_jax.external_fields import sample_coil_field_cylindrical
     from vmec_jax.free_boundary import _sample_external_boundary_arrays
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
@@ -4388,13 +4329,7 @@ def test_jax_nestor_operator_fixed_boundary_ad_matches_central_fd_for_coil_vars(
         ntheta=6,
     )
     base_params = _circle_coil_params(current=3.0e7, n_segments=64)
-    init = run_free_boundary(
-        input_path,
-        use_initial_guess=True,
-        verbose=False,
-        external_field_provider_kind="direct_coils",
-        external_field_provider_params=base_params,
-    )
+    init = _run_direct_initial_guess(input_path, base_params)
     result, _runtime = nestor_external_only_step(
         state=init.state,
         static=init.static,
