@@ -262,7 +262,7 @@ the recommended local escalation path.
      - After changing QI branch-ranking metrics, seed audit/prefine manifests,
        sweep summary fields, or renderer selection rules.
    * - Optional validation plan helper
-     - ``python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json``
+     - ``python tools/diagnostics/qi/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json``
      - To record the current non-required VMEC2000/SIMSOPT/QI seed-robustness
        lanes and concrete bounded parity commands before a local or scheduled
        validation run.
@@ -519,7 +519,7 @@ QI seed-robustness gates:
   before any actual seed-robustness run.  The manifest is a review artifact:
   it makes selected seeds, run commands, and output paths explicit before
   expensive probes start.
-- Use ``validation/qi_seed_robustness_plan.py`` to record the optional
+- Use ``tools/diagnostics/qi/qi_seed_robustness_plan.py`` to record the optional
   validation lanes and acceptance criteria.  The plan includes required CI
   baseline checks, family-representative QI solved-state audit, dry-run prefine
   manifests, explicit tiny prefine runs, SIMSOPT formula parity, and VMEC2000

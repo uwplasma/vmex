@@ -813,7 +813,7 @@ The machine-readable list of these bounded parity commands is emitted by:
 
 .. code-block:: bash
 
-   python validation/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json
+   python tools/diagnostics/qi/qi_seed_robustness_plan.py --output results/qi_seed_audit/validation_plan.json
 
 The emitted plan intentionally does not embed a stale green CI run by default.
 Verify the current ``main`` CI run with ``gh run list``/``gh run view`` and pass

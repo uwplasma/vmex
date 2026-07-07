@@ -39,7 +39,7 @@ The declarative helper is:
 
 .. code-block:: bash
 
-   python validation/qi_seed_robustness_plan.py \
+   python tools/diagnostics/qi/qi_seed_robustness_plan.py \
      --output results/qi_seed_audit/validation_plan.json
 
 It writes a JSON manifest with required lanes, optional lanes, family
@@ -48,7 +48,7 @@ reviewable text form:
 
 .. code-block:: bash
 
-   python validation/qi_seed_robustness_plan.py \
+   python tools/diagnostics/qi/qi_seed_robustness_plan.py \
      --format markdown \
      --output results/qi_seed_audit/validation_plan.md
 

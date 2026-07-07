@@ -7,8 +7,8 @@ import re
 import sys
 
 
-SCRIPT = Path(__file__).resolve().parents[2] / "validation" / "qi_seed_robustness_plan.py"
-REPO_ROOT = SCRIPT.parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = REPO_ROOT / "tools" / "diagnostics" / "qi" / "qi_seed_robustness_plan.py"
 
 
 def _load_module():
@@ -160,7 +160,9 @@ def test_optional_vmec2000_commands_preserve_timeout_and_iteration_bounds():
 
 def test_simsopt_optional_commands_cover_qa_and_qh_family_cases():
     mod = _load_module()
-    simsopt_tests = _load_test_module(REPO_ROOT / "tests" / "test_simsopt_optional_validation.py")
+    simsopt_tests = _load_test_module(
+        REPO_ROOT / "tests" / "integrations" / "test_simsopt_optional_validation.py"
+    )
 
     plan = mod.build_plan()
     commands = {command["command_id"]: command for command in plan["optional_parity_commands"]}
