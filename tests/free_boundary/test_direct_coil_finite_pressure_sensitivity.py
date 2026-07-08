@@ -2889,6 +2889,27 @@ def _assert_trace_objective_directional_matches_fd(
     return exact
 
 
+def _same_branch_complete_solve_kwargs(*, adjoint_trace_mode: str = "full") -> dict:
+    """Return the tiny complete-solve options used by same-branch FD gates."""
+
+    return {
+        "max_iter": 2,
+        "ftol": 1.0e-8,
+        "vmec2000_control": True,
+        "auto_flip_force": False,
+        "use_direct_fallback": True,
+        "verbose": False,
+        "verbose_vmec2000_table": False,
+        "jit_forces": False,
+        "use_scan": False,
+        "host_update_assembly": False,
+        "adjoint_trace": True,
+        "adjoint_trace_mode": adjoint_trace_mode,
+        "external_field_provider_kind": "direct_coils",
+        "free_boundary_activate_fsq": 1.0e99,
+    }
+
+
 def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
     *,
     input_path: Path,
@@ -2929,22 +2950,7 @@ def _assert_direct_coil_same_branch_custom_vjp_matches_complete_fd(
             include_qs_total=check_qs_total_scalar,
         ),
         eps=eps,
-        solve_kwargs={
-            "max_iter": 2,
-            "ftol": 1.0e-8,
-            "vmec2000_control": True,
-            "auto_flip_force": False,
-            "use_direct_fallback": True,
-            "verbose": False,
-            "verbose_vmec2000_table": False,
-            "jit_forces": False,
-            "use_scan": False,
-            "host_update_assembly": False,
-            "adjoint_trace": True,
-            "adjoint_trace_mode": "full",
-            "external_field_provider_kind": "direct_coils",
-            "free_boundary_activate_fsq": 1.0e99,
-        },
+        solve_kwargs=_same_branch_complete_solve_kwargs(),
         fingerprint_rtol=1.0e-6,
         fingerprint_atol=1.0e-9,
     )
@@ -3556,22 +3562,7 @@ def test_direct_coil_branch_trace_mode_keeps_replay_controls_without_raw_force_p
     payload = direct_coil_complete_solve_trace(
         input_path,
         base_params,
-        solve_kwargs={
-            "max_iter": 2,
-            "ftol": 1.0e-8,
-            "vmec2000_control": True,
-            "auto_flip_force": False,
-            "use_direct_fallback": True,
-            "verbose": False,
-            "verbose_vmec2000_table": False,
-            "jit_forces": False,
-            "use_scan": False,
-            "host_update_assembly": False,
-            "adjoint_trace": True,
-            "adjoint_trace_mode": "branch",
-            "external_field_provider_kind": "direct_coils",
-            "free_boundary_activate_fsq": 1.0e99,
-        },
+        solve_kwargs=_same_branch_complete_solve_kwargs(adjoint_trace_mode="branch"),
     )
 
     traces = tuple(payload["traces"])
