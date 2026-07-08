@@ -20,7 +20,7 @@ remain in development.
 
 This full bundled single-grid fixed-boundary matrix compares VMEC2000,
 `vmec_jax` cold/warm CPU runs, and VMEC++ where VMEC++ converges cleanly.
-The plotted inputs live in `examples/data/single_grid` and are normalized to
+The plotted inputs live in `examples/data` and are normalized to
 `NS_ARRAY=151`, `FTOL_ARRAY=1e-14`, and `NITER_ARRAY=5000`. The performance
 docs keep the detailed CSV/JSON provenance, WOUT-parity rows, and regression
 classifications; rows are ordered by descending cold `vmec_jax` speedup over
@@ -152,49 +152,12 @@ pass `solver_device="cpu"` / `solver_device="gpu"` explicitly.
 
 ## Optimization Examples
 
-Editable optimization examples live in `examples/optimization/`. Start with
-`examples/optimization/README.md`, then use `docs/optimization.rst`,
-`docs/optimization_sweep_results.rst`, and `docs/piecewise_omnigenous_plan.rst`.
-
-The compact panels show QA/QH/QP common-minimal-seed runs and QI NFP1/2/3/4
-minimal-seed examples. For QI, the public per-NFP scripts start from the same
-circular-torus-like `input.minimal_seed_nfp*` decks, first build a QP basin, and
-then switch the objective to QI. Full numeric tables, caveats, LASYM panels, and
-artifact-promotion rules live in the docs, with historical
-`readme_best_optimization_qa.png`, `readme_best_optimization_qh.png`,
-`readme_best_optimization_qp.png`, and `readme_best_optimization_qi.png`
-archived there.
-
-![Common minimal-seed QA/QH/QP states](docs/_static/figures/minimal_seed_showcase_state_panel.png)
-
-![QI minimal-seed NFP coverage](docs/_static/figures/readme_qi_optimization_cases.png)
-
-Reproduce the minimal-seed optimization rows with:
-
-```bash
-PYTHONPATH=. JAX_PLATFORMS=cuda python3 tools/diagnostics/optimization/generate_minimal_seed_showcase.py \
-  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3 \
-  --backend-label gpu \
-  --solver-device gpu --worker-jax-platforms cuda --policy continuation --max-mode 5 --ess on \
-  --max-nfev 70 --continuation-nfev 20 --inner-max-iter 550 --inner-ftol 1e-10 \
-  --trial-max-iter 550 --trial-ftol 1e-10 --ess-alpha 1.2 --case-timeout-s 7200 --rerun
-PYTHONPATH=. python tools/diagnostics/optimization/render_minimal_seed_showcase.py --publication-matrix
-```
-
-Run individual editable examples with `python examples/optimization/QA_optimization.py`,
-`QH_optimization.py`, `QP_optimization.py`, or `QI_optimization.py`. The public
-QA/QH/QP scripts default to `MAX_MODE = 4`; set the commented `MAX_MODE = 5`
-line near the top of those scripts for a richer high-mode audit after the
-mode-4 route is working for your case.
-Simple QI examples are `QI_optimization_nfp1.py` through
-`QI_optimization_nfp4.py`; each file exposes the seed, objective tuples, QP
-stage, QI stage, saved outputs, and plots directly. The seed-3127 preset is retained as a diagnostic stress
-case, not a README promotion row. The checked-in QI NFP panel is a reviewed
-historical artifact; rerendering it requires the corresponding final WOUTs
-under `docs/_static/qi_readme_cases/`, so regenerate or restore those artifacts
-before running `python tools/diagnostics/optimization/render_qi_readme_cases.py`.
-Full provenance and artifact-promotion rules live in the docs:
-`docs/optimization.rst` and `docs/optimization_sweep_results.rst`.
+Optimization examples live in `examples/optimization/`: run
+`python examples/optimization/QA_optimization.py` (or the `QH`, `QP`, `QI`
+variants) to optimize from a circular-torus-like seed toward the target
+symmetry class. `docs/optimization.rst` documents the objectives, staged
+mode-continuation options, and caveats (for QI, the per-NFP scripts first
+build a QP basin and then switch the objective to QI).
 
 ## Performance, Validation, Release
 

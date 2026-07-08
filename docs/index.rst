@@ -25,7 +25,6 @@ vmec-jax documentation
       installation
       quickstart
       optimization
-      optimization_sweep_results
 
    .. toctree::
       :maxdepth: 2
@@ -36,7 +35,6 @@ vmec-jax documentation
       vmec_wiki_primer
       algorithms
       discrete_adjoint
-      piecewise_omnigenous_plan
       simsopt_comparison
       jxbforce_mercier
       bootstrap_current_fixed_point
@@ -48,8 +46,6 @@ vmec-jax documentation
       validation
       testing_strategy
       release_checklist
-      optional_validation_plan
-      free_boundary_plan
       free_boundary_coil_optimization
       performance
 
@@ -57,9 +53,6 @@ vmec-jax documentation
       :maxdepth: 2
       :caption: Development notes
 
-      aggressive_performance_plan
-      accelerated_merge_readiness
-      code_structure
       contributing
       references
 

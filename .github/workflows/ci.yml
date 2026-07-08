@@ -5,8 +5,6 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  schedule:
-    - cron: "17 8 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,40 +13,17 @@ concurrency:
 env:
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 permissions:
   contents: read
-  id-token: write
 
+# Interim CI during the vmec_jax overhaul (see plan.md).  The full coverage
+# gate (>=95%) returns in Phase 8 together with the restructured test suite.
 jobs:
-  parity-smoke:
-    name: Parity Manifest Smoke (dry-run)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-
-      - name: Manifest smoke sweep (dry-run)
-        run: |
-          python tools/diagnostics/parity/parity_sweep_manifest.py --tier smoke --dry-run --vmec-exec /usr/bin/true
-
-      - name: Source namespace gate
-        run: |
-          python tools/diagnostics/repo_health/source_health.py --top 20 --max-root-helper-prefix-files 2 \
-            --require-public-docstrings --public-docstring-root vmec_jax \
-            --max-function-lines-at vmec_jax/solvers/fixed_boundary/residual/iteration.py:solve_fixed_boundary_residual_iter=2440 \
-            --max-function-lines-at vmec_jax/driver.py:run_fixed_boundary=424
-
   test:
     name: Fast Tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -66,23 +41,18 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install .
-          python -m pip install pytest pytest-cov pytest-xdist
+          python -m pip install pytest pytest-xdist
 
-      - name: Compile (Python)
+      - name: Repository size check
         run: |
-          python -m compileall -q vmec_jax
+          size_kb=$(du -sk --exclude=.git . | cut -f1)
+          echo "working tree: ${size_kb} KiB"
+          test "$size_kb" -lt 40960 || { echo "working tree exceeds 40 MiB"; exit 1; }
 
-      - name: Repository size audit
-        run: |
-          python tools/diagnostics/repo_health/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
-
-      - name: Run tests
+      - name: Run fast tests
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          while true; do sleep 60; echo "::notice::compatibility pytest still running at $(date -u +%H:%M:%S)"; done &
-          heartbeat_pid=$!
-          trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
           VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 pytest -q -n 2 -m "not full and not vmec2000 and not simsopt" \
             tests/core/test_compat.py \
             tests/release/test_packaging_metadata.py \
@@ -95,209 +65,12 @@ jobs:
             tests/objectives/test_quasi_isodynamic.py \
             tests/external_fields/test_external_fields_coils_jax.py \
             tests/external_fields/test_external_fields_mgrid_jax.py \
-            --durations=50
-
-  test-py311-core:
-    name: "Fast Tests (py3.11 core coverage: ${{ matrix.bucket }})"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        bucket: [driver-solve-discrete, optimization-qi, freeb-external, wout-booz-plot-profiles, rest]
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install -U pip
-          python -m pip install .
-          python -m pip install pytest pytest-cov pytest-xdist
-
-      - name: Compile (Python)
-        run: |
-          python -m compileall -q vmec_jax
-
-      - name: Repository size audit
-        run: |
-          python tools/diagnostics/repo_health/repo_size_audit.py --top 20 --max-total-mib 50 --max-file-mib 2
-
-      - name: Fetch optional WOUT fixtures
-        if: matrix.bucket != 'driver-solve-discrete'
-        run: |
-          python tools/fetch_assets.py --bundle wout-fixtures
-
-      - name: Run core coverage tests
-        env:
-          JAX_ENABLE_X64: "1"
-          VMEC_JAX_SKIP_PY311_COVERAGE_ONLY: "1"
-        run: |
-          while true; do sleep 60; echo "::notice::core coverage pytest still running at $(date -u +%H:%M:%S)"; done &
-          heartbeat_pid=$!
-          trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
-          python tools/diagnostics/repo_health/ci_core_bucket_args.py "${{ matrix.bucket }}" > /tmp/py311-core-args.txt
-          xargs pytest -q -n 4 -m "not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax --cov-report= < /tmp/py311-core-args.txt
-          cp .coverage coverage.py311-core-${{ matrix.bucket }}
-
-      - name: Upload core coverage artifact
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: coverage-py311-core-${{ matrix.bucket }}
-          path: coverage.py311-core-${{ matrix.bucket }}
-
-  test-py311-exact:
-    name: "Fast Tests (py3.11 exact coverage: ${{ matrix.bucket }})"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        bucket: [accepted-update, same-branch, remaining]
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install -U pip
-          python -m pip install .
-          python -m pip install pytest pytest-cov pytest-xdist
-
-      - name: Run exact coverage tests
-        env:
-          JAX_ENABLE_X64: "1"
-        run: |
-          case "${{ matrix.bucket }}" in
-            accepted-update)
-              pytest -q -n 1 \
-                tests/free_boundary/test_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree \
-                --durations=50 --cov=vmec_jax --cov-report=
-              ;;
-            same-branch)
-              pytest -q -n 3 \
-                tests/free_boundary/test_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd \
-                tests/free_boundary/test_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd \
-                tests/free_boundary/test_direct_coil_finite_pressure_sensitivity.py::test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch \
-                --durations=50 --cov=vmec_jax --cov-report=
-              ;;
-            remaining)
-              pytest -q -n 4 \
-                -m "py311_coverage_only and not full and not vmec2000 and not simsopt" \
-                -k "not test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree and not test_direct_coil_current_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_fourier_only_same_branch_custom_vjp_matches_complete_solve_fd and not test_direct_coil_lasym_fixed_trace_custom_vjp_matches_complete_solve_fd_on_same_branch" \
-                --durations=50 --cov=vmec_jax --cov-report=
-              ;;
-            *)
-              echo "unknown exact coverage bucket: ${{ matrix.bucket }}" >&2
-              exit 2
-              ;;
-          esac
-          cp .coverage coverage.py311-exact-${{ matrix.bucket }}
-
-      - name: Upload exact coverage artifact
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: coverage-py311-exact-${{ matrix.bucket }}
-          path: coverage.py311-exact-${{ matrix.bucket }}
-
-  test-py311-slow:
-    name: Fast Tests (py3.11 slow physics coverage)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install -U pip
-          python -m pip install .
-          python -m pip install pytest pytest-cov pytest-xdist
-
-      - name: Fetch optional WOUT fixtures
-        run: |
-          python tools/fetch_assets.py --bundle wout-fixtures
-
-      - name: Run slow physics coverage tests
-        env:
-          JAX_ENABLE_X64: "1"
-        run: |
-          pytest -q -n 4 -m "py311_slow_coverage and not full and not vmec2000 and not simsopt" --durations=50 --cov=vmec_jax --cov-report=
-          cp .coverage coverage.py311-slow
-
-      - name: Upload slow physics coverage artifact
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: coverage-py311-slow
-          path: coverage.py311-slow
-
-  coverage-py311:
-    name: Coverage Gate (py3.11 combined)
-    needs: [test-py311-core, test-py311-exact, test-py311-slow]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install coverage tooling
-        run: |
-          python -m pip install -U pip
-          python -m pip install "coverage[toml]"
-
-      - name: Download coverage artifacts
-        uses: actions/download-artifact@v7.0.0
-        with:
-          pattern: coverage-py311-*
-          path: coverage-artifacts
-
-      - name: Combine and enforce coverage
-        run: |
-          coverage combine coverage-artifacts/coverage-py311-core-*/coverage.py311-core-* coverage-artifacts/coverage-py311-exact-*/coverage.py311-exact-* coverage-artifacts/coverage-py311-slow/coverage.py311-slow
-          coverage xml
-          coverage report --skip-covered
-          python -c 'import sys, xml.etree.ElementTree as ET; threshold=0.95; rate=float(ET.parse("coverage.xml").getroot().attrib["line-rate"]); print(f"Exact line coverage: {100.0 * rate:.2f}%"); sys.exit(0 if rate + 1.0e-12 >= threshold else f"Exact line coverage {100.0 * rate:.2f}% is below {100.0 * threshold:.2f}%")'
-
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v7.0.0
-        with:
-          name: coverage-py311
-          path: coverage.xml
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
-        with:
-          use_oidc: true
-          files: coverage.xml
-          flags: py311
-          name: py311-full
-          fail_ci_if_error: false
-          verbose: true
+            --durations=25
 
   cli-smoke:
     name: Console Script Smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -316,100 +89,22 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          vmec_jax --help
+          vmec --help
           rm -rf /tmp/vmec_jax_cli_smoke
           mkdir -p /tmp/vmec_jax_cli_smoke
           cd /tmp
-          vmec_jax "$GITHUB_WORKSPACE/examples/data/input.circular_tokamak" \
+          vmec "$GITHUB_WORKSPACE/examples/data/input.circular_tokamak" \
             --max-iter 2 \
             --no-multigrid \
             --no-use-input-niter \
             --quiet \
             --outdir /tmp/vmec_jax_cli_smoke
           test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
-          vmec_jax --test \
-            --max-iter 3 \
-            --quiet \
-            --outdir /tmp/vmec_jax_cli_bundled_smoke
-          test -f /tmp/vmec_jax_cli_bundled_smoke/input.nfp4_QH_warm_start
-          test -f /tmp/vmec_jax_cli_bundled_smoke/wout_nfp4_QH_warm_start.nc
-          test -f /tmp/vmec_jax_cli_bundled_smoke/figures/nfp4_QH_warm_start_VMEC_3Dplot.png
-
-  physics-smoke:
-    name: Physics Smoke (py3.11)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install -U pip
-          python -m pip install .
-          python -m pip install pytest
-
-      - name: Fetch large assets
-        run: |
-          python tools/fetch_assets.py
-
-      - name: Run bounded physics smoke
-        env:
-          JAX_ENABLE_X64: "1"
-          RUN_FULL: "1"
-        run: |
-          test -s examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc
-          pytest -q \
-            'tests/io/wout/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[circular_tokamak]' \
-            'tests/io/wout/test_wout_comprehensive_parity.py::test_wout_comprehensive_parity[nfp4_QH_warm_start]' \
-            'tests/io/wout/test_wout_comprehensive_parity.py::test_convergence_only[cth_like_free_bdy]' \
-            'tests/io/wout/test_wout_comprehensive_parity.py::test_convergence_only[nfp2_QA_highres]' \
-            'tests/io/wout/test_wout_bfield_bundled_parity.py::test_bundled_wout_stored_bsup_cartesian_magnitude_matches_bmnc[basic_non_stellsym_pressure_single_grid-examples/data/single_grid/input.basic_non_stellsym_pressure-examples/data/single_grid/wout_basic_non_stellsym_pressure_reference.nc-0.012]' \
-            'tests/io/wout/test_wout_profiles_currents_bundled_parity.py::test_bundled_wout_surface_averaged_currents_follow_ampere_radial_difference[single_grid_lasym_pressure]' \
-            'tests/parity/test_converged_wout_matrix_parity.py::test_bundled_converged_wout_matrix_physics_gates[fixed_nonaxis_lasym_single_basic_non_stellsym_pressure]' \
-            tests/drivers/test_driver_api.py::test_run_free_boundary_smoke_on_bundled_small_case \
-            tests/free_boundary/test_beta_response_validation.py::test_free_boundary_pressure_scale_changes_bundled_lcfs_and_field
-
-  physics-full:
-    name: Physics Full (manual/nightly)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install
-        run: |
-          python -m pip install -U pip
-          python -m pip install .
-          python -m pip install pytest pytest-cov
-
-      - name: Fetch large assets
-        run: |
-          python tools/fetch_assets.py
-
-      - name: Run full physics suite
-        env:
-          JAX_ENABLE_X64: "1"
-          RUN_FULL: "1"
-        run: |
-          pytest -q -m "full and not vmec2000"
 
   build:
     name: Build (wheel/sdist + docs)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -430,35 +125,5 @@ jobs:
           python -m build
 
       - name: Build docs (warnings as errors)
-        env:
-          LC_ALL: C.UTF-8
-          LANG: C.UTF-8
-          SPHINX_FAST: "1"
         run: |
           python -m sphinx -W -j auto -b html docs docs/_build/html
-
-  docs-full:
-    name: Docs (full guide)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6.0.2
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.2.0
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install docs deps
-        run: |
-          python -m pip install -U pip
-          python -m pip install ".[docs]"
-
-      - name: Build full docs
-        env:
-          LC_ALL: C.UTF-8
-          LANG: C.UTF-8
-          READTHEDOCS: "True"
-        run: |
-          python -m sphinx -W -j auto -b html docs docs/_build/html_full

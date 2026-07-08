@@ -494,7 +494,7 @@ Optimization gates:
   must select the best finite exact accepted point rather than an unreplayed
   trial point.
 - Full optimization sweeps are not required PR tests; they remain generated
-  benchmark artifacts documented in :doc:`optimization_sweep_results`.
+  benchmark artifacts kept with the local result trees.
 
 QI seed-robustness gates:
 
@@ -542,7 +542,7 @@ Historical local optional evidence:
   should be diagnosed from those JSON reports before broadening the matrix.
 
 The current detailed lane list and next parity gates are in
-:doc:`optional_validation_plan`.
+the historical validation notes (git history).
 
 
 Release Checklist

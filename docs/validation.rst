@@ -525,7 +525,7 @@ you need a strict single-phase comparison against a legacy run.
 
 For the current optional validation plan, including CI verification commands,
 family-representative QI probe workflow, VMEC2000/SIMSOPT optional lanes, and
-deferred parity gates, see :doc:`optional_validation_plan`.
+deferred parity gates, see the git history of the validation notes.
 
 Validated ``wout`` fields
 --------------------------
