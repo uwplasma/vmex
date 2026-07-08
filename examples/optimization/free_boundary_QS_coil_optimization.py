@@ -1,0 +1,1284 @@
+#!/usr/bin/env python
+"""Direct-coil free-boundary coil-only quasisymmetry optimization.
+
+This is intentionally *not* a production QS optimization.  The only optimizer
+variables are direct-coil currents and selected direct-coil Fourier dofs.  The
+plasma boundary coefficients from the VMEC input deck are never included in the
+optimization vector.
+
+The validation-scale objective is deliberately transparent:
+
+* VMEC residual from a tiny direct-coil free-boundary solve,
+* VMEC-state quasisymmetry-ratio residual,
+* aspect-ratio target,
+* mean-iota target.
+
+The QS residual is evaluated from the accepted VMEC state, not from a
+full coil-to-Boozer exact adjoint.  The optional same-branch report writes the
+current complete-solve finite-difference and fixed-accepted-branch derivative
+evidence without claiming differentiation through adaptive host branch
+selection.
+
+Run a minimal smoke from the repository root:
+
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle
+
+Add a same-branch derivative artifact using the validated branch-local vector
+JVP report, or ask that report to propose one conservative coil step that is
+still accepted/rejected by a normal complete free-boundary solve:
+
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle --write-same-branch-report
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider circle --same-branch-derivative-proposal
+
+Preview the generated input, selected coil variables, objective weights, and
+baseline coil diagnostics without running VMEC:
+
+    python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --dry-run --provider circle
+
+For the optional ESSOS provider, set the ESSOS checkout and input directory:
+
+    export ESSOS_ROOT=/path/to/ESSOS_mgrid_pr
+    export ESSOS_INPUT_DIR=$ESSOS_ROOT/examples/input_files
+    PYTHONPATH=$ESSOS_ROOT:$PYTHONPATH python examples/optimization/free_boundary_QS_coil_optimization.py --smoke --provider essos
+
+If ESSOS assets are not available, the ESSOS provider exits with code 77 and a
+helpful message.
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import replace
+import json
+import os
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+from typing import Any
+
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from vmec_jax._compat import jnp
+from vmec_jax.driver import write_wout_from_fixed_boundary_run
+from vmec_jax.external_fields import CoilFieldParams, from_essos_coils
+from vmec_jax.solvers.free_boundary.coil_optimization import (
+    DEFAULT_SAME_BRANCH_VECTOR_KEYS,
+    SINGLE_STAGE_LIMITATIONS,
+    STATE_ONLY_SAME_BRANCH_KEYS,
+    SUPPORTED_SAME_BRANCH_VECTOR_KEYS,
+    apply_coil_variables,
+    coil_diagnostics,
+    direct_coil_optimization_workflow_metadata,
+    direct_coil_qs_summary_configs,
+    json_safe_payload,
+    make_circle_provider,
+    make_free_boundary_indata,
+    nestor_profile_policy_from_results,  # noqa: F401 - compatibility export for tests/users.
+    objective_from_summary,
+    objective_terms_from_summary,
+    parse_float_list,
+    parse_profile_matrix_free_solvers,  # noqa: F401 - compatibility export for tests/users.
+    parse_same_branch_vector_keys,  # noqa: F401 - compatibility export for tests/users.
+    run_direct_free_boundary,
+    same_branch_derivative_gate_evidence,  # noqa: F401 - compatibility export for tests/users.
+    same_branch_derivative_proposal_from_report,  # noqa: F401 - compatibility export for tests/users.
+    same_branch_derivative_proposals_from_report,
+    same_branch_replay_options_from_args,  # noqa: F401 - compatibility export for tests/users.
+    same_branch_report_direction_policy,  # noqa: F401 - compatibility export for tests/users.
+    same_branch_report_runtime_configs,
+    same_branch_report_vector_keys_from_args,  # noqa: F401 - compatibility export for tests/users.
+    same_branch_scalar_function_registry,
+    select_coil_variables,
+    summarize_run,
+    variable_records,
+    write_json,
+    write_same_branch_validation_report_core,
+)
+
+
+SKIP_EXIT_CODE = 77
+DEFAULT_INPUT = REPO_ROOT / "examples" / "data" / "input.LandremanPaul2021_QA_lowres"
+DEFAULT_OUTDIR = REPO_ROOT / "results" / "free_boundary_QS_coil_optimization"
+DEFAULT_ESSOS_COIL_JSON = "ESSOS_biot_savart_LandremanPaulQA.json"
+DEFAULT_FREE_BOUNDARY_PHIEDGE = -0.025
+
+
+class SkipExample(RuntimeError):
+    """Raised when optional external assets needed by the example are absent."""
+
+
+def candidate_essos_input_dirs() -> list[Path]:
+    candidates: list[Path] = []
+    if os.getenv("ESSOS_INPUT_DIR"):
+        candidates.append(Path(os.environ["ESSOS_INPUT_DIR"]).expanduser())
+    candidates.extend(
+        [
+            REPO_ROOT.parent / "ESSOS" / "examples" / "input_files",
+            REPO_ROOT.parent / "ESSOS_mgrid_pr" / "examples" / "input_files",
+        ]
+    )
+    return candidates
+
+
+def find_essos_coil_json() -> Path:
+    for directory in candidate_essos_input_dirs():
+        path = directory / DEFAULT_ESSOS_COIL_JSON
+        if path.exists():
+            return path
+    searched = "\n  ".join(str(path) for path in candidate_essos_input_dirs())
+    raise SkipExample(
+        f"Missing ESSOS coil asset {DEFAULT_ESSOS_COIL_JSON}. Set ESSOS_INPUT_DIR "
+        f"to an ESSOS examples/input_files directory. Searched:\n  {searched}"
+    )
+
+
+def load_essos_provider(coils_json: Path | None, *, chunk_size: int, current_scale: float) -> tuple[CoilFieldParams, dict[str, Any]]:
+    try:
+        from essos.coils import Coils_from_json
+    except Exception as exc:  # pragma: no cover - depends on optional ESSOS.
+        raise SkipExample(
+            "ESSOS is not importable. Install ESSOS or set PYTHONPATH to an ESSOS checkout, "
+            "or use --provider circle for a synthetic direct-coil smoke."
+        ) from exc
+
+    resolved = coils_json if coils_json is not None else find_essos_coil_json()
+    if not resolved.exists():
+        raise SkipExample(f"ESSOS coil JSON does not exist: {resolved}")
+    coils = Coils_from_json(str(resolved))
+    params = from_essos_coils(coils, chunk_size=chunk_size)
+    params = replace(params, current_scale=float(params.current_scale) * float(current_scale))
+    metadata = {
+        "provider": "essos",
+        "coils_json": resolved,
+        "n_base_coils": int(np.asarray(params.base_currents).size),
+        "n_segments": int(params.n_segments),
+        "nfp": int(params.nfp),
+        "stellsym": bool(params.stellsym),
+        "current_scale_multiplier": float(current_scale),
+    }
+    return params, metadata
+
+
+def same_branch_direction_from_variables(
+    variables: list[tuple[str, tuple[int, ...]]],
+    *,
+    policy: str = "all",
+) -> np.ndarray:
+    """Return a same-branch validation direction in optimizer space."""
+
+    policy = str(policy).strip().lower()
+    if policy not in {"all", "current-only"}:
+        raise ValueError("same-branch direction policy must be 'all' or 'current-only'")
+    direction = np.zeros(len(variables), dtype=float)
+    current_index = next((i for i, (kind, _index) in enumerate(variables) if kind == "current"), None)
+    fourier_index = next((i for i, (kind, _index) in enumerate(variables) if kind == "fourier_dof"), None)
+    if current_index is not None:
+        direction[current_index] = 1.0
+    if policy == "all" and fourier_index is not None:
+        direction[fourier_index] = 1.0
+    if not np.any(direction):
+        raise ValueError(f"same-branch validation policy {policy!r} needs at least one matching coil variable")
+    return direction
+
+
+def coil_param_direction_from_variables(
+    base_params: CoilFieldParams,
+    x_direction: np.ndarray,
+    variables: list[tuple[str, tuple[int, ...]]],
+    *,
+    current_step: float,
+    dof_step: float,
+) -> CoilFieldParams:
+    """Return the direct-coil parameter tangent for one optimizer direction."""
+
+    currents = np.zeros_like(np.asarray(base_params.base_currents, dtype=float))
+    dofs = np.zeros_like(np.asarray(base_params.base_curve_dofs, dtype=float))
+    for value, (kind, index) in zip(np.asarray(x_direction, dtype=float), variables, strict=True):
+        if value == 0.0:
+            continue
+        if kind == "current":
+            i = index[0]
+            currents[i] += float(value) * float(current_step) * float(np.asarray(base_params.base_currents)[i])
+        elif kind == "fourier_dof":
+            dofs[index] += float(value) * float(dof_step)
+        else:  # pragma: no cover - defensive programming for future variable kinds.
+            raise ValueError(f"unknown coil variable kind {kind!r}")
+    return base_params.with_arrays(base_curve_dofs=jnp.asarray(dofs), base_currents=jnp.asarray(currents))
+
+
+def same_branch_report_anchor_params(
+    base_params: CoilFieldParams,
+    best: dict[str, Any] | None,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+) -> tuple[CoilFieldParams, str]:
+    """Return the coil point used by the opt-in branch-local derivative report."""
+
+    anchor = str(getattr(args, "same_branch_report_anchor", "best")).strip().lower()
+    if anchor not in {"initial", "best"}:
+        raise ValueError("--same-branch-report-anchor must be one of initial, best")
+    if anchor == "initial":
+        return base_params, "initial"
+    if best is None or "x" not in best:
+        return base_params, "initial_no_best_available"
+    return (
+        apply_coil_variables(
+            base_params,
+            np.asarray(best["x"], dtype=float),
+            variables,
+            current_step=float(args.current_step),
+            dof_step=float(args.dof_step),
+        ),
+        "best",
+    )
+
+
+def same_branch_params_for_scale(
+    base_params: CoilFieldParams,
+    direction_x: np.ndarray,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+):
+    """Return the complete-FD coil-parameter callback for a report direction."""
+
+    def params_for(scale: float) -> CoilFieldParams:
+        return apply_coil_variables(
+            base_params,
+            direction_x * float(scale),
+            variables,
+            current_step=float(args.current_step),
+            dof_step=float(args.dof_step),
+        )
+
+    return params_for
+
+
+def same_branch_objective_values_callback(
+    *,
+    args: argparse.Namespace,
+    qs_surfaces: list[float],
+    scalar_value_fns: dict[str, Any],
+    requested_report_keys: set[str],
+):
+    """Return physical scalar values for complete-solve same-branch reports."""
+
+    needs_boozer_qs = "boozer_qs_total" in requested_report_keys
+
+    def objective_fn(payload: dict[str, Any]) -> dict[str, float]:
+        run_like = SimpleNamespace(
+            result=payload["result"],
+            state=payload["result"].state,
+            static=payload["init"].static,
+            indata=payload["init"].indata,
+            signgs=payload["init"].signgs,
+        )
+        summary = summarize_run(
+            run_like,
+            payload["params"],
+            objective=np.nan,
+            wall_s=np.nan,
+            target_aspect=float(args.target_aspect),
+            target_iota=float(args.target_iota),
+            helicity_m=int(args.helicity_m),
+            helicity_n=int(args.helicity_n),
+            qs_surfaces=qs_surfaces,
+            qs_ntheta=int(args.qs_ntheta),
+            qs_nphi=int(args.qs_nphi),
+        )
+        total = objective_from_summary(
+            summary,
+            residual_weight=float(args.residual_weight),
+            qs_weight=float(args.qs_weight),
+            aspect_weight=float(args.aspect_weight),
+            iota_weight=float(args.iota_weight),
+        )
+        values = {
+            "objective": total,
+            "state_norm": scalar_value_fns["state_norm"](payload),
+            "residual_proxy": float(summary.get("residual_proxy") or 0.0),
+            "qs_total": float(summary["qs_total"]) if summary.get("qs_total") is not None else np.nan,
+            "aspect": float(summary["aspect"]) if summary.get("aspect") is not None else np.nan,
+            "mean_iota": float(summary["mean_iota"]) if summary.get("mean_iota") is not None else np.nan,
+            "lcfs_boundary_moment": scalar_value_fns["lcfs_boundary_moment"](payload),
+            "accepted_bnormal_rms": scalar_value_fns["accepted_bnormal_rms"](payload),
+            "bnormal_rms": float(summary["free_boundary_bnormal_rms"])
+            if summary.get("free_boundary_bnormal_rms") is not None
+            else np.nan,
+        }
+        if needs_boozer_qs:
+            values["boozer_qs_total"] = scalar_value_fns["boozer_qs_total"](payload)
+        for key in sorted(requested_report_keys):
+            if key not in values and key in scalar_value_fns:
+                values[key] = scalar_value_fns[key](payload)
+        return values
+
+    return objective_fn
+
+
+def write_same_branch_validation_report(
+    *,
+    input_path: Path,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+    outdir: Path,
+    report_anchor: str = "initial",
+) -> Path:
+    """Write an optional same-branch complete-solve FD report for this example."""
+    return write_same_branch_validation_report_core(
+        input_path=input_path,
+        base_params=base_params,
+        variables=variables,
+        args=args,
+        outdir=outdir,
+        report_anchor=report_anchor,
+        direction_from_variables_fn=same_branch_direction_from_variables,
+        coil_param_direction_from_variables_fn=coil_param_direction_from_variables,
+        params_for_scale_fn=same_branch_params_for_scale,
+        objective_values_callback_fn=same_branch_objective_values_callback,
+        variable_records_fn=variable_records,
+        scalar_function_registry_fn=same_branch_scalar_function_registry,
+        write_json_fn=write_json,
+        json_safe_payload_fn=json_safe_payload,
+    )
+
+
+def attach_same_branch_report_and_proposals(
+    summary: dict[str, Any],
+    *,
+    input_path: Path,
+    base_params: CoilFieldParams,
+    variables: list[tuple[str, tuple[int, ...]]],
+    args: argparse.Namespace,
+    outdir: Path,
+    objective_model: dict[str, Any],
+    evaluate: Any,
+    get_best: Any,
+    history: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach optional same-branch derivative reports and proposal trials."""
+
+    if bool(args.write_same_branch_report):
+        report_best_before_derivative_proposal = get_best()
+        report_params, report_anchor = same_branch_report_anchor_params(
+            base_params,
+            report_best_before_derivative_proposal,
+            variables,
+            args,
+        )
+        report_path = write_same_branch_validation_report(
+            input_path=input_path,
+            base_params=report_params,
+            variables=variables,
+            args=args,
+            outdir=outdir,
+            report_anchor=report_anchor,
+        )
+        summary["same_branch_complete_solve_report"] = report_path
+        summary["same_branch_complete_solve_report_anchor"] = report_anchor
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": bool(args.same_branch_derivative_proposal),
+            "final_best_changed_after_report": False,
+            "report_matches_final_best": True,
+        }
+        if bool(args.same_branch_derivative_proposal):
+            attach_same_branch_derivative_proposal_summary(
+                summary,
+                report_path=report_path,
+                report_best_before_derivative_proposal=report_best_before_derivative_proposal,
+                objective_model=objective_model,
+                args=args,
+                evaluate=evaluate,
+                get_best=get_best,
+                history=history,
+            )
+        else:
+            summary["same_branch_derivative_proposal"] = {
+                "available": False,
+                "reason": "not requested",
+            }
+            summary["same_branch_derivative_proposals"] = []
+    elif bool(args.same_branch_derivative_proposal):
+        summary["same_branch_derivative_proposal"] = {
+            "available": False,
+            "reason": "--same-branch-derivative-proposal requires --write-same-branch-report",
+        }
+        summary["same_branch_derivative_proposals"] = []
+    return summary
+
+
+def attach_same_branch_derivative_proposal_summary(
+    summary: dict[str, Any],
+    *,
+    report_path: Path,
+    report_best_before_derivative_proposal: dict[str, Any] | None,
+    objective_model: dict[str, Any],
+    args: argparse.Namespace,
+    evaluate: Any,
+    get_best: Any,
+    history: list[dict[str, Any]],
+) -> None:
+    """Evaluate same-branch derivative proposals with complete-solve authority."""
+
+    report_data = json.loads(report_path.read_text())
+    proposal_steps = (
+        parse_float_list(str(args.same_branch_proposal_steps))
+        if str(args.same_branch_proposal_steps).strip()
+        else [float(args.same_branch_proposal_step)]
+    )
+    proposals = same_branch_derivative_proposals_from_report(
+        report_data,
+        objective_model,
+        get_best(),
+        step_sizes=proposal_steps,
+        max_base_abs_delta=float(args.same_branch_proposal_max_base_delta),
+        max_trials=int(args.same_branch_proposal_max_trials),
+    )
+    evaluated_proposals: list[dict[str, Any]] = []
+    final_best_changed_after_report = False
+    accepted_proposal_index: int | None = None
+    for proposal in proposals:
+        if not proposal.get("available"):
+            evaluated_proposals.append(proposal)
+            break
+        previous_best = get_best()
+        previous_best_objective = None if previous_best is None else float(previous_best["summary"]["objective"])
+        trial_objective = evaluate(np.asarray(proposal["trial_x"], dtype=float))
+        trial_entry = history[-1]
+        accepted_by_complete_solve = bool(get_best() is trial_entry)
+        proposal["trial_eval"] = int(trial_entry["eval"])
+        proposal["trial_objective"] = float(trial_objective)
+        proposal["previous_best_objective"] = previous_best_objective
+        proposal["accepted_by_complete_solve"] = accepted_by_complete_solve
+        proposal["rejected_by_complete_solve"] = not accepted_by_complete_solve
+        proposal["acceptance_decision_source"] = "complete_solve_objective"
+        proposal["best_eval_before_trial"] = None if previous_best is None else int(previous_best.get("eval", -1))
+        proposal["best_eval_after_trial"] = None if get_best() is None else int(get_best().get("eval", -1))
+        evaluated_proposals.append(proposal)
+        if accepted_by_complete_solve:
+            final_best_changed_after_report = True
+            accepted_proposal_index = int(proposal.get("trial_index", len(evaluated_proposals) - 1))
+            break
+
+    proposal = evaluated_proposals[-1] if evaluated_proposals else {
+        "available": False,
+        "reason": "no same-branch derivative proposal was generated",
+    }
+    if evaluated_proposals and any(item.get("available") for item in evaluated_proposals):
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": True,
+            "final_best_changed_after_report": final_best_changed_after_report,
+            "report_matches_final_best": not final_best_changed_after_report,
+            "accepted_proposal_index": accepted_proposal_index,
+            "note": (
+                "The same-branch report is the derivative evidence used to form the trial. "
+                "If the normal complete solve accepts that trial, rerun the report at the "
+                "new best point for final-point derivative evidence."
+            ),
+        }
+    elif report_best_before_derivative_proposal is not get_best():
+        summary["same_branch_complete_solve_report_final_best_status"] = {
+            "report_generated_before_derivative_proposal": True,
+            "final_best_changed_after_report": True,
+            "report_matches_final_best": False,
+            "note": "The final best point changed after the report was written.",
+        }
+    summary["same_branch_derivative_proposal"] = proposal
+    summary["same_branch_derivative_proposals"] = evaluated_proposals
+
+
+def load_direct_coil_provider_from_args(args: argparse.Namespace) -> tuple[CoilFieldParams, dict[str, Any]]:
+    """Load the direct-coil provider requested by the example arguments."""
+
+    if args.provider == "essos":
+        return load_essos_provider(
+            args.coils_json,
+            chunk_size=256 if args.chunk_size is None else int(args.chunk_size),
+            current_scale=float(args.current_scale),
+        )
+    if args.provider == "circle":
+        return make_circle_provider(
+            current_scale=float(args.current_scale),
+            chunk_size=None if args.chunk_size is None else int(args.chunk_size),
+            current=float(args.circle_current),
+            radius=float(args.circle_radius),
+            n_segments=int(args.circle_n_segments),
+            nfp=int(args.circle_nfp),
+            stellsym=bool(args.circle_stellsym),
+        )
+    raise ValueError(f"unknown provider {args.provider!r}")
+
+
+def build_direct_coil_qs_optimization_context(args: argparse.Namespace) -> SimpleNamespace:
+    """Build the VMEC input, selected variables, and summary metadata."""
+
+    base_params, provider_metadata = load_direct_coil_provider_from_args(args)
+
+    x0, variables = select_coil_variables(
+        base_params,
+        max_current_vars=int(args.max_current_vars),
+        max_fourier_vars=int(args.max_fourier_vars),
+    )
+    if not variables:
+        raise ValueError("No coil optimization variables selected. Increase --max-current-vars or --max-fourier-vars.")
+    variable_manifest = variable_records(
+        variables,
+        base_params,
+        current_step=float(args.current_step),
+        dof_step=float(args.dof_step),
+    )
+
+    outdir = args.outdir.resolve()
+    outdir.mkdir(parents=True, exist_ok=True)
+    workflow = direct_coil_optimization_workflow_metadata(REPO_ROOT)
+    input_path = make_free_boundary_indata(
+        args.input,
+        outdir / "input.direct_coil_qs",
+        vmec_max_iter=int(args.vmec_max_iter),
+        ftol=float(args.ftol),
+        ns=int(args.ns),
+        mpol=int(args.mpol),
+        ntor=int(args.ntor),
+        nzeta=int(args.nzeta),
+        beta_percent=float(args.beta),
+        pressure_profile=str(args.pressure_profile),
+        pressure_scale=float(args.pressure_scale),
+        phiedge=float(args.phiedge),
+    )
+
+    objective_model, vmec_config, optimizer_config = direct_coil_qs_summary_configs(
+        args,
+        input_path=input_path,
+        workflow=workflow,
+    )
+    same_branch_report_config, same_branch_derivative_proposal_config = same_branch_report_runtime_configs(
+        args,
+        variables,
+    )
+    summary_base = {
+        "phase": "single-stage-direct-coil-validation",
+        "flow": workflow["flow"],
+        "workflow": workflow,
+        "scope": "deterministic coil-only direct-coil free-boundary QS optimization example",
+        "plasma_boundary_optimized": False,
+        "single_stage_limitations": SINGLE_STAGE_LIMITATIONS,
+        "optimized_variables": variable_manifest,
+        "objective_model": objective_model,
+        "provider": provider_metadata,
+        "baseline_coils": coil_diagnostics(base_params),
+        "vmec_config": vmec_config,
+        "optimizer_config": optimizer_config,
+        "same_branch_report_config": same_branch_report_config,
+        "same_branch_derivative_proposal_config": same_branch_derivative_proposal_config,
+        "input": input_path,
+        "outdir": outdir,
+        "history_json": outdir / "history.json",
+        "best_wout": outdir / "wout_best_direct_coil_qs.nc",
+    }
+    return SimpleNamespace(
+        base_params=base_params,
+        provider_metadata=provider_metadata,
+        x0=x0,
+        variables=variables,
+        variable_manifest=variable_manifest,
+        outdir=outdir,
+        input_path=input_path,
+        objective_model=objective_model,
+        summary_base=summary_base,
+    )
+
+
+class DirectCoilQSObjectiveEvaluator:
+    """Stateful complete-solve objective used by the small Powell example."""
+
+    def __init__(self, args: argparse.Namespace, context: SimpleNamespace) -> None:
+        self.args = args
+        self.context = context
+        self.history: list[dict[str, Any]] = []
+        self.best: dict[str, Any] | None = None
+
+    def __call__(self, x: np.ndarray) -> float:
+        eval_id = len(self.history)
+        params = apply_coil_variables(
+            self.context.base_params,
+            x,
+            self.context.variables,
+            current_step=float(self.args.current_step),
+            dof_step=float(self.args.dof_step),
+        )
+        try:
+            entry, objective = self._successful_entry(eval_id, x, params)
+        except Exception as exc:
+            objective = float(self.args.failure_objective)
+            entry = self._failure_entry(eval_id, x, params, exc, objective)
+            print(f"eval={eval_id:03d} failed with {entry['error']}; returning {objective:.3e}", flush=True)
+        self.history.append(entry)
+        write_json(self.context.outdir / "history.json", self.history)
+        return objective
+
+    def _successful_entry(
+        self,
+        eval_id: int,
+        x: np.ndarray,
+        params: CoilFieldParams,
+    ) -> tuple[dict[str, Any], float]:
+        run, wall_s = run_direct_free_boundary(
+            self.context.input_path,
+            params,
+            vmec_max_iter=int(self.args.vmec_max_iter),
+            activate_fsq=float(self.args.activate_fsq),
+            jit_forces=bool(self.args.jit_forces),
+        )
+        provisional = summarize_run(
+            run,
+            params,
+            objective=np.nan,
+            wall_s=wall_s,
+            target_aspect=float(self.args.target_aspect),
+            target_iota=float(self.args.target_iota),
+            helicity_m=int(self.args.helicity_m),
+            helicity_n=int(self.args.helicity_n),
+            qs_surfaces=parse_float_list(str(self.args.qs_surfaces)),
+            qs_ntheta=int(self.args.qs_ntheta),
+            qs_nphi=int(self.args.qs_nphi),
+        )
+        objective_terms = objective_terms_from_summary(
+            provisional,
+            residual_weight=float(self.args.residual_weight),
+            qs_weight=float(self.args.qs_weight),
+            aspect_weight=float(self.args.aspect_weight),
+            iota_weight=float(self.args.iota_weight),
+        )
+        objective = float(objective_terms["total"])
+        provisional["objective"] = objective
+        provisional["objective_terms"] = objective_terms
+        entry = {
+            "eval": eval_id,
+            "x": np.asarray(x, dtype=float).tolist(),
+            "variables": self.context.variable_manifest,
+            "coil_diagnostics": coil_diagnostics(params),
+            "summary": provisional,
+        }
+        if self.best is None or objective < float(self.best["summary"]["objective"]):
+            self.best = entry
+            write_wout_from_fixed_boundary_run(self.context.outdir / "wout_best_direct_coil_qs.nc", run, include_fsq=True)
+        print_direct_coil_qs_evaluation(eval_id, objective, provisional, objective_terms, wall_s)
+        return entry, objective
+
+    def _failure_entry(
+        self,
+        eval_id: int,
+        x: np.ndarray,
+        params: CoilFieldParams,
+        exc: Exception,
+        objective: float,
+    ) -> dict[str, Any]:
+        return {
+            "eval": eval_id,
+            "x": np.asarray(x, dtype=float).tolist(),
+            "variables": self.context.variable_manifest,
+            "coil_diagnostics": coil_diagnostics(params),
+            "error": f"{type(exc).__name__}: {exc}",
+            "summary": {"objective": objective},
+        }
+
+
+def print_direct_coil_qs_evaluation(
+    eval_id: int,
+    objective: float,
+    provisional: dict[str, Any],
+    objective_terms: dict[str, Any],
+    wall_s: float,
+) -> None:
+    """Print one complete-solve objective evaluation in a stable compact form."""
+
+    print(
+        f"eval={eval_id:03d} objective={objective:.6e} "
+        f"residual={provisional['residual_proxy']:.3e} qs={provisional['qs_total']} "
+        f"aspect={provisional['aspect']} "
+        f"mean_iota={provisional['mean_iota']} "
+        f"residual_term={objective_terms['residual']['contribution']:.3e} "
+        f"qs_term={objective_terms['quasisymmetry']['contribution']:.3e} "
+        f"aspect_term={objective_terms['aspect']['contribution']:.3e} "
+        f"iota_term={objective_terms['mean_iota']['contribution']:.3e} wall_s={wall_s:.2f}",
+        flush=True,
+    )
+
+
+def optimize_coils(args: argparse.Namespace) -> dict[str, Any]:
+    context = build_direct_coil_qs_optimization_context(args)
+    if bool(args.dry_run):
+        summary = {**context.summary_base, "dry_run": True}
+        write_json(context.outdir / "summary.json", summary)
+        print("Flow: single-stage direct-coil/no-mgrid optimization; only coil variables are selected.")
+        print(f"Dry run: wrote {context.outdir / 'summary.json'} without running VMEC or the optimizer.")
+        return summary
+
+    from scipy.optimize import minimize
+
+    evaluator = DirectCoilQSObjectiveEvaluator(args, context)
+    optimizer_result = minimize(
+        evaluator,
+        context.x0,
+        method="Powell",
+        options={
+            "maxiter": int(args.max_iter),
+            "maxfev": int(args.max_evals),
+            "xtol": float(args.xtol),
+            "ftol": float(args.optimizer_ftol),
+            "disp": False,
+        },
+    )
+
+    summary = {
+        **context.summary_base,
+        "dry_run": False,
+        "optimizer": {
+            "method": "Powell",
+            "success": bool(optimizer_result.success),
+            "message": str(optimizer_result.message),
+            "nfev": int(optimizer_result.nfev),
+            "nit": int(optimizer_result.nit),
+            "fun": float(optimizer_result.fun),
+            "x": np.asarray(optimizer_result.x, dtype=float),
+        },
+        "best": evaluator.best,
+    }
+    attach_same_branch_report_and_proposals(
+        summary,
+        input_path=context.input_path,
+        base_params=context.base_params,
+        variables=context.variables,
+        args=args,
+        outdir=context.outdir,
+        objective_model=context.objective_model,
+        evaluate=evaluator,
+        get_best=lambda: evaluator.best,
+        history=evaluator.history,
+    )
+    summary["best"] = evaluator.best
+    write_json(context.outdir / "summary.json", summary)
+    print("Flow: single-stage direct-coil/no-mgrid optimization; every trial used a complete free-boundary solve.")
+    print(f"Wrote {context.outdir / 'history.json'}")
+    print(f"Wrote {context.outdir / 'summary.json'}")
+    return summary
+
+
+def add_provider_options(parser: argparse.ArgumentParser) -> None:
+    """Add input/direct-coil provider options."""
+
+    parser.add_argument("--smoke", action="store_true", help="Use tiny defaults for a fast direct-coil QS smoke.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Write configuration and coil/variable diagnostics without running VMEC or the optimizer.",
+    )
+    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR)
+    parser.add_argument("--provider", choices=("essos", "circle"), default="essos")
+    parser.add_argument("--coils-json", type=Path, default=None)
+    parser.add_argument("--current-scale", type=float, default=1.0)
+    parser.add_argument("--circle-current", type=float, default=2.0, help="Base current for the synthetic circle provider.")
+    parser.add_argument("--circle-radius", type=float, default=1.4, help="Major radius of the synthetic circle provider.")
+    parser.add_argument("--circle-n-segments", type=int, default=96, help="Quadrature segments for the synthetic circle provider.")
+    parser.add_argument("--circle-nfp", type=int, default=1, help="Field periods for synthetic circle symmetry expansion.")
+    parser.add_argument(
+        "--circle-stellsym",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply stellarator symmetry to the synthetic circle provider.",
+    )
+    parser.add_argument(
+        "--chunk-size",
+        type=int,
+        default=None,
+        help=(
+            "Direct-coil field point chunk size. By default, synthetic circle runs are "
+            "unchunked and ESSOS runs use 256. Use 0 to disable chunking explicitly."
+        ),
+    )
+
+
+def add_solver_optimizer_options(parser: argparse.ArgumentParser) -> None:
+    """Add VMEC inner-solve and outer optimizer options."""
+
+    parser.add_argument("--max-iter", type=int, default=None, help="Outer Powell optimizer iterations.")
+    parser.add_argument("--max-evals", type=int, default=None, help="Maximum objective evaluations.")
+    parser.add_argument("--vmec-max-iter", type=int, default=None, help="Inner free-boundary VMEC iterations.")
+    parser.add_argument("--ftol", type=float, default=1.0e-8)
+    parser.add_argument("--optimizer-ftol", type=float, default=1.0e-4)
+    parser.add_argument("--xtol", type=float, default=1.0e-4)
+    parser.add_argument("--ns", type=int, default=None)
+    parser.add_argument("--mpol", type=int, default=None)
+    parser.add_argument("--ntor", type=int, default=None)
+    parser.add_argument("--nzeta", type=int, default=None)
+    parser.add_argument("--beta", type=float, default=0.0, help="Nominal beta percent for --pressure-profile standard.")
+    parser.add_argument(
+        "--pressure-profile",
+        choices=("standard", "linear-scale"),
+        default="standard",
+        help=(
+            "Pressure-profile model. 'standard' uses e*(ne*Te+ni*Ti) with "
+            "Landreman-style beta scaling. 'linear-scale' uses the legacy "
+            "PRES_SCALE*(1-s) profile."
+        ),
+    )
+    parser.add_argument("--pressure-scale", type=float, default=0.0, help="Legacy PRES_SCALE for --pressure-profile linear-scale.")
+    parser.add_argument(
+        "--phiedge",
+        type=float,
+        default=DEFAULT_FREE_BOUNDARY_PHIEDGE,
+        help="PHIEDGE override matching the unit-scale ESSOS LP-QA coil/input fixture.",
+    )
+    parser.add_argument("--activate-fsq", type=float, default=1.0e99)
+    parser.add_argument(
+        "--jit-forces",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use JIT force kernels; --no-jit-forces is a parity/debug escape hatch.",
+    )
+    parser.add_argument("--max-current-vars", type=int, default=1)
+    parser.add_argument("--max-fourier-vars", type=int, default=1)
+    parser.add_argument("--current-step", type=float, default=0.02)
+    parser.add_argument("--dof-step", type=float, default=1.0e-3)
+
+
+def add_qs_objective_options(parser: argparse.ArgumentParser) -> None:
+    """Add QS objective, target, and weight options."""
+
+    parser.add_argument("--target-aspect", type=float, default=6.0)
+    parser.add_argument("--target-iota", type=float, default=0.4)
+    parser.add_argument(
+        "--helicity-m",
+        type=int,
+        default=1,
+        help="QS helicity m for the VMEC-state quasisymmetry-ratio residual; QH uses 1.",
+    )
+    parser.add_argument(
+        "--helicity-n",
+        type=int,
+        default=0,
+        help="QS helicity n for the VMEC-state quasisymmetry-ratio residual; QA uses 0, QH typically uses -1.",
+    )
+    parser.add_argument(
+        "--qs-surfaces",
+        default="0.25,0.5,0.75",
+        help="Comma/space-separated normalized toroidal-flux surfaces for the QS residual.",
+    )
+    parser.add_argument("--qs-ntheta", type=int, default=31, help="Angular theta grid for the QS residual.")
+    parser.add_argument("--qs-nphi", type=int, default=32, help="Angular phi grid for the QS residual.")
+    parser.add_argument(
+        "--same-branch-boozer-mboz",
+        type=int,
+        default=8,
+        help="Boozer poloidal resolution for opt-in same-branch boozer_qs_total validation.",
+    )
+    parser.add_argument(
+        "--same-branch-boozer-nboz",
+        type=int,
+        default=8,
+        help="Boozer toroidal resolution for opt-in same-branch boozer_qs_total validation.",
+    )
+    parser.add_argument(
+        "--same-branch-boozer-normalize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Normalize the opt-in boozer_qs_total by total Boozer |B| spectral power.",
+    )
+    parser.add_argument("--residual-weight", type=float, default=1.0)
+    parser.add_argument("--qs-weight", type=float, default=1.0)
+    parser.add_argument("--aspect-weight", type=float, default=1.0e-2)
+    parser.add_argument("--iota-weight", type=float, default=1.0)
+    parser.add_argument("--failure-objective", type=float, default=1.0e30)
+
+
+def add_same_branch_report_core_options(parser: argparse.ArgumentParser) -> None:
+    """Add opt-in same-branch validation report options."""
+
+    parser.add_argument(
+        "--write-same-branch-report",
+        action="store_true",
+        help="After the optimization, write an opt-in same-branch complete-solve FD validation report.",
+    )
+    parser.add_argument(
+        "--same-branch-report-anchor",
+        choices=("best", "initial"),
+        default="best",
+        help=(
+            "Coil point for --write-same-branch-report. The default validates "
+            "the best optimized coil point; 'initial' preserves the older "
+            "initial-coil diagnostic."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-direction",
+        choices=("auto", "all", "current-only"),
+        default="auto",
+        help=(
+            "Optimizer-space finite-difference/JVP direction for same-branch reports. "
+            "'all' uses one current and one Fourier coefficient when available. "
+            "'current-only' uses only one current and enables the fixed-coil-geometry "
+            "JVP fast path. 'auto' uses current-only for derivative-proposal reports "
+            "when a current variable is selected, otherwise all."
+        ),
+    )
+    parser.add_argument("--same-branch-report-eps", type=float, default=1.0e-4)
+    parser.add_argument(
+        "--same-branch-report-mode",
+        choices=("scalar", "vector", "none"),
+        default="vector",
+        help=(
+            "Derivative detail for --write-same-branch-report. 'vector' is the default "
+            "validated production-report path: in direct mode it reports JVP "
+            "directional derivatives for several physical scalars without materializing "
+            "the full Jacobian. 'scalar' validates one branch-local physical-scalar "
+            "gradient. 'none' writes only complete-solve FD diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-scalar-key",
+        choices=SUPPORTED_SAME_BRANCH_VECTOR_KEYS,
+        default="qs_total",
+        help=(
+            "Physical scalar validated by --same-branch-report-mode scalar. "
+            "Use 'state_norm' as a non-physics replay-graph timing probe, "
+            "'aspect' for a cheap physical scalar, 'qs_total' for the VMEC-state "
+            "QS scalar, 'boozer_qs_total' for the opt-in Boozer-space QS scalar, "
+            "or 'betatotal' for the finite-beta total-beta scalar."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-vector-keys",
+        default=None,
+        help=(
+            "Comma/space-separated physical scalars for --same-branch-report-mode vector. "
+            f"Supported: {', '.join(SUPPORTED_SAME_BRANCH_VECTOR_KEYS)}. "
+            "Alias: bnormal_rms -> accepted_bnormal_rms. "
+            "Use state_norm as a non-physics replay-graph timing probe. "
+            "Use all supported keys for broader validation; the default is "
+            f"{','.join(DEFAULT_SAME_BRANCH_VECTOR_KEYS)}. Final-state-only "
+            f"keys ({', '.join(STATE_ONLY_SAME_BRANCH_KEYS)}) use a compact replay "
+            "that omits accepted-history RMS arrays; accepted_bnormal_rms keeps "
+            "the full-history path. When --same-branch-derivative-proposal is "
+            "requested and no explicit key list is provided, the default is "
+            "narrowed to aspect,qs_total,mean_iota because those are the "
+            "objective terms consumed by the proposal."
+        ),
+    )
+
+
+def add_same_branch_replay_options(parser: argparse.ArgumentParser) -> None:
+    """Add accepted-branch replay and NESTOR/source response options."""
+
+    parser.add_argument(
+        "--same-branch-report-ad-mode",
+        choices=("direct", "custom_vjp"),
+        default="direct",
+        help=(
+            "Accepted-branch AD path for scalar/vector derivative reports. "
+            "'direct' differentiates the fixed replay directly and is faster; "
+            "'custom_vjp' exercises the explicit custom-VJP wrapper."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-disable-jit-preconditioner",
+        action="store_true",
+        help=(
+            "Diagnostic only: use the non-JIT radial preconditioner apply inside "
+            "branch-local accepted replay to isolate cold JVP graph construction."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-disable-analytic",
+        action="store_true",
+        help=(
+            "Diagnostic only: omit analytic NESTOR terms from branch-local accepted replay "
+            "to isolate graph construction cost. This changes the replay operator and is "
+            "not a promoted physics-validation path."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-freeze-bsqvac",
+        action="store_true",
+        help=(
+            "Diagnostic only: reuse accepted-trace bsqvac instead of differentiably recomputing "
+            "the direct-coil/NESTOR vacuum response. This isolates strict VMEC update graph cost "
+            "and is not a promoted physics-validation path."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-freeze-vacuum-field",
+        action="store_true",
+        help=(
+            "Diagnostic only: reuse accepted-trace vacuum-field projection arrays while still "
+            "running JAX NESTOR/source assembly. This isolates Biot-Savart/projection graph cost "
+            "from NESTOR graph cost and is not a promoted physics-validation path."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-solve-mode",
+        choices=("dense", "matrix_free", "operator", "operator_gmres", "gmres", "bicgstab"),
+        default="dense",
+        help=(
+            "NESTOR/source solve used inside the fixed accepted-branch replay. "
+            "The default dense path is the promoted validation path; matrix_free/gmres/bicgstab "
+            "exercise the opt-in matrix-free response seam for profiling."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-solver",
+        choices=("gmres", "bicgstab"),
+        default="gmres",
+        help="Krylov solver for --same-branch-report-nestor-solve-mode matrix_free/operator.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-tol",
+        type=float,
+        default=1.0e-11,
+        help="Relative tolerance for the matrix-free NESTOR/source Krylov solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-atol",
+        type=float,
+        default=1.0e-13,
+        help="Absolute tolerance for the matrix-free NESTOR/source Krylov solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-maxiter",
+        type=int,
+        default=None,
+        help="Optional maximum Krylov iterations for the matrix-free NESTOR/source solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-nestor-operator-restart",
+        type=int,
+        default=None,
+        help="Optional GMRES restart length for the matrix-free NESTOR/source solve.",
+    )
+    parser.add_argument(
+        "--same-branch-report-enable-current-jvp-cache",
+        action="store_true",
+        help=(
+            "Opt in to a small closure-bound cache for current-only branch-local "
+            "directional JVP executables. This is useful for repeated same-branch "
+            "profiling/proposal reports; complete solves remain the acceptance authority."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-disable-current-jvp-precompile",
+        action="store_true",
+        help=(
+            "When the current-JVP cache is enabled, keep the cached executable as "
+            "a lazy jax.jit callable instead of explicitly lowering/compiling on "
+            "cache miss. This is useful for backend comparisons; the default "
+            "precompiles to separate compile time from replay execution time."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-current-jvp-cache-probe",
+        action="store_true",
+        help=(
+            "After the main vector/JVP report, rerun the same branch-local vector replay once "
+            "to measure whether the current-only JVP executable cache hits. Requires the cache "
+            "flag to be useful and adds one extra replay/JVP call."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-replay-max-mode-count",
+        type=int,
+        default=220,
+        help=(
+            "Skip branch-local scalar/vector replay reports above this VMEC Fourier mode count. "
+            "Use 0 to disable the guard on larger-memory machines."
+        ),
+    )
+
+
+def add_same_branch_profile_options(parser: argparse.ArgumentParser) -> None:
+    """Add optional replay profiling and controller-slot gates."""
+
+    parser.add_argument(
+        "--same-branch-report-profile-nestor",
+        choices=("none", "dense-vs-matrix-free"),
+        default="none",
+        help=(
+            "Optionally profile dense and matrix-free NESTOR/source replay on the same "
+            "complete-solve payload. This adds replay/JVP timings only; it does not rerun "
+            "the complete FD triplet."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-profile-matrix-free-solvers",
+        default="gmres,bicgstab",
+        help="Comma/space-separated matrix-free solvers to profile; supported: gmres,bicgstab.",
+    )
+    parser.add_argument(
+        "--same-branch-report-profile-min-mode-count",
+        type=int,
+        default=96,
+        help="Do not promote matrix-free replay unless the VMEC Fourier mode count is at least this value.",
+    )
+    parser.add_argument(
+        "--same-branch-report-profile-min-speedup",
+        type=float,
+        default=1.15,
+        help="Do not promote matrix-free replay unless dense_wall/matrix_free_wall exceeds this speedup.",
+    )
+    parser.add_argument(
+        "--same-branch-report-profile-max-mode-count",
+        type=int,
+        default=220,
+        help=(
+            "Skip dense-vs-matrix-free replay profiling above this VMEC Fourier mode count. "
+            "Use 0 to disable the guard on larger-memory machines."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-rejected-slot-gate",
+        action="store_true",
+        help=(
+            "Also replay a fixed accepted/rejected controller-slot mask using the same branch. "
+            "This is a fingerprint/provenance gate and still does not differentiate adaptive "
+            "host branch selection."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-report-rejected-slot-mode",
+        choices=("replay", "fingerprint"),
+        default="replay",
+        help=(
+            "Validation mode for --same-branch-report-rejected-slot-gate. "
+            "'replay' runs the strict padded-trace replay/JVP gate; 'fingerprint' "
+            "records the accepted/rejected slot provenance without compiling an "
+            "additional replay graph."
+        ),
+    )
+
+
+def add_same_branch_proposal_options(parser: argparse.ArgumentParser) -> None:
+    """Add derivative-proposal options driven by same-branch reports."""
+
+    parser.add_argument(
+        "--same-branch-report-max-iter",
+        type=int,
+        default=None,
+        help="Inner iterations for --write-same-branch-report; defaults to --vmec-max-iter.",
+    )
+    parser.add_argument(
+        "--same-branch-derivative-proposal",
+        action="store_true",
+        help=(
+            "Opt-in only: after Powell, use the same-branch vector/JVP report "
+            "to propose one directional coil step, then evaluate that trial "
+            "with the normal complete-solve objective. This implies "
+            "--write-same-branch-report. This does not differentiate adaptive "
+            "host branch selection."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-proposal-step",
+        type=float,
+        default=0.05,
+        help="Optimizer-coordinate step length for --same-branch-derivative-proposal.",
+    )
+    parser.add_argument(
+        "--same-branch-proposal-steps",
+        default="",
+        help=(
+            "Optional comma/space-separated optimizer-coordinate step lengths "
+            "for --same-branch-derivative-proposal. If omitted, "
+            "--same-branch-proposal-step is used."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-proposal-max-trials",
+        type=int,
+        default=3,
+        help=(
+            "Maximum number of same-direction proposal lengths to evaluate with "
+            "complete solves. Values <=0 evaluate all requested lengths."
+        ),
+    )
+    parser.add_argument(
+        "--same-branch-proposal-max-base-delta",
+        type=float,
+        default=2.0e-3,
+        help=(
+            "Maximum allowed production-vs-replay base scalar mismatch for "
+            "--same-branch-derivative-proposal. Larger mismatches mark the "
+            "branch-local derivative evidence stale and skip the proposal."
+        ),
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_provider_options(parser)
+    add_solver_optimizer_options(parser)
+    add_qs_objective_options(parser)
+    add_same_branch_report_core_options(parser)
+    add_same_branch_replay_options(parser)
+    add_same_branch_profile_options(parser)
+    add_same_branch_proposal_options(parser)
+    return parser
+
+
+def apply_smoke_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    if args.smoke:
+        if args.chunk_size is None:
+            args.chunk_size = None if args.provider == "circle" else 256
+        elif int(args.chunk_size) <= 0:
+            args.chunk_size = None
+        args.max_iter = 1 if args.max_iter is None else args.max_iter
+        args.max_evals = 3 if args.max_evals is None else args.max_evals
+        # VMEC free-boundary cadence turns on the vacuum/NESTOR path only after
+        # the first iteration, so the smoke run needs at least two inner steps.
+        args.vmec_max_iter = 2 if args.vmec_max_iter is None else args.vmec_max_iter
+        args.ns = 12 if args.ns is None else args.ns
+        args.mpol = 3 if args.mpol is None else args.mpol
+        args.ntor = 2 if args.ntor is None else args.ntor
+        args.nzeta = 4 if args.nzeta is None else args.nzeta
+        return args
+
+    if args.chunk_size is None:
+        args.chunk_size = None if args.provider == "circle" else 256
+    elif int(args.chunk_size) <= 0:
+        args.chunk_size = None
+    args.max_iter = 4 if args.max_iter is None else args.max_iter
+    args.max_evals = 12 if args.max_evals is None else args.max_evals
+    args.vmec_max_iter = 3 if args.vmec_max_iter is None else args.vmec_max_iter
+    args.ns = 12 if args.ns is None else args.ns
+    args.mpol = 4 if args.mpol is None else args.mpol
+    args.ntor = 4 if args.ntor is None else args.ntor
+    args.nzeta = 6 if args.nzeta is None else args.nzeta
+    return args
+
+
+def normalize_same_branch_options(args: argparse.Namespace) -> argparse.Namespace:
+    """Keep the branch-local proposal path a single explicit user action."""
+
+    # The derivative proposal consumes the validated same-branch vector/JVP
+    # report, so requesting a proposal without the report only creates stale
+    # metadata.  Normalize early, before summary configuration is assembled.
+    if bool(args.same_branch_derivative_proposal):
+        args.write_same_branch_report = True
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = normalize_same_branch_options(apply_smoke_defaults(parser.parse_args(argv)))
+    try:
+        optimize_coils(args)
+    except SkipExample as exc:
+        print(f"SKIP: {exc}", file=sys.stderr)
+        return SKIP_EXIT_CODE
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

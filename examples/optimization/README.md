@@ -1,0 +1,556 @@
+# Optimization Examples
+
+These scripts are intended to be read and modified directly.  The recommended
+workflow is to instantiate a VMEC object, assemble a list of objective tuples
+`(objective_function, target, weight)`, call `least_squares_solve`, and then
+inspect, save, or plot the returned result.
+
+## Editable Workflow Anatomy
+
+The QA/QH/QP scripts are intentionally linear.  Read them as four visible
+blocks, not as wrappers:
+
+| Block | Edit when you want to... | Where to look |
+| --- | --- | --- |
+| VMEC and stage setup | change input deck, active boundary modes, continuation, or device | top-level variables and `FixedBoundaryVMEC.from_input(...)` |
+| Objective assembly | add/remove physics terms or tune targets and weights | `objective_tuples = [...]` and `LeastSquaresProblem.from_tuples(...)` |
+| Solve controls | change optimizer method, tolerances, ESS, or saved stage artifacts | `least_squares_solve(...)` keyword arguments |
+| Outputs and plots | change filenames, add exports, or choose figures | `result` properties, `save_optimization_result`, direct `save_input`/`save_wout`/`save_history`, and `vj.plot_*` calls |
+
+`least_squares_solve` receives optimizer, continuation, device, and output
+controls only.  Scientific targets stay in the explicit objective tuple list
+or, for QI field terms, in the shared `QuasiIsodynamicOptions` and objective
+objects.
+
+The simple QI NFP examples follow the same pattern with one extra visible
+handoff: they first run a QP objective from the circular/minimal seed, save that
+result, then instantiate a second VMEC object from the QP final input and
+replace the field objective with `QuasiIsodynamicResidual`.  The only seed
+preparation is `prepare_simple_omnigenity_seed_input(...)`; there is no
+reference-family scan, global optimizer, or subprocess wrapper in these public
+scripts.
+
+## Objective Tuple Pattern
+
+Use explicit SIMSOPT-style tuples and keep the list visible:
+
+```python
+aspect = vj.AspectRatio()
+iota_floor = vj.AbsMeanIotaFloor(0.41)
+qs = vj.QuasisymmetryRatioResidual(helicity_m=1, helicity_n=-1, surfaces=SURFACES)
+
+objective_tuples = [
+    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
+    (iota_floor.J, 0.0, IOTA_FLOOR_WEIGHT),
+    (qs.J, 0.0, QS_WEIGHT),
+]
+problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
+```
+
+`weight` follows SIMSOPT semantics: the residual is
+`sqrt(weight) * (objective - target)`.  Do not pre-scale callbacks.  QI terms
+use the same tuple form, but encode QI thresholds and smoothing in
+`QuasiIsodynamicOptions`, `MirrorRatio`, `VMECMirrorRatio`, and
+`MaxElongation`; QI tuple targets
+should remain `0.0`. `QuasiIsodynamicOptions` defaults to `jit_booz=True`,
+which is currently faster for the Boozer/QI residual phase on both CPU and GPU;
+set it to `False` only for diagnostics or parity isolation.
+
+## Minimal Far-From-Goal Seed Inputs
+
+The bundled files `examples/data/input.minimal_seed_nfp1`,
+`examples/data/input.minimal_seed_nfp2`, `examples/data/input.minimal_seed_nfp3`,
+and `examples/data/input.minimal_seed_nfp4` all use the same three-coefficient
+boundary template:
+
+```python
+indata = vj.minimal_fixed_boundary_indata(nfp=2)
+vj.write_indata("input.minimal_seed_nfp2", indata)
+```
+
+Only `RBC(0,0)`, `RBC(0,1)`, and `ZBS(0,1)` are nonzero.  Use these inputs
+when testing whether QA, QH, QP, or QI policies can build the target
+omnigenous structure from a seed that does not already contain the target
+helicity.  Higher Fourier coefficients should be introduced by `max_mode`,
+mode continuation, ESS, or a staged QI policy, not by the seed file itself.
+
+For deterministic simple-seed runs, keep the raw input files exactly as above
+and add only optimization-time hints.  The standalone QA/QH/QP examples call
+`vj.prepare_simple_omnigenity_seed_input(...)`, which writes an `input.simple_seed`
+under the run directory.  That generated input keeps only `RBC(0,0)`,
+`RBC(0,1)`, and `ZBS(0,1)` from the selected seed deck, then fills active
+`RBC/ZBS` modes up to `max_mode` with deterministic `1e-5` perturbations so
+the Jacobian does not start on an exactly zero-transform branch.  The raw
+bundled input decks are not modified.  QA additionally applies
+`vj.run_target_helicity_seed_preconditioner(...)` as a visible optimization-time
+step: it overwrites the low-order mode-1 signs with the reviewed all-positive
+`1e-5` terms that make iota move from a circular seed in short budget probes.
+QP is more sensitive to the zero-transform basin in direct high-mode starts
+from the common minimal seed, so `QP_optimization.py` keeps the same
+`SIMPLE_SEED_PERTURBATION = 1e-5` as QA/QH but repeats intermediate
+continuation modes before the final high-mode cleanup.
+The lower-level staged QI policy still exists for stress tests, but the public
+per-NFP QI scripts below intentionally avoid target-helicity and reference-family
+preconditioners.  They use only the deterministic `1e-5` active-mode
+perturbations written by `prepare_simple_omnigenity_seed_input(...)`; the raw
+seed files remain exactly minimal.
+Some archived common-minimal showcase rows predate this public standalone
+policy and may record reference-family preseeds in `showcase_case.json`.  Treat
+those rows as historical sweep provenance; the current standalone QA/QH/QP
+scripts keep all seed conditioning visible in the script itself.
+
+The bounded common-seed showcase is a stress test, not a best-result table.  It
+maps the configured minimal seeds to QI NFP=1/2/3/4, QA NFP=2/3, QH NFP=3/4,
+and QP NFP=2/3 for the full common-minimal target matrix; `qp_nfp1` is also available
+as a stress row.  It then renders the failure-revealing objective panel used by the docs.  The
+QI rows dispatch through `QI_optimization.py` via `qi_staged_runner.py`, so the
+common minimal seeds use the same staged/reference-family QI policy as the
+standalone QI example instead of the simpler quasisymmetry sweep path.  The
+checked-in objective panel is intentionally conservative: it currently contains
+synced aspect-5, `max_mode=5` QA/QH/QP rows and does not fabricate missing common-minimal QI rows.  Missing QI
+NFP rows indicate open validation work rather than successful hidden results.
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cuda python3 tools/diagnostics/optimization/generate_minimal_seed_showcase.py \
+  --cases qa_nfp2,qa_nfp3,qh_nfp3,qh_nfp4,qp_nfp2,qp_nfp3 \
+  --backend-label gpu --solver-device gpu --worker-jax-platforms cuda \
+  --policy continuation --max-mode 5 --ess on \
+  --max-nfev 70 --continuation-nfev 20 \
+  --inner-max-iter 550 --inner-ftol 1e-10 \
+  --trial-max-iter 550 --trial-ftol 1e-10 \
+  --ess-alpha 1.2 --case-timeout-s 7200 --rerun
+PYTHONPATH=. python tools/diagnostics/optimization/render_minimal_seed_showcase.py --publication-matrix
+```
+
+Run QI rows separately with the direct QP-to-QI per-NFP scripts below.  Their
+default reviewed direct modes are NFP1:3, NFP2:5, NFP3:4, and NFP4:3.
+The standalone QA/QH/QP scripts default to `MAX_MODE = 4` for first-run
+robustness; each file also keeps a commented `MAX_MODE = 5` line for advanced
+high-mode audits after the mode-4 path is validated.
+
+For a bounded smoke render after one case or partial timeout, keep roots explicit
+and filter to the attempted case:
+
+```bash
+PYTHONPATH=. python tools/diagnostics/optimization/render_minimal_seed_showcase.py \
+  --output-root /path/to/minimal_seed_showcase \
+  --figure-dir /path/to/figures \
+  --cases qi_nfp1 --skip-missing
+```
+
+Use `cpu` for `JAX_PLATFORMS`, `--solver-device`, and `--worker-jax-platforms`
+for a slower local CPU-only reproduction.  Keep `--rerun` for a fresh local reproduction.  Without it, existing
+successful `showcase_case.json` rows are reused and can leave old outputs on
+disk; the renderer skips known-stale rows by default, and `--include-stale`
+should be reserved for debugging.  Current common-minimal QI rows use policy
+case names `minimal_nfp1_qi`, `minimal_nfp2_qi_balanced_mirror035`,
+`minimal_nfp3_qi`, and `minimal_nfp4_qi`; the public aliases `nfp1_qi` through
+`nfp4_qi` point to those minimal-seed cases in the showcase script.  Old QI rows under
+`.../continuation/qp_preseed/...` or explicitly named far-seed cases such as
+`qi_stel_seed_3127` predate the staged dispatch.  Old QA/QP rows without
+`reference_preseed` metadata also predate the current reference-family preseed
+policy.
+When a case hits `--case-timeout-s`, the runner terminates the worker process
+group, including solver or GPU descendant processes, before writing the timeout
+result.
+
+Run the public QI examples one NFP at a time with:
+
+```bash
+python examples/optimization/QI_optimization_nfp1.py
+python examples/optimization/QI_optimization_nfp2.py  # reviewed balanced NFP=2 preset
+python examples/optimization/QI_optimization_nfp3.py
+python examples/optimization/QI_optimization_nfp4.py
+```
+
+Those scripts are self-contained: the QP objective tuples, QI objective tuples,
+two optimizer calls, result saving, and raw-seed-to-final plots are all visible
+in the file being run.
+
+## Result Object Pattern
+
+The standalone scripts also show how to work from the returned result object
+instead of relying on hidden plotting or printing helpers:
+
+```python
+result = vj.least_squares_solve(vmec, problem, ...)
+
+history = result.history
+objective_history = result.objective_history
+timing = result.timing_summary
+
+saved_paths = vj.save_optimization_result(result, output_dir=OUTPUT_DIR)
+
+print(history["objective_final"])
+print(timing["total_wall_time_s"])
+print(objective_history[-3:])
+
+wout_final = vj.load_wout(saved_paths.final_wout)
+theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(wout_final, s_index=-1)
+
+plot_paths = {
+    "boundary_comparison": vj.plot_3d_boundary_comparison(
+        saved_paths.initial_wout,
+        saved_paths.final_wout,
+        outdir=OUTPUT_DIR,
+    ),
+    "boozer_lcfs_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
+        saved_paths.initial_wout,
+        saved_paths.final_wout,
+        outdir=OUTPUT_DIR,
+    ),
+    "objective_history": vj.plot_objective_history(
+        saved_paths.history,
+        outdir=OUTPUT_DIR,
+    ),
+}
+```
+
+The examples pass `save_final_outputs=False` and then call
+`save_optimization_result` so users can see the result object before choosing
+diagnostics and plots.  For custom filenames, call `result.initial_optimizer`
+and `result.final_optimizer` directly; for convenience, omit
+`save_final_outputs=False` to let `least_squares_solve` write the default final
+artifacts. `result.final_params` and `result.final_state` refer to the selected exact accepted point, not an unreplayed relaxed trial point.
+For continuation details, start with
+`result.initial_stage` and `result.final_stage`; use
+`result.stage_histories` and `result.stage_timing_summaries` for per-stage
+accepted exact-replay history and timing.  The raw `result.stage_records`
+remain available for custom inspection.
+
+## Recommended Standalone Examples
+
+- `QA_optimization.py`: recommended quasi-axisymmetric fixed-boundary optimization.
+- `QH_optimization.py`: recommended quasi-helical fixed-boundary optimization.
+- `QP_optimization.py`: quasi-poloidal fixed-boundary optimization from the public NFP=2 minimal seed, with an explicit optimization-time QI-family preseed when enabled.
+- `free_boundary_QS_coil_optimization.py`: direct-coil, no-mgrid, single-stage free-boundary coil-only QS validation example. Optional same-branch reports use validated branch-local vector/JVP derivatives only as diagnostics or proposal evidence; complete free-boundary solves remain the acceptance authority.
+- `free_boundary_QA_finite_beta_coil_optimization.py`: QA finite-beta wrapper around the direct-coil single-stage workflow. It uses `examples/data/input.nfp2_QA_finite_beta`, a standard pressure profile, QA helicity, and synthetic direct coils by default for a dependency-light smoke run.
+
+Run the finite-beta QA single-stage smoke with:
+
+```bash
+python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py --smoke --dry-run
+python examples/optimization/free_boundary_QA_finite_beta_coil_optimization.py --smoke --max-evals 2
+```
+- `QI_optimization.py`: recommended quasi-isodynamic optimization from `input.minimal_seed_nfp2` by default, with Boozer-space QI metrics, mirror-ratio and elongation penalties, repeated lower-mode continuation, and ESS. Edit `INPUT_FILE`, `OUTPUT_DIR`, seed helpers, objective weights, and optimizer controls at the top of the script, then run it directly. Use `STAGE_MODE_POLICY = "lower-repeat"` with `STAGE_REPEATS = 1` for a shorter one-pass ladder, `STAGE_MODE_POLICY = "lower"` for the legacy QA/QH/QP repeated ladder, or `"repeat"` only when the input is already in a good QI basin and same-mode cleanup is desired.
+- `QI_optimization_seed.py`: diagnostic far-seed preset for NFP=3 `input.QI_stel_seed_3127`; README QI promotion rows use `input.minimal_seed_nfp*` decks instead.
+- `qi_optimization_cases.py`: reproducible staged presets for sweeps and docs. Use `minimal_nfp2_qi_balanced_mirror035` when you want the reviewed high-budget NFP=2 mode-5 QI/mirror/aspect polish path with smooth QI below `5e-3`, legacy QI below `2e-3`, mirror ratio below `0.35`, and aspect ratio below `7`.
+- `qa_optimization_finite_beta.py`, `qh_optimization_finite_beta.py`, and `qi_optimization_finite_beta.py`:
+  finite-beta stage-1 examples with pressure/current-profile terms. These intentionally use
+  `FixedBoundaryExactOptimizer` directly because each continuation stage builds custom
+  finite-pressure/current residual closures; the helper only standardizes stage artifacts.
+
+`QI_optimization.py` keeps the same visible workflow as QA/QH/QP: edit
+top-level controls, construct objective tuples, call `least_squares_solve`,
+then save and plot from the returned result.  If a far seed needs basin
+capture before local QI cleanup, enable `USE_TARGET_HELICITY_SEED` or
+`USE_REFERENCE_FAMILY_SEED` in that script and point `REFERENCE_INPUT_FILE` at
+a scientifically appropriate same-NFP reference.  The scientific defaults
+remain visible in the driver, and physics terms stay in objective tuples
+rather than being passed as shortcut arguments into `least_squares_solve`.
+
+Run one case from the repository root:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
+```
+
+Set `SOLVER_DEVICE = "gpu"` inside the script, or run with
+`JAX_PLATFORM_NAME=gpu`, to use a GPU-enabled JAX installation.
+Optimizer and output controls are also top-level variables, including
+`METHOD`, `SCIPY_TR_SOLVER`, `FTOL`, `GTOL`, `XTOL`, `INNER_MAX_ITER`,
+`TRIAL_MAX_ITER`, `SAVE_STAGE_INPUTS`, `SAVE_STAGE_WOUTS`, and `MAKE_PLOTS`.
+For common-minimal seed studies, also inspect `SIMPLE_SEED_PERTURBATION` and
+`STAGE_MODES`; these are ordinary script-level controls, not hidden solver
+settings.
+QI runs also expose `OPT_QI_RESOLUTION` at the top of `QI_optimization.py`.
+Production examples use the script defaults; sweep/debug subprocesses may pass
+`--qi-mboz`, `--qi-nboz`, `--qi-nphi`, `--qi-nalpha`, and `--qi-n-bounce` to
+lower Boozer/QI resolution for checkpoint or profiling probes without editing
+the script.
+
+For reproducible comparison artifacts, use the sweep driver rather than a
+single edited script.  The current production sweep runs QI directly from the
+public minimal seed (`--qi-qp-preseed off`); use `--qi-qp-preseed both` only
+for the focused QI preseed/no-preseed matrix.
+`--backend-label` is output provenance only; it does not select a backend.
+Select the process backend with `JAX_PLATFORMS=cpu`, `JAX_PLATFORM_NAME=gpu`,
+or `JAX_PLATFORMS=cuda`, and pass matching `--solver-device` when the optimizer
+should force a device.  Spawned workers inherit the parent JAX selection unless
+`--worker-jax-platforms` is set.  Confirm the actual runtime from
+`case_result.json` or summary CSV fields `jax_backend`, `jax_device_kind`,
+`solver_device`, and `jax_platforms`.  Existing successful `case_result.json`
+files are reused; add `--rerun` when you need a fresh local reproduction.
+
+## QI Diagnostics
+
+Before treating a QI result as a final candidate, audit the smooth objective
+against the legacy branch diagnostics and render the constrained QI matrix.
+The first-class record helpers are `vj.QIDiagnosticOptions`,
+`vj.qi_diagnostics_from_boozer_output`, `vj.qi_diagnostics_from_state`, and
+`vj.rank_qi_seed_records`; they return unweighted smooth/raw aliases, legacy QI,
+mirror-ratio, elongation, optional `LgradB`, resolution metadata, and
+diagnostic error fields.
+
+Mirror-ratio cleanup must be guarded by a QI residual ceiling or by an
+independent engineering promotion gate.  Endpoints that lower mirror ratio but
+fail the independent smooth/legacy QI and engineering gates are rejected and
+should not be promoted as improved QI candidates.
+
+For far seeds, `QI_optimization.py` uses the same single script but a longer
+policy.  The `input.QI_stel_seed_3127` case now starts with a deterministic
+same-NFP reference-family preconditioner: it interpolates the raw seed boundary
+toward the bundled NFP=3 QI reference, runs bounded fixed-boundary solves for
+the candidate interpolation points, ranks them with independent QI/mirror/iota
+diagnostics, prefers a non-endpoint candidate when one passes the gate, and
+records that candidate as the accepted baseline before local QI cleanup.  This
+is a global-to-local move; the
+previous ESS-scaled local basin prefilter remains available but is not the
+default for this seed because it did not enter the precise-QI basin.
+The far-seed gate keeps the legacy Goodman-style metric tight at `2e-3` and
+uses a `5e-3` cap for the smooth differentiable proxy on the six-surface audit.
+Mirror-balanced cleanup stages are kept in diagnostic scripts because the
+current all-surface mirror objective trades away the QI gate for purely local
+`input.QI_stel_seed_3127` runs.
+The final files in the top-level output directory come from the last promoted
+stage, or from the best exact-diagnostic candidate if no stage passes the
+promotion gate.  Review `basin_prefilter/top_candidates.json` and
+`mirror_ramp_promotion_log.json` before using a far-seed result in figures.
+Far-seed policies may use a cheaper Boozer/QI grid during optimization and a
+higher-resolution final audit; both grids are written into `diagnostics.json`.
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/compare_omnigenity_qi_objective.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/qi_objective_component_report.py
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/audit_qi_seed_suitability.py --quick \
+  --csv results/qi_seed_audit.csv
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/audit_qi_seed_suitability.py --quick \
+  --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
+  --csv results/qi_seed3127_audit.csv
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/audit_qi_seed_suitability.py --quick \
+  --prefine-probes plan \
+  --prefine-manifest results/qi_seed_audit/prefine_manifest.json \
+  --prefine-output-dir results/qi_seed_audit/prefine_probes
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization_seed.py
+# Reproduce the NFP=1/2/3/4 QI rows from minimal seeds:
+for nfp in 1 2 3 4; do
+  PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization.py \
+    --input-file examples/data/input.minimal_seed_nfp${nfp} \
+    --output-dir results/qi_opt/ess/minimal_nfp${nfp}_qi \
+    --target-aspect 6 --target-abs-iota-min 0.41 \
+    --max-mirror-ratio 0.35 --max-elongation 10 \
+    --max-mode 5 --max-nfev 70 --continuation-nfev 20 \
+    --inner-max-iter 450 --inner-ftol 1e-9 \
+    --trial-max-iter 450 --trial-ftol 1e-9 \
+    --ess-alpha 1.2 --use-ess --use-mode-continuation \
+    --stage-mode-policy lower
+done
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/qi/qi_boundary_interpolation_scan.py \
+  --seed-input examples/data/input.QI_stel_seed_3127 \
+  --reference-input examples/data/input.nfp3_QI_fixed_resolution_final \
+  --out-root results/diagnostics/qi_seed3127_boundary_interpolation \
+  --lambdas 0.99,0.995,1.0,1.005,1.008,1.01,1.012 \
+  --max-mode 4 --max-iter 80 --target-aspect 5.0 \
+  --surfaces 0.1,0.28,0.46,0.64,0.82,1.0 \
+  --mboz 18 --nboz 18 --nphi 151 --nalpha 31 --n-bounce 51 \
+  --smooth-qi-max 5e-3 --legacy-qi-max 2e-3 \
+  --max-mirror-ratio 0.35 --max-elongation 8.0
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/optimization/generate_qs_ess_sweep.py \
+  --backend-label cpu --solver-device cpu --policy continuation \
+  --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --rerun
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/optimization/generate_qs_ess_sweep.py \
+  --backend-label cpu --solver-device cpu --policy direct \
+  --problems qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed both --rerun
+PYTHONPATH=. python tools/diagnostics/optimization/render_qi_constrained_sweep.py
+PYTHONPATH=. python tools/diagnostics/optimization/render_qi_readme_cases.py
+```
+
+To reproduce one reviewed NFP=1/2/3/4 QI row, run the loop body above with a
+single `nfp` value or edit the top-level `INPUT_FILE`, `OUTPUT_DIR`, and
+optional `REFERENCE_INPUT_FILE` values in `QI_optimization.py`.  The public QI
+README renderer expects reviewed minimal-seed bundles under
+`docs/_static/qi_readme_cases/nfp*_minimal`.
+For the diagnostic NFP=3 seed-3127 far-seed stress case, run:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QI_optimization_seed.py
+```
+
+That preset keeps the raw `input.QI_stel_seed_3127` initial condition, scans
+`input.nfp3_QI_fixed_resolution_final` with the archived lambda grid, uses a
+cheap `max_iter=80` preconditioner scan, and replays the selected accepted
+baseline with `INNER_MAX_ITER=450` before writing final diagnostics and plots.
+
+The constrained-QI sweep is the compact bundled-seed matrix, not the staged
+far-seed runner.  If its summary reports a stale QI target aspect, rerun the
+two sweep commands above with the current aspect-5 policy before using the
+rendered matrix.
+Read the docs NFP=4 QI coverage row as a minimal-seed same-NFP reference-family
+proposal with an exact audit, not as a long local descent.  The generated
+`docs/_static/figures/readme_qi_optimization_cases.csv` row should remain
+`validation_status=case-gated` and `expected_gate_status=candidate`; passing
+gate fields do not make the row an aspect-5 README best row or a common-minimal
+completion.
+
+For publication-quality QI validation, re-run the diagnostic with higher
+`QI_MBOZ`, `QI_NBOZ`, `QI_NPHI`, `QI_NALPHA`, and `QI_N_BOUNCE`, then check
+that the smooth-vs-legacy ranking, component totals, mirror ratio, elongation,
+and LCFS `|B|` contours remain stable.
+
+For seed-robustness experiments, first run the audit, then use
+`audit_qi_seed_suitability.py --prefine-probes plan` to write a reviewed
+manifest before launching expensive prefine probes.
+
+For a new external VMEC input deck, set `INPUT_FILE = Path("/path/to/input.my_seed")`
+at the top of `QI_optimization.py`.  If the seed is far from QI, first run
+`audit_qi_seed_suitability.py`, then enable `USE_REFERENCE_FAMILY_SEED` with a
+same-NFP reference or use the target-helicity seed helper before local
+optimization.  `examples/optimization/QI_optimization_seed.py` remains available
+for small diagnostic probes, but the recommended user-facing QI path is the
+editable `QI_optimization.py` workflow.
+
+`tools/diagnostics/qi/qi_landscape_scan.py` and
+`tools/diagnostics/qi/qi_basin_survey.py` are useful for
+mapping rugged seed neighborhoods, but their default executed diagnostics use
+trial solves for speed. Add `--exact-solve` before using scan values as
+promotion evidence.
+
+## Sweep And Rendering Tools
+
+- `tools/diagnostics/optimization/generate_qs_ess_sweep.py`: CPU/GPU QA/QH/QP/QI policy sweep over mode continuation, ESS, and maximum boundary mode.
+- `tools/diagnostics/optimization/render_qs_ess_publication_panel.py`: render full-sweep docs assets from sweep outputs: objective histories over all stages, initial/final 3D atlases, initial/final VMEC-angle LCFS `|B|` line-contour atlases, and wall-time/status summary tables.
+- `tools/diagnostics/optimization/render_readme_best_optimizations.py`: render only the compact README best-row figures and CSV table; use `--summary-only` to refresh just the selector CSV without rerendering figures.
+- `tools/diagnostics/optimization/render_qi_readme_cases.py`: render the NFP=1-4 QI docs coverage figure and CSV from existing `QI_optimization.py` outputs, using Boozer `|B|` line contours only. Use `--summary-only` for a quick CSV/provenance check, and `--figure-out` / `--csv-out` to write review copies outside the tracked docs tree.
+- `tools/diagnostics/optimization/render_qi_constrained_sweep.py`: render QI-focused constrained-sweep diagnostics; use `--summary-only` to refresh the CSV/JSON summaries without rerendering the objective panel.
+
+Example:
+
+```bash
+PYTHONPATH=. JAX_PLATFORMS=cpu python tools/diagnostics/optimization/generate_qs_ess_sweep.py \
+  --backend-label cpu --solver-device cpu --policy continuation \
+  --problems qa,qh,qp,qi --modes 1,2,3,4,5 --ess both --qi-qp-preseed off \
+  --max-nfev 70 --continuation-nfev 25 \
+  --inner-max-iter 80 --inner-ftol 1e-8 \
+  --trial-max-iter 80 --trial-ftol 1e-8 --rerun
+PYTHONPATH=. python tools/diagnostics/optimization/render_qs_ess_publication_panel.py
+```
+
+The sweep driver accepts explicit budget overrides so tuning runs do not require
+editing source constants.  The current QA/QP teaching examples use the reviewed
+`80`-iteration, `1e-8` VMEC solve budget; the QH teaching example uses the
+measured faster `60`-iteration, `1e-8` budget; and staged QI examples keep
+stricter budgets because the QI metric path is more sensitive.  Use stricter
+`120`/`180` iteration and `1e-9` audit reruns only after checking whether the
+faster budget changes final objective, aspect, iota, mirror, elongation, or
+WOUT diagnostics.
+For compact budget retuning without launching the full sweep, use
+`tools/diagnostics/qs_budget_matrix.py`.  It compares accepted/trial VMEC
+budgets against a conservative reference and records whether a faster candidate
+is quality-matched, slower, or an objective regression.  Its summary reports
+both the fastest quality-matched budget and the best-objective budget because
+short trust-region trajectories can be path-dependent.  Quality matching uses
+the objective plus available aspect, mean-iota, QS residual, mirror-ratio, and
+elongation diagnostics.  These diagnostics are interpreted with the same
+physics semantics as the example objectives: aspect and QA iota are compared
+as target errors, QH/QP/QI iota is compared as a minimum-|iota| floor, QS is
+lower-is-better, and mirror/elongation are upper-bound constraint violations.
+
+```bash
+PYTHONPATH=. python tools/diagnostics/qs_budget_matrix.py \
+  --problem qa --problem qh --problem qp --problem qi \
+  --budget 60:1e-8 --budget 80:1e-8 --budget 120:1e-9 \
+  --reference-budget 120:1e-9 --policy loop \
+  --aspect-abs-tol 5e-3 --iota-abs-tol 5e-3 --qs-abs-tol 5e-3 \
+  --mirror-abs-tol 2e-2 --elongation-abs-tol 2.5e-1 \
+  --max-nfev 4 --continuation-nfev 0 \
+  --output-dir /tmp/vmec_jax_qs_budget_matrix
+```
+
+To compare accepted-Jacobian replay variants in the same matrix, add
+`--fused-projected-replay on|off|auto`, `--replay-column-chunk N|auto|off`,
+or `--chunked-projected-replay-projection on|off|auto`.  These flags are
+diagnostic controls; do not promote a route to example defaults unless the
+quality gates above still match the conservative reference.  Add
+`--scan-timing --scan-arg-summary` when comparing compat-scan runs; the matrix
+then records scan-cache hits, history materialization, and velocity,
+preconditioner, controller, state, and runtime-input carry sizes.
+
+For replay-route retuning specifically, prefer the smaller route matrix:
+
+```bash
+PYTHONPATH=. python tools/diagnostics/qs_replay_route_matrix.py \
+  --problem qa --problem qh --problem qp \
+  --route default --route fused --route chunked \
+  --reference-route default --budget 80:1e-8 \
+  --policy scan-vmec2000 --max-mode 4 --max-nfev 5 \
+  --scan-timing --scan-arg-summary \
+  --output-dir /tmp/vmec_jax_qs_replay_route_matrix
+```
+
+The current CPU evidence keeps the production default projected replay route.
+Fused replay can win on short QA traces, but a larger max-mode-4 QA gate and
+compact QH/QP gates did not show a robust wall-time win, so fused and chunked
+replay remain diagnostic controls rather than example defaults.
+
+For QI, keep budget changes especially conservative.  A compact
+VMEC2000-compatible trial-solve probe with QP preseed and QI polish rejected
+`60:1e-8` as an objective/aspect/QS regression against `80:1e-8`, so the faster
+budget should not be promoted for QI without a larger quality-matched rerun.
+The same compact VMEC2000-compatible probe at `max_mode=2` found QA
+quality-matched at `60:1e-8` but only about 3% faster, while QH and QP
+regressed in objective and physics diagnostics.  That lower-mode result is a
+guardrail, not a replacement for the public mode-specific evidence: the QH
+teaching script keeps its separately validated mode-4 `60:1e-8` route.  A
+rerun of that mode-4 QH gate with objective-aware floor/target diagnostics
+recommended `60:1e-8` over `80:1e-8`: objective `0.3382` versus `1.1490`,
+solve wall time `33.85 s` versus `44.85 s`, no diagnostic mismatches, and a
+`1.33x` speedup.  QA and QP stay at `80:1e-8`.
+
+After the scan-cache scalar-key and scan-guard updates, a compact forced
+`scan-vmec2000` check for QA/QH/QP/QI still kept scan as a diagnostic route on
+local CPU.  The rows completed, but did not beat the loop/default trial route
+on endpoint quality and wall time.  Keep `VMEC_JAX_OPT_TRIAL_SCAN=1` for
+profiling only unless a new `qs_budget_matrix.py` run proves a quality-matched
+speedup for your problem.
+
+Keep generated full-sweep atlases, PDFs, and bulky report panels in ignored
+result directories or release assets until reviewed.  Checked-in PNG/JPEG
+figures under `docs/_static/figures` are expected to stay compressed below
+2 MiB each.
+
+## Comparison And Diagnostic Scripts
+
+- `tools/diagnostics/qi/compare_omnigenity_qi_objective.py`: compare VMEC-JAX QI metrics with the legacy omnigenity implementation.
+- `tools/diagnostics/optimization/compare_omnigenity_qs_mode1.py`: compare low-mode quasisymmetry optimization components.
+- `tools/diagnostics/optimization/compare_qs_policy_matrix.py`: compare policy choices across direct/continuation and ESS/non-ESS lanes.
+- `tools/diagnostics/qs_budget_matrix.py`: compare accepted/trial VMEC solve budgets for QA/QH/QP/QI examples before changing public defaults.
+- `tools/diagnostics/qs_replay_route_matrix.py`: compare accepted-Jacobian replay routes before changing exact-callback defaults.
+
+## Profiling And Test Checks
+
+Use `tools/diagnostics/profile_exact_optimizer.py` for exact optimizer callback
+profiling and `tools/diagnostics/profile_fixed_boundary.py` for raw solver
+throughput. Accepted-point exact callbacks default to the tape path on both CPU
+and GPU; use `VMEC_JAX_OPT_EXACT_PATH=scan` only for scan-exact diagnostics.
+CPU/GPU command examples live in `docs/performance.rst`. Optimization scripts
+may set `METHOD = "auto"` to let vmec_jax choose a profiled optimizer method
+without changing the requested device. The QI examples default to
+`METHOD = "auto_scalar"` because compact max-mode-3 probes show the
+scalar-gradient route is faster than dense projected replay for the
+Boozer/QI residual callback while preserving the same first-callback objective.
+
+For QI-specific GPU diagnostics, isolate the Boozer/QI residual from optimizer
+bookkeeping first:
+
+```bash
+JAX_PLATFORM_NAME=gpu PYTHONPATH=. python tools/diagnostics/profile_qi_boozer_gpu.py \
+  --solver-device gpu --repeat 2 --jit-booz \
+  --output results/diagnostics/qi_boozer_gpu.json
+```
+
+Relevant lightweight tests:
+
+```bash
+pytest -q tests/test_optimization_examples.py tests/test_qs_ess_render_smoke.py
+pytest -q tests/test_quasi_isodynamic.py tests/test_qi_legacy.py tests/test_qi_diagnostics.py tests/test_booz_input.py
+```
