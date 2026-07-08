@@ -356,6 +356,32 @@ def _same_branch_derivative_proposal_rejection_cases() -> list[tuple]:
 
 _DERIVATIVE_PROPOSAL_REJECTION_CASES = _same_branch_derivative_proposal_rejection_cases()
 
+_VECTOR_REPORT_KEYS = (
+    "aspect",
+    "qs_total",
+    "boozer_qs_total",
+    "mean_iota",
+    "lcfs_boundary_moment",
+    "betatotal",
+)
+_VECTOR_REPORT_KEY_CSV = ",".join(_VECTOR_REPORT_KEYS)
+_VECTOR_REPORT_VALUES = {
+    "aspect": 6.0,
+    "qs_total": 0.4,
+    "boozer_qs_total": 0.5,
+    "mean_iota": 0.4,
+    "lcfs_boundary_moment": 0.2,
+    "betatotal": 0.025,
+}
+_VECTOR_REPORT_DIRECTIONALS = {
+    "aspect": 0.1,
+    "qs_total": 0.4,
+    "boozer_qs_total": 0.6,
+    "mean_iota": 0.2,
+    "lcfs_boundary_moment": 0.2,
+    "betatotal": 0.01,
+}
+
 
 def test_objective_terms_report_weighted_proxy_components():
     module = _load_example_module()
@@ -1530,7 +1556,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     )
     args = _same_branch_report_args(
         same_branch_report_mode="vector",
-        same_branch_report_vector_keys="aspect,qs_total,boozer_qs_total,mean_iota,lcfs_boundary_moment,betatotal",
+        same_branch_report_vector_keys=_VECTOR_REPORT_KEY_CSV,
         same_branch_report_disable_analytic=True,
         same_branch_report_freeze_vacuum_field=True,
         same_branch_report_freeze_bsqvac=True,
@@ -1615,14 +1641,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
         assert kwargs["replay_kwargs"]["freeze_freeb_bsqvac"] is True
         assert kwargs["direction_params"] is not None
         assert kwargs["direction_params"].n_segments == direction_params.n_segments
-        assert kwargs["scalar_keys"] == (
-            "aspect",
-            "qs_total",
-            "boozer_qs_total",
-            "mean_iota",
-            "lcfs_boundary_moment",
-            "betatotal",
-        )
+        assert kwargs["scalar_keys"] == _VECTOR_REPORT_KEYS
         return {
             "uses_production_forward": True,
             "differentiates_adaptive_controller": False,
@@ -1630,7 +1649,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
             "differentiates_fixed_accepted_branch": True,
             "replay_ad_mode": "direct",
             "derivative_mode": "directional_jvp",
-            "scalar_keys": ("aspect", "qs_total", "boozer_qs_total", "mean_iota", "lcfs_boundary_moment", "betatotal"),
+            "scalar_keys": _VECTOR_REPORT_KEYS,
             "includes_payload": False,
             "includes_replay_graph_metadata": False,
             "replay_option_flags": {
@@ -1650,14 +1669,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                     "available": True,
                     "ad_mode": "direct",
                     "derivative_mode": "directional_jvp",
-                    "scalar_keys": [
-                        "aspect",
-                        "qs_total",
-                        "boozer_qs_total",
-                        "mean_iota",
-                        "lcfs_boundary_moment",
-                        "betatotal",
-                    ],
+                    "scalar_keys": list(_VECTOR_REPORT_KEYS),
                     "n_scalars": 6,
                     "fast_path": "current_only",
                     "current_only": True,
@@ -1681,14 +1693,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "available": True,
                 "ad_mode": "direct",
                 "derivative_mode": "directional_jvp",
-                "scalar_keys": [
-                    "aspect",
-                    "qs_total",
-                    "boozer_qs_total",
-                    "mean_iota",
-                    "lcfs_boundary_moment",
-                    "betatotal",
-                ],
+                "scalar_keys": list(_VECTOR_REPORT_KEYS),
                 "n_scalars": 6,
                 "fast_path": "current_only",
                 "current_only": True,
@@ -1720,38 +1725,14 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
                 "has_active_freeb_replay": [True],
             },
             "max_base_abs_delta": 0.0,
-            "values": {
-                "aspect": 6.0,
-                "qs_total": 0.4,
-                "boozer_qs_total": 0.5,
-                "mean_iota": 0.4,
-                "lcfs_boundary_moment": 0.2,
-                "betatotal": 0.025,
-            },
+            "values": dict(_VECTOR_REPORT_VALUES),
             "replay_value_map": {
-                "aspect": jnp.asarray(6.0),
-                "qs_total": jnp.asarray(0.4),
-                "boozer_qs_total": jnp.asarray(0.5),
-                "mean_iota": jnp.asarray(0.4),
-                "lcfs_boundary_moment": jnp.asarray(0.2),
-                "betatotal": jnp.asarray(0.025),
+                key: jnp.asarray(value) for key, value in _VECTOR_REPORT_VALUES.items()
             },
-            "base_abs_delta": {
-                "aspect": 0.0,
-                "qs_total": 0.0,
-                "boozer_qs_total": 0.0,
-                "mean_iota": 0.0,
-                "lcfs_boundary_moment": 0.0,
-                "betatotal": 0.0,
-            },
+            "base_abs_delta": dict.fromkeys(_VECTOR_REPORT_KEYS, 0.0),
             "jacobian": None,
             "directional_derivatives": {
-                "aspect": jnp.asarray(0.1),
-                "qs_total": jnp.asarray(0.4),
-                "boozer_qs_total": jnp.asarray(0.6),
-                "mean_iota": jnp.asarray(0.2),
-                "lcfs_boundary_moment": jnp.asarray(0.2),
-                "betatotal": jnp.asarray(0.01),
+                key: jnp.asarray(value) for key, value in _VECTOR_REPORT_DIRECTIONALS.items()
             },
             "timings": {
                 "production_scalar_eval_wall_s": 0.01,
@@ -1797,14 +1778,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["derivative_mode"] == "directional_jvp"
     assert vector["directional_jvp_fast_path"] == "current_only"
     assert vector["directional_uses_fixed_coil_geometry"] is True
-    assert vector["scalar_keys"] == [
-        "aspect",
-        "qs_total",
-        "boozer_qs_total",
-        "mean_iota",
-        "lcfs_boundary_moment",
-        "betatotal",
-    ]
+    assert vector["scalar_keys"] == list(_VECTOR_REPORT_KEYS)
     assert vector["state_only_replay"] is True
     assert vector["replay_option_flags"]["use_stacked_step_controls"] is True
     assert vector["replay_option_flags"]["state_only_replay"] is True
@@ -1831,15 +1805,7 @@ def test_same_branch_report_writer_records_branch_local_vector_jacobian(tmp_path
     assert vector["controller_slot_summary"]["rejected_slots"] == 0
     assert vector["max_base_abs_delta"] == pytest.approx(0.0)
     assert vector["max_base_rel_delta"] == pytest.approx(0.0)
-    expected_directionals = {
-        "aspect": 0.1,
-        "qs_total": 0.4,
-        "boozer_qs_total": 0.6,
-        "mean_iota": 0.2,
-        "lcfs_boundary_moment": 0.2,
-        "betatotal": 0.01,
-    }
-    for key, expected_directional in expected_directionals.items():
+    for key, expected_directional in _VECTOR_REPORT_DIRECTIONALS.items():
         scalar_evidence = vector["scalars"][key]
         assert scalar_evidence["exact_directional"] == pytest.approx(expected_directional)
         assert scalar_evidence["complete_fd_directional"] == pytest.approx(expected_directional)
