@@ -264,6 +264,99 @@ def _same_branch_validation_report_writer(*, include_current_jvp_cache_probe: bo
     return fake_write_same_branch_validation_report
 
 
+def _base_derivative_proposal_report() -> dict[str, object]:
+    """Return the minimal branch-local directional-JVP report accepted by proposals."""
+
+    return {
+        "direction_x": [1.0],
+        "branch_compatibility": {"same_branch": True},
+        "branch_local_vector_jacobian": {
+            "available": True,
+            "uses_production_forward": True,
+            "differentiates_adaptive_controller": False,
+            "differentiates_run_free_boundary": False,
+            "differentiates_fixed_accepted_branch": True,
+            "replay_ad_mode": "direct",
+            "derivative_mode": "directional_jvp",
+            "max_base_abs_delta": 0.0,
+            "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
+        },
+    }
+
+
+def _same_branch_derivative_proposal_rejection_cases() -> list[tuple]:
+    """Build explicit negative-path cases for branch-local derivative proposals."""
+
+    cases = []
+
+    adaptive_claim = json.loads(json.dumps(_base_derivative_proposal_report()))
+    adaptive_claim["branch_local_vector_jacobian"]["differentiates_adaptive_controller"] = True
+    cases.append(("adaptive-claim", adaptive_claim, "adaptive-controller", {}, {}))
+
+    failed_vector_gate = json.loads(json.dumps(_base_derivative_proposal_report()))
+    failed_vector_gate["branch_local_vector_gate"] = {
+        "available": True,
+        "passed": False,
+        "physical_scalar_gate": {"passed": False},
+    }
+    cases.append(
+        (
+            "failed-vector-gate",
+            failed_vector_gate,
+            "vector gate",
+            {},
+            {
+                "branch_local_vector_gate_available": True,
+                "branch_local_vector_gate_passed": False,
+                "physical_scalar_gate_passed": False,
+            },
+        )
+    )
+
+    failed_rejected_slot = json.loads(json.dumps(_base_derivative_proposal_report()))
+    failed_rejected_slot["accepted_rejected_controller_slot_gate"] = {
+        "requested": True,
+        "available": True,
+        "passed": False,
+    }
+    cases.append(
+        (
+            "failed-rejected-slot-gate",
+            failed_rejected_slot,
+            "accepted/rejected controller-slot gate",
+            {},
+            {
+                "accepted_rejected_controller_slot_gate_requested": True,
+                "accepted_rejected_controller_slot_gate_passed": False,
+            },
+        )
+    )
+
+    custom_vjp = json.loads(json.dumps(_base_derivative_proposal_report()))
+    custom_vjp["branch_local_vector_jacobian"]["replay_ad_mode"] = "custom_vjp"
+    cases.append(("requires-direct-jvp", custom_vjp, "direct JVP", {}, {}))
+
+    stale_replay = json.loads(json.dumps(_base_derivative_proposal_report()))
+    stale_replay["branch_local_vector_jacobian"]["max_base_abs_delta"] = 1.0e-2
+    cases.append(
+        (
+            "stale-replay",
+            stale_replay,
+            "exceeds proposal cap",
+            {"max_base_abs_delta": 1.0e-3},
+            {"branch_local_vector_gate_available": False},
+        )
+    )
+
+    changed_branch = json.loads(json.dumps(_base_derivative_proposal_report()))
+    changed_branch["branch_compatibility"]["same_branch"] = False
+    cases.append(("changed-branch", changed_branch, "branch fingerprint", {}, {}))
+    return cases
+
+
+_DERIVATIVE_PROPOSAL_REJECTION_CASES = _same_branch_derivative_proposal_rejection_cases()
+
+
 def test_objective_terms_report_weighted_proxy_components():
     module = _load_example_module()
 
@@ -1067,164 +1160,32 @@ def test_same_branch_derivative_proposal_uses_gated_directional_report():
     np.testing.assert_allclose(proposals[1]["trial_x"], [-0.15, 0.2, 0.55])
 
 
-def test_same_branch_derivative_proposal_rejects_adaptive_claims():
+@pytest.mark.parametrize(
+    ("_case_name", "report", "expected_reason", "proposal_kwargs", "expected_gate_evidence"),
+    _DERIVATIVE_PROPOSAL_REJECTION_CASES,
+    ids=[case[0] for case in _DERIVATIVE_PROPOSAL_REJECTION_CASES],
+)
+def test_same_branch_derivative_proposal_rejects_invalid_gates(
+    _case_name,
+    report,
+    expected_reason,
+    proposal_kwargs,
+    expected_gate_evidence,
+):
     module = _load_example_module()
 
     proposal = module.same_branch_derivative_proposal_from_report(
-        {
-            "direction_x": [1.0],
-            "branch_compatibility": {"same_branch": True},
-            "branch_local_vector_jacobian": {
-                "available": True,
-                "uses_production_forward": True,
-                "differentiates_adaptive_controller": True,
-                "differentiates_run_free_boundary": False,
-                "differentiates_fixed_accepted_branch": True,
-                "replay_ad_mode": "direct",
-                "derivative_mode": "directional_jvp",
-                "max_base_abs_delta": 0.0,
-                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
-            },
-        },
-        {"qs_weight": 1.0},
+        json.loads(json.dumps(report)),
+        {"residual_weight": 0.0, "qs_weight": 1.0, "aspect_weight": 0.0, "iota_weight": 0.0},
         {"x": [0.0]},
         step_size=0.1,
+        **proposal_kwargs,
     )
 
     assert proposal["available"] is False
-    assert "adaptive-controller" in proposal["reason"]
-
-
-def test_same_branch_derivative_proposal_rejects_failed_vector_gate():
-    module = _load_example_module()
-
-    proposal = module.same_branch_derivative_proposal_from_report(
-        {
-            "direction_x": [1.0],
-            "branch_compatibility": {"same_branch": True},
-            "branch_local_vector_gate": {
-                "available": True,
-                "passed": False,
-                "physical_scalar_gate": {"passed": False},
-            },
-            "branch_local_vector_jacobian": {
-                "available": True,
-                "uses_production_forward": True,
-                "differentiates_adaptive_controller": False,
-                "differentiates_run_free_boundary": False,
-                "differentiates_fixed_accepted_branch": True,
-                "replay_ad_mode": "direct",
-                "derivative_mode": "directional_jvp",
-                "max_base_abs_delta": 0.0,
-                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
-            },
-        },
-        {"qs_weight": 1.0},
-        {"x": [0.0]},
-        step_size=0.1,
-    )
-
-    assert proposal["available"] is False
-    assert "vector gate" in proposal["reason"]
-    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is True
-    assert proposal["gate_evidence"]["branch_local_vector_gate_passed"] is False
-    assert proposal["gate_evidence"]["physical_scalar_gate_passed"] is False
-
-
-def test_same_branch_derivative_proposal_rejects_failed_rejected_slot_gate():
-    module = _load_example_module()
-
-    proposal = module.same_branch_derivative_proposal_from_report(
-        {
-            "direction_x": [1.0],
-            "branch_compatibility": {"same_branch": True},
-            "accepted_rejected_controller_slot_gate": {
-                "requested": True,
-                "available": True,
-                "passed": False,
-            },
-            "branch_local_vector_jacobian": {
-                "available": True,
-                "uses_production_forward": True,
-                "differentiates_adaptive_controller": False,
-                "differentiates_run_free_boundary": False,
-                "differentiates_fixed_accepted_branch": True,
-                "replay_ad_mode": "direct",
-                "derivative_mode": "directional_jvp",
-                "max_base_abs_delta": 0.0,
-                "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
-            },
-        },
-        {"qs_weight": 1.0},
-        {"x": [0.0]},
-        step_size=0.1,
-    )
-
-    assert proposal["available"] is False
-    assert "accepted/rejected controller-slot gate" in proposal["reason"]
-    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_requested"] is True
-    assert proposal["gate_evidence"]["accepted_rejected_controller_slot_gate_passed"] is False
-
-
-def test_same_branch_derivative_proposal_requires_direct_jvp_and_fresh_replay():
-    module = _load_example_module()
-    base_report = {
-        "branch_compatibility": {"same_branch": True},
-        "direction_x": [1.0],
-        "branch_local_vector_jacobian": {
-            "available": True,
-            "uses_production_forward": True,
-            "differentiates_adaptive_controller": False,
-            "differentiates_run_free_boundary": False,
-            "differentiates_fixed_accepted_branch": True,
-            "replay_ad_mode": "direct",
-            "derivative_mode": "directional_jvp",
-            "max_base_abs_delta": 0.0,
-            "scalars": {"qs_total": {"value": 0.2, "exact_directional": 1.0, "base_abs_delta": 0.0}},
-        },
-    }
-    objective_model = {
-        "residual_weight": 0.0,
-        "qs_weight": 1.0,
-        "aspect_weight": 0.0,
-        "iota_weight": 0.0,
-    }
-    best = {"x": [0.0]}
-
-    custom_vjp_report = json.loads(json.dumps(base_report))
-    custom_vjp_report["branch_local_vector_jacobian"]["replay_ad_mode"] = "custom_vjp"
-    proposal = module.same_branch_derivative_proposal_from_report(
-        custom_vjp_report,
-        objective_model,
-        best,
-        step_size=0.1,
-    )
-    assert proposal["available"] is False
-    assert "direct JVP" in proposal["reason"]
-
-    stale_report = json.loads(json.dumps(base_report))
-    stale_report["branch_local_vector_jacobian"]["max_base_abs_delta"] = 1.0e-2
-    proposal = module.same_branch_derivative_proposal_from_report(
-        stale_report,
-        objective_model,
-        best,
-        step_size=0.1,
-        max_base_abs_delta=1.0e-3,
-    )
-    assert proposal["available"] is False
-    assert "exceeds proposal cap" in proposal["reason"]
-    assert proposal["gate_evidence"]["branch_local_vector_gate_available"] is False
-
-    changed_branch_report = json.loads(json.dumps(base_report))
-    changed_branch_report["branch_compatibility"]["same_branch"] = False
-    proposal = module.same_branch_derivative_proposal_from_report(
-        changed_branch_report,
-        objective_model,
-        best,
-        step_size=0.1,
-    )
-    assert proposal["available"] is False
-    assert "branch fingerprint" in proposal["reason"]
+    assert expected_reason in proposal["reason"]
+    for key, expected in expected_gate_evidence.items():
+        assert proposal["gate_evidence"][key] is expected
 
 
 def test_nestor_profile_policy_requires_size_and_speedup_thresholds():
