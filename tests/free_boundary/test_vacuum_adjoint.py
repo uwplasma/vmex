@@ -2539,6 +2539,39 @@ def test_dense_vmec_nestor_mode_solve_gradients_match_finite_difference():
     np.testing.assert_allclose(exact_geometry, fd_geometry, rtol=3.0e-6, atol=1.0e-10)
 
 
+def _assert_value_error(match: str, func, *args, **kwargs) -> None:
+    """Assert one public input-validation error without hiding the target API."""
+
+    with pytest.raises(ValueError, match=match):
+        func(*args, **kwargs)
+
+
+def _nonsingular_kwargs(sample, basis, tables, bexni, **overrides):
+    """Return keyword arguments for JAX NESTOR nonsingular-term validators."""
+
+    kwargs = {
+        "R": sample.R,
+        "Z": sample.Z,
+        "Ru": sample.Ru,
+        "Zu": sample.Zu,
+        "Rv": sample.Rv,
+        "Zv": sample.Zv,
+        "ruu": sample.ruu,
+        "ruv": sample.ruv,
+        "rvv": sample.rvv,
+        "zuu": sample.zuu,
+        "zuv": sample.zuv,
+        "zvv": sample.zvv,
+        "bexni": bexni,
+        "basis": basis,
+        "tables": tables,
+        "signgs": 1,
+        "nvper": 2,
+    }
+    kwargs.update(overrides)
+    return kwargs
+
+
 def test_free_boundary_adjoint_operator_validation_errors_are_explicit():
     """Guard the public validation contract of the JAX NESTOR operator blocks."""
 
@@ -2546,149 +2579,83 @@ def test_free_boundary_adjoint_operator_validation_errors_are_explicit():
     tables = _ensure_vmec_nonsingular_kernel_tables(basis=basis, nv=sample.R.shape[1], nvper=2)
     bexni = np.linspace(-0.18, 0.24, int(basis["nuv3"]), dtype=float)
 
-    with pytest.raises(ValueError, match="square dense matrix"):
-        dense_vacuum_solve_jax(np.ones((2, 3)), np.ones(2))
-    with pytest.raises(ValueError, match="leading dimension"):
-        dense_vacuum_solve_jax(np.eye(2), np.ones(3))
-    with pytest.raises(ValueError, match="requires imirr"):
-        vmec_source_from_gsource_jax(np.ones(4), onp=1.0, lasym=False)
+    _assert_value_error("square dense matrix", dense_vacuum_solve_jax, np.ones((2, 3)), np.ones(2))
+    _assert_value_error("leading dimension", dense_vacuum_solve_jax, np.eye(2), np.ones(3))
+    _assert_value_error("requires imirr", vmec_source_from_gsource_jax, np.ones(4), onp=1.0, lasym=False)
 
-    with pytest.raises(ValueError, match="sin_basis must be a 2D array"):
-        mode_rhs_from_gsource_jax(
-            np.ones(3), sin_basis=np.ones(3), xmpot=np.arange(3), n_raw=np.arange(3), onp=1.0, lasym=True
-        )
-    with pytest.raises(ValueError, match="cos_basis is required"):
-        mode_rhs_from_gsource_jax(
-            np.ones(3),
-            sin_basis=np.ones((3, 2)),
-            xmpot=np.arange(2),
-            n_raw=np.arange(2),
-            onp=1.0,
-            lasym=True,
-        )
-    with pytest.raises(ValueError, match="cos_basis must match"):
-        mode_rhs_from_gsource_jax(
-            np.ones(3),
-            sin_basis=np.ones((3, 2)),
-            cos_basis=np.ones((3, 1)),
-            xmpot=np.arange(2),
-            n_raw=np.arange(2),
-            onp=1.0,
-            lasym=True,
-        )
+    _assert_value_error(
+        "sin_basis must be a 2D array",
+        mode_rhs_from_gsource_jax,
+        np.ones(3),
+        sin_basis=np.ones(3),
+        xmpot=np.arange(3),
+        n_raw=np.arange(3),
+        onp=1.0,
+        lasym=True,
+    )
+    _assert_value_error(
+        "cos_basis is required",
+        mode_rhs_from_gsource_jax,
+        np.ones(3),
+        sin_basis=np.ones((3, 2)),
+        xmpot=np.arange(2),
+        n_raw=np.arange(2),
+        onp=1.0,
+        lasym=True,
+    )
+    _assert_value_error(
+        "cos_basis must match",
+        mode_rhs_from_gsource_jax,
+        np.ones(3),
+        sin_basis=np.ones((3, 2)),
+        cos_basis=np.ones((3, 1)),
+        xmpot=np.arange(2),
+        n_raw=np.arange(2),
+        onp=1.0,
+        lasym=True,
+    )
 
-    with pytest.raises(ValueError, match="grpmn must be a 2D array"):
-        mode_matrix_from_grpmn_jax(
-            np.ones(4), sin_basis=np.ones((3, 2)), xmpot=np.arange(2), n_raw=np.arange(2), lasym=False
-        )
-    with pytest.raises(ValueError, match="sin_basis must be a 2D array"):
-        mode_matrix_from_grpmn_jax(
-            np.ones((2, 3)), sin_basis=np.ones(2), xmpot=np.arange(2), n_raw=np.arange(2), lasym=False
-        )
-    with pytest.raises(ValueError, match="invalid_grpmn_shape"):
-        mode_matrix_from_grpmn_jax(
-            np.ones((1, 3)), sin_basis=np.ones((3, 2)), xmpot=np.arange(2), n_raw=np.arange(2), lasym=False
-        )
-    with pytest.raises(ValueError, match="invalid_grpmn_shape_lasym"):
-        mode_matrix_from_grpmn_jax(
-            np.ones((2, 3)),
-            sin_basis=np.ones((3, 2)),
-            xmpot=np.arange(2),
-            n_raw=np.arange(2),
-            lasym=True,
-            cos_basis=np.ones((3, 2)),
-        )
-    with pytest.raises(ValueError, match="cos_basis is required"):
-        mode_matrix_from_grpmn_jax(
-            np.ones((4, 3)), sin_basis=np.ones((3, 2)), xmpot=np.arange(2), n_raw=np.arange(2), lasym=True
-        )
-    with pytest.raises(ValueError, match="cos_basis must match"):
-        mode_matrix_from_grpmn_jax(
-            np.ones((4, 3)),
-            sin_basis=np.ones((3, 2)),
-            cos_basis=np.ones((3, 1)),
-            xmpot=np.arange(2),
-            n_raw=np.arange(2),
-            lasym=True,
-        )
+    mode_matrix_base = {"sin_basis": np.ones((3, 2)), "xmpot": np.arange(2), "n_raw": np.arange(2)}
+    for match, grpmn, kwargs in (
+        ("grpmn must be a 2D array", np.ones(4), {"lasym": False}),
+        ("sin_basis must be a 2D array", np.ones((2, 3)), {"sin_basis": np.ones(2), "lasym": False}),
+        ("invalid_grpmn_shape", np.ones((1, 3)), {"lasym": False}),
+        ("invalid_grpmn_shape_lasym", np.ones((2, 3)), {"lasym": True, "cos_basis": np.ones((3, 2))}),
+        ("cos_basis is required", np.ones((4, 3)), {"lasym": True}),
+        ("cos_basis must match", np.ones((4, 3)), {"lasym": True, "cos_basis": np.ones((3, 1))}),
+    ):
+        _assert_value_error(match, mode_matrix_from_grpmn_jax, grpmn, **{**mode_matrix_base, **kwargs})
 
-    with pytest.raises(ValueError, match="R must be a 2D"):
-        vmec_nonsingular_terms_from_bexni_jax(
-            R=np.ones(3),
-            Z=sample.Z,
-            Ru=sample.Ru,
-            Zu=sample.Zu,
-            Rv=sample.Rv,
-            Zv=sample.Zv,
-            ruu=sample.ruu,
-            ruv=sample.ruv,
-            rvv=sample.rvv,
-            zuu=sample.zuu,
-            zuv=sample.zuv,
-            zvv=sample.zvv,
-            bexni=bexni,
-            basis=basis,
-            tables=tables,
-            signgs=1,
-            nvper=2,
-        )
-    with pytest.raises(ValueError, match="Z must match R shape"):
-        vmec_nonsingular_terms_from_bexni_jax(
-            R=sample.R,
-            Z=sample.Z[:, :-1],
-            Ru=sample.Ru,
-            Zu=sample.Zu,
-            Rv=sample.Rv,
-            Zv=sample.Zv,
-            ruu=sample.ruu,
-            ruv=sample.ruv,
-            rvv=sample.rvv,
-            zuu=sample.zuu,
-            zuv=sample.zuv,
-            zvv=sample.zvv,
-            bexni=bexni,
-            basis=basis,
-            tables=tables,
-            signgs=1,
-            nvper=2,
-        )
+    _assert_value_error(
+        "R must be a 2D",
+        vmec_nonsingular_terms_from_bexni_jax,
+        **_nonsingular_kwargs(sample, basis, tables, bexni, R=np.ones(3)),
+    )
+    _assert_value_error(
+        "Z must match R shape",
+        vmec_nonsingular_terms_from_bexni_jax,
+        **_nonsingular_kwargs(sample, basis, tables, bexni, Z=sample.Z[:, :-1]),
+    )
     bad_basis = dict(basis)
     bad_basis["nu_full"] = int(basis["nu_full"]) + 1
-    with pytest.raises(ValueError, match="nu_full"):
-        _jax_nonsingular_terms(sample, bad_basis, bexni)
+    _assert_value_error("nu_full", _jax_nonsingular_terms, sample, bad_basis, bexni)
+
     bad_tables = dict(tables)
     bad_tables["cosui"] = np.empty((1, 0), dtype=float)
-    with pytest.raises(ValueError, match="table shape"):
-        vmec_nonsingular_terms_from_bexni_jax(
-            R=sample.R,
-            Z=sample.Z,
-            Ru=sample.Ru,
-            Zu=sample.Zu,
-            Rv=sample.Rv,
-            Zv=sample.Zv,
-            ruu=sample.ruu,
-            ruv=sample.ruv,
-            rvv=sample.rvv,
-            zuu=sample.zuu,
-            zuv=sample.zuv,
-            zvv=sample.zvv,
-            bexni=bexni,
-            basis=basis,
-            tables=bad_tables,
-            signgs=1,
-            nvper=2,
-        )
-    with pytest.raises(ValueError, match="bexni"):
-        _jax_nonsingular_terms(sample, basis, bexni[:2])
+    _assert_value_error(
+        "table shape",
+        vmec_nonsingular_terms_from_bexni_jax,
+        **_nonsingular_kwargs(sample, basis, bad_tables, bexni),
+    )
+    _assert_value_error("bexni", _jax_nonsingular_terms, sample, basis, bexni[:2])
 
-    with pytest.raises(ValueError, match="sin_basis must be a 2D array"):
-        dense_mode_vacuum_solve_jax(np.eye(2), np.ones(2), np.ones(2))
-    with pytest.raises(ValueError, match="must match sin_basis columns"):
-        dense_mode_vacuum_solve_jax(np.eye(2), np.ones(2), np.ones((3, 3)))
-    with pytest.raises(ValueError, match="cos_basis must match"):
-        dense_mode_vacuum_solve_jax(np.eye(4), np.ones(4), np.ones((3, 2)), np.ones((3, 1)))
-    with pytest.raises(ValueError, match="2 \\* sin_basis columns"):
-        dense_mode_vacuum_solve_jax(np.eye(3), np.ones(3), np.ones((3, 2)), np.ones((3, 2)))
+    for match, args in (
+        ("sin_basis must be a 2D array", (np.eye(2), np.ones(2), np.ones(2))),
+        ("must match sin_basis columns", (np.eye(2), np.ones(2), np.ones((3, 3)))),
+        ("cos_basis must match", (np.eye(4), np.ones(4), np.ones((3, 2)), np.ones((3, 1)))),
+        ("2 \\* sin_basis columns", (np.eye(3), np.ones(3), np.ones((3, 2)), np.ones((3, 2)))),
+    ):
+        _assert_value_error(match, dense_mode_vacuum_solve_jax, *args)
 
 
 def _mode_vacuum_inputs(*, lasym: bool = False):
