@@ -692,6 +692,7 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         {**{key: value[2:4] for key, value in controls.items()}, "accept_fn_forbidden": jnp.asarray([True, True])},
         {key: value[4:] for key, value in controls.items()},
     )
+    accepted_only_flags = (True, False, True, False)
     initial_state = jnp.asarray([0.06, -0.02], dtype=float)
     params = {
         "matrix": jnp.asarray([[0.22, -0.04], [0.08, 0.18]], dtype=float),
@@ -721,47 +722,41 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
     def converged_fn(_accepted_state, _params, control, _aux):
         return control["stop"]
 
-    monolithic = jax_visible_accepted_nonlinear_controller_jax(
-        step,
-        accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        controls,
-        checkpoint_steps=True,
-    )
-    segmented = jax_visible_segmented_accepted_nonlinear_controller_jax(
-        step,
-        accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        control_segments,
-        checkpoint_steps=True,
-    )
-    fast_segmented = jax_visible_segmented_accepted_nonlinear_controller_jax(
-        step,
-        guarded_accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        fast_control_segments,
-        checkpoint_steps=True,
-        accepted_only_segments=(True, False, True, False),
-    )
-    unrolled_fast_segmented = jax_visible_segmented_accepted_nonlinear_controller_jax(
-        step,
-        guarded_accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        fast_control_segments,
-        checkpoint_steps=True,
-        accepted_only_segments=(True, False, True, False),
-        unroll_accepted_only_segments_below=2,
-    )
+    def run_monolithic_controller(controller_params):
+        return jax_visible_accepted_nonlinear_controller_jax(
+            step,
+            accept_fn,
+            converged_fn,
+            initial_state,
+            controller_params,
+            controls,
+            checkpoint_steps=True,
+        )
 
-    def assert_segmented_run_matches(run, *, expected_segments: int) -> None:
+    def run_segmented_controller(controller_params, *, fast=False, state_only=False, unroll=False):
+        segmented_controller = (
+            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax
+            if state_only
+            else jax_visible_segmented_accepted_nonlinear_controller_jax
+        )
+        kwargs = {"checkpoint_steps": True}
+        if fast:
+            kwargs["accepted_only_segments"] = accepted_only_flags
+            if unroll:
+                kwargs["unroll_accepted_only_segments_below"] = 2
+        return segmented_controller(
+            step,
+            guarded_accept_fn if fast else accept_fn,
+            converged_fn,
+            initial_state,
+            controller_params,
+            fast_control_segments if fast else control_segments,
+            **kwargs,
+        )
+
+    monolithic = run_monolithic_controller(params)
+
+    def assert_state_matches_monolithic(run) -> None:
         tree_util.tree_map(
             lambda actual, expected: np.testing.assert_allclose(
                 np.asarray(actual),
@@ -773,6 +768,9 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
             monolithic["state"],
         )
         assert bool(run["done"]) == bool(monolithic["done"])
+
+    def assert_segmented_run_matches(run, *, expected_segments: int) -> None:
+        assert_state_matches_monolithic(run)
         assert run["n_segments"] == expected_segments
         for key in ("active", "accepted", "rejected", "done"):
             np.testing.assert_array_equal(np.asarray(run["history"][key]), np.asarray(monolithic["history"][key]))
@@ -783,59 +781,23 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
             atol=1.0e-14,
         )
 
-    for run, expected_segments in (
-        (segmented, 2),
-        (fast_segmented, 4),
-        (unrolled_fast_segmented, 4),
+    for kwargs, expected_segments in (
+        ({}, 2),
+        ({"fast": True}, 4),
+        ({"fast": True, "unroll": True}, 4),
     ):
-        assert_segmented_run_matches(run, expected_segments=expected_segments)
-
-    state_only_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
-        step,
-        accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        control_segments,
-        checkpoint_steps=True,
-    )
-    state_only_fast_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
-        step,
-        guarded_accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        fast_control_segments,
-        checkpoint_steps=True,
-        accepted_only_segments=(True, False, True, False),
-    )
-    state_only_unrolled_fast_segmented = jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
-        step,
-        guarded_accept_fn,
-        converged_fn,
-        initial_state,
-        params,
-        fast_control_segments,
-        checkpoint_steps=True,
-        accepted_only_segments=(True, False, True, False),
-        unroll_accepted_only_segments_below=2,
-    )
-    for state_only_run in (
-        state_only_segmented,
-        state_only_fast_segmented,
-        state_only_unrolled_fast_segmented,
-    ):
-        tree_util.tree_map(
-            lambda actual, expected: np.testing.assert_allclose(
-                np.asarray(actual),
-                np.asarray(expected),
-                rtol=1.0e-14,
-                atol=1.0e-14,
-            ),
-            state_only_run["state"],
-            monolithic["state"],
+        assert_segmented_run_matches(
+            run_segmented_controller(params, **kwargs),
+            expected_segments=expected_segments,
         )
-        assert bool(state_only_run["done"]) == bool(monolithic["done"])
+
+    for kwargs in (
+        {"state_only": True},
+        {"state_only": True, "fast": True},
+        {"state_only": True, "fast": True, "unroll": True},
+    ):
+        state_only_run = run_segmented_controller(params, **kwargs)
+        assert_state_matches_monolithic(state_only_run)
         assert state_only_run["history"] == {}
         assert state_only_run["n_segments"] in (2, 4)
 
@@ -849,74 +811,23 @@ def test_segmented_accepted_controller_matches_monolithic_scan_and_gradient():
         )
 
     def monolithic_objective(controller_params):
-        return objective_from_run(
-            jax_visible_accepted_nonlinear_controller_jax(
-                step,
-                accept_fn,
-                converged_fn,
-                initial_state,
-                controller_params,
-                controls,
-                checkpoint_steps=True,
-            )
-        )
+        return objective_from_run(run_monolithic_controller(controller_params))
 
     def segmented_objective(controller_params):
-        return objective_from_run(
-            jax_visible_segmented_accepted_nonlinear_controller_jax(
-                step,
-                accept_fn,
-                converged_fn,
-                initial_state,
-                controller_params,
-                control_segments,
-                checkpoint_steps=True,
-            )
-        )
+        return objective_from_run(run_segmented_controller(controller_params))
 
     def fast_segmented_objective(controller_params):
-        return objective_from_run(
-            jax_visible_segmented_accepted_nonlinear_controller_jax(
-                step,
-                guarded_accept_fn,
-                converged_fn,
-                initial_state,
-                controller_params,
-                fast_control_segments,
-                checkpoint_steps=True,
-                accepted_only_segments=(True, False, True, False),
-            )
-        )
+        return objective_from_run(run_segmented_controller(controller_params, fast=True))
 
     def state_only_objective_from_run(run):
         return 0.5 * jnp.vdot(jnp.asarray([1.1, 0.8], dtype=float) * run["state"], run["state"])
 
     def state_only_segmented_objective(controller_params):
-        return state_only_objective_from_run(
-            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
-                step,
-                accept_fn,
-                converged_fn,
-                initial_state,
-                controller_params,
-                control_segments,
-                checkpoint_steps=True,
-            )
-        )
+        return state_only_objective_from_run(run_segmented_controller(controller_params, state_only=True))
 
     def state_only_fast_segmented_objective(controller_params):
         return state_only_objective_from_run(
-            jax_visible_segmented_state_only_accepted_nonlinear_controller_jax(
-                step,
-                guarded_accept_fn,
-                converged_fn,
-                initial_state,
-                controller_params,
-                fast_control_segments,
-                checkpoint_steps=True,
-                accepted_only_segments=(True, False, True, False),
-                unroll_accepted_only_segments_below=2,
-            )
+            run_segmented_controller(controller_params, state_only=True, fast=True, unroll=True)
         )
 
     monolithic_grad = jax.grad(monolithic_objective)(params)
