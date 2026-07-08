@@ -1027,6 +1027,229 @@ def _assert_trace_fingerprint_delta_contracts(trace0: dict, trace1: dict, z: np.
             assert field in delta["changed_fields"]
 
 
+def _assert_replay_objective_close(left, right, *, rtol: float = 2.0e-12, atol: float = 1.0e-12) -> None:
+    np.testing.assert_allclose(np.asarray(left["objective"]), np.asarray(right["objective"]), rtol=rtol, atol=atol)
+
+
+def _assert_replay_state_close(left, right, *, rtol: float = 5.0e-12, atol: float = 5.0e-12) -> None:
+    np.testing.assert_allclose(
+        np.asarray(pack_state(left["state"])),
+        np.asarray(pack_state(right["state"])),
+        rtol=rtol,
+        atol=atol,
+    )
+
+
+def _assert_replay_array_equal(container, name, expected) -> None:
+    np.testing.assert_array_equal(np.asarray(container[name]), np.asarray(expected))
+
+
+def _assert_replay_history_close(left, right, key, *, rtol: float = 5.0e-12, atol: float = 5.0e-12) -> None:
+    np.testing.assert_allclose(np.asarray(left["history"][key]), np.asarray(right["history"][key]), rtol=rtol, atol=atol)
+
+
+def _assert_replay_history_equal(left, right, key) -> None:
+    np.testing.assert_array_equal(np.asarray(left["history"][key]), np.asarray(right["history"][key]))
+
+
+def _assert_two_step_controller_replay_variants(
+    *,
+    accepted_replay_objective,
+    controller_replay_objective,
+    trace0: dict,
+    trace1: dict,
+    static,
+    base_params: CoilFieldParams,
+    direction: CoilFieldParams,
+) -> dict[str, object]:
+    from vmec_jax._compat import jax, jnp
+    from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
+        direct_coil_accepted_trace_controller_replay_plan,
+        direct_coil_accepted_trace_step_controls_jax,
+        direct_coil_accepted_trace_step_policy_segments,
+    )
+
+    replay = accepted_replay_objective()
+    assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
+    assert np.isfinite(float(replay["objective"]))
+    controller_replay = controller_replay_objective()
+    fallback_controller_replay = controller_replay_objective(use_accepted_only_fast_path=False)
+    assert controller_replay["used_accepted_only_fast_path"]
+    assert controller_replay["accepted_only_fast_path_segments"] == (True,)
+    assert not fallback_controller_replay["used_accepted_only_fast_path"]
+    assert fallback_controller_replay["accepted_only_fast_path_segments"] == (False,)
+    _assert_replay_objective_close(controller_replay, fallback_controller_replay)
+    _assert_replay_state_close(controller_replay, fallback_controller_replay)
+    for key in ("active", "accepted", "rejected", "done", "state_reset", "force", "bsqvac"):
+        _assert_replay_history_close(controller_replay, fallback_controller_replay, key)
+    for container, name, expected in (
+        (controller_replay["history"], "accepted", [True, True]),
+        (controller_replay["history"], "rejected", [False, False]),
+        (controller_replay["controls"], "step_index", [0, 1]),
+        (controller_replay["controls"], "reset_to_trace_pre", [False, False]),
+        (controller_replay["controls"], "has_active_freeb_replay", [True, True]),
+    ):
+        _assert_replay_array_equal(container, name, expected)
+    np.testing.assert_allclose(
+        np.asarray(controller_replay["controls"]["step_scalars"]["dt_eff"]),
+        np.asarray([_trace_scalar_value(trace0["dt_eff"]), _trace_scalar_value(trace1["dt_eff"])]),
+    )
+    for key in ("flip_sign", "limit_update_rms", "divide_by_scalxc_for_update"):
+        assert key in controller_replay["controls"]["step_scalars"]
+    for key in ("preconditioner_use_lax_tridi", "preconditioner_use_precomputed_tridi"):
+        assert key not in controller_replay["controls"]["step_scalars"]
+    np.testing.assert_allclose(
+        np.asarray(controller_replay["scalar_controls"]["fac"]),
+        np.asarray([_trace_scalar_value(trace0["fac"]), _trace_scalar_value(trace1["fac"])]),
+    )
+    assert "limit_update_rms" in controller_replay["scalar_controls"]
+    assert "preconditioner_use_lax_tridi" in controller_replay["scalar_controls"]
+    assert controller_replay["preconditioner_controls_segment_stacked"] == ()
+    np.testing.assert_allclose(
+        np.asarray(controller_replay["controls"]["step_arrays"]["vRcc_before"][0]),
+        np.asarray(trace0["vRcc_before"]),
+    )
+    assert np.asarray(controller_replay["array_controls"]["vLcs_before"]).shape[0] == 2
+    np.testing.assert_allclose(
+        np.asarray(controller_replay["controls"]["step_preconditioner"]["lam_prec"][0]),
+        np.asarray(trace0["lam_prec"]),
+    )
+    assert controller_replay["preconditioner_controls_stacked"]
+    assert np.asarray(controller_replay["preconditioner_controls"]["w_mode_mn"]).shape[0] == 2
+    assert controller_replay["preconditioner_policy_n_segments"] == 1
+    assert controller_replay["step_policy_n_segments"] >= 1
+    assert "state_pre" in direct_coil_accepted_trace_step_controls_jax([trace0, trace1])
+    step_segments = direct_coil_accepted_trace_step_policy_segments([trace0, trace1])
+    assert step_segments[0]["start"] == 0
+    assert step_segments[-1]["stop"] == 2
+    assert sum(int(segment["n_steps"]) for segment in step_segments) == 2
+    assert [
+        (segment["start"], segment["stop"], segment["n_steps"])
+        for segment in controller_replay["preconditioner_policy_segments"]
+    ] == [(0, 2, 2)]
+    assert [
+        (
+            segment["start"],
+            segment["stop"],
+            segment["accepted_steps"],
+            segment["rejected_steps"],
+            segment["free_boundary_replay_steps"],
+            segment["state_resets"],
+        )
+        for segment in controller_replay["preconditioner_policy_segment_summary"]
+    ] == [(0, 2, 2, 0, 2, 0)]
+    _assert_replay_objective_close(controller_replay, replay)
+    _assert_replay_state_close(controller_replay, replay)
+    segmented_controller_replay = controller_replay_objective(use_preconditioner_policy_segments=True)
+    segmented_fallback_replay = controller_replay_objective(
+        use_preconditioner_policy_segments=True,
+        use_accepted_only_fast_path=False,
+    )
+    assert segmented_controller_replay["used_preconditioner_policy_segments"]
+    assert segmented_controller_replay["preconditioner_controls_segment_stacked"] == (True,)
+    assert segmented_controller_replay["used_accepted_only_fast_path"]
+    assert segmented_controller_replay["accepted_only_fast_path_segments"] == (True,)
+    assert segmented_fallback_replay["accepted_only_fast_path_segments"] == (False,)
+    _assert_replay_objective_close(segmented_controller_replay, controller_replay)
+    _assert_replay_state_close(segmented_controller_replay, controller_replay)
+    _assert_replay_objective_close(segmented_controller_replay, segmented_fallback_replay)
+    stacked_controller_replay = controller_replay_objective(use_stacked_step_controls=True)
+    stacked_fallback_replay = controller_replay_objective(
+        use_stacked_step_controls=True,
+        use_accepted_only_fast_path=False,
+    )
+    assert stacked_controller_replay["used_stacked_step_controls"]
+    assert stacked_controller_replay["step_policy_n_segments"] == len(step_segments)
+    assert stacked_controller_replay["preconditioner_controls_segment_stacked"] == (True,) * len(step_segments)
+    assert stacked_controller_replay["used_accepted_only_fast_path"]
+    assert stacked_controller_replay["accepted_only_fast_path_segments"] == (True,) * len(step_segments)
+    assert stacked_fallback_replay["accepted_only_fast_path_segments"] == (False,) * len(step_segments)
+    _assert_replay_objective_close(stacked_controller_replay, controller_replay)
+    stacked_plan = direct_coil_accepted_trace_controller_replay_plan(
+        [trace0, trace1],
+        static=static,
+        use_stacked_step_controls=True,
+    )
+    assert stacked_plan["segment_source"] == "step_policy"
+    assert stacked_plan["accepted_only_fast_path_segments"] == (True,) * len(step_segments)
+    stacked_plan_replay = controller_replay_objective(
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+    )
+    assert stacked_plan_replay["used_stacked_step_controls"]
+    _assert_replay_objective_close(stacked_plan_replay, stacked_controller_replay)
+    stacked_state_only_replay = controller_replay_objective(
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+    )
+    assert stacked_state_only_replay["used_stacked_step_controls"]
+    assert stacked_state_only_replay["used_state_only_replay"] is True
+    assert stacked_state_only_replay["history"] == {}
+    _assert_replay_state_close(stacked_state_only_replay, stacked_controller_replay)
+    frozen_vacuum_field_replay = controller_replay_objective(
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+        freeze_vacuum_field=True,
+    )
+    frozen_bsqvac_replay = controller_replay_objective(
+        state_weight=0.0,
+        bsqvac_weight=0.0,
+        force_weight=0.0,
+        use_stacked_step_controls=True,
+        replay_plan=stacked_plan,
+        state_only_replay=True,
+        freeze_freeb_bsqvac=True,
+    )
+    assert frozen_vacuum_field_replay["used_state_only_replay"] is True
+    assert frozen_bsqvac_replay["used_state_only_replay"] is True
+    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_vacuum_field_replay["state"]))))
+    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_bsqvac_replay["state"]))))
+
+    def full_replay_state_norm(params: CoilFieldParams):
+        replay = controller_replay_objective(
+            params=params,
+            state_weight=0.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            use_stacked_step_controls=True,
+            replay_plan=stacked_plan,
+            include_replay_aux=False,
+        )
+        return jnp.linalg.norm(pack_state(replay["state"]))
+
+    def state_only_replay_state_norm(params: CoilFieldParams):
+        replay = controller_replay_objective(
+            params=params,
+            state_weight=0.0,
+            bsqvac_weight=0.0,
+            force_weight=0.0,
+            use_stacked_step_controls=True,
+            replay_plan=stacked_plan,
+            include_replay_aux=False,
+            state_only_replay=True,
+        )
+        return jnp.linalg.norm(pack_state(replay["state"]))
+
+    full_value, full_jvp = jax.jvp(full_replay_state_norm, (base_params,), (direction,))
+    state_only_value, state_only_jvp = jax.jvp(state_only_replay_state_norm, (base_params,), (direction,))
+    np.testing.assert_allclose(state_only_value, full_value, rtol=5.0e-12, atol=5.0e-12)
+    np.testing.assert_allclose(state_only_jvp, full_jvp, rtol=5.0e-12, atol=5.0e-12)
+    _assert_replay_state_close(stacked_controller_replay, controller_replay)
+    _assert_replay_objective_close(stacked_controller_replay, stacked_fallback_replay)
+    for key in ("active", "accepted", "rejected", "done", "state_reset"):
+        _assert_replay_history_equal(segmented_controller_replay, controller_replay, key)
+        _assert_replay_history_equal(stacked_controller_replay, controller_replay, key)
+    return {"controller_replay": controller_replay}
+
+
 @pytest.mark.py311_coverage_only
 def test_direct_coil_trace_fingerprint_detects_control_branch_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     z = np.arange(6.0).reshape(2, 3)
@@ -3550,11 +3773,9 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     from vmec_jax.discrete_adjoint import strict_update_one_step_from_trace
     from vmec_jax.solvers.free_boundary.adjoint.branch_local_derivatives import (
         direct_coil_accepted_trace_controller_replay_objective_jax,
-        direct_coil_accepted_trace_controller_replay_plan,
         accepted_trace_effective_state_pre,
         direct_coil_accepted_trace_fingerprint,
         direct_coil_accepted_trace_fingerprint_delta,
-        direct_coil_accepted_trace_step_controls_jax,
         direct_coil_accepted_trace_step_policy_segments,
         direct_coil_accepted_trace_replay_objective_jax,
         direct_coil_boundary_bsqvac_from_trace_jax,
@@ -3766,199 +3987,16 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
             **kwargs,
         )
 
-    def assert_objective_close(left, right, *, rtol: float = 2.0e-12, atol: float = 1.0e-12) -> None:
-        np.testing.assert_allclose(np.asarray(left["objective"]), np.asarray(right["objective"]), rtol=rtol, atol=atol)
-
-    def assert_state_close(left, right, *, rtol: float = 5.0e-12, atol: float = 5.0e-12) -> None:
-        np.testing.assert_allclose(np.asarray(pack_state(left["state"])), np.asarray(pack_state(right["state"])), rtol=rtol, atol=atol)
-
-    def assert_array_equal(container, name, expected) -> None:
-        np.testing.assert_array_equal(np.asarray(container[name]), np.asarray(expected))
-
-    def assert_history_close(left, right, key, *, rtol: float = 5.0e-12, atol: float = 5.0e-12) -> None:
-        np.testing.assert_allclose(np.asarray(left["history"][key]), np.asarray(right["history"][key]), rtol=rtol, atol=atol)
-
-    def assert_history_equal(left, right, key) -> None:
-        np.testing.assert_array_equal(np.asarray(left["history"][key]), np.asarray(right["history"][key]))
-
-    replay = accepted_replay_objective()
-    assert {"state", "bsqvac", "force"}.issubset(replay["objective_components"])
-    assert np.isfinite(float(replay["objective"]))
-    controller_replay = controller_replay_objective()
-    fallback_controller_replay = controller_replay_objective(use_accepted_only_fast_path=False)
-    assert controller_replay["used_accepted_only_fast_path"]
-    assert controller_replay["accepted_only_fast_path_segments"] == (True,)
-    assert not fallback_controller_replay["used_accepted_only_fast_path"]
-    assert fallback_controller_replay["accepted_only_fast_path_segments"] == (False,)
-    assert_objective_close(controller_replay, fallback_controller_replay)
-    assert_state_close(controller_replay, fallback_controller_replay)
-    for key in ("active", "accepted", "rejected", "done", "state_reset", "force", "bsqvac"):
-        assert_history_close(controller_replay, fallback_controller_replay, key)
-    for container, name, expected in (
-        (controller_replay["history"], "accepted", [True, True]),
-        (controller_replay["history"], "rejected", [False, False]),
-        (controller_replay["controls"], "step_index", [0, 1]),
-        (controller_replay["controls"], "reset_to_trace_pre", [False, False]),
-        (controller_replay["controls"], "has_active_freeb_replay", [True, True]),
-    ):
-        assert_array_equal(container, name, expected)
-    np.testing.assert_allclose(
-        np.asarray(controller_replay["controls"]["step_scalars"]["dt_eff"]),
-        np.asarray([_trace_scalar_value(trace0["dt_eff"]), _trace_scalar_value(trace1["dt_eff"])]),
-    )
-    for key in ("flip_sign", "limit_update_rms", "divide_by_scalxc_for_update"):
-        assert key in controller_replay["controls"]["step_scalars"]
-    for key in ("preconditioner_use_lax_tridi", "preconditioner_use_precomputed_tridi"):
-        assert key not in controller_replay["controls"]["step_scalars"]
-    np.testing.assert_allclose(
-        np.asarray(controller_replay["scalar_controls"]["fac"]),
-        np.asarray([_trace_scalar_value(trace0["fac"]), _trace_scalar_value(trace1["fac"])]),
-    )
-    assert "limit_update_rms" in controller_replay["scalar_controls"]
-    assert "preconditioner_use_lax_tridi" in controller_replay["scalar_controls"]
-    assert controller_replay["preconditioner_controls_segment_stacked"] == ()
-    np.testing.assert_allclose(
-        np.asarray(controller_replay["controls"]["step_arrays"]["vRcc_before"][0]),
-        np.asarray(trace0["vRcc_before"]),
-    )
-    assert np.asarray(controller_replay["array_controls"]["vLcs_before"]).shape[0] == 2
-    np.testing.assert_allclose(
-        np.asarray(controller_replay["controls"]["step_preconditioner"]["lam_prec"][0]),
-        np.asarray(trace0["lam_prec"]),
-    )
-    assert controller_replay["preconditioner_controls_stacked"]
-    assert np.asarray(controller_replay["preconditioner_controls"]["w_mode_mn"]).shape[0] == 2
-    assert controller_replay["preconditioner_policy_n_segments"] == 1
-    assert controller_replay["step_policy_n_segments"] >= 1
-    assert "state_pre" in direct_coil_accepted_trace_step_controls_jax([trace0, trace1])
-    step_segments = direct_coil_accepted_trace_step_policy_segments([trace0, trace1])
-    assert step_segments[0]["start"] == 0
-    assert step_segments[-1]["stop"] == 2
-    assert sum(int(segment["n_steps"]) for segment in step_segments) == 2
-    assert [
-        (segment["start"], segment["stop"], segment["n_steps"])
-        for segment in controller_replay["preconditioner_policy_segments"]
-    ] == [(0, 2, 2)]
-    assert [
-        (
-            segment["start"],
-            segment["stop"],
-            segment["accepted_steps"],
-            segment["rejected_steps"],
-            segment["free_boundary_replay_steps"],
-            segment["state_resets"],
-        )
-        for segment in controller_replay["preconditioner_policy_segment_summary"]
-    ] == [(0, 2, 2, 0, 2, 0)]
-    assert_objective_close(controller_replay, replay)
-    assert_state_close(controller_replay, replay)
-    segmented_controller_replay = controller_replay_objective(use_preconditioner_policy_segments=True)
-    segmented_fallback_replay = controller_replay_objective(
-        use_preconditioner_policy_segments=True,
-        use_accepted_only_fast_path=False,
-    )
-    assert segmented_controller_replay["used_preconditioner_policy_segments"]
-    assert segmented_controller_replay["preconditioner_controls_segment_stacked"] == (True,)
-    assert segmented_controller_replay["used_accepted_only_fast_path"]
-    assert segmented_controller_replay["accepted_only_fast_path_segments"] == (True,)
-    assert segmented_fallback_replay["accepted_only_fast_path_segments"] == (False,)
-    assert_objective_close(segmented_controller_replay, controller_replay)
-    assert_state_close(segmented_controller_replay, controller_replay)
-    assert_objective_close(segmented_controller_replay, segmented_fallback_replay)
-    stacked_controller_replay = controller_replay_objective(use_stacked_step_controls=True)
-    stacked_fallback_replay = controller_replay_objective(
-        use_stacked_step_controls=True,
-        use_accepted_only_fast_path=False,
-    )
-    assert stacked_controller_replay["used_stacked_step_controls"]
-    assert stacked_controller_replay["step_policy_n_segments"] == len(step_segments)
-    assert stacked_controller_replay["preconditioner_controls_segment_stacked"] == (True,) * len(step_segments)
-    assert stacked_controller_replay["used_accepted_only_fast_path"]
-    assert stacked_controller_replay["accepted_only_fast_path_segments"] == (True,) * len(step_segments)
-    assert stacked_fallback_replay["accepted_only_fast_path_segments"] == (False,) * len(step_segments)
-    assert_objective_close(stacked_controller_replay, controller_replay)
-    stacked_plan = direct_coil_accepted_trace_controller_replay_plan(
-        [trace0, trace1],
+    replay_variants = _assert_two_step_controller_replay_variants(
+        accepted_replay_objective=accepted_replay_objective,
+        controller_replay_objective=controller_replay_objective,
+        trace0=trace0,
+        trace1=trace1,
         static=init.static,
-        use_stacked_step_controls=True,
+        base_params=base_params,
+        direction=direction,
     )
-    assert stacked_plan["segment_source"] == "step_policy"
-    assert stacked_plan["accepted_only_fast_path_segments"] == (True,) * len(step_segments)
-    stacked_plan_replay = controller_replay_objective(
-        use_stacked_step_controls=True,
-        replay_plan=stacked_plan,
-    )
-    assert stacked_plan_replay["used_stacked_step_controls"]
-    assert_objective_close(stacked_plan_replay, stacked_controller_replay)
-    stacked_state_only_replay = controller_replay_objective(
-        state_weight=0.0,
-        bsqvac_weight=0.0,
-        force_weight=0.0,
-        use_stacked_step_controls=True,
-        replay_plan=stacked_plan,
-        state_only_replay=True,
-    )
-    assert stacked_state_only_replay["used_stacked_step_controls"]
-    assert stacked_state_only_replay["used_state_only_replay"] is True
-    assert stacked_state_only_replay["history"] == {}
-    assert_state_close(stacked_state_only_replay, stacked_controller_replay)
-    frozen_vacuum_field_replay = controller_replay_objective(
-        state_weight=0.0,
-        bsqvac_weight=0.0,
-        force_weight=0.0,
-        use_stacked_step_controls=True,
-        replay_plan=stacked_plan,
-        state_only_replay=True,
-        freeze_vacuum_field=True,
-    )
-    frozen_bsqvac_replay = controller_replay_objective(
-        state_weight=0.0,
-        bsqvac_weight=0.0,
-        force_weight=0.0,
-        use_stacked_step_controls=True,
-        replay_plan=stacked_plan,
-        state_only_replay=True,
-        freeze_freeb_bsqvac=True,
-    )
-    assert frozen_vacuum_field_replay["used_state_only_replay"] is True
-    assert frozen_bsqvac_replay["used_state_only_replay"] is True
-    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_vacuum_field_replay["state"]))))
-    assert np.isfinite(float(jnp.linalg.norm(pack_state(frozen_bsqvac_replay["state"]))))
-
-    def full_replay_state_norm(params: CoilFieldParams):
-        replay = controller_replay_objective(
-            params=params,
-            state_weight=0.0,
-            bsqvac_weight=0.0,
-            force_weight=0.0,
-            use_stacked_step_controls=True,
-            replay_plan=stacked_plan,
-            include_replay_aux=False,
-        )
-        return jnp.linalg.norm(pack_state(replay["state"]))
-
-    def state_only_replay_state_norm(params: CoilFieldParams):
-        replay = controller_replay_objective(
-            params=params,
-            state_weight=0.0,
-            bsqvac_weight=0.0,
-            force_weight=0.0,
-            use_stacked_step_controls=True,
-            replay_plan=stacked_plan,
-            include_replay_aux=False,
-            state_only_replay=True,
-        )
-        return jnp.linalg.norm(pack_state(replay["state"]))
-
-    full_value, full_jvp = jax.jvp(full_replay_state_norm, (base_params,), (direction,))
-    state_only_value, state_only_jvp = jax.jvp(state_only_replay_state_norm, (base_params,), (direction,))
-    np.testing.assert_allclose(state_only_value, full_value, rtol=5.0e-12, atol=5.0e-12)
-    np.testing.assert_allclose(state_only_jvp, full_jvp, rtol=5.0e-12, atol=5.0e-12)
-    assert_state_close(stacked_controller_replay, controller_replay)
-    assert_objective_close(stacked_controller_replay, stacked_fallback_replay)
-    for key in ("active", "accepted", "rejected", "done", "state_reset"):
-        assert_history_equal(segmented_controller_replay, controller_replay, key)
-        assert_history_equal(stacked_controller_replay, controller_replay, key)
+    controller_replay = replay_variants["controller_replay"]
 
     axis_reference_trace = deepcopy(trace0)
     axis_changed_trace = deepcopy(trace0)
@@ -3993,9 +4031,9 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         )
     ) > 1.0e-9
     for key in ("bsqvac_rms", "bnormal_rms"):
-        assert_history_close(axis_changed_stacked_replay, axis_changed_controller_replay, key)
-    assert_objective_close(axis_changed_stacked_replay, axis_changed_controller_replay, rtol=5.0e-12, atol=5.0e-12)
-    assert_state_close(axis_changed_stacked_replay, axis_changed_controller_replay)
+        _assert_replay_history_close(axis_changed_stacked_replay, axis_changed_controller_replay, key)
+    _assert_replay_objective_close(axis_changed_stacked_replay, axis_changed_controller_replay, rtol=5.0e-12, atol=5.0e-12)
+    _assert_replay_state_close(axis_changed_stacked_replay, axis_changed_controller_replay)
 
     static_changed_trace = dict(trace1)
     static_changed_trace["include_edge_residual"] = not bool(trace1["include_edge_residual"])
@@ -4013,9 +4051,9 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
     )
     assert not padded_controller_replay["used_accepted_only_fast_path"]
     assert padded_controller_replay["accepted_only_fast_path_segments"] == (False,)
-    assert_array_equal(padded_controller_replay["history"], "active", [True, True, False])
-    assert_array_equal(padded_controller_replay["history"], "accepted", [True, True, False])
-    assert_array_equal(padded_controller_replay["controls"], "reset_to_trace_pre", [False, False, True])
+    _assert_replay_array_equal(padded_controller_replay["history"], "active", [True, True, False])
+    _assert_replay_array_equal(padded_controller_replay["history"], "accepted", [True, True, False])
+    _assert_replay_array_equal(padded_controller_replay["controls"], "reset_to_trace_pre", [False, False, True])
     assert padded_controller_replay["preconditioner_policy_n_segments"] == 1
     assert [
         (segment["start"], segment["stop"], segment["n_steps"])
@@ -4033,7 +4071,7 @@ def test_direct_coil_accepted_update_replay_ad_matches_fd_for_coil_pytree(
         )
         for segment in padded_controller_replay["preconditioner_policy_segment_summary"]
     ] == [(0, 3, 2, 1, 1, 3, 1)]
-    assert_objective_close(padded_controller_replay, controller_replay)
+    _assert_replay_objective_close(padded_controller_replay, controller_replay)
 
 
 @pytest.mark.py311_coverage_only
