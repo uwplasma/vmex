@@ -248,7 +248,17 @@ def test_flux_profiles_match_old(case):
 
 def test_mass_and_icurv_match_old(case):
     _allclose(case.setup.mass, case.mass_old, "mass")
-    _allclose(case.setup.icurv, case.icurv_old, "icurv")
+    # Integrated pcurr lanes ('two_power'/'gauss_trunc') now use VMEC2000's
+    # exact 10-point Gauss-Legendre rule (profile_functions.f); the legacy
+    # evaluator used 16 points, deviating from VMEC2000 by ~2e-6 relative
+    # (bug exposed by the end-to-end cth_like_fixed_bdy wout parity test).
+    if str(case.inp.pcurr_type) in ("two_power", "gauss_trunc"):
+        np.testing.assert_allclose(np.asarray(case.setup.icurv),
+                                   np.asarray(case.icurv_old),
+                                   rtol=5e-6, atol=1e-12,
+                                   err_msg="icurv (quadrature lane) mismatch")
+    else:
+        _allclose(case.setup.icurv, case.icurv_old, "icurv")
     assert case.setup.ncurr == int(case.indata.get_int("NCURR", 0))
     if case.setup.ncurr == 1 and abs(float(case.inp.curtor)) > 0 and np.any(
         np.asarray(case.inp.ac)

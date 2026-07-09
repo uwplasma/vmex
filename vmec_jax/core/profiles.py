@@ -71,9 +71,23 @@ __all__ = [
 #: Vacuum permeability [N/A^2]; VMEC2000 ``stel_constants`` uses 4e-7*pi.
 MU0 = 4e-7 * np.pi
 
-# Fixed-order Gauss-Legendre quadrature on [-1, 1], mapped to [0, x] to
-# integrate parameterized I'(x) -> I(x) (VMEC2000 pcurr uses 10 points).
-_GL_X, _GL_W = (jnp.asarray(v) for v in np.polynomial.legendre.leggauss(16))
+# 10-point Gauss-Legendre quadrature on [0, 1] used by VMEC2000 to integrate
+# parameterized I'(x) -> I(x).  The nodes/weights are copied verbatim from
+# ``LIBSTELL/Sources/Miscel/profile_functions.f`` (``gln = 10``, ``glx/glw``)
+# so the integrated 'two_power'/'gauss_trunc' current profiles are bit-exact
+# against VMEC2000 (a higher-order rule would be *less* parity-accurate).
+_GL_X = jnp.asarray([
+    0.01304673574141414, 0.06746831665550774, 0.1602952158504878,
+    0.2833023029353764, 0.4255628305091844, 0.5744371694908156,
+    0.7166976970646236, 0.8397047841495122, 0.9325316833444923,
+    0.9869532642585859,
+])
+_GL_W = jnp.asarray([
+    0.03333567215434407, 0.0747256745752903, 0.1095431812579910,
+    0.1346333596549982, 0.1477621123573764, 0.1477621123573764,
+    0.1346333596549982, 0.1095431812579910, 0.0747256745752903,
+    0.03333567215434407,
+])
 
 
 def _coeffs(coefficients):
@@ -189,10 +203,14 @@ def _pcurr_power_series_i(coefficients, x):
 
 
 def _integrate_0_to_x(fun, coefficients, x):
-    """``int_0^x fun(c, t) dt`` by 16-point Gauss-Legendre on [0, x]."""
+    """``int_0^x fun(c, t) dt`` by VMEC2000's 10-point Gauss-Legendre rule.
+
+    ``profile_functions.f``: ``pcurr = x * sum_i glw(i) * fun(x*glx(i))`` with
+    the hard-coded ``[0, 1]`` nodes/weights above (exact VMEC2000 parity).
+    """
     x = jnp.asarray(x)
-    t = 0.5 * x[..., None] * (_GL_X[None, :] + 1.0)
-    return 0.5 * x * jnp.sum(_GL_W[None, :] * fun(coefficients, t), axis=-1)
+    t = x[..., None] * _GL_X[None, :]
+    return x * jnp.sum(_GL_W[None, :] * fun(coefficients, t), axis=-1)
 
 
 def _pcurr_two_power_ip(coefficients, x):

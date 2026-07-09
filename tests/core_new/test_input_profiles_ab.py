@@ -215,11 +215,22 @@ def test_profiles_match_legacy(deck_name: str) -> None:
                            bloat=new.bloat),
         old["iota"],
     )
-    check(
-        core_profiles.current(new.pcurr_type, new.ac, new.ac_aux_s, new.ac_aux_f, s,
-                              bloat=new.bloat),
-        old["current"],
+    # Integrated current parameterizations ('two_power'/'gauss_trunc') now use
+    # VMEC2000's exact 10-point Gauss-Legendre rule (profile_functions.f
+    # gln = 10); the legacy evaluator used a 16-point rule, which deviates
+    # from VMEC2000 by ~2e-6 relative (the bug was exposed by the end-to-end
+    # cth_like_fixed_bdy wout parity test).  Compare quadrature-based lanes at
+    # the known legacy deviation; everything else stays strict.
+    quadrature_lane = new.pcurr_type in ("two_power", "gauss_trunc")
+    current_new = core_profiles.current(
+        new.pcurr_type, new.ac, new.ac_aux_s, new.ac_aux_f, s, bloat=new.bloat
     )
+    if quadrature_lane:
+        np.testing.assert_allclose(np.asarray(current_new),
+                                   np.asarray(old["current"]),
+                                   rtol=5e-6, atol=1e-12)
+    else:
+        check(current_new, old["current"])
 
 
 def test_vmecpp_json_example() -> None:
