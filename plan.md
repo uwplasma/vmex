@@ -298,10 +298,30 @@ loop (solovev 215/215 iterations vs VMEC2000, cth 434, machine-precision wout pa
 complete wout writer (all 39 missing variables; found legacy lasym output bugs: buco/jcur*/ctor
 x1/2, jdotb x1/16, fast-bcovar bsubsmns corruption), mgrid IO/field (ESSOS PR#33 cross-verified),
 and multigrid interpolation. Golden fixtures are a GitHub release (golden-v1) with sha256 fetch;
-core suite is in CI with coverage reporting. **Next, in order (external review 2026-07-09
-concurs):** (1) solver executable reuse — module-level jit callables keyed by static config
-instead of per-solve closures (jit lane currently 2.4 s repeated vs legacy 0.02 s warm); (2)
-multigrid ladder driver with padded radial arrays (one executable across NS_ARRAY stages);
+core suite is in CI with coverage reporting.
+**(1) DONE + (2) DONE (2026-07-09, per-stage variant):** `SolverRuntime` is now a registered
+pytree passed to module-level jitted lanes (`_while_lane`/`_block_lane`): RunSetup arrays +
+`rcon0/zcon0` as data, `Resolution` + scalar config as meta, numpy trig/mode/gather tables
+derived from meta via lru-cached `_static_tables`. Proven (tests/core_new/
+test_multigrid_ladder.py, JAX_LOG_COMPILES subprocess counts): second solve at same Resolution
+with different boundary = 0 compiles, 0.02 s on solovev. `solve(initial_state=...)` hot restart
+added (boundary delta spread with the profil3d radial profile; bare edge-row swap measured
+fsqr~0.5, spread ~4e-6; cth 1% RBC(0,1) restart 298 vs 434 iters — <25% is stepper-rate-limited,
+needs Phase-4 Newton/2D precond). `multigrid.solve_multigrid` (runvmec.f ladder: skip-decreasing,
+per-stage banners/ftol/niter, interp.f handoff) matches xvmec2000 ladders to machine precision
+(cth 5/9/15 rel 9e-15; nfp4_QH 9/17/35 identical printed wb; NOTE ladder-vs-single-grid wb
+scatter 1.36e-8 on nfp4_QH is inherent to VMEC — reproduced by xvmec2000 itself — m=1 freeze).
+Compile behavior: one block-lane compile per distinct stage structure per session (3 for a
+3-stage ladder, ~3 s each — cold ladder 9.3 s vs cold direct 5.1 s on cth; warm ladder 0.3 s,
+0 compiles; direct-after-ladder reuses the final-stage executable, 0 compiles). **Follow-up
+(padding, not attempted — >2 h):** ONE executable for all stages = pad radial arrays to
+max(ns_array) as pytree *data* (s grids/hs/profiles already data, so per-stage values reuse one
+executable) + a static `ns_active` mask threaded through the radial reductions (energies/force
+norms in fields.py `energies_and_force_norms`, getfsq sums in residuals.py, precondn/lamcal
+integrals and the tridiagonal jmax in preconditioner.py, jacobian half-mesh differences at the
+padded rows) with masked rows pinned to identity updates in the loop body; validate vs the
+per-stage ladder to 1e-15 per stage, then flip solve_multigrid to a single lane. (3)-(4)
+unchanged below.
 (3) parity breadth: 3D/lasym/finite-beta/ncurr=1/high-mode across all nine golden fixtures
 (known gap: legacy lasym solver drifts ~5% on asym harmonics — validate the new core against
 golden directly); (4) switch one public vertical slice (CLI fixed-boundary path) to the core,
