@@ -583,8 +583,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    under refinement. A perturbed cylinder reduced variational force from `5.39e-2` to below
    `1e-12` and its continuum tensor residual to `6.09e-14`;
    forced short runs raise a typed convergence error. The analytic two-coil flux-tube fixture now
-   verifies throat/center field and paraxial residual scaling. MMS and production preconditioning
-   remain M2 gates.
+   verifies throat/center field and paraxial residual scaling. A closed-form flared-tube MMS shows
+   axial spectral force convergence (`1.39e-5`, `1.67e-8`, `1.77e-11` at `nxi=9,13,17`). The
+   scalable lane uses exact JAX Hessian products with damped Newton-GMRES and a tensor-product
+   radial/CGL stiffness inverse; a 585-unknown solve reaches `1.69e-15` variational force and
+   `5.09e-13` continuum residual. M2 continuation and broader resolution studies remain open.
 
    **M3 STATUS (2026-07-09): closure layer landed; equilibrium coupling next.** Isotropic,
    ANIMEC bi-Maxwellian (Suzuki et al. Eqs. 4–6), and bilinear tabulated `p_parallel(s,B)` closures

@@ -55,6 +55,7 @@ from .model import (
 from .solver import (
     MirrorConvergenceError,
     MirrorSolveResult,
+    SeparableMirrorPreconditioner,
     solve_fixed_boundary_cli,
 )
 
@@ -85,6 +86,7 @@ __all__ = [
     "ThetaBasis",
     "TabulatedPressureClosure",
     "VariationalResidual",
+    "SeparableMirrorPreconditioner",
     "build_mirror_grid",
     "anisotropy_indicators",
     "anisotropic_fixed_boundary_energy_gradient",

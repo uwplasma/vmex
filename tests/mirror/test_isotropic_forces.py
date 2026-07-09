@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from scipy.sparse.linalg import LinearOperator, gmres
 
 jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
@@ -16,6 +17,7 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorConfig,
     MirrorConvergenceError,
     MirrorResolution,
+    SeparableMirrorPreconditioner,
     MirrorState,
     fixed_boundary_energy_gradient,
     isotropic_force_residual,
@@ -25,6 +27,16 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_fixed_boundary_cli,
 )
 from vmec_jax.mirror.forces import MU0  # noqa: E402
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _enable_solver_jit():
+    """Exercise nonlinear solver tests in their production execution mode."""
+
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    yield
+    jax.config.update("jax_disable_jit", previous)
 
 
 def _cylinder(*, ns: int = 11, nxi: int = 21, radius: float = 0.3, half_length: float = 1.2):
@@ -132,6 +144,85 @@ def test_energy_gradient_matches_central_difference_for_interior_shape() -> None
     np.testing.assert_allclose(directional_ad, directional_fd, rtol=2.0e-7, atol=2.0e-5)
 
 
+def test_flared_tube_manufactured_lorentz_force_converges_spectrally() -> None:
+    """Compare the continuum force to a closed-form divergence-free field."""
+
+    relative_errors = []
+    for nxi in (9, 13, 17):
+        half_length = 1.4
+        grid, _, _ = _cylinder(ns=9, nxi=nxi, half_length=half_length)
+        xi = jnp.asarray(grid.xi)
+        radius = 0.3 * (1.0 + 0.12 * xi**2)
+        boundary = MirrorBoundary.from_radius(radius, grid)
+        state = MirrorState.from_boundary(boundary, grid)
+        flux = 0.1
+        residual = isotropic_force_residual(
+            mirror_energy(state, grid, axial_flux_derivative=flux), grid
+        )
+
+        radius_z = 0.3 * 0.24 * xi / half_length
+        radius_zz = jnp.full_like(xi, 0.3 * 0.24 / half_length**2)
+        logarithmic_slope = radius_z / radius
+        curvature = radius_zz / radius - 3.0 * logarithmic_slope**2
+        axial_field = 2.0 * flux / radius**2
+        exact_covariant_s = 0.5 * radius**2 * axial_field**2 * curvature / MU0
+        numerical = np.asarray(residual.covariant_s)[1:, 0, :]
+        error = np.max(np.abs(numerical - np.asarray(exact_covariant_s)))
+        relative_errors.append(error / np.max(np.abs(np.asarray(exact_covariant_s))))
+        np.testing.assert_allclose(residual.covariant_xi[1:], 0.0, atol=3.0e-11)
+
+    assert relative_errors[1] < 2.0e-3 * relative_errors[0]
+    assert relative_errors[2] < 2.0e-3 * relative_errors[1]
+    assert relative_errors[-1] < 3.0e-11
+
+
+def test_separable_preconditioner_is_exact_for_its_model_and_reduces_gmres_work() -> None:
+    grid, _, _ = _cylinder(ns=17, nxi=33)
+    preconditioner = SeparableMirrorPreconditioner.build(grid)
+    rng = np.random.default_rng(42)
+    exact = rng.normal(size=preconditioner.size)
+    right_hand_side = preconditioner.operator(exact)
+    np.testing.assert_allclose(
+        preconditioner.apply(right_hand_side), exact, rtol=2.0e-12, atol=2.0e-12
+    )
+
+    operator = LinearOperator(
+        (preconditioner.size, preconditioner.size),
+        matvec=preconditioner.operator,
+        dtype=float,
+    )
+    inverse = LinearOperator(
+        (preconditioner.size, preconditioner.size),
+        matvec=preconditioner.apply,
+        dtype=float,
+    )
+    iterations = {"plain": 0, "preconditioned": 0}
+    plain, plain_info = gmres(
+        operator,
+        right_hand_side,
+        rtol=1.0e-11,
+        atol=0.0,
+        callback=lambda _: iterations.__setitem__("plain", iterations["plain"] + 1),
+        callback_type="pr_norm",
+    )
+    accelerated, accelerated_info = gmres(
+        operator,
+        right_hand_side,
+        M=inverse,
+        rtol=1.0e-11,
+        atol=0.0,
+        callback=lambda _: iterations.__setitem__(
+            "preconditioned", iterations["preconditioned"] + 1
+        ),
+        callback_type="pr_norm",
+    )
+    assert plain_info == accelerated_info == 0
+    assert iterations["plain"] >= 10
+    assert iterations["preconditioned"] <= 2
+    np.testing.assert_allclose(plain, exact, rtol=2.0e-9, atol=2.0e-9)
+    np.testing.assert_allclose(accelerated, exact, rtol=2.0e-12, atol=2.0e-12)
+
+
 def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9),
@@ -168,6 +259,41 @@ def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None
     assert result.history.shape[1] == 6
     assert float(result.history[-1, 4]) <= config.ftol
     np.testing.assert_allclose(result.state.radius_scale, 0.3, atol=2.0e-13)
+
+
+def test_matrix_free_solver_closes_large_system_dense_reference_limit() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=17, mpol=0, ntheta=1, nxi=41),
+        z_min=-1.2,
+        z_max=1.2,
+        ftol=1.0e-12,
+        max_iterations=300,
+    )
+    grid = config.build_grid()
+    boundary = MirrorBoundary.from_radius(0.3, grid)
+    base = MirrorState.from_boundary(boundary, grid)
+    s = jnp.asarray(grid.s)[:, None, None]
+    xi = jnp.asarray(grid.xi)[None, None, :]
+    initial = replace(
+        base,
+        radius_scale=base.radius_scale + 0.03 * s * (1.0 - s) * (1.0 - xi**2),
+    )
+    assert (grid.ns - 2) * (grid.nxi - 2) > 512
+
+    result = solve_fixed_boundary_cli(
+        initial,
+        boundary,
+        grid,
+        config,
+        axial_flux_derivative=0.1,
+        gradient_tolerance=1.0e-12,
+        require_convergence=True,
+    )
+    assert result.converged
+    assert result.linear_iterations > 0
+    assert result.final_linear_residual < 1.0e-8
+    assert float(result.variational.maximum) <= config.ftol
+    assert float(result.force.normalized_rms) < 1.0e-11
 
 
 def test_reference_solver_raises_instead_of_returning_best_unconverged_state() -> None:
