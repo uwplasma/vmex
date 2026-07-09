@@ -493,6 +493,29 @@ median; GPU runs validated; README plot regenerated from `run_baseline.py`.
 
 ---
 
+### 7.8 GPU profiling workstream (added 2026-07-09; hardware available)
+
+`ssh office` (pop-os, 2x RTX A4000 16GB, repo at ~/vmec_jax) is available for GPU work. Reported
+symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
+
+1. **Environment**: venv on office with CUDA jax (`pip install -U "jax[cuda12]"`), editable
+   vmec_jax at current main, golden fixtures via the conftest downloader.
+2. **Benchmark matrix** (extend `benchmarks/run_baseline.py` with a `--device {cpu,gpu}` axis and
+   an office-runner mode): all baseline decks x {cpu, gpu} x {legacy solver, core solver
+   cli/jit lanes} x {single-grid, multigrid} x {cold, warm}, recording wall, device memory,
+   compile vs run time (jax.profiler), and per-iteration step time across problem sizes
+   (ns=11 -> 151, low and high mpol/ntor) — locate the GPU crossover point.
+3. **Hypotheses to test** for GPU-slower-than-CPU: (a) small kernels + dispatch overhead at low
+   resolution (GPU should win only at high ns*mnmax); (b) host<->device syncs per iteration in
+   the legacy driver; (c) the tridiagonal Thomas solve serializes over ns on GPU (lax.scan) —
+   consider cyclic reduction or a batched parallel solve, or pin the tridiagonal solve to CPU;
+   (d) float64 throughput on A4000 (GA104 fp64 = 1/32 fp32) — measure; experiment with fp32
+   preconditioner + fp64 physics; (e) recompiles from per-solve closures (identity-cache landed;
+   structural runtime caching pending).
+4. **Deliverables**: `benchmarks/gpu_baseline.json`, a docs/performance section explaining the
+   crossover + tuning guidance, and implementation changes ranked by measured impact feeding
+   Phase 4.
+
 ## 8. Phase 5 — Free boundary, ESSOS, mirrors
 
 1. **mgrid path** (VMEC2000-compatible, tokamaks *and* stellarators — VMEC++ can do neither
