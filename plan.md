@@ -557,9 +557,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    **M2 STATUS (2026-07-09): physical reference solve in progress.** Mass-conserving isotropic
    energy now uses VMEC-style radial half cells; an independent `curl(B)/mu0 x B - grad(p)` tensor
    residual caught and prevented a nonvariational full-mesh discretization. The host reference lane
-   combines L-BFGS with an exact-JAX residual-Newton polish and accepts a result only by physical
-   force. A perturbed cylinder reduced normalized force from `5.79` to `6.09e-14`; forced short runs
-   raise a typed convergence error. Two-coil/MMS and production preconditioning remain M2 gates.
+   combines L-BFGS with an exact-JAX residual-Newton polish and accepts a result only by the
+   nondimensional variational force (the mirror analogue of VMEC `fsq`). The separately differenced
+   continuum tensor force is always reported as a spatial-verification residual and must converge
+   under refinement. A perturbed cylinder reduced variational force from `5.39e-2` to below
+   `1e-12` and its continuum tensor residual to `6.09e-14`;
+   forced short runs raise a typed convergence error. The analytic two-coil flux-tube fixture now
+   verifies throat/center field and paraxial residual scaling. MMS and production preconditioning
+   remain M2 gates.
 
    **5.1 Supported physical model**
 

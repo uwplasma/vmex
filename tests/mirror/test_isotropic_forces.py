@@ -164,9 +164,9 @@ def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None
     assert result.converged
     assert result.optimizer_success
     assert result.iterations > 0
-    assert float(result.force.normalized_rms) <= config.ftol
-    assert result.history.shape[1] == 4
-    assert float(result.history[-1, 3]) <= config.ftol
+    assert float(result.variational.maximum) <= config.ftol
+    assert result.history.shape[1] == 6
+    assert float(result.history[-1, 4]) <= config.ftol
     np.testing.assert_allclose(result.state.radius_scale, 0.3, atol=2.0e-13)
 
 
@@ -195,4 +195,4 @@ def test_reference_solver_raises_instead_of_returning_best_unconverged_state() -
             require_convergence=True,
         )
     assert not caught.value.result.converged
-    assert float(caught.value.result.force.normalized_rms) > config.ftol
+    assert float(caught.value.result.variational.maximum) > config.ftol

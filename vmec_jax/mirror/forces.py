@@ -122,7 +122,18 @@ class IsotropicForceResidual:
     component_rms: Array
 
 
-for _cls in (MirrorEnergy, IsotropicForceResidual):
+@dataclass(frozen=True)
+class VariationalResidual:
+    """Nondimensional generalized forces used for nonlinear convergence."""
+
+    radius_gradient: Array
+    lambda_gradient: Array
+    radius_rms: Array
+    lambda_rms: Array
+    maximum: Array
+
+
+for _cls in (MirrorEnergy, IsotropicForceResidual, VariationalResidual):
     jax.tree_util.register_dataclass(
         _cls,
         data_fields=[field.name for field in fields(_cls)],
@@ -209,6 +220,49 @@ def fixed_boundary_energy_gradient(
         return mirror_energy(projected, grid, **energy_kwargs).total
 
     return jax.grad(objective)(state)
+
+
+def fixed_boundary_variational_residual(
+    state: MirrorState,
+    boundary: MirrorBoundary,
+    grid: "MirrorGrid",
+    **energy_kwargs: Any,
+) -> VariationalResidual:
+    """Return normalized fixed-boundary energy-gradient force components.
+
+    This is the mirror analogue of VMEC's variational ``fsqr/fsqz/fsql``
+    convergence residual.  The independently differenced tensor force from
+    :func:`isotropic_force_residual` remains a discretization-verification
+    diagnostic and should converge under grid refinement.
+    """
+
+    projected = project_fixed_boundary_state(state, boundary, grid)
+    energy = mirror_energy(projected, grid, **energy_kwargs)
+    gradient = fixed_boundary_energy_gradient(projected, boundary, grid, **energy_kwargs)
+    energy_scale = jnp.maximum(jnp.abs(energy.total), jnp.finfo(energy.total.dtype).tiny)
+    radius_scale = jnp.mean(jnp.asarray(boundary.radius_scale))
+    radius_gradient = gradient.radius_scale * radius_scale / energy_scale
+
+    psi = _profile(
+        energy_kwargs["axial_flux_derivative"],
+        grid.ns,
+        energy.total.dtype,
+        name="axial_flux_derivative",
+    )
+    flux_scale = jnp.maximum(jnp.max(jnp.abs(psi)), jnp.finfo(psi.dtype).tiny)
+    lambda_gradient = gradient.lambda_stream * flux_scale / energy_scale
+
+    radius_free = radius_gradient[1:-1, :, 1:-1]
+    radius_rms = jnp.sqrt(jnp.mean(radius_free**2))
+    lambda_rms = jnp.sqrt(jnp.mean(lambda_gradient**2))
+    maximum = jnp.maximum(jnp.max(jnp.abs(radius_free)), jnp.max(jnp.abs(lambda_gradient)))
+    return VariationalResidual(
+        radius_gradient=radius_gradient,
+        lambda_gradient=lambda_gradient,
+        radius_rms=radius_rms,
+        lambda_rms=lambda_rms,
+        maximum=maximum,
+    )
 
 
 def isotropic_force_residual(

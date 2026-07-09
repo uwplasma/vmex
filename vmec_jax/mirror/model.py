@@ -139,6 +139,32 @@ class MirrorBoundary:
             )
         return cls(radius_scale=value)
 
+    @classmethod
+    def from_axis_field(
+        cls,
+        axial_flux_derivative: Array,
+        on_axis_bz: Array,
+        grid: "MirrorGrid",
+        *,
+        radius_floor: float = 0.0,
+    ) -> "MirrorBoundary":
+        """Build the leading-order flux tube ``a=sqrt(2*Psi'/|Bz|)``.
+
+        This paraxial relation is an initializer and analytic validation
+        fixture, not a replacement for a finite-radius equilibrium solve.
+        """
+
+        bz = jnp.asarray(on_axis_bz)
+        if bz.shape != (grid.nxi,):
+            raise ValueError(f"on_axis_bz shape {bz.shape} must be ({grid.nxi},)")
+        flux = jnp.asarray(axial_flux_derivative, dtype=bz.dtype)
+        if flux.ndim != 0:
+            raise ValueError("flux-tube boundary requires a scalar axial_flux_derivative")
+        tiny = jnp.finfo(bz.dtype).tiny
+        radius = jnp.sqrt(2.0 * flux / jnp.maximum(jnp.abs(bz), tiny))
+        radius = jnp.maximum(radius, jnp.asarray(radius_floor, dtype=bz.dtype))
+        return cls.from_radius(radius, grid)
+
 
 @dataclass(frozen=True)
 class MirrorState:

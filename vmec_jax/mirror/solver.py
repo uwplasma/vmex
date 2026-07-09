@@ -23,6 +23,8 @@ from scipy.optimize import least_squares, minimize
 from .forces import (
     IsotropicForceResidual,
     MirrorEnergy,
+    VariationalResidual,
+    fixed_boundary_variational_residual,
     isotropic_force_residual,
     mirror_energy,
 )
@@ -35,13 +37,15 @@ Array = Any
 class MirrorSolveResult:
     """Solved state, diagnostics, and dense iteration history.
 
-    History columns are ``iteration, total_energy, gradient_inf,
-    normalized_physical_force``.  ``optimizer_success`` is recorded separately
-    and never substitutes for ``converged``.
+    History columns are ``iteration, total_energy, radius_variational_rms,
+    lambda_variational_rms, variational_max, continuum_tensor_rms``.
+    ``optimizer_success`` is recorded separately and never substitutes for
+    ``converged``.
     """
 
     state: MirrorState
     energy: MirrorEnergy
+    variational: VariationalResidual
     force: IsotropicForceResidual
     history: Array
     iterations: int
@@ -52,7 +56,7 @@ class MirrorSolveResult:
 
 jax.tree_util.register_dataclass(
     MirrorSolveResult,
-    data_fields=["state", "energy", "force", "history"],
+    data_fields=["state", "energy", "variational", "force", "history"],
     meta_fields=["iterations", "converged", "optimizer_success", "message"],
 )
 
@@ -63,8 +67,8 @@ class MirrorConvergenceError(RuntimeError):
     def __init__(self, result: MirrorSolveResult):
         self.result = result
         super().__init__(
-            f"mirror solve did not reach ftol: normalized force "
-            f"{float(result.force.normalized_rms):.3e} after {result.iterations} iterations"
+            f"mirror solve did not reach ftol: variational force "
+            f"{float(result.variational.maximum):.3e} after {result.iterations} iterations"
         )
 
 
@@ -150,27 +154,35 @@ def solve_fixed_boundary_cli(
             cache_gradient = np.asarray(gradient, dtype=float)
         return cache_value, cache_gradient
 
-    history: list[tuple[float, float, float, float]] = []
+    history: list[tuple[float, float, float, float, float, float]] = []
 
     def record(iteration: int, x: np.ndarray) -> None:
-        _, gradient = evaluate(x)
         state = unpack(jnp.asarray(x))
         energy = mirror_energy(state, grid, **energy_kwargs)
+        variational = fixed_boundary_variational_residual(
+            state, boundary, grid, **energy_kwargs
+        )
         force = isotropic_force_residual(energy, grid)
         history.append(
             (
                 float(iteration),
                 float(energy.total),
-                float(np.max(np.abs(gradient), initial=0.0)),
+                float(variational.radius_rms),
+                float(variational.lambda_rms),
+                float(variational.maximum),
                 float(force.normalized_rms),
             )
         )
 
     record(0, x0)
-    if history[-1][3] <= config.ftol:
+    if history[-1][4] <= config.ftol:
+        initial_variational = fixed_boundary_variational_residual(
+            projected_initial, boundary, grid, **energy_kwargs
+        )
         result = MirrorSolveResult(
             state=projected_initial,
             energy=initial_energy,
+            variational=initial_variational,
             force=isotropic_force_residual(initial_energy, grid),
             history=jnp.asarray(history),
             iterations=0,
@@ -212,8 +224,10 @@ def solve_fixed_boundary_cli(
     # reliable M2 reference for modest systems; M4 replaces this size-limited
     # path with matrix-free Newton-GMRES and the separable preconditioner.
     candidate_energy = mirror_energy(unpack(jnp.asarray(final_x)), grid, **energy_kwargs)
-    candidate_force = isotropic_force_residual(candidate_energy, grid)
-    if float(candidate_force.normalized_rms) > config.ftol and final_x.size <= 512:
+    candidate_variational = fixed_boundary_variational_residual(
+        unpack(jnp.asarray(final_x)), boundary, grid, **energy_kwargs
+    )
+    if float(candidate_variational.maximum) > config.ftol and final_x.size <= 512:
         gradient_function = jax.jit(jax.grad(objective))
         hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
         remaining = max(1, int(config.max_iterations) - int(optimization.nit))
@@ -236,18 +250,22 @@ def solve_fixed_boundary_cli(
 
     final_state = unpack(jnp.asarray(final_x))
     final_energy = mirror_energy(final_state, grid, **energy_kwargs)
+    final_variational = fixed_boundary_variational_residual(
+        final_state, boundary, grid, **energy_kwargs
+    )
     final_force = isotropic_force_residual(final_energy, grid)
     record(callback_iterations + polish_evaluations, final_x)
     converged = bool(
-        float(final_force.normalized_rms) <= config.ftol
+        float(final_variational.maximum) <= config.ftol
         and not bool(final_energy.geometry.jacobian_sign_changed)
     )
     message = optimizer_message
     if not converged:
-        message += f"; physical normalized force={float(final_force.normalized_rms):.3e}"
+        message += f"; variational force={float(final_variational.maximum):.3e}"
     result = MirrorSolveResult(
         state=final_state,
         energy=final_energy,
+        variational=final_variational,
         force=final_force,
         history=jnp.asarray(history),
         iterations=int(optimization.nit) + polish_evaluations,

@@ -11,6 +11,7 @@ jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
+from vmec_jax.core.coils import two_coil_on_axis_bz  # noqa: E402
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
@@ -19,7 +20,9 @@ from vmec_jax.mirror import (  # noqa: E402
     contravariant_field,
     divergence_b,
     evaluate_geometry,
+    isotropic_force_residual,
     magnetic_field_squared,
+    mirror_energy,
 )
 
 
@@ -156,3 +159,57 @@ def test_geometry_volume_is_jax_differentiable_with_analytic_cylinder_gradient()
     expected = 4.0 * np.pi * 1.3 * radius
     np.testing.assert_allclose(derivative, expected, rtol=3.0e-13, atol=3.0e-13)
     jax.make_jaxpr(volume)(radius)
+
+
+def test_two_coil_flux_tube_has_high_field_throats_and_correct_on_axis_field() -> None:
+    grid = _axisymmetric_grid(ns=13, nxi=41, half_length=1.0)
+    coil_radius, separation, current = 0.8, 2.0, 2.0e5
+    bz_reference = two_coil_on_axis_bz(
+        jnp.asarray(grid.z),
+        coil_radius=coil_radius,
+        separation=separation,
+        current=current,
+    )
+    center = grid.nxi // 2
+    center_radius = 0.05
+    flux = 0.5 * bz_reference[center] * center_radius**2
+    boundary = MirrorBoundary.from_axis_field(flux, bz_reference, grid)
+    radius = np.asarray(boundary.radius_scale[0])
+    assert radius[center] == pytest.approx(center_radius)
+    assert radius[0] < radius[center] and radius[-1] < radius[center]
+    np.testing.assert_allclose(radius, radius[::-1], rtol=2.0e-14, atol=2.0e-14)
+
+    state = MirrorState.from_boundary(boundary, grid)
+    geometry = evaluate_geometry(state, grid)
+    field = contravariant_field(
+        state,
+        geometry,
+        grid,
+        axial_flux_derivative=flux,
+    )
+    bmag_axis = np.sqrt(np.asarray(magnetic_field_squared(field, geometry))[0, 0])
+    np.testing.assert_allclose(bmag_axis, bz_reference, rtol=3.0e-13, atol=3.0e-13)
+
+
+def test_two_coil_paraxial_tensor_residual_decreases_with_tube_radius() -> None:
+    grid = _axisymmetric_grid(ns=13, nxi=33, half_length=1.0)
+    bz = two_coil_on_axis_bz(
+        jnp.asarray(grid.z),
+        coil_radius=0.8,
+        separation=2.0,
+        current=2.0e5,
+    )
+    center = grid.nxi // 2
+    residuals = []
+    for center_radius in (0.1, 0.05, 0.025):
+        flux = 0.5 * bz[center] * center_radius**2
+        boundary = MirrorBoundary.from_axis_field(flux, bz, grid)
+        state = MirrorState.from_boundary(boundary, grid)
+        energy = mirror_energy(state, grid, axial_flux_derivative=flux)
+        residuals.append(float(isotropic_force_residual(energy, grid).normalized_rms))
+    assert residuals[0] > residuals[1] > residuals[2]
+    np.testing.assert_allclose(
+        np.asarray(residuals[:-1]) / np.asarray(residuals[1:]),
+        2.0,
+        rtol=3.0e-3,
+    )
