@@ -576,7 +576,8 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    central-difference shape derivatives. A coordinate-invariant tensor divergence computes
    `J x B - div(P)` with metric connection terms; it recovers a constant-pressure cylinder at
    `1.46e-13` normalized residual and separately verifies parallel force balance in shaped 3D
-   states. Remaining M3 work is interface stress and solved finite-beta benchmarks.
+   states. The lateral diagnostic now independently reports plasma/vacuum tangency and the ANIMEC
+   normal-stress jump. Remaining M3 work is solved finite-beta benchmarks.
 
    **5.1 Supported physical model**
 

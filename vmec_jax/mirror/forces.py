@@ -169,12 +169,23 @@ class AnisotropicForceResidual:
     parallel_pressure_rms: Array
 
 
+@dataclass(frozen=True)
+class InterfaceResidual:
+    """Lateral plasma-vacuum tangency and normal-stress residuals."""
+
+    plasma_b_normal_rms: Array
+    vacuum_b_normal_rms: Array
+    normal_stress_rms: Array
+    normal_stress_jump: Array
+
+
 for _cls in (
     MirrorEnergy,
     IsotropicForceResidual,
     VariationalResidual,
     AnisotropicMirrorEnergy,
     AnisotropicForceResidual,
+    InterfaceResidual,
 ):
     jax.tree_util.register_dataclass(
         _cls,
@@ -514,6 +525,57 @@ def anisotropic_force_residual(
         / jnp.maximum(reference_rms, jnp.finfo(physical_rms.dtype).tiny),
         component_rms=component_rms,
         parallel_pressure_rms=parallel_pressure_rms,
+    )
+
+
+def interface_residual(
+    *,
+    perpendicular_pressure: Array,
+    plasma_b_squared: Array,
+    vacuum_b_squared: Array,
+    plasma_b_normal: Array,
+    vacuum_b_normal: Array,
+    theta_weights: Array,
+    axial_weights: Array,
+    mu0: float = MU0,
+) -> InterfaceResidual:
+    """Evaluate anisotropic free-boundary interface conditions.
+
+    The lateral interface requires both fields to be tangent and
+    ``p_perp + B_plasma^2/(2*mu0) = B_vacuum^2/(2*mu0)``.
+    Inputs are sampled on ``(theta, xi)``.
+    """
+
+    p_perp, bp2, bv2, bnp, bnv = jnp.broadcast_arrays(
+        perpendicular_pressure,
+        plasma_b_squared,
+        vacuum_b_squared,
+        plasma_b_normal,
+        vacuum_b_normal,
+    )
+    weights = jnp.asarray(theta_weights)[:, None] * jnp.asarray(axial_weights)[None, :]
+    denominator = jnp.sum(weights)
+    plasma_b_normal_rms = jnp.sqrt(
+        jnp.sum(weights * bnp**2 / jnp.maximum(bp2, jnp.finfo(bp2.dtype).tiny))
+        / denominator
+    )
+    vacuum_b_normal_rms = jnp.sqrt(
+        jnp.sum(weights * bnv**2 / jnp.maximum(bv2, jnp.finfo(bv2.dtype).tiny))
+        / denominator
+    )
+    jump = p_perp + bp2 / (2.0 * float(mu0)) - bv2 / (2.0 * float(mu0))
+    stress_scale = (
+        jnp.abs(p_perp) + bp2 / (2.0 * float(mu0)) + bv2 / (2.0 * float(mu0))
+    )
+    normal_stress_rms = jnp.sqrt(
+        jnp.sum(weights * (jump / jnp.maximum(stress_scale, jnp.finfo(bp2.dtype).tiny)) ** 2)
+        / denominator
+    )
+    return InterfaceResidual(
+        plasma_b_normal_rms=plasma_b_normal_rms,
+        vacuum_b_normal_rms=vacuum_b_normal_rms,
+        normal_stress_rms=normal_stress_rms,
+        normal_stress_jump=jump,
     )
 
 

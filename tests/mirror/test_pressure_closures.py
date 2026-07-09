@@ -21,6 +21,7 @@ from vmec_jax.mirror import (  # noqa: E402
     anisotropic_force_residual,
     anisotropic_mirror_energy,
     anisotropy_indicators,
+    interface_residual,
 )
 from vmec_jax.mirror.forces import MU0  # noqa: E402
 
@@ -232,3 +233,37 @@ def test_anisotropic_tensor_divergence_satisfies_parallel_force_balance() -> Non
     # This prescribed shaped state is intentionally not an equilibrium; only
     # the closure's parallel force identity should vanish before solving.
     assert float(residual.normalized_rms) > 1.0e-3
+
+
+def test_anisotropic_interface_residual_recognizes_exact_pressure_balance() -> None:
+    ntheta, nxi = 7, 13
+    pressure = jnp.full((ntheta, nxi), 2.0e4)
+    plasma_b_squared = jnp.full((ntheta, nxi), 1.1**2)
+    vacuum_b_squared = plasma_b_squared + 2.0 * MU0 * pressure
+    zeros = jnp.zeros_like(pressure)
+    residual = interface_residual(
+        perpendicular_pressure=pressure,
+        plasma_b_squared=plasma_b_squared,
+        vacuum_b_squared=vacuum_b_squared,
+        plasma_b_normal=zeros,
+        vacuum_b_normal=zeros,
+        theta_weights=jnp.full(ntheta, 2.0 * np.pi / ntheta),
+        axial_weights=jnp.full(nxi, 2.0 / nxi),
+    )
+    np.testing.assert_allclose(residual.normal_stress_jump, 0.0, atol=2.0e-10)
+    assert float(residual.normal_stress_rms) < 2.0e-15
+    assert float(residual.plasma_b_normal_rms) == 0.0
+    assert float(residual.vacuum_b_normal_rms) == 0.0
+
+    perturbed = interface_residual(
+        perpendicular_pressure=pressure,
+        plasma_b_squared=plasma_b_squared,
+        vacuum_b_squared=vacuum_b_squared * 1.01,
+        plasma_b_normal=jnp.full_like(pressure, 1.0e-3),
+        vacuum_b_normal=jnp.full_like(pressure, -2.0e-3),
+        theta_weights=jnp.full(ntheta, 2.0 * np.pi / ntheta),
+        axial_weights=jnp.full(nxi, 2.0 / nxi),
+    )
+    assert float(perturbed.normal_stress_rms) > 1.0e-4
+    assert float(perturbed.plasma_b_normal_rms) > 0.0
+    assert float(perturbed.vacuum_b_normal_rms) > 0.0
