@@ -611,14 +611,58 @@ def fixed_boundary_variational_residual(
     projected = project_fixed_boundary_state(state, boundary, grid)
     energy = mirror_energy(projected, grid, **energy_kwargs)
     gradient = fixed_boundary_energy_gradient(projected, boundary, grid, **energy_kwargs)
-    energy_scale = jnp.maximum(jnp.abs(energy.total), jnp.finfo(energy.total.dtype).tiny)
+    return _normalized_variational_residual(
+        gradient,
+        energy.total,
+        boundary,
+        grid,
+        axial_flux_derivative=energy_kwargs["axial_flux_derivative"],
+    )
+
+
+def anisotropic_fixed_boundary_variational_residual(
+    state: MirrorState,
+    boundary: MirrorBoundary,
+    grid: "MirrorGrid",
+    closure: PressureClosure,
+    **energy_kwargs: Any,
+) -> VariationalResidual:
+    """Return normalized generalized forces for the ANIMEC functional."""
+
+    projected = project_fixed_boundary_state(state, boundary, grid)
+    energy = anisotropic_mirror_energy(projected, grid, closure, **energy_kwargs)
+    gradient = anisotropic_fixed_boundary_energy_gradient(
+        projected, boundary, grid, closure, **energy_kwargs
+    )
+    return _normalized_variational_residual(
+        gradient,
+        energy.total,
+        boundary,
+        grid,
+        axial_flux_derivative=energy_kwargs["axial_flux_derivative"],
+    )
+
+
+def _normalized_variational_residual(
+    gradient: MirrorState,
+    energy_total: Array,
+    boundary: MirrorBoundary,
+    grid: "MirrorGrid",
+    *,
+    axial_flux_derivative: Array,
+) -> VariationalResidual:
+    """Scale an energy gradient into component-wise mirror force norms."""
+
+    energy_scale = jnp.maximum(
+        jnp.abs(energy_total), jnp.finfo(jnp.asarray(energy_total).dtype).tiny
+    )
     radius_scale = jnp.mean(jnp.asarray(boundary.radius_scale))
     radius_gradient = gradient.radius_scale * radius_scale / energy_scale
 
     psi = _profile(
-        energy_kwargs["axial_flux_derivative"],
+        axial_flux_derivative,
         grid.ns,
-        energy.total.dtype,
+        jnp.asarray(energy_total).dtype,
         name="axial_flux_derivative",
     )
     flux_scale = jnp.maximum(jnp.max(jnp.abs(psi)), jnp.finfo(psi.dtype).tiny)

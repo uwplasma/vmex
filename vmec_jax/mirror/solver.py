@@ -24,14 +24,25 @@ from scipy.optimize import least_squares, minimize
 from scipy.sparse.linalg import LinearOperator, gmres
 
 from .forces import (
+    AnisotropicForceResidual,
+    AnisotropicMirrorEnergy,
     IsotropicForceResidual,
     MirrorEnergy,
     VariationalResidual,
+    anisotropic_fixed_boundary_variational_residual,
+    anisotropic_force_residual,
+    anisotropic_mirror_energy,
     fixed_boundary_variational_residual,
     isotropic_force_residual,
     mirror_energy,
 )
-from .model import MirrorBoundary, MirrorConfig, MirrorState, project_fixed_boundary_state
+from .model import (
+    MirrorBoundary,
+    MirrorConfig,
+    MirrorState,
+    PressureClosure,
+    project_fixed_boundary_state,
+)
 
 Array = Any
 
@@ -47,9 +58,9 @@ class MirrorSolveResult:
     """
 
     state: MirrorState
-    energy: MirrorEnergy
+    energy: MirrorEnergy | AnisotropicMirrorEnergy
     variational: VariationalResidual
-    force: IsotropicForceResidual
+    force: IsotropicForceResidual | AnisotropicForceResidual
     history: Array
     iterations: int
     converged: bool
@@ -298,14 +309,17 @@ def solve_fixed_boundary_cli(
     mass_profile: Array = 0.0,
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
+    pressure_closure: PressureClosure | None = None,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
 ) -> MirrorSolveResult:
-    """Solve an isotropic fixed-boundary mirror with host L-BFGS control.
+    """Solve a fixed-boundary mirror with host L-BFGS/Newton control.
 
     M2 evolves geometry only.  ``lambda_stream`` remains in the physical state
     and energy, but its nonlinear solve is enabled with finite-current M4 after
-    the lambda preconditioner and end-flux data are implemented.
+    the lambda preconditioner and end-flux data are implemented.  Supplying a
+    ``pressure_closure`` selects the consistent ANIMEC functional; otherwise
+    the mass-conserving isotropic functional is used.
     """
 
     initial_state.validate_shape(grid)
@@ -326,13 +340,52 @@ def solve_fixed_boundary_cli(
         raise ValueError("mean boundary radius must be positive and finite")
     x0 = np.asarray(projected_initial.radius_scale)[mask_numpy] / boundary_scale
 
-    energy_kwargs = {
-        "axial_flux_derivative": axial_flux_derivative,
-        "mass_profile": mass_profile,
-        "current_derivative": current_derivative,
-        "gamma": gamma,
-    }
-    initial_energy = mirror_energy(projected_initial, grid, **energy_kwargs)
+    if pressure_closure is None:
+        energy_kwargs = {
+            "axial_flux_derivative": axial_flux_derivative,
+            "mass_profile": mass_profile,
+            "current_derivative": current_derivative,
+            "gamma": gamma,
+        }
+
+        def evaluate_energy(state: MirrorState) -> MirrorEnergy | AnisotropicMirrorEnergy:
+            return mirror_energy(state, grid, **energy_kwargs)
+
+        def evaluate_variational(state: MirrorState) -> VariationalResidual:
+            return fixed_boundary_variational_residual(
+                state, boundary, grid, **energy_kwargs
+            )
+
+        def evaluate_force(
+            state: MirrorState, energy: MirrorEnergy | AnisotropicMirrorEnergy
+        ) -> IsotropicForceResidual | AnisotropicForceResidual:
+            del state
+            return isotropic_force_residual(energy, grid)
+
+    else:
+        energy_kwargs = {
+            "axial_flux_derivative": axial_flux_derivative,
+            "current_derivative": current_derivative,
+        }
+
+        def evaluate_energy(state: MirrorState) -> MirrorEnergy | AnisotropicMirrorEnergy:
+            return anisotropic_mirror_energy(
+                state, grid, pressure_closure, **energy_kwargs
+            )
+
+        def evaluate_variational(state: MirrorState) -> VariationalResidual:
+            return anisotropic_fixed_boundary_variational_residual(
+                state, boundary, grid, pressure_closure, **energy_kwargs
+            )
+
+        def evaluate_force(
+            state: MirrorState, energy: MirrorEnergy | AnisotropicMirrorEnergy
+        ) -> IsotropicForceResidual | AnisotropicForceResidual:
+            return anisotropic_force_residual(
+                state, energy, grid, pressure_closure
+            )
+
+    initial_energy = evaluate_energy(projected_initial)
     energy_scale = max(abs(float(initial_energy.total)), np.finfo(float).tiny)
 
     def unpack(x: Array) -> MirrorState:
@@ -346,7 +399,7 @@ def solve_fixed_boundary_cli(
         )
 
     def objective(x: Array) -> Array:
-        return mirror_energy(unpack(x), grid, **energy_kwargs).total / energy_scale
+        return evaluate_energy(unpack(x)).total / energy_scale
 
     value_and_gradient = jax.jit(jax.value_and_grad(objective))
     cache_x: np.ndarray | None = None
@@ -366,11 +419,9 @@ def solve_fixed_boundary_cli(
 
     def record(iteration: int, x: np.ndarray) -> None:
         state = unpack(jnp.asarray(x))
-        energy = mirror_energy(state, grid, **energy_kwargs)
-        variational = fixed_boundary_variational_residual(
-            state, boundary, grid, **energy_kwargs
-        )
-        force = isotropic_force_residual(energy, grid)
+        energy = evaluate_energy(state)
+        variational = evaluate_variational(state)
+        force = evaluate_force(state, energy)
         history.append(
             (
                 float(iteration),
@@ -384,14 +435,12 @@ def solve_fixed_boundary_cli(
 
     record(0, x0)
     if history[-1][4] <= config.ftol:
-        initial_variational = fixed_boundary_variational_residual(
-            projected_initial, boundary, grid, **energy_kwargs
-        )
+        initial_variational = evaluate_variational(projected_initial)
         result = MirrorSolveResult(
             state=projected_initial,
             energy=initial_energy,
             variational=initial_variational,
-            force=isotropic_force_residual(initial_energy, grid),
+            force=evaluate_force(projected_initial, initial_energy),
             history=jnp.asarray(history),
             iterations=0,
             converged=True,
@@ -439,9 +488,7 @@ def solve_fixed_boundary_cli(
     # physical force is small.  An exact dense residual-Newton polish is a
     # reliable M2 reference for modest systems; M4 replaces this size-limited
     # path with matrix-free Newton-GMRES and the separable preconditioner.
-    candidate_variational = fixed_boundary_variational_residual(
-        unpack(jnp.asarray(final_x)), boundary, grid, **energy_kwargs
-    )
+    candidate_variational = evaluate_variational(unpack(jnp.asarray(final_x)))
     gradient_function = jax.jit(jax.grad(objective))
     if float(candidate_variational.maximum) > config.ftol and final_x.size > 512:
         remaining = max(1, int(config.max_iterations) - int(optimization.nit))
@@ -469,9 +516,7 @@ def solve_fixed_boundary_cli(
         )
         optimizer_success = bool(newton_success)
         optimizer_message += f"; {newton_message}"
-        candidate_variational = fixed_boundary_variational_residual(
-            unpack(jnp.asarray(final_x)), boundary, grid, **energy_kwargs
-        )
+        candidate_variational = evaluate_variational(unpack(jnp.asarray(final_x)))
 
     if float(candidate_variational.maximum) > config.ftol and final_x.size <= 512:
         hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
@@ -494,11 +539,9 @@ def solve_fixed_boundary_cli(
         optimizer_message += f"; residual-Newton: {polish.message}"
 
     final_state = unpack(jnp.asarray(final_x))
-    final_energy = mirror_energy(final_state, grid, **energy_kwargs)
-    final_variational = fixed_boundary_variational_residual(
-        final_state, boundary, grid, **energy_kwargs
-    )
-    final_force = isotropic_force_residual(final_energy, grid)
+    final_energy = evaluate_energy(final_state)
+    final_variational = evaluate_variational(final_state)
+    final_force = evaluate_force(final_state, final_energy)
     record(callback_iterations + newton_steps + polish_evaluations, final_x)
     converged = bool(
         float(final_variational.maximum) <= config.ftol
@@ -523,6 +566,33 @@ def solve_fixed_boundary_cli(
     if require_convergence and not converged:
         raise MirrorConvergenceError(result)
     return result
+
+
+def solve_anisotropic_fixed_boundary_cli(
+    initial_state: MirrorState,
+    boundary: MirrorBoundary,
+    grid: "MirrorGrid",
+    config: MirrorConfig,
+    closure: PressureClosure,
+    *,
+    axial_flux_derivative: Array,
+    current_derivative: Array = 0.0,
+    gradient_tolerance: float = 1.0e-11,
+    require_convergence: bool = False,
+) -> MirrorSolveResult:
+    """Solve a consistent anisotropic fixed-boundary mirror equilibrium."""
+
+    return solve_fixed_boundary_cli(
+        initial_state,
+        boundary,
+        grid,
+        config,
+        axial_flux_derivative=axial_flux_derivative,
+        current_derivative=current_derivative,
+        pressure_closure=closure,
+        gradient_tolerance=gradient_tolerance,
+        require_convergence=require_convergence,
+    )
 
 
 from typing import TYPE_CHECKING

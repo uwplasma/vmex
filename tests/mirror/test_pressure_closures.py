@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -22,6 +24,7 @@ from vmec_jax.mirror import (  # noqa: E402
     anisotropic_mirror_energy,
     anisotropy_indicators,
     interface_residual,
+    solve_anisotropic_fixed_boundary_cli,
 )
 from vmec_jax.mirror.forces import MU0  # noqa: E402
 
@@ -200,6 +203,68 @@ def test_animec_energy_shape_gradient_matches_central_difference() -> None:
     epsilon = 2.0e-6
     directional_fd = (objective(epsilon) - objective(-epsilon)) / (2.0 * epsilon)
     np.testing.assert_allclose(directional_ad, directional_fd, rtol=3.0e-7, atol=3.0e-5)
+
+
+def test_finite_beta_bimaxwellian_cylinder_solves_both_force_routes() -> None:
+    previous_jit_setting = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    try:
+        config = MirrorConfig(
+            resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9),
+            z_min=-1.2,
+            z_max=1.2,
+            ftol=1.0e-12,
+            max_iterations=300,
+        )
+        grid = config.build_grid()
+        boundary = MirrorBoundary.from_radius(0.3, grid)
+        base = MirrorState.from_boundary(boundary, grid)
+        s = jnp.asarray(grid.s)[:, None, None]
+        xi = jnp.asarray(grid.xi)[None, None, :]
+        initial = replace(
+            base,
+            radius_scale=base.radius_scale + 0.02 * s * (1.0 - s) * (1.0 - xi**2),
+        )
+        closure = BiMaxwellianPressureClosure(
+            mass_coefficients=jnp.asarray([2.0e4]),
+            hot_fraction_coefficients=jnp.asarray([0.3]),
+            temperature_ratio=0.4,
+            critical_field=2.5,
+        )
+        result = solve_anisotropic_fixed_boundary_cli(
+            initial,
+            boundary,
+            grid,
+            config,
+            closure,
+            axial_flux_derivative=0.1,
+            gradient_tolerance=1.0e-12,
+            require_convergence=True,
+        )
+    finally:
+        jax.config.update("jax_disable_jit", previous_jit_setting)
+
+    beta_parallel = (
+        2.0
+        * MU0
+        * result.energy.moments_half.parallel
+        / result.energy.b_squared_half
+    )
+    assert result.converged
+    assert float(result.variational.maximum) <= config.ftol
+    assert float(result.force.normalized_rms) < 1.0e-11
+    assert float(result.force.parallel_pressure_rms) < 1.0e-9
+    assert bool(result.energy.indicators_half.valid)
+    assert 5.0e-3 < float(jnp.mean(beta_parallel)) < 5.0e-2
+    assert float(
+        jnp.max(
+            jnp.abs(
+                result.energy.moments_half.parallel
+                - result.energy.moments_half.perpendicular
+            )
+        )
+    ) > 100.0
+    np.testing.assert_allclose(result.state.radius_scale, 0.3, atol=2.0e-13)
 
 
 def test_anisotropic_tensor_divergence_satisfies_parallel_force_balance() -> None:

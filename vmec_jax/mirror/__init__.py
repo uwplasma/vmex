@@ -26,6 +26,7 @@ from .forces import (
     MirrorEnergy,
     VariationalResidual,
     anisotropic_fixed_boundary_energy_gradient,
+    anisotropic_fixed_boundary_variational_residual,
     anisotropic_force_residual,
     anisotropic_mirror_energy,
     fixed_boundary_energy_gradient,
@@ -56,6 +57,7 @@ from .solver import (
     MirrorConvergenceError,
     MirrorSolveResult,
     SeparableMirrorPreconditioner,
+    solve_anisotropic_fixed_boundary_cli,
     solve_fixed_boundary_cli,
 )
 
@@ -90,6 +92,7 @@ __all__ = [
     "build_mirror_grid",
     "anisotropy_indicators",
     "anisotropic_fixed_boundary_energy_gradient",
+    "anisotropic_fixed_boundary_variational_residual",
     "anisotropic_force_residual",
     "anisotropic_mirror_energy",
     "contravariant_field",
@@ -103,5 +106,6 @@ __all__ = [
     "mass_profile_from_pressure",
     "mirror_energy",
     "project_fixed_boundary_state",
+    "solve_anisotropic_fixed_boundary_cli",
     "solve_fixed_boundary_cli",
 ]

@@ -600,7 +600,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    `J x B - div(P)` with metric connection terms; it recovers a constant-pressure cylinder at
    `1.46e-13` normalized residual and separately verifies parallel force balance in shaped 3D
    states. The lateral diagnostic now independently reports plasma/vacuum tangency and the ANIMEC
-   normal-stress jump. Remaining M3 work is solved finite-beta benchmarks.
+   normal-stress jump. A perturbed finite-beta bi-Maxwellian cylinder now solves to `1.50e-15`
+   variational force, `1.11e-13` tensor force, and `1.03e-11` parallel residual with valid
+   ellipticity. Radially varying pressure still requires a refinement study before M3 promotion:
+   its coarse-grid variational solve exposed a `~5e-3` continuum residual and is not accepted as
+   converged physics.
 
    **5.1 Supported physical model**
 
