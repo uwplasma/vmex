@@ -43,6 +43,8 @@ from __future__ import annotations
 from dataclasses import dataclass, fields as dataclass_fields, replace
 from typing import Any, Callable
 
+import functools
+
 import numpy as np
 
 import jax
@@ -878,23 +880,39 @@ def _emit_lines(rt: SolverRuntime, trajectory: np.ndarray, upto: int,
         printed.add(it)
 
 
+@functools.lru_cache(maxsize=64)
+def _compiled_lanes(rt: SolverRuntime):
+    """Compiled (while_lane, block_lane) for a runtime, cached by identity.
+
+    ``SolverRuntime`` is hashed by object identity (``eq=False``), so every
+    caller that holds on to a runtime — optimization loops, hot restarts,
+    multigrid stages — reuses the same XLA executables instead of retracing
+    per solve.  (Full structural caching — runtime as a pytree argument with
+    static meta — is the follow-up recorded in plan.md Phase 2 item (1).)
+    """
+    body = _make_body(rt)
+
+    def cond(c: _LoopCarry):
+        return jnp.logical_not(c.done)
+
+    while_lane = jax.jit(lambda c: lax.while_loop(cond, body, c))
+    block_lane = jax.jit(
+        lambda c: lax.scan(lambda cc, _: (body(cc), None), c, None, length=BLOCK_SIZE)[0]
+    )
+    return while_lane, block_lane
+
+
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
               ijacob: int, verbose: bool, emit) -> _LoopCarry:
     """Run the iteration loop in the requested lane; return the final carry."""
-    body = _make_body(rt)
     carry = _initial_carry(state0, rt, ijacob=ijacob)
+    loop, block = _compiled_lanes(rt)
 
     if mode == "jit":
-        def cond(c: _LoopCarry):
-            return jnp.logical_not(c.done)
-
-        loop = jax.jit(lambda c: lax.while_loop(cond, body, c))
         return loop(carry)
 
     if mode != "cli":
         raise ValueError(f"unknown mode {mode!r}; expected 'cli' or 'jit'")
-
-    block = jax.jit(lambda c: lax.scan(lambda cc, _: (body(cc), None), c, None, length=BLOCK_SIZE)[0])
     if verbose:
         emit(stage_banner(rt.resolution.ns, rt.resolution.mpol, rt.ftol, rt.max_iterations), end="")
         emit(FORCE_ITERATIONS_BANNER, end="")
