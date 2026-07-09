@@ -26,10 +26,11 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
    converged physics quantities match VMEC2000 within per-quantity validation tolerances.
 4. **Performance parity or better** than VMEC2000 single-thread CPU on the benchmark suite,
    including multigrid (`NS_ARRAY` ladders), which is currently slower than VMEC2000 — a named bug.
-5. **A small, readable codebase**: ≤ ~35 Python files in `vmec_jax/`, ≤ ~15k library lines
-   (down from **229 files / ~123k lines** today), physically meaningful names, docstrings
-   everywhere, ≥95% coverage without repo bloat (tests are currently ~138k lines — larger than the
-   package — with visible coverage-padding files; target ≤ ~6k test lines).
+5. **A small, readable codebase**: 30–40 Python files in `vmec_jax/`, ~25–30k library lines
+   (revised 2026-07-09 from the original ≤15k after the fixed-boundary core alone measured ~10k
+   well-documented lines; still a >4x reduction from **229 files / ~123k lines**), physically
+   meaningful names, docstrings everywhere, ≥95% coverage without repo bloat (tests currently
+   ~140k lines with coverage-padding files; target ≤ ~10k test lines).
 6. **A ~10 MB repository** after a `git filter-repo` history rewrite (currently 57.4 MiB packed);
    large assets move to GitHub Releases; no Claude in the contributors panel.
 7. **User-friendly docs** with full derivations (energy functional → forces → spectral condensation
@@ -290,6 +291,22 @@ tree (tests may be temporarily reduced — full restructure lands in Phase 9).
 ---
 
 ## 5. Phase 2 — Core library refactor (architecture, naming, fixed-boundary parity)
+
+**STATUS (2026-07-09): core landed, integration/perf hardening next.** `vmec_jax/core/` has 20
+modules (~10k lines), each A/B-proven vs the legacy kernels (420+ tests) — including the solve
+loop (solovev 215/215 iterations vs VMEC2000, cth 434, machine-precision wout parity), the
+complete wout writer (all 39 missing variables; found legacy lasym output bugs: buco/jcur*/ctor
+x1/2, jdotb x1/16, fast-bcovar bsubsmns corruption), mgrid IO/field (ESSOS PR#33 cross-verified),
+and multigrid interpolation. Golden fixtures are a GitHub release (golden-v1) with sha256 fetch;
+core suite is in CI with coverage reporting. **Next, in order (external review 2026-07-09
+concurs):** (1) solver executable reuse — module-level jit callables keyed by static config
+instead of per-solve closures (jit lane currently 2.4 s repeated vs legacy 0.02 s warm); (2)
+multigrid ladder driver with padded radial arrays (one executable across NS_ARRAY stages);
+(3) parity breadth: 3D/lasym/finite-beta/ncurr=1/high-mode across all nine golden fixtures
+(known gap: legacy lasym solver drifts ~5% on asym harmonics — validate the new core against
+golden directly); (4) switch one public vertical slice (CLI fixed-boundary path) to the core,
+then delete the corresponding legacy modules and migrate tests — repeat until the legacy tree is
+gone. Implicit diff (Phase 3) starts once the residual API is frozen by (1)-(2).
 
 ### 5.1 Target layout (~30 files; one concern per file, none over ~1000 lines)
 

@@ -164,7 +164,7 @@ build a QP basin and then switch the objective to QI).
 - Performance notes: `docs/performance.rst`; validation, coverage, and release
   gates: `docs/validation.rst`, `docs/testing_strategy.rst`, and
   `docs/release_checklist.rst`.
-- Latest repository release tag: [`v0.0.16`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.16).
+- Latest repository release tag: [`v0.0.18`](https://github.com/uwplasma/vmec_jax/releases/tag/v0.0.18).
 
 ## CLI Reference
 

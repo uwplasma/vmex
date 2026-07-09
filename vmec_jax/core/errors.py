@@ -14,7 +14,7 @@ VMEC2000 counterpart: the ``ier_flag`` error codes defined in
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # VMEC2000 ier_flag values (Sources/General/vmec_params.f).
 NORM_TERM_FLAG = 0

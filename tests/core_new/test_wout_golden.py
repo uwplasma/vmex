@@ -43,7 +43,13 @@ from vmec_jax.core.wout import (  # noqa: E402
     write_wout,
 )
 
-GOLDEN_DIR = Path.home() / "vmec_jax_notes" / "golden"
+from conftest import resolve_golden_dir
+
+GOLDEN_DIR = resolve_golden_dir()
+pytestmark_golden = pytest.mark.skipif(
+    GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"
+)
+pytestmark = [pytestmark_golden]
 DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
 
 CASES = [
