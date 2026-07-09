@@ -263,6 +263,8 @@ def case(request):
     )
 
     # ------------------------------------------------------------------ old
+    # Legacy tables are Fortran-faithful since the fixaray.f lasym dnorm fix
+    # landed in vmec_jax/kernels/tomnsp.py; no rescaling compensation needed.
     trig_old = vmec_trig_tables(
         ntheta=int(cfg.ntheta),
         nzeta=int(cfg.nzeta),

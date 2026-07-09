@@ -34,10 +34,8 @@ dependencies = [
 ]
 
 [project.scripts]
-vmec = "vmec_jax.cli:main"
-vmec-jax = "vmec_jax.cli:main"
-vmec_jax = "vmec_jax.cli:main"
-xvmec_jax = "vmec_jax.cli:main"
+vmec = "vmec_jax.core.cli:main"
+vmec-jax = "vmec_jax.core.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/uwplasma/vmec_jax"

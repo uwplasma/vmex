@@ -73,9 +73,12 @@ def _resolution(case) -> Resolution:
 
 
 def _old_trig(case):
+    # The legacy tables are Fortran-faithful since the fixaray.f lasym dnorm
+    # fix landed in vmec_jax/kernels/tomnsp.py (matching the core fix in
+    # vmec_jax/core/fourier.py); no rescaling compensation is needed.
     mpol, ntor, ntheta, nzeta, nfp, lasym = case
     return vmec_trig_tables(
-        ntheta=ntheta, nzeta=nzeta, nfp=nfp, mmax=mpol - 1, nmax=ntor, lasym=lasym
+        ntheta=ntheta, nzeta=nzeta, nfp=nfp, mmax=mpol - 1, nmax=ntor, lasym=lasym,
     )
 
 
@@ -445,10 +448,13 @@ def test_tomnsps_recovers_band_limited_coefficients(case):
     Feed ``tomnsps`` a pure geometry-style field through the undifferentiated
     kernels (``armn``/``azmn``) built from internal coefficients ``x`` with the
     scaled trig tables.  The mscale/nscale normalization makes the projection
-    recover ``x`` exactly (factor 1) on the symmetric reduced grid; for
-    ``lasym=True`` the reduced-interval integration with the full-grid
-    normalization ``dnorm = 1/(nzeta*ntheta3)`` yields exactly ``x/2`` (the
-    antisymmetric transform supplies the complementary half in VMEC).
+    recover ``x`` exactly (factor 1) in both symmetry modes: for
+    ``lasym=True`` the reduced-interval integration carries the fixaray.f
+    weight ``dnorm = 1/(nzeta*(ntheta2-1)) = 2/(nzeta*ntheta1)`` with
+    endpoint half-weights, which equals the full-grid average for the
+    reflection-symmetric basis products fed here.  (Before the core lasym
+    dnorm fix this recovered ``x/2`` — the inherited legacy defect that
+    halved every lasym force projection.)
     """
     mpol, ntor, _, _, _, lasym = case
     res = _resolution(case)
@@ -495,8 +501,9 @@ def test_tomnsps_recovers_band_limited_coefficients(case):
         include_edge=False,
     )
 
-    # Known normalization: 1 on the symmetric reduced grid, 1/2 for lasym.
-    factor = 0.5 if lasym else 1.0
+    # Known normalization: exact recovery in both symmetry modes (fixaray.f
+    # dnorm; see the docstring).
+    factor = 1.0
     mask = _rz_mask(NS, mpol)
 
     np.testing.assert_allclose(

@@ -47,10 +47,11 @@ def test_project_exposes_vmec_console_aliases() -> None:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     scripts = data["project"]["scripts"]
 
-    assert scripts["vmec"] == "vmec_jax.cli:main"
-    assert scripts["vmec-jax"] == "vmec_jax.cli:main"
-    assert scripts["vmec_jax"] == "vmec_jax.cli:main"
-    assert scripts["xvmec_jax"] == "vmec_jax.cli:main"
+    # New-core CLI (plan.md §2.3): `vmec` + the `vmec-jax` alias only; the
+    # legacy `vmec_jax`/`xvmec_jax` aliases were removed with the core switch.
+    assert scripts["vmec"] == "vmec_jax.core.cli:main"
+    assert scripts["vmec-jax"] == "vmec_jax.core.cli:main"
+    assert set(scripts) == {"vmec", "vmec-jax"}
 
 
 def test_plain_install_includes_plotting_and_qi_dependencies() -> None:

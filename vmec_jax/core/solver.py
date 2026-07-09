@@ -36,6 +36,23 @@ Both lanes share one traced single-iteration body:
 The per-iteration ``(fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1, ...)`` trajectory
 is recorded in a preallocated buffer carried through the loop, so the two
 lanes produce identical histories.
+
+Structural executable reuse (2026-07-09, plan.md Phase 2 item (1))
+------------------------------------------------------------------
+:class:`SolverRuntime` is a registered pytree passed as an *argument* to the
+module-level jitted lanes :func:`_while_lane`/:func:`_block_lane` (previously
+per-runtime closures cached by object identity).  Array-valued run data
+(:class:`~vmec_jax.core.setup.RunSetup`, ``rcon0/zcon0``) are pytree data;
+the hashable configuration (:class:`~vmec_jax.core.fourier.Resolution`,
+``gamma/tcon0/ftol/max_iterations/time_step0/nstep/jmax``) is pytree meta;
+the NumPy mode/trig/weight/gather tables — consumed with ``np.*``/fancy
+indexing at trace time — are derived from the meta resolution through the
+cached :func:`_static_tables` and never enter the pytree.  Consequence: two
+different runtimes with equal structure (e.g. different boundary values at
+one resolution, hot restarts, multigrid re-runs) share one XLA executable
+per lane.  :func:`solve` additionally accepts ``initial_state`` (hot
+restart), and the stage machinery is factored into :func:`_solve_stage`/
+:func:`_finalize` for reuse by :func:`vmec_jax.core.multigrid.solve_multigrid`.
 """
 
 from __future__ import annotations
@@ -51,9 +68,64 @@ import jax
 
 jax.config.update("jax_enable_x64", True)  # float64 mandatory (plan.md §7.7)
 
+
+def _harden_compilation_cache() -> None:
+    """Idempotent persistent compile-cache setup at ``core.solver`` import.
+
+    benchmarks/gpu_baseline.json pitfall (2026-07-09): launching Python from a
+    cwd that contains the repo checkout can resolve ``vmec_jax`` as a
+    *namespace* package, so ``vmec_jax/__init__.py`` — which configures the
+    persistent XLA compilation cache — never runs and every ``solve()`` pays a
+    full recompile (~7 s vs ~1.7 s warm on CUDA for solovev).  This module
+    always executes on any core solve path, so the cache policy is re-applied
+    here: warn on the shadowed import, then configure the ``_compat`` cache
+    defaults *only* when neither the user (``JAX_COMPILATION_CACHE_DIR`` env /
+    an explicit ``jax.config.update``) nor ``vmec_jax/__init__`` already set a
+    cache directory.
+    """
+    import os
+    import sys
+    import warnings
+
+    top = sys.modules.get(__name__.partition(".")[0])
+    if top is not None and getattr(top, "__file__", None) is None:
+        warnings.warn(
+            "vmec_jax was imported as a namespace package (vmec_jax.__file__ is "
+            "missing) — its __init__.py never ran.  This usually means the "
+            "current working directory shadows the installed package (e.g. "
+            "running Python from the directory containing the vmec_jax "
+            "checkout).  Change directory or fix sys.path; package-level "
+            "defaults such as the persistent compilation cache are otherwise "
+            "skipped.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+    try:
+        current = jax.config.jax_compilation_cache_dir
+    except AttributeError:  # pragma: no cover - very old jax
+        return
+    if current:  # user env/jax.config or vmec_jax/__init__ already set it
+        return
+    try:
+        from .._compat import _configure_compilation_cache, _default_compilation_cache_dir
+    except Exception:  # pragma: no cover - core used standalone
+        return
+    cache_dir = _default_compilation_cache_dir()
+    if cache_dir is None:  # policy says no cache (e.g. CPU-only, not forced)
+        return
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:  # pragma: no cover - unwritable cache location
+        return
+    _configure_compilation_cache(jax, cache_dir)
+
+
+_harden_compilation_cache()
+
 import jax.numpy as jnp
 from jax import lax
 
+from .device import device_context
 from .errors import (
     BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
     NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG, VmecConvergenceError,
@@ -90,6 +162,7 @@ __all__ = [
     "NS4", "SpectralState", "PreconditionerCache", "FunctDiagnostics",
     "SolverRuntime", "SolveResult", "resolution_from_input",
     "prepare_runtime", "evaluate_forces", "solve",
+    "hot_restart_state", "runtime_with_baselines",
 ]
 
 Array = Any
@@ -224,30 +297,98 @@ for _cls in (SpectralState, PreconditionerCache, FunctDiagnostics, _EvalResult,
     _register(_cls)
 
 
-# -- Runtime (static per-solve context) ------------------------------------------------------------------------------
+# -- Runtime (per-solve context: a jit-passable pytree) ---------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=None)
+def _static_tables(resolution: Resolution):
+    """Cached trace-time-static tables derived from a :class:`Resolution`.
+
+    Returns ``(modes, trig, weights, gather_m, gather_n, cos_w, sin_w)`` —
+    all host NumPy objects consumed *at trace time* (fancy-index tables,
+    trig-table matmuls inside :mod:`vmec_jax.core.transforms`, angular
+    weights).  The lru_cache guarantees that two runtimes built from the same
+    ``Resolution`` share the *identical* table objects, so the runtime pytree
+    treedefs compare equal and ``jax.jit`` reuses one executable across
+    solves with different boundary/profile values (plan.md Phase 2 item (1)).
+    """
+    modes = mode_table(resolution.mpol, resolution.ntor)
+    trig = trig_tables(resolution)
+    weights = angular_integration_weights(
+        ntheta=resolution.ntheta, nzeta=resolution.nzeta, lasym=resolution.lasym
+    )
+    gather_m, gather_n, cos_w, sin_w = _force_gather_tables(modes)
+    return modes, trig, weights, gather_m, gather_n, cos_w, sin_w
 
 
 @dataclass(frozen=True, eq=False)
 class SolverRuntime:
-    """Static per-solve context closed over by the jitted iteration body.
+    """Per-solve context, registered as a JAX pytree.
 
-    Carries the resolution tables, the :class:`RunSetup` profile arrays, the
-    fixed-boundary constraint baselines ``rcon0/zcon0`` (``funct3d.f`` —
-    constant in fixed-boundary mode because the edge spectral row never
-    evolves), and the static force-block -> signed-coefficient gather tables.
+    Passed *as an argument* to the module-level jitted lanes
+    (:func:`_while_lane` / :func:`_block_lane`):
+
+    - **data fields** (traced): the :class:`RunSetup` arrays (profiles,
+      radial grids, boundary, initial state — everything that changes with
+      boundary values) and the fixed-boundary constraint baselines
+      ``rcon0/zcon0`` (``funct3d.f`` — constant per run because the edge
+      spectral row never evolves, but boundary-value dependent);
+    - **meta fields** (static, hashable): the :class:`Resolution` plus the
+      scalar configuration (``gamma`` is consumed concretely by
+      ``fields.magnetic_fields``; ``max_iterations`` sizes the trajectory
+      buffer; the rest are loop-control constants).
+
+    The NumPy mode/trig/weight/gather tables are *derived* from the meta
+    ``resolution`` via the cached :func:`_static_tables` (exposed as
+    properties), so they never enter the pytree: they are used with
+    ``np.*``/fancy indexing at trace time and must stay concrete.  Two
+    runtimes with equal structure (same resolution + scalars, same array
+    shapes) therefore share one XLA executable per lane.
     """
 
-    resolution: Resolution; modes: ModeTable; trig: TrigTables
+    resolution: Resolution
     setup: RunSetup
-    weights: np.ndarray                 # angular integration weights (wint)
+    rcon0: Array; zcon0: Array
     gamma: float; tcon0: float; ftol: float
     max_iterations: int; time_step0: float; nstep: int
     jmax: int                           # evolved radial rows (fixed: ns-1)
-    rcon0: Array; zcon0: Array
+
+    # -- trace-time-static tables, derived from the meta resolution ---------
+    @property
+    def modes(self) -> ModeTable:
+        return _static_tables(self.resolution)[0]
+
+    @property
+    def trig(self) -> TrigTables:
+        return _static_tables(self.resolution)[1]
+
+    @property
+    def weights(self) -> np.ndarray:    # angular integration weights (wint)
+        return _static_tables(self.resolution)[2]
+
     # force-block gather tables (static, from _force_gather_tables):
     # cos_w weights the (cc, ss) blocks; sin_w the (sc, cs) blocks.
-    gather_m: np.ndarray; gather_n: np.ndarray
-    cos_w: np.ndarray; sin_w: np.ndarray
+    @property
+    def gather_m(self) -> np.ndarray:
+        return _static_tables(self.resolution)[3]
+
+    @property
+    def gather_n(self) -> np.ndarray:
+        return _static_tables(self.resolution)[4]
+
+    @property
+    def cos_w(self) -> np.ndarray:
+        return _static_tables(self.resolution)[5]
+
+    @property
+    def sin_w(self) -> np.ndarray:
+        return _static_tables(self.resolution)[6]
+
+
+_register(SolverRuntime, meta=(
+    "resolution", "gamma", "tcon0", "ftol", "max_iterations", "time_step0",
+    "nstep", "jmax",
+))
 
 
 def _force_gather_tables(modes: ModeTable) -> tuple[np.ndarray, ...]:
@@ -397,14 +538,8 @@ def prepare_runtime(
                         delt=float(inp.delt), tcon0=float(inp.tcon0),
                         gamma=float(inp.gamma), nstep=int(inp.nstep))
 
-    modes = mode_table(resolution.mpol, resolution.ntor)
-    trig = trig_tables(resolution)
-    weights = angular_integration_weights(ntheta=resolution.ntheta, nzeta=resolution.nzeta, lasym=resolution.lasym)
-    gather_m, gather_n, cos_w, sin_w = _force_gather_tables(modes)
-
     rt = SolverRuntime(
-        resolution=resolution, modes=modes, trig=trig, setup=setup,
-        weights=weights,
+        resolution=resolution, setup=setup,
         gamma=float(defaults["gamma"] if gamma is None else gamma),
         tcon0=float(defaults["tcon0"] if tcon0 is None else tcon0),
         ftol=float(defaults["ftol"] if ftol is None else ftol),
@@ -413,9 +548,62 @@ def prepare_runtime(
         nstep=int(defaults["nstep"] if nstep is None else nstep),
         jmax=int(resolution.ns) - 1,
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
-        gather_m=gather_m, gather_n=gather_n, cos_w=cos_w, sin_w=sin_w,
     )
     rcon0, zcon0 = _constraint_baselines(_initial_state(setup), rt)
+    return replace(rt, rcon0=rcon0, zcon0=zcon0)
+
+
+def hot_restart_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
+    """Adapt a previous solve's state to this runtime's boundary (hot restart).
+
+    In fixed-boundary mode the R/Z edge row never evolves, so restarting from
+    ``state`` unchanged would silently re-solve the OLD boundary.  Replacing
+    only the edge row injects a discontinuous shear between the last two
+    surfaces (measured: initial ``fsqr ~ 0.5`` on cth, i.e. *worse* than the
+    fresh interior guess).  Instead the boundary delta is spread smoothly
+    into the volume with the ``profil3d.f`` interior-guess radial profile —
+    ``sqrts**m`` for ``m > 0``, linear in ``s`` for ``m = 0`` (the axis is
+    held fixed) — which lands the edge row exactly on the new boundary
+    (``facj(ns) = 1``) and keeps the interior near equilibrium (measured:
+    initial ``fsqr ~ 4e-6`` for a 1% ``RBC(0,1)`` perturbation on cth).
+    Lambda is carried over unchanged.
+    """
+    setup = rt.setup
+    s = jnp.asarray(setup.s_full)
+    dtype = s.dtype
+    m = np.asarray(rt.modes.m, dtype=int)
+    rho = jnp.sqrt(jnp.maximum(s, 0.0)).at[-1].set(jnp.asarray(1.0, dtype=dtype))
+    m_j = jnp.asarray(m)[None, :]
+    facj = jnp.where(m_j > 0, rho[:, None] ** m_j,
+                     s[:, None] * jnp.ones((1, m.size), dtype=dtype))
+
+    def shift(old, new_boundary):
+        old = jnp.asarray(old, dtype=dtype)
+        delta = jnp.asarray(new_boundary, dtype=dtype)[-1] - old[-1]
+        return old + facj * delta[None, :]
+
+    return replace(
+        state,
+        R_cos=shift(state.R_cos, setup.R_cos),
+        R_sin=shift(state.R_sin, setup.R_sin),
+        Z_cos=shift(state.Z_cos, setup.Z_cos),
+        Z_sin=shift(state.Z_sin, setup.Z_sin),
+    )
+
+
+def runtime_with_baselines(rt: SolverRuntime, state: SpectralState) -> SolverRuntime:
+    """Rebind ``rcon0/zcon0`` to a new starting state (``funct3d.f``).
+
+    VMEC2000 sets the constraint baselines from the *current* state whenever
+    ``iter2 == iter1`` — i.e. at the start of every grid.  A runtime from
+    :func:`prepare_runtime` carries baselines for the ``profil3d.f`` interior
+    guess; callers that start from a different state (hot restart via
+    ``solve(initial_state=...)``, multigrid stages starting from the
+    ``interp.f`` interpolant) must rebind them, or the constraint force —
+    and hence the converged equilibrium — is subtly wrong (observed as a
+    ~1e-8 relative ``wb`` shift on the nfp4_QH ladder).
+    """
+    rcon0, zcon0 = _constraint_baselines(state, rt)
     return replace(rt, rcon0=rcon0, zcon0=zcon0)
 
 
@@ -763,6 +951,11 @@ def _initial_carry(state: SpectralState, rt: SolverRuntime, *, ijacob: int) -> _
     zeros = jax.tree.map(jnp.zeros_like, state)
     delt0 = jnp.asarray(rt.time_step0, dtype=dtype)
     zero, inf = jnp.zeros((), dtype=dtype), jnp.asarray(jnp.inf, dtype=dtype)
+    # NOTE: scalar counters/flags carry explicit (non-weak) dtypes so that the
+    # initial carry has exactly the avals of the carry the jitted lanes
+    # return; weak-typed Python scalars here would force a second lane
+    # compilation on the first block round-trip.
+    int_ = lambda v: jnp.asarray(v, dtype=jnp.int64)  # noqa: E731
     return _LoopCarry(
         state=state, xcdot=zeros, xstore=state, cache=_zero_cache(rt),
         time_step=delt0,
@@ -770,9 +963,9 @@ def _initial_carry(state: SpectralState, rt: SolverRuntime, *, ijacob: int) -> _
         fsq=one, res0=inf, res1=inf,
         fsqr=one, fsqz=one, fsql=one, fsqr1=one, fsqz1=one, fsql1=one,
         wb=zero, wp=zero, r00=zero,
-        iteration=jnp.asarray(1), iter1=jnp.asarray(1),
-        ijacob=jnp.asarray(int(ijacob)),
-        done=jnp.asarray(False), ier=jnp.asarray(NORM_TERM_FLAG),
+        iteration=int_(1), iter1=int_(1),
+        ijacob=int_(int(ijacob)),
+        done=jnp.zeros((), dtype=bool), ier=int_(NORM_TERM_FLAG),
         trajectory=jnp.zeros((rt.max_iterations, _TRAJ_COLS), dtype=dtype),
     )
 
@@ -880,48 +1073,46 @@ def _emit_lines(rt: SolverRuntime, trajectory: np.ndarray, upto: int,
         printed.add(it)
 
 
-@functools.lru_cache(maxsize=64)
-def _compiled_lanes(rt: SolverRuntime):
-    """Compiled (while_lane, block_lane) for a runtime, cached by identity.
+@jax.jit
+def _while_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
+    """Whole-solve ``lax.while_loop`` lane, keyed structurally on ``rt``.
 
-    ``SolverRuntime`` is hashed by object identity (``eq=False``), so every
-    caller that holds on to a runtime — optimization loops, hot restarts,
-    multigrid stages — reuses the same XLA executables instead of retracing
-    per solve.  (Full structural caching — runtime as a pytree argument with
-    static meta — is the follow-up recorded in plan.md Phase 2 item (1).)
+    Module-level ``jax.jit`` with the runtime passed as a pytree argument:
+    two DIFFERENT runtimes with equal structure (same meta, same leaf
+    shapes/dtypes) — e.g. two boundaries at one :class:`Resolution`, hot
+    restarts, optimization iterates — share one XLA executable.
     """
     body = _make_body(rt)
+    return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
-    def cond(c: _LoopCarry):
-        return jnp.logical_not(c.done)
 
-    while_lane = jax.jit(lambda c: lax.while_loop(cond, body, c))
-    block_lane = jax.jit(
-        lambda c: lax.scan(lambda cc, _: (body(cc), None), c, None, length=BLOCK_SIZE)[0]
-    )
-    return while_lane, block_lane
+@jax.jit
+def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
+    """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural."""
+    body = _make_body(rt)
+    return lax.scan(lambda cc, _: (body(cc), None), carry, None, length=BLOCK_SIZE)[0]
 
 
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
               ijacob: int, verbose: bool, emit) -> _LoopCarry:
     """Run the iteration loop in the requested lane; return the final carry."""
     carry = _initial_carry(state0, rt, ijacob=ijacob)
-    loop, block = _compiled_lanes(rt)
 
     if mode == "jit":
-        return loop(carry)
+        return _while_lane(carry, rt)
 
     if mode != "cli":
         raise ValueError(f"unknown mode {mode!r}; expected 'cli' or 'jit'")
     if verbose:
-        emit(stage_banner(rt.resolution.ns, rt.resolution.mpol, rt.ftol, rt.max_iterations), end="")
+        # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
+        emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, rt.ftol, rt.max_iterations), end="")
         emit(FORCE_ITERATIONS_BANNER, end="")
         emit(screen_header(lasym=rt.resolution.lasym, lfreeb=False), end="")
 
     printed: set[int] = set()
     max_passes = rt.max_iterations + 200
     for _ in range(max_passes):
-        carry = block(carry)
+        carry = _block_lane(carry, rt)
         done = bool(carry.done)
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
         if verbose:
@@ -930,6 +1121,67 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         if done:
             break
     return carry
+
+
+def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
+                 mode: str, verbose: bool, emit,
+                 try_axis_reguess: bool = True) -> _LoopCarry:
+    """Run one solve at a fixed runtime, with the eqsolve.f axis-retry.
+
+    ``state0=None`` starts from the runtime's ``profil3d.f`` interior guess.
+    On a first-iteration Jacobian sign change with ``ijacob == 0``
+    (``eqsolve.f``), the axis is re-guessed from the failing geometry and the
+    loop restarted once (``try_axis_reguess``).  Returns the final carry;
+    the caller maps ``carry.ier`` to results/exceptions (:func:`_finalize`).
+    """
+    setup = rt.setup
+    if state0 is None:
+        state0 = _initial_state(setup)
+    carry = _run_loop(state0, rt, mode=mode, ijacob=0, verbose=verbose, emit=emit)
+
+    # eqsolve.f: on a first-iteration Jacobian sign change with ijacob == 0,
+    # re-guess the axis from the current geometry and restart once.
+    if try_axis_reguess and int(carry.ier) == BAD_JACOBIAN_FLAG \
+            and int(carry.ijacob) == 0 and rt.resolution.ns >= 3:
+        if verbose:
+            emit(" INITIAL JACOBIAN CHANGED SIGN!")
+            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
+        _, geometry = _geometry(state0, rt)
+        axis = guess_axis(geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs)
+        new_state = interior_guess(
+            boundary_R_cos=setup.boundary_R_cos, boundary_R_sin=setup.boundary_R_sin,
+            boundary_Z_cos=setup.boundary_Z_cos, boundary_Z_sin=setup.boundary_Z_sin,
+            raxis_c=axis[0], raxis_s=axis[1], zaxis_c=axis[2], zaxis_s=axis[3],
+            modes=rt.modes, trig=rt.trig, s=setup.s_full,
+        )
+        state0 = SpectralState(
+            R_cos=new_state[0], R_sin=new_state[1], Z_cos=new_state[2],
+            Z_sin=new_state[3], L_cos=new_state[4], L_sin=new_state[5],
+        )
+        carry = _run_loop(state0, rt, mode=mode, ijacob=1, verbose=verbose,
+                          emit=emit)
+    return carry
+
+
+def _finalize(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
+    """Map the final carry to a :class:`SolveResult` or a typed exception."""
+    ier = int(carry.ier)
+    fsq = (float(carry.fsqr), float(carry.fsqz), float(carry.fsql))
+    if ier == SUCCESSFUL_TERM_FLAG:
+        return _result_from_carry(carry, rt)
+    if ier == MORE_ITER_FLAG:
+        raise VmecConvergenceError(
+            WERROR_MESSAGES[MORE_ITER_FLAG],
+            hint="increase NITER or loosen FTOL",
+            iteration=int(carry.iteration), fsq=fsq, ftol=rt.ftol,
+        )
+    raise VmecJacobianError(
+        WERROR_MESSAGES.get(ier, WERROR_MESSAGES[JAC75_FLAG]),
+        hint="decrease DELT or improve the axis guess",
+        ier_flag=ier if ier in WERROR_MESSAGES else JAC75_FLAG,
+        iteration=int(carry.iteration), jacobian_resets=int(carry.ijacob),
+        fsq=fsq,
+    )
 
 
 def solve(
@@ -941,6 +1193,8 @@ def solve(
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
     lconm1: bool = True, verbose: bool = False, emit=print,
+    initial_state: SpectralState | None = None,
+    device: Any = None,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
@@ -961,53 +1215,37 @@ def solve(
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
     when ``max_iterations`` is exhausted (``more_iter_flag``); both carry the
     final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.
+
+    ``initial_state`` hot-restarts the solve from a previous
+    :class:`SpectralState` at the *same* resolution (e.g. ``result.state`` of
+    an earlier solve on a perturbed boundary — VMEC++-style hot restart; use
+    :func:`vmec_jax.core.multigrid.interpolate_state` first when ``ns``
+    differs).  The R/Z *edge row* of the provided state is replaced by the
+    input's processed boundary (the edge never evolves in fixed-boundary
+    mode, so keeping the old row would silently re-solve the old boundary);
+    the interior and lambda are kept.
+
+    ``device`` places the jitted iteration lanes: ``"cpu"``/``"gpu"``/
+    ``"cuda"``/``"tpu"`` or a ``jax.Device`` (always honored), or ``None``
+    (default) to apply the measured small-work-to-CPU policy of
+    :mod:`vmec_jax.core.device` — which never overrides a user-pinned
+    ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME``.
     """
     rt = prepare_runtime(
         source, resolution, ftol=ftol, max_iterations=max_iterations,
         time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
         lconm1=lconm1,
     )
-    setup = rt.setup
-    state0 = _initial_state(setup)
-
-    carry = _run_loop(state0, rt, mode=mode, ijacob=0, verbose=verbose, emit=emit)
-
-    # eqsolve.f: on a first-iteration Jacobian sign change with ijacob == 0,
-    # re-guess the axis from the current geometry and restart once.
-    if int(carry.ier) == BAD_JACOBIAN_FLAG and int(carry.ijacob) == 0 \
-            and rt.resolution.ns >= 3:
-        if verbose:
-            emit(" INITIAL JACOBIAN CHANGED SIGN!")
-            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
-        _, geometry = _geometry(state0, rt)
-        axis = guess_axis(geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs)
-        new_state = interior_guess(
-            boundary_R_cos=setup.boundary_R_cos, boundary_R_sin=setup.boundary_R_sin,
-            boundary_Z_cos=setup.boundary_Z_cos, boundary_Z_sin=setup.boundary_Z_sin,
-            raxis_c=axis[0], raxis_s=axis[1], zaxis_c=axis[2], zaxis_s=axis[3],
-            modes=rt.modes, trig=rt.trig, s=setup.s_full,
-        )
-        state0 = SpectralState(
-            R_cos=new_state[0], R_sin=new_state[1], Z_cos=new_state[2],
-            Z_sin=new_state[3], L_cos=new_state[4], L_sin=new_state[5],
-        )
-        carry = _run_loop(state0, rt, mode=mode, ijacob=1, verbose=verbose,
-                          emit=emit)
-
-    ier = int(carry.ier)
-    fsq = (float(carry.fsqr), float(carry.fsqz), float(carry.fsql))
-    if ier == SUCCESSFUL_TERM_FLAG:
-        return _result_from_carry(carry, rt)
-    if ier == MORE_ITER_FLAG:
-        raise VmecConvergenceError(
-            WERROR_MESSAGES[MORE_ITER_FLAG],
-            hint="increase NITER or loosen FTOL",
-            iteration=int(carry.iteration), fsq=fsq, ftol=rt.ftol,
-        )
-    raise VmecJacobianError(
-        WERROR_MESSAGES.get(ier, WERROR_MESSAGES[JAC75_FLAG]),
-        hint="decrease DELT or improve the axis guess",
-        ier_flag=ier if ier in WERROR_MESSAGES else JAC75_FLAG,
-        iteration=int(carry.iteration), jacobian_resets=int(carry.ijacob),
-        fsq=fsq,
-    )
+    if initial_state is not None:
+        ns, mnmax = rt.resolution.ns, rt.modes.mnmax
+        if tuple(initial_state.R_cos.shape) != (ns, mnmax):
+            raise ValueError(
+                f"initial_state has shape {tuple(initial_state.R_cos.shape)}, "
+                f"expected ({ns}, {mnmax}); interpolate with "
+                "vmec_jax.core.multigrid.interpolate_state first"
+            )
+        initial_state = hot_restart_state(rt, initial_state)
+        rt = runtime_with_baselines(rt, initial_state)  # funct3d.f iter2==iter1
+    with device_context(device, rt.resolution):
+        carry = _solve_stage(rt, initial_state, mode=mode, verbose=verbose, emit=emit)
+    return _finalize(carry, rt)

@@ -79,8 +79,12 @@ def test_vmec_trig_tables_lasym_full_theta_grid():
     assert np.allclose(float(np.asarray(trig.cosmu[i, m])), expected_cos)
     assert np.allclose(float(np.asarray(trig.sinmu[i, m])), expected_sin)
 
-    # VMEC fixaray.f switches dnorm to 1/(nzeta*ntheta3) for LASYM=T.
-    # Using the symmetric-grid normalization here gives a 2x force-coefficient
-    # error and therefore a 4x residual-scalar error in LASYM stage parity.
-    assert np.allclose(float(trig.dnorm), 1.0 / float(nzeta * ntheta3))
-    assert np.allclose(float(trig.dnorm3), float(trig.dnorm))
+    # VMEC fixaray.f uses dnorm = 1/(nzeta*(ntheta2-1)) UNCONDITIONALLY for
+    # the reduced [0, pi] force projections (lasym kernels are symmetrized by
+    # symforce.f first); only the surface-average normalization dnorm3
+    # switches to the full grid 1/(nzeta*ntheta3) for LASYM=T (SPH012314).
+    # This test previously pinned the ported defect (full-grid dnorm for
+    # lasym), which halved every lasym force projection vs VMEC2000; fixed
+    # alongside vmec_jax/core/fourier.py in vmec_jax/kernels/tomnsp.py.
+    assert np.allclose(float(trig.dnorm), 1.0 / float(nzeta * (ntheta2 - 1)))
+    assert np.allclose(float(trig.dnorm3), 1.0 / float(nzeta * ntheta3))

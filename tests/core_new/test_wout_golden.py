@@ -136,13 +136,16 @@ _FLOAT_TOL: dict[str, tuple[float, float, int, bool]] = {
 
 # Equilibrium-drift tolerance set, applied when the solved state itself is
 # expected to differ from the golden state beyond the tight bounds:
-#  - lasym runs: the legacy lasym solve converges to an equilibrium whose
-#    asymmetric harmonic amplitudes differ from VMEC2000's by up to ~5%
-#    (solver parity gap tracked for the core-solver phase; the up_down deck
-#    was previously validated convergence-only);
 #  - loosely-converged goldens (ftolv > 1e-9, e.g. li383 at ftol=1e-6):
 #    both runs stop at fsq ~ 1e-6 where slow quantities (axis iota for
 #    current-driven decks) still carry ~1% drift.
+# (lasym runs used to be in this set wholesale: the legacy lasym solve
+# inherited the fixaray.f dnorm defect and converged ~5% away from VMEC2000.
+# With the dnorm fix in vmec_jax/kernels/tomnsp.py / vmec_jax/core/fourier.py
+# the up_down deck matches the golden at the tight bounds on the solved
+# harmonics and scalars, so lasym no longer triggers drift tolerances by
+# itself — only the writer-recomputed diagnostic channels below stay
+# relaxed for lasym.)
 # The wout *writer* itself is exact - proven by the tightly-converged
 # symmetric cases and by the bit-exact recomputation identities
 # (force_balance/currents/equif validated on the golden files). These
@@ -188,6 +191,14 @@ _DRIFT_TOL: dict[str, tuple[float, float, int, bool]] = {
 # Normalized force-balance/stability diagnostics of drifted states are
 # derivative-amplified beyond useful comparison: finite-only.
 _DRIFT_FINITE_ONLY = {"DMerc", "DShear", "DWell", "DCurr", "DGeod", "equif"}
+# lasym channels that stay drift-relaxed even though the lasym solve now
+# matches golden tightly (fixaray.f dnorm fix): the writer-recomputed
+# near-axis current/bsubv harmonics and Mercier-family diagnostics still
+# disagree with golden beyond drift levels while the solved harmonics agree
+# to ~1e-11 (lasym writer recomputation parity is a tracked follow-up).
+_LASYM_DIAG_DRIFT = {
+    "bsubvmnc", "bsubvmns", "currumnc", "currumns", "currvmnc", "currvmns",
+}
 # For goldens stored at loose ftol (li383: 1e-6), the current-density
 # harmonics (radial derivatives of the ~1e-3-drifted field) lose all
 # significant digits in subdominant channels: finite-only there.
@@ -271,7 +282,11 @@ def test_golden_values(case):
     with netCDF4.Dataset(golden) as gd, netCDF4.Dataset(out) as nd:
         lasym = bool(int(_get(gd, "lasym__logical__")))
         ftolv = float(_get(gd, "ftolv"))
-        drift = lasym or ftolv > 1e-9
+        # lasym alone no longer triggers full drift tolerances: the
+        # fixaray.f dnorm fix (vmec_jax/kernels/tomnsp.py) closed the lasym
+        # solver parity gap.  Only _LASYM_DIAG_DRIFT / _DRIFT_FINITE_ONLY
+        # channels stay relaxed for lasym goldens.
+        drift = ftolv > 1e-9
         golden_conv = max(float(_get(gd, "fsqr")), float(_get(gd, "fsqz")),
                           float(_get(gd, "fsql"))) <= ftolv
         for name in sorted(gd.variables):
@@ -301,14 +316,14 @@ def test_golden_values(case):
                 if not np.all(np.isfinite(n)):
                     failures.append(f"{name}: non-finite value for nonconverged case")
                 continue
-            if (drift and name in _DRIFT_FINITE_ONLY) or (
+            if ((drift or lasym) and name in _DRIFT_FINITE_ONLY) or (
                 ftolv > 1e-9 and name in _LOOSE_FINITE_ONLY
             ):
                 if not np.all(np.isfinite(n)):
                     failures.append(f"{name}: non-finite values")
                 continue
             tol = _FLOAT_TOL.get(name)
-            if drift:
+            if drift or (lasym and name in _LASYM_DIAG_DRIFT):
                 tol = _DRIFT_TOL.get(name, tol)
             if tol is None:
                 failures.append(f"{name}: no comparison policy defined")

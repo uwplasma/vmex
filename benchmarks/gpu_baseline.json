@@ -1,0 +1,1117 @@
+{
+ "meta": {
+  "host": "pop-os",
+  "date": "2026-07-09 16:32",
+  "synth_niter": 150,
+  "hardware": "2x NVIDIA RTX A4000 16GB (office, pop-os), jax 0.6.2 cuda12, python 3.10",
+  "notes": [
+   "matrix: cold_wall_s = 1st in-process solve (incl. compile/cache-load); warm_wall_s = 2nd solve. warm still includes per-solve retrace overhead (~0.2-0.4s legacy, 1.7-4.7s core_jit) because solve() retraces per call.",
+   "stepscan: per_iter_ms_marginal = (wall_NITER450 - wall_NITER150)/300 on synthetic nfp4_QH decks with FTOL=1e-30 -> pure iteration throughput; per_solve_overhead_s = fixed cost per solve call.",
+   "tridiag: best-of-N ms for core.preconditioner.tridiagonal_solve, jitted, block_until_ready. GPU time ~15us/ns-row, independent of ncols (lax.scan serialization, launch-latency bound); fp32==fp64 on GPU (latency- not FLOP-bound).",
+   "pitfall: running python with cwd containing the repo checkout shadows vmec_jax as a namespace package -> __init__ never runs -> persistent compilation cache disabled -> every solve() pays full XLA recompile (~7s vs ~1.7s warm on cuda for solovev).",
+   "core_jit runs only the first NS_ARRAY stage; legacy runs the full multigrid ladder -> cross-lane iteration counts differ (LandremanPaul, NuhrenbergZille)."
+  ]
+ },
+ "matrix": {
+  "solovev": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.436,
+    "cold_wall_s": 5.263,
+    "warm_wall_s": 0.043,
+    "compile_est_s": 5.22,
+    "iterations": 215,
+    "per_iter_ms": 0.199,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 6.521
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.431,
+    "cold_wall_s": 6.258,
+    "warm_wall_s": 3.176,
+    "compile_est_s": 3.082,
+    "iterations": 215,
+    "per_iter_ms": 14.772,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 10.735
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.593,
+    "cold_wall_s": 2.743,
+    "warm_wall_s": 0.289,
+    "compile_est_s": 2.454,
+    "iterations": 215,
+    "per_iter_ms": 1.345,
+    "converged": true,
+    "peak_device_mem_mb": 0.3,
+    "ok": true,
+    "subprocess_wall_s": 4.516
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.556,
+    "cold_wall_s": 2.572,
+    "warm_wall_s": 1.81,
+    "compile_est_s": 0.762,
+    "iterations": 215,
+    "per_iter_ms": 8.42,
+    "converged": true,
+    "peak_device_mem_mb": 0.3,
+    "ok": true,
+    "subprocess_wall_s": 5.882
+   }
+  },
+  "cth_like_fixed_bdy": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.341,
+    "cold_wall_s": 5.345,
+    "warm_wall_s": 0.198,
+    "compile_est_s": 5.147,
+    "iterations": 434,
+    "per_iter_ms": 0.456,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 6.628
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.368,
+    "cold_wall_s": 10.236,
+    "warm_wall_s": 5.016,
+    "compile_est_s": 5.22,
+    "iterations": 434,
+    "per_iter_ms": 11.557,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 16.535
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.624,
+    "cold_wall_s": 10.415,
+    "warm_wall_s": 0.383,
+    "compile_est_s": 10.033,
+    "iterations": 434,
+    "per_iter_ms": 0.881,
+    "converged": true,
+    "peak_device_mem_mb": 0.4,
+    "ok": true,
+    "subprocess_wall_s": 12.333
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.535,
+    "cold_wall_s": 13.768,
+    "warm_wall_s": 2.185,
+    "compile_est_s": 11.583,
+    "iterations": 434,
+    "per_iter_ms": 5.035,
+    "converged": true,
+    "peak_device_mem_mb": 12.2,
+    "ok": true,
+    "subprocess_wall_s": 17.483
+   }
+  },
+  "nfp4_QH_warm_start": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.349,
+    "cold_wall_s": 7.294,
+    "warm_wall_s": 0.954,
+    "compile_est_s": 6.34,
+    "iterations": 450,
+    "per_iter_ms": 2.12,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 9.354
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.365,
+    "cold_wall_s": 9.49,
+    "warm_wall_s": 4.713,
+    "compile_est_s": 4.777,
+    "iterations": 450,
+    "per_iter_ms": 10.474,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 15.49
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.583,
+    "cold_wall_s": 14.81,
+    "warm_wall_s": 0.574,
+    "compile_est_s": 14.236,
+    "iterations": 450,
+    "per_iter_ms": 1.275,
+    "converged": true,
+    "peak_device_mem_mb": 3.0,
+    "ok": true,
+    "subprocess_wall_s": 17.013
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.64,
+    "cold_wall_s": 13.476,
+    "warm_wall_s": 3.468,
+    "compile_est_s": 10.008,
+    "iterations": 450,
+    "per_iter_ms": 7.706,
+    "converged": true,
+    "peak_device_mem_mb": 1.9,
+    "ok": true,
+    "subprocess_wall_s": 18.638
+   }
+  },
+  "LandremanPaul2021_QA_lowres": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.415,
+    "cold_wall_s": 34.115,
+    "warm_wall_s": 14.543,
+    "compile_est_s": 19.572,
+    "iterations": 1877,
+    "per_iter_ms": 7.748,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 50.219
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.381,
+    "cold_wall_s": 9.976,
+    "warm_wall_s": 4.808,
+    "compile_est_s": 5.169,
+    "iterations": 189,
+    "per_iter_ms": 25.437,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 16.12
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.583,
+    "cold_wall_s": 46.449,
+    "warm_wall_s": 4.19,
+    "compile_est_s": 42.26,
+    "iterations": 1880,
+    "per_iter_ms": 2.229,
+    "converged": true,
+    "peak_device_mem_mb": 26.6,
+    "ok": true,
+    "subprocess_wall_s": 52.564
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.681,
+    "cold_wall_s": 16.291,
+    "warm_wall_s": 2.582,
+    "compile_est_s": 13.709,
+    "iterations": 189,
+    "per_iter_ms": 13.662,
+    "converged": true,
+    "peak_device_mem_mb": 9.0,
+    "ok": true,
+    "subprocess_wall_s": 20.611
+   }
+  },
+  "NuhrenbergZille_1988_QHS": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.341,
+    "cold_wall_s": 333.136,
+    "warm_wall_s": 276.952,
+    "compile_est_s": 56.184,
+    "iterations": 14741,
+    "per_iter_ms": 18.788,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 612.468
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.384,
+    "cold_wall_s": 10.614,
+    "warm_wall_s": 4.765,
+    "compile_est_s": 5.848,
+    "iterations": 125,
+    "per_iter_ms": 38.121,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 16.707
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.589,
+    "cold_wall_s": 192.773,
+    "warm_wall_s": 90.135,
+    "compile_est_s": 102.638,
+    "iterations": 14757,
+    "per_iter_ms": 6.108,
+    "converged": true,
+    "peak_device_mem_mb": 189.5,
+    "ok": true,
+    "subprocess_wall_s": 285.241
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.572,
+    "cold_wall_s": 14.179,
+    "warm_wall_s": 2.405,
+    "compile_est_s": 11.774,
+    "iterations": 125,
+    "per_iter_ms": 19.243,
+    "converged": true,
+    "peak_device_mem_mb": 9.9,
+    "ok": true,
+    "subprocess_wall_s": 18.262
+   }
+  },
+  "synth_nfp4QH_ns35_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.353,
+    "cold_wall_s": 6.771,
+    "warm_wall_s": 0.3,
+    "compile_est_s": 6.471,
+    "iterations": 150,
+    "per_iter_ms": 2.0,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 8.219
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.371,
+    "cold_wall_s": 7.231,
+    "warm_wall_s": 4.163,
+    "compile_est_s": 3.067,
+    "iterations": 150,
+    "per_iter_ms": 27.755,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 12.674
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.605,
+    "cold_wall_s": 10.371,
+    "warm_wall_s": 0.328,
+    "compile_est_s": 10.043,
+    "iterations": 150,
+    "per_iter_ms": 2.186,
+    "converged": true,
+    "peak_device_mem_mb": 3.0,
+    "ok": true,
+    "subprocess_wall_s": 12.301
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.553,
+    "cold_wall_s": 11.294,
+    "warm_wall_s": 2.35,
+    "compile_est_s": 8.944,
+    "iterations": 150,
+    "per_iter_ms": 15.668,
+    "converged": false,
+    "peak_device_mem_mb": 1.6,
+    "ok": true,
+    "subprocess_wall_s": 15.166
+   }
+  },
+  "synth_nfp4QH_ns35_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.356,
+    "cold_wall_s": 7.286,
+    "warm_wall_s": 0.549,
+    "compile_est_s": 6.737,
+    "iterations": 150,
+    "per_iter_ms": 3.659,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 8.968
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.377,
+    "cold_wall_s": 8.972,
+    "warm_wall_s": 4.46,
+    "compile_est_s": 4.512,
+    "iterations": 150,
+    "per_iter_ms": 29.735,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 14.721
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.591,
+    "cold_wall_s": 20.526,
+    "warm_wall_s": 0.327,
+    "compile_est_s": 20.198,
+    "iterations": 150,
+    "per_iter_ms": 2.183,
+    "converged": true,
+    "peak_device_mem_mb": 6.1,
+    "ok": true,
+    "subprocess_wall_s": 22.518
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.566,
+    "cold_wall_s": 14.979,
+    "warm_wall_s": 2.382,
+    "compile_est_s": 12.596,
+    "iterations": 150,
+    "per_iter_ms": 15.881,
+    "converged": false,
+    "peak_device_mem_mb": 4.6,
+    "ok": true,
+    "subprocess_wall_s": 19.029
+   }
+  },
+  "synth_nfp4QH_ns75_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.36,
+    "cold_wall_s": 6.911,
+    "warm_wall_s": 0.485,
+    "compile_est_s": 6.425,
+    "iterations": 150,
+    "per_iter_ms": 3.237,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 8.57
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.373,
+    "cold_wall_s": 8.866,
+    "warm_wall_s": 4.419,
+    "compile_est_s": 4.447,
+    "iterations": 150,
+    "per_iter_ms": 29.462,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 14.554
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.626,
+    "cold_wall_s": 17.408,
+    "warm_wall_s": 0.434,
+    "compile_est_s": 16.974,
+    "iterations": 150,
+    "per_iter_ms": 2.895,
+    "converged": true,
+    "peak_device_mem_mb": 6.0,
+    "ok": true,
+    "subprocess_wall_s": 19.555
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.58,
+    "cold_wall_s": 14.044,
+    "warm_wall_s": 2.773,
+    "compile_est_s": 11.271,
+    "iterations": 150,
+    "per_iter_ms": 18.487,
+    "converged": false,
+    "peak_device_mem_mb": 4.4,
+    "ok": true,
+    "subprocess_wall_s": 18.489
+   }
+  },
+  "synth_nfp4QH_ns75_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.355,
+    "cold_wall_s": 8.1,
+    "warm_wall_s": 0.868,
+    "compile_est_s": 7.232,
+    "iterations": 150,
+    "per_iter_ms": 5.784,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 10.119
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.373,
+    "cold_wall_s": 9.39,
+    "warm_wall_s": 4.913,
+    "compile_est_s": 4.477,
+    "iterations": 150,
+    "per_iter_ms": 32.756,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 15.594
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.612,
+    "cold_wall_s": 18.364,
+    "warm_wall_s": 0.431,
+    "compile_est_s": 17.934,
+    "iterations": 150,
+    "per_iter_ms": 2.871,
+    "converged": true,
+    "peak_device_mem_mb": 12.8,
+    "ok": true,
+    "subprocess_wall_s": 20.531
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.589,
+    "cold_wall_s": 15.336,
+    "warm_wall_s": 2.712,
+    "compile_est_s": 12.624,
+    "iterations": 150,
+    "per_iter_ms": 18.08,
+    "converged": false,
+    "peak_device_mem_mb": 9.1,
+    "ok": true,
+    "subprocess_wall_s": 19.742
+   }
+  },
+  "synth_nfp4QH_ns151_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.355,
+    "cold_wall_s": 7.724,
+    "warm_wall_s": 0.768,
+    "compile_est_s": 6.956,
+    "iterations": 150,
+    "per_iter_ms": 5.123,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 9.604
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.369,
+    "cold_wall_s": 8.772,
+    "warm_wall_s": 4.454,
+    "compile_est_s": 4.318,
+    "iterations": 150,
+    "per_iter_ms": 29.694,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 14.514
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.603,
+    "cold_wall_s": 18.324,
+    "warm_wall_s": 0.558,
+    "compile_est_s": 17.766,
+    "iterations": 150,
+    "per_iter_ms": 3.723,
+    "converged": true,
+    "peak_device_mem_mb": 12.2,
+    "ok": true,
+    "subprocess_wall_s": 20.665
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.564,
+    "cold_wall_s": 16.265,
+    "warm_wall_s": 3.612,
+    "compile_est_s": 12.653,
+    "iterations": 150,
+    "per_iter_ms": 24.08,
+    "converged": false,
+    "peak_device_mem_mb": 8.8,
+    "ok": true,
+    "subprocess_wall_s": 21.548
+   }
+  },
+  "synth_nfp4QH_ns151_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.355,
+    "cold_wall_s": 8.214,
+    "warm_wall_s": 1.268,
+    "compile_est_s": 6.946,
+    "iterations": 150,
+    "per_iter_ms": 8.454,
+    "converged": true,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 10.615
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "devices": [
+     "TFRT_CPU_0"
+    ],
+    "import_s": 0.374,
+    "cold_wall_s": 10.427,
+    "warm_wall_s": 5.555,
+    "compile_est_s": 4.871,
+    "iterations": 150,
+    "per_iter_ms": 37.034,
+    "converged": false,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 17.287
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.627,
+    "cold_wall_s": 16.897,
+    "warm_wall_s": 0.63,
+    "compile_est_s": 16.267,
+    "iterations": 150,
+    "per_iter_ms": 4.2,
+    "converged": true,
+    "peak_device_mem_mb": 25.6,
+    "ok": true,
+    "subprocess_wall_s": 19.218
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "devices": [
+     "cuda:0",
+     "cuda:1"
+    ],
+    "import_s": 0.573,
+    "cold_wall_s": 15.416,
+    "warm_wall_s": 3.564,
+    "compile_est_s": 11.852,
+    "iterations": 150,
+    "per_iter_ms": 23.761,
+    "converged": false,
+    "peak_device_mem_mb": 18.2,
+    "ok": true,
+    "subprocess_wall_s": 20.626
+   }
+  }
+ },
+ "tridiag": {
+  "cpu/f64": {
+   "backend": "cpu",
+   "dtype": "f64",
+   "best_ms": {
+    "ns=16,ncols=30": 0.0135,
+    "ns=16,ncols=150": 0.0411,
+    "ns=16,ncols=600": 0.1139,
+    "ns=16,ncols=2400": 0.5189,
+    "ns=35,ncols=30": 0.056,
+    "ns=35,ncols=150": 0.0744,
+    "ns=35,ncols=600": 0.2035,
+    "ns=35,ncols=2400": 1.2503,
+    "ns=75,ncols=30": 0.0616,
+    "ns=75,ncols=150": 0.129,
+    "ns=75,ncols=600": 0.6031,
+    "ns=75,ncols=2400": 2.5378,
+    "ns=151,ncols=30": 0.1376,
+    "ns=151,ncols=150": 0.2083,
+    "ns=151,ncols=600": 1.2796,
+    "ns=151,ncols=2400": 5.4532,
+    "ns=301,ncols=30": 0.2058,
+    "ns=301,ncols=150": 0.8308,
+    "ns=301,ncols=600": 1.9688,
+    "ns=301,ncols=2400": 20.3411,
+    "ns=601,ncols=30": 0.3194,
+    "ns=601,ncols=150": 0.9252,
+    "ns=601,ncols=600": 4.4293,
+    "ns=601,ncols=2400": 34.17
+   },
+   "ok": true,
+   "subprocess_wall_s": 5.211
+  },
+  "cuda/f64": {
+   "backend": "gpu",
+   "dtype": "f64",
+   "best_ms": {
+    "ns=16,ncols=30": 0.3069,
+    "ns=16,ncols=150": 0.3047,
+    "ns=16,ncols=600": 0.3005,
+    "ns=16,ncols=2400": 0.3134,
+    "ns=35,ncols=30": 0.5974,
+    "ns=35,ncols=150": 0.5998,
+    "ns=35,ncols=600": 0.5995,
+    "ns=35,ncols=2400": 0.5844,
+    "ns=75,ncols=30": 1.2256,
+    "ns=75,ncols=150": 1.167,
+    "ns=75,ncols=600": 1.1621,
+    "ns=75,ncols=2400": 1.248,
+    "ns=151,ncols=30": 2.3704,
+    "ns=151,ncols=150": 2.3587,
+    "ns=151,ncols=600": 2.3558,
+    "ns=151,ncols=2400": 2.4077,
+    "ns=301,ncols=30": 4.4655,
+    "ns=301,ncols=150": 4.6408,
+    "ns=301,ncols=600": 4.6106,
+    "ns=301,ncols=2400": 4.8024,
+    "ns=601,ncols=30": 8.9552,
+    "ns=601,ncols=150": 8.9782,
+    "ns=601,ncols=600": 8.9205,
+    "ns=601,ncols=2400": 8.9372
+   },
+   "ok": true,
+   "subprocess_wall_s": 8.898
+  },
+  "cuda/f32": {
+   "backend": "gpu",
+   "dtype": "f32",
+   "best_ms": {
+    "ns=16,ncols=30": 0.3062,
+    "ns=16,ncols=150": 0.325,
+    "ns=16,ncols=600": 0.3475,
+    "ns=16,ncols=2400": 0.2987,
+    "ns=35,ncols=30": 0.5954,
+    "ns=35,ncols=150": 0.5933,
+    "ns=35,ncols=600": 0.597,
+    "ns=35,ncols=2400": 0.6004,
+    "ns=75,ncols=30": 1.317,
+    "ns=75,ncols=150": 1.2231,
+    "ns=75,ncols=600": 1.3138,
+    "ns=75,ncols=2400": 1.2421,
+    "ns=151,ncols=30": 2.4113,
+    "ns=151,ncols=150": 2.379,
+    "ns=151,ncols=600": 2.4031,
+    "ns=151,ncols=2400": 2.3736,
+    "ns=301,ncols=30": 4.6089,
+    "ns=301,ncols=150": 4.4508,
+    "ns=301,ncols=600": 4.4547,
+    "ns=301,ncols=2400": 4.6952,
+    "ns=601,ncols=30": 8.8433,
+    "ns=601,ncols=150": 8.7486,
+    "ns=601,ncols=600": 8.9283,
+    "ns=601,ncols=2400": 8.7766
+   },
+   "ok": true,
+   "subprocess_wall_s": 8.442
+  }
+ },
+ "stepscan": {
+  "ns35_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 0.259,
+    "wall_450_s": 0.83,
+    "per_iter_ms_marginal": 1.9005,
+    "per_solve_overhead_s": -0.026,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 14.385
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 4.029,
+    "wall_450_s": 4.692,
+    "per_iter_ms_marginal": 2.21,
+    "per_solve_overhead_s": 3.697,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 31.571
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.301,
+    "wall_450_s": 0.55,
+    "per_iter_ms_marginal": 0.832,
+    "per_solve_overhead_s": 0.176,
+    "peak_device_mem_mb": 3.2,
+    "ok": true,
+    "subprocess_wall_s": 15.479
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 2.259,
+    "wall_450_s": 2.985,
+    "per_iter_ms_marginal": 2.4182,
+    "per_solve_overhead_s": 1.897,
+    "peak_device_mem_mb": 1.9,
+    "ok": true,
+    "subprocess_wall_s": 27.263
+   }
+  },
+  "ns35_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 0.545,
+    "wall_450_s": 1.588,
+    "per_iter_ms_marginal": 3.477,
+    "per_solve_overhead_s": 0.023,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 17.254
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 4.394,
+    "wall_450_s": 5.688,
+    "per_iter_ms_marginal": 4.3123,
+    "per_solve_overhead_s": 3.747,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 37.179
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.319,
+    "wall_450_s": 0.618,
+    "per_iter_ms_marginal": 0.9963,
+    "per_solve_overhead_s": 0.17,
+    "peak_device_mem_mb": 6.6,
+    "ok": true,
+    "subprocess_wall_s": 15.674
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 2.201,
+    "wall_450_s": 3.136,
+    "per_iter_ms_marginal": 3.1176,
+    "per_solve_overhead_s": 1.733,
+    "peak_device_mem_mb": 5.1,
+    "ok": true,
+    "subprocess_wall_s": 28.711
+   }
+  },
+  "ns75_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 0.436,
+    "wall_450_s": 1.292,
+    "per_iter_ms_marginal": 2.8554,
+    "per_solve_overhead_s": 0.007,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 16.81
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 4.783,
+    "wall_450_s": 5.819,
+    "per_iter_ms_marginal": 3.4517,
+    "per_solve_overhead_s": 4.265,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 37.487
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.422,
+    "wall_450_s": 0.851,
+    "per_iter_ms_marginal": 1.431,
+    "per_solve_overhead_s": 0.207,
+    "peak_device_mem_mb": 6.3,
+    "ok": true,
+    "subprocess_wall_s": 18.728
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 2.983,
+    "wall_450_s": 4.624,
+    "per_iter_ms_marginal": 5.4694,
+    "per_solve_overhead_s": 2.162,
+    "peak_device_mem_mb": 4.9,
+    "ok": true,
+    "subprocess_wall_s": 35.119
+   }
+  },
+  "ns75_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 0.812,
+    "wall_450_s": 2.314,
+    "per_iter_ms_marginal": 5.0055,
+    "per_solve_overhead_s": 0.062,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 21.372
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 5.565,
+    "wall_450_s": 7.218,
+    "per_iter_ms_marginal": 5.5078,
+    "per_solve_overhead_s": 4.739,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 44.985
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.618,
+    "wall_450_s": 1.112,
+    "per_iter_ms_marginal": 1.6496,
+    "per_solve_overhead_s": 0.37,
+    "peak_device_mem_mb": 13.9,
+    "ok": true,
+    "subprocess_wall_s": 20.957
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 2.684,
+    "wall_450_s": 4.511,
+    "per_iter_ms_marginal": 6.0882,
+    "per_solve_overhead_s": 1.771,
+    "peak_device_mem_mb": 10.2,
+    "ok": true,
+    "subprocess_wall_s": 36.839
+   }
+  },
+  "ns151_mpol2_ntor2": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 0.652,
+    "wall_450_s": 1.896,
+    "per_iter_ms_marginal": 4.1468,
+    "per_solve_overhead_s": 0.03,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 19.487
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 4.515,
+    "wall_450_s": 5.875,
+    "per_iter_ms_marginal": 4.5338,
+    "per_solve_overhead_s": 3.835,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 37.944
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.539,
+    "wall_450_s": 1.27,
+    "per_iter_ms_marginal": 2.4347,
+    "per_solve_overhead_s": 0.174,
+    "peak_device_mem_mb": 13.1,
+    "ok": true,
+    "subprocess_wall_s": 18.563
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 3.4,
+    "wall_450_s": 6.43,
+    "per_iter_ms_marginal": 10.099,
+    "per_solve_overhead_s": 1.886,
+    "peak_device_mem_mb": 9.7,
+    "ok": true,
+    "subprocess_wall_s": 42.419
+   }
+  },
+  "ns151_mpol4_ntor4": {
+   "cpu/legacy": {
+    "backend": "cpu",
+    "wall_150_s": 1.26,
+    "wall_450_s": 3.854,
+    "per_iter_ms_marginal": 8.6467,
+    "per_solve_overhead_s": -0.037,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 26.664
+   },
+   "cpu/core_jit": {
+    "backend": "cpu",
+    "wall_150_s": 5.522,
+    "wall_450_s": 8.702,
+    "per_iter_ms_marginal": 10.5994,
+    "per_solve_overhead_s": 3.933,
+    "peak_device_mem_mb": null,
+    "ok": true,
+    "subprocess_wall_s": 49.246
+   },
+   "cuda/legacy": {
+    "backend": "gpu",
+    "wall_150_s": 0.614,
+    "wall_450_s": 1.447,
+    "per_iter_ms_marginal": 2.7789,
+    "per_solve_overhead_s": 0.197,
+    "peak_device_mem_mb": 27.9,
+    "ok": true,
+    "subprocess_wall_s": 18.531
+   },
+   "cuda/core_jit": {
+    "backend": "gpu",
+    "wall_150_s": 3.357,
+    "wall_450_s": 6.436,
+    "per_iter_ms_marginal": 10.2634,
+    "per_solve_overhead_s": 1.817,
+    "peak_device_mem_mb": 20.3,
+    "ok": true,
+    "subprocess_wall_s": 42.148
+   }
+  }
+ }
+}

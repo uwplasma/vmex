@@ -80,7 +80,7 @@ vmec --test
 `vmec --doctor` prints Python, pip, package, and JAX backend diagnostics.
 `vmec --test` copies `input.nfp4_QH_warm_start`, runs with `FTOL_ARRAY = 1e-12`,
 writes WOUT and plots under `vmec_jax_test/`, and prints equivalent manual
-commands. The canonical executable is `vmec`; old aliases remain supported.
+commands. The executables are `vmec` and the `vmec-jax` alias.
 
 To run the same workflow manually with an input downloaded from the repository:
 
@@ -170,10 +170,11 @@ build a QP basin and then switch the objective to QI).
 
 ```text
 vmec input.*           run the equilibrium solver and write wout_*.nc
+                       (accepts INDATA namelists and VMEC++-style JSON decks)
 vmec --plot wout.nc    generate VMEC diagnostic plots from a WOUT file
 vmec --booz wout.nc    run booz_xform_jax and write boozmn_*.nc
 vmec --plot boozmn.nc  generate Boozer contour and spectrum plots
-vmec --parity input.*  force the conservative VMEC2000-style loop
-vmec --solver-mode memory input.*  choose the lower-peak-memory parity path
+vmec --mode jit input.*  run the fully jitted lax.while_loop solver lane
+vmec --ftol 1e-12 --max-iter 5000 input.*  override the final-stage tolerance/budget
 vmec --help            show the full option list
 ```

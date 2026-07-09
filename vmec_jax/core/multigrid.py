@@ -40,11 +40,17 @@ import numpy as np
 
 import jax.numpy as jnp
 
+from .device import device_context
+from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
 from .fourier import ModeTable
-from .solver import SpectralState
+from .input import VmecInput
+from .solver import (
+    SolveResult, SpectralState, _finalize, _solve_stage, hot_restart_state,
+    prepare_runtime, resolution_from_input, runtime_with_baselines,
+)
 from .transforms import odd_m_sqrt_s_scaling
 
-__all__ = ["interpolate_coefficients", "interpolate_state"]
+__all__ = ["interpolate_coefficients", "interpolate_state", "solve_multigrid"]
 
 Array = Any
 
@@ -161,3 +167,124 @@ def interpolate_state(
         Z_cos=interp(state_coarse.Z_cos), Z_sin=interp(state_coarse.Z_sin),
         L_cos=interp(state_coarse.L_cos), L_sin=interp(state_coarse.L_sin),
     )
+
+
+# ---------------------------------------------------------------------------
+# NS_ARRAY ladder driver (runvmec.f)
+# ---------------------------------------------------------------------------
+
+
+def solve_multigrid(
+    inp: VmecInput,
+    ns_array=None,
+    ftol_array=None,
+    niter_array=None,
+    *,
+    mode: str = "cli",
+    lconm1: bool = True,
+    verbose: bool = False,
+    emit=print,
+    initial_state: SpectralState | None = None,
+    time_step: float | None = None, tcon0: float | None = None,
+    gamma: float | None = None, nstep: int | None = None,
+    device: Any = None,
+) -> SolveResult:
+    """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
+
+    VMEC2000 ``Sources/TimeStep/runvmec.f``: for each grid ``igrid`` the
+    radial resolution ``nsval = ns_array(igrid)`` is solved with tolerance
+    ``ftol_array(igrid)`` and iteration cap ``niter_array(igrid)``; stages
+    with ``nsval`` *below* the best resolution reached so far are skipped
+    (``IF (nsval < ns_min) CYCLE`` — decreasing entries are ignored, equal
+    entries re-run), and each executed stage after the first starts from the
+    ``interp.f`` coarse -> fine interpolation (:func:`interpolate_state`) of
+    the previous stage's final state.  The time step resets to the input
+    ``DELT`` at every stage, and each stage prints its own ``NS = ...``
+    banner (``verbose=True``, ``mode="cli"``).
+
+    ``ns_array/ftol_array/niter_array`` default to the input's ladder; when
+    given they are broadcast to a common stage count (shorter ``ftol/niter``
+    arrays repeat their last entry).  ``initial_state`` seeds the *first*
+    executed stage (hot restart; must match that stage's ``ns``).
+
+    Intermediate stages are allowed to exhaust their iteration cap
+    (``more_iter_flag`` — VMEC2000 proceeds to the next grid); any other
+    failure raises immediately, and the final stage must converge
+    (:class:`~vmec_jax.core.errors.VmecConvergenceError` otherwise), exactly
+    like :func:`vmec_jax.core.solver.solve`.
+
+    Executable reuse: stage runtimes are structural pytrees (solver.py,
+    plan.md Phase 2 item (1)), so one XLA executable is compiled per distinct
+    stage structure ``(ns, ftol, niter, ...)`` per session, and repeated
+    ladders (parameter scans, hot restarts) recompile nothing.  Full radial
+    padding to ``max(ns_array)`` — ONE executable for all stages — is the
+    recorded follow-up (plan.md §7 item 1); it requires masked radial
+    reductions through geometry/fields/forces/preconditioner and is not
+    attempted here.
+
+    ``device`` places each stage's jitted lanes (see
+    :func:`vmec_jax.core.solver.solve`): an explicit ``"cpu"``/``"gpu"``/
+    ``jax.Device`` is always honored; ``None`` (default) applies the measured
+    per-stage policy of :mod:`vmec_jax.core.device` (small per-iteration work
+    solves on CPU) unless the user pinned ``JAX_PLATFORMS``.
+
+    Returns the final stage's :class:`~vmec_jax.core.solver.SolveResult`.
+    """
+    ns_arr = np.atleast_1d(np.asarray(
+        inp.ns_array if ns_array is None else ns_array, dtype=np.int64)).ravel()
+    ns_arr = ns_arr[: int(np.argmax(ns_arr <= 0))] if np.any(ns_arr <= 0) else ns_arr
+    if ns_arr.size == 0:
+        raise ValueError("ns_array has no positive stages")
+    n_stages = int(ns_arr.size)
+
+    def _stage_values(values, default, dtype):
+        arr = np.atleast_1d(np.asarray(
+            default if values is None else values, dtype=dtype)).ravel()
+        if arr.size == 0:
+            raise ValueError("empty ftol/niter stage array")
+        if arr.size < n_stages:  # repeat the last entry (VmecInput convention)
+            arr = np.concatenate([arr, np.full(n_stages - arr.size, arr[-1], dtype=dtype)])
+        return arr[:n_stages]
+
+    ftol_arr = _stage_values(ftol_array, inp.ftol_array, np.float64)
+    niter_arr = _stage_values(niter_array, inp.niter_array, np.int64)
+
+    state: SpectralState | None = initial_state
+    first_executed = True
+    ns_min = 0
+    carry = rt = None
+    for igrid in range(n_stages):
+        nsval = int(ns_arr[igrid])
+        if nsval < ns_min:      # runvmec.f: decreasing ns values are skipped
+            continue
+        ns_min = nsval
+        resolution = resolution_from_input(inp, ns=nsval)
+        rt = prepare_runtime(
+            inp, resolution, ftol=float(ftol_arr[igrid]),
+            max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
+            time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+        )
+        if state is not None and int(state.R_cos.shape[0]) != nsval:
+            state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)
+        if state is not None:
+            if first_executed:
+                # user-provided hot-restart seed: adapt to this input's boundary
+                state = hot_restart_state(rt, state)
+            # funct3d.f: rcon0/zcon0 are set from the state at iter2 == iter1,
+            # i.e. from THIS stage's starting state, not the interior guess.
+            rt = runtime_with_baselines(rt, state)
+        with device_context(device, resolution):
+            carry = _solve_stage(
+                rt, state, mode=mode, verbose=verbose, emit=emit,
+                # the eqsolve.f axis re-guess applies to the fresh interior guess
+                try_axis_reguess=first_executed and state is None,
+            )
+        first_executed = False
+        ier = int(carry.ier)
+        last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
+        if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (
+                last_stage and ier != SUCCESSFUL_TERM_FLAG):
+            _finalize(carry, rt)  # raises the typed error for this stage
+        state = carry.state
+
+    return _finalize(carry, rt)

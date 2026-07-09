@@ -77,7 +77,13 @@ def test_grid_and_trig_cache_keys_are_parameter_specific():
     trig3 = vmec_trig_tables(ntheta=8, nzeta=3, nfp=2, mmax=2, nmax=1, lasym=True, dtype=np.float32)
     assert trig1 is trig2
     assert trig3 is not trig1
-    assert np.isclose(trig1.dnorm, 1.0 / (3 * trig1.ntheta3))
+    # fixaray.f: dnorm = 1/(nzeta*(ntheta2-1)) in BOTH symmetry modes; only
+    # dnorm3 switches to the full grid 1/(nzeta*ntheta3) for lasym.  (The
+    # legacy port used to pin the full-grid value for dnorm too — the
+    # inherited fixaray.f dnorm defect that halved every lasym force
+    # projection; see vmec_jax/kernels/tomnsp.py.)
+    assert np.isclose(trig1.dnorm, 1.0 / (3 * (trig1.ntheta2 - 1)))
+    assert np.isclose(trig1.dnorm3, 1.0 / (3 * trig1.ntheta3))
     with pytest.raises(ValueError, match="Invalid theta sizes"):
         vmec_trig_tables(ntheta=0, nzeta=3, nfp=1, mmax=1, nmax=1, lasym=False)
     with pytest.raises(ValueError, match="nfp must be positive"):

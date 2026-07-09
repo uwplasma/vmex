@@ -88,8 +88,14 @@ from typing import Any, NamedTuple
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 from jax import lax
+
+try:  # jax >= 0.4.16: per-lowering-platform branch selection.
+    from jax.lax import platform_dependent as _platform_dependent
+except ImportError:  # pragma: no cover - very old jax
+    _platform_dependent = None
 
 __all__ = [
     "RadialPreconditionerCoefficients",
@@ -606,22 +612,98 @@ def tridiagonal_solve(
     diagonal: Array,
     subdiagonal: Array,
     rhs: Array,
+    *,
+    method: str = "auto",
 ) -> Array:
-    """Thomas algorithm vectorized over all (m,n) columns and stacked fields.
+    """Radial tridiagonal solve vectorized over all (m,n) columns and fields.
 
     VMEC2000: ``serial_tridslv`` (in ``scalfor.f``): solve, along the leading
     (radial) axis, ``sub[j]*x[j-1] + diag[j]*x[j] + super[j]*x[j+1] = rhs[j]``
     for every trailing-column element simultaneously.  ``sub[0]`` and
     ``super[-1]`` are ignored.  ``rhs`` may carry extra trailing axes (stacked
     force fields) beyond the shape of ``diagonal``; they are solved in one
-    pass.  Implemented as two ``lax.scan`` sweeps (jit-friendly, no host
-    round-trips); zero pivots are guarded with ``eps = 1e-12`` exactly as the
-    legacy parity-proven port.
+    pass.
+
+    ``method`` selects the backend implementation (2026-07-09 GPU overhaul,
+    benchmarks/gpu_baseline.json ``tridiag``):
+
+    - ``"thomas"``: two ``lax.scan`` Thomas sweeps (jit-friendly, no host
+      round-trips); zero pivots guarded with ``eps = 1e-12`` exactly as the
+      legacy parity-proven port.  This is the CPU path and stays **bitwise**
+      identical to the pinned A/B tests.
+    - ``"lax"``: XLA's fused batched solver ``jax.lax.linalg.tridiagonal_solve``
+      (cuSPARSE ``gtsv2`` on CUDA, LAPACK ``gtsv`` on CPU).  On GPU the scan
+      sweeps serialize into ~15 us-per-radial-row kernel launches (independent
+      of the column count), so the fused kernel is the fast path there.
+      Numerically equivalent (same solution to roundoff) but not bit-identical
+      to Thomas.
+    - ``"auto"`` (default): pick per *lowering platform* at trace time via
+      ``jax.lax.platform_dependent`` — Thomas on CPU (bit parity), the fused
+      solver elsewhere (CUDA/ROCm/TPU).  This respects a
+      ``jax.default_device``/``JAX_PLATFORMS`` CPU pin even on GPU machines.
+      On jax versions without ``platform_dependent`` the choice falls back to
+      ``jax.default_backend()``.
+
+    Systems with fewer than 3 radial rows always use Thomas (the cuSPARSE
+    kernel requires ``m >= 3``).
     """
     superd = jnp.asarray(superdiagonal)
     diag = jnp.asarray(diagonal)
     subd = jnp.asarray(subdiagonal)
     rhs = jnp.asarray(rhs)
+    n_rows = int(rhs.shape[0])
+    if n_rows == 0:
+        return rhs
+    if method not in ("auto", "thomas", "lax"):
+        raise ValueError(f"unknown method {method!r}; expected 'auto', 'thomas' or 'lax'")
+    if method == "thomas" or n_rows < 3:
+        return _thomas_tridiagonal_solve(superd, diag, subd, rhs)
+    if method == "lax":
+        return _lax_tridiagonal_solve(superd, diag, subd, rhs)
+    if _platform_dependent is not None:
+        return _platform_dependent(
+            superd, diag, subd, rhs,
+            cpu=_thomas_tridiagonal_solve,
+            default=_lax_tridiagonal_solve,
+        )
+    if jax.default_backend() == "cpu":  # pragma: no cover - old-jax fallback
+        return _thomas_tridiagonal_solve(superd, diag, subd, rhs)
+    return _lax_tridiagonal_solve(superd, diag, subd, rhs)  # pragma: no cover
+
+
+def _lax_tridiagonal_solve(superd: Array, diag: Array, subd: Array, rhs: Array) -> Array:
+    """Fused batched tridiagonal solve (``jax.lax.linalg.tridiagonal_solve``).
+
+    Maps the ``(n_rows, *columns[, *fields])`` layout of
+    :func:`tridiagonal_solve` onto the ``lax.linalg`` convention: the system
+    dimension goes *last* in ``dl/d/du`` and *second-to-last* in the
+    right-hand side, columns become batch dimensions and all extra trailing
+    field axes are flattened into the multiple-RHS axis.  ``dl[0]``/``du[-1]``
+    are zeroed (ignored by the Thomas convention, required to be zero by
+    cuSPARSE), and zero diagonal entries get the same ``eps = 1e-12`` guard
+    as the Thomas path.
+    """
+    d = diag
+    du = jnp.broadcast_to(superd, d.shape)
+    dl = jnp.broadcast_to(subd, d.shape)
+    dl = dl.at[0].set(0.0)
+    du = du.at[-1].set(0.0)
+    eps = jnp.asarray(1.0e-12, dtype=rhs.dtype)
+    d = jnp.where(d != 0.0, d, eps)
+    tail = rhs.shape[d.ndim:]
+    n_fields = int(np.prod(tail, dtype=np.int64)) if tail else 1
+    rhs_in = rhs.reshape(d.shape + (n_fields,))
+    solution_t = jax.lax.linalg.tridiagonal_solve(
+        jnp.moveaxis(dl, 0, -1),
+        jnp.moveaxis(d, 0, -1),
+        jnp.moveaxis(du, 0, -1),
+        jnp.moveaxis(rhs_in, 0, -2),
+    )
+    return jnp.moveaxis(solution_t, -2, 0).reshape(rhs.shape)
+
+
+def _thomas_tridiagonal_solve(superd: Array, diag: Array, subd: Array, rhs: Array) -> Array:
+    """Two-sweep ``lax.scan`` Thomas solve (bit-parity CPU path; see above)."""
     if rhs.ndim > diag.ndim:
         expand = (1,) * (rhs.ndim - diag.ndim)
         superd = superd.reshape(superd.shape + expand)
@@ -667,6 +749,7 @@ def scalfor(
     matrices: TridiagonalMatrices,
     *,
     jmax: int,
+    tridiagonal_method: str = "auto",
 ) -> Array:
     """Apply the assembled preconditioner to a spectral force (``scalfor.f``).
 
@@ -686,6 +769,11 @@ def scalfor(
         Output of :func:`scalfor_matrices` for the matching force family.
     jmax:
         Same ``jmax`` used to assemble ``matrices`` (static).
+    tridiagonal_method:
+        Forwarded to :func:`tridiagonal_solve` (``"auto"``/``"thomas"``/
+        ``"lax"``; static).  The default picks per lowering platform: the
+        bit-parity Thomas scan on CPU, the fused cuSPARSE-backed kernel on
+        accelerators.
     """
     ax, bx, dx = matrices
     f = jnp.asarray(force)
@@ -698,12 +786,14 @@ def scalfor(
 
     if jmax > 0:
         solution_m0 = tridiagonal_solve(
-            ax[:jmax, 0, :], dx[:jmax, 0, :], bx[:jmax, 0, :], f[:jmax, 0, :, :]
+            ax[:jmax, 0, :], dx[:jmax, 0, :], bx[:jmax, 0, :], f[:jmax, 0, :, :],
+            method=tridiagonal_method,
         )
         out = out.at[:jmax, 0].set(solution_m0)
         if mpol > 1 and jmax > 1:
             solution_m = tridiagonal_solve(
-                ax[1:jmax, 1:, :], dx[1:jmax, 1:, :], bx[1:jmax, 1:, :], f[1:jmax, 1:, :, :]
+                ax[1:jmax, 1:, :], dx[1:jmax, 1:, :], bx[1:jmax, 1:, :], f[1:jmax, 1:, :, :],
+                method=tridiagonal_method,
             )
             out = out.at[1:jmax, 1:].set(solution_m)
             out = out.at[0, 1:].set(0.0)

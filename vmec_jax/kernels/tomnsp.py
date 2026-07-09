@@ -257,15 +257,18 @@ def vmec_trig_tables(
         if cached is not None:
             return cached
 
-    # VMEC fixaray.f normalizes LASYM transforms on the full theta grid:
-    #   dnorm = 1/(nzeta*ntheta3)  ! SPH012314
-    # while stellarator-symmetric transforms use endpoint-weighted [0, pi].
-    if lasym:
-        dnorm = 1.0 / (nzeta * ntheta3)
-    else:
-        dnorm = 1.0 / (nzeta * (ntheta2 - 1))
-    # dnorm3 normalization for surface averages.
-    dnorm3 = dnorm
+    # Integration normalization (fixaray.f).  ``dnorm`` weights the reduced
+    # [0, pi] force projections (cosmui/sinmui) and is 1/(nzeta*(ntheta2-1))
+    # for BOTH symmetry modes: lasym kernels are symmetrized first
+    # (symforce.f), so the endpoint-half-weighted reduced integral with
+    # weight 2/ntheta1 equals the full-grid average.  Only the full-surface
+    # average normalization ``dnorm3`` (wint/cosmui3) is lasym-dependent:
+    # 1/(nzeta*ntheta1) on the full grid (SPH012314).  (The previous revision
+    # used the full-grid dnorm for cosmui too, halving every lasym force
+    # projection relative to VMEC2000's fixaray.f -- same defect fixed in
+    # vmec_jax/core/fourier.py.)
+    dnorm = 1.0 / (nzeta * (ntheta2 - 1))
+    dnorm3 = 1.0 / (nzeta * ntheta3) if lasym else dnorm
 
     # VMEC uses `osqrt2 = 1/sqrt(2)` and sets:
     #   mscale(1:) = mscale(0)/osqrt2  => sqrt(2) for m>=1 (with mscale(0)=1)

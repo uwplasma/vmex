@@ -270,14 +270,18 @@ def trig_tables(res: Resolution) -> TrigTables:
     m_max = res.mpol - 1  # largest poloidal mode number
     n_max = res.ntor  # largest toroidal mode number (before *nfp)
 
-    # Integration normalization (fixaray.f).  For lasym the full theta grid is
-    # normalized (dnorm = 1/(nzeta*ntheta3), SPH012314); symmetric runs use the
-    # endpoint-weighted reduced grid on [0, pi].
-    if lasym:
-        dnorm = 1.0 / (nzeta * ntheta3)
-    else:
-        dnorm = 1.0 / (nzeta * (ntheta2 - 1))
-    dnorm3 = dnorm
+    # Integration normalization (fixaray.f).  ``dnorm`` weights the reduced
+    # [0, pi] force projections (cosmui/sinmui) and is 1/(nzeta*(ntheta2-1))
+    # for BOTH symmetry modes: lasym kernels are symmetrized first
+    # (symforce.f), so the endpoint-half-weighted reduced integral with
+    # weight 2/ntheta1 equals the full-grid average.  Only the full-surface
+    # average normalization ``dnorm3`` (wint/cosmui3) is lasym-dependent:
+    # 1/(nzeta*ntheta1) on the full grid.  (The previous revision used the
+    # full-grid dnorm for cosmui too, halving every lasym force projection
+    # and, through alias.f's gcon, the constraint-force weight relative to
+    # the MHD force -- shifting the lasym fixed point away from VMEC2000.)
+    dnorm = 1.0 / (nzeta * (ntheta2 - 1))
+    dnorm3 = 1.0 / (nzeta * ntheta3) if lasym else dnorm
 
     # mscale(0)=nscale(0)=1; sqrt(2) for m,n >= 1 (fixaray.f, osqrt2).
     one_over_sqrt2 = 1.0 / np.sqrt(2.0)
