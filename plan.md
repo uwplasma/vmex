@@ -566,6 +566,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    verifies throat/center field and paraxial residual scaling. MMS and production preconditioning
    remain M2 gates.
 
+   **M3 STATUS (2026-07-09): closure layer landed; equilibrium coupling next.** Isotropic,
+   ANIMEC bi-Maxwellian (Suzuki et al. Eqs. 4–6), and bilinear tabulated `p_parallel(s,B)` closures
+   are differentiable PyTrees. `p_perp` is always derived from
+   `p_parallel - B*partial_B(p_parallel)`; independent inconsistent moments cannot enter the API.
+   Firehose `sigma` and mirror ellipticity are computed and tested, including the isotropic limit,
+   trapped/passing continuity, tabulated interpolation, and coefficient gradients. The remaining
+   M3 work is anisotropic half-mesh energy, tensor force, interface stress, and solved benchmarks.
+
    **5.1 Supported physical model**
 
    - Coordinates are `(s, theta, xi)`, with `s in [0,1]`, periodic `theta`, and nonperiodic
