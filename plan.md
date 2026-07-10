@@ -607,6 +607,20 @@ examples/
   single_stage_free_boundary.py  # advanced, ESSOS
 ```
 
+**Example style requirements (user directive 2026-07-09; binding):** pedagogic and user-friendly —
+no `main()` functions; input parameters at the top; the user writes their own objective function
+in the script (importing gradient-ready building blocks from `vmec_jax.core.optimize`); scripts
+teach: reading input files AND creating a `VmecInput` from scratch, writing outputs (wout),
+plotting, and printing initial conditions, per-iteration progress, and final results. Not so
+minimal that users cannot generalize; no auxiliary-function mazes (anything reusable moves into
+the source). Optimization examples target **precise QA/QH/QP/QI at several nfp, max_mode=5, with
+ESS, from a circular torus**; for QI, try **QP-first-then-QI** as the simple route before any
+seed/preconditioner machinery (compare against the legacy seed approach and report). Runs must be
+fast on CPU and GPU: reuse the warm solver (structural executable cache), use implicit autodiff
+with measured accuracy (test gradient accuracy in CI), and include **commented-out but fully
+tested** extra objective terms (DMerc, LgradB, magnetic well, ...) that work when uncommented
+(tests exercise them uncommented).
+
 **Optimization examples** mirror simsopt's `QH_fixed_resolution.py` (66 lines: build equilibrium →
 `QuasisymmetryRatioResidual(surfaces, helicity_m, helicity_n)` + aspect target → one least-squares
 call). Ours: `vmec_jax.optimize.QuasisymmetryResidual(m, n)` with (QA: m=1,n=0; QH: m=1,n=−nfp;
