@@ -75,6 +75,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
+from solvax import auto_chunk_size, chunk_map
+
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .solver import (
@@ -1156,6 +1158,7 @@ def least_squares(
     max_mode: int | Sequence[int] = 1,
     x0: np.ndarray | None = None,
     jac: str | None = None,
+    jac_chunk_size: int | str | None = None,
     hot_restart: bool = True,
     use_ess: bool = False,
     ess_alpha: float = 1.2,
@@ -1204,6 +1207,14 @@ def least_squares(
     :func:`l_grad_b` / the Boozer QI residual need ``jac=None``) and
     ``lasym = False`` (the implicit parameter map does not implement the
     lasym ``readin.f`` boundary rotation).
+    ``jac_chunk_size`` (R17.1 memory knob, ``jac="implicit"`` only) chunks the
+    per-dof Jacobian columns via :func:`solvax.chunk_map`: ``None`` (default)
+    is one wide ``vmap`` (current behavior), an ``int`` processes that many
+    boundary dofs at a time (peak memory ``m0 + m1*chunk`` instead of scaling
+    with the full dof count), and ``"auto"`` lets :func:`solvax.auto_chunk_size`
+    pick the width.  It is inert for ``jac=None`` (scipy computes the
+    finite-difference Jacobian itself).
+
     ``hot_restart`` seeds each trial solve from the previous converged state
     (both modes; in implicit mode via the per-config host-solve cache).
     Remaining keywords go to :func:`scipy.optimize.least_squares` (e.g.
@@ -1227,6 +1238,7 @@ def least_squares(
         for mm in modes_schedule:
             result = least_squares(
                 objective_terms, current, max_mode=mm, jac=jac,
+                jac_chunk_size=jac_chunk_size,
                 hot_restart=hot_restart, use_ess=use_ess, ess_alpha=ess_alpha,
                 device=device, solve_kwargs=solve_kwargs, verbose=verbose,
                 **scipy_kwargs)
@@ -1242,6 +1254,7 @@ def least_squares(
                 "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
+            jac_chunk_size=jac_chunk_size,
             solve_kwargs=dict(solve_kwargs or {}), device=device,
             verbose=verbose, **scipy_kwargs)
     if jac is not None:
@@ -1327,6 +1340,7 @@ def _least_squares_implicit(
     *,
     max_mode: int,
     x0: np.ndarray | None,
+    jac_chunk_size: int | str | None = None,
     solve_kwargs: dict,
     device: Any = None,
     verbose: int = 0,
@@ -1419,17 +1433,27 @@ def _least_squares_implicit(
     _, mask_np = imp._host_solve_and_mask(cfg, params0_np)
     mask_const = jax.tree.map(jnp.asarray, mask_np)
 
-    # One-hot boundary tangents in ImplicitParams space, stacked for vmap.
+    # One-hot boundary tangents in ImplicitParams space, stacked over dofs
+    # (leading axis 2*nm) so chunk_map can process them in fixed-size chunks.
     t_rbc = np.zeros((2 * nm,) + np.shape(params0.rbc))
     t_zbs = np.zeros((2 * nm,) + np.shape(params0.zbs))
     for j in range(nm):
         t_rbc[j, row_idx[j], col_idx[j]] = 1.0
         t_zbs[nm + j, row_idx[j], col_idx[j]] = 1.0
     zerop = jax.tree.map(jnp.zeros_like, params0)
-    tangents = dataclasses.replace(zerop, rbc=jnp.asarray(t_rbc),
-                                   zbs=jnp.asarray(t_zbs))
-    tangent_axes = dataclasses.replace(
-        jax.tree.map(lambda _: None, zerop), rbc=0, zbs=0)
+    tangent_rbc = jnp.asarray(t_rbc)
+    tangent_zbs = jnp.asarray(t_zbs)
+
+    # R17.1 memory knob: chunk_size None == one wide vmap (current behavior),
+    # an int / "auto" caps peak Jacobian memory at that many dofs at a time.
+    if jac_chunk_size == "auto":
+        chunk = int(auto_chunk_size(2 * nm))
+    elif jac_chunk_size is None or isinstance(jac_chunk_size, int):
+        chunk = jac_chunk_size
+    else:
+        raise ValueError(
+            "jac_chunk_size must be None, a positive int, or 'auto', "
+            f"got {jac_chunk_size!r}")
 
     def jacobian_rows(x: jnp.ndarray) -> jnp.ndarray:
         """Exact residual Jacobian by *forward* implicit differentiation.
@@ -1457,12 +1481,14 @@ def _least_squares_implicit(
         def Fz(dz):
             return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
 
-        def column(tp):
+        def column(tp_pair):
+            tp = dataclasses.replace(zerop, rbc=tp_pair[0], zbs=tp_pair[1])
             b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
             dz, _ = imp._adjoint_solve(Fz, jax.tree.map(jnp.negative, b), cfg)
             return jax.jvp(G, (z_star, params), (P(dz), tp))[1]
 
-        return jnp.transpose(jax.vmap(column, in_axes=(tangent_axes,))(tangents))
+        cols = chunk_map(column, (tangent_rbc, tangent_zbs), chunk_size=chunk)
+        return jnp.transpose(cols)
 
     jac_jit = jax.jit(jacobian_rows)
 

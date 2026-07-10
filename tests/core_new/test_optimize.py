@@ -380,6 +380,30 @@ def test_least_squares_implicit_smoke(solovev_eq):
     assert abs(aspect1 - 4.0) < abs(aspect0 - 4.0)
 
 
+def test_least_squares_implicit_jac_chunking(solovev_eq):
+    """The R17.1 chunked implicit Jacobian matches the unchunked one.
+
+    ``jac_chunk_size`` only changes how the per-dof Jacobian columns are
+    batched (:func:`solvax.chunk_map`: one wide ``vmap`` when ``None`` vs
+    ``jax.lax.map`` in fixed-size chunks otherwise), so the Jacobian scipy
+    evaluates at the initial boundary must be identical.  Compared at a single
+    evaluation (``max_nfev=1``, same default x0) to keep the test cheap; the
+    solovev deck has 2 boundary dofs so ``jac_chunk_size=1`` is a real
+    2-chunk pass.
+    """
+    jax.config.update("jax_disable_jit", False)
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    obj = [(opt.aspect_ratio, 4.0, 1.0)]
+    ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit", max_nfev=1)
+    assert ref.jac.shape[1] == 2  # RBC(0,1), ZBS(0,1)
+    for chunk in (1, 2, "auto"):
+        got = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                                jac_chunk_size=chunk, max_nfev=1)
+        assert got.jac.shape == ref.jac.shape
+        np.testing.assert_allclose(got.jac, ref.jac, rtol=1e-8, atol=1e-10,
+                                   err_msg=f"chunk={chunk!r}")
+
+
 def test_least_squares_max_mode_schedule():
     """Staged max_mode continuation: stages chain through result.input.
 

@@ -30,6 +30,7 @@ dependencies = [
   "matplotlib",
   "packaging",
   "booz_xform_jax",
+  "solvax",
   "tomli; python_version < '3.11'",
 ]
 

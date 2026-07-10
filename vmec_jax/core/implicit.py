@@ -75,6 +75,9 @@ import numpy as np
 
 import jax
 import jax.numpy as jnp
+from jax.flatten_util import ravel_pytree
+
+from solvax import gmres as _solvax_gmres
 
 from .fields import energies_and_force_norms, magnetic_fields, metric_elements
 from .fourier import Resolution
@@ -704,10 +707,27 @@ def _solve_implicit_fwd(params, cfg):
 
 
 def _adjoint_solve(A, b, cfg: ImplicitConfig):
-    return jax.scipy.sparse.linalg.gmres(
-        A, b, tol=cfg.adjoint_tol, atol=0.0, restart=cfg.adjoint_restart,
-        maxiter=cfg.adjoint_maxiter, solve_method="incremental",
+    """Adjoint linear solve ``(dF/dz)^T lambda = b`` via ``solvax.gmres``.
+
+    ``solvax.gmres`` (roadmap R18b shared-solver consolidation) operates on
+    flat ``(n,)`` vectors, so the :class:`SpectralState` pytree ``b`` is
+    raveled to a flat vector and the matrix-free operator ``A`` wrapped to
+    match; the flat GMRES is exactly the pytree GMRES because ``ravel_pytree``
+    is a linear isomorphism.  Tolerances/limits mirror the previous
+    ``jax.scipy.sparse.linalg.gmres`` call (``rtol = adjoint_tol``, ``atol =
+    0``, Arnoldi cycle size ``adjoint_restart``, up to ``adjoint_maxiter``
+    restarts), so the adjoint accuracy is unchanged.
+    """
+    b_flat, unravel = ravel_pytree(b)
+
+    def matvec(v):
+        return ravel_pytree(A(unravel(v)))[0]
+
+    sol = _solvax_gmres(
+        matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
+        restart=cfg.adjoint_restart, max_restarts=cfg.adjoint_maxiter,
     )
+    return unravel(sol.x), sol
 
 
 def _solve_implicit_bwd(cfg, res, gbar):

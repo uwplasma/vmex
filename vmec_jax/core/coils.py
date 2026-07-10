@@ -51,6 +51,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from solvax import chunk_map
+
 from .mgrid import MgridData
 
 _TWO_PI = 2.0 * _PI
@@ -445,7 +447,7 @@ def biot_savart_from_geometry(
         )
         return value[0]
 
-    values = jax.lax.map(one_point, flat, batch_size=int(chunk_size))
+    values = chunk_map(one_point, flat, chunk_size=int(chunk_size))
     return jnp.reshape(values, original_shape + (3,))
 
 

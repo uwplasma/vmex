@@ -204,7 +204,10 @@ Steps:
   3. **Code-size comparison.** Add a README table: source files + lines of code for vmec_jax vs
      VMEC2000 vs VMEC++ (count with `cloc`/`tokei` over `/Users/rogerio/local/STELLOPT/VMEC2000/Sources`
      and `/Users/rogerio/local/vmecpp/src`; state what's counted). Message: comparable/greater
-     capability in a fraction of the code.
+     capability in a fraction of the code. **Measured 2026-07-10 (solver source only; tests/
+     bindings/third-party excluded): vmec_jax 34 files / 19,237 Python lines; VMEC2000 115
+     files / 36,693 Fortran lines; VMEC++ 117 files / ~39,677 (34,255 C++ + 5,422 Python) —
+     vmec_jax is ~half the code of both, with a superset of capabilities.**
   4. **Showcase figure.** `readme_equilibrium_showcase.png`: show the **3D geometry with |B| color on
      the surface**; and change the current flat |B| plot to **|B| in Boozer coordinates with the `jet`
      colormap** (the STELLOPT/Boozer convention). Update `core.plotting`/`core.boozer` plot helpers as
@@ -351,6 +354,12 @@ patterns do. Ordered by value, each cross-referenced into the lane it strengthen
   near-axis) through the uwplasma packages (R19).**
 
 **R18. SOLVAX integration — slim vmec_jax, share solver infra with the uwplasma ecosystem.**
+*(STATUS 2026-07-10: R18a + R18b DONE.* SOLVAX PR #1 merged + released v0.2.0 to PyPI
+(backend-aware tridiagonal_solve + chunked-autodiff, example-per-capability + full docs).
+vmec_jax imports them (d6b4c938): preconditioner tridiagonal, adjoint GMRES, jac_chunk_size
+all via solvax; preconditioner + gradient tests bit-identical; CI green incl. 95% gate; core
+−56 net lines now. Remaining: the big reduction with the 2D preconditioner on
+solvax.block_thomas_truncated (R10.2).)*
 `uwplasma/SOLVAX` (local `/Users/rogerio/local/SOLVAX`, v0.1.0, "differentiable structured linear
 solvers, preconditioners and matrix-free methods in JAX", built on lineax) ALREADY ships: `banded`
 LU (+periodic), `krylov` (`gmres`, `gcrot`=recycled Krylov), `implicit` (`linear_solve`,
