@@ -291,12 +291,17 @@ def test_missing_mgrid_raises(tmp_path):
 
 def test_cli_missing_mgrid_fallback_warns(tmp_path):
     """CLI policy: missing mgrid -> fixed-boundary fallback warning (VMEC2000)."""
-    from vmec_jax.core.cli import _check_free_boundary
+    import types
+
+    from vmec_jax.core.cli import _free_boundary_plan
 
     deck = tmp_path / "input.cth_like_free_bdy_lasym_small"
     deck.write_text(DECK.read_text())  # mgrid deliberately NOT copied
     inp = VmecInput.from_file(deck)
     messages: list[str] = []
-    _check_free_boundary(inp, deck, emit=lambda s, **k: messages.append(str(s)))
+    args = types.SimpleNamespace(coils=None)
+    plan = _free_boundary_plan(args, inp, deck,
+                               emit=lambda s, **k: messages.append(str(s)))
+    assert plan is None  # fixed-boundary fallback
     assert any("FIXED-BOUNDARY" in msg for msg in messages)
     assert any("mgrid file not found" in msg for msg in messages)

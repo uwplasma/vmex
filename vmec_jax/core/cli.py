@@ -14,10 +14,33 @@ plus the core plotting (``--plot``) and Boozer (``--booz``) drivers.
 Zero-crash policy (plan.md §2.5): every failure maps to a typed
 :class:`vmec_jax.core.errors.VmecError`; the CLI prints the VMEC2000
 ``werror`` message plus a one-line hint and exits with the matching
-``ier_flag`` code.  Free-boundary decks are not yet served by the core: a
-missing mgrid file falls back to a fixed-boundary solve with a warning
-(VMEC2000 behavior), any other ``LFREEB = T`` deck is redirected to the
-legacy entry point (``python -m vmec_jax``).
+``ier_flag`` code.
+
+Free-boundary routing (``LFREEB = T``):
+
+- a readable mgrid file goes to
+  :func:`vmec_jax.core.freeboundary.solve_free_boundary` with the VMEC2000
+  console output (``In VACUUM`` block, ``VACUUM PRESSURE TURNED ON`` banner)
+  and free-boundary wout metadata (``nextcur``/``extcur``/``curlabel``/
+  ``mgrid_mode``);
+- a missing mgrid file falls back to a fixed-boundary solve with a warning
+  (VMEC2000 behavior, dropped by VMEC++);
+- ``MGRID_FILE = 'DIRECT_COILS'`` (or the ``--coils`` flag) evaluates the
+  external field directly from an ESSOS-style coils file via
+  :class:`vmec_jax.core.coils.CoilSet` Biot-Savart
+  (``solve_free_boundary(inp, external_field=coilset)``).
+
+Documented divergences of the free-boundary lane:
+
+- :func:`~vmec_jax.core.freeboundary.solve_free_boundary` is single-grid
+  with no warm-start seam, so only the *final* ``NS_ARRAY`` stage is run
+  (from the standard interior guess); VMEC2000 runs the whole ladder with
+  vacuum re-activating per stage.  Multi-stage decks print a note.
+- The NESTOR vacuum potential is not returned by the solver, so the wout
+  ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` variables are written as
+  netCDF fill (see :func:`vmec_jax.core.wout.wout_from_state`).
+- An NITER-exhausted free-boundary run still writes the wout (VMEC2000
+  behavior) and exits with ``ier_flag = 2`` (MORE ITERATIONS REQUIRED).
 """
 
 from __future__ import annotations
@@ -99,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="vmec",
         description=(
-            "vmec_jax equilibrium solver (fixed-boundary core).\n\n"
+            "vmec_jax equilibrium solver (fixed- and free-boundary core).\n\n"
             "  vmec input.X           — solve (INDATA or VMEC++ JSON), write wout_X.nc\n"
             "  vmec --plot wout_*.nc  — diagnostic plots from a WOUT file\n"
             "  vmec --booz wout_*.nc  — run booz_xform_jax, write boozmn_*.nc\n"
@@ -163,6 +186,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--ftol", type=float, default=None, help="Override the final-stage FTOL_ARRAY tolerance.")
     p.add_argument("--max-iter", type=int, default=None, help="Override the final-stage NITER_ARRAY iteration cap.")
+    p.add_argument(
+        "--coils",
+        metavar="PATH",
+        type=str,
+        default=None,
+        help=(
+            "ESSOS-style coils file (.json or .npz with dofs_curves, "
+            "dofs_currents, n_segments, nfp, stellsym) supplying the external "
+            "field of an LFREEB = T deck directly via Biot-Savart instead of "
+            "an mgrid file (pairs with MGRID_FILE = 'DIRECT_COILS')."
+        ),
+    )
     p.add_argument(
         "--doctor",
         action="store_true",
@@ -267,16 +302,109 @@ def _read_input(input_path: Path):
         ) from exc
 
 
-def _check_free_boundary(inp, input_path: Path, *, emit) -> None:
-    """Free-boundary policy: mgrid fallback or redirect to the legacy CLI.
+#: MGRID_FILE sentinel selecting the direct-coil Biot-Savart external field.
+_DIRECT_COILS = "DIRECT_COILS"
 
-    VMEC2000 falls back to a fixed-boundary solve when the mgrid file cannot
-    be read (a behavior VMEC++ dropped); decks with a readable mgrid need the
-    free-boundary solver, which is not in the core yet.
+
+class _FreeBoundaryPlan:
+    """Resolved free-boundary routing: solver kwargs + wout metadata."""
+
+    def __init__(self, *, solver_kwargs, nextcur=0, extcur=None,
+                 mgrid_mode="", curlabel=None):
+        self.solver_kwargs = dict(solver_kwargs)
+        self.nextcur = int(nextcur)
+        self.extcur = extcur
+        self.mgrid_mode = str(mgrid_mode)
+        self.curlabel = curlabel
+
+
+def _load_coilset(path: Path):
+    """:class:`~vmec_jax.core.coils.CoilSet` from an ESSOS-style coils file.
+
+    Accepts the ``essos.coils.Coils.to_json`` layout (also as an ``.npz``
+    archive with the same keys): ``dofs_curves`` with shape
+    ``(n_base_coils, 3, 2*order + 1)``, ``dofs_currents``, ``n_segments``,
+    ``nfp``, ``stellsym``, plus an optional ``currents_scale``.  No ESSOS
+    import is required (mirrors ``essos.coils.Coils_from_json``).
     """
+    import json
+
+    import numpy as np
+
+    from .coils import CoilSet
+
+    try:
+        if path.suffix.lower() == ".npz":
+            with np.load(path) as npz:
+                data = {key: npz[key] for key in npz.files}
+        else:
+            data = json.loads(path.read_text())
+        dofs = np.asarray(data["dofs_curves"], dtype=float)
+        currents = np.asarray(data["dofs_currents"], dtype=float).reshape(-1)
+        n_segments = int(np.asarray(data["n_segments"]).reshape(-1)[0])
+        nfp = int(np.asarray(data.get("nfp", 1)).reshape(-1)[0])
+        stellsym = bool(np.asarray(data.get("stellsym", False)).reshape(-1)[0])
+        scale = float(np.asarray(data.get("currents_scale", 1.0)).reshape(-1)[0])
+    except (KeyError, ValueError, OSError) as exc:
+        raise VmecInputError(
+            WERROR_MESSAGES[INPUT_ERROR_FLAG],
+            hint=(
+                f"--coils {path.name}: expected an ESSOS coils file (.json/.npz "
+                "with dofs_curves, dofs_currents, n_segments, nfp, stellsym): "
+                f"{exc}"
+            ),
+        ) from exc
+    return CoilSet(
+        base_curve_dofs=dofs, base_currents=currents,
+        n_segments=n_segments, nfp=nfp, stellsym=stellsym,
+        current_scale=scale,
+    )
+
+
+def _free_boundary_plan(args, inp, input_path: Path, *, emit):
+    """Free-boundary routing policy (``None`` -> fixed-boundary solve).
+
+    - readable mgrid -> :class:`_FreeBoundaryPlan` with ``mgrid_path`` and
+      the wout coil metadata (``nextcur``/``extcur``/``curlabel``/
+      ``mgrid_mode``) read from the file;
+    - missing mgrid -> warning + fixed-boundary fallback (VMEC2000 policy);
+    - ``--coils`` / ``MGRID_FILE = 'DIRECT_COILS'`` -> plan with
+      ``external_field`` from :func:`_load_coilset` (``nextcur = 0``: the
+      coil currents live in the coils file, not in EXTCUR).
+    """
+    import numpy as np
+
+    coils_arg = getattr(args, "coils", None)
     if not bool(inp.lfreeb):
-        return
-    mgrid = Path(str(inp.mgrid_file)).expanduser()
+        if coils_arg:
+            raise VmecInputError(
+                WERROR_MESSAGES[INPUT_ERROR_FLAG],
+                hint="--coils requires an LFREEB = T input deck",
+            )
+        return None
+
+    mgrid_name = str(inp.mgrid_file or "").strip().strip("'\"")
+    if coils_arg or mgrid_name.upper() == _DIRECT_COILS:
+        if not coils_arg:
+            raise VmecInputError(
+                WERROR_MESSAGES[INPUT_ERROR_FLAG],
+                hint=(
+                    "MGRID_FILE = 'DIRECT_COILS' needs --coils <essos_coils"
+                    ".json|.npz>, or use the Python API: solve_free_boundary("
+                    "inp, external_field=CoilSet(...))"
+                ),
+            )
+        coils_path = Path(coils_arg).expanduser().resolve()
+        if not coils_path.exists():
+            raise VmecInputError(
+                WERROR_MESSAGES[INPUT_ERROR_FLAG],
+                hint=f"coils file not found: {coils_path}",
+            )
+        return _FreeBoundaryPlan(
+            solver_kwargs={"external_field": _load_coilset(coils_path)},
+        )
+
+    mgrid = Path(mgrid_name).expanduser()
     if not mgrid.is_absolute():
         mgrid = (input_path.parent / mgrid).resolve()
     if not mgrid.exists():
@@ -284,12 +412,38 @@ def _check_free_boundary(inp, input_path: Path, *, emit) -> None:
             f" WARNING: mgrid file not found: {mgrid}\n"
             "          proceeding with a FIXED-BOUNDARY solve (VMEC2000 fallback)."
         )
-        return
-    raise VmecError(
-        "free-boundary runs are not yet served by the vmec_jax core",
-        hint=f"use the legacy entry point: python -m vmec_jax {input_path}",
-        ier_flag=INPUT_ERROR_FLAG,
+        return None
+
+    from .mgrid import read_mgrid
+
+    data = read_mgrid(mgrid)
+    extcur = np.zeros((int(data.nextcur),), dtype=float)
+    given = np.atleast_1d(np.asarray(
+        inp.extcur if inp.extcur is not None else [], dtype=float)).ravel()
+    extcur[: min(given.size, extcur.size)] = given[: extcur.size]
+    return _FreeBoundaryPlan(
+        solver_kwargs={"mgrid_path": mgrid},
+        nextcur=int(data.nextcur), extcur=extcur,
+        mgrid_mode=str(data.mgrid_mode), curlabel=tuple(data.coil_groups),
     )
+
+
+def _final_stage_params(inp, args) -> tuple[int, float, int]:
+    """Final ``NS_ARRAY`` stage ``(ns, ftol, niter)`` incl. CLI overrides."""
+    import numpy as np
+
+    ns_arr = np.atleast_1d(np.asarray(inp.ns_array, dtype=np.int64)).ravel()
+    positive = ns_arr[ns_arr > 0]
+    ns = int(positive.max()) if positive.size else int(ns_arr[0])
+    ftol = (
+        float(args.ftol) if args.ftol is not None
+        else float(np.atleast_1d(np.asarray(inp.ftol_array, dtype=float)).ravel()[-1])
+    )
+    niter = (
+        int(args.max_iter) if args.max_iter is not None
+        else int(np.atleast_1d(np.asarray(inp.niter_array)).ravel()[-1])
+    )
+    return ns, ftol, niter
 
 
 def _stage_overrides(inp, *, ftol: float | None, max_iter: int | None):
@@ -307,8 +461,13 @@ def _stage_overrides(inp, *, ftol: float | None, max_iter: int | None):
     return ftol_array, niter_array
 
 
-def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path):
-    """Build the full VMEC2000-compatible wout dataset and write it."""
+def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
+                            freeb_plan=None):
+    """Build the full VMEC2000-compatible wout dataset and write it.
+
+    ``freeb_plan`` (a :class:`_FreeBoundaryPlan`) supplies the free-boundary
+    coil metadata (``nextcur``/``extcur``/``mgrid_mode``/``curlabel``).
+    """
     import numpy as np
 
     from .wout import wout_from_state, write_wout
@@ -321,6 +480,12 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path):
         stride = total.size // 100 + 1
         fsqt = total[stride - 1 :: stride][:100]
 
+    freeb_kwargs = {}
+    if freeb_plan is not None:
+        freeb_kwargs = dict(
+            nextcur=freeb_plan.nextcur, extcur=freeb_plan.extcur,
+            mgrid_mode=freeb_plan.mgrid_mode, curlabel=freeb_plan.curlabel,
+        )
     wout = wout_from_state(
         inp=inp,
         state=result.state,
@@ -329,14 +494,15 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path):
         niter=int(result.iterations),
         converged=bool(result.converged),
         input_extension=case_from_input(input_path),
+        **freeb_kwargs,
     )
     write_wout(wout_path, wout)
     return wout
 
 
 def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> int:
-    """Full solve pipeline for one input deck (fixed-boundary core)."""
-    from .multigrid import solve_multigrid
+    """Full solve pipeline for one input deck (fixed- or free-boundary)."""
+    import numpy as np
 
     case = case_from_input(input_path)
     verbose = not bool(args.quiet)
@@ -347,25 +513,51 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
     if verbose:
         emit(_preamble(case))
-    _check_free_boundary(inp, input_path, emit=emit)
-
-    ftol_array, niter_array = _stage_overrides(inp, ftol=args.ftol, max_iter=args.max_iter)
+    freeb_plan = _free_boundary_plan(args, inp, input_path, emit=emit)
 
     t1 = time.perf_counter()
-    result = solve_multigrid(
-        inp,
-        ftol_array=ftol_array,
-        niter_array=niter_array,
-        mode=str(args.mode),
-        verbose=verbose,
-        emit=emit,
-    )
+    if freeb_plan is not None:
+        from .freeboundary import solve_free_boundary
+        from .solver import resolution_from_input
+
+        ns, ftol, niter = _final_stage_params(inp, args)
+        n_stages = np.atleast_1d(np.asarray(inp.ns_array, dtype=np.int64))
+        if verbose and int(np.count_nonzero(n_stages > 0)) > 1:
+            emit(
+                " NOTE: free-boundary solves are single-grid; running only the "
+                f"final NS_ARRAY stage (NS = {ns})."
+            )
+        # NITER-exhausted runs return (not raise) so the wout is still
+        # written (VMEC2000 behavior); the exit code carries ier_flag = 2.
+        result = solve_free_boundary(
+            inp,
+            resolution=resolution_from_input(inp, ns=ns),
+            ftol=ftol,
+            max_iterations=niter,
+            verbose=verbose,
+            emit=emit,
+            error_on_no_convergence=False,
+            **freeb_plan.solver_kwargs,
+        )
+    else:
+        from .multigrid import solve_multigrid
+
+        ftol_array, niter_array = _stage_overrides(inp, ftol=args.ftol, max_iter=args.max_iter)
+        result = solve_multigrid(
+            inp,
+            ftol_array=ftol_array,
+            niter_array=niter_array,
+            mode=str(args.mode),
+            verbose=verbose,
+            emit=emit,
+        )
     solve_s = time.perf_counter() - t1
 
     wout_path = resolve_wout_path(input_path=input_path, outdir=outdir)
     wout_path.parent.mkdir(parents=True, exist_ok=True)
     t2 = time.perf_counter()
-    wout = _write_wout_from_result(inp, input_path, result, wout_path)
+    wout = _write_wout_from_result(inp, input_path, result, wout_path,
+                                   freeb_plan=freeb_plan)
     wout_s = time.perf_counter() - t2
 
     if verbose:
@@ -390,6 +582,8 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             wout_path, args, plot_dir,
             plot=args.plot is not None, emit=emit, quiet=bool(args.quiet),
         )
+    if not bool(result.converged):  # free-boundary NITER exhaustion (wout kept)
+        return int(result.ier_flag) or 1
     return 0
 
 

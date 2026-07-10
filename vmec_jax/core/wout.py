@@ -539,6 +539,10 @@ def wout_from_state(
     converged: bool = True,
     input_extension: str = "",
     version: float = 9.0,
+    nextcur: int = 0,
+    extcur=None,
+    mgrid_mode: str = "",
+    curlabel=None,
 ) -> WoutData:
     """Build a complete :class:`WoutData` from a solved fixed-boundary state.
 
@@ -557,6 +561,16 @@ def wout_from_state(
     zero-crash policy keeps diagnostic output for non-converged states and
     records convergence in ``ier_flag`` (0 = converged, 2 = more iterations
     needed, matching vmec_params.f).
+
+    Free-boundary metadata: ``nextcur``/``extcur``/``mgrid_mode``/
+    ``curlabel`` are caller-supplied (the CLI reads them from the mgrid file;
+    ``extcur`` is the input EXTCUR array in Amperes, as ``wrout.f`` writes
+    it).  The NESTOR vacuum potential is NOT populated: ``potsin``/
+    ``potcos``/``xmpot``/``xnpot`` and the ``*_sur`` surface-field tables
+    stay ``None`` (netCDF fill) because
+    :func:`vmec_jax.core.freeboundary.solve_free_boundary` does not return
+    its :class:`~vmec_jax.core.freeboundary.FreeBoundaryState` (which holds
+    ``potvac``) — a documented gap until the solver exposes it.
     """
     import jax
 
@@ -796,7 +810,12 @@ def wout_from_state(
         Rmajor_p=rmajor_p, volume_p=volume_p,
         ftolv=_ftolv_from_input(inp),
         fsql=float(fsql), fsqr=float(fsqr), fsqz=float(fsqz),
-        nextcur=0, extcur=np.zeros((1,), dtype=float), mgrid_mode="",
+        nextcur=int(nextcur),
+        extcur=(np.asarray(extcur, dtype=float).reshape(-1)
+                if extcur is not None and np.asarray(extcur).size
+                else np.zeros((1,), dtype=float)),
+        mgrid_mode=str(mgrid_mode),
+        curlabel=(tuple(str(lbl) for lbl in curlabel) if curlabel else None),
         xm=xm, xn=xn,
         xm_nyq=np.asarray(xm_nyq, dtype=float),
         xn_nyq=np.asarray(xn_nyq, dtype=float),
