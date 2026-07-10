@@ -70,6 +70,7 @@ from .vacuum import (
     evaluate_vacuum_geometry,
     external_field_from_coils,
     solve_vacuum_potential,
+    vacuum_energy_functional,
     vacuum_laplacian,
 )
 
@@ -129,5 +130,6 @@ __all__ = [
     "solve_anisotropic_fixed_boundary_cli",
     "solve_fixed_boundary_cli",
     "solve_vacuum_potential",
+    "vacuum_energy_functional",
     "vacuum_laplacian",
 ]

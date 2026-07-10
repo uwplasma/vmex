@@ -18,6 +18,7 @@ from vmec_jax.mirror import (  # noqa: E402
     evaluate_vacuum_geometry,
     external_field_from_coils,
     solve_vacuum_potential,
+    vacuum_energy_functional,
     vacuum_laplacian,
 )
 from vmec_jax.core.coils import CoilSet  # noqa: E402
@@ -138,6 +139,31 @@ def test_direct_coil_field_on_annulus_is_jittable_and_current_differentiable() -
     assert float(value) > 0.0
     assert np.all(np.isfinite(np.asarray(derivative)))
     assert np.all(np.asarray(derivative) > 0.0)
+
+
+def test_vacuum_operator_is_reciprocal_for_shaped_annulus() -> None:
+    _, grid = _grid(ns=5, nxi=7)
+    theta = jnp.asarray(grid.theta)[:, None]
+    xi = jnp.asarray(grid.axial_basis.nodes)[None, :]
+    boundary = MirrorBoundary.from_radius(
+        0.3 * (1.0 + 0.04 * jnp.cos(theta) * (1.0 - xi**2)), grid
+    )
+    geometry = evaluate_vacuum_geometry(boundary, grid, outer_radius=0.7)
+    external = external_field_from_coils(_two_end_coils(), geometry)
+    rng = np.random.default_rng(91)
+    point = jnp.asarray(rng.normal(size=grid.shape))
+    left = jnp.asarray(rng.normal(size=grid.shape))
+    right = jnp.asarray(rng.normal(size=grid.shape))
+
+    def energy(potential):
+        return vacuum_energy_functional(potential, geometry, grid, external)
+
+    gradient = jax.grad(energy)
+    h_left = jax.jvp(gradient, (point,), (left,))[1]
+    h_right = jax.jvp(gradient, (point,), (right,))[1]
+    np.testing.assert_allclose(
+        jnp.vdot(left, h_right), jnp.vdot(right, h_left), rtol=2.0e-12
+    )
 
 
 def test_two_coil_vacuum_solve_reduces_plasma_normal_field_under_refinement() -> None:

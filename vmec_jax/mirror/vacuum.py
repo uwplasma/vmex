@@ -331,6 +331,30 @@ def _external_flux_boundary_functional(
     return (outer + ends) / float(mu0)
 
 
+def vacuum_energy_functional(
+    potential: Array,
+    geometry: VacuumGeometry,
+    grid: VacuumGrid,
+    external_field_xyz: Array,
+    *,
+    boundary_condition: str = "fixed_external_flux",
+) -> Array:
+    """Quadratic vacuum functional used by host and future JAX solvers."""
+
+    energy = evaluate_vacuum_field(
+        potential, geometry, grid, external_field_xyz
+    ).energy
+    if boundary_condition == "fixed_external_flux":
+        return energy - _external_flux_boundary_functional(
+            potential, geometry, grid, external_field_xyz
+        )
+    if boundary_condition == "fixed_potential":
+        return energy
+    raise ValueError(
+        "boundary_condition must be 'fixed_external_flux' or 'fixed_potential'"
+    )
+
+
 def solve_vacuum_potential(
     boundary: MirrorBoundary,
     grid: VacuumGrid,
@@ -372,14 +396,13 @@ def solve_vacuum_potential(
 
     def objective(vector: Array) -> Array:
         potential = unpack(vector)
-        energy = evaluate_vacuum_field(
-            potential, geometry, grid, external_field_xyz
-        ).energy
-        if boundary_condition == "fixed_external_flux":
-            energy -= _external_flux_boundary_functional(
-                potential, geometry, grid, external_field_xyz
-            )
-        return energy
+        return vacuum_energy_functional(
+            potential,
+            geometry,
+            grid,
+            external_field_xyz,
+            boundary_condition=boundary_condition,
+        )
 
     initial_energy = max(abs(float(objective(jnp.asarray(x0)))), 1.0)
     normalized = lambda vector: objective(vector) / initial_energy
