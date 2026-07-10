@@ -77,7 +77,7 @@ from .vacuum import (
     vacuum_energy_functional,
     vacuum_laplacian,
 )
-from .continuation import solve_axisymmetric_beta_scan_cli
+from .continuation import interpolate_fixed_boundary_state, solve_axisymmetric_beta_scan_cli
 
 __all__ = [
     "MIRROR_INPUT_SCHEMA",
@@ -131,6 +131,7 @@ __all__ = [
     "fixed_boundary_variational_residual",
     "isotropic_force_residual",
     "interface_residual",
+    "interpolate_fixed_boundary_state",
     "magnetic_field_squared",
     "mass_profile_from_pressure",
     "mirror_energy",

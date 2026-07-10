@@ -4,14 +4,59 @@ from __future__ import annotations
 
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
 from .forces import MU0, mass_profile_from_pressure, mirror_energy
-from .model import MirrorBoundary, MirrorConfig, MirrorState
+from .model import MirrorBoundary, MirrorConfig, MirrorState, project_fixed_boundary_state
 from .vacuum import FreeBoundaryMirrorResult, VacuumGrid, solve_axisymmetric_free_boundary_cli
 
 Array = Any
+
+
+def interpolate_fixed_boundary_state(
+    state: MirrorState,
+    source_grid: "MirrorGrid",
+    boundary: MirrorBoundary,
+    target_grid: "MirrorGrid",
+) -> MirrorState:
+    """Interpolate a converged fixed-boundary state to a new ``ns/nxi`` grid.
+
+    Axial values use the source CGL barycentric interpolant; radial values use
+    piecewise-linear interpolation in normalized flux. Poloidal nodes must be
+    unchanged so no Fourier information is silently added or discarded. The
+    target boundary, axis closure, end cuts, and lambda gauge are projected
+    after interpolation.
+    """
+
+    state.validate_shape(source_grid)
+    expected_boundary_shape = (target_grid.ntheta, target_grid.nxi)
+    if tuple(jnp.shape(boundary.radius_scale)) != expected_boundary_shape:
+        raise ValueError(
+            f"boundary shape {jnp.shape(boundary.radius_scale)} must be "
+            f"{expected_boundary_shape}"
+        )
+    if source_grid.ntheta != target_grid.ntheta or not np.allclose(
+        source_grid.theta, target_grid.theta, rtol=0.0, atol=2.0e-14
+    ):
+        raise ValueError("state interpolation requires identical theta grids")
+
+    def interpolate(values: Array) -> Array:
+        axial = source_grid.axial_basis.interpolate(
+            values, target_grid.xi, axis=2
+        )
+        columns = axial.reshape(source_grid.ns, -1).T
+        radial = jax.vmap(
+            lambda column: jnp.interp(target_grid.s, source_grid.s, column)
+        )(columns)
+        return radial.T.reshape(target_grid.shape)
+
+    candidate = MirrorState(
+        radius_scale=interpolate(state.radius_scale),
+        lambda_stream=interpolate(state.lambda_stream),
+    )
+    return project_fixed_boundary_state(candidate, boundary, target_grid)
 
 
 def solve_axisymmetric_beta_scan_cli(
