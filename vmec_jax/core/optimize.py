@@ -1,0 +1,1122 @@
+"""Optimization objectives and least-squares driver for the new core (plan.md §5.1, §10).
+
+Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
+
+- :class:`QuasisymmetryRatioResidual` — the two-term quasisymmetry ratio
+  residual of Landreman & Paul (simsopt ``QuasisymmetryRatioResidual``),
+  evaluated from the wout-engine field tables of a converged core state;
+  math ported verbatim from the parity-proven legacy
+  ``vmec_jax/quasisymmetry.py`` (``quasisymmetry_ratio_residual_from_wout``).
+- practical scalar targets — :func:`aspect_ratio`, :func:`mean_iota`,
+  :func:`edge_iota`, :func:`mirror_ratio`, :func:`volume`,
+  :func:`magnetic_well` — each a pure function of
+  ``(SpectralState, SolverRuntime)`` on :mod:`vmec_jax.core.geometry` /
+  :mod:`vmec_jax.core.fields`.
+- a distilled Goodman-style QI residual (:func:`quasi_isodynamic_residual`)
+  keeping exactly the four terms the minimal-seed QI examples exercised
+  (``examples/optimization/QI_optimization_nfp1.py``): level-set bounce-width
+  variance, branch trapped-well width variance, field-line profile
+  consistency, and the branch-shuffle profile comparison.  The unused legacy
+  knobs (``aligned_profile_*``, ``weighted_shuffle_*``,
+  ``shuffle_profile_nphi_out``) were dropped.
+- :func:`least_squares` — a thin :func:`scipy.optimize.least_squares` driver
+  over boundary Fourier dofs (:func:`pack_boundary`/:func:`unpack_boundary`),
+  taking simsopt-style ``(callable, target, weight)`` terms.
+
+Helicity conventions (match legacy/simsopt exactly)
+---------------------------------------------------
+The QS residual keeps the ``|B|`` spectrum aligned with the single helicity
+``chi = helicity_m * theta - helicity_n * nfp * phi`` — ``helicity_n`` is in
+units of ``nfp`` (the internal target mode number is ``nn = helicity_n * nfp``):
+
+- QA: ``(helicity_m, helicity_n) = (1, 0)``
+- QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``; legacy/simsopt sign — the
+  plan's "``n = -nfp``" written in physical toroidal mode numbers)
+- QP: ``(0, 1)``
+
+Gradient modes
+--------------
+:func:`least_squares` defaults to scipy finite differences (``jac=None`` ->
+``"2-point"``).  ``jac="implicit"`` is a documented stub reserved for the
+Phase-6 implicit-gradient path (:mod:`vmec_jax.core.implicit`, soft-imported;
+being finished separately) and currently raises ``NotImplementedError``.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import inspect
+from dataclasses import dataclass
+from functools import cached_property
+from typing import Any, Callable, Iterable, Sequence
+
+import numpy as np
+
+import jax
+import jax.numpy as jnp
+
+from .input import VmecInput
+from .multigrid import solve_multigrid
+from .solver import (
+    SolveResult,
+    SolverRuntime,
+    SpectralState,
+    _geometry,
+    prepare_runtime,
+    resolution_from_input,
+)
+from .geometry import half_mesh_jacobian
+from .fields import energies_and_force_norms, magnetic_fields, metric_elements
+from .wout import WoutData, wout_from_state
+
+__all__ = [
+    "Equilibrium",
+    "solve_equilibrium",
+    "QuasisymmetryRatioResidual",
+    "aspect_ratio",
+    "mean_iota",
+    "edge_iota",
+    "mirror_ratio",
+    "volume",
+    "magnetic_well",
+    "d_merc",
+    "l_grad_b",
+    "quasi_isodynamic_residual",
+    "boozer_modes_from_wout",
+    "quasi_isodynamic_residual_from_wout",
+    "boundary_dof_names",
+    "pack_boundary",
+    "unpack_boundary",
+    "least_squares",
+]
+
+Array = Any
+
+
+# ===========================================================================
+# Converged-equilibrium bundle
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class Equilibrium:
+    """A converged fixed-boundary equilibrium plus its evaluation contexts.
+
+    Objective callables in :func:`least_squares` receive one of these.  The
+    solver-native pieces (``state``, ``runtime``) feed the differentiable
+    scalar targets; ``wout`` (built lazily, host NumPy) feeds the wout-table
+    objectives (QS ratio residual, Boozer-based QI residual).
+    """
+
+    inp: VmecInput
+    state: SpectralState
+    runtime: SolverRuntime
+    result: SolveResult
+
+    @cached_property
+    def wout(self) -> WoutData:
+        """Full wout dataset of this state (``vmec_jax.core.wout``, cached)."""
+        r = self.result
+        return wout_from_state(
+            inp=self.inp, state=self.state,
+            fsqr=float(r.fsqr), fsqz=float(r.fsqz), fsql=float(r.fsql),
+            niter=int(r.iterations), converged=bool(r.converged),
+        )
+
+
+def solve_equilibrium(
+    inp: VmecInput,
+    *,
+    initial_state: SpectralState | None = None,
+    raise_on_max_iterations: bool = False,
+    **solve_kwargs,
+) -> Equilibrium:
+    """Converge ``inp`` with the core multigrid solver -> :class:`Equilibrium`.
+
+    ``raise_on_max_iterations=False`` by default: during optimization a
+    NITER-exhausted trial state is still a usable (penalized) sample —
+    VMEC2000 behaves the same way.  Extra keywords go to
+    :func:`vmec_jax.core.multigrid.solve_multigrid`.
+    """
+    result = solve_multigrid(
+        inp, verbose=False, initial_state=initial_state,
+        raise_on_max_iterations=raise_on_max_iterations, **solve_kwargs,
+    )
+    ns = int(np.shape(result.state.R_cos)[0])
+    runtime = prepare_runtime(inp, resolution_from_input(inp, ns=ns))
+    return Equilibrium(inp=inp, state=result.state, runtime=runtime, result=result)
+
+
+# ===========================================================================
+# Quasisymmetry ratio residual (simsopt convention; legacy parity port)
+# ===========================================================================
+
+
+def _as_1d(values, dtype=np.float64) -> jnp.ndarray:
+    try:
+        seq = list(values)  # type: ignore[arg-type]
+    except TypeError:
+        seq = [values]
+    return jnp.asarray(np.asarray(seq, dtype=dtype))
+
+
+def _half_grid(ns: int, dtype) -> jnp.ndarray:
+    s_full = jnp.linspace(0.0, 1.0, ns, dtype=dtype)
+    return 0.5 * (s_full[:-1] + s_full[1:])
+
+
+def _interp_half_grid(samples: jnp.ndarray, surfaces: jnp.ndarray, s_half: jnp.ndarray) -> jnp.ndarray:
+    """Linear interpolation of half-mesh radial samples onto ``surfaces``."""
+    if int(s_half.shape[0]) == 1:
+        return jnp.broadcast_to(samples[:1], (surfaces.shape[0],) + samples.shape[1:])
+    idx_hi = jnp.clip(jnp.searchsorted(s_half, surfaces, side="left"), 1, s_half.shape[0] - 1)
+    idx_lo = idx_hi - 1
+    x0, x1 = s_half[idx_lo], s_half[idx_hi]
+    denom = jnp.where(x1 != x0, x1 - x0, jnp.ones_like(x1))
+    t = ((surfaces - x0) / denom).reshape((surfaces.shape[0],) + (1,) * (samples.ndim - 1))
+    return samples[idx_lo] + t * (samples[idx_hi] - samples[idx_lo])
+
+
+def _mode_matrix(wout, name: str, *, ns: int, mn: int, optional: bool = False) -> jnp.ndarray:
+    """A ``(ns, mn)`` coefficient table from a wout-like object (either layout)."""
+    value = getattr(wout, name, None)
+    if value is None:
+        if optional:
+            return jnp.zeros((ns, mn), dtype=jnp.float64)
+        raise AttributeError(f"wout-like object lacks required table {name!r}")
+    arr = jnp.asarray(np.ascontiguousarray(np.asarray(value, dtype=np.float64)))
+    if arr.shape == (ns, mn):
+        return arr
+    if arr.shape == (mn, ns):
+        return arr.T
+    raise ValueError(f"{name}: unexpected shape {arr.shape}, expected {(ns, mn)}")
+
+
+class QuasisymmetryRatioResidual:
+    """Two-term quasisymmetry ratio residual (simsopt convention).
+
+    On each requested surface the field is sampled on a uniform
+    ``(theta, phi)`` grid (VMEC angles) and the pointwise residual
+
+    ``f = [(B x grad B . grad psi)(nn - iota*m) - (B . grad B)(m*G + nn*I)] / B^3``
+
+    (``m = helicity_m``, ``nn = helicity_n * nfp``, ``G``/``I`` the Boozer
+    covariant field averages ``bvco``/``buco``) is weighted by the
+    flux-surface measure ``sqrt(nfp*dtheta*dphi*|sqrt g| / V')`` so that
+    ``total = sum(residuals**2)`` is simsopt's surface-averaged QS ratio.
+    ``f`` vanishes identically iff ``|B|`` depends on the angles only through
+    ``helicity_m*theta - nn*phi``.
+
+    The evaluation consumes the parity-proven wout-engine tables
+    (``bmnc/gmnc/bsub*/bsup*``, :mod:`vmec_jax.core.nyquist`) of a
+    :class:`~vmec_jax.core.wout.WoutData` — from
+    :func:`~vmec_jax.core.wout.wout_from_state` or any ``wout_*.nc`` — ported
+    from legacy ``quasisymmetry_ratio_residual_from_wout`` (A/B bit-exact).
+    """
+
+    name = "qs"
+
+    def __init__(
+        self,
+        surfaces,
+        helicity_m: int = 1,
+        helicity_n: int = 0,
+        *,
+        weights: Iterable[float] | None = None,
+        ntheta: int = 63,
+        nphi: int = 64,
+    ):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        self.helicity_m = int(helicity_m)
+        self.helicity_n = int(helicity_n)
+        self.weights = None if weights is None else np.asarray(list(weights), dtype=float)
+        self.ntheta = int(ntheta)
+        self.nphi = int(nphi)
+
+    # -- wout-table evaluation ------------------------------------------------
+
+    def compute(self, wout) -> dict[str, Array]:
+        """Full diagnostics dict from a wout-like object or :class:`Equilibrium`."""
+        if isinstance(wout, Equilibrium):
+            wout = wout.wout
+        surfaces = _as_1d(self.surfaces)
+        nsurf = int(surfaces.shape[0])
+        weights = jnp.ones((nsurf,)) if self.weights is None else _as_1d(self.weights)
+        if int(weights.shape[0]) != nsurf:
+            raise ValueError("weights must have the same length as surfaces")
+
+        nfp = int(wout.nfp)
+        iotas = _as_1d(np.asarray(wout.iotas, dtype=float))
+        ns = int(iotas.shape[0])
+        xm = _as_1d(np.asarray(wout.xm_nyq, dtype=float))
+        xn = _as_1d(np.asarray(wout.xn_nyq, dtype=float))
+        mn = int(xm.shape[0])
+        s_half = _half_grid(ns, iotas.dtype)
+
+        def half(values):
+            return _interp_half_grid(values[1:], surfaces, s_half)
+
+        iota = half(iotas)
+        G = half(_as_1d(np.asarray(wout.bvco, dtype=float)))
+        I = half(_as_1d(np.asarray(wout.buco, dtype=float)))  # noqa: E741 - Boozer I
+
+        tables = {}
+        for name in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
+            tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn))
+        for name in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsupumns", "bsupvmns"):
+            optional = not bool(getattr(wout, "lasym", False))
+            tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn, optional=True)
+                                if not optional else jnp.zeros((ns, mn)))
+
+        theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, self.ntheta, endpoint=False)
+        phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, self.nphi, endpoint=False)
+        dtheta, dphi = theta1d[1] - theta1d[0], phi1d[1] - phi1d[0]
+        angle = (theta1d[:, None, None] * xm[None, None, :]
+                 - phi1d[None, :, None] * xn[None, None, :])
+        cosangle, sinangle = jnp.cos(angle), jnp.sin(angle)
+
+        def synth(cos_tab, sin_tab, cos_w=cosangle, sin_w=sinangle):
+            return (jnp.einsum("sm,tpm->stp", cos_tab, cos_w)
+                    + jnp.einsum("sm,tpm->stp", sin_tab, sin_w))
+
+        modB = synth(tables["bmnc"], tables["bmns"])
+        dB_dtheta = (jnp.einsum("sm,tpm,m->stp", tables["bmnc"], -sinangle, xm)
+                     + jnp.einsum("sm,tpm,m->stp", tables["bmns"], cosangle, xm))
+        dB_dphi = (jnp.einsum("sm,tpm,m->stp", tables["bmnc"], sinangle, xn)
+                   + jnp.einsum("sm,tpm,m->stp", tables["bmns"], -cosangle, xn))
+        sqrtg = synth(tables["gmnc"], tables["gmns"])
+        bsubu = synth(tables["bsubumnc"], tables["bsubumns"])
+        bsubv = synth(tables["bsubvmnc"], tables["bsubvmns"])
+        bsupu = synth(tables["bsupumnc"], tables["bsupumns"])
+        bsupv = synth(tables["bsupvmnc"], tables["bsupvmns"])
+
+        d_psi_d_s = -_as_1d(np.asarray(wout.phi, dtype=float))[-1] / (2.0 * jnp.pi)
+        sqrtg_safe = jnp.where(sqrtg != 0.0, sqrtg, jnp.ones_like(sqrtg))
+        B_dot_grad_B = bsupu * dB_dtheta + bsupv * dB_dphi
+        B_cross_grad_B_dot_grad_psi = (
+            d_psi_d_s * (bsubu * dB_dphi - bsubv * dB_dtheta) / sqrtg_safe)
+
+        tiny = jnp.asarray(jnp.finfo(sqrtg.dtype).tiny, dtype=sqrtg.dtype)
+        sqrtg_abs = jnp.maximum(jnp.abs(sqrtg), tiny)
+        modB_safe = jnp.maximum(jnp.abs(modB), tiny)
+        V_prime = nfp * dtheta * dphi * jnp.sum(sqrtg_abs, axis=(1, 2))
+
+        nn = self.helicity_n * nfp
+        prefactor = jnp.sqrt(
+            weights[:, None, None] * nfp * dtheta * dphi / V_prime[:, None, None] * sqrtg_abs)
+        residuals3d = prefactor * (
+            B_cross_grad_B_dot_grad_psi * (nn - iota[:, None, None] * self.helicity_m)
+            - B_dot_grad_B * (self.helicity_m * G[:, None, None] + nn * I[:, None, None])
+        ) / (modB_safe ** 3)
+
+        residuals1d = jnp.ravel(residuals3d)
+        return {
+            "surfaces": surfaces,
+            "residuals1d": residuals1d,
+            "residuals3d": residuals3d,
+            "profile": jnp.sum(residuals3d * residuals3d, axis=(1, 2)),
+            "total": jnp.sum(residuals1d * residuals1d),
+            "modB": modB,
+            "iota": iota,
+            "G": G,
+            "I": I,
+            "V_prime": V_prime,
+        }
+
+    def residuals(self, wout) -> jnp.ndarray:
+        """Flat least-squares residual vector (target 0, weight applied by the driver)."""
+        return self.compute(wout)["residuals1d"]
+
+    def profile(self, wout) -> jnp.ndarray:
+        """Per-surface sum of squared residuals."""
+        return self.compute(wout)["profile"]
+
+    def total(self, wout) -> Array:
+        """Scalar QS ratio objective ``sum(residuals**2)``."""
+        return self.compute(wout)["total"]
+
+    def J(self, eq: Equilibrium) -> jnp.ndarray:
+        """Objective-term entry point for :func:`least_squares` (residual vector)."""
+        return self.residuals(eq)
+
+
+# ===========================================================================
+# Practical scalar targets — pure functions of (SpectralState, SolverRuntime)
+# ===========================================================================
+
+
+def _field_chain(state: SpectralState, rt: SolverRuntime):
+    """Geometry -> Jacobian -> metric -> fields -> energies of a core state."""
+    setup = rt.setup
+    s = setup.s_full
+    _, geometry = _geometry(state, rt)
+    jacobian = half_mesh_jacobian(geometry, s=s)
+    metrics = metric_elements(geometry, s=s)
+    fields = magnetic_fields(
+        geometry=geometry, jacobian=jacobian, metrics=metrics, trig=rt.trig,
+        s=s, phips=setup.phips, phipf=setup.phipf, chips=setup.chips,
+        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
+        ncurr=setup.ncurr, enclosed_current=setup.icurv,
+    )
+    energies = energies_and_force_norms(
+        jacobian=jacobian, metrics=metrics, fields=fields, trig=rt.trig,
+        s=s, signgs=setup.signgs,
+    )
+    return geometry, jacobian, metrics, fields, energies
+
+
+def _aspect_scalars(state: SpectralState, rt: SolverRuntime):
+    """``aspectratio.f`` scalars ``(Aminor_p, Rmajor_p, aspect, volume_p)``.
+
+    Boundary-surface quadrature identical to the wout writer
+    (:func:`vmec_jax.core.postprocess.aspect_ratio_scalars`), kept in JAX.
+    """
+    geometry, _, _, _, _ = _field_chain(state, rt)
+    sqrts_edge = jnp.asarray(rt.setup.sqrts)[-1]
+    rb = jnp.asarray(geometry.R_even)[-1] + sqrts_edge * jnp.asarray(geometry.R_odd)[-1]
+    zub = (jnp.asarray(geometry.dZ_dtheta_even)[-1]
+           + sqrts_edge * jnp.asarray(geometry.dZ_dtheta_odd)[-1])
+    wint = jnp.asarray(rt.trig.wint)
+    t1 = rb * zub * wint
+    volume_p = 2.0 * jnp.pi ** 2 * jnp.abs(jnp.sum(rb * t1))
+    area = 2.0 * jnp.pi * jnp.abs(jnp.sum(t1))
+    area_safe = jnp.where(area != 0.0, area, 1.0)
+    aminor = jnp.sqrt(area_safe / jnp.pi)
+    rmajor = volume_p / (2.0 * jnp.pi * area_safe)
+    return aminor, rmajor, rmajor / aminor, volume_p
+
+
+def aspect_ratio(state: SpectralState, rt: SolverRuntime) -> Array:
+    """VMEC aspect ratio ``Rmajor_p / Aminor_p`` (``aspectratio.f`` convention).
+
+    ``Aminor_p = sqrt(<cross-section area> / pi)``, ``Rmajor_p =
+    volume_p / (2 pi <area>)`` from the boundary surface quadrature; equals
+    the wout ``aspect`` scalar of the same state.
+    """
+    return _aspect_scalars(state, rt)[2]
+
+
+def volume(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Plasma volume ``volume_p`` [m^3] (wout convention, boundary quadrature)."""
+    return _aspect_scalars(state, rt)[3]
+
+
+def _iotas_half(state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
+    """Half-mesh rotational transform (``add_fluxes.f90`` conventions).
+
+    ``ncurr = 0``: the prescribed profile; ``ncurr = 1``: reconstructed from
+    the current-constrained ``chips`` of the solved state (differentiable),
+    exactly as the solver/wout writer do.  Index 0 is the (zeroed) axis slot.
+    """
+    setup = rt.setup
+    if int(setup.ncurr) != 1:
+        return jnp.asarray(setup.iotas)
+    _, _, _, fields, _ = _field_chain(state, rt)
+    phips = jnp.asarray(setup.phips)
+    safe = jnp.where(phips != 0.0, phips, 1.0)
+    return jnp.where(phips != 0.0, fields.chips / safe, 0.0)
+
+
+def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Mean rotational transform over the half-mesh surfaces (axis excluded).
+
+    Matches the legacy optimization ``mean_iota`` convention
+    (``mean(iotas[1:])``, i.e. the mean of the wout ``iotas`` profile).
+    """
+    iotas = _iotas_half(state, rt)
+    return jnp.mean(iotas[1:])
+
+
+def edge_iota(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Rotational transform at the boundary (wout ``iotaf[-1]`` convention:
+    linear extrapolation of the half mesh, ``1.5 iotas[-1] - 0.5 iotas[-2]``)."""
+    iotas = _iotas_half(state, rt)
+    return 1.5 * iotas[-1] - 0.5 * iotas[-2]
+
+
+def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) -> Array:
+    """Mirror ratio ``(Bmax - Bmin) / (Bmax + Bmin)`` on one half-mesh surface.
+
+    ``|B|`` is evaluated on the solver's internal angular grid from the
+    half-mesh field state (``|B|^2 = 2 (bsq - p)``, ``bcovar.f``); ``s_index``
+    selects the half-mesh surface (default: outermost).  Hard max/min — smooth
+    almost everywhere, adequate for finite-difference least squares (the
+    legacy ``VMECMirrorRatio`` softmax knobs were an optimizer nicety only).
+    """
+    _, _, _, fields, _ = _field_chain(state, rt)
+    bsq = jnp.asarray(fields.total_pressure) - jnp.asarray(fields.pressure)[:, None, None]
+    bmag = jnp.sqrt(jnp.maximum(2.0 * bsq[s_index],
+                                jnp.asarray(jnp.finfo(bsq.dtype).tiny, dtype=bsq.dtype)))
+    bmax, bmin = jnp.max(bmag), jnp.min(bmag)
+    return (bmax - bmin) / (bmax + bmin)
+
+
+def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
+    """VMEC/simsopt magnetic-well proxy ``(V'(0) - V'(1)) / V'(0)``.
+
+    ``V' = dV/ds`` endpoints are linear extrapolations of the half-mesh
+    differential volume ``vp`` (``bcovar.f``); positive values mean a
+    favorable well (``vacuum_well`` in simsopt).  Ported from legacy
+    ``vmec_jax.finite_beta.magnetic_well_from_vp``.
+    """
+    _, _, _, _, energies = _field_chain(state, rt)
+    dvol = jnp.abs(jnp.asarray(energies.vp))[1:]
+    v0 = 1.5 * dvol[0] - 0.5 * dvol[1]
+    v1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
+    v0_safe = jnp.where(v0 != 0.0, v0, jnp.ones_like(v0))
+    return jnp.where(v0 != 0.0, (v0 - v1) / v0_safe, 0.0)
+
+
+def d_merc(eq) -> jnp.ndarray:
+    """Mercier stability criterion profile ``DMerc(s)`` (full mesh).
+
+    Positive interior values indicate Mercier stability.  Evaluated through
+    the parity-proven wout engine (:func:`vmec_jax.core.nyquist.mercier_and_jxb`
+    via :func:`~vmec_jax.core.wout.wout_from_state`) — host NumPy, so this
+    objective is finite-difference-only (not jit/AD transparent; the first
+    two surfaces and the edge carry the usual near-axis noise, so practical
+    targets should penalize e.g. ``min(DMerc[2:-1], 0)``).  Accepts an
+    :class:`Equilibrium` or any wout-like object.
+    """
+    wout = eq.wout if isinstance(eq, Equilibrium) else eq
+    return jnp.asarray(np.asarray(wout.DMerc, dtype=float))
+
+
+def l_grad_b(eq, *, s_index: int = -1, ntheta: int = 24, nphi: int = 24) -> Array:
+    """Magnetic-gradient scale length ``min L_grad_B`` on one half-mesh surface.
+
+    ``L_grad_B = |B| sqrt(2 / (grad B : grad B))`` with ``grad B : grad B``
+    the squared Frobenius norm of the Cartesian field-gradient tensor —
+    the Kappel/Landreman coil-complexity / compactness proxy, and the
+    ``L_grad_B`` diagnostic of the legacy QI scripts
+    (``vmec_jax.quasi_isodynamic.objectives.lgradb_from_state``).  Here it is
+    evaluated from the wout tables of the converged state: ``B^u``/``B^v``
+    from the half-mesh ``bsupumnc/bsupvmnc`` Nyquist spectra, the coordinate
+    basis vectors and their derivatives spectrally from ``rmnc/zmns``, and
+    radial derivatives from the native half/full-mesh finite differences
+    (one-sided at the edge) — so values agree with the legacy diagnostic at
+    discretization level, not bitwise.
+
+    Returns the (hard) minimum over a uniform ``(theta, phi)`` grid on the
+    selected surface (``s_index`` indexes the ``ns``-long half-mesh arrays;
+    default edge).  Larger is better; a practical least-squares term is
+    ``max(1/L - 1/threshold, 0)``.  Symmetric configurations only (lasym
+    sine partners are ignored).  Accepts an :class:`Equilibrium` or wout-like.
+    """
+    wout = eq.wout if isinstance(eq, Equilibrium) else eq
+    ns = int(wout.ns)
+    j = max(1, min(s_index % ns, ns - 1))
+    hs = 1.0 / (ns - 1)
+    xm = jnp.asarray(np.asarray(wout.xm, dtype=float))
+    xn = jnp.asarray(np.asarray(wout.xn, dtype=float))
+    xmn = jnp.asarray(np.asarray(wout.xm_nyq, dtype=float))
+    xnn = jnp.asarray(np.asarray(wout.xn_nyq, dtype=float))
+    rmnc = jnp.asarray(np.asarray(wout.rmnc, dtype=float))
+    zmns = jnp.asarray(np.asarray(wout.zmns, dtype=float))
+    bsupu_t = jnp.asarray(np.asarray(wout.bsupumnc, dtype=float))
+    bsupv_t = jnp.asarray(np.asarray(wout.bsupvmnc, dtype=float))
+
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
+    phi = jnp.linspace(0.0, 2.0 * jnp.pi / int(wout.nfp), int(nphi), endpoint=False)
+
+    def tables(m, n):
+        ang = (theta[:, None, None] * m[None, None, :]
+               - phi[None, :, None] * n[None, None, :])
+        return jnp.cos(ang), jnp.sin(ang)
+
+    cosang, sinang = tables(xm, xn)
+
+    def series(coeff, parity, second: bool = True):
+        """Value + angular derivatives of a cos/sin(m theta - n phi) series."""
+        base, alt = (cosang, sinang) if parity == "cos" else (sinang, cosang)
+        s1 = -1.0 if parity == "cos" else 1.0
+        val = jnp.einsum("m,tpm->tp", coeff, base)
+        d_t = s1 * jnp.einsum("m,tpm,m->tp", coeff, alt, xm)
+        d_p = -s1 * jnp.einsum("m,tpm,m->tp", coeff, alt, xn)
+        if not second:
+            return val, d_t, d_p, None, None, None
+        d_tt = -jnp.einsum("m,tpm,m->tp", coeff, base, xm * xm)
+        d_tp = jnp.einsum("m,tpm,m->tp", coeff, base, xm * xn)
+        d_pp = -jnp.einsum("m,tpm,m->tp", coeff, base, xn * xn)
+        return val, d_t, d_p, d_tt, d_tp, d_pp
+
+    # Full-mesh R/Z -> half-mesh values + radial derivatives (exact on half mesh).
+    R, Ru, Rv, Ruu, Ruv, Rvv = series(0.5 * (rmnc[j - 1] + rmnc[j]), "cos")
+    Z, Zu, Zv, Zuu, Zuv, Zvv = series(0.5 * (zmns[j - 1] + zmns[j]), "sin")
+    Rs, Rsu, Rsv, _, _, _ = series((rmnc[j] - rmnc[j - 1]) / hs, "cos", second=False)
+    Zs, Zsu, Zsv, _, _, _ = series((zmns[j] - zmns[j - 1]) / hs, "sin", second=False)
+
+    cphi, sphi = jnp.cos(phi)[None, :], jnp.sin(phi)[None, :]
+
+    def cart(vR, vP, vZ):
+        """Cylindrical (R, phi, Z) components -> Cartesian (x, y, z)."""
+        return jnp.stack([vR * cphi - vP * sphi, vR * sphi + vP * cphi, vZ], axis=-1)
+
+    zero = jnp.zeros_like(R)
+    e_s, e_u, e_v = cart(Rs, zero, Zs), cart(Ru, zero, Zu), cart(Rv, R, Zv)
+    # d(e_u)/du, d(e_u)/dv=d(e_v)/du, d(e_v)/dv, d(e_u)/ds, d(e_v)/ds
+    deu_u = cart(Ruu, zero, Zuu)
+    deu_v = cart(Ruv, Ru, Zuv)
+    dev_v = cart(Rvv - R, 2.0 * Rv, Zvv)
+    deu_s = cart(Rsu, zero, Zsu)
+    dev_s = cart(Rsv, Rs, Zsv)
+
+    # Half-mesh contravariant field (Nyquist modes) + radial derivative.
+    cosn, sinn = tables(xmn, xnn)
+
+    def nyq(coeff):
+        return (jnp.einsum("m,tpm->tp", coeff, cosn),
+                -jnp.einsum("m,tpm,m->tp", coeff, sinn, xmn),
+                jnp.einsum("m,tpm,m->tp", coeff, sinn, xnn))
+
+    bu, bu_t, bu_p = nyq(bsupu_t[j])
+    bv, bv_t, bv_p = nyq(bsupv_t[j])
+    lo, hi = (j - 1, j + 1) if 1 < j < ns - 1 else ((j, j + 1) if j == 1 else (j - 1, j))
+    span = hs * (hi - lo)
+    bu_s, _, _ = nyq((bsupu_t[hi] - bsupu_t[lo]) / span)
+    bv_s, _, _ = nyq((bsupv_t[hi] - bsupv_t[lo]) / span)
+
+    B = bu[..., None] * e_u + bv[..., None] * e_v
+    dB = jnp.stack([
+        bu_s[..., None] * e_u + bv_s[..., None] * e_v
+        + bu[..., None] * deu_s + bv[..., None] * dev_s,
+        bu_t[..., None] * e_u + bv_t[..., None] * e_v
+        + bu[..., None] * deu_u + bv[..., None] * deu_v,
+        bu_p[..., None] * e_u + bv_p[..., None] * e_v
+        + bu[..., None] * deu_v + bv[..., None] * dev_v,
+    ], axis=-2)                                        # (t, p, coord, cart)
+
+    basis = jnp.stack([e_s, e_u, e_v], axis=-2)
+    g = jnp.einsum("...ic,...jc->...ij", basis, basis)
+    ginv = jnp.linalg.inv(g)
+    grad_sq = jnp.einsum("...ic,...ij,...jc->...", dB, ginv, dB)
+    tiny = jnp.asarray(jnp.finfo(grad_sq.dtype).tiny, dtype=grad_sq.dtype)
+    bmag = jnp.sqrt(jnp.maximum(jnp.sum(B * B, axis=-1), tiny))
+    return jnp.min(bmag * jnp.sqrt(2.0 / jnp.maximum(grad_sq, tiny)))
+
+
+# ===========================================================================
+# Quasi-isodynamic residual (Goodman-style; distilled legacy port)
+# ===========================================================================
+
+
+def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, nfp: int, weights, nphi: int,
+             nalpha: int, n_bounce: int, include_bounce_endpoints: bool,
+             softness: float, phimin: float):
+    """Normalized ``|B|`` along field lines + bounce levels (legacy `_qi_boozer_surface_grid`).
+
+    ``theta = alpha + iota * phi`` samples ``nalpha`` field-line labels over
+    one field period; ``bnorm`` rescales ``|B|`` to [0, 1] per surface.
+    """
+    bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
+    xm_b = jnp.asarray(xm_b, dtype=jnp.float64)
+    xn_b = jnp.asarray(xn_b, dtype=jnp.float64)
+    iota_b = jnp.asarray(iota_b, dtype=jnp.float64)
+    if bmnc_b.ndim != 2:
+        raise ValueError(f"bmnc_b must have shape (nsurf, nmodes), got {bmnc_b.shape}")
+    if nphi < 4 or nalpha < 2 or n_bounce < 2:
+        raise ValueError("QI residual requires nphi >= 4, nalpha >= 2, n_bounce >= 2")
+    nsurf = int(bmnc_b.shape[0])
+    dtype = bmnc_b.dtype
+    weights_arr = jnp.ones((nsurf,), dtype=dtype) if weights is None else _as_1d(weights)
+
+    phi0 = jnp.asarray(float(phimin), dtype=dtype)
+    phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
+    phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
+    alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
+    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
+    angle = (theta[:, :, :, None] * xm_b[None, None, None, :]
+             - phi[None, :, None, None] * xn_b[None, None, None, :])
+    bmag = jnp.sum(bmnc_b[:, None, None, :] * jnp.cos(angle), axis=-1)
+
+    bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
+    bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    bnorm = (bmag - bmin) / jnp.maximum(bmax - bmin, tiny)
+
+    if include_bounce_endpoints:
+        levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
+    else:
+        levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
+    eps = jnp.maximum(jnp.asarray(float(softness), dtype=dtype),
+                      jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+    return weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps
+
+
+def quasi_isodynamic_residual(
+    *,
+    bmnc_b,
+    xm_b,
+    xn_b,
+    iota_b,
+    nfp: int,
+    weights: Iterable[float] | None = None,
+    nphi: int = 151,
+    nalpha: int = 31,
+    n_bounce: int = 51,
+    include_bounce_endpoints: bool = False,
+    softness: float = 2.0e-2,
+    width_weight: float = 1.0,
+    branch_width_weight: float = 0.5,
+    branch_width_softness: float = 1.0e-2,
+    profile_weight: float = 0.1,
+    shuffle_profile_weight: float = 1.0,
+    shuffle_profile_softness: float = 2.0e-2,
+    phimin: float = 0.0,
+) -> dict[str, Array]:
+    """Smooth Goodman-style quasi-isodynamic residual from Boozer ``|B|`` modes.
+
+    A configuration is quasi-isodynamic when the ``|B|`` contours are
+    poloidally closed and the trapped-particle bounce distance between the
+    two branches of each magnetic well is independent of the field-line label
+    ``alpha`` (omnigenity).  This residual samples the normalized ``|B|``
+    along field lines ``theta = alpha + iota*phi`` over one field period and
+    penalizes, per surface (weights are the legacy defaults, i.e. exactly the
+    terms the minimal-seed QI examples used):
+
+    - **level-set width variance** (``width_weight``): for each bounce level
+      ``B*`` the smooth occupancy ``sigmoid((B* - bnorm)/softness)`` gives the
+      fraction of the field line below ``B*``; its variance over ``alpha``
+      measures misalignment of the ``|B|`` contours.
+    - **branch width variance** (``branch_width_weight``): each field line is
+      split at its ``|B|`` minimum, both branches are made monotone with a
+      running maximum, and the (smooth) level-crossing distances of the two
+      branches are summed — the trapped-well bounce width, whose variance
+      over ``alpha`` is the classic omnigenity error.
+    - **profile consistency** (``profile_weight``): small penalty on the
+      variance of ``bnorm`` itself over ``alpha`` at fixed ``phi``, which
+      keeps degenerate QH-like candidates from gaming the width terms.
+    - **branch-shuffle profile** (``shuffle_profile_weight``): the "squash and
+      shuffle" comparison — each well's branch crossings are shifted so every
+      field line has the *mean* bounce width, the shuffled well is
+      reinterpolated onto the original grid and compared pointwise to the
+      original ``bnorm`` (the closest smooth analogue of Goodman et al.'s
+      construction of the nearest omnigenous field).
+
+    Ported from the legacy ``vmec_jax.quasi_isodynamic.objectives.
+    quasi_isodynamic_residual_from_boozer_modes`` with the unused
+    ``aligned_profile_*`` / ``weighted_shuffle_*`` / ``shuffle_profile_nphi_out``
+    machinery removed (they defaulted to off in the QI examples).  ``xn_b``
+    uses physical toroidal mode numbers (booz_xform convention).  Returns
+    ``residuals1d`` (least-squares vector) and ``total`` (its squared norm).
+    """
+    (weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps) = _qi_grid(
+        bmnc_b, xm_b, xn_b, iota_b, nfp=int(nfp), weights=weights, nphi=int(nphi),
+        nalpha=int(nalpha), n_bounce=int(n_bounce),
+        include_bounce_endpoints=bool(include_bounce_endpoints),
+        softness=float(softness), phimin=float(phimin))
+    dtype = bnorm.dtype
+    nsurf, nphi_, nalpha_ = int(bnorm.shape[0]), int(bnorm.shape[1]), int(bnorm.shape[2])
+    nlev = int(levels.shape[0])
+    sqrt_w = jnp.sqrt(weights_arr)[:, None, None]
+    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
+    pieces: list[jnp.ndarray] = []
+
+    # -- level-set occupancy width variance + profile consistency ----------
+    occupancy = jax.nn.sigmoid((levels[None, None, None, :] - bnorm[:, :, :, None]) / eps)
+    widths = jnp.mean(occupancy, axis=1)                      # (nsurf, nalpha, nlev)
+    width_res = (widths - jnp.mean(widths, axis=1, keepdims=True)) * sqrt_w * width_weight
+    pieces.append(jnp.ravel(width_res) / jnp.sqrt(jnp.asarray(nalpha_ * nlev, dtype=dtype)))
+
+    profile_res = (bnorm - jnp.mean(bnorm, axis=2, keepdims=True)) * sqrt_w * profile_weight
+    pieces.append(jnp.ravel(profile_res) / jnp.sqrt(jnp.asarray(nalpha_ * nphi_, dtype=dtype)))
+
+    # -- branch-based trapped-well width variance --------------------------
+    if float(branch_width_weight) != 0.0:
+        bper = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)           # periodic, (nsurf, nalpha, nper)
+        nper = nphi_ - 1
+        offs = jnp.arange(max(1, nper // 2) + 1, dtype=jnp.int32)
+        imin = jnp.argmin(bper, axis=-1)
+        left = jnp.maximum.accumulate(
+            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] - offs[None, None, :], nper), axis=-1), axis=-1)
+        right = jnp.maximum.accumulate(
+            jnp.take_along_axis(bper, jnp.mod(imin[:, :, None] + offs[None, None, :], nper), axis=-1), axis=-1)
+        left = (left - left[..., :1]) / jnp.maximum(left[..., -1:] - left[..., :1], tiny)
+        right = (right - right[..., :1]) / jnp.maximum(right[..., -1:] - right[..., :1], tiny)
+        distance = jnp.asarray(offs, dtype=dtype) / jnp.asarray(nper, dtype=dtype)
+        beps = jnp.maximum(jnp.asarray(float(branch_width_softness), dtype=dtype),
+                           jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+
+        def crossing(branch):
+            logits = -((branch[:, :, :, None] - levels[None, None, None, :]) / beps) ** 2
+            logits = logits - jnp.max(logits, axis=2, keepdims=True)
+            w = jnp.exp(logits)
+            w = w / jnp.sum(w, axis=2, keepdims=True)
+            return jnp.sum(w * distance[None, None, :, None], axis=2)
+
+        bw = crossing(left) + crossing(right)                 # (nsurf, nalpha, nlev)
+        bw_res = (bw - jnp.mean(bw, axis=1, keepdims=True)) * sqrt_w * branch_width_weight
+        pieces.insert(1, jnp.ravel(bw_res) / jnp.sqrt(jnp.asarray(nalpha_ * nlev, dtype=dtype)))
+
+    # -- branch-shuffle profile comparison ----------------------------------
+    if float(shuffle_profile_weight) != 0.0:
+        b_alpha = jnp.swapaxes(bnorm, 1, 2)                   # (nsurf, nalpha, nphi)
+        offs = jnp.arange(nphi_, dtype=jnp.int32)
+        offs_f = jnp.asarray(offs, dtype=dtype)
+        dphi = (phi1 - phi0) / jnp.asarray(nphi_ - 1, dtype=dtype)
+        period = phi1 - phi0
+        imin = jnp.argmin(b_alpha, axis=-1)
+        li_raw = imin[:, :, None] - offs[None, None, :]
+        ri_raw = imin[:, :, None] + offs[None, None, :]
+        lvalid, rvalid = li_raw >= 0, ri_raw < nphi_
+        lraw = jnp.take_along_axis(b_alpha, jnp.clip(li_raw, 0, nphi_ - 1), axis=-1)
+        rraw = jnp.take_along_axis(b_alpha, jnp.clip(ri_raw, 0, nphi_ - 1), axis=-1)
+        one = jnp.asarray(1.0, dtype=dtype)
+        left = jnp.maximum.accumulate(jnp.where(lvalid, lraw, one), axis=-1)
+        right = jnp.maximum.accumulate(jnp.where(rvalid, rraw, one), axis=-1)
+
+        seps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
+                           jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
+        trapz_w = jnp.ones((nphi_,), dtype=dtype).at[0].set(0.5).at[-1].set(0.5)
+
+        def branch_crossing(branch):
+            occ = jax.nn.sigmoid((levels[None, None, None, :] - branch[:, :, :, None]) / seps)
+            return jnp.sum(occ * trapz_w[None, None, :, None], axis=2) * dphi
+
+        lcross, rcross = branch_crossing(left), branch_crossing(right)
+        bw = lcross + rcross
+        bw_mean = jnp.mean(bw, axis=1, keepdims=True)
+
+        min_phi = phi0 + jnp.asarray(imin, dtype=dtype) * dphi
+        lend = jnp.maximum(min_phi - phi0, 0.0)
+        rend = jnp.maximum(phi1 - min_phi, 0.0)
+        signed_phi = (offs_f[None, None, :] - jnp.asarray(imin[:, :, None], dtype=dtype)) * dphi
+
+        level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), levels,
+                                      jnp.ones((1,), dtype=dtype)])
+        y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
+
+        delta = 0.5 * (bw - bw_mean)
+        ltarget = jnp.clip(lcross - delta, 0.0, lend[:, :, None])
+        rtarget = jnp.clip(rcross - delta, 0.0, rend[:, :, None])
+        zeros = jnp.zeros((nsurf, nalpha_, 1), dtype=dtype)
+        lfull = jnp.maximum.accumulate(
+            jnp.concatenate([zeros, ltarget, lend[:, :, None]], axis=-1), axis=-1)
+        rfull = jnp.maximum.accumulate(
+            jnp.concatenate([zeros, rtarget, rend[:, :, None]], axis=-1), axis=-1)
+        x_target = jnp.concatenate([-jnp.flip(lfull, axis=-1), rfull[:, :, 1:]], axis=-1)
+        ramp = (jnp.arange(x_target.shape[-1], dtype=dtype)
+                * jnp.asarray(1.0e-14, dtype=dtype) * period)
+        x_target = x_target + ramp[None, None, :]
+
+        def interp_one(xp, x):
+            return jnp.interp(x, xp, y_target)
+
+        shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
+            x_target, signed_phi)
+        shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
+        pieces.append(jnp.ravel(shuffle_res)
+                      / jnp.sqrt(jnp.asarray(nalpha_ * nphi_, dtype=dtype)))
+
+    residuals1d = jnp.concatenate(pieces)
+    return {
+        "residuals1d": residuals1d,
+        "total": jnp.sum(residuals1d * residuals1d),
+        "bnorm": bnorm,
+        "bmag": bmag,
+        "levels": levels,
+        "phi": phi,
+        "alpha": alpha,
+    }
+
+
+def boozer_modes_from_wout(
+    wout,
+    *,
+    surfaces,
+    mboz: int = 18,
+    nboz: int = 18,
+    jit: bool = False,
+) -> dict[str, np.ndarray]:
+    """Boozer ``|B|`` spectrum of selected surfaces via ``booz_xform_jax``.
+
+    ``wout`` is a :class:`~vmec_jax.core.wout.WoutData` (or any wout-like
+    object accepted by ``Booz_xform.read_wout_data``); ``surfaces`` are
+    normalized-flux values matched to the nearest half-mesh surfaces.
+    Returns ``{bmnc_b, xm_b, xn_b, iota_b, nfp, s_b}`` with ``bmnc_b`` shaped
+    ``(nsurf, nmodes)`` — the inputs of :func:`quasi_isodynamic_residual`.
+
+    ``booz_xform_jax`` is an optional dependency (soft import).
+    """
+    try:
+        from booz_xform_jax import Booz_xform
+    except Exception as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "Boozer-based objectives require booz_xform_jax; "
+            "run `pip install booz_xform_jax`.") from exc
+    if isinstance(wout, Equilibrium):
+        wout = wout.wout
+    bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
+    bx.read_wout_data(wout)
+    s_in = np.asarray(bx.s_in, dtype=float)
+    values = np.atleast_1d(np.asarray(list(np.ravel(surfaces)), dtype=float))
+    indices = sorted({int(np.argmin(np.abs(s_in - v))) for v in values})
+    bx.compute_surfs = indices
+    bx.run(jit=bool(jit))
+    bmnc_b = np.asarray(bx.bmnc_b, dtype=float)
+    xm_b = np.asarray(bx.xm_b, dtype=float)
+    if bmnc_b.shape[0] == xm_b.shape[0]:      # (nmodes, nsurf) -> (nsurf, nmodes)
+        bmnc_b = bmnc_b.T
+    return {
+        "bmnc_b": bmnc_b,
+        "xm_b": xm_b,
+        "xn_b": np.asarray(bx.xn_b, dtype=float),
+        "iota_b": np.asarray(bx.iota, dtype=float)[indices],
+        "nfp": int(bx.nfp),
+        "s_b": s_in[indices],
+    }
+
+
+def quasi_isodynamic_residual_from_wout(
+    wout,
+    *,
+    surfaces,
+    mboz: int = 18,
+    nboz: int = 18,
+    jit_booz: bool = False,
+    **qi_kwargs,
+) -> dict[str, Array]:
+    """QI residual of a converged equilibrium: wout -> Boozer -> residual.
+
+    Convenience composition of :func:`boozer_modes_from_wout` and
+    :func:`quasi_isodynamic_residual`; ``qi_kwargs`` are the residual's
+    sampling/weight knobs.  Accepts a :class:`Equilibrium` too, so it can be
+    used directly as a :func:`least_squares` objective term via
+    ``lambda eq: quasi_isodynamic_residual_from_wout(eq, surfaces=...)["residuals1d"]``.
+    """
+    booz = boozer_modes_from_wout(wout, surfaces=surfaces, mboz=mboz, nboz=nboz,
+                                  jit=jit_booz)
+    return quasi_isodynamic_residual(
+        bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
+        iota_b=booz["iota_b"], nfp=booz["nfp"], **qi_kwargs)
+
+
+# ===========================================================================
+# Boundary degrees of freedom + scipy least-squares driver
+# ===========================================================================
+
+
+def _dof_modes(inp: VmecInput, max_mode: int) -> list[tuple[int, int]]:
+    """Canonical (m, n) list for the boundary dofs at ``max_mode``.
+
+    ``m = 0`` keeps only ``n >= 1`` (negative-``n`` m=0 cosine modes are
+    redundant, the m=0 sine modes are their sign flips, and ``RBC(0, 0)`` —
+    the major radius — is held fixed to remove the trivial scale direction,
+    exactly like the simsopt QS examples fix the major radius).
+    """
+    m_max = min(int(max_mode), int(inp.mpol) - 1)
+    n_max = min(int(max_mode), int(inp.ntor))
+    out: list[tuple[int, int]] = []
+    for m in range(0, m_max + 1):
+        for n in range(-n_max, n_max + 1):
+            if m == 0 and n <= 0:
+                continue
+            out.append((m, n))
+    return out
+
+
+def boundary_dof_names(inp: VmecInput, max_mode: int) -> list[str]:
+    """Human-readable labels ("RBC(n,m)" / "ZBS(n,m)", INDATA index order)."""
+    modes = _dof_modes(inp, max_mode)
+    return ([f"RBC({n},{m})" for (m, n) in modes]
+            + [f"ZBS({n},{m})" for (m, n) in modes])
+
+
+def pack_boundary(inp: VmecInput, max_mode: int) -> np.ndarray:
+    """Flat boundary-dof vector ``[rbc..., zbs...]`` (see :func:`_dof_modes`).
+
+    Inverse of :func:`unpack_boundary`; ``RBC(0,0)`` is excluded (fixed major
+    radius).  Only the stellarator-symmetric ``rbc``/``zbs`` families are
+    packed — lasym boundary optimization is out of scope here.
+    """
+    modes = _dof_modes(inp, max_mode)
+    ntor = int(inp.ntor)
+    rbc = np.asarray(inp.rbc, dtype=float)
+    zbs = np.asarray(inp.zbs, dtype=float)
+    return np.asarray([rbc[n + ntor, m] for (m, n) in modes]
+                      + [zbs[n + ntor, m] for (m, n) in modes], dtype=float)
+
+
+def unpack_boundary(inp: VmecInput, x, max_mode: int) -> VmecInput:
+    """New :class:`VmecInput` with the boundary dofs ``x`` applied."""
+    modes = _dof_modes(inp, max_mode)
+    x = np.asarray(x, dtype=float).ravel()
+    if x.size != 2 * len(modes):
+        raise ValueError(f"expected {2 * len(modes)} dofs, got {x.size}")
+    ntor = int(inp.ntor)
+    rbc = np.array(inp.rbc, dtype=float, copy=True)
+    zbs = np.array(inp.zbs, dtype=float, copy=True)
+    for k, (m, n) in enumerate(modes):
+        rbc[n + ntor, m] = x[k]
+        zbs[n + ntor, m] = x[len(modes) + k]
+    return dataclasses.replace(inp, rbc=rbc, zbs=zbs)
+
+
+def _call_term(fun: Callable, eq: Equilibrium) -> np.ndarray:
+    """Evaluate an objective callable against an :class:`Equilibrium`.
+
+    Callables with two or more positional parameters are treated as pure
+    ``(state, runtime)`` functions (the scalar targets above); single-argument
+    callables receive the :class:`Equilibrium` (e.g.
+    ``QuasisymmetryRatioResidual.J`` or user lambdas).
+    """
+    try:
+        params = [p for p in inspect.signature(fun).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        two_positional = len(params) >= 2 and params[1].default is inspect.Parameter.empty
+    except (TypeError, ValueError):  # builtins / partials without signature
+        two_positional = False
+    value = fun(eq.state, eq.runtime) if two_positional else fun(eq)
+    return np.atleast_1d(np.asarray(jax.device_get(value), dtype=float)).ravel()
+
+
+def _ess_scale(inp: VmecInput, max_mode: int, alpha: float) -> np.ndarray:
+    """Exponential Spectral Scaling (ESS) trust-region weights per dof.
+
+    ``x_scale[i] = exp(-alpha * max(|m_i|, |n_i|)) / exp(-alpha)`` — higher
+    (m, n) boundary harmonics get proportionally smaller trust-region steps,
+    which stabilizes staged ``max_mode`` continuation from crude seeds.
+    Ported from legacy ``optimizers.fixed_boundary.parameterization.
+    create_x_scale`` (the ``use_ess``/``ess_alpha`` option of the legacy
+    ``least_squares_solve``); passed to scipy as ``x_scale``.
+    """
+    modes = _dof_modes(inp, max_mode)
+    levels = np.asarray([max(abs(m), abs(n)) for (m, n) in modes] * 2, dtype=float)
+    if alpha <= 0.0:
+        return np.ones_like(levels)
+    return np.exp(-alpha * levels) / np.exp(-alpha)
+
+
+def least_squares(
+    objective_terms: Sequence[tuple[Callable, float, float]],
+    inp: VmecInput,
+    *,
+    max_mode: int | Sequence[int] = 1,
+    x0: np.ndarray | None = None,
+    jac: str | None = None,
+    hot_restart: bool = True,
+    use_ess: bool = False,
+    ess_alpha: float = 1.2,
+    device: Any = None,
+    solve_kwargs: dict | None = None,
+    verbose: int = 0,
+    **scipy_kwargs,
+):
+    """Boundary-shape least squares: simsopt's ``least_squares_serial_solve``.
+
+    ``objective_terms`` is a list of ``(fun, target, weight)``: each ``fun``
+    maps a converged :class:`Equilibrium` (or, for two-positional-argument
+    callables, its ``(state, runtime)`` pair) to a scalar or residual vector,
+    and contributes ``weight * (fun(eq) - target)`` rows to the stacked
+    residual, i.e. ``cost = 1/2 sum_i w_i^2 (f_i - t_i)^2`` (scipy's 1/2
+    convention).  The decision variables are the boundary Fourier
+    coefficients up to ``max_mode`` (:func:`pack_boundary` — ``RBC(0,0)``
+    fixed).  Trial boundaries whose solve fails return a large finite
+    residual so the trust region backs off instead of crashing.  Objective
+    swaps between stages of a staged campaign (e.g. the QP-basin-then-QI
+    route) are just two calls with different ``objective_terms``, the second
+    seeded with the first call's ``result.input``.
+
+    ``max_mode`` may be a single int or an increasing schedule (e.g.
+    ``(1, 2, 3)``): each continuation stage optimizes the enlarged dof set
+    starting from the previous stage's boundary (higher harmonics enter at
+    their current — typically zero — values).  Repeated trial solves are
+    cheap by construction: runtimes with the same
+    :class:`~vmec_jax.core.fourier.Resolution` are structural pytrees, so the
+    solver reuses one XLA executable across all boundary trials
+    (``vmec_jax.core.solver`` plan.md Phase-2 cache; only the first solve of
+    a stage compiles).  ``device`` is forwarded to the solver
+    (:mod:`vmec_jax.core.device` policy applies when ``None``).
+
+    ``use_ess`` enables Exponential Spectral Scaling of the trust region
+    (:func:`_ess_scale`, ``ess_alpha``), the legacy ``use_ess`` option.
+
+    ``jac=None`` (default) uses scipy ``"2-point"`` finite differences.
+    ``jac="implicit"`` is reserved for the Phase-6 implicit-gradient path
+    (:mod:`vmec_jax.core.implicit`; being finished separately) and raises
+    ``NotImplementedError`` for now — the wiring point is documented inline.
+    ``hot_restart`` seeds each trial solve from the previous converged state
+    when the radial ladder has a single stage.  Remaining keywords go to
+    :func:`scipy.optimize.least_squares` (e.g. ``max_nfev``, ``ftol``,
+    ``xtol``, ``diff_step``).
+
+    Returns the scipy ``OptimizeResult`` of the final stage with extra
+    attributes: ``input`` (optimized :class:`VmecInput`), ``equilibrium``
+    (last successfully solved :class:`Equilibrium`) and ``stage_results``
+    (per-``max_mode`` results for schedules).
+    """
+    import scipy.optimize
+
+    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
+                      else [int(m) for m in max_mode])
+    if len(modes_schedule) > 1:
+        if x0 is not None:
+            raise ValueError("x0 cannot be combined with a max_mode schedule")
+        stage_results = []
+        current = inp
+        result = None
+        for mm in modes_schedule:
+            result = least_squares(
+                objective_terms, current, max_mode=mm, jac=jac,
+                hot_restart=hot_restart, use_ess=use_ess, ess_alpha=ess_alpha,
+                device=device, solve_kwargs=solve_kwargs, verbose=verbose,
+                **scipy_kwargs)
+            stage_results.append(result)
+            current = result.input
+        result.stage_results = stage_results
+        return result
+    max_mode = modes_schedule[0]
+
+    if jac == "implicit":
+        # Wiring point for the implicit-gradient mode: vmec_jax.core.implicit
+        # provides solve_implicit (custom-VJP equilibrium) + runtime_from_params;
+        # d(residual)/d(dofs) then comes from jax.jacrev through
+        # unpack_boundary -> params_from_input -> solve_implicit -> objectives.
+        try:
+            from . import implicit as _implicit  # noqa: F401 - availability probe
+            detail = "vmec_jax.core.implicit is importable but the objective wiring is not implemented yet"
+        except Exception:
+            detail = "vmec_jax.core.implicit is not importable in this environment"
+        raise NotImplementedError(
+            f"jac='implicit' is a documented stub ({detail}); use jac=None "
+            "(finite differences) for now.")
+    if jac is not None:
+        raise ValueError(f"jac must be None or 'implicit', got {jac!r}")
+
+    solve_kwargs = dict(solve_kwargs or {})
+    if device is not None:
+        solve_kwargs.setdefault("device", device)
+    if use_ess:
+        scipy_kwargs.setdefault("x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
+    if x0 is None:
+        x0 = pack_boundary(inp, max_mode)
+    state_holder: dict[str, Any] = {"hot": None, "eq": None, "nres": None}
+    single_stage = int(np.asarray(inp.ns_array).size) == 1
+
+    def fun(x: np.ndarray) -> np.ndarray:
+        trial = unpack_boundary(inp, x, max_mode)
+        try:
+            seed = state_holder["hot"] if (hot_restart and single_stage) else None
+            eq = solve_equilibrium(trial, initial_state=seed, **solve_kwargs)
+            parts = [w * (_call_term(f, eq) - t) for (f, t, w) in objective_terms]
+            residual = np.concatenate(parts)
+        except Exception as exc:  # zero-crash policy: penalize, don't die
+            if state_holder["nres"] is None:
+                raise  # the very first evaluation must succeed (sizes scipy's residual)
+            if verbose:
+                print(f"[least_squares] trial solve failed: {exc}")
+            return np.full((state_holder["nres"],), 1.0e6)
+        if not np.all(np.isfinite(residual)):
+            residual = np.where(np.isfinite(residual), residual, 1.0e6)
+        state_holder["hot"] = eq.state
+        state_holder["eq"] = eq
+        state_holder["nres"] = residual.size
+        if verbose:
+            print(f"[least_squares] cost = {0.5 * float(residual @ residual):.6e}")
+        return residual
+
+    result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
+                                          jac="2-point", **scipy_kwargs)
+    result.input = unpack_boundary(inp, result.x, max_mode)
+    result.equilibrium = state_holder["eq"]
+    return result
