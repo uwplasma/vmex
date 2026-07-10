@@ -18,11 +18,67 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, cg
 
-from .geometry import radial_derivative
+from .basis import ChebyshevBasis, ThetaBasis
 from .model import MirrorBoundary, MirrorConfig
 
 Array = Any
 MU0 = 4.0e-7 * np.pi
+
+
+@dataclass(frozen=True, eq=False)
+class VacuumGrid:
+    """CGL radial/axial and Fourier poloidal vacuum collocation grid."""
+
+    radial_basis: ChebyshevBasis
+    theta_basis: ThetaBasis
+    axial_basis: ChebyshevBasis
+    z: np.ndarray
+    dz_dxi: float
+
+    @property
+    def nrho(self) -> int:
+        return self.radial_basis.size
+
+    @property
+    def ntheta(self) -> int:
+        return self.theta_basis.size
+
+    @property
+    def nxi(self) -> int:
+        return self.axial_basis.size
+
+    @property
+    def rho(self) -> np.ndarray:
+        return 0.5 * (self.radial_basis.nodes + 1.0)
+
+    @property
+    def radial_weights(self) -> np.ndarray:
+        return 0.5 * self.radial_basis.weights
+
+    @property
+    def theta(self) -> np.ndarray:
+        return self.theta_basis.nodes
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (self.nrho, self.ntheta, self.nxi)
+
+    def radial_derivative(self, values: Array) -> Array:
+        """Differentiate with respect to ``rho in [0,1]``."""
+
+        return 2.0 * self.radial_basis.differentiate(values, axis=0)
+
+
+def build_vacuum_grid(plasma_grid: "MirrorGrid", *, nrho: int | None = None) -> VacuumGrid:
+    """Build the Fourier-CGL annulus grid sharing plasma theta/end nodes."""
+
+    return VacuumGrid(
+        radial_basis=ChebyshevBasis.build(plasma_grid.ns if nrho is None else int(nrho)),
+        theta_basis=plasma_grid.theta_basis,
+        axial_basis=plasma_grid.axial_basis,
+        z=np.asarray(plasma_grid.z),
+        dz_dxi=float(plasma_grid.dz_dxi),
+    )
 
 
 @dataclass(frozen=True)
@@ -45,6 +101,9 @@ class VacuumField:
     correction_xyz: Array
     total_xyz: Array
     b_normal_inner: Array
+    correction_normal_outer: Array
+    correction_normal_lower: Array
+    correction_normal_upper: Array
     energy: Array
     laplacian: Array
 
@@ -73,7 +132,7 @@ for _cls in (VacuumGeometry, VacuumField, VacuumSolveResult):
 
 def evaluate_vacuum_geometry(
     boundary: MirrorBoundary,
-    grid: "MirrorGrid",
+    grid: VacuumGrid,
     *,
     outer_radius: float,
 ) -> VacuumGeometry:
@@ -82,7 +141,7 @@ def evaluate_vacuum_geometry(
     if outer_radius <= 0.0:
         raise ValueError("outer_radius must be positive")
     a = jnp.asarray(boundary.radius_scale)[None, :, :]
-    rho = jnp.asarray(grid.s)[:, None, None]
+    rho = jnp.asarray(grid.rho)[:, None, None]
     gap = float(outer_radius) - a
     radius = a + rho * gap
     a_theta = grid.theta_basis.differentiate(a, axis=1)
@@ -146,11 +205,11 @@ def evaluate_vacuum_geometry(
 
 
 def _potential_gradient_xyz(
-    potential: Array, geometry: VacuumGeometry, grid: "MirrorGrid"
+    potential: Array, geometry: VacuumGeometry, grid: VacuumGrid
 ) -> Array:
     partial = jnp.stack(
         [
-            radial_derivative(potential, float(grid.s[1] - grid.s[0])),
+            grid.radial_derivative(potential),
             grid.theta_basis.differentiate(potential, axis=1),
             grid.axial_basis.differentiate(potential, axis=2),
         ],
@@ -161,13 +220,13 @@ def _potential_gradient_xyz(
 
 
 def vacuum_laplacian(
-    potential: Array, geometry: VacuumGeometry, grid: "MirrorGrid"
+    potential: Array, geometry: VacuumGeometry, grid: VacuumGrid
 ) -> Array:
     """Evaluate ``div(grad(nu))`` in annular coordinates."""
 
     partial = jnp.stack(
         [
-            radial_derivative(potential, float(grid.s[1] - grid.s[0])),
+            grid.radial_derivative(potential),
             grid.theta_basis.differentiate(potential, axis=1),
             grid.axial_basis.differentiate(potential, axis=2),
         ],
@@ -177,7 +236,7 @@ def vacuum_laplacian(
         "...ij,...j->...i", geometry.inverse_metric, partial
     )
     divergence = (
-        radial_derivative(flux[..., 0], float(grid.s[1] - grid.s[0]))
+        grid.radial_derivative(flux[..., 0])
         + grid.theta_basis.differentiate(flux[..., 1], axis=1)
         + grid.axial_basis.differentiate(flux[..., 2], axis=2)
     )
@@ -187,7 +246,7 @@ def vacuum_laplacian(
 def evaluate_vacuum_field(
     potential: Array,
     geometry: VacuumGeometry,
-    grid: "MirrorGrid",
+    grid: VacuumGrid,
     external_field_xyz: Array,
     *,
     mu0: float = MU0,
@@ -199,6 +258,13 @@ def evaluate_vacuum_field(
     correction = _potential_gradient_xyz(potential, geometry, grid)
     total = external + correction
     b_normal = jnp.sum(total[0] * geometry.inner_normal_xyz, axis=-1)
+    e_rho = geometry.basis_xyz[..., :, 0]
+    e_theta = geometry.basis_xyz[..., :, 1]
+    e_xi = geometry.basis_xyz[..., :, 2]
+    outer_area = jnp.cross(e_theta[-1], e_xi[-1])
+    outer_normal = outer_area / jnp.linalg.norm(outer_area, axis=-1)[..., None]
+    end_area = jnp.cross(e_rho, e_theta)
+    end_normal = end_area / jnp.linalg.norm(end_area, axis=-1)[..., None]
     energy_density = jnp.sum(total**2, axis=-1) * geometry.sqrt_g / (2.0 * float(mu0))
     energy = jnp.einsum(
         "i,j,k,ijk->",
@@ -211,6 +277,13 @@ def evaluate_vacuum_field(
         correction_xyz=correction,
         total_xyz=total,
         b_normal_inner=b_normal,
+        correction_normal_outer=jnp.sum(correction[-1] * outer_normal, axis=-1),
+        correction_normal_lower=-jnp.sum(
+            correction[:, :, 0] * end_normal[:, :, 0], axis=-1
+        ),
+        correction_normal_upper=jnp.sum(
+            correction[:, :, -1] * end_normal[:, :, -1], axis=-1
+        ),
         energy=energy,
         laplacian=vacuum_laplacian(potential, geometry, grid),
     )
@@ -224,22 +297,72 @@ def external_field_from_coils(coilset: Any, geometry: VacuumGeometry) -> Array:
     return biot_savart(coilset, geometry.xyz)
 
 
+def _external_flux_boundary_functional(
+    potential: Array,
+    geometry: VacuumGeometry,
+    grid: VacuumGrid,
+    external_field_xyz: Array,
+    *,
+    mu0: float = MU0,
+) -> Array:
+    """Boundary source that leaves external flux unchanged at outer/end cuts."""
+
+    external = jnp.broadcast_to(jnp.asarray(external_field_xyz), geometry.xyz.shape)
+    e_rho = geometry.basis_xyz[..., :, 0]
+    e_theta = geometry.basis_xyz[..., :, 1]
+    e_xi = geometry.basis_xyz[..., :, 2]
+    outer_area = jnp.cross(e_theta[-1], e_xi[-1])
+    outer_flux = jnp.sum(external[-1] * outer_area, axis=-1)
+    outer = jnp.einsum(
+        "j,k,jk->",
+        jnp.asarray(grid.theta_basis.weights),
+        jnp.asarray(grid.axial_basis.weights),
+        potential[-1] * outer_flux,
+    )
+    end_area = jnp.cross(e_rho, e_theta)
+    lower_flux = -jnp.sum(external[:, :, 0] * end_area[:, :, 0], axis=-1)
+    upper_flux = jnp.sum(external[:, :, -1] * end_area[:, :, -1], axis=-1)
+    ends = jnp.einsum(
+        "i,j,ij->",
+        jnp.asarray(grid.radial_weights),
+        jnp.asarray(grid.theta_basis.weights),
+        potential[:, :, 0] * lower_flux + potential[:, :, -1] * upper_flux,
+    )
+    return (outer + ends) / float(mu0)
+
+
 def solve_vacuum_potential(
     boundary: MirrorBoundary,
-    grid: "MirrorGrid",
+    grid: VacuumGrid,
     config: MirrorConfig,
     external_field_xyz: Array,
     fixed_potential: Array,
     *,
     outer_radius: float,
     initial_potential: Array = 0.0,
+    boundary_condition: str = "fixed_external_flux",
 ) -> VacuumSolveResult:
-    """Solve the quadratic open-annulus scalar-potential problem."""
+    """Solve the quadratic open-annulus scalar-potential problem.
+
+    ``fixed_external_flux`` is the production fixed-flux-cut policy: the
+    correction has zero normal flux on the outer boundary and end cuts, and a
+    single nodal value removes the constant gauge. ``fixed_potential`` keeps
+    prescribed outer/end values and is useful for Dirichlet MMS cases.
+    """
 
     geometry = evaluate_vacuum_geometry(boundary, grid, outer_radius=outer_radius)
     fixed = jnp.broadcast_to(jnp.asarray(fixed_potential), grid.shape)
-    free_mask = np.zeros(grid.shape, dtype=bool)
-    free_mask[:-1, :, 1:-1] = True
+    free_mask = np.ones(grid.shape, dtype=bool)
+    if boundary_condition == "fixed_potential":
+        free_mask[-1] = False
+        free_mask[:, :, [0, -1]] = False
+    elif boundary_condition == "fixed_external_flux":
+        free_mask[-1, 0, 0] = False
+        fixed = fixed.at[-1, 0, 0].set(0.0)
+    else:
+        raise ValueError(
+            "boundary_condition must be 'fixed_external_flux' or 'fixed_potential'"
+        )
     indices = tuple(np.asarray(index) for index in np.nonzero(free_mask))
     initial = np.broadcast_to(np.asarray(initial_potential, dtype=float), grid.shape)
     x0 = initial[indices]
@@ -248,9 +371,15 @@ def solve_vacuum_potential(
         return fixed.at[indices].set(jnp.asarray(vector))
 
     def objective(vector: Array) -> Array:
-        return evaluate_vacuum_field(
-            unpack(vector), geometry, grid, external_field_xyz
+        potential = unpack(vector)
+        energy = evaluate_vacuum_field(
+            potential, geometry, grid, external_field_xyz
         ).energy
+        if boundary_condition == "fixed_external_flux":
+            energy -= _external_flux_boundary_functional(
+                potential, geometry, grid, external_field_xyz
+            )
+        return energy
 
     initial_energy = max(abs(float(objective(jnp.asarray(x0)))), 1.0)
     normalized = lambda vector: objective(vector) / initial_energy

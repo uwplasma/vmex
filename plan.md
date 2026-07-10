@@ -707,12 +707,15 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
       side-interface `B.n`, end flux, outer-boundary convergence, and axisymmetric comparisons
       against direct circular-loop fields.
-      **STATUS (2026-07-09): variational annulus foundation landed.** A moving-side/fixed-outer
-      Fourier-CGL map now evaluates `B_external + grad(nu)` and solves the quadratic vacuum energy
-      with fixed outer/end potential data and natural plasma-side tangency. Exact annulus volume,
-      linear harmonic/Laplace MMS, uniform-field cancellation, and differentiable direct `CoilSet`
-      sampling are tested. Coil-driven tangency, reciprocity, outer-radius convergence, mgrid
-      parity, and plasma-interface coupling remain.
+      **STATUS (2026-07-09): variational annulus and direct-coil tangency landed.** A moving-side,
+      Fourier-CGL radial/axial map evaluates `B_external + grad(nu)` and solves the quadratic vacuum
+      energy. The production boundary functional enforces zero correction flux on the outer/end
+      cuts while natural variation enforces plasma-side tangency; fixed-potential MMS remains
+      available. Exact annulus volume, linear harmonic/Laplace MMS, uniform-field cancellation,
+      and differentiable direct `CoilSet` sampling are tested. For two circular end coils, normalized
+      plasma `B.n` decreases `1.79e-2, 4.71e-3, 2.10e-3, 8.31e-4` over
+      `(nrho,nxi)=(5,9),(7,13),(9,17),(13,25)`. Reciprocity, outer-radius convergence, mgrid parity,
+      nonaxisymmetric coils, and plasma-interface coupling remain.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior
       state jointly, with beta continuation `0, 0.01, 0.03, 0.10` and hot restarts. Validate
       isotropic and anisotropic cases against an independently generated Pleiades/WHAM-style
