@@ -90,6 +90,8 @@ def test_vacuum_cylinder_has_exact_energy_and_negligible_physical_force() -> Non
 
     residual = isotropic_force_residual(energy, grid)
     assert float(residual.normalized_rms) < 2.0e-13
+    assert float(residual.bulk_normalized_rms) < 2.0e-13
+    assert float(residual.axis_normalized_rms) < 2.0e-13
     np.testing.assert_allclose(residual.component_rms[1:], 0.0, atol=2.0e-14)
 
     gradient = fixed_boundary_energy_gradient(

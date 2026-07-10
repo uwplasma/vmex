@@ -139,6 +139,8 @@ class IsotropicForceResidual:
     current_sup_xi: Array
     physical_rms: Array
     normalized_rms: Array
+    bulk_normalized_rms: Array
+    axis_normalized_rms: Array
     component_rms: Array
 
 
@@ -786,6 +788,23 @@ def isotropic_force_residual(
     magnetic_force_scale = energy.b_squared[1:-1, :, 1:-1] / (float(mu0) * length)
     reference_rms = jnp.sqrt(jnp.sum(weights * magnetic_force_scale**2) / jnp.sum(weights))
     normalized_rms = physical_rms / jnp.maximum(reference_rms, jnp.finfo(physical_rms.dtype).tiny)
+    active_s = jnp.asarray(grid.s[1:-1])
+
+    def regional_normalized_rms(mask: Array) -> Array:
+        regional_weights = weights * jnp.asarray(mask)[:, None, None]
+        denominator = jnp.maximum(
+            jnp.sum(regional_weights), jnp.finfo(physical_rms.dtype).tiny
+        )
+        regional_force = jnp.sqrt(jnp.sum(regional_weights * force_squared) / denominator)
+        regional_reference = jnp.sqrt(
+            jnp.sum(regional_weights * magnetic_force_scale**2) / denominator
+        )
+        return regional_force / jnp.maximum(
+            regional_reference, jnp.finfo(physical_rms.dtype).tiny
+        )
+
+    bulk_normalized_rms = regional_normalized_rms(active_s >= 0.2)
+    axis_normalized_rms = regional_normalized_rms(active_s < 0.2)
     return IsotropicForceResidual(
         covariant_s=force_s,
         covariant_theta=force_theta,
@@ -795,6 +814,8 @@ def isotropic_force_residual(
         current_sup_xi=current_xi,
         physical_rms=physical_rms,
         normalized_rms=normalized_rms,
+        bulk_normalized_rms=bulk_normalized_rms,
+        axis_normalized_rms=axis_normalized_rms,
         component_rms=component_rms,
     )
 
