@@ -695,6 +695,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
    5. **M4 — fixed-boundary 3D mirror.** Add nonaxisymmetric/helical boundaries and finite axial
       current. Demonstrate visible pitch, nonzero lambda response, and convergence under radial,
       poloidal, and axial refinement using the same solver and residual.
+      **STATUS (2026-07-09): joint geometry/lambda solve landed.** The shared host solver now packs
+      fixed-cut, axis-regular, surface-gauge-free lambda variables and uses the exact packed
+      objective gradient for convergence. An `mpol=1` helical-boundary case with finite current
+      converges below `1e-12`, has nonzero lambda and field-line pitch, and preserves end/gauge
+      constraints. A mode-aware scalable lambda preconditioner and `ns/mpol/nxi` studies remain.
    6. **M5 — open-vacuum solver.** Implement the annular scalar-potential solve and couple direct
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
       side-interface `B.n`, end flux, outer-boundary convergence, and axisymmetric comparisons

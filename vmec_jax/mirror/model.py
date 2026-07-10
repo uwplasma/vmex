@@ -228,6 +228,7 @@ def project_fixed_boundary_state(
     radius_scale = radius_scale.at[0].set(radius_scale[1])
 
     lam = jnp.asarray(state.lambda_stream)
+    lam = lam.at[0].set(lam[1])
     theta_weights = jnp.asarray(grid.theta_basis.weights)
     xi_weights = jnp.asarray(grid.axial_basis.weights)
     denominator = jnp.sum(theta_weights) * jnp.sum(xi_weights)

@@ -104,6 +104,127 @@ def _free_radius_mask(grid: "MirrorGrid") -> np.ndarray:
 
 
 @dataclass(frozen=True)
+class _MirrorStateVectorizer:
+    """Pack constrained geometry and gauge-free lambda into solver vectors."""
+
+    base: MirrorState
+    radius_indices: tuple[np.ndarray, np.ndarray, np.ndarray]
+    radius_scale: float
+    flux_scale: float
+    lambda_free_indices: np.ndarray
+    lambda_pivot: int
+    lambda_interior_weights: np.ndarray
+    lambda_fixed_weighted_sum: np.ndarray
+    solve_lambda: bool
+
+    @classmethod
+    def build(
+        cls,
+        state: MirrorState,
+        boundary: MirrorBoundary,
+        grid: "MirrorGrid",
+        *,
+        axial_flux_derivative: Array,
+        solve_lambda: bool,
+    ) -> "_MirrorStateVectorizer":
+        base = project_fixed_boundary_state(state, boundary, grid)
+        radius_scale = float(np.mean(np.asarray(boundary.radius_scale)))
+        if not np.isfinite(radius_scale) or radius_scale <= 0.0:
+            raise ValueError("mean boundary radius must be positive and finite")
+        flux = np.asarray(axial_flux_derivative, dtype=float)
+        flux_scale = max(float(np.max(np.abs(flux))), np.finfo(float).tiny)
+        interior_weights = (
+            np.asarray(grid.theta_basis.weights)[:, None]
+            * np.asarray(grid.axial_basis.weights)[None, 1:-1]
+        ).reshape(-1)
+        if solve_lambda and interior_weights.size < 2:
+            raise ValueError("lambda solve requires at least two interior theta-xi nodes")
+        pivot = int(np.argmax(interior_weights)) if interior_weights.size else 0
+        free_indices = np.delete(np.arange(interior_weights.size), pivot)
+        full_weights = (
+            np.asarray(grid.theta_basis.weights)[:, None]
+            * np.asarray(grid.axial_basis.weights)[None, :]
+        )
+        endpoint_weights = np.zeros_like(full_weights)
+        endpoint_weights[:, [0, -1]] = full_weights[:, [0, -1]]
+        fixed_sum = np.einsum(
+            "jk,ijk->i", endpoint_weights, np.asarray(base.lambda_stream)[1:]
+        )
+        return cls(
+            base=base,
+            radius_indices=tuple(np.asarray(index) for index in np.nonzero(_free_radius_mask(grid))),
+            radius_scale=radius_scale,
+            flux_scale=flux_scale,
+            lambda_free_indices=free_indices,
+            lambda_pivot=pivot,
+            lambda_interior_weights=interior_weights,
+            lambda_fixed_weighted_sum=fixed_sum,
+            solve_lambda=bool(solve_lambda),
+        )
+
+    @property
+    def radius_size(self) -> int:
+        return int(self.radius_indices[0].size)
+
+    @property
+    def lambda_size(self) -> int:
+        if not self.solve_lambda:
+            return 0
+        return int((self.base.radius_scale.shape[0] - 1) * self.lambda_free_indices.size)
+
+    @property
+    def size(self) -> int:
+        return self.radius_size + self.lambda_size
+
+    def pack(self) -> np.ndarray:
+        radius = np.asarray(self.base.radius_scale)[self.radius_indices] / self.radius_scale
+        if not self.solve_lambda:
+            return radius
+        interior = np.asarray(self.base.lambda_stream)[1:, :, 1:-1].reshape(
+            self.base.radius_scale.shape[0] - 1, -1
+        )
+        lam = interior[:, self.lambda_free_indices].reshape(-1) / self.flux_scale
+        return np.concatenate([radius, lam])
+
+    def unpack(self, vector: Array) -> MirrorState:
+        vector = jnp.asarray(vector)
+        radius = self.base.radius_scale.at[self.radius_indices].set(
+            vector[: self.radius_size] * self.radius_scale
+        )
+        radius = radius.at[0].set(radius[1])
+        if not self.solve_lambda:
+            return MirrorState(radius, self.base.lambda_stream)
+        shape = self.base.radius_scale.shape
+        free = vector[self.radius_size :].reshape(
+            shape[0] - 1, self.lambda_free_indices.size
+        ) * self.flux_scale
+        interior = self.base.lambda_stream[1:, :, 1:-1].reshape(shape[0] - 1, -1)
+        interior = interior.at[:, jnp.asarray(self.lambda_free_indices)].set(free)
+        weighted_free = jnp.sum(
+            free * jnp.asarray(self.lambda_interior_weights[self.lambda_free_indices])[None, :],
+            axis=1,
+        )
+        pivot_value = -(
+            jnp.asarray(self.lambda_fixed_weighted_sum) + weighted_free
+        ) / float(self.lambda_interior_weights[self.lambda_pivot])
+        interior = interior.at[:, self.lambda_pivot].set(pivot_value)
+        lam = self.base.lambda_stream.at[1:, :, 1:-1].set(
+            interior.reshape(shape[0] - 1, shape[1], shape[2] - 2)
+        )
+        lam = lam.at[0].set(lam[1])
+        return MirrorState(radius, lam)
+
+    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        lower = np.concatenate(
+            [np.full(self.radius_size, 0.2), np.full(self.lambda_size, -np.inf)]
+        )
+        upper = np.concatenate(
+            [np.full(self.radius_size, 5.0), np.full(self.lambda_size, np.inf)]
+        )
+        return lower, upper
+
+
+@dataclass(frozen=True)
 class SeparableMirrorPreconditioner:
     """Tensor-product inverse for the free radial/axial geometry block.
 
@@ -209,11 +330,22 @@ def _matrix_free_newton_polish(
     ftol: float,
     max_steps: int,
     record_step: Any,
+    lower_bounds: np.ndarray,
+    upper_bounds: np.ndarray,
 ) -> tuple[np.ndarray, int, int, float, bool, str]:
     """Damped Newton-GMRES polish using exact JAX Hessian products."""
 
     x = np.asarray(x0, dtype=float)
     preconditioner = SeparableMirrorPreconditioner.build(grid)
+
+    def apply_preconditioner(vector: np.ndarray) -> np.ndarray:
+        vector = np.asarray(vector, dtype=float)
+        result = np.array(vector, copy=True)
+        result[: preconditioner.size] = preconditioner.apply(
+            vector[: preconditioner.size]
+        )
+        return result
+
     hessian_vector = jax.jit(
         lambda point, direction: jax.jvp(
             gradient_function, (point,), (direction,)
@@ -237,7 +369,7 @@ def _matrix_free_newton_polish(
 
         operator = LinearOperator((x.size, x.size), matvec=matrix_vector, dtype=float)
         inverse = LinearOperator(
-            (x.size, x.size), matvec=preconditioner.apply, dtype=float
+            (x.size, x.size), matvec=apply_preconditioner, dtype=float
         )
         iteration_counter = 0
 
@@ -264,14 +396,16 @@ def _matrix_free_newton_polish(
         if info < 0 or not np.all(np.isfinite(direction)):
             return x, step_index, linear_iterations, final_linear_residual, False, "GMRES breakdown"
         if float(np.dot(gradient, direction)) >= 0.0:
-            direction = -preconditioner.apply(gradient)
+            direction = -apply_preconditioner(gradient)
 
         value = float(objective_function(jnp.asarray(x)))
         slope = float(np.dot(gradient, direction))
         accepted = False
         step_length = 1.0
         for _ in range(24):
-            candidate = np.clip(x + step_length * direction, 0.2, 5.0)
+            candidate = np.clip(
+                x + step_length * direction, lower_bounds, upper_bounds
+            )
             candidate_value = float(objective_function(jnp.asarray(candidate)))
             if np.isfinite(candidate_value) and candidate_value <= value + 1.0e-4 * step_length * slope:
                 x = candidate
@@ -310,14 +444,14 @@ def solve_fixed_boundary_cli(
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     pressure_closure: PressureClosure | None = None,
+    solve_lambda: bool = False,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
 ) -> MirrorSolveResult:
     """Solve a fixed-boundary mirror with host L-BFGS/Newton control.
 
-    M2 evolves geometry only.  ``lambda_stream`` remains in the physical state
-    and energy, but its nonlinear solve is enabled with finite-current M4 after
-    the lambda preconditioner and end-flux data are implemented.  Supplying a
+    Supplying ``solve_lambda=True`` enables the gauge-free M4 stream-function
+    variables while preserving their fixed end-cut values. A
     ``pressure_closure`` selects the consistent ANIMEC functional; otherwise
     the mass-conserving isotropic functional is used.
     """
@@ -332,13 +466,16 @@ def solve_fixed_boundary_cli(
     if gradient_tolerance <= 0.0:
         raise ValueError("gradient_tolerance must be positive")
 
-    projected_initial = project_fixed_boundary_state(initial_state, boundary, grid)
-    mask_numpy = _free_radius_mask(grid)
-    mask = jnp.asarray(mask_numpy)
-    boundary_scale = float(np.mean(np.asarray(boundary.radius_scale)))
-    if not np.isfinite(boundary_scale) or boundary_scale <= 0.0:
-        raise ValueError("mean boundary radius must be positive and finite")
-    x0 = np.asarray(projected_initial.radius_scale)[mask_numpy] / boundary_scale
+    vectorizer = _MirrorStateVectorizer.build(
+        initial_state,
+        boundary,
+        grid,
+        axial_flux_derivative=axial_flux_derivative,
+        solve_lambda=solve_lambda,
+    )
+    projected_initial = vectorizer.base
+    x0 = vectorizer.pack()
+    lower_bounds, upper_bounds = vectorizer.bounds()
 
     if pressure_closure is None:
         energy_kwargs = {
@@ -389,14 +526,7 @@ def solve_fixed_boundary_cli(
     energy_scale = max(abs(float(initial_energy.total)), np.finfo(float).tiny)
 
     def unpack(x: Array) -> MirrorState:
-        radius_scale = projected_initial.radius_scale.at[mask].set(
-            jnp.asarray(x) * boundary_scale
-        )
-        return project_fixed_boundary_state(
-            MirrorState(radius_scale, projected_initial.lambda_stream),
-            boundary,
-            grid,
-        )
+        return vectorizer.unpack(x)
 
     def objective(x: Array) -> Array:
         return evaluate_energy(unpack(x)).total / energy_scale
@@ -415,12 +545,32 @@ def solve_fixed_boundary_cli(
             cache_gradient = np.asarray(gradient, dtype=float)
         return cache_value, cache_gradient
 
+    def packed_variational(x: Array, state: MirrorState) -> VariationalResidual:
+        variational = evaluate_variational(state)
+        if not solve_lambda:
+            return variational
+        gradient = evaluate(np.asarray(x, dtype=float))[1]
+        radius_values = gradient[: vectorizer.radius_size]
+        lambda_values = gradient[vectorizer.radius_size :]
+        radius_rms = float(np.sqrt(np.mean(radius_values**2)))
+        lambda_rms = float(np.sqrt(np.mean(lambda_values**2)))
+        maximum = float(
+            max(np.max(np.abs(radius_values)), np.max(np.abs(lambda_values)))
+        )
+        return VariationalResidual(
+            radius_gradient=variational.radius_gradient,
+            lambda_gradient=variational.lambda_gradient,
+            radius_rms=jnp.asarray(radius_rms),
+            lambda_rms=jnp.asarray(lambda_rms),
+            maximum=jnp.asarray(maximum),
+        )
+
     history: list[tuple[float, float, float, float, float, float]] = []
 
     def record(iteration: int, x: np.ndarray) -> None:
         state = unpack(jnp.asarray(x))
         energy = evaluate_energy(state)
-        variational = evaluate_variational(state)
+        variational = packed_variational(x, state)
         force = evaluate_force(state, energy)
         history.append(
             (
@@ -435,7 +585,7 @@ def solve_fixed_boundary_cli(
 
     record(0, x0)
     if history[-1][4] <= config.ftol:
-        initial_variational = evaluate_variational(projected_initial)
+        initial_variational = packed_variational(x0, projected_initial)
         result = MirrorSolveResult(
             state=projected_initial,
             energy=initial_energy,
@@ -466,7 +616,7 @@ def solve_fixed_boundary_cli(
         x0=x0,
         jac=lambda x: evaluate(x)[1],
         method="L-BFGS-B",
-        bounds=[(0.2, 5.0)] * x0.size,
+        bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
         callback=callback,
         options={
             "maxiter": lbfgs_budget,
@@ -488,7 +638,9 @@ def solve_fixed_boundary_cli(
     # physical force is small.  An exact dense residual-Newton polish is a
     # reliable M2 reference for modest systems; M4 replaces this size-limited
     # path with matrix-free Newton-GMRES and the separable preconditioner.
-    candidate_variational = evaluate_variational(unpack(jnp.asarray(final_x)))
+    candidate_variational = packed_variational(
+        final_x, unpack(jnp.asarray(final_x))
+    )
     gradient_function = jax.jit(jax.grad(objective))
     if float(candidate_variational.maximum) > config.ftol and final_x.size > 512:
         remaining = max(1, int(config.max_iterations) - int(optimization.nit))
@@ -513,10 +665,14 @@ def solve_fixed_boundary_cli(
             ftol=config.ftol,
             max_steps=min(30, remaining),
             record_step=record_newton,
+            lower_bounds=lower_bounds,
+            upper_bounds=upper_bounds,
         )
         optimizer_success = bool(newton_success)
         optimizer_message += f"; {newton_message}"
-        candidate_variational = evaluate_variational(unpack(jnp.asarray(final_x)))
+        candidate_variational = packed_variational(
+            final_x, unpack(jnp.asarray(final_x))
+        )
 
     if float(candidate_variational.maximum) > config.ftol and final_x.size <= 512:
         hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
@@ -525,7 +681,7 @@ def solve_fixed_boundary_cli(
             fun=lambda x: np.asarray(gradient_function(jnp.asarray(x)), dtype=float),
             x0=final_x,
             jac=lambda x: np.asarray(hessian_function(jnp.asarray(x)), dtype=float),
-            bounds=(np.full(final_x.size, 0.2), np.full(final_x.size, 5.0)),
+            bounds=(lower_bounds, upper_bounds),
             method="trf",
             ftol=1.0e-14,
             xtol=1.0e-14,
@@ -540,7 +696,7 @@ def solve_fixed_boundary_cli(
 
     final_state = unpack(jnp.asarray(final_x))
     final_energy = evaluate_energy(final_state)
-    final_variational = evaluate_variational(final_state)
+    final_variational = packed_variational(final_x, final_state)
     final_force = evaluate_force(final_state, final_energy)
     record(callback_iterations + newton_steps + polish_evaluations, final_x)
     converged = bool(
@@ -577,6 +733,7 @@ def solve_anisotropic_fixed_boundary_cli(
     *,
     axial_flux_derivative: Array,
     current_derivative: Array = 0.0,
+    solve_lambda: bool = False,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
 ) -> MirrorSolveResult:
@@ -590,6 +747,7 @@ def solve_anisotropic_fixed_boundary_cli(
         axial_flux_derivative=axial_flux_derivative,
         current_derivative=current_derivative,
         pressure_closure=closure,
+        solve_lambda=solve_lambda,
         gradient_tolerance=gradient_tolerance,
         require_convergence=require_convergence,
     )
