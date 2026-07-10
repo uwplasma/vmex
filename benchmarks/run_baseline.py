@@ -14,7 +14,8 @@ Usage:
 Solvers exercised per case:
 - ``vmec2000``       — /Users/rogerio/local/STELLOPT/VMEC2000/Release/xvmec2000
 - ``vmec_jax_cold``  — fresh ``vmec`` CLI subprocess (includes JAX/XLA setup)
-- ``vmec_jax_warm``  — second in-process solve (compile cache hot)
+- ``vmec_jax_warm``  — second in-process core solve (structural executable
+  cache hot; same ``vmec_jax.core`` route as the CLI)
 - ``vmecpp``         — VMEC++ python API, where the case converges cleanly
 
 Each deck is run twice per applicable solver: as-is (``grid: input``) and,
@@ -142,10 +143,29 @@ def run_vmecjax_cold(deck: Path, aux: list[str], timeout: int) -> dict:
 
 WARM_SNIPPET = r"""
 import json, sys, time, resource
-import vmec_jax as vj
+import numpy as np
+import vmec_jax  # sets the persistent XLA compilation cache dir
+from vmec_jax.core.input import VmecInput
+from vmec_jax.core.multigrid import solve_multigrid
+
+def run(path):
+    # Same route as the ``vmec`` CLI (core/cli.py): fixed-boundary decks run
+    # the full NS_ARRAY ladder; free-boundary decks run the final stage.
+    inp = VmecInput.from_file(path)
+    if bool(getattr(inp, "lfreeb", False)):
+        from vmec_jax.core.freeboundary import solve_free_boundary
+        from vmec_jax.core.solver import resolution_from_input
+
+        ns = int(np.atleast_1d(np.asarray(inp.ns_array))[-1])
+        return solve_free_boundary(
+            inp, resolution=resolution_from_input(inp, ns=ns),
+            error_on_no_convergence=False,
+        )
+    return solve_multigrid(inp)
+
 path = sys.argv[1]
-t0 = time.time(); vj.run_fixed_boundary(path); t1 = time.time()
-t2 = time.time(); vj.run_fixed_boundary(path); t3 = time.time()
+t0 = time.time(); run(path); t1 = time.time()
+t2 = time.time(); run(path); t3 = time.time()
 rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
 print(json.dumps({"cold_inproc_s": round(t1-t0,3), "warm_s": round(t3-t2,3),
                   "peak_rss_mb": round(rss,1)}))
