@@ -888,8 +888,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       exterior limit from above while the finite-wall Neumann variant approaches from below; their
       gap decreases `0.01836,0.00794,0.00490,0.00356 T` as outer radius moves
       `0.50,0.65,0.75,0.82 m`. This is quantified truncation uncertainty, not yet an
-      outer-boundary-independent claim. A Dirichlet-to-Neumann/boundary-integral exterior operator,
-      mgrid parity, and nonaxisymmetric coils remain.
+      outer-boundary-independent claim. The merged clean-core `MgridField` now uses the same moving-
+      annulus external-field adapter as direct coils; uniform-table conversion is exact and a
+      33-by-65 two-coil mgrid agrees with direct Biot-Savart below `5e-3` relative RMS on the
+      annulus. End-to-end free-boundary mgrid parity, a Dirichlet-to-Neumann/boundary-integral
+      exterior operator, and nonaxisymmetric coils remain.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior
       state jointly, with beta continuation `0, 0.01, 0.03, 0.10` and hot restarts. Validate
       isotropic and anisotropic cases against an independently generated Pleiades/WHAM-style

@@ -15,7 +15,7 @@ The branch currently includes:
 * isotropic and ANIMEC-style anisotropic pressure energies and independent
   tensor-force diagnostics,
 * a variational scalar-potential vacuum annulus with direct JAX Biot-Savart
-  coils,
+  coils or the shared ESSOS/MAKEGRID-compatible ``MgridField``,
 * coupled axisymmetric isotropic free-boundary beta continuation, and
 * component-wise nonlinear convergence checks at a requested ``ftol=1e-12``.
 

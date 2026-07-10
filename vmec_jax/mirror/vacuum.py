@@ -316,12 +316,29 @@ def evaluate_vacuum_field(
     )
 
 
-def external_field_from_coils(coilset: Any, geometry: VacuumGeometry) -> Array:
-    """Evaluate the differentiable clean-core Biot-Savart field on the annulus."""
+def external_field_from_source(source: Any, geometry: VacuumGeometry) -> Array:
+    """Evaluate a direct-coil or cylindrical mgrid field on the annulus."""
+
+    if hasattr(source, "b_cyl"):
+        x, y, z = jnp.moveaxis(geometry.xyz, -1, 0)
+        radius = jnp.sqrt(x**2 + y**2)
+        phi = jnp.arctan2(y, x)
+        b_r, b_phi, b_z = source.b_cyl(radius, phi, z)
+        cosine, sine = jnp.cos(phi), jnp.sin(phi)
+        return jnp.stack(
+            (b_r * cosine - b_phi * sine, b_r * sine + b_phi * cosine, b_z),
+            axis=-1,
+        )
 
     from vmec_jax.core.coils import biot_savart
 
-    return biot_savart(coilset, geometry.xyz)
+    return biot_savart(source, geometry.xyz)
+
+
+def external_field_from_coils(coilset: Any, geometry: VacuumGeometry) -> Array:
+    """Backward-compatible direct-coil external-field adapter."""
+
+    return external_field_from_source(coilset, geometry)
 
 
 def _external_flux_boundary_functional(
@@ -634,7 +651,7 @@ def solve_axisymmetric_free_boundary_cli(
         vacuum_geometry = evaluate_vacuum_geometry(
             boundary, vacuum_grid, outer_radius=outer_radius
         )
-        external = external_field_from_coils(coilset, vacuum_geometry)
+        external = external_field_from_source(coilset, vacuum_geometry)
         vacuum_functional = vacuum_energy_functional(
             potential,
             vacuum_geometry,
@@ -739,7 +756,7 @@ def solve_axisymmetric_free_boundary_cli(
     vacuum_geometry = evaluate_vacuum_geometry(
         boundary, vacuum_grid, outer_radius=outer_radius
     )
-    external = external_field_from_coils(coilset, vacuum_geometry)
+    external = external_field_from_source(coilset, vacuum_geometry)
     vacuum_field = evaluate_vacuum_field(
         potential, vacuum_geometry, vacuum_grid, external
     )

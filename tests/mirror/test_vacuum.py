@@ -20,6 +20,7 @@ from vmec_jax.mirror import (  # noqa: E402
     evaluate_vacuum_field,
     evaluate_vacuum_geometry,
     external_field_from_coils,
+    external_field_from_source,
     mass_profile_from_pressure,
     mirror_energy,
     solve_axisymmetric_free_boundary_cli,
@@ -29,7 +30,8 @@ from vmec_jax.mirror import (  # noqa: E402
     vacuum_energy_functional,
     vacuum_laplacian,
 )
-from vmec_jax.core.coils import CoilSet, two_coil_on_axis_bz  # noqa: E402
+from vmec_jax.core.coils import CoilSet, to_mgrid_data, two_coil_on_axis_bz  # noqa: E402
+from vmec_jax.core.mgrid import MgridData, MgridField  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -87,6 +89,60 @@ def test_cylindrical_annulus_has_exact_volume_metric_and_normal() -> None:
     expected_normal = np.broadcast_to(expected_normal, geometry.inner_normal_xyz.shape)
     np.testing.assert_allclose(geometry.inner_normal_xyz, expected_normal, atol=2.0e-14)
     assert bool(geometry.valid)
+
+
+def test_mgrid_external_field_is_converted_to_cartesian_on_annulus() -> None:
+    _, grid = _grid(ns=5, nxi=7)
+    geometry = evaluate_vacuum_geometry(
+        MirrorBoundary.from_radius(0.3, grid), grid, outer_radius=0.7
+    )
+    shape = (1, 4, 5, 6)
+    data = MgridData(
+        rmin=0.0,
+        rmax=1.0,
+        zmin=-1.5,
+        zmax=1.5,
+        ir=6,
+        jz=5,
+        kp=4,
+        nfp=1,
+        nextcur=1,
+        mgrid_mode="S",
+        coil_groups=("uniform",),
+        raw_coil_cur=(1.0,),
+        br=np.full(shape, 0.2),
+        bp=np.full(shape, 0.3),
+        bz=np.full(shape, 0.4),
+    )
+    source = MgridField.from_mgrid_data(data, extcur=jnp.asarray([2.0]))
+    actual = external_field_from_source(source, geometry)
+    phi = jnp.arctan2(geometry.xyz[..., 1], geometry.xyz[..., 0])
+    expected = jnp.stack(
+        (
+            0.4 * jnp.cos(phi) - 0.6 * jnp.sin(phi),
+            0.4 * jnp.sin(phi) + 0.6 * jnp.cos(phi),
+            jnp.full_like(phi, 0.8),
+        ),
+        axis=-1,
+    )
+    np.testing.assert_allclose(actual, expected, rtol=2.0e-14, atol=2.0e-14)
+
+
+def test_two_coil_mgrid_matches_direct_field_on_mirror_annulus() -> None:
+    _, grid = _grid(ns=5, nxi=9)
+    geometry = evaluate_vacuum_geometry(
+        MirrorBoundary.from_radius(0.3, grid), grid, outer_radius=0.7
+    )
+    coils = _two_end_coils()
+    data = to_mgrid_data(
+        coils, 0.0, 0.8, -1.3, 1.3, ir=33, jz=65, kp=4, mgrid_mode="S"
+    )
+    mgrid = MgridField.from_mgrid_data(data)
+    direct = external_field_from_coils(coils, geometry)
+    interpolated = external_field_from_source(mgrid, geometry)
+    relative_rms = jnp.linalg.norm(interpolated - direct) / jnp.linalg.norm(direct)
+
+    assert float(relative_rms) < 5.0e-3
 
 
 def test_linear_harmonic_potentials_have_zero_laplacian_and_exact_gradient() -> None:
