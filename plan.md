@@ -729,7 +729,7 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       square system; it does not vary the Neumann vacuum functional as a shape energy. Direct
       two-coil solves at beta `0,1%,3%,10%` all reach `<3.6e-15` residual and `<1.7e-15` active
       stress error. Solved center radii increase monotonically
-      `0.253176,0.253443,0.253979,0.255863`. Resolution/initial-boundary independence,
+      `0.253176,0.253437,0.253958,0.255779`. Resolution/initial-boundary independence,
       diamagnetic-field/reference parity, anisotropy, and hot state/potential restarts remain.
    8. **M7 — nonaxisymmetric finite-beta free boundary.** Add helical coils/boundaries, then require
       3D force, interface, field-line, and resolution gates. This lane is supported only after M6;
