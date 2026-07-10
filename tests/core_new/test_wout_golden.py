@@ -1,11 +1,13 @@
 """Golden-file validation of the complete ``vmec_jax.core.wout`` writer.
 
-For each reference deck, converge the equilibrium with the legacy driver at
-the deck's own settings, build the full VMEC2000-compatible dataset with
-:func:`vmec_jax.core.wout.wout_from_state` (via :func:`wout_from_run`),
-write it with :func:`write_wout`, and compare EVERY variable that also
-exists in the golden VMEC2000 ``wout_*.nc`` (fresh VMEC2000 runs stored in
-``~/vmec_jax_notes/golden``).
+For each reference deck, converge the equilibrium with the core multigrid
+solver (:func:`vmec_jax.core.multigrid.solve_multigrid`) at the deck's own
+settings, build the full VMEC2000-compatible dataset with
+:func:`vmec_jax.core.wout.wout_from_state`, write it with
+:func:`write_wout`, and compare EVERY variable that also exists in the
+golden VMEC2000 ``wout_*.nc`` (fresh VMEC2000 runs stored in
+``~/vmec_jax_notes/golden``).  This drives the same pure-core pipeline as
+the ``vmec`` CLI (no legacy modules anywhere in the loop).
 
 Comparison policy per variable class:
 
@@ -39,7 +41,7 @@ jax.config.update("jax_enable_x64", True)
 from vmec_jax.core.wout import (  # noqa: E402
     WoutData,
     read_wout,
-    wout_from_run,
+    wout_from_state,
     write_wout,
 )
 
@@ -225,7 +227,7 @@ _RUN_CACHE: dict[str, tuple[Path, Path]] = {}
 
 @pytest.fixture(scope="module", params=CASES, ids=CASES)
 def case(request, tmp_path_factory):
-    """Converge one deck with the legacy driver and write the new wout."""
+    """Converge one deck with the core solver and write the new wout."""
     name = request.param
     golden = GOLDEN_DIR / name / f"wout_{name}.nc"
     deck = DATA_DIR / f"input.{name}"
@@ -237,10 +239,29 @@ def case(request, tmp_path_factory):
         # conftest disables JIT for unit tests; full solves need it.
         jax.config.update("jax_disable_jit", False)
         os.environ.setdefault("VMEC_JAX_TOMNSPS_FFT", "0")
-        from vmec_jax.driver import run_fixed_boundary
+        from vmec_jax.core.input import VmecInput
+        from vmec_jax.core.multigrid import solve_multigrid
 
-        run = run_fixed_boundary(str(deck), solver_mode="parity", verbose=False)
-        wout = wout_from_run(run, input_extension=name)
+        inp = VmecInput.from_file(deck)
+        # raise_on_max_iterations=False: the up_down deck exhausts NITER
+        # before FTOL — exactly like the golden VMEC2000 run, which simply
+        # wrote its last (NITER-exhausted) state to the wout file.
+        result = solve_multigrid(inp, verbose=False,
+                                 raise_on_max_iterations=False)
+        # fsqt history (wrout.f nstore_seq subsampling of fsqr + fsqz).
+        history = np.asarray(result.fsq_history, dtype=float)
+        fsqt = None
+        if history.size:
+            total = history[:, 0] + history[:, 1]
+            stride = total.size // 100 + 1
+            fsqt = total[stride - 1 :: stride][:100]
+        wout = wout_from_state(
+            inp=inp, state=result.state,
+            fsqr=float(result.fsqr), fsqz=float(result.fsqz),
+            fsql=float(result.fsql), fsqt=fsqt,
+            niter=int(result.iterations), converged=bool(result.converged),
+            input_extension=name,
+        )
         out = tmp_path_factory.mktemp(name) / f"wout_{name}.nc"
         write_wout(out, wout)
         _RUN_CACHE[name] = (out, golden)

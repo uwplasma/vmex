@@ -21,12 +21,12 @@ dtypes and unit conventions of the reference implementation:
 values found in the netCDF file), so ``read_wout(write_wout(x)) == x``.
 
 :func:`wout_from_state` builds the complete dataset from a converged
-fixed-boundary spectral state.  The parity-proven Nyquist/jxbforce/Mercier
-post-processing engine from :mod:`vmec_jax.io.wout_files` (ports of
-``wrout.f``/``jxbforce.f``/``mercier.f``/``bss.f``) supplies the core
-tables; the remaining VMEC2000 output quantities (``eqfor.f``/
-``spectrum.f``/``Compute_Currents`` et al.) come from
-:mod:`vmec_jax.core.postprocess`.
+fixed-boundary core state (:class:`vmec_jax.core.input.VmecInput` +
+:class:`vmec_jax.core.solver.SpectralState`), legacy-free: the
+Nyquist/jxbforce/Mercier tables come from the ``wrout.f``/``bss.f``/
+``jxbforce.f``/``mercier.f`` ports in :mod:`vmec_jax.core.nyquist`, the
+remaining VMEC2000 output quantities (``eqfor.f``/``spectrum.f``/
+``Compute_Currents`` et al.) from :mod:`vmec_jax.core.postprocess`.
 """
 
 from __future__ import annotations
@@ -506,41 +506,29 @@ def read_wout(path: str | Path) -> WoutData:
 # wout construction from a solved fixed-boundary state
 # ==========================================================================
 
-def _preset_array(indata, key: str, size: int = _PRESET, fill: float = 0.0) -> np.ndarray:
-    """Fixed-width profile array from a namelist entry (wrout.f preset dims)."""
-    raw = indata.get(key, None) if hasattr(indata, "get") else None
+def _preset_array(values, size: int = _PRESET, fill: float = 0.0) -> np.ndarray:
+    """Fixed-width profile array from an input entry (wrout.f preset dims)."""
     out = np.full((size,), float(fill), dtype=float)
-    if raw is None:
+    if values is None:
         return out
-    vals = np.atleast_1d(np.asarray(raw, dtype=float)).ravel()
+    vals = np.atleast_1d(np.asarray(values, dtype=float)).ravel()
     n = min(int(vals.size), size)
     out[:n] = vals[:n]
     return out
 
 
-def _indata_str(indata, key: str, default: str) -> str:
-    """Namelist string with surrounding quotes/blanks stripped."""
-    raw = indata.get(key, None) if hasattr(indata, "get") else None
-    if raw is None:
-        return default
-    return str(raw).strip().strip("'\"").strip() or default
-
-
-def _ftolv_from_indata(indata, *, ns: int) -> float:
+def _ftolv_from_input(inp) -> float:
     """``ftol_array(MAXLOC(ns_array))`` exactly as wrout.f evaluates ftolv."""
-    ns_arr = np.atleast_1d(np.asarray(indata.get("NS_ARRAY", [ns]), dtype=float))
-    ftol_arr = np.atleast_1d(np.asarray(
-        indata.get("FTOL_ARRAY", [indata.get_float("FTOL", 1.0e-10)]), dtype=float))
+    ns_arr = np.atleast_1d(np.asarray(inp.ns_array, dtype=float))
+    ftol_arr = np.atleast_1d(np.asarray(inp.ftol_array, dtype=float))
     idx = int(np.argmax(ns_arr))
     return float(ftol_arr[min(idx, ftol_arr.size - 1)])
 
 
 def wout_from_state(
     *,
+    inp,
     state,
-    static,
-    indata,
-    signgs: int,
     fsqr: float,
     fsqz: float,
     fsql: float,
@@ -551,19 +539,18 @@ def wout_from_state(
     converged: bool = True,
     input_extension: str = "",
     version: float = 9.0,
-    path: str | Path = "wout_vmec_jax.nc",
-    flux_override=None,
-    profiles_override=None,
-    force_payload_override=None,
-    fast_bcovar: bool = False,
 ) -> WoutData:
     """Build a complete :class:`WoutData` from a solved fixed-boundary state.
 
-    ``state``/``static``/``indata``/``signgs`` are the solved-run objects
-    (as returned by the driver).  The parity-proven wout engine in
-    :mod:`vmec_jax.io.wout_files` supplies the geometry/Nyquist/Mercier
-    tables; this function adds every remaining VMEC2000 ``wrout.f``
-    variable via :mod:`vmec_jax.core.postprocess` and the input deck.
+    ``inp`` is the parsed :class:`vmec_jax.core.input.VmecInput` deck and
+    ``state`` the converged :class:`vmec_jax.core.solver.SpectralState`
+    (internal normalization, m = 1-constrained, odd-m without ``scalxc``) —
+    the exact representation the core solver evolves.  The geometry/field
+    state is re-evaluated on the Nyquist-extended internal grid with the core
+    pipeline (:mod:`~vmec_jax.core.geometry` / :mod:`~vmec_jax.core.fields`),
+    the Nyquist/jxbforce/Mercier tables come from
+    :mod:`vmec_jax.core.nyquist`, and every remaining VMEC2000 ``wrout.f``
+    variable from :mod:`vmec_jax.core.postprocess` and the input deck.
 
     Unlike VMEC2000 (which zeroes the late ``eqfor.f`` scalars when the run
     hits NITER), all derived quantities are always computed - vmec_jax's
@@ -571,78 +558,157 @@ def wout_from_state(
     records convergence in ``ier_flag`` (0 = converged, 2 = more iterations
     needed, matching vmec_params.f).
     """
-    import os
+    import jax
 
-    from ..wout import wout_minimal_from_fixed_boundary
+    from . import nyquist as _nyq
+    from .fields import energies_and_force_norms, magnetic_fields, metric_elements
+    from .fourier import Resolution, mode_table, trig_tables
+    from .geometry import (
+        apply_lambda_axis_closure,
+        half_mesh_jacobian,
+        real_space_geometry,
+    )
+    from .residuals import m1_constrained_to_physical
+    from .setup import boundary_from_input, flux_profiles, radial_grids
+    from .solver import resolution_from_input
+    from .transforms import physical_to_internal_scale
 
-    # The legacy engine reads its bcovar lane from the environment; force the
-    # parity-faithful (slow) lane so bsubsmns/jxbforce outputs match wrout.f.
-    prev_fast = os.environ.get("VMEC_JAX_WOUT_FAST_BCOVAR")
-    os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = "1" if fast_bcovar else "0"
-    try:
-        legacy = wout_minimal_from_fixed_boundary(
-            path=path,
-            state=state,
-            static=static,
-            indata=indata,
-            signgs=int(signgs),
-            fsqr=float(fsqr),
-            fsqz=float(fsqz),
-            fsql=float(fsql),
-            fsqt=fsqt,
-            converged=bool(converged),
-            flux_override=flux_override,
-            profiles_override=profiles_override,
-            force_payload_override=force_payload_override,
-        )
-    finally:
-        if prev_fast is None:
-            os.environ.pop("VMEC_JAX_WOUT_FAST_BCOVAR", None)
-        else:
-            os.environ["VMEC_JAX_WOUT_FAST_BCOVAR"] = prev_fast
+    # -- resolution / static tables (Nyquist-extended trig) ----------------
+    ns = int(np.shape(state.R_cos)[0])
+    res = resolution_from_input(inp, ns=ns)
+    mpol, ntor, nfp, lasym = int(res.mpol), int(res.ntor), int(res.nfp), bool(res.lasym)
+    ntheta, nzeta = int(res.ntheta), int(res.nzeta)
+    modes = mode_table(mpol, ntor)
+    mnyq_grid = max(res.ntheta1 // 2, mpol - 1)
+    nnyq_grid = max(nzeta // 2, ntor)
+    trig = trig_tables(Resolution(mpol=mnyq_grid + 1, ntor=nnyq_grid, ntheta=ntheta,
+                                  nzeta=nzeta, nfp=nfp, lasym=lasym, ns=ns))
+    grids = radial_grids(ns)
+    s = np.asarray(grids.s_full, dtype=float)
+    gamma = float(inp.gamma)
+    ncurr = int(inp.ncurr)
 
-    ns = int(legacy.ns)
-    nfp = int(legacy.nfp)
-    lasym = bool(legacy.lasym)
-    cfg = static.cfg
-    ntheta = int(getattr(cfg, "ntheta", 0)) or (2 * int(legacy.mpol) + 6)
-    nzeta = int(getattr(cfg, "nzeta", 0)) or 1
-    gamma = float(indata.get_float("GAMMA", 0.0))
+    # -- profil1d.f profiles / readin.f boundary metadata -------------------
+    boundary = boundary_from_input(inp, modes=modes, trig=trig, lconm1=True)
+    signgs = int(boundary.signgs)
+    prof = flux_profiles(inp, grids, r00=boundary.r00, signgs=signgs,
+                         lflip=boundary.lflip)
 
-    pres_pa = np.asarray(legacy.pres, dtype=float) / MU0
-    presf_pa = np.asarray(legacy.presf, dtype=float) / MU0
-    pres_pa[0] = 0.0
-    vp = np.asarray(legacy.vp, dtype=float).copy()
+    # -- geometry + half-mesh field state (totzsps/jacobian/bcovar) ---------
+    R_cos_p, Z_sin_p, R_sin_p, Z_cos_p = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=modes, lthreed=bool(res.lthreed), lasym=lasym, lconm1=True,
+    )
+    lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=modes, ntor=ntor)
+    geometry = real_space_geometry(
+        R_cos=R_cos_p, R_sin=R_sin_p, Z_cos=Z_cos_p, Z_sin=Z_sin_p,
+        lambda_cos=state.L_cos, lambda_sin=lambda_sin,
+        modes=modes, trig=trig, s=grids.s_full,
+    )
+    jacobian = half_mesh_jacobian(geometry, s=grids.s_full)
+    metrics = metric_elements(geometry, s=grids.s_full)
+    fields = magnetic_fields(
+        geometry=geometry, jacobian=jacobian, metrics=metrics, trig=trig,
+        s=grids.s_full, phips=prof["phips"], phipf=prof["phipf"],
+        chips=prof["chips"], signgs=signgs, gamma=gamma, mass=prof["mass"],
+        ncurr=ncurr, enclosed_current=prof["icurv"],
+    )
+    norms = energies_and_force_norms(
+        jacobian=jacobian, metrics=metrics, fields=fields, trig=trig,
+        s=grids.s_full, signgs=signgs,
+    )
+    (geometry, jacobian, metrics, fields, norms, R_cos_p, Z_sin_p, R_sin_p,
+     Z_cos_p) = jax.device_get(
+        (geometry, jacobian, metrics, fields, norms, R_cos_p, Z_sin_p,
+         R_sin_p, Z_cos_p))
+
+    # -- 1D profiles in file conventions ------------------------------------
+    vp = np.asarray(norms.vp, dtype=float).copy()
     vp[0] = 0.0
-    iotas = np.asarray(legacy.iotas, dtype=float).copy()
-    iotas[0] = 0.0
-    phips = np.asarray(legacy.phips, dtype=float).copy()
+    wb = float(np.asarray(norms.wb))
+    wp = float(np.asarray(norms.wp))
+    pres_int = np.asarray(fields.pressure, dtype=float).copy()
+    pres_int[0] = 0.0
+    pres_pa = pres_int / MU0
+    presf_pa = _pp.full_mesh_from_half(pres_int) / MU0
+    phips = np.asarray(prof["phips"], dtype=float).copy()
     phips[0] = 0.0
-    phipf_out = np.asarray(legacy.phipf, dtype=float)
-    chipf_out = np.asarray(legacy.chipf, dtype=float)
+    phipf_int = np.asarray(prof["phipf"], dtype=float)
+    if ncurr == 1:
+        # add_fluxes.f90: the current-constrained chips defines iota/chipf.
+        chips = np.asarray(fields.chips, dtype=float)
+        iotas = np.divide(chips, phips, out=np.zeros_like(chips), where=phips != 0.0)
+        chipf_int = _pp.chipf_from_chips(chips)
+    else:
+        iotas = np.asarray(prof["iotas"], dtype=float).copy()
+        chipf_int = np.asarray(prof["chipf"], dtype=float)
+    iotas[0] = 0.0
+    iotaf = _pp.iotaf_from_iotas(iotas)
+    two_pi_sg = 2.0 * np.pi * float(signgs)
+    phipf_out = two_pi_sg * phipf_int
+    chipf_out = two_pi_sg * chipf_int
+    phi = _pp.toroidal_flux_profile(phipf_out=phipf_out, s=s)
 
-    a = {"rmns": None, "zmnc": None}
+    # -- main-mode coefficient tables (wout normalization) -------------------
+    mode_scale = 1.0 / physical_to_internal_scale(modes, trig)
+    rmnc = np.asarray(R_cos_p, dtype=float) * mode_scale[None, :]
+    zmns = np.asarray(Z_sin_p, dtype=float) * mode_scale[None, :]
+    rmns = np.asarray(R_sin_p, dtype=float) * mode_scale[None, :] if lasym else None
+    zmnc = np.asarray(Z_cos_p, dtype=float) * mode_scale[None, :] if lasym else None
+    lamscale = float(np.asarray(fields.lamscale))
+    lmns = _pp.lambda_wout_from_full_mesh(
+        lam_full=np.asarray(state.L_sin, dtype=float) * mode_scale[None, :],
+        m_modes=np.asarray(modes.m, dtype=int), s=s,
+        phipf_internal=phipf_int, lamscale=lamscale)
+    lmnc = None
     if lasym:
-        a = {k: np.asarray(getattr(legacy, k), dtype=float) for k in a}
+        lmnc = _pp.lambda_wout_from_full_mesh(
+            lam_full=np.asarray(state.L_cos, dtype=float) * mode_scale[None, :],
+            m_modes=np.asarray(modes.m, dtype=int), s=s,
+            phipf_internal=phipf_int, lamscale=lamscale)
+    xm = np.asarray(modes.m, dtype=float)
+    xn = np.asarray(modes.n, dtype=float) * float(nfp)
+    n_axis = ntor + 1  # mode ordering: the first ntor+1 modes are (m=0, n>=0)
+    raxis_cc = rmnc[0, :n_axis].copy()
+    zaxis_cs = zmns[0, :n_axis].copy()
+    raxis_cs = rmns[0, :n_axis].copy() if lasym else None
+    zaxis_cc = zmnc[0, :n_axis].copy() if lasym else None
+
+    # -- eqfor.f / aspectratio.f scalars -------------------------------------
+    sqrts_edge = np.asarray(grids.sqrts, dtype=float)[-1]
+    r_boundary = np.asarray(geometry.R_even, dtype=float)[-1] + sqrts_edge * np.asarray(
+        geometry.R_odd, dtype=float)[-1]
+    zu_boundary = np.asarray(geometry.dZ_dtheta_even, dtype=float)[-1] + sqrts_edge * np.asarray(
+        geometry.dZ_dtheta_odd, dtype=float)[-1]
+    aminor_p, rmajor_p, aspect, volume_p = _pp.aspect_ratio_scalars(
+        r_boundary=r_boundary, zu_boundary=zu_boundary, wint=trig.wint)
+    betapol, betator, betatotal = _pp.eqfor_beta_scalars(
+        pres=pres_int, vp=vp, bsq=fields.total_pressure, r12=jacobian.r12,
+        bsupv=fields.bsupv, sqrtg=jacobian.sqrt_g, wint=trig.wint, signgs=signgs)
+
+    # -- Nyquist tables + jxbforce/Mercier profiles (wrout.f/bss.f ports) ----
+    tabs = _nyq.wout_field_tables(
+        geometry=geometry, jacobian=jacobian, metrics=metrics, fields=fields,
+        trig=trig, s=s, mpol=mpol, ntor=ntor, nfp=nfp, lasym=lasym,
+        vp=vp, phips=phips, iotas=iotas, phipf=phipf_int, signgs=signgs)
 
     # -- official VMEC2000 Nyquist mode set (grid Nyquist, fixaray.f) ------
     # VMEC2000 sizes the Nyquist table from the *grid* (mnyq = ntheta1/2,
     # nnyq = nzeta/2 with the deck's NZETA), even when ntor = 0. The solver
     # may have run with a reduced toroidal grid; expand the tables (the
     # extra toroidal harmonics vanish identically for such runs).
-    xm_nyq = np.asarray(legacy.xm_nyq, dtype=float)
-    xn_nyq = np.asarray(legacy.xn_nyq, dtype=float)
-    nyq = {name: np.asarray(getattr(legacy, name), dtype=float)
+    xm_nyq = np.asarray(tabs.xm_nyq, dtype=float)
+    xn_nyq = np.asarray(tabs.xn_nyq, dtype=float)
+    nyq = {name: np.asarray(getattr(tabs, name), dtype=float)
            for name in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsubsmns",
                         "bsupumnc", "bsupvmnc")}
-    nyq_a = {name: None for name in ("gmns", "bmns", "bsubumns", "bsubvmns",
-                                     "bsubsmnc", "bsupumns", "bsupvmns")}
-    if lasym:
-        nyq_a = {k: np.asarray(getattr(legacy, k), dtype=float) for k in nyq_a}
-    nzeta_vmec = int(indata.get_int("NZETA", 0)) or (1 if int(legacy.ntor) == 0 else nzeta)
+    nyq_a = {name: (np.asarray(getattr(tabs, name), dtype=float) if lasym else None)
+             for name in ("gmns", "bmns", "bsubumns", "bsubvmns",
+                          "bsubsmnc", "bsupumns", "bsupvmns")}
+    nzeta_vmec = int(inp.nzeta) or (1 if ntor == 0 else nzeta)
     nnyq_target = int(nzeta_vmec) // 2
-    nnyq_legacy = int(np.max(xn_nyq)) // nfp if xn_nyq.size else 0
-    if nnyq_target != nnyq_legacy:
+    nnyq_have = int(np.max(xn_nyq)) // nfp if xn_nyq.size else 0
+    if nnyq_target != nnyq_have:
         mnyq = int(np.max(xm_nyq)) if xm_nyq.size else 0
         xm_new, xn_new = _pp.nyquist_mode_table(mnyq=mnyq, nnyq=nnyq_target, nfp=nfp)
         for name, tab in nyq.items():
@@ -652,19 +718,18 @@ def wout_from_state(
                 nyq_a[name] = _pp.expand_mode_columns(tab, xm_nyq, xn_nyq, xm_new, xn_new)
         xm_nyq, xn_nyq = xm_new, xn_new
 
-    # -- fbal.f/bcovar.f: current averages recomputed from the proven
-    #    bsub[uv]mnc tables (also fixes the legacy lasym wint normalization)
+    # -- fbal.f/bcovar.f: current averages from the bsub[uv]mnc tables ------
     buco, bvco, jcuru, jcurv, equif, ctor = _pp.force_balance(
         bsubumnc=nyq["bsubumnc"], bsubvmnc=nyq["bsubvmnc"],
         xm_nyq=xm_nyq, xn_nyq=xn_nyq,
         phipf=phipf_out, chipf=chipf_out, pres=pres_pa, vp=vp,
-        signgs=int(signgs))
+        signgs=signgs)
 
-    # jxbforce.f jdotb: the legacy lasym lane misses VMEC2000's 2013 output
+    # jxbforce.f jdotb: the ported lasym lane predates VMEC2000's 2013 output
     # integration-norm change (four factor-2 normalizations: wint doubling
     # plus the (u,v) current pair on both J and B legs); measured exactly 16
     # against golden VMEC2000 lasym output. Symmetric runs are unaffected.
-    jdotb = np.asarray(legacy.jdotb, dtype=float)
+    jdotb = np.asarray(tabs.jdotb, dtype=float)
     if lasym:
         jdotb = 16.0 * jdotb
 
@@ -674,30 +739,29 @@ def wout_from_state(
         bsubvmnc=nyq["bsubvmnc"], xm_nyq=xm_nyq, xn_nyq=xn_nyq,
         bsubsmnc=nyq_a["bsubsmnc"], bsubumns=nyq_a["bsubumns"],
         bsubvmns=nyq_a["bsubvmns"], lasym=lasym)
-    specw = _pp.spectral_width(rmnc=legacy.rmnc, zmns=legacy.zmns,
-                               xm=legacy.xm, xn=legacy.xn,
-                               rmns=a["rmns"], zmnc=a["zmnc"])
+    specw = _pp.spectral_width(rmnc=rmnc, zmns=zmns, xm=xm, xn=xn,
+                               rmns=rmns, zmnc=zmnc)
     chi = _pp.poloidal_flux(phips=phips, iotas=iotas)
-    q_factor = _pp.safety_factor(legacy.iotaf)
+    q_factor = _pp.safety_factor(iotaf)
     mass = _pp.mass_profile(pres=pres_pa, vp=vp, gamma=gamma)
     beta_vol, betaxis, over_r = _pp.beta_volume_profiles(
         bmnc=nyq["bmnc"], gmnc=nyq["gmnc"], xm_nyq=xm_nyq,
-        xn_nyq=xn_nyq, pres=pres_pa, vp=vp, signgs=int(signgs),
-        rmnc=legacy.rmnc, xm=legacy.xm, xn=legacy.xn, ntheta=ntheta,
+        xn_nyq=xn_nyq, pres=pres_pa, vp=vp, signgs=signgs,
+        rmnc=rmnc, xm=xm, xn=xn, ntheta=ntheta,
         nzeta=nzeta, nfp=nfp, lasym=lasym,
-        bmns=nyq_a["bmns"], gmns=nyq_a["gmns"], rmns=a["rmns"])
+        bmns=nyq_a["bmns"], gmns=nyq_a["gmns"], rmns=rmns)
     rmax_surf, rmin_surf, zmax_surf = _pp.surface_extrema(
-        rmnc=legacy.rmnc, zmns=legacy.zmns, xm=legacy.xm, xn=legacy.xn,
+        rmnc=rmnc, zmns=zmns, xm=xm, xn=xn,
         ntheta=ntheta, nzeta=nzeta, nfp=nfp, lasym=lasym,
-        rmns=a["rmns"], zmnc=a["zmnc"])
+        rmns=rmns, zmnc=zmnc)
     rbtor0, rbtor, b0, volavgb, ion_larmor = _pp.field_scalars(
-        bvco=bvco, raxis_cc=legacy.raxis_cc, wb=float(legacy.wb),
-        volume_p=float(legacy.volume_p))
+        bvco=bvco, raxis_cc=raxis_cc, wb=wb, volume_p=volume_p)
 
     # -- histories --------------------------------------------------------
     fsqt_out = np.zeros((_NSTORE,), dtype=float)
-    src = np.asarray(legacy.fsqt, dtype=float).ravel()
-    fsqt_out[: min(src.size, _NSTORE)] = src[:_NSTORE]
+    if fsqt is not None:
+        src = np.asarray(fsqt, dtype=float).ravel()
+        fsqt_out[: min(src.size, _NSTORE)] = src[:_NSTORE]
     wdot_out = np.zeros((_NSTORE,), dtype=float)
     if wdot is not None:
         w = np.asarray(wdot, dtype=float).ravel()
@@ -708,130 +772,72 @@ def wout_from_state(
     return WoutData(
         version_=float(version),
         input_extension=str(input_extension),
-        mgrid_file=_indata_str(indata, "MGRID_FILE", "NONE"),
-        pcurr_type=_indata_str(indata, "PCURR_TYPE", "power_series"),
-        pmass_type=_indata_str(indata, "PMASS_TYPE", "power_series"),
-        piota_type=_indata_str(indata, "PIOTA_TYPE", "power_series"),
-        wb=float(legacy.wb), wp=float(legacy.wp), gamma=gamma,
+        mgrid_file=str(inp.mgrid_file or "NONE"),
+        pcurr_type=str(inp.pcurr_type), pmass_type=str(inp.pmass_type),
+        piota_type=str(inp.piota_type),
+        wb=wb, wp=wp, gamma=gamma,
         rmax_surf=rmax_surf, rmin_surf=rmin_surf, zmax_surf=zmax_surf,
-        nfp=nfp, ns=ns, mpol=int(legacy.mpol), ntor=int(legacy.ntor),
-        mnmax=int(legacy.mnmax),
+        nfp=nfp, ns=ns, mpol=mpol, ntor=ntor,
+        mnmax=int(modes.mnmax),
         mnyq=int(np.max(xm_nyq)) if xm_nyq.size else 0,
         nnyq=int(np.max(xn_nyq)) // nfp if xn_nyq.size else 0,
         mnmax_nyq=int(xm_nyq.size),
         niter=int(niter), itfsq=int(itfsq),
         lasym=lasym, lrecon=False,
-        lfreeb=bool(indata.get_bool("LFREEB", False)),
-        lmove_axis=bool(indata.get_bool("LMOVE_AXIS", True)),
-        lrfp=bool(indata.get_bool("LRFP", False)),
+        lfreeb=bool(inp.lfreeb),
+        lmove_axis=True,
+        lrfp=False,
         ier_flag=0 if bool(converged) else 2,
-        aspect=float(legacy.aspect), betatotal=float(legacy.betatotal),
-        betapol=float(legacy.betapol), betator=float(legacy.betator),
+        aspect=aspect, betatotal=betatotal,
+        betapol=betapol, betator=betator,
         betaxis=betaxis, b0=b0, rbtor0=rbtor0, rbtor=rbtor,
-        signgs=int(signgs), IonLarmor=ion_larmor, volavgB=volavgb,
-        ctor=ctor, Aminor_p=float(legacy.Aminor_p),
-        Rmajor_p=float(legacy.Rmajor_p), volume_p=float(legacy.volume_p),
-        ftolv=_ftolv_from_indata(indata, ns=ns),
+        signgs=signgs, IonLarmor=ion_larmor, volavgB=volavgb,
+        ctor=ctor, Aminor_p=aminor_p,
+        Rmajor_p=rmajor_p, volume_p=volume_p,
+        ftolv=_ftolv_from_input(inp),
         fsql=float(fsql), fsqr=float(fsqr), fsqz=float(fsqz),
         nextcur=0, extcur=np.zeros((1,), dtype=float), mgrid_mode="",
-        xm=np.asarray(legacy.xm, dtype=float),
-        xn=np.asarray(legacy.xn, dtype=float),
+        xm=xm, xn=xn,
         xm_nyq=np.asarray(xm_nyq, dtype=float),
         xn_nyq=np.asarray(xn_nyq, dtype=float),
-        raxis_cc=np.asarray(legacy.raxis_cc, dtype=float),
-        zaxis_cs=np.asarray(legacy.zaxis_cs, dtype=float),
-        am=_preset_array(indata, "AM"), ac=_preset_array(indata, "AC"),
-        ai=_preset_array(indata, "AI"),
-        am_aux_s=_preset_array(indata, "AM_AUX_S", _NDFMAX, -1.0),
-        am_aux_f=_preset_array(indata, "AM_AUX_F", _NDFMAX, 0.0),
-        ai_aux_s=_preset_array(indata, "AI_AUX_S", _NDFMAX, -1.0),
-        ai_aux_f=_preset_array(indata, "AI_AUX_F", _NDFMAX, 0.0),
-        ac_aux_s=_preset_array(indata, "AC_AUX_S", _NDFMAX, -1.0),
-        ac_aux_f=_preset_array(indata, "AC_AUX_F", _NDFMAX, 0.0),
-        iotaf=np.asarray(legacy.iotaf, dtype=float), q_factor=q_factor,
-        presf=presf_pa, phi=np.asarray(legacy.phi, dtype=float),
-        phipf=np.asarray(legacy.phipf, dtype=float), chi=chi,
-        chipf=np.asarray(legacy.chipf, dtype=float),
+        raxis_cc=raxis_cc, zaxis_cs=zaxis_cs,
+        am=_preset_array(inp.am), ac=_preset_array(inp.ac),
+        ai=_preset_array(inp.ai),
+        am_aux_s=_preset_array(inp.am_aux_s, _NDFMAX, -1.0),
+        am_aux_f=_preset_array(inp.am_aux_f, _NDFMAX, 0.0),
+        ai_aux_s=_preset_array(inp.ai_aux_s, _NDFMAX, -1.0),
+        ai_aux_f=_preset_array(inp.ai_aux_f, _NDFMAX, 0.0),
+        ac_aux_s=_preset_array(inp.ac_aux_s, _NDFMAX, -1.0),
+        ac_aux_f=_preset_array(inp.ac_aux_f, _NDFMAX, 0.0),
+        iotaf=iotaf, q_factor=q_factor,
+        presf=presf_pa, phi=phi,
+        phipf=phipf_out, chi=chi, chipf=chipf_out,
         jcuru=jcuru, jcurv=jcurv,
         iotas=iotas, mass=mass, pres=pres_pa, beta_vol=beta_vol,
         buco=buco, bvco=bvco, vp=vp, specw=specw, phips=phips,
         over_r=over_r, jdotb=jdotb,
-        bdotb=np.asarray(legacy.bdotb, dtype=float),
-        bdotgradv=np.asarray(legacy.bdotgradv, dtype=float),
-        DMerc=np.asarray(legacy.DMerc, dtype=float),
-        DShear=np.asarray(legacy.Dshear, dtype=float),
-        DWell=np.asarray(legacy.Dwell, dtype=float),
-        DCurr=np.asarray(legacy.Dcurr, dtype=float),
-        DGeod=np.asarray(legacy.Dgeod, dtype=float),
+        bdotb=np.asarray(tabs.bdotb, dtype=float),
+        bdotgradv=np.asarray(tabs.bdotgradv, dtype=float),
+        DMerc=np.asarray(tabs.DMerc, dtype=float),
+        DShear=np.asarray(tabs.DShear, dtype=float),
+        DWell=np.asarray(tabs.DWell, dtype=float),
+        DCurr=np.asarray(tabs.DCurr, dtype=float),
+        DGeod=np.asarray(tabs.DGeod, dtype=float),
         equif=equif,
         fsqt=fsqt_out, wdot=wdot_out,
-        rmnc=np.asarray(legacy.rmnc, dtype=float),
-        zmns=np.asarray(legacy.zmns, dtype=float),
-        lmns=np.asarray(legacy.lmns, dtype=float),
+        rmnc=rmnc, zmns=zmns, lmns=lmns,
         gmnc=nyq["gmnc"], bmnc=nyq["bmnc"],
         bsubumnc=nyq["bsubumnc"], bsubvmnc=nyq["bsubvmnc"],
         bsubsmns=nyq["bsubsmns"],
         currumnc=currumnc, currvmnc=currvmnc,
         bsupumnc=nyq["bsupumnc"], bsupvmnc=nyq["bsupvmnc"],
-        raxis_cs=np.asarray(legacy.raxis_cs, dtype=float) if lasym else None,
-        zaxis_cc=np.asarray(legacy.zaxis_cc, dtype=float) if lasym else None,
-        rmns=a["rmns"], zmnc=a["zmnc"],
-        lmnc=np.asarray(legacy.lmnc, dtype=float) if lasym else None,
+        raxis_cs=raxis_cs, zaxis_cc=zaxis_cc,
+        rmns=rmns, zmnc=zmnc, lmnc=lmnc,
         gmns=nyq_a["gmns"], bmns=nyq_a["bmns"],
         bsubumns=nyq_a["bsubumns"], bsubvmns=nyq_a["bsubvmns"],
         bsubsmnc=nyq_a["bsubsmnc"],
         currumns=currumns, currvmns=currvmns,
         bsupumns=nyq_a["bsupumns"], bsupvmns=nyq_a["bsupvmns"],
-    )
-
-
-def wout_from_run(run, *, input_extension: str = "",
-                  path: str | Path = "wout_vmec_jax.nc") -> WoutData:
-    """Convenience wrapper: build :class:`WoutData` from a driver run object.
-
-    Extracts the residual scalars, iteration counts and VMEC-style ``fsqt``
-    history from a ``run_fixed_boundary`` result, then delegates to
-    :func:`wout_from_state`.
-    """
-    res = getattr(run, "result", None)
-    diag = getattr(res, "diagnostics", {}) or {}
-    converged = bool(diag.get("converged", True))
-    niter = int(getattr(res, "n_iter", 0) or 0)
-
-    fsqr = fsqz = fsql = None
-    fsqt = None
-    rh = getattr(res, "fsqr2_history", None)
-    zh = getattr(res, "fsqz2_history", None)
-    lh = getattr(res, "fsql2_history", None)
-    if rh is not None and zh is not None:
-        rh = np.asarray(rh, dtype=float)
-        zh = np.asarray(zh, dtype=float)
-        hist = rh + zh
-        n = int(hist.size)
-        if n:
-            stride = n // _NSTORE + 1
-            fsqt = np.zeros((_NSTORE,), dtype=float)
-            picks = hist[stride - 1::stride][:_NSTORE]
-            fsqt[: picks.size] = picks
-        fsqr = float(rh[-1])
-        fsqz = float(zh[-1])
-    if lh is not None:
-        fsql = float(np.asarray(lh, dtype=float)[-1])
-    if fsqr is None or fsqz is None or fsql is None:
-        from ..drivers.output import residual_scalars_from_state
-
-        fsqr, fsqz, fsql = residual_scalars_from_state(
-            state=run.state, static=run.static, indata=run.indata,
-            signgs=int(run.signgs), use_vmec_synthesis=True)
-
-    return wout_from_state(
-        state=run.state, static=run.static, indata=run.indata,
-        signgs=int(run.signgs), fsqr=fsqr, fsqz=fsqz, fsql=fsql,
-        fsqt=fsqt, niter=niter, converged=converged,
-        input_extension=input_extension, path=path,
-        flux_override=getattr(run, "flux", None),
-        profiles_override=getattr(run, "profiles", None),
-        force_payload_override=getattr(res, "_final_force_payload", None),
     )
 
 

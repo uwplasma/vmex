@@ -146,9 +146,10 @@ from .preconditioner import (
 from .printing import FORCE_ITERATIONS_BANNER, screen_header, screen_line, stage_banner
 from .residuals import (
     ForceResiduals, PreconditionedResiduals, apply_lambda_preconditioner,
-    apply_radial_preconditioner, force_residuals, m1_constrained_to_physical,
-    m1_residue_rotation, m1_zero_condition, preconditioned_residuals,
-    scale_m1_preconditioner_rhs, scalxc_scale_force, zero_m1_z_force,
+    apply_radial_preconditioner, edge_force_condition, force_residuals,
+    m1_constrained_to_physical, m1_residue_rotation, m1_zero_condition,
+    preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
+    zero_m1_z_force,
 )
 from .setup import RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
@@ -353,6 +354,19 @@ class SolverRuntime:
     max_iterations: int; time_step0: float; nstep: int
     jmax: int                           # evolved radial rows (fixed: ns-1)
 
+    # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
+    # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
+    # (jmax = ns is passed by the free-boundary driver), tomnsps keeps the
+    # edge row, and forces.f's `armn(ns) += zu0*rbsq` / `azmn(ns) -= ru0*rbsq`
+    # edge terms are injected with rbsq = (bsqvac + presf_ns)*R(edge)*ohs.
+    # `bsqvac_edge` is the NESTOR 0.5*|B|^2 on the (ntheta3, nzeta) boundary
+    # grid, refreshed by the host driver between iterations (data field: no
+    # retrace).  `presf_ns_scale` is the static funct3d.f edge-pressure
+    # factor pmass(1)/pmass(hs*(ns-1.5)) applied to pres(ns).
+    lfreeb: bool = False
+    bsqvac_edge: Array | None = None
+    presf_ns_scale: Array | None = None
+
     # -- trace-time-static tables, derived from the meta resolution ---------
     @property
     def modes(self) -> ModeTable:
@@ -387,7 +401,7 @@ class SolverRuntime:
 
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0", "ftol", "max_iterations", "time_step0",
-    "nstep", "jmax",
+    "nstep", "jmax", "lfreeb",
 ))
 
 
@@ -645,6 +659,7 @@ def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
 def _evaluate(
     state: SpectralState, cache: PreconditionerCache, iteration: Array,
     iter_last_reset: Array, fsqz_previous: Array, rt: SolverRuntime,
+    fsq_rz_previous: Array | None = None,
 ) -> _EvalResult:
     """One funct3d.f pass (fixed boundary), pure and jit-friendly.
 
@@ -699,7 +714,11 @@ def _evaluate(
         dxdu_even_full=geometry.dR_dtheta_even, dxdu_odd_full=geometry.dR_dtheta_odd,
         x_odd_full=geometry.R_odd, **common,
     )
-    mat_kwargs = dict(delta_s=hs, mpol=res.mpol, ntor=res.ntor, nfp=res.nfp, ns=ns, jmax=None)
+    # jmax follows scalfor.f: ns-1 fixed boundary (rt.jmax default), ns once
+    # the vacuum field is on (free-boundary lane) — activates the
+    # EDGE_PEDESTAL / ZC(0,0) edge stiffening inside scalfor_matrices.
+    mat_kwargs = dict(delta_s=hs, mpol=res.mpol, ntor=res.ntor, nfp=res.nfp, ns=ns,
+                      jmax=int(rt.jmax))
     matrices_R = scalfor_matrices(coefficients_R, stabilize_edge_zc00=False, **mat_kwargs)
     matrices_Z = scalfor_matrices(coefficients_Z, stabilize_edge_zc00=True, **mat_kwargs)
     faclam_new = lamcal(
@@ -729,14 +748,51 @@ def _evaluate(
         modes=rt.modes, trig=rt.trig, s=s, phipf=setup.phipf,
         tcon=cache.tcon, signgs=setup.signgs, rcon0=rt.rcon0, zcon0=rt.zcon0,
     )
-    spectral = spectral_mhd_forces(forces, mpol=res.mpol, ntor=res.ntor, trig=rt.trig, include_edge=False)
+    if rt.lfreeb:
+        # forces.f (ivac >= 1): vacuum-pressure edge force.  funct3d.f builds
+        # rbsq = (bsqvac + presf_ns) * (r1(ns,0) + r1(ns,1)) * ohs with
+        # presf_ns = [pmass(1)/pmass(hs*(ns-1.5))] * pres(ns), then forces.f
+        # adds zu0*rbsq to the even AND odd armn edge rows (and -ru0*rbsq to
+        # azmn).  sqrts(ns) = 1, so even+odd sums are the physical edge row.
+        presf_ns = jnp.asarray(rt.presf_ns_scale) * fields.pressure[-1]
+        gcon_edge = jnp.asarray(rt.bsqvac_edge) + presf_ns
+        r1_edge = geometry.R_even[-1] + geometry.R_odd[-1]
+        rbsq = gcon_edge * r1_edge / hs
+        ru0, zu0 = geometry.theta_derivatives_full(s)
+        forces = replace(
+            forces,
+            force_R_even=jnp.asarray(forces.force_R_even).at[-1].add(zu0[-1] * rbsq),
+            force_R_odd=jnp.asarray(forces.force_R_odd).at[-1].add(zu0[-1] * rbsq),
+            force_Z_even=jnp.asarray(forces.force_Z_even).at[-1].add(-ru0[-1] * rbsq),
+            force_Z_odd=jnp.asarray(forces.force_Z_odd).at[-1].add(-ru0[-1] * rbsq),
+        )
+    spectral = spectral_mhd_forces(
+        forces, mpol=res.mpol, ntor=res.ntor, trig=rt.trig, include_edge=bool(rt.lfreeb)
+    )
 
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
     zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
     released = zero_m1_z_force(rotated, zero_gate)
     scaled = scalxc_scale_force(released, s=s)
-    residuals = force_residuals(scaled, fnorm=cache.fnorm, fnormL=cache.fnormL, r1=energies.r1, include_edge=False)
+    if rt.lfreeb:
+        # residue.f90 medge rule: the edge rows join fsqr/fsqz only when
+        # iter2 - iter1 < 50 and the previous fsqr+fsqz < 1e-6 (traced
+        # condition; both variants are cheap sums).
+        res_int = force_residuals(scaled, fnorm=cache.fnorm, fnormL=cache.fnormL,
+                                  r1=energies.r1, include_edge=False)
+        res_edge = force_residuals(scaled, fnorm=cache.fnorm, fnormL=cache.fnormL,
+                                   r1=energies.r1, include_edge=True)
+        fsq_rz_prev = jnp.asarray(1.0, dtype=s.dtype) if fsq_rz_previous is None \
+            else jnp.asarray(fsq_rz_previous)
+        medge = edge_force_condition(
+            fsq_rz_previous=fsq_rz_prev,
+            iterations_since_restart=iteration - iter_last_reset,
+            free_boundary=True,
+        )
+        residuals = _select(medge, res_edge, res_int)
+    else:
+        residuals = force_residuals(scaled, fnorm=cache.fnorm, fnormL=cache.fnormL, r1=energies.r1, include_edge=False)
     if setup.lthreed or setup.lasym:
         rhs = scale_m1_preconditioner_rhs(
             scaled, coefficients_R=cache.coefficients_R,
@@ -804,7 +860,8 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         running = jnp.logical_not(carry.done)
 
         # ---- funct3d (evolve.f) -------------------------------------------
-        e1 = _evaluate(carry.state, carry.cache, it, carry.iter1, carry.fsqz, rt)
+        e1 = _evaluate(carry.state, carry.cache, it, carry.iter1, carry.fsqz, rt,
+                       carry.fsqr + carry.fsqz)
         jac1 = e1.jacobian_sign_changed
         # On irst=2 funct3d skips residue: the module residuals stay stale.
         fsqr_c = jnp.where(jac1, carry.fsqr, e1.residuals.fsqr)
@@ -849,9 +906,9 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         # Re-evaluate at the restored state (TimeStepControl calls funct3d).
         e2 = lax.cond(
             restart,
-            lambda args: _evaluate(args[0], args[1], it, it, args[2], rt),
+            lambda args: _evaluate(args[0], args[1], it, it, args[2], rt, args[3]),
             lambda args: e1,
-            (state_r, e1.cache, fsqz_c),
+            (state_r, e1.cache, fsqz_c, fsqr_c + fsqz_c),
         )
         reeval_bad = restart & e2.jacobian_sign_changed
 

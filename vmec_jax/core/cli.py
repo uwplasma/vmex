@@ -307,67 +307,11 @@ def _stage_overrides(inp, *, ftol: float | None, max_iter: int | None):
     return ftol_array, niter_array
 
 
-def _legacy_run_objects(inp, input_path: Path, *, ns: int):
-    """Bridge to the legacy (cfg, static, indata) trio the wout engine needs.
-
-    The parity-proven wout post-processing engine consumes the legacy
-    ``VMECStatic``/``InData`` containers; both are pure functions of the deck.
-    JSON decks round-trip through :meth:`VmecInput.to_indata` (exact writer)
-    so the legacy namelist reader sees identical values.  Temporary until the
-    legacy wout engine internals move into the core (plan.md §5, sweep step).
-    """
-    import dataclasses
-    import tempfile
-
-    from ..config import load_config
-    from ..static import build_static
-
-    source = input_path
-    tmp_name = None
-    try:
-        text = input_path.read_text()
-    except Exception:
-        text = ""
-    if input_path.suffix.lower() == ".json" or text.lstrip()[:1] == "{":
-        with tempfile.NamedTemporaryFile(
-            "w", prefix="input.", suffix=".vmec_jax_indata", delete=False
-        ) as handle:
-            tmp_name = handle.name
-        inp.to_indata(tmp_name)
-        source = Path(tmp_name)
-    try:
-        cfg, indata = load_config(source)
-    finally:
-        if tmp_name is not None:
-            Path(tmp_name).unlink(missing_ok=True)
-    if int(cfg.ns) != int(ns):  # final ladder stage (runvmec.f skips decreasing ns)
-        cfg = dataclasses.replace(cfg, ns=int(ns))
-    # The wout engine synthesizes on VMEC's internal ntheta1/2/3 grid.
-    from ..kernels.tomnsp import vmec_angle_grid
-
-    grid = vmec_angle_grid(
-        ntheta=int(cfg.ntheta), nzeta=int(cfg.nzeta),
-        nfp=int(cfg.nfp), lasym=bool(cfg.lasym),
-    )
-    return cfg, build_static(cfg, grid=grid), indata
-
-
 def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path):
     """Build the full VMEC2000-compatible wout dataset and write it."""
     import numpy as np
 
-    from ..state import StateLayout, VMECState
     from .wout import wout_from_state, write_wout
-
-    ns, mnmax = (int(v) for v in np.shape(result.state.R_cos))
-    cfg, static, indata = _legacy_run_objects(inp, input_path, ns=ns)
-    layout = StateLayout(ns=ns, K=mnmax, lasym=bool(cfg.lasym))
-    state = VMECState(
-        layout=layout,
-        Rcos=np.asarray(result.state.R_cos), Rsin=np.asarray(result.state.R_sin),
-        Zcos=np.asarray(result.state.Z_cos), Zsin=np.asarray(result.state.Z_sin),
-        Lcos=np.asarray(result.state.L_cos), Lsin=np.asarray(result.state.L_sin),
-    )
 
     # fsqt history (wrout.f nstore_seq subsampling of fsqr + fsqz).
     history = np.asarray(result.fsq_history, dtype=float)
@@ -378,16 +322,13 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path):
         fsqt = total[stride - 1 :: stride][:100]
 
     wout = wout_from_state(
-        state=state,
-        static=static,
-        indata=indata,
-        signgs=int(indata.get_int("SIGNGS", -1)),
+        inp=inp,
+        state=result.state,
         fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
         fsqt=fsqt,
         niter=int(result.iterations),
         converged=bool(result.converged),
         input_extension=case_from_input(input_path),
-        path=wout_path,
     )
     write_wout(wout_path, wout)
     return wout

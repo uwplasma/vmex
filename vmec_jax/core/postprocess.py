@@ -435,6 +435,164 @@ def force_balance(*, bsubumnc, bsubvmnc, xm_nyq, xn_nyq, phipf, chipf,
     return buco, bvco, jcuru / MU0, jcurv / MU0, equif, float(ctor)
 
 
+def eqfor_beta_scalars(*, pres, vp, bsq, r12, bsupv, sqrtg, wint, signgs):
+    """``eqfor.f`` beta scalars ``(betapol, betator, betatotal)``.
+
+    Inputs are the internal half-mesh field state: ``pres`` in mu0*Pa,
+    ``bsq`` the total pressure ``|B|^2/2 + pres``, ``r12/bsupv/sqrtg`` the
+    half-mesh grid arrays and ``wint`` the angular weights.  Reproduces::
+
+        sump    = vnorm * sum(vp*pres)
+        sumbtot = 2*(vnorm*sum(bsq*tau) - sump)
+        sumbtor = vnorm*sum(tau*(r12*bsupv)**2)
+        beta*   = 2*sump / sumb*
+    """
+    pres = np.asarray(pres, dtype=float)
+    ns = int(pres.shape[0])
+    if ns < 3:
+        return 0.0, 0.0, 0.0
+    hs = 1.0 / float(ns - 1)
+    vnorm = (2.0 * np.pi) ** 2 * hs
+    tau = float(signgs) * np.asarray(wint, dtype=float)[None, :, :] * np.asarray(sqrtg, dtype=float)
+    vp = np.asarray(vp, dtype=float)
+    bsq = np.asarray(bsq, dtype=float)
+    sump = vnorm * float(np.sum(vp[1:] * pres[1:]))
+    sumbtot = 2.0 * (vnorm * float(np.sum(bsq[1:] * tau[1:])) - sump)
+    sumbtor = vnorm * float(np.sum(tau[1:] * (np.asarray(r12, dtype=float)[1:] * np.asarray(bsupv, dtype=float)[1:]) ** 2))
+    sumbpol = sumbtot - sumbtor
+
+    def _div(num, den):
+        return num / den if den != 0.0 else 0.0
+
+    return _div(2.0 * sump, sumbpol), _div(2.0 * sump, sumbtor), _div(2.0 * sump, sumbtot)
+
+
+def aspect_ratio_scalars(*, r_boundary, zu_boundary, wint):
+    """``aspectratio.f`` scalars ``(Aminor_p, Rmajor_p, aspect, volume_p)``.
+
+    ``r_boundary``/``zu_boundary`` are the boundary-surface ``R`` and
+    ``dZ/dtheta`` on the internal angular grid, ``wint`` the angular weights.
+    """
+    rb = np.asarray(r_boundary, dtype=float)
+    zub = np.asarray(zu_boundary, dtype=float)
+    wint = np.asarray(wint, dtype=float)
+    t1 = rb * zub * wint
+    volume_p = float(2.0 * np.pi * np.pi * abs(np.sum(rb * t1)))
+    cross_area_p = float(2.0 * np.pi * abs(np.sum(t1)))
+    if cross_area_p == 0.0:
+        return 0.0, 0.0, 0.0, volume_p
+    aminor = float(np.sqrt(cross_area_p / np.pi))
+    rmajor = float(volume_p / (2.0 * np.pi * cross_area_p))
+    return aminor, rmajor, (rmajor / aminor if aminor != 0.0 else 0.0), volume_p
+
+
+def full_mesh_from_half(profile):
+    """Full-mesh companion of a half-mesh profile (eqfor.f presf convention).
+
+    ``f(1) = 1.5 f(2) - 0.5 f(3)``, interior averages, edge extrapolation.
+    """
+    p = np.asarray(profile, dtype=float)
+    ns = int(p.shape[0])
+    if ns < 2:
+        return p.copy()
+    out = np.zeros_like(p)
+    out[0] = 1.5 * p[1] - 0.5 * p[2] if ns >= 3 else p[1]
+    if ns > 2:
+        out[1:-1] = 0.5 * (p[1:-1] + p[2:])
+    out[-1] = 1.5 * p[-1] - 0.5 * p[-2]
+    return out
+
+
+def iotaf_from_iotas(iotas):
+    """``add_fluxes.f90`` full-mesh iota from the half-mesh profile (no RFP)."""
+    return full_mesh_from_half(iotas)
+
+
+def chipf_from_chips(chips):
+    """``add_fluxes.f90`` full-mesh ``chipf`` from half-mesh ``chips``."""
+    return full_mesh_from_half(chips)
+
+
+def toroidal_flux_profile(*, phipf_out, s):
+    """``phi`` [Wb] on the full mesh: rectangle-rule integral of ``phipf``.
+
+    ``phi[i] = sum_{j<=i} phipf_out[j]*(s[j]-s[j-1])`` with ``phi[0] = 0``
+    (``phipf_out`` in file convention, i.e. including ``2*pi*signgs``).
+    """
+    y = np.asarray(phipf_out, dtype=float)
+    s = np.asarray(s, dtype=float)
+    out = np.zeros_like(y)
+    if y.shape[0] >= 2:
+        out[1:] = np.cumsum(y[1:] * (s[1:] - s[:-1]))
+    return out
+
+
+def _lambda_half_mesh_weights(s):
+    """``sm/sp`` weights of the wrout.f half-mesh lambda conversion (1-based)."""
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    sm_f = np.zeros((ns + 1,), dtype=float)
+    sp_f = np.zeros((ns + 1,), dtype=float)
+    if ns < 2:
+        return sm_f, sp_f
+    hs = float(s_arr[1] - s_arr[0])
+    sqrts_f = np.zeros((ns + 1,), dtype=float)
+    shalf_f = np.zeros((ns + 1,), dtype=float)
+    for i in range(1, ns + 1):
+        sqrts_f[i] = np.sqrt(max(hs * float(i - 1), 0.0))
+        shalf_f[i] = np.sqrt(hs * abs(float(i) - 1.5))
+    sqrts_f[ns] = 1.0
+    for i in range(2, ns + 1):
+        sm_f[i] = shalf_f[i] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        if i < ns:
+            sp_f[i] = shalf_f[i + 1] / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+        else:
+            sp_f[i] = 1.0 / sqrts_f[i] if sqrts_f[i] != 0.0 else 0.0
+    sm_f[1] = 0.0
+    sp_f[0] = 0.0
+    sp_f[1] = sm_f[2] if ns >= 2 else 0.0
+    return sm_f, sp_f
+
+
+def lambda_wout_from_full_mesh(*, lam_full, m_modes, s, phipf_internal, lamscale):
+    """Internal full-mesh lambda coefficients -> the wout half-mesh ``lmns``.
+
+    ``wrout.f``: the internal lambda (evolved as ``lamscale * lambda`` with
+    the flux normalization ``phip``) is rescaled by ``lamscale/phipf`` and
+    interpolated to the half mesh with parity-dependent ``sm/sp`` weights;
+    the axis row is zeroed.
+    """
+    lam_full = np.asarray(lam_full, dtype=float)
+    s_arr = np.asarray(s, dtype=float).reshape(-1)
+    ns = int(s_arr.shape[0])
+    m_modes = np.asarray(m_modes, dtype=int)
+    phipf_internal = np.asarray(phipf_internal, dtype=float).reshape(-1)
+    if float(lamscale) == 0.0:
+        return np.zeros_like(lam_full)
+    phipf_safe = np.where(phipf_internal == 0.0, 1.0, phipf_internal)
+    lam_ext = lam_full * (float(lamscale) / phipf_safe[:, None])
+    if ns < 2:
+        return np.zeros_like(lam_ext)
+
+    sm_f, sp_f = _lambda_half_mesh_weights(s_arr)
+    lam_half = lam_ext.copy()
+    mask_m_le1 = m_modes <= 1
+    if np.any(mask_m_le1):
+        lam_half[0, mask_m_le1] = lam_half[1, mask_m_le1]
+    even_mask = (m_modes % 2) == 0
+    odd_mask = ~even_mask
+    for js_idx in range(ns - 1, 0, -1):
+        if np.any(even_mask):
+            lam_half[js_idx, even_mask] = 0.5 * (lam_half[js_idx, even_mask] + lam_half[js_idx - 1, even_mask])
+        if np.any(odd_mask):
+            lam_half[js_idx, odd_mask] = 0.5 * (
+                sm_f[js_idx + 1] * lam_half[js_idx, odd_mask]
+                + sp_f[js_idx] * lam_half[js_idx - 1, odd_mask]
+            )
+    lam_half[0, :] = 0.0
+    return lam_half
+
+
 def field_scalars(*, bvco, raxis_cc, wb, volume_p):
     """Edge/axis field scalars from ``bcovar.f`` / ``eqfor.f``.
 

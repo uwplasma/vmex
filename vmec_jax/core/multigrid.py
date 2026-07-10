@@ -45,8 +45,9 @@ from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
 from .fourier import ModeTable
 from .input import VmecInput
 from .solver import (
-    SolveResult, SpectralState, _finalize, _solve_stage, hot_restart_state,
-    prepare_runtime, resolution_from_input, runtime_with_baselines,
+    SolveResult, SpectralState, _finalize, _result_from_carry, _solve_stage,
+    hot_restart_state, prepare_runtime, resolution_from_input,
+    runtime_with_baselines,
 )
 from .transforms import odd_m_sqrt_s_scaling
 
@@ -188,6 +189,7 @@ def solve_multigrid(
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
     device: Any = None,
+    raise_on_max_iterations: bool = True,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -211,7 +213,11 @@ def solve_multigrid(
     (``more_iter_flag`` — VMEC2000 proceeds to the next grid); any other
     failure raises immediately, and the final stage must converge
     (:class:`~vmec_jax.core.errors.VmecConvergenceError` otherwise), exactly
-    like :func:`vmec_jax.core.solver.solve`.
+    like :func:`vmec_jax.core.solver.solve`.  With
+    ``raise_on_max_iterations=False`` a final stage that merely hits NITER
+    returns its last state instead (``converged=False``, ``ier_flag =
+    more_iter_flag``) — VMEC2000's own behavior, which writes the
+    NITER-exhausted state to the wout file.
 
     Executable reuse: stage runtimes are structural pytrees (solver.py,
     plan.md Phase 2 item (1)), so one XLA executable is compiled per distinct
@@ -283,8 +289,11 @@ def solve_multigrid(
         ier = int(carry.ier)
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
         if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (
-                last_stage and ier != SUCCESSFUL_TERM_FLAG):
+                last_stage and ier != SUCCESSFUL_TERM_FLAG
+                and not (ier == MORE_ITER_FLAG and not raise_on_max_iterations)):
             _finalize(carry, rt)  # raises the typed error for this stage
         state = carry.state
 
+    if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
+        return _result_from_carry(carry, rt)
     return _finalize(carry, rt)
