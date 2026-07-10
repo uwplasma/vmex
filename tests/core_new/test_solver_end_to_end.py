@@ -11,7 +11,6 @@ Checked here:
 1. convergence to ftol = 1e-14 with the golden iteration count (+-20%);
 2. wout parity: ``wb``, ``iotaf``, ``rmnc/zmns`` against the golden wout;
 3. early trajectory: the first 40 iterations of (fsqr, fsqz, fsql) against
-   the parity-proven legacy driver history (rtol 1e-8, solovev), and the
    golden threed1 printed iterations (rtol 5e-2, both cases);
 4. lane equivalence: the ``mode="cli"`` (scan blocks) and ``mode="jit"``
    (``lax.while_loop``) trajectories agree to 1e-15 (same jitted body).
@@ -144,37 +143,6 @@ def test_trajectory_matches_golden_threed1_rows(case):
             ours, np.asarray(row), rtol=5e-2,
             err_msg=f"{name}: threed1 iteration {it}",
         )
-
-
-def test_solovev_early_trajectory_matches_legacy_driver(case):
-    """First 40 iterations vs the parity-proven legacy driver (rtol 1e-8).
-
-    solovev only: the cth deck exercises the integrated 'two_power' current
-    profile, where the legacy evaluator's 16-point quadrature deviates from
-    the VMEC2000 10-point rule now used by the core (see profiles.py).
-    """
-    name, _, result, _ = case
-    if name != "solovev":
-        pytest.skip("legacy comparison uses the ncurr=0 deck")
-    vj = pytest.importorskip("vmec_jax")
-    run = vj.run_fixed_boundary(
-        str(DATA_DIR / "input.solovev"), max_iter=40, verbose=False
-    )
-    legacy = np.stack(
-        [
-            np.asarray(run.result.fsqr2_history),
-            np.asarray(run.result.fsqz2_history),
-            np.asarray(run.result.fsql2_history),
-        ],
-        axis=1,
-    )
-    ours = result.fsq_history[:40, :3]
-    np.testing.assert_allclose(ours, legacy[:40], rtol=1e-8, atol=1e-30)
-
-
-# ---------------------------------------------------------------------------
-# Lane equivalence (plan.md §5.3: one physics, two lanes)
-# ---------------------------------------------------------------------------
 
 
 def test_lane_equivalence_cli_vs_jit(case):

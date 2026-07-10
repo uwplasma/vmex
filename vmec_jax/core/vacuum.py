@@ -610,7 +610,6 @@ def _analytic_terms(
     ``m != 0 and n != 0`` branch.  ``include_kernel=False`` mirrors
     ``analyt(ivacskip != 0)``, which recomputes the source only.
     """
-    mnpd = int(basis.mnpd)
     lasym = bool(basis.lasym)
     mf = int(basis.mf)
     nf = int(basis.nf)

@@ -145,7 +145,7 @@ def run_booz_xform(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     tuple_surfaces = None if surfaces is None else tuple(
-        float(v) for v in np.atleast_1d(np.asarray(list(np.ravel(surfaces)), dtype=float))
+        float(v) for v in np.ravel(np.asarray(surfaces, dtype=float))
     )
     bx = Booz_xform(verbose=1 if verbose else 0, mboz=int(mbooz), nboz=int(nbooz))
     bx.read_wout(str(wout), flux=False)

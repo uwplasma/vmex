@@ -53,22 +53,19 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          VMEC_JAX_SKIP_PY311_COVERAGE_ONLY=1 pytest -q -n 2 -m "not full and not vmec2000 and not simsopt" \
-            tests/core/test_compat.py \
-            tests/release/test_packaging_metadata.py \
-            tests/drivers/test_cli_helpers.py \
-            tests/drivers/test_doctor.py \
-            tests/core/test_namelist.py \
-            tests/core/test_config_edges.py \
-            tests/core/test_boundary_eval.py \
-            tests/objectives/test_quasisymmetry.py \
-            tests/objectives/test_quasi_isodynamic.py \
-            tests/external_fields/test_external_fields_coils_jax.py \
-            tests/external_fields/test_external_fields_mgrid_jax.py \
+          pytest -q -n 2 -m "not full" \
+            tests/core_new/test_packaging_metadata.py \
+            tests/core_new/test_fetch_assets.py \
+            tests/core_new/test_input_profiles.py \
+            tests/core_new/test_fourier_transforms.py \
+            tests/core_new/test_preconditioner.py \
+            tests/core_new/test_setup.py \
+            tests/core_new/test_mgrid.py \
+            tests/core_new/test_coils.py \
             --durations=25
 
   core-new:
-    name: New-core A/B + golden parity suite
+    name: Core + golden parity suite
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -122,16 +119,14 @@ jobs:
           JAX_ENABLE_X64: "1"
         run: |
           vmec --help
+          vmec --version
           rm -rf /tmp/vmec_jax_cli_smoke
           mkdir -p /tmp/vmec_jax_cli_smoke
           cd /tmp
-          vmec "$GITHUB_WORKSPACE/examples/data/input.circular_tokamak" \
-            --max-iter 2 \
-            --no-multigrid \
-            --no-use-input-niter \
+          vmec "$GITHUB_WORKSPACE/examples/data/input.solovev" \
             --quiet \
             --outdir /tmp/vmec_jax_cli_smoke
-          test -f /tmp/vmec_jax_cli_smoke/wout_circular_tokamak.nc
+          test -f /tmp/vmec_jax_cli_smoke/wout_solovev.nc
 
   build:
     name: Build (wheel/sdist + docs)

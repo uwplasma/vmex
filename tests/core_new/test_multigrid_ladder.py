@@ -239,7 +239,6 @@ def test_qh_ladder_wb_matches_direct_1e10_target():
 
 def test_ladder_skips_decreasing_stages():
     """runvmec.f: decreasing NS_ARRAY entries are skipped, equal re-run."""
-    cfg = LADDERS["cth_like_fixed_bdy"]
     result = multigrid.solve_multigrid(
         _load_input("cth_like_fixed_bdy"), ns_array=[5, 9, 5, 15],
         ftol_array=[1e-8, 1e-10, 1e-10, 1e-14], niter_array=[25000],

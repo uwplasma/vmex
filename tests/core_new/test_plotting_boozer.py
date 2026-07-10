@@ -6,8 +6,8 @@ Uses the golden VMEC2000 ``wout`` fixtures (see ``conftest.resolve_golden_dir``)
   ``up_down_asymmetric_tokamak`` deck: every requested figure is written,
   each under 400 kB, with no exceptions;
 - ``run_booz_xform`` on ``cth_like_fixed_bdy``: the ``boozmn`` file loads,
-  ``bmnc_b`` is finite, and the spectrum matches the legacy
-  ``vmec_jax.booz.run_booz_xform`` A/B at rtol 1e-10;
+  ``bmnc_b`` is finite, and surface selection works (spectrum parity with
+  the legacy driver was A/B-proven before the legacy tree retired);
 - ``plot_boozmn`` produces its figure set from that ``boozmn`` file.
 
 All outputs go to ``tmp_path`` only.
@@ -112,30 +112,6 @@ def test_run_booz_xform_output_loads_and_is_finite(boozmn_new: Path, booz_case: 
     assert np.all(np.isfinite(bmnc_b))
     assert np.max(np.abs(bmnc_b)) > 0.0
     assert ns_b >= 1
-
-
-def test_run_booz_xform_matches_legacy(
-    boozmn_new: Path, booz_case: str, tmp_path: Path
-) -> None:
-    """A/B against the legacy driver: identical boozmn spectra (rtol 1e-10)."""
-    import vmec_jax as vj
-
-    wout_path = GOLDEN_DIR / booz_case / f"wout_{booz_case}.nc"
-    legacy_path = vj.run_booz_xform(
-        wout_path,
-        output_path=tmp_path / f"boozmn_{booz_case}_legacy.nc",
-        mbooz=24,
-        nbooz=24,
-        verbose=False,
-    )
-    with netCDF4.Dataset(boozmn_new) as ds_new, netCDF4.Dataset(legacy_path) as ds_old:
-        for var in ("bmnc_b", "rmnc_b", "zmns_b", "gmn_b", "ixm_b", "ixn_b", "iota_b"):
-            if var not in ds_new.variables or var not in ds_old.variables:
-                continue
-            new = np.asarray(ds_new.variables[var][:], dtype=float)
-            old = np.asarray(ds_old.variables[var][:], dtype=float)
-            assert new.shape == old.shape, var
-            np.testing.assert_allclose(new, old, rtol=1e-10, atol=1e-13, err_msg=var)
 
 
 def test_run_booz_xform_surface_selection(booz_case: str, tmp_path: Path) -> None:

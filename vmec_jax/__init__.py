@@ -1,17 +1,29 @@
-"""vmec_jax: a JAX implementation of VMEC2000 for fixed and free-boundary equilibria."""
+"""vmec_jax: a JAX implementation of VMEC2000 for fixed and free-boundary equilibria.
 
-# ruff: noqa: F401
-#
-# This module intentionally imports many public names so users can write
-# ``import vmec_jax as vj``.  The export list is derived near the bottom of the
-# file from those public globals plus lazy compatibility exports.
+Public API (lazily imported; ``import vmec_jax as vj``):
 
+- :class:`~vmec_jax.core.input.VmecInput` — INDATA / VMEC++-JSON input pytree
+- :func:`~vmec_jax.core.solver.solve` — single-grid fixed-boundary solve
+- :func:`~vmec_jax.core.multigrid.solve_multigrid` — NS_ARRAY ladder (runvmec.f)
+- :func:`~vmec_jax.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmec_jax.core.wout.read_wout` / :func:`~vmec_jax.core.wout.write_wout`
+  / :func:`~vmec_jax.core.wout.wout_from_state` / :class:`~vmec_jax.core.wout.WoutData`
+- :func:`~vmec_jax.core.plotting.plot_wout` / :func:`~vmec_jax.core.plotting.plot_boozmn`
+- :func:`~vmec_jax.core.boozer.run_booz_xform` — Boozer transform (booz_xform_jax)
+- :func:`~vmec_jax.core.mgrid.read_mgrid` / :func:`~vmec_jax.core.mgrid.write_mgrid`
+  / :class:`~vmec_jax.core.mgrid.MgridField` / :class:`~vmec_jax.core.coils.CoilSet`
+- ``vmec_jax.optimize`` — objectives + least-squares driver (module)
+- ``vmec_jax.implicit`` — implicit differentiation of the equilibrium (module)
+- ``vmec_jax.errors`` — typed zero-crash exceptions (also exported directly)
+
+The ``vmec`` console entry point lives in :mod:`vmec_jax.core.cli`.
+"""
+
+from importlib import import_module as _import_module
 from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _package_version
-from importlib import import_module as _import_module
 import os as _os
 from pathlib import Path as _Path
-import types as _types
 
 from ._compat import _default_compilation_cache_dir as _default_jax_cache_dir
 
@@ -47,415 +59,71 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-# Enable JAX persistent XLA compilation cache in a machine-scoped directory
-# when requested by the backend/env policy in _compat. Accelerator runs use the
-# cache by default; CPU runs are opt-in to avoid XLA:CPU AOT feature-mismatch
-# warnings on shared or changing runtime environments.
+# Enable the JAX persistent XLA compilation cache in a machine-scoped
+# directory when requested by the backend/env policy in _compat. Accelerator
+# runs use the cache by default; CPU runs are opt-in to avoid XLA:CPU AOT
+# feature-mismatch warnings on shared or changing runtime environments.
+# ``core.solver._harden_compilation_cache`` re-applies this policy on every
+# solve path in case this module never ran (namespace-package shadowing).
 import jax as _jax
+
 _jax_cache_dir = _default_jax_cache_dir()
 if _jax_cache_dir is not None:
     _os.makedirs(_jax_cache_dir, exist_ok=True)
     _jax.config.update("jax_enable_compilation_cache", True)
     _jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
 
-from .namelist import read_indata, write_indata, InData, minimal_fixed_boundary_indata
-from .config import FreeBoundaryConfig, VMECConfig, load_config
-from .modes import ModeTable, vmec_mode_table, nyquist_mode_table, default_grid_sizes
-from .grids import AngleGrid, make_angle_grid
-from .boundary import (
-    BoundaryCoeffs,
-    boundary_from_indata,
-    boundary_input_from_indata,
-    boundary_from_input_convention,
-    boundary_aspect_ratio,
-    boundary_aspect_ratio_from_static,
-)
-from .fourier import (
-    HelicalBasis,
-    build_helical_basis,
-    eval_fourier,
-    eval_fourier_dtheta,
-    eval_fourier_dzeta_phys,
-)
-from .driver import (
-    ExampleData,
-    FixedBoundaryRun,
-    example_paths,
-    load_example,
-    load_input,
-    load_wout,
-    run_free_boundary,
-    run_fixed_boundary,
-    solve_fixed_boundary_from_boundary,
-    save_npz,
-    residual_scalars_from_state,
-    write_wout_from_fixed_boundary_run,
-    wout_from_fixed_boundary_run,
-)
-from .booz_input import booz_xform_inputs_from_state
-from .wout import equilibrium_aspect_ratio_from_state, equilibrium_iota_profiles_from_state
-from .state import VMECState, pack_state, unpack_state
-from .static import VMECStatic, build_static
-from .free_boundary import (
-    FreeBoundaryRuntimeState,
-    MGridMetadata,
-    MGridData,
-    PreparedMGrid,
-    VacuumBoundaryFields,
-    ExternalBoundarySample,
-    NestorPoissonCache,
-    NestorVmecLikeCache,
-    NestorRuntimeState,
-    NestorSolveResult,
-    boundary_metric_from_rz,
-    covariant_boundary_field_from_cylindrical,
-    contravariant_boundary_field_from_covariant,
-    vacuum_boundary_fields_from_cylindrical,
-    sample_free_boundary_external_field as sample_free_boundary_external_field,
-    sample_external_vacuum_diagnostics,
-    nestor_external_only_step,
-    initial_free_boundary_state,
-    interpolate_mgrid_bfield,
-    load_mgrid,
-    prepare_mgrid_for_config,
-    validate_free_boundary_config,
-)
-from .init_guess import extract_axis_override_from_state, initial_guess_from_boundary
-from .optimization import (
-    BoundaryParamSpec,
-    FixedBoundaryContext,
-    FixedBoundaryExactOptimizer,
-    apply_boundary_params,
-    boundary_param_names,
-    boundary_param_specs,
-    create_x_scale,
-    extend_boundary_for_max_mode,
-    gauss_newton_least_squares,
-    lift_boundary_params,
-    make_qh_residuals_fn,
-    make_qs_residuals_fn,
-    parse_surface_list,
-    prepare_fixed_boundary_context,
-    smooth_min_abs_iota_residual,
-    surface_indices_from_s,
-    surface_indices_from_static,
-    truncate_indata_boundary_modes,
-)
-from .coords import Coords, eval_coords
-from .geom import Geom, eval_geom
-from .profiles import (
-    ELEMENTARY_CHARGE,
-    Profile,
-    ProfileInputs,
-    ProfilePolynomial,
-    ProfilePressure,
-    ProfileScaled,
-    StandardFiniteBetaProfiles,
-    eval_profiles,
-    pressure_profile_to_vmec_am,
-    profile_to_power_series_coeffs,
-    profiles_from_indata,
-    standard_finite_beta_profiles,
-    standard_pressure_profile,
-    with_pressure_profile,
-)
-from .finite_beta import (
-    FiniteBetaTargets,
-    finite_beta_global_residuals_from_state,
-    finite_beta_scalars_from_state,
-    jxbforce_profiles_from_realspace,
-    magnetic_well_from_state,
-    magnetic_well_from_vp,
-    mercier_bss_geometry_channels_from_state,
-    mercier_bss_half_mesh_geometry_from_realspace,
-    mercier_bsubs_derivatives_lasym_false,
-    mercier_bsubs_derivatives_lasym_true,
-    mercier_bsubs_full_mesh_from_half_mesh,
-    mercier_bsubs_half_mesh_from_geometry,
-    mercier_bdotk_from_covariant_derivatives,
-    mercier_gpp_from_realspace_geometry,
-    mercier_realspace_geometry_channels_from_state,
-    mercier_surface_integrals_from_realspace,
-    mercier_terms_from_state,
-    mercier_terms_from_profile_integrals,
-    mercier_zeta_half_mesh_from_realspace_geometry,
-    polynomial_profile_and_derivative,
-    redl_bootstrap_geometry_from_state,
-    redl_bootstrap_jdotb,
-    redl_bootstrap_mismatch_from_profiles,
-    redl_bootstrap_mismatch_from_state,
-    trapped_fraction_from_modb_sqrtg,
-)
-from .bootstrap_current import (
-    BootstrapCurrentIteration,
-    BootstrapCurrentOptions,
-    BootstrapCurrentResult,
-    apply_current_profile_to_indata,
-    bootstrap_current_fixed_point,
-    bootstrap_current_update_to_indata,
-    damp_current_profile,
-    dpsi_ds_from_vmec_phiedge,
-    integrate_current_derivative,
-    redl_current_derivative_update,
-    redl_current_integrating_factor_update,
-    redl_current_rhs,
-    vmec_current_profile_from_bootstrap_update,
-)
-from .mercier import glasser_resistive_interchange_from_mercier_terms
-from .integrals import dvds_from_sqrtg, cumtrapz_s, volume_from_sqrtg
-from .field import (
-    b_cartesian_from_state,
-    b2_from_bsup,
-    bsup_from_geom,
-    bsup_from_sqrtg_lambda,
-    signgs_from_sqrtg,
-)
-from .energy import magnetic_wb_from_state, flux_profiles_from_indata
-from .diagnostics import Summary, print_jacobian_stats, print_summary, summarize_array, summarize_many
-from .kernels.jacobian import vmec_half_mesh_jacobian_from_state
-from .kernels.realspace import vmec_realspace_analysis, vmec_realspace_geom_from_state
-from .preconditioner_1d_jax import clear_preconditioner_jit_caches
-from .solve import (
-    SolveFixedBoundaryResult,
-    SolveLambdaResult,
-    solve_fixed_boundary_gd,
-    solve_fixed_boundary_lbfgs,
-    solve_fixed_boundary_lbfgs_vmec_residual,
-    solve_fixed_boundary_gn_vmec_residual,
-    solve_fixed_boundary_residual_iter,
-    solve_lambda_gd,
-)
-from .residuals import ForceResiduals, force_residuals_from_state
-from .quasisymmetry import (
-    quasisymmetry_diagnostics_from_state,
-    quasisymmetry_boozer_mode_residual_from_boozer_output,
-    quasisymmetry_ratio_residual_from_state,
-    quasisymmetry_ratio_residual_from_wout,
-)
-
-_LAZY_ATTRS = {
-    "api": ".api",
-    "FreeBoundaryRuntimeState": ".free_boundary",
-    "MGridMetadata": ".free_boundary",
-    "MGridData": ".free_boundary",
-    "PreparedMGrid": ".free_boundary",
-    "VacuumBoundaryFields": ".free_boundary",
-    "ExternalBoundarySample": ".free_boundary",
-    "NestorPoissonCache": ".free_boundary",
-    "NestorVmecLikeCache": ".free_boundary",
-    "NestorRuntimeState": ".free_boundary",
-    "NestorSolveResult": ".free_boundary",
-    "boundary_metric_from_rz": ".free_boundary",
-    "covariant_boundary_field_from_cylindrical": ".free_boundary",
-    "contravariant_boundary_field_from_covariant": ".free_boundary",
-    "vacuum_boundary_fields_from_cylindrical": ".free_boundary",
-    "sample_free_boundary_external_field": ".free_boundary",
-    "sample_external_vacuum_diagnostics": ".free_boundary",
-    "nestor_external_only_step": ".free_boundary",
-    "initial_free_boundary_state": ".free_boundary",
-    "interpolate_mgrid_bfield": ".free_boundary",
-    "load_mgrid": ".free_boundary",
-    "prepare_mgrid_for_config": ".free_boundary",
-    "validate_free_boundary_config": ".free_boundary",
-    "FreeBoundaryDerivativeOptions": ".solvers.free_boundary.derivatives",
-    "coil_direction": ".solvers.free_boundary.derivatives",
-    "contract_free_boundary_vjp": ".solvers.free_boundary.derivatives",
-    "free_boundary_value_and_jacobian": ".solvers.free_boundary.derivatives",
-    "free_boundary_value_and_jvp": ".solvers.free_boundary.derivatives",
-    "SurfaceData": ".plotting",
-    "axis_rz_from_wout": ".plotting",
-    "axis_rz_from_wout_physical": ".plotting",
-    "axis_rz_from_state_physical": ".plotting",
-    "bmag_from_wout": ".plotting",
-    "bmag_from_wout_physical": ".plotting",
-    "bmag_from_state_physical": ".plotting",
-    "bmag_from_state_vmec_realspace": ".plotting",
-    "bsup_from_wout": ".plotting",
-    "bsub_from_wout": ".plotting",
-    "boozer_bmag_grid_from_state": ".plotting",
-    "closed_theta_grid": ".plotting",
-    "fix_matplotlib_3d": ".plotting",
-    "profiles_from_wout": ".plotting",
-    "select_zeta_slices": ".plotting",
-    "surface_data_from_wout": ".plotting",
-    "surface_rz_from_wout": ".plotting",
-    "surface_rz_from_wout_physical": ".plotting",
-    "surface_rz_from_state": ".plotting",
-    "surface_rz_from_state_physical": ".plotting",
-    "surface_stack": ".plotting",
-    "plot_3d_boundary_comparison": ".plotting",
-    "plot_bmag_contours": ".plotting",
-    "plot_boozmn": ".plotting",
-    "plot_boozmn_bmag_contours": ".plotting",
-    "plot_boozmn_mode_families": ".plotting",
-    "plot_boozmn_spectrum": ".plotting",
-    "plot_boozer_bmag_contours_from_state": ".plotting",
-    "plot_boozer_lcfs_bmag_comparison": ".plotting",
-    "plot_objective_history": ".plotting",
-    "plot_wout": ".plotting",
-    "vmecplot2_bmag_grid": ".plotting",
-    "vmecplot2_cross_section_indices": ".plotting",
-    "vmecplot2_lcfs_3d_grid": ".plotting",
-    "vmecplot2_surface_grid": ".plotting",
-    "write_axisym_overview": ".plotting",
-    "write_bmag_parity_figures": ".plotting",
-    "write_bsub_parity_figures": ".plotting",
-    "write_bsup_parity_figures": ".plotting",
-    "zeta_grid": ".plotting",
-    "zeta_grid_field_period": ".plotting",
-    "BoozConfig": ".booz",
-    "parse_booz_surfaces": ".booz",
-    "read_booz_config": ".booz",
-    "resolve_boozmn_path": ".booz",
-    "run_booz_xform": ".booz",
-    "QIOptimizationContext": ".quasi_isodynamic.optimization",
-    "apply_qi_example_cli_overrides": ".quasi_isodynamic.optimization",
-    "diagnostic_float": ".quasi_isodynamic.optimization",
-    "jsonable": ".quasi_isodynamic.optimization",
-    "make_qi_optimization_context": ".quasi_isodynamic.optimization",
-    "qi_diagnostics_for_result": ".quasi_isodynamic.optimization",
-    "qi_engineering_constraint_tuples": ".quasi_isodynamic.optimization",
-    "qi_mirror_objective_for_stage": ".quasi_isodynamic.optimization",
-    "qi_stage_modes": ".quasi_isodynamic.optimization",
-    "run_boundary_reference_preconditioner": ".quasi_isodynamic.optimization",
-    "run_qi_stage_policy": ".quasi_isodynamic.optimization",
-    "run_target_helicity_seed_preconditioner": ".quasi_isodynamic.optimization",
-    "save_raw_seed_initial_artifacts": ".quasi_isodynamic.optimization",
-    "target_helicity_seed_terms": ".quasi_isodynamic.optimization",
-    "AbsMeanIotaFloor": ".optimization_workflow",
-    "AbsMeanIotaCeiling": ".optimization_workflow",
-    "AspectRatio": ".optimization_workflow",
-    "AugmentedLagrangianConstraint": ".optimization_workflow",
-    "BVector": ".optimization_workflow",
-    "BDotB": ".optimization_workflow",
-    "BDotGradV": ".optimization_workflow",
-    "BetaTotal": ".optimization_workflow",
-    "BoozerBTarget": ".optimization_workflow",
-    "BoundaryModeLimits": ".optimization_workflow",
-    "DMerc": ".optimization_workflow",
-    "FixedBoundaryOptimizationResult": ".optimization_workflow",
-    "FixedBoundaryVMEC": ".optimization_workflow",
-    "GlasserResistiveInterchange": ".optimization_workflow",
-    "JDotB": ".optimization_workflow",
-    "JVector": ".optimization_workflow",
-    "LeastSquaresProblem": ".optimization_workflow",
-    "LgradB": ".optimization_workflow",
-    "MagneticWell": ".optimization_workflow",
-    "MaxElongation": ".optimization_workflow",
-    "MeanIota": ".optimization_workflow",
-    "MirrorRatio": ".optimization_workflow",
-    "VMECMirrorRatio": ".optimization_workflow",
-    "ObjectiveTerm": ".optimization_workflow",
-    "OptimizationOutputPaths": ".optimization_workflow",
-    "QuasiIsodynamicOptions": ".optimization_workflow",
-    "QuasiIsodynamicResidual": ".optimization_workflow",
-    "QuasiIsodynamicResidualCeiling": ".optimization_workflow",
-    "QuasisymmetryRatioResidual": ".optimization_workflow",
-    "QIObjectiveTerm": ".optimization_workflow",
-    "RedlBootstrapMismatch": ".optimization_workflow",
-    "StageContext": ".optimization_workflow",
-    "ToroidalCurrent": ".optimization_workflow",
-    "ToroidalCurrentGradient": ".optimization_workflow",
-    "abs_mean_iota_floor_objective": ".optimization_workflow",
-    "abs_mean_iota_ceiling_objective": ".optimization_workflow",
-    "aspect_objective": ".optimization_workflow",
-    "boozer_b_target_from_wout": ".optimization_workflow",
-    "describe_boundary_mode_limits": ".optimization_workflow",
-    "lgradb_objective": ".optimization_workflow",
-    "interpolate_indata_boundary": ".optimization_workflow",
-    "least_squares_solve": ".optimization_workflow",
-    "mean_iota_objective": ".optimization_workflow",
-    "normalize_boundary_mode_limits": ".optimization_workflow",
-    "optimization_output_paths": ".optimization_workflow",
-    "prepare_simple_omnigenity_seed_input": ".optimization_workflow",
-    "qs_stage_modes": ".optimization_workflow",
-    "qi_boozer_b_target_objective": ".optimization_workflow",
-    "qi_lgradb_objective": ".optimization_workflow",
-    "qi_max_elongation_constraint": ".optimization_workflow",
-    "qi_max_elongation_objective": ".optimization_workflow",
-    "qi_mirror_ratio_constraint": ".optimization_workflow",
-    "qi_mirror_ratio_objective": ".optimization_workflow",
-    "quasi_isodynamic_field_objective": ".optimization_workflow",
-    "quasisymmetry_objective": ".optimization_workflow",
-    "rebuild_for_optimization_resolution": ".optimization_workflow",
-    "repeated_stage_modes": ".optimization_workflow",
-    "run_fixed_boundary_objective_optimization": ".optimization_workflow",
-    "run_quasi_isodynamic_objective_optimization": ".optimization_workflow",
-    "save_optimization_result": ".optimization_workflow",
-    "simple_omnigenity_seed_indata": ".optimization_workflow",
-    "VolavgB": ".optimization_workflow",
-    "ImplicitFixedBoundaryOptions": ".implicit",
-    "ImplicitLambdaOptions": ".implicit",
-    "solve_fixed_boundary_state_implicit": ".implicit",
-    "solve_lambda_state_implicit": ".implicit",
-    "ResidualCheckpointTape": ".discrete_adjoint",
-    "ResidualIterationTrace": ".discrete_adjoint",
-    "build_residual_checkpoint_tape": ".discrete_adjoint",
-    "build_residual_checkpoint_tape_direct": ".discrete_adjoint",
-    "clear_replay_scan_caches": ".discrete_adjoint",
-    "checkpoint_tape_param_jvp": ".discrete_adjoint",
-    "checkpoint_tape_param_vjp": ".discrete_adjoint",
-    "checkpoint_tape_state_jvp": ".discrete_adjoint",
-    "checkpoint_tape_state_jvp_columns": ".discrete_adjoint",
-    "checkpoint_tape_state_vjp": ".discrete_adjoint",
-    "concat_residual_iteration_traces": ".discrete_adjoint",
-    "preconditioned_force_channels_from_raw_forces": ".discrete_adjoint",
-    "preconditioned_force_channels_from_rz_output": ".discrete_adjoint",
-    "raw_force_residual_from_state": ".discrete_adjoint",
-    "replay_residual_checkpoint_step": ".discrete_adjoint",
-    "state_dependent_preconditioner_from_forces": ".discrete_adjoint",
-    "strict_update_accepted_step": ".discrete_adjoint",
-    "strict_update_one_step_from_state": ".discrete_adjoint",
-    "strict_update_velocity_block": ".discrete_adjoint",
-    "strict_update_velocity_limit": ".discrete_adjoint",
-    "strict_update_velocity_state_advance": ".discrete_adjoint",
-    "residual_iteration_trace_from_result": ".discrete_adjoint",
-    "max_elongation_penalty_from_state": ".quasi_isodynamic",
-    "mirror_ratio_penalty_from_boozer_modes": ".quasi_isodynamic",
-    "mirror_ratio_penalty_from_boozer_output": ".quasi_isodynamic",
-    "quasi_isodynamic_residual_from_boozer_modes": ".quasi_isodynamic",
-    "quasi_isodynamic_residual_from_boozer_output": ".quasi_isodynamic",
-    "quasi_isodynamic_residual_from_state": ".quasi_isodynamic",
-    "legacy_qi_branch_shuffle_diagnostic_from_boozer_output": ".quasi_isodynamic.legacy",
-    "QI_DIAGNOSTIC_VERSION": ".quasi_isodynamic.diagnostics",
-    "QIDiagnosticOptions": ".quasi_isodynamic.diagnostics",
-    "QISeedSuitabilityTargets": ".quasi_isodynamic.diagnostics",
-    "annotate_qi_seed_suitability": ".quasi_isodynamic.diagnostics",
-    "qi_cleanup_candidate_promotable": ".quasi_isodynamic.diagnostics",
-    "qi_diagnostics_from_boozer_output": ".quasi_isodynamic.diagnostics",
-    "qi_diagnostics_from_state": ".quasi_isodynamic.diagnostics",
-    "qi_promotion_score": ".quasi_isodynamic.diagnostics",
-    "rank_qi_seed_records": ".quasi_isodynamic.diagnostics",
-    "export_vtk_surface_and_fieldline": ".visualization",
+# Lazy public exports: name -> (module, attribute).  ``attribute=None``
+# exports the module itself.
+_LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
+    # input
+    "VmecInput": (".core.input", "VmecInput"),
+    # solvers
+    "solve": (".core.solver", "solve"),
+    "solve_multigrid": (".core.multigrid", "solve_multigrid"),
+    "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
+    # wout IO
+    "WoutData": (".core.wout", "WoutData"),
+    "read_wout": (".core.wout", "read_wout"),
+    "write_wout": (".core.wout", "write_wout"),
+    "wout_from_state": (".core.wout", "wout_from_state"),
+    # plotting + Boozer
+    "plot_wout": (".core.plotting", "plot_wout"),
+    "plot_boozmn": (".core.plotting", "plot_boozmn"),
+    "run_booz_xform": (".core.boozer", "run_booz_xform"),
+    # external fields
+    "CoilSet": (".core.coils", "CoilSet"),
+    "MgridData": (".core.mgrid", "MgridData"),
+    "MgridField": (".core.mgrid", "MgridField"),
+    "read_mgrid": (".core.mgrid", "read_mgrid"),
+    "write_mgrid": (".core.mgrid", "write_mgrid"),
+    # errors
+    "VmecError": (".core.errors", "VmecError"),
+    "VmecInputError": (".core.errors", "VmecInputError"),
+    "VmecJacobianError": (".core.errors", "VmecJacobianError"),
+    "VmecConvergenceError": (".core.errors", "VmecConvergenceError"),
+    "MgridNotFoundError": (".core.errors", "MgridNotFoundError"),
+    # modules
+    "core": (".core", None),
+    "errors": (".core.errors", None),
+    "optimize": (".core.optimize", None),
+    "implicit": (".core.implicit", None),
+    "doctor": (".doctor", None),
 }
+
+__all__ = ["__version__", *sorted(_LAZY_ATTRS)]
 
 
 def __getattr__(name: str):
-    module_name = _LAZY_ATTRS.get(name)
-    if module_name is None:
+    entry = _LAZY_ATTRS.get(name)
+    if entry is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_name, attribute = entry
     module = _import_module(module_name, __name__)
-    if name == "api":
-        value = module
-    else:
-        value = getattr(module, name)
+    value = module if attribute is None else getattr(module, attribute)
     globals()[name] = value
     return value
 
 
 def __dir__():
     return sorted(set(globals()) | set(_LAZY_ATTRS))
-
-__all__ = list(
-    dict.fromkeys(
-        (
-            "api",
-            *(
-                name
-                for name, value in globals().items()
-                if not name.startswith("_") and not isinstance(value, _types.ModuleType)
-            ),
-            *_LAZY_ATTRS,
-        )
-    )
-)

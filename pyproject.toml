@@ -68,77 +68,39 @@ include = ["vmec_jax*"]
 exclude = ["tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"]
 
 [tool.setuptools.package-data]
-vmec_jax = ["resources/input.nfp4_QH_warm_start", "resources/accelerated_scan_profile.json"]
+vmec_jax = ["resources/input.nfp4_QH_warm_start"]
 
 [tool.pytest.ini_options]
 markers = [
-  "vmec2000: integration tests requiring a local VMEC2000 build (+ mpi4py/netCDF4)",
-  "simsopt: optional integration tests comparing against SIMSOPT",
-  "full: slower/full-physics tests; fetched-asset rows require tools/fetch_assets.py",
-  "py311_coverage_only: expensive physics/numerics gates run in the Python 3.11 coverage lane and are skipped in compatibility-only CI lanes",
-  "py311_slow_coverage: expensive physics/numerics gates split into a separate Python 3.11 coverage shard and skipped in core/compatibility CI lanes",
+  "full: slower/full-physics tests; set RUN_FULL=1 to run",
 ]
 
 [tool.ruff]
 line-length = 120
 
 [tool.ruff.lint]
-# E402: module-level import not at top-of-file.  This codebase uses deferred
-#        imports inside functions deliberately to avoid triggering JAX/GPU
-#        initialisation at import time.  Silencing E402 globally is intentional.
-# F821: undefined name in annotation.  Ruff occasionally reports false positives
-#        inside very long functions (closures over outer-scope locals) and for
-#        TYPE_CHECKING-only imports used in annotations.  Silence globally and
-#        rely on mypy for real undefined-name checks.
-# F841: local variable is assigned to but never used.  Many VMEC routines assign
-#        intermediate diagnostics for debugging that are not always consumed by
-#        the caller.  mypy --warn-unused-variables or a per-symbol noqa is a
-#        better gate here.
+# E402: module-level import not at top-of-file.  Deferred imports (after env
+#        setup / jax.config calls) are deliberate to control JAX initialisation.
 # E501: line too long.  Handled by the line-length setting above; long lines in
-#        generated / ported Fortran-style code are acceptable.
-ignore = ["E402", "F821", "F841", "E501"]
-
-# Allow single-statement blocks on the same line as the colon (E701) and
-# semicolons as statement separators (E702) in tightly coupled numerical kernels.
-# These are common in ported Fortran code and do not impair readability.
-# E731: lambda-assignment — allow where lambdas are used as concise callbacks.
-# E741: ambiguous variable name — l/O/I are used as loop indices in physics code.
-extend-ignore = ["E701", "E702", "E731", "E741"]
+#        ported Fortran-style code are acceptable.
+# E702: semicolons as statement separators in tightly coupled numerical
+#        kernels, common in ported Fortran code.
+ignore = ["E402", "E501", "E702"]
 
 [tool.mypy]
-# vmec_jax is a JAX/NumPy numerical physics codebase ported from Fortran.
-# Many type errors are pre-existing false positives stemming from:
-#   - JAX's dynamically-typed array operations (jax.Array is opaque to mypy)
-#   - Very long functions with nested closures (mypy loses type context)
-#   - TYPE_CHECKING-guarded imports used in annotations
-#   - Ported Fortran patterns (lots of Any-typed intermediate arrays)
-# We configure mypy conservatively: catch obvious bugs but avoid blocking
-# development with spurious false-positive noise.
-python_version = "3.10"
+# Note: recent numpy stubs use PEP 695 `type` statements, so the checked
+# python_version cannot be pinned below 3.12.
 ignore_missing_imports = true
-no_strict_optional = true
-warn_return_any = false
-warn_unused_ignores = false
-# Disable the most noisy checks that produce mostly false positives here:
-disable_error_code = ["attr-defined", "operator", "valid-type", "name-defined", "call-arg", "return-value", "arg-type", "assignment", "index", "union-attr", "misc", "type-arg", "no-any-return", "override"]
+# With full defaults the core trips 38 errors in 11 files, all jax.Array /
+# ndarray-typing false positives (mypy sees opaque jax.Array where numpy
+# overloads are annotated).  Disabled codes shrunk from the legacy 14-code
+# blanket to the 8 the core actually needs; name-defined, valid-type,
+# call-arg, misc, type-arg, no-any-return and override are enabled again.
+disable_error_code = ["operator", "union-attr", "assignment", "arg-type", "index", "return-value", "list-item", "attr-defined"]
 
 [[tool.mypy.overrides]]
-module = [
-  "vmec_jax.solve",
-  "vmec_jax.driver",
-  "vmec_jax.boundary",
-  "vmec_jax.kernels.forces",
-  "vmec_jax.geom",
-  "vmec_jax.wout",
-  "vmec_jax.kernels.parity",
-  "vmec_jax.fourier",
-  "vmec_jax.static",
-  "vmec_jax.implicit",
-  "vmec_jax.diagnostics",
-  "vmec_jax.free_boundary",
-  "vmec_jax.init_guess",
-  "vmec_jax.booz_input",
-  "vmec_jax.kernels.residue",
-  "vmec_jax.kernels.tomnsp",
-]
-ignore_errors = true
+# TODO(optimize/implicit agent): one narrow error each —
+#   core/implicit.py:629 [var-annotated] (_MASK_CACHE needs an annotation)
+#   core/optimize.py:977 [dict-item] (heterogeneous dict literal)
+module = ["vmec_jax.core.optimize", "vmec_jax.core.implicit"]
+disable_error_code = ["var-annotated", "dict-item"]

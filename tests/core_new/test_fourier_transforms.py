@@ -1,0 +1,226 @@
+"""Property tests for ``vmec_jax.core.{fourier,transforms}``.
+
+Covers the transform algebra that the (deleted) legacy A/B suite proved
+during the port:
+
+- ``real_to_fourier(fourier_to_real(x)) == x`` on band-limited data,
+- ``tomnsps`` is the exact inverse of the ``totzsps``-style synthesis
+  (fixaray.f dnorm normalization, including the lasym lane),
+- ``symforce_split`` recovers pure reflection parities exactly.
+"""
+
+from __future__ import annotations
+
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
+import numpy as np
+import pytest
+
+from vmec_jax.core.fourier import Resolution, mode_table, trig_tables
+from vmec_jax.core.transforms import (
+    fourier_to_real,
+    real_to_fourier,
+    symforce_split,
+    tomnsps,
+)
+
+# (mpol, ntor, ntheta, nzeta, nfp, lasym)
+CASES = [
+    (6, 0, 18, 1, 1, False),
+    (6, 3, 22, 16, 3, False),
+    (9, 6, 28, 24, 4, False),
+    (5, 2, 20, 18, 2, True),
+]
+CASE_IDS = ["axisym", "nfp3", "nfp4", "nfp2-lasym"]
+NS = 7
+
+RTOL = 1e-12
+
+
+def _resolution(case) -> Resolution:
+    mpol, ntor, ntheta, nzeta, nfp, lasym = case
+    return Resolution(
+        mpol=mpol, ntor=ntor, ntheta=ntheta, nzeta=nzeta, nfp=nfp, lasym=lasym, ns=NS
+    )
+
+
+def _seed(case) -> int:
+    return abs(hash(case)) % (2**31)
+
+
+@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
+def test_synthesis_analysis_roundtrip(case):
+    """real_to_fourier(fourier_to_real(x)) == x on band-limited data.
+
+    On the reduced symmetric theta grid the cos and sin families are each
+    internally orthogonal (but not mutually), so the round trip is exact per
+    parity block; on the full lasym grid it is exact for both blocks jointly.
+    """
+    mpol, ntor, *_ = case
+    lasym = case[5]
+    res = _resolution(case)
+    trig = trig_tables(res)
+    modes = mode_table(mpol, ntor)
+
+    rng = np.random.default_rng(_seed(case) + 3)
+    coeff_cos = rng.standard_normal((NS, modes.mnmax))
+    coeff_sin = rng.standard_normal((NS, modes.mnmax))
+    # sin(m*theta - n*zeta) is identically zero for (m, n) = (0, 0).
+    coeff_sin[:, (modes.m == 0) & (modes.n == 0)] = 0.0
+
+    if lasym:
+        (field,) = fourier_to_real(
+            coeff_cos, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
+        )
+        back_cos, back_sin = real_to_fourier(field, modes=modes, trig=trig, parity="both")
+        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
+        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
+    else:
+        zero = np.zeros_like(coeff_cos)
+        (field_cos,) = fourier_to_real(
+            coeff_cos, zero, modes=modes, trig=trig, derivatives=("value",)
+        )
+        back_cos, back_sin = real_to_fourier(field_cos, modes=modes, trig=trig, parity="cos")
+        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
+        assert not np.any(np.asarray(back_sin))
+
+        (field_sin,) = fourier_to_real(
+            zero, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
+        )
+        back_cos, back_sin = real_to_fourier(field_sin, modes=modes, trig=trig, parity="sin")
+        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
+        assert not np.any(np.asarray(back_cos))
+
+
+# ---------------------------------------------------------------------------
+# tomnsp( totzsp(x) ) round trip
+# ---------------------------------------------------------------------------
+
+
+def _rz_mask(ns: int, mpol: int) -> np.ndarray:
+    """Expected R/Z radial mask (jmin2 start indices, edge excluded)."""
+    js = np.arange(ns) + 1
+    m = np.arange(mpol)
+    jmin2 = np.where(m == 0, 1, 2)[None, :]
+    mask = (js[:, None] >= jmin2) & (js[:, None] <= ns - 1)
+    return mask.astype(float)[:, :, None]
+
+
+@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
+def test_tomnsps_recovers_band_limited_coefficients(case):
+    """tomnsps is the exact inverse of the totzsps synthesis on band-limited data.
+
+    Feed ``tomnsps`` a pure geometry-style field through the undifferentiated
+    kernels (``armn``/``azmn``) built from internal coefficients ``x`` with the
+    scaled trig tables.  The mscale/nscale normalization makes the projection
+    recover ``x`` exactly (factor 1) in both symmetry modes: for
+    ``lasym=True`` the reduced-interval integration carries the fixaray.f
+    weight ``dnorm = 1/(nzeta*(ntheta2-1)) = 2/(nzeta*ntheta1)`` with
+    endpoint half-weights, which equals the full-grid average for the
+    reflection-symmetric basis products fed here.  (Before the core lasym
+    dnorm fix this recovered ``x/2`` — the inherited legacy defect that
+    halved every lasym force projection.)
+    """
+    mpol, ntor, _, _, _, lasym = case
+    res = _resolution(case)
+    trig = trig_tables(res)
+
+    rng = np.random.default_rng(_seed(case) + 6)
+    m_grid = np.arange(mpol)[:, None]
+    n_grid = np.arange(ntor + 1)[None, :]
+
+    coeff_R_cc = rng.standard_normal((NS, mpol, ntor + 1))
+    coeff_R_ss = rng.standard_normal((NS, mpol, ntor + 1))
+    coeff_R_ss *= (m_grid > 0) & (n_grid > 0)  # sin*sin basis vanishes otherwise
+    coeff_Z_sc = rng.standard_normal((NS, mpol, ntor + 1))
+    coeff_Z_sc *= m_grid > 0
+    coeff_Z_cs = rng.standard_normal((NS, mpol, ntor + 1))
+    coeff_Z_cs *= n_grid > 0
+
+    cosmu, sinmu = np.asarray(trig.cosmu), np.asarray(trig.sinmu)
+    cosnv, sinnv = np.asarray(trig.cosnv), np.asarray(trig.sinnv)
+    field_R = np.einsum("smn,im,kn->sik", coeff_R_cc, cosmu, cosnv) + np.einsum(
+        "smn,im,kn->sik", coeff_R_ss, sinmu, sinnv
+    )
+    field_Z = np.einsum("smn,im,kn->sik", coeff_Z_sc, sinmu, cosnv) + np.einsum(
+        "smn,im,kn->sik", coeff_Z_cs, cosmu, sinnv
+    )
+
+    zeros = np.zeros_like(field_R)
+    out = tomnsps(
+        force_R_even=field_R,
+        force_R_odd=field_R,
+        force_R_du_even=zeros,
+        force_R_du_odd=zeros,
+        force_R_dv_even=zeros,
+        force_R_dv_odd=zeros,
+        force_Z_even=field_Z,
+        force_Z_odd=field_Z,
+        force_Z_du_even=zeros,
+        force_Z_du_odd=zeros,
+        force_Z_dv_even=zeros,
+        force_Z_dv_odd=zeros,
+        mpol=mpol,
+        ntor=ntor,
+        trig=trig,
+        include_edge=False,
+    )
+
+    # Known normalization: exact recovery in both symmetry modes (fixaray.f
+    # dnorm; see the docstring).
+    factor = 1.0
+    mask = _rz_mask(NS, mpol)
+
+    np.testing.assert_allclose(
+        np.asarray(out.force_R_cc), factor * coeff_R_cc * mask, rtol=RTOL, atol=1e-12
+    )
+    np.testing.assert_allclose(
+        np.asarray(out.force_Z_sc), factor * coeff_Z_sc * mask, rtol=RTOL, atol=1e-12
+    )
+    if ntor > 0:
+        np.testing.assert_allclose(
+            np.asarray(out.force_R_ss), factor * coeff_R_ss * mask, rtol=RTOL, atol=1e-12
+        )
+        np.testing.assert_allclose(
+            np.asarray(out.force_Z_cs), factor * coeff_Z_cs * mask, rtol=RTOL, atol=1e-12
+        )
+    else:
+        assert out.force_R_ss is None
+        assert out.force_Z_cs is None
+
+
+# ---------------------------------------------------------------------------
+# symforce split (symforce.f)
+# ---------------------------------------------------------------------------
+
+
+def test_symforce_split_recovers_pure_parities():
+    """A reflection-even field has no antisymmetric part (and vice versa)."""
+    case = CASES[3]  # the lasym case: full theta grid
+    mpol, ntor, *_ = case
+    res = _resolution(case)
+    trig = trig_tables(res)
+    rng = np.random.default_rng(_seed(case) + 7)
+
+    cosmu, sinmu = np.asarray(trig.cosmu), np.asarray(trig.sinmu)
+    cosnv = np.asarray(trig.cosnv)
+    coeff = rng.standard_normal((NS, mpol, ntor + 1))
+
+    # Even under (theta, zeta) -> (-theta, -zeta): cos*cos (and sin*sin).
+    field_even = np.einsum("smn,im,kn->sik", coeff, cosmu, cosnv)
+    sym, asym = symforce_split(field_even, trig=trig, reflect_even=True)
+    n_theta2 = trig.ntheta2
+    np.testing.assert_allclose(
+        np.asarray(sym)[:, :n_theta2], field_even[:, :n_theta2], rtol=RTOL, atol=1e-12
+    )
+    np.testing.assert_allclose(np.asarray(asym), 0.0, atol=1e-12)
+
+    # Odd under the reflection: sin*cos.
+    field_odd = np.einsum("smn,im,kn->sik", coeff, sinmu, cosnv)
+    sym, asym = symforce_split(field_odd, trig=trig, reflect_even=False)
+    np.testing.assert_allclose(
+        np.asarray(sym)[:, :n_theta2], field_odd[:, :n_theta2], rtol=RTOL, atol=1e-12
+    )
+    np.testing.assert_allclose(np.asarray(asym), 0.0, atol=1e-12)

@@ -7,7 +7,7 @@ _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("ABSL_MIN_LOG_LEVEL", "2")
 _os.environ.setdefault("GLOG_minloglevel", "2")
 
-from .cli import main
+from .core.cli import main
 
 
 if __name__ == "__main__":  # pragma: no cover
