@@ -162,6 +162,128 @@ tag, publish PyPI + conda-forge, verify `pip install vmec-jax && vmec --test` on
 - Every commit rogeriojorge, no AI trailer; push small, let CI verify; avoid rapid successive pushes
   that cancel in-flight runs via concurrency.
 
+### R10-R16 — detailed resumable tasks (added 2026-07-10 from user review; specific steps)
+
+**R10. Prove functionality completeness vs VMEC2000 + VMEC++ (the "is it all there?" question).**
+The core is small (34 files / 19.2k lines) because JAX/Python is far denser than Fortran/C++ and we
+dropped VMEC2000's MPI, v3fit reconstruction, and ANIMEC boilerplate — NOT because physics is missing.
+Verified present: fixed + free boundary (NESTOR), lasym, ntor=0 free-bdy, multigrid + hot restart,
+**18 profile parameterizations** (power_series/two_power/gauss_trunc/pedestal/cubic+akima splines/
+line_segment + _i/_ip integrated variants), ncurr=0/1, full wrout.f wout set, Mercier, jxbforce, bss,
+Boozer, JSON+INDATA, zero-crash, implicit diff (fixed-bdy), direct-coil free boundary, GPU.
+Steps:
+  1. Write `docs/functionality_matrix.rst` (+ a README summary): a feature-by-feature table
+     vmec_jax vs VMEC2000 vs VMEC++ with a "where implemented (module:function)" column, so
+     completeness is provable and auditable. Include the LOC/file-count comparison row (see R11.3).
+  2. Close the **genuine gaps**, in priority: (a) **2D preconditioner** — currently only accepted as
+     an input key (`precon_type`/`prec2d_threshold` in input.py) but NOT implemented; only the 1D
+     radial preconditioner exists. Implement the optional 2D block preconditioner via matrix-free
+     `jax.jvp` Hessian-vector products + preconditioned GMRES (plan §7.5), activated below a
+     threshold on the finest grid, to cut iteration counts on stiff cases. (b) document ANIMEC
+     (anisotropic pressure) and RFP (`lrfp`) as explicitly out-of-scope/niche, or add if a user
+     needs them. Gate: functionality_matrix has no unexplained ❌ for a mainstream VMEC2000 feature.
+
+**R11. README overhaul (all ns≥51; optimization + Boozer; code-size comparison; better showcase).**
+  1. **All benchmark rows ns≥51.** `benchmarks/run_baseline.py` already ramps fixed-bdy to ns≥51;
+     the **free-boundary row (cth_like_free_bdy) must also run at ns≥51** (currently its deck ns may
+     be <51). Bump the free-bdy deck's final NS_ARRAY stage to ≥51 (regenerate its mgrid if the grid
+     resolution requires), re-run the whole suite, regenerate `readme_runtime_compare.png`. Verify no
+     row in the figure/table uses ns<51.
+  2. **Optimization panels.** Add README figures showing QA/QH/QI/QP **initial vs optimized** boundary
+     cross-sections + **Boozer |B| on the LCFS** for each, from the R1 converged results. One compact
+     multi-panel `readme_optimization.png` (compressed <150 KB). Generate via a tracked
+     `benchmarks/make_readme_figures.py` addition using `core.plotting` + `core.boozer`.
+  3. **Code-size comparison.** Add a README table: source files + lines of code for vmec_jax vs
+     VMEC2000 vs VMEC++ (count with `cloc`/`tokei` over `/Users/rogerio/local/STELLOPT/VMEC2000/Sources`
+     and `/Users/rogerio/local/vmecpp/src`; state what's counted). Message: comparable/greater
+     capability in a fraction of the code.
+  4. **Showcase figure.** `readme_equilibrium_showcase.png`: show the **3D geometry with |B| color on
+     the surface**; and change the current flat |B| plot to **|B| in Boozer coordinates with the `jet`
+     colormap** (the STELLOPT/Boozer convention). Update `core.plotting`/`core.boozer` plot helpers as
+     needed (add a `cmap` arg + a boozer-|B|-on-LCFS plot).
+
+**R12. Rename `tests/core_new/` → `tests/`.** "new" is meaningless to users and the legacy `tests/`
+is gone. Steps: `git mv tests/core_new/* tests/` (handle conftest.py merge — root `tests/conftest.py`
+already exists with the RUN_FULL/jit gates; merge the core_new conftest fixtures into it), update
+every CI path in `.github/workflows/ci.yml` (parity shard file lists, ignores, prefetch), update the
+golden-fetch import path, `pyproject.toml` pytest config, and any `tests/core_new` string in docs.
+Gate: CI green with the flat `tests/` layout; no `core_new` anywhere.
+
+**R13. Many more pedagogic examples (study STELLOPT / VMEC2000 / hiddenSymmetries simsopt / DESC /
+VMEC++ example layouts).** Each is one simsopt-style file (params at top, no `main()`, prints
+initial→progress→final, teaches one feature) and is CI-smoke-tested (reduced budget) + doubles as the
+docs tutorial (R14.3). Target set:
+  - `run_fixed_boundary.py` (exists), `run_from_json.py` (VMEC++ JSON in/out + convert),
+  - `free_boundary_mgrid.py` (mgrid path), `free_boundary_essos_coils.py` (direct Biot-Savart, no
+    mgrid; needs ESSOS), `free_boundary_beta_scan.py` (β=0..5% hot-restarted; the README β-scan),
+  - `profiles_power_and_spline.py` (power_series vs cubic/akima; pressure/iota/current; ncurr=0 vs 1),
+  - `finite_beta_scan.py` (pressure ramp; beta, Mercier, Shafranov shift),
+  - `take_gradients.py` (implicit d(aspect|iota|QS)/d(boundary|profile) vs FD; jacrev usage),
+  - `plot_and_boozer.py` (all plot types + `--booz` on LCFS),
+  - `hot_restart_scan.py` (reuse a converged state across a parameter scan; warm speedups),
+  - `single_stage_free_boundary_opt.py` (ESSOS coils → free-bdy equilibrium → QS/aspect targets;
+    advanced) — gated on R15 free-bdy differentiation.
+  Keep QA/QH/QP/QI optimization examples. `examples/README.md` indexes them by feature. Gate: every
+  example smoke-passes in CI; each maps to a docs tutorial.
+
+**R14. Complete the documentation (full theory + algorithms + tutorials, not an overview).**
+  1. **Theory & numerics, exhaustive** (`docs/theory/` split into pages, each equation linked to its
+     implementing `core` function): ideal-MHD energy functional + Hirshman-Whitson moment method;
+     flux coordinates + λ; Fourier representation + parities + lasym; **how |B| is computed** (metric
+     → B^u/B^v → covariant B → |B|, from `core.fields`); the MHD **forces** (`core.forces`) and
+     spectral condensation; **preconditioners** (1D radial derivation + tridiagonal solve; the 2D
+     extension from R10.2); Richardson time-stepping + restart; multigrid + hot restart; **NESTOR**
+     free-boundary vacuum (Green's function); the **implicit differentiation** adjoint (custom_vjp +
+     preconditioned GMRES, with the basin/saddle finding from R1); the CLI-vs-jit lanes; device policy.
+  2. **Reference**: API autodoc (all core modules), input reference (INDATA + JSON), wout reference
+     (Appendix A rendered), glossary (VMEC2000↔vmec_jax names), CLI reference.
+  3. **Tutorials = the examples** (R13): one docs page per example with rendered figures + expected
+     output; the examples ARE the tutorials (docs currently reference tutorials that don't exist).
+  Gate: docs `-W` green; a reader can follow B-field→forces→preconditioner→solve→differentiate→optimize
+  entirely from the docs; every example has a tutorial page.
+
+**R15. Free boundary to production parity + performance + differentiability (make it excellent AND
+show it).** Current: CTH free-bdy stops at NITER (fsq~9e-2, unconverged), warm 17 s ≫ Fortran 6.6 s,
+coil derivatives unsupported. Steps:
+  1. **Converge as well as VMEC2000.** Diagnose why the free-bdy solve stalls (nvacskip cadence, ivac
+     activation threshold, edge-force/preconditioner interaction at js=ns, delt policy) vs VMEC2000 on
+     the same deck; raise NITER and match VMEC2000's converged fsq. Produce a **converged
+     free-boundary golden fixture** (validate wout per-variable vs VMEC2000). This is the acceptance
+     authority — no coil-derivative claims before it.
+  2. **Fast.** Profile the NESTOR/vacuum solve (dominant cost); the dense scalar-potential solve and
+     Green's-function assembly are the suspects. Target free-bdy warm within ~3× VMEC2000 (from 17 s).
+  3. **Differentiable.** Extend the implicit residual to include the free-boundary/NESTOR contribution
+     so coil-dof and pressure gradients flow through the converged free-boundary fixed point;
+     FD-validate d(boundary|QS)/d(coil-dof) and d/d(extcur).
+  4. **Show it.** README free-boundary parity + performance row (ns≥51); a
+     `single_stage_free_boundary_opt.py` example (R13); the β-scan showcase (R13) with mgrid vs direct
+     agreement. Gate: converged free-bdy wout parity vs VMEC2000; free-bdy warm within ~3× Fortran;
+     free-bdy gradients FD-validated; examples + README updated.
+
+**R16. Memory reduction (reason + act; the biggest quantitative gap).** Measured: solves use
+0.6-1.5 GB (NuhrenbergZille 3.3 GB, free-bdy 2.6 GB) vs VMEC2000's 28-102 MB — **20-30×**; implicit
+gradient 3.4 GB. This IS improvable — the causes are architectural, not fundamental:
+  1. **Profile** peak device/host buffers with `jax.profiler.device_memory_profile()` +
+     `memory_stats()` on a mid + large deck; attribute MB to: the batched-DFT transform matrices
+     (dense `(nznt × mnmax)` per parity/derivative — the prime suspect; VMEC2000 uses O(N) DFT loops),
+     the trajectory/history buffers, un-donated carry copies, and jit residual variants.
+  2. **Act**, in impact order: donate solver-carry buffers in the CLI lane
+     (`jax.jit(donate_argnums=...)`); free/rematerialize the large transform tensors instead of
+     holding all parities/derivatives simultaneously (or use the FFT path where it wins); shrink the
+     trajectory buffer (store only what prints needs); collapse redundant structural jit variants
+     (padded shapes); for the implicit gradient, chunk the per-dof Jacobian (DESC's `jac_chunk_size`
+     idea — see R17) so peak memory doesn't scale with dof count.
+  3. Gate: **≥2× peak-memory reduction** on the benchmark median (target <~700 MB for mid decks,
+     <1.5 GB for the largest), implicit-gradient peak <~1.5 GB, recorded in `benchmarks/baseline.json`
+     and the README performance notes. Correctness (parity + gradient tests) unchanged.
+
+**R17. Apply DESC ideas (research pending).** A DESC deep-dive is running (functionality, docs,
+GPU/memory patterns, objective library, optimization API). When it reports, fold applicable ideas
+here with concrete steps — expected candidates: `jac_chunk_size`-style Jacobian chunking for memory
+(feeds R16.2), a richer objective library (omnigenity/effective-ripple/ballooning) for R1, an
+`Equilibrium`/family object + continuation UX, and notebook-style tutorials. Gate: each adopted idea
+lands as a concrete R-item with tests.
+
 ---
 
 ## 1. Ground truth — current state (audited 2026-07-08)
