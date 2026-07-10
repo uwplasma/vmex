@@ -55,6 +55,17 @@ from vmec_jax.core.input import VmecInput
 DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
 FD_CACHE = Path(tempfile.gettempdir()) / "vmec_jax_implicit_fd_cache.pkl"
 
+
+@pytest.fixture(autouse=True, scope="module")
+def _jit_enabled():
+    """tests/conftest.py disables jit globally for cheap unit tests; the
+    implicit-gradient tests run full solves + adjoint GMRES and are ~40x
+    slower interpreted (105-160 s/test in CI) — run them jitted."""
+    prev = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    yield
+    jax.config.update("jax_disable_jit", prev)
+
 CASES = {
     "solovev": dict(ftol=1e-14, max_iterations=2000),
     "li383_low_res": dict(ftol=1e-13, max_iterations=6000),

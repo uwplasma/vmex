@@ -51,6 +51,7 @@ __all__ = [
     "iteration_work",
     "recommended_device",
     "resolve_device",
+    "resolve_implicit_device",
     "device_context",
 ]
 
@@ -120,6 +121,42 @@ def resolve_device(device: Any, resolution: Any):
         f"unknown device {device!r}; expected 'cpu', 'gpu', 'cuda', 'rocm', "
         "'tpu' or a jax.Device"
     )
+
+
+def resolve_implicit_device(device: Any, resolution: Any):
+    """Device for the implicit-gradient Jacobian / adjoint GMRES (or ``None``).
+
+    Unlike the forward solve, the ``jac="implicit"`` path builds a per-dof
+    *vmapped* forward-implicit-differentiation graph — dozens of preconditioned
+    GMRES solves (each with control flow), one per boundary Fourier dof — whose
+    XLA compile grows with the dof count and whose evaluation is kernel-launch
+    bound.  Measured on 2x RTX A4000 (plan.md R1, ``benchmarks`` notes) it is
+    *slower* on the GPU than on the CPU at every optimization size tested: a
+    ``max_mode=2`` QH stage (24 dofs) did not finish a single Jacobian eval in
+    37 min on the GPU, versus minutes on the CPU; the forward solve itself is a
+    host callback that never touches the accelerator.  So the default here is
+    always the CPU:
+
+    - an explicit ``device`` (``"cpu"``/``"gpu"``/... or a ``jax.Device``) is
+      still honored (delegated to :func:`resolve_device`);
+    - a user ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME`` pin stands down
+      (returns ``None`` — leave placement alone);
+    - otherwise pin to the CPU when the default backend is an accelerator, or
+      leave placement untouched (``None``) when already on the CPU.
+
+    ``resolution`` is accepted for signature parity with :func:`resolve_device`
+    (and in case a size-dependent rule is wanted later); it is unused today.
+    """
+    if device is not None:
+        return resolve_device(device, resolution)
+    if _user_pinned_platform():
+        return None
+    if jax.default_backend() == "cpu":
+        return None
+    try:
+        return jax.devices("cpu")[0]
+    except RuntimeError:  # pragma: no cover - CPU device always present
+        return None
 
 
 def device_context(device: Any, resolution: Any):

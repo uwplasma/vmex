@@ -65,6 +65,8 @@ jax.config.update("jax_enable_x64", True)
 from vmec_jax.core import multigrid, solver
 from vmec_jax.core.input import VmecInput
 
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
+
 DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmec_jax_ladder_cache")
 
@@ -170,7 +172,10 @@ print(json.dumps(dict(c1=c1, t1=t1, c2=c2, t2=t2, l1=l1, l2=l2,
     assert out["c1"] > 0                       # cold solve does compile
     assert out["l1"] == 1                      # exactly one block-lane compile
     assert out["c2"] == 0, f"second solve recompiled {out['c2']} executables"
-    assert out["t2"] < 0.1, f"second solve took {out['t2']:.3f}s (>= 0.1s)"
+    # c2 == 0 already proves executable reuse (a recompile would be seconds).
+    # The wall-time bound is a coarse backstop with generous CI/coverage
+    # headroom — not a tight microbenchmark (that lives in benchmarks/).
+    assert out["t2"] < 1.0, f"second solve took {out['t2']:.3f}s (>= 1.0s)"
 
 
 # ---------------------------------------------------------------------------

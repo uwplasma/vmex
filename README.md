@@ -18,9 +18,12 @@ original, it is differentiable and runs on GPUs.
   preconditioner, spectral condensation, NESTOR vacuum solve). Benchmark
   decks converge in the *same* number of iterations and reproduce the
   plasma energy at machine precision.
-- **Differentiable.** Gradients of equilibrium outputs with respect to
-  boundary shape, profiles, and coil parameters by implicit differentiation
-  of the converged fixed point — no finite differences, no unrolling.
+- **Differentiable.** Gradients of fixed-boundary equilibrium outputs with
+  respect to boundary shape and profile parameters by implicit
+  differentiation of the converged fixed point — no finite differences, no
+  unrolling — validated against central finite differences to ~1e-6 relative
+  (see the gradient table in the docs). Free-boundary and coil-parameter
+  derivatives are not yet supported by the implicit residual (roadmap).
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.
@@ -85,6 +88,15 @@ boundary); on the remaining row (Nuhrenberg–Zille QHS) vmec-jax converges in
 *fewer* iterations (1681 vs 2829). Per-variable wout agreement and the full
 test gates live in the [documentation](https://vmec-jax.readthedocs.io/en/latest/).
 
+![Force residual vs iteration for vmec_jax, VMEC2000, and VMEC++](docs/_static/figures/readme_convergence.png)
+
+*Parity is per-iteration, not just end-to-end: the total force residual
+(`fsqr + fsqz + fsql`) of the quick-start QH case at ns=51, per iteration.
+The vmec_jax trajectory lies exactly on top of VMEC2000's (both converge in
+502 iterations); VMEC++ follows a near-identical path (501 iterations).
+Traces: vmec_jax `SolveResult.fsq_history`, VMEC2000 `NSTEP=1` stdout,
+VMEC++ wout `fsqt`.*
+
 ## Performance
 
 ![Wall-clock comparison against VMEC2000 and VMEC++](docs/_static/figures/readme_runtime_compare.png)
@@ -128,7 +140,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Boozer transform built in (`--booz`) | ✅ | ❌ | ❌ |
 | Plotting built in (`--plot`) | ✅ | ❌ | ❌ |
 | GPU execution | ✅ | ❌ | ❌ |
-| Differentiable (implicit diff of the fixed point) | ✅ | ❌ | ❌ |
+| Differentiable (implicit diff, fixed boundary) | ✅ | ❌ | ❌ |
 
 ## Python API
 
@@ -153,7 +165,28 @@ Optimization building blocks live in `vmec_jax.core.optimize`
 targets; a least-squares driver over boundary Fourier coefficients) with
 complete QA/QH/QP/QI scripts in `examples/optimization/`, and
 `vmec_jax.core.implicit` provides implicit-differentiation gradients of the
-converged equilibrium.
+converged fixed-boundary equilibrium. The least-squares driver accepts
+`jac="implicit"` to use those exact gradients (fixed boundary,
+`LASYM = F`, implicit-differentiable objective terms); the default is
+scipy finite differences.
+
+From a circular-torus seed, staged `max_mode` continuation with ESS and
+`jac="implicit"` (measured on a 2× RTX A4000 workstation, quasisymmetry
+residual = `QuasisymmetryRatioResidual.total`):
+
+| class | nfp | helicity (m,n) | seed QS | achieved QS | max_mode | status |
+|-------|-----|----------------|---------|-------------|----------|--------|
+| QA | 2 | (1, 0)  | 2.04e-01 | **1.70e-04** | 2 | precise (>3 orders; aspect 6.00, iota 0.42) |
+| QH | 4 | (1, −1) | 6.91e-01 | 1.40e-01 | 1 | descends via implicit (higher `max_mode` compile-bound) |
+| QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 3 | basin-limited (documented QP caveat) |
+| QI | 1 | (0,1)→QI | — | partial | 3 | hardest; QP-basin + Boozer refinement |
+
+Implicit gradients are *essential*, not merely faster: for the helical (QH)
+target the exact-axisymmetric seed is a saddle where finite differences stall,
+and for QP the implicit path reaches a far better basin than FD. The forward
+solve is a host callback, so the small fixed-boundary solve does not benefit
+from a GPU (cold solve ~2× faster on CPU); per stage the wall is dominated by
+a one-time XLA compile of the implicit Jacobian.
 
 ## CLI reference
 

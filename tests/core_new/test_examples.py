@@ -67,7 +67,11 @@ def test_fixed_boundary_run(tmp_path):
     assert (outdir / "li383_low_res_summary.png").exists()
 
 
-@pytest.mark.parametrize("case", ["QA", "QH", "QP"])
+@pytest.mark.parametrize("case", [
+    "QA",  # PR smoke: proves the QS optimization pipeline end-to-end
+    pytest.param("QH", marks=pytest.mark.full),  # nightly (subprocess cold-start heavy)
+    pytest.param("QP", marks=pytest.mark.full),
+])
 def test_qs_optimization_examples(case, tmp_path):
     script = EXAMPLES / "optimization" / f"{case}_optimization.py"
     out = _run_example(script, tmp_path)
@@ -81,6 +85,7 @@ def test_qs_optimization_examples(case, tmp_path):
     assert match is not None and np.isfinite(float(match.group(2)))
 
 
+@pytest.mark.full  # nightly: QP-basin + QI stages + Boozer, subprocess cold-start heavy
 def test_qi_optimization_example(tmp_path):
     pytest.importorskip("booz_xform_jax")
     script = EXAMPLES / "optimization" / "QI_optimization.py"

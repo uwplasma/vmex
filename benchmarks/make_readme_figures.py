@@ -9,11 +9,16 @@ Produces (into ``docs/_static/figures/``):
 - ``readme_parity.png``               — iteration-for-iteration parity table
   vs the golden VMEC2000 fixtures (solves the five cases; needs the golden
   bundle, see ``tests/core_new/conftest.py``).
+- ``readme_convergence.png``          — force residual vs iteration for one
+  representative case (nfp4_QH_warm_start at ns=51) in vmec_jax, VMEC2000
+  (NSTEP=1 stdout trace), and VMEC++ (wout ``fsqt``).  Traces are cached in
+  ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
 - ``readme_equilibrium_showcase.png`` — flux surfaces + boundary ``|B|`` of
   the bundled quick-start case (solves it in-process).
 
 Usage:
-    python benchmarks/make_readme_figures.py [--only runtime,parity,showcase]
+    python benchmarks/make_readme_figures.py
+        [--only runtime,parity,convergence,showcase]
         [--outdir docs/_static/figures]
 
 Figures are written uncompressed; compress before committing:
@@ -286,7 +291,125 @@ def make_parity_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 3. Equilibrium showcase (solves the bundled quick-start case)
+# 3. Convergence trace: force residual vs iteration, three codes
+# --------------------------------------------------------------------------
+
+CONV_CASE = "nfp4_QH_warm_start"
+CONV_NS = 51
+CONV_CACHE = REPO / "benchmarks" / "convergence_nfp4_ns51.json"
+
+VMECPP_TRACE_SNIPPET = r"""
+import json, sys
+import numpy as np
+import vmecpp
+out = vmecpp.run(vmecpp.VmecInput.from_file(sys.argv[1]), verbose=0)
+# wout.fsqt is the per-iteration fsqr+fsqz+fsql trace (len == itfsq)
+print(json.dumps({"niter": int(out.wout.niter),
+                  "fsqt": np.asarray(out.wout.fsqt).tolist()}))
+"""
+
+
+def collect_convergence() -> dict:
+    """Per-iteration total force residual (fsqr+fsqz+fsql) from all codes.
+
+    - vmec_jax: ``SolveResult.fsq_history`` (recorded every iteration).
+    - VMEC2000: stdout iteration table with NSTEP=1 (one row per iteration).
+    - VMEC++: ``wout.fsqt`` (stored per iteration).
+    Cached in CONV_CACHE; delete the file to re-run all three codes.
+    """
+    if CONV_CACHE.exists():
+        return json.loads(CONV_CACHE.read_text())
+
+    import re
+    import subprocess
+    import sys
+    import tempfile
+
+    sys.path.insert(0, str(REPO / "benchmarks"))
+    from run_baseline import XVMEC2000, VMECPP_PY, make_ramped_deck
+
+    from vmec_jax.core.input import VmecInput
+    from vmec_jax.core import solver
+
+    with tempfile.TemporaryDirectory() as td:
+        deck = Path(td) / f"input.{CONV_CASE}"
+        make_ramped_deck(DATA / f"input.{CONV_CASE}", deck, min_ns=CONV_NS)
+
+        # vmec_jax: in-process solve, per-iteration history from SolveResult.
+        res = solver.solve(VmecInput.from_file(str(deck)))
+        hist = np.asarray(res.fsq_history)
+        jax_fsq = hist[:, :3].sum(axis=1).tolist()
+
+        # VMEC2000: NSTEP=1 makes the stdout table one row per iteration
+        # (columns: ITER, FSQR, FSQZ, FSQL, RAX, DELT, WMHD).
+        text = deck.read_text()
+        deck.write_text(re.sub(r"NSTEP\s*=\s*\d+", "NSTEP = 1", text))
+        proc = subprocess.run([str(XVMEC2000), deck.name], cwd=td,
+                              capture_output=True, text=True, timeout=900)
+        rows = re.findall(
+            r"^\s*(\d+)\s+([\d.E+-]+)\s+([\d.E+-]+)\s+([\d.E+-]+)",
+            proc.stdout, re.M)
+        v2k_fsq = [float(r[1]) + float(r[2]) + float(r[3]) for r in rows]
+
+        # VMEC++: fsqt array from the wout payload.
+        proc = subprocess.run([str(VMECPP_PY), "-c", VMECPP_TRACE_SNIPPET,
+                               deck.name], cwd=td, capture_output=True,
+                              text=True, timeout=900)
+        vpp = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    data = {"case": CONV_CASE, "ns": CONV_NS,
+            "ftol": 1e-13,  # deck FTOL_ARRAY final stage
+            "vmec_jax": jax_fsq, "vmec2000": v2k_fsq, "vmecpp": vpp["fsqt"]}
+    CONV_CACHE.write_text(json.dumps(data))
+    return data
+
+
+def make_convergence_figure(out: Path) -> None:
+    d = collect_convergence()
+    jax_t, v2k_t, vpp_t = d["vmec_jax"], d["vmec2000"], d["vmecpp"]
+
+    fig, ax = plt.subplots(figsize=(8.6, 3.7), dpi=160)
+    # Widest underneath, hero (blue) on top: the three traces coincide.
+    ax.semilogy(range(1, len(v2k_t) + 1), v2k_t, color=INK2, lw=3.6,
+                alpha=0.5, solid_capstyle="round",
+                label=f"VMEC2000 (Fortran), {len(v2k_t)} iterations")
+    ax.semilogy(range(1, len(vpp_t) + 1), vpp_t, color=YELLOW, lw=2.2,
+                alpha=0.9, label=f"VMEC++, {len(vpp_t)} iterations")
+    ax.semilogy(range(1, len(jax_t) + 1), jax_t, color=BLUE, lw=1.1,
+                label=f"vmec_jax, {len(jax_t)} iterations")
+
+    ax.axhline(3 * d["ftol"], color=BASELINE, lw=0.9, ls=(0, (5, 4)))
+    ax.annotate("converged: fsqr, fsqz, fsql all < FTOL = 1e-13",
+                xy=(len(jax_t) * 0.02, 3 * d["ftol"] * 1.6), ha="left",
+                va="bottom", fontsize=8, color=MUTED)
+    mid = len(jax_t) // 2
+    ax.annotate("vmec_jax tracks VMEC2000\niteration-for-iteration\n"
+                "(curves overlap)",
+                xy=(mid, jax_t[mid]), xytext=(mid * 0.62, jax_t[mid] * 3e3),
+                fontsize=8.5, color=INK2, ha="center",
+                arrowprops=dict(arrowstyle="-", color=MUTED, lw=0.8,
+                                shrinkB=4))
+
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("force residual  fsqr + fsqz + fsql")
+    ax.set_xlim(0, max(len(jax_t), len(v2k_t), len(vpp_t)) * 1.02)
+    ax.yaxis.grid(True)
+    ax.set_axisbelow(True)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    ax.set_title(f"Convergence trace: {CASE_LABELS[CONV_CASE]} "
+                 f"(ns={d['ns']}, single grid)", loc="left", pad=10,
+                 fontsize=13, color=INK)
+    ax.legend(loc="upper right", fontsize=8.5, labelspacing=0.4,
+              handlelength=1.8)
+    fig.tight_layout()
+    fig.savefig(out, dpi=160)
+    plt.close(fig)
+    print("wrote", out)
+
+
+# --------------------------------------------------------------------------
+# 4. Equilibrium showcase (solves the bundled quick-start case)
 # --------------------------------------------------------------------------
 
 def make_showcase_figure(out: Path) -> None:
@@ -350,7 +473,7 @@ def make_showcase_figure(out: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="runtime,parity,showcase")
+    ap.add_argument("--only", default="runtime,parity,convergence,showcase")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
     args = ap.parse_args()
     outdir = Path(args.outdir)
@@ -361,6 +484,8 @@ def main() -> None:
         make_runtime_figure(outdir / "readme_runtime_compare.png")
     if "parity" in which:
         make_parity_figure(outdir / "readme_parity.png")
+    if "convergence" in which:
+        make_convergence_figure(outdir / "readme_convergence.png")
     if "showcase" in which:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.png")
 

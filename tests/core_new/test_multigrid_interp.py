@@ -29,6 +29,8 @@ from vmec_jax.core.input import VmecInput
 from vmec_jax.core.multigrid import interpolate_coefficients, interpolate_state
 from vmec_jax.core.solver import SpectralState
 
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
+
 DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
 INPUT_FILE = DATA_DIR / "input.cth_like_fixed_bdy"
 CACHE = Path("/tmp/vmec_jax_multigrid_cth_ns15_state.pkl")

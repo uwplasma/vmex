@@ -58,6 +58,120 @@ Every decision below optimizes for: *simpler to use, fewer files, faster, more m
 
 ---
 
+## 0.5 Completion roadmap (updated 2026-07-10) — honest status + ordered remaining work
+
+This is the actionable index of what is DONE and what REMAINS. Sections 1-16 below are the original
+phase specs (still authoritative for detail); this roadmap supersedes the scattered STATUS notes and
+folds in every requirement from the user prompts and the two independent reviews.
+
+### Done and verified on current `main` (d26bed44)
+- Legacy tree deleted; package is `vmec_jax/core/` only — **34 files / 19.2k lines** (revised target
+  25-30k), tests **34 files / 6.7k lines**. Fresh clone ≤ ~12 MB; no Claude contributor; all commits
+  rogeriojorge.
+- Fixed-boundary equilibrium at **VMEC2000 machine-precision parity** across the 9 golden fixtures
+  (exact iteration counts incl. lasym after the fixaray dnorm fix; wb ~1e-16, geometry ~1e-12).
+- Structural executable reuse (SolverRuntime pytree; 0 recompiles on same-Resolution re-solve),
+  NS_ARRAY multigrid ladder, hot restart, wout (full wrout.f set), plotting, Boozer, CLI on the core,
+  VMEC++-JSON input, zero-crash typed errors, mgrid fallback.
+- Free-boundary NESTOR solve (vacuum activates at the golden iteration exactly) + direct-coil field;
+  CLI routes LFREEB decks + `--coils`.
+- Implicit differentiation (custom_vjp + preconditioned-GMRES adjoint), FD-validated 1e-6..1e-12 for
+  fixed-boundary boundary/profile/phiedge params; `jac="implicit"` wired into `least_squares`.
+- GPU fixes (cuSPARSE tridiagonal, cache hardening, device policy) measured on office 2x A4000.
+- README ns≥51 benchmark + vmecpp-style convergence figure; docs restructured (17 pages) with honest
+  fixed-vs-free differentiability scoping; **CI green: 7 shards, wall ~9 min, 95% coverage gate**.
+- Examples: 5 clean simsopt-style files (541 lines) on the core API; `jac="implicit"` used.
+
+### Remaining work — ordered by priority (each item has an acceptance gate)
+
+**R1. Optimization examples actually reach precise QA/QH/QP/QI (biggest open lane; user's #1 ask).**
+Current: scripts run and objectives decrease at CI budget; genuine convergence from a circular torus
+is UNVALIDATED. Gate: from a near-circular seed, staged `max_mode` 1→5 with ESS and `jac="implicit"`,
+running **thousands of iterations/nfev as needed**, reach *precise* QS/QI — QA (nfp=2) & QH (nfp=4)
+QS residual ≤ ~1e-3 of seed and aspect on target; QP (nfp=2, note the max_mode≥4 bad-basin caveat)
+and QI (nfp=1, QP-first-then-QI) to documented precision. Record achieved values in each docstring;
+add a `full`-marked convergence test per class asserting the achieved bound. Run the heavy ones on
+`ssh office` GPU; compare CPU vs GPU wall + autodiff-vs-FD accuracy. Verify the commented DMerc/
+LgradB/magnetic-well terms work uncommented (already CI-tested) and read well pedagogically.
+
+_R1 status (2026-07-10, office 2x A4000 / 36-core CPU, on f45a6491):_
+- **QA (nfp2) — PRECISE, validated.** `jac="implicit"` + ESS from the kicked circular seed:
+  QS total 2.043e-01 → 9.82e-03 (max_mode=1) → **1.701e-04 (max_mode=2)**, aspect 6.000 &
+  mean iota 0.420 on target. >3 orders, ≤1e-3-of-seed gate met. Docstring updated.
+- **QH (nfp4) — descends via implicit; precise not re-validated this session.** QS 6.908e-01 →
+  1.401e-01 (max_mode=1, iota −0.917). Key finding: the exact-axisymmetric seed is a *saddle*
+  (QS residual even in the symmetry-breaking harmonic) — finite differences STALL (njev=1, QS
+  unchanged); implicit escapes it, so the example is correct to use implicit (no kick). Higher
+  max_mode continuation is compile/eval-bound (see below); stage 2 did not finish in budget.
+- **QP (nfp2) — basin-limited, not precise (as documented).** Implicit reaches QS 4.458e-01 →
+  9.42e-02 (max_mode=1, ~the docstring's 7e-2 basin); FD stalls much worse at 2.32e-01. Confirms
+  the QP bad-basin caveat AND that the gradient method selects the basin (implicit ≫ FD here).
+  Schedule capped at 3.
+- **QI (nfp1) — partial (hardest).** QP-basin (FD) 2.43 → ~1.15 (QI total), QP 6.7e-2 → 3.85e-2;
+  the Boozer QI-stage refinement barely moves from a crude circular nfp1 seed — precise QI needs
+  more than the current 4-term FD path (documented, not overclaimed).
+- **Autodiff accuracy:** implicit gradients drive the same descent as FD (QA reaches precise;
+  `tests/core_new/test_implicit_grad.py` already validates implicit vs central FD, rtol ≤1e-6
+  solovev / ~1e-5 li383-3D). Implicit is *essential* for the helical/basin cases (FD stalls/worse
+  basin), not just faster.
+- **CPU vs GPU / per-step:** warm forward solve ~0.9 s; the implicit forward solve is a host (CPU)
+  callback so the GPU only accelerates the adjoint GMRES — and does NOT help this small problem
+  (cold solve CPU 13 s vs GPU 27 s; GPU per-stage dominated by a one-time XLA compile that grows
+  with dof count: QA stage1 761 s / stage2 1261 s, amortized 20–37 s/step; a 24-dof QH GPU stage
+  hung >37 min in a single kernel-launch-bound GMRES eval). **Actionable for R3/R6:** the
+  per-dof-vmap implicit Jacobian compile/eval is the scaling bottleneck for max_mode ≥ 2.
+- Added `tests/core_new/test_optimization_convergence.py` (`full`-marked, per class).
+- REMAINING: get QH to precise (run implicit continuation on CPU where GMRES eval is fast, or
+  reduce the adjoint/vmap cost); improve QP basin & QI omnigenity residual.
+
+**R2. Free boundary to production.** Current: CTH free-bdy stops at NITER (fsq~9e-2), not converged;
+warm 14.4 s ≫ Fortran 1.95 s; coil derivatives unsupported by the implicit residual. Gate: a
+*converged* free-boundary golden fixture (raise NITER; validate wout vs VMEC2000), NESTOR/vacuum
+performance profiled and tuned (target within ~3x Fortran warm), then free-boundary implicit
+derivatives (coil dofs → boundary/QS) FD-validated. β-scan showcase example (ESSOS Landreman-Paul QA
+coils + a tokamak coil set; β=0..5% hot-restarted; mgrid vs direct Biot-Savart agreement) → one
+compressed README panel. Do NOT promote coil-derivative claims before the converged fixture exists.
+
+**R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
+3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate
+CLI-lane buffers; eliminate redundant structural jit variants; reuse fixed-shape residual/adjoint
+kernels; persistent-cache guidance documented. Targets: ≥2x solve-memory reduction; cold small-deck
+CLI < ~2.5 s; record in benchmarks. This is the lane the reviews scored lowest (cold/memory 40%).
+
+**R4. GPU production evidence.** Current: microbenchmarks + fixes done; production runs across all
+solver types/modes/geometries not yet benchmarked. Gate: `benchmarks/gpu_baseline.json` extended on
+office to fixed+free, sym+lasym, single+multigrid, small→large ns, with the crossover documented and
+the auto device policy validated end-to-end; README/docs GPU section updated.
+
+**R5. Finite-beta + diagnostics parity.** Validate finite-beta wout channels (currents, `DMerc`,
+`D_R`/Glasser, jdotb) against VMEC2000 and their AD-vs-central-FD gradients; add golden fixtures for a
+finite-beta case. Gate: per-variable tolerances met; gradient tests permanent.
+
+**R6. Refactor + docstring hygiene.** Split the 4 files >1000 lines when next touched (optimize 1482,
+solver 1308, nyquist 1046, setup 1005); close the **71/355 public-def docstring gap**. Gate: no core
+file >~1000 lines; 0 public defs without docstrings; ruff+mypy clean without blanket ignores.
+
+**R7. Docs completion.** Per-example tutorial pages with rendered figures; theory-with-equations pass
+(every equation linked to its implementing function); `docs/glossary.rst` (VMEC2000↔vmec_jax names).
+Gate: docs `-W` green; each example has a tutorial; glossary present.
+
+**R8. Mirror geometry (dev).** Rebase/port PR #22 (codex/mirror-geometry) onto the core, or implement
+the `docs/mirrors.rst` design + xfail scaffolds per §7 Phase 5.5. Gate: design doc + a fixed-boundary
+axisymmetric mirror smoke.
+
+**R9. Release v0.1.0.** After R1-R5: regenerate benchmarks/README, refresh the release asset bundle,
+tag, publish PyPI + conda-forge, verify `pip install vmec-jax && vmec --test` on a clean machine.
+
+### Standing constraints (apply to all remaining work)
+- CI wall ≤10 min, coverage ≥95%, no brittle absolute wall-clock asserts (use ratios / compile counts).
+- Optimization runs use thousands of iterations for real convergence; CI uses reduced budgets.
+- Docs/README claims stay honest: separate validated fixed-boundary from in-progress free-boundary.
+- Use `ssh office` (2x RTX A4000) for GPU/heavy runs; keep the local machine responsive (watchdog).
+- Every commit rogeriojorge, no AI trailer; push small, let CI verify; avoid rapid successive pushes
+  that cancel in-flight runs via concurrency.
+
+---
+
 ## 1. Ground truth — current state (audited 2026-07-08)
 
 Facts established by direct audit; the executor should trust these and not re-derive them.
@@ -314,6 +428,16 @@ mirror design doc.
    global fixture disables JIT, making implicit tests 105-160 s each — the main CI cost), cache
    goldens, and restore the **95% coverage gate** (currently 90%; weak: profiles 31%, step 72%,
    printing 77% — add targeted tests, don't pad).
+   *(2026-07-10 progress, 0f9aca65):* sharded into fast/parity/gradient/examples/coverage-gate/
+   cli-smoke/build; module-scoped JIT fixture landed (solver tests 5-40x faster); the parity long
+   pole was test_examples subprocess smokes (QA 145s/QH 101s/QP 81s/QI 67s) — isolated into their
+   own shard with QH/QP/QI gated to nightly RUN_FULL; device.py (was 71%, untested) + mgrid/
+   optimize error branches given targeted tests. **CI GREEN (run 29110749965)**: 7 parallel
+   shards each under a 9-min timeout (parity-a 8.0m, parity-b 4.3m, gradient 8.8m, others <2m;
+   wall ~9m, meets <=10m) and the **95% coverage gate PASSES** (8521 stmts, 414 missing = 95%).
+   parity split into two balanced shards (a=8 heavy solver modules/104 tests, b=rest/370); one
+   brittle warm-solve wall bound relaxed (0.1s->1.0s; the zero-recompile check remains the gate).
+   PR #23 closed (already on main, pre-deletion base); orphan branch/worktrees cleaned.
 2. **Docs/README honesty**: distinguish validated fixed-boundary implicit differentiation from
    NOT-yet-supported free-boundary/coil derivatives and the optimizer wiring status; fix
    optimization.rst "no special handling" claim; README examples claim must become true when the

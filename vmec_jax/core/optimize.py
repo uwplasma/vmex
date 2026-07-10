@@ -13,8 +13,9 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
   ``(SpectralState, SolverRuntime)`` on :mod:`vmec_jax.core.geometry` /
   :mod:`vmec_jax.core.fields`.
 - a distilled Goodman-style QI residual (:func:`quasi_isodynamic_residual`)
-  keeping exactly the four terms the minimal-seed QI examples exercised
-  (``examples/optimization/QI_optimization_nfp1.py``): level-set bounce-width
+  keeping exactly the four terms the legacy minimal-seed QI examples
+  exercised (now ``examples/optimization/QI_optimization.py``): level-set
+  bounce-width
   variance, branch trapped-well width variance, field-line profile
   consistency, and the branch-shuffle profile comparison.  The unused legacy
   knobs (``aligned_profile_*``, ``weighted_shuffle_*``,
@@ -37,9 +38,28 @@ units of ``nfp`` (the internal target mode number is ``nn = helicity_n * nfp``):
 Gradient modes
 --------------
 :func:`least_squares` defaults to scipy finite differences (``jac=None`` ->
-``"2-point"``).  ``jac="implicit"`` is a documented stub reserved for the
-Phase-6 implicit-gradient path (:mod:`vmec_jax.core.implicit`, soft-imported;
-being finished separately) and currently raises ``NotImplementedError``.
+``"2-point"``).  ``jac="implicit"`` uses the Phase-6 implicit-gradient path
+(:mod:`vmec_jax.core.implicit`): each trial boundary is solved once through
+:func:`~vmec_jax.core.implicit.solve_implicit` (a ``jax.custom_vjp`` around
+the host solver) and the exact residual Jacobian comes from *forward*
+implicit differentiation of the fixed point — one preconditioned GMRES per
+boundary dof (a few dozen residual linearizations each) instead of one full
+equilibrium solve per dof.  In implicit mode every objective term must be a
+traceable function of ``(SpectralState, SolverRuntime)``; vector-valued
+terms exposing a ``residuals_state`` method
+(:class:`QuasisymmetryRatioResidual`) contribute their full pointwise
+residual vector, matching the finite-difference stacked-residual cost and
+Gauss-Newton geometry (internal-grid sampling instead of the wout grid).
+Wout-engine terms (:func:`d_merc`, :func:`l_grad_b`, the Boozer-based QI
+residual) run on host NumPy and are finite-difference-only.  The implicit
+parameter map does not implement the lasym ``readin.f`` delta rotation, so
+``jac="implicit"`` requires ``lasym = False``.
+
+Measured cost (2026-07-10, RTX A4000, nfp2 circular seed, QS + aspect +
+iota objective, ``max_mode=2`` -> 24 dofs): warm implicit Jacobian 2.5 s
+(~1.5 hot-restart equilibrium-solve equivalents, independent of the dof
+count) vs the 2-point FD Jacobian's 24 hot solves ~ 39 s — **15.7x**; the
+gap widens linearly with ``max_mode``.
 """
 
 from __future__ import annotations
@@ -66,7 +86,10 @@ from .solver import (
     resolution_from_input,
 )
 from .geometry import half_mesh_jacobian
-from .fields import energies_and_force_norms, magnetic_fields, metric_elements
+from .fields import (
+    energies_and_force_norms, magnetic_fields, metric_elements,
+    surface_currents,
+)
 from .wout import WoutData, wout_from_state
 
 __all__ = [
@@ -338,6 +361,145 @@ class QuasisymmetryRatioResidual:
     def J(self, eq: Equilibrium) -> jnp.ndarray:
         """Objective-term entry point for :func:`least_squares` (residual vector)."""
         return self.residuals(eq)
+
+    __call__ = J  # the instance itself can be an objective term
+
+    # -- traceable (state, runtime) evaluation --------------------------------
+
+    def _pointwise_state(self, state: SpectralState, rt: SolverRuntime):
+        """Weighted pointwise QS residual on the solver's internal grid.
+
+        Traceable core of :meth:`residuals_state` / :meth:`profile_state` /
+        :meth:`total_state`.  The reduced symmetric ``[0, pi]`` theta grid is
+        mirrored to the full circle with the stellarator-symmetry map
+        ``X(2 pi - theta, -zeta) = X(theta, zeta)`` and the ``|B|`` angular
+        derivatives come from FFT spectral differentiation on that full
+        periodic grid (exact at grid resolution).  Returns ``(r3d, s_half)``
+        with ``r3d`` shaped ``(ns - 1, ntheta1, nzeta)`` normalized so that
+        ``sum_angles r3d[i]**2`` is the surface-averaged QS ratio ``<f^2>``
+        of half-mesh surface ``i`` — the same quantity as the wout-table
+        :meth:`profile`, agreeing at discretization level (solver angular
+        grid vs the 63x64 wout sampling), not bitwise.  Symmetric
+        configurations only (``lasym = False``).
+        """
+        setup = rt.setup
+        if bool(setup.lasym):
+            raise NotImplementedError(
+                "QuasisymmetryRatioResidual traceable evaluation supports "
+                "lasym = False only")
+        s = jnp.asarray(setup.s_full)
+        nfp = int(rt.resolution.nfp)
+        _, jacobian, _, fields, _ = _field_chain(state, rt)
+
+        # Mirror the reduced [0, pi] grid to the full theta circle.
+        ntheta2 = int(np.shape(fields.total_pressure)[1])
+        nzeta = int(np.shape(fields.total_pressure)[2])
+        ntheta1 = max(2 * (ntheta2 - 1), 1)
+        i_full = np.arange(ntheta1)
+        i_src = np.where(i_full < ntheta2, i_full, ntheta1 - i_full)
+        k = np.arange(nzeta)
+        k_src = np.where(i_full[:, None] < ntheta2, k[None, :],
+                         (nzeta - k[None, :]) % nzeta)
+        i_src = np.broadcast_to(i_src[:, None], (ntheta1, nzeta))
+
+        def full(a):
+            # Drop the zeroed axis row (js = 0) *before* the singular
+            # divisions below: keeping it poisons reverse-mode AD with
+            # 0 * inf = nan even though the row never enters the result.
+            return jnp.asarray(a)[1:, i_src, k_src]
+
+        # |B| on the half-mesh internal grid (bcovar.f: bsq = |B|^2/2 + p).
+        bsq2 = 2.0 * (jnp.asarray(fields.total_pressure)
+                      - jnp.asarray(fields.pressure)[:, None, None])
+        tiny = jnp.asarray(jnp.finfo(bsq2.dtype).tiny, dtype=bsq2.dtype)
+        bmag = jnp.sqrt(jnp.maximum(full(bsq2), tiny))
+
+        # FFT spectral differentiation on the full periodic (theta, zeta) grid;
+        # zeta spans one field period, so d/dphi carries the nfp factor.
+        kt = jnp.asarray(np.fft.fftfreq(ntheta1) * ntheta1)
+        kz = jnp.asarray(np.fft.fftfreq(nzeta) * nzeta * nfp)
+        bhat = jnp.fft.fft2(bmag, axes=(1, 2))
+        dB_dtheta = jnp.real(jnp.fft.ifft2(1j * kt[None, :, None] * bhat, axes=(1, 2)))
+        dB_dphi = jnp.real(jnp.fft.ifft2(1j * kz[None, None, :] * bhat, axes=(1, 2)))
+
+        # Profiles: iota (add_fluxes.f), Boozer covariant averages G/I (fbal.f).
+        phips = jnp.asarray(setup.phips)
+        if int(setup.ncurr) == 1:
+            safe = jnp.where(phips != 0.0, phips, 1.0)
+            iota = jnp.where(phips != 0.0, jnp.asarray(fields.chips) / safe, 0.0)
+        else:
+            iota = jnp.asarray(setup.iotas)
+        cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
+                               trig=rt.trig, s=s, signgs=setup.signgs)
+        G, I = jnp.asarray(cur.bvco), jnp.asarray(cur.buco)  # noqa: E741
+
+        # d(psi)/ds = -phi_edge / (2 pi), wout sign convention.
+        hs = s[1] - s[0]
+        d_psi_d_s = -float(setup.signgs) * hs * jnp.sum(jnp.asarray(setup.phipf)[1:])
+
+        gsqrt = full(jacobian.sqrt_g)
+        gsqrt_safe = jnp.where(gsqrt != 0.0, gsqrt, jnp.ones_like(gsqrt))
+        B_dot_grad_B = full(fields.bsupu) * dB_dtheta + full(fields.bsupv) * dB_dphi
+        B_cross_grad_B_dot_grad_psi = (
+            d_psi_d_s * (full(fields.bsubu) * dB_dphi - full(fields.bsubv) * dB_dtheta)
+            / gsqrt_safe)
+        nn = self.helicity_n * nfp
+        iota_h, G_h, I_h = iota[1:], G[1:], I[1:]      # match the sliced grid
+        f = (B_cross_grad_B_dot_grad_psi * (nn - iota_h[:, None, None] * self.helicity_m)
+             - B_dot_grad_B * (self.helicity_m * G_h + nn * I_h)[:, None, None]) / bmag ** 3
+
+        # Flux-surface measure weights: sum_angles r3d^2 = <f^2> per surface.
+        g_abs = jnp.abs(gsqrt)
+        den = jnp.maximum(jnp.sum(g_abs, axis=(1, 2), keepdims=True), tiny)
+        r3d = f * jnp.sqrt(g_abs / den)                # half-mesh js = 1..ns-1
+        return r3d, 0.5 * (s[:-1] + s[1:])
+
+    def _surface_coefficients(self, s_half: jnp.ndarray) -> jnp.ndarray:
+        """Nonnegative half-mesh weights ``c`` with ``sum(c * <f^2>) = total``.
+
+        The wout-table convention interpolates per-surface totals onto the
+        requested ``surfaces`` and applies ``weights``; because linear
+        interpolation is linear in the profile, that is exactly a fixed
+        nonnegative combination ``c`` of the half-mesh surfaces (obtained
+        here as the VJP of the interpolation).
+        """
+        surfaces = _as_1d(self.surfaces)
+        weights = (jnp.ones((int(surfaces.shape[0]),)) if self.weights is None
+                   else _as_1d(self.weights))
+        probe = jnp.zeros_like(s_half)
+        _, vjp = jax.vjp(
+            lambda p: jnp.sum(weights * jnp.interp(surfaces, s_half, p)), probe)
+        return vjp(jnp.asarray(1.0, dtype=probe.dtype))[0]
+
+    def residuals_state(self, state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
+        """Traceable flat residual vector with ``sum(r**2) = total_state``.
+
+        The internal-grid analogue of :meth:`residuals` (wout tables): the
+        pointwise weighted residual of :meth:`_pointwise_state` scaled by the
+        square roots of the surface coefficients — this is the residual
+        vector ``jac="implicit"`` optimizes, giving the least-squares driver
+        the full pointwise Gauss-Newton geometry.
+        """
+        r3d, s_half = self._pointwise_state(state, rt)
+        c = self._surface_coefficients(s_half)
+        return jnp.ravel(jnp.sqrt(c)[:, None, None] * r3d)
+
+    def profile_state(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Traceable *weighted* per-surface QS totals at ``surfaces``.
+
+        ``weights * interp(surfaces, <f^2> profile)`` from
+        :meth:`_pointwise_state`; ``sum = total_state``.
+        """
+        r3d, s_half = self._pointwise_state(state, rt)
+        profile = jnp.sum(r3d * r3d, axis=(1, 2))
+        surfaces = _as_1d(self.surfaces)
+        weights = (jnp.ones((int(surfaces.shape[0]),)) if self.weights is None
+                   else _as_1d(self.weights))
+        return weights * jnp.interp(surfaces, s_half, profile)
+
+    def total_state(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Traceable scalar QS objective: ``sum(profile_state)`` (see there)."""
+        return jnp.sum(self.profile_state(state, rt))
 
 
 # ===========================================================================
@@ -1032,13 +1194,20 @@ def least_squares(
     (:func:`_ess_scale`, ``ess_alpha``), the legacy ``use_ess`` option.
 
     ``jac=None`` (default) uses scipy ``"2-point"`` finite differences.
-    ``jac="implicit"`` is reserved for the Phase-6 implicit-gradient path
-    (:mod:`vmec_jax.core.implicit`; being finished separately) and raises
-    ``NotImplementedError`` for now — the wiring point is documented inline.
+    ``jac="implicit"`` uses the Phase-6 implicit-gradient path
+    (:mod:`vmec_jax.core.implicit`): one hot-restarted forward solve per
+    trial boundary, and the exact residual Jacobian by forward implicit
+    differentiation — one preconditioned GMRES per boundary dof instead of
+    one full equilibrium solve per dof.  Requirements (see the module
+    docstring): every term traceable in ``(state, runtime)`` (vector terms
+    expose ``residuals_state``; wout-engine terms like :func:`d_merc` /
+    :func:`l_grad_b` / the Boozer QI residual need ``jac=None``) and
+    ``lasym = False`` (the implicit parameter map does not implement the
+    lasym ``readin.f`` boundary rotation).
     ``hot_restart`` seeds each trial solve from the previous converged state
-    when the radial ladder has a single stage.  Remaining keywords go to
-    :func:`scipy.optimize.least_squares` (e.g. ``max_nfev``, ``ftol``,
-    ``xtol``, ``diff_step``).
+    (both modes; in implicit mode via the per-config host-solve cache).
+    Remaining keywords go to :func:`scipy.optimize.least_squares` (e.g.
+    ``max_nfev``, ``ftol``, ``xtol``, ``diff_step``).
 
     Returns the scipy ``OptimizeResult`` of the final stage with extra
     attributes: ``input`` (optimized :class:`VmecInput`), ``equilibrium``
@@ -1068,18 +1237,13 @@ def least_squares(
     max_mode = modes_schedule[0]
 
     if jac == "implicit":
-        # Wiring point for the implicit-gradient mode: vmec_jax.core.implicit
-        # provides solve_implicit (custom-VJP equilibrium) + runtime_from_params;
-        # d(residual)/d(dofs) then comes from jax.jacrev through
-        # unpack_boundary -> params_from_input -> solve_implicit -> objectives.
-        try:
-            from . import implicit as _implicit  # noqa: F401 - availability probe
-            detail = "vmec_jax.core.implicit is importable but the objective wiring is not implemented yet"
-        except Exception:
-            detail = "vmec_jax.core.implicit is not importable in this environment"
-        raise NotImplementedError(
-            f"jac='implicit' is a documented stub ({detail}); use jac=None "
-            "(finite differences) for now.")
+        if use_ess:
+            scipy_kwargs.setdefault(
+                "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
+        return _least_squares_implicit(
+            objective_terms, inp, max_mode=max_mode, x0=x0,
+            solve_kwargs=dict(solve_kwargs or {}), device=device,
+            verbose=verbose, **scipy_kwargs)
     if jac is not None:
         raise ValueError(f"jac must be None or 'implicit', got {jac!r}")
 
@@ -1119,4 +1283,216 @@ def least_squares(
                                           jac="2-point", **scipy_kwargs)
     result.input = unpack_boundary(inp, result.x, max_mode)
     result.equilibrium = state_holder["eq"]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Implicit-gradient mode (vmec_jax.core.implicit wiring)
+# ---------------------------------------------------------------------------
+
+
+def _traceable_term(fun: Callable) -> Callable:
+    """Objective callable -> traceable ``(state, runtime)`` function.
+
+    Terms exposing ``residuals_state`` (:class:`QuasisymmetryRatioResidual`
+    instances or their bound ``J``/``residuals`` methods) contribute their
+    full traceable pointwise residual vector — same least-squares cost as
+    the finite-difference stacked residuals (internal-grid sampling instead
+    of the 63x64 wout grid), same Gauss-Newton geometry.
+    Two-positional-argument callables (the scalar targets) are used as-is.
+    Anything else (wout-table objectives — host NumPy) is rejected with a
+    pointer to ``jac=None``.
+    """
+    owner = getattr(fun, "__self__", fun)
+    if hasattr(owner, "residuals_state"):
+        return owner.residuals_state
+    try:
+        params = [p for p in inspect.signature(fun).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        two_positional = len(params) >= 2 and params[1].default is inspect.Parameter.empty
+    except (TypeError, ValueError):
+        two_positional = False
+    if two_positional:
+        return fun
+    raise ValueError(
+        f"objective term {fun!r} is not implicit-differentiable: jac='implicit' "
+        "needs traceable (state, runtime) callables or a residuals_state method. "
+        "Wout-engine terms (d_merc, l_grad_b, the Boozer QI residual) run on "
+        "host NumPy — use jac=None (finite differences) for those.")
+
+
+def _least_squares_implicit(
+    objective_terms: Sequence[tuple[Callable, float, float]],
+    inp: VmecInput,
+    *,
+    max_mode: int,
+    x0: np.ndarray | None,
+    solve_kwargs: dict,
+    device: Any = None,
+    verbose: int = 0,
+    **scipy_kwargs,
+):
+    """Single-stage boundary least squares with implicit-gradient Jacobians.
+
+    ``fun`` maps the dof vector through the traceable boundary update ->
+    :func:`~vmec_jax.core.implicit.solve_implicit` (host solver behind
+    ``pure_callback``, hot-restarted) ->
+    :func:`~vmec_jax.core.implicit.runtime_from_params` -> the stacked
+    objective rows: one warm host solve per trial ``x``.  ``jac`` computes
+    the exact residual Jacobian by *forward* implicit differentiation (see
+    ``jacobian_rows``): one preconditioned GMRES per boundary dof, batched —
+    versus one full equilibrium solve per dof for finite differences — while
+    keeping the full pointwise Gauss-Newton residual geometry.  Both are
+    jit-compiled once per stage.
+
+    The residual and Jacobian graphs run on the device chosen by
+    :func:`vmec_jax.core.device.resolve_implicit_device` — the CPU by default,
+    where the per-dof vmapped adjoint GMRES is far faster than the
+    launch-bound, dof-count-scaling GPU compile (plan.md R1); an explicit
+    ``device=`` overrides this.  The forward equilibrium solve is a host
+    callback and always runs on the CPU regardless.
+    """
+    import scipy.optimize
+
+    from . import implicit as imp
+    from .device import resolve_implicit_device
+
+    if bool(inp.lasym):
+        raise NotImplementedError(
+            "jac='implicit' requires lasym = False (the implicit parameter map "
+            "does not implement the lasym readin.f boundary rotation)")
+    terms = [(_traceable_term(f), float(t), float(w)) for (f, t, w) in objective_terms]
+    modes = _dof_modes(inp, max_mode)
+    nm = len(modes)
+    ntor = int(inp.ntor)
+    row_idx = np.asarray([n + ntor for (_, n) in modes], dtype=int)
+    col_idx = np.asarray([m for (m, _) in modes], dtype=int)
+    # multigrid=True routes the host solve through solve_multigrid (even for
+    # single-stage ladders) so NITER-exhausted trials are penalized instead
+    # of raising, matching the finite-difference path's trial policy.
+    # Loose adjoint budget: the trust-region optimizer only needs ~1e-3
+    # gradient accuracy; measured row-norm deviation vs the tight
+    # (1e-11, 300) diagnostics default is <~1e-4 at a fraction of the cost.
+    # hot_restart seeds each trial's host solve from the stage's previous
+    # converged state (same fixed points, far fewer iterations) — the
+    # implicit-mode analogue of the finite-difference path's hot restart.
+    cfg = imp.make_config(inp, multigrid=True, hot_restart=True,
+                          adjoint_tol=1e-6, adjoint_maxiter=30)
+    # Pin the residual/Jacobian graphs to the fastest device for this launch-
+    # bound path (CPU by default; explicit device= honored) — committing the
+    # input dof vector to it makes both jits compile and run there, and their
+    # uncommitted constants follow.  ``None`` leaves placement untouched.
+    jac_device = resolve_implicit_device(device, cfg.resolution)
+
+    def _place(x: np.ndarray) -> jnp.ndarray:
+        a = jnp.asarray(x, dtype=jnp.float64)
+        return a if jac_device is None else jax.device_put(a, jac_device)
+
+    params0 = imp.params_from_input(inp)
+    imp._template_runtime(cfg)  # host-built template: warm the per-cfg cache
+    # eagerly so runtime_from_params stays traceable under jit below
+
+    def params_of(x: jnp.ndarray):
+        rbc = params0.rbc.at[row_idx, col_idx].set(x[:nm])
+        zbs = params0.zbs.at[row_idx, col_idx].set(x[nm:])
+        return dataclasses.replace(params0, rbc=rbc, zbs=zbs)
+
+    def term_rows(state, rt) -> jnp.ndarray:
+        return jnp.concatenate([
+            jnp.atleast_1d(w * (jnp.asarray(f(state, rt)) - t)).ravel()
+            for (f, t, w) in terms])
+
+    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+        params = params_of(x)
+        state = imp.solve_implicit(params, cfg)
+        return term_rows(state, imp.runtime_from_params(params, cfg))
+
+    rows_jit = jax.jit(residual_rows)
+
+    # The evolved-dof mask is a *structural* per-config constant; fetch it
+    # once (first host solve, cached in implicit._MASK_CACHE) so the Jacobian
+    # graph below can close over it.
+    if x0 is None:
+        x0 = pack_boundary(inp, max_mode)
+    params0_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
+                              params_of(jnp.asarray(x0, dtype=jnp.float64)))
+    _, mask_np = imp._host_solve_and_mask(cfg, params0_np)
+    mask_const = jax.tree.map(jnp.asarray, mask_np)
+
+    # One-hot boundary tangents in ImplicitParams space, stacked for vmap.
+    t_rbc = np.zeros((2 * nm,) + np.shape(params0.rbc))
+    t_zbs = np.zeros((2 * nm,) + np.shape(params0.zbs))
+    for j in range(nm):
+        t_rbc[j, row_idx[j], col_idx[j]] = 1.0
+        t_zbs[nm + j, row_idx[j], col_idx[j]] = 1.0
+    zerop = jax.tree.map(jnp.zeros_like, params0)
+    tangents = dataclasses.replace(zerop, rbc=jnp.asarray(t_rbc),
+                                   zbs=jnp.asarray(t_zbs))
+    tangent_axes = dataclasses.replace(
+        jax.tree.map(lambda _: None, zerop), rbc=0, zbs=0)
+
+    def jacobian_rows(x: jnp.ndarray) -> jnp.ndarray:
+        """Exact residual Jacobian by *forward* implicit differentiation.
+
+        At the fixed point, ``dz_j = -(dF/dz)^{-1} dF/dp t_j`` per boundary
+        dof tangent ``t_j`` (one batched preconditioned GMRES over all dofs —
+        F's linearization is plain JAX, so forward mode is available even
+        though the solve itself is an opaque custom-VJP callback), then
+        ``J[:, j] = G_z dz_j + G_p t_j`` with ``G`` the residual rows of the
+        assembled state.  Cost: ~one GMRES per dof — far below one forward
+        solve per dof (finite differences) — while exposing the *full*
+        pointwise Gauss-Newton geometry to scipy.
+        """
+        params = params_of(x)
+        frozen = jax.lax.stop_gradient(imp.solve_implicit(params, cfg))
+        P = imp._dof_projector(cfg, mask_const)
+        edge = imp._edge_mask(cfg)
+        F = imp.residual_fn(cfg, frozen, mask_const)
+        z_star = P(frozen)
+
+        def G(z, prm):
+            rt_p = imp.runtime_from_params(prm, cfg)
+            return term_rows(imp._assemble(z, rt_p, frozen, P, edge), rt_p)
+
+        def Fz(dz):
+            return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
+
+        def column(tp):
+            b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
+            dz, _ = imp._adjoint_solve(Fz, jax.tree.map(jnp.negative, b), cfg)
+            return jax.jvp(G, (z_star, params), (P(dz), tp))[1]
+
+        return jnp.transpose(jax.vmap(column, in_axes=(tangent_axes,))(tangents))
+
+    jac_jit = jax.jit(jacobian_rows)
+
+    holder: dict[str, Any] = {"nres": None}
+
+    def fun(x: np.ndarray) -> np.ndarray:
+        try:
+            residual = np.asarray(
+                jax.device_get(rows_jit(_place(x))), dtype=float)
+        except Exception as exc:  # zero-crash policy: penalize, don't die
+            if holder["nres"] is None:
+                raise
+            if verbose:
+                print(f"[least_squares] trial solve failed: {exc}")
+            return np.full((holder["nres"],), 1.0e6)
+        if not np.all(np.isfinite(residual)):
+            residual = np.where(np.isfinite(residual), residual, 1.0e6)
+        holder["nres"] = residual.size
+        if verbose:
+            print(f"[least_squares] cost = {0.5 * float(residual @ residual):.6e}")
+        return residual
+
+    def jac_fn(x: np.ndarray) -> np.ndarray:
+        return np.asarray(jax.device_get(jac_jit(_place(x))), dtype=float)
+
+    result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
+                                          jac=jac_fn, **scipy_kwargs)
+    result.input = unpack_boundary(inp, result.x, max_mode)
+    try:
+        result.equilibrium = solve_equilibrium(result.input, **solve_kwargs)
+    except Exception:  # pragma: no cover - diagnostic attribute only
+        result.equilibrium = None
     return result

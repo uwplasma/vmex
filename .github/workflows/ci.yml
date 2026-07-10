@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # nightly full-physics run (RUN_FULL=1 tests)
+    - cron: "17 4 * * *"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,13 +20,14 @@ env:
 permissions:
   contents: read
 
-# Interim CI during the vmec_jax overhaul (see plan.md).  The full coverage
-# gate (>=95%) returns in Phase 8 together with the restructured test suite.
+# Sharded CI (plan.md Phase-2 review item 1): five parallel jobs, each well
+# under the 10-minute wall-time budget, plus a coverage gate that combines
+# the parity + gradient shards and enforces >= 95% on vmec_jax.
 jobs:
-  test:
-    name: Fast Tests (py${{ matrix.python-version }})
+  fast:
+    name: Fast unit tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 9
     strategy:
       fail-fast: false
       matrix:
@@ -49,14 +53,17 @@ jobs:
           echo "working tree: ${size_kb} KiB"
           test "$size_kb" -lt 40960 || { echo "working tree exceeds 40 MiB"; exit 1; }
 
-      - name: Run fast tests
+      - name: Run fast unit tests (no golden fixtures)
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q -n 2 -m "not full" \
+          pytest -q -n 4 -m "not full" \
             tests/core_new/test_packaging_metadata.py \
             tests/core_new/test_fetch_assets.py \
             tests/core_new/test_input_profiles.py \
+            tests/core_new/test_profiles.py \
+            tests/core_new/test_step_control.py \
+            tests/core_new/test_printing.py \
             tests/core_new/test_fourier_transforms.py \
             tests/core_new/test_preconditioner.py \
             tests/core_new/test_setup.py \
@@ -64,10 +71,86 @@ jobs:
             tests/core_new/test_coils.py \
             --durations=25
 
-  core-new:
-    name: Core + golden parity suite
+  parity:
+    name: Parity suite ${{ matrix.shard }} (goldens, coverage)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [a, b]
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest pytest-xdist pytest-cov
+
+      - name: Cache golden fixtures
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vmec_jax
+          key: golden-v1
+
+      - name: Prefetch golden fixtures (once, before xdist workers fork)
+        run: |
+          python - <<'EOF'
+          import importlib.util
+          spec = importlib.util.spec_from_file_location(
+              "core_new_conftest", "tests/core_new/conftest.py")
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          print("golden dir:", mod.resolve_golden_dir())
+          EOF
+
+      # Shard a runs the heavy solver-golden modules; shard b runs the rest
+      # (everything in tests/core_new except implicit, examples, and shard a).
+      # Together they cover the whole non-gradient, non-example suite once.
+      - name: Run parity shard ${{ matrix.shard }} with coverage
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          A_FILES="tests/core_new/test_parity_breadth.py \
+                   tests/core_new/test_multigrid_ladder.py \
+                   tests/core_new/test_multigrid_interp.py \
+                   tests/core_new/test_optimize.py \
+                   tests/core_new/test_optimize_traceable_qs.py \
+                   tests/core_new/test_freeboundary.py \
+                   tests/core_new/test_cli_freeboundary.py \
+                   tests/core_new/test_solver_end_to_end.py"
+          if [ "${{ matrix.shard }}" = "a" ]; then
+            pytest -q -n 4 $A_FILES --durations=15 --cov=vmec_jax --cov-report=term
+          else
+            IGNORES=$(for f in $A_FILES; do echo "--ignore=$f"; done)
+            pytest -q -n 4 tests/core_new \
+              --ignore=tests/core_new/test_implicit_grad.py \
+              --ignore=tests/core_new/test_examples.py \
+              $IGNORES \
+              --durations=15 --cov=vmec_jax --cov-report=term
+          fi
+
+      - name: Stash coverage data
+        run: mv .coverage coverage.parity-${{ matrix.shard }}
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-parity-${{ matrix.shard }}
+          path: coverage.parity-${{ matrix.shard }}
+          retention-days: 3
+
+  gradient:
+    name: Implicit-gradient suite (JIT on, coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -83,23 +166,101 @@ jobs:
           python -m pip install .
           python -m pip install pytest pytest-cov
 
-      - name: Cache golden fixtures
+      - name: Cache finite-difference reference solves
         uses: actions/cache@v4
         with:
-          path: ~/.cache/vmec_jax
-          key: golden-v1
+          path: /tmp/vmec_jax_implicit_fd_cache.pkl
+          # entries are keyed by (case, dof, step, ftol, ns) inside the pickle,
+          # so hash the test file: changed FD parameters invalidate the cache.
+          key: implicit-fd-v1-${{ hashFiles('tests/core_new/test_implicit_grad.py') }}
 
-      - name: Run new-core suite with coverage (golden fixtures auto-fetched)
+      - name: Run implicit-gradient tests with coverage
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q tests/core_new --durations=15 \
-            --cov=vmec_jax/core --cov-report=term
+          pytest -q tests/core_new/test_implicit_grad.py \
+            --durations=0 \
+            --cov=vmec_jax --cov-report=term
+
+      - name: Stash coverage data
+        run: mv .coverage coverage.gradient
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-gradient
+          path: coverage.gradient
+          retention-days: 3
+
+  examples:
+    name: Example scripts smoke (coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest pytest-cov
+
+      - name: Run example smokes (QH/QP/QI gated to nightly RUN_FULL)
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          pytest -q tests/core_new/test_examples.py \
+            --durations=10 \
+            --cov=vmec_jax --cov-report=term
+
+      - name: Stash coverage data
+        run: mv .coverage coverage.examples
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-examples
+          path: coverage.examples
+          retention-days: 3
+
+  coverage-gate:
+    name: Coverage gate (>= 95%)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [parity, gradient, examples]
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install coverage
+        run: python -m pip install coverage
+
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine shards and enforce the gate
+        run: |
+          coverage combine coverage.parity-a coverage.parity-b coverage.gradient coverage.examples
+          coverage report --fail-under=95
 
   cli-smoke:
     name: Console Script Smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -131,7 +292,7 @@ jobs:
   build:
     name: Build (wheel/sdist + docs)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -154,3 +315,39 @@ jobs:
       - name: Build docs (warnings as errors)
         run: |
           python -m sphinx -W -j auto -b html docs docs/_build/html
+
+  full:
+    name: Full-physics suite (nightly / manual only)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Includes the compile-heavy optimization-convergence tests (QA precise,
+    # QH/QP descent) and the free-boundary end-to-end; nightly wall time is
+    # not the <=10-min PR budget, so allow generous headroom.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest
+
+      - name: Cache golden fixtures
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vmec_jax
+          key: golden-v1
+
+      - name: Run the whole suite including full-marked tests
+        env:
+          JAX_ENABLE_X64: "1"
+          RUN_FULL: "1"
+        run: |
+          pytest -q tests/core_new --durations=25

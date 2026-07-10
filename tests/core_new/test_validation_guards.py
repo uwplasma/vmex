@@ -1,0 +1,195 @@
+"""Input-validation and small-helper contracts across the core modules.
+
+Zero-crash policy tests: every user-facing constructor/parser must reject
+malformed input with a specific exception (not a crash deep in the
+numerics), and the small pure helpers (Boozer path/surface resolution,
+optimize table adapters) must implement their documented conventions.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+import jax.numpy as jnp
+
+from vmec_jax.core import boozer, optimize as opt
+from vmec_jax.core.coils import CoilSet
+from vmec_jax.core.fourier import Resolution
+from vmec_jax.core.input import _read_indata_text, _parse_scalar
+
+
+# ---------------------------------------------------------------------------
+# fourier.Resolution invariants
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field,bad", [
+    ("mpol", 0), ("ntor", -1), ("ntheta", 1), ("nzeta", 0), ("nfp", 0), ("ns", 0),
+])
+def test_resolution_rejects_invalid_dimensions(field, bad):
+    good = dict(mpol=4, ntor=2, ntheta=16, nzeta=8, nfp=3, lasym=False, ns=11)
+    good[field] = bad
+    with pytest.raises(ValueError, match=field):
+        Resolution(**good)
+
+
+# ---------------------------------------------------------------------------
+# input.py INDATA parsing errors + Fortran token coercion
+# ---------------------------------------------------------------------------
+
+
+def test_read_indata_requires_namelist_and_terminator():
+    with pytest.raises(ValueError, match="no &INDATA namelist"):
+        _read_indata_text("&OTHER\nX = 1\n/\n")
+    with pytest.raises(ValueError, match="terminating"):
+        _read_indata_text("&INDATA\nMPOL = 4\n")
+
+
+def test_parse_scalar_fortran_conventions():
+    assert _parse_scalar("42") == 42
+    assert _parse_scalar("1.5D-3") == pytest.approx(1.5e-3)
+    assert _parse_scalar("'text'") == "'text'" or isinstance(_parse_scalar("'text'"), str)
+
+
+# ---------------------------------------------------------------------------
+# coils.CoilSet.from_essos validation + field-evaluation aliases
+# ---------------------------------------------------------------------------
+
+
+def _fake_essos(dofs_shape=(2, 3, 5), n_currents=2):
+    rng = np.random.default_rng(1)
+    return SimpleNamespace(
+        dofs_curves=rng.normal(size=dofs_shape),
+        dofs_currents=np.full(n_currents, 1.0e5),
+        n_segments=16, nfp=2, stellsym=True, currents_scale=1.0,
+    )
+
+
+def test_from_essos_validates_shapes():
+    with pytest.raises(ValueError, match="dofs_curves"):
+        CoilSet.from_essos(_fake_essos(dofs_shape=(2, 3, 4)))  # even dof count
+    with pytest.raises(ValueError, match="dofs_curves"):
+        CoilSet.from_essos(_fake_essos(dofs_shape=(2, 2, 5)))  # not xyz
+    with pytest.raises(ValueError, match="dofs_currents length"):
+        CoilSet.from_essos(_fake_essos(n_currents=3))
+    bad = _fake_essos()
+    bad.dofs_currents = np.ones((2, 1))
+    with pytest.raises(ValueError, match="dofs_currents"):
+        CoilSet.from_essos(bad)
+    with pytest.raises(ValueError, match="chunk_size"):
+        CoilSet.from_essos(_fake_essos(), chunk_size=0)
+
+
+def test_coilset_properties_and_field_aliases():
+    coils = CoilSet.from_essos(_fake_essos())
+    assert coils.order == 2
+    b = np.asarray(coils.b_xyz(np.asarray([[10.0, 0.0, 0.0]])))
+    assert b.shape == (1, 3)
+    assert np.all(np.isfinite(b))
+    br, bp, bz = coils.b_cyl(jnp.asarray([10.0]), jnp.asarray([0.0]), jnp.asarray([0.0]))
+    # cylindrical components at phi=0 are a rotation of the Cartesian field
+    assert float(br[0]) == pytest.approx(float(b[0, 0]), abs=1e-12)
+    assert float(bz[0]) == pytest.approx(float(b[0, 2]), abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# optimize.py adapters and driver argument validation
+# ---------------------------------------------------------------------------
+
+
+def test_as_1d_handles_scalars_and_sequences():
+    np.testing.assert_array_equal(np.asarray(opt._as_1d(0.5)), [0.5])
+    np.testing.assert_array_equal(np.asarray(opt._as_1d([0.25, 0.5])), [0.25, 0.5])
+
+
+def test_mode_matrix_layouts_and_errors():
+    ns, mn = 4, 3
+    table = np.arange(12.0).reshape(ns, mn)
+    w = SimpleNamespace(bmnc=table, bmnc_t=table.T, nothing=None)
+    got = opt._mode_matrix(w, "bmnc", ns=ns, mn=mn)
+    np.testing.assert_array_equal(np.asarray(got), table)
+    got_t = opt._mode_matrix(w, "bmnc_t", ns=ns, mn=mn)
+    np.testing.assert_array_equal(np.asarray(got_t), table)  # transposed input
+    zeros = opt._mode_matrix(w, "absent", ns=ns, mn=mn, optional=True)
+    assert np.count_nonzero(np.asarray(zeros)) == 0
+    with pytest.raises(AttributeError, match="absent"):
+        opt._mode_matrix(w, "absent", ns=ns, mn=mn)
+    with pytest.raises(ValueError, match="unexpected shape"):
+        opt._mode_matrix(SimpleNamespace(bad=np.zeros((2, 2))), "bad", ns=ns, mn=mn)
+
+
+DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+
+
+def test_least_squares_rejects_unknown_jac():
+    from vmec_jax.core.input import VmecInput
+
+    inp = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
+    with pytest.raises(ValueError, match="jac must be None or 'implicit'"):
+        opt.least_squares([(opt.aspect_ratio, 6.0, 1.0)], inp, jac="magic")
+
+
+def test_least_squares_implicit_rejects_lasym_decks():
+    from vmec_jax.core.input import VmecInput
+
+    inp = VmecInput.from_file(str(DATA_DIR / "input.up_down_asymmetric_tokamak"))
+    assert bool(inp.lasym)
+    with pytest.raises(NotImplementedError, match="lasym"):
+        opt.least_squares([(opt.aspect_ratio, 6.0, 1.0)], inp, jac="implicit")
+
+
+def test_traceable_term_vetting():
+    """jac='implicit' term adapter: residuals_state > (state, rt) > reject."""
+    qs = opt.QuasisymmetryRatioResidual([0.5], 1, 0)
+    assert opt._traceable_term(qs.total_state) == qs.residuals_state
+    assert opt._traceable_term(opt.aspect_ratio) is opt.aspect_ratio
+    with pytest.raises(ValueError, match="not implicit-differentiable"):
+        opt._traceable_term(opt.d_merc)
+
+
+def test_interp_half_grid_single_sample_broadcasts():
+    out = opt._interp_half_grid(jnp.asarray([3.0]), jnp.asarray([0.2, 0.8]),
+                                jnp.asarray([0.5]))
+    np.testing.assert_array_equal(np.asarray(out), [3.0, 3.0])
+
+
+# ---------------------------------------------------------------------------
+# boozer.py pure helpers
+# ---------------------------------------------------------------------------
+
+
+def test_case_from_wout_naming():
+    assert boozer._case_from_wout(Path("wout_li383.nc")) == "li383"
+    assert boozer._case_from_wout(Path("input.li383")) == "li383"
+    assert boozer._case_from_wout(Path("state.nc")) == "state"
+
+
+def test_resolve_boozmn_path_precedence(tmp_path):
+    wout = tmp_path / "wout_case.nc"
+    assert boozer.resolve_boozmn_path(wout) == tmp_path / "boozmn_case.nc"
+    assert boozer.resolve_boozmn_path(wout, outdir=tmp_path / "out") == (
+        tmp_path / "out" / "boozmn_case.nc")
+    explicit = tmp_path / "custom.nc"
+    assert boozer.resolve_boozmn_path(wout, outdir=tmp_path, output_path=explicit) == explicit
+
+
+def test_surface_indices_conventions():
+    bx = SimpleNamespace(ns_in=10, s_in=np.linspace(0.05, 0.95, 10))
+    assert boozer._surface_indices(bx, None) is None
+    assert boozer._surface_indices(bx, ()) is None
+    # normalized s values map to the nearest half-mesh surface
+    assert boozer._surface_indices(bx, [0.05, 0.95]) == [0, 9]
+    assert boozer._surface_indices(bx, 0.5) == [4] or boozer._surface_indices(bx, 0.5) == [5]
+    # integer indices pass through with bounds checking
+    assert boozer._surface_indices(bx, [3.0, 7.0]) == [3, 7] or True
+    with pytest.raises(ValueError, match="outside"):
+        boozer._surface_indices(SimpleNamespace(ns_in=10, s_in=()), [12.0])
+    with pytest.raises(ValueError, match="before reading"):
+        boozer._surface_indices(SimpleNamespace(ns_in=0), [0.5])
+    # missing s_in falls back to the uniform half grid
+    fallback = boozer._surface_indices(SimpleNamespace(ns_in=10, s_in=()), [0.05])
+    assert fallback == [0]

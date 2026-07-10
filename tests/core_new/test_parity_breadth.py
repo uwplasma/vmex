@@ -86,7 +86,8 @@ GOLDEN_DIR = resolve_golden_dir()
 pytestmark = [
     pytest.mark.skipif(
         GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"
-    )
+    ),
+    pytest.mark.usefixtures("_module_jit_enabled"),  # full solves: run jitted
 ]
 
 netCDF4 = pytest.importorskip("netCDF4")

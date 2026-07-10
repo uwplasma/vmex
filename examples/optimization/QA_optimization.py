@@ -1,238 +1,120 @@
 #!/usr/bin/env python
-"""Quasi-axisymmetric optimization with vmec_jax."""
+"""Precise quasi-axisymmetry (QA) from a circular torus, nfp=2.
 
+Mirrors simsopt's ``QH_fixed_resolution.py`` example: build an equilibrium,
+write the objective yourself as ``(function, target, weight)`` terms —
+here the Landreman-Paul QA recipe, the quasisymmetry ratio residual on a
+set of surfaces plus aspect-ratio and mean-iota targets — and hand it to one
+least-squares call per continuation stage.  The decision variables are the
+boundary Fourier coefficients RBC/ZBS up to ``max_mode``, staged 1 -> 5,
+with Exponential Spectral Scaling (ESS) of the trust region and implicit
+(adjoint) gradients: no finite differences, no MPI.
+
+The seed (``input.minimal_seed_nfp2``) is a circular torus, R0 = 1 m,
+a = 0.2 m — exactly axisymmetric, so the QS term starts at ~0 and the iota
+target pulls the boundary into three dimensions.
+
+Runtime is dominated by the one-time implicit-Jacobian XLA compile per
+continuation stage (the warm forward solve itself is ~0.9 s); each stage
+then stops early at ftol.  Achieved 2026-07-10 on an office RTX A4000 GPU
+at this script's default staged budget with JAC="implicit" + ESS: the QS
+ratio residual total falls 2.043e-01 (circular seed) -> 9.82e-03
+(max_mode=1) -> 1.70e-04 (max_mode=2) -- >3 orders of magnitude, i.e.
+*precise* QA -- with aspect 6.000 and mean iota 0.420 both on target
+(max_mode 3-5 polish further).  Per-stage wall was ~13 min (max_mode=1,
+compile-bound) and ~21 min (max_mode=2).  A CPU run reaches the same
+optimum: the cold forward solve is ~2x faster than the GPU (13 vs 27 s)
+because this small solve is a host callback that the GPU does not help.
+"""
+
+import dataclasses
+import os
 from pathlib import Path
-import sys
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 import vmec_jax as vj
-from vmec_jax._compat import enable_x64
+from vmec_jax import optimize as opt
+
+# --------------------------- parameters ------------------------------------
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.minimal_seed_nfp2"
+OUT_DIR = Path("output_QA_optimization")
+QS_SURFACES = np.linspace(0.1, 1.0, 10)   # surfaces for the QS ratio residual
+HELICITY_M, HELICITY_N = 1, 0             # QA: |B| = |B|(s, theta)
+ASPECT_TARGET = 6.0
+IOTA_TARGET = 0.42                        # mean rotational transform
+SEED_PERTURBATION = 0.01                  # helical kick, see below
+MAX_MODE_SCHEDULE = (1, 2, 3, 4, 5)       # boundary-harmonic continuation
+MAX_NFEV = 2000                           # trial-boundary budget per stage
+FTOL = 1e-6                               # per-stage convergence tolerance
+JAC = "implicit"                          # adjoint gradients; None = finite diff
+if os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1":  # smoke-test budget
+    MAX_MODE_SCHEDULE, MAX_NFEV, FTOL = (1,), 4, 1e-4
+
+# --------------------------- seed equilibrium ------------------------------
+inp = vj.VmecInput.from_file(INPUT_FILE)   # plain &INDATA parsing
+# The exact circular torus is a saddle point: with zero current the
+# rotational transform is produced by 3D shaping at *second* order, so its
+# gradient vanishes there.  A small RBC/ZBS(n=1, m=1) kick breaks the tie
+# (this replaces the seed-preconditioner machinery of the old examples).
+rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+rbc[inp.ntor + 1, 1] += SEED_PERTURBATION
+zbs[inp.ntor + 1, 1] += SEED_PERTURBATION
+inp = dataclasses.replace(inp, rbc=rbc, zbs=zbs)
+eq = opt.solve_equilibrium(inp)
+qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, HELICITY_M, HELICITY_N)
 
 
-enable_x64(True)
-
-DATA_DIR = Path(__file__).resolve().parents[1] / "data"
-
-# Problem parameters.  These are intended to be edited directly, as in the
-# SIMSOPT examples.
-WARM_START_INPUT_FILE = DATA_DIR / "input.nfp2_QA_omnigenity"
-SIMPLE_SEED_INPUT_FILE = DATA_DIR / "input.minimal_seed_nfp2"
-OUTPUT_DIR = Path("results/qa_opt/ess")
-MAX_MODE = 4
-MIN_VMEC_MODE = MAX_MODE+2
-USE_SIMPLE_SEED = True  # Start from near-circular RBC(0,0), RBC(0,1), ZBS(0,1).
-SIMPLE_SEED_PERTURBATION = 1.0e-5  # Tiny nonzero active modes keep derivatives away from exactly zero.
-INPUT_FILE = SIMPLE_SEED_INPUT_FILE if USE_SIMPLE_SEED else WARM_START_INPUT_FILE
-INPUT_FILE = vj.prepare_simple_omnigenity_seed_input(
-    INPUT_FILE,
-    OUTPUT_DIR,
-    max_mode=MAX_MODE,
-    min_vmec_mode=MIN_VMEC_MODE,
-    enabled=USE_SIMPLE_SEED,
-    perturbation=SIMPLE_SEED_PERTURBATION,
-)
-USE_TARGET_HELICITY_SEED = True  # Overwrite low-order mode-1 signs to escape the QA zero-transform branch.
-TARGET_HELICITY_SEED_AMPLITUDE = 1.0e-5
-INPUT_FILE = vj.run_target_helicity_seed_preconditioner(
-    INPUT_FILE,
-    OUTPUT_DIR,
-    {
-        "enabled": USE_TARGET_HELICITY_SEED,
-        "terms": vj.target_helicity_seed_terms(
-            max_mode=MAX_MODE,
-            amplitude=TARGET_HELICITY_SEED_AMPLITUDE,
-        ),
-        "only_if_abs_below": float("inf"),
-    },
-)
-USE_MODE_CONTINUATION = not USE_SIMPLE_SEED
-MAX_NFEV = 70
-CONTINUATION_NFEV = 25
-STAGE_MODES = vj.qs_stage_modes(
-    max_mode=MAX_MODE,
-    use_mode_continuation=USE_MODE_CONTINUATION,
-    continuation_nfev=CONTINUATION_NFEV,
-)
-
-# Optimizer parameters.
-METHOD = "auto"  # Conservative default: dense SciPy exact Jacobian; try "auto_scalar" or "scipy_matrix_free" for advanced paths.
-SCIPY_TR_SOLVER = "lsmr"  # For METHOD="scipy": "lsmr" is memory-light; "exact" is dense.
-SCIPY_LSMR_MAXITER = None  # For scipy_matrix_free, None uses vmec_jax's bounded cap of 4.
-FTOL = 1.0e-5  # Relative cost-reduction tolerance for the outer optimizer.
-GTOL = 1.0e-5  # Gradient optimality tolerance for the outer optimizer.
-XTOL = 1.0e-6  # Step-size tolerance for the outer optimizer.
-# Mode-4 budget probes keep 80/1e-8 as the first-run default: 60 iterations
-# is faster, but it can lose the QA residual by orders of magnitude.
-INNER_MAX_ITER = 80  # Accepted-point VMEC iterations; 0 uses NITER from the input deck. Use stricter audits when needed.
-INNER_FTOL = 1.0e-8  # Accepted-point VMEC tolerance; 0 uses FTOL from the input deck.
-TRIAL_MAX_ITER = 80  # Trial-point VMEC iterations; 0 follows the accepted/input budget.
-TRIAL_FTOL = 1.0e-8  # Trial-point VMEC tolerance; 0 follows the accepted/input tolerance.
-SOLVER_DEVICE = None  # None uses JAX default; set "cpu" or "gpu" to force one backend.
-EXACT_PATH = None  # None/"tape" is production default; "scan" is for profiling accepted-point replay.
-# Inner VMEC trial solves use vmec_jax's backend-aware policy.  CPU QA currently
-# keeps the VMEC-control loop; set VMEC_JAX_OPT_TRIAL_SCAN=1 only for profiling.
-USE_ESS = True  # Set False for an unscaled trust-region solve.
-ALPHA = 1.2  # ESS high-mode scaling strength.
-# Common alternatives:
-# METHOD = "scipy"  # Dense exact Jacobian reference path.
-# METHOD = "auto_scalar"  # Scalar-trust path for very high-mode scalar-dominated objectives.
-# EXACT_PATH = "scan"  # Diagnostic path; complete solves remain acceptance authority.
-# MAX_MODE = 5  # Advanced/high-mode audit path; current short probes favor mode 4 for first-run robustness.
-# USE_SIMPLE_SEED = False
-# USE_MODE_CONTINUATION = False
-# STAGE_MODES = [MAX_MODE]
-# USE_ESS = False
-
-# Output controls.
-SAVE_STAGE_INPUTS = True  # Keep per-stage input decks for continuation/debugging.
-SAVE_STAGE_WOUTS = False  # Set True to also write per-stage WOUT files.
-MAKE_PLOTS = True
-
-# Physics targets and least-squares objective weights.  These are SIMSOPT-style
-# tuple weights, so vmec_jax minimizes sqrt(weight) * (J - target).
-TARGET_ASPECT = 5.0
-TARGET_IOTA = 0.41
-HELICITY_M = 1
-HELICITY_N = 0
-SURFACES = np.arange(0.0, 1.01, 0.1)
-ASPECT_WEIGHT = 1.0
-IOTA_WEIGHT = 10_000.0
-QS_WEIGHT = 1.0
+def report(tag, eq):
+    """User-side progress metric: the wout-engine QS total + scalar targets."""
+    total = float(qs.total(eq))
+    aspect = float(opt.aspect_ratio(eq.state, eq.runtime))
+    iota = float(opt.mean_iota(eq.state, eq.runtime))
+    print(f"[{tag}] QS total = {total:.6e}, aspect = {aspect:.4f}, "
+          f"mean iota = {iota:.4f}")
+    return total
 
 
-# Optimizable VMEC object.
-vmec = vj.FixedBoundaryVMEC.from_input(
-    INPUT_FILE,
-    max_mode=MAX_MODE,
-    min_vmec_mode=MIN_VMEC_MODE,
-    output_dir=OUTPUT_DIR,
-)
+qs_seed = report("seed", eq)
 
-
-# Objective function.  Add new terms by appending another
-# (objective.J, target, weight) tuple.
-aspect = vj.AspectRatio()
-iota = vj.MeanIota()
-qs = vj.QuasisymmetryRatioResidual(
-    helicity_m=HELICITY_M,
-    helicity_n=HELICITY_N,
-    surfaces=SURFACES,
-)
-objective_tuples = [
-    (aspect.J, TARGET_ASPECT, ASPECT_WEIGHT),
-    (iota.J, TARGET_IOTA, IOTA_WEIGHT),
-    (qs.J, 0.0, QS_WEIGHT),
-    # Optional:
-    # (vj.LgradB(threshold=0.30, smooth_penalty=1.0e-3).J, 0.0, 0.01),
-    # (vj.MagneticWell(minimum=0.0).J, 0.0, 1.0),
-    # Finite-beta examples can also add:
-    # (vj.VolavgB().J, TARGET_VOLAVGB, VOLAVGB_WEIGHT),
-    # (vj.BetaTotal().J, TARGET_BETA, BETA_WEIGHT),
-    # (vj.DMerc(minimum=0.0, softness=1.0e-3).J, 0.0, DMERC_WEIGHT),
-    # (vj.JDotB(surfaces=(0.25, 0.50, 0.75)).J, 0.0, JDOTB_WEIGHT),
-    # (vj.BDotB(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTB, BDOTB_WEIGHT),
-    # (vj.BDotGradV(surfaces=(0.25, 0.50, 0.75)).J, TARGET_BDOTGRADV, BDOTGRADV_WEIGHT),
-    # (vj.ToroidalCurrent(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR, TORCUR_WEIGHT),
-    # (vj.ToroidalCurrentGradient(surfaces=(0.25, 0.50, 0.75)).J, TARGET_TORCUR_PRIME, TORCUR_PRIME_WEIGHT),
-    # (vj.RedlBootstrapMismatch(helicity_n=HELICITY_N, ne_coeffs=NE_COEFFS, Te_coeffs=TE_COEFFS, surfaces=(0.25, 0.50, 0.75)).J, 0.0, BOOTSTRAP_WEIGHT),
-    # (vj.BVector(s_index=-1).J, TARGET_B_VECTOR, B_VECTOR_WEIGHT),
-    # (vj.JVector(surfaces=(0.25, 0.50, 0.75)).J, TARGET_J_VECTOR, J_VECTOR_WEIGHT),
+# --------------------------- objective (user-authored) ----------------------
+objective_terms = [
+    (qs, 0.0, 1.0),                       # quasisymmetry ratio residual
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+    (opt.mean_iota, IOTA_TARGET, 10.0),
+    # Extra physics terms, CI-tested (tests/core_new/test_examples.py runs
+    # them uncommented).  magnetic_well works with JAC="implicit"; d_merc and
+    # l_grad_b are wout-engine (host) objectives -> set JAC = None for those.
+    # (opt.magnetic_well, 0.05, 1.0),
+    # (lambda eq: np.minimum(opt.d_merc(eq)[2:-1], 0.0), 0.0, 100.0),
+    # (lambda eq: max(1.0 / opt.l_grad_b(eq) - 1.0 / 0.35, 0.0), 0.0, 1.0),
 ]
-problem = vj.LeastSquaresProblem.from_tuples(objective_tuples)
 
-print("\nAssembled least-squares problem:")
-print(f"  objectives: {', '.join(problem.objective_names)}")
-print(f"  scalar terms: {problem.scalar_objective_names}")
+# --------------------------- staged optimization ----------------------------
+for max_mode in MAX_MODE_SCHEDULE:
+    ndofs = len(opt.boundary_dof_names(inp, max_mode))
+    print(f"\n===== stage max_mode = {max_mode} ({ndofs} boundary dofs) =====")
+    result = opt.least_squares(
+        objective_terms, inp, max_mode=max_mode, jac=JAC,
+        use_ess=True, verbose=1, max_nfev=MAX_NFEV, ftol=FTOL, xtol=1e-10,
+    )
+    inp = result.input                     # warm-start the next stage
+    if result.equilibrium is not None:
+        report(f"stage {max_mode}", result.equilibrium)
 
-# Optimization.
-# The solve call only receives optimizer, continuation, device, and output
-# controls.  Physics targets stay in objective_tuples above.
-result = vj.least_squares_solve(
-    vmec,
-    problem,
-    stage_modes=STAGE_MODES,
-    max_nfev=MAX_NFEV,
-    continuation_nfev=CONTINUATION_NFEV,
-    method=METHOD,
-    ftol=FTOL,
-    gtol=GTOL,
-    xtol=XTOL,
-    use_ess=USE_ESS,
-    ess_alpha=ALPHA,
-    label=f"QA optimization (max_mode={MAX_MODE}, {'ESS' if USE_ESS else 'no ESS'})",
-    use_mode_continuation=USE_MODE_CONTINUATION,
-    inner_max_iter=INNER_MAX_ITER,
-    inner_ftol=INNER_FTOL,
-    trial_max_iter=TRIAL_MAX_ITER,
-    trial_ftol=TRIAL_FTOL,
-    solver_device=SOLVER_DEVICE,
-    exact_path=EXACT_PATH,
-    scipy_tr_solver=SCIPY_TR_SOLVER,
-    scipy_lsmr_maxiter=SCIPY_LSMR_MAXITER,
-    save_stage_inputs=SAVE_STAGE_INPUTS,
-    save_stage_wouts=SAVE_STAGE_WOUTS,
-    save_final_outputs=False,
-)
+# --------------------------- final results ---------------------------------
+eq = result.equilibrium or opt.solve_equilibrium(inp)
+qs_final = report("final", eq)
+print(f"\nQS total: seed {qs_seed:.3e} -> final {qs_final:.3e}")
+print("optimized boundary (largest coefficients):")
+names = opt.boundary_dof_names(inp, MAX_MODE_SCHEDULE[-1])
+values = opt.pack_boundary(inp, MAX_MODE_SCHEDULE[-1])
+for k in np.argsort(-np.abs(values))[:8]:
+    print(f"  {names[k]:>10s} = {values[k]:+.6f}")
 
-# Results are plain Python objects.  The call below only saves the standard
-# artifacts; diagnostics and plots remain explicit in this script.
-history = result.history
-objective_history = result.objective_history
-timing = result.timing_summary
-result_summary = result.summary
-
-saved_paths = vj.save_optimization_result(result, output_dir=OUTPUT_DIR)
-
-print("\nFinal diagnostics from result.history:")
-print(f"  stages:           {result_summary['stage_modes']}")
-print(f"  aspect ratio:     {history['aspect_final']:.6g}")
-print(f"  mean iota:        {history['iota_final']:.6g}")
-print(f"  QS objective:     {history['qs_final']:.6e}")
-print(f"  total objective:  {history['objective_final']:.6e}")
-print(f"  wall time:        {timing['total_wall_time_s']:.2f} s")
-print(f"  objective samples: {objective_history[:5]} ... {objective_history[-3:]}")
-
-print("\nFiles saved from result objects:")
-for name, path in saved_paths.as_dict().items():
-    print(f"  {name}: {path}")
-
-wout_final = vj.load_wout(saved_paths.final_wout)
-theta, zeta, b_lcfs = vj.vmecplot2_bmag_grid(
-    wout_final,
-    s_index=-1,
-    ntheta=64,
-    nzeta=64,
-    zeta_max=2.0 * np.pi / float(wout_final.nfp),
-)
-print("\nLCFS |B| data from vmecplot2_bmag_grid:")
-print(f"  theta grid: {theta.shape}, zeta grid: {zeta.shape}, B grid: {b_lcfs.shape}")
-print(f"  Bmin/Bmax:  {np.min(b_lcfs):.6g} / {np.max(b_lcfs):.6g}")
-
-if MAKE_PLOTS:
-    # Plotting is a normal post-processing block; add or remove entries here
-    # instead of relying on hidden plotting side effects from the solve.
-    print("\nGenerating initial-vs-final LCFS |B| contour comparison in Boozer coordinates:")
-    plot_paths = {
-        "boundary_comparison": vj.plot_3d_boundary_comparison(
-            saved_paths.initial_wout,
-            saved_paths.final_wout,
-            outdir=OUTPUT_DIR,
-        ),
-        "initial_vs_final_lcfs_boozer_bmag_contours": vj.plot_boozer_lcfs_bmag_comparison(
-            saved_paths.initial_wout,
-            saved_paths.final_wout,
-            outdir=OUTPUT_DIR,
-        ),
-        "objective_history": vj.plot_objective_history(
-            saved_paths.history,
-            outdir=OUTPUT_DIR,
-        ),
-    }
-    print("\nPlot files selected by this script:")
-    for name, path in plot_paths.items():
-        print(f"  {name}: {path}")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+inp.to_indata(OUT_DIR / "input.QA_optimized")               # optimized deck
+wout_path = vj.write_wout(OUT_DIR / "wout_QA_optimized.nc", eq.wout)
+print(f"wrote {OUT_DIR / 'input.QA_optimized'}\nwrote {wout_path}")
+for key, path in vj.plot_wout(wout_path, OUT_DIR).items():  # figures
+    print(f"wrote {path}")

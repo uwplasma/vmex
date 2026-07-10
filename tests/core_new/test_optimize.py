@@ -40,8 +40,11 @@ from vmec_jax.core import optimize as opt  # noqa: E402
 from conftest import resolve_golden_dir  # noqa: E402
 
 GOLDEN_DIR = resolve_golden_dir()
-pytestmark = pytest.mark.skipif(
-    GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)")
+pytestmark = [
+    pytest.mark.skipif(
+        GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"),
+    pytest.mark.usefixtures("_module_jit_enabled"),  # full solves: run jitted
+]
 DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmec_jax_test_cache_optimize")
 

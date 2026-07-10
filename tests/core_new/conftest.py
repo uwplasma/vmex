@@ -59,3 +59,23 @@ def golden_dir() -> Path:
     if path is None:
         pytest.skip("golden VMEC2000 fixtures unavailable (offline?)")
     return path
+
+
+@pytest.fixture(scope="module")
+def _module_jit_enabled():
+    """Run a whole module jitted (tests/conftest.py disables jit globally).
+
+    Solver-heavy modules opt in with
+    ``pytestmark = pytest.mark.usefixtures("_module_jit_enabled")`` — a
+    usefixtures mark is instantiated before same-scope fixtures declared in
+    the module, so module-scoped solve fixtures run jitted too.  Full solves
+    are 5-40x faster jitted (e.g. solovev ns=11: 26 s interpreted vs 3.5 s
+    cold / 0.03 s warm jitted); without this the suite's runtime depended on
+    which xdist worker had previously run a test that re-enabled jit.
+    """
+    import jax
+
+    prev = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    yield
+    jax.config.update("jax_disable_jit", prev)
