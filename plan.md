@@ -1117,9 +1117,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       component-wise `1e-12` variational contract; bulk force decreases
       `0.00934,0.00893,0.00779,0.00635,0.00628`. The `ns=31` case has 3,805 unknowns, takes 141 s,
       uses 10,500 Krylov iterations, and the full three-run process peaks at 1.92 GB RSS. A
-      differentiable coarse/fine full-state interpolation helper is tested. SOLVAX 0.1.0 provides
-      the intended JAX GCROT/Kronecker migration target, but is not added until it replaces rather
-      than layers over the current SciPy path. M4 remains open for mode-regular axis derivatives,
+      differentiable coarse/fine full-state interpolation helper is tested. Main now imports
+      SOLVAX 0.2.0 for shared core solver utilities; the mirror host preconditioner remains separate
+      until a JAX replacement deletes its SciPy path. A VMEC2000-source-guided experiment applying
+      odd-mode `sqrt(s)` scaling only in the force diagnostic was rejected: together with a regular
+      physical-lambda axis it changed the `ns=15` all/axis/bulk residuals to
+      `0.0563/0.0860/0.0489`, improving only the axis row while making the well-resolved bulk five
+      times worse. VMEC applies this scaling throughout its internal Fourier state, geometry,
+      half-mesh energy, forces, and preconditioner. Any retry must therefore use that complete
+      representation and prove improvement against the current benchmark. M4 remains open for
+      mode-regular axis derivatives,
       a decreasing axis residual, and materially lower Krylov work/memory at `ns>=31`.
    6. **M5 — open-vacuum solver.** Implement the annular scalar-potential solve and couple direct
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
