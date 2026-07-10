@@ -394,7 +394,11 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
     jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
-    ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit", max_nfev=1)
+    # Pin the reference to the unchunked (one wide vmap) path explicitly — the
+    # default is now jac_chunk_size="auto" (R17.1 memory-bounded default), so
+    # None is what makes this an unchunked-vs-chunked comparison.
+    ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                            jac_chunk_size=None, max_nfev=1)
     assert ref.jac.shape[1] == 2  # RBC(0,1), ZBS(0,1)
     for chunk in (1, 2, "auto"):
         got = opt.least_squares(obj, inp, max_mode=1, jac="implicit",

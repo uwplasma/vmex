@@ -413,5 +413,21 @@
    "ok": false,
    "error": "lasym unsupported"
   }
+ },
+ "_r16_memory[notes]": {
+  "_comment": "R16/R17 memory profiling (2026-07-10). Inert metadata key: the figure scripts split on '[' and skip it (no vmec2000/warm rows). Regenerated away by run_baseline.py; the durable record is README Performance + the plan.",
+  "finding": "Peak host RSS is dominated by the transient XLA COMPILE working set (~0.5 GB floor per solve, growing with resolution and per multigrid stage), NOT by any vmec_jax data structure. The R16-hypothesised dense DFT transform tensors are 0.017 MB (nfp4_QH ns51) to 2.1 MB (NuhrenbergZille); trajectory buffer 0.13-0.84 MB; solver carry 0.2-1.1 MB; _block_lane XLA scratch 1.6-2.4 MB. A solve's warm RUNTIME working set is tens of MB; the implicit gradient's is ~180 MB. remat and Jacobian column-chunking are runtime-memory knobs and so do NOT move the CPU peak; only shrinking the compiled graph (jit-factoring reusable sub-computations) does.",
+  "attribution_mb": {
+   "nfp4_QH_warm_start[ns51]": {"peak_rss": 806, "est_compile_floor": 605, "phase_tables": 0.017, "trajectory": 0.13, "carry": 0.21, "block_lane_xla_temp": 1.6, "solve_runtime_delta": 51},
+   "NuhrenbergZille_ns11_stage": {"peak_rss": 919, "phase_tables": 2.1, "trajectory": 0.84, "carry": 1.1, "solve_runtime_delta": 64},
+   "implicit_gradient_solovev_ns11_before": {"peak_rss": 3809, "warm_runtime_working_set": 180, "attribution": "XLA compile of the adjoint GMRES + objective jacrev program"}
+  },
+  "changes_measured": {
+   "implicit_gradient_jit_factoring": {"before_mb": 3809, "after_mb": 3045, "before_wall_s": 40.0, "after_wall_s": 31.6, "reduction": "-20% peak, -21% wall", "bit_identical": true, "what": "jax.jit the implicit residual F and _field_chain so their vjp/jvp linearizations compile as reusable XLA sub-computations instead of inlining into the enclosing jax.grad/jacrev"},
+   "remat_rejected": {"baseline_mb": 3809, "remat_forces_mb": 3885, "what": "R17.2 jax.checkpoint on the force/field chain: verified ineffective (slightly worse) because the peak is compile memory, not stored runtime residuals"},
+   "jac_chunk_size_default": {"from": null, "to": "auto", "nfp2_QA_max_mode3_48dof_none_mb": 3699, "auto_mb": 3725, "bit_identical": true, "what": "R17.1 memory-bounded default; bounds optimization-Jacobian RUNTIME memory to m0+m1*chunk (real on GPU and for large dof counts); CPU peak unchanged because it too is compile-bound"},
+   "donate_solver_carry": {"mid_deck_peak_before_mb": 809, "after_mb": 806, "what": "R16.3 donate_argnums=(0,) on the CLI _block_lane; removes the transient 2x-carry high-water mark; parity byte-identical; CPU peak unchanged (compile-bound)"}
+  },
+  "gate_status": "The >=2x peak-memory gate is NOT met on CPU: the peak is the XLA compiler working set, not vmec_jax data, so the R16/R17 runtime-memory levers (remat, chunking, donation, transform shrinking) cannot reach it. The one lever that touches the compile floor (jit-factoring) cut the implicit-gradient peak 3.8->3.0 GB. All parity and gradient tests remain byte/bit-identical."
  }
 }

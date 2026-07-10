@@ -1332,9 +1332,18 @@ def _while_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@jax.jit
+@functools.partial(jax.jit, donate_argnums=(0,))
 def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
-    """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural."""
+    """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural.
+
+    ``donate_argnums=(0,)`` (R16.3): the CLI lane drives the solve as a Python
+    loop ``carry = _block_lane(carry, rt)``, so the input carry is dead after
+    each call — donating it lets XLA alias the (multi-array) carry's output
+    onto the input buffers instead of allocating a fresh copy per block,
+    removing the transient 2x-carry high-water mark.  ``rt`` (argument 1) is
+    reused across blocks and is *not* donated.  Numerically identical to the
+    non-donated lane.
+    """
     body = _make_body(rt)
     return lax.scan(lambda cc, _: (body(cc), None), carry, None, length=BLOCK_SIZE)[0]
 
@@ -1349,6 +1358,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
 
     if mode != "cli":
         raise ValueError(f"unknown mode {mode!r}; expected 'cli' or 'jit'")
+    # The donated CLI lane (_block_lane, donate_argnums=0) requires every leaf
+    # of the input carry to be a distinct buffer; _initial_carry aliases some
+    # (xstore=state, shared cache zeros).  One copy to distinct buffers here
+    # (values bit-for-bit unchanged) makes the per-block donation valid and is
+    # amortized over the whole solve.
+    carry = jax.tree.map(jnp.array, carry)
     if verbose:
         # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
         emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, rt.ftol, rt.max_iterations), end="")

@@ -122,6 +122,16 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
   CPU wins outright; per-iteration throughput favours the GPU by ~3x on the
   largest decks, and the default device policy picks CPU or GPU per stage
   accordingly.
+- **Memory.** Peak resident memory (0.6–1.5 GB, up to 3.3 GB on the largest
+  multigrid deck) is dominated by the transient JAX/XLA *compile* working set,
+  not the equilibrium data — the spectral state, DFT transform tensors, and
+  solver carry together are a few MB, and a solve's warm runtime footprint is
+  tens of MB. It is a per-process, per-resolution compile cost that amortizes
+  across repeated solves. The optimization Jacobian is memory-bounded by
+  column chunking (`jac_chunk_size="auto"`; DESC's knob) so it does not scale
+  with the boundary-dof count, and the implicit-gradient compile was cut ~20%
+  by factoring the residual and field pipelines into reusable compiled
+  sub-computations.
 
 ## Features
 

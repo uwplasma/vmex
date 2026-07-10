@@ -1158,7 +1158,7 @@ def least_squares(
     max_mode: int | Sequence[int] = 1,
     x0: np.ndarray | None = None,
     jac: str | None = None,
-    jac_chunk_size: int | str | None = None,
+    jac_chunk_size: int | str | None = "auto",
     hot_restart: bool = True,
     use_ess: bool = False,
     ess_alpha: float = 1.2,
@@ -1208,12 +1208,16 @@ def least_squares(
     ``lasym = False`` (the implicit parameter map does not implement the
     lasym ``readin.f`` boundary rotation).
     ``jac_chunk_size`` (R17.1 memory knob, ``jac="implicit"`` only) chunks the
-    per-dof Jacobian columns via :func:`solvax.chunk_map`: ``None`` (default)
-    is one wide ``vmap`` (current behavior), an ``int`` processes that many
-    boundary dofs at a time (peak memory ``m0 + m1*chunk`` instead of scaling
-    with the full dof count), and ``"auto"`` lets :func:`solvax.auto_chunk_size`
-    pick the width.  It is inert for ``jac=None`` (scipy computes the
-    finite-difference Jacobian itself).
+    per-dof Jacobian columns via :func:`solvax.chunk_map`: ``"auto"`` (default)
+    lets :func:`solvax.auto_chunk_size` pick a memory-bounded width (the
+    largest block that fits the device budget on GPU, a sqrt-balanced width on
+    CPU) so peak Jacobian memory is ``m0 + m1*chunk`` instead of scaling with
+    the full dof count; an ``int`` fixes that many boundary dofs at a time; and
+    ``None`` forces one wide ``vmap`` over all dofs (the pre-R17.1 behavior,
+    fastest but peak memory O(dofs)).  The column blocks are mathematically
+    independent, so the assembled Jacobian is identical to float64 round-off
+    (~1e-15) across chunk sizes.  It is inert for ``jac=None`` (scipy computes
+    the finite-difference Jacobian itself).
 
     ``hot_restart`` seeds each trial solve from the previous converged state
     (both modes; in implicit mode via the per-config host-solve cache).
@@ -1340,7 +1344,7 @@ def _least_squares_implicit(
     *,
     max_mode: int,
     x0: np.ndarray | None,
-    jac_chunk_size: int | str | None = None,
+    jac_chunk_size: int | str | None = "auto",
     solve_kwargs: dict,
     device: Any = None,
     verbose: int = 0,

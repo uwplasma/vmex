@@ -286,7 +286,16 @@ coil derivatives unsupported. Steps:
      agreement. Gate: converged free-bdy wout parity vs VMEC2000; free-bdy warm within ~3× Fortran;
      free-bdy gradients FD-validated; examples + README updated.
 
-**R16. Memory reduction (reason + act; the biggest quantitative gap).** Measured: solves use
+**R16. Memory reduction (reason + act; the biggest quantitative gap).**
+*(R16 FINDING 2026-07-10: the DFT-transform-tensor premise is REFUTED by profiling — those
+are 0.017-2.1 MB, negligible. The peak (0.6 GB floor; 3.8 GB implicit gradient) is XLA COMPILE
+working set, not data. remat/jax.checkpoint tested + REJECTED (3885 vs 3809 MB — nothing to
+save). What worked: jit-factoring the implicit residual F + _field_chain → implicit gradient
+3809→3045 MB (−20%) AND 40→31.6 s (−21%), bit-identical; jac_chunk_size='auto' default
+(bounds GPU/large-dof runtime memory); donate CLI carry (neutral CPU). The ≥2× CPU gate is NOT
+met because the bottleneck is the compiler; <1.5 GB needs a custom_vjp split of the monolithic
+jacrev program (correctness risk) or a smaller XLA footprint. REFRAME R16: 'reduce the XLA
+compile working set' — the real levers are jit-factoring + GPU chunking + persistent cache.)* Measured: solves use
 0.6-1.5 GB (NuhrenbergZille 3.3 GB, free-bdy 2.6 GB) vs VMEC2000's 28-102 MB — **20-30×**; implicit
 gradient 3.4 GB. This IS improvable — the causes are architectural, not fundamental:
   1. **Profile** peak device/host buffers with `jax.profiler.device_memory_profile()` +
