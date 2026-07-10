@@ -298,6 +298,26 @@ Remaining project work tracked in §10 (examples), §12 (tutorials), §13 (relea
 free-boundary vacuum tuning + potvac export + freeb ladder, full radial padding, coverage gate,
 mirror design doc.
 
+**Independent review (2026-07-10, ~65% overall) — binding follow-ups:**
+1. **CI must run in <=10 minutes** (currently ~22-26) at equal-or-better coverage: shard
+   (fast / parity / gradient / optional full-physics), re-enable JIT inside gradient tests (a
+   global fixture disables JIT, making implicit tests 105-160 s each — the main CI cost), cache
+   goldens, and restore the **95% coverage gate** (currently 90%; weak: profiles 31%, step 72%,
+   printing 77% — add targeted tests, don't pad).
+2. **Docs/README honesty**: distinguish validated fixed-boundary implicit differentiation from
+   NOT-yet-supported free-boundary/coil derivatives and the optimizer wiring status; fix
+   optimization.rst "no special handling" claim; README examples claim must become true when the
+   examples land.
+3. **Free boundary to production**: a CONVERGED free-boundary fixture (raise NITER; the CTH deck
+   stops at 1000 with fsq~9e-2), vacuum-solve performance tuning (warm 14.4 s vs Fortran 1.95 s),
+   then freeb implicit derivatives — do not promote coil-derivative claims before this.
+4. **Memory workstream**: solves use 0.7-1.5 GB vs VMEC2000's 27-43 MB; implicit gradient 3.4 GB.
+   Profile buffers, donate in the CLI lane, audit temporaries; targets in §7.7.
+5. **Optimization convergence budgets**: examples run as many iterations as needed (thousands)
+   for genuine convergence; CI smoke uses reduced budgets via VMEC_JAX_EXAMPLES_CI.
+6. Line/docstring hygiene: 4 files >1000 lines to split when touched; ~142 functions lack
+   docstrings — close during Phase-9 doc pass.
+
 *(superseded status of 2026-07-09:)* core landed, integration/perf hardening next. `vmec_jax/core/` has 20
 modules (~10k lines), each A/B-proven vs the legacy kernels (420+ tests) — including the solve
 loop (solovev 215/215 iterations vs VMEC2000, cth 434, machine-precision wout parity), the
