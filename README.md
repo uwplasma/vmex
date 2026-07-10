@@ -18,9 +18,12 @@ original, it is differentiable and runs on GPUs.
   preconditioner, spectral condensation, NESTOR vacuum solve). Benchmark
   decks converge in the *same* number of iterations and reproduce the
   plasma energy at machine precision.
-- **Differentiable.** Gradients of equilibrium outputs with respect to
-  boundary shape, profiles, and coil parameters by implicit differentiation
-  of the converged fixed point — no finite differences, no unrolling.
+- **Differentiable.** Gradients of fixed-boundary equilibrium outputs with
+  respect to boundary shape and profile parameters by implicit
+  differentiation of the converged fixed point — no finite differences, no
+  unrolling — validated against central finite differences to ~1e-6 relative
+  (see the gradient table in the docs). Free-boundary and coil-parameter
+  derivatives are not yet supported by the implicit residual (roadmap).
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.
@@ -85,6 +88,15 @@ boundary); on the remaining row (Nuhrenberg–Zille QHS) vmec-jax converges in
 *fewer* iterations (1681 vs 2829). Per-variable wout agreement and the full
 test gates live in the [documentation](https://vmec-jax.readthedocs.io/en/latest/).
 
+![Force residual vs iteration for vmec_jax, VMEC2000, and VMEC++](docs/_static/figures/readme_convergence.png)
+
+*Parity is per-iteration, not just end-to-end: the total force residual
+(`fsqr + fsqz + fsql`) of the quick-start QH case at ns=51, per iteration.
+The vmec_jax trajectory lies exactly on top of VMEC2000's (both converge in
+502 iterations); VMEC++ follows a near-identical path (501 iterations).
+Traces: vmec_jax `SolveResult.fsq_history`, VMEC2000 `NSTEP=1` stdout,
+VMEC++ wout `fsqt`.*
+
 ## Performance
 
 ![Wall-clock comparison against VMEC2000 and VMEC++](docs/_static/figures/readme_runtime_compare.png)
@@ -128,7 +140,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Boozer transform built in (`--booz`) | ✅ | ❌ | ❌ |
 | Plotting built in (`--plot`) | ✅ | ❌ | ❌ |
 | GPU execution | ✅ | ❌ | ❌ |
-| Differentiable (implicit diff of the fixed point) | ✅ | ❌ | ❌ |
+| Differentiable (implicit diff, fixed boundary) | ✅ | ❌ | ❌ |
 
 ## Python API
 
@@ -153,7 +165,10 @@ Optimization building blocks live in `vmec_jax.core.optimize`
 targets; a least-squares driver over boundary Fourier coefficients) with
 complete QA/QH/QP/QI scripts in `examples/optimization/`, and
 `vmec_jax.core.implicit` provides implicit-differentiation gradients of the
-converged equilibrium.
+converged fixed-boundary equilibrium. The least-squares driver accepts
+`jac="implicit"` to use those exact gradients (fixed boundary,
+`LASYM = F`, implicit-differentiable objective terms); the default is
+scipy finite differences.
 
 ## CLI reference
 

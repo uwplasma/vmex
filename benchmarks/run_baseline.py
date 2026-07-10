@@ -18,8 +18,13 @@ Solvers exercised per case:
   cache hot; same ``vmec_jax.core`` route as the CLI)
 - ``vmecpp``         — VMEC++ python API, where the case converges cleanly
 
-Each deck is run twice per applicable solver: as-is (``grid: input``) and,
-for cases listed in MULTIGRID_CASES, with a generated NS_ARRAY ladder
+Every benchmark row runs at ``ns >= RAMP_NS`` (51): decks whose finest
+NS_ARRAY stage is below that get a generated variant with the final stage
+rewritten to 51 (``grid: ns51``); decks already at or above 51 run as-is
+(``grid: input``).  FTOL_ARRAY/NITER_ARRAY are left untouched, so each
+deck's own convergence semantics (final ftol, iteration caps) are kept.
+Cases listed in MULTIGRID_CASES additionally run with a generated
+coarse->fine NS_ARRAY ladder ending at ``max(deck_ns, 51)``
 (``grid: multigrid``) to compare multigrid behavior across codes.
 """
 
@@ -54,33 +59,53 @@ CASES: dict[str, list[str]] = {
     "cth_like_free_bdy_lasym_small": ["mgrid_cth_like_lasym_small.nc"],
 }
 
+# Minimum final-stage ns for every benchmark row (see module docstring).
+RAMP_NS = 51
+
 # Cases that additionally run with a generated coarse->fine NS_ARRAY ladder.
-# Ladder ends at the deck's own finest ns so results stay comparable.
+# Ladder ends at max(deck ns, RAMP_NS) so results stay comparable.
 MULTIGRID_CASES = {
-    "cth_like_fixed_bdy": "5 9 15",
-    "nfp4_QH_warm_start": "9 17 35",
+    "cth_like_fixed_bdy": "15 31 51",
+    "nfp4_QH_warm_start": "17 35 51",
     "LandremanPaul2021_QA_lowres": None,  # ladder derived from deck ns below
 }
 
 TIME_RE = re.compile(r"(\d+\.\d+)\s+real.*?(\d+)\s+maximum resident set size", re.S)
 
+# Active (non-comment) NS_ARRAY assignment; `!`-commented lines don't match.
+NS_ARRAY_RE = re.compile(r"^(\s*NS_ARRAY\s*=\s*)([\d,\s]+)", re.I | re.M)
+
 
 def read_deck_ns(deck: Path) -> int:
-    text = deck.read_text()
-    m = re.search(r"NS_ARRAY\s*=\s*([\d,\s]+)", text, re.I)
-    return int(m.group(1).replace(",", " ").split()[-1]) if m else 0
+    m = NS_ARRAY_RE.search(deck.read_text())
+    return int(m.group(2).replace(",", " ").split()[-1]) if m else 0
+
+
+def make_ramped_deck(deck: Path, dest: Path, min_ns: int = RAMP_NS) -> None:
+    """Rewrite the final NS_ARRAY stage to max(deck_ns, min_ns).
+
+    FTOL_ARRAY/NITER_ARRAY are left untouched (same stage count), so the
+    deck's own final-ftol and iteration-cap semantics are preserved.
+    """
+
+    def repl(m: re.Match) -> str:
+        stages = m.group(2).replace(",", " ").split()
+        stages[-1] = str(max(int(stages[-1]), min_ns))
+        return m.group(1) + " ".join(stages) + "\n "
+
+    dest.write_text(NS_ARRAY_RE.sub(repl, deck.read_text(), count=1))
 
 
 def make_multigrid_deck(deck: Path, ladder: str | None, dest: Path) -> None:
     """Rewrite NS_ARRAY/FTOL_ARRAY/NITER_ARRAY as a coarse->fine ladder."""
-    ns_final = read_deck_ns(deck)
+    ns_final = max(read_deck_ns(deck), RAMP_NS)
     if ladder is None:
         third = max(5, ns_final // 4) | 1
         half = max(third + 2, ns_final // 2) | 1
         ladder = f"{third} {half} {ns_final}"
     stages = ladder.split()
     text = deck.read_text()
-    text = re.sub(r"NS_ARRAY\s*=\s*[\d,\s]+", f"NS_ARRAY = {' '.join(stages)}\n ", text, flags=re.I)
+    text = NS_ARRAY_RE.sub(lambda m: f"{m.group(1)}{' '.join(stages)}\n ", text, count=1)
     text = re.sub(r"FTOL_ARRAY\s*=\s*[\deE.+\-,\s]+", f"FTOL_ARRAY = {' '.join(['1e-8'] * (len(stages) - 1))} 1e-14\n ", text, flags=re.I)
     text = re.sub(r"NITER_ARRAY\s*=\s*[\d,\s]+", f"NITER_ARRAY = {' '.join(['4000'] * len(stages))}\n ", text, flags=re.I)
     dest.write_text(text)
@@ -231,10 +256,16 @@ def main() -> None:
 
     for name in cases:
         aux = CASES.get(name, [])
-        variants = [("input", DATA / f"input.{name}")]
+        src = DATA / f"input.{name}"
+        if read_deck_ns(src) >= RAMP_NS:
+            variants = [("input", src)]
+        else:
+            ramped = Path(tempfile.mkdtemp()) / f"input.{name}"
+            make_ramped_deck(src, ramped)
+            variants = [(f"ns{RAMP_NS}", ramped)]
         if name in MULTIGRID_CASES:
             mg = Path(tempfile.mkdtemp()) / f"input.{name}"
-            make_multigrid_deck(DATA / f"input.{name}", MULTIGRID_CASES[name], mg)
+            make_multigrid_deck(src, MULTIGRID_CASES[name], mg)
             variants.append(("multigrid", mg))
         for grid, deck in variants:
             key = f"{name}[{grid}]"
