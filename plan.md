@@ -277,12 +277,68 @@ gradient 3.4 GB. This IS improvable — the causes are architectural, not fundam
      <1.5 GB for the largest), implicit-gradient peak <~1.5 GB, recorded in `benchmarks/baseline.json`
      and the README performance notes. Correctness (parity + gradient tests) unchanged.
 
-**R17. Apply DESC ideas (research pending).** A DESC deep-dive is running (functionality, docs,
-GPU/memory patterns, objective library, optimization API). When it reports, fold applicable ideas
-here with concrete steps — expected candidates: `jac_chunk_size`-style Jacobian chunking for memory
-(feeds R16.2), a richer objective library (omnigenity/effective-ripple/ballooning) for R1, an
-`Equilibrium`/family object + continuation UX, and notebook-style tutorials. Gate: each adopted idea
-lands as a concrete R-item with tests.
+**R17. Apply DESC ideas (deep-dive done 2026-07-10; https://github.com/PlasmaControl/DESC).** DESC is
+a JAX Fourier-Zernike force-residual code — numerics don't transfer 1:1, but these architecture/UX
+patterns do. Ordered by value, each cross-referenced into the lane it strengthens:
+
+  *Memory (feeds R16):*
+  1. **`jac_chunk_size` column-chunking of the optimization Jacobian** — DESC's headline memory knob:
+     build the residual Jacobian in column blocks so peak memory = m0 + m1·chunk (time ≈ t0 +
+     t1/chunk), `"auto"` picks the largest that fits. We chunk only coil eval today, NOT the objective
+     Jacobian. Add a `jac_chunk_size` kwarg to `least_squares` (both FD and `jac="implicit"`), chunk
+     the per-dof loop with `jax.lax.map(..., batch_size=chunk)`. THE fix for optimization memory.
+  2. **`jax.checkpoint`/remat on the adjoint + field chain** — core has NO remat anywhere; wrapping
+     `implicit._field_chain`/force-eval in `jax.checkpoint` recomputes in backward instead of storing,
+     the direct lever on the 3.4 GB implicit-gradient backward.
+  3. **Expose GPU knobs**: `XLA_PYTHON_CLIENT_MEM_FRACTION` (0.75→0.9), `XLA_PYTHON_CLIENT_ALLOCATOR=
+     platform` for OOM debugging; surface in `doctor.py`. Verify our persistent cache is as aggressive
+     as DESC (`jax_persistent_cache_min_compile_time_secs=0`) to help the cold small-deck target (R16).
+
+  *Optimization depth (feeds R1):*
+  4. **Block-solve all dof columns against ONE shared linearization** (block-GMRES / recycled Krylov
+     subspace) instead of one preconditioned GMRES per dof — DESC's "factorize once, reuse" lesson;
+     the most direct per-dof Jacobian-cost win, complements the CPU-pin fix (a37d0ec3).
+  5. **Perturbation (analytic Newton) warm-start for trial solves** — seed each trial boundary with a
+     first-order step `dx = −(∂F/∂x)^{-1}(∂F/∂c)dc` (we already have `∂F/∂x`, `∂F/∂c` VJPs in
+     `implicit.py`) before iterating; cuts per-trial iterations → deeper QA/QH/QP/QI at fixed budget.
+  6. **`bounds=(lo,hi)` inequality targets + generic `loss_function` (min/max/mean) on every term** —
+     DESC's objective contract; removes weight-tuning guesswork (aspect∈(7,9), mirror∈(0.18,0.22))
+     and unifies the `l_grad_b`/`mirror_ratio` bespoke reductions. Extend the `(fun,target,weight)`
+     term to `(fun, target|bounds, weight, loss_function)`.
+  7. **Richer objective library** into `core.optimize`, high-value first: `QuasisymmetryTripleProduct`
+     (local `f_T`, no FSA — cheap complement to our ratio residual); **`EffectiveRipple` ε_eff**
+     (1/ν neoclassical — we have the bounce primitives in `quasi_isodynamic`); `GammaC` (fast-ion);
+     `Omnigenity`+`OmnigenousField` target (a cleaner QI formulation than our 4-term residual — study
+     for QI depth); `BootstrapRedlConsistency`, `BallooningStability` (fuller stability vs Mercier);
+     medium: elongation/curvature/BScaleLength/rotational-transform+shear profile targets.
+
+  *Free-boundary differentiation (feeds R15):*
+  8. **Virtual-casing `BoundaryError` as an ADDITIONAL differentiable free-boundary formulation** —
+     DESC gets free-boundary gradients WITHOUT a NESTOR subsolve by making `B·n=0` and the pressure
+     balance a differentiable objective via the virtual-casing principle. This sidesteps
+     differentiating our NESTOR fixed point and is the cleanest route to coil→boundary→QS gradients.
+     Keep NESTOR for the forward VMEC2000-parity solve; add virtual casing for the differentiable path.
+
+  *UX / capability (feeds R13/R14/R1):*
+  9. **Near-axis (pyQSC/pyQIC) seeding** — `from_near_axis` builds a physically-good `VmecInput`
+     boundary from a QSC/QIC solution instead of a circular seed → better QA/QH/QI starts (our input
+     decks even note "B0 not yet implemented"). Direct optimization-depth lever.
+  10. **`Equilibrium` save/load (HDF5) + `EquilibriaFamily`** — return the staged `max_mode`/multigrid
+      sequence as an inspectable family; make campaigns resumable (feeds the save/load UX).
+  11. **Plot helpers to mirror**: `plot_qs_error` (QS `f_B/f_C/f_T` vs flux), `plot_comparison`
+      (overlay before/after optimization surfaces — the README optimization panels of R11.2),
+      `plot_boozer_surface`/`plot_boozer_modes` (LCFS Boozer, feeds R11.4), `plot_coefficients`
+      (spectral-convergence diagnostic we lack). Add to `core.plotting`.
+  12. **Notebook tutorials + output-analysis notebook** — DESC ships 7 rendered notebooks; convert the
+      flagship examples to narrated notebooks with inline plots (feeds R13/R14.3); add a "how to read
+      a wout / compute QS error / plot Boozer" analysis tutorial.
+  13. **CI: split fast-unit vs slow-regression workflows** (DESC pattern) — we already shard; formalize
+      the golden/regression split and add the I/O-format reference doc (every INDATA + wout var, §827).
+
+  Gate: items 1-2 (chunk+remat) land first (biggest measurable win, feed R16's ≥2× gate); each other
+  adopted idea lands as a tested change in its cross-referenced lane. Note: our matrix-free O(1)-memory
+  adjoint is already BETTER than DESC's for a single scalar gradient — keep it; borrow the chunking,
+  remat, warm-start, objectives, virtual-casing, and UX.
 
 ---
 
