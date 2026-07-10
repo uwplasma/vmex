@@ -86,6 +86,18 @@ add a `full`-marked convergence test per class asserting the achieved bound. Run
 `ssh office` GPU; compare CPU vs GPU wall + autodiff-vs-FD accuracy. Verify the commented DMerc/
 LgradB/magnetic-well terms work uncommented (already CI-tested) and read well pedagogically.
 
+**Seed policy (user 2026-07-10; ties to the R1 saddle finding).** The seed does NOT have to be an
+exact circular torus — an exact-axisymmetric/circular boundary is a *saddle* of the QS residual (the
+symmetry-breaking harmonics are even → gradient vanishes there), which is exactly why FD stalls and
+implicit gradients are needed. So seed from a **near-circular torus with the would-be-zero boundary
+harmonics initialized to ~1e-4** (a small symmetry-/shape-breaking "kick"), with one shaping mode
+seeded a bit larger to give the optimizer a defined descent direction, instead of exact zeros. This
+makes even the first step well-posed, is physically honest, and matches how the QA precise result was
+obtained ("kicked circular seed"). Make the kick amplitude an example parameter-at-top (default
+~1e-4) and document it. The alternative, richer seed is the **near-axis (pyQSC_JAX/pyQIC) seed of
+R19** — offer both: the tiny-kick circular seed (simplest, in-repo) and the near-axis seed (best
+starting point) so users learn both routes.
+
 _R1 status (2026-07-10, office 2x A4000 / 36-core CPU, on f45a6491):_
 - **QA (nfp2) — PRECISE, validated.** `jac="implicit"` + ESS from the kicked circular seed:
   QS total 2.043e-01 → 9.82e-03 (max_mode=1) → **1.701e-04 (max_mode=2)**, aspect 6.000 &
@@ -199,7 +211,14 @@ Steps:
      capability in a fraction of the code. **Measured 2026-07-10 (solver source only; tests/
      bindings/third-party excluded): vmec_jax 34 files / 19,237 Python lines; VMEC2000 115
      files / 36,693 Fortran lines; VMEC++ 117 files / ~39,677 (34,255 C++ + 5,422 Python) —
-     vmec_jax is ~half the code of both, with a superset of capabilities.**
+     vmec_jax is ~half the code of both, with a superset of capabilities.** ALSO report the
+     **comment/docstring vs actual-code split** (user 2026-07-10) to show vmec_jax is better
+     documented and more user-friendly. Measured (tokenize for Python; comment-line count for
+     Fortran/C++): vmec_jax **11,274 actual code (SLOC)** + 5,112 comments/docstrings (27% of
+     total) → **doc-to-code ratio 0.45**; VMEC2000 24,164 code + 8,451 comment → 0.35; VMEC++
+     ~23,149 code + ~5,841 comment → ~0.25. Headline: **vmec_jax has <half the actual code AND
+     the highest documentation density of the three.** Use `pygount`/`cloc` for the README
+     table (install if needed) so the comment/code split is reproducible.
   4. **Showcase figure.** `readme_equilibrium_showcase.png`: show the **3D geometry with |B| color on
      the surface**; and change the current flat |B| plot to **|B| in Boozer coordinates with the `jet`
      colormap** (the STELLOPT/Boozer convention). Update `core.plotting`/`core.boozer` plot helpers as
