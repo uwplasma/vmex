@@ -737,9 +737,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       seed radius from 0.25 m to 0.50 m reduces, rather than amplifies, relative LCFS motion at fixed
       beta, so small visual displacement is not evidence of uncoupled pressure. The root example
       now separates nominal, achieved-central, and volume beta and renders geometry displacement,
-      pressure, fields, coils, cap-to-cap lines, and convergence. Resolution/initial-boundary
-      independence, an independent Pleiades/WHAM curve, anisotropy, and full state/potential hot
-      restarts remain.
+      pressure, fields, coils, cap-to-cap lines, and convergence. Full beta continuation now hot
+      restarts the lateral boundary, plasma interior, and vacuum potential. A formal
+      `(ns,nxi,nrho)=(5,7,5),(7,13,7),(9,17,9)` test requires the last two center radius, field,
+      and achieved-beta triples to agree within `1e-4` relative; normalized vacuum `B.n` decreases
+      `1.60e-2,4.25e-3,1.85e-3`. Separate fixed-mass solves from +/-10% free-side radius
+      perturbations agree to `2e-12` absolute in boundary and `2e-11` relative in `B^2`.
+      Higher-resolution vacuum tangency/outer-domain convergence, an independent Pleiades/WHAM
+      curve, anisotropy, and restart-file serialization remain.
    8. **M7 — nonaxisymmetric finite-beta free boundary.** Add helical coils/boundaries, then require
       3D force, interface, field-line, and resolution gates. This lane is supported only after M6;
       no axisymmetric boundary replicated in theta counts as a 3D validation.

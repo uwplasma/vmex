@@ -19,11 +19,13 @@ The branch currently includes:
 * coupled axisymmetric isotropic free-boundary beta continuation, and
 * component-wise nonlinear convergence checks at a requested ``ftol=1e-12``.
 
-The axisymmetric free-boundary path is a research capability until the
-resolution, initial-condition, independent-reference, anisotropic, output,
-and restart gates in ``plan.md`` are complete. Nonaxisymmetric free-boundary
-mirrors and the toroidal stellarator-mirror hybrid are later milestones and
-must not be inferred from the axisymmetric result.
+The axisymmetric free-boundary path is a research capability. A first formal
+resolution study, free-side initial-condition test, and in-memory continuation
+restart are complete. Higher-resolution vacuum tangency and outer-domain
+convergence, independent-reference, anisotropic, restart-file, and output gates
+in ``plan.md`` remain. Nonaxisymmetric free-boundary mirrors and the toroidal
+stellarator-mirror hybrid are later milestones and must not be inferred from
+the axisymmetric result.
 
 Beta scan example
 -----------------

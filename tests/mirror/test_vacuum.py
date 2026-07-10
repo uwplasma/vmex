@@ -13,10 +13,14 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
+    MirrorState,
     build_vacuum_grid,
     evaluate_vacuum_field,
     evaluate_vacuum_geometry,
     external_field_from_coils,
+    mass_profile_from_pressure,
+    mirror_energy,
+    solve_axisymmetric_free_boundary_cli,
     solve_vacuum_potential,
     solve_axisymmetric_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
@@ -265,4 +269,105 @@ def test_two_coil_free_boundary_beta_scan_uses_solved_expanding_surfaces() -> No
     assert 0.03 < float(diagnostics[-1].volume_averaged_beta) < 0.04
     assert float(diagnostics[-1].diamagnetic_field_ratio) < 0.97
     assert abs(float(diagnostics[-1].paraxial_relative_error)) < 0.01
+    assert all(result.vacuum_potential.shape == vacuum_grid.shape for result in results)
+    assert all(float(result.vacuum_potential[-1, 0, 0]) == 0.0 for result in results)
     assert all(np.all(np.isfinite(np.asarray(result.vacuum_field.total_xyz))) for result in results)
+
+
+@pytest.mark.py311_slow_coverage
+def test_free_boundary_beta_observables_converge_with_resolution() -> None:
+    summaries = []
+    tangency = []
+    for ns, nxi, nrho in ((5, 7, 5), (7, 13, 7), (9, 17, 9)):
+        config = MirrorConfig(
+            resolution=MirrorResolution(ns=ns, mpol=0, ntheta=1, nxi=nxi),
+            z_min=-0.8,
+            z_max=0.8,
+            ftol=1.0e-12,
+            max_iterations=2000,
+        )
+        plasma_grid = config.build_grid()
+        vacuum_grid = build_vacuum_grid(plasma_grid, nrho=nrho)
+        on_axis_field = two_coil_on_axis_bz(
+            jnp.asarray(plasma_grid.z), coil_radius=0.9, separation=2.0, current=2.0e5
+        )
+        center = int(np.argmin(np.abs(plasma_grid.z)))
+        flux = 0.5 * on_axis_field[center] * 0.25**2
+        results = solve_axisymmetric_beta_scan_cli(
+            MirrorBoundary.from_axis_field(flux, on_axis_field, plasma_grid),
+            plasma_grid,
+            vacuum_grid,
+            config,
+            _two_end_coils(),
+            jnp.asarray([0.0, 0.10]),
+            outer_radius=0.65,
+            axial_flux_derivative=flux,
+            reference_field=float(on_axis_field[center]),
+        )
+        summary = summarize_axisymmetric_beta_scan(
+            results,
+            jnp.asarray([0.0, 0.10]),
+            plasma_grid,
+            reference_field=float(on_axis_field[center]),
+        )[-1]
+        summaries.append(
+            np.asarray([summary.center_radius, summary.center_axis_field, summary.achieved_reference_beta])
+        )
+        tangency.append(float(results[-1].interface.vacuum_b_normal_rms))
+        assert all(float(result.variational_max) <= config.ftol for result in results)
+
+    relative_change = np.abs((summaries[-1] - summaries[-2]) / summaries[-1])
+    assert np.max(relative_change) < 1.0e-4
+    assert np.all(np.diff(tangency) < 0.0)
+    assert tangency[-1] < 0.002
+
+
+@pytest.mark.py311_slow_coverage
+def test_free_boundary_solution_is_independent_of_free_side_initial_radius() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=13),
+        z_min=-0.8,
+        z_max=0.8,
+        ftol=1.0e-12,
+        max_iterations=2000,
+    )
+    plasma_grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(plasma_grid, nrho=7)
+    on_axis_field = two_coil_on_axis_bz(
+        jnp.asarray(plasma_grid.z), coil_radius=0.9, separation=2.0, current=2.0e5
+    )
+    center = int(np.argmin(np.abs(plasma_grid.z)))
+    flux = 0.5 * on_axis_field[center] * 0.25**2
+    reference_boundary = MirrorBoundary.from_axis_field(flux, on_axis_field, plasma_grid)
+    reference_energy = mirror_energy(
+        MirrorState.from_boundary(reference_boundary, plasma_grid),
+        plasma_grid,
+        axial_flux_derivative=flux,
+    )
+    central_pressure = 0.10 * float(on_axis_field[center]) ** 2 / (2.0 * 4.0e-7 * np.pi)
+    mass = mass_profile_from_pressure(
+        central_pressure * (1.0 - jnp.asarray(plasma_grid.s)),
+        reference_energy.volume_derivative,
+    )
+    results = []
+    for amplitude in (-0.10, 0.10):
+        radius = np.asarray(reference_boundary.radius_scale) * (
+            1.0 + amplitude * (1.0 - np.asarray(plasma_grid.xi)[None, :] ** 2)
+        )
+        results.append(
+            solve_axisymmetric_free_boundary_cli(
+                MirrorBoundary(jnp.asarray(radius)),
+                plasma_grid,
+                vacuum_grid,
+                config,
+                _two_end_coils(),
+                outer_radius=0.65,
+                axial_flux_derivative=flux,
+                mass_profile=mass,
+                require_convergence=True,
+            )
+        )
+
+    np.testing.assert_allclose(results[0].boundary.radius_scale, results[1].boundary.radius_scale, atol=2.0e-12)
+    np.testing.assert_allclose(results[0].plasma_energy.b_squared, results[1].plasma_energy.b_squared, rtol=2.0e-11)
+    assert all(float(result.variational_max) <= config.ftol for result in results)

@@ -24,7 +24,6 @@ from .forces import (
     InterfaceResidual,
     MirrorEnergy,
     interface_residual,
-    mass_profile_from_pressure,
     mirror_energy,
 )
 from .model import MirrorBoundary, MirrorConfig, MirrorState
@@ -141,6 +140,7 @@ class FreeBoundaryMirrorResult:
     plasma_energy: MirrorEnergy
     vacuum_geometry: VacuumGeometry
     vacuum_field: VacuumField
+    vacuum_potential: Array
     interface: InterfaceResidual
     history: Array
     variational_max: Array
@@ -512,6 +512,8 @@ def solve_axisymmetric_free_boundary_cli(
     mass_profile: Array = 0.0,
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
+    initial_state: MirrorState | None = None,
+    initial_potential: Array | None = None,
     require_convergence: bool = False,
 ) -> FreeBoundaryMirrorResult:
     """Jointly solve an isotropic axisymmetric plasma and open vacuum.
@@ -547,12 +549,18 @@ def solve_axisymmetric_free_boundary_cli(
     np_state = plasma_indices[0].size
     nv = vacuum_indices[0].size
 
-    base_state = MirrorState.from_boundary(initial_boundary, plasma_grid)
+    base_state = MirrorState.from_boundary(initial_boundary, plasma_grid) if initial_state is None else initial_state
+    base_state.validate_shape(plasma_grid)
+    if not np.allclose(np.asarray(base_state.radius_scale[-1]), initial_boundary_radius):
+        raise ValueError("initial_state boundary must match initial_boundary")
+    potential_seed = np.zeros(vacuum_grid.shape) if initial_potential is None else np.asarray(initial_potential)
+    if potential_seed.shape != vacuum_grid.shape:
+        raise ValueError(f"initial_potential shape {potential_seed.shape} must be {vacuum_grid.shape}")
     x0 = np.concatenate(
         [
             initial_boundary_radius[0, boundary_indices] / boundary_scale,
             np.asarray(base_state.radius_scale)[plasma_indices] / boundary_scale,
-            np.zeros(nv),
+            potential_seed[vacuum_indices] / potential_scale,
         ]
     )
     geometric_upper = 0.98 * float(outer_radius) / boundary_scale
@@ -718,6 +726,7 @@ def solve_axisymmetric_free_boundary_cli(
         plasma_energy=plasma,
         vacuum_geometry=vacuum_geometry,
         vacuum_field=vacuum_field,
+        vacuum_potential=potential,
         interface=interface,
         history=jnp.asarray(history),
         variational_max=jnp.asarray(variational_max),
@@ -729,59 +738,6 @@ def solve_axisymmetric_free_boundary_cli(
     if require_convergence and not converged:
         raise RuntimeError(message)
     return result
-
-
-def solve_axisymmetric_beta_scan_cli(
-    initial_boundary: MirrorBoundary,
-    plasma_grid: "MirrorGrid",
-    vacuum_grid: VacuumGrid,
-    config: MirrorConfig,
-    coilset: Any,
-    beta_values: Array,
-    *,
-    outer_radius: float,
-    axial_flux_derivative: Array,
-    reference_field: float,
-    gamma: float = 5.0 / 3.0,
-) -> tuple[FreeBoundaryMirrorResult, ...]:
-    """Solve a hot-started axisymmetric free-boundary beta continuation."""
-
-    beta_values = np.asarray(beta_values, dtype=float)
-    if beta_values.ndim != 1 or beta_values.size < 1:
-        raise ValueError("beta_values must be a nonempty one-dimensional array")
-    if np.any(beta_values < 0.0) or np.any(np.diff(beta_values) < 0.0):
-        raise ValueError("beta_values must be nonnegative and increasing")
-    reference_state = MirrorState.from_boundary(initial_boundary, plasma_grid)
-    reference_energy = mirror_energy(
-        reference_state,
-        plasma_grid,
-        axial_flux_derivative=axial_flux_derivative,
-    )
-    pressure_shape = 1.0 - jnp.asarray(plasma_grid.s)
-    boundary = initial_boundary
-    results = []
-    for beta in beta_values:
-        central_pressure = float(beta) * float(reference_field) ** 2 / (2.0 * MU0)
-        mass = mass_profile_from_pressure(
-            central_pressure * pressure_shape,
-            reference_energy.volume_derivative,
-            gamma=gamma,
-        )
-        result = solve_axisymmetric_free_boundary_cli(
-            boundary,
-            plasma_grid,
-            vacuum_grid,
-            config,
-            coilset,
-            outer_radius=outer_radius,
-            axial_flux_derivative=axial_flux_derivative,
-            mass_profile=mass,
-            gamma=gamma,
-            require_convergence=True,
-        )
-        results.append(result)
-        boundary = result.boundary
-    return tuple(results)
 
 
 from typing import TYPE_CHECKING

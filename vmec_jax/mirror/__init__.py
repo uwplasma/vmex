@@ -73,10 +73,10 @@ from .vacuum import (
     external_field_from_coils,
     solve_vacuum_potential,
     solve_axisymmetric_free_boundary_cli,
-    solve_axisymmetric_beta_scan_cli,
     vacuum_energy_functional,
     vacuum_laplacian,
 )
+from .continuation import solve_axisymmetric_beta_scan_cli
 
 __all__ = [
     "MIRROR_INPUT_SCHEMA",
