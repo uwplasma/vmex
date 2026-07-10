@@ -57,7 +57,7 @@ def test_fixed_boundary_state_interpolation_roundtrips_and_preserves_constraints
     )
     np.testing.assert_allclose(interpolated.radius_scale[-1], fine_boundary.radius_scale)
     np.testing.assert_allclose(interpolated.radius_scale[0], interpolated.radius_scale[1])
-    np.testing.assert_allclose(interpolated.lambda_stream[0], interpolated.lambda_stream[1])
+    np.testing.assert_allclose(interpolated.lambda_stream[0], 0.0, atol=2.0e-15)
     np.testing.assert_allclose(interpolated.lambda_stream[:, :, [0, -1]], 0.0, atol=2.0e-15)
 
 

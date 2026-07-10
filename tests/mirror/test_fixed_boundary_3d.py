@@ -77,7 +77,7 @@ def test_helical_finite_current_solve_converges_with_gauge_free_lambda() -> None
     assert float(jnp.max(jnp.abs(result.state.lambda_stream))) > 1.0e-3
     assert float(jnp.max(jnp.abs(pitch))) > 1.0e-3
     np.testing.assert_allclose(surface_means, 0.0, atol=2.0e-15)
-    np.testing.assert_allclose(result.state.lambda_stream[0], result.state.lambda_stream[1])
+    np.testing.assert_allclose(result.state.lambda_stream[0], 0.0, atol=2.0e-15)
     np.testing.assert_allclose(result.state.lambda_stream[:, :, [0, -1]], 0.0)
     np.testing.assert_allclose(result.state.radius_scale[-1], boundary.radius_scale)
 

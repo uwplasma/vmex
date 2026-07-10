@@ -228,12 +228,14 @@ def project_fixed_boundary_state(
     radius_scale = radius_scale.at[0].set(radius_scale[1])
 
     lam = jnp.asarray(state.lambda_stream)
-    lam = lam.at[0].set(lam[1])
     theta_weights = jnp.asarray(grid.theta_basis.weights)
     xi_weights = jnp.asarray(grid.axial_basis.weights)
     denominator = jnp.sum(theta_weights) * jnp.sum(xi_weights)
     surface_mean = jnp.einsum("j,k,ijk->i", theta_weights, xi_weights, lam) / denominator
     lam = lam - surface_mean[:, None, None]
+    # All theta labels meet at one physical axis point. After removing the
+    # surface-constant gauge, regularity therefore requires lambda(s=0)=0.
+    lam = lam.at[0].set(jnp.zeros_like(lam[0]))
     return MirrorState(radius_scale=radius_scale, lambda_stream=lam)
 
 

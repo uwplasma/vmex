@@ -213,7 +213,7 @@ class _MirrorStateVectorizer:
         lam = self.base.lambda_stream.at[1:, :, 1:-1].set(
             interior.reshape(shape[0] - 1, shape[1], shape[2] - 2)
         )
-        lam = lam.at[0].set(lam[1])
+        lam = lam.at[0].set(jnp.zeros_like(lam[0]))
         return MirrorState(radius, lam)
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:

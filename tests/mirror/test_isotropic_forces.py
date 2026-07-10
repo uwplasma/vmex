@@ -68,7 +68,7 @@ def test_fixed_boundary_projection_enforces_geometry_and_lambda_gauge() -> None:
         np.broadcast_to(np.asarray(boundary.radius_scale[:, 0]), (grid.ns, grid.ntheta)),
     )
     np.testing.assert_allclose(projected.radius_scale[0], projected.radius_scale[1])
-    np.testing.assert_allclose(projected.lambda_stream[0], projected.lambda_stream[1])
+    np.testing.assert_allclose(projected.lambda_stream[0], 0.0, atol=2.0e-15)
     surface_mean = np.einsum(
         "j,k,ijk->i",
         grid.theta_basis.weights,
