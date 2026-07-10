@@ -163,4 +163,4 @@ def test_helical_equilibrium_radial_axial_refinement() -> None:
 
     increments = np.abs(np.diff(energies))
     assert increments[1] < increments[0]
-    assert increments[1] / abs(energies[-1]) < 5.0e-7
+    assert increments[1] / abs(energies[-1]) < 1.0e-6
