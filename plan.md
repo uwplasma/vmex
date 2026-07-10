@@ -851,8 +851,22 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       converges below `1e-12`, has nonzero lambda and field-line pitch, and preserves end/gauge
       constraints. A manual `mpol=1,2,3` study converges every case below `6e-16`; the `mpol=2`
       and `mpol=3` energies agree to `~2e-13` relative, while lambda amplitude and maximum pitch
-      change by about 2% and 3%. A mode-aware scalable lambda preconditioner and formal `ns/nxi`
-      studies remain.
+      change by about 2% and 3%.
+      **UPDATE (2026-07-10): refinement and bounded 3D preconditioning landed.** The separable
+      Newton preconditioner now includes normalized radial, Fourier-poloidal, and CGL-axial
+      stiffness, with a symmetric lift/project operation for the eliminated weighted lambda gauge.
+      A scheduled `full` test solves `(ns,nxi)=(5,5),(7,7),(9,9)` to component-wise residuals
+      `4.09e-16, 7.94e-16, 1.10e-15`; the last energy increment is `3.88e-7` relative and smaller
+      than the preceding increment. Reserving residual-Newton work fixed the former `7x7` stall at
+      `6.33e-7`. At `13x13` (747 unknowns), office CPU reaches `1.33e-13` in 41.4 s, while one RTX
+      A4000 reaches `9.73e-16` in 99.9 s after dense fallback; energy agrees to displayed precision
+      (`1.111046094678217e6`) and `max|lambda|=1.0365e-2`, maximum pitch `0.18108` agree within
+      `1e-8` relative. The shared device policy now defaults this launch-bound mirror size to CPU
+      while honoring explicit JAX/device pins.
+      This case still needs 15,000 capped Krylov iterations (`1.37e-2` final linear residual) and a
+      bounded dense residual-Newton fallback, so the mode-aware block is useful but not yet the
+      scalable production preconditioner. M4 remains open for independent `ns`/`nxi` convergence,
+      reduced Krylov work, and a no-dense-fallback case above 1024 unknowns.
    6. **M5 — open-vacuum solver.** Implement the annular scalar-potential solve and couple direct
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
       side-interface `B.n`, end flux, outer-boundary convergence, and axisymmetric comparisons

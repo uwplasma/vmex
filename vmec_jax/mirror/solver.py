@@ -23,6 +23,7 @@ from scipy.linalg import eigh
 from scipy.optimize import least_squares, minimize
 from scipy.sparse.linalg import LinearOperator, gmres
 
+from ..core.device import resolve_device
 from .forces import (
     AnisotropicForceResidual,
     AnisotropicMirrorEnergy,
@@ -45,6 +46,7 @@ from .model import (
 )
 
 Array = Any
+_DEVICE_ACTIVE = object()
 
 
 @dataclass(frozen=True)
@@ -496,14 +498,37 @@ def solve_fixed_boundary_cli(
     solve_lambda: bool = False,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
+    device: Any = None,
 ) -> MirrorSolveResult:
     """Solve a fixed-boundary mirror with host L-BFGS/Newton control.
 
     Supplying ``solve_lambda=True`` enables the gauge-free M4 stream-function
     variables while preserving their fixed end-cut values. A
     ``pressure_closure`` selects the consistent ANIMEC functional; otherwise
-    the mass-conserving isotropic functional is used.
+    the mass-conserving isotropic functional is used. ``device=None`` applies
+    the measured core device policy; an explicit device or JAX platform pin is
+    always honored.
     """
+
+    if device is not _DEVICE_ACTIVE:
+        resolved = resolve_device(device, config.resolution)
+        if resolved is not None:
+            with jax.default_device(resolved):
+                return solve_fixed_boundary_cli(
+                    initial_state,
+                    boundary,
+                    grid,
+                    config,
+                    axial_flux_derivative=axial_flux_derivative,
+                    mass_profile=mass_profile,
+                    current_derivative=current_derivative,
+                    gamma=gamma,
+                    pressure_closure=pressure_closure,
+                    solve_lambda=solve_lambda,
+                    gradient_tolerance=gradient_tolerance,
+                    require_convergence=require_convergence,
+                    device=_DEVICE_ACTIVE,
+                )
 
     initial_state.validate_shape(grid)
     if grid.shape != (
@@ -795,6 +820,7 @@ def solve_anisotropic_fixed_boundary_cli(
     solve_lambda: bool = False,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
+    device: Any = None,
 ) -> MirrorSolveResult:
     """Solve a consistent anisotropic fixed-boundary mirror equilibrium."""
 
@@ -809,6 +835,7 @@ def solve_anisotropic_fixed_boundary_cli(
         solve_lambda=solve_lambda,
         gradient_tolerance=gradient_tolerance,
         require_convergence=require_convergence,
+        device=device,
     )
 
 
