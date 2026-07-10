@@ -1,18 +1,40 @@
 Contributing
 ============
 
+Migration status
+----------------
+
+The repository recently completed a clean-room rewrite: the production
+implementation is :mod:`vmec_jax.core` (~30 focused modules, one concern per
+file — see :doc:`architecture`), and the ``vmec`` CLI runs on it end to end.
+The remaining top-level legacy modules are being removed in an ongoing
+deletion sweep; new code, tests, and documentation should target
+``vmec_jax.core`` only. Every core module was validated by A/B equivalence
+tests against the parity-proven legacy implementation
+(``tests/core_new/``) and end to end against VMEC2000 golden runs.
+
 Workflow
 --------
 
-1. Add or extend a kernel with a focused API.
-2. Add an example that writes an ``.npz`` artifact and prints diagnostics.
-3. Add a regression test (fast) against synthetic data or a released ``wout`` fixture.
-4. Keep JAX gotchas in mind:
+1. Add or extend a kernel with a focused API in the matching
+   :mod:`vmec_jax.core` module; the module header docstring names the
+   VMEC2000 counterpart file it ports — keep that cross-reference current.
+2. Add a regression test under ``tests/`` (fast, offline where possible);
+   parity-sensitive changes need a check against the golden VMEC2000
+   fixtures.
+3. Keep JAX gotchas in mind:
 
-   - jitted functions should only take arrays / PyTrees,
-   - avoid duplicate PyTree registration (make registration idempotent),
-   - keep static objects out of jitted call signatures unless they are PyTrees.
+   - jitted functions should only take arrays / pytrees (static config stays
+     hashable and out of traced signatures),
+   - solver functions are pure ``state -> state`` — no hidden host state,
+   - float64 is mandatory (enforced at solver import).
 
-Development installs::
+Development install and checks::
 
   pip install -e .[dev]
+  ruff check .
+  pytest -q
+
+Documentation builds must pass strict mode::
+
+  python -m sphinx -W -j auto -b html docs docs/_build/html

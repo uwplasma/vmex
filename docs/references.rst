@@ -56,3 +56,15 @@ Background and canonical references for VMEC and related equilibrium methods:
 15. J. Schilling et al., “Magnetohydrodynamic equilibrium and stability
     properties of the Infinity Two fusion pilot plant,” *Journal of Plasma
     Physics* 90(6), 905900615 (2024), Appendix B.
+
+16. J. Schilling et al., “VMEC++: The Numerics of VMEC,” arXiv:2502.04374 —
+    hot restart, JSON input schema, zero-crash policy, and the wout
+    validation methodology adopted here.
+
+17. C. S. Skene and K. J. Burns, “Fast automated adjoints for spectral PDE
+    solvers,” arXiv:2506.14792 — adjoints reusing the forward spectral
+    machinery; the template for the implicit-differentiation module.
+
+18. M. Blondel et al., “Efficient and Modular Implicit Differentiation,”
+    NeurIPS 2022 (jaxopt) — the implicit-function-theorem ``custom_vjp``
+    formulation used for equilibrium gradients.

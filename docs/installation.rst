@@ -5,136 +5,85 @@ Requirements
 ------------
 
 - Python 3.10+
-- NumPy (core requirement)
-- JAX + jaxlib (for performance + autodiff)
-- ``netCDF4`` to read and write VMEC ``wout_*.nc`` files
-- ``matplotlib`` for plotting helpers and examples
-- ``booz_xform_jax`` for differentiable Boozer-coordinate QI objectives
+- ``numpy``, ``jax`` + ``jaxlib``, ``netCDF4``, ``matplotlib``,
+  ``booz_xform_jax`` (all installed automatically)
 
 From PyPI
 ---------
 
-``vmec-jax`` is available on `PyPI <https://pypi.org/project/vmec-jax/>`_::
+.. code-block:: bash
 
-  pip install vmec-jax
+   pip install vmec-jax
 
-PyPI can lag repository tags.  Check the package-index version before pinning or
-advertising an exact release.
+The plain install includes everything needed for solving, plotting, and the
+Boozer transform — there are no user-facing extras to remember. Verify with:
 
-The plain install includes plotting support and the differentiable
-``booz_xform_jax`` dependency used by the QI optimization examples.  There is
-no separate plotting or QI extra.
+.. code-block:: bash
 
-For most users, bare ``pip`` is the shortest install path.  If it does not
-install into the Python you intend to use, check that ``pip --version`` and
-``python -m pip --version`` agree; use ``python -m pip`` only when bare
-``pip`` points at the wrong interpreter.  If an install or backend import
-fails, run::
+   vmec --doctor
+   vmec --test
 
-  vmec --doctor
-
-and include that report when asking for help.
-
-Troubleshooting mixed Python environments
------------------------------------------
-
-If an editable/source install fails with an error like::
-
-  ImportError: Cannot import `packaging.licenses`.
-
-do not start by uninstalling global ``setuptools`` or ``packaging`` packages.
-That usually makes a Homebrew/system Python environment more inconsistent.  First
-check that ``pip --version`` and ``python -m pip --version`` point to the same
-Python.  Then try the same bare ``pip`` install again::
-
-  pip install vmec-jax
-  vmec --doctor
-  vmec --test
-
-If bare ``pip`` still points at the wrong Python, use the matching
-``python -m pip`` form for that same install command.
-
-For a source checkout, replace the package install line with::
-
-  pip install -e .
-
-The important checks are that ``pip`` agrees with ``python -m pip`` and that
-``vmec --doctor`` does not report a user-site/Homebrew prefix mix.
-
-GPU-enabled JAX is intentionally not forced by ``vmec-jax`` because the correct
-wheel depends on platform, CUDA/ROCm version, and driver support.  Install the
-CPU package above first, or install/upgrade JAX for your accelerator using the
-official JAX installation matrix:
-https://docs.jax.dev/en/latest/installation.html.
+``vmec --doctor`` diagnoses mixed-Python environments (it prints the active
+interpreter, pip location, package versions, and JAX backend). If an install
+misbehaves, first check that ``pip --version`` and ``python -m pip --version``
+point at the same Python.
 
 From conda-forge
 ----------------
 
-``vmec-jax`` can be installed as a conda package from `conda-forge
-<https://github.com/conda-forge/vmec-jax-feedstock>`_ into a particular project
-with `Pixi <https://pixi.prefix.dev/>`_::
+.. code-block:: bash
 
-  pixi add vmec-jax
+   conda install --channel conda-forge vmec-jax
 
-or into a conda environment with `conda
-<https://docs.conda.io/projects/conda/>`_::
-
-  conda install --channel conda-forge vmec-jax
-
-The feedstock may lag both PyPI and the repository tag; verify the available
-conda-forge version when documenting a release.
+or, with `Pixi <https://pixi.prefix.dev/>`_, ``pixi add vmec-jax``. The
+`feedstock <https://github.com/conda-forge/vmec-jax-feedstock>`_ may lag PyPI.
 
 From source
 -----------
 
-From the repo root (non-editable install)::
+.. code-block:: bash
 
-  pip install .
+   git clone https://github.com/uwplasma/vmec_jax
+   cd vmec_jax
+   pip install -e .          # editable install, recommended for development
 
-VMEC relies heavily on float64. JAX defaults to float32 unless x64 is enabled.
-We recommend setting::
-
-  export JAX_ENABLE_X64=1
-
-Editable install (recommended for development)::
-
-  pip install -e .
-
-Optional validation assets
---------------------------
-
-Generated VMEC reference ``wout`` fixtures and full-size free-boundary
-``mgrid`` files are release assets rather than tracked git blobs.  A fresh
-clone is enough to run the input decks and small bundled examples; the example
-``wout_*.nc`` files are generated on demand.  Fetch the optional released
-assets only when running full physics/parity gates or regenerating docs panels
-that consume stored WOUTs::
-
-  python tools/fetch_assets.py --list
-  python tools/fetch_assets.py
-
-After installation, ``vmec --test`` runs a packaged quick-start input with
-``FTOL_ARRAY = 1e-12`` and therefore works even outside a source checkout.
-
-Build docs locally
+Float64 (required)
 ------------------
 
-Install doc dependencies::
+VMEC's numerics require double precision. ``vmec-jax`` enables JAX x64 mode
+itself when you use the CLI or the core solver entry points; if you drive JAX
+directly in your own scripts, set:
 
-  pip install ".[docs]"
+.. code-block:: bash
 
-Then build docs::
+   export JAX_ENABLE_X64=1
 
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -b html docs docs/_build/html
+or ``jax.config.update("jax_enable_x64", True)`` before solving.
 
-To reproduce the current strict CI / release build locally, use warnings as
-errors::
+GPU support
+-----------
 
-  LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html
+GPU-enabled JAX is intentionally not forced by ``vmec-jax`` because the right
+wheel depends on your platform and CUDA/ROCm version. Install the CPU package
+first, then install JAX for your accelerator following the
+`official JAX installation matrix <https://docs.jax.dev/en/latest/installation.html>`_,
+e.g.:
 
-The full documentation is not yet nitpicky-clean; use ``-n`` only when working
-specifically on cross-reference cleanup.  Read the Docs builds the full user
-guide with warnings treated as errors.  For local edit cycles where only the
-landing page is needed, use the explicit fast mode::
+.. code-block:: bash
 
-  SPHINX_FAST=1 LANG=C.UTF-8 LC_ALL=C.UTF-8 python -m sphinx -W -j auto -b html docs docs/_build/html_fast
+   pip install -U "jax[cuda12]"
+
+``vmec-jax`` then picks CPU or GPU per solve using a measured device policy —
+small decks stay on the CPU, large ones move to the GPU. See
+:ref:`performance:GPU guidance` for the policy, how to pin a backend with
+``JAX_PLATFORMS``, and the persistent compilation cache.
+
+Build the documentation locally
+-------------------------------
+
+.. code-block:: bash
+
+   pip install ".[docs]"
+   python -m sphinx -W -j auto -b html docs docs/_build/html
+
+``SPHINX_FAST=1`` builds only a minimal landing page for quick CI checks.

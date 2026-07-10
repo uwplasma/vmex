@@ -17,15 +17,15 @@ The rule implemented here uses the per-iteration work proxy
 cost driver of the ``totzsps/tomnsps`` batched matmuls that dominate one
 ``funct3d`` pass):
 
-======================================  ==========  ==============  ========
+======================================  ==========  =================  ======
 deck (first NS_ARRAY stage)             work proxy  warm wall CPU/GPU  winner
-======================================  ==========  ==============  ========
-solovev (11*6*10)                              660  0.043 / 0.289 s      cpu
-nfp4_QH_warm_start (35*8*48)                13,440  0.954 / 0.574 s      gpu*
-cth_like_fixed_bdy (15*5*324)               24,300  0.198 / 0.383 s      cpu
-LandremanPaul2021_QA (16*128*240)          491,520  14.54 / 4.19 s       gpu
-NuhrenbergZille_1988_QHS (11*162*286)      509,652  276.9 / 90.1 s       gpu
-======================================  ==========  ==============  ========
+======================================  ==========  =================  ======
+solovev (11*6*10)                              660  0.043 / 0.289 s    cpu
+nfp4_QH_warm_start (35*8*48)                13,440  0.954 / 0.574 s    gpu*
+cth_like_fixed_bdy (15*5*324)               24,300  0.198 / 0.383 s    cpu
+LandremanPaul2021_QA (16*128*240)          491,520  14.54 / 4.19 s     gpu
+NuhrenbergZille_1988_QHS (11*162*286)      509,652  276.9 / 90.1 s     gpu
+======================================  ==========  =================  ======
 
 Below :data:`GPU_MIN_ITERATION_WORK` the measured difference is < 0.5 s
 either way (the ``*`` misclassification costs ~0.4 s); above it the GPU wins

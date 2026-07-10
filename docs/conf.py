@@ -59,13 +59,38 @@ if _FAST:
     include_patterns = ["index_fast.rst"]
     suppress_warnings = ["toc.not_readable", "toc.excluded"]
 
-autosummary_generate = not _FAST
+autosummary_generate = False
 autosummary_imported_members = False
 autosectionlabel_prefix_document = True
+# Only label top-level page sections: section headings inside module
+# docstrings (rendered by autodoc) would otherwise collide ("VMEC2000
+# counterparts" appears in most vmec_jax.core module docstrings).
+autosectionlabel_maxdepth = 2
 todo_include_todos = False
-autodoc_mock_imports = ["jax", "jaxlib"]
+
+# Mock heavy runtime dependencies only when they are genuinely unavailable
+# (e.g. a docs-only CI environment). With the real packages installed,
+# autodoc imports vmec_jax.core modules directly.
+autodoc_mock_imports = []
+for _mod in ("jax", "jaxlib", "netCDF4", "matplotlib", "scipy"):
+    try:
+        __import__(_mod)
+    except Exception:
+        autodoc_mock_imports.append(_mod)
+autodoc_member_order = "bysource"
+
+# sphinx-copybutton is an optional nicety; enable it when installed.
+try:
+    import sphinx_copybutton  # noqa: F401
+
+    extensions.append("sphinx_copybutton")
+    copybutton_prompt_text = r">>> |\.\.\. |\$ "
+    copybutton_prompt_is_regexp = True
+except Exception:
+    pass
+
 if _FAST:
-    exclude_patterns += ["api/index.rst", "api/generated/*"]
+    exclude_patterns += ["api/index.rst"]
 
 
 # -- Options for HTML output ----------------------------------------------------
@@ -83,6 +108,19 @@ else:
         # (like furo) are not installed in the current environment.
         html_theme = "alabaster"
 html_static_path = ["_static"]
+
+if html_theme == "furo":
+    html_theme_options = {
+        "sidebar_hide_name": False,
+        "light_css_variables": {
+            "color-brand-primary": "#0f5c8c",
+            "color-brand-content": "#0f5c8c",
+        },
+        "dark_css_variables": {
+            "color-brand-primary": "#6fb7e6",
+            "color-brand-content": "#6fb7e6",
+        },
+    }
 
 
 # -- Intersphinx mapping --------------------------------------------------------

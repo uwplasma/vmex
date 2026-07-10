@@ -1,58 +1,101 @@
-vmec-jax documentation
-======================
+vmec-jax
+========
 
-``vmec-jax`` is an incremental, JAX-based rewrite of **VMEC2000**, targeting:
+``vmec-jax`` is a clean-room, JAX-native reimplementation of the **VMEC2000**
+ideal-MHD equilibrium code for stellarators and tokamaks. It solves fixed- and
+free-boundary equilibria with VMEC2000-parity numerics, writes standard
+``wout_*.nc`` output, and — unlike the Fortran original — is end-to-end
+differentiable and runs on CPUs and GPUs.
 
-- bundled-reference validation and optional executable-backed VMEC2000 checks
-  for representative fixed-boundary and free-boundary solves, with strict field
-  parity promoted case-by-case,
-- axisymmetric and non-axisymmetric ``lasym=False/True`` coverage, including
-  convergence/physics gates where strict parity is not yet promoted,
-- end-to-end differentiability (JAX autodiff),
-- performance profiling and tuned default paths, with CPU/GPU benchmark results
-  documented per case rather than implied globally,
-- required fast coverage enforced at the 95% gate after the latest
-  CI-equivalent coverage ratchet,
-- stepwise validation against VMEC2000 output (``wout_*.nc``).
+Why vmec-jax?
+-------------
+
+- **VMEC2000 parity.** The solver ports the VMEC2000 algorithms
+  (steepest-descent moment method, 1D radial preconditioner, Richardson time
+  stepping, spectral condensation, NESTOR vacuum solve) constant-for-constant.
+  Benchmark decks converge in the *same* iteration counts as VMEC2000 and the
+  ``wout`` files agree per-variable (see :doc:`performance`).
+- **Differentiable.** Gradients of equilibrium properties with respect to
+  boundary shape, profiles, and coil parameters via implicit differentiation
+  of the converged fixed point (:mod:`vmec_jax.core.implicit`) — no finite
+  differences, no iteration unrolling.
+- **Drop-in workflow.** The ``vmec`` command reads VMEC2000 ``input.*``
+  namelists and VMEC++-style JSON, prints VMEC2000-format iteration output,
+  and writes ``wout_*.nc`` files that load unchanged in simsopt and
+  booz_xform.
+- **Batteries included.** Built-in plotting (``vmec --plot``), Boozer
+  transform (``vmec --booz`` via ``booz_xform_jax``), spline profiles,
+  multigrid with hot restart, and typed zero-crash error handling.
+
+Quickstart
+----------
+
+.. code-block:: bash
+
+   pip install vmec-jax
+   vmec --test                       # bundled QH case: solve + wout + plots
+   vmec input.circular_tokamak       # run any VMEC input deck
+   vmec --plot wout_circular_tokamak.nc
+
+See :doc:`quickstart` for a full tour, including the Python API and the
+Boozer-coordinate workflow.
+
+.. figure:: _static/figures/readme_runtime_compare.png
+   :alt: Runtime comparison of vmec_jax against VMEC2000 and VMEC++
+   :align: center
+   :width: 95%
+
+   Benchmark-suite runtimes: ``vmec_jax`` (cold and warm) versus VMEC2000 and
+   VMEC++. Warm (compiled-cache) solves are the relevant number for
+   optimization loops; see :doc:`performance` for the full table.
+
+Documentation
+-------------
 
 .. only:: not fast
 
    .. toctree::
-      :maxdepth: 2
-      :caption: User guide
+      :maxdepth: 1
+      :caption: Getting started
 
-      overview
       installation
       quickstart
-      optimization
 
    .. toctree::
-      :maxdepth: 2
-      :caption: Physics and algorithms
+      :maxdepth: 1
+      :caption: Tutorials
+
+      tutorials
+
+   .. toctree::
+      :maxdepth: 1
+      :caption: Theory and numerics
 
       theory
       equations
-      vmec_wiki_primer
       algorithms
-      discrete_adjoint
-      simsopt_comparison
-      jxbforce_mercier
-      bootstrap_current_fixed_point
+      architecture
 
    .. toctree::
-      :maxdepth: 2
-      :caption: Validation and release
+      :maxdepth: 1
+      :caption: Reference
 
-      validation
-      testing_strategy
-      release_checklist
-      free_boundary_coil_optimization
+      api/index
+      cli
+      input_reference
+      wout_reference
+
+   .. toctree::
+      :maxdepth: 1
+      :caption: Performance and validation
+
       performance
 
    .. toctree::
-      :maxdepth: 2
-      :caption: Development notes
+      :maxdepth: 1
+      :caption: Developer guide
 
+      optimization
       contributing
       references
 
@@ -60,11 +103,3 @@ vmec-jax documentation
 
    Fast doc builds are enabled (``SPHINX_FAST=1``). The full user guide and API
    reference are skipped to keep CI fast.
-
-.. only:: not fast
-
-   .. toctree::
-      :maxdepth: 2
-      :caption: API reference
-
-      api/index

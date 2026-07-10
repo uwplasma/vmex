@@ -5,13 +5,13 @@ Self-contained matplotlib (Agg) port of the figure set from the legacy
 (or an in-memory :class:`vmec_jax.core.wout.WoutData`):
 
 - ``summary``   3x3 overview: iota, pressure, buco/bvco, jcuru/jcurv, DMerc,
-  and |B| line contours at mid radius and at the plasma boundary;
+  and ``|B|`` line contours at mid radius and at the plasma boundary;
 - ``surfaces``  flux-surface cross-sections at several zeta over one field
   period, with the magnetic axis marked;
-- ``modB``      |B| contours in (zeta, theta) at mid radius and boundary;
+- ``modB``      ``|B|`` contours in (zeta, theta) at mid radius and boundary;
 - ``profiles``  iota / pressure / current profiles plus the ``fsqt``
   force-residual convergence trace;
-- ``3d``        3-D plasma boundary colored by |B|.
+- ``3d``        3-D plasma boundary colored by ``|B|``.
 
 Both stellarator-symmetric and ``lasym`` (asymmetric) equilibria are
 supported: the sine/cosine partner tables (``rmns``, ``zmnc``, ``bmns``,
@@ -124,7 +124,7 @@ def surface_rz(wout, *, s_index: int, theta: np.ndarray, phi: np.ndarray):
 
 
 def surface_modB(wout, *, s_index: int, theta: np.ndarray, phi: np.ndarray):
-    """|B| on one half-mesh surface (Nyquist tables), shape (ntheta, nphi)."""
+    """``|B|`` on one half-mesh surface (Nyquist tables), shape (ntheta, nphi)."""
     bmnc, bmns = _coeff_pair(wout, "bmnc", "bmns", s_index)
     return _eval_modes(bmnc, bmns, wout.xm_nyq, wout.xn_nyq, theta, phi)
 
@@ -168,7 +168,7 @@ _S_LABEL = r"$s = \psi/\psi_b$"
 
 
 def plot_summary(wout, out_path: str | Path, *, s_plot_ignore: float = 0.2) -> Path:
-    """3x3 overview figure (profiles + two |B| contour panels)."""
+    """3x3 overview figure (profiles + two ``|B|`` contour panels)."""
     plt = _import_matplotlib()
     wout, _ = _as_wout(wout)
     ns = int(wout.ns)
@@ -281,7 +281,7 @@ def plot_modB(
     ntheta: int = 90,
     nphi: int = 180,
 ) -> Path:
-    """|B| contours in (phi, theta) at mid radius and the plasma boundary."""
+    """``|B|`` contours in (phi, theta) at mid radius and the plasma boundary."""
     plt = _import_matplotlib()
     wout, _ = _as_wout(wout)
     ns = int(wout.ns)
@@ -394,7 +394,7 @@ def plot_boundary_3d(
     ntheta: int = 60,
     nzeta: int | None = None,
 ) -> Path:
-    """3-D plasma boundary colored by |B| (full torus)."""
+    """3-D plasma boundary colored by ``|B|`` (full torus)."""
     plt = _import_matplotlib()
     from matplotlib import cm
     from matplotlib.colors import Normalize
@@ -532,7 +532,7 @@ def _boozer_modB_grid(bx, *, js: int, ntheta: int = 90, nphi: int = 180):
 
 
 def plot_boozmn_modB(boozmn, out_path: str | Path, *, ntheta: int = 90, nphi: int = 180) -> Path:
-    """Boozer-coordinate |B| contours at mid radius and the outermost surface."""
+    """Boozer-coordinate ``|B|`` contours at mid radius and the outermost surface."""
     plt = _import_matplotlib()
     bx = _load_boozmn(boozmn)
     ns_b = int(np.asarray(bx.bmnc_b).shape[1])
@@ -562,7 +562,7 @@ def plot_boozmn_modB(boozmn, out_path: str | Path, *, ntheta: int = 90, nphi: in
 
 
 def plot_boozmn_mode_profiles(boozmn, out_path: str | Path, *, max_modes: int = 80) -> Path:
-    """Radial Boozer |B| mode amplitudes grouped by symmetry family."""
+    """Radial Boozer ``|B|`` mode amplitudes grouped by symmetry family."""
     plt = _import_matplotlib()
     bx = _load_boozmn(boozmn)
     amp, _bmnc, _bmns, xm, xn = _boozer_amplitudes(bx)
@@ -598,7 +598,7 @@ def plot_boozmn_mode_profiles(boozmn, out_path: str | Path, *, max_modes: int = 
 
 
 def plot_boozmn_spectrum(boozmn, out_path: str | Path, *, surface_index: int = -1, nmodes: int = 40) -> Path:
-    """Largest Boozer |B| Fourier amplitudes on one surface (log bar chart)."""
+    """Largest Boozer ``|B|`` Fourier amplitudes on one surface (log bar chart)."""
     plt = _import_matplotlib()
     bx = _load_boozmn(boozmn)
     amp, _bmnc, _bmns, xm, xn = _boozer_amplitudes(bx)

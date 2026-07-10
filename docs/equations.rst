@@ -514,14 +514,23 @@ behavior matches VMEC2000.
 Implementation mapping (``vmec_jax``)
 -------------------------------------
 
-Key modules that directly implement the equations above:
+Key :mod:`vmec_jax.core` modules that directly implement the equations above
+(the full map is in :doc:`architecture`):
 
-- ``vmec_jax/geom.py``: geometry, metric, Jacobian.
-- ``vmec_jax/kernels/bcovar.py``: contravariant/covariant field components.
-- ``vmec_jax/kernels/forces.py``: real-space force kernels (``A,B,C`` blocks).
-- ``vmec_jax/kernels/tomnsp.py``: VMEC-style Fourier transforms of forces.
-- ``vmec_jax/kernels/residue.py``: VMEC scalar residuals (FSQR/FSQZ/FSQL).
-- ``vmec_jax/solve.py``: fixed-boundary iteration loop (VMEC2000 parity path).
+- :mod:`vmec_jax.core.fourier` — mode tables, ``mscale/nscale``, trig/weight
+  tables (``fixaray.f``).
+- :mod:`vmec_jax.core.transforms` — ``totzsps/tomnsps``-family transforms as
+  batched matmuls.
+- :mod:`vmec_jax.core.geometry` — geometry, metric, Jacobian and the
+  :math:`\tau` sign check (``jacobian.f``).
+- :mod:`vmec_jax.core.fields` — contravariant/covariant field components,
+  energies, ``tcon`` (``bcovar.f``).
+- :mod:`vmec_jax.core.forces` — real-space force kernels (``A,B,C`` blocks)
+  and the spectral-condensation constraint force (``forces.f``, ``alias.f``).
+- :mod:`vmec_jax.core.residuals` — scalar residuals ``fsqr/fsqz/fsql`` and the
+  m=1 constraint (``residue.f90``).
+- :mod:`vmec_jax.core.solver` — the fixed-boundary iteration loop
+  (``funct3d.f``, ``eqsolve.f``).
 
 References (local)
 ------------------

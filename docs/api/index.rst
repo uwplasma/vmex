@@ -1,10 +1,111 @@
 API reference
 =============
 
-This section is generated from docstrings using Sphinx autodoc.
+The production API is :mod:`vmec_jax.core`. Modules are grouped as in
+:doc:`/architecture`; every docstring names the VMEC2000 counterpart it
+ports.
 
-.. toctree::
-   :maxdepth: 2
+Inputs and profiles
+-------------------
 
-   public_api
-   vmec_jax
+.. automodule:: vmec_jax.core.input
+   :members:
+
+.. automodule:: vmec_jax.core.profiles
+   :members:
+
+Spectral representation and physics kernels
+-------------------------------------------
+
+.. automodule:: vmec_jax.core.fourier
+   :members:
+
+.. automodule:: vmec_jax.core.transforms
+   :members:
+
+.. automodule:: vmec_jax.core.geometry
+   :members:
+
+.. automodule:: vmec_jax.core.fields
+   :members:
+
+.. automodule:: vmec_jax.core.forces
+   :members:
+
+.. automodule:: vmec_jax.core.residuals
+   :members:
+
+Solver
+------
+
+.. automodule:: vmec_jax.core.setup
+   :members:
+
+.. automodule:: vmec_jax.core.preconditioner
+   :members:
+
+.. automodule:: vmec_jax.core.step
+   :members:
+
+.. automodule:: vmec_jax.core.solver
+   :members:
+
+.. automodule:: vmec_jax.core.multigrid
+   :members:
+
+.. automodule:: vmec_jax.core.device
+   :members:
+
+Free boundary
+-------------
+
+.. automodule:: vmec_jax.core.vacuum
+   :members:
+
+.. automodule:: vmec_jax.core.freeboundary
+   :members:
+
+.. automodule:: vmec_jax.core.mgrid
+   :members:
+
+.. automodule:: vmec_jax.core.coils
+   :members:
+
+Differentiation and optimization
+--------------------------------
+
+.. automodule:: vmec_jax.core.implicit
+   :members:
+
+.. automodule:: vmec_jax.core.optimize
+   :members:
+
+Outputs
+-------
+
+.. automodule:: vmec_jax.core.wout
+   :members:
+
+.. automodule:: vmec_jax.core.nyquist
+   :members:
+
+.. automodule:: vmec_jax.core.postprocess
+   :members:
+
+.. automodule:: vmec_jax.core.printing
+   :members:
+
+.. automodule:: vmec_jax.core.plotting
+   :members:
+
+.. automodule:: vmec_jax.core.boozer
+   :members:
+
+Errors and CLI
+--------------
+
+.. automodule:: vmec_jax.core.errors
+   :members:
+
+.. automodule:: vmec_jax.core.cli
+   :members:

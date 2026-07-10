@@ -635,11 +635,11 @@ def constraint_scaling(
     """Spectral-condensation constraint strength ``tcon(js)``.
 
     VMEC2000: ``bcovar.f`` (with the ``m = 0`` diagonal elements of
-    ``precondn.f``) — per plan Appendix D:
+    ``precondn.f``) — per plan Appendix D::
 
-        ``tcon(js) = min(|ard(js,1)|/arnorm(js), |azd(js,1)|/aznorm(js))
-                     * tcon_multiplier * (32*hs)^2``  for ``js = 2..ns-1``,
-        ``tcon(ns) = 0.5 * tcon(ns-1)``,
+        tcon(js) = min(|ard(js,1)|/arnorm(js), |azd(js,1)|/aznorm(js))
+                   * tcon_multiplier * (32*hs)^2    for js = 2..ns-1,
+        tcon(ns) = 0.5 * tcon(ns-1),
 
     where (precondn.f, with ``ptau = pfactor*r12^2*bsq*wint/sqrt(g)`` and
     ``pfactor = -4*r0scale^2``):
@@ -649,8 +649,8 @@ def constraint_scaling(
       versa for ``azd``);
     - ``arnorm(js) = <ru0^2>``, ``aznorm(js) = <zu0^2>`` with
       ``ru0 = ru_even + sqrt(s)*ru_odd``;
-    - ``tcon_multiplier = min(|tcon0|, 1) * (1 + ns*(1/60 + ns/(200*120)))
-      / (4*r0scale^2)^2`` (the resolution-dependent ramp of ``bcovar.f``).
+    - ``tcon_multiplier = min(|tcon0|, 1)*(1 + ns*(1/60 + ns/(200*120)))/(4*r0scale^2)^2``
+      (the resolution-dependent ramp of ``bcovar.f``).
 
     The axis slot holds the clamped ``tcon0`` (VMEC initializes ``tcon(:) =
     tcon0`` before overwriting the interior; the value is never used by the

@@ -48,9 +48,10 @@ VMEC represents a surface in cylindrical coordinates using Fourier series:
       Z_{mn}^c(s)\cos(m\theta-n\zeta) + Z_{mn}^s(s)\sin(m\theta-n\zeta)
    \Bigr).
 
-``vmec-jax`` stores these coefficients in a ``VMECState`` as arrays shaped
+``vmec-jax`` stores these coefficients in the
+:class:`~vmec_jax.core.solver.SpectralState` pytree as arrays shaped
 ``(ns, K)`` where ``K`` is the number of ``(m,n)`` modes in the main VMEC
-ordering.
+ordering (see :mod:`vmec_jax.core.fourier` for the mode bookkeeping).
 
 Regularity and internal storage
 -------------------------------

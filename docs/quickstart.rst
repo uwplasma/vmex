@@ -1,333 +1,142 @@
 Quickstart
 ==========
 
-Install directly from PyPI::
+This page walks through a first session with ``vmec-jax``: verify the
+installation, run an equilibrium, plot it, and run the Boozer transform. All
+commands work from any directory after ``pip install vmec-jax``.
 
-  pip install vmec-jax
+Verify the installation
+-----------------------
 
-If bare ``pip`` does not install into the Python you intend to use, check that
-``pip --version`` and ``python -m pip --version`` agree; use the matching
-``python -m pip`` form only if bare ``pip`` points at the wrong interpreter.
+.. code-block:: bash
 
-Run the bundled CLI test
-~~~~~~~~~~~~~~~~~~~~~~~~
+   vmec --doctor
+   vmec --test
 
-The fastest first check after a PyPI install is::
+``vmec --doctor`` prints the active Python, package versions, and the JAX
+backend (CPU/GPU). ``vmec --test`` runs the bundled fixed-boundary QH case
+end to end: it copies the packaged ``input.nfp4_QH_warm_start`` deck into
+``./vmec_jax_test/``, solves it (with ``FTOL_ARRAY = 1e-12`` for a fast first
+check), writes ``wout_nfp4_QH_warm_start.nc``, and renders diagnostic figures
+into ``vmec_jax_test/figures/``. It also prints the equivalent manual
+commands so you can reproduce each step yourself.
 
-  vmec --doctor
-  vmec --test
+First run
+---------
 
-``vmec --doctor`` prints the active Python executable, pip location, package
-versions, and JAX backend.  ``vmec --test`` does not require a source checkout.
-It copies the packaged
-``input.nfp4_QH_warm_start`` into ``vmec_jax_test/``, runs the fixed-boundary
-solver with ``FTOL_ARRAY = 1e-12`` for a faster first check, writes
-``wout_nfp4_QH_warm_start.nc``, plots the WOUT file into
-``vmec_jax_test/figures/``, and prints the equivalent manual commands.
+``vmec`` behaves like the ``xvmec2000`` executable: point it at a VMEC input
+file (an ``input.*`` INDATA namelist or a VMEC++-style ``.json`` deck):
 
-Run the minimal showcase (recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: bash
 
-The simplest way to get started is the axisymmetric showcase. It runs a small
-suite of input decks, writes a ``wout_*.nc`` for each, and produces plots.  The
-optional parity summary uses released VMEC2000 reference ``wout`` fixtures that
-are intentionally not tracked in git.  Fetch them first when you want CI-style
-validation rather than just generating fresh outputs from the inputs::
+   vmec input.circular_tokamak
 
-  python tools/fetch_assets.py --list
-  python tools/fetch_assets.py
+This prints the VMEC2000-format iteration table (``ITER  FSQR  FSQZ  FSQL
+RAX(v=0)  DELT  WMHD``), runs the full ``NS_ARRAY`` multigrid ladder, and
+writes ``wout_circular_tokamak.nc`` next to the input file. Useful flags:
 
-For a small free-boundary smoke test that does not require the large asset
-bundle, use the bundled ``input.cth_like_free_bdy_lasym_small`` case together
-with the tracked ``mgrid_cth_like_lasym_small.nc`` file in ``examples/data``.
+- ``--outdir DIR`` — write outputs elsewhere,
+- ``--quiet`` — silence the iteration table,
+- ``--ftol X`` / ``--max-iter N`` — override the final-stage tolerance or
+  iteration cap,
+- ``--mode jit`` — run the fully traced ``lax.while_loop`` solver lane instead
+  of the default host-blocked CLI lane (see :doc:`architecture`).
 
-By default the showcase uses a parity-first single-grid run (``--single-ns 13``)
-and VMEC2000-style per-iteration **screen** output (FSQR/FSQZ/FSQL, RAX, DELT, WMHD)::
+Free-boundary decks (``LFREEB = T``) route automatically: a readable
+``MGRID_FILE`` runs the free-boundary solver; a missing mgrid file falls back
+to a fixed-boundary solve with a warning (VMEC2000 behavior); and
+``MGRID_FILE = 'DIRECT_COILS'`` together with ``--coils coils.json`` evaluates
+the external field directly from an ESSOS-style coil set via Biot-Savart —
+no mgrid interpolation at all. See :doc:`cli` for the complete reference.
 
-  pip install -e .
-  python examples/showcase_axisym_input_to_wout.py --suite
+Plotting
+--------
 
-If you want a release-style non-editable install instead::
+Every ``wout_*.nc`` file (from ``vmec-jax`` or from VMEC2000 itself) can be
+plotted directly:
 
-  pip install .
+.. code-block:: bash
 
-Run the test suite::
+   vmec --plot wout_circular_tokamak.nc
+   vmec input.circular_tokamak --plot     # solve, then plot in one command
 
-  pytest -q
+This writes a set of figures next to the file (or into ``--outdir``): a
+summary panel, flux-surface cross-sections at several toroidal angles,
+``|B|`` on the boundary, radial profiles (pressure, iota, current), and a 3D
+boundary rendering.
 
-Run the full test suite (requires released netCDF assets)::
+Boozer coordinates
+------------------
 
-  python tools/fetch_assets.py
-  RUN_FULL=1 pytest -q
+The plain install includes the differentiable ``booz_xform_jax`` transform:
 
-CLI (VMEC2000-style executable)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: bash
 
-Once installed (or when working from the repo), you can run ``vmec`` like the
-VMEC2000 executable by pointing it to a single ``input.*`` file::
+   vmec input.nfp4_QH_warm_start --booz          # solve + Boozer transform
+   vmec wout_nfp4_QH_warm_start.nc --booz        # transform an existing wout
+   vmec --plot boozmn_nfp4_QH_warm_start.nc      # Boozer |B| contours + spectra
 
-  vmec examples/data/input.circular_tokamak
+``--booz`` writes a standard ``boozmn_*.nc`` file. The transform resolution
+and surfaces are configurable:
 
-Sanity check (verifies the console script is wired to the right interpreter)::
+.. code-block:: bash
 
-  vmec --help
+   vmec wout_nfp4_QH_warm_start.nc --booz --mbooz 48 --nbooz 48 \
+        --booz-surfaces "0.25, 0.5, 1.0"
 
-The ``vmec_jax``, ``vmec-jax``, and ``xvmec_jax`` command names remain aliases
-for compatibility. If no console command is found or a command raises
-``ModuleNotFoundError``, install and run via the module entrypoint::
+Python API
+----------
 
-  pip install -e .
-  python -m vmec_jax examples/data/input.circular_tokamak
-
-This writes ``wout_circular_tokamak.nc`` next to the input file and prints the
-VMEC2000-style per-iteration screen output by default. Use ``--quiet`` to
-silence the iteration table, and ``--outdir`` or ``--output`` to control where
-the ``wout_*.nc`` file is written. If you only want a short debug run, pass
-``--max-iter`` and ``--no-multigrid`` (single grid).
-
-Boozer-coordinate CLI workflow
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The plain ``vmec-jax`` install includes ``booz_xform_jax``.  Use
-``vmec --booz`` to run a Boozer transform after a VMEC solve, or directly
-from an existing ``wout_*.nc`` file.  The default transform resolution is
-``mbooz = 32``, ``nbooz = 32``, with all VMEC surfaces included::
-
-  vmec --booz input.nfp4_QH_warm_start
-  vmec --booz --plot input.nfp4_QH_warm_start
-  vmec --booz wout_nfp4_QH_warm_start.nc
-  vmec --plot boozmn_nfp4_QH_warm_start.nc
-
-``--booz --plot`` writes the usual ``wout_*.nc``, runs ``booz_xform_jax``,
-writes ``boozmn_*.nc``, and then creates:
-
-- mid-radius and LCFS ``|B|`` contour-line plots in Boozer coordinates,
-- radial Boozer ``|B|`` spectra grouped into QA/axisymmetric, QH, mirror, and
-  non-symmetric mode families,
-- an LCFS Fourier spectrum for the largest Boozer modes.
-
-Override the transform resolution or selected surfaces from the CLI::
-
-  vmec --booz wout_nfp4_QH_warm_start.nc --mbooz 48 --nbooz 48
-  vmec --booz wout_nfp4_QH_warm_start.nc --booz-surfaces "0.25,0.5,1.0"
-
-Input decks can carry Boozer defaults in a separate namelist.  ``LBOOZ = F`` is
-the safe default used by the example inputs; passing ``--booz`` overrides it::
-
-  &BOOZ_XFORM_JAX
-    LBOOZ = F
-    MBOOZ = 32
-    NBOOZ = 32
-    BOOZ_SURFACES = 'all'
-  /
-
-``vmec_jax`` writes diagnostic ``wout`` files from the last available state even
-when the requested residual tolerance is not reached. These files preserve the
-computed geometry, profiles, field diagnostics, and residual traces, and mark
-the solver status with ``ier_flag`` plus ``vmec_jax_converged__logical__`` and
-``vmec_jax_status``. Treat ``vmec_jax_status = nonconverged`` as a diagnostic
-checkpoint rather than a validated equilibrium.
-
-Load, save, and inspect a ``wout`` file
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The ``wout_*.nc`` file is the standard VMEC output container.  Use
-``vmec_jax.wout.read_wout`` and ``vmec_jax.wout.write_wout`` when you want to
-inspect or round-trip these files directly:
+The production solver lives in :mod:`vmec_jax.core`. A minimal solve from
+Python:
 
 .. code-block:: python
 
-   import numpy as np
+   from vmec_jax.core.input import VmecInput
+   from vmec_jax.core.multigrid import solve_multigrid
+   from vmec_jax.core.wout import wout_from_state, write_wout
 
-   import vmec_jax as vj
-   from vmec_jax.wout import read_wout, write_wout
+   inp = VmecInput.from_file("input.circular_tokamak")
+   result = solve_multigrid(inp)          # full NS_ARRAY ladder
+   print("converged:", result.converged, "in", result.iterations, "iterations")
 
-   wout = read_wout("wout_nfp4_QH_warm_start.nc")
-   write_wout("wout_nfp4_QH_warm_start_copy.nc", wout, overwrite=True)
+   wout = wout_from_state(
+       inp=inp, state=result.state,
+       fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
+       niter=int(result.iterations), converged=bool(result.converged),
+       input_extension="circular_tokamak",
+   )
+   write_wout("wout_circular_tokamak.nc", wout)
 
-   s = np.linspace(0.0, 1.0, int(wout.ns))
-   print("aspect =", float(wout.aspect))
-   print("mean edge iota =", float(wout.iotaf[-1]))
+``VmecInput`` is a frozen dataclass with VMEC2000 semantics and defaults —
+you can also build one from scratch in Python (all INDATA fields are keyword
+arguments; see :doc:`input_reference`) and round-trip it to INDATA or
+VMEC++-style JSON.
 
-   for js, (sj, iota_j) in enumerate(zip(s, wout.iotaf)):
-       _theta, _zeta, bmag = vj.vmecplot2_bmag_grid(wout, s_index=js)
-       print(f"s={sj:.3f}  iota={float(iota_j): .6e}  <|B|>={float(np.mean(bmag)): .6e}")
+For gradient-based work, wrap the solve with the implicit-differentiation
+driver in :mod:`vmec_jax.core.implicit` and the objectives in
+:mod:`vmec_jax.core.optimize` — see :doc:`optimization`.
 
-The complete runnable example is:
+Reading wout files
+------------------
 
-.. code-block:: bash
+.. code-block:: python
 
-   python examples/diagnostics/load_save_wout_profiles.py
+   from vmec_jax.core.wout import read_wout
 
-It creates a ``wout`` from ``examples/data/input.nfp4_QH_warm_start`` if one
-does not already exist, saves a round-trip copy, then prints scalar
-diagnostics, the iota profile, and simple surface-averaged ``|B|`` values.
+   wout = read_wout("wout_circular_tokamak.nc")
+   print("aspect ratio:", float(wout.aspect))
+   print("edge iota:   ", float(wout.iotaf[-1]))
+   print("beta total:  ", float(wout.betatotal))
 
-Spline pressure, iota, and current profiles
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The written files carry the full VMEC2000 variable set (:doc:`wout_reference`)
+and load unchanged in simsopt, booz_xform, and other VMEC-ecosystem tools.
 
-VMEC input decks can prescribe profiles as polynomial coefficients or as
-tabulated spline knots. ``vmec_jax`` supports the common VMEC forms:
+Where to go next
+----------------
 
-- ``PMASS_TYPE = "power_series"`` with ``AM`` coefficients, or
-  ``PMASS_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
-  with ``AM_AUX_S`` and ``AM_AUX_F``.
-- ``PIOTA_TYPE = "power_series"`` with ``AI`` coefficients, or
-  ``PIOTA_TYPE = "cubic_spline"``, ``"akima_spline"``, or ``"line_segment"``
-  with ``AI_AUX_S`` and ``AI_AUX_F`` when ``NCURR = 0``.
-- ``PCURR_TYPE = "power_series"`` with ``AC`` coefficients for :math:`I'(s)`,
-  ``PCURR_TYPE = "power_series_i"`` with ``AC`` coefficients for :math:`I(s)`,
-  or ``PCURR_TYPE = "cubic_spline_ip"`` / ``"cubic_spline_i"`` (and matching
-  ``akima_spline`` or ``line_segment`` forms) with ``AC_AUX_S`` and ``AC_AUX_F`` when
-  ``NCURR = 1``.
-
-The ``*_AUX_S`` arrays are knot locations in normalized toroidal flux
-:math:`s \in [0,1]`; the matching ``*_AUX_F`` arrays are profile values at
-those knots. A compact pressure/iota spline example is included:
-
-.. code-block:: bash
-
-   vmec examples/data/input.profile_splines --plot
-
-Generate editable polynomial and spline pressure/current decks side by side
-with:
-
-.. code-block:: bash
-
-   python examples/profile_input_examples.py
-   vmec examples/outputs/profile_inputs/input.profile_polynomial_pressure_current
-   vmec examples/outputs/profile_inputs/input.profile_spline_pressure_current
-
-For a finite-beta current-spline example, use:
-
-.. code-block:: bash
-
-   vmec examples/data/input.nfp4_QH_finite_beta
-
-Free-boundary CLI smoke test
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-For a small bundled free-boundary case, run::
-
-  vmec examples/data/input.cth_like_free_bdy_lasym_small
-
-This input references the tracked ``examples/data/mgrid_cth_like_lasym_small.nc``
-fixture, so it works in a fresh clone without downloading the large asset
-bundle. The resulting ``wout_cth_like_free_bdy_lasym_small.nc`` can be plotted
-with::
-
-  vmec --plot examples/data/wout_cth_like_free_bdy_lasym_small.nc
-
-For ESSOS/direct-coil finite-beta scans and coil-only free-boundary examples,
-see :doc:`free_boundary_coil_optimization`.
-
-If you want to compare the conservative parity track against the optimized
-fixed-boundary CLI-style controller from Python, run::
-
-  python examples/fixed_boundary_driver_tracks.py \
-    examples/data/input.circular_tokamak \
-    --quiet --json
-
-That example writes two ``wout`` files (parity and optimized) unless you pass
-``--no-write-wout``, and it prints a short runtime / ``fsq_total`` comparison
-table at the end.
-
-Kernel parity on reference states (solver-free)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To validate intermediate pipeline quantities on *reference* ``wout`` states (no
-nonlinear solve), run::
-
-  python tools/diagnostics/parity/pipeline_parity_summary.py
-
-By default this covers the 4-axisymmetric benchmark suite (``circular_tokamak``,
-``purely_toroidal_field``, ``shaped_tokamak_pressure``, ``solovev``).
-
-Scalar residual parity (``fsqr/fsqz/fsql``) on reference states
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-To compare scalar residuals reconstructed from a reference state against
-``wout.fsqr/fsqz/fsql``::
-
-  python tools/diagnostics/parity/getfsq_parity_cases.py --solve-metric
-
-End-to-end solve snapshot
--------------------------
-
-To run a short fixed-boundary solve and compare a few end-to-end outputs against
-released references, fetch the optional WOUT fixtures first::
-
-  python tools/fetch_assets.py --bundle wout-fixtures
-
-  python tools/diagnostics/parity/end_to_end_solve_parity_summary.py --use-input-niter --fast
-
-Drop ``--fast`` and increase ``--max-iter`` for a full parity snapshot (longer runtime).
-
-External VMEC2000 run (optional)
---------------------------------
-
-If you have the VMEC2000 Python extension installed (``vmec`` + ``mpi4py`` +
-``netCDF4``), you can run VMEC2000 on an input and compare outputs to released
-references::
-
-  python tools/diagnostics/assets/external_vmec_driver_compare.py --case circular_tokamak
-
-A minimal API sketch (recommended)
-----------------------------------
-
-Most users should start from the small public API in ``vmec_jax.api``::
-
-  import vmec_jax.api as vj
-
-  run = vj.run_fixed_boundary(
-      "examples/data/input.shaped_tokamak_pressure",
-      max_iter=10,
-      verbose=True,
-  )
-  wout_path = "wout_shaped_tokamak_pressure_vmec_jax.nc"
-  wout = vj.write_wout_from_fixed_boundary_run(
-      wout_path,
-      run,
-      include_fsq=True,
-  )
-  boozmn = vj.run_booz_xform(wout_path, mbooz=32, nbooz=32)
-  vj.plot_boozmn(boozmn, outdir="figures/")
-
-  # If you only need an in-memory wout object (no file I/O):
-  wout_mem = vj.wout_from_fixed_boundary_run(run, include_fsq=True)
-
-  wref = vj.read_wout("examples/data/wout_shaped_tokamak_pressure.nc")
-  print("fsq_total(ref)=", float(wref.fsqr + wref.fsqz + wref.fsql))
-  print("fsq_total(new)=", float(wout.fsqr + wout.fsqz + wout.fsql))
-
-For free-boundary decks, prefer the explicit entrypoint::
-
-  import vmec_jax.api as vj
-
-  freeb = vj.run_free_boundary(
-      "examples/data/input.cth_like_free_bdy_lasym_small",
-      verbose=False,
-      use_initial_guess=False,
-  )
-  wout_freeb = vj.wout_from_fixed_boundary_run(freeb, include_fsq=True)
-  print("wb =", float(wout_freeb.wb))
-  print("wp =", float(wout_freeb.wp))
-
-Use ``run_fixed_boundary(...)`` if you deliberately want one driver that
-accepts either mode. It remains backward compatible and will still dispatch to
-the free-boundary path when ``LFREEB = T`` in the input deck.
-
-Simple optimization example
----------------------------
-
-For a VMEC-JAX-only optimization workflow with explicit SIMSOPT-style
-objective construction, run::
-
-  PYTHONPATH=. JAX_PLATFORMS=cpu python examples/optimization/QH_optimization.py
-
-The script builds a ``FixedBoundaryVMEC`` object, constructs objective tuples
-such as aspect ratio, iota floor, and quasisymmetry residuals, runs
-``least_squares_solve``, then shows how to save and plot the resulting
-equilibrium.  The companion ``examples/optimization/README.md`` file lists the
-recommended standalone examples, sweep/rendering tools, and older comparison
-scripts.
+- :doc:`tutorials` — worked examples (fixed boundary, free boundary,
+  optimization).
+- :doc:`architecture` — how the core is organized and how it maps onto
+  VMEC2000 subroutines.
+- :doc:`performance` — benchmarks, parity results, and GPU guidance.

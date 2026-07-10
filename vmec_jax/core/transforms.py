@@ -186,10 +186,10 @@ def fourier_to_real(
     ``lmncc/lmnss``).  In the signed-(m, n) mode packing used here (one cos and
     one sin coefficient per mode, ``n`` signed) both reduce to a single
     cos/sin synthesis, so this one function covers R, Z and lambda for both
-    parities:
+    parities::
 
-        ``f(s, theta, zeta) = sum_k [ c_cos_k cos(m_k theta - n_k zeta)
-                                    + c_sin_k sin(m_k theta - n_k zeta) ]``
+        f(s, theta, zeta) = sum_k [ c_cos_k cos(m_k theta - n_k zeta)
+                                  + c_sin_k sin(m_k theta - n_k zeta) ]
 
     Parameters
     ----------
