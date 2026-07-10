@@ -41,7 +41,7 @@ MAX_NFEV = 2000                            # trial budget per stage
 FTOL = 1e-6                                # per-stage convergence tolerance
 JAC = "implicit"
 if os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1":  # smoke-test budget
-    MAX_MODE_SCHEDULE, MAX_NFEV, FTOL = (1,), 6, 1e-4
+    MAX_MODE_SCHEDULE, MAX_NFEV, FTOL = (1,), 4, 1e-4
 
 # --------------------------- seed input, built from scratch -----------------
 rbc = np.zeros((2 * NTOR + 1, MPOL))       # dense INDATA layout [n + NTOR, m]

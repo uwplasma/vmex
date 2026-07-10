@@ -107,12 +107,13 @@ jobs:
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
-      - name: Run parity suite with coverage (gradient shard runs separately)
+      - name: Run parity suite with coverage (gradient + examples shards run separately)
         env:
           JAX_ENABLE_X64: "1"
         run: |
           pytest -q -n 4 tests/core_new \
             --ignore=tests/core_new/test_implicit_grad.py \
+            --ignore=tests/core_new/test_examples.py \
             --durations=15 \
             --cov=vmec_jax --cov-report=term
 
@@ -171,11 +172,48 @@ jobs:
           path: coverage.gradient
           retention-days: 3
 
+  examples:
+    name: Example scripts smoke (coverage)
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install .
+          python -m pip install pytest pytest-cov
+
+      - name: Run example smokes (QH/QP/QI gated to nightly RUN_FULL)
+        env:
+          JAX_ENABLE_X64: "1"
+        run: |
+          pytest -q tests/core_new/test_examples.py \
+            --durations=10 \
+            --cov=vmec_jax --cov-report=term
+
+      - name: Stash coverage data
+        run: mv .coverage coverage.examples
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-examples
+          path: coverage.examples
+          retention-days: 3
+
   coverage-gate:
     name: Coverage gate (>= 95%)
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [parity, gradient]
+    needs: [parity, gradient, examples]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -196,7 +234,7 @@ jobs:
 
       - name: Combine shards and enforce the gate
         run: |
-          coverage combine coverage.parity coverage.gradient
+          coverage combine coverage.parity coverage.gradient coverage.examples
           coverage report --fail-under=95
 
   cli-smoke:

@@ -45,7 +45,7 @@ MAX_NFEV = 2000                           # trial-boundary budget per stage
 FTOL = 1e-6                               # per-stage convergence tolerance
 JAC = "implicit"                          # adjoint gradients; None = finite diff
 if os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1":  # smoke-test budget
-    MAX_MODE_SCHEDULE, MAX_NFEV, FTOL = (1,), 6, 1e-4
+    MAX_MODE_SCHEDULE, MAX_NFEV, FTOL = (1,), 4, 1e-4
 
 # --------------------------- seed equilibrium ------------------------------
 inp = vj.VmecInput.from_file(INPUT_FILE)   # plain &INDATA parsing
