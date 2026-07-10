@@ -177,6 +177,10 @@ tag, publish PyPI + conda-forge, verify `pip install vmec-jax && vmec --test` on
 ### R10-R16 — detailed resumable tasks (added 2026-07-10 from user review; specific steps)
 
 **R10. Prove functionality completeness vs VMEC2000 + VMEC++ (the "is it all there?" question).**
+*(R10.2 DONE 2026-07-10, 2980d812: 2D block preconditioner — matrix-free Newton via
+jax.jvp HVP on solvax.gmres; 2.5-11x iteration reduction on stiff cases (aspect-100 97->18,
+163->15; nfp4_QH finite-beta 1885->204); default 1D path byte-identical; CI green incl. 95%
+gate. Wall neutral on CPU cold — GPU/warm-cache/gcrot-recycling win pending. Showcase = R20.)*
 The core is small (34 files / 19.2k lines) because JAX/Python is far denser than Fortran/C++ and we
 dropped VMEC2000's MPI, v3fit reconstruction, and ANIMEC boilerplate — NOT because physics is missing.
 Verified present: fixed + free boundary (NESTOR), lasym, ntor=0 free-bdy, multigrid + hot restart,
