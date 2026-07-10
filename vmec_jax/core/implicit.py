@@ -67,6 +67,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import types
+import weakref
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -187,6 +188,11 @@ class ImplicitConfig:
     adjoint_tol: float = 1e-11
     adjoint_restart: int = 30
     adjoint_maxiter: int = 300
+    #: seed repeated host solves from the last converged state of this config
+    #: (optimization trials; the fixed point — hence the gradient — is
+    #: unchanged, only the iteration count drops).  Makes the callback
+    #: stateful across calls, so keep False for one-shot/diagnostic use.
+    hot_restart: bool = False
 
 
 def make_config(
@@ -201,6 +207,7 @@ def make_config(
     adjoint_tol: float = 1e-11,
     adjoint_restart: int = 30,
     adjoint_maxiter: int = 300,
+    hot_restart: bool = False,
 ) -> ImplicitConfig:
     """Build the static config; ``resolution`` is the (final-stage) grid."""
     if multigrid and ns is None:
@@ -215,12 +222,20 @@ def make_config(
         max_iterations=int(max_iterations), mode=str(mode),
         multigrid=bool(multigrid), lconm1=bool(lconm1),
         adjoint_tol=float(adjoint_tol), adjoint_restart=int(adjoint_restart),
-        adjoint_maxiter=int(adjoint_maxiter),
+        adjoint_maxiter=int(adjoint_maxiter), hot_restart=bool(hot_restart),
     )
 
 
+@functools.lru_cache(maxsize=8)
 def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
-    """Reference (host-built) runtime at the config's base input."""
+    """Reference (host-built) runtime at the config's base input.
+
+    Cached per config (identity hash — :class:`ImplicitConfig` is ``eq=False``):
+    the template is p-independent, and caching both avoids rebuilding it on
+    every trial solve of an optimization and keeps
+    :func:`runtime_from_params` traceable (the host-side ``run_setup`` logic
+    never runs under a trace once the template is a closure constant).
+    """
     return prepare_runtime(
         cfg.inp, cfg.resolution, ftol=cfg.ftol,
         max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
@@ -604,27 +619,56 @@ def _dof_mask(x_star: SpectralState, rt: SolverRuntime,
 # ---------------------------------------------------------------------------
 
 
+_HOT_CACHE = weakref.WeakKeyDictionary()  # cfg -> last converged SpectralState
+
+
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     inp2 = input_with_params(cfg.inp, params)
+    seed = _HOT_CACHE.get(cfg) if cfg.hot_restart else None
     if cfg.multigrid:
         ns_arr = np.asarray(inp2.ns_array)
         ftol_arr = np.asarray(inp2.ftol_array, dtype=float).copy()
         ftol_arr[-1] = cfg.ftol
-        return solve_multigrid(inp2, ns_array=ns_arr, ftol_array=ftol_arr,
-                               mode=cfg.mode, lconm1=cfg.lconm1)
-    return solve(inp2, cfg.resolution, ftol=cfg.ftol,
-                 max_iterations=cfg.max_iterations, mode=cfg.mode,
-                 lconm1=cfg.lconm1)
+        # NITER-exhausted final stages still return a usable (penalized)
+        # state — matching the optimize.least_squares trial-solve policy
+        # (VMEC2000 behaves the same way).
+        run = lambda init: solve_multigrid(  # noqa: E731
+            inp2, ns_array=ns_arr, ftol_array=ftol_arr, mode=cfg.mode,
+            lconm1=cfg.lconm1, raise_on_max_iterations=False,
+            initial_state=init)
+    else:
+        run = lambda init: solve(  # noqa: E731
+            inp2, cfg.resolution, ftol=cfg.ftol,
+            max_iterations=cfg.max_iterations, mode=cfg.mode,
+            lconm1=cfg.lconm1, initial_state=init)
+    try:
+        result = run(seed)
+    except Exception:
+        if seed is None:
+            raise
+        result = run(None)  # a bad hot seed must not fail the trial
+    if cfg.hot_restart and bool(result.converged):
+        _HOT_CACHE[cfg] = result.state
+    return result
+
+
+_MASK_CACHE = weakref.WeakKeyDictionary()  # cfg -> host dof mask (structural)
 
 
 def _host_solve_and_mask(cfg: ImplicitConfig, params_np) -> tuple:
     params = jax.tree.map(jnp.asarray, params_np)
     result = _host_solve(cfg, params)
-    rt = runtime_from_params(params, cfg)
-    mask = _dof_mask(result.state, rt, cfg)
     as_np = lambda t: jax.tree.map(  # noqa: E731
         lambda a: np.asarray(a, dtype=np.float64), t)
-    return as_np(result.state), as_np(mask)
+    # The dof mask captures *structural* zero patterns (resolution, symmetry,
+    # lconm1 pairing) — invariant across the parameter values of one config,
+    # so repeated solves of an optimization reuse the first solve's mask.
+    mask = _MASK_CACHE.get(cfg)
+    if mask is None:
+        rt = runtime_from_params(params, cfg)
+        mask = as_np(_dof_mask(result.state, rt, cfg))
+        _MASK_CACHE[cfg] = mask
+    return as_np(result.state), mask
 
 
 def _state_struct(cfg: ImplicitConfig) -> SpectralState:
