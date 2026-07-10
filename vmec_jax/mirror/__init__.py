@@ -61,6 +61,11 @@ from .solver import (
     solve_anisotropic_fixed_boundary_cli,
     solve_fixed_boundary_cli,
 )
+from .restart import (
+    FreeBoundaryRestart,
+    load_free_boundary_restart,
+    save_free_boundary_restart,
+)
 from .vacuum import (
     VacuumField,
     FreeBoundaryMirrorResult,
@@ -109,6 +114,7 @@ __all__ = [
     "VariationalResidual",
     "VacuumField",
     "FreeBoundaryMirrorResult",
+    "FreeBoundaryRestart",
     "VacuumGeometry",
     "VacuumGrid",
     "VacuumSolveResult",
@@ -134,6 +140,7 @@ __all__ = [
     "interpolate_fixed_boundary_state",
     "magnetic_field_squared",
     "mass_profile_from_pressure",
+    "load_free_boundary_restart",
     "mirror_energy",
     "project_fixed_boundary_state",
     "solve_anisotropic_fixed_boundary_cli",
@@ -141,6 +148,7 @@ __all__ = [
     "solve_vacuum_potential",
     "solve_axisymmetric_free_boundary_cli",
     "solve_axisymmetric_beta_scan_cli",
+    "save_free_boundary_restart",
     "summarize_axisymmetric_beta_scan",
     "vacuum_energy_functional",
     "vacuum_laplacian",

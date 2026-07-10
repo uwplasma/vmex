@@ -1186,10 +1186,15 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       and achieved-beta triples to agree within `1e-4` relative; normalized vacuum `B.n` decreases
       `1.60e-2,4.25e-3,1.85e-3`. Separate fixed-mass solves from +/-10% free-side radius
       perturbations agree to `2e-12` absolute in boundary and `2e-11` relative in `B^2`.
+      Compact, atomic `.npz` restart files now preserve only boundary, plasma state, vacuum
+      potential, and calibrated mass scale; loading validates schema, finiteness, and both grid
+      shapes. Continuation now propagates the solved mass scale as well as geometry and vacuum state,
+      and can resume a beta suffix from a loaded restart while retaining the original beta-zero
+      pressure reference. The root beta-scan example exposes both save and resume inputs.
       An independent Pleiades Green-function study at upstream commit `0161abb3` converges its
       1%,3%,10% field ratios to `0.995370,0.986049,0.952754` on a 51x101 grid; the 10% `vmec_jax`
       ratio differs by 0.061% relative. Higher-resolution vacuum tangency/exterior closure,
-      independent boundary curves, anisotropy, and restart-file serialization remain.
+      independent boundary curves and anisotropy remain.
    8. **M7 — nonaxisymmetric finite-beta free boundary.** Add helical coils/boundaries, then require
       3D force, interface, field-line, and resolution gates. This lane is supported only after M6;
       no axisymmetric boundary replicated in theta counts as a 3D validation.

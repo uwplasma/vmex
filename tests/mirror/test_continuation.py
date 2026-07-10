@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -10,13 +12,17 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
+    FreeBoundaryRestart,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
     MirrorState,
+    build_vacuum_grid,
     interpolate_fixed_boundary_state,
     project_fixed_boundary_state,
+    solve_axisymmetric_beta_scan_cli,
 )
+import vmec_jax.mirror.continuation as continuation  # noqa: E402
 
 
 def _grid(ns: int, nxi: int):
@@ -76,3 +82,46 @@ def test_fixed_boundary_state_interpolation_is_differentiable() -> None:
     derivative = jax.jacfwd(interpolate_lambda)(1.0)
     assert bool(jnp.all(jnp.isfinite(derivative)))
     assert float(jnp.linalg.norm(derivative)) > 0.0
+
+
+def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=5)
+    )
+    grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(grid, nrho=3)
+    reference = MirrorBoundary.from_radius(0.3, grid)
+    restart_boundary = MirrorBoundary.from_radius(0.31, grid)
+    restart_state = MirrorState.from_boundary(restart_boundary, grid)
+    restart = FreeBoundaryRestart(
+        restart_boundary, restart_state, jnp.zeros(vacuum_grid.shape), 2.5
+    )
+    received = []
+
+    def fake_solve(boundary, *_args, **kwargs):
+        received.append((boundary, kwargs["initial_state"], kwargs["initial_mass_scale"]))
+        return SimpleNamespace(
+            boundary=boundary,
+            plasma_state=kwargs["initial_state"],
+            vacuum_potential=kwargs["initial_potential"],
+            mass_scale=jnp.asarray(kwargs["initial_mass_scale"] + 0.5),
+        )
+
+    monkeypatch.setattr(continuation, "solve_axisymmetric_free_boundary_cli", fake_solve)
+    solve_axisymmetric_beta_scan_cli(
+        reference,
+        grid,
+        vacuum_grid,
+        config,
+        object(),
+        jnp.asarray([0.0, 0.0]),
+        outer_radius=0.6,
+        axial_flux_derivative=0.1,
+        reference_field=1.0,
+        initial_restart=restart,
+    )
+
+    assert received[0][0] is restart_boundary
+    assert received[0][1] is restart_state
+    assert received[0][2] == 2.5
+    assert received[1][2] == 3.0

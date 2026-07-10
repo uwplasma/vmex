@@ -28,10 +28,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from vmec_jax.core.coils import CoilSet, coil_geometry, two_coil_on_axis_bz  # noqa: E402
 from vmec_jax.mirror import (  # noqa: E402
+    FreeBoundaryRestart,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
     build_vacuum_grid,
+    load_free_boundary_restart,
+    save_free_boundary_restart,
     solve_axisymmetric_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
 )
@@ -50,6 +53,8 @@ COIL_CURRENT = 2.0e5
 CENTER_RADIUS = 0.25
 OUTER_RADIUS = 0.65
 OUTPUT_DIR = Path("results/mirror_free_boundary_beta_scan")
+SAVE_RESTARTS = True
+RESTART_FROM = None  # e.g. OUTPUT_DIR / "beta_003p0pct.npz"; then trim BETAS
 PLEIADES_REFERENCE = Path(__file__).resolve().parent / "data" / "pleiades_two_coil_beta_reference.csv"
 
 jax.config.update("jax_enable_x64", True)
@@ -74,6 +79,11 @@ config = MirrorConfig(
 )
 grid = config.build_grid()
 vacuum_grid = build_vacuum_grid(grid, nrho=NRHO)
+initial_restart = (
+    None
+    if RESTART_FROM is None
+    else load_free_boundary_restart(RESTART_FROM, grid, vacuum_grid)
+)
 vacuum_axis_field = two_coil_on_axis_bz(
     jnp.asarray(grid.z),
     coil_radius=COIL_RADIUS,
@@ -99,7 +109,14 @@ results = solve_axisymmetric_beta_scan_cli(
     outer_radius=OUTER_RADIUS,
     axial_flux_derivative=axial_flux_derivative,
     reference_field=float(vacuum_axis_field[center]),
+    initial_restart=initial_restart,
 )
+if SAVE_RESTARTS:
+    for beta, result in zip(BETAS, results, strict=True):
+        label = f"beta_{100 * beta:05.1f}pct".replace(".", "p")
+        save_free_boundary_restart(
+            OUTPUT_DIR / label, FreeBoundaryRestart.from_result(result)
+        )
 diagnostics = summarize_axisymmetric_beta_scan(
     results,
     jnp.asarray(BETAS),

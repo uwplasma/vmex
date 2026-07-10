@@ -10,6 +10,7 @@ import numpy as np
 
 from .forces import MU0, mass_profile_from_pressure, mirror_energy
 from .model import MirrorBoundary, MirrorConfig, MirrorState, project_fixed_boundary_state
+from .restart import FreeBoundaryRestart
 from .vacuum import FreeBoundaryMirrorResult, VacuumGrid, solve_axisymmetric_free_boundary_cli
 
 Array = Any
@@ -72,6 +73,7 @@ def solve_axisymmetric_beta_scan_cli(
     reference_field: float,
     gamma: float = 5.0 / 3.0,
     beta_rtol: float = 1.0e-8,
+    initial_restart: FreeBoundaryRestart | None = None,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
     """Solve a fully hot-started axisymmetric free-boundary beta scan.
 
@@ -79,6 +81,8 @@ def solve_axisymmetric_beta_scan_cli(
     potential for the next pressure value. The coupled nonlinear system adds
     one mass-amplitude unknown and one central-pressure equation so requested
     beta is achieved without an outer sequence of full equilibrium solves.
+    ``initial_restart`` resumes a suffix of the scan while ``initial_boundary``
+    remains the beta-zero reference used to construct the pressure profile.
     """
 
     beta_values = np.asarray(beta_values, dtype=float)
@@ -95,9 +99,10 @@ def solve_axisymmetric_beta_scan_cli(
         axial_flux_derivative=axial_flux_derivative,
     )
     pressure_shape = 1.0 - jnp.asarray(plasma_grid.s)
-    boundary = initial_boundary
-    state = None
-    potential = None
+    boundary = initial_boundary if initial_restart is None else initial_restart.boundary
+    state = None if initial_restart is None else initial_restart.plasma_state
+    potential = None if initial_restart is None else initial_restart.vacuum_potential
+    mass_scale = 1.0 if initial_restart is None else initial_restart.mass_scale
     results = []
     for beta in beta_values:
         central_pressure = float(beta) * float(reference_field) ** 2 / (2.0 * MU0)
@@ -118,6 +123,7 @@ def solve_axisymmetric_beta_scan_cli(
             gamma=gamma,
             initial_state=state,
             initial_potential=potential,
+            initial_mass_scale=mass_scale,
             target_central_pressure=None if beta == 0.0 else central_pressure,
             require_convergence=True,
         )
@@ -129,6 +135,7 @@ def solve_axisymmetric_beta_scan_cli(
         boundary = result.boundary
         state = result.plasma_state
         potential = result.vacuum_potential
+        mass_scale = float(result.mass_scale)
     return tuple(results)
 
 

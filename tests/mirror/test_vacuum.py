@@ -12,6 +12,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
+    FreeBoundaryRestart,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
@@ -23,6 +24,8 @@ from vmec_jax.mirror import (  # noqa: E402
     external_field_from_source,
     mass_profile_from_pressure,
     mirror_energy,
+    load_free_boundary_restart,
+    save_free_boundary_restart,
     solve_axisymmetric_free_boundary_cli,
     solve_vacuum_potential,
     solve_axisymmetric_beta_scan_cli,
@@ -51,6 +54,41 @@ def _grid(*, ns: int = 7, nxi: int = 7):
         max_iterations=500,
     )
     return config, build_vacuum_grid(config.build_grid(), nrho=ns)
+
+
+def test_free_boundary_restart_roundtrip_is_compact_and_grid_checked(tmp_path) -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9)
+    )
+    plasma_grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(plasma_grid, nrho=5)
+    boundary = MirrorBoundary.from_radius(0.3, plasma_grid)
+    state = MirrorState.from_boundary(boundary, plasma_grid)
+    restart = FreeBoundaryRestart(
+        boundary=boundary,
+        plasma_state=state,
+        vacuum_potential=jnp.zeros(vacuum_grid.shape),
+        mass_scale=1.25,
+    )
+
+    path = save_free_boundary_restart(tmp_path / "beta_003", restart)
+    loaded = load_free_boundary_restart(path, plasma_grid, vacuum_grid)
+
+    assert path.suffix == ".npz"
+    assert path.stat().st_size < 4096
+    np.testing.assert_array_equal(loaded.boundary.radius_scale, boundary.radius_scale)
+    np.testing.assert_array_equal(loaded.plasma_state.radius_scale, state.radius_scale)
+    np.testing.assert_array_equal(loaded.plasma_state.lambda_stream, state.lambda_stream)
+    np.testing.assert_array_equal(loaded.vacuum_potential, restart.vacuum_potential)
+    assert loaded.mass_scale == restart.mass_scale
+
+    mismatched = MirrorConfig(
+        resolution=MirrorResolution(ns=9, mpol=0, ntheta=1, nxi=9)
+    ).build_grid()
+    with pytest.raises(ValueError, match="plasma state"):
+        load_free_boundary_restart(
+            path, mismatched, build_vacuum_grid(mismatched, nrho=5)
+        )
 
 
 def _two_end_coils() -> CoilSet:

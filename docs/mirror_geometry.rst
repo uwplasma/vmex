@@ -80,6 +80,13 @@ solves every beta point and writes CSV plus three reviewed figures under
 coils, cap-to-cap field lines, field arrows, and coupled residual histories.
 Generated results are ignored by git.
 
+Set ``SAVE_RESTARTS = True`` to write one compressed ``.npz`` hot-start per
+beta point. :func:`vmec_jax.mirror.load_free_boundary_restart` checks its
+schema and both plasma/vacuum grid shapes before returning the boundary,
+plasma state, vacuum potential, and calibrated mass scale.
+Set ``RESTART_FROM`` and trim ``BETAS`` to resume only the unfinished suffix;
+the original beta-zero boundary remains the pressure-profile reference.
+
 Interpreting beta
 -----------------
 
