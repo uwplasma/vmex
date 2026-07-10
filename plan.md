@@ -699,7 +699,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       fixed-cut, axis-regular, surface-gauge-free lambda variables and uses the exact packed
       objective gradient for convergence. An `mpol=1` helical-boundary case with finite current
       converges below `1e-12`, has nonzero lambda and field-line pitch, and preserves end/gauge
-      constraints. A mode-aware scalable lambda preconditioner and `ns/mpol/nxi` studies remain.
+      constraints. A manual `mpol=1,2,3` study converges every case below `6e-16`; the `mpol=2`
+      and `mpol=3` energies agree to `~2e-13` relative, while lambda amplitude and maximum pitch
+      change by about 2% and 3%. A mode-aware scalable lambda preconditioner and formal `ns/nxi`
+      studies remain.
    6. **M5 — open-vacuum solver.** Implement the annular scalar-potential solve and couple direct
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
       side-interface `B.n`, end flux, outer-boundary convergence, and axisymmetric comparisons
