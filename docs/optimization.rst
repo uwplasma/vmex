@@ -29,7 +29,13 @@ Simsopt-style building blocks, all pure functions of a converged core state:
   ``scipy.optimize.least_squares`` driver over boundary Fourier degrees of
   freedom (:func:`~vmec_jax.core.optimize.pack_boundary` /
   :func:`~vmec_jax.core.optimize.unpack_boundary`), taking simsopt-style
-  ``(callable, target, weight)`` terms.
+  ``(callable, target, weight)`` terms. Jacobians default to scipy
+  finite differences (``jac=None``); ``jac="implicit"`` switches to exact
+  implicit-differentiation Jacobians through
+  :mod:`vmec_jax.core.implicit`. Implicit mode is restricted to
+  fixed-boundary, stellarator-symmetric (``LASYM = F``) problems whose
+  objective terms are implicit-differentiable (the Mercier/`L_grad_B`/QI
+  diagnostics run on host NumPy and need ``jac=None``).
 
 Gradients (:mod:`vmec_jax.core.implicit`)
 -----------------------------------------
@@ -44,7 +50,11 @@ construction. See the *Implicit differentiation* section of
 :doc:`algorithms` for the formulation and cost analysis.
 
 Gradient accuracy is validated in CI against central finite differences for
-boundary coefficients, profile parameters, and coil degrees of freedom.
+**fixed-boundary** degrees of freedom: boundary Fourier coefficients,
+``phiedge``, and profile parameters (``pres_scale``), on a 2D (solovev) and
+a 3D (li383) case — the gradient table lives in
+``tests/core_new/test_implicit_grad.py``, with agreement at the 1e-6
+relative level (2D) and at the finite-difference noise floor (3D).
 
 .. code-block:: python
 
@@ -58,6 +68,10 @@ boundary coefficients, profile parameters, and coil degrees of freedom.
    sol = implicit.run(inp, p0)                        # ImplicitSolution pytree
    grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)   # adjoint gradient
 
-Free-boundary decks differentiate the same way: the NESTOR vacuum solve is
-inside the residual, so coil parameters (ESSOS coil sets,
-:mod:`vmec_jax.core.coils`) get gradients with no special handling.
+Free-boundary decks are **not yet differentiable**: the implicit residual
+currently covers the fixed-boundary force balance only, so derivatives with
+respect to coil parameters (ESSOS coil sets, :mod:`vmec_jax.core.coils`) or
+through the NESTOR vacuum solve are not available. Extending the implicit
+residual to the free-boundary fixed point — and validating coil-parameter
+gradients the same way as the fixed-boundary table above — is a roadmap
+item.

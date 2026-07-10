@@ -4,8 +4,8 @@ vmec-jax
 ``vmec-jax`` is a clean-room, JAX-native reimplementation of the **VMEC2000**
 ideal-MHD equilibrium code for stellarators and tokamaks. It solves fixed- and
 free-boundary equilibria with VMEC2000-parity numerics, writes standard
-``wout_*.nc`` output, and — unlike the Fortran original — is end-to-end
-differentiable and runs on CPUs and GPUs.
+``wout_*.nc`` output, and — unlike the Fortran original — is differentiable
+(fixed boundary) and runs on CPUs and GPUs.
 
 Why vmec-jax?
 -------------
@@ -15,10 +15,13 @@ Why vmec-jax?
   stepping, spectral condensation, NESTOR vacuum solve) constant-for-constant.
   Benchmark decks converge in the *same* iteration counts as VMEC2000 and the
   ``wout`` files agree per-variable (see :doc:`performance`).
-- **Differentiable.** Gradients of equilibrium properties with respect to
-  boundary shape, profiles, and coil parameters via implicit differentiation
-  of the converged fixed point (:mod:`vmec_jax.core.implicit`) — no finite
-  differences, no iteration unrolling.
+- **Differentiable.** Gradients of fixed-boundary equilibrium properties
+  with respect to boundary shape and profile parameters via implicit
+  differentiation of the converged fixed point
+  (:mod:`vmec_jax.core.implicit`) — no finite differences, no iteration
+  unrolling — validated against central finite differences (see
+  :doc:`optimization`). Free-boundary and coil-parameter derivatives are
+  not yet supported by the implicit residual (roadmap).
 - **Drop-in workflow.** The ``vmec`` command reads VMEC2000 ``input.*``
   namelists and VMEC++-style JSON, prints VMEC2000-format iteration output,
   and writes ``wout_*.nc`` files that load unchanged in simsopt and
