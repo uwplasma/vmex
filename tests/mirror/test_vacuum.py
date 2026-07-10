@@ -351,6 +351,62 @@ def test_two_coil_free_boundary_beta_scan_uses_solved_expanding_surfaces() -> No
 
 
 @pytest.mark.full
+def test_free_boundary_mgrid_matches_direct_two_coil_equilibrium() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=7),
+        z_min=-0.8,
+        z_max=0.8,
+        ftol=1.0e-12,
+        max_iterations=1000,
+    )
+    plasma_grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(plasma_grid, nrho=5)
+    coils = _two_end_coils()
+    table = to_mgrid_data(
+        coils, 0.0, 0.75, -1.2, 1.2, ir=49, jz=97, kp=4, mgrid_mode="S"
+    )
+    mgrid = MgridField.from_mgrid_data(table)
+    on_axis = two_coil_on_axis_bz(
+        jnp.asarray(plasma_grid.z),
+        coil_radius=0.9,
+        separation=2.0,
+        current=2.0e5,
+    )
+    center = plasma_grid.nxi // 2
+    flux = 0.5 * on_axis[center] * 0.25**2
+    boundary = MirrorBoundary.from_axis_field(flux, on_axis, plasma_grid)
+
+    def solve(source):
+        return solve_axisymmetric_free_boundary_cli(
+            boundary,
+            plasma_grid,
+            vacuum_grid,
+            config,
+            source,
+            outer_radius=0.65,
+            axial_flux_derivative=flux,
+            require_convergence=True,
+        )
+
+    direct, interpolated = solve(coils), solve(mgrid)
+    assert direct.converged and interpolated.converged
+    assert float(direct.variational_max) <= config.ftol
+    assert float(interpolated.variational_max) <= config.ftol
+    np.testing.assert_allclose(
+        interpolated.boundary.radius_scale,
+        direct.boundary.radius_scale,
+        rtol=5.0e-3,
+        atol=2.0e-5,
+    )
+    np.testing.assert_allclose(
+        interpolated.vacuum_field.total_xyz,
+        direct.vacuum_field.total_xyz,
+        rtol=8.0e-3,
+        atol=2.0e-4,
+    )
+
+
+@pytest.mark.full
 def test_free_boundary_beta_observables_converge_with_resolution() -> None:
     summaries = []
     tangency = []

@@ -1139,8 +1139,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       outer-boundary-independent claim. The merged clean-core `MgridField` now uses the same moving-
       annulus external-field adapter as direct coils; uniform-table conversion is exact and a
       33-by-65 two-coil mgrid agrees with direct Biot-Savart below `5e-3` relative RMS on the
-      annulus. End-to-end free-boundary mgrid parity, a Dirichlet-to-Neumann/boundary-integral
-      exterior operator, and nonaxisymmetric coils remain.
+      annulus. A scheduled full test now solves the same beta-zero free-boundary equilibrium from
+      direct coils and a 49-by-97 mgrid: both reach component-wise `1e-12`, with the LCFS agreeing
+      within `5e-3` relative and the annulus field within `8e-3`. A Dirichlet-to-Neumann/boundary-
+      integral exterior operator and nonaxisymmetric coils remain.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior
       state jointly, with beta continuation `0, 0.01, 0.03, 0.10` and hot restarts. Validate
       isotropic and anisotropic cases against an independently generated Pleiades/WHAM-style

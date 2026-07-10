@@ -106,6 +106,13 @@ ratio of 0.952754 on a 51 by 101 grid. The production mixed-truncation
 anisotropic independent-reference curves
 remain promotion gates rather than being replaced by this scalar comparison.
 
+The direct-coil and mgrid routes share one external-field adapter. A formal
+full-physics test samples the two end coils onto a 49 by 97 mgrid and solves
+the same beta-zero free-boundary equilibrium through both routes. Both reach
+``ftol=1e-12``; their LCFS agrees within 0.5% and the annulus field within
+0.8%. This validates interpolation and coupling parity, not yet the open-
+exterior truncation.
+
 The mixed vacuum truncation fixes the correction potential on the outer
 cylinder, preserves zero correction flux through the axial cuts, and obtains
 total-field tangency naturally on the plasma side. Finite-wall Neumann and
