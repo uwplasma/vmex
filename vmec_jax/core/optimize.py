@@ -1242,8 +1242,8 @@ def least_squares(
                 "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
-            solve_kwargs=dict(solve_kwargs or {}), verbose=verbose,
-            **scipy_kwargs)
+            solve_kwargs=dict(solve_kwargs or {}), device=device,
+            verbose=verbose, **scipy_kwargs)
     if jac is not None:
         raise ValueError(f"jac must be None or 'implicit', got {jac!r}")
 
@@ -1328,6 +1328,7 @@ def _least_squares_implicit(
     max_mode: int,
     x0: np.ndarray | None,
     solve_kwargs: dict,
+    device: Any = None,
     verbose: int = 0,
     **scipy_kwargs,
 ):
@@ -1343,10 +1344,18 @@ def _least_squares_implicit(
     versus one full equilibrium solve per dof for finite differences — while
     keeping the full pointwise Gauss-Newton residual geometry.  Both are
     jit-compiled once per stage.
+
+    The residual and Jacobian graphs run on the device chosen by
+    :func:`vmec_jax.core.device.resolve_implicit_device` — the CPU by default,
+    where the per-dof vmapped adjoint GMRES is far faster than the
+    launch-bound, dof-count-scaling GPU compile (plan.md R1); an explicit
+    ``device=`` overrides this.  The forward equilibrium solve is a host
+    callback and always runs on the CPU regardless.
     """
     import scipy.optimize
 
     from . import implicit as imp
+    from .device import resolve_implicit_device
 
     if bool(inp.lasym):
         raise NotImplementedError(
@@ -1369,6 +1378,16 @@ def _least_squares_implicit(
     # implicit-mode analogue of the finite-difference path's hot restart.
     cfg = imp.make_config(inp, multigrid=True, hot_restart=True,
                           adjoint_tol=1e-6, adjoint_maxiter=30)
+    # Pin the residual/Jacobian graphs to the fastest device for this launch-
+    # bound path (CPU by default; explicit device= honored) — committing the
+    # input dof vector to it makes both jits compile and run there, and their
+    # uncommitted constants follow.  ``None`` leaves placement untouched.
+    jac_device = resolve_implicit_device(device, cfg.resolution)
+
+    def _place(x: np.ndarray) -> jnp.ndarray:
+        a = jnp.asarray(x, dtype=jnp.float64)
+        return a if jac_device is None else jax.device_put(a, jac_device)
+
     params0 = imp.params_from_input(inp)
     imp._template_runtime(cfg)  # host-built template: warm the per-cfg cache
     # eagerly so runtime_from_params stays traceable under jit below
@@ -1452,8 +1471,7 @@ def _least_squares_implicit(
     def fun(x: np.ndarray) -> np.ndarray:
         try:
             residual = np.asarray(
-                jax.device_get(rows_jit(jnp.asarray(x, dtype=jnp.float64))),
-                dtype=float)
+                jax.device_get(rows_jit(_place(x))), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -1468,9 +1486,7 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
-        return np.asarray(
-            jax.device_get(jac_jit(jnp.asarray(x, dtype=jnp.float64))),
-            dtype=float)
+        return np.asarray(jax.device_get(jac_jit(_place(x))), dtype=float)
 
     result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
                                           jac=jac_fn, **scipy_kwargs)

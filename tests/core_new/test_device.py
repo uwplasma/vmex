@@ -8,7 +8,6 @@ decision, not the presence of an accelerator.
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 
 import jax
 import pytest
@@ -74,6 +73,29 @@ def test_gpu_request_on_cpu_machine_raises():
     if jax.default_backend() == "cpu":
         with pytest.raises(RuntimeError):
             dev.resolve_device("gpu", _res(ns=11, mpol=6, ntor=0))
+
+
+def test_resolve_implicit_device_defaults_to_cpu(monkeypatch):
+    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
+    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    res = _res(ns=35, mpol=6, ntor=6, nfp=4)  # a QH-class stage
+    resolved = dev.resolve_implicit_device(None, res)
+    if jax.default_backend() == "cpu":
+        # already on CPU -> nothing to place (the implicit path stays put).
+        assert resolved is None
+    else:
+        # on an accelerator the launch-bound Jacobian is pinned to the CPU.
+        assert resolved is not None and resolved.platform == "cpu"
+
+
+def test_resolve_implicit_device_honors_explicit_and_pin(monkeypatch):
+    res = _res(ns=35, mpol=6, ntor=6, nfp=4)
+    # explicit device is honored (delegated to resolve_device).
+    explicit = dev.resolve_implicit_device("cpu", res)
+    assert explicit is not None and explicit.platform == "cpu"
+    # a user platform pin stands the auto policy down.
+    monkeypatch.setenv("JAX_PLATFORMS", "cpu")
+    assert dev.resolve_implicit_device(None, res) is None
 
 
 def test_device_context_is_a_nullcontext_when_placement_untouched(monkeypatch):
