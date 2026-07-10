@@ -1125,9 +1125,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       `0.0563/0.0860/0.0489`, improving only the axis row while making the well-resolved bulk five
       times worse. VMEC applies this scaling throughout its internal Fourier state, geometry,
       half-mesh energy, forces, and preconditioner. Any retry must therefore use that complete
-      representation and prove improvement against the current benchmark. M4 remains open for
-      mode-regular axis derivatives,
-      a decreasing axis residual, and materially lower Krylov work/memory at `ns>=31`.
+      representation and prove improvement against the current benchmark. A disposable complete-
+      representation prototype then restored odd-mode scaling in the full-grid field, Gauss-cell
+      energy, force curl, and solver state together. It passed all 20 focused tests and at `ns=15`
+      reached `8.90e-13`, reducing all/axis force to `0.0330/0.0412`, but raising bulk force to
+      `0.0312` and runtime to 44.9 s. Its direct `ns=23` solve exceeded four minutes and 1.25 GB
+      without finishing (accepted path: 66.5 s), proving the current preconditioner is incompatible
+      with the scaled Hessian. The prototype was not promoted. M4 remains open, but the scaled-state
+      rewrite is deferred until it is paired from inception with parity-aware SOLVAX block
+      preconditioning; acceptance still requires decreasing axis and bulk residuals plus materially
+      lower Krylov work/memory at `ns>=31`.
    6. **M5 — open-vacuum solver.** Implement the annular scalar-potential solve and couple direct
       coils/mgrid fields. Validate Laplace MMS, reciprocity, gauge removal, coil-only fields,
       side-interface `B.n`, end flux, outer-boundary convergence, and axisymmetric comparisons
