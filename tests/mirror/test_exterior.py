@@ -433,8 +433,9 @@ def test_duffy_rule_is_differentiable_in_geometry_and_density() -> None:
     np.testing.assert_allclose(jnp.sum(geometry_gradient, axis=0), 0.0, atol=3.0e-15)
 
 
-def test_spectral_side_density_reproduces_fourier_chebyshev_data() -> None:
-    grid = _grid(ns=7, mpol=2, ntheta=5, nxi=7)
+@pytest.mark.parametrize("ntheta", [5, 6])
+def test_spectral_side_density_reproduces_fourier_chebyshev_data(ntheta: int) -> None:
+    grid = _grid(ns=7, mpol=2, ntheta=ntheta, nxi=7)
     surface = build_closed_mirror_surface(MirrorBoundary.from_radius(0.3, grid), grid)
     nside = 2 * grid.ntheta * (grid.nxi - 1)
     triangles = np.asarray(surface.triangles[:nside])
