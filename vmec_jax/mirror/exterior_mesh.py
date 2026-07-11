@@ -167,16 +167,21 @@ def _spectral_side_density_samples(
         barycentric * triangle_axial_nodes[:, None, None, :], axis=-1
     )
     axial_weights = _cgl_interpolation_weights(axial_targets, nxi)
-    values = lateral_values.reshape(ntheta, nxi)
+    scalar_input = lateral_values.ndim == 1
+    values = lateral_values.reshape((-1, ntheta, nxi))
     if axisymmetric:
-        return jnp.einsum("tqrk,k->tqr", axial_weights, values[0])
+        samples = jnp.einsum("tqrk,ak->atqr", axial_weights, values[:, 0])
+        return samples[0] if scalar_input else samples
 
     angular_nodes = 2.0 * jnp.pi * (indices // nxi) / ntheta
     anchor = angular_nodes[:, :1]
     unwrapped = anchor + (angular_nodes - anchor + jnp.pi) % (2.0 * jnp.pi) - jnp.pi
     angular_targets = jnp.sum(barycentric * unwrapped[:, None, None, :], axis=-1)
     angular_weights = _periodic_interpolation_weights(angular_targets, ntheta)
-    return jnp.einsum("tqrj,jk,tqrk->tqr", angular_weights, values, axial_weights)
+    samples = jnp.einsum(
+        "tqrj,ajk,tqrk->atqr", angular_weights, values, axial_weights
+    )
+    return samples[0] if scalar_input else samples
 
 
 @partial(jax.jit, static_argnames=("order",))
@@ -327,30 +332,20 @@ def panel_green_gradient_off_surface(
         ntheta, nxi = lateral_shape
         lateral_size = ntheta * nxi
         side_count = 2 * ntheta * (nxi - 1)
+        side_samples = _spectral_side_density_samples(
+            triangles[:side_count],
+            jnp.stack([dirichlet[:lateral_size], neumann[:lateral_size]]),
+            ntheta=ntheta,
+            nxi=nxi,
+            order=order,
+            axisymmetric=axisymmetric_side,
+        )
         triangle_dirichlet = _linear_density_samples(
             triangle_dirichlet, order=order
-        ).at[:side_count].set(
-            _spectral_side_density_samples(
-                triangles[:side_count],
-                dirichlet[:lateral_size],
-                ntheta=ntheta,
-                nxi=nxi,
-                order=order,
-                axisymmetric=axisymmetric_side,
-            )
-        )
+        ).at[:side_count].set(side_samples[0])
         triangle_neumann = _linear_density_samples(
             triangle_neumann, order=order
-        ).at[:side_count].set(
-            _spectral_side_density_samples(
-                triangles[:side_count],
-                neumann[:lateral_size],
-                ntheta=ntheta,
-                nxi=nxi,
-                order=order,
-                axisymmetric=axisymmetric_side,
-            )
-        )
+        ).at[:side_count].set(side_samples[1])
     return jnp.stack(
         [
             _triangle_gradient_sum(
@@ -419,31 +414,22 @@ def panel_green_boundary_residual(
             ntheta, nxi = lateral_shape
             lateral_size = ntheta * nxi
             side_count = 2 * ntheta * (nxi - 1)
+            side_samples = _spectral_side_density_samples(
+                triangle_indices[:side_count],
+                jnp.stack([dirichlet[:lateral_size], neumann[:lateral_size]]),
+                ntheta=ntheta,
+                nxi=nxi,
+                order=order,
+                axisymmetric=axisymmetric_side,
+            )
             triangle_dirichlet = _linear_density_samples(
                 triangle_dirichlet, order=order
             ).at[:side_count].set(
-                _spectral_side_density_samples(
-                    triangle_indices[:side_count],
-                    dirichlet[:lateral_size],
-                    ntheta=ntheta,
-                    nxi=nxi,
-                    order=order,
-                    axisymmetric=axisymmetric_side,
-                )
-                - dirichlet[target_index]
+                side_samples[0] - dirichlet[target_index]
             )
             triangle_neumann = _linear_density_samples(
                 triangle_neumann, order=order
-            ).at[:side_count].set(
-                _spectral_side_density_samples(
-                    triangle_indices[:side_count],
-                    neumann[:lateral_size],
-                    ntheta=ntheta,
-                    nxi=nxi,
-                    order=order,
-                    axisymmetric=axisymmetric_side,
-                )
-            )
+            ).at[:side_count].set(side_samples[1])
         residual.append(
             _triangle_layer_sum(
                 xyz[target_index],
