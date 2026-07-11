@@ -1708,9 +1708,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       80 do not cross target beta 0.7040625% after 400 iterations (`1.016e-8/2.41e-10/1.012e-8`,
       314.8 s). Width 120 with only three restart cycles converges in 121 corrector iterations
       (`9.94e-9/6.77e-10/9.98e-9`, 115.3 s), and NESTOR releases it in 3 iterations at achieved
-      beta 0.7190%. The previous block-preconditioner requirement was premature: retain width 120
-      above this point and continue through a refined ladder to 1%. Implement a larger block/Schur
-      method only if this simpler setting reaches another measured conditioning barrier.
+      beta 0.7190%. At target beta 0.72%, width 120 remains GPU-bound beyond 578 s, while width 160
+      converges in 171 corrector iterations and releases in 3 at achieved beta 0.7343%, with all
+      components below `1e-8`. The previous block-preconditioner requirement was premature: use
+      the staged widths 80/120/160 and continue through a refined ladder to 1%. Implement a larger
+      block/Schur method only if these simpler settings reach another measured barrier.
    10. **M9 — implicit differentiation and optimization.** Wrap the converged mirror residual in a
        `custom_vjp`; solve JVP/VJP systems matrix-free with the primal preconditioner. Validate
        boundary, pressure, current, and coil derivatives against central differences. Do not

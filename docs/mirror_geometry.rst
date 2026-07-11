@@ -175,10 +175,12 @@ gate. A follow-up Krylov screen resolves the next step without adding a new
 preconditioner. Arnoldi width 80 with five restart cycles remains above the
 gate after 400 iterations and 314.8 seconds, while width 120 with three cycles
 converges target beta 0.7040625% in 121 iterations and 115.3 seconds. NESTOR
-releases that state in three iterations at achieved beta 0.7190%. The refined
-continuation therefore uses width 120 above this point; a coupled block or
-Schur preconditioner is deferred until the wider basis encounters a new
-measured barrier.
+releases that state in three iterations at achieved beta 0.7190%. At target
+beta 0.72%, width 120 is still GPU-bound after 578 seconds, whereas width 160
+converges in 171 corrector iterations and releases in three at achieved beta
+0.7343%. The refined continuation therefore stages widths 80, 120, and 160;
+a coupled block or Schur preconditioner is deferred until these simpler bases
+encounter a new measured barrier.
 
 ``examples/toroidal_stellarator_mirror_hybrid_free_boundary.py`` is the
 reproducible front end for this lane. Its editable target schedule includes

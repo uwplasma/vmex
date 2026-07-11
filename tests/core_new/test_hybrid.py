@@ -115,3 +115,4 @@ def test_square_coil_vacuum_axis_is_closed_planar_and_fourier_resolved() -> None
 def test_hybrid_corrector_expands_krylov_space_only_above_validated_endpoint() -> None:
     assert _corrector_config(0.006978125).gmres_restart == 80
     assert _corrector_config(0.007040625).gmres_restart == 120
+    assert _corrector_config(0.0072).gmres_restart == 160

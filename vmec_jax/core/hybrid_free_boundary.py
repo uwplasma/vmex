@@ -76,7 +76,9 @@ def _corrector_config(target_beta: float) -> Prec2DConfig | None:
         threshold=1.0,
         start_iteration=10,
         step=0.25,
-        gmres_restart=120 if target_beta > 0.006978125 else 80,
+        gmres_restart=(
+            160 if target_beta > 0.0071 else 120 if target_beta > 0.006978125 else 80
+        ),
         gmres_max_restarts=3,
         gmres_rtol=1.0e-2,
         backtracking=True,
@@ -156,7 +158,7 @@ def solve_square_coil_free_boundary_scan(
     Each finite-pressure point uses a fixed-LCFS predictor/corrector followed
     by a NESTOR free-boundary release.  The previous *solved* LCFS is retained
     throughout.  The current Fourier branch is validated through target beta
-    0.7040625%; higher targets remain useful for exposing the solver barrier,
+    0.72%; higher targets remain useful for exposing the solver barrier,
     but are never reported as equilibria unless they converge.
     """
 
