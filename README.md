@@ -241,8 +241,9 @@ is shaped into a quasi-symmetric stellarator (blue) by the least-squares driver
 coloured by `|B|`, and the bottom row is `|B|` in Boozer coordinates on the LCFS
 (jet line contours), whose contour geometry reads off the symmetry family —
 horizontal for QA, diagonal for QH, vertical for QP. `QS` is the quasisymmetry
-residual measured on the plotted equilibrium; the table above lists the deepest
-values reached by the full continuation campaign. Reproduce with
+residual on the plotted equilibrium: QA and QH reach deep quasisymmetry
+(1.6e-4 and **5.8e-5** — note QH's near-straight diagonal contours), while
+quasi-poloidal QP is the hardest class and plateaus near 1e-1. Reproduce with
 `python benchmarks/make_readme_figures.py --only optimization` from the decks
 in `benchmarks/opt_decks/`.*
 
