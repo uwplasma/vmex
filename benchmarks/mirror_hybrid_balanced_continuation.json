@@ -17,16 +17,27 @@
     {"target_beta": 0.006153125, "achieved_beta": 0.006285888139724074, "lambda_row_scale": 0.004, "iterations": [1, 71, 3], "residuals": [9.336038292182975e-9, 4.44569243815037e-9, 9.825506706285904e-9], "volume_m3": 0.3329833101947472, "wall_seconds": 141.67},
     {"target_beta": 0.006403125, "achieved_beta": 0.006541510017786663, "lambda_row_scale": 0.004, "iterations": [1, 81, 3], "residuals": [8.873728566659693e-9, 2.6596244407785522e-9, 9.890740381393173e-9], "volume_m3": 0.3329833106157, "wall_seconds": 68.19},
     {"target_beta": 0.006715625, "achieved_beta": 0.006860817603534578, "lambda_row_scale": 0.004, "iterations": [1, 315, 3], "residuals": [9.962155903874364e-9, 1.671255666405407e-9, 9.996696006222798e-9], "volume_m3": 0.332983311264985, "wall_seconds": 259.04},
-    {"target_beta": 0.006815625, "achieved_beta": 0.006962915596554015, "lambda_balance_target": 0.1, "iterations": [1, 261, 3], "residuals": [9.995963470690904e-9, 1.4207610393531905e-9, 9.975668267753733e-9], "volume_m3": 0.3329833119872916, "wall_seconds": 323.59}
+    {"target_beta": 0.006815625, "achieved_beta": 0.006962915596554015, "lambda_balance_target": 0.1, "iterations": [1, 261, 3], "residuals": [9.995963470690904e-9, 1.4207610393531905e-9, 9.975668267753733e-9], "volume_m3": 0.3329833119872916, "wall_seconds": 323.59},
+    {"target_beta": 0.006915625, "achieved_beta": 0.007064925035917505, "lambda_balance_target": 0.1, "newton_interval": 20, "iterations": [1, 203, 3], "residuals": [9.915666452799922e-9, 6.948863883396068e-10, 9.987288116541364e-9], "volume_m3": 0.332983312782517, "wall_seconds": 147.52},
+    {"target_beta": 0.006978125, "achieved_beta": 0.007128176300467442, "lambda_balance_target": 0.1, "newton_interval": 20, "iterations": [1, 300, 3], "residuals": [9.999500102973013e-9, 3.770533109921722e-10, 9.983614828760198e-9], "volume_m3": 0.33298331362305794, "wall_seconds": 130.79}
   ],
   "rejected_step_examples": [
     {"from_target_beta": 0.005, "target_beta": 0.0055, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [2.1482004262961658e-8, 1.547161233909098e-9, 7.690856349249837e-9]},
-    {"from_target_beta": 0.005, "target_beta": 0.00525, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [1.9660782267945982e-8, 1.5766451610779146e-9, 7.310534559762974e-9]}
+    {"from_target_beta": 0.005, "target_beta": 0.00525, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [1.9660782267945982e-8, 1.5766451610779146e-9, 7.310534559762974e-9]},
+    {"from_target_beta": 0.006915625, "target_beta": 0.007040625, "lambda_balance_target": 0.1, "newton_interval": 20, "corrector_iterations": 1000, "residuals": [1.024435547815958e-8, 2.897953544291883e-10, 1.0077072010521881e-8]}
   ],
   "dynamic_balance_screen": [
     {"target": 0.05, "derived_scale_range": [0.0006492429644588119, 0.0010860988499560452], "residuals_after_120": [1.0980355140728255e-8, 3.6341425037986868e-9, 1.0776645299663202e-8]},
     {"target": 0.1, "derived_scale_range": [0.0013033180364045694, 0.0021721976999120904], "residuals_after_120": [1.0830278504526699e-8, 2.9170725337593238e-9, 1.0547928516887476e-8]},
     {"target": 0.2, "derived_scale_range": [0.002645214633980514, 0.004344395399824181], "residuals_after_120": [1.1381040886604774e-8, 4.153792772191797e-9, 1.118461244846658e-8]}
+  ],
+  "cadence_screen": [
+    {"interval": 5, "max_residual_after_120": 1.0849666849128555e-8, "wall_seconds": 236.80},
+    {"interval": 10, "max_residual_after_120": 1.0768234558513808e-8, "wall_seconds": 107.66},
+    {"interval": 18, "max_residual_after_120": 1.0391774984012365e-8, "wall_seconds": 96.31},
+    {"interval": 20, "max_residual_after_120": 1.0225682561854022e-8, "wall_seconds": 102.78},
+    {"interval": 22, "max_residual_after_120": 1.1218826507346287e-8, "wall_seconds": 89.11},
+    {"interval": 30, "max_residual_after_120": 1.077887108691002e-8, "wall_seconds": 79.87}
   ],
   "endpoint_geometry_diagnostics": {
     "jacobian_sign_changed": false,
@@ -40,5 +51,5 @@
     "lcfs_delta_from_target_beta_0p003_max_m": 7.819948555385524e-8,
     "lcfs_delta_from_target_beta_0p003_rms_m": 2.1610656093927775e-8
   },
-  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.696%. The limiting physical components shift between FSQR and FSQL, requiring static lambda scales 0.01, 0.005, then 0.004. A bounded norm-derived scale with target ratio 0.1 advances the endpoint once more, but both physical components remain tangent to the 1e-8 gate and the corrector takes 261 iterations. The endpoint has a healthy Jacobian margin and small spectral tail, excluding loss of nested surfaces as the current blocker; improved variable/block conditioning is next."
+  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.713%. The limiting physical components shift between FSQR and FSQL, requiring static then norm-derived lambda scaling. Cadence 20 is the best globalization screen and advances two more points, but the accepted pressure increment collapses to 6.25e-5 while both residuals sit within 5e-13 of the 1e-8 gate. The endpoint has a healthy Jacobian margin and small spectral tail, excluding loss of nested surfaces. This matrix-free corrector is not a viable route to 1-50%; continuation is deferred pending a true coupled block preconditioner."
 }

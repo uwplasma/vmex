@@ -155,8 +155,8 @@ then converges in 51 iterations, with all five scheduled Newton steps accepted
 at 0.25. Its NESTOR release converges in three iterations at achieved beta
 0.3575%.
 
-Adaptive balancing extends that result through ten more genuine free-boundary
-points to achieved beta 0.6963%. The lambda row scale decreases from 0.01 to
+Adaptive balancing extends that result through twelve more genuine
+free-boundary points to achieved beta 0.7128%. The lambda row scale decreases from 0.01 to
 0.005 and 0.004 as the limiting component shifts, while every NESTOR release
 still converges in three iterations. At the last point the fixed corrector
 takes 315 iterations and ends at
@@ -164,13 +164,14 @@ takes 315 iterations and ends at
 tangent to the acceptance gate. The compact ladder is recorded in
 ``benchmarks/mirror_hybrid_balanced_continuation.json``. A bounded norm-derived
 scale, frozen within each GMRES solve and recorded in ``newton_history``,
-advances the endpoint once more but leaves ``FSQR`` and ``FSQL`` tangent to the
-gate. The next assessment is Jacobian conditioning, nested-surface quality,
-and a possible equilibrium/bifurcation limit; the branch is not extrapolated
-to 50%. That endpoint has no Jacobian sign change, minimum active-half-mesh
+plus a cadence of 20 advances the endpoint but leaves ``FSQR`` and ``FSQL``
+tangent to the gate. That endpoint has no Jacobian sign change, minimum active-half-mesh
 ``|sqrt(g)|`` is 74% of its median, spectral-tail L2 content is ``1.06e-4``,
 and iota is smooth over 0.07191--0.07241. The present limit is therefore
-solver conditioning rather than loss of nested surfaces.
+solver conditioning rather than loss of nested surfaces. Right scaling is
+numerically ineffective and GCROT costs about 40% more without crossing the
+gate. The present matrix-free corrector is therefore deferred for the 1--50%
+scan pending a true coupled block or Schur preconditioner.
 
 Fixed-boundary 3D solver
 ------------------------

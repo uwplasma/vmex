@@ -1671,8 +1671,8 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       and the inner residual is `9.1--9.2e-7`. The full NESTOR release then converges in 3
       iterations at achieved beta 0.3575%. Next: resume adaptive continuation from this solved free
       LCFS with the accepted scaling, retaining the strict component gate through 50%.
-      **Balanced continuation:** ten additional fixed-corrector/NESTOR points now reach target beta
-      0.6815625% (achieved 0.6963%). Lambda row scales decrease from 0.01 to 0.005 to 0.004 as the
+      **Balanced continuation:** twelve additional fixed-corrector/NESTOR points now reach target
+      beta 0.6978125% (achieved 0.7128%). Lambda row scales decrease from 0.01 to 0.005 to 0.004 as the
       limiting component shifts; every free release converges in 3 iterations. At the endpoint the
       fixed corrector takes 315 iterations and lands at
       `(9.96e-9,1.67e-9,9.997e-9)`, so FSQR and FSQL are simultaneously tangent to the gate.
@@ -1683,14 +1683,20 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       `0.1 * max(||g_R||,||g_Z||)`, clips the scale, freezes it for GMRES, and records it in
       `newton_history`. Target-ratio screens 0.05/0.1/0.2 select 0.1; it advances one more genuine
       point in 261 corrector + 3 NESTOR iterations at
-      `(9.996e-9,1.42e-9,9.976e-9)`. Since dynamic scaling does not remove the tangent gate, next
+      `(9.996e-9,1.42e-9,9.976e-9)`. Cadence screening selects 20; it advances two further points,
+      but the final accepted pressure increment collapses to `6.25e-5` and the endpoint takes 300
+      corrector iterations at `(9.9995e-9,3.77e-10,9.9836e-9)`. Since dynamic scaling and cadence
+      do not remove the tangent gate, next
       diagnose Jacobian conditioning, nested-surface quality, and a possible equilibrium/bifurcation
       limit before spending more continuation steps. The endpoint audit excludes geometric failure:
       minimum active-half-mesh `|sqrt(g)|` is 74% of its median, no sign change occurs, spectral-tail
       L2 content is `1.06e-4`, and iota is smooth over `0.07191--0.07241`. The LCFS displacement
       from target beta 0.30% is only 78 nm. The blocker is numerical conditioning, not lost nested
-      surfaces. Next: add opt-in right scaling of R/Z/lambda unknowns, screen it matrix-free at the
-      endpoint, and retain only a scaling that reduces both physical components and GMRES residual.
+      surfaces. Right scaling and GCROT were screened and rejected: right scales are numerically
+      indistinguishable, while GCROT misses the gate and costs 40% more. The matrix-free corrector
+      is therefore **deferred for 1--50% continuation**. A future tranche must implement the true
+      coupled radial/Fourier block structure (or an equivalent Schur preconditioner) and beat this
+      endpoint in wall time and component residual before the high-beta scan resumes.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.
