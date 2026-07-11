@@ -1564,8 +1564,9 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
       Validate mode convergence and `wout` parity with VMEC2000 before considering a native spline
       equilibrium state. Then run the 16-coil free-boundary beta scan using solved boundaries.
-      **STATUS (2026-07-11): coil-informed fixed-boundary Fourier equilibrium accepted at
-      `ftol=1e-8`; strict tolerance and free boundary remain open.** A compact
+      **STATUS (2026-07-11): coil-informed fixed-boundary Fourier equilibrium and a genuine
+      low-beta NESTOR branch are accepted at `ftol=1e-8`; tolerance promotion and the 1--50%
+      toroidal free-boundary scan remain open.** A compact
       clean-core module samples a superellipse square axis with four straight mirror
       regions and localized rotating corner ellipses, then least-squares projects the single
       real-space target into ordinary `RBC/ZBS` and axis coefficients. Geometry tests prove four
@@ -1697,9 +1698,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       is therefore **deferred for 1--50% continuation**. A future tranche must implement the true
       coupled radial/Fourier block structure (or an equivalent Schur preconditioner) and beat this
       endpoint in wall time and component residual before the high-beta scan resumes.
-      The plotted root example
-      now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
-      histories; only afterward should the 16-coil free-boundary beta scan be attempted.
+      A permanent root example now reconstructs the coils and mgrid, performs the genuine
+      fixed-predictor/fixed-corrector/NESTOR sequence, and requests the complete ladder through
+      1%, 3%, 10%, 25%, and 50%. It writes WOUT and summary data only for accepted equilibria,
+      then plots 3D coils/solved LCFS/two-turn field lines, `|B|`, cross-sections, profiles, and
+      predictor/corrector/free-release force histories. It stops with the typed sub-1% barrier;
+      it never substitutes prescribed or interpolated high-beta boundaries. A reduced scheduled
+      test runs a real beta-zero square-coil NESTOR solve and asserts the complete figure set.
+      Next: implement a coupled radial/Fourier block or Schur preconditioner and accept it only if
+      it crosses target beta 0.7040625% faster than the present 1,000-iteration failure while all
+      three physical residuals remain below `1e-8`; then resume the exact ladder to 50%.
    10. **M9 — implicit differentiation and optimization.** Wrap the converged mirror residual in a
        `custom_vjp`; solve JVP/VJP systems matrix-free with the primal preconditioner. Validate
        boundary, pressure, current, and coil derivatives against central differences. Do not

@@ -6,6 +6,8 @@ Public API (lazily imported; ``import vmec_jax as vj``):
 - :func:`~vmec_jax.core.solver.solve` — single-grid fixed-boundary solve
 - :func:`~vmec_jax.core.multigrid.solve_multigrid` — NS_ARRAY ladder (runvmec.f)
 - :func:`~vmec_jax.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmec_jax.core.hybrid_free_boundary.solve_square_coil_free_boundary_scan`
+  — solved-boundary 16-coil hybrid continuation
 - :func:`~vmec_jax.core.wout.read_wout` / :func:`~vmec_jax.core.wout.write_wout`
   / :func:`~vmec_jax.core.wout.wout_from_state` / :class:`~vmec_jax.core.wout.WoutData`
 - :func:`~vmec_jax.core.plotting.plot_wout` / :func:`~vmec_jax.core.plotting.plot_boozmn`
@@ -82,6 +84,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve": (".core.solver", "solve"),
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
+    "solve_square_coil_free_boundary_scan": (
+        ".core.hybrid_free_boundary",
+        "solve_square_coil_free_boundary_scan",
+    ),
     # wout IO
     "WoutData": (".core.wout", "WoutData"),
     "read_wout": (".core.wout", "read_wout"),
@@ -90,6 +96,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # plotting + Boozer
     "plot_wout": (".core.plotting", "plot_wout"),
     "plot_boozmn": (".core.plotting", "plot_boozmn"),
+    "plot_hybrid_free_boundary_scan": (".core.plotting", "plot_hybrid_free_boundary_scan"),
     "run_booz_xform": (".core.boozer", "run_booz_xform"),
     # external fields
     "CoilSet": (".core.coils", "CoilSet"),

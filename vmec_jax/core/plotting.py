@@ -40,6 +40,7 @@ __all__ = [
     "plot_modB",
     "plot_profiles",
     "plot_boundary_3d",
+    "plot_hybrid_free_boundary_scan",
     "plot_boozmn_modB",
     "plot_boozmn_spectrum",
     "plot_boozmn_mode_profiles",
@@ -429,6 +430,140 @@ def plot_boundary_3d(
     fig.savefig(out_path, dpi=_DPI, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
     return out_path
+
+
+def _field_line_rz(wout, alpha: float, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Trace one VMEC field line by inverting ``theta* = theta + lambda``."""
+
+    iota = float(np.asarray(wout.iotaf)[-1])
+    theta_star = alpha + iota * phi
+    theta = theta_star.copy()
+    if hasattr(wout, "lmns"):
+        lmns, lmnc = _coeff_pair(wout, "lmns", "lmnc", -1)
+        for _ in range(10):
+            angle = np.asarray(wout.xm)[:, None] * theta[None] - np.asarray(wout.xn)[:, None] * phi[None]
+            lam = np.sum(lmnc[:, None] * np.cos(angle) + lmns[:, None] * np.sin(angle), axis=0)
+            theta = theta_star - lam
+    radius, height = surface_rz(wout, s_index=-1, theta=theta, phi=phi)
+    diagonal = np.arange(phi.size)
+    return radius[diagonal, diagonal], height[diagonal, diagonal]
+
+
+def plot_hybrid_free_boundary_scan(scan, outdir: str | Path) -> dict[str, Path]:
+    """Plot coils, solved LCFSs, field lines, and continuation diagnostics.
+
+    ``scan`` is a :class:`~vmec_jax.core.hybrid_free_boundary.HybridFreeBoundaryScan`.
+    Only its accepted coupled equilibria are plotted.
+    """
+
+    from .coils import coil_geometry
+
+    plt = _import_matplotlib()
+    outdir = _ensure_outdir(outdir)
+    first, final = scan.points[0], scan.points[-1]
+    paths: dict[str, Path] = {}
+    theta = np.linspace(0.0, 2.0 * np.pi, 65)
+    phi = np.linspace(0.0, 2.0 * np.pi, 181)
+    radius, height = surface_rz(final.wout, s_index=-1, theta=theta, phi=phi)
+    phi2d = np.broadcast_to(phi[None], radius.shape)
+
+    fig = plt.figure(figsize=(8.2, 6.4), constrained_layout=True)
+    ax = fig.add_subplot(projection="3d")
+    ax.plot_surface(
+        radius * np.cos(phi2d),
+        radius * np.sin(phi2d),
+        height,
+        color="#4C9F70",
+        alpha=0.30,
+        linewidth=0,
+    )
+    for curve in np.asarray(coil_geometry(scan.coils)[0]):
+        closed = np.vstack((curve, curve[0]))
+        ax.plot(*closed.T, color="#C44E52", lw=1.15)
+    line_phi = np.linspace(0.0, 4.0 * np.pi, 720)
+    for alpha in np.linspace(0.0, 2.0 * np.pi, 7, endpoint=False):
+        line_r, line_z = _field_line_rz(final.wout, alpha, line_phi)
+        line_x, line_y = line_r * np.cos(line_phi), line_r * np.sin(line_phi)
+        ax.plot(line_x, line_y, line_z, color="white", lw=2.0, alpha=0.75)
+        ax.plot(line_x, line_y, line_z, color="#111111", lw=0.85)
+    ax.set(
+        xlabel="x [m]",
+        ylabel="y [m]",
+        zlabel="z [m]",
+        title=f"Solved free LCFS and field lines, beta={100 * final.achieved_beta:.3f}%",
+    )
+    ax.set_box_aspect((1.0, 1.0, 0.35))
+    ax.view_init(elev=27, azim=-48)
+    paths["coils_fieldlines"] = outdir / "hybrid_free_coils_fieldlines.png"
+    fig.savefig(paths["coils_fieldlines"], dpi=_DPI, bbox_inches="tight")
+    plt.close(fig)
+
+    cuts = (0, len(phi) // 8, len(phi) // 4, 3 * len(phi) // 8)
+    fig, axes = plt.subplots(1, 4, figsize=(11.5, 3.1), constrained_layout=True)
+    first_r, first_z = surface_rz(first.wout, s_index=-1, theta=theta, phi=phi)
+    for ax, index in zip(axes, cuts, strict=True):
+        ax.plot(first_r[:, index], first_z[:, index], "--", color="#666666", label="beta=0")
+        ax.plot(
+            radius[:, index],
+            height[:, index],
+            color="#0072B2",
+            label=f"beta={100 * final.achieved_beta:.3f}%",
+        )
+        ax.set_aspect("equal")
+        ax.grid(alpha=0.2)
+        ax.set(xlabel="R [m]", title=rf"$\phi={np.degrees(phi[index]):.0f}^\circ$")
+    axes[0].set_ylabel("Z [m]")
+    axes[0].legend(fontsize=7)
+    paths["cross_sections"] = outdir / "hybrid_free_cross_sections.png"
+    fig.savefig(paths["cross_sections"], dpi=_DPI, bbox_inches="tight")
+    plt.close(fig)
+
+    targets = np.asarray([point.target_beta for point in scan.points])
+    achieved = np.asarray([point.achieved_beta for point in scan.points])
+    iterations = np.asarray(
+        [point.predictor_iterations + point.corrector_iterations + point.free_iterations for point in scan.points]
+    )
+    fig, axes = plt.subplots(2, 2, figsize=(9.0, 6.5), constrained_layout=True)
+    axes[0, 0].plot(100 * targets, 100 * achieved, "o-", color="#0072B2")
+    axes[0, 0].plot(100 * targets, 100 * targets, "--", color="#777777", lw=1)
+    axes[0, 0].set(xlabel="Target beta [%]", ylabel="Achieved beta [%]", title="Coupled equilibria")
+    if scan.failed_corrector is None:
+        stages = [
+            ("predictor", final.predictor_result),
+            ("corrector", final.corrector_result),
+            ("free release", final.result),
+        ]
+        convergence_title = "Endpoint convergence"
+    else:
+        stages = [
+            ("predictor", scan.failed_predictor),
+            ("rejected corrector", scan.failed_corrector),
+        ]
+        convergence_title = f"Rejected target {100 * scan.failed_target_beta:.4f}%"
+    histories = [np.asarray(result.fsq_history) for _, result in stages if result is not None]
+    history = np.concatenate(histories)
+    for column, label, color in zip(range(3), ("FSQR", "FSQZ", "FSQL"), ("#0072B2", "#009E73", "#D55E00"), strict=True):
+        axes[0, 1].semilogy(np.maximum(history[:, column], 1.0e-18), label=label, color=color)
+    axes[0, 1].axhline(final.maximum_residual, color="#777777", ls=":", lw=1)
+    offset = 0
+    for label, result in stages[:-1]:
+        if result is not None:
+            offset += len(result.fsq_history)
+            axes[0, 1].axvline(offset, color="#999999", ls="--", lw=0.8)
+            axes[0, 1].text(offset, axes[0, 1].get_ylim()[1], label, rotation=90, va="top", ha="right", fontsize=7)
+    axes[0, 1].set(xlabel="Solve iteration", ylabel="Force residual", title=convergence_title)
+    axes[0, 1].legend(fontsize=8)
+    axes[1, 0].plot(100 * targets, iterations, "s-", color="#009E73")
+    axes[1, 0].set(xlabel="Target beta [%]", ylabel="Total iterations", title="Continuation cost")
+    volumes = np.asarray([point.wout.volume_p for point in scan.points])
+    axes[1, 1].plot(100 * targets, 100 * (volumes / volumes[0] - 1.0), "o-", color="#D55E00")
+    axes[1, 1].set(xlabel="Target beta [%]", ylabel="Volume change [%]", title="Solved boundary response")
+    for ax in axes.flat:
+        ax.grid(alpha=0.2)
+    paths["continuation"] = outdir / "hybrid_free_beta_convergence.png"
+    fig.savefig(paths["continuation"], dpi=_DPI, bbox_inches="tight")
+    plt.close(fig)
+    return paths
 
 
 # ==========================================================================

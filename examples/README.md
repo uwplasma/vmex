@@ -29,6 +29,11 @@ All runnable examples live under this single `examples/` tree.
     ellipses, solve the finite-current equilibrium, and write WOUT plus 3D
     coils/LCFS/pitched-field-line, `|B|`, cross-section, profile, and residual
     plots.
+  - `toroidal_stellarator_mirror_hybrid_free_boundary.py` — construct the same
+    16 coils, solve the coil-matched LCFS with NESTOR, and pressure-continue
+    only accepted equilibria. The requested schedule extends through 50%, but
+    the present Fourier corrector stops honestly at its documented sub-1%
+    conditioning barrier; no prescribed high-beta surfaces are plotted.
 - `optimization/`: precise QA/QH/QP/QI from a circular torus — one file each,
   simsopt-style (`(function, target, weight)` terms + one least-squares call
   per `max_mode` continuation stage, implicit adjoint gradients).  All read

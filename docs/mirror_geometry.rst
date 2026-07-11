@@ -30,9 +30,10 @@ Higher-order exterior traces and additional independent boundary references
 remain promotion gates. The nonaxisymmetric path also converges through 50%,
 but its point observables are not yet monotone under spatial refinement, so it
 remains a development capability. The toroidal stellarator-mirror hybrid now
-has a converged coil-informed fixed-boundary path and independent VMEC2000
-restart parity at ``1e-8``; stricter preconditioning and free-boundary gates
-remain open.
+has a converged coil-informed fixed-boundary path, independent VMEC2000 restart
+parity, and a genuine NESTOR branch through achieved beta 0.7128% at
+``ftol=1e-8``. Stricter preconditioning and the 1--50% toroidal free-boundary
+gate remain open.
 
 Toroidal hybrid foundation
 --------------------------
@@ -172,6 +173,24 @@ solver conditioning rather than loss of nested surfaces. Right scaling is
 numerically ineffective and GCROT costs about 40% more without crossing the
 gate. The present matrix-free corrector is therefore deferred for the 1--50%
 scan pending a true coupled block or Schur preconditioner.
+
+``examples/toroidal_stellarator_mirror_hybrid_free_boundary.py`` is the
+reproducible front end for this lane. Its editable target schedule includes
+1%, 3%, 10%, 25%, and 50%, but every output boundary comes from a completed
+fixed-predictor/fixed-corrector/NESTOR solve. At the current conditioning
+barrier the script records the rejected target and stops; it does not draw
+prescribed high-beta surfaces. For each accepted point it writes WOUT and a
+compact JSON row. The final accepted state receives the standard ``|B|``,
+profile, surface, and 3D plots plus hybrid-specific coil/LCFS/two-turn field
+lines, cross-sections, volume response, and all-stage force histories.
+
+Run examples from an editable installation of this checkout so another local
+clone cannot be imported accidentally::
+
+   cd /path/to/vmec_mirror
+   python -m venv venv
+   venv/bin/python -m pip install -e .
+   venv/bin/python examples/toroidal_stellarator_mirror_hybrid_free_boundary.py
 
 Fixed-boundary 3D solver
 ------------------------
