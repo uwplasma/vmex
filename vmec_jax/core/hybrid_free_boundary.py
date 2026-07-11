@@ -158,7 +158,7 @@ def solve_square_coil_free_boundary_scan(
     Each finite-pressure point uses a fixed-LCFS predictor/corrector followed
     by a NESTOR free-boundary release.  The previous *solved* LCFS is retained
     throughout.  The current Fourier branch is validated through target beta
-    0.75%; higher targets remain useful for exposing the solver barrier,
+    0.775%; higher targets remain useful for exposing the solver barrier,
     but are never reported as equilibria unless they converge.
     """
 

@@ -1711,7 +1711,8 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       beta 0.7190%. At target beta 0.72%, width 120 remains GPU-bound beyond 578 s, while width 160
       converges in 171 corrector iterations and releases in 3 at achieved beta 0.7343%, with all
       components below `1e-8`. Width 160 also accepts targets 0.735% and 0.75% in 291 and 411
-      corrector iterations, reaching achieved beta 0.7643%. The previous block-preconditioner
+      corrector iterations, reaching achieved beta 0.7643%. Target 0.775% then converges in 431
+      corrector iterations and releases at achieved beta 0.7896%. The previous block-preconditioner
       requirement was premature: use the staged widths 80/120/160 and continue through a refined
       ladder to 1%. Implement a larger block/Schur method only if these simpler settings reach
       another measured barrier.
