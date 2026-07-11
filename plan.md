@@ -536,6 +536,15 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
 
 **R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
 as a longer refactor).**
+  **(R22 DONE 2026-07-11 except the ns=201 figure regen, which is folded into R9.)** Commits caf…→3e8296b2:
+  (1) install now reads PyPI-recommended-OR-conda; (2) all `|B|` plots are line contours (plot_modB,
+  Boozer, showcase, optimization); (3) QI reworked into its own `readme_qi.png` at nfp 1-4 with the
+  OMNIGENITY residual (1.3e-2→3.2e-3) + 3D `|B|`, and `readme_optimization.png` split to QA/QH/QP with
+  3D `|B|` and the PRECISE R1 QH deck (QS 5.83e-5, straight diagonal Boozer contours; QA 1.6e-4; QP
+  0.094 — honestly the hardest class); (4) DESC comparison rewritten as a concise where-each-wins table;
+  (5) warm/cold/GPU/memory bullets cut to 1-2 sentences; (6) benchmark harness RAMP_NS=201 (figure regen
+  at R9 — needs idle box + vmecpp). NOTE learned: the QH/QP re-optimization is genuinely multi-hour even
+  capped (implicit-gradient per-dof GMRES); reused the saved R1 campaign decks from office instead.
   1. **Install: PyPI (recommended) OR conda-forge.** Make the README install section state clearly that
      it is *either* `pip install vmex/vmec-jax` (recommended) *or* `conda install -c conda-forge`, not
      both — one path, recommended = PyPI.
