@@ -233,17 +233,30 @@ residual = `QuasisymmetryRatioResidual.total`):
 | QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
 | QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
 
-![QA/QH/QP/QI optimization: seed vs optimized boundary and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
+![QA/QH/QP optimization: seed vs optimized boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
 
-*Each class starts from a near-circular torus (grey, dashed) and is shaped
-into a quasi-symmetric stellarator (blue) by the least-squares driver; the
-bottom row is `|B|` in Boozer coordinates on the LCFS (jet), whose contour
-geometry reads off the symmetry family — horizontal for QA, diagonal for QH,
-vertical for QP. `QS` is the quasisymmetry residual measured on the plotted
-equilibrium; the table above lists the deepest values reached by the full
-continuation campaign. Reproduce with
+*Each quasisymmetry class starts from a near-circular torus (grey, dashed) and
+is shaped into a quasi-symmetric stellarator (blue) by the least-squares driver
+(top row); the middle row is the optimized last-closed flux surface in 3-D
+coloured by `|B|`, and the bottom row is `|B|` in Boozer coordinates on the LCFS
+(jet line contours), whose contour geometry reads off the symmetry family —
+horizontal for QA, diagonal for QH, vertical for QP. `QS` is the quasisymmetry
+residual measured on the plotted equilibrium; the table above lists the deepest
+values reached by the full continuation campaign. Reproduce with
 `python benchmarks/make_readme_figures.py --only optimization` from the decks
 in `benchmarks/opt_decks/`.*
+
+Quasi-isodynamic (QI) shaping is intrinsically harder than quasisymmetry, so it
+gets its own row across field periods:
+
+![QI equilibria at nfp 1-4: boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_qi.png)
+
+*Quasi-isodynamic (QI) equilibria at nfp 1, 2, 3, 4 (bundled decks in
+`examples/data/`): boundary cross-sections (top), 3-D `|B|` geometry (middle),
+and `|B|` in Boozer coordinates on the LCFS (jet, bottom). The label is the QI
+(omnigenity) residual — **not** QS; QI is hard, so ~1e-3–1e-2 is expected here,
+not the ~1e-5 reachable for quasisymmetry. Reproduce with
+`python benchmarks/make_readme_figures.py --only qi`.*
 
 Implicit gradients are *essential*, not merely faster: for the helical (QH)
 target the exact-axisymmetric seed is a saddle where finite differences stall,
