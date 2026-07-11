@@ -116,6 +116,7 @@ def solve_free_boundary_cli(
     exterior_ntheta: int = 40,
     exterior_order: int = 8,
     exterior_spectral_side_density: bool = False,
+    exterior_high_order_cap_panels: bool = False,
     exterior_curved_side_geometry: bool = False,
     exterior_jacobian_chunk_size: int = 6,
     require_convergence: bool = False,
@@ -279,6 +280,7 @@ def solve_free_boundary_cli(
                     axisymmetric_ntheta=exterior_ntheta,
                     order=exterior_order,
                     spectral_side_density=exterior_spectral_side_density,
+                    spectral_cap_density=exterior_high_order_cap_panels,
                     curved_side_geometry=exterior_curved_side_geometry,
                 )
             else:
@@ -290,6 +292,7 @@ def solve_free_boundary_cli(
                     coilset,
                     order=exterior_order,
                     spectral_side_density=exterior_spectral_side_density,
+                    spectral_cap_density=exterior_high_order_cap_panels,
                     curved_side_geometry=exterior_curved_side_geometry,
                 )
             vacuum_geometry = vacuum_field.surface

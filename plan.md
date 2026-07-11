@@ -1456,15 +1456,17 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       `(ns,nxi,ntheta)=(9,13,16),(13,21,24),(17,29,32)`, about 2.6 times below the fine planar-
       side result; axisymmetric and 3D shape JVPs remain finite. Separating residuals shows the
       remaining fine-grid error is concentrated on the planar caps/rim, so side refinement alone
-      is complete. A mixed Fourier/local-cubic cap-density prototype is stable on rim-graded nodes
-      and improves the medium dipole field error `1.056% -> 0.503%`, but only changes boundary
-      error `0.786% -> 0.766%` and raises condition number `3.88 -> 4.83`. At the coupled coarse
-      `ns=5` gates, cap interpolation raises the axisymmetric/3D BIE condition numbers
-      `3.00 -> 242.6` and `2.66 -> 53.4`; both full equilibrium gates therefore reject it. Keep
-      cap interpolation in the differentiated low-level BIE research API only, not the CLI or beta
-      continuation. The next discretization experiment is curved cap geometry with a rim-aware
-      local basis or singular edge treatment, accepted only if it improves MMS convergence and
-      coupled conditioning simultaneously.
+      is complete. A density-only Fourier/local-cubic cap prototype improves the medium dipole
+      field error `1.056% -> 0.503%`, but raises the coarse `ns=5` axisymmetric/3D condition numbers
+      `3.00 -> 242.6` and `2.66 -> 53.4`; it was rejected. The accepted paired method instead uses
+      exact polar/star-shaped cap geometry and selects linear, quadratic, or cubic radial density
+      interpolation according to ring count, retaining Fourier interpolation in angle. Circular
+      cap area and orientation are exact to roundoff; axisymmetric and 3D shape JVPs pass. At the
+      medium dipole grid, boundary error improves `0.786% -> 0.725%`, off-surface field error
+      `1.056% -> 0.121%`, and condition remains 4.89. Coarse axisymmetric/3D conditions are
+      `3.07/2.73`. Both actual beta `0,10%,25%,50%` coupled gates pass at `ftol=1e-12` in 436 s.
+      The equilibrium API exposes this as `exterior_high_order_cap_panels`; it remains opt-in until
+      medium/fine global and local-mode convergence plus runtime/memory costs are measured.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.

@@ -74,6 +74,7 @@ def solve_beta_scan_cli(
     exterior_ntheta: int = 40,
     exterior_order: int = 8,
     exterior_spectral_side_density: bool = False,
+    exterior_high_order_cap_panels: bool = False,
     exterior_curved_side_geometry: bool = False,
     exterior_jacobian_chunk_size: int = 6,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
@@ -147,6 +148,7 @@ def solve_beta_scan_cli(
             exterior_ntheta=exterior_ntheta,
             exterior_order=exterior_order,
             exterior_spectral_side_density=exterior_spectral_side_density,
+            exterior_high_order_cap_panels=exterior_high_order_cap_panels,
             exterior_curved_side_geometry=exterior_curved_side_geometry,
             exterior_jacobian_chunk_size=exterior_jacobian_chunk_size,
             target_central_pressure=None if beta == 0.0 else central_pressure,

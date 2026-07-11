@@ -10,11 +10,15 @@ import jax.numpy as jnp
 import jax
 import numpy as np
 from .basis import _cgl_derivative_matrix
+from .exterior_cap_panels import (
+    curved_cap_geometry as _curved_cap_geometry,
+    curved_cap_gradient_sum as _curved_cap_gradient_sum,
+    curved_cap_layer_sum as _curved_cap_layer_sum,
+    spectral_cap_samples as _spectral_cap_samples,
+)
 from .exterior_interpolation import (
-    cap_nodal_values as _cap_nodal_values,
     cgl_interpolation_weights as _cgl_interpolation_weights,
     periodic_interpolation_weights as _periodic_interpolation_weights,
-    spectral_cap_density_samples as _spectral_cap_density_samples,
 )
 
 Array = Any
@@ -113,52 +117,6 @@ def _linear_density_samples(values: Array, *, order: int) -> Array:
         (1.0 - v) * values[:, 1, None, None]
         + v * values[:, 2, None, None]
     )
-
-
-def _triangle_source_points(vertices: Array, *, order: int) -> Array:
-    """Map Duffy quadrature nodes to linear triangle source points."""
-
-    nodes, _ = _unit_gauss_legendre(order)
-    u = jnp.asarray(nodes, dtype=vertices.dtype)[None, :, None]
-    v = jnp.asarray(nodes, dtype=vertices.dtype)[None, None, :]
-    edge1 = vertices[:, 1] - vertices[:, 0]
-    edge2 = vertices[:, 2] - vertices[:, 0]
-    ray = (1.0 - v)[..., None] * edge1[:, None, None, :] + (
-        v[..., None] * edge2[:, None, None, :]
-    )
-    return vertices[:, 0, :][:, None, None, :] + u[..., None] * ray
-
-
-def _spectral_cap_samples(
-    vertices: Array,
-    dirichlet: Array,
-    neumann: Array,
-    lower_cap_xyz: Array,
-    upper_cap_xyz: Array,
-    *,
-    side_count: int,
-    ntheta: int,
-    nxi: int,
-    order: int,
-) -> Array:
-    """Evaluate both boundary densities on lower and upper cap triangles."""
-
-    ns = int(lower_cap_xyz.shape[0])
-    cap_count = (vertices.shape[0] - side_count) // 2
-    values = jnp.stack([dirichlet, neumann])
-    lower_values = _cap_nodal_values(
-        values, ntheta=ntheta, nxi=nxi, ns=ns, upper=False
-    )
-    upper_values = _cap_nodal_values(
-        values, ntheta=ntheta, nxi=nxi, ns=ns, upper=True
-    )
-    lower_source = _triangle_source_points(
-        vertices[side_count : side_count + cap_count], order=order
-    )
-    upper_source = _triangle_source_points(vertices[side_count + cap_count :], order=order)
-    lower = _spectral_cap_density_samples(lower_source, lower_values, lower_cap_xyz)
-    upper = _spectral_cap_density_samples(upper_source, upper_values, upper_cap_xyz)
-    return jnp.concatenate([lower, upper], axis=1)
 
 
 def _side_parameter_data(
@@ -549,6 +507,15 @@ def panel_green_gradient_off_surface(
             raise ValueError("cap geometry is required for spectral cap density")
         ntheta, nxi = lateral_shape
         side_count = 2 * ntheta * (nxi - 1)
+        cap_count = (triangles.shape[0] - side_count) // 2
+        lower_triangles = triangles[side_count : side_count + cap_count]
+        upper_triangles = triangles[side_count + cap_count :]
+        lower_source, _ = _curved_cap_geometry(
+            lower_triangles, lower_cap_xyz, nxi=nxi, upper=False, order=order
+        )
+        upper_source, _ = _curved_cap_geometry(
+            upper_triangles, upper_cap_xyz, nxi=nxi, upper=True, order=order
+        )
         if triangle_dirichlet.ndim == 2:
             triangle_dirichlet = _linear_density_samples(
                 triangle_dirichlet, order=order
@@ -564,13 +531,16 @@ def panel_green_gradient_off_surface(
             ntheta=ntheta,
             nxi=nxi,
             order=order,
+            lower_source=lower_source,
+            upper_source=upper_source,
         )
         triangle_dirichlet = triangle_dirichlet.at[side_count:].set(cap_samples[0])
         triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
 
-    if curved_side_geometry:
+    if curved_side_geometry or spectral_cap_density:
         if lateral_xyz is None:
             raise ValueError("lateral_xyz is required for curved side geometry")
+        side_vertices = vertices[:side_count]
         side_gradient = jnp.stack(
             [
                 _curved_side_gradient_sum(
@@ -582,6 +552,14 @@ def panel_green_gradient_off_surface(
                     order=order,
                     axisymmetric=axisymmetric_side,
                 )
+                if curved_side_geometry
+                else _triangle_gradient_sum(
+                    target,
+                    side_vertices,
+                    triangle_dirichlet[:side_count],
+                    triangle_neumann[:side_count],
+                    order=order,
+                )
                 for target in targets
             ]
         )
@@ -590,7 +568,28 @@ def panel_green_gradient_off_surface(
         cap_neumann = triangle_neumann[side_count:]
         cap_gradient = jnp.stack(
             [
-                _triangle_gradient_sum(
+                _curved_cap_gradient_sum(
+                    target,
+                    lower_triangles,
+                    lower_cap_xyz,
+                    cap_dirichlet[:cap_count],
+                    cap_neumann[:cap_count],
+                    nxi=nxi,
+                    upper=False,
+                    order=order,
+                )
+                + _curved_cap_gradient_sum(
+                    target,
+                    upper_triangles,
+                    upper_cap_xyz,
+                    cap_dirichlet[cap_count:],
+                    cap_neumann[cap_count:],
+                    nxi=nxi,
+                    upper=True,
+                    order=order,
+                )
+                if spectral_cap_density
+                else _triangle_gradient_sum(
                     target,
                     cap_vertices,
                     cap_dirichlet,
@@ -697,6 +696,23 @@ def panel_green_boundary_residual(
                 raise ValueError("cap geometry is required for spectral cap density")
             ntheta, nxi = lateral_shape
             side_count = 2 * ntheta * (nxi - 1)
+            cap_count = (triangle_indices.shape[0] - side_count) // 2
+            lower_triangles = triangle_indices[side_count : side_count + cap_count]
+            upper_triangles = triangle_indices[side_count + cap_count :]
+            lower_source, _ = _curved_cap_geometry(
+                lower_triangles,
+                lower_cap_xyz,
+                nxi=nxi,
+                upper=False,
+                order=order,
+            )
+            upper_source, _ = _curved_cap_geometry(
+                upper_triangles,
+                upper_cap_xyz,
+                nxi=nxi,
+                upper=True,
+                order=order,
+            )
             if triangle_dirichlet.ndim == 2:
                 triangle_dirichlet = _linear_density_samples(
                     triangle_dirichlet, order=order
@@ -714,29 +730,64 @@ def panel_green_boundary_residual(
                 ntheta=ntheta,
                 nxi=nxi,
                 order=order,
+                lower_source=lower_source,
+                upper_source=upper_source,
             )
             triangle_dirichlet = triangle_dirichlet.at[side_count:].set(
                 cap_samples[0] - dirichlet[target_index]
             )
             triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
-        if curved_side_geometry:
+        if curved_side_geometry or spectral_cap_density:
             if lateral_xyz is None:
                 raise ValueError("lateral_xyz is required for curved side geometry")
-            side_integral = _curved_side_layer_sum(
-                xyz[target_index],
-                triangle_indices[:side_count],
-                lateral_xyz,
-                triangle_dirichlet[:side_count],
-                triangle_neumann[:side_count],
-                order=order,
-                axisymmetric=axisymmetric_side,
+            side_integral = (
+                _curved_side_layer_sum(
+                    xyz[target_index],
+                    triangle_indices[:side_count],
+                    lateral_xyz,
+                    triangle_dirichlet[:side_count],
+                    triangle_neumann[:side_count],
+                    order=order,
+                    axisymmetric=axisymmetric_side,
+                )
+                if curved_side_geometry
+                else _triangle_layer_sum(
+                    xyz[target_index],
+                    xyz[triangle_indices[:side_count]],
+                    triangle_dirichlet[:side_count],
+                    triangle_neumann[:side_count],
+                    order=order,
+                )
             )
-            cap_integral = _triangle_layer_sum(
-                xyz[target_index],
-                xyz[triangle_indices[side_count:]],
-                triangle_dirichlet[side_count:],
-                triangle_neumann[side_count:],
-                order=order,
+            cap_integral = (
+                _curved_cap_layer_sum(
+                    xyz[target_index],
+                    lower_triangles,
+                    lower_cap_xyz,
+                    triangle_dirichlet[side_count : side_count + cap_count],
+                    triangle_neumann[side_count : side_count + cap_count],
+                    nxi=nxi,
+                    upper=False,
+                    order=order,
+                )
+                + _curved_cap_layer_sum(
+                    xyz[target_index],
+                    upper_triangles,
+                    upper_cap_xyz,
+                    triangle_dirichlet[side_count + cap_count :],
+                    triangle_neumann[side_count + cap_count :],
+                    nxi=nxi,
+                    upper=True,
+                    order=order,
+                )
+                if spectral_cap_density
+                else _triangle_layer_sum(
+                    xyz[target_index],
+                    xyz[triangle_indices[side_count:]],
+                    triangle_dirichlet[side_count:],
+                    triangle_neumann[side_count:],
+                    order=order,
+                )
             )
             residual.append(side_integral + cap_integral)
             continue

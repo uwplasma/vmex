@@ -105,6 +105,7 @@ def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
                 kwargs["initial_state"],
                 kwargs["initial_mass_scale"],
                 kwargs["exterior_spectral_side_density"],
+                kwargs["exterior_high_order_cap_panels"],
                 kwargs["exterior_curved_side_geometry"],
             )
         )
@@ -128,6 +129,7 @@ def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
         reference_field=1.0,
         initial_restart=restart,
         exterior_spectral_side_density=True,
+        exterior_high_order_cap_panels=True,
         exterior_curved_side_geometry=True,
     )
 
@@ -137,3 +139,4 @@ def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
     assert received[1][2] == 3.0
     assert all(item[3] is True for item in received)
     assert all(item[4] is True for item in received)
+    assert all(item[5] is True for item in received)

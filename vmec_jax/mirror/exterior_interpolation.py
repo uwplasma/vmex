@@ -96,7 +96,10 @@ def spectral_cap_density_samples(
     # norm at the cap center, whose coordinate is identically zero.
     reference_radius = jnp.maximum(cap_xyz[-1, 0, 0], jnp.finfo(source.dtype).tiny)
     radial_nodes = cap_xyz[:, 0, 0] / reference_radius
-    radial_weights = local_interpolation_weights(radial_nodes, normalized_radius)
+    width = 2 if ns < 7 else 3 if ns < 11 else 4
+    radial_weights = local_interpolation_weights(
+        radial_nodes, normalized_radius, width=width
+    )
     samples = jnp.einsum(
         "...j,arj,...r->a...", angular_weights, cap_values, radial_weights
     )

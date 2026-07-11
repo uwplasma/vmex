@@ -18,6 +18,10 @@ from vmec_jax.mirror.exterior_mesh import (  # noqa: E402
 from vmec_jax.mirror.exterior_interpolation import (  # noqa: E402
     spectral_cap_density_samples,
 )
+from vmec_jax.mirror.exterior_cap_panels import (  # noqa: E402
+    _unit_rule,
+    curved_cap_geometry,
+)
 
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
@@ -69,6 +73,31 @@ def test_closed_cylinder_has_exact_area_volume_and_orientation() -> None:
     )
     assert np.all(np.asarray(surface.lower_cap_weighted_normals[..., 2]) < 0.0)
     assert np.all(np.asarray(surface.upper_cap_weighted_normals[..., 2]) > 0.0)
+
+
+def test_curved_cap_panels_integrate_exact_circular_disks() -> None:
+    grid = _grid(ns=7, nxi=9)
+    radius = 0.37
+    surface = build_closed_mirror_surface(
+        MirrorBoundary.from_radius(radius, grid), grid, axisymmetric_ntheta=12
+    )
+    side_count = 2 * 12 * (grid.nxi - 1)
+    cap_count = (surface.triangles.shape[0] - side_count) // 2
+    _, weights = _unit_rule(8)
+    for upper, cap_xyz, triangles in (
+        (False, surface.lower_cap_xyz, surface.triangles[side_count : side_count + cap_count]),
+        (True, surface.upper_cap_xyz, surface.triangles[side_count + cap_count :]),
+    ):
+        _, area_vectors = curved_cap_geometry(
+            triangles, cap_xyz, nxi=grid.nxi, upper=upper, order=8
+        )
+        area = jnp.sum(
+            jnp.asarray(weights)[None, :, None]
+            * jnp.asarray(weights)[None, None, :]
+            * jnp.linalg.norm(area_vectors, axis=-1)
+        )
+        np.testing.assert_allclose(area, np.pi * radius**2, rtol=2.0e-14)
+        assert np.all(np.sign(np.asarray(area_vectors[..., 2])) == (1 if upper else -1))
 
 
 def test_shaped_surface_satisfies_divergence_theorem_moments() -> None:
@@ -512,7 +541,7 @@ def test_spectral_side_density_reproduces_fourier_chebyshev_data(ntheta: int) ->
 
 
 def test_spectral_cap_density_reproduces_radial_fourier_data() -> None:
-    ns, ntheta = 7, 8
+    ns, ntheta = 11, 8
     radial_nodes = jnp.asarray(np.linspace(0.0, 1.0, ns) ** 2)
     theta_nodes = 2.0 * jnp.pi * jnp.arange(ntheta) / ntheta
     rho, theta = jnp.meshgrid(radial_nodes, theta_nodes, indexing="ij")
