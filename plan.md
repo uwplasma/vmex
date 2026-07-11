@@ -1245,7 +1245,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       vanishes at exterior targets. Repeated polar cap centers now map to one density unknown, and
       cap rims reuse the lateral end-ring unknowns; a continuity test proves exact expansion from
       this unique collocation grid back to quadrature nodes. This removes the known duplicate-node
-      rank defect before system assembly. This does not yet solve the exterior problem: cap-aware singular/near-singular
+      rank defect before system assembly. A periodic-side/polar-cap triangular mesh over those
+      nodes is watertight (every edge has two owners), outward oriented, nondegenerate, and shows
+      the expected second-order cylinder area/volume convergence. Disposable boundary-limit tests
+      rejected offset collocation (condition numbers `1e6--1e19`, unreliable densities) and
+      equal-area-disk self terms (8.3% linear-harmonic boundary error at about 1,900 unknowns).
+      Following Duffy (1982), the next accepted path is local transformed singular quadrature with
+      explicit cap-rim grading; smooth-surface QBX alone does not resolve the artificial sharp rim.
+      This does not yet solve the exterior problem: cap-aware singular/near-singular
       quadrature, the second-kind boundary equation and nullspace, harmonic MMS, and coupling that
       deletes the finite outer cylinder remain the next M5 gates.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior

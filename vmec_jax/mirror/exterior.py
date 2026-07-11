@@ -17,6 +17,8 @@ import jax.numpy as jnp
 import numpy as np
 from virtual_casing_jax import laplace_dx_u_eval, laplace_fx_u, laplace_fxd_u_eval
 
+from .exterior_mesh import closed_surface_triangles
+
 Array = Any
 
 
@@ -38,6 +40,7 @@ class ClosedMirrorSurface:
     collocation_xyz: Array
     collocation_normals: Array
     quadrature_to_collocation: Array
+    triangles: Array
 
     @property
     def xyz(self) -> Array:
@@ -98,6 +101,29 @@ class ClosedMirrorSurface:
         if values.shape != expected:
             raise ValueError(f"collocation values shape {values.shape} must be {expected}")
         return values[self.quadrature_to_collocation]
+
+    @property
+    def triangle_xyz(self) -> Array:
+        """Linear-panel vertices with shape ``(ntriangle, 3, 3)``."""
+
+        return self.collocation_xyz[self.triangles]
+
+    @property
+    def mesh_area(self) -> Array:
+        """Area of the piecewise-linear closed panel mesh."""
+
+        vertices = self.triangle_xyz
+        cross = jnp.cross(vertices[:, 1] - vertices[:, 0], vertices[:, 2] - vertices[:, 0])
+        return 0.5 * jnp.sum(jnp.linalg.norm(cross, axis=1))
+
+    @property
+    def mesh_volume(self) -> Array:
+        """Signed volume of the outward-oriented panel mesh."""
+
+        vertices = self.triangle_xyz
+        return jnp.sum(
+            jnp.einsum("ij,ij->i", vertices[:, 0], jnp.cross(vertices[:, 1], vertices[:, 2]))
+        ) / 6.0
 
 
 jax.tree_util.register_dataclass(
@@ -244,6 +270,9 @@ def build_closed_mirror_surface(
             upper_collocation_normals,
         ]
     )
+    triangles = jnp.asarray(
+        closed_surface_triangles(lateral_map, lower_map, upper_map)
+    )
     return ClosedMirrorSurface(
         lateral_xyz=lateral_xyz,
         lateral_weighted_normals=lateral_weighted_normals,
@@ -254,6 +283,7 @@ def build_closed_mirror_surface(
         collocation_xyz=collocation_xyz,
         collocation_normals=collocation_normals,
         quadrature_to_collocation=quadrature_to_collocation,
+        triangles=triangles,
     )
 
 

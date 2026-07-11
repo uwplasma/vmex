@@ -105,6 +105,47 @@ def test_collocation_map_identifies_cap_centers_and_rims() -> None:
     np.testing.assert_allclose(expanded, expected_values, atol=2.0e-15)
 
 
+def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:
+    errors = []
+    for ns, nxi, ntheta in ((9, 13, 8), (17, 25, 32)):
+        grid = _grid(ns=ns, nxi=nxi)
+        radius = 0.37
+        surface = build_closed_mirror_surface(
+            MirrorBoundary.from_radius(radius, grid),
+            grid,
+            axisymmetric_ntheta=ntheta,
+        )
+        triangles = np.asarray(surface.triangles)
+        edges = np.sort(
+            np.concatenate(
+                [triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]]
+            ),
+            axis=1,
+        )
+        _, edge_counts = np.unique(edges, axis=0, return_counts=True)
+        assert np.all(edge_counts == 2)
+
+        vertices = np.asarray(surface.triangle_xyz)
+        doubled_area = np.linalg.norm(
+            np.cross(vertices[:, 1] - vertices[:, 0], vertices[:, 2] - vertices[:, 0]),
+            axis=1,
+        )
+        assert np.all(doubled_area > 0.0)
+        assert float(surface.mesh_volume) > 0.0
+
+        expected_area = 2.0 * np.pi * radius * 2.8 + 2.0 * np.pi * radius**2
+        expected_volume = np.pi * radius**2 * 2.8
+        errors.append(
+            max(
+                abs(float(surface.mesh_area) - expected_area) / expected_area,
+                abs(float(surface.mesh_volume) - expected_volume) / expected_volume,
+            )
+        )
+
+    assert errors[1] < 0.3 * errors[0]
+    assert errors[1] < 7.0e-3
+
+
 def test_closed_surface_volume_is_differentiable() -> None:
     grid = _grid(ns=15, nxi=21)
 

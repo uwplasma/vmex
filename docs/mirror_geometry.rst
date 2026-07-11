@@ -163,6 +163,11 @@ end rings. ``ClosedMirrorSurface`` therefore also provides a unique
 collocation grid and an explicit map that expands continuous collocation values
 back to all quadrature nodes; repeated geometry never becomes duplicate BIE
 unknowns.
+The same unique nodes define a watertight outward-oriented triangular panel
+mesh. Every undirected edge belongs to exactly two panels, no panel is
+degenerate, and cylinder area/volume converge at the expected second order as
+the inscribed angular polygon is refined. This topology is the input for local
+Duffy quadrature at singular panels.
 
 Tests require exact cylinder area and volume, zero integrated normal, the full
 tensor divergence theorem on a theta-shaped flared tube, cap/side ring
@@ -180,3 +185,16 @@ still needs cap-aware singular and near-singular quadrature, a second-kind
 exterior boundary equation with gauge/nullspace handling, manufactured
 harmonic convergence, and replacement of the finite outer cylinder in the
 coupled free-boundary solve.
+
+Two cheaper boundary-limit approximations were tested and rejected. Inward or
+outward offset collocation produced density-system condition numbers from
+``1e6`` to ``1e19`` and did not converge reliably. Replacing each singular
+single-layer panel by an equal-area disk was stable but only algebraic: the
+hardest linear harmonic retained 8.3% boundary error at about 1,900 unknowns.
+The implementation therefore follows local singular quadrature rather than
+labeling either approximation research-grade. Relevant numerical foundations
+are Duffy's `vertex-singularity transform
+<https://doi.org/10.1137/0719090>`_ and the distinction between smooth-surface
+QBX error control and explicit corner treatment discussed by
+`af Klinteberg and Tornberg <https://arxiv.org/abs/1603.08366>`_ and
+`Helsing and Ojala <https://doi.org/10.1016/j.jcp.2008.06.022>`_.
