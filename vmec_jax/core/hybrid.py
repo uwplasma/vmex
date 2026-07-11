@@ -35,7 +35,8 @@ def sample_stellarator_mirror_hybrid(
     ntheta: int = 64,
     nzeta: int = 256,
     axis_half_width: float = 1.5,
-    axis_square_power: int = 6,
+    axis_square_power: float = 6.0,
+    axis_square_fraction: float = 1.0,
     minor_radius: float = 0.10,
     side_elongation: float = 0.25,
     corner_ellipticity: float = 0.18,
@@ -46,15 +47,17 @@ def sample_stellarator_mirror_hybrid(
     """Sample one closed square-torus LCFS with stellarator-shaped corners."""
 
     ntheta, nzeta = int(ntheta), int(nzeta)
-    power = int(axis_square_power)
+    power = float(axis_square_power)
     if ntheta < 8 or nzeta < 32:
         raise ValueError("ntheta must be >= 8 and nzeta must be >= 32")
     if axis_half_width <= 0.0 or minor_radius <= 0.0:
         raise ValueError("axis_half_width and minor_radius must be positive")
     if minor_radius >= axis_half_width:
         raise ValueError("minor_radius must be smaller than axis_half_width")
-    if power < 4 or power % 2:
-        raise ValueError("axis_square_power must be an even integer >= 4")
+    if power < 2.0:
+        raise ValueError("axis_square_power must be >= 2")
+    if not 0.0 <= axis_square_fraction <= 1.0:
+        raise ValueError("axis_square_fraction must satisfy 0 <= value <= 1")
     if not 0.0 <= corner_ellipticity < 0.8:
         raise ValueError("corner_ellipticity must satisfy 0 <= value < 0.8")
     if corner_localization <= 0.0:
@@ -64,9 +67,12 @@ def sample_stellarator_mirror_hybrid(
     zeta = np.linspace(0.0, 2.0 * np.pi, nzeta, endpoint=False)
     theta2, zeta2 = np.meshgrid(theta, zeta, indexing="ij")
     cosine, sine = np.cos(zeta), np.sin(zeta)
-    axis_radius = float(axis_half_width) / (
-        cosine**power + sine**power
+    square_radius = float(axis_half_width) / (
+        np.abs(cosine) ** power + np.abs(sine) ** power
     ) ** (1.0 / power)
+    axis_radius = float(axis_half_width) + float(axis_square_fraction) * (
+        square_radius - float(axis_half_width)
+    )
 
     side_seed = np.clip(0.5 * (1.0 + np.cos(4.0 * zeta)), 0.0, 1.0)
     side = side_seed**float(corner_localization)
@@ -158,6 +164,8 @@ def stellarator_mirror_hybrid_input(
         ftol_array=ftol_array,
         niter_array=niter_array,
         phiedge=phiedge,
+        ncurr=1,
+        curtor=0.0,
         lfreeb=False,
         rbc=rbc,
         zbs=zbs,

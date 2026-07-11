@@ -48,13 +48,23 @@ and corner orientation spans more than 0.2 radians. Fourier maximum component
 error decreases from 13.0 mm at ``(mpol,ntor)=(4,8)`` to 0.912 mm at ``(6,16)``,
 0.262 mm at ``(6,20)``, and 0.077 mm at ``(8,24)``.
 
-This is not yet a converged M8 equilibrium. The ordinary 1D-preconditioned
-solver stalls after 5,000 iterations near ``2.5e-5/2.5e-5/5.0e-5`` for the
-default projected deck; gentler shaping reaches
-``9.2e-6/7.9e-6/1.76e-5`` but not the requested tolerance. Direct activation
-of the current 2D preconditioner exceeded two minutes versus 8.2 seconds for
-the 1D run and was rejected. Axis/shape continuation and VMEC2000 parity remain
-the next M8 gates; no root example will label this geometry solved before then.
+This is not yet a converged M8 square-axis equilibrium. The circular-axis
+member of the same shaped family converges component-wise to ``1e-12`` in
+1,870 iterations. Continuous superellipse-exponent continuation reaches
+``p=4.20`` on ``ns=3`` at ``1e-8``, but the state stalls near ``1.14e-6``
+when lifted to ``ns=5``; direct ``ns=5`` continuation stops near ``p=3.05``.
+Linear circle-to-square continuation stops near 44% of the requested axis.
+
+VMEC2000 reproduces the default and unshaped-square stalled residuals to the
+printed digits after 5,000 iterations, including its repeated Jacobian resets.
+A 10,000-iteration VMEC2000 time-step scan finds ``DELT=0.1`` best, at
+``2.53e-7/1.60e-7/3.62e-7``, but it does not converge. Increasing Fourier
+bandwidth does not move the continuation limit. Direct activation of the
+current 2D preconditioner exceeded two minutes versus 8.2 seconds for the 1D
+run and was rejected. These parity checks identify a target/basin limitation,
+not a vmec_jax implementation discrepancy. The next M8 gate is therefore a
+coil-informed, curvature-bounded target family followed by the same VMEC2000
+parity test; no root example will label this geometry solved before then.
 
 Fixed-boundary 3D solver
 ------------------------

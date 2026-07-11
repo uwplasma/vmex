@@ -24,6 +24,20 @@ def test_square_axis_has_straight_sides_and_four_localized_corners() -> None:
     assert np.ptp(samples.axis_radius[corner]) < 1.0e-2
     assert np.mean(samples.axis_radius[corner]) > np.mean(samples.axis_radius[side])
 
+    circular = sample_stellarator_mirror_hybrid(
+        ntheta=16, nzeta=64, axis_square_fraction=0.0
+    )
+    np.testing.assert_allclose(circular.axis_radius, 1.5, atol=2.0e-15)
+    circular_power = sample_stellarator_mirror_hybrid(
+        ntheta=16, nzeta=64, axis_square_power=2.0
+    )
+    np.testing.assert_allclose(circular_power.axis_radius, 1.5, atol=2.0e-15)
+    intermediate = sample_stellarator_mirror_hybrid(
+        ntheta=16, nzeta=64, axis_square_power=2.5
+    )
+    assert np.ptp(intermediate.axis_radius) > 0.0
+    assert np.ptp(intermediate.axis_radius) < np.ptp(samples.axis_radius)
+
 
 def test_corner_ellipse_rotates_while_side_sections_remain_aligned() -> None:
     samples = sample_stellarator_mirror_hybrid(ntheta=128, nzeta=256)
@@ -51,6 +65,7 @@ def test_fourier_projection_converges_and_builds_standard_vmec_input() -> None:
         mpol=6, ntor=20, ntheta=48, nzeta=256
     )
     assert inp.nfp == 1 and not inp.lfreeb and not inp.lasym
+    assert inp.ncurr == 1 and inp.curtor == 0.0
     assert inp.rbc.shape == (41, 6)
     assert inp.zbs.shape == inp.rbc.shape
     assert np.count_nonzero(inp.rbc) > 10

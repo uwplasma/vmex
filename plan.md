@@ -1345,18 +1345,25 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
       Validate mode convergence and `wout` parity with VMEC2000 before considering a native spline
       equilibrium state. Then run the 16-coil free-boundary beta scan using solved boundaries.
-      **STATUS (2026-07-10): clean geometry/projection foundation, equilibrium open.** A new
-      182-line clean-core module samples a superellipse square axis with four straight mirror
+      **STATUS (2026-07-10): clean geometry/projection foundation, equilibrium open.** A compact
+      clean-core module samples a superellipse square axis with four straight mirror
       regions and localized rotating corner ellipses, then least-squares projects the single
       real-space target into ordinary `RBC/ZBS` and axis coefficients. Geometry tests prove four
       corner regions, side straightness below 2 mm, aligned side sections, and corner orientation
       span above 0.2 rad. Maximum projection error decreases 13.0, 0.912, 0.262, and 0.077 mm at
       `(mpol,ntor)=(4,8),(6,16),(6,20),(8,24)`. No legacy native-spline/replay solver was restored.
-      The ordinary solver currently stalls after 5,000 iterations near
-      `2.5e-5/2.5e-5/5.0e-5`; a gentler shape reaches `9.2e-6/7.9e-6/1.76e-5` but not tolerance.
-      Direct 2D-preconditioner activation exceeded two minutes (1D: 8.2 s) and was terminated.
-      Next: axis/shape continuation, then VMEC2000 fixed-boundary parity. Do not add the root solved
-      example or 16-coil beta scan until that gate passes.
+      The circular-axis member converges component-wise to `1e-12` in 1,870 iterations. The axis
+      superellipse exponent is now a continuous low-dimensional control: continuation reaches
+      `p=4.20` on `ns=3` at `1e-8`, but lifting that state to `ns=5` stalls near `1.14e-6`; direct
+      `ns=5` continuation stops near `p=3.05`. Linear circle-to-square continuation reaches 44%
+      before the next step stalls, and higher Fourier bandwidth does not move that limit.
+      VMEC2000 reproduces the default and unshaped-square 5,000-iteration residuals to the printed
+      digits. Its 10,000-iteration DELT scan is best at `DELT=0.1`, reaching
+      `2.53e-7/1.60e-7/3.62e-7` but not convergence. The current 2D preconditioner was also rejected
+      (>2 minutes versus 8.2 seconds for 1D). The square target is therefore a shared equilibrium
+      basin/geometry limitation, not a vmec_jax parity defect. Next: construct a coil-informed,
+      curvature-bounded target family and repeat the vmec_jax/VMEC2000 parity gate. Do not add the
+      root solved example or 16-coil beta scan until that gate passes.
    10. **M9 — implicit differentiation and optimization.** Wrap the converged mirror residual in a
        `custom_vjp`; solve JVP/VJP systems matrix-free with the primal preconditioner. Validate
        boundary, pressure, current, and coil derivatives against central differences. Do not
