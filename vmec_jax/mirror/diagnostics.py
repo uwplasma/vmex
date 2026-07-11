@@ -53,6 +53,20 @@ class AxisymmetricBetaDiagnostics:
     paraxial_relative_error: Array
 
 
+@dataclass(frozen=True)
+class NonaxisymmetricBetaDiagnostics:
+    """Global and modal checks for one theta-dependent beta point."""
+
+    requested_beta: Array
+    achieved_reference_beta: Array
+    volume_averaged_beta: Array
+    center_mean_radius: Array
+    center_mean_field: Array
+    center_boundary_modes: Array
+    plasma_volume: Array
+    plasma_energy: Array
+
+
 def _volume_average(values: Array, result: "FreeBoundaryMirrorResult", grid: "MirrorGrid") -> Array:
     geometry = result.plasma_energy.geometry
     weights = (
@@ -62,6 +76,16 @@ def _volume_average(values: Array, result: "FreeBoundaryMirrorResult", grid: "Mi
     )
     measure = weights * geometry.sqrt_g
     return jnp.sum(jnp.asarray(values) * measure) / jnp.sum(measure)
+
+
+def _plasma_volume(result: "FreeBoundaryMirrorResult", grid: "MirrorGrid") -> Array:
+    geometry = result.plasma_energy.geometry
+    weights = (
+        jnp.asarray(grid.radial_weights)[:, None, None]
+        * jnp.asarray(grid.theta_basis.weights)[None, :, None]
+        * jnp.asarray(grid.axial_basis.weights)[None, None, :]
+    )
+    return jnp.sum(weights * geometry.sqrt_g)
 
 
 def summarize_axisymmetric_beta_scan(
@@ -118,6 +142,50 @@ def summarize_axisymmetric_beta_scan(
                 paraxial_field_ratio=paraxial_ratio,
                 paraxial_relative_error=(diamagnetic_ratio - paraxial_ratio)
                 / jnp.maximum(paraxial_ratio, jnp.finfo(axis_field.dtype).tiny),
+            )
+        )
+    return tuple(summaries)
+
+
+def summarize_nonaxisymmetric_beta_scan(
+    results: tuple["FreeBoundaryMirrorResult", ...],
+    requested_betas: Array,
+    grid: "MirrorGrid",
+    *,
+    reference_field: float,
+) -> tuple[NonaxisymmetricBetaDiagnostics, ...]:
+    """Summarize solved 3D beta points with global and Fourier observables."""
+
+    betas = jnp.asarray(requested_betas)
+    if betas.ndim != 1 or betas.size != len(results):
+        raise ValueError("requested_betas must have one value per result")
+    if not results:
+        raise ValueError("beta diagnostics require at least one result")
+    if grid.ntheta <= 1:
+        raise ValueError("nonaxisymmetric beta diagnostics require ntheta > 1")
+    center = int(np.argmin(np.abs(np.asarray(grid.z))))
+    reference_field_squared = float(reference_field) ** 2
+    summaries = []
+    for requested_beta, result in zip(betas, results, strict=True):
+        pressure = result.perpendicular_pressure
+        center_field = jnp.sqrt(result.plasma_b_squared[0, :, center])
+        summaries.append(
+            NonaxisymmetricBetaDiagnostics(
+                requested_beta=requested_beta,
+                achieved_reference_beta=(
+                    2.0 * MU0 * jnp.mean(pressure[0, :, center]) / reference_field_squared
+                ),
+                volume_averaged_beta=(
+                    2.0
+                    * MU0
+                    * _volume_average(pressure, result, grid)
+                    / _volume_average(result.plasma_b_squared, result, grid)
+                ),
+                center_mean_radius=jnp.mean(result.boundary.radius_scale[:, center]),
+                center_mean_field=jnp.mean(center_field),
+                center_boundary_modes=boundary_fourier_amplitudes(result.boundary)[:, center],
+                plasma_volume=_plasma_volume(result, grid),
+                plasma_energy=result.plasma_energy.total,
             )
         )
     return tuple(summaries)

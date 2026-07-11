@@ -35,6 +35,7 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_axisymmetric_beta_scan_cli,
     solve_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
+    summarize_nonaxisymmetric_beta_scan,
     vacuum_energy_functional,
     vacuum_laplacian,
 )
@@ -507,29 +508,23 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
         for result in results
     )
 
-    achieved_betas = np.asarray(
-        [
-            2.0
-            * MU0
-            * result.perpendicular_pressure[0, 0, center]
-            / float(on_axis[center]) ** 2
-            for result in results
-        ]
+    diagnostics = summarize_nonaxisymmetric_beta_scan(
+        results,
+        betas,
+        grid,
+        reference_field=float(on_axis[center]),
     )
+    achieved_betas = np.asarray([item.achieved_reference_beta for item in diagnostics])
     np.testing.assert_allclose(achieved_betas, betas, rtol=2.0e-8, atol=1.0e-12)
-    mean_radii = np.asarray(
-        [np.mean(np.asarray(result.boundary.radius_scale[:, center])) for result in results]
-    )
-    mean_fields = np.asarray(
-        [np.mean(np.sqrt(np.asarray(result.plasma_b_squared[:, 0, center]))) for result in results]
-    )
-    mode_one = np.asarray(
-        [boundary_fourier_amplitudes(result.boundary)[1, center] for result in results]
-    )
+    mean_radii = np.asarray([item.center_mean_radius for item in diagnostics])
+    mean_fields = np.asarray([item.center_mean_field for item in diagnostics])
+    mode_one = np.asarray([item.center_boundary_modes[1] for item in diagnostics])
     assert np.all(np.diff(mean_radii) > 0.0)
     assert np.all(np.diff(mean_fields) < 0.0)
     assert np.all(mode_one > 1.0e-4)
     assert mode_one[-1] > 1.5 * mode_one[0]
+    assert all(float(item.plasma_volume) > 0.0 for item in diagnostics)
+    assert all(float(item.plasma_energy) > 0.0 for item in diagnostics)
 
 
 @pytest.mark.full
