@@ -1,0 +1,26 @@
+{
+  "schema": "vmec_jax.benchmark.mirror_hybrid_balanced_continuation/1",
+  "case": {
+    "base": "benchmarks/mirror_hybrid_free_boundary.json",
+    "ftol": 1e-8,
+    "predictor_ftol": 1e-7,
+    "newton": {"step": 0.25, "interval": 10, "gmres_restart": 80, "gmres_max_restarts": 3, "gmres_rtol": 0.01},
+    "free_boundary": {"max_vacuum_skip": 1, "delt": 0.002}
+  },
+  "accepted": [
+    {"target_beta": 0.004, "achieved_beta": 0.004086030522507231, "lambda_row_scale": 0.01, "iterations": [38, 61, 3], "residuals": [9.386479213036659e-9, 3.400091128770178e-9, 5.3279267918303925e-9], "volume_m3": 0.3329833118771477, "wall_seconds": 91.80},
+    {"target_beta": 0.00475, "achieved_beta": 0.0048523527325324825, "lambda_row_scale": 0.01, "iterations": [60, 81, 3], "residuals": [9.965238847090986e-9, 2.1031557537661532e-9, 7.564520474042953e-9], "volume_m3": 0.3329833110874793, "wall_seconds": 69.67},
+    {"target_beta": 0.005, "achieved_beta": 0.005106970146677112, "lambda_row_scale": 0.01, "iterations": [1, 81, 3], "residuals": [9.942673304941681e-9, 1.9829440607356908e-9, 8.473035965425573e-9], "volume_m3": 0.3329833104817042, "wall_seconds": 68.17},
+    {"target_beta": 0.00525, "achieved_beta": 0.005362543726793147, "lambda_row_scale": 0.005, "iterations": [1, 31, 3], "residuals": [9.229727570829107e-9, 5.480530007221182e-9, 9.459409501211623e-9], "volume_m3": 0.33298331005885823, "wall_seconds": 109.49},
+    {"target_beta": 0.0055625, "achieved_beta": 0.005682028910789786, "lambda_row_scale": 0.005, "iterations": [1, 64, 3], "residuals": [8.227391371566062e-9, 5.35365088399206e-9, 9.927179601795496e-9], "volume_m3": 0.3329833098647676, "wall_seconds": 51.57},
+    {"target_beta": 0.005953125, "achieved_beta": 0.006081415233782417, "lambda_row_scale": 0.005, "iterations": [15, 75, 3], "residuals": [9.735085961657975e-9, 5.548353826430337e-9, 9.98716406587288e-9], "volume_m3": 0.33298330995657743, "wall_seconds": 60.35},
+    {"target_beta": 0.006153125, "achieved_beta": 0.006285888139724074, "lambda_row_scale": 0.004, "iterations": [1, 71, 3], "residuals": [9.336038292182975e-9, 4.44569243815037e-9, 9.825506706285904e-9], "volume_m3": 0.3329833101947472, "wall_seconds": 141.67},
+    {"target_beta": 0.006403125, "achieved_beta": 0.006541510017786663, "lambda_row_scale": 0.004, "iterations": [1, 81, 3], "residuals": [8.873728566659693e-9, 2.6596244407785522e-9, 9.890740381393173e-9], "volume_m3": 0.3329833106157, "wall_seconds": 68.19},
+    {"target_beta": 0.006715625, "achieved_beta": 0.006860817603534578, "lambda_row_scale": 0.004, "iterations": [1, 315, 3], "residuals": [9.962155903874364e-9, 1.671255666405407e-9, 9.996696006222798e-9], "volume_m3": 0.332983311264985, "wall_seconds": 259.04}
+  ],
+  "rejected_step_examples": [
+    {"from_target_beta": 0.005, "target_beta": 0.0055, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [2.1482004262961658e-8, 1.547161233909098e-9, 7.690856349249837e-9]},
+    {"from_target_beta": 0.005, "target_beta": 0.00525, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [1.9660782267945982e-8, 1.5766451610779146e-9, 7.310534559762974e-9]}
+  ],
+  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.686%. The limiting physical components shift between FSQR and FSQL, requiring lambda row scale 0.01, 0.005, then 0.004. Near target beta 0.672%, both components sit within 4e-12 of the 1e-8 gate and the corrector count rises to 315; continuation above this point requires a dynamic scaling rule or improved block preconditioner, not larger blind pressure jumps."
+}

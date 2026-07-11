@@ -1671,6 +1671,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       and the inner residual is `9.1--9.2e-7`. The full NESTOR release then converges in 3
       iterations at achieved beta 0.3575%. Next: resume adaptive continuation from this solved free
       LCFS with the accepted scaling, retaining the strict component gate through 50%.
+      **Balanced continuation:** nine additional fixed-corrector/NESTOR points now reach target beta
+      0.6715625% (achieved 0.6861%). Lambda row scales decrease from 0.01 to 0.005 to 0.004 as the
+      limiting component shifts; every free release converges in 3 iterations. At the endpoint the
+      fixed corrector takes 315 iterations and lands at
+      `(9.96e-9,1.67e-9,9.997e-9)`, so FSQR and FSQL are simultaneously tangent to the gate.
+      Compact data live in `benchmarks/mirror_hybrid_balanced_continuation.json`. Next: replace
+      manually staged row scales with a tested dynamic block-balancing rule (bounded and frozen
+      during each GMRES solve), then continue toward 1%; do not extrapolate this branch to 50%.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

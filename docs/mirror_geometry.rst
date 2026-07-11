@@ -153,7 +153,18 @@ Left-scaling the lambda equations by 0.01 leaves the exact Newton root and
 physical merit unchanged but balances truncated GMRES. The 0.35% corrector
 then converges in 51 iterations, with all five scheduled Newton steps accepted
 at 0.25. Its NESTOR release converges in three iterations at achieved beta
-0.3575%. Higher beta remains an adaptive-continuation gate.
+0.3575%.
+
+Adaptive balancing extends that result through nine more genuine free-boundary
+points to achieved beta 0.6861%. The lambda row scale decreases from 0.01 to
+0.005 and 0.004 as the limiting component shifts, while every NESTOR release
+still converges in three iterations. At the last point the fixed corrector
+takes 315 iterations and ends at
+``(9.96e-9, 1.67e-9, 9.997e-9)``: both ``FSQR`` and ``FSQL`` are effectively
+tangent to the acceptance gate. The compact ladder is recorded in
+``benchmarks/mirror_hybrid_balanced_continuation.json``. Continuation to 1%
+now requires a bounded dynamic block-balancing rule; the branch is not
+extrapolated to 50%.
 
 Fixed-boundary 3D solver
 ------------------------

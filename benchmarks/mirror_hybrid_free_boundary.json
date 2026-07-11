@@ -73,12 +73,12 @@
   "blockers": {
     "closed_target_beta": 0.003,
     "former_result": "the 1D corrector exhausted 5000 iterations; safeguarded active-coordinate Newton now converges in 291",
-    "remaining_result": "lambda-balanced correction closes target beta 0.35%; continuation from that solved free boundary through 50% remains open",
+    "remaining_result": "lambda-balanced adaptive continuation reaches achieved beta 0.686% (see mirror_hybrid_balanced_continuation.json); the coupled FSQR/FSQL gate tightens there and continuation through 50% remains open",
     "tolerance_ladder": "halving beta increments and restarting at 1e-7 does not move the barrier",
     "mode_study": "ntor=12 and ntor=16 do not meet 1e-8 at beta zero; ntor=20 is required",
     "generic_2d_100_iterations": {"fsqr_initial": 9.98e-8, "fsqr_final": 1.90e-7, "fsql_initial": 9.14e-9, "fsql_final": 9.48e-10},
     "vmec2000_cold_beta_zero": {"iterations_observed": 4320, "fsqr": 4.88e-6, "fsqz": 1.34e-6, "fsql": 3.56e-6, "peak_rss_mib": 86},
     "vmec2000_free_restart": {"iterations_observed": 5200, "fsqr": 1.42e-5, "fsqz": 1.08e-5, "fsql": 1.20e-6, "peak_rss_mib": 84}
   },
-  "assessment": "Beta-zero through target beta 0.35% are genuine NESTOR-coupled equilibria. Physical-force backtracking closes 0.30%, and lambda-balanced active-coordinate Newton closes the next 0.35% point in 51 fixed plus 3 free iterations. Promotion requires adaptive continuation and validation through 50%; no higher-beta result is claimed."
+  "assessment": "Beta-zero through achieved beta 0.686% are genuine NESTOR-coupled equilibria. Physical-force backtracking closes 0.30%, and lambda-balanced active-coordinate Newton extends the free-boundary branch through nine further points. Promotion requires a dynamic scaling/block correction to continue and validate through 50%; no higher-beta result is claimed."
 }
