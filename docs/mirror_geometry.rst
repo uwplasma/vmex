@@ -237,11 +237,14 @@ trace error decreases ``14.9% -> 5.44%`` over the regular two-grid test, while
 the exterior field-gradient error at ``z=2`` decreases to 1.12%.
 Reconstructing the field directly on the side from solved normal data and the
 CGL derivative of boundary potential exposes the remaining coupling blocker:
-the dipole lateral-field error decreases ``48.4% -> 14.5% -> 8.16%`` over
-three meshes. Removing endpoint bands does not change it, which identifies
-linear density interpolation on side triangles rather than cap singularity as
-the limiter. Higher-order side density is required before this field replaces
-the annulus value in M6 normal stress.
+the dipole lateral-field error decreases ``48.4% -> 14.5% -> 5.28% -> 3.08%``
+over four meshes; the finest solve takes 5.7 seconds and has condition number
+4.02. Removing endpoint bands does not change the rate. Spectral filtering,
+off-surface extrapolation, and two-grid Richardson correction were measured
+and rejected because they increase the error. Linear density interpolation on
+side triangles is therefore the limiter. The finest-grid result is accurate
+enough for a guarded first M6 coupling study, but higher-order side density is
+still required before replacing the annulus backend by default.
 Source ownership is kept narrow: ``exterior.py`` builds geometry and reduction
 maps, ``exterior_mesh.py`` owns panel topology and Duffy quadrature, and
 ``exterior_bie.py`` owns layer evaluation and Neumann solves. Public functions

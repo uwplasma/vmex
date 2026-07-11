@@ -209,7 +209,12 @@ def test_reduced_exterior_neumann_solve_recovers_decaying_dipole() -> None:
     boundary_errors = []
     field_errors = []
     lateral_errors = []
-    for ns, nxi, ntheta in ((9, 13, 16), (13, 21, 24)):
+    for ns, nxi, ntheta in (
+        (9, 13, 16),
+        (13, 21, 24),
+        (17, 29, 32),
+        (21, 37, 40),
+    ):
         grid = _grid(ns=ns, nxi=nxi)
         surface = build_closed_mirror_surface(
             MirrorBoundary.from_radius(0.37, grid),
@@ -277,12 +282,21 @@ def test_reduced_exterior_neumann_solve_recovers_decaying_dipole() -> None:
         assert float(result.condition_number) < 5.0
         assert float(jnp.linalg.norm(result.residual)) < 3.0e-14
 
-    assert boundary_errors[1] < 0.4 * boundary_errors[0]
-    assert boundary_errors[1] < 6.0e-2
-    assert field_errors[1] < field_errors[0]
-    assert field_errors[1] < 1.2e-2
-    assert lateral_errors[1] < lateral_errors[0]
-    assert lateral_errors[1] < 1.5e-1
+    assert all(
+        fine < coarse
+        for coarse, fine in zip(boundary_errors[:-1], boundary_errors[1:], strict=True)
+    )
+    assert boundary_errors[-1] < 3.5e-2
+    assert all(
+        fine < coarse
+        for coarse, fine in zip(field_errors[:-1], field_errors[1:], strict=True)
+    )
+    assert field_errors[-1] < 8.0e-3
+    assert all(
+        fine < coarse
+        for coarse, fine in zip(lateral_errors[:-1], lateral_errors[1:], strict=True)
+    )
+    assert lateral_errors[-1] < 4.0e-2
 
 
 def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:

@@ -1279,9 +1279,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       sign. A zero-flux dipole MMS closes its algebraic residual below `3e-14` with condition below
       5; boundary error decreases `14.9% -> 5.44%`, and exterior gradient error reaches 1.12%.
       Side-boundary field reconstruction from Neumann data plus the CGL potential derivative
-      converges `48.4% -> 14.5% -> 8.16%`; endpoint exclusion does not improve it. Linear
-      side-panel density interpolation is therefore the measured coupling blocker, and the BIE
-      field is not yet used in M6 stress.
+      converges `48.4% -> 14.5% -> 5.28% -> 3.08%`; the finest solve takes 5.7 s with condition
+      number 4.02. Endpoint exclusion does not improve the rate, while spectral filtering,
+      off-surface extrapolation, and Richardson correction make it worse. Linear side-panel density
+      interpolation remains the accuracy limiter. The finest grid is now accepted for a guarded
+      first M6 coupling study, but the BIE field is not yet the default stress backend.
       The implementation is split by ownership into 355-line geometry/maps, 299-line panel/Duffy,
       and 434-line BIE/solve modules; the public `vmec_jax.mirror` API is unchanged.
       Analytic Green gradients remove axis `NaN` from differentiating safe-distance branches.
