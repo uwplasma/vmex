@@ -31,6 +31,7 @@ dependencies = [
   "packaging",
   "booz_xform_jax",
   "solvax>=0.2.0",
+  "virtual-casing-jax>=0.0.2",
   "tomli; python_version < '3.11'",
 ]
 
@@ -47,7 +48,9 @@ Changelog = "https://github.com/uwplasma/vmec_jax/releases"
 
 [project.optional-dependencies]
 # Differentiable free boundary via virtual casing (plan.md R15.3 + R19).
-# The required extender API currently lives on uwplasma/virtual_casing_jax's
+# The low-level kernels are a core dependency above. The higher-level extender
+# API required by this optional lane currently lives on
+# uwplasma/virtual_casing_jax's
 # ``feature/jax-vmec-extender`` branch, not in the PyPI 0.0.2 release. Install
 # a checkout of that branch editable alongside vmec_jax before using this lane:
 #   pip install -e /path/to/virtual_casing_jax
