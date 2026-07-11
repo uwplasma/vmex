@@ -1379,9 +1379,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       field conversion now handles all contravariant components, and a general closed-surface
       Neumann adapter samples finite-current theta-dependent lateral/end-cut data plus direct coils.
       A genuine `mpol=1,ntheta=3` shaped case matches metric and Cartesian `|B|^2` within `5e-13`,
-      has lateral `B.n < 2e-15`, and closes integrated flux within `2e-3`. Next: full-theta
-      Dirichlet solve and tangential trace, then insert that field into the nonlinear interface
-      residual. This test is not a replicated axisymmetric surface and is not labeled equilibrium.
+      has lateral `B.n < 2e-15`, and closes integrated flux within `2e-3`. The full-theta exterior
+      Dirichlet solve now has condition below 20 and equation residual below `2e-12`; theta/axial
+      tangential reconstruction gives total lateral `B.n < 3e-15`, and its complete shape JVP is
+      finite and nonzero. Next: insert this closure into the nonlinear 3D interface residual. This
+      test is not a replicated axisymmetric surface and is not labeled equilibrium.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.

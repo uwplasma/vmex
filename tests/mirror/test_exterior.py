@@ -36,6 +36,7 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_reduced_exterior_laplace_neumann,
     solve_reduced_interior_laplace_neumann,
     solve_axisymmetric_exterior_vacuum,
+    solve_nonaxisymmetric_exterior_vacuum,
 )
 
 
@@ -638,6 +639,20 @@ def test_nonaxisymmetric_plasma_neumann_data_preserves_closed_flux() -> None:
     flux_scale = surface.area * jnp.sqrt(jnp.mean(neumann**2))
     assert float(jnp.abs(net_flux) / flux_scale) < 2.0e-3
 
+    vacuum = solve_nonaxisymmetric_exterior_vacuum(
+        boundary,
+        field,
+        geometry,
+        grid,
+        zero_coil,
+        cap_rim_grade=2.5,
+        order=6,
+    )
+    assert vacuum.lateral_field_xyz.shape == (grid.ntheta, grid.nxi, 3)
+    assert float(jnp.max(jnp.abs(vacuum.lateral_b_normal))) < 3.0e-15
+    assert float(vacuum.neumann_result.condition_number) < 20.0
+    assert float(jnp.linalg.norm(vacuum.neumann_result.residual)) < 2.0e-12
+
 
 def test_axisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
     grid = MirrorConfig(
@@ -678,6 +693,53 @@ def test_axisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
     _, tangent = jax.jvp(
         lateral_field,
         (jnp.asarray(0.3),),
+        (jnp.asarray(1.0),),
+    )
+    assert np.all(np.isfinite(np.asarray(tangent)))
+    assert float(jnp.linalg.norm(tangent)) > 0.0
+
+
+def test_nonaxisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
+    grid = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=5),
+        z_min=-0.5,
+        z_max=0.5,
+    ).build_grid()
+    theta = jnp.asarray(grid.theta)[:, None]
+    xi = jnp.asarray(grid.xi)[None, :]
+    zero_coil = CoilSet(
+        base_curve_dofs=jnp.zeros((1, 3, 3)),
+        base_currents=jnp.zeros(1),
+        n_segments=16,
+    )
+
+    def lateral_field(amplitude):
+        boundary = MirrorBoundary.from_radius(
+            0.3 * (1.0 + amplitude * jnp.cos(theta) * (1.0 - xi**2)),
+            grid,
+        )
+        state = MirrorState.from_boundary(boundary, grid)
+        geometry = evaluate_geometry(state, grid)
+        field = contravariant_field(
+            state,
+            geometry,
+            grid,
+            axial_flux_derivative=0.003,
+            current_derivative=1.0e-3 * jnp.asarray(grid.s),
+        )
+        return solve_nonaxisymmetric_exterior_vacuum(
+            boundary,
+            field,
+            geometry,
+            grid,
+            zero_coil,
+            cap_rim_grade=2.5,
+            order=4,
+        ).lateral_field_xyz
+
+    _, tangent = jax.jvp(
+        lateral_field,
+        (jnp.asarray(0.04),),
         (jnp.asarray(1.0),),
     )
     assert np.all(np.isfinite(np.asarray(tangent)))

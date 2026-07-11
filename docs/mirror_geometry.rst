@@ -332,9 +332,12 @@ and ``plasma_coil_neumann`` assembles lateral plus graded-cap data on a
 theta-dependent closed surface. A finite-current ``mpol=1`` manufactured case
 matches the metric ``|B|^2`` contraction to ``5e-13``, keeps lateral ``B.n``
 below ``2e-15``, and closes integrated flux within ``2e-3`` on a small grid.
-This is boundary data, not yet a nonaxisymmetric free-boundary equilibrium;
-full-theta Dirichlet solve and tangential trace reconstruction are the next M7
-gates.
+The same case now solves the full-theta exterior Dirichlet trace with condition
+number below 20 and equation residual below ``2e-12``. Theta/axial surface
+derivatives reconstruct total lateral tangency below ``3e-15``, and a complete
+boundary-shape JVP is finite and nonzero. This is a differentiable 3D vacuum
+closure, not yet a nonaxisymmetric free-boundary equilibrium; insertion into
+the nonlinear 3D interface residual is the next M7 gate.
 
 Two cheaper boundary-limit approximations were tested and rejected. Inward or
 outward offset collocation produced density-system condition numbers from
