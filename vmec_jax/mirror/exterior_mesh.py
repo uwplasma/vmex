@@ -10,6 +10,12 @@ import jax.numpy as jnp
 import jax
 import numpy as np
 from .basis import _cgl_derivative_matrix
+from .exterior_interpolation import (
+    cap_nodal_values as _cap_nodal_values,
+    cgl_interpolation_weights as _cgl_interpolation_weights,
+    periodic_interpolation_weights as _periodic_interpolation_weights,
+    spectral_cap_density_samples as _spectral_cap_density_samples,
+)
 
 Array = Any
 
@@ -109,34 +115,50 @@ def _linear_density_samples(values: Array, *, order: int) -> Array:
     )
 
 
-def _cgl_interpolation_weights(targets: Array, nxi: int) -> Array:
-    """Barycentric weights from increasing CGL nodes to ``targets``."""
+def _triangle_source_points(vertices: Array, *, order: int) -> Array:
+    """Map Duffy quadrature nodes to linear triangle source points."""
 
-    targets = jnp.asarray(targets)
-    degree = nxi - 1
-    nodes = jnp.cos(jnp.pi * jnp.arange(nxi, dtype=targets.dtype) / degree)[::-1]
-    barycentric = (-1.0) ** jnp.arange(nxi, dtype=targets.dtype)
-    barycentric = barycentric.at[jnp.asarray([0, nxi - 1])].multiply(0.5)
-    difference = targets[..., None] - nodes
-    exact = jnp.abs(difference) <= 8.0 * jnp.finfo(targets.dtype).eps
-    scaled = barycentric / jnp.where(exact, 1.0, difference)
-    weights = scaled / jnp.sum(scaled, axis=-1, keepdims=True)
-    exact_weights = exact.astype(targets.dtype)
-    return jnp.where(jnp.any(exact, axis=-1, keepdims=True), exact_weights, weights)
+    nodes, _ = _unit_gauss_legendre(order)
+    u = jnp.asarray(nodes, dtype=vertices.dtype)[None, :, None]
+    v = jnp.asarray(nodes, dtype=vertices.dtype)[None, None, :]
+    edge1 = vertices[:, 1] - vertices[:, 0]
+    edge2 = vertices[:, 2] - vertices[:, 0]
+    ray = (1.0 - v)[..., None] * edge1[:, None, None, :] + (
+        v[..., None] * edge2[:, None, None, :]
+    )
+    return vertices[:, 0, :][:, None, None, :] + u[..., None] * ray
 
 
-def _periodic_interpolation_weights(targets: Array, ntheta: int) -> Array:
-    """Real trigonometric interpolation weights on a uniform periodic grid."""
+def _spectral_cap_samples(
+    vertices: Array,
+    dirichlet: Array,
+    neumann: Array,
+    lower_cap_xyz: Array,
+    upper_cap_xyz: Array,
+    *,
+    side_count: int,
+    ntheta: int,
+    nxi: int,
+    order: int,
+) -> Array:
+    """Evaluate both boundary densities on lower and upper cap triangles."""
 
-    targets = jnp.asarray(targets)
-    nodes = 2.0 * jnp.pi * jnp.arange(ntheta, dtype=targets.dtype) / ntheta
-    difference = targets[..., None] - nodes
-    weights = jnp.ones_like(difference)
-    for mode in range(1, (ntheta + 1) // 2):
-        weights = weights + 2.0 * jnp.cos(mode * difference)
-    if ntheta % 2 == 0:
-        weights = weights + jnp.cos((ntheta // 2) * difference)
-    return weights / ntheta
+    ns = int(lower_cap_xyz.shape[0])
+    cap_count = (vertices.shape[0] - side_count) // 2
+    values = jnp.stack([dirichlet, neumann])
+    lower_values = _cap_nodal_values(
+        values, ntheta=ntheta, nxi=nxi, ns=ns, upper=False
+    )
+    upper_values = _cap_nodal_values(
+        values, ntheta=ntheta, nxi=nxi, ns=ns, upper=True
+    )
+    lower_source = _triangle_source_points(
+        vertices[side_count : side_count + cap_count], order=order
+    )
+    upper_source = _triangle_source_points(vertices[side_count + cap_count :], order=order)
+    lower = _spectral_cap_density_samples(lower_source, lower_values, lower_cap_xyz)
+    upper = _spectral_cap_density_samples(upper_source, upper_values, upper_cap_xyz)
+    return jnp.concatenate([lower, upper], axis=1)
 
 
 def _side_parameter_data(
@@ -481,7 +503,10 @@ def panel_green_gradient_off_surface(
     order: int = 8,
     lateral_shape: tuple[int, int] | None = None,
     lateral_xyz: Array | None = None,
+    lower_cap_xyz: Array | None = None,
+    upper_cap_xyz: Array | None = None,
     spectral_side_density: bool = False,
+    spectral_cap_density: bool = False,
     curved_side_geometry: bool = False,
     axisymmetric_side: bool = False,
 ) -> Array:
@@ -519,6 +544,29 @@ def panel_green_gradient_off_surface(
         ).at[:side_count].set(side_samples[1])
     elif curved_side_geometry:
         raise ValueError("curved side geometry requires spectral side density")
+    if spectral_cap_density:
+        if lateral_shape is None or lower_cap_xyz is None or upper_cap_xyz is None:
+            raise ValueError("cap geometry is required for spectral cap density")
+        ntheta, nxi = lateral_shape
+        side_count = 2 * ntheta * (nxi - 1)
+        if triangle_dirichlet.ndim == 2:
+            triangle_dirichlet = _linear_density_samples(
+                triangle_dirichlet, order=order
+            )
+            triangle_neumann = _linear_density_samples(triangle_neumann, order=order)
+        cap_samples = _spectral_cap_samples(
+            vertices,
+            dirichlet,
+            neumann,
+            lower_cap_xyz,
+            upper_cap_xyz,
+            side_count=side_count,
+            ntheta=ntheta,
+            nxi=nxi,
+            order=order,
+        )
+        triangle_dirichlet = triangle_dirichlet.at[side_count:].set(cap_samples[0])
+        triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
 
     if curved_side_geometry:
         if lateral_xyz is None:
@@ -577,7 +625,10 @@ def panel_green_boundary_residual(
     target_indices: np.ndarray | None = None,
     lateral_shape: tuple[int, int] | None = None,
     lateral_xyz: Array | None = None,
+    lower_cap_xyz: Array | None = None,
+    upper_cap_xyz: Array | None = None,
     spectral_side_density: bool = False,
+    spectral_cap_density: bool = False,
     curved_side_geometry: bool = False,
     axisymmetric_side: bool = False,
 ) -> Array:
@@ -641,6 +692,33 @@ def panel_green_boundary_residual(
             ).at[:side_count].set(side_samples[1])
         elif curved_side_geometry:
             raise ValueError("curved side geometry requires spectral side density")
+        if spectral_cap_density:
+            if lateral_shape is None or lower_cap_xyz is None or upper_cap_xyz is None:
+                raise ValueError("cap geometry is required for spectral cap density")
+            ntheta, nxi = lateral_shape
+            side_count = 2 * ntheta * (nxi - 1)
+            if triangle_dirichlet.ndim == 2:
+                triangle_dirichlet = _linear_density_samples(
+                    triangle_dirichlet, order=order
+                )
+                triangle_neumann = _linear_density_samples(
+                    triangle_neumann, order=order
+                )
+            cap_samples = _spectral_cap_samples(
+                xyz[triangle_indices],
+                dirichlet,
+                neumann,
+                lower_cap_xyz,
+                upper_cap_xyz,
+                side_count=side_count,
+                ntheta=ntheta,
+                nxi=nxi,
+                order=order,
+            )
+            triangle_dirichlet = triangle_dirichlet.at[side_count:].set(
+                cap_samples[0] - dirichlet[target_index]
+            )
+            triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
         if curved_side_geometry:
             if lateral_xyz is None:
                 raise ValueError("lateral_xyz is required for curved side geometry")

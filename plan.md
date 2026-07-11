@@ -1451,6 +1451,20 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       565/1830 s and 3.66/5.39 GiB RSS on A4000. Keep this research option opt-in. The next accuracy
       experiment must raise side geometry and cap density order together; do not add another
       brute-force grid or treat density interpolation alone as promotion evidence.
+      Curved parametric side panels now evaluate exact Fourier-CGL side geometry at Duffy nodes.
+      For the dipole MMS, boundary error decreases from `0.0845 -> 0.00786 -> 0.00131` over
+      `(ns,nxi,ntheta)=(9,13,16),(13,21,24),(17,29,32)`, about 2.6 times below the fine planar-
+      side result; axisymmetric and 3D shape JVPs remain finite. Separating residuals shows the
+      remaining fine-grid error is concentrated on the planar caps/rim, so side refinement alone
+      is complete. A mixed Fourier/local-cubic cap-density prototype is stable on rim-graded nodes
+      and improves the medium dipole field error `1.056% -> 0.503%`, but only changes boundary
+      error `0.786% -> 0.766%` and raises condition number `3.88 -> 4.83`. At the coupled coarse
+      `ns=5` gates, cap interpolation raises the axisymmetric/3D BIE condition numbers
+      `3.00 -> 242.6` and `2.66 -> 53.4`; both full equilibrium gates therefore reject it. Keep
+      cap interpolation in the differentiated low-level BIE research API only, not the CLI or beta
+      continuation. The next discretization experiment is curved cap geometry with a rim-aware
+      local basis or singular edge treatment, accepted only if it improves MMS convergence and
+      coupled conditioning simultaneously.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
