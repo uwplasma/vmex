@@ -415,6 +415,70 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
     assert all(
         np.isfinite(float(item.center_vacuum_side_field)) for item in diagnostics
     )
+
+
+@pytest.mark.full
+def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
+    observables = []
+    compatibility = []
+    for ns, nxi, ntheta_panel in ((5, 7, 8), (7, 13, 12), (9, 17, 16)):
+        config = MirrorConfig(
+            resolution=MirrorResolution(ns=ns, mpol=0, ntheta=1, nxi=nxi),
+            z_min=-0.8,
+            z_max=0.8,
+            ftol=1.0e-12,
+            max_iterations=500,
+        )
+        plasma_grid = config.build_grid()
+        vacuum_grid = build_vacuum_grid(plasma_grid, nrho=ns)
+        on_axis = two_coil_on_axis_bz(
+            jnp.asarray(plasma_grid.z),
+            coil_radius=0.9,
+            separation=2.0,
+            current=2.0e5,
+        )
+        center = plasma_grid.nxi // 2
+        flux = 0.5 * on_axis[center] * 0.25**2
+        results = solve_axisymmetric_beta_scan_cli(
+            MirrorBoundary.from_axis_field(flux, on_axis, plasma_grid),
+            plasma_grid,
+            vacuum_grid,
+            config,
+            _two_end_coils(),
+            jnp.asarray([0.0, 0.10]),
+            outer_radius=0.1,
+            axial_flux_derivative=flux,
+            reference_field=float(on_axis[center]),
+            vacuum_backend="exterior",
+            exterior_ntheta=ntheta_panel,
+            exterior_order=8,
+        )
+        assert all(result.converged for result in results)
+        assert all(float(result.variational_max) <= config.ftol for result in results)
+        observables.append(
+            np.asarray(
+                [
+                    [
+                        float(result.boundary.radius_scale[0, center]),
+                        float(jnp.sqrt(result.plasma_b_squared[0, 0, center])),
+                    ]
+                    for result in results
+                ]
+            )
+        )
+        compatibility.append(
+            np.asarray(
+                [
+                    float(result.vacuum_field.neumann_result.compatibility_error)
+                    for result in results
+                ]
+            )
+        )
+
+    relative_change = np.abs((observables[-1] - observables[-2]) / observables[-1])
+    assert np.max(relative_change) < 5.0e-4
+    assert np.max(compatibility[-1]) < 2.0e-9
+    assert np.all(compatibility[-1] < compatibility[0])
     assert float(results[1].boundary.radius_scale[0, center]) > 1.01 * float(
         results[0].boundary.radius_scale[0, center]
     )

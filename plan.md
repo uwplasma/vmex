@@ -1310,7 +1310,12 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       Monolithic forward AD at the 120-variable third grid was terminated at 9.67 GB RSS. An
       adaptive exact-JVP Jacobian now keeps monolithic AD through 80 variables and chunks six
       columns above it; the third grid then converges in 118.8 s at 5.48 GB RSS. Physics convergence
-      is established at beta zero, while memory and the beta-10 third grid remain promotion gates.
+      is established at beta zero. The office A4000 then completes the full third-grid beta 0/10%
+      scan in 119.5 s at 1.99 GB host RSS. Beta 10% gives radius/axis field
+      `0.2561004 m/0.0797034 T`, agreeing with `ns=7` within `3.0e-5/3.65e-4` relative; residual is
+      `6.92e-15`, compatibility `6.43e-10`, and condition 3.29. A permanent full three-grid test
+      gates observables at `5e-4` and compatibility at `2e-9`. The finite-beta two-coil accuracy
+      gate is closed; higher-order panels and lower CPU memory remain.
       The root beta-scan example now exposes the exterior backend and writes compatibility/condition
       diagnostics. A solved 0/10% exterior render at `ftol=1e-12` produced all three figure panels;
       the 3D LCFS, coils, cap-to-cap lines, field arrows, `|B|`, pressure, beta, and residual plots

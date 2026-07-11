@@ -289,8 +289,18 @@ AD: it was terminated at 9.67 GB RSS before producing an iteration. The solver
 now keeps the fast monolithic Jacobian through 80 variables and evaluates exact
 forward-mode JVP columns in chunks of six above that point. The same third grid
 then converges in 118.8 seconds at 5.48 GB peak RSS. This closes the first
-three-grid physics gate, but memory and beta-10 third-grid convergence remain
-promotion blockers.
+three-grid beta-zero physics gate and identifies CPU memory as a performance
+blocker; the GPU result below closes the finite-beta follow-up.
+
+The beta-10 third grid now also converges on one office RTX A4000. Its center
+radius is 0.2561004 m and axis field is 0.0797034 T, agreeing with ``ns=7``
+within ``3.0e-5`` and ``3.65e-4`` relative. Beta 0 and 10% each require eight
+nonlinear evaluations with residuals ``3.43e-15`` and ``6.92e-15``. The full
+two-point GPU run takes 119.5 seconds and 1.99 GB host RSS, compared with
+118.8 seconds and 5.48 GB for beta zero alone on the local CPU. A ``full``
+three-grid regression now preserves the ``5e-4`` observable and ``2e-9``
+compatibility gates. Accuracy promotion is closed for this two-coil case;
+higher-order panels and lower CPU memory remain M5/M10 work.
 An analytic Green-gradient evaluator avoids differentiating safe-distance
 branches on the symmetry axis. Duffy panel evaluation also controls near-cap
 targets in the interior validation: for two circular coils outside a
