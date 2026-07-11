@@ -1254,7 +1254,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       explicit cap-rim grading; smooth-surface QBX alone does not resolve the artificial sharp rim.
       The first JAX Duffy primitive now regularizes a vertex-singular linear triangle. Orders
       `2,4,8,16` converge monotonically to the analytic right-triangle single-layer integral, with
-      order 16 at `1.4e-14`; linear density and geometry/density gradient identities pass.
+      order 16 at `1.4e-14`; linear density and geometry/density gradient identities pass. The
+      assembled boundary identity uses `S(q)+K(u-u_target)=0`, preserving the constant nullspace
+      and avoiding an invalid smooth-surface jump coefficient at the rim. For harmonic `u=x,z`,
+      its worst normalized residual falls `3.47e-3 -> 1.78e-3` from 154 to 862 nodes. Duffy orders
+      8 and 10 agree, so panel/rim refinement, not quadrature order, is now the measured limiter.
       This does not yet solve the exterior problem: cap-aware singular/near-singular
       quadrature, the second-kind boundary equation and nullspace, harmonic MMS, and coupling that
       deletes the finite outer cylinder remain the next M5 gates.

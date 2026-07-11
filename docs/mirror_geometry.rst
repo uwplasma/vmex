@@ -173,6 +173,13 @@ square, interpolates density linearly, and is differentiable in panel geometry
 and density. On a right triangle, orders ``2,4,8,16`` converge monotonically;
 order 16 matches the analytic constant-density single-layer integral within
 ``1.4e-14`` and the linear ``x+y`` density gives exactly half that value.
+The assembled boundary-limit identity uses
+``S(q) + K(u-u_target) = 0``. Target subtraction preserves the constant
+nullspace and absorbs the local solid-angle coefficient, including at cap
+rims. For the independent harmonic fields ``u=x`` and ``u=z``, the worst
+normalized residual falls from ``3.47e-3`` on a 154-node mesh to ``1.78e-3``
+on an 862-node mesh. Raising Duffy order from 8 to 10 does not change the
+error, identifying linear-panel/rim resolution as the next limiter.
 
 Tests require exact cylinder area and volume, zero integrated normal, the full
 tensor divergence theorem on a theta-shaped flared tube, cap/side ring

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from functools import partial
 from typing import Any
 
 import jax.numpy as jnp
+import jax
 import numpy as np
 
 Array = Any
@@ -92,3 +94,101 @@ def duffy_triangle_single_layer(
         area_scale * interpolated_density / (4.0 * jnp.pi * radius_per_u)
     )
     return jnp.sum(quadrature_weights * regular_integrand)
+
+
+@partial(jax.jit, static_argnames=("order",))
+def _triangle_layer_sum(
+    target: Array,
+    vertices: Array,
+    dirichlet: Array,
+    neumann: Array,
+    *,
+    order: int,
+) -> Array:
+    """Sum single and double layers over triangles anchored for one target."""
+
+    nodes, weights = _unit_gauss_legendre(order)
+    dtype = vertices.dtype
+    u = jnp.asarray(nodes, dtype=dtype)[None, :, None]
+    v = jnp.asarray(nodes, dtype=dtype)[None, None, :]
+    weights_2d = (
+        jnp.asarray(weights, dtype=dtype)[None, :, None]
+        * jnp.asarray(weights, dtype=dtype)[None, None, :]
+    )
+    edge1 = vertices[:, 1] - vertices[:, 0]
+    edge2 = vertices[:, 2] - vertices[:, 0]
+    ray = (1.0 - v)[..., None] * edge1[:, None, None, :] + (
+        v[..., None] * edge2[:, None, None, :]
+    )
+    source = vertices[:, 0, :][:, None, None, :] + u[..., None] * ray
+    displacement = target[None, None, None, :] - source
+    radius_squared = jnp.sum(displacement**2, axis=-1)
+    inverse_radius = jax.lax.rsqrt(radius_squared)
+    area_vectors = jnp.cross(edge1, edge2)
+    area_scale = jnp.linalg.norm(area_vectors, axis=-1)
+    normals = area_vectors / area_scale[:, None]
+    jacobian = area_scale[:, None, None] * u
+
+    def interpolate(values: Array) -> Array:
+        return (1.0 - u) * values[:, 0, None, None] + u * (
+            (1.0 - v) * values[:, 1, None, None]
+            + v * values[:, 2, None, None]
+        )
+
+    single = interpolate(neumann) * jacobian * inverse_radius / (4.0 * jnp.pi)
+    normal_displacement = jnp.einsum(
+        "ti,tqri->tqr", normals, displacement
+    )
+    double = (
+        -interpolate(dirichlet)
+        * jacobian
+        * normal_displacement
+        * inverse_radius**3
+        / (4.0 * jnp.pi)
+    )
+    return jnp.sum(weights_2d * (single + double))
+
+
+def panel_green_boundary_residual(
+    xyz: Array,
+    triangles: Array,
+    dirichlet: Array,
+    neumann: Array,
+    *,
+    order: int = 8,
+) -> Array:
+    """Evaluate ``S(q) + K(u-u_target)`` at all mesh vertices.
+
+    Incident triangles are reordered so the collocation vertex is Duffy's
+    singular vertex. The subtraction makes constants an exact nullspace and
+    avoids assuming a smooth-surface jump coefficient at cap rims.
+    """
+
+    xyz = jnp.asarray(xyz)
+    triangles_np = np.asarray(triangles, dtype=int)
+    dirichlet = jnp.asarray(dirichlet)
+    neumann = jnp.asarray(neumann)
+    nvertices = int(xyz.shape[0])
+    if xyz.ndim != 2 or xyz.shape[1] != 3:
+        raise ValueError("xyz must have shape (n, 3)")
+    if dirichlet.shape != (nvertices,) or neumann.shape != (nvertices,):
+        raise ValueError("dirichlet and neumann must have one value per vertex")
+
+    residual = []
+    for target_index in range(nvertices):
+        ordered = np.array(triangles_np, copy=True)
+        rows, positions = np.nonzero(ordered == target_index)
+        for row, position in zip(rows, positions, strict=True):
+            ordered[row, [0, position]] = ordered[row, [position, 0]]
+        triangle_indices = jnp.asarray(ordered)
+        triangle_dirichlet = dirichlet[triangle_indices] - dirichlet[target_index]
+        residual.append(
+            _triangle_layer_sum(
+                xyz[target_index],
+                xyz[triangle_indices],
+                triangle_dirichlet,
+                neumann[triangle_indices],
+                order=order,
+            )
+        )
+    return jnp.stack(residual)

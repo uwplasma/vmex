@@ -17,6 +17,7 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorResolution,
     build_closed_mirror_surface,
     laplace_double_layer_off_surface,
+    laplace_green_boundary_residual,
     laplace_green_representation_off_surface,
     laplace_single_layer_gradient_off_surface,
 )
@@ -272,3 +273,32 @@ def test_green_representation_converges_for_harmonic_polynomials() -> None:
 
     assert errors[1] < 0.4 * errors[0]
     assert errors[1] < 2.0e-5
+
+
+def test_singular_boundary_green_identity_converges_for_linear_harmonics() -> None:
+    errors = []
+    for ns, nxi, ntheta, order in ((7, 9, 8, 6), (13, 21, 20, 8)):
+        grid = _grid(ns=ns, nxi=nxi)
+        surface = build_closed_mirror_surface(
+            MirrorBoundary.from_radius(0.37, grid),
+            grid,
+            axisymmetric_ntheta=ntheta,
+        )
+        xyz = surface.collocation_xyz
+        normal = surface.collocation_normals
+        case_errors = []
+        for dirichlet, neumann in (
+            (xyz[:, 0], normal[:, 0]),
+            (xyz[:, 2], normal[:, 2]),
+        ):
+            residual = laplace_green_boundary_residual(
+                surface, dirichlet, neumann, order=order
+            )
+            scale = jnp.sqrt(
+                jnp.mean(dirichlet**2) + surface.area * jnp.mean(neumann**2)
+            )
+            case_errors.append(float(jnp.sqrt(jnp.mean(residual**2)) / scale))
+        errors.append(max(case_errors))
+
+    assert errors[1] < errors[0]
+    assert errors[1] < 2.0e-3

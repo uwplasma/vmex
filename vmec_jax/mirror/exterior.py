@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 from virtual_casing_jax import laplace_dx_u_eval, laplace_fx_u, laplace_fxd_u_eval
 
-from .exterior_mesh import closed_surface_triangles
+from .exterior_mesh import closed_surface_triangles, panel_green_boundary_residual
 
 Array = Any
 
@@ -359,6 +359,24 @@ def laplace_green_representation_off_surface(
 
     return laplace_single_layer_off_surface(surface, neumann, targets) + (
         laplace_double_layer_off_surface(surface, dirichlet, targets)
+    )
+
+
+def laplace_green_boundary_residual(
+    surface: ClosedMirrorSurface,
+    dirichlet: Array,
+    neumann: Array,
+    *,
+    order: int = 8,
+) -> Array:
+    """Evaluate the singular Green identity on unique boundary nodes."""
+
+    return panel_green_boundary_residual(
+        surface.collocation_xyz,
+        surface.triangles,
+        dirichlet,
+        neumann,
+        order=order,
     )
 
 
