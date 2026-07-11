@@ -1419,6 +1419,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       `summarize_nonaxisymmetric_beta_scan` now makes those gates reusable: achieved and volume
       beta, theta-mean midplane radius/field, Fourier amplitudes, plasma volume, and total energy
       are computed from the solved state with the same quadrature used by the equilibrium.
+      A one-primal `jax.linearize` plus batched `lax.map` Jacobian was measured and rejected: the
+      axisymmetric three-grid test exceeded 7.5 GB RSS before completion at 170 s, versus 5.48 GB
+      for the existing host-chunked exact JVP columns. Keep the bounded-memory path until a
+      matrix-free or block-eliminated nonlinear solve removes the dense SciPy Jacobian contract.
       The coarse genuine-3D continuation now also reaches beta `25%` and `50%` without stalling:
       residual stays below `3.7e-15`, normal stress below `2.1e-15`, and vacuum tangency below
       `4.4e-17`. From beta zero to 50%, mean midplane radius grows `0.201794 -> 0.217968 m`, mean
