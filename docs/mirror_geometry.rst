@@ -141,6 +141,14 @@ in three iterations at achieved beta 0.3064%. Complete values are in
 until adaptive continuation has produced and validated every higher-beta
 equilibrium; no prescribed-boundary result is counted as completion.
 
+Adaptive continuation above that point rejects target beta 0.50%, 0.40%, and
+0.35% after 1,000 corrector iterations; their largest residual components are
+``2.22e-8``, ``1.49e-8``, and ``1.20e-8``. Continuing the serialized 0.35%
+state for another 1,000 iterations worsens ``FSQR/FSQL`` instead of crossing
+the gate. The next method is therefore block scaling and inexact-Newton
+regularization using the recorded accepted-step and GMRES histories, not a
+larger iteration budget.
+
 Fixed-boundary 3D solver
 ------------------------
 

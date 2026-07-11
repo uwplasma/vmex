@@ -1653,7 +1653,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       unconverged checkpoint instead of raising, so long correctors resume their own state in
       explicit 1,000-iteration chunks. `SolveResult.newton_history` records the accepted line-search
       step and inner GMRES residual per nonlinear iteration for convergence plots and stall audits.
-      No result above 0.30% is claimed yet.
+      **Continuation audit:** target beta 0.50%, 0.40%, and 0.35% are rejected after 1,000
+      corrector iterations at maxima `2.22e-8`, `1.49e-8`, and `1.20e-8`. Resuming the serialized
+      0.35% state for a second 1,000-iteration chunk worsens the result to
+      `(1.25e-8,3.31e-9,1.27e-8)`, so more blind iterations are not the next method. Next: use the
+      recorded accepted-step and GMRES histories to compare R/Z/lambda block scaling and inexact
+      Newton regularization on the reproducible 0.35% predictor, accept a method only if all three
+      physical residuals descend, then restart adaptive continuation. No result above 0.30% is
+      claimed yet.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

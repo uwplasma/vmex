@@ -39,15 +39,25 @@
     "wall_seconds_rtx_a4000": 299.17,
     "peak_rss_mib": 1609.6
   },
+  "continuation_above_0p3_percent": {
+    "accepted_points": [],
+    "rejected_points": [
+      {"target_beta": 0.0050, "corrector_iterations": 1000, "residuals": [2.2244354718309275e-8, 2.8787337441420814e-9, 1.129324854900158e-8]},
+      {"target_beta": 0.0040, "corrector_iterations": 1000, "residuals": [1.49088897464278e-8, 3.771437204639407e-9, 8.970530761391048e-9]},
+      {"target_beta": 0.0035, "corrector_iterations": 1000, "residuals": [1.2041521085314448e-8, 2.0808319526466206e-9, 5.2539324280134916e-9]},
+      {"target_beta": 0.0035, "corrector_iterations": 2000, "residuals": [1.253968601033525e-8, 3.314247553595362e-9, 1.2681697001844203e-8], "restart_from_previous_checkpoint": true}
+    ],
+    "assessment": "Adaptive step halving and an explicit 1000-iteration state checkpoint do not produce the next equilibrium. Continuing the near-converged 0.35% state for a second chunk worsens FSQR/FSQL, so larger iteration budgets are rejected as the next method."
+  },
   "blockers": {
     "closed_target_beta": 0.003,
     "former_result": "the 1D corrector exhausted 5000 iterations; safeguarded active-coordinate Newton now converges in 291",
-    "remaining_result": "continuation above 0.30% through the requested 50% has not yet been run",
+    "remaining_result": "continuation above 0.30% is blocked: target beta 0.35%, 0.40%, and 0.50% fail the 1e-8 component gate after 1000 corrector iterations; a resumed 0.35% checkpoint also fails",
     "tolerance_ladder": "halving beta increments and restarting at 1e-7 does not move the barrier",
     "mode_study": "ntor=12 and ntor=16 do not meet 1e-8 at beta zero; ntor=20 is required",
     "generic_2d_100_iterations": {"fsqr_initial": 9.98e-8, "fsqr_final": 1.90e-7, "fsql_initial": 9.14e-9, "fsql_final": 9.48e-10},
     "vmec2000_cold_beta_zero": {"iterations_observed": 4320, "fsqr": 4.88e-6, "fsqz": 1.34e-6, "fsql": 3.56e-6, "peak_rss_mib": 86},
     "vmec2000_free_restart": {"iterations_observed": 5200, "fsqr": 1.42e-5, "fsqz": 1.08e-5, "fsql": 1.20e-6, "peak_rss_mib": 84}
   },
-  "assessment": "Beta-zero through target beta 0.30% are genuine NESTOR-coupled equilibria. A physical-force backtracked, cadence-controlled active-coordinate Newton corrector closes the former 0.30% fixed-boundary barrier. Promotion still requires continuation and validation through the requested 50%; no higher-beta result is claimed yet."
+  "assessment": "Beta-zero through target beta 0.30% are genuine NESTOR-coupled equilibria. A physical-force backtracked, cadence-controlled active-coordinate Newton corrector closes the former 0.30% fixed-boundary barrier. Adaptive continuation establishes a new fixed-corrector barrier immediately above 0.30%; promotion requires a better scaled/regularized correction before continuation and validation through 50%. No higher-beta result is claimed."
 }
