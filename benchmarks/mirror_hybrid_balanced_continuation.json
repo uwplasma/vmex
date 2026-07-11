@@ -16,11 +16,17 @@
     {"target_beta": 0.005953125, "achieved_beta": 0.006081415233782417, "lambda_row_scale": 0.005, "iterations": [15, 75, 3], "residuals": [9.735085961657975e-9, 5.548353826430337e-9, 9.98716406587288e-9], "volume_m3": 0.33298330995657743, "wall_seconds": 60.35},
     {"target_beta": 0.006153125, "achieved_beta": 0.006285888139724074, "lambda_row_scale": 0.004, "iterations": [1, 71, 3], "residuals": [9.336038292182975e-9, 4.44569243815037e-9, 9.825506706285904e-9], "volume_m3": 0.3329833101947472, "wall_seconds": 141.67},
     {"target_beta": 0.006403125, "achieved_beta": 0.006541510017786663, "lambda_row_scale": 0.004, "iterations": [1, 81, 3], "residuals": [8.873728566659693e-9, 2.6596244407785522e-9, 9.890740381393173e-9], "volume_m3": 0.3329833106157, "wall_seconds": 68.19},
-    {"target_beta": 0.006715625, "achieved_beta": 0.006860817603534578, "lambda_row_scale": 0.004, "iterations": [1, 315, 3], "residuals": [9.962155903874364e-9, 1.671255666405407e-9, 9.996696006222798e-9], "volume_m3": 0.332983311264985, "wall_seconds": 259.04}
+    {"target_beta": 0.006715625, "achieved_beta": 0.006860817603534578, "lambda_row_scale": 0.004, "iterations": [1, 315, 3], "residuals": [9.962155903874364e-9, 1.671255666405407e-9, 9.996696006222798e-9], "volume_m3": 0.332983311264985, "wall_seconds": 259.04},
+    {"target_beta": 0.006815625, "achieved_beta": 0.006962915596554015, "lambda_balance_target": 0.1, "iterations": [1, 261, 3], "residuals": [9.995963470690904e-9, 1.4207610393531905e-9, 9.975668267753733e-9], "volume_m3": 0.3329833119872916, "wall_seconds": 323.59}
   ],
   "rejected_step_examples": [
     {"from_target_beta": 0.005, "target_beta": 0.0055, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [2.1482004262961658e-8, 1.547161233909098e-9, 7.690856349249837e-9]},
     {"from_target_beta": 0.005, "target_beta": 0.00525, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [1.9660782267945982e-8, 1.5766451610779146e-9, 7.310534559762974e-9]}
   ],
-  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.686%. The limiting physical components shift between FSQR and FSQL, requiring lambda row scale 0.01, 0.005, then 0.004. Near target beta 0.672%, both components sit within 4e-12 of the 1e-8 gate and the corrector count rises to 315; continuation above this point requires a dynamic scaling rule or improved block preconditioner, not larger blind pressure jumps."
+  "dynamic_balance_screen": [
+    {"target": 0.05, "derived_scale_range": [0.0006492429644588119, 0.0010860988499560452], "residuals_after_120": [1.0980355140728255e-8, 3.6341425037986868e-9, 1.0776645299663202e-8]},
+    {"target": 0.1, "derived_scale_range": [0.0013033180364045694, 0.0021721976999120904], "residuals_after_120": [1.0830278504526699e-8, 2.9170725337593238e-9, 1.0547928516887476e-8]},
+    {"target": 0.2, "derived_scale_range": [0.002645214633980514, 0.004344395399824181], "residuals_after_120": [1.1381040886604774e-8, 4.153792772191797e-9, 1.118461244846658e-8]}
+  ],
+  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.696%. The limiting physical components shift between FSQR and FSQL, requiring static lambda scales 0.01, 0.005, then 0.004. A bounded norm-derived scale with target ratio 0.1 advances the endpoint once more, but both physical components remain tangent to the 1e-8 gate and the corrector takes 261 iterations. Continuation requires improved block structure or a physics/bifurcation assessment, not larger blind pressure jumps."
 }

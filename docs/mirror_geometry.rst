@@ -155,16 +155,19 @@ then converges in 51 iterations, with all five scheduled Newton steps accepted
 at 0.25. Its NESTOR release converges in three iterations at achieved beta
 0.3575%.
 
-Adaptive balancing extends that result through nine more genuine free-boundary
-points to achieved beta 0.6861%. The lambda row scale decreases from 0.01 to
+Adaptive balancing extends that result through ten more genuine free-boundary
+points to achieved beta 0.6963%. The lambda row scale decreases from 0.01 to
 0.005 and 0.004 as the limiting component shifts, while every NESTOR release
 still converges in three iterations. At the last point the fixed corrector
 takes 315 iterations and ends at
 ``(9.96e-9, 1.67e-9, 9.997e-9)``: both ``FSQR`` and ``FSQL`` are effectively
 tangent to the acceptance gate. The compact ladder is recorded in
-``benchmarks/mirror_hybrid_balanced_continuation.json``. Continuation to 1%
-now requires a bounded dynamic block-balancing rule; the branch is not
-extrapolated to 50%.
+``benchmarks/mirror_hybrid_balanced_continuation.json``. A bounded norm-derived
+scale, frozen within each GMRES solve and recorded in ``newton_history``,
+advances the endpoint once more but leaves ``FSQR`` and ``FSQL`` tangent to the
+gate. The next assessment is Jacobian conditioning, nested-surface quality,
+and a possible equilibrium/bifurcation limit; the branch is not extrapolated
+to 50%.
 
 Fixed-boundary 3D solver
 ------------------------

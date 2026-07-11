@@ -91,6 +91,13 @@ class Prec2DConfig:
         Static left scaling for the inner ``(R, Z, lambda)`` equations. It
         changes GMRES conditioning and inexact-solve priorities but not the
         exact Newton direction. The physical-force line search is unscaled.
+    auto_balance_lambda:
+        If true, replace the static lambda row scale at every Newton attempt
+        by ``lambda_balance_target * max(||g_R||, ||g_Z||) / ||g_lambda||``,
+        clipped to ``lambda_scale_bounds`` and then frozen during GMRES.
+    lambda_balance_target, lambda_scale_bounds:
+        Target scaled lambda-to-geometry norm ratio and safety bounds for
+        automatic balancing.
     step:
         Damping applied to the (full) Newton step, ``state += step * delta``.
         ``1.0`` is the undamped Newton update; VMEC2000 instead folds the step
@@ -120,6 +127,9 @@ class Prec2DConfig:
     start_iteration: int = 10
     interval: int = 1
     row_scales: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    auto_balance_lambda: bool = False
+    lambda_balance_target: float = 0.1
+    lambda_scale_bounds: tuple[float, float] = (1.0e-4, 1.0)
     step: float = 1.0
     gmres_restart: int = 40
     gmres_max_restarts: int = 3

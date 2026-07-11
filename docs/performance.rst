@@ -277,6 +277,10 @@ lambda)`` equations. This does not change an exact Newton direction and is
 never used by the physical-force line search; it only conditions a truncated
 GMRES solve. Keep the default ``(1, 1, 1)`` unless channel diagnostics show a
 clear imbalance and a convergence study validates the alternative.
+``auto_balance_lambda=True`` instead derives a bounded lambda scale from the
+current active channel norms at each Newton attempt and freezes it for that
+GMRES solve. The used value is the third column of
+``SolveResult.newton_history``.
 
 Memory
 ------

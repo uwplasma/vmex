@@ -177,7 +177,7 @@ BLOCK_SIZE = 10
 
 #: Trajectory buffer columns:
 #: iter, fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1, r00, z00, wmhd, delt.
-_TRAJ_COLS = 13
+_TRAJ_COLS = 14
 
 _TWO_PI_SQ = (2.0 * np.pi) ** 2
 
@@ -850,11 +850,11 @@ def _newton_step(
     rt: SolverRuntime, state: SpectralState, gc_signed: SpectralState,
     cache: PreconditionerCache, iteration: Array, fsqz_previous: Array,
     fsq_raw: Array, gate: Array,
-) -> tuple[SpectralState, Array, Array, Array]:
+) -> tuple[SpectralState, Array, Array, Array, Array]:
     """2D-preconditioner Newton direction, gated on the activation predicate.
 
-    Returns ``(direction, active, accepted_step, linear_residual)``. When
-    ``active`` (finest grid,
+    Returns ``(direction, active, accepted_step, linear_residual,
+    lambda_row_scale)``. When ``active`` (finest grid,
     ``fsq_raw < threshold``, past ``start_iteration``, on the configured
     cadence, and the base ``gate``), ``direction`` is the damped-Newton
     replacement for the 1D force
@@ -880,6 +880,7 @@ def _newton_step(
             jnp.zeros((), dtype=bool),
             jnp.asarray(-1.0, dtype=dtype),
             jnp.asarray(jnp.nan, dtype=dtype),
+            jnp.asarray(cfg.row_scales[2], dtype=dtype),
         )
 
     cadence = ((iteration - cfg.start_iteration) % max(int(cfg.interval), 1)) == 0
@@ -889,14 +890,36 @@ def _newton_step(
     )
     channels = _ALL_CHANNELS if rt.setup.lasym else ("R_cos", "Z_sin", "L_sin")
     indices = _newton_active_indices(rt, channels)
+    dtype = rt.setup.s_full.dtype
+
+    def active_norm(prefix: str) -> Array:
+        norm_squared = jnp.asarray(0.0, dtype=dtype)
+        for channel in channels:
+            if channel.startswith(prefix):
+                values = getattr(gc_signed, channel).reshape(-1)[indices[channel]]
+                norm_squared = norm_squared + jnp.vdot(values, values).real
+        return jnp.sqrt(norm_squared)
+
+    lambda_row_scale = jnp.asarray(cfg.row_scales[2], dtype=dtype)
+    if cfg.auto_balance_lambda:
+        geometry_norm = jnp.maximum(active_norm("R_"), active_norm("Z_"))
+        lambda_norm = active_norm("L_")
+        low, high = cfg.lambda_scale_bounds
+        lambda_row_scale = jnp.clip(
+            cfg.lambda_balance_target * geometry_norm
+            / jnp.maximum(lambda_norm, jnp.finfo(dtype).tiny),
+            low, high,
+        )
     row_scale = {
         channel: jnp.asarray(
             cfg.row_scales[0 if channel.startswith("R_") else
-                           1 if channel.startswith("Z_") else 2],
-            dtype=rt.setup.s_full.dtype,
+                           1 if channel.startswith("Z_") else 2], dtype=dtype,
         )
         for channel in channels
     }
+    for channel in channels:
+        if channel.startswith("L_"):
+            row_scale[channel] = lambda_row_scale
 
     def to_full(reduced: dict) -> SpectralState:
         full = {}
@@ -965,20 +988,26 @@ def _newton_step(
                 value = flat.reshape(value.shape)
             full[channel] = value
         accepted_step = jnp.where(accepted, cfg.step * factor, 0.0)
-        return SpectralState(**full), accepted, accepted_step, sol.residual_norm
+        return (
+            SpectralState(**full), accepted, accepted_step,
+            sol.residual_norm, lambda_row_scale,
+        )
 
-    dtype = rt.setup.s_full.dtype
-    direction, accepted, accepted_step, linear_residual = lax.cond(
+    direction, accepted, accepted_step, linear_residual, used_lambda_scale = lax.cond(
         active, do_newton,
         lambda _: (
             gc_signed,
             jnp.zeros((), dtype=bool),
             jnp.asarray(-1.0, dtype=dtype),
             jnp.asarray(jnp.nan, dtype=dtype),
+            lambda_row_scale,
         ),
         operand=None,
     )
-    return direction, active & accepted, accepted_step, linear_residual
+    return (
+        direction, active & accepted, accepted_step,
+        linear_residual, used_lambda_scale,
+    )
 
 
 def _evaluate(
@@ -1235,10 +1264,11 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         # velocity, mirroring evolve.f's xcdot reset on prec2d activation.
         newton_step = jnp.asarray(-1.0, dtype=fsqr_f.dtype)
         newton_linear_residual = jnp.asarray(jnp.nan, dtype=fsqr_f.dtype)
+        newton_lambda_scale = jnp.asarray(jnp.nan, dtype=fsqr_f.dtype)
         if rt.prec2d is not None:
             fsqz_prev_used = jnp.where(restart, fsqz_c, carry.fsqz)
             (newton_dir, prec2d_active, newton_step,
-             newton_linear_residual) = _newton_step(
+             newton_linear_residual, newton_lambda_scale) = _newton_step(
                 rt, state_r, gc_f, cache_f, it, fsqz_prev_used,
                 fsqr_f + fsqz_f + fsql_f, stepping & (~reeval_bad),
             )
@@ -1282,7 +1312,7 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         row = jnp.stack([
             it.astype(wb_f.dtype), fsqr_f, fsqz_f, fsql_f,
             fsqr1_f, fsqz1_f, fsql1_f, r00_f, z00_f, w0 * _TWO_PI_SQ, delt_r,
-            newton_step, newton_linear_residual,
+            newton_step, newton_linear_residual, newton_lambda_scale,
         ])
         idx = jnp.clip(it - 1, 0, max_iter - 1)
         old_row = lax.dynamic_slice_in_dim(carry.trajectory, idx, 1, axis=0)[0]
@@ -1354,8 +1384,9 @@ class SolveResult:
     ``ncurr = 1``.  ``fsq_history`` has one row per iteration:
     ``(fsqr, fsqz, fsql, fsqr1, fsqz1, fsql1)``.  ``wmhd`` is the printed
     ``WMHD = (wb + wp/(gamma-1)) * (2 pi)^2``. ``newton_history`` stores
-    ``(accepted_step, linear_residual)``; step ``-1`` means no attempt and
-    ``0`` means a rejected correction followed by the regular VMEC update.
+    ``(accepted_step, linear_residual, lambda_row_scale)``; step ``-1`` means
+    no attempt and ``0`` means a rejected correction followed by the regular
+    VMEC update.
     """
 
     converged: bool; iterations: int; ier_flag: int
@@ -1424,7 +1455,7 @@ def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
         state=state, xm=xm, xn=xn,
         rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc, iotaf=iotaf,
         fsq_history=trajectory[:, 1:7].copy(),
-        newton_history=trajectory[:, 11:13].copy(),
+        newton_history=trajectory[:, 11:14].copy(),
     )
 
 

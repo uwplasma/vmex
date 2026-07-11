@@ -135,6 +135,7 @@ def test_prec2d_config_is_hashable():
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, backtracking=True))
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, interval=10))
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, row_scales=(1.0, 1.0, 0.1)))
+    assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, auto_balance_lambda=True))
 
 
 def test_newton_system_contains_only_evolved_physical_entries():
@@ -197,7 +198,8 @@ def test_2d_backtracking_converges_stiff_equilibrium():
     res = Resolution(mpol=r0.mpol, ntor=r0.ntor, ntheta=r0.ntheta, nzeta=r0.nzeta,
                      nfp=r0.nfp, lasym=r0.lasym, ns=21)
     cfg = Prec2DConfig(threshold=1e-4, gmres_restart=40, gmres_max_restarts=2,
-                       gmres_rtol=3e-3, backtracking=True)
+                       gmres_rtol=3e-3, backtracking=True,
+                       auto_balance_lambda=True)
 
     result = solve(inp, res, mode="jit", ftol=1e-9, max_iterations=2000, prec2d=cfg)
 
@@ -206,3 +208,5 @@ def test_2d_backtracking_converges_stiff_equilibrium():
     attempted = result.newton_history[:, 0] >= 0.0
     assert np.any(result.newton_history[:, 0] > 0.0)
     assert np.all(np.isfinite(result.newton_history[attempted, 1]))
+    scales = result.newton_history[attempted, 2]
+    assert np.all((scales >= 1e-4) & (scales <= 1.0))
