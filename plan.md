@@ -1640,7 +1640,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       2,294 active unknowns; the existing stiff aspect-100 full test still reaches the same
       equilibrium in fewer iterations. A direct exact-direction audit shows a 1% Newton step is
       descending while the former 25--100% steps are not, so Jacobian-aware backtracking is the
-      remaining corrector work rather than more fixed step-factor scans.
+      remaining corrector work rather than more fixed step-factor scans. **Corrector barrier
+      closed (2026-07-11):** the safeguarded corrector minimizes the largest normalized physical
+      force component, rejects sign-changing Jacobians, falls back to the regular VMEC update when
+      no Newton candidate descends, and can attempt the expensive matrix-free solve on a static
+      cadence. With step 0.25 and cadence 10, the former 0.30% blocker converges in 291 iterations
+      to `(9.99e-9,2.49e-9,3.28e-9)` (299 s and 1.57 GiB peak RSS on an RTX A4000). Releasing that
+      state through a full NESTOR update converges in 3 iterations to achieved beta 0.3064%, with
+      volume `0.332983315 m^3` and aspect 16.5511. The old 0.30% blocker is closed; the next finite
+      task is an adaptive continuation through 1, 3, 10, 25, and 50%, retaining each solved free
+      LCFS as the following fixed predictor boundary. No result above 0.30% is claimed yet.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

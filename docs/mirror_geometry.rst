@@ -117,20 +117,29 @@ a force-converged fixed seed could return before NESTOR activation, and its
 pre-vacuum best checkpoint could reject every coupled update. With signed
 coil-matched ``PHIEDGE``, the unshaped toroidal-flux seed now completes a real
 beta-zero NESTOR turn-on and converges at ``ftol=1e-8`` in three iterations
-using ``DELT=0.002``. Finite-pressure continuation and the full 0--50% scan
-remain open.
+using ``DELT=0.002``. Finite-pressure continuation through 50% remains open.
 
 A split fixed-predictor/fixed-corrector/NESTOR continuation then converges
 target beta 0.05--0.25% (achieved 0.0511--0.2555%); each released-boundary
 correction takes three iterations. The 0.30% fixed predictor reaches
-``1e-7``, but its ``1e-8`` corrector exhausts 5,000 iterations. Smaller beta
-steps and tolerance restarts do not move that boundary. ``ntor=12`` and 16
-also fail at beta zero, while 20 converges, so spline controls cannot replace
-the equilibrium Fourier bandwidth. The generic 2D block reduces lambda but
-worsens radial force, and VMEC2000 cold/restart runs likewise remain above
-``1e-6`` after more than 4,000 iterations. Complete values are in
-``benchmarks/mirror_hybrid_free_boundary.json``. The 0--50% scan remains a
-blocked research target, not a supported example.
+``1e-7``, but its original ``1e-8`` corrector exhausted 5,000 iterations.
+Smaller beta steps and tolerance restarts did not move that boundary.
+``ntor=12`` and 16 also fail at beta zero, while 20 converges, so spline
+controls cannot replace the equilibrium Fourier bandwidth. VMEC2000
+cold/restart runs likewise remain above ``1e-6`` after more than 4,000
+iterations.
+
+The active-coordinate Newton system now omits fixed and gauge coordinates and
+uses an optional physical-force line search. It minimizes the largest of
+``FSQR``, ``FSQZ``, and ``FSQL``, rejects sign-changing Jacobians, and returns
+to the regular VMEC update when no Newton candidate descends. Running the
+matrix-free correction every ten iterations closes the former 0.30% barrier:
+the fixed corrector converges in 291 iterations to
+``(9.99e-9, 2.49e-9, 3.28e-9)``. The subsequent full NESTOR release converges
+in three iterations at achieved beta 0.3064%. Complete values are in
+``benchmarks/mirror_hybrid_free_boundary.json``. The 0--50% scan remains open
+until adaptive continuation has produced and validated every higher-beta
+equilibrium; no prescribed-boundary result is counted as completion.
 
 Fixed-boundary 3D solver
 ------------------------
