@@ -34,6 +34,7 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
+    TabulatedPressureClosure,
     build_vacuum_grid,
     load_free_boundary_restart,
     save_free_boundary_restart,
@@ -43,7 +44,7 @@ from vmec_jax.mirror import (  # noqa: E402
 
 # Inputs: edit these values, then run the file directly.
 BETAS = np.asarray([0.0, 0.01, 0.03, 0.10, 0.25, 0.50])
-PRESSURE_MODEL = "isotropic"  # or "bi_maxwellian"
+PRESSURE_MODEL = "isotropic"  # "bi_maxwellian" or "tabulated"
 HOT_FRACTION = 0.2
 TEMPERATURE_RATIO = 0.7
 NS = 7
@@ -99,16 +100,27 @@ initial_boundary = MirrorBoundary.from_axis_field(
     grid,
 )
 pressure_closure = None
-if PRESSURE_MODEL == "bi_maxwellian":
-    pressure_closure = BiMaxwellianPressureClosure(
+if PRESSURE_MODEL in {"bi_maxwellian", "tabulated"}:
+    bi_maxwellian = BiMaxwellianPressureClosure(
         mass_coefficients=jnp.asarray([1.0, -1.0]),
         hot_fraction_coefficients=jnp.asarray([HOT_FRACTION]),
         temperature_ratio=TEMPERATURE_RATIO,
         critical_field=float(vacuum_axis_field[center]),
         gamma=0.0,
     )
+    if PRESSURE_MODEL == "bi_maxwellian":
+        pressure_closure = bi_maxwellian
+    else:
+        s_nodes = jnp.linspace(0.0, 1.0, 5)
+        b_nodes = jnp.linspace(0.4 * vacuum_axis_field[center], 2.0 * vacuum_axis_field[center], 9)
+        pressure_closure = TabulatedPressureClosure(
+            s_nodes,
+            b_nodes,
+            bi_maxwellian.parallel_pressure(s_nodes[:, None], b_nodes[None, :]),
+            gamma=0.0,
+        )
 elif PRESSURE_MODEL != "isotropic":
-    raise ValueError("PRESSURE_MODEL must be 'isotropic' or 'bi_maxwellian'")
+    raise ValueError("PRESSURE_MODEL must be 'isotropic', 'bi_maxwellian', or 'tabulated'")
 
 print(f"Solving {BETAS.size} beta points at ns={NS}, nxi={NXI}, nrho={NRHO}, ftol={FTOL:.0e}")
 results = solve_axisymmetric_beta_scan_cli(

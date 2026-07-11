@@ -80,10 +80,11 @@ solves every beta point and writes CSV plus three reviewed figures under
 coils, cap-to-cap field lines, field arrows, and coupled residual histories.
 Generated results are ignored by git.
 
-``PRESSURE_MODEL`` selects the mass-conserving isotropic scan or a consistent
-bi-Maxwellian ANIMEC closure. In the anisotropic lane the solved beta target
-is midplane ``p_perp``, the interface stress uses ``p_perp``, and convergence
-also requires the firehose/mirror ellipticity indicators to remain valid.
+``PRESSURE_MODEL`` selects the mass-conserving isotropic scan, a consistent
+bi-Maxwellian ANIMEC closure, or a tabulated ``p_parallel(s,B)`` sampled from
+that closure. In the anisotropic lane the solved beta target is midplane
+``p_perp``, the interface stress uses ``p_perp``, and convergence also requires
+the firehose/mirror ellipticity indicators to remain valid.
 
 Set ``SAVE_RESTARTS = True`` to write one compressed ``.npz`` hot-start per
 beta point. :func:`vmec_jax.mirror.load_free_boundary_restart` checks its

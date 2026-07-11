@@ -18,6 +18,7 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorConfig,
     MirrorResolution,
     MirrorState,
+    TabulatedPressureClosure,
     build_vacuum_grid,
     evaluate_vacuum_field,
     evaluate_vacuum_geometry,
@@ -409,6 +410,59 @@ def test_two_coil_anisotropic_free_boundary_calibrates_perpendicular_beta() -> N
     assert float(anisotropy) > 0.04
     assert bool(jnp.all(energy.indicators_half.valid))
     assert float(result.boundary.radius_scale[0, center]) > float(results[0].boundary.radius_scale[0, center])
+
+
+def test_tabulated_pressure_free_boundary_matches_sampled_bimaxwellian() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=7),
+        z_min=-0.8,
+        z_max=0.8,
+        ftol=1.0e-12,
+        max_iterations=1000,
+    )
+    grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(grid, nrho=5)
+    on_axis = two_coil_on_axis_bz(jnp.asarray(grid.z), coil_radius=0.9, separation=2.0, current=2.0e5)
+    center = grid.nxi // 2
+    flux = 0.5 * on_axis[center] * 0.25**2
+    boundary = MirrorBoundary.from_axis_field(flux, on_axis, grid)
+    reference = BiMaxwellianPressureClosure(
+        mass_coefficients=jnp.asarray([1.0, -1.0]),
+        hot_fraction_coefficients=jnp.asarray([0.2]),
+        temperature_ratio=0.7,
+        critical_field=float(on_axis[center]),
+        gamma=0.0,
+    )
+    s_nodes = jnp.linspace(0.0, 1.0, 5)
+    b_nodes = jnp.linspace(0.04, 0.18, 9)
+    closure = TabulatedPressureClosure(
+        s_nodes,
+        b_nodes,
+        reference.parallel_pressure(s_nodes[:, None], b_nodes[None, :]),
+        gamma=0.0,
+    )
+    betas = jnp.asarray([0.0, 0.01])
+    results = solve_axisymmetric_beta_scan_cli(
+        boundary,
+        grid,
+        vacuum_grid,
+        config,
+        _two_end_coils(),
+        betas,
+        outer_radius=0.65,
+        axial_flux_derivative=flux,
+        reference_field=float(on_axis[center]),
+        pressure_closure=closure,
+    )
+    result = results[-1]
+    diagnostic = summarize_axisymmetric_beta_scan(results, betas, grid, reference_field=float(on_axis[center]))[-1]
+
+    assert result.converged
+    assert float(result.variational_max) <= config.ftol
+    assert bool(jnp.all(result.plasma_energy.indicators_half.valid))
+    np.testing.assert_allclose(diagnostic.achieved_reference_beta, 0.01, rtol=2e-8)
+    np.testing.assert_allclose(diagnostic.center_radius, 0.2533157164, rtol=2e-8)
+    np.testing.assert_allclose(diagnostic.diamagnetic_field_ratio, 0.9955138994, rtol=2e-8)
 
 
 @pytest.mark.full
