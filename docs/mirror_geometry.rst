@@ -118,6 +118,11 @@ solves every beta point and writes CSV plus three reviewed figures under
 ``z`` geometry, LCFS displacement, on-axis and LCFS ``|B|``, pressure balance,
 coils, cap-to-cap field lines, field arrows, and coupled residual histories.
 Generated results are ignored by git.
+Set ``VACUUM_BACKEND = "exterior"`` in the same input block to replace the
+finite outer cylinder with the differentiable free-space BIE solve. The CSV
+then includes closed-surface compatibility and BIE condition number for every
+beta point; the default remains ``"annulus"`` until the exterior memory and
+finite-beta resolution gates above close.
 
 ``PRESSURE_MODEL`` selects the mass-conserving isotropic scan, a consistent
 bi-Maxwellian ANIMEC closure, or a tabulated ``p_parallel(s,B)`` sampled from

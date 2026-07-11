@@ -50,6 +50,10 @@ TEMPERATURE_RATIO = 0.7
 NS = 7
 NXI = 13
 NRHO = 7
+VACUUM_BACKEND = "annulus"  # "exterior" removes the finite outer cylinder
+EXTERIOR_NTHETA = 12
+EXTERIOR_ORDER = 8
+EXTERIOR_JACOBIAN_CHUNK_SIZE = 6
 FTOL = 1.0e-12
 MAX_ITERATIONS = 2000
 Z_MIN, Z_MAX = -0.8, 0.8
@@ -122,7 +126,10 @@ if PRESSURE_MODEL in {"bi_maxwellian", "tabulated"}:
 elif PRESSURE_MODEL != "isotropic":
     raise ValueError("PRESSURE_MODEL must be 'isotropic', 'bi_maxwellian', or 'tabulated'")
 
-print(f"Solving {BETAS.size} beta points at ns={NS}, nxi={NXI}, nrho={NRHO}, ftol={FTOL:.0e}")
+print(
+    f"Solving {BETAS.size} beta points at ns={NS}, nxi={NXI}, "
+    f"vacuum={VACUUM_BACKEND}, ftol={FTOL:.0e}"
+)
 results = solve_axisymmetric_beta_scan_cli(
     initial_boundary,
     grid,
@@ -135,6 +142,10 @@ results = solve_axisymmetric_beta_scan_cli(
     reference_field=float(vacuum_axis_field[center]),
     initial_restart=initial_restart,
     pressure_closure=pressure_closure,
+    vacuum_backend=VACUUM_BACKEND,
+    exterior_ntheta=EXTERIOR_NTHETA,
+    exterior_order=EXTERIOR_ORDER,
+    exterior_jacobian_chunk_size=EXTERIOR_JACOBIAN_CHUNK_SIZE,
 )
 if SAVE_RESTARTS:
     for beta, result in zip(BETAS, results, strict=True):
@@ -163,6 +174,12 @@ summary = np.asarray(
             float(result.interface.vacuum_b_normal_rms),
             float(result.mass_scale),
             float(result.iterations),
+            float(result.vacuum_field.neumann_result.compatibility_error)
+            if VACUUM_BACKEND == "exterior"
+            else np.nan,
+            float(result.vacuum_field.neumann_result.condition_number)
+            if VACUUM_BACKEND == "exterior"
+            else np.nan,
         ]
         for item, result in zip(diagnostics, results, strict=True)
     ]
@@ -170,7 +187,8 @@ summary = np.asarray(
 header = (
     "requested_beta,achieved_reference_beta,volume_averaged_beta,center_radius_m,"
     "center_axis_field_T,diamagnetic_field_ratio,paraxial_field_ratio,"
-    "paraxial_relative_error,variational_max,normal_stress_rms,bnormal_rms_normalized,mass_scale,iterations"
+    "paraxial_relative_error,variational_max,normal_stress_rms,bnormal_rms_normalized,"
+    "mass_scale,iterations,exterior_compatibility,exterior_condition_number"
 )
 np.savetxt(OUTPUT_DIR / "beta_scan.csv", summary, delimiter=",", header=header, comments="")
 
