@@ -400,15 +400,20 @@ def test_free_boundary_converged_golden(golden_dir):
 
     # 4. Same-resolution continuation retains the solved LCFS and should be
     #    materially cheaper than rebuilding the equilibrium from INDATA.
+    warm_lines: list[str] = []
     warm = FB.solve_free_boundary(
         inp,
         mgrid_path=CONV_MGRID,
         initial_state=result.state,
         max_iterations=1000,
+        verbose=True,
+        emit=lambda *a, **k: warm_lines.append(a[0] if a else ""),
         error_on_no_convergence=False,
     )
     assert warm.converged
+    assert warm.iterations > 2
     assert warm.iterations < result.iterations
+    assert "VACUUM PRESSURE TURNED ON" in "".join(warm_lines)
     assert abs(warm.wb - result.wb) <= 1e-6 * abs(result.wb) + 1e-12
 
 

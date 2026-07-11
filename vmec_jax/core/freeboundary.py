@@ -45,7 +45,7 @@ import jax
 import jax.numpy as jnp
 
 from . import profiles as _profiles
-from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
+from .errors import MORE_ITER_FLAG, NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
 from .geometry import half_mesh_jacobian
@@ -979,6 +979,18 @@ def solve_free_boundary(
                 rt_use = rt_freeb
 
         carry = _iter_lane(carry, rt_use)
+
+        # A converged fixed-boundary hot start can satisfy FTOL before IVAC0
+        # has evaluated the vacuum pressure. Keep stepping through the normal
+        # two-call NESTOR turn-on sequence; otherwise a prescribed LCFS would
+        # be mislabeled as a solved free boundary.
+        if bool(carry.done) and int(carry.ier) == SUCCESSFUL_TERM_FLAG and not fb.turned_on:
+            carry = replace(
+                carry,
+                iteration=carry.iteration + jnp.asarray(1, dtype=carry.iteration.dtype),
+                done=jnp.zeros((), dtype=bool),
+                ier=jnp.asarray(NORM_TERM_FLAG, dtype=carry.ier.dtype),
+            )
 
         if fb.banner_pending:
             if verbose:
