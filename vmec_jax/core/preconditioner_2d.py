@@ -46,6 +46,11 @@ Wiring lives in :mod:`vmec_jax.core.solver` (``_make_body``): when
 ``precon_type != "NONE"`` the traced iteration replaces the 1D force direction
 by :func:`newton_direction` under a ``lax.cond`` gated on the activation
 predicate, so the default 1D-only path is untouched.
+
+The solver packs only entries that Richardson can physically evolve. Fixed
+R/Z boundary rows, axis-null harmonics, lambda-axis values, and zero/gauge
+modes are excluded from GMRES and reconstructed with zero Newton updates.
+This avoids singular or nonphysical columns without changing the force map.
 """
 
 from __future__ import annotations

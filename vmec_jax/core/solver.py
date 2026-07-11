@@ -806,6 +806,26 @@ def _preconditioned_force_signed(
 _ALL_CHANNELS = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
 
 
+def _newton_active_indices(rt: SolverRuntime, channels: tuple[str, ...]) -> dict[str, np.ndarray]:
+    """Flat indices of physical degrees of freedom in the Newton system."""
+
+    ns, mnmax = rt.resolution.ns, rt.modes.mnmax
+    m = np.asarray(rt.modes.m)
+    zero_mode = (m == 0) & (np.asarray(rt.modes.n) == 0)
+    indices: dict[str, np.ndarray] = {}
+    for channel in channels:
+        mask = np.zeros((ns, mnmax), dtype=bool)
+        if channel.startswith(("R_", "Z_")):
+            mask[: rt.jmax] = True
+            mask[0, m > 0] = False
+        else:
+            mask[1:] = True  # lambda axis values are closure/gauge data
+        if channel.endswith("_sin") or channel.startswith("L_"):
+            mask[:, zero_mode] = False
+        indices[channel] = np.flatnonzero(mask.reshape(-1))
+    return indices
+
+
 def _newton_step(
     rt: SolverRuntime, state: SpectralState, gc_signed: SpectralState,
     cache: PreconditionerCache, iteration: Array, fsqz_previous: Array,
@@ -821,7 +841,9 @@ def _newton_step(
     ``jax.jvp``), so ``state += cfg.step * delta`` is the block-preconditioned
     update (``precon2d.f`` ``block_precond``: ``gc <- -H^{-1} gc``).  Otherwise
     ``direction = gc_signed`` and ``active = False``.  The linear solve runs
-    only over the non-trivial spectral channels (symmetric: R_cos/Z_sin/L_sin).
+    only over physical, evolved entries of the non-trivial spectral channels
+    (symmetric: R_cos/Z_sin/L_sin). Fixed R/Z edge rows, axis-null harmonics,
+    lambda-axis values, and identically zero/gauge modes are omitted.
     Only reached when ``rt.prec2d is not None`` (the branch is otherwise never
     traced, keeping the 1D-only path byte-identical).
     """
@@ -831,30 +853,37 @@ def _newton_step(
 
     active = gate & (fsq_raw < cfg.threshold) & (iteration >= cfg.start_iteration)
     channels = _ALL_CHANNELS if rt.setup.lasym else ("R_cos", "Z_sin", "L_sin")
-    inactive = tuple(c for c in _ALL_CHANNELS if c not in channels)
+    indices = _newton_active_indices(rt, channels)
 
     def to_full(reduced: dict) -> SpectralState:
-        # inactive (identically-zero) channels are frozen constants of the HVP
-        full = dict(reduced)
-        for c in inactive:
-            full[c] = getattr(state, c) * 0.0
-        return SpectralState(**{c: full[c] for c in _ALL_CHANNELS})
+        full = {}
+        for channel in _ALL_CHANNELS:
+            base = getattr(state, channel)
+            if channel in reduced:
+                flat = base.reshape(-1).at[indices[channel]].set(reduced[channel])
+                base = flat.reshape(base.shape)
+            full[channel] = base
+        return SpectralState(**full)
 
     def g_reduced(reduced: dict) -> dict:
         gc_full = _preconditioned_force_signed(
             to_full(reduced), cache, rt, iteration=iteration, fsqz_previous=fsqz_previous,
         )
-        return {c: getattr(gc_full, c) for c in channels}
+        return {c: getattr(gc_full, c).reshape(-1)[indices[c]] for c in channels}
 
-    x0 = {c: getattr(state, c) for c in channels}
-    rhs = {c: -getattr(gc_signed, c) for c in channels}  # solve J delta = -g
+    x0 = {c: getattr(state, c).reshape(-1)[indices[c]] for c in channels}
+    rhs = {c: -getattr(gc_signed, c).reshape(-1)[indices[c]] for c in channels}
 
     def do_newton(_):
         delta, _sol = newton_direction(g_reduced, x0, rhs, cfg)
-        return SpectralState(**{
-            c: (delta[c] if c in channels else getattr(gc_signed, c))
-            for c in _ALL_CHANNELS
-        })
+        full = {}
+        for channel in _ALL_CHANNELS:
+            value = jnp.zeros_like(getattr(gc_signed, channel))
+            if channel in delta:
+                flat = value.reshape(-1).at[indices[channel]].set(delta[channel])
+                value = flat.reshape(value.shape)
+            full[channel] = value
+        return SpectralState(**full)
 
     direction = lax.cond(active, do_newton, lambda _: gc_signed, operand=None)
     return direction, active

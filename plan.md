@@ -1635,6 +1635,12 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       WOUT restart at `(1.42e-5,1.08e-5,1.20e-6)` after 5,200, using only ~85 MiB. Compact evidence
       is in `benchmarks/mirror_hybrid_free_boundary.json`. The next implementation is a constrained,
       R/Z/lambda-scaled fixed-boundary corrector; do not start the 1--50% production scan before it.
+      The matrix-free Newton system now removes fixed edge rows, axis-null harmonics, lambda-axis
+      values, and zero/gauge modes, reducing the hybrid solve from 3,390 stored coordinates to
+      2,294 active unknowns; the existing stiff aspect-100 full test still reaches the same
+      equilibrium in fewer iterations. A direct exact-direction audit shows a 1% Newton step is
+      descending while the former 25--100% steps are not, so Jacobian-aware backtracking is the
+      remaining corrector work rather than more fixed step-factor scans.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

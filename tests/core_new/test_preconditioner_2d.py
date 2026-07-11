@@ -35,7 +35,7 @@ from vmec_jax.core.preconditioner_2d import (
     Prec2DConfig, flat_operator, newton_direction,
 )
 from vmec_jax.core.solver import (
-    SpectralState, _initial_state, _preconditioned_force_signed,
+    SpectralState, _initial_state, _newton_active_indices, _preconditioned_force_signed,
     evaluate_forces, prepare_runtime, resolution_from_input, solve,
 )
 
@@ -132,6 +132,24 @@ def test_prec2d_config_is_hashable():
     cfg = Prec2DConfig(threshold=1e-6)
     assert hash(cfg) == hash(Prec2DConfig(threshold=1e-6))
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-7))
+
+
+def test_newton_system_contains_only_evolved_physical_entries():
+    """Fixed edge, axis-null, and lambda-gauge coordinates are not GMRES unknowns."""
+    inp = VmecInput.from_file(str(DATA_DIR / "input.circular_tokamak"))
+    rt = prepare_runtime(inp, Resolution(mpol=4, ntor=0, ntheta=8, nzeta=1, nfp=1, lasym=False, ns=6))
+    active = _newton_active_indices(rt, ("R_cos", "Z_sin", "L_sin"))
+    mnmax = rt.modes.mnmax
+
+    r_rows, r_modes = np.divmod(active["R_cos"], mnmax)
+    assert np.all(r_rows < rt.resolution.ns - 1)
+    assert np.all(rt.modes.m[r_modes[r_rows == 0]] == 0)
+
+    for channel in ("Z_sin", "L_sin"):
+        rows, modes = np.divmod(active[channel], mnmax)
+        if channel == "L_sin":
+            assert np.all(rows > 0)
+        assert not np.any((rt.modes.m[modes] == 0) & (rt.modes.n[modes] == 0))
 
 
 @pytest.mark.full
