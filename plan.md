@@ -451,6 +451,36 @@ work is **bidirectional** and the net effect is a SLIMMER, better-integrated vme
     (R13) + a tutorial page (R14). Gate: README/docs enumerate the differentiators with evidence;
     each important new capability has an example.
 
+**R21. Rename everything `vmec_jax` → VMEX (user 2026-07-10; DO AFTER the current feature lanes, as
+the clean atomic cutover right before the v0.1.0 release R9).** Names: GitHub repo
+`uwplasma/vmec_jax` → `uwplasma/VMEX`; Python import package `vmec_jax` → **`vmex`** (lowercase,
+PEP 8; `import vmex`); PyPI distribution `vmec-jax` → **`vmex`** (verified AVAILABLE on PyPI
+2026-07-10, HTTP 404); CLI command → **`vmex`** (keep `vmec` as an alias — do NOT rename the output
+`wout_*.nc`/`boozmn_*.nc` files, those are the VMEC community conventions, not our package name).
+Scope measured: 96 files / 444 Python occurrences. Do it as ONE ATOMIC sweep (a partial rename breaks
+everything), paired with R12 (`tests/core_new/` → `tests/`):
+  1. `git mv vmec_jax vmex`; global identifier replace `vmec_jax` → `vmex` across .py/.rst/.md/.toml/
+     .yml (mind word boundaries: `vmec_jax` the package vs `vmec2000`/`vmec_input`/wout var names that
+     must NOT change; and the display string "vmec-jax"/"vmec_jax" in prose → "VMEX"). Update
+     `pyproject.toml` name=`vmex`, `[project.scripts] vmex = "vmex.core.cli:main"` (+ `vmec` alias),
+     all `[project.urls]` to the VMEX repo, package-data paths. Update `.github/workflows/*.yml`
+     (test paths, the golden fetch, size check), `docs/conf.py` + readthedocs slug, README badges
+     (PyPI/docs/CI URLs → vmex / VMEX), `CITATION.cff`, `.readthedocs.yaml`.
+  2. Ship a thin **`vmec_jax` compatibility shim** for one release: a stub package that
+     `from vmex import *` and emits a `DeprecationWarning` (pre-1.0 courtesy so existing imports don't
+     hard-break); document the deprecation. (Optional — a clean break is acceptable at v0.0.x, but the
+     shim is user-friendly.)
+  3. GitHub repo rename (auto-creates redirects); update the local `git remote`; re-point the
+     readthedocs project and the conda-forge feedstock (if it exists) to `vmex`; keep the old
+     `vmec-jax` PyPI project with a final `0.0.x` release whose long-description points to `vmex`.
+  4. NO-BUGS GATE (the user's explicit requirement): after the sweep — `pip install -e .` resolves;
+     `python -c "import vmex; print(vmex.__version__)"`; `vmex --test` + `vmex input.solovev` +
+     `--plot` + `--booz` all work; FULL test suite green (rename any `tests/` import of the package);
+     docs `-W` green; CI green incl. the 95% coverage gate; ruff clean; and a grep confirms **zero
+     stray `vmec_jax` identifiers** remain except the intentional compat shim. Verify on a fresh clone.
+  Gate: fresh clone installs as `vmex`, CLI/docs/CI all green, no stray identifiers, PyPI `vmex`
+  published; then proceed to R9 release under the VMEX name.
+
 ---
 
 ## 1. Ground truth — current state (audited 2026-07-08)
