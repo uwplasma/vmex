@@ -269,6 +269,13 @@ docs tutorial (R14.3). Target set:
   entirely from the docs; every example has a tutorial page.
 
 **R15. Free boundary to production parity + performance + differentiability (make it excellent AND
+*(R15.1 DONE 2026-07-11, c83bb2a1: free boundary now CONVERGES to VMEC2000 parity — fixed a
+double-nfp vacuum phase bug (boundary synthesis used xn=n·nfp against per-period zeta; the
+geometric angle is phi=zeta·onp). input.cth_like_free_bdy: was stalling at NITER; now 574
+iters to fsqr=9.9e-11, wb parity 2.1e-7 vs VMEC2000's 476-iter golden. Remaining: iters 574
+vs 476 (~20% tail); R15.2 perf 13.7× (vacuum host↔device glue → JAX-fusion follow-up); R15.3
+differentiation via virtual_casing_jax (R19) still to do; add cth golden+mgrid to the CI
+bundle.)*
 show it).** Current: CTH free-bdy stops at NITER (fsq~9e-2, unconverged), warm 17 s ≫ Fortran 6.6 s,
 coil derivatives unsupported. Steps:
   1. **Converge as well as VMEC2000.** Diagnose why the free-bdy solve stalls (nvacskip cadence, ivac
