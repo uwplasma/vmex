@@ -74,7 +74,11 @@ def summarize_axisymmetric_beta_scan(
     for requested_beta, result in zip(betas, results, strict=True):
         pressure = result.perpendicular_pressure
         axis_field = jnp.sqrt(result.plasma_b_squared[0, 0, center])
-        vacuum_side_field = jnp.linalg.norm(result.vacuum_field.total_xyz[0, 0, center])
+        if hasattr(result.vacuum_field, "lateral_field_xyz"):
+            vacuum_xyz = result.vacuum_field.lateral_field_xyz[center]
+        else:
+            vacuum_xyz = result.vacuum_field.total_xyz[0, 0, center]
+        vacuum_side_field = jnp.linalg.norm(vacuum_xyz)
         achieved_beta = 2.0 * MU0 * pressure[0, 0, center] / reference_field_squared
         local_beta = 2.0 * MU0 * pressure[0, 0, center] / axis_field**2
         average_pressure = _volume_average(pressure, result, grid)

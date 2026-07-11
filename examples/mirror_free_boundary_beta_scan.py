@@ -314,18 +314,18 @@ for panel, index in enumerate(display_indices, start=1):
         closed = np.vstack([curve, curve[0]])
         ax.plot(closed[:, 2], closed[:, 0], closed[:, 1], color="#C44E52", lw=2.0)
     for angle in np.linspace(0.0, 2.0 * np.pi, 10, endpoint=False):
-        line_x = 1.006 * radius * np.cos(angle)
-        line_y = 1.006 * radius * np.sin(angle)
-        ax.plot(z, line_x, line_y, color="black", lw=2.0, alpha=0.75)
-        ax.plot(z, line_x, line_y, color="white", lw=0.9, alpha=0.98)
+        line_x = 1.05 * radius * np.cos(angle)
+        line_y = 1.05 * radius * np.sin(angle)
+        ax.plot(z, line_x, line_y, color="black", lw=3.4, alpha=0.9)
+        ax.plot(z, line_x, line_y, color="#00BFC4", lw=1.7, alpha=1.0)
     arrow_indices = np.arange(12, z.size - 12, 24)
     radial_slope = np.gradient(radius, z)
     arrow_norm = np.sqrt(1.0 + radial_slope[arrow_indices] ** 2)
     for angle in (0.0, np.pi):
         ax.quiver(
             z[arrow_indices],
-            radius[arrow_indices] * np.cos(angle),
-            radius[arrow_indices] * np.sin(angle),
+            1.06 * radius[arrow_indices] * np.cos(angle),
+            1.06 * radius[arrow_indices] * np.sin(angle),
             0.12 / arrow_norm,
             0.12 * radial_slope[arrow_indices] * np.cos(angle) / arrow_norm,
             0.12 * radial_slope[arrow_indices] * np.sin(angle) / arrow_norm,

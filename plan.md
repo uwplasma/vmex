@@ -1311,6 +1311,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       adaptive exact-JVP Jacobian now keeps monolithic AD through 80 variables and chunks six
       columns above it; the third grid then converges in 118.8 s at 5.48 GB RSS. Physics convergence
       is established at beta zero, while memory and the beta-10 third grid remain promotion gates.
+      The root beta-scan example now exposes the exterior backend and writes compatibility/condition
+      diagnostics. A solved 0/10% exterior render at `ftol=1e-12` produced all three figure panels;
+      the 3D LCFS, coils, cap-to-cap lines, field arrows, `|B|`, pressure, beta, and residual plots
+      were visually inspected. Shared beta diagnostics now support both vacuum field layouts.
       Shaped/finite-beta exterior MMS, higher-order side density, tighter trace/near-field convergence,
       and coupling that deletes the finite outer cylinder remain the next M5 gates.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior

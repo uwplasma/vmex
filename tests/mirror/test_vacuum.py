@@ -400,6 +400,21 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
     )
     assert all(result.vacuum_potential.shape == vacuum_grid.shape for result in results)
     assert all(np.all(np.asarray(result.vacuum_potential) == 0.0) for result in results)
+    diagnostics = summarize_axisymmetric_beta_scan(
+        results,
+        jnp.asarray([0.0, 0.10]),
+        plasma_grid,
+        reference_field=float(on_axis[center]),
+    )
+    np.testing.assert_allclose(
+        [item.achieved_reference_beta for item in diagnostics],
+        [0.0, 0.10],
+        rtol=2.0e-8,
+        atol=1.0e-12,
+    )
+    assert all(
+        np.isfinite(float(item.center_vacuum_side_field)) for item in diagnostics
+    )
     assert float(results[1].boundary.radius_scale[0, center]) > 1.01 * float(
         results[0].boundary.radius_scale[0, center]
     )
