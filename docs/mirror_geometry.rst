@@ -18,18 +18,20 @@ The branch currently includes:
   coils or the shared ESSOS/MAKEGRID-compatible ``MgridField``,
 * coupled axisymmetric isotropic and anisotropic free-boundary beta
   continuation with compressed restart files,
-* a differentiable closed-surface adapter for the lateral LCFS and both end
-  disks, with nonsingular off-surface Laplace kernels from
-  ``virtual_casing_jax``, and
+* a free-space boundary-integral vacuum backend on the lateral LCFS and both
+  end disks, alongside the finite-annulus backend,
+* a genuine theta-dependent exterior free-boundary solve with finite axial
+  current and nonaxisymmetric coils, and
 * component-wise nonlinear convergence checks at a requested ``ftol=1e-12``.
 
-The axisymmetric free-boundary path is a research capability. A first formal
-resolution study, free-side initial-condition test, anisotropic closure study,
-and restart-file path are complete. Higher-resolution vacuum tangency,
-open-exterior closure, independent boundary references, and output gates in
-``plan.md`` remain. Nonaxisymmetric free-boundary mirrors and the toroidal
-stellarator-mirror hybrid are later milestones and must not be inferred from
-the axisymmetric result.
+The axisymmetric free-boundary path is a research capability with completed
+annulus and unbounded-exterior resolution studies through 50% requested beta.
+Higher-order exterior traces and additional independent boundary references
+remain promotion gates. The nonaxisymmetric path also converges through 50%,
+but its point observables are not yet monotone under spatial refinement, so it
+remains a development capability. The toroidal stellarator-mirror hybrid has
+not passed its equilibrium gate and must not be inferred from these straight-
+axis results.
 
 Toroidal hybrid foundation
 --------------------------
@@ -120,16 +122,15 @@ From a developer checkout, run:
    python examples/mirror_free_boundary_beta_scan.py
 
 The script has editable inputs at its top and no command-line parser. It
-solves every beta point and writes CSV plus three reviewed figures under
-``results/mirror_free_boundary_beta_scan/``. The figures include horizontal
+solves every beta point from 0 through 50% and writes CSV plus three reviewed
+figures under ``results/mirror_free_boundary_beta_scan_exterior/``. The figures include horizontal
 ``z`` geometry, LCFS displacement, on-axis and LCFS ``|B|``, pressure balance,
 coils, cap-to-cap field lines, field arrows, and coupled residual histories.
 Generated results are ignored by git.
-Set ``VACUUM_BACKEND = "exterior"`` in the same input block to replace the
-finite outer cylinder with the differentiable free-space BIE solve. The CSV
-then includes closed-surface compatibility and BIE condition number for every
-beta point; the default remains ``"annulus"`` until the exterior memory and
-finite-beta resolution gates above close.
+The default ``VACUUM_BACKEND = "exterior"`` removes the finite outer cylinder.
+Set it to ``"annulus"`` for the bounded comparison model; each backend writes
+to a separate result directory. Exterior CSV rows include closed-surface
+compatibility and BIE condition number for every beta point.
 
 ``PRESSURE_MODEL`` selects the mass-conserving isotropic scan, a consistent
 bi-Maxwellian ANIMEC closure, or a tabulated ``p_parallel(s,B)`` sampled from
@@ -171,6 +172,12 @@ central field falls by 4.78%; the field ratio is within 0.37% relative of the
 paraxial estimate. Thus field depression is the more sensitive validation
 observable for this zero-edge-pressure profile.
 
+On the unbounded exterior grid ``(ns,nxi,ntheta_panel)=(9,17,16)``, the 50%
+point reaches center radius ``0.272660 m``, field ratio ``0.747645``, and
+volume beta ``0.219148`` with nonlinear residual ``7.7e-15``. The paraxial
+small-beta estimate is intentionally shown but is no longer an accuracy
+reference at 50%; the solved nonlinear pressure balance is the governing gate.
+
 The finite-beta mirror trend follows the WHAM/Pleiades discussion in Frank et
 al., `Confinement performance predictions for a high field axisymmetric tandem
 mirror <https://doi.org/10.1017/S002237782510055X>`_. A checked Pleiades
@@ -192,8 +199,9 @@ cylinder, preserves zero correction flux through the axial cuts, and obtains
 total-field tangency naturally on the plasma side. Finite-wall Neumann and
 mixed-Dirichlet center fields approach one another as the outer cylinder is
 expanded, but their remaining gap is reported as truncation uncertainty. A
-true exterior Dirichlet-to-Neumann or boundary-integral operator remains an M5
-promotion gate.
+free-space boundary-integral backend now removes this truncation. The annulus
+remains useful for parity and inexpensive comparison tests; exterior trace
+order and memory cost remain M5 promotion gates.
 
 Open-exterior foundation
 ------------------------
@@ -255,8 +263,9 @@ over four meshes; the finest solve takes 5.7 seconds and has condition number
 off-surface extrapolation, and two-grid Richardson correction were measured
 and rejected because they increase the error. Linear density interpolation on
 side triangles is therefore the limiter. The finest-grid result is accurate
-enough for a guarded first M6 coupling study, but higher-order side density is
-still required before replacing the annulus backend by default.
+enough for guarded M6 coupling and is the root beta-scan example default.
+Higher-order side density is still required before making exterior vacuum the
+library-wide default for every workload.
 Source ownership is kept narrow: ``exterior.py`` builds geometry and reduction
 maps, ``exterior_mesh.py`` owns panel topology and Duffy quadrature, and
 ``exterior_bie.py`` owns layer evaluation and Neumann solves. Public functions
@@ -268,7 +277,7 @@ Neumann problem, and returns the lateral total-field trace. Tangency and a
 full shape JVP pass on the coupled adapter, so the remaining gate is nonlinear
 equilibrium behavior rather than a missing differentiation path.
 The adapter is also available as ``vacuum_backend="exterior"`` in the coupled
-axisymmetric free-boundary and beta-continuation drivers. On the bounded
+axisymmetric free-boundary and beta-continuation drivers. On the coarse
 ``(ns,nxi,ntheta_panel)=(5,7,8)`` two-coil gate, beta 0 and 10% both converge
 in seven nonlinear evaluations. Maximum residuals are ``7.93e-16`` and
 ``2.95e-15``; vacuum tangency is below ``6.3e-17`` and normalized stress below
@@ -299,15 +308,14 @@ then converges in 118.8 seconds at 5.48 GB peak RSS. This closes the first
 three-grid beta-zero physics gate and identifies CPU memory as a performance
 blocker; the GPU result below closes the finite-beta follow-up.
 
-The beta-10 third grid now also converges on one office RTX A4000. Its center
-radius is 0.2561004 m and axis field is 0.0797034 T, agreeing with ``ns=7``
-within ``3.0e-5`` and ``3.65e-4`` relative. Beta 0 and 10% each require eight
-nonlinear evaluations with residuals ``3.43e-15`` and ``6.92e-15``. The full
-two-point GPU run takes 119.5 seconds and 1.99 GB host RSS, compared with
-118.8 seconds and 5.48 GB for beta zero alone on the local CPU. A ``full``
-three-grid regression now preserves the ``5e-4`` observable and ``2e-9``
-compatibility gates. Accuracy promotion is closed for this two-coil case;
-higher-order panels and lower CPU memory remain M5/M10 work.
+The office RTX A4000 study now continues every grid through 50% beta. On the
+third grid, beta 50% gives center radius ``0.2726602 m``, axis field
+``0.0624749 T``, volume beta ``0.219148``, compatibility ``2.09e-9``, and
+condition 3.23. All nonlinear residuals through the scan remain below
+``8.1e-15``. Medium-to-fine relative changes at 50% are ``7.4e-4`` in radius,
+``4.2e-3`` in field, and ``4.7e-3`` in volume beta. The ``full`` regression
+therefore preserves the ``5e-4`` low-beta gate and uses a separate ``5e-3``
+high-beta gate. Higher-order panels and lower CPU memory remain M5/M10 work.
 An analytic Green-gradient evaluator avoids differentiating safe-distance
 branches on the symmetry axis. Duffy panel evaluation also controls near-cap
 targets in the interior validation: for two circular coils outside a
@@ -357,6 +365,12 @@ stress below ``2.1e-15``, compatibility near ``1.05e-3``, and condition below
 a separate ``2e-3`` compatibility gate; axisymmetric production remains at
 ``1e-6``. Nonaxisymmetric resolution convergence and independent coil/field
 references remain promotion gates.
+The same genuine-3D case continues through 25% and 50% without stalling. From
+zero to 50%, mean midplane radius grows ``0.201794 -> 0.217968 m``, mean
+central field falls ``0.082215 -> 0.071173 T``, and Fourier ``m=1`` radius
+amplitude grows ``0.255 -> 0.421 mm`` while residual remains below
+``3.7e-15``. This is a nonlinear robustness result, not a spatial-accuracy
+promotion.
 ``solve_beta_scan_cli`` is the topology-independent hot-start driver and
 propagates the finite-current profile through its reference and finite-beta
 solves; ``solve_axisymmetric_beta_scan_cli`` remains a compatibility alias.
