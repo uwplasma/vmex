@@ -30,9 +30,9 @@ from vmec_jax.mirror import (  # noqa: E402
     load_free_boundary_restart,
     save_free_boundary_restart,
     solve_axisymmetric_free_boundary_cli,
-    solve_free_boundary_cli,
     solve_vacuum_potential,
     solve_axisymmetric_beta_scan_cli,
+    solve_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
     vacuum_energy_functional,
     vacuum_laplacian,
@@ -454,21 +454,19 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
         * jnp.asarray(grid.xi)[None, :]
         * jnp.cos(jnp.asarray(grid.theta)[:, None])
     )
-    solve_kwargs = dict(
-        outer_radius=0.1,
-        axial_flux_derivative=flux,
-        current_derivative=1.0e-3 * jnp.asarray(grid.s),
-        vacuum_backend="exterior",
-        exterior_order=6,
-        require_convergence=True,
-    )
-    result = solve_free_boundary_cli(
+    result, finite_beta = solve_beta_scan_cli(
         boundary,
         grid,
         vacuum_grid,
         config,
         coils,
-        **solve_kwargs,
+        jnp.asarray([0.0, 0.10]),
+        outer_radius=0.1,
+        axial_flux_derivative=flux,
+        reference_field=float(on_axis[center]),
+        current_derivative=1.0e-3 * jnp.asarray(grid.s),
+        vacuum_backend="exterior",
+        exterior_order=6,
     )
 
     assert result.converged and float(result.variational_max) <= config.ftol
@@ -479,29 +477,6 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
     center_radii = np.asarray(result.boundary.radius_scale[:, center])
     assert np.ptp(center_radii) > 1.0e-4
 
-    reference = mirror_energy(
-        MirrorState.from_boundary(boundary, grid),
-        grid,
-        axial_flux_derivative=flux,
-        current_derivative=1.0e-3 * jnp.asarray(grid.s),
-    )
-    target_pressure = 0.10 * float(on_axis[center]) ** 2 / (2.0 * MU0)
-    mass = mass_profile_from_pressure(
-        target_pressure * (1.0 - jnp.asarray(grid.s)),
-        reference.volume_derivative,
-    )
-    finite_beta = solve_free_boundary_cli(
-        result.boundary,
-        grid,
-        vacuum_grid,
-        config,
-        coils,
-        mass_profile=mass,
-        initial_state=result.plasma_state,
-        target_central_pressure=target_pressure,
-        initial_mass_scale=float(result.mass_scale),
-        **solve_kwargs,
-    )
     assert finite_beta.converged and float(finite_beta.variational_max) <= config.ftol
     assert float(finite_beta.interface.normal_stress_rms) < 1.0e-12
     achieved_beta = (

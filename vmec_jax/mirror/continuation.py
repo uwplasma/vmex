@@ -54,7 +54,7 @@ def interpolate_fixed_boundary_state(
     return project_fixed_boundary_state(candidate, boundary, target_grid)
 
 
-def solve_axisymmetric_beta_scan_cli(
+def solve_beta_scan_cli(
     initial_boundary: MirrorBoundary,
     plasma_grid: "MirrorGrid",
     vacuum_grid: VacuumGrid,
@@ -65,6 +65,7 @@ def solve_axisymmetric_beta_scan_cli(
     outer_radius: float,
     axial_flux_derivative: Array,
     reference_field: float,
+    current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     beta_rtol: float = 1.0e-8,
     initial_restart: FreeBoundaryRestart | None = None,
@@ -74,7 +75,7 @@ def solve_axisymmetric_beta_scan_cli(
     exterior_order: int = 8,
     exterior_jacobian_chunk_size: int = 6,
 ) -> tuple[FreeBoundaryMirrorResult, ...]:
-    """Solve a fully hot-started axisymmetric free-boundary beta scan.
+    """Solve a fully hot-started free-boundary mirror beta scan.
 
     Each accepted point supplies the boundary, plasma interior, and vacuum
     potential for the next pressure value. The coupled nonlinear system adds
@@ -99,6 +100,7 @@ def solve_axisymmetric_beta_scan_cli(
         reference_state,
         plasma_grid,
         axial_flux_derivative=axial_flux_derivative,
+        current_derivative=current_derivative,
     )
     pressure_shape = 1.0 - jnp.asarray(plasma_grid.s)
     boundary = initial_boundary if initial_restart is None else initial_restart.boundary
@@ -132,6 +134,7 @@ def solve_axisymmetric_beta_scan_cli(
             coilset,
             outer_radius=outer_radius,
             axial_flux_derivative=axial_flux_derivative,
+            current_derivative=current_derivative,
             mass_profile=mass,
             gamma=gamma,
             initial_state=state,
@@ -157,6 +160,9 @@ def solve_axisymmetric_beta_scan_cli(
         mass_scale = float(result.mass_scale)
         using_closure = active_closure is not None
     return tuple(results)
+
+
+solve_axisymmetric_beta_scan_cli = solve_beta_scan_cli
 
 
 from typing import TYPE_CHECKING

@@ -350,6 +350,9 @@ stress below ``2.1e-15``, compatibility near ``1.05e-3``, and condition below
 a separate ``2e-3`` compatibility gate; axisymmetric production remains at
 ``1e-6``. Nonaxisymmetric resolution convergence and independent coil/field
 references remain promotion gates.
+``solve_beta_scan_cli`` is the topology-independent hot-start driver and
+propagates the finite-current profile through its reference and finite-beta
+solves; ``solve_axisymmetric_beta_scan_cli`` remains a compatibility alias.
 
 Two cheaper boundary-limit approximations were tested and rejected. Inward or
 outward offset collocation produced density-system condition numbers from

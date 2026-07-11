@@ -113,7 +113,11 @@ from .vacuum import (
     vacuum_energy_functional,
     vacuum_laplacian,
 )
-from .continuation import interpolate_fixed_boundary_state, solve_axisymmetric_beta_scan_cli
+from .continuation import (
+    interpolate_fixed_boundary_state,
+    solve_axisymmetric_beta_scan_cli,
+    solve_beta_scan_cli,
+)
 
 __all__ = [
     "MIRROR_INPUT_SCHEMA",
@@ -204,6 +208,7 @@ __all__ = [
     "solve_axisymmetric_free_boundary_cli",
     "solve_free_boundary_cli",
     "solve_axisymmetric_beta_scan_cli",
+    "solve_beta_scan_cli",
     "save_free_boundary_restart",
     "summarize_axisymmetric_beta_scan",
     "vacuum_energy_functional",
