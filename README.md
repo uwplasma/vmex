@@ -181,19 +181,24 @@ converged fixed-boundary equilibrium. The least-squares driver accepts
 scipy finite differences.
 
 From a circular-torus seed, staged `max_mode` continuation with ESS and
-`jac="implicit"` (measured on a 2× RTX A4000 workstation, quasisymmetry
+`jac="implicit"` (measured on an office 36-core CPU, quasisymmetry
 residual = `QuasisymmetryRatioResidual.total`):
 
 | class | nfp | helicity (m,n) | seed QS | achieved QS | max_mode | status |
 |-------|-----|----------------|---------|-------------|----------|--------|
 | QA | 2 | (1, 0)  | 2.04e-01 | **1.70e-04** | 2 | precise (>3 orders; aspect 6.00, iota 0.42) |
-| QH | 4 | (1, −1) | 6.91e-01 | 1.40e-01 | 1 | descends via implicit (higher `max_mode` compile-bound) |
-| QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 3 | basin-limited (documented QP caveat) |
-| QI | 1 | (0,1)→QI | — | partial | 3 | hardest; QP-basin + Boozer refinement |
+| QH | 4 | (1, −1) | 6.91e-01 | **5.83e-05** | 5 | precise (>4 orders; aspect 8.00, iota −1.22) |
+| QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
+| QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
 
 Implicit gradients are *essential*, not merely faster: for the helical (QH)
 target the exact-axisymmetric seed is a saddle where finite differences stall,
-and for QP the implicit path reaches a far better basin than FD. The forward
+and for QP the implicit path reaches a far better basin than FD. The implicit
+Jacobian is **CPU-pinned by default** — it is launch-bound (one preconditioned
+GMRES per boundary dof), so a `max_mode`-2 (24-dof) Jacobian evaluates in
+~101 s on CPU versus >37 min hung in a single kernel-launch on the GPU. That
+pin is what makes the deep QH `max_mode` 3→5 continuation (to precise QS
+5.8e-5) tractable; the whole campaign is a multi-hour CPU run. The forward
 solve is a host callback, so the small fixed-boundary solve does not benefit
 from a GPU (cold solve ~2× faster on CPU); per stage the wall is dominated by
 a one-time XLA compile of the implicit Jacobian.

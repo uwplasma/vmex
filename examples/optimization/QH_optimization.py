@@ -18,13 +18,25 @@ a = 1/8 m, ~1 T) is assembled directly from its Fourier coefficients.
 
 Runtime per continuation stage is dominated by the one-time implicit-
 Jacobian XLA compile (the warm forward solve is ~0.9 s).  Achieved
-2026-07-10 with JAC="implicit" + ESS: QS total 6.91e-01 -> 1.40e-01 at
-max_mode=1 (iota -0.917), on the same continuation machinery that takes QA
-to precise (1.7e-4 by max_mode=2, see ``QA_optimization.py``).  The deeper
-max_mode>=2 QH continuation is compile/eval-bound on GPU here (the iota~-0.9
-config's adjoint GMRES is slow to evaluate); a prior pilot reached
-~6e-5 (aspect 8.0).  Run the heavy stages on CPU, where the GMRES
-evaluation is faster (plan.md R1).
+2026-07-11 with JAC="implicit" + ESS on the office 36-core CPU (the
+implicit Jacobian is CPU-pinned by default; see below) -- the full
+max_mode 1 -> 5 continuation reaches *precise* QH:
+
+    QS total 6.908e-01 (circular seed)
+        -> 1.401e-01 (max_mode 1, iota -0.917)
+        -> 2.788e-03 (max_mode 2, iota -1.148)
+        -> 2.407e-04 (max_mode 3, iota -1.207)
+        -> 1.647e-04 (max_mode 4, iota -1.218)
+        -> 5.831e-05 (max_mode 5, iota -1.218), aspect 8.000
+
+i.e. > 4 orders of magnitude below the axisymmetric seed (the
+Landreman-Paul precise-QH literature value is fQS ~ 2e-3,
+arXiv:2311.16386, so this is comfortably precise).  The deep stages are
+tractable on CPU because the per-dof implicit Jacobian is launch-bound
+(one preconditioned GMRES per boundary dof): a max_mode-2 (24-dof)
+Jacobian evaluates in ~101 s on CPU versus > 37 min hung in a single
+kernel-launch-bound GMRES on the GPU before the CPU pin (plan.md R1).
+The whole 1->5 campaign is a multi-hour CPU run.
 """
 
 import os

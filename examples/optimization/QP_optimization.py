@@ -12,20 +12,22 @@ toroidal ``|B|`` modulation depth.
 
 The default continuation stops at ``max_mode = 3``.  The QP basin caveat
 recorded for the legacy runs ("releasing high harmonics early trades QS
-against irremovable ripple") was re-tested empirically on 2026-07-10 with
-this script extended to ``(1, 2, 3, 4, 5)``: stages > 3 neither hurt nor
-help — the optimizer stalls at the established basin's value (each extra
-stage stops at ``ftol`` within a few trials), so the longer schedule only
-adds compile time.  QP from a crude circular seed is basin-sensitive:
-most of the reduction comes from stages 1-2, and CPU/GPU rounding alone
-can land in mirror-image basins (iota of either sign).
+against irremovable ripple") was re-confirmed on the office 36-core CPU
+(2026-07-11) with this script extended to ``(1, 2, 3, 4, 5)``: the
+max_mode-5 run lands at QS(0,1) total 9.415e-02 (aspect 6.02, mean iota
+-0.15, mirror 0.20) — the *same* basin as max_mode 1, so stages > 3
+neither hurt nor help (each extra stage stops at ``ftol`` within a few
+trials and only adds compile time).  QP from a crude circular seed is
+basin-sensitive: most of the reduction comes from stages 1-2, and CPU/GPU
+rounding alone can land in mirror-image basins (iota of either sign).
 
 The gradient method selects the basin: with JAC="implicit" (below) this
-reaches QS(0,1) total 4.46e-01 -> 9.4e-02 already at max_mode=1 (aspect
-6.02, |mean iota| 0.15, mirror 0.20), matching the legacy pilot's
-~7e-2; the same objective with finite differences stalls far worse at
-2.3e-01.  QP from a crude circular seed is basin-limited: this is *not*
-precise QS, and the docstring above reflects the documented ceiling.
+reaches QS(0,1) total 4.458e-01 -> 9.4e-02 already at max_mode=1 (aspect
+6.02, |mean iota| 0.15, mirror 0.20), and stays at that ~9.4e-2 ceiling
+through max_mode 5; the same objective with finite differences stalls far
+worse at 2.3e-01.  QP from a crude circular seed is basin-limited: this is
+*not* precise QS (near-axis theory forbids exact QP), and the docstring
+above reflects the documented, empirically confirmed ceiling.
 
 Expected runtime is dominated by the one-time implicit-Jacobian XLA
 compile per stage (measured max_mode=1 wall ~18 min on an RTX A4000;

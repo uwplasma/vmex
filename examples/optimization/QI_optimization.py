@@ -24,20 +24,29 @@ route below replaces all of it: stage 1 alone takes the raw circular torus
 into a QP basin, and stage 2 refines omnigenity from there — the achieved
 values quoted above come from exactly this script with no seed machinery.
 
-Expected runtime: ~25 min on a laptop CPU at the default budget (stage 2
-finite differences dominate).  Achieved (default budget, 2026-07, this
-script as-is): QI total 1.5e-02 -> 1.9e-03 after stage 2, with aspect 6.0
-and |mean iota| >= 0.15.  Requires ``pip install booz_xform_jax``.
+Expected runtime: multi-hour on the office 36-core CPU at the default
+budget (the stage-2 finite differences dominate; the implicit QP stages
+are CPU-pinned).  Achieved (default budget, office 36-core CPU,
+2026-07-11, this script as-is): the implicit QP stages take the QI residual
+total 2.430 (circular nfp1 seed) -> ~0.64, and the Boozer QI stage then
+refines it to QI total 2.139e-02 (QP total 1.38e-02, |mean iota| 0.15) --
+a > 2-order improvement.  This is a strong QP->QI result but *not* precise
+QI: the aspect ratio drifts to ~10.9 at the low aspect weight, and the
+omnigenity residual plateaus well above the ~1e-3 precise bar.  Requires
+``pip install booz_xform_jax``.
 
-Honest re-validation caveat (2026-07-10): reaching a *good* QP basin is
-the prerequisite, and it is basin-sensitive — stage 1 must use the
-implicit path (finite differences land in a much worse basin; cf.
-``QP_optimization.py``).  A fast FD-only re-run (implicit stage 1 replaced
-by finite differences for speed) only reached QI total ~1.1 and the
-Boozer refinement then stalled, i.e. QI is the class most dependent on the
-quality of the QP basin and on the omnigenity residual; do not expect
-precise QI without the implicit QP stage above (and possibly a richer
-residual than the current 4-term one).
+Honest caveat (2026-07-11): QI is the class most dependent on the quality
+of the QP basin and on the omnigenity residual.  Reaching a *good* QP
+basin is the prerequisite and it is basin-sensitive -- stage 1 must use
+the implicit path (finite differences land in a much worse basin; cf.
+``QP_optimization.py``), and different CPU runs land in different basins
+(QI total 2.1e-2 to 6.6e-1 observed across runs).  Precise QI is *not*
+reached by the current 4-term Goodman residual (bounce-width variance,
+branch widths, profile consistency, branch shuffle); it would need a
+richer omnigenity formulation -- a proper Omnigenity/OmnigenousField
+target plus an EffectiveRipple (eps_eff) neoclassical metric (plan.md
+R17.7) -- which is not yet implemented here.  Do not expect precise QI
+from this script as-is.
 """
 
 import os
