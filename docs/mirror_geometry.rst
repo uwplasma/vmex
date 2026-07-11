@@ -16,14 +16,18 @@ The branch currently includes:
   tensor-force diagnostics,
 * a variational scalar-potential vacuum annulus with direct JAX Biot-Savart
   coils or the shared ESSOS/MAKEGRID-compatible ``MgridField``,
-* coupled axisymmetric isotropic free-boundary beta continuation, and
+* coupled axisymmetric isotropic and anisotropic free-boundary beta
+  continuation with compressed restart files,
+* a differentiable closed-surface adapter for the lateral LCFS and both end
+  disks, with nonsingular off-surface Laplace kernels from
+  ``virtual_casing_jax``, and
 * component-wise nonlinear convergence checks at a requested ``ftol=1e-12``.
 
 The axisymmetric free-boundary path is a research capability. A first formal
-resolution study, free-side initial-condition test, and in-memory continuation
-restart are complete. Higher-resolution vacuum tangency and outer-domain
-convergence, independent-reference, anisotropic, restart-file, and output gates
-in ``plan.md`` remain. Nonaxisymmetric free-boundary mirrors and the toroidal
+resolution study, free-side initial-condition test, anisotropic closure study,
+and restart-file path are complete. Higher-resolution vacuum tangency,
+open-exterior closure, independent boundary references, and output gates in
+``plan.md`` remain. Nonaxisymmetric free-boundary mirrors and the toroidal
 stellarator-mirror hybrid are later milestones and must not be inferred from
 the axisymmetric result.
 
@@ -143,3 +147,27 @@ mixed-Dirichlet center fields approach one another as the outer cylinder is
 expanded, but their remaining gap is reported as truncation uncertainty. A
 true exterior Dirichlet-to-Neumann or boundary-integral operator remains an M5
 promotion gate.
+
+Open-exterior foundation
+------------------------
+
+:func:`vmec_jax.mirror.build_closed_mirror_surface` closes a star-shaped
+lateral LCFS with disks at both fixed-flux cuts. It stores outward ``n dA``
+directly, including quadrature weights, so the disk center is regular and no
+unit-normal division enters geometric identities. For axisymmetric equilibrium
+grids, which intentionally store one theta node, the adapter supplies an
+independent eight-point Cartesian angular quadrature.
+
+Tests require exact cylinder area and volume, zero integrated normal, the full
+tensor divergence theorem on a theta-shaped flared tube, cap/side ring
+continuity, and a JAX shape derivative. The off-surface double-layer and
+single-layer-gradient adapters call the released ``virtual_casing_jax>=0.0.2``
+kernels; a constant double layer converges to one inside and zero outside, and
+the single layer reaches its far-field monopole limit.
+
+These functions are nonsingular evaluators only. They reject malformed source
+and target arrays and do not label on-surface collocation as supported. M5
+still needs cap-aware singular and near-singular quadrature, a second-kind
+exterior boundary equation with gauge/nullspace handling, manufactured
+harmonic convergence, and replacement of the finite outer cylinder in the
+coupled free-boundary solve.

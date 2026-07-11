@@ -1232,7 +1232,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       coils in the exterior, its center field still shifted `0.09090,0.09718,0.10189 T` as the
       outer radius moved `0.50,0.65,0.82 m`, while plasma-side `B.n` worsened. M5 therefore requires
       a full closed-surface boundary integral (lateral surface plus axial apertures), not another
-      local or radial-only outer condition.
+      local or radial-only outer condition. The first full-surface tranche now closes the moving
+      lateral LCFS with regular `r=sqrt(s) a(theta)` end disks and consistent outward weighted
+      normals. Exact cylinder area/volume, zero net normal, all divergence-theorem first moments on
+      a shaped tube, cap-ring continuity, and a JAX boundary derivative pass. The released
+      `virtual_casing_jax>=0.0.2` low-level kernels now evaluate nonsingular off-surface double
+      layers and single-layer gradients on this mixed wall/cap quadrature. Constant-density solid
+      angle converges to one inside and zero outside; the gradient reaches its far-field monopole
+      limit. This does not yet solve the exterior problem: cap-aware singular/near-singular
+      quadrature, the second-kind boundary equation and nullspace, harmonic MMS, and coupling that
+      deletes the finite outer cylinder remain the next M5 gates.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior
       state jointly, with beta continuation `0, 0.01, 0.03, 0.10` and hot restarts. Validate
       isotropic and anisotropic cases against an independently generated Pleiades/WHAM-style

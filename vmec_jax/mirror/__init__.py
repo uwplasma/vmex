@@ -19,6 +19,12 @@ from .geometry import (
     evaluate_geometry,
     magnetic_field_squared,
 )
+from .exterior import (
+    ClosedMirrorSurface,
+    build_closed_mirror_surface,
+    laplace_double_layer_off_surface,
+    laplace_single_layer_gradient_off_surface,
+)
 from .forces import (
     AnisotropicMirrorEnergy,
     AnisotropicForceResidual,
@@ -87,6 +93,7 @@ __all__ = [
     "MIRROR_INPUT_SCHEMA",
     "MIRROR_OUTPUT_SCHEMA",
     "ChebyshevBasis",
+    "ClosedMirrorSurface",
     "ContravariantField",
     "EndCondition",
     "AnisotropyIndicators",
@@ -119,6 +126,7 @@ __all__ = [
     "VacuumSolveResult",
     "SeparableMirrorPreconditioner",
     "build_mirror_grid",
+    "build_closed_mirror_surface",
     "build_vacuum_grid",
     "anisotropy_indicators",
     "anisotropic_fixed_boundary_energy_gradient",
@@ -140,6 +148,8 @@ __all__ = [
     "magnetic_field_squared",
     "mass_profile_from_pressure",
     "load_free_boundary_restart",
+    "laplace_double_layer_off_surface",
+    "laplace_single_layer_gradient_off_surface",
     "mirror_energy",
     "project_fixed_boundary_state",
     "solve_anisotropic_fixed_boundary_cli",

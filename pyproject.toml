@@ -31,6 +31,7 @@ dependencies = [
   "packaging",
   "booz_xform_jax",
   "solvax>=0.2.0",
+  "virtual-casing-jax>=0.0.2",
   "tomli; python_version < '3.11'",
 ]
 
