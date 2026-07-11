@@ -265,6 +265,13 @@ tokamak, a tie even on the aspect-100 case) — and peak memory is ≈30% higher
 to ~1e-10, so it changes the path, not the fixed point. Reach for it when the
 1D iteration count is the bottleneck or stalls, not as a blanket default.
 
+For safeguarded runs, ``SolveResult.newton_history`` records the effective
+accepted Newton step and the inner GMRES residual at every nonlinear
+iteration. A step of ``-1`` means no Newton attempt was scheduled, while
+``0`` means the physical-force line search rejected the correction and the
+regular VMEC update was used. This keeps convergence plots and stall reports
+based on recorded solver diagnostics rather than console parsing.
+
 Memory
 ------
 

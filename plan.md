@@ -1649,7 +1649,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       state through a full NESTOR update converges in 3 iterations to achieved beta 0.3064%, with
       volume `0.332983315 m^3` and aspect 16.5511. The old 0.30% blocker is closed; the next finite
       task is an adaptive continuation through 1, 3, 10, 25, and 50%, retaining each solved free
-      LCFS as the following fixed predictor boundary. No result above 0.30% is claimed yet.
+      LCFS as the following fixed predictor boundary. Fixed solves can now return a typed
+      unconverged checkpoint instead of raising, so long correctors resume their own state in
+      explicit 1,000-iteration chunks. `SolveResult.newton_history` records the accepted line-search
+      step and inner GMRES residual per nonlinear iteration for convergence plots and stall audits.
+      No result above 0.30% is claimed yet.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

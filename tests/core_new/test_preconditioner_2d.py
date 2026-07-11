@@ -202,3 +202,6 @@ def test_2d_backtracking_converges_stiff_equilibrium():
 
     assert result.converged
     assert max(result.fsqr, result.fsqz, result.fsql) < 1e-9
+    attempted = result.newton_history[:, 0] >= 0.0
+    assert np.any(result.newton_history[:, 0] > 0.0)
+    assert np.all(np.isfinite(result.newton_history[attempted, 1]))
