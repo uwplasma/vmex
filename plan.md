@@ -1424,6 +1424,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        scaling, and CLI versus JAX lanes; add mirror-native `mout` output, restart, `--plot`, docs,
        and short root examples. Remove obsolete archived implementations only after parity data are
        recorded. Mark the feature supported only when every gate below passes.
+       Coverage instrumentation is an explicit promotion gate: the dedicated mirror shard passes,
+       but coverage.py currently aborts when tracing nested JAX/BIE solves. The release-core 95%
+       report transparently omits `vmec_jax/mirror/*` until that crash is fixed; no mirror coverage
+       percentage is claimed meanwhile.
 
    **5.5 Convergence, validation, and presentation gates**
 
