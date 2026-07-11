@@ -30,6 +30,7 @@ from vmec_jax.mirror import (  # noqa: E402
     load_free_boundary_restart,
     save_free_boundary_restart,
     solve_axisymmetric_free_boundary_cli,
+    solve_free_boundary_cli,
     solve_vacuum_potential,
     solve_axisymmetric_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
@@ -415,6 +416,105 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
     assert all(
         np.isfinite(float(item.center_vacuum_side_field)) for item in diagnostics
     )
+
+
+@pytest.mark.full
+def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=5),
+        z_min=-0.8,
+        z_max=0.8,
+        ftol=1.0e-12,
+        max_iterations=300,
+    )
+    grid = config.build_grid()
+    vacuum_grid = build_vacuum_grid(grid, nrho=5)
+    dofs = np.zeros((2, 3, 3))
+    dofs[:, 0, 2] = 0.9
+    dofs[:, 1, 1] = 0.9
+    dofs[:, 2, 0] = [-1.0, 1.0]
+    dofs[:, 0, 0] = [0.04, -0.04]
+    coils = CoilSet(
+        base_curve_dofs=jnp.asarray(dofs),
+        base_currents=jnp.asarray([2.0e5, 2.0e5]),
+        n_segments=128,
+    )
+    on_axis = two_coil_on_axis_bz(
+        jnp.asarray(grid.z),
+        coil_radius=0.9,
+        separation=2.0,
+        current=2.0e5,
+    )
+    center = grid.nxi // 2
+    flux = 0.5 * on_axis[center] * 0.2**2
+    base = MirrorBoundary.from_axis_field(flux, on_axis, grid)
+    boundary = MirrorBoundary(
+        base.radius_scale
+        + 0.03
+        * jnp.asarray(grid.xi)[None, :]
+        * jnp.cos(jnp.asarray(grid.theta)[:, None])
+    )
+    solve_kwargs = dict(
+        outer_radius=0.1,
+        axial_flux_derivative=flux,
+        current_derivative=1.0e-3 * jnp.asarray(grid.s),
+        vacuum_backend="exterior",
+        exterior_order=6,
+        require_convergence=True,
+    )
+    result = solve_free_boundary_cli(
+        boundary,
+        grid,
+        vacuum_grid,
+        config,
+        coils,
+        **solve_kwargs,
+    )
+
+    assert result.converged and float(result.variational_max) <= config.ftol
+    assert float(result.interface.vacuum_b_normal_rms) < 1.0e-12
+    assert float(result.interface.normal_stress_rms) < 1.0e-12
+    assert float(result.vacuum_field.neumann_result.compatibility_error) < 2.0e-3
+    assert float(result.vacuum_field.neumann_result.condition_number) < 5.0
+    center_radii = np.asarray(result.boundary.radius_scale[:, center])
+    assert np.ptp(center_radii) > 1.0e-4
+
+    reference = mirror_energy(
+        MirrorState.from_boundary(boundary, grid),
+        grid,
+        axial_flux_derivative=flux,
+        current_derivative=1.0e-3 * jnp.asarray(grid.s),
+    )
+    target_pressure = 0.10 * float(on_axis[center]) ** 2 / (2.0 * MU0)
+    mass = mass_profile_from_pressure(
+        target_pressure * (1.0 - jnp.asarray(grid.s)),
+        reference.volume_derivative,
+    )
+    finite_beta = solve_free_boundary_cli(
+        result.boundary,
+        grid,
+        vacuum_grid,
+        config,
+        coils,
+        mass_profile=mass,
+        initial_state=result.plasma_state,
+        target_central_pressure=target_pressure,
+        initial_mass_scale=float(result.mass_scale),
+        **solve_kwargs,
+    )
+    assert finite_beta.converged and float(finite_beta.variational_max) <= config.ftol
+    assert float(finite_beta.interface.normal_stress_rms) < 1.0e-12
+    achieved_beta = (
+        2.0
+        * MU0
+        * finite_beta.perpendicular_pressure[0, 0, center]
+        / float(on_axis[center]) ** 2
+    )
+    np.testing.assert_allclose(achieved_beta, 0.10, rtol=2.0e-8)
+    assert float(finite_beta.boundary.radius_scale[0, center]) > 1.01 * float(
+        result.boundary.radius_scale[0, center]
+    )
+    assert np.ptp(np.asarray(finite_beta.boundary.radius_scale[:, center])) > 1.0e-4
 
 
 @pytest.mark.full

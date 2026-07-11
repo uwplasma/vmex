@@ -94,7 +94,11 @@ from .restart import (
     load_free_boundary_restart,
     save_free_boundary_restart,
 )
-from .free_boundary import FreeBoundaryMirrorResult, solve_axisymmetric_free_boundary_cli
+from .free_boundary import (
+    FreeBoundaryMirrorResult,
+    solve_axisymmetric_free_boundary_cli,
+    solve_free_boundary_cli,
+)
 from .vacuum import (
     VacuumField,
     VacuumGeometry,
@@ -198,6 +202,7 @@ __all__ = [
     "solve_fixed_boundary_cli",
     "solve_vacuum_potential",
     "solve_axisymmetric_free_boundary_cli",
+    "solve_free_boundary_cli",
     "solve_axisymmetric_beta_scan_cli",
     "save_free_boundary_restart",
     "summarize_axisymmetric_beta_scan",

@@ -1382,8 +1382,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       has lateral `B.n < 2e-15`, and closes integrated flux within `2e-3`. The full-theta exterior
       Dirichlet solve now has condition below 20 and equation residual below `2e-12`; theta/axial
       tangential reconstruction gives total lateral `B.n < 3e-15`, and its complete shape JVP is
-      finite and nonzero. Next: insert this closure into the nonlinear 3D interface residual. This
-      test is not a replicated axisymmetric surface and is not labeled equilibrium.
+      finite and nonzero. The shared `solve_free_boundary_cli` now couples this closure to the full
+      theta-dependent plasma/interior/interface residual. Two oppositely offset end coils retain a
+      genuine midplane `m=1` radius spread (`0.433 -> 0.467` mm at beta 0 -> 10%) instead of
+      relaxing to replicated axisymmetry. Both points converge in 9/7 evaluations with force below
+      `3.7e-15`, tangency below `3e-17`, stress below `2.1e-15`, compatibility about `1.05e-3`, and
+      condition below 3.7; theta-zero center radius expands `0.201985 -> 0.204418` m. The coarse 3D
+      smoke has a measured `2e-3` compatibility gate while axisymmetric production remains `1e-6`.
+      Next: nonaxisymmetric resolution convergence and independent coil/field references.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.

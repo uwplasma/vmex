@@ -336,8 +336,20 @@ The same case now solves the full-theta exterior Dirichlet trace with condition
 number below 20 and equation residual below ``2e-12``. Theta/axial surface
 derivatives reconstruct total lateral tangency below ``3e-15``, and a complete
 boundary-shape JVP is finite and nonzero. This is a differentiable 3D vacuum
-closure, not yet a nonaxisymmetric free-boundary equilibrium; insertion into
-the nonlinear 3D interface residual is the next M7 gate.
+closure. ``solve_free_boundary_cli`` now inserts it into the same nonlinear
+plasma/interior/interface residual used in axisymmetry; the former
+``solve_axisymmetric_free_boundary_cli`` name remains an alias.
+
+With two oppositely offset circular end coils, an ``mpol=1, ntheta=3`` tube
+retains a genuine midplane ``m=1`` radius spread of 0.433 mm after solving,
+rather than relaxing to replicated axisymmetry. Beta 0 and 10% converge in
+9 and 7 evaluations with force below ``3.7e-15``, tangency below ``3e-17``,
+stress below ``2.1e-15``, compatibility near ``1.05e-3``, and condition below
+3.7. At 10%, the theta-zero center radius expands from 0.201985 m to
+0.204418 m and the ``m=1`` spread remains 0.467 mm. The coarse M7 smoke uses
+a separate ``2e-3`` compatibility gate; axisymmetric production remains at
+``1e-6``. Nonaxisymmetric resolution convergence and independent coil/field
+references remain promotion gates.
 
 Two cheaper boundary-limit approximations were tested and rejected. Inward or
 outward offset collocation produced density-system condition numbers from
