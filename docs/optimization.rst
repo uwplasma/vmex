@@ -68,10 +68,35 @@ relative level (2D) and at the finite-difference noise floor (3D).
    sol = implicit.run(inp, p0)                        # ImplicitSolution pytree
    grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)   # adjoint gradient
 
-Free-boundary decks are **not yet differentiable**: the implicit residual
-currently covers the fixed-boundary force balance only, so derivatives with
-respect to coil parameters (ESSOS coil sets, :mod:`vmec_jax.core.coils`) or
-through the NESTOR vacuum solve are not available. Extending the implicit
-residual to the free-boundary fixed point — and validating coil-parameter
-gradients the same way as the fixed-boundary table above — is a roadmap
-item.
+**Free boundary** is differentiable through a different route
+(:mod:`vmec_jax.core.freeboundary_diff`): rather than differentiating the
+NESTOR vacuum solve, the plasma boundary contribution to the vacuum field is
+computed by **virtual casing**, which is a smooth function of the coil /
+``extcur`` parameters and the plasma surface. Coil-parameter derivatives of
+free-boundary outputs are obtained end-to-end this way and are
+finite-difference-validated. (The two scopes are complementary: the
+fixed-boundary implicit adjoint is validated to ~1e-6 relative; the
+free-boundary virtual-casing path is FD-validated.)
+
+Worked results
+--------------
+
+From a near-circular torus seed, staged ``max_mode`` continuation with ESS and
+``jac="implicit"`` reaches precise quasisymmetry (measured on an office CPU):
+QA (nfp 2) QS ``1.70e-4``, QH (nfp 4) QS ``5.83e-5``, QP (nfp 2) QS
+``9.4e-2`` (basin-limited), and QI (nfp 1, QP→QI) ``2.14e-2``. Implicit
+gradients are *essential* here, not merely faster: the exact-axisymmetric seed
+is a saddle of the QS residual where finite differences stall, and for QP the
+implicit path selects a better basin. The complete scripts are in
+``examples/optimization/`` (``QA``/``QH``/``QP``/``QI``).
+
+.. figure:: _static/figures/readme_optimization.png
+   :alt: QA/QH/QP/QI seed vs optimized boundary and Boozer |B| on the LCFS
+   :align: center
+   :width: 100%
+
+   Seed (grey) vs optimized (blue) boundary cross sections and ``|B|`` in
+   Boozer coordinates on the LCFS (jet) for each class; the contour geometry
+   reads off the symmetry family. Reproduce with
+   ``benchmarks/make_readme_figures.py --only optimization`` from the decks in
+   ``benchmarks/opt_decks/``.

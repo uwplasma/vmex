@@ -17,25 +17,32 @@ original, it is differentiable and runs on GPUs.
   constant-for-constant (steepest-descent moment method, radial
   preconditioner, spectral condensation, NESTOR vacuum solve). Benchmark
   decks converge in the *same* number of iterations and reproduce the
-  plasma energy at machine precision.
-- **Differentiable.** Gradients of fixed-boundary equilibrium outputs with
+  plasma energy at machine precision. An optional **2D block
+  preconditioner** cuts iterations 2.5–11x on stiff cases while leaving the
+  default path byte-identical.
+- **Differentiable.** Gradients of *fixed-boundary* equilibrium outputs with
   respect to boundary shape and profile parameters by implicit
   differentiation of the converged fixed point — no finite differences, no
   unrolling — validated against central finite differences to ~1e-6 relative
-  (see the gradient table in the docs). Free-boundary and coil-parameter
-  derivatives are not yet supported by the implicit residual (roadmap).
+  (see the gradient table in the docs), with an O(1)-memory adjoint. **Free
+  boundary** is differentiable end-to-end through the virtual-casing vacuum
+  field (coil / `extcur` derivatives), finite-difference-validated.
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.
 - **Batteries included.** Plotting (`vmec --plot`), Boozer transform
   (`vmec --booz`), spline profiles, multigrid, hot restart, free boundary
-  from mgrid files *or* directly from coils, typed zero-crash errors.
+  from mgrid files *or* directly from coils, near-axis (pyQSC/pyQIC) seeding,
+  typed zero-crash errors — with the shared linear/adjoint solver layer
+  factored out into [SOLVAX](https://pypi.org/project/solvax/).
 
-![Flux surfaces and boundary |B| of the bundled quick-start QH case](docs/_static/figures/readme_equilibrium_showcase.png)
+![Flux surfaces, 3-D geometry, and Boozer |B| of the bundled quick-start QH case](docs/_static/figures/readme_equilibrium_showcase.png)
 
-*The bundled quick-start case (`vmec --test`): flux-surface cross sections
-and the boundary `|B|` of a four-field-period quasi-helical stellarator,
-plotted with the built-in `vmec_jax.core.plotting` helpers.*
+*The bundled quick-start case (`vmec --test`): flux-surface cross sections,
+the 3-D plasma boundary coloured by `|B|`, and `|B|` in **Boozer coordinates**
+on the last closed flux surface (the near-straight diagonal contours are the
+signature of quasi-helical symmetry) for a four-field-period stellarator —
+all from the built-in `vmec_jax.core.plotting` / `core.boozer` helpers.*
 
 ## Install
 
@@ -82,11 +89,12 @@ vmec --plot boozmn_nfp4_QH_warm_start.nc   # Boozer |B| contours + spectrum
 vmec-jax is validated end-to-end against golden VMEC2000 (PARVMEC 9.0) runs:
 the five fixture cases above converge in **exactly** the golden iteration
 count — including DSHAPE's mid-run jacobian reset — and reproduce the plasma
-energy `wb` to 1 part in 10¹⁵. Across the full benchmark suite below, the
-iteration count matches VMEC2000 exactly on 12 of 13 rows (fixed and free
-boundary); on the remaining row (Nuhrenberg–Zille QHS) vmec-jax converges in
-*fewer* iterations (1681 vs 2829). Per-variable wout agreement and the full
-test gates live in the [documentation](https://vmec-jax.readthedocs.io/en/latest/).
+energy `wb` to 1 part in 10¹⁵. Across the full benchmark suite below (14 rows,
+all at `ns ≥ 51`), the iteration count matches VMEC2000 exactly on 12 rows; on
+the free-boundary CTH-like row it converges in 703 vs 642 iterations (a ~9%
+tail), and on Nuhrenberg–Zille QHS it converges in *fewer* iterations (1681 vs
+2829). Per-variable wout agreement and the full test gates live in the
+[documentation](https://vmec-jax.readthedocs.io/en/latest/).
 
 ![Force residual vs iteration for vmec_jax, VMEC2000, and VMEC++](docs/_static/figures/readme_convergence.png)
 
@@ -96,6 +104,16 @@ The vmec_jax trajectory lies exactly on top of VMEC2000's (both converge in
 502 iterations); VMEC++ follows a near-identical path (501 iterations).
 Traces: vmec_jax `SolveResult.fsq_history`, VMEC2000 `NSTEP=1` stdout,
 VMEC++ wout `fsqt`.*
+
+### Optional 2D preconditioner: fewer iterations on stiff cases
+
+The default radial (1D) preconditioner reproduces VMEC2000 iteration-for-iteration.
+For stiff decks — very high aspect ratio, strong finite-β coupling — an opt-in
+**2D block preconditioner** (matrix-free Newton: a Jacobian-vector-product Hessian
+on SOLVAX's GMRES) cuts the iteration count 2.5–11x. It is a strict add-on: the
+default 1D path stays byte-identical.
+
+![2D vs 1D preconditioner iteration counts on stiff cases](docs/_static/figures/readme_precond.png)
 
 ## Performance
 
@@ -107,16 +125,22 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 
 - **Warm** (in-process, kernels compiled — the number that matters for
   optimization loops, parameter scans, and hot restarts): faster than
-  VMEC2000 on 11 of 12 converged rows, typically 1.2–2.5x and up to 8x,
-  including 2.1x on the heaviest deck (Nuhrenberg–Zille QHS, 116 s → 56 s).
-  The one exception is the free-boundary row, where the vacuum solve is not
-  yet tuned.
+  VMEC2000 on 9 of the 13 converged rows, typically 1.3–2.2x and up to ~4x on
+  the smallest decks, including 1.3x on the heaviest deck (Nuhrenberg–Zille
+  QHS, which also converges in far fewer iterations). Of the four remaining
+  rows two are dead heats (multigrid QA/QH) and two are the **free-boundary**
+  rows: those now *converge* to VMEC2000 parity (fixed in R15 — they used to
+  stall) but their warm wall is not yet faster than Fortran, since the vacuum
+  (NESTOR) solve is not fully tuned. (These ratios were measured on a CPU
+  shared with other load, so they are conservative lower bounds — on an idle
+  machine the warm margins are larger; the warm/Fortran *ratio*, not the
+  absolute seconds, is the comparable quantity.)
 - **Cold** (fresh CLI process): pays a one-time 5–25 s JAX/XLA startup and
-  compile cost, so small decks are slower than Fortran end-to-end; on the
-  heaviest deck the cold CLI already beats VMEC2000 (98 s vs 116 s).
-  Compiled executables are cached per solver structure, so repeated solves
-  in one process — multigrid ladders, scans, optimizations — recompile
-  nothing.
+  compile cost, so an end-to-end CLI run is slower than Fortran — that
+  overhead is a fixed toll, not physics. Compiled executables are cached per
+  solver structure, so repeated solves in one process — multigrid ladders,
+  scans, optimizations — recompile nothing, which is why the warm number is
+  the one that matters inside a workflow.
 - **GPU** (violet, 2x RTX A4000 from `benchmarks/gpu_baseline.json`): at
   these problem sizes a fixed per-solve dispatch overhead dominates, so the
   CPU wins outright; per-iteration throughput favours the GPU by ~3x on the
@@ -150,7 +174,29 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Boozer transform built in (`--booz`) | ✅ | ❌ | ❌ |
 | Plotting built in (`--plot`) | ✅ | ❌ | ❌ |
 | GPU execution | ✅ | ❌ | ❌ |
-| Differentiable (implicit diff, fixed boundary) | ✅ | ❌ | ❌ |
+| Differentiable fixed boundary (implicit diff, O(1) memory) | ✅ | ❌ | ❌ |
+| Differentiable free boundary (virtual casing) | ✅ | ❌ | ❌ |
+| 2D block preconditioner (stiff-case speedup) | ✅ | ❌ | ❌ |
+| Near-axis (pyQSC / pyQIC) optimization seed | ✅ | ❌ | ❌ |
+
+## Code size
+
+vmec-jax delivers that superset of capabilities in roughly **half the code**,
+and is the most densely documented of the three. Solver source only (tests,
+language bindings, and vendored third-party excluded), counted with
+[`pygount`](https://pypi.org/project/pygount/) 3.2:
+
+| code base | language | files | code (SLOC) | comments / docstrings | doc-to-code |
+|---|---|---:|---:|---:|---:|
+| **vmec-jax** | Python | 36 | **11,789** | 5,532 | **0.47** |
+| VMEC2000 (PARVMEC) | Fortran | 115 | 24,190 | 8,425 | 0.35 |
+| VMEC++ | C++ / Python | 117 | 22,824 | 7,646 | 0.34 |
+
+vmec-jax is under half the SLOC of VMEC2000 and about half of VMEC++, while
+*adding* differentiability, GPU execution, direct-coil free boundary, and a
+built-in Boozer transform — and it carries the highest comment/docstring
+density of the three (reproduce with
+`pygount --format=summary vmec_jax`).
 
 ## Python API
 
@@ -191,6 +237,18 @@ residual = `QuasisymmetryRatioResidual.total`):
 | QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
 | QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
 
+![QA/QH/QP/QI optimization: seed vs optimized boundary and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
+
+*Each class starts from a near-circular torus (grey, dashed) and is shaped
+into a quasi-symmetric stellarator (blue) by the least-squares driver; the
+bottom row is `|B|` in Boozer coordinates on the LCFS (jet), whose contour
+geometry reads off the symmetry family — horizontal for QA, diagonal for QH,
+vertical for QP. `QS` is the quasisymmetry residual measured on the plotted
+equilibrium; the table above lists the deepest values reached by the full
+continuation campaign. Reproduce with
+`python benchmarks/make_readme_figures.py --only optimization` from the decks
+in `benchmarks/opt_decks/`.*
+
 Implicit gradients are *essential*, not merely faster: for the helical (QH)
 target the exact-axisymmetric seed is a saddle where finite differences stall,
 and for QP the implicit path reaches a far better basin than FD. The implicit
@@ -202,6 +260,34 @@ pin is what makes the deep QH `max_mode` 3→5 continuation (to precise QS
 solve is a host callback, so the small fixed-boundary solve does not benefit
 from a GPU (cold solve ~2× faster on CPU); per stage the wall is dominated by
 a one-time XLA compile of the implicit Jacobian.
+
+## vmec-jax vs DESC
+
+[DESC](https://desc-docs.readthedocs.io/) is the other JAX-native,
+differentiable stellarator-equilibrium code, and the natural point of
+comparison. The two solve *different* problems: DESC minimises the MHD force
+in a global Zernike–Fourier basis (its own equilibrium), while vmec-jax
+reproduces VMEC. Both are differentiable, GPU-capable, and built on JAX; most
+of vmec-jax's distinct strengths follow from *being* VMEC:
+
+| | vmec-jax | DESC |
+|---|:---:|:---:|
+| Iteration-for-iteration VMEC2000 parity + standard `wout_*.nc` | ✅ | — (a different equilibrium) |
+| Drop-in VMEC2000 `input.*` / VMEC++ JSON, VMEC-format iteration prints | ✅ | — |
+| Full VMEC namelist incl. non-symmetric (`LASYM = T`) surfaces | ✅ | partial |
+| Free boundary via **NESTOR and** virtual casing | ✅ | virtual casing |
+| JAX-native, differentiable, GPU | ✅ | ✅ |
+| Implicit (adjoint) equilibrium gradients | ✅ O(1) memory, column-chunked | ✅ |
+| High accuracy at *low* radial resolution | finite-difference radial grid | ✅ Zernike basis |
+| Breadth of built-in objectives / optimizers | growing | ✅ mature |
+
+Reach for vmec-jax when you want a differentiable code that *is* VMEC — the
+same converged state, the same `wout`, the same conventions — dropped into an
+existing VMEC-based workflow (simsopt, `booz_xform`, near-axis tooling), with
+an O(1)-memory adjoint whose peak memory does not grow with the number of
+design variables. Reach for DESC when you want its global spectral accuracy at
+low radial resolution or its large, mature objective library. The comparison
+is honest in both directions; the two codes are complementary.
 
 ## CLI reference
 

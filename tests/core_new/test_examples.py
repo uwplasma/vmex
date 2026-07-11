@@ -67,6 +67,90 @@ def test_fixed_boundary_run(tmp_path):
     assert (outdir / "li383_low_res_summary.png").exists()
 
 
+def test_plot_and_boozer(tmp_path):
+    out = _run_example(EXAMPLES / "plot_and_boozer.py", tmp_path, timeout=900)
+    assert "converged = True" in out
+    outdir = tmp_path / "output_plot_and_boozer"
+    assert (outdir / "wout_li383_low_res.nc").exists()
+    # every plot_wout figure kind is written unconditionally
+    for suffix in ("summary", "surfaces", "modB", "profiles", "boundary3d"):
+        assert (outdir / f"li383_low_res_{suffix}.png").exists()
+
+
+def test_profiles_power_and_spline(tmp_path):
+    out = _run_example(EXAMPLES / "profiles_power_and_spline.py", tmp_path, timeout=900)
+    # both profile representations converge to the same equilibrium
+    assert out.count("converged=True") == 2
+    match = re.search(r"\|d aspect\| = ([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(1)) < 1e-3
+
+
+@pytest.mark.full  # nightly: ~1 min (2 adjoint grads + 4 FD solves, subprocess cold-start)
+def test_take_gradients(tmp_path):
+    out = _run_example(EXAMPLES / "take_gradients.py", tmp_path, timeout=900)
+    # both implicit-adjoint gradients agree with central finite differences
+    rels = [float(m) for m in re.findall(r"rel=([0-9.eE+-]+)", out)]
+    assert len(rels) == 2, f"expected two AD-vs-FD checks, got {rels}"
+    assert max(rels) < 1e-4, f"adjoint gradient disagrees with FD: rel={rels}"
+
+
+def test_run_from_json(tmp_path):
+    out = _run_example(EXAMPLES / "run_from_json.py", tmp_path, timeout=900)
+    match = re.search(r"\|diff\|=([0-9.eE+-]+)", out)
+    assert match is not None and float(match.group(1)) < 1e-6
+    assert (tmp_path / "output_run_from_json" / "circular_tokamak.json").exists()
+    assert (tmp_path / "output_run_from_json" / "wout_circular_tokamak.nc").exists()
+
+
+def test_hot_restart_scan(tmp_path):
+    out = _run_example(EXAMPLES / "hot_restart_scan.py", tmp_path, timeout=900)
+    base = re.search(r"cold base solve:\s*(\d+) iters", out)
+    warm = [int(m) for m in re.findall(r"^\s*[0-9.]+\s+(\d+)\s+[0-9.]+\s+warm", out, re.M)]
+    assert base is not None and int(base.group(1)) > 10, "base should need many iters"
+    assert len(warm) == 5 and max(warm) <= 5, f"warm restarts should be cheap: {warm}"
+
+
+@pytest.mark.full  # nightly: free-bdy NESTOR solve ~10s; parity already covered in shard-a
+def test_free_boundary_mgrid(tmp_path):
+    out = _run_example(EXAMPLES / "free_boundary_mgrid.py", tmp_path, timeout=900)
+    assert "converged = True" in out
+    assert (tmp_path / "output_free_boundary_mgrid" / "wout_cth_like_free_bdy.nc").exists()
+
+
+def test_take_free_boundary_gradients(tmp_path):
+    # skips where the optional virtual_casing_jax dep is absent (core CI);
+    # validates the FD-checked coil/extcur gradients where it is installed.
+    pytest.importorskip("virtual_casing_jax")
+    from vmec_jax.core import freeboundary_diff
+
+    if not freeboundary_diff.have_virtual_casing_jax():
+        pytest.skip("installed virtual_casing_jax lacks the optional extender API")
+    out = _run_example(EXAMPLES / "take_free_boundary_gradients.py", tmp_path, timeout=900)
+    # each gradient row ends with its AD-vs-FD relative error in scientific notation
+    rels = [float(m) for m in re.findall(r"\s([0-9.]+e[+-]\d+)\s*$", out, re.M)]
+    assert "FD-validate" in out and rels and max(rels) < 1e-3, f"gradient rel errors: {rels}"
+
+
+@pytest.mark.full  # nightly: one NESTOR solve per pressure point (~40s)
+def test_free_boundary_beta_scan(tmp_path):
+    out = _run_example(EXAMPLES / "free_boundary_beta_scan.py", tmp_path, timeout=1200)
+    betas = [float(b) for _, b in re.findall(
+        r"^\s*([0-9.]+)\s+([0-9.eE+-]+)\s+[0-9.]+\s+\d+\s*$", out, re.M)]
+    assert len(betas) == 3 and betas[-1] > 1e-2, f"beta should reach finite values: {betas}"
+
+
+def test_finite_beta_scan(tmp_path):
+    out = _run_example(EXAMPLES / "finite_beta_scan.py", tmp_path, timeout=900)
+    # rows: pres_scale  beta_tot  R_axis  Shafranov  minDMerc
+    rows = re.findall(r"^\s*([0-9.eE+-]+)\s+([0-9.eE+-]+)\s+[0-9.]+\s+([+-][0-9.]+)\s",
+                      out, re.M)
+    betas = [float(b) for _, b, _ in rows]
+    shafr = [float(s) for _, _, s in rows]
+    assert len(betas) == 3, f"expected 3 pressure points, got {rows}"
+    assert betas[-1] > betas[0] and betas[-1] > 5e-3, "beta should rise into finite-beta"
+    assert shafr[-1] > shafr[0], "magnetic axis should shift outward (Shafranov)"
+
+
 @pytest.mark.parametrize("case", [
     "QA",  # PR smoke: proves the QS optimization pipeline end-to-end
     pytest.param("QH", marks=pytest.mark.full),  # nightly (subprocess cold-start heavy)

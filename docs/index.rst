@@ -5,7 +5,8 @@ vmec-jax
 ideal-MHD equilibrium code for stellarators and tokamaks. It solves fixed- and
 free-boundary equilibria with VMEC2000-parity numerics, writes standard
 ``wout_*.nc`` output, and — unlike the Fortran original — is differentiable
-(fixed boundary) and runs on CPUs and GPUs.
+(fixed boundary by implicit differentiation, free boundary through the
+virtual-casing vacuum field) and runs on CPUs and GPUs.
 
 Why vmec-jax?
 -------------
@@ -14,21 +15,28 @@ Why vmec-jax?
   (steepest-descent moment method, 1D radial preconditioner, Richardson time
   stepping, spectral condensation, NESTOR vacuum solve) constant-for-constant.
   Benchmark decks converge in the *same* iteration counts as VMEC2000 and the
-  ``wout`` files agree per-variable (see :doc:`performance`).
+  ``wout`` files agree per-variable (see :doc:`performance`). An optional 2D
+  block preconditioner cuts iterations 2.5–11x on stiff decks while leaving
+  the default path byte-identical.
 - **Differentiable.** Gradients of fixed-boundary equilibrium properties
   with respect to boundary shape and profile parameters via implicit
   differentiation of the converged fixed point
   (:mod:`vmec_jax.core.implicit`) — no finite differences, no iteration
   unrolling — validated against central finite differences (see
-  :doc:`optimization`). Free-boundary and coil-parameter derivatives are
-  not yet supported by the implicit residual (roadmap).
+  :doc:`optimization`), with an O(1)-memory adjoint. Free-boundary
+  equilibria are differentiable end-to-end through the virtual-casing vacuum
+  field (coil / ``extcur`` derivatives), finite-difference-validated
+  (:mod:`vmec_jax.core.freeboundary_diff`).
 - **Drop-in workflow.** The ``vmec`` command reads VMEC2000 ``input.*``
   namelists and VMEC++-style JSON, prints VMEC2000-format iteration output,
   and writes ``wout_*.nc`` files that load unchanged in simsopt and
   booz_xform.
 - **Batteries included.** Built-in plotting (``vmec --plot``), Boozer
   transform (``vmec --booz`` via ``booz_xform_jax``), spline profiles,
-  multigrid with hot restart, and typed zero-crash error handling.
+  multigrid with hot restart, free boundary from mgrid files *or* directly
+  from coils, near-axis (pyQSC/pyQIC) optimization seeding, and typed
+  zero-crash error handling. The shared linear/adjoint solver layer is
+  factored out into `SOLVAX <https://pypi.org/project/solvax/>`_.
 
 Quickstart
 ----------

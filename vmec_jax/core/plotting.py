@@ -43,6 +43,7 @@ __all__ = [
     "plot_boozmn_modB",
     "plot_boozmn_spectrum",
     "plot_boozmn_mode_profiles",
+    "boozer_modB_on_surface",
 ]
 
 _DPI = 110  # <=150 per plan; keeps every figure well under 400 kB.
@@ -531,8 +532,36 @@ def _boozer_modB_grid(bx, *, js: int, ntheta: int = 90, nphi: int = 180):
     return theta, phi, B
 
 
-def plot_boozmn_modB(boozmn, out_path: str | Path, *, ntheta: int = 90, nphi: int = 180) -> Path:
-    """Boozer-coordinate ``|B|`` contours at mid radius and the outermost surface."""
+def boozer_modB_on_surface(boozmn, *, s_index: int = -1, ntheta: int = 90, nphi: int = 180):
+    """Boozer ``|B|(theta_B, phi_B)`` on one surface of a Boozer transform.
+
+    Accepts a ``booz_xform_jax.Booz_xform`` object or a ``boozmn_*.nc`` path
+    (as produced by :func:`vmec_jax.core.boozer.run_booz_xform`).  ``s_index``
+    indexes the computed Boozer surfaces; ``-1`` (the default) selects the
+    outermost surface, i.e. ``|B|`` in Boozer coordinates on the LCFS.
+
+    Returns ``(theta_B, phi_B, B)`` where ``B`` has shape ``(ntheta, nphi)``
+    over one field period, suitable for a ``jet`` contour plot.
+    """
+    bx = _load_boozmn(boozmn)
+    ns_b = int(np.asarray(bx.bmnc_b).shape[1])
+    if ns_b < 1:
+        raise ValueError("Boozer output contains no computed surfaces")
+    js = int(s_index) + (ns_b if s_index < 0 else 0)
+    if js < 0 or js >= ns_b:
+        raise IndexError(f"s_index {s_index} outside Boozer range 0..{ns_b - 1}")
+    return _boozer_modB_grid(bx, js=js, ntheta=ntheta, nphi=nphi)
+
+
+def plot_boozmn_modB(
+    boozmn, out_path: str | Path, *, ntheta: int = 90, nphi: int = 180,
+    cmap: str = "viridis",
+) -> Path:
+    """Boozer-coordinate ``|B|`` contours at mid radius and the outermost surface.
+
+    ``cmap`` selects the contour colormap (pass ``"jet"`` for the STELLOPT /
+    booz_xform convention).
+    """
     plt = _import_matplotlib()
     bx = _load_boozmn(boozmn)
     ns_b = int(np.asarray(bx.bmnc_b).shape[1])
@@ -546,7 +575,7 @@ def plot_boozmn_modB(boozmn, out_path: str | Path, *, ntheta: int = 90, nphi: in
     for ax, (title, js) in zip(axes[0], selected):
         theta, phi, B = _boozer_modB_grid(bx, js=js, ntheta=ntheta, nphi=nphi)
         phi2d, theta2d = np.meshgrid(phi, theta)
-        cs = ax.contour(phi2d, theta2d, B, levels=24, cmap="viridis", linewidths=1.0)
+        cs = ax.contour(phi2d, theta2d, B, levels=24, cmap=cmap, linewidths=1.0)
         fig.colorbar(cs, ax=ax, label="|B| [T]")
         ax.set_title(title)
         ax.set_xlabel(r"Boozer toroidal angle $\phi_B$")

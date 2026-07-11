@@ -56,6 +56,9 @@ CASES: dict[str, list[str]] = {
     "LandremanPaul2021_QH_reactorScale_lowres": [],
     "nfp4_QH_warm_start": [],
     "NuhrenbergZille_1988_QHS": [],
+    # Free boundary with the real mgrid (R15.1: now converges to VMEC2000
+    # parity).  Ramped to ns >= 51 like every other row.
+    "cth_like_free_bdy": ["mgrid_cth_like.nc"],
     "cth_like_free_bdy_lasym_small": ["mgrid_cth_like_lasym_small.nc"],
 }
 

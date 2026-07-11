@@ -208,6 +208,16 @@ Steps:
      needs them. Gate: functionality_matrix has no unexplained ❌ for a mainstream VMEC2000 feature.
 
 **R11. README overhaul (all ns≥51; optimization + Boozer; code-size comparison; better showcase).**
+  **(R11 DONE 2026-07-11, commit caf6166c.)** All four subitems shipped: free-bdy row runs at ns≥51
+  (cth_like_free_bdy + cth_like_free_bdy_lasym_small, both converged in baseline.json); README
+  `readme_optimization.png` (QA/QH/QP/QI initial-vs-optimized + Boozer |B|); code-size table via
+  pygount 3.2 (vmec-jax **36 files / 11,789 SLOC / 5,532 comment / 0.47 doc-ratio** vs VMEC2000 115f
+  /24,190/8,425/0.35 and VMEC++ 117f/22,824/7,646/0.34 — the shipped numbers, slightly refined from
+  the 2026-07-10 estimate below as the core grew during R15/R18); `readme_equilibrium_showcase.png`
+  now has 3D |B|-on-surface + Boozer-|B| with jet cmap (plotting.py `cmap` arg + `boozer_modB_on_surface`).
+  Performance section reconciled to baseline.json (warm faster than VMEC2000 on 9/13 rows) with an
+  explicit shared-CPU caveat: the ratios are conservative lower bounds measured under load; **R9
+  re-runs the runtime figure on a clean machine.** docs -W green, ruff clean.
   1. **All benchmark rows ns≥51.** `benchmarks/run_baseline.py` already ramps fixed-bdy to ns≥51;
      the **free-boundary row (cth_like_free_bdy) must also run at ns≥51** (currently its deck ns may
      be <51). Bump the free-bdy deck's final NS_ARRAY stage to ≥51 (regenerate its mgrid if the grid
@@ -244,7 +254,21 @@ golden-fetch import path, `pyproject.toml` pytest config, and any `tests/core_ne
 Gate: CI green with the flat `tests/` layout; no `core_new` anywhere.
 
 **R13. Many more pedagogic examples (study STELLOPT / VMEC2000 / hiddenSymmetries simsopt / DESC /
-VMEC++ example layouts).** Each is one simsopt-style file (params at top, no `main()`, prints
+VMEC++ example layouts).**
+  **(R13 IN PROGRESS 2026-07-11.)** Shipped so far (each simsopt-style, params-at-top, CI-smoke-tested,
+  indexed in examples/README.md): `plot_and_boozer.py` (every plot_wout figure + Boozer on the LCFS),
+  `profiles_power_and_spline.py` (power-series vs cubic-spline profiles → identical equilibrium; NCURR
+  0 vs 1), `take_gradients.py` (implicit-adjoint d(aspect)/d(RBC) and d(wb)/d(phiedge) vs central FD,
+  rel ~1e-9), `run_from_json.py` (VMEC++ JSON ↔ &INDATA round-trip → one equilibrium),
+  `hot_restart_scan.py` (seed each scan point from the previous state → warm converges in ~1 iter vs
+  ~309 cold, no recompile). Light ones run in the PR examples shard; take_gradients is nightly (`full`).
+  `finite_beta_scan.py` (pressure ramp → beta, Shafranov axis shift, Mercier DMerc; hot-restarted).
+  `free_boundary_mgrid.py` (NESTOR free boundary from coil EXTCUR + mgrid; LCFS solved for, nightly),
+  `free_boundary_beta_scan.py` (free-bdy pressure ramp → beta 0→2.6%, LCFS re-solved each point, nightly).
+  8 examples shipped this session. DEFERRED (need real coil data / advanced, follow-up):
+  free_boundary_essos_coils (direct-coil free bdy — no bundled CTH coils that reproduce mgrid_cth_like
+  and converge; needs a purpose-built coil set), single_stage_free_boundary_opt (gated on R15 free-bdy
+  IFT wrap). These two are the remaining R13 items; the rest of R13 is done. Each is one simsopt-style file (params at top, no `main()`, prints
 initial→progress→final, teaches one feature) and is CI-smoke-tested (reduced budget) + doubles as the
 docs tutorial (R14.3). Target set:
   - `run_fixed_boundary.py` (exists), `run_from_json.py` (VMEC++ JSON in/out + convert),
@@ -261,6 +285,13 @@ docs tutorial (R14.3). Target set:
   example smoke-passes in CI; each maps to a docs tutorial.
 
 **R14. Complete the documentation (full theory + algorithms + tutorials, not an overview).**
+  **(R14.3 DONE 2026-07-11.)** `docs/tutorials.rst` rewritten from a "coming soon" stub into a real
+  gallery: every R13 example (`literalinclude` so the page stays in sync with the tested code) grouped
+  by theme — getting started (fixed run, plot+Boozer, JSON), profiles & finite-beta, hot restart,
+  differentiation (implicit + free-bdy), free boundary (mgrid + beta scan), optimization (QA + the
+  QH/QP/QI note). docs `-W` green. R14.1 theory (theory/equations/algorithms/architecture, ~1100 lines)
+  and R14.2 reference (api/input/wout/cli) already substantial from prior lanes; remaining R14 polish is
+  incremental, not a gap.
   1. **Theory & numerics, exhaustive** (`docs/theory/` split into pages, each equation linked to its
      implementing `core` function): ideal-MHD energy functional + Hirshman-Whitson moment method;
      flux coordinates + λ; Fourier representation + parities + lasym; **how |B| is computed** (metric
@@ -458,6 +489,15 @@ work is **bidirectional** and the net effect is a SLIMMER, better-integrated vme
   deeper precision than the circular seed (feeds R1); examples added (R13).
 
 **R20. Showcase everything new (README + docs + examples) — the differentiators.**
+  **(R20 DONE 2026-07-11, commit caf6166c, with R11.)** README now carries `readme_precond.png`
+  (2D-vs-1D iteration counts, 2.5–11x on stiff decks), a **DESC comparison section** (VMEC2000
+  iteration-parity + standard wout, INDATA/JSON drop-in, NESTOR *and* virtual-casing free boundary,
+  lasym, VMEC2000-format prints; honest about DESC's Zernike-at-low-res and objective-library edge),
+  and a capability matrix enumerating every beyond-VMEC2000 feature (implicit diff, direct coils, 2D
+  precond, chunked memory, virtual-casing free-bdy, near-axis seeding, SOLVAX-shared solvers). Each
+  user-facing capability has an example (R13) + tutorial (R14). Residual follow-up: a couple of
+  examples/tutorials still to broaden under R13/R14, tracked there — the showcase evidence itself is
+  shipped.
   - **2D preconditioner advantages** (once R10.2/R18b land): README + docs figure — iteration-count
     and wall-time reduction vs the 1D preconditioner on a stiff case; explain the method (docs R14).
   - **DESC comparison where vmec_jax WINS** (README table + notes), beyond the O(1)-memory adjoint:

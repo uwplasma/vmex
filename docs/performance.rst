@@ -27,75 +27,103 @@ executable cache makes every solve after the first warm).
      - vmec_jax cold
      - vmec_jax warm
      - VMEC++
-   * - solovev
-     - 11
-     - 0.10
-     - 3.4
-     - **0.013**
-     - 0.07
-   * - DSHAPE (multigrid)
-     - 128
-     - 1.13
-     - 10.6
-     - **0.42**
-     - 1.50
-   * - circular_tokamak
-     - 201
-     - 0.18
-     - 5.8
-     - **0.046**
-     - 0.40
-   * - cth_like_fixed_bdy
-     - 15
-     - 0.31
-     - 5.3
-     - **0.026**
-     - failed
-   * - li383_low_res
-     - 16
-     - 0.12
-     - 6.1
-     - **0.10**
-     - 0.09
-   * - LandremanPaul2021_QA_lowres (multigrid)
-     - 50
-     - 6.0
-     - 19.9
-     - **5.7**
-     - 2.9
-   * - LandremanPaul2021_QH_reactorScale_lowres
-     - 75
-     - 8.3
-     - 19.6
-     - **8.2**
-     - failed
-   * - nfp4_QH_warm_start
-     - 35
-     - 0.33
-     - 7.1
-     - **0.13**
-     - 0.41
-   * - NuhrenbergZille_1988_QHS
+   * - li383_low_res (NCSX)
      - 51
-     - 121.7
-     - 162.9
-     - 123.9
-     - 48.8
-   * - cth_like_free_bdy_lasym_small (free boundary)
-     - 15
-     - 1.9
-     - 19.8
-     - **7.7**
+     - 0.24
+     - 5.5
+     - **0.17**
+     - 0.18
+   * - circular_tokamak
+     - 51
+     - 0.26
+     - 9.5
+     - **0.13**
+     - 0.77
+   * - solovev
+     - 51
+     - 0.31
+     - 6.7
+     - **0.08**
+     - 0.45
+   * - nfp4_QH_warm_start (multigrid)
+     - 51
+     - 0.37
+     - 16.9
+     - 0.38
+     - 1.00
+   * - nfp4_QH_warm_start
+     - 51
+     - 0.40
+     - 6.3
+     - **0.30**
+     - 0.81
+   * - cth_like_fixed_bdy (multigrid)
+     - 51
+     - 1.09
+     - 14.2
+     - **0.69**
      - failed
+   * - cth_like_fixed_bdy
+     - 51
+     - 1.16
+     - 7.6
+     - **0.82**
+     - failed
+   * - DSHAPE
+     - 128
+     - 1.34
+     - 18.7
+     - **0.61**
+     - 2.07
+   * - cth_like_free_bdy (free boundary)
+     - 51
+     - 2.93
+     - 34.6
+     - 5.11
+     - 2.71
+   * - LandremanPaul2021_QA_lowres (multigrid)
+     - 51
+     - 6.77
+     - 23.9
+     - 7.50
+     - 5.15
+   * - cth_like_free_bdy_lasym_small (free bdy, lasym)
+     - 51
+     - 8.44
+     - --
+     - 13.2
+     - n/a
+   * - LandremanPaul2021_QH_reactorScale_lowres
+     - 51
+     - 12.4
+     - 33.4
+     - **12.0**
+     - failed
+   * - NuhrenbergZille_1988_QHS
+     - 201
+     - 144
+     - 193
+     - **114**
+     - 94.5
+
+Every row runs at ``ns >= 51`` (the harness ramps each deck's final NS_ARRAY
+stage to at least 51; see ``benchmarks/run_baseline.py``). Bold marks the warm
+solve beating VMEC2000. These are wall-clock seconds on a shared Apple-Silicon
+CPU, so the warm/Fortran *ratio* is the comparable quantity, not the absolute
+numbers.
 
 Reading the table:
 
-- **Cold** runs are dominated by XLA compilation (~2-9 s), not physics; the
+- **Cold** runs are dominated by one-time XLA compilation, not physics; the
   persistent compilation cache removes most of it on subsequent processes.
-- **Warm** solves are typically 2-10x faster than VMEC2000 on small and
-  medium decks and competitive on the largest ones.
+- **Warm** solves are faster than VMEC2000 on 9 of the 13 converged rows,
+  typically 1.3–2.2x and up to ~4x on the smallest decks. The two
+  **free-boundary** rows now *converge* to VMEC2000 parity (fixed in R15 —
+  they previously stalled), but their warm wall is not yet faster than Fortran
+  because the NESTOR vacuum solve is not fully tuned.
 - VMEC++ rows marked *failed* aborted during the first iterations on those
-  decks; ``vmec_jax`` converges on the full suite (zero-crash policy).
+  decks; ``vmec_jax`` converges on the full suite (zero-crash policy). ``n/a``
+  marks a configuration VMEC++ does not support (``lasym`` free boundary).
 
 Parity with VMEC2000
 --------------------
@@ -186,6 +214,64 @@ tokamak), both codes are stopped at a matched residual and the documented
 absolute tolerances cover the golden run's own remaining non-convergence.
 wout files are compared per-variable with CompareWOut-style combined
 rel+abs tolerances.
+
+2D block preconditioner
+-----------------------
+
+The default 1D radial preconditioner is what reproduces VMEC2000
+iteration-for-iteration. For *stiff* decks — very high aspect ratio or strong
+finite-β coupling — an opt-in 2D block preconditioner
+(:mod:`vmec_jax.core.preconditioner_2d`) replaces the radial-only approximation
+with a matrix-free Newton step: a Jacobian-vector-product Hessian applied
+through GMRES (SOLVAX's ``block_thomas_truncated`` / Krylov layer). It cuts the
+iteration count 2.5–11x on the stiff cases below, and is a strict add-on — the
+default 1D path stays byte-identical, so parity is untouched.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20 20 20
+
+   * - stiff case
+     - 1D radial
+     - 2D block
+     - reduction
+   * - aspect-100 tokamak (a)
+     - 97
+     - 18
+     - 5.4x
+   * - aspect-100 tokamak (b)
+     - 163
+     - 15
+     - 10.9x
+   * - nfp4 QH, finite beta
+     - 1885
+     - 204
+     - 9.2x
+
+.. figure:: _static/figures/readme_precond.png
+   :alt: 2D vs 1D preconditioner iteration counts on stiff cases
+   :align: center
+   :width: 90%
+
+   Iterations to converge, 2D block vs 1D radial preconditioner
+   (``benchmarks/make_readme_figures.py --only precond``).
+
+Memory
+------
+
+Peak resident memory (0.6–1.5 GB, up to ~3.3 GB on the largest multigrid deck)
+is dominated by the transient JAX/XLA *compile* working set, not the
+equilibrium data — the spectral state, transform tensors, and solver carry
+together are a few MB, and a warm solve's runtime footprint is tens of MB. It
+is a per-process, per-resolution compile cost that amortizes across repeated
+solves. Two knobs bound the optimization-time footprint:
+
+- The optimization Jacobian is column-chunked (``jac_chunk_size="auto"``, the
+  same knob DESC exposes), so peak memory does not scale with the number of
+  boundary degrees of freedom.
+- Factoring the residual and field pipelines into reusable compiled
+  sub-computations cut the implicit-gradient compile ~20% in memory and ~21% in
+  wall time, bit-identically (plan.md R16).
 
 GPU guidance
 ------------
