@@ -21,6 +21,7 @@ from vmec_jax.mirror import (  # noqa: E402
     laplace_green_representation_off_surface,
     laplace_reduced_green_boundary_residual,
     laplace_single_layer_gradient_off_surface,
+    solve_reduced_laplace_neumann,
 )
 
 
@@ -138,6 +139,60 @@ def test_axisymmetric_reduction_preserves_ring_values() -> None:
         rtol=2.0e-12,
         atol=2.0e-13,
     )
+
+
+def test_cap_grading_clusters_rim_without_changing_cylinder_integrals() -> None:
+    grid = _grid(ns=13, nxi=17)
+    boundary = MirrorBoundary.from_radius(0.3, grid)
+    uniform = build_closed_mirror_surface(boundary, grid, cap_rim_grade=1.0)
+    graded = build_closed_mirror_surface(boundary, grid, cap_rim_grade=2.5)
+    radii = np.linalg.norm(np.asarray(graded.lower_cap_xyz[:, 0, :2]), axis=1)
+    assert radii[-1] - radii[-2] < 0.1 * (radii[1] - radii[0])
+    np.testing.assert_allclose(graded.area, uniform.area, rtol=3.0e-14)
+    np.testing.assert_allclose(graded.volume, uniform.volume, rtol=3.0e-14)
+
+
+def test_reduced_neumann_solve_recovers_linear_harmonic() -> None:
+    grid = _grid(ns=13, nxi=21)
+    surface = build_closed_mirror_surface(
+        MirrorBoundary.from_radius(0.37, grid),
+        grid,
+        axisymmetric_ntheta=24,
+        cap_rim_grade=3.5,
+    )
+    exact = surface.reduce_collocation_values(surface.collocation_xyz[:, 2])
+    neumann = surface.reduce_collocation_values(surface.collocation_normals[:, 2])
+    result = solve_reduced_laplace_neumann(surface, neumann)
+    exact -= jnp.mean(exact)
+    recovered = result.boundary_potential - jnp.mean(result.boundary_potential)
+    relative_error = jnp.linalg.norm(recovered - exact) / jnp.linalg.norm(exact)
+
+    assert float(relative_error) < 3.0e-4
+    assert float(jnp.linalg.norm(result.residual)) < 2.0e-8
+    assert float(result.compatibility_error) < 2.0e-14
+    assert float(result.condition_number) < 25.0
+    assert float(result.gauge_error) < 2.0e-14
+
+
+def test_reduced_neumann_solve_is_forward_differentiable() -> None:
+    grid = _grid(ns=7, nxi=9)
+    surface = build_closed_mirror_surface(
+        MirrorBoundary.from_radius(0.37, grid),
+        grid,
+        axisymmetric_ntheta=8,
+        cap_rim_grade=3.0,
+    )
+    neumann = surface.reduce_collocation_values(surface.collocation_normals[:, 2])
+    direction = jnp.sin(jnp.arange(surface.reduced_size, dtype=neumann.dtype))
+    _, tangent = jax.jvp(
+        lambda data: solve_reduced_laplace_neumann(
+            surface, data, order=6
+        ).boundary_potential,
+        (neumann,),
+        (direction,),
+    )
+    assert np.all(np.isfinite(np.asarray(tangent)))
+    assert float(jnp.linalg.norm(tangent)) > 0.0
 
 
 def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:

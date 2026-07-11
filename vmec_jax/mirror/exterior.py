@@ -154,6 +154,24 @@ class ClosedMirrorSurface:
         ) / 6.0
 
 
+@dataclass(frozen=True)
+class LaplaceNeumannResult:
+    """Reduced boundary potential and diagnostics for a Neumann solve."""
+
+    boundary_potential: Array
+    residual: Array
+    compatibility_error: Array
+    condition_number: Array
+    gauge_error: Array
+
+
+jax.tree_util.register_dataclass(
+    LaplaceNeumannResult,
+    data_fields=[field.name for field in fields(LaplaceNeumannResult)],
+    meta_fields=[],
+)
+
+
 jax.tree_util.register_dataclass(
     ClosedMirrorSurface,
     data_fields=[field.name for field in fields(ClosedMirrorSurface)],
@@ -166,12 +184,14 @@ def build_closed_mirror_surface(
     grid: "MirrorGrid",
     *,
     axisymmetric_ntheta: int = 16,
+    cap_rim_grade: float = 1.0,
 ) -> ClosedMirrorSurface:
     """Close a star-shaped mirror LCFS with disks on both axial cuts.
 
     The side wall uses ``(theta, xi)`` and each cap uses the regular disk
-    coordinate ``r = sqrt(s) a(theta)``.  The latter gives the nonsingular area
-    element ``a(theta)^2 ds dtheta / 2`` even at ``s=0``.
+    coordinate ``r = rho(s) a(theta)``. ``cap_rim_grade > 1`` clusters panels
+    at the sharp rim. The area coordinate remains ``rho^2``, giving the regular
+    element ``a(theta)^2 d(rho^2) dtheta / 2`` at the center.
     """
 
     radius = jnp.asarray(boundary.radius_scale)
@@ -230,12 +250,24 @@ def build_closed_mirror_surface(
     )
     lateral_weighted_normals = lateral_area_vectors * lateral_weights[..., None]
 
-    sqrt_s = jnp.sqrt(jnp.asarray(grid.s))[:, None]
-    radial_weights = jnp.asarray(grid.radial_weights)[:, None]
+    cap_rim_grade = float(cap_rim_grade)
+    if not np.isfinite(cap_rim_grade) or cap_rim_grade < 1.0:
+        raise ValueError("cap_rim_grade must be finite and at least 1")
+    base_radius_nodes = np.sqrt(np.asarray(grid.s))
+    cap_radius_nodes = 1.0 - (1.0 - base_radius_nodes) ** cap_rim_grade
+    cap_area_nodes = cap_radius_nodes**2
+    cap_radial_weights = np.empty_like(cap_area_nodes)
+    cap_radial_weights[0] = 0.5 * (cap_area_nodes[1] - cap_area_nodes[0])
+    cap_radial_weights[-1] = 0.5 * (cap_area_nodes[-1] - cap_area_nodes[-2])
+    cap_radial_weights[1:-1] = 0.5 * (
+        cap_area_nodes[2:] - cap_area_nodes[:-2]
+    )
+    cap_radius_nodes = jnp.asarray(cap_radius_nodes)[:, None]
+    radial_weights = jnp.asarray(cap_radial_weights)[:, None]
     theta_weights = theta_weights_1d[None, :]
 
     def cap(endpoint: int, orientation: float) -> tuple[Array, Array]:
-        cap_radius = sqrt_s * radius[:, endpoint][None, :]
+        cap_radius = cap_radius_nodes * radius[:, endpoint][None, :]
         cap_xyz = jnp.stack(
             [
                 cap_radius * cosine[None, :],
@@ -447,6 +479,69 @@ def laplace_reduced_green_boundary_residual(
         surface.expand_reduced_values(neumann),
         order=order,
         target_indices=representatives,
+    )
+
+
+def solve_reduced_laplace_neumann(
+    surface: ClosedMirrorSurface,
+    neumann: Array,
+    *,
+    order: int = 8,
+) -> LaplaceNeumannResult:
+    """Solve the closed-surface Neumann problem in the symmetry basis.
+
+    The constant potential nullspace is removed with an area-weighted
+    zero-mean gauge in a saddle-point system. ``compatibility_error`` reports
+    net flux normalized by ``area * rms(neumann)``; callers must reject data
+    that do not satisfy the Neumann compatibility condition.
+    """
+
+    neumann = jnp.asarray(neumann)
+    expected = (surface.reduced_size,)
+    if neumann.shape != expected:
+        raise ValueError(f"neumann shape {neumann.shape} must be {expected}")
+    zero = jnp.zeros_like(neumann)
+
+    def dirichlet_operator(values: Array) -> Array:
+        return laplace_reduced_green_boundary_residual(
+            surface, values, zero, order=order
+        )
+
+    matrix = jax.jacfwd(dirichlet_operator)(zero)
+    right_hand_side = -laplace_reduced_green_boundary_residual(
+        surface, zero, neumann, order=order
+    )
+    quadrature_to_reduced = np.asarray(surface.collocation_to_reduced)[
+        np.asarray(surface.quadrature_to_collocation)
+    ]
+    reduced_weights = jnp.zeros(surface.reduced_size).at[
+        jnp.asarray(quadrature_to_reduced)
+    ].add(surface.quadrature_weights)
+    reduced_weights /= jnp.sum(reduced_weights)
+    augmented = jnp.block(
+        [
+            [matrix, reduced_weights[:, None]],
+            [reduced_weights[None, :], jnp.zeros((1, 1), dtype=matrix.dtype)],
+        ]
+    )
+    solution = jnp.linalg.solve(
+        augmented, jnp.concatenate([right_hand_side, jnp.zeros(1)])
+    )
+    potential = solution[:-1]
+    residual = matrix @ potential - right_hand_side
+
+    full_neumann = surface.expand_reduced_values(neumann)
+    quadrature_neumann = surface.expand_collocation_values(full_neumann)
+    net_flux = jnp.sum(quadrature_neumann * surface.quadrature_weights)
+    flux_scale = surface.area * jnp.maximum(
+        jnp.sqrt(jnp.mean(neumann**2)), jnp.finfo(neumann.dtype).tiny
+    )
+    return LaplaceNeumannResult(
+        boundary_potential=potential,
+        residual=residual,
+        compatibility_error=jnp.abs(net_flux) / flux_scale,
+        condition_number=jnp.linalg.cond(augmented),
+        gauge_error=jnp.abs(reduced_weights @ potential),
     )
 
 

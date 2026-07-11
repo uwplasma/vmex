@@ -21,6 +21,7 @@ from .geometry import (
 )
 from .exterior import (
     ClosedMirrorSurface,
+    LaplaceNeumannResult,
     build_closed_mirror_surface,
     laplace_double_layer_off_surface,
     laplace_green_boundary_residual,
@@ -28,6 +29,7 @@ from .exterior import (
     laplace_reduced_green_boundary_residual,
     laplace_single_layer_off_surface,
     laplace_single_layer_gradient_off_surface,
+    solve_reduced_laplace_neumann,
 )
 from .forces import (
     AnisotropicMirrorEnergy,
@@ -98,6 +100,7 @@ __all__ = [
     "MIRROR_OUTPUT_SCHEMA",
     "ChebyshevBasis",
     "ClosedMirrorSurface",
+    "LaplaceNeumannResult",
     "ContravariantField",
     "EndCondition",
     "AnisotropyIndicators",
@@ -158,6 +161,7 @@ __all__ = [
     "laplace_reduced_green_boundary_residual",
     "laplace_single_layer_off_surface",
     "laplace_single_layer_gradient_off_surface",
+    "solve_reduced_laplace_neumann",
     "mirror_energy",
     "project_fixed_boundary_state",
     "solve_anisotropic_fixed_boundary_cli",

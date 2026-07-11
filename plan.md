@@ -1262,7 +1262,12 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       Axisymmetric densities now reduce exactly to `nxi+2(ns-1)` ring unknowns while retaining all
       angular source panels. Evaluating one representative target per orbit cuts the 57-unknown,
       1,762-vertex Jacobian from 67.5 to 2.75 s; its `u=z` recovery is unchanged at 3.27% with
-      condition number 19.1. Cap-rim grading is the next accuracy step before coupling.
+      condition number 19.1. Power grading toward the cap rim then reduces 45-unknown `u=z`
+      recovery error from 4.39% ungraded to 0.222%, 0.0589%, 0.0264%, and 0.0216% at grades
+      2, 2.5, 3, and 3.5 without degrading conditioning (`cond=17.0`). A differentiable weighted
+      saddle solve now removes the constant gauge and reports compatibility, condition, gauge, and
+      equation residual; its forward JVP is finite. The graded MMS has roundoff flux/gauge closure
+      and `8.9e-9` panel-discrete equation residual, so it is not yet a `1e-12` exterior claim.
       This does not yet solve the exterior problem: cap-aware singular/near-singular
       quadrature, the second-kind boundary equation and nullspace, harmonic MMS, and coupling that
       deletes the finite outer cylinder remain the next M5 gates.

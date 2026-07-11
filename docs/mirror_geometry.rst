@@ -186,6 +186,14 @@ but one target is evaluated per rotational orbit. The density dimension is
 target Jacobian takes 2.75 seconds instead of 67.5 seconds, with unchanged
 3.27% ``u=z`` boundary error and condition number 19.1. The reduction is exact
 for ring-constant values and does not lower angular integration resolution.
+Power grading in the cap radius resolves the edge density without changing
+closed-surface area or volume. At 45 reduced unknowns, ``u=z`` recovery improves
+from 4.39% ungraded to 0.222%, 0.0589%, and 0.0264% at grades 2, 2.5, and 3;
+grade 3.5 gives 0.0216% with condition number 17.0. The differentiable
+area-weighted saddle solve reports net-flux compatibility, gauge error,
+condition number, and its full equation residual. In this case compatibility
+and gauge close near roundoff, while the panel-discrete equation residual is
+``8.9e-9``; it is not described as a ``1e-12`` exterior discretization.
 
 Tests require exact cylinder area and volume, zero integrated normal, the full
 tensor divergence theorem on a theta-shaped flared tube, cap/side ring
@@ -197,12 +205,11 @@ converges jointly under disk-radial, axial, and angular refinement for the
 harmonic manufactured fields ``1``, ``x``, ``z``, and ``x^2-y^2`` while
 returning zero at exterior targets.
 
-These functions are nonsingular evaluators only. They reject malformed source
-and target arrays and do not label on-surface collocation as supported. M5
-still needs cap-aware singular and near-singular quadrature, a second-kind
-exterior boundary equation with gauge/nullspace handling, manufactured
-harmonic convergence, and replacement of the finite outer cylinder in the
-coupled free-boundary solve.
+The off-surface functions reject malformed source and target arrays. M5 now has
+a tested on-surface reduced Neumann solve, but still needs shaped-boundary and
+coil-data studies, near-singular field evaluation, resolution/error targets
+tight enough for interface coupling, and replacement of the finite outer
+cylinder in the coupled free-boundary solve.
 
 Two cheaper boundary-limit approximations were tested and rejected. Inward or
 outward offset collocation produced density-system condition numbers from
