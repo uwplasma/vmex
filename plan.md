@@ -1327,6 +1327,13 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       were visually inspected. Shared beta diagnostics now support both vacuum field layouts.
       Shaped/finite-beta exterior MMS, higher-order side density, tighter trace/near-field convergence,
       and coupling that deletes the finite outer cylinder remain the next M5 gates.
+      **Spectral side-density option (2026-07-11):** global CGL/Fourier interpolation of lateral
+      Dirichlet and Neumann data now replaces piecewise-linear density inside side panels when
+      `spectral_side_density=True`; geometry and cap density remain linear. It reproduces resolved
+      Fourier-Chebyshev data to `2e-13`, preserves axisymmetric/nonaxisymmetric shape JVPs, and
+      improves the medium dipole boundary-potential error `5.44% -> 1.19%` and far-field gradient
+      error `1.12% -> 0.72%`, with condition below 4. The coupled API and beta continuation expose
+      the option, but the default remains linear pending the coupled findings under M7.
    7. **M6 — axisymmetric finite-beta free boundary.** Vary the lateral interface and interior
       state jointly, with beta continuation `0, 0.01, 0.03, 0.10` and hot restarts. Validate
       isotropic and anisotropic cases against an independently generated Pleiades/WHAM-style
@@ -1436,6 +1443,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       high-beta response is stable to 0.2% while local 3D shape remains blocked. The exact inputs,
       endpoint values, and 519/1410 s A4000 timings live in
       `benchmarks/mirror_free_boundary_nonaxisymmetric.json`.
+      Spectral side density does not close this gate. Axisymmetric beta-50 medium/fine convergence
+      changes only marginally (`4.19e-3 -> 4.15e-3` for field) and the fine spectral/linear fields
+      agree within `1.1e-4`. In 3D, spectral beta-50 medium/fine radius/field/volume/energy changes
+      are `4.87e-4/3.09e-3/2.32e-4/5.79e-4`, but `m=1` changes `0.154 -> 0.0569 mm` (171%) and the
+      fine spectral field differs from linear by 14.1%. The medium/fine endpoint pairs cost
+      565/1830 s and 3.66/5.39 GiB RSS on A4000. Keep this research option opt-in. The next accuracy
+      experiment must raise side geometry and cap density order together; do not add another
+      brute-force grid or treat density interpolation alone as promotion evidence.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.

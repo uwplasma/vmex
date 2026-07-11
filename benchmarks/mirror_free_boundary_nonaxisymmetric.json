@@ -1,5 +1,5 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/1",
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/2",
   "case": {
     "coils": "two radius-0.9 m circular coils at z=+-1 m with x offsets +-0.04 m",
     "current_A": 200000.0,
@@ -20,9 +20,18 @@
     {"beta": 0.0, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1409.805, "residual": 9.008e-15, "compatibility": 8.932e-8, "mean_center_radius_m": 0.201939661, "mean_center_field_T": 0.082036062, "m1_radius_m": 6.886007618e-5, "volume_m3": 0.1646253048, "energy_J": 714.5481563},
     {"beta": 0.50, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1409.805, "residual": 9.010e-15, "compatibility": 2.551e-8, "mean_center_radius_m": 0.217876261, "mean_center_field_T": 0.071029365, "m1_radius_m": 1.314742785e-4, "volume_m3": 0.1833070235, "energy_J": 872.5859988}
   ],
+  "spectral_side_density_endpoints": [
+    {"beta": 0.0, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 565.050, "peak_rss_mib": 3745.2, "residual": 3.853e-15, "compatibility": 1.224e-5, "mean_center_radius_m": 0.2014239447, "mean_center_field_T": 0.0841681463, "m1_radius_m": 1.063197429e-4, "volume_m3": 0.1646260179, "energy_J": 714.5290465},
+    {"beta": 0.50, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 565.050, "peak_rss_mib": 3745.2, "residual": 5.645e-15, "compatibility": 1.196e-5, "mean_center_radius_m": 0.2178956220, "mean_center_field_T": 0.0624290683, "m1_radius_m": 1.540190773e-4, "volume_m3": 0.1833355810, "energy_J": 871.7166867},
+    {"beta": 0.0, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1830.180, "peak_rss_mib": 5515.2, "residual": 8.204e-15, "compatibility": 1.630e-7, "mean_center_radius_m": 0.2018529383, "mean_center_field_T": 0.0836069924, "m1_radius_m": 5.928157384e-5, "volume_m3": 0.1645930095, "energy_J": 714.5496967},
+    {"beta": 0.50, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1830.180, "peak_rss_mib": 5515.2, "residual": 8.184e-15, "compatibility": 9.381e-8, "mean_center_radius_m": 0.2177894842, "mean_center_field_T": 0.0622370622, "m1_radius_m": 5.686962478e-5, "volume_m3": 0.1833781722, "energy_J": 872.2220062}
+  ],
   "assessment": {
     "beta50_medium_to_fine_relative": {"mean_center_radius": 6.462e-4, "mean_center_field": 1.089e-3, "volume": 4.452e-4, "energy": 5.277e-4},
     "m1_radius_relative_change": 1.318,
-    "status": "Global beta-50 response is resolution-stable to 0.2%; local m=1 shape is not promoted."
+    "spectral_beta50_medium_to_fine_relative": {"mean_center_radius": 4.873e-4, "mean_center_field": 3.085e-3, "volume": 2.323e-4, "energy": 5.793e-4},
+    "spectral_m1_radius_relative_change": 1.708,
+    "spectral_vs_linear_fine_beta50_field_relative": 0.1413,
+    "status": "Global response is stable, but local m=1 shape and the fine central field are discretization-dependent; neither side-density scheme is promoted for 3D accuracy."
   }
 }

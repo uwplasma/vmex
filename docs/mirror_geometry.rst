@@ -267,10 +267,19 @@ over four meshes; the finest solve takes 5.7 seconds and has condition number
 4.02. Removing endpoint bands does not change the rate. Spectral filtering,
 off-surface extrapolation, and two-grid Richardson correction were measured
 and rejected because they increase the error. Linear density interpolation on
-side triangles is therefore the limiter. The finest-grid result is accurate
-enough for guarded M6 coupling and is the root beta-scan example default.
-Higher-order side density is still required before making exterior vacuum the
-library-wide default for every workload.
+side triangles are therefore the leading candidate limiter. The finest-grid
+result is accurate enough for guarded M6 coupling and is the root beta-scan
+example default. The option below isolates density order before any
+library-wide default changes.
+
+An opt-in spectral side-density rule now evaluates lateral Dirichlet and
+Neumann data with global Fourier-Chebyshev interpolation while retaining the
+same linear panel geometry and cap density. It reproduces resolved
+Fourier-Chebyshev functions to ``2e-13`` and improves the medium dipole
+boundary-potential error from 5.44% to 1.19% and far-field gradient error from
+1.12% to 0.72%. Set ``EXTERIOR_SPECTRAL_SIDE_DENSITY = True`` in the beta-scan
+example to exercise it. The default is false because the coupled 3D study
+below shows that density order alone is insufficient.
 Source ownership is kept narrow: ``exterior.py`` builds geometry and reduction
 maps, ``exterior_mesh.py`` owns panel topology and Duffy quadrature, and
 ``exterior_bie.py`` owns layer evaluation and Neumann solves. Public functions
@@ -405,6 +414,16 @@ from ``1.18e-5`` to ``2.55e-8``. The ``m=1`` amplitude changes from 0.305 to
 0.131 mm, however, so only the global response is stable to 0.2%; local 3D
 shape is not promoted. Inputs and complete values are stored in
 ``benchmarks/mirror_free_boundary_nonaxisymmetric.json``.
+
+Spectral side density does not close the local 3D gate. At beta 50%, its
+medium-to-fine changes are ``4.87e-4`` in mean radius, ``3.09e-3`` in mean
+field, ``2.32e-4`` in volume, and ``5.79e-4`` in energy, but the ``m=1``
+amplitude changes from 0.154 to 0.0569 mm. The fine spectral central field
+also differs from the fine linear-density result by 14.1%. The endpoint pairs
+take 565 and 1,830 seconds and peak at 3.66 and 5.39 GiB RSS on an A4000.
+Consequently the option remains a research diagnostic; the next discretization
+study must increase side-geometry and cap-density order together rather than
+adding another brute-force grid.
 ``boundary_fourier_amplitudes`` now reports theta mean and peak-normalized
 positive Fourier modes without the odd-grid bias of sampled peak-to-peak
 values. Its analytic ``m=0,1,2`` test closes to ``5e-17``. The next audit will
