@@ -93,7 +93,10 @@ pitched field lines, ``|B|``, cross-sections, profiles, and force histories.
 Tolerance promotion remains open: the unshaped state
 reaches ``1e-9``, but neither it nor the fully shaped state reaches ``1e-10``
 under the tested ``DELT`` values. VMEC2000 parity and block preconditioning are
-required before the free-boundary 16-coil beta scan is promoted.
+required before the free-boundary 16-coil beta scan is promoted. The current
+generic 2D block preconditioner was tested at step factors 0.25, 0.5, and 1.0
+on the 3 kA base and increased, rather than reduced, the residual; a
+hybrid-scaled block is needed rather than further tuning of that path.
 
 Fixed-boundary 3D solver
 ------------------------

@@ -1550,8 +1550,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       `(1.00e-8,3.39e-9,6.59e-9)` and produces `iota=-0.805...-0.807`. The Fourier fixed-boundary
       geometry blocker is closed at `1e-8`. Tightening remains open: the unshaped base reaches
       `1e-9` in 212 iterations, but `DELT=0.02,0.05,0.1,0.2` does not reach `1e-10`, and the shaped
-      state destabilizes when polished to `1e-9`. Next: apply the production 2D/block
-      preconditioner to this now-valid basin and establish VMEC2000 parity. The plotted root example
+      state destabilizes when polished to `1e-9`. With 3 kA current, the unshaped `1e-8` base takes
+      1,518 iterations and does not reach `1e-9`. The production 2D preconditioner at steps
+      `0.25,0.5,1.0` worsens the 300-iteration residual to `2.9e-8,2.8e-8,5.4e-8`; it is rejected
+      for this lane. Next: establish VMEC2000 parity and design a hybrid-specific scaled block
+      preconditioner instead of retuning the current generic block. The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.
    10. **M9 — implicit differentiation and optimization.** Wrap the converged mirror residual in a
