@@ -28,7 +28,8 @@
     {"target_beta": 0.0015, "achieved_beta": 0.0015327049681, "pressure_scale_Pa": 2619.301343, "free_iterations": 3, "volume_m3": 0.3329833138, "converged": true},
     {"target_beta": 0.0020, "achieved_beta": 0.0020438327403, "pressure_scale_Pa": 3492.401791, "free_iterations": 3, "volume_m3": 0.3329833142, "converged": true},
     {"target_beta": 0.0025, "achieved_beta": 0.0025552460673, "pressure_scale_Pa": 4365.502239, "free_iterations": 3, "volume_m3": 0.3329833145, "converged": true},
-    {"target_beta": 0.0030, "achieved_beta": 0.0030641349335, "pressure_scale_Pa": 5238.602686, "free_iterations": 3, "volume_m3": 0.3329833149, "converged": true}
+    {"target_beta": 0.0030, "achieved_beta": 0.0030641349335, "pressure_scale_Pa": 5238.602686, "free_iterations": 3, "volume_m3": 0.3329833149, "converged": true},
+    {"target_beta": 0.0035, "achieved_beta": 0.0035751330355, "pressure_scale_Pa": 6111.703134, "fixed_corrector_iterations": 51, "free_iterations": 3, "volume_m3": 0.3329833132, "converged": true}
   ],
   "safeguarded_corrector": {
     "target_beta": 0.003,
@@ -40,14 +41,16 @@
     "peak_rss_mib": 1609.6
   },
   "continuation_above_0p3_percent": {
-    "accepted_points": [],
+    "accepted_points": [
+      {"target_beta": 0.0035, "achieved_beta": 0.0035751330355, "lambda_row_scale": 0.01, "fixed_corrector_iterations": 51, "free_iterations": 3, "residuals": [9.846408186747526e-9, 4.8063141553029674e-9, 3.76007576445117e-9]}
+    ],
     "rejected_points": [
       {"target_beta": 0.0050, "corrector_iterations": 1000, "residuals": [2.2244354718309275e-8, 2.8787337441420814e-9, 1.129324854900158e-8]},
       {"target_beta": 0.0040, "corrector_iterations": 1000, "residuals": [1.49088897464278e-8, 3.771437204639407e-9, 8.970530761391048e-9]},
       {"target_beta": 0.0035, "corrector_iterations": 1000, "residuals": [1.2041521085314448e-8, 2.0808319526466206e-9, 5.2539324280134916e-9]},
       {"target_beta": 0.0035, "corrector_iterations": 2000, "residuals": [1.253968601033525e-8, 3.314247553595362e-9, 1.2681697001844203e-8], "restart_from_previous_checkpoint": true}
     ],
-    "assessment": "Adaptive step halving and an explicit 1000-iteration state checkpoint do not produce the next equilibrium. Continuing the near-converged 0.35% state for a second chunk worsens FSQR/FSQL, so larger iteration budgets are rejected as the next method."
+    "assessment": "Unscaled adaptive step halving and an explicit 1000-iteration state checkpoint do not produce the next equilibrium. Continuing the unscaled near-converged 0.35% state for a second chunk worsens FSQR/FSQL, so larger iteration budgets are rejected. Lambda row scaling closes the same target in 51 corrector plus 3 NESTOR iterations."
   },
   "inexact_newton_screen_at_target_beta_0p0035": {
     "iterations_per_case": 120,
@@ -62,19 +65,20 @@
       {"scale": 1.0, "residuals": [2.342922363984718e-8, 3.9452464698462325e-9, 2.0329178465854e-9], "linear_residual_range": [4.058948542474439e-6, 4.371771760097285e-6], "accepted_attempts": 3},
       {"scale": 0.3, "residuals": [2.2994994454189313e-8, 5.36105937269648e-9, 2.16780088086895e-9], "linear_residual_range": [3.2762070695512835e-6, 3.958601914197567e-6], "accepted_attempts": 4},
       {"scale": 0.1, "residuals": [1.7607939764381552e-8, 2.3712395525709216e-9, 1.4847943918760286e-9], "linear_residual_range": [2.9441745952206038e-6, 3.435231391398459e-6], "accepted_attempts": 3},
-      {"scale": 0.03, "residuals": [1.7562305645801742e-8, 2.040592269135557e-9, 1.6068840790670107e-9], "linear_residual_range": [1.9572782814266503e-6, 2.130354810694311e-6], "accepted_attempts": 4}
+      {"scale": 0.03, "residuals": [1.7562305645801742e-8, 2.040592269135557e-9, 1.6068840790670107e-9], "linear_residual_range": [1.9572782814266503e-6, 2.130354810694311e-6], "accepted_attempts": 4},
+      {"scale": 0.01, "converged": true, "iterations": 51, "residuals": [9.845715643204108e-9, 4.708827990859311e-9, 3.7602154250739035e-9], "linear_residual_range": [9.128438288455558e-7, 9.230203083861106e-7], "accepted_attempts": 5, "attempts": 5, "accepted_steps": [0.25], "wall_seconds": 92.24}
     ],
-    "assessment": "GMRES rtol is inactive at the tested Krylov budgets; restart dimension and equation balance control quality. Lambda dominates the preconditioned inner norm by about 10x despite FSQL being physically smallest. Scaling lambda rows to 0.03-0.1 improves the 120-iteration physical maximum by about 25% without changing the physical line-search merit."
+    "assessment": "GMRES rtol is inactive at the tested Krylov budgets; restart dimension and equation balance control quality. Lambda dominates the preconditioned inner norm by about 10x despite FSQL being physically smallest. Scaling lambda rows to 0.01 converges the formerly blocked 0.35% corrector in 51 iterations; every scheduled Newton correction is accepted at the full 0.25 step."
   },
   "blockers": {
     "closed_target_beta": 0.003,
     "former_result": "the 1D corrector exhausted 5000 iterations; safeguarded active-coordinate Newton now converges in 291",
-    "remaining_result": "continuation above 0.30% is blocked: target beta 0.35%, 0.40%, and 0.50% fail the 1e-8 component gate after 1000 corrector iterations; a resumed 0.35% checkpoint also fails",
+    "remaining_result": "lambda-balanced correction closes target beta 0.35%; continuation from that solved free boundary through 50% remains open",
     "tolerance_ladder": "halving beta increments and restarting at 1e-7 does not move the barrier",
     "mode_study": "ntor=12 and ntor=16 do not meet 1e-8 at beta zero; ntor=20 is required",
     "generic_2d_100_iterations": {"fsqr_initial": 9.98e-8, "fsqr_final": 1.90e-7, "fsql_initial": 9.14e-9, "fsql_final": 9.48e-10},
     "vmec2000_cold_beta_zero": {"iterations_observed": 4320, "fsqr": 4.88e-6, "fsqz": 1.34e-6, "fsql": 3.56e-6, "peak_rss_mib": 86},
     "vmec2000_free_restart": {"iterations_observed": 5200, "fsqr": 1.42e-5, "fsqz": 1.08e-5, "fsql": 1.20e-6, "peak_rss_mib": 84}
   },
-  "assessment": "Beta-zero through target beta 0.30% are genuine NESTOR-coupled equilibria. A physical-force backtracked, cadence-controlled active-coordinate Newton corrector closes the former 0.30% fixed-boundary barrier. Adaptive continuation establishes a new fixed-corrector barrier immediately above 0.30%; promotion requires a better scaled/regularized correction before continuation and validation through 50%. No higher-beta result is claimed."
+  "assessment": "Beta-zero through target beta 0.35% are genuine NESTOR-coupled equilibria. Physical-force backtracking closes 0.30%, and lambda-balanced active-coordinate Newton closes the next 0.35% point in 51 fixed plus 3 free iterations. Promotion requires adaptive continuation and validation through 50%; no higher-beta result is claimed."
 }

@@ -1666,7 +1666,11 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       although physical FSQL is already smallest. Optional left row scaling leaves the exact Newton
       root and physical line search unchanged. Lambda scales 0.1 and 0.03 reduce the 120-iteration
       maximum from `2.34e-8` to `1.76e-8`; 0.03 lowers the linear residual to about `2.0e-6` and
-      accepts four full 0.25 steps. Next: screen one stronger scale, then extend only the best case.
+      accepts four full 0.25 steps. Lambda scale 0.01 closes the 0.35% corrector in 51 iterations
+      at `(9.85e-9,4.71e-9,3.76e-9)`: all five scheduled Newton attempts take the full 0.25 step,
+      and the inner residual is `9.1--9.2e-7`. The full NESTOR release then converges in 3
+      iterations at achieved beta 0.3575%. Next: resume adaptive continuation from this solved free
+      LCFS with the accepted scaling, retaining the strict component gate through 50%.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

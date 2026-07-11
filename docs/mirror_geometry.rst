@@ -147,7 +147,13 @@ Adaptive continuation above that point rejects target beta 0.50%, 0.40%, and
 state for another 1,000 iterations worsens ``FSQR/FSQL`` instead of crossing
 the gate. The next method is therefore block scaling and inexact-Newton
 regularization using the recorded accepted-step and GMRES histories, not a
-larger iteration budget.
+larger iteration budget. That audit shows the lambda inner-force norm is about
+ten times the R/Z norms even though physical ``FSQL`` is already smallest.
+Left-scaling the lambda equations by 0.01 leaves the exact Newton root and
+physical merit unchanged but balances truncated GMRES. The 0.35% corrector
+then converges in 51 iterations, with all five scheduled Newton steps accepted
+at 0.25. Its NESTOR release converges in three iterations at achieved beta
+0.3575%. Higher beta remains an adaptive-continuation gate.
 
 Fixed-boundary 3D solver
 ------------------------
