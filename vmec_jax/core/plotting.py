@@ -297,8 +297,7 @@ def plot_modB(
         (axes[1], ns - 1, "plasma boundary"),
     ):
         B = surface_modB(wout, s_index=int(irad), theta=theta, phi=phi)
-        cf = ax.contourf(phi2d, theta2d, B, levels=25, cmap="viridis")
-        ax.contour(phi2d, theta2d, B, levels=25, colors="k", linewidths=0.3, alpha=0.4)
+        cf = ax.contour(phi2d, theta2d, B, levels=25, cmap="viridis", linewidths=1.0)
         fig.colorbar(cf, ax=ax, label="|B| [T]")
         ax.set_title(f"|B| on {title} (one field period)")
         ax.set_xlabel(r"toroidal angle $\phi$")

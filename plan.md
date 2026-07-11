@@ -541,6 +541,53 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   Gate: fresh clone installs as `vmex`, CLI/docs/CI all green, no stray identifiers, PyPI `vmex`
   published; then proceed to R9 release under the VMEX name.
 
+**R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
+as a longer refactor).**
+  1. **Install: PyPI (recommended) OR conda-forge.** Make the README install section state clearly that
+     it is *either* `pip install vmex/vmec-jax` (recommended) *or* `conda install -c conda-forge`, not
+     both — one path, recommended = PyPI.
+  2. **`|B|` as line contours, not filled.** All `|B|` plots (`plot_modB`, `plot_boozmn_modB`, the
+     showcase Boozer `|B|`) should be line contours (`ax.contour`), not filled `contourf`. Regenerate the
+     affected README/docs figures.
+  3. **QI optimization row reworked.** In `readme_optimization.png`: QI gets its **own row** with
+     **nfp = 1, 2, 3, 4** examples, displays the achieved **QI residual** (omnigenity), *not* the QS
+     residual, at **higher `max_mode`**; add **3D geometry plots with `|B|` on the surface** for the
+     optimized configs. QA/QH/QP keep the QS residual. Regenerate the figure + the example/deck set.
+  4. **DESC comparison rewritten for clarity.** Replace the prose with a concise
+     advantages/disadvantages presentation — the same clear style as the vmec-jax vs VMEC2000 vs VMEC++
+     feature matrix: what vmec-jax does better, what DESC does better, in short bullets/table cells.
+  5. **Concise performance descriptions.** The warm / cold / GPU / memory bullets are too long — tighten
+     each to one or two clear sentences.
+  6. **Full-solve benchmarks at ns=201, not ns=51.** The full-equilibrium wall-clock table/figure should
+     run at **ns = 201** (not 51) so the JIT compile time is small relative to run time (a fairer warm
+     comparison). Regenerate `readme_runtime_compare.png` + reconcile the numbers. (Watch memory/wall on
+     the heaviest decks; ns=201 is much larger — keep the suite honest and machine-load-caveated per R11.)
+     **(R22.6 CONFIG DONE 2026-07-11: `run_baseline.py` `RAMP_NS=201`, multigrid ladders extended to
+     201, docstring updated. Probe confirms the point — cth_like ns=201 warm=3.8 s vs cold=10.5 s, so the
+     solve dominates. Figure REGEN DEFERRED TO R9: a clean, complete ns=201 figure needs (a) an idle
+     machine — the box is currently contended by the user's sfincs at ~300% CPU, and the heaviest deck
+     (NuhrenbergZille ns=201) is minutes-long — and (b) `vmecpp`, which is not importable in the current
+     venv (the figure would drop its column). R9 finalizes benchmarks on a clean machine per R11; ns=201
+     is now the harness default it will use.)**
+
+**R23. Decide whether the 2D block preconditioner should be the DEFAULT (user 2026-07-11: "if it is so
+good, why isn't it the default?").** Measure 2D-vs-1D on representative decks: (a) **accuracy** — the
+converged `wout` must match the 1D/VMEC2000 golden to the same tolerance (the 2D precond changes the
+*path*, not the fixed point; verify it doesn't shift the answer); (b) **wall-clock** warm speed;
+(c) **peak memory**; (d) **iteration counts** (already known 2.5–11× fewer on stiff decks). Decision
+rule: if 2D is *at least as accurate* AND *faster in wall-clock* (not just iterations) AND *not
+materially heavier in memory* across the board (not only stiff decks), make it the **default**;
+otherwise keep it opt-in with a **documented rationale** (e.g. per-iteration cost or memory on easy
+decks). Update the README precond section + the `prec2d`/`precon_type` default in `solver.py` accordingly.
+  **(R23 DONE 2026-07-11 — DECISION: keep opt-in.)** Measured 1D vs 2D (ns=51, warm, ftol=1e-11):
+  accuracy IDENTICAL (wb parity 1e-9…1e-11 — 2D changes the path, not the fixed point); iterations
+  2.6–5.4× fewer everywhere; but **wall-clock 0.55–1.16×** — a wash-to-slower (solovev 1.16×, cth_like
+  1.14×, circular_tokamak **0.55× = ~2× slower**, aspect-100 stiff **0.97× tie**): the per-iteration
+  GMRES+HVP cost offsets the iteration savings even on the stiffest deck. Peak RSS ~30% higher
+  (cth_like 761→987 MB, the GMRES/HVP compile graph). So default 1D unchanged; 2D stays opt-in for
+  iteration-count-bound / stalling cases. README precond section rewritten with this honest rationale;
+  `solver.py` default (`prec2d=None`) left as-is (correct).
+
 ---
 
 ## 1. Ground truth — current state (audited 2026-07-08)

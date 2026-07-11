@@ -18,14 +18,16 @@ Solvers exercised per case:
   cache hot; same ``vmec_jax.core`` route as the CLI)
 - ``vmecpp``         — VMEC++ python API, where the case converges cleanly
 
-Every benchmark row runs at ``ns >= RAMP_NS`` (51): decks whose finest
+Every benchmark row runs at ``ns >= RAMP_NS`` (201): decks whose finest
 NS_ARRAY stage is below that get a generated variant with the final stage
-rewritten to 51 (``grid: ns51``); decks already at or above 51 run as-is
-(``grid: input``).  FTOL_ARRAY/NITER_ARRAY are left untouched, so each
-deck's own convergence semantics (final ftol, iteration caps) are kept.
-Cases listed in MULTIGRID_CASES additionally run with a generated
-coarse->fine NS_ARRAY ladder ending at ``max(deck_ns, 51)``
-(``grid: multigrid``) to compare multigrid behavior across codes.
+rewritten to 201 (``grid: ns201``); decks already at or above 201 run as-is
+(``grid: input``).  ns=201 is chosen so the *solve* dominates the wall-clock
+and the one-time JIT compile is a small fraction of it — a fairer warm
+comparison than ns=51, where compile time is a larger share.  FTOL_ARRAY/
+NITER_ARRAY are left untouched, so each deck's own convergence semantics
+(final ftol, iteration caps) are kept.  Cases listed in MULTIGRID_CASES
+additionally run with a generated coarse->fine NS_ARRAY ladder ending at
+``max(deck_ns, 201)`` (``grid: multigrid``) to compare multigrid behavior.
 """
 
 from __future__ import annotations
@@ -63,13 +65,14 @@ CASES: dict[str, list[str]] = {
 }
 
 # Minimum final-stage ns for every benchmark row (see module docstring).
-RAMP_NS = 51
+# 201 so the solve dominates the wall-clock and JIT compile is a small share.
+RAMP_NS = 201
 
 # Cases that additionally run with a generated coarse->fine NS_ARRAY ladder.
 # Ladder ends at max(deck ns, RAMP_NS) so results stay comparable.
 MULTIGRID_CASES = {
-    "cth_like_fixed_bdy": "15 31 51",
-    "nfp4_QH_warm_start": "17 35 51",
+    "cth_like_fixed_bdy": "15 31 51 101 201",
+    "nfp4_QH_warm_start": "17 35 71 101 201",
     "LandremanPaul2021_QA_lowres": None,  # ladder derived from deck ns below
 }
 

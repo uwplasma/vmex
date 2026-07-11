@@ -91,12 +91,25 @@ implicit path selects a better basin. The complete scripts are in
 ``examples/optimization/`` (``QA``/``QH``/``QP``/``QI``).
 
 .. figure:: _static/figures/readme_optimization.png
-   :alt: QA/QH/QP/QI seed vs optimized boundary and Boozer |B| on the LCFS
+   :alt: QA/QH/QP seed vs optimized boundary, 3-D |B|, and Boozer |B| on the LCFS
    :align: center
    :width: 100%
 
-   Seed (grey) vs optimized (blue) boundary cross sections and ``|B|`` in
-   Boozer coordinates on the LCFS (jet) for each class; the contour geometry
-   reads off the symmetry family. Reproduce with
+   Quasisymmetry (QA/QH/QP): seed (grey) vs optimized (blue) boundary cross
+   sections (top), the optimized LCFS in 3-D coloured by ``|B|`` (middle), and
+   ``|B|`` in Boozer coordinates on the LCFS (jet line contours, bottom), whose
+   contour geometry reads off the symmetry family. The label is the QS residual
+   measured on the plotted equilibrium. Reproduce with
    ``benchmarks/make_readme_figures.py --only optimization`` from the decks in
    ``benchmarks/opt_decks/``.
+
+.. figure:: _static/figures/readme_qi.png
+   :alt: QI equilibria at nfp 1-4: boundary, 3-D |B|, and Boozer |B| on the LCFS
+   :align: center
+   :width: 100%
+
+   Quasi-isodynamic (QI) equilibria at nfp 1/2/3/4 (bundled decks in
+   ``examples/data/``): boundary cross sections, 3-D ``|B|`` geometry, and
+   ``|B|`` in Boozer coordinates on the LCFS (jet). The label is the QI
+   (omnigenity) residual, not QS. Reproduce with
+   ``benchmarks/make_readme_figures.py --only qi``.

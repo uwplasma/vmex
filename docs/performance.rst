@@ -256,6 +256,15 @@ default 1D path stays byte-identical, so parity is untouched.
    Iterations to converge, 2D block vs 1D radial preconditioner
    (``benchmarks/make_readme_figures.py --only precond``).
 
+It is opt-in, not the default, on purpose. Fewer iterations is not fewer
+seconds: each 2D Newton step (a GMRES solve over Hessian-vector products) costs
+far more than a 1D radial sweep, so the measured wall-clock ranges 0.55–1.16x
+across easy and stiff decks — a wash to *slower* (≈2x slower on a plain circular
+tokamak, a tie even on the aspect-100 case) — and peak memory is ≈30% higher
+(the extra GMRES/HVP compile graph). The converged ``wb`` matches the 1D result
+to ~1e-10, so it changes the path, not the fixed point. Reach for it when the
+1D iteration count is the bottleneck or stalls, not as a blanket default.
+
 Memory
 ------
 

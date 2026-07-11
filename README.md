@@ -46,8 +46,11 @@ all from the built-in `vmec_jax.core.plotting` / `core.boozer` helpers.*
 
 ## Install
 
+Install with **one** of the following — PyPI is recommended:
+
 ```bash
-pip install vmec-jax                        # PyPI
+pip install vmec-jax                        # PyPI (recommended)
+# ...or, if you prefer conda:
 conda install -c conda-forge vmec-jax       # conda-forge
 ```
 
@@ -108,12 +111,21 @@ VMEC++ wout `fsqt`.*
 ### Optional 2D preconditioner: fewer iterations on stiff cases
 
 The default radial (1D) preconditioner reproduces VMEC2000 iteration-for-iteration.
-For stiff decks — very high aspect ratio, strong finite-β coupling — an opt-in
-**2D block preconditioner** (matrix-free Newton: a Jacobian-vector-product Hessian
-on SOLVAX's GMRES) cuts the iteration count 2.5–11x. It is a strict add-on: the
-default 1D path stays byte-identical.
+An opt-in **2D block preconditioner** (matrix-free Newton: a Jacobian-vector-product
+Hessian on SOLVAX's GMRES) cuts the iteration count **2.5–11×** at *identical*
+accuracy — the converged `wb` matches the 1D result to ~1e-10 (it changes the path,
+not the fixed point).
 
 ![2D vs 1D preconditioner iteration counts on stiff cases](docs/_static/figures/readme_precond.png)
+
+**Why it is opt-in, not the default.** Fewer iterations is not the same as less
+wall-clock: each 2D Newton step (a GMRES solve of Hessian-vector products) costs far
+more than a 1D radial sweep. Measured across easy and stiff decks the wall-clock
+ranges 0.55–1.16× — a wash to *slower* (e.g. ~2× slower on a plain circular tokamak,
+a tie even on an aspect-ratio-100 stiff case) — and peak memory is ~30% higher (the
+extra GMRES/HVP compile graph). So the 1D path stays the byte-identical default, and
+the 2D preconditioner is there for cases where the 1D iteration count is the
+bottleneck or stalls.
 
 ## Performance
 
@@ -123,39 +135,23 @@ Full-solve wall-clock times on the bundled benchmark suite (Apple Silicon
 CPU, single thread; `benchmarks/baseline.json`; reproduce with
 `python benchmarks/run_baseline.py`):
 
-- **Warm** (in-process, kernels compiled — the number that matters for
-  optimization loops, parameter scans, and hot restarts): faster than
-  VMEC2000 on 9 of the 13 converged rows, typically 1.3–2.2x and up to ~4x on
-  the smallest decks, including 1.3x on the heaviest deck (Nuhrenberg–Zille
-  QHS, which also converges in far fewer iterations). Of the four remaining
-  rows two are dead heats (multigrid QA/QH) and two are the **free-boundary**
-  rows: those now *converge* to VMEC2000 parity (fixed in R15 — they used to
-  stall) but their warm wall is not yet faster than Fortran, since the vacuum
-  (NESTOR) solve is not fully tuned. (These ratios were measured on a CPU
-  shared with other load, so they are conservative lower bounds — on an idle
-  machine the warm margins are larger; the warm/Fortran *ratio*, not the
-  absolute seconds, is the comparable quantity.)
-- **Cold** (fresh CLI process): pays a one-time 5–25 s JAX/XLA startup and
-  compile cost, so an end-to-end CLI run is slower than Fortran — that
-  overhead is a fixed toll, not physics. Compiled executables are cached per
-  solver structure, so repeated solves in one process — multigrid ladders,
-  scans, optimizations — recompile nothing, which is why the warm number is
-  the one that matters inside a workflow.
-- **GPU** (violet, 2x RTX A4000 from `benchmarks/gpu_baseline.json`): at
-  these problem sizes a fixed per-solve dispatch overhead dominates, so the
-  CPU wins outright; per-iteration throughput favours the GPU by ~3x on the
-  largest decks, and the default device policy picks CPU or GPU per stage
-  accordingly.
-- **Memory.** Peak resident memory (0.6–1.5 GB, up to 3.3 GB on the largest
-  multigrid deck) is dominated by the transient JAX/XLA *compile* working set,
-  not the equilibrium data — the spectral state, DFT transform tensors, and
-  solver carry together are a few MB, and a solve's warm runtime footprint is
-  tens of MB. It is a per-process, per-resolution compile cost that amortizes
-  across repeated solves. The optimization Jacobian is memory-bounded by
-  column chunking (`jac_chunk_size="auto"`; DESC's knob) so it does not scale
-  with the boundary-dof count, and the implicit-gradient compile was cut ~20%
-  by factoring the residual and field pipelines into reusable compiled
-  sub-computations.
+- **Warm** — kernels already compiled; the number that matters inside an
+  optimization loop or scan. Faster than VMEC2000 on most decks (typically
+  1.3–2.2×, up to ~4× on small ones); the only exceptions are the
+  free-boundary rows, which now converge to parity but whose NESTOR vacuum
+  solve is not yet speed-tuned. Ratios measured on a shared CPU are
+  conservative lower bounds.
+- **Cold** — a fresh CLI process pays a one-time 5–25 s JAX/XLA compile, so a
+  single run is slower than Fortran. Executables cache per solver structure, so
+  scans, ladders, and optimizations recompile nothing — which is why *warm* is
+  the workflow number.
+- **GPU** — at these sizes a fixed per-solve dispatch cost dominates and the CPU
+  wins outright; per-iteration throughput favours the GPU ~3× on the largest
+  decks. The device policy picks CPU or GPU per stage.
+- **Memory** — peak (0.6–3.3 GB) is the transient XLA *compile* working set, not
+  the data: the equilibrium state is a few MB. The optimization Jacobian is
+  bounded by column chunking (`jac_chunk_size="auto"`), so it does not grow with
+  the number of design variables.
 
 ## Features
 
@@ -237,17 +233,30 @@ residual = `QuasisymmetryRatioResidual.total`):
 | QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
 | QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
 
-![QA/QH/QP/QI optimization: seed vs optimized boundary and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
+![QA/QH/QP optimization: seed vs optimized boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
 
-*Each class starts from a near-circular torus (grey, dashed) and is shaped
-into a quasi-symmetric stellarator (blue) by the least-squares driver; the
-bottom row is `|B|` in Boozer coordinates on the LCFS (jet), whose contour
-geometry reads off the symmetry family — horizontal for QA, diagonal for QH,
-vertical for QP. `QS` is the quasisymmetry residual measured on the plotted
-equilibrium; the table above lists the deepest values reached by the full
-continuation campaign. Reproduce with
+*Each quasisymmetry class starts from a near-circular torus (grey, dashed) and
+is shaped into a quasi-symmetric stellarator (blue) by the least-squares driver
+(top row); the middle row is the optimized last-closed flux surface in 3-D
+coloured by `|B|`, and the bottom row is `|B|` in Boozer coordinates on the LCFS
+(jet line contours), whose contour geometry reads off the symmetry family —
+horizontal for QA, diagonal for QH, vertical for QP. `QS` is the quasisymmetry
+residual measured on the plotted equilibrium; the table above lists the deepest
+values reached by the full continuation campaign. Reproduce with
 `python benchmarks/make_readme_figures.py --only optimization` from the decks
 in `benchmarks/opt_decks/`.*
+
+Quasi-isodynamic (QI) shaping is intrinsically harder than quasisymmetry, so it
+gets its own row across field periods:
+
+![QI equilibria at nfp 1-4: boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_qi.png)
+
+*Quasi-isodynamic (QI) equilibria at nfp 1, 2, 3, 4 (bundled decks in
+`examples/data/`): boundary cross-sections (top), 3-D `|B|` geometry (middle),
+and `|B|` in Boozer coordinates on the LCFS (jet, bottom). The label is the QI
+(omnigenity) residual — **not** QS; QI is hard, so ~1e-3–1e-2 is expected here,
+not the ~1e-5 reachable for quasisymmetry. Reproduce with
+`python benchmarks/make_readme_figures.py --only qi`.*
 
 Implicit gradients are *essential*, not merely faster: for the helical (QH)
 target the exact-axisymmetric seed is a saddle where finite differences stall,
@@ -264,30 +273,22 @@ a one-time XLA compile of the implicit Jacobian.
 ## vmec-jax vs DESC
 
 [DESC](https://desc-docs.readthedocs.io/) is the other JAX-native,
-differentiable stellarator-equilibrium code, and the natural point of
-comparison. The two solve *different* problems: DESC minimises the MHD force
-in a global Zernike–Fourier basis (its own equilibrium), while vmec-jax
-reproduces VMEC. Both are differentiable, GPU-capable, and built on JAX; most
-of vmec-jax's distinct strengths follow from *being* VMEC:
+differentiable, GPU-capable stellarator-equilibrium code. The key difference:
+DESC minimises the MHD force in a global Zernike–Fourier basis — *its own*
+equilibrium — while vmec-jax reproduces VMEC exactly. They are complementary;
+the honest trade-off, side by side:
 
-| | vmec-jax | DESC |
-|---|:---:|:---:|
-| Iteration-for-iteration VMEC2000 parity + standard `wout_*.nc` | ✅ | — (a different equilibrium) |
-| Drop-in VMEC2000 `input.*` / VMEC++ JSON, VMEC-format iteration prints | ✅ | — |
-| Full VMEC namelist incl. non-symmetric (`LASYM = T`) surfaces | ✅ | partial |
-| Free boundary via **NESTOR and** virtual casing | ✅ | virtual casing |
-| JAX-native, differentiable, GPU | ✅ | ✅ |
-| Implicit (adjoint) equilibrium gradients | ✅ O(1) memory, column-chunked | ✅ |
-| High accuracy at *low* radial resolution | finite-difference radial grid | ✅ Zernike basis |
-| Breadth of built-in objectives / optimizers | growing | ✅ mature |
+| Where **vmec-jax** wins | Where **DESC** wins |
+|---|---|
+| **Is VMEC**: iteration-for-iteration VMEC2000 parity, standard `wout_*.nc`, VMEC-format prints | **Low-resolution accuracy**: global Zernike basis converges in fewer radial points |
+| **Drop-in**: reads VMEC2000 `input.*` and VMEC++ JSON unchanged | **Objective library**: large, mature set of built-in optimization targets |
+| **Full namelist**: non-symmetric surfaces (`LASYM = T`), NESTOR *and* virtual-casing free boundary | **Optimizers**: more built-in stochastic / constrained optimizers |
+| **O(1)-memory adjoint**: peak memory flat in the number of design variables | Adjoint gradients (both codes are differentiable) |
 
-Reach for vmec-jax when you want a differentiable code that *is* VMEC — the
-same converged state, the same `wout`, the same conventions — dropped into an
-existing VMEC-based workflow (simsopt, `booz_xform`, near-axis tooling), with
-an O(1)-memory adjoint whose peak memory does not grow with the number of
-design variables. Reach for DESC when you want its global spectral accuracy at
-low radial resolution or its large, mature objective library. The comparison
-is honest in both directions; the two codes are complementary.
+Reach for **vmec-jax** to drop a differentiable code that *is* VMEC into an
+existing VMEC workflow (simsopt, `booz_xform`, near-axis tooling). Reach for
+**DESC** for its spectral accuracy at low radial resolution or its mature
+objective library.
 
 ## CLI reference
 
