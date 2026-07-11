@@ -1,0 +1,44 @@
+{
+  "schema": "vmec_jax.benchmark.mirror_hybrid_free_boundary/1",
+  "case": {
+    "coils": "16 circular coils, four per side of a 3 m square",
+    "coil_radius_m": 0.5,
+    "coil_current_A": 800000.0,
+    "toroidal_current_A": 3000.0,
+    "mpol": 6,
+    "ntor": 20,
+    "ns": 5,
+    "ftol": 1e-8,
+    "phiedge_Wb": -0.04448973466467371,
+    "mgrid": {"ir": 49, "jz": 41, "kp_vmec_jax": 96, "kp_vmec2000": 88}
+  },
+  "beta_zero": {
+    "fixed_seed_iterations": 1494,
+    "free_boundary_iterations": 3,
+    "converged": true,
+    "fsqr": 9.963949530230478e-9,
+    "fsqz": 6.2995611602432985e-9,
+    "fsql": 3.421855978180827e-9,
+    "volume_m3": 0.33298331270030185,
+    "aspect": 16.551080604967243
+  },
+  "finite_beta_continuation": [
+    {"target_beta": 0.0005, "achieved_beta": 0.0005108064540, "pressure_scale_Pa": 873.100448, "free_iterations": 3, "volume_m3": 0.3329833131, "converged": true},
+    {"target_beta": 0.0010, "achieved_beta": 0.0010217516980, "pressure_scale_Pa": 1746.200895, "free_iterations": 3, "volume_m3": 0.3329833134, "converged": true},
+    {"target_beta": 0.0015, "achieved_beta": 0.0015327049681, "pressure_scale_Pa": 2619.301343, "free_iterations": 3, "volume_m3": 0.3329833138, "converged": true},
+    {"target_beta": 0.0020, "achieved_beta": 0.0020438327403, "pressure_scale_Pa": 3492.401791, "free_iterations": 3, "volume_m3": 0.3329833142, "converged": true},
+    {"target_beta": 0.0025, "achieved_beta": 0.0025552460673, "pressure_scale_Pa": 4365.502239, "free_iterations": 3, "volume_m3": 0.3329833145, "converged": true}
+  ],
+  "blockers": {
+    "next_target_beta": 0.003,
+    "fixed_predictor_tolerance": 1e-7,
+    "fixed_corrector_tolerance": 1e-8,
+    "result": "predictor converges; 1D corrector exhausts 5000 iterations",
+    "tolerance_ladder": "halving beta increments and restarting at 1e-7 does not move the barrier",
+    "mode_study": "ntor=12 and ntor=16 do not meet 1e-8 at beta zero; ntor=20 is required",
+    "generic_2d_100_iterations": {"fsqr_initial": 9.98e-8, "fsqr_final": 1.90e-7, "fsql_initial": 9.14e-9, "fsql_final": 9.48e-10},
+    "vmec2000_cold_beta_zero": {"iterations_observed": 4320, "fsqr": 4.88e-6, "fsqz": 1.34e-6, "fsql": 3.56e-6, "peak_rss_mib": 86},
+    "vmec2000_free_restart": {"iterations_observed": 5200, "fsqr": 1.42e-5, "fsqz": 1.08e-5, "fsql": 1.20e-6, "peak_rss_mib": 84}
+  },
+  "assessment": "Beta-zero and low-beta free boundaries are genuine NESTOR-coupled equilibria. Promotion to the requested 50% beta is blocked by the fixed-boundary hybrid corrector near 0.3%, not by free-boundary turn-on. VMEC2000 does not remove the blocker from cold or WOUT-restart states."
+}

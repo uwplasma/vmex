@@ -1552,8 +1552,13 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       medium dipole grid, boundary error improves `0.786% -> 0.725%`, off-surface field error
       `1.056% -> 0.121%`, and condition remains 4.89. Coarse axisymmetric/3D conditions are
       `3.07/2.73`. Both actual beta `0,10%,25%,50%` coupled gates pass at `ftol=1e-12` in 436 s.
-      The equilibrium API exposes this as `exterior_high_order_cap_panels`; it remains opt-in until
-      medium/fine global and local-mode convergence plus runtime/memory costs are measured.
+      The equilibrium API exposes this as `exterior_high_order_cap_panels`. Endpoint benchmarking
+      rejects it for production: axisymmetric compatibility is `4.71e-6/3.35e-5` at beta 0/50%
+      on `(7,13)` and `5.74e-6/1.67e-5` on `(9,17)`, above the `1e-6` gate. The medium 3D pair costs
+      2,149 s and 9.26 GiB RSS (3.8x/2.5x the spectral pair), while the fine pair did not finish in
+      94 minutes at 11.9 GiB RSS and 9.25 GiB GPU memory. Keep the tested API opt-in for quadrature
+      research; do not spend another grid on this formulation. M7 production accuracy remains open
+      on the lower-cost spectral/linear alternatives and needs a matrix-free/block-eliminated BIE.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
@@ -1617,6 +1622,19 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       force a full NESTOR update every iteration without changing default VMEC2000 cadence. Next:
       close finite-pressure stepping, design a hybrid-specific scaled block preconditioner, then
       use this continuation path for the 16-coil `0--50%` beta scan.
+      **Finite-beta boundary isolated (2026-07-11):** fixed-LCFS pressure prediction followed by a
+      strict fixed corrector and NESTOR release converges target beta `0.05,0.10,0.15,0.20,0.25%`;
+      achieved values are `0.0511--0.2555%`, and every free correction takes 3 iterations below
+      `1e-8`. The next `0.30%` fixed predictor reaches `1e-7`, but its `1e-8` corrector exhausts
+      5,000 iterations. Halved beta steps and a `1e-7 -> 1e-8` restart do not move this boundary.
+      `ntor=12/16` fail the beta-zero `1e-8` gate, so `ntor=20` is equilibrium resolution, not just
+      design overhead; splines can reduce controls but cannot remove these modes. The generic 2D
+      block over 100 iterations improves lambda `9.14e-9 -> 9.48e-10` but worsens radial force
+      `9.98e-8 -> 1.90e-7`; tighter/looser step tuning is rejected. VMEC2000 is not more robust:
+      a cold run remains at `(4.88e-6,1.34e-6,3.56e-6)` after 4,320 iterations and a free-metadata
+      WOUT restart at `(1.42e-5,1.08e-5,1.20e-6)` after 5,200, using only ~85 MiB. Compact evidence
+      is in `benchmarks/mirror_hybrid_free_boundary.json`. The next implementation is a constrained,
+      R/Z/lambda-scaled fixed-boundary corrector; do not start the 1--50% production scan before it.
       The plotted root example
       now writes WOUT, 3D coils/LCFS/pitched field lines, `|B|`, cross-sections, profiles, and force
       histories; only afterward should the 16-coil free-boundary beta scan be attempted.

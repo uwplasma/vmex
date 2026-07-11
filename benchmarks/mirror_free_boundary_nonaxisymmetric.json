@@ -1,5 +1,5 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/2",
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/3",
   "case": {
     "coils": "two radius-0.9 m circular coils at z=+-1 m with x offsets +-0.04 m",
     "current_A": 200000.0,
@@ -26,12 +26,31 @@
     {"beta": 0.0, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1830.180, "peak_rss_mib": 5515.2, "residual": 8.204e-15, "compatibility": 1.630e-7, "mean_center_radius_m": 0.2018529383, "mean_center_field_T": 0.0836069924, "m1_radius_m": 5.928157384e-5, "volume_m3": 0.1645930095, "energy_J": 714.5496967},
     {"beta": 0.50, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1830.180, "peak_rss_mib": 5515.2, "residual": 8.184e-15, "compatibility": 9.381e-8, "mean_center_radius_m": 0.2177894842, "mean_center_field_T": 0.0622370622, "m1_radius_m": 5.686962478e-5, "volume_m3": 0.1833781722, "energy_J": 872.2220062}
   ],
+  "high_order_cap_endpoints": [
+    {"beta": 0.0, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 2149.071, "peak_rss_mib": 9484.43, "residual": 6.232e-15, "compatibility": 1.23387e-5, "condition_number": 3.1942, "mean_center_radius_m": 0.2013537792, "mean_center_field_T": 0.0842445100, "m1_radius_m": 1.208498e-4, "volume_m3": 0.1644859896, "energy_J": 715.3369019},
+    {"beta": 0.50, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 2149.071, "peak_rss_mib": 9484.43, "residual": 5.9745e-15, "compatibility": 1.2084e-5, "condition_number": 3.1733, "mean_center_radius_m": 0.2176959347, "mean_center_field_T": 0.0625874857, "m1_radius_m": 1.717984e-4, "volume_m3": 0.1830292581, "energy_J": 872.3276618}
+  ],
+  "high_order_cap_axisymmetric": [
+    {"beta": 0.0, "ns": 7, "nxi": 13, "wall_s_pair": 437.177, "peak_rss_mib": 3986.23, "residual": 3.6053e-15, "compatibility": 4.7142e-6, "condition_number": 3.6227, "center_radius_m": 0.2016582823, "center_field_T": 0.0835001999},
+    {"beta": 0.50, "ns": 7, "nxi": 13, "wall_s_pair": 437.177, "peak_rss_mib": 3986.23, "residual": 4.1178e-15, "compatibility": 3.3496e-5, "condition_number": 3.5457, "center_radius_m": 0.2175342195, "center_field_T": 0.0622328410},
+    {"beta": 0.0, "ns": 9, "nxi": 17, "wall_s_pair": 992.380, "peak_rss_mib": 4361.33, "residual": 6.4266e-15, "compatibility": 5.7361e-6, "condition_number": 3.6717, "center_radius_m": 0.2016374816, "center_field_T": 0.0835190198},
+    {"beta": 0.50, "ns": 9, "nxi": 17, "wall_s_pair": 992.380, "peak_rss_mib": 4361.33, "residual": 1.0144e-14, "compatibility": 1.6656e-5, "condition_number": 3.5892, "center_radius_m": 0.2177395180, "center_field_T": 0.0619257340}
+  ],
+  "high_order_cap_fine_3d_attempt": {
+    "grid": {"ns": 9, "ntheta": 7, "nxi": 9},
+    "jacobian_chunk_size": 1,
+    "terminated_after_s": 5660,
+    "peak_rss_mib": 12210.9,
+    "gpu_memory_mib": 9474,
+    "result": "not completed"
+  },
   "assessment": {
     "beta50_medium_to_fine_relative": {"mean_center_radius": 6.462e-4, "mean_center_field": 1.089e-3, "volume": 4.452e-4, "energy": 5.277e-4},
     "m1_radius_relative_change": 1.318,
     "spectral_beta50_medium_to_fine_relative": {"mean_center_radius": 4.873e-4, "mean_center_field": 3.085e-3, "volume": 2.323e-4, "energy": 5.793e-4},
     "spectral_m1_radius_relative_change": 1.708,
     "spectral_vs_linear_fine_beta50_field_relative": 0.1413,
-    "status": "Global response is stable, but local m=1 shape and the fine central field are discretization-dependent; neither side-density scheme is promoted for 3D accuracy."
+    "high_order_axis_beta50_medium_to_fine_relative": {"center_radius": 9.44e-4, "center_field": 4.93e-3},
+    "status": "Global response is stable, but local m=1 shape and the fine central field are discretization-dependent. High-order cap panels fail the 1e-6 axisymmetric compatibility gate, cost 3.8x the spectral medium pair with 2.5x RSS, and did not complete the fine 3D pair in 94 minutes; they remain opt-in and are rejected for production."
   }
 }

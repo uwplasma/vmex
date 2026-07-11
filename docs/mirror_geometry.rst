@@ -120,6 +120,18 @@ beta-zero NESTOR turn-on and converges at ``ftol=1e-8`` in three iterations
 using ``DELT=0.002``. Finite-pressure continuation and the full 0--50% scan
 remain open.
 
+A split fixed-predictor/fixed-corrector/NESTOR continuation then converges
+target beta 0.05--0.25% (achieved 0.0511--0.2555%); each released-boundary
+correction takes three iterations. The 0.30% fixed predictor reaches
+``1e-7``, but its ``1e-8`` corrector exhausts 5,000 iterations. Smaller beta
+steps and tolerance restarts do not move that boundary. ``ntor=12`` and 16
+also fail at beta zero, while 20 converges, so spline controls cannot replace
+the equilibrium Fourier bandwidth. The generic 2D block reduces lambda but
+worsens radial force, and VMEC2000 cold/restart runs likewise remain above
+``1e-6`` after more than 4,000 iterations. Complete values are in
+``benchmarks/mirror_hybrid_free_boundary.json``. The 0--50% scan remains a
+blocked research target, not a supported example.
+
 Fixed-boundary 3D solver
 ------------------------
 
@@ -485,6 +497,17 @@ take 565 and 1,830 seconds and peak at 3.66 and 5.39 GiB RSS on an A4000.
 Consequently the option remains a research diagnostic; the next discretization
 study must increase side-geometry and cap-density order together rather than
 adding another brute-force grid.
+
+Exact polar cap geometry with resolution-adaptive radial density interpolation
+was then tested as ``exterior_high_order_cap_panels``. It improves the medium
+dipole off-surface field error from 1.056% to 0.121% without ill-conditioning,
+but fails the equilibrium gates. Axisymmetric compatibility is
+``4.71e-6/3.35e-5`` at beta 0/50% on ``(ns,nxi)=(7,13)`` and
+``5.74e-6/1.67e-5`` on ``(9,17)``, above the production ``1e-6`` limit. The
+medium 3D endpoint pair costs 2,149 s and 9.26 GiB RSS, 3.8 times and 2.5
+times the spectral-side pair. Its fine run exceeded 94 minutes, 11.9 GiB RSS,
+and 9.25 GiB GPU memory without completing. The API remains opt-in for
+quadrature research and is rejected as the production cap discretization.
 ``boundary_fourier_amplitudes`` now reports theta mean and peak-normalized
 positive Fourier modes without the odd-grid bias of sampled peak-to-peak
 values. Its analytic ``m=0,1,2`` test closes to ``5e-17``. The next audit will
