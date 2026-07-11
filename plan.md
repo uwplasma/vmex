@@ -1429,6 +1429,13 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       central field falls `0.082215 -> 0.071173 T`, and the physical `m=1` radius amplitude grows
       `0.255 -> 0.421 mm`. This closes nonlinear-continuation robustness, but not the documented
       spatial-resolution blocker; no 3D production-accuracy claim is made yet.
+      The beta-0/50% endpoint study at `(7,5,7)` and `(9,7,9)` now uses global diagnostics. At
+      beta 50%, medium-to-fine relative changes are `6.46e-4` mean radius, `1.09e-3` mean field,
+      `4.45e-4` volume, and `5.28e-4` total energy; compatibility improves `1.18e-5 -> 2.55e-8`.
+      The `m=1` amplitude changes `0.305 -> 0.131 mm` (132% relative to the fine value), so global
+      high-beta response is stable to 0.2% while local 3D shape remains blocked. The exact inputs,
+      endpoint values, and 519/1410 s A4000 timings live in
+      `benchmarks/mirror_free_boundary_nonaxisymmetric.json`.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.

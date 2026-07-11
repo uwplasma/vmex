@@ -1,0 +1,28 @@
+{
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/1",
+  "case": {
+    "coils": "two radius-0.9 m circular coils at z=+-1 m with x offsets +-0.04 m",
+    "current_A": 200000.0,
+    "axial_current_derivative": "1e-3 * s",
+    "vacuum_backend": "exterior",
+    "ftol": 1e-12,
+    "device": "office RTX A4000"
+  },
+  "coarse_continuation": [
+    {"beta": 0.0, "ns": 5, "ntheta": 3, "nxi": 5, "residual": 3.347e-15, "compatibility": 1.052e-3, "mean_center_radius_m": 0.201794061, "mean_center_field_T": 0.082214875, "m1_radius_m": 2.552960688e-4},
+    {"beta": 0.10, "ns": 5, "ntheta": 3, "nxi": 5, "residual": 3.606e-15, "compatibility": 1.045e-3, "mean_center_radius_m": 0.204211564, "mean_center_field_T": 0.080297249, "m1_radius_m": 2.751920830e-4},
+    {"beta": 0.25, "ns": 5, "ntheta": 3, "nxi": 5, "residual": 3.259e-15, "compatibility": 1.032e-3, "mean_center_radius_m": 0.208446062, "mean_center_field_T": 0.077188766, "m1_radius_m": 3.138854216e-4},
+    {"beta": 0.50, "ns": 5, "ntheta": 3, "nxi": 5, "residual": 2.846e-15, "compatibility": 1.004e-3, "mean_center_radius_m": 0.217967976, "mean_center_field_T": 0.071173090, "m1_radius_m": 4.214999372e-4}
+  ],
+  "resolution_endpoints": [
+    {"beta": 0.0, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 519.192, "residual": 5.414e-15, "compatibility": 1.210e-5, "mean_center_radius_m": 0.201433021, "mean_center_field_T": 0.082602174, "m1_radius_m": 1.858306997e-4, "volume_m3": 0.1646506814, "energy_J": 714.5106337},
+    {"beta": 0.50, "ns": 7, "ntheta": 5, "nxi": 7, "wall_s_pair": 519.192, "residual": 5.236e-15, "compatibility": 1.178e-5, "mean_center_radius_m": 0.218017052, "mean_center_field_T": 0.071106731, "m1_radius_m": 3.048037102e-4, "volume_m3": 0.1832254167, "energy_J": 872.1254992},
+    {"beta": 0.0, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1409.805, "residual": 9.008e-15, "compatibility": 8.932e-8, "mean_center_radius_m": 0.201939661, "mean_center_field_T": 0.082036062, "m1_radius_m": 6.886007618e-5, "volume_m3": 0.1646253048, "energy_J": 714.5481563},
+    {"beta": 0.50, "ns": 9, "ntheta": 7, "nxi": 9, "wall_s_pair": 1409.805, "residual": 9.010e-15, "compatibility": 2.551e-8, "mean_center_radius_m": 0.217876261, "mean_center_field_T": 0.071029365, "m1_radius_m": 1.314742785e-4, "volume_m3": 0.1833070235, "energy_J": 872.5859988}
+  ],
+  "assessment": {
+    "beta50_medium_to_fine_relative": {"mean_center_radius": 6.462e-4, "mean_center_field": 1.089e-3, "volume": 4.452e-4, "energy": 5.277e-4},
+    "m1_radius_relative_change": 1.318,
+    "status": "Global beta-50 response is resolution-stable to 0.2%; local m=1 shape is not promoted."
+  }
+}

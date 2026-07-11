@@ -396,6 +396,15 @@ run is therefore evidence of both nonlinear robustness and unresolved spatial
 convergence, not a validation result. M7 needs a better refinement coordinate,
 higher-order exterior trace, and lower-memory Jacobian before another larger
 grid is worthwhile.
+
+Global observables are better behaved at high beta. For the beta-0/50%
+endpoint study, the ``(7,5,7)`` to ``(9,7,9)`` relative changes at 50% are
+``6.46e-4`` in theta-mean radius, ``1.09e-3`` in theta-mean field,
+``4.45e-4`` in volume, and ``5.28e-4`` in total energy. Compatibility improves
+from ``1.18e-5`` to ``2.55e-8``. The ``m=1`` amplitude changes from 0.305 to
+0.131 mm, however, so only the global response is stable to 0.2%; local 3D
+shape is not promoted. Inputs and complete values are stored in
+``benchmarks/mirror_free_boundary_nonaxisymmetric.json``.
 ``boundary_fourier_amplitudes`` now reports theta mean and peak-normalized
 positive Fourier modes without the odd-grid bias of sampled peak-to-peak
 values. Its analytic ``m=0,1,2`` test closes to ``5e-17``. The next audit will
