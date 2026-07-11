@@ -97,6 +97,11 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "MgridField": (".core.mgrid", "MgridField"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),
     "write_mgrid": (".core.mgrid", "write_mgrid"),
+    # toroidal stellarator-mirror hybrid geometry
+    "HybridBoundarySamples": (".core.hybrid", "HybridBoundarySamples"),
+    "sample_stellarator_mirror_hybrid": (".core.hybrid", "sample_stellarator_mirror_hybrid"),
+    "stellarator_mirror_hybrid_input": (".core.hybrid", "stellarator_mirror_hybrid_input"),
+    "hybrid_projection_error": (".core.hybrid", "hybrid_projection_error"),
     # errors
     "VmecError": (".core.errors", "VmecError"),
     "VmecInputError": (".core.errors", "VmecInputError"),

@@ -31,6 +31,31 @@ open-exterior closure, independent boundary references, and output gates in
 stellarator-mirror hybrid are later milestones and must not be inferred from
 the axisymmetric result.
 
+Toroidal hybrid foundation
+--------------------------
+
+``sample_stellarator_mirror_hybrid`` builds a closed square-like toroidal axis
+in the horizontal plane. Four long superellipse sides are the mirror sections;
+localized rotating elliptical cross-sections provide stellarator shaping at
+the four corners. ``stellarator_mirror_hybrid_input`` projects this one
+real-space target into ordinary ``RBC/ZBS`` arrays and returns a standard
+fixed-boundary :class:`vmec_jax.VmecInput`; there is no native spline state or
+second equilibrium solver.
+
+The axis side distance from the ideal square is below 2 mm in the designated
+side regions, four corner regions are detected, side ellipses remain aligned,
+and corner orientation spans more than 0.2 radians. Fourier maximum component
+error decreases from 13.0 mm at ``(mpol,ntor)=(4,8)`` to 0.912 mm at ``(6,16)``,
+0.262 mm at ``(6,20)``, and 0.077 mm at ``(8,24)``.
+
+This is not yet a converged M8 equilibrium. The ordinary 1D-preconditioned
+solver stalls after 5,000 iterations near ``2.5e-5/2.5e-5/5.0e-5`` for the
+default projected deck; gentler shaping reaches
+``9.2e-6/7.9e-6/1.76e-5`` but not the requested tolerance. Direct activation
+of the current 2D preconditioner exceeded two minutes versus 8.2 seconds for
+the 1D run and was rejected. Axis/shape continuation and VMEC2000 parity remain
+the next M8 gates; no root example will label this geometry solved before then.
+
 Fixed-boundary 3D solver
 ------------------------
 

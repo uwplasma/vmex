@@ -1345,6 +1345,18 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
       Validate mode convergence and `wout` parity with VMEC2000 before considering a native spline
       equilibrium state. Then run the 16-coil free-boundary beta scan using solved boundaries.
+      **STATUS (2026-07-10): clean geometry/projection foundation, equilibrium open.** A new
+      182-line clean-core module samples a superellipse square axis with four straight mirror
+      regions and localized rotating corner ellipses, then least-squares projects the single
+      real-space target into ordinary `RBC/ZBS` and axis coefficients. Geometry tests prove four
+      corner regions, side straightness below 2 mm, aligned side sections, and corner orientation
+      span above 0.2 rad. Maximum projection error decreases 13.0, 0.912, 0.262, and 0.077 mm at
+      `(mpol,ntor)=(4,8),(6,16),(6,20),(8,24)`. No legacy native-spline/replay solver was restored.
+      The ordinary solver currently stalls after 5,000 iterations near
+      `2.5e-5/2.5e-5/5.0e-5`; a gentler shape reaches `9.2e-6/7.9e-6/1.76e-5` but not tolerance.
+      Direct 2D-preconditioner activation exceeded two minutes (1D: 8.2 s) and was terminated.
+      Next: axis/shape continuation, then VMEC2000 fixed-boundary parity. Do not add the root solved
+      example or 16-coil beta scan until that gate passes.
    10. **M9 — implicit differentiation and optimization.** Wrap the converged mirror residual in a
        `custom_vjp`; solve JVP/VJP systems matrix-free with the primal preconditioner. Validate
        boundary, pressure, current, and coil derivatives against central differences. Do not
