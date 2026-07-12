@@ -44,6 +44,39 @@
     "gpu_memory_mib": 9474,
     "result": "not completed"
   },
+  "corrected_fixed_cap_refinement": {
+    "method": "spectral side density, curved side geometry, linear cap density; consistent (5,3,5), (7,5,7), (9,7,9) ladder",
+    "note": "The stored endpoint-excluded L2 values use the superseded moving-CGL-node diagnostic. Raw modal profiles are authoritative. The code now evaluates future core norms from the Fourier-CGL interpolant on the fixed |xi|<=0.75 window.",
+    "grids": [
+      {
+        "grid": {"ns": 5, "ntheta": 3, "nxi": 5},
+        "wall_s_pair": 292.699,
+        "peak_rss_mib": 2807.38,
+        "beta0": {"residual": 2.392e-15, "compatibility": 1.025468e-3, "mean_center_radius_m": 0.201483137, "mean_center_field_T": 0.083764942, "m1_center_m": 1.564123e-4, "volume_m3": 0.165137335, "energy_J": 717.452574, "m1_axial_profile_m": [0.03, 9.349228e-4, 1.564123e-4, 1.774971e-3, 0.03]},
+        "beta50": {"residual": 2.980e-15, "compatibility": 9.745645e-4, "mean_center_radius_m": 0.217011866, "mean_center_field_T": 0.062968033, "m1_center_m": 2.550223e-4, "volume_m3": 0.183758254, "energy_J": 877.061025, "m1_axial_profile_m": [0.03, 9.293524e-4, 2.550223e-4, 1.860294e-3, 0.03]}
+      },
+      {
+        "grid": {"ns": 7, "ntheta": 5, "nxi": 7},
+        "wall_s_pair": 943.944,
+        "peak_rss_mib": 4677.04,
+        "beta0": {"residual": 6.638e-15, "compatibility": 1.213309e-5, "mean_center_radius_m": 0.201500628, "mean_center_field_T": 0.084119898, "m1_center_m": 1.084229e-4, "volume_m3": 0.164603721, "energy_J": 714.640880, "m1_axial_profile_m": [0.03, 3.722467e-3, 2.074752e-3, 1.084229e-4, 2.070597e-3, 3.725807e-3, 0.03]},
+        "beta50": {"residual": 5.182e-15, "compatibility": 1.178635e-5, "mean_center_radius_m": 0.217873935, "mean_center_field_T": 0.062458380, "m1_center_m": 1.538539e-4, "volume_m3": 0.183198851, "energy_J": 871.874192, "m1_axial_profile_m": [0.03, 3.994786e-3, 2.502859e-3, 1.538539e-4, 2.498537e-3, 3.995781e-3, 0.03]}
+      },
+      {
+        "grid": {"ns": 9, "ntheta": 7, "nxi": 9},
+        "wall_s_pair": 2994.901,
+        "peak_rss_mib": 7524.89,
+        "beta0": {"residual": 9.914e-15, "compatibility": 1.119939e-7, "mean_center_radius_m": 0.201714652, "mean_center_field_T": 0.083692245, "m1_center_m": 7.952242e-5, "volume_m3": 0.164573538, "energy_J": 714.657085, "m1_axial_profile_m": [0.03, 7.222170e-3, 3.436400e-3, 5.522847e-4, 7.952242e-5, 5.528100e-4, 3.435387e-3, 7.222996e-3, 0.03]},
+        "beta50": {"residual": 8.509e-15, "compatibility": 6.185172e-8, "mean_center_radius_m": 0.217503786, "mean_center_field_T": 0.062395096, "m1_center_m": 8.936920e-5, "volume_m3": 0.183278796, "energy_J": 872.368427, "m1_axial_profile_m": [0.03, 7.395369e-3, 3.761070e-3, 6.517945e-4, 8.936920e-5, 6.523182e-4, 3.759832e-3, 7.396687e-3, 0.03]}
+      }
+    ],
+    "medium_to_fine_relative": {
+      "beta0": {"mean_center_radius": 1.061e-3, "mean_center_field": 5.110e-3, "volume": 1.834e-4, "energy": 2.268e-5, "m1_center": 3.634e-1},
+      "beta50": {"mean_center_radius": 1.702e-3, "mean_center_field": 1.014e-3, "volume": 4.362e-4, "energy": 5.665e-4, "m1_center": 7.216e-1}
+    },
+    "figure": "docs/_static/figures/mirror_nonaxisymmetric_refinement.png",
+    "verdict": "Nonlinear and exterior closure convergence pass. Global beta-50 response is stable near 0.2%, but the local m=1 shape does not converge; M7 remains research-only."
+  },
   "assessment": {
     "beta50_medium_to_fine_relative": {"mean_center_radius": 6.462e-4, "mean_center_field": 1.089e-3, "volume": 4.452e-4, "energy": 5.277e-4},
     "m1_radius_relative_change": 1.318,
@@ -51,6 +84,6 @@
     "spectral_m1_radius_relative_change": 1.708,
     "spectral_vs_linear_fine_beta50_field_relative": 0.1413,
     "high_order_axis_beta50_medium_to_fine_relative": {"center_radius": 9.44e-4, "center_field": 4.93e-3},
-    "status": "Global response is stable, but local m=1 shape and the fine central field are discretization-dependent. High-order cap panels fail the 1e-6 axisymmetric compatibility gate, cost 3.8x the spectral medium pair with 2.5x RSS, and did not complete the fine 3D pair in 94 minutes; they remain opt-in and are rejected for production."
+    "status": "The corrected three-grid ladder confirms nonlinear and vacuum-closure convergence but not local m=1 convergence: medium-to-fine center-mode changes remain 36%/72% at beta 0/50%. Global beta-50 response is stable near 0.2%. High-order cap panels fail the 1e-6 axisymmetric compatibility gate, cost 3.8x the spectral medium pair with 2.5x RSS, and did not complete the fine 3D pair in 94 minutes; all 3D variants remain research-only."
   }
 }

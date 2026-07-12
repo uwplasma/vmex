@@ -11,10 +11,12 @@ the working tree **and from git history** in Phase 1. Keep this plan.md under 20
 document, updated with a short status line per phase as work proceeds, and moved to `docs/dev/` (or
 deleted) at the v0.1.0 release.
 
-**Mirror status (2026-07-11): ACTIVE IMPLEMENTATION PLAN.** Straight-axis finite-beta free boundary
-is the supported high-beta target under the anisotropic `fixed_flux_cut` model in Phase 5. The
+**Mirror status (2026-07-12): ACTIVE IMPLEMENTATION PLAN.** Axisymmetric straight-axis finite-beta
+free boundary is the supported high-beta target under the anisotropic `fixed_flux_cut` model in
+Phase 5. The
 toroidal Fourier hybrid is validated only through achieved beta 0.8333% and is deferred above that
-measured limit. Implementation proceeds through the remaining M9--M10 integration gates without
+measured limit. The nonaxisymmetric straight-mirror lane is deferred after failing its local-mode
+refinement gate. Implementation proceeds through the remaining M9--M10 integration gates without
 reopening rejected solver variants.
 
 ---
@@ -1700,8 +1702,16 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       on `(7,13)` and `5.74e-6/1.67e-5` on `(9,17)`, above the `1e-6` gate. The medium 3D pair costs
       2,149 s and 9.26 GiB RSS (3.8x/2.5x the spectral pair), while the fine pair did not finish in
       94 minutes at 11.9 GiB RSS and 9.25 GiB GPU memory. Keep the tested API opt-in for quadrature
-      research; do not spend another grid on this formulation. M7 production accuracy remains open
-      on the lower-cost spectral/linear alternatives and needs a matrix-free/block-eliminated BIE.
+      research; do not spend another grid on this formulation.
+      **Final M7 refinement verdict (2026-07-12): unsupported, deferred.** The consistent
+      `(5,3,5),(7,5,7),(9,7,9)` spectral-side/linear-cap ladder converges all six beta-0/50
+      equilibria below `1e-14`; compatibility falls from about `1e-3` to `1e-7`. At beta 50%,
+      medium-to-fine mean radius/field/volume/energy changes are
+      `1.70e-3/1.01e-3/4.36e-4/5.67e-4`, but center `m=1` changes by 72% (36% at beta zero).
+      Excluding only endpoint CGL nodes was itself resolution-dependent, so future diagnostics
+      integrate the Fourier-CGL interpolant on fixed `|xi|<=0.75`; the completed runs retain raw
+      profiles. The 3D lane is not promoted and no larger dense-Jacobian run is justified. Reopen
+      only after a matrix-free/block-eliminated BIE changes the cost/accuracy formulation.
    9. **M8 — toroidal stellarator–mirror hybrid.** Model the closed square/rounded-square torus with
       straight mirror sides and stellarator corners using ordinary VMEC Fourier equilibrium.
       Piecewise splines are low-dimensional axis/boundary design controls projected to Fourier.
@@ -1903,7 +1913,13 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        static pytree metadata. The public `solve_fixed_boundary_implicit` custom VJP now runs the
        host nonlinear solve through `pure_callback` and applies the matrix-free adjoint in reverse;
        isotropic and registered anisotropic gradients match the explicit adjoint at `2e-9` rtol.
-       Free-boundary coil derivatives remain before M9 promotion.
+       The supported axisymmetric exterior free boundary now has an implicit coil adjoint over the
+       physical LCFS/plasma fixed point. An accepted `ns=5,nxi=7` case reaches `1.63e-15`
+       primal residual and `1.07e-8` compatibility; its shared-preconditioner transpose solve
+       reaches `3.68e-10` in 19 iterations, and combined circular-coil radius/current controls
+       match two reconverged equilibria to `4.28e-10` relative. End cuts and the physical pressure
+       profile are held fixed. M9 is complete for supported mirror lanes; 3D free-boundary
+       derivatives are deferred with the failed M7 refinement gate.
    11. **M10 — performance, outputs, and promotion.** Benchmark CPU/GPU cold/warm time, memory,
        scaling, and CLI versus JAX lanes; add mirror-native `mout` output, restart, `--plot`, docs,
        and short root examples. Remove obsolete archived implementations only after parity data are
@@ -1914,8 +1930,8 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        `vmec --plot mout_*.nc` renders the horizontal 3D LCFS/coils/cap-to-cap field lines, `|B|`,
        cross-sections, pressure, and `ftol` history. The 0--50% straight-mirror example writes one
        file per accepted equilibrium and renders its endpoint through this disk-backed path.
-       The complete package is now 58 Python files / 30,679 lines; the mirror backend is 18 files /
-       7,481 lines, its largest module is 855 lines, and generated outputs remain ignored. This meets
+       The complete package is now 59 Python files / 31,044 lines; the mirror backend is 19 files /
+       7,846 lines, its largest module is 855 lines, and generated outputs remain ignored. This meets
        the revised 50--60 file / 30--31k line budget without merging distinct operators into oversized
        modules.
        Coverage instrumentation is an explicit promotion gate: the dedicated mirror shard passes,
@@ -2102,10 +2118,11 @@ Structure:
 - [ ] Fixed-boundary axisymmetric mirror meets the component-wise `1e-12` force contract and its
       analytic field, fixed-flux end-cut, anisotropic-closure, and resolution tests;
       nonaxisymmetric mirror is supported only after its physical-residual and resolution gates.
-- [ ] Straight-axis finite-beta free-boundary mirrors are supported in axisymmetric and 3D modes:
-      solved lateral interfaces satisfy total `B·n` and anisotropic normal-stress balance, every
-      beta scan point through 50% is a converged equilibrium, ellipticity gates pass, and
-      axisymmetric results agree with independent Pleiades/WHAM-style reference data.
+- [ ] Straight-axis finite-beta free-boundary mirrors are supported in axisymmetry: solved lateral
+      interfaces satisfy total `B·n` and anisotropic normal-stress balance, every beta scan point
+      through 50% is a converged equilibrium, ellipticity gates pass, and results agree with
+      independent Pleiades/WHAM-style reference data. Nonaxisymmetric free boundary remains an
+      explicit research API, not a supported capability, until local Fourier modes converge.
 - [ ] Toroidal stellarator–mirror hybrid has VMEC2000 parity at its documented fixed-boundary
       tolerance and a reproducible free-boundary continuation through the measured 0.8333% beta
       limit. Every published point uses a solved surface and total `B·n`; higher beta and a native

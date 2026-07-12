@@ -334,8 +334,31 @@ to JAX objectives. Its static context keeps the host solver out of the AD tape::
    )(parameters)
 
 The custom VJP matches the explicit adjoint for both isotropic and registered
-anisotropic controls. Coupled free-boundary coil derivatives remain the M9
-promotion gate.
+anisotropic controls. The supported free-boundary coil derivative follows.
+
+Axisymmetric free-boundary implicit gradients
+---------------------------------------------
+
+``free_boundary_adjoint`` differentiates the supported axisymmetric exterior
+equilibrium with respect to direct-coil Fourier coefficients, coil currents,
+axial flux, pressure profile, and axial current. The physical fixed point
+contains the lateral LCFS and plasma-interior radii. The exterior Neumann BIE
+eliminates vacuum unknowns, so its exact reverse-AD coil and shape responses
+enter the interface-stress rows directly. The transpose solve reuses the
+separable primal plasma preconditioner and does not assemble a dense Jacobian
+or retain nonlinear iterations.
+
+The high-order ``ns=5, nxi=7`` validation reaches ``1.63e-15`` primal
+residual and ``1.07e-8`` exterior compatibility. Its coupled adjoint converges
+in 19 iterations to ``3.68e-10`` relative residual. A simultaneous change in
+both circular-coil radii and currents is checked against two fully
+reconverged equilibria to ``4.28e-10`` relative; compact values are stored in
+``benchmarks/mirror_free_boundary_implicit.json``.
+
+This derivative holds fixed the end-cut radii and physical pressure profile.
+The nonaxisymmetric free-boundary derivative is deliberately unavailable
+because M7 failed local Fourier-mode refinement; it will not be presented as
+a supported gradient.
 
 ``device=None`` uses the shared measured device policy. On the office host,
 the corrected ``15x15`` case took 35.2 seconds on CPU and 44.2 seconds on one
@@ -685,10 +708,26 @@ medium 3D endpoint pair costs 2,149 s and 9.26 GiB RSS, 3.8 times and 2.5
 times the spectral-side pair. Its fine run exceeded 94 minutes, 11.9 GiB RSS,
 and 9.25 GiB GPU memory without completing. The API remains opt-in for
 quadrature research and is rejected as the production cap discretization.
-``boundary_fourier_amplitudes`` now reports theta mean and peak-normalized
+``boundary_fourier_amplitudes`` reports theta mean and peak-normalized
 positive Fourier modes without the odd-grid bias of sampled peak-to-peak
-values. Its analytic ``m=0,1,2`` test closes to ``5e-17``. The next audit will
-use this modal diagnostic plus volume, energy, and theta-averaged fields.
+values. Its analytic ``m=0,1,2`` test closes to ``5e-17``. The corrected
+``(5,3,5), (7,5,7), (9,7,9)`` audit converges every nonlinear residual below
+``1e-14`` and improves exterior compatibility from about ``1e-3`` to
+``1e-7``. At beta 50%, medium-to-fine mean radius/field/volume/energy
+changes are ``0.170/0.101/0.044/0.057%``. The center ``m=1`` amplitude,
+however, changes by 36% at beta zero and 72% at beta 50%.
+
+Dropping only the cap nodes was also found to compare different physical
+locations because CGL nodes move toward the caps under refinement. The core
+norm now integrates the Fourier-CGL interpolant with Gauss-Legendre quadrature
+on the fixed ``|xi| <= 0.75`` window. The completed runs retain their raw
+collocation profiles rather than retroactively inventing this value. This
+closes the audit with an unsupported 3D verdict; no larger dense-Jacobian grid
+is scheduled.
+
+.. image:: _static/figures/mirror_nonaxisymmetric_refinement.png
+   :alt: Nonaxisymmetric mirror modal profiles, global refinement, and exterior compatibility
+   :width: 100%
 
 Two cheaper boundary-limit approximations were tested and rejected. Inward or
 outward offset collocation produced density-system condition numbers from
