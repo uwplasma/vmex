@@ -1,4 +1,4 @@
-"""Validation gates for :mod:`vmec_jax.core.bootstrap` (R26.g steps 1-2).
+"""Validation gates for :mod:`vmec_jax.core.bootstrap` (R26.g steps 1-4).
 
 Spec: ``notes_r26g_redl_spec.md`` sections 7-8 — the CI-sized subset:
 
@@ -10,6 +10,19 @@ Spec: ``notes_r26g_redl_spec.md`` sections 7-8 — the CI-sized subset:
 - differentiability (double-where guards): finite grads through
   ``compute_trapped_fraction`` and ``j_dot_B_redl``;
 - traceable lane vs wout lane agreement on the solovev equilibrium.
+
+Steps 3-4 gates:
+
+- V4: the section-6.2 ``<J.B>`` identity vs the wout ``jdotb`` — on the
+  three optimized Zenodo wouts (<= 2%) and, traceably, on the solovev
+  equilibrium (<= 1%);
+- V5: ``f_boot <= 1e-3`` on the Zenodo published optima with the paper
+  profiles (wout lane of :class:`RedlBootstrapMismatch`);
+- lane agreement + finite state/profile grads of the mismatch;
+- V6 (small): the fixed-boundary Picard loop converges on a solovev-derived
+  ncurr=1 tokamak in <= 10 iterations;
+- driver: ``least_squares(..., current_dofs=k, jac="implicit")`` runs and
+  its AC/CURTOR Jacobian columns match central finite differences.
 
 Reference arrays were generated offline with simsopt master (2026-07-11,
 ``RedlGeomVmec`` + ``j_dot_B_Redl``) and are pasted to 8-9 significant
@@ -42,6 +55,27 @@ ZENODO = Path("/Users/rogerio/local/"
 BENCH = ZENODO / "calculations" / "20211226-01-sfincs_for_precise_QS_for_Redl_benchmark"
 needs_zenodo = pytest.mark.skipif(not BENCH.is_dir(),
                                   reason="local Zenodo bootstrap dataset unavailable")
+
+# Published optimized configurations (paper table 1 / Zenodo configurations/):
+# wout path, (n0 [1/m^3], T0 [eV]) of the paper profiles, helicity_n.
+OPTIMA = {
+    "QA_beta2.5": (ZENODO / "configurations" / "QA_aspect6_beta2.5" /
+                   "wout_QA_beta0p025_iota0p42_dreopt_HIGHERRES_2022-04-15.nc",
+                   2.38e20, 9.45e3, 0),
+    "QH_beta2.5": (ZENODO / "configurations" / "QH_aspect6.5_beta2.5" /
+                   "wout_20220218-01-021_QH_A6.5_n0_2.2_T0_10_highResVmecForBestFrom020.nc",
+                   2.2e20, 10.0e3, -1),
+    "QH_beta5": (ZENODO / "configurations" / "QH_aspect6.5_beta5" /
+                 "wout_20220102-01-053-003_QH_nfp4_aspect6p5_beta0p05_iteratedWithSfincs.nc",
+                 3.0e20, 15.0e3, -1),
+}
+
+
+def _paper_profiles(n0: float, T0: float) -> "bs.KineticProfiles":
+    """``ne = n0 (1 - s^5)``, ``Te = Ti = T0 (1 - s)`` (arXiv:2205.02914)."""
+    return bs.KineticProfiles(ne_coeffs=n0 * np.array([1, 0, 0, 0, 0, -1.0]),
+                              Te_coeffs=T0 * np.array([1, -1.0]),
+                              Ti_coeffs=T0 * np.array([1, -1.0]))
 
 # ---------------------------------------------------------------------------
 # Reference data (pasted; see module docstring)
@@ -379,3 +413,202 @@ def test_state_lane_default_surfaces_and_pytree(eq):
     leaves = jax.tree_util.tree_leaves(geom)
     assert leaves and all(np.all(np.isfinite(np.asarray(leaf))) for leaf in leaves)
     assert 0.0 < float(np.min(np.asarray(geom.f_t))) < float(np.max(np.asarray(geom.f_t))) < 1.0
+
+
+# ---------------------------------------------------------------------------
+# Steps 3-4: <J.B>_vmec identity (V4)
+# ---------------------------------------------------------------------------
+
+
+def _interp_full(wout, surfaces, values):
+    return np.interp(surfaces, np.linspace(0.0, 1.0, int(wout.ns)),
+                     np.asarray(values, dtype=float))
+
+
+def test_vmec_j_dot_B_state_lane_matches_wout_jdotb(eq):
+    """Traceable identity <J.B> vs the wout-engine jdotb (jxbforce.f) on the
+    solovev equilibrium: <= 1% (observed ~5e-5); wout-table identity ditto."""
+    surfaces = np.linspace(0.2, 0.9, 8)
+    jv = np.asarray(bs.vmec_j_dot_B(eq.state, eq.runtime, surfaces=surfaces))
+    jw = _interp_full(eq.wout, surfaces, eq.wout.jdotb)
+    scale = np.max(np.abs(jw))
+    assert scale > 1e3  # the deck carries real current: the gate is nontrivial
+    np.testing.assert_allclose(jv, jw, atol=1e-2 * scale)
+    jv_wout = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces))
+    np.testing.assert_allclose(jv_wout, jw, atol=1e-2 * scale)
+    # fsa_B2 reuse path (geom from the same surfaces) is the same identity.
+    geom = bs.redl_geometry_from_wout(eq.wout, surfaces)
+    jv_geom = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces, geom=geom))
+    np.testing.assert_allclose(jv_geom, jv_wout, rtol=1e-3)
+
+
+@needs_zenodo
+@pytest.mark.parametrize("config", sorted(OPTIMA))
+def test_zenodo_identity_matches_wout_jdotb(config):
+    """V4: the section-6.2 identity from wout arrays vs wout jdotb, <= 2%
+    interior on the three optimized finite-beta Zenodo wouts (observed
+    <= 5e-4) — both the dI/ds and the mu0*I*dp/ds term live at beta > 0."""
+    path, _, _, _ = OPTIMA[config]
+    from vmec_jax.core.wout import read_wout
+    wout = read_wout(path)
+    surfaces = np.linspace(0.1, 0.9, 17)
+    jv = np.asarray(bs.vmec_j_dot_B_from_wout(wout, surfaces))
+    jw = _interp_full(wout, surfaces, wout.jdotb)
+    np.testing.assert_allclose(jv, jw, atol=2e-2 * np.max(np.abs(jw)))
+
+
+# ---------------------------------------------------------------------------
+# Steps 3-4: RedlBootstrapMismatch (V5 + lane agreement + grads)
+# ---------------------------------------------------------------------------
+
+
+@needs_zenodo
+@pytest.mark.parametrize("config", sorted(OPTIMA))
+def test_zenodo_published_optima_f_boot_small(config):
+    """V5: the paper's optimized configurations are bootstrap-self-consistent
+    — f_boot <= 1e-3 with the paper profiles (observed 2.5e-4 QA, 3.5e-5 QH
+    beta=2.5%, 1.3e-4 QH beta=5%), wout lane (simsopt parity)."""
+    path, n0, T0, helicity_n = OPTIMA[config]
+    boot = bs.RedlBootstrapMismatch(_paper_profiles(n0, T0), helicity_n)
+    f_boot = float(boot.total(path))
+    assert 0.0 < f_boot <= 1e-3
+
+
+def test_mismatch_lanes_agree(eq):
+    """residuals_state vs J(eq) at discretization level (identity Jv +
+    internal grid vs jxbforce jdotb + 64x65 wout synthesis)."""
+    prof = _paper_profiles(1e19, 2e3)
+    boot = bs.RedlBootstrapMismatch(prof, 0, surfaces=np.linspace(0.2, 0.9, 8))
+    r_wout = np.asarray(boot.J(eq))
+    r_state = np.asarray(boot.residuals_state(eq.state, eq.runtime))
+    assert r_wout.shape == r_state.shape == (8,)
+    np.testing.assert_allclose(r_state, r_wout, atol=1e-3)
+    # totals are the paper f_boot (bounded by 1) and agree across lanes
+    t_wout = float(boot.total(eq))
+    t_state = float(boot.total_state(eq.state, eq.runtime))
+    assert 0.0 < t_state < 1.0
+    np.testing.assert_allclose(t_state, t_wout, rtol=1e-2, atol=1e-5)
+
+
+def test_mismatch_grads_finite(eq):
+    """jax.grad of the traceable f_boot w.r.t. the state and w.r.t. a kinetic
+    profile coefficient is finite and nonzero (gate: differentiability)."""
+    boot = bs.RedlBootstrapMismatch(_paper_profiles(1e19, 2e3), 0,
+                                    surfaces=np.linspace(0.2, 0.9, 4))
+    g_state = jax.grad(lambda st: boot.total_state(st, eq.runtime))(eq.state)
+    leaves = jax.tree_util.tree_leaves(g_state)
+    assert all(np.all(np.isfinite(np.asarray(g))) for g in leaves)
+    assert any(np.any(np.asarray(g) != 0.0) for g in leaves)
+
+    def f_of_n0(n0):
+        b = bs.RedlBootstrapMismatch(_paper_profiles(n0, 2e3), 0,
+                                     surfaces=np.linspace(0.2, 0.9, 4))
+        return b.total_state(eq.state, eq.runtime)
+
+    g_n0 = jax.grad(f_of_n0)(1e19)
+    assert np.isfinite(float(g_n0)) and float(g_n0) != 0.0
+
+
+# ---------------------------------------------------------------------------
+# Step 4: fixed-boundary Picard loop (V6, small) + current-profile dofs
+# ---------------------------------------------------------------------------
+
+
+def _tokamak_ncurr1(curtor=-3.8e5, ac01=(1.0, -0.5)):
+    """solovev deck re-parameterized to prescribed current (ncurr=1)."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    ac = np.zeros(21)
+    ac[0], ac[1] = ac01
+    return dataclasses.replace(inp, ncurr=1, pcurr_type="power_series",
+                               ac=ac, curtor=float(curtor))
+
+
+#: profiles sized so the solovev-scale tokamak (B ~ 0.2 T, R ~ 4 m) carries
+#: an O(0.4 MA) bootstrap current -> healthy iota ~ 0.8 at the fixed point.
+TOKAMAK_PROFILES = bs.KineticProfiles(
+    ne_coeffs=1e19 * np.array([1, 0, 0, 0, 0, -1.0]),
+    Te_coeffs=2.0e3 * np.array([1, -1.0]),
+    Ti_coeffs=2.0e3 * np.array([1, -1.0]))
+
+
+def test_self_consistent_bootstrap_picard_converges():
+    """V6 (small): Picard loop on the ncurr=1 tokamak converges (delta below
+    tol) in <= 10 iterations and drives f_boot down ~two orders of magnitude.
+    relax=0.5 because iota here is entirely bootstrap-driven (the undamped
+    <J.B> ~ 1/iota ~ 1/I map is marginally stable; spec section 6.5)."""
+    inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))  # flat I' guess
+    res = bs.self_consistent_bootstrap(
+        inp, TOKAMAK_PROFILES, 0, n_iter=10, tol=1e-3, relax=0.5, degree=6,
+        s_eval=np.linspace(0.02, 0.98, 25))
+    assert res.converged and res.iterations <= 10
+    assert res.input.ncurr == 1 and res.input.pcurr_type == "power_series"
+    # fixed point: ~0.38 MA of bootstrap current, sign preserved
+    assert 2e5 < -res.input.curtor < 6e5
+    f_first = res.history[0]["f_boot"]
+    f_last = res.history[-1]["f_boot"]
+    assert f_last < 0.02 and f_last < 0.05 * f_first
+    assert res.history[-1]["delta"] <= 1e-3
+
+
+def test_current_dof_packing_and_validation():
+    """Scaled AC/CURTOR dof block: pack/apply round trip + input validation."""
+    inp = _tokamak_ncurr1()
+    k, ac_scale = opt._current_dof_setup(inp, 2)
+    assert k == 2 and ac_scale == 1.0  # max|AC| of the shape-normalized deck
+    xc = opt._pack_current(inp, k, ac_scale)
+    np.testing.assert_allclose(xc, [1.0, -0.5, -0.38])
+    back = opt._apply_current(inp, xc, k, ac_scale)
+    np.testing.assert_allclose(np.asarray(back.ac), np.asarray(inp.ac))
+    assert back.curtor == inp.curtor
+    # ampere-scale decks (self_consistent_bootstrap refits) scale by max|AC|
+    amp = dataclasses.replace(inp, ac=1e6 * np.asarray(inp.ac), curtor=-2.7e6)
+    assert opt._current_dof_setup(amp, 2)[1] == 1e6
+    with pytest.raises(ValueError, match="ncurr = 1"):
+        opt._current_dof_setup(dataclasses.replace(inp, ncurr=0), 2)
+    with pytest.raises(ValueError, match="pcurr_type"):
+        opt._current_dof_setup(
+            dataclasses.replace(inp, pcurr_type="cubic_spline_ip"), 2)
+    with pytest.raises(ValueError, match="dense AC length"):
+        opt._current_dof_setup(inp, 22)
+
+
+def test_least_squares_current_dofs_implicit():
+    """Driver gate: a 2-nfev implicit least squares with the mismatch term and
+    current_dofs=2 runs, and the AC/CURTOR Jacobian columns of the implicit
+    path match central finite differences of re-solved equilibria."""
+    inp = _tokamak_ncurr1()
+    boot = bs.RedlBootstrapMismatch(TOKAMAK_PROFILES, 0,
+                                    surfaces=np.linspace(0.2, 0.9, 6),
+                                    n_lambda=32)
+    terms = [(boot.residuals_state, 0.0, 1.0), (opt.aspect_ratio, 3.2, 0.1)]
+    res = opt.least_squares(terms, inp, max_mode=1, jac="implicit",
+                            current_dofs=2, max_nfev=2)
+    nb = 2 * len(opt._dof_modes(inp, 1))
+    assert res.x.size == nb + 3
+    assert np.isfinite(res.cost) and res.nfev <= 2
+    jac = np.asarray(res.jac)
+    assert np.all(np.isfinite(jac))
+    # round trip of the optimized current dofs into the returned input
+    k, ac_scale = opt._current_dof_setup(inp, 2)
+    np.testing.assert_allclose(np.asarray(res.input.ac)[:2],
+                               res.x[nb:nb + 2] * ac_scale)
+    np.testing.assert_allclose(res.input.curtor, res.x[nb + 2] * opt._CURTOR_SCALE)
+
+    # FD cross-check of two current-dof Jacobian columns at the returned x
+    # (observed implicit-vs-FD agreement ~1e-5; loose gate for FD noise).
+    def resid(x):
+        trial = opt.unpack_boundary(inp, x[:nb], 1)
+        trial = opt._apply_current(trial, x[nb:], k, ac_scale)
+        eq_t = opt.solve_equilibrium(trial)
+        return np.concatenate(
+            [w * (opt._call_term(f, eq_t) - t) for (f, t, w) in terms])
+
+    x_star = np.asarray(res.x, dtype=float)
+    for col in (nb, nb + 2):  # one AC coefficient + curtor
+        h = 1e-4
+        xp = x_star.copy(); xp[col] += h
+        xm = x_star.copy(); xm[col] -= h
+        fd = (resid(xp) - resid(xm)) / (2 * h)
+        np.testing.assert_allclose(jac[:, col], fd,
+                                   atol=1e-3 * max(np.max(np.abs(fd)), 1e-12),
+                                   err_msg=f"implicit Jacobian column {col}")

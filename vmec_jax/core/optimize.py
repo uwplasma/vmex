@@ -118,9 +118,19 @@ __all__ = [
     "pack_boundary",
     "unpack_boundary",
     "least_squares",
+    "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
+
+
+def __getattr__(name: str):  # PEP 562 lazy re-export
+    # bootstrap.py imports this module's private helpers at import time, so
+    # the f_boot objective is re-exported lazily to avoid the import cycle.
+    if name == "RedlBootstrapMismatch":
+        from .bootstrap import RedlBootstrapMismatch
+        return RedlBootstrapMismatch
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ===========================================================================
@@ -1121,6 +1131,62 @@ def unpack_boundary(inp: VmecInput, x, max_mode: int) -> VmecInput:
     return dataclasses.replace(inp, rbc=rbc, zbs=zbs)
 
 
+#: curtor dof storage scale (dof = CURTOR/1e6, i.e. MA) — keeps the trust
+#: region O(1) alongside the boundary dofs (spec notes_r26g section 6.4).
+_CURTOR_SCALE = 1.0e6
+
+
+def _current_dof_setup(inp: VmecInput, current_dofs: int | None) -> tuple[int, float]:
+    """Validate the optional AC/CURTOR dof block of :func:`least_squares`.
+
+    Returns ``(k, ac_scale)``: ``k`` leading ``AC`` power-series coefficients
+    are freed (0 disables the block); the dof vector then gains ``k + 1``
+    trailing entries ``[ac_0/ac_scale, ..., ac_{k-1}/ac_scale,
+    curtor/1e6]``.  ``ac_scale = max|AC|`` frozen from the seed input (VMEC
+    normalizes the AC profile by its own edge integral, so the coefficient
+    magnitude — ampere-scale for the Zenodo/self_consistent_bootstrap decks,
+    O(1) for shape-normalized decks — is the right trust-region unit; the
+    spec's ``|curtor|`` is the fallback when the seed AC block is all zero).
+    """
+    if not current_dofs:
+        return 0, 1.0
+    k = int(current_dofs)
+    if k <= 0:
+        raise ValueError(f"current_dofs must be a positive int, got {current_dofs!r}")
+    if int(inp.ncurr) != 1:
+        raise ValueError("current_dofs requires ncurr = 1 (prescribed current)")
+    kind = str(inp.pcurr_type).strip().lower()
+    if "spline" in kind or "line_segment" in kind:
+        raise ValueError(
+            "current_dofs requires an AC-coefficient pcurr_type (e.g. "
+            f"'power_series'), got {inp.pcurr_type!r}; re-parameterize the "
+            "deck (e.g. with vmec_jax.core.bootstrap.self_consistent_bootstrap, "
+            "whose refit emits a power_series AC) first")
+    if k > int(np.asarray(inp.ac).size):
+        raise ValueError(f"current_dofs = {k} exceeds the dense AC length "
+                         f"{int(np.asarray(inp.ac).size)}")
+    ac_scale = float(np.max(np.abs(np.asarray(inp.ac, dtype=float))))
+    if ac_scale == 0.0:
+        ac_scale = max(abs(float(inp.curtor)), 1.0)
+    return k, ac_scale
+
+
+def _pack_current(inp: VmecInput, k: int, ac_scale: float) -> np.ndarray:
+    """Scaled ``[ac_0..ac_{k-1}, curtor]`` dof block (see :func:`_current_dof_setup`)."""
+    return np.concatenate([np.asarray(inp.ac, dtype=float)[:k] / ac_scale,
+                           [float(inp.curtor) / _CURTOR_SCALE]])
+
+
+def _apply_current(inp: VmecInput, xc, k: int, ac_scale: float) -> VmecInput:
+    """New :class:`VmecInput` with the scaled current dof block ``xc`` applied."""
+    xc = np.asarray(xc, dtype=float).ravel()
+    if xc.size != k + 1:
+        raise ValueError(f"expected {k + 1} current dofs, got {xc.size}")
+    ac = np.array(inp.ac, dtype=float, copy=True)
+    ac[:k] = xc[:k] * ac_scale
+    return dataclasses.replace(inp, ac=ac, curtor=float(xc[k]) * _CURTOR_SCALE)
+
+
 def _call_term(fun: Callable, eq: Equilibrium) -> np.ndarray:
     """Evaluate an objective callable against an :class:`Equilibrium`.
 
@@ -1162,6 +1228,7 @@ def least_squares(
     *,
     max_mode: int | Sequence[int] = 1,
     x0: np.ndarray | None = None,
+    current_dofs: int | None = None,
     jac: str | None = None,
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "block",
@@ -1189,6 +1256,26 @@ def least_squares(
     swaps between stages of a staged campaign (e.g. the QP-basin-then-QI
     route) are just two calls with different ``objective_terms``, the second
     seeded with the first call's ``result.input``.
+
+    ``current_dofs = k`` (plan R26.g, spec section 6.4) additionally frees
+    the equilibrium current profile: the first ``k`` ``AC`` power-series
+    coefficients (VMEC ``pcurr_type="power_series"``, i.e. ``I'(s)``) plus
+    ``CURTOR``, appended to the dof vector as
+    ``[..boundary.., ac_0/ac_scale, ..., ac_{k-1}/ac_scale, curtor/1e6]``
+    (``ac_scale = max(|curtor|, 1)`` frozen from the seed) so the trust
+    region sees O(1) numbers.  Requires ``ncurr = 1`` and an
+    AC-parameterized ``pcurr_type`` (splines are rejected — re-fit them to a
+    power series first, e.g. via
+    :func:`vmec_jax.core.bootstrap.self_consistent_bootstrap`).  Both
+    gradient modes support it (finite differences re-solve per current dof;
+    ``jac="implicit"`` adds ``k + 1`` one-hot tangent rows through
+    ``ImplicitParams.ac``/``curtor``, which ``runtime_from_params`` already
+    traces).  Note that VMEC normalizes the AC profile by its own edge
+    integral (only the *shape* of ``I'`` matters; ``CURTOR`` sets the
+    amplitude), so the overall-AC-scale direction is objective-neutral; the
+    trust-region solvers handle the resulting Jacobian null direction.
+    This is the dof set of the self-consistent-bootstrap objective
+    (:class:`vmec_jax.core.bootstrap.RedlBootstrapMismatch`).
 
     ``max_mode`` may be a single int or an increasing schedule (e.g.
     ``(1, 2, 3)``): each continuation stage optimizes the enlarged dof set
@@ -1308,7 +1395,8 @@ def least_squares(
         result = None
         for mm in modes_schedule:
             result = least_squares(
-                objective_terms, current, max_mode=mm, jac=jac,
+                objective_terms, current, max_mode=mm,
+                current_dofs=current_dofs, jac=jac,
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 recycle=recycle, hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
@@ -1319,13 +1407,20 @@ def least_squares(
         result.stage_results = stage_results
         return result
     max_mode = modes_schedule[0]
+    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
+
+    def _ess_scale_full() -> np.ndarray:
+        scale = _ess_scale(inp, max_mode, float(ess_alpha))
+        if k_cur:  # current dofs are already O(1) by construction
+            scale = np.concatenate([scale, np.ones(k_cur + 1)])
+        return scale
 
     if jac == "implicit":
         if use_ess:
-            scipy_kwargs.setdefault(
-                "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
+            scipy_kwargs.setdefault("x_scale", _ess_scale_full())
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
+            current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             recycle=recycle,
             warm_start=(warm_start if hot_restart else None),
@@ -1338,14 +1433,25 @@ def least_squares(
     if device is not None:
         solve_kwargs.setdefault("device", device)
     if use_ess:
-        scipy_kwargs.setdefault("x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
+        scipy_kwargs.setdefault("x_scale", _ess_scale_full())
     if x0 is None:
         x0 = pack_boundary(inp, max_mode)
+        if k_cur:
+            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
+    nb = 2 * len(_dof_modes(inp, max_mode))
+
+    def unpack_full(x: np.ndarray) -> VmecInput:
+        trial = unpack_boundary(inp, np.asarray(x, dtype=float)[:nb], max_mode)
+        if k_cur:
+            trial = _apply_current(trial, np.asarray(x, dtype=float)[nb:],
+                                   k_cur, ac_scale)
+        return trial
+
     state_holder: dict[str, Any] = {"hot": None, "eq": None, "nres": None}
     single_stage = int(np.asarray(inp.ns_array).size) == 1
 
     def fun(x: np.ndarray) -> np.ndarray:
-        trial = unpack_boundary(inp, x, max_mode)
+        trial = unpack_full(x)
         try:
             seed = state_holder["hot"] if (hot_restart and single_stage) else None
             eq = solve_equilibrium(trial, initial_state=seed, **solve_kwargs)
@@ -1368,7 +1474,7 @@ def least_squares(
 
     result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
                                           jac="2-point", **scipy_kwargs)
-    result.input = unpack_boundary(inp, result.x, max_mode)
+    result.input = unpack_full(result.x)
     result.equilibrium = state_holder["eq"]
     return result
 
@@ -1414,6 +1520,7 @@ def _least_squares_implicit(
     *,
     max_mode: int,
     x0: np.ndarray | None,
+    current_dofs: int | None = None,
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "block",
     recycle: bool = False,
@@ -1462,6 +1569,11 @@ def _least_squares_implicit(
     ntor = int(inp.ntor)
     row_idx = np.asarray([n + ntor for (_, n) in modes], dtype=int)
     col_idx = np.asarray([m for (m, _) in modes], dtype=int)
+    # Optional AC/CURTOR dof block (spec 6.4): k + 1 trailing dofs, one-hot
+    # tangents through ImplicitParams.ac / .curtor (runtime_from_params
+    # already traces both).
+    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
+    ndof = 2 * nm + (k_cur + 1 if k_cur else 0)
     # multigrid=True routes the host solve through solve_multigrid (even for
     # single-stage ladders) so NITER-exhausted trials are penalized instead
     # of raising, matching the finite-difference path's trial policy.
@@ -1498,8 +1610,13 @@ def _least_squares_implicit(
 
     def params_of(x: jnp.ndarray):
         rbc = params0.rbc.at[row_idx, col_idx].set(x[:nm])
-        zbs = params0.zbs.at[row_idx, col_idx].set(x[nm:])
-        return dataclasses.replace(params0, rbc=rbc, zbs=zbs)
+        zbs = params0.zbs.at[row_idx, col_idx].set(x[nm:2 * nm])
+        params = dataclasses.replace(params0, rbc=rbc, zbs=zbs)
+        if k_cur:
+            ac = params0.ac.at[:k_cur].set(x[2 * nm:2 * nm + k_cur] * ac_scale)
+            params = dataclasses.replace(
+                params, ac=ac, curtor=x[2 * nm + k_cur] * _CURTOR_SCALE)
+        return params
 
     def term_rows(state, rt) -> jnp.ndarray:
         return jnp.concatenate([
@@ -1518,26 +1635,35 @@ def _least_squares_implicit(
     # graph below can close over it.
     if x0 is None:
         x0 = pack_boundary(inp, max_mode)
+        if k_cur:
+            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
     params0_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
                               params_of(jnp.asarray(x0, dtype=jnp.float64)))
     _, mask_np = imp._host_solve_and_mask(cfg, params0_np)
     mask_const = jax.tree.map(jnp.asarray, mask_np)
 
-    # One-hot boundary tangents in ImplicitParams space, stacked over dofs
-    # (leading axis 2*nm) so chunk_map can process them in fixed-size chunks.
-    t_rbc = np.zeros((2 * nm,) + np.shape(params0.rbc))
-    t_zbs = np.zeros((2 * nm,) + np.shape(params0.zbs))
+    # One-hot dof tangents in ImplicitParams space, stacked over dofs
+    # (leading axis ndof) so chunk_map can process them in fixed-size chunks:
+    # boundary rbc/zbs rows first, then the scaled AC/CURTOR rows.
+    t_rbc = np.zeros((ndof,) + np.shape(params0.rbc))
+    t_zbs = np.zeros((ndof,) + np.shape(params0.zbs))
+    t_ac = np.zeros((ndof,) + np.shape(params0.ac))
+    t_curtor = np.zeros((ndof,))
     for j in range(nm):
         t_rbc[j, row_idx[j], col_idx[j]] = 1.0
         t_zbs[nm + j, row_idx[j], col_idx[j]] = 1.0
+    for j in range(k_cur):
+        t_ac[2 * nm + j, j] = ac_scale
+    if k_cur:
+        t_curtor[2 * nm + k_cur] = _CURTOR_SCALE
     zerop = jax.tree.map(jnp.zeros_like, params0)
-    tangent_rbc = jnp.asarray(t_rbc)
-    tangent_zbs = jnp.asarray(t_zbs)
+    tangent_stack = (jnp.asarray(t_rbc), jnp.asarray(t_zbs),
+                     jnp.asarray(t_ac), jnp.asarray(t_curtor))
 
     # R17.1 memory knob: chunk_size None == one wide vmap (current behavior),
     # an int / "auto" caps peak Jacobian memory at that many dofs at a time.
     if jac_chunk_size == "auto":
-        chunk = int(auto_chunk_size(2 * nm))
+        chunk = int(auto_chunk_size(ndof))
     elif jac_chunk_size is None or isinstance(jac_chunk_size, int):
         chunk = jac_chunk_size
     else:
@@ -1572,8 +1698,9 @@ def _least_squares_implicit(
         def Fz(dz):
             return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
 
-        def tangent_of(tp_pair):
-            return dataclasses.replace(zerop, rbc=tp_pair[0], zbs=tp_pair[1])
+        def tangent_of(tp):
+            return dataclasses.replace(zerop, rbc=tp[0], zbs=tp[1],
+                                       ac=tp[2], curtor=tp[3])
 
         def rhs_of(tp):
             b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
@@ -1598,13 +1725,12 @@ def _least_squares_implicit(
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
 
-        def column(tp_pair):
-            tp = tangent_of(tp_pair)
+        def column(tp_stack):
+            tp = tangent_of(tp_stack)
             dz, _ = imp._adjoint_solve(Fz, rhs_of(tp), cfg)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(column, (tangent_rbc, tangent_zbs),
-                                  chunk_size=chunk)
+        cols, dz_cols = chunk_map(column, tangent_stack, chunk_size=chunk)
         return jnp.transpose(cols), dz_cols
 
     # R25.2 amortized block-tridiagonal variant.  The *raw* residual
@@ -1704,24 +1830,24 @@ def _least_squares_implicit(
         # are ignored by the factorization anyway.
         factors = block_thomas_factor(band(-1), band(0), band(1))
 
-        def raw_rhs(tp_pair):
-            tp = tangent_of(tp_pair)
+        def raw_rhs(tp_stack):
+            tp = tangent_of(tp_stack)
             b = jax.jvp(lambda prm: F_raw(z_star, prm), (params,), (tp,))[1]
             return _pack(jax.tree.map(jnp.negative, b))
 
-        rhs = chunk_map(raw_rhs, (tangent_rbc, tangent_zbs), chunk_size=chunk)
+        rhs = chunk_map(raw_rhs, tangent_stack, chunk_size=chunk)
         dz0 = block_thomas_solve(factors, jnp.moveaxis(rhs, 0, -1))
 
         def column(args):
-            t_rbc, t_zbs, dz0_mat = args
-            tp = tangent_of((t_rbc, t_zbs))
+            *tp_stack_j, dz0_mat = args
+            tp = tangent_of(tuple(tp_stack_j))
             dz, _ = imp._adjoint_solve(
                 Fz, rhs_of(tp), cfg, x0=_unpack(dz0_mat),
                 max_restarts=min(3, cfg.adjoint_maxiter))
             return column_of(dz, tp), dz
 
         cols, dz_cols = chunk_map(
-            column, (tangent_rbc, tangent_zbs, jnp.moveaxis(dz0, -1, 0)),
+            column, (*tangent_stack, jnp.moveaxis(dz0, -1, 0)),
             chunk_size=chunk)
         return jnp.transpose(cols), dz_cols
 
@@ -1735,9 +1861,9 @@ def _least_squares_implicit(
     # have zero RHS (gcrot converges in zero cycles) and are discarded.
     n_flat = sum(int(np.prod(s.shape))
                  for s in jax.tree.leaves(imp._state_struct(cfg)))
-    csize = int(chunk) if chunk else 2 * nm
-    nchunks = -(-(2 * nm) // csize)
-    pad = nchunks * csize - 2 * nm
+    csize = int(chunk) if chunk else ndof
+    nchunks = -(-ndof // csize)
+    pad = nchunks * csize - ndof
 
     def jacobian_rows_recycled(x: jnp.ndarray, C: jnp.ndarray,
                                U: jnp.ndarray):
@@ -1753,8 +1879,8 @@ def _least_squares_implicit(
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
 
-        def column(tp_pair, rec):
-            tp = tangent_of(tp_pair)
+        def column(tp_stack_j, rec):
+            tp = tangent_of(tp_stack_j)
             dz, sol = imp._recycled_solve(Fz, rhs_of(tp), cfg, rec)
             return column_of(dz, tp), sol.recycle
 
@@ -1772,8 +1898,8 @@ def _least_squares_implicit(
 
         (C, U), cols = jax.lax.scan(
             scan_body, (C, U),
-            (pad_stack(tangent_rbc), pad_stack(tangent_zbs)))
-        cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:2 * nm]
+            tuple(pad_stack(t) for t in tangent_stack))
+        cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:ndof]
         return jnp.transpose(cols), C, U
 
     if jac_solver not in ("block", "gmres"):
@@ -1869,7 +1995,10 @@ def _least_squares_implicit(
 
     result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
                                           jac=jac_fn, **scipy_kwargs)
-    result.input = unpack_boundary(inp, result.x, max_mode)
+    result.input = unpack_boundary(inp, result.x[:2 * nm], max_mode)
+    if k_cur:
+        result.input = _apply_current(result.input, result.x[2 * nm:],
+                                      k_cur, ac_scale)
     stats = imp._SOLVE_STATS.get(cfg)
     result.solve_stats = None if stats is None else dict(stats)
     try:
