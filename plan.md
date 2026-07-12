@@ -34,7 +34,7 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
    converged physics quantities match VMEC2000 within per-quantity validation tolerances.
 4. **Performance parity or better** than VMEC2000 single-thread CPU on the benchmark suite,
    including multigrid (`NS_ARRAY` ladders), which is currently slower than VMEC2000 — a named bug.
-5. **A small, readable codebase**: 50–60 Python files in `vmec_jax/`, ~30–31k library lines
+5. **A small, readable codebase**: 50–60 Python files in `vmec_jax/`, ~30–32k library lines
    (revised 2026-07-12 after main added bootstrap/stability numerics and the open-field topology
    landed as focused modules; still
    a >4x reduction from **229 files / ~123k lines**), physically
@@ -54,10 +54,11 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
     free boundary for tokamaks (`ntor=0`) and stellarators, fixed-boundary fallback on missing
     mgrid, spline/pedestal profile types, and a 2D preconditioner option — while borrowing VMEC++'s
     hot restart, JSON input, zero-crash policy, and validation methodology.
-11. **Production mirror equilibria**: fixed- and free-boundary straight-axis mirrors at finite beta,
-    axisymmetric and nonaxisymmetric, with open axial field lines, isotropic and consistent
-    anisotropic pressure closures, external coils, implicit derivatives, and mirror-native output;
-    plus closed toroidal stellarator–mirror hybrids using the ordinary VMEC backend.
+11. **Production mirror equilibria**: supported axisymmetric fixed/free straight mirrors at finite
+    beta, with open axial field lines, isotropic and consistent anisotropic pressure closures,
+    external coils, implicit derivatives, and mirror-native output. Nonaxisymmetric open mirrors
+    remain a research API after failing local-mode refinement. Closed toroidal stellarator–mirror
+    hybrids use the ordinary VMEC backend at their documented tolerance/beta limit.
 
 Every decision below optimizes for: *simpler to use, fewer files, faster, more manageable*.
 
@@ -69,10 +70,10 @@ This is the actionable index of what is DONE and what REMAINS. Sections 1-16 bel
 phase specs (still authoritative for detail); this roadmap supersedes the scattered STATUS notes and
 folds in every requirement from the user prompts and the two independent reviews.
 
-### Done and verified on current `main` (d26bed44)
-- Legacy tree deleted; package is `vmec_jax/core/` only — **34 files / 19.2k lines** (revised target
-  25-30k), tests **34 files / 6.7k lines**. Fresh clone ≤ ~12 MB; no Claude contributor; all commits
-  rogeriojorge.
+### Done and verified on the current merged branch (2026-07-12)
+- Legacy tree deleted; the package is **60 Python files / 31,768 lines**, including the focused
+  19-file open-mirror backend and the traceable omnigenity module. The tracked checkout is 6.4 MiB;
+  no generated mirror results are tracked.
 - Fixed-boundary equilibrium at **VMEC2000 machine-precision parity** across the 9 golden fixtures
   (exact iteration counts incl. lasym after the fixaray dnorm fix; wb ~1e-16, geometry ~1e-12).
 - Structural executable reuse (SolverRuntime pytree; 0 recompiles on same-Resolution re-solve),
@@ -89,15 +90,14 @@ folds in every requirement from the user prompts and the two independent reviews
 
 ### Remaining work — ordered by priority (each item has an acceptance gate)
 
-**R1. Optimization examples actually reach precise QA/QH/QP/QI (biggest open lane; user's #1 ask).**
-Current: scripts run and objectives decrease at CI budget; genuine convergence from a circular torus
-is UNVALIDATED. Gate: from a near-circular seed, staged `max_mode` 1→5 with ESS and `jac="implicit"`,
-running **thousands of iterations/nfev as needed**, reach *precise* QS/QI — QA (nfp=2) & QH (nfp=4)
-QS residual ≤ ~1e-3 of seed and aspect on target; QP (nfp=2, note the max_mode≥4 bad-basin caveat)
-and QI (nfp=1, QP-first-then-QI) to documented precision. Record achieved values in each docstring;
-add a `full`-marked convergence test per class asserting the achieved bound. Run the heavy ones on
-`ssh office` GPU; compare CPU vs GPU wall + autodiff-vs-FD accuracy. Verify the commented DMerc/
-LgradB/magnetic-well terms work uncommented (already CI-tested) and read well pedagogically.
+**R1. Finish compact quasi-isodynamic optimization (only remaining optimization precision lane).**
+QA and QH are precise. Exact QP is not a valid finite-aspect target (the documented near-axis
+obstruction and measured basin remain explicit), so its accepted gate is reproducible descent into
+the best measured max-mode-5 basin. The remaining gate is QI: from the kicked circular seed, use one
+ESS/`jac="implicit"` call plus continuation from its converged deck to reach QI residual `<1e-2`
+while restoring aspect `<=8`, with iota floor and mirror constraints satisfied. Record the deck,
+wall/RSS, objective components, and a permanent full test. Heavy campaigns run on the office CPU;
+the implicit Jacobian is measured launch-bound on A4000.
 
 **Seed policy (user 2026-07-10; ties to the R1 saddle finding).** The seed does NOT have to be an
 exact circular torus — an exact-axisymmetric/circular boundary is a *saddle* of the QS residual (the
@@ -111,35 +111,17 @@ obtained ("kicked circular seed"). Make the kick amplitude an example parameter-
 R19** — offer both: the tiny-kick circular seed (simplest, in-repo) and the near-axis seed (best
 starting point) so users learn both routes.
 
-_R1 status (2026-07-10, office 2x A4000 / 36-core CPU, on f45a6491):_
-- **QA (nfp2) — PRECISE, validated.** `jac="implicit"` + ESS from the kicked circular seed:
-  QS total 2.043e-01 → 9.82e-03 (max_mode=1) → **1.701e-04 (max_mode=2)**, aspect 6.000 &
-  mean iota 0.420 on target. >3 orders, ≤1e-3-of-seed gate met. Docstring updated.
-- **QH (nfp4) — descends via implicit; precise not re-validated this session.** QS 6.908e-01 →
-  1.401e-01 (max_mode=1, iota −0.917). Key finding: the exact-axisymmetric seed is a *saddle*
-  (QS residual even in the symmetry-breaking harmonic) — finite differences STALL (njev=1, QS
-  unchanged); implicit escapes it, so the example is correct to use implicit (no kick). Higher
-  max_mode continuation is compile/eval-bound (see below); stage 2 did not finish in budget.
-- **QP (nfp2) — basin-limited, not precise (as documented).** Implicit reaches QS 4.458e-01 →
-  9.42e-02 (max_mode=1, ~the docstring's 7e-2 basin); FD stalls much worse at 2.32e-01. Confirms
-  the QP bad-basin caveat AND that the gradient method selects the basin (implicit ≫ FD here).
-  Schedule capped at 3.
-- **QI (nfp1) — partial (hardest).** QP-basin (FD) 2.43 → ~1.15 (QI total), QP 6.7e-2 → 3.85e-2;
-  the Boozer QI-stage refinement barely moves from a crude circular nfp1 seed — precise QI needs
-  more than the current 4-term FD path (documented, not overclaimed).
-- **Autodiff accuracy:** implicit gradients drive the same descent as FD (QA reaches precise;
-  `tests/core_new/test_implicit_grad.py` already validates implicit vs central FD, rtol ≤1e-6
-  solovev / ~1e-5 li383-3D). Implicit is *essential* for the helical/basin cases (FD stalls/worse
-  basin), not just faster.
-- **CPU vs GPU / per-step:** warm forward solve ~0.9 s; the implicit forward solve is a host (CPU)
-  callback so the GPU only accelerates the adjoint GMRES — and does NOT help this small problem
-  (cold solve CPU 13 s vs GPU 27 s; GPU per-stage dominated by a one-time XLA compile that grows
-  with dof count: QA stage1 761 s / stage2 1261 s, amortized 20–37 s/step; a 24-dof QH GPU stage
-  hung >37 min in a single kernel-launch-bound GMRES eval). **Actionable for R3/R6:** the
-  per-dof-vmap implicit Jacobian compile/eval is the scaling bottleneck for max_mode ≥ 2.
-- Added `tests/core_new/test_optimization_convergence.py` (`full`-marked, per class).
-- REMAINING: get QH to precise (run implicit continuation on CPU where GMRES eval is fast, or
-  reduce the adjoint/vmap cost); improve QP basin & QI omnigenity residual.
+_R1 status (2026-07-12, office 36-core CPU):_
+- **QA precise:** single-stage max-mode-5 ESS gives `2.043e-1 -> 7.155e-6`, aspect 6.000,
+  iota 0.420, in 868 s.
+- **QH precise:** staged max-mode 1→5 gives `6.908e-1 -> 5.831e-5`, aspect 8.000,
+  iota -1.218.
+- **QP accepted basin:** the final max-mode-5 deck gives about `4.5e-2`, a 2.1x improvement over
+  the earlier plateau, but is deliberately not called exact QP.
+- **QI active:** the new traceable constructed-QI residual and single-stage max-mode-6 ESS give
+  `4.515e-1 -> 1.812e-2` in 1,037 s, with iota 0.137 and mirror 0.28; aspect relaxes to 10.8.
+- **Remaining:** continue from that solved QI state with stronger compactness control to meet the
+  `<1e-2`, aspect `<=8` gate. No QA/QH rerun or new optimizer abstraction is needed.
 
 **R2. Free boundary to production.** Current: CTH free-bdy stops at NITER (fsq~9e-2), not converged;
 warm 14.4 s ≫ Fortran 1.95 s; coil derivatives unsupported by the implicit residual. Gate: a
@@ -2125,7 +2107,7 @@ Structure:
 
 - [ ] Fresh clone ≤ 10 MB; single branch; zero `Co-Authored-By: Claude` trailers in history; Claude
       absent from the GitHub contributors panel; all new commits authored by rogeriojorge.
-- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~30–31k lines after the
+- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~30–32k lines after the
       mirror backend lands; no mirror file exceeds ~900 lines; docstrings and source/equation
       cross-references are complete; ruff and mypy pass without blanket ignores.
 - [ ] Fixed + free boundary (mgrid and direct-coil; tokamak and stellarator; sym and lasym)
