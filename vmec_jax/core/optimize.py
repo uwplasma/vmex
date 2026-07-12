@@ -1162,6 +1162,7 @@ def least_squares(
     *,
     max_mode: int | Sequence[int] = 1,
     x0: np.ndarray | None = None,
+    initial_state: SpectralState | None = None,
     jac: str | None = None,
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "block",
@@ -1200,6 +1201,11 @@ def least_squares(
     (``vmec_jax.core.solver`` plan.md Phase-2 cache; only the first solve of
     a stage compiles).  ``device`` is forwarded to the solver
     (:mod:`vmec_jax.core.device` policy applies when ``None``).
+
+    ``initial_state`` seeds the first equilibrium solve of a single-stage
+    call.  It is useful when continuing an optimization with new objective
+    weights; subsequent trials still use the usual state or perturbation hot
+    restart.  Pass an explicit single ``max_mode`` when using this option.
 
     ``use_ess`` enables Exponential Spectral Scaling of the trust region
     (:func:`_ess_scale`, ``ess_alpha``), the legacy ``use_ess`` option.
@@ -1303,6 +1309,8 @@ def least_squares(
     if len(modes_schedule) > 1:
         if x0 is not None:
             raise ValueError("x0 cannot be combined with a max_mode schedule")
+        if initial_state is not None:
+            raise ValueError("initial_state requires a single max_mode")
         stage_results = []
         current = inp
         result = None
@@ -1326,6 +1334,7 @@ def least_squares(
                 "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
+            initial_state=initial_state,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             recycle=recycle,
             warm_start=(warm_start if hot_restart else None),
@@ -1341,7 +1350,8 @@ def least_squares(
         scipy_kwargs.setdefault("x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
     if x0 is None:
         x0 = pack_boundary(inp, max_mode)
-    state_holder: dict[str, Any] = {"hot": None, "eq": None, "nres": None}
+    state_holder: dict[str, Any] = {
+        "hot": initial_state, "eq": None, "nres": None}
     single_stage = int(np.asarray(inp.ns_array).size) == 1
 
     def fun(x: np.ndarray) -> np.ndarray:
@@ -1414,6 +1424,7 @@ def _least_squares_implicit(
     *,
     max_mode: int,
     x0: np.ndarray | None,
+    initial_state: SpectralState | None,
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "block",
     recycle: bool = False,
@@ -1482,6 +1493,8 @@ def _least_squares_implicit(
     cfg = imp.make_config(inp, multigrid=True,
                           hot_restart=(warm_start is not None),
                           adjoint_tol=1e-6, adjoint_maxiter=30)
+    if initial_state is not None:
+        imp._HOT_CACHE[cfg] = initial_state
     # Pin the residual/Jacobian graphs to the fastest device for this launch-
     # bound path (CPU by default; explicit device= honored) — committing the
     # input dof vector to it makes both jits compile and run there, and their
