@@ -173,6 +173,13 @@ The production 2D Newton preconditioner was also rejected for this scan: with
 ``precon_type="GMRES"`` and ``prec2d_threshold=1e-5`` it did not complete the first reported
 equilibrium within the default 1D path's practical run budget. It remains opt-in and is not used by
 the showcase.
+An attempted direct-``CoilSet`` extension of the coupled forward sensitivity
+was likewise removed after its real LP-QA gate failed. At ``ns=8``, ``ftol=1e-10``, the Krylov
+derivative converged to residual ``1.30e-10``, but reconverged finite differences were not
+step-stable, two positive perturbations stalled, and the surviving derivatives disagreed with the
+implicit value. Evidence is retained in ``benchmarks/free_boundary_sensitivity.json``. Do not expose
+coil-shape solved-LCFS derivatives until a strict-tolerance continuation yields a smooth independent
+finite-difference gate.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate

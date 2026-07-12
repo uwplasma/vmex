@@ -45,5 +45,18 @@
     "derivative_relative_error": 0.004227701585294648,
     "accepted": false,
     "reason": "NESTOR edge pressure depends on global plasma-current and magnetic-axis quantities, so the coupled Jacobian is not purely radial block-tridiagonal. The warm start reduced Krylov iterations but increased wall time and more than doubled peak memory."
+  },
+  "rejected_direct_coil_forward_extension": {
+    "case": "Landreman-Paul QA direct Biot-Savart, ns8 mpol3 ntor3",
+    "forward_ftol": 1e-10,
+    "forward_iterations": 2233,
+    "krylov_iterations": 835,
+    "krylov_residual": 1.3010803971243227e-10,
+    "implicit_edge_r00_derivative": 0.00015316946591807253,
+    "central_fd_steps": [0.02, 0.01, 0.005],
+    "central_fd_derivatives": [-0.010454126877629255, -0.008193358673225237, -0.01846075043097084],
+    "central_fd_positive_converged": [false, false, true],
+    "accepted": false,
+    "reason": "The Krylov derivative was stable, but reconverged direct-coil finite differences were neither step-stable nor consistently converged and disagreed with the implicit result. The experimental CoilSet API was removed; promotion requires a smooth strict-tolerance continuation or an independently parity-checked mgrid parameterization."
   }
 }
