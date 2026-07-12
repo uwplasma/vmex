@@ -84,11 +84,29 @@ Worked results
 From a near-circular torus seed, staged ``max_mode`` continuation with ESS and
 ``jac="implicit"`` reaches precise quasisymmetry (measured on an office CPU):
 QA (nfp 2) QS ``1.70e-4``, QH (nfp 4) QS ``5.83e-5``, QP (nfp 2) QS
-``9.4e-2`` (basin-limited), and QI (nfp 1, QP→QI) ``2.14e-2``. Implicit
+``9.4e-2`` (basin-limited), and compact QI (nfp 1) ``9.58e-3``. Implicit
 gradients are *essential* here, not merely faster: the exact-axisymmetric seed
 is a saddle of the QS residual where finite differences stall, and for QP the
 implicit path selects a better basin. The complete scripts are in
 ``examples/optimization/`` (``QA``/``QH``/``QP``/``QI``).
+
+.. figure:: _static/figures/qi_compact_convergence.png
+   :alt: Compact QI trust-region convergence and QI/aspect continuation path
+   :align: center
+   :width: 92%
+
+   The QI ESS solve releases all max-mode-6 harmonics at once. Three
+   fixed-weight continuation calls restore the measured acceptance region
+   without a mode ladder. The accepted restart reconverges to
+   ``fsqr=9.99e-14`` and is guarded by a permanent full test; see
+   ``benchmarks/qi_compact.json`` for timings, memory, and residual components.
+
+.. figure:: _static/figures/qi_compact_3d.png
+   :alt: Compact quasi-isodynamic LCFS colored by magnetic-field strength with field lines
+   :align: center
+   :width: 58%
+
+   Accepted compact-QI LCFS coloured by ``|B|`` with pitched field lines.
 
 .. figure:: _static/figures/readme_optimization.png
    :alt: QA/QH/QP seed vs optimized boundary, 3-D |B|, and Boozer |B| on the LCFS

@@ -39,6 +39,9 @@ _COST_RE = re.compile(r"\[least_squares\] cost = ([0-9.eE+-]+)")
 
 def _run_example(script: Path, cwd: Path, timeout: int = 2400) -> str:
     env = dict(os.environ, VMEC_JAX_EXAMPLES_CI="1")
+    source_root = str(EXAMPLES.parent)
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (source_root, env.get("PYTHONPATH")) if part)
     env.pop("JAX_DISABLE_JIT", None)
     proc = subprocess.run(
         [sys.executable, str(script)], cwd=cwd, env=env,
@@ -212,7 +215,7 @@ def test_qs_optimization_examples(case, tmp_path):
     assert match is not None and np.isfinite(float(match.group(2)))
 
 
-@pytest.mark.full  # nightly: single-stage ESS variants (one least_squares call, no ladder)
+@pytest.mark.full  # nightly smoke: one ESS call in CI mode, no max_mode ladder
 @pytest.mark.parametrize("case", ["QA", "QI"])
 def test_ess_optimization_examples(case, tmp_path):
     script = EXAMPLES / "optimization" / f"{case}_optimization_ess.py"

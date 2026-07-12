@@ -50,9 +50,10 @@ All runnable examples live under this single `examples/` tree.
 - `optimization/`: precise QA/QH/QP/QI from a circular torus — one file each;
   the QI ESS example reports each omnigenity component and writes the standard
   cross-section, profile, `|B|`, and field-line-overlaid 3D figures.
-  `QA_optimization_ess.py` and `QI_optimization_ess.py` are the single-call
-  variants: all large-`max_mode` harmonics at once, Exponential Spectral
-  Scaling (`use_ess`) replacing the continuation ladder,
+  `QA_optimization_ess.py` is the single-call variant. The QI ESS script
+  releases all large-`max_mode` harmonics at once, then runs three measured
+  constraint-restoration calls without changing `max_mode`. Both use
+  Exponential Spectral Scaling (`use_ess`) instead of a mode ladder and remain
   simsopt-style (`(function, target, weight)` terms + one least-squares call
   per `max_mode` continuation stage, implicit adjoint gradients).  All read
   `VMEC_JAX_EXAMPLES_CI=1` to shrink budgets for the CI smoke tests

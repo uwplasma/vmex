@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-"""QI in ONE least-squares call: no mode ladder, no QP pre-stage — just ESS.
+"""Compact QI without a mode ladder: one ESS solve plus constraint restoration.
 
 The staged QI example (``QI_optimization.py``) walks a quasi-poloidal basin
 stage and then a QI refinement up the ``max_mode`` ladder.  This script is the
-single-call alternative: release *all* the max_mode-6 boundary harmonics at
+ESS alternative: release *all* the max_mode-6 boundary harmonics at
 once and let **Exponential Spectral Scaling** (``use_ess=True``) impose the
 coarse-to-fine ordering through the trust region — each dof's radius scales as
 ``exp(-alpha * max(|m|, |n|))``, so high harmonics move on exponentially
-shorter leashes and no continuation loop is needed.
+shorter leashes. Three fixed-weight continuation calls then restore the
+compactness, iota, and mirror acceptance region without changing ``max_mode``.
 
 The objective combines the traceable Goodman constructed-QI omnigenity
 residual (:class:`vmec_jax.core.omnigenity.QIResidual`, implicit-adjoint
@@ -20,10 +21,10 @@ mpol=ntor=7.  All gradients via ``jac="implicit"`` (adjoint + block-
 tridiagonal Jacobian + perturbation warm start).  Measured 2026-07-12 on the
 office 36-core CPU:
 
-    seed QI 4.515e-01 -> final QI 1.812e-02 (25x) in ONE call, 1037 s
-    (17.3 min), 168 dofs; iota 0.137, mirror 0.28 held (aspect relaxed to
-    10.8 under its weak 0.25 weight — retighten it if a compact device is
-    the goal).
+    seed QI 4.515e-01 -> ESS 1.812e-02 -> accepted 9.578e-03,
+    aspect 8.001, |iota| 0.1200, mirror 0.426; the final state independently
+    reconverges to fsqr=9.99e-14. See benchmarks/qi_compact.json for stage
+    timings, objective components, memory, and the measured Pareto path.
 """
 
 import os
@@ -47,11 +48,15 @@ SURFACES = np.linspace(0.15, 0.95, 6)
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.12
 MIRROR_TARGET = 0.20
+QI_GATE = 9.5e-3
+ASPECT_MAX = 8.0
+MIRROR_MIN, MIRROR_MAX = 0.15, 0.30
 MAX_MODE = 6                               # ALL harmonics at once — no ladder
 ESS_ALPHA = 0.7
 MAX_NFEV = 4000
 FTOL = 1e-8
-if os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1":  # smoke-test budget
+CI_SMOKE = os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1"
+if CI_SMOKE:  # smoke-test budget: exercise the single ESS call only
     MAX_MODE, MAX_NFEV, FTOL = 2, 4, 1e-4
     SURFACES = np.linspace(0.25, 0.75, 3)
 
@@ -75,6 +80,38 @@ qp = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 
 def iota_shortfall(state, rt):
     return jnp.maximum(IOTA_FLOOR - jnp.abs(opt.mean_iota(state, rt)), 0.0)
+
+
+def aspect_excess(state, rt):
+    return jnp.maximum(opt.aspect_ratio(state, rt) - ASPECT_MAX, 0.0)
+
+
+def mirror_excess(state, rt):
+    return jnp.maximum(opt.mirror_ratio(state, rt) - MIRROR_MAX, 0.0)
+
+
+def mirror_shortfall(state, rt):
+    return jnp.maximum(MIRROR_MIN - opt.mirror_ratio(state, rt), 0.0)
+
+
+def qi_excess(state, rt):
+    return jnp.maximum(jnp.sqrt(qi.total_state(state, rt)) - np.sqrt(QI_GATE), 0.0)
+
+
+def continue_stage(label, terms, previous, max_nfev, xtol=1e-10):
+    """Continue from the exact prior state with unchanged spectral freedom."""
+    if previous.equilibrium is None:
+        raise RuntimeError(f"{label} requires a converged previous stage")
+    print(f"\n{label}: max_mode = {MAX_MODE} (no mode ladder)")
+    current = opt.least_squares(
+        terms, previous.input, max_mode=MAX_MODE,
+        initial_state=previous.equilibrium.state, jac="implicit",
+        use_ess=True, ess_alpha=ESS_ALPHA, verbose=1,
+        max_nfev=max_nfev, ftol=1e-10, xtol=xtol, gtol=1e-10,
+    )
+    if current.equilibrium is not None:
+        report(label, current.equilibrium)
+    return current
 
 
 def report(tag, eq):
@@ -110,14 +147,42 @@ result = opt.least_squares(
     use_ess=True, ess_alpha=ESS_ALPHA,
     verbose=1, max_nfev=MAX_NFEV, ftol=FTOL, xtol=1e-10,
 )
+
+if not CI_SMOKE:
+    result = continue_stage("compact target", [
+        (qi, 0.0, 20.0),
+        (qp, 0.0, 0.1),
+        (opt.aspect_ratio, 7.5, 1.0),
+        (iota_shortfall, 0.0, 100.0),
+        (opt.mirror_ratio, 0.20, 10.0),
+    ], result, max_nfev=1500, xtol=1e-11)
+    result = continue_stage("QI and shape bounds", [
+        (qi, 0.0, 50.0),
+        (aspect_excess, 0.0, 20.0),
+        (iota_shortfall, 0.0, 500.0),
+        (mirror_excess, 0.0, 20.0),
+        (mirror_shortfall, 0.0, 20.0),
+    ], result, max_nfev=1200)
+
+    def restored_iota_shortfall(state, rt):
+        return jnp.maximum(0.1201 - jnp.abs(opt.mean_iota(state, rt)), 0.0)
+
+    result = continue_stage("constraint restoration", [
+        (qi_excess, 0.0, 1000.0),
+        (aspect_excess, 0.0, 100.0),
+        (restored_iota_shortfall, 0.0, 2000.0),
+        (opt.mirror_ratio, 0.25, 30.0),
+    ], result, max_nfev=800)
+
 inp = result.input
 
 # --------------------------- final results ---------------------------------
 qi_final = qi_seed
 if result.equilibrium is not None:
     qi_final = report("final", result.equilibrium)
+method = "one call" if CI_SMOKE else "ESS plus constraint continuation"
 print(f"\nQI total: seed {qi_seed:.3e} -> final {qi_final:.3e} "
-      f"(one call, no max_mode ladder)")
+      f"({method}, no max_mode ladder)")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 inp.to_indata(OUT_DIR / "input.QI_ess_optimized")
 if result.equilibrium is not None:

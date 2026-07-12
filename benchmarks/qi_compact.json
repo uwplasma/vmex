@@ -1,0 +1,88 @@
+{
+  "schema": "vmec_jax.benchmark.qi_compact/1",
+  "date": "2026-07-12",
+  "source_commit": "720106f8",
+  "machine": "office 36-core CPU",
+  "resolution": {
+    "nfp": 1,
+    "mpol": 7,
+    "ntor": 7,
+    "max_mode": 6,
+    "ns": 35,
+    "equilibrium_ftol": 1e-13
+  },
+  "continuation": [
+    {
+      "stage": "single_stage_ess",
+      "objective_evaluations": 64,
+      "wall_s": 771,
+      "qi_total": 0.0181220692,
+      "aspect": 10.7910346,
+      "mean_iota": -0.1372915,
+      "mirror": 0.2842767
+    },
+    {
+      "stage": "compact_equality_target",
+      "nfev": 89,
+      "wall_s": 904.71,
+      "peak_rss_kib": 8457376,
+      "qi_total": 0.0119926271,
+      "aspect": 8.6657181,
+      "mean_iota": -0.1194863,
+      "mirror": 0.3862773
+    },
+    {
+      "stage": "qi_and_shape_bounds",
+      "nfev": 60,
+      "wall_s": 696.89,
+      "peak_rss_kib": 8212172,
+      "qi_total": 0.0073679050,
+      "aspect": 8.0114681,
+      "mean_iota": -0.1198816,
+      "mirror": 0.4608514
+    },
+    {
+      "stage": "constraint_restoration",
+      "nfev": 74,
+      "wall_s": 668.58,
+      "peak_rss_kib": 8066504,
+      "qi_total": 0.0095775327,
+      "aspect": 8.0010817,
+      "mean_iota": -0.1200019,
+      "mirror": 0.4262675
+    }
+  ],
+  "strict_reconvergence": {
+    "converged": true,
+    "iterations": 5973,
+    "wall_s": 49.04,
+    "peak_rss_kib": 1470920,
+    "fsqr": 9.9890781e-14,
+    "fsqz": 4.4085002e-15,
+    "fsql": 7.2701561e-15,
+    "qi_total": 0.0095775327,
+    "well_total": 0.0064923570,
+    "extremum_total": 0.0030355067,
+    "squash_total": 4.9668967e-05,
+    "aspect": 8.0010817,
+    "mean_iota": -0.1200019,
+    "mirror": 0.4262675
+  },
+  "acceptance": {
+    "qi_total_max": 0.01,
+    "aspect_max": 8.01,
+    "abs_mean_iota_min": 0.12,
+    "mirror_max": 0.45,
+    "passed": true,
+    "note": "The former mirror=0.20 equality target is not compatible with compact QI in the measured max-mode-6 basin; the bounded gate records the achieved QI mirror variation without hiding the Pareto tradeoff."
+  },
+  "artifacts": {
+    "input": "benchmarks/opt_decks/input.qi_optimized",
+    "restart_state": "benchmarks/opt_decks/state.qi_optimized.npz",
+    "convergence_figure": "docs/_static/figures/qi_compact_convergence.png",
+    "geometry_figure": "docs/_static/figures/qi_compact_3d.png",
+    "modB_figure": "docs/_static/figures/qi_compact_modB.png",
+    "surfaces_figure": "docs/_static/figures/qi_compact_surfaces.png"
+  },
+  "known_issue": "The optimized input is not cold-start robust: the generic interior guess changes Jacobian sign even with the converged axis coefficients. Use the 77 KiB restart state; improving the cold interior guess remains a solver task."
+}

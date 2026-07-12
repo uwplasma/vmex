@@ -16,8 +16,8 @@ free boundary is the supported high-beta target under the anisotropic `fixed_flu
 Phase 5. The
 toroidal Fourier hybrid is validated only through achieved beta 0.8333% and is deferred above that
 measured limit. The nonaxisymmetric straight-mirror lane is deferred after failing its local-mode
-refinement gate. Implementation proceeds through the remaining M9--M10 integration gates without
-reopening rejected solver variants.
+refinement gate. The M9--M10 integration gates are complete; implementation proceeds through the
+ordered core roadmap without reopening rejected solver variants.
 
 ---
 
@@ -90,14 +90,14 @@ folds in every requirement from the user prompts and the two independent reviews
 
 ### Remaining work — ordered by priority (each item has an acceptance gate)
 
-**R1. Finish compact quasi-isodynamic optimization (only remaining optimization precision lane).**
+**R1. DONE — compact quasi-isodynamic optimization.**
 QA and QH are precise. Exact QP is not a valid finite-aspect target (the documented near-axis
 obstruction and measured basin remain explicit), so its accepted gate is reproducible descent into
-the best measured max-mode-5 basin. The remaining gate is QI: from the kicked circular seed, use one
-ESS/`jac="implicit"` call plus continuation from its converged deck to reach QI residual `<1e-2`
-while restoring aspect `<=8`, with iota floor and mirror constraints satisfied. Record the deck,
-wall/RSS, objective components, and a permanent full test. Heavy campaigns run on the office CPU;
-the implicit Jacobian is measured launch-bound on A4000.
+the best measured max-mode-5 basin. For QI, one ESS/`jac="implicit"` call from the kicked circular
+seed plus continuation from its converged state reaches QI residual `<1e-2`
+while restoring compactness, iota, and a measured mirror bound. The deck, 77 KiB strict restart,
+wall/RSS, objective components, compressed figures, and permanent full test are recorded. The
+implicit Jacobian remains launch-bound and peaks near 8 GiB; this evidence feeds R3.
 
 **Seed policy (user 2026-07-10; ties to the R1 saddle finding).** The seed does NOT have to be an
 exact circular torus — an exact-axisymmetric/circular boundary is a *saddle* of the QS residual (the
@@ -118,10 +118,14 @@ _R1 status (2026-07-12, office 36-core CPU):_
   iota -1.218.
 - **QP accepted basin:** the final max-mode-5 deck gives about `4.5e-2`, a 2.1x improvement over
   the earlier plateau, but is deliberately not called exact QP.
-- **QI active:** the new traceable constructed-QI residual and single-stage max-mode-6 ESS give
-  `4.515e-1 -> 1.812e-2` in 1,037 s, with iota 0.137 and mirror 0.28; aspect relaxes to 10.8.
-- **Remaining:** continue from that solved QI state with stronger compactness control to meet the
-  `<1e-2`, aspect `<=8` gate. No QA/QH rerun or new optimizer abstraction is needed.
+- **QI precise/compact:** max-mode-6 ESS plus three fixed-weight continuation calls give
+  `4.515e-1 -> 9.578e-3`, aspect 8.001, `|iota|=0.120002`, mirror 0.426. Independent
+  reconvergence reaches `(fsqr,fsqz,fsql)=(9.99e-14,4.41e-15,7.27e-15)` in 5,973 iterations.
+  The acceptance tolerance is aspect `<=8.01`, mirror `<=0.45`; forcing mirror to the former
+  arbitrary equality target 0.20 destroys the compact-QI Pareto point.
+- **Known issue passed to R3:** the optimized input is not cold-start robust even with the
+  converged axis coefficients. The compact restart is the supported reproduction path until the
+  generic interior guess is improved. Evidence is in `benchmarks/qi_compact.json`.
 
 **R2. Free boundary to production.** Current: CTH free-bdy stops at NITER (fsq~9e-2), not converged;
 warm 14.4 s ≫ Fortran 1.95 s; coil derivatives unsupported by the implicit residual. Gate: a

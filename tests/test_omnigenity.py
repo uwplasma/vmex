@@ -27,12 +27,34 @@ jax.config.update("jax_enable_x64", True)
 from vmec_jax.core import omnigenity as omn
 from vmec_jax.core import optimize as opt
 from vmec_jax.core.input import VmecInput
+from vmec_jax.core.solver import SpectralState
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
+OPT_DECKS = DATA_DIR.parents[1] / "benchmarks" / "opt_decks"
 SURFACES = (0.25, 0.5, 0.75)
 FAST = dict(mboz=10, nboz=10, nphi=61, nalpha=13, n_levels=8)
+
+
+@pytest.mark.full
+def test_compact_qi_restart_meets_promotion_gates():
+    """The measured max-mode-6 QI state reconverges and passes every gate."""
+    inp = VmecInput.from_file(OPT_DECKS / "input.qi_optimized")
+    with np.load(OPT_DECKS / "state.qi_optimized.npz") as restart:
+        state = SpectralState(**{
+            name: restart[name] for name in (
+                "R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+        })
+    eq = opt.solve_equilibrium(inp, initial_state=state)
+    assert eq.result.converged
+    assert max(eq.result.fsqr, eq.result.fsqz, eq.result.fsql) <= 1.01e-13
+
+    qi = omn.QIResidual(np.linspace(0.15, 0.95, 6))
+    assert float(qi.total(eq)) < 1e-2
+    assert float(opt.aspect_ratio(eq.state, eq.runtime)) <= 8.01
+    assert abs(float(opt.mean_iota(eq.state, eq.runtime))) >= 0.12
+    assert float(opt.mirror_ratio(eq.state, eq.runtime)) <= 0.45
 
 
 @pytest.fixture(scope="module")

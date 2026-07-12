@@ -253,7 +253,20 @@ residual = `QuasisymmetryRatioResidual.total`):
 | QA | 2 | (1, 0)  | 2.04e-01 | **1.70e-04** | 2 | precise (>3 orders; aspect 6.00, iota 0.42) |
 | QH | 4 | (1, −1) | 6.91e-01 | **5.83e-05** | 5 | precise (>4 orders; aspect 8.00, iota −1.22) |
 | QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
-| QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
+| QI | 1 | constructed QI | 4.52e-01 | **9.58e-03** | 6 | compact QI; aspect 8.001, abs(iota) 0.120, strict fsqr 9.99e-14 |
+
+![Compact QI optimization convergence and measured continuation path](docs/_static/figures/qi_compact_convergence.png)
+
+*The no-mode-ladder QI campaign releases all max-mode-6 harmonics with ESS,
+then restores QI, aspect, iota, and mirror bounds in three fixed continuation
+calls. The checked-in 77 KiB restart reconverges the accepted deck and guards
+QI `<1e-2`, aspect `<=8.01`, `|iota|>=0.12`, and mirror `<=0.45`; full timings,
+RSS, components, and the cold-interior-guess caveat are in
+`benchmarks/qi_compact.json`.*
+
+![Compact QI LCFS colored by |B| with field-line pitch](docs/_static/figures/qi_compact_3d.png)
+
+![Compact QI |B| contours on the mid-radius and boundary surfaces](docs/_static/figures/qi_compact_modB.png)
 
 ![QA/QH/QP optimization: seed vs optimized boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
 
