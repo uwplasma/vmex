@@ -155,6 +155,12 @@ reverse graph and passes solved-LCFS central differences on 3D CTH (0.33%) and a
 (0.42%). Measured peaks are 4.7 and 3.3 GiB; records and reproduction live in
 ``benchmarks/free_boundary_sensitivity.json`` and ``profile_production.py``. Remaining R2 derivative
 work is the many-parameter coil-shape adjoint and coupled-Krylov memory/preconditioning reduction.
+A radial block-tridiagonal warm start was measured and rejected on axisymmetric DIII-D: it reduced
+Krylov iterations 2,270→1,312 but increased sensitivity wall time to 159.7 s and peak RSS
+3.3→7.27 GiB. NESTOR edge pressure carries global plasma-current/axis coupling, so the radial block
+is not an exact inverse (direct residual 1.33%). The implementation was removed; evidence remains in
+``benchmarks/free_boundary_sensitivity.json``. The next preconditioner must represent that global
+coupling without assembling the full reverse graph.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate

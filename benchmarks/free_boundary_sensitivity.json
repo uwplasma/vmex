@@ -32,5 +32,18 @@
     "peak_rss_gb_approx": 10.8,
     "elapsed_before_stop_s": 189,
     "reason": "reverse trace through geometry-dependent NESTOR Green-matrix assembly remained compilation-bound"
+  },
+  "rejected_radial_block_warm_start": {
+    "case": "diii_d_axisymmetric_ns16",
+    "date": "2026-07-12",
+    "direct_block_relative_residual": 0.013349703966306968,
+    "corrected_krylov_iterations": 1312,
+    "baseline_krylov_iterations": 2270,
+    "corrected_wall_s": 159.73828270938247,
+    "corrected_peak_rss_gb": 7.271284736,
+    "baseline_peak_rss_gb_approx": 3.3,
+    "derivative_relative_error": 0.004227701585294648,
+    "accepted": false,
+    "reason": "NESTOR edge pressure depends on global plasma-current and magnetic-axis quantities, so the coupled Jacobian is not purely radial block-tridiagonal. The warm start reduced Krylov iterations but increased wall time and more than doubled peak memory."
   }
 }
