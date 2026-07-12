@@ -37,8 +37,8 @@ DEFAULT_RTOL = 3e-3          # wp, betatotal/pol/tor, presf endpoints
 ATOL = 1e-8                  # for values that pass through ~0
 
 # Light cases run on every PR; the heavier finite-beta / high-ns cases nightly.
-LIGHT = ["solovev", "circular_tokamak", "li383_low_res", "cth_like_fixed_bdy"]
-HEAVY = ["DSHAPE", "nfp2_QA_finite_beta", "nfp4_QH_finite_beta"]
+LIGHT = ["solovev", "circular_tokamak"]
+HEAVY = ["li383_low_res", "cth_like_fixed_bdy", "DSHAPE", "nfp2_QA_finite_beta", "nfp4_QH_finite_beta"]
 
 
 def _solve_scalars(case: str) -> dict:

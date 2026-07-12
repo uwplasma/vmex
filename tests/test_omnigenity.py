@@ -63,6 +63,7 @@ def qa_eq():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.full
 def test_boozer_spectrum_matches_booz_xform(qi_eq):
     pytest.importorskip("booz_xform_jax")
     # 0.53 is not equidistant between half surfaces (0.5 is a snapping tie).
@@ -122,6 +123,7 @@ def test_qi_deck_far_below_circular_tokamak(qi_eq, tok_eq):
     assert total_qi < total_tok / 20.0           # QI deck: far below
 
 
+@pytest.mark.full
 def test_ordering_matches_wout_engine(qi_eq, tok_eq, qa_eq):
     """Deck ordering agrees with the host booz_xform QI residual."""
     pytest.importorskip("booz_xform_jax")
@@ -151,6 +153,7 @@ def test_grad_wrt_state_is_finite_and_nonzero(qi_eq):
     assert float(np.sum(r * r)) == pytest.approx(float(qi.total(qi_eq)), rel=1e-12)
 
 
+@pytest.mark.full
 def test_least_squares_implicit_composes():
     """QIResidual works as a jac='implicit' objective term (2 trial solves)."""
     inp = VmecInput.from_file(DATA_DIR / "input.minimal_seed_nfp2")
