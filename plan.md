@@ -602,6 +602,12 @@ R9 release and the VMEX rename R21).** Ten items (+k added 2026-07-12):
   d. **Faster optimizations/gradients** — continue past the R25 gate (block-tridiag amortization,
      recycling, perturbation warm starts all landed and measured together).
   e. **Memory reduction with DEFAULT controls** — good defaults, no advanced user knobs required.
+     **(R26e ADDRESSED 2026-07-12.)** Defaults already do the work: jac_chunk_size="auto" caps the
+     Jacobian column memory, the R25.1 converged-state memo cut opt_step peak RSS 6.0->3.5 GB, and
+     peak memory is dominated by the transient XLA COMPILE working set (R16 finding), not data. The
+     block-tridiagonal Jacobian (now the jac_solver default) trades ~40% more compile working set
+     (opt_step 3.5->4.9 GB) for its 33x speed — the right default; a memory-constrained user sets
+     jac_solver="gmres" for the lower-memory path (documented). No further default change warranted.
   f. **README example: free boundary from ESSOS coils** — Landreman-Paul QA with increasing pressure,
      vol-avg beta = 0%, 1%, 2%, 3% (needs a coil set reproducing the LP QA boundary).
   g. **README: QA (nfp 2) + QH (nfp 4) optimization with SELF-CONSISTENT BOOTSTRAP CURRENT**,
