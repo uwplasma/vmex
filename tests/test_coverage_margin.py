@@ -17,7 +17,7 @@ from vmec_jax.core.errors import MgridNotFoundError
 from vmec_jax.core.input import VmecInput
 from vmec_jax.core.mgrid import MgridData, read_mgrid
 
-DATA = Path(__file__).resolve().parent.parent.parent / "examples" / "data"
+DATA = Path(__file__).resolve().parent.parent / "examples" / "data"
 
 
 def _valid_mgrid_kwargs(nextcur=1, ir=4, jz=5, kp=3):

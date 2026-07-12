@@ -34,7 +34,9 @@ def test_version_matches_pyproject():
 
 
 def test_source_tree_version_parses_pyproject():
-    pyproject = Path(vmec_jax.__file__).resolve().parents[0] / "pyproject.toml"
+    # anchored to the PACKAGE (vmec_jax/__init__.py), not this test file:
+    # parents[1] of vmec_jax/__init__.py is the repo root.
+    pyproject = Path(vmec_jax.__file__).resolve().parents[1] / "pyproject.toml"
     expected = None
     in_project = False
     for line in pyproject.read_text().splitlines():
