@@ -567,8 +567,16 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   **Finding #2:** `opt_step` (2-nfev max_mode-1 least_squares, minimal_seed_nfp2) warm ~63 s / peak
   RSS ~6 GB on a contended local CPU — the heaviest per-call production path; profile where the time
   goes (per-dof implicit JVP solves vs forward solves vs trf overhead) and cut it.
-  Status: GPU profile running on office; CPU profile after the local ns=201 bench frees the box;
-  analysis + optimizations follow.
+  **Measured (office 2x A4000, CPU contended by QA/QP):** before-fix GPU warm — fixed ns=201 6.9 s
+  (5.4 ms/iter), multigrid 9.3 s, free-bdy 8.0 s (13.9 ms/iter) → forward solves ARE GPU-competitive at
+  ns=201; implicit_grad 57 s, opt_step 151 s → gradients pathological on GPU. **After the params-pin fix
+  (9f239620): implicit_grad 57→27.8 s (2×+, on contended cores; more when idle). opt_step unchanged
+  (152 s) — its dof vector was already pinned; the remaining cost is ALGORITHMIC:** scipy trf's fun(x0)
+  + jac(x0) each trigger a separate solve_implicit at the same x, and least_squares re-solves the final
+  equilibrium via solve_equilibrium for the .equilibrium attribute (no hot restart). Next levers: share
+  the frozen solve between fun/jac at the same x (hot-restart makes the 2nd cheap but not free), reuse
+  the last trial state for result.equilibrium, and re-measure. CPU profile still pending (local bench
+  occupies the box).
 
 **R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
 as a longer refactor).**
