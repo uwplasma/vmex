@@ -29,6 +29,11 @@ All runnable examples live under this single `examples/` tree.
     cap-to-cap field lines, solved LCFS, `|B|`, pressure, and residual plots.
     Each accepted point is also written as mirror-native `mout_*.nc`; rerun
     its four endpoint figures with `vmec --plot mout_*.nc`.
+  - `mirror_fixed_boundary_gradients.py` — solve a finite-pressure,
+    finite-current flared mirror, differentiate an interior radius with one
+    preconditioned implicit adjoint, validate boundary/flux/pressure/current
+    gradients against reconverged central differences, and write MOUT plus
+    3D, `|B|`, cross-section, residual, and sensitivity figures.
   - `toroidal_stellarator_mirror_hybrid.py` — trace the 16-coil vacuum axis,
     build a flux-conserving square-torus seed, continue rotating corner
     ellipses, solve the finite-current equilibrium, and write WOUT plus 3D

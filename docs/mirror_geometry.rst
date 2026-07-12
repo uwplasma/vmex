@@ -281,6 +281,31 @@ The axis residual and 10,500 Krylov iterations remain promotion blockers.
 Systems through 2,048 unknowns have a bounded dense reference polish; larger
 systems report matrix-free convergence honestly.
 
+Fixed-boundary implicit gradients
+---------------------------------
+
+``fixed_boundary_adjoint`` differentiates a scalar diagnostic through the
+converged isotropic fixed-boundary equilibrium. Its residual is the packed
+energy gradient after eliminating fixed side/end geometry and the lambda
+gauge. The transpose Hessian action is exact JAX reverse AD, while GMRES uses
+the same separable radial, poloidal, and axial preconditioner as the primal
+Newton polish. Nonlinear iteration histories are not differentiated or saved.
+
+The returned gradient covers boundary radius, axial flux derivative,
+mass/pressure profile, and axial current derivative in one reverse solve. The
+root example validates all four controls simultaneously against two fully
+reconverged finite-difference equilibria::
+
+   python examples/mirror_fixed_boundary_gradients.py
+
+For the finite-pressure, finite-current flared tube, the primal reaches
+``ftol=1e-12``. The adjoint converges in four iterations to relative linear
+residual ``8.85e-16`` and the combined directional derivative agrees with
+central differences to ``1.10e-7`` relative. The example writes mirror-native
+MOUT and horizontal 3D, ``|B|``, cross-section, pressure, residual, and
+sensitivity figures. Anisotropic closure parameters and coupled free-boundary
+coil derivatives remain M9 promotion gates.
+
 ``device=None`` uses the shared measured device policy. On the office host,
 the corrected ``15x15`` case took 35.2 seconds on CPU and 44.2 seconds on one
 RTX A4000. Energy and force diagnostics agree to numerical precision. Explicit

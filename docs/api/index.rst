@@ -118,6 +118,9 @@ Straight-axis mirrors
 .. automodule:: vmec_jax.mirror.free_boundary
    :members:
 
+.. automodule:: vmec_jax.mirror.implicit
+   :members:
+
 .. automodule:: vmec_jax.mirror.output
    :members:
 

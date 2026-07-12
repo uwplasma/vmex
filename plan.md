@@ -1880,6 +1880,15 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        `custom_vjp`; solve JVP/VJP systems matrix-free with the primal preconditioner. Validate
        boundary, pressure, current, and coil derivatives against central differences. Do not
        differentiate through iteration histories or restore fingerprint/replay machinery.
+       **STATUS (2026-07-12): fixed-boundary isotropic adjoint landed.** The packed, constrained
+       energy-gradient residual now has an exact reverse-AD transpose solve using the primal
+       separable radial/poloidal/axial preconditioner. One solve returns total gradients with
+       respect to boundary, axial flux, mass/pressure profile, and axial current. A finite-current,
+       finite-pressure gauge-free-lambda case converges the adjoint in four iterations at
+       `8.85e-16` relative linear residual; its combined directional derivative matches two fully
+       reconverged central-difference equilibria to `1.10e-7` relative. The root example writes
+       MOUT and reviewed geometry/field/residual/sensitivity plots. Anisotropic controls, a public
+       custom-VJP solve wrapper, and free-boundary coil derivatives remain before M9 promotion.
    11. **M10 — performance, outputs, and promotion.** Benchmark CPU/GPU cold/warm time, memory,
        scaling, and CLI versus JAX lanes; add mirror-native `mout` output, restart, `--plot`, docs,
        and short root examples. Remove obsolete archived implementations only after parity data are

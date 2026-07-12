@@ -53,52 +53,91 @@ def mout_from_result(
     *,
     axial_flux_derivative: Any,
     current_derivative: Any = 0.0,
+    boundary: Any | None = None,
+    perpendicular_pressure: Any | None = None,
     parallel_pressure: Any | None = None,
     coil_xyz: Any | None = None,
     closure: str = "unknown",
 ) -> MoutData:
-    """Collect a solved mirror result and reproducible plotting fields."""
+    """Collect a fixed- or free-boundary result and plotting fields."""
 
-    geometry = evaluate_geometry(result.plasma_state, grid)
+    state = getattr(result, "plasma_state", None)
+    free_boundary = state is not None
+    if state is None:
+        state = getattr(result, "state", None)
+    if state is None:
+        raise ValueError("mirror result has no solved state")
+    solved_boundary = getattr(result, "boundary", boundary)
+    if solved_boundary is None:
+        raise ValueError("fixed-boundary mirror output requires boundary=")
+    geometry = evaluate_geometry(state, grid)
     field = contravariant_field(
-        result.plasma_state,
+        state,
         geometry,
         grid,
         axial_flux_derivative=axial_flux_derivative,
         current_derivative=current_derivative,
     )
-    perpendicular = np.asarray(result.perpendicular_pressure)
+    b_xyz = np.asarray(magnetic_field_xyz(field, geometry))
+    shape = tuple(state.radius_scale.shape)
+    if perpendicular_pressure is None:
+        perpendicular_pressure = getattr(result, "perpendicular_pressure", None)
+    if perpendicular_pressure is None and hasattr(result.energy, "pressure"):
+        perpendicular_pressure = np.broadcast_to(
+            np.asarray(result.energy.pressure)[:, None, None], shape
+        )
+    perpendicular = (
+        np.full(shape, np.nan)
+        if perpendicular_pressure is None
+        else np.asarray(perpendicular_pressure)
+    )
+    if parallel_pressure is None and closure == "isotropic":
+        parallel_pressure = perpendicular
     parallel = (
-        np.full(perpendicular.shape, np.nan)
+        np.full(shape, np.nan)
         if parallel_pressure is None
         else np.asarray(parallel_pressure)
     )
+    if perpendicular.shape != shape:
+        raise ValueError("perpendicular_pressure must match the solved state")
     if parallel.shape != perpendicular.shape:
         raise ValueError("parallel_pressure must match perpendicular_pressure")
     coils = np.empty((0, 0, 3)) if coil_xyz is None else np.asarray(coil_xyz)
     if coils.ndim != 3 or coils.shape[-1] != 3:
         raise ValueError("coil_xyz must have shape (ncoil, npoint, 3)")
+    interface = getattr(result, "interface", None)
+    variational = getattr(result, "variational", None)
+    variational_max = getattr(result, "variational_max", None)
+    if variational_max is None:
+        variational_max = variational.maximum
+    history = np.asarray(result.history)
+    if not free_boundary and history.ndim == 2 and history.shape[1] >= 5:
+        history = history[:, [0, 4]]
     return MoutData(
         s=np.asarray(grid.s),
         theta=np.asarray(grid.theta),
         xi=np.asarray(grid.xi),
         z=np.asarray(grid.z),
-        boundary_radius=np.asarray(result.boundary.radius_scale),
-        radius_scale=np.asarray(result.plasma_state.radius_scale),
-        lambda_stream=np.asarray(result.plasma_state.lambda_stream),
-        mod_b=np.sqrt(np.asarray(result.plasma_b_squared)),
-        b_xyz=np.asarray(magnetic_field_xyz(field, geometry)),
+        boundary_radius=np.asarray(solved_boundary.radius_scale),
+        radius_scale=np.asarray(state.radius_scale),
+        lambda_stream=np.asarray(state.lambda_stream),
+        mod_b=np.linalg.norm(b_xyz, axis=-1),
+        b_xyz=b_xyz,
         p_perpendicular=perpendicular,
         p_parallel=parallel,
-        history=np.asarray(result.history),
+        history=history,
         coil_xyz=coils,
         ftol=float(config.ftol),
         iterations=int(result.iterations),
         converged=bool(result.converged),
-        mass_scale=float(result.mass_scale),
-        variational_max=float(result.variational_max),
-        normal_stress_rms=float(result.interface.normal_stress_rms),
-        b_normal_rms=float(result.interface.vacuum_b_normal_rms),
+        mass_scale=float(getattr(result, "mass_scale", 1.0)),
+        variational_max=float(variational_max),
+        normal_stress_rms=(
+            float(interface.normal_stress_rms) if interface is not None else np.nan
+        ),
+        b_normal_rms=(
+            float(interface.vacuum_b_normal_rms) if interface is not None else np.nan
+        ),
         closure=str(closure),
         message=str(result.message),
     )

@@ -19,6 +19,7 @@ from vmec_jax.mirror import (
     MirrorConfig,
     MirrorResolution,
     MirrorState,
+    mirror_energy,
     mout_from_result,
     read_mout,
     write_mout,
@@ -103,6 +104,41 @@ def test_mout_from_solved_result_contract() -> None:
     assert data.b_xyz.shape == (*shape, 3)
     assert np.all(np.isfinite(data.b_xyz))
     assert np.all(np.isnan(data.p_parallel))
+
+
+def test_mout_accepts_fixed_boundary_result() -> None:
+    config = MirrorConfig(resolution=MirrorResolution(ns=3, nxi=5))
+    grid = config.build_grid()
+    boundary = MirrorBoundary.from_radius(0.25, grid)
+    state = MirrorState.from_boundary(boundary, grid)
+    energy = mirror_energy(
+        state,
+        grid,
+        axial_flux_derivative=0.02,
+        mass_profile=np.asarray([2.0e-4, 1.0e-4, 0.0]),
+    )
+    result = SimpleNamespace(
+        state=state,
+        energy=energy,
+        variational=SimpleNamespace(maximum=1.0e-13),
+        history=np.asarray([[0.0, energy.total, 0.0, 0.0, 1.0e-13, 2.0e-3]]),
+        iterations=0,
+        converged=True,
+        message="converged",
+    )
+    data = mout_from_result(
+        result,
+        grid,
+        config,
+        boundary=boundary,
+        axial_flux_derivative=0.02,
+        closure="isotropic",
+    )
+
+    assert data.boundary_radius.shape == (1, grid.nxi)
+    np.testing.assert_allclose(data.p_perpendicular, data.p_parallel)
+    assert np.all(np.isfinite(data.mod_b))
+    np.testing.assert_allclose(data.history, [[0.0, 1.0e-13]])
 
 
 def test_cli_plots_mout_without_toroidal_dispatch(tmp_path) -> None:
