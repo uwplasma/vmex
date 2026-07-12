@@ -545,6 +545,25 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   Gate: fresh clone installs as `vmex`, CLI/docs/CI all green, no stray identifiers, PyPI `vmex`
   published; then proceed to R9 release under the VMEX name.
 
+**R24. Full production profiling (CPU + GPU) + runtime/memory/simplicity pass (user 2026-07-12).**
+  Harness: `benchmarks/profile_production.py` — five production workflows (fixed ns=201, multigrid
+  51/101/201, NESTOR free boundary, implicit value_and_grad, least_squares opt step), each reporting
+  cold (compile) vs warm wall, iterations, ms/iter, peak RSS, and GPU device memory. Run with
+  `JAX_PLATFORMS=cpu` for the CPU profile; plain on a GPU box for the GPU profile.
+  **Finding #1 (2026-07-12, HIGH):** on a GPU box the QA/QH/QP optimization examples ran the hot loop
+  on the GPU by default and took HOURS per stage vs MINUTES pinned to `JAX_PLATFORMS=cpu` (office 2x
+  A4000: capped QH still in stage 2 after 100+ min on GPU; QA stage 1 in ~minutes on CPU). The
+  forward-solve policy (`device.recommended_device`, 100k iteration-work threshold) and the implicit
+  pin (`resolve_implicit_device` → CPU) exist, but something in the `least_squares(jac="implicit")`
+  hot path still lands on the accelerator — diagnose with the GPU-vs-CPU profile pair and either fix
+  the placement or make the optimizer pin its whole session to the recommended backend. Also: JAX had
+  preallocated 13.3 GB VRAM (default 75%) — consider XLA_PYTHON_CLIENT_PREALLOCATE=false guidance.
+  **Finding #2:** `opt_step` (2-nfev max_mode-1 least_squares, minimal_seed_nfp2) warm ~63 s / peak
+  RSS ~6 GB on a contended local CPU — the heaviest per-call production path; profile where the time
+  goes (per-dof implicit JVP solves vs forward solves vs trf overhead) and cut it.
+  Status: GPU profile running on office; CPU profile after the local ns=201 bench frees the box;
+  analysis + optimizations follow.
+
 **R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
 as a longer refactor).**
   **(R22 DONE 2026-07-11 except the ns=201 figure regen, which is folded into R9.)** Commits caf…→3e8296b2:

@@ -23,9 +23,11 @@ NS_ARRAY stage is below that get a generated variant with the final stage
 rewritten to 201 (``grid: ns201``); decks already at or above 201 run as-is
 (``grid: input``).  ns=201 is chosen so the *solve* dominates the wall-clock
 and the one-time JIT compile is a small fraction of it — a fairer warm
-comparison than ns=51, where compile time is a larger share.  FTOL_ARRAY/
-NITER_ARRAY are left untouched, so each deck's own convergence semantics
-(final ftol, iteration caps) are kept.  Cases listed in MULTIGRID_CASES
+comparison than ns=51, where compile time is a larger share.  FTOL_ARRAY is
+left untouched (each deck's own final-ftol semantics are kept); the final
+iteration cap is raised to >= 10000 when ramping, since a cap tuned for the
+deck's native coarse grid would turn ns=201 into a spurious non-convergence
+for every code.  Cases listed in MULTIGRID_CASES
 additionally run with a generated coarse->fine NS_ARRAY ladder ending at
 ``max(deck_ns, 201)`` (``grid: multigrid``) to compare multigrid behavior.
 """
@@ -59,7 +61,7 @@ CASES: dict[str, list[str]] = {
     "nfp4_QH_warm_start": [],
     "NuhrenbergZille_1988_QHS": [],
     # Free boundary with the real mgrid (R15.1: now converges to VMEC2000
-    # parity).  Ramped to ns >= 51 like every other row.
+    # parity).  Ramped to ns >= RAMP_NS like every other row.
     "cth_like_free_bdy": ["mgrid_cth_like.nc"],
     "cth_like_free_bdy_lasym_small": ["mgrid_cth_like_lasym_small.nc"],
 }
@@ -90,16 +92,38 @@ def read_deck_ns(deck: Path) -> int:
 def make_ramped_deck(deck: Path, dest: Path, min_ns: int = RAMP_NS) -> None:
     """Rewrite the final NS_ARRAY stage to max(deck_ns, min_ns).
 
-    FTOL_ARRAY/NITER_ARRAY are left untouched (same stage count), so the
-    deck's own final-ftol and iteration-cap semantics are preserved.
+    FTOL_ARRAY is left untouched (same stage count) so the deck's own
+    final-ftol semantics are preserved.  The final NITER(_ARRAY) stage is
+    raised to at least 10000 when ramping: iteration counts grow with ns,
+    and a cap tuned for the deck's native coarse grid (e.g. solovev's
+    NITER=500 at ns=11) would otherwise turn the ns=201 row into a
+    spurious non-convergence for every code.
     """
+    text = deck.read_text()
 
     def repl(m: re.Match) -> str:
         stages = m.group(2).replace(",", " ").split()
         stages[-1] = str(max(int(stages[-1]), min_ns))
         return m.group(1) + " ".join(stages) + "\n "
 
-    dest.write_text(NS_ARRAY_RE.sub(repl, deck.read_text(), count=1))
+    text = NS_ARRAY_RE.sub(repl, text, count=1)
+
+    def repl_niter(m: re.Match) -> str:
+        head, vals = m.group(0).split("=", 1)
+        stages = vals.replace(",", " ").split()
+        stages[-1] = str(max(int(stages[-1]), 10000))
+        return head + "= " + " ".join(stages) + "\n "
+
+    # When both are present, the per-stage NITER_ARRAY governs and bare NITER
+    # is ignored — several bundled decks (circular_tokamak, QA/QH lowres) put
+    # bare NITER first, so "first match wins" would rewrite the ineffective
+    # line.  Prefer NITER_ARRAY; fall back to bare NITER.
+    text, n = re.subn(r"^\s*NITER_ARRAY\s*=\s*[\d,\s]+", repl_niter, text,
+                      count=1, flags=re.I | re.M)
+    if n == 0:
+        text = re.sub(r"^\s*NITER\s*=\s*[\d,\s]+", repl_niter, text,
+                      count=1, flags=re.I | re.M)
+    dest.write_text(text)
 
 
 def make_multigrid_deck(deck: Path, ladder: str | None, dest: Path) -> None:
@@ -112,8 +136,18 @@ def make_multigrid_deck(deck: Path, ladder: str | None, dest: Path) -> None:
     stages = ladder.split()
     text = deck.read_text()
     text = NS_ARRAY_RE.sub(lambda m: f"{m.group(1)}{' '.join(stages)}\n ", text, count=1)
-    text = re.sub(r"FTOL_ARRAY\s*=\s*[\deE.+\-,\s]+", f"FTOL_ARRAY = {' '.join(['1e-8'] * (len(stages) - 1))} 1e-14\n ", text, flags=re.I)
-    text = re.sub(r"NITER_ARRAY\s*=\s*[\d,\s]+", f"NITER_ARRAY = {' '.join(['4000'] * len(stages))}\n ", text, flags=re.I)
+    # Active-line anchored like NS_ARRAY_RE (a `!`-commented line must not
+    # match); prefer NITER_ARRAY over bare NITER for the same reason as in
+    # make_ramped_deck.
+    text = re.sub(r"^\s*FTOL_ARRAY\s*=\s*[\deE.+\- \t,]+",
+                  f"FTOL_ARRAY = {' '.join(['1e-8'] * (len(stages) - 1))} 1e-14\n ",
+                  text, count=1, flags=re.I | re.M)
+    niter_line = f"NITER_ARRAY = {' '.join(['4000'] * len(stages))}\n "
+    text, n = re.subn(r"^\s*NITER_ARRAY\s*=\s*[\d,\s]+", niter_line, text,
+                      count=1, flags=re.I | re.M)
+    if n == 0:
+        text = re.sub(r"^\s*NITER\s*=\s*[\d,\s]+", niter_line, text,
+                      count=1, flags=re.I | re.M)
     dest.write_text(text)
 
 
