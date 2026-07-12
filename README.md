@@ -87,16 +87,14 @@ vmec --plot boozmn_nfp4_QH_warm_start.nc   # Boozer |B| contours + spectrum
 
 ## Parity with VMEC2000
 
-![Iteration counts and plasma-energy agreement vs VMEC2000](docs/_static/figures/readme_parity.png)
-
 vmec-jax is validated end-to-end against golden VMEC2000 (PARVMEC 9.0) runs:
-the five fixture cases above converge in **exactly** the golden iteration
-count — including DSHAPE's mid-run jacobian reset — and reproduce the plasma
-energy `wb` to 1 part in 10¹⁵. Across the full benchmark suite below (14 rows,
-all at `ns ≥ 51`), the iteration count matches VMEC2000 exactly on 12 rows; on
-the free-boundary CTH-like row it converges in 703 vs 642 iterations (a ~9%
-tail), and on Nuhrenberg–Zille QHS it converges in *fewer* iterations (1681 vs
-2829). Per-variable wout agreement and the full test gates live in the
+benchmark decks converge in **exactly** the golden iteration count — including
+DSHAPE's mid-run jacobian reset — and reproduce the plasma energy `wb` to
+1 part in 10¹⁵. Across the full benchmark suite (14 rows, all at `ns ≥ 201`),
+the iteration count matches VMEC2000 exactly on 12 rows; on the free-boundary
+CTH-like row it converges in a ~9% iteration tail, and on Nuhrenberg–Zille QHS
+it converges in *fewer* iterations (1681 vs 2829). Per-variable wout agreement
+and the full test gates live in the
 [documentation](https://vmec-jax.readthedocs.io/en/latest/).
 
 ![Force residual vs iteration for vmec_jax, VMEC2000, and VMEC++](docs/_static/figures/readme_convergence.png)
@@ -235,25 +233,34 @@ plot_wout(wout, "figures/")
 ```
 
 Optimization building blocks live in `vmec_jax.core.optimize`
-(quasisymmetry residuals; aspect ratio, iota, mirror ratio, magnetic well
-targets; a least-squares driver over boundary Fourier coefficients) with
-complete QA/QH/QP/QI scripts in `examples/optimization/`, and
-`vmec_jax.core.implicit` provides implicit-differentiation gradients of the
-converged fixed-boundary equilibrium. The least-squares driver accepts
-`jac="implicit"` to use those exact gradients (fixed boundary,
-`LASYM = F`, implicit-differentiable objective terms); the default is
-scipy finite differences.
+(quasisymmetry and omnigenity residuals; aspect ratio, iota, mirror ratio,
+magnetic well, ballooning-stability targets; a least-squares driver over
+boundary Fourier coefficients) with implicit-differentiation gradients from
+`vmec_jax.core.implicit` (`jac="implicit"`). The recommended pattern is **one
+`least_squares` call** — no `max_mode` continuation loop — with **Exponential
+Spectral Scaling** ordering the harmonics through the trust region:
 
-From a circular-torus seed, staged `max_mode` continuation with ESS and
-`jac="implicit"` (measured on an office 36-core CPU, quasisymmetry
-residual = `QuasisymmetryRatioResidual.total`):
+```python
+from vmec_jax import optimize as opt
 
-| class | nfp | helicity (m,n) | seed QS | achieved QS | max_mode | status |
-|-------|-----|----------------|---------|-------------|----------|--------|
-| QA | 2 | (1, 0)  | 2.04e-01 | **1.70e-04** | 2 | precise (>3 orders; aspect 6.00, iota 0.42) |
-| QH | 4 | (1, −1) | 6.91e-01 | **5.83e-05** | 5 | precise (>4 orders; aspect 8.00, iota −1.22) |
-| QP | 2 | (0, 1)  | 4.46e-01 | 9.4e-02 | 5 | basin-limited (documented QP caveat; same basin to `max_mode` 5) |
-| QI | 1 | (0,1)→QI | 2.43 | 2.14e-02 | 3 | strong QP→QI (>2 orders); not precise — needs richer omnigenity residual |
+qs = opt.QuasisymmetryRatioResidual(surfaces, helicity_m=1, helicity_n=0)
+result = opt.least_squares(
+    [(qs, 0.0, 1.0), (opt.aspect_ratio, 6.0, 1.0), (opt.mean_iota, 0.42, 1.0)],
+    inp, max_mode=5, jac="implicit",
+    use_ess=True,        # exp(-alpha*max(|m|,|n|)) trust radius per dof:
+)                        # high harmonics on short leashes — no ladder needed
+```
+
+Measured on a 36-core CPU from a near-circular torus (single call, all
+harmonics released at once; `examples/optimization/*_ess.py`; the staged
+`max_mode`-ladder variants live alongside for comparison):
+
+| class | nfp | residual | seed | achieved | max_mode | wall | status |
+|-------|-----|----------|------|----------|----------|------|--------|
+| QA | 2 | QS (1, 0)  | 2.04e-01 | **7.2e-06** | 5 | **14.5 min** | precise; aspect 6.00, iota 0.42 (ladder: 3.7e-07 in 25.5 min) |
+| QH | 4 | QS (1, −1) | 6.91e-01 | **5.83e-05** | 5 | 25.5 min (ladder) | precise; aspect 8.00, iota −1.22 |
+| QP | 2 | QS (0, 1)  | 4.46e-01 | 4.5e-02 | 5 | ~3.4 h (ladder) | hardest QS class — plateaus near 5e-2 |
+| QI | 1 | omnigenity | 4.52e-01 | **1.81e-02** | 6 | **17.3 min** | 25× via the traceable Goodman constructed-QI residual |
 
 ![QA/QH/QP optimization: seed vs optimized boundary, 3-D |B| geometry, and Boozer |B| on the LCFS](docs/_static/figures/readme_optimization.png)
 
@@ -282,15 +289,16 @@ not the ~1e-5 reachable for quasisymmetry. Reproduce with
 
 Implicit gradients are *essential*, not merely faster: for the helical (QH)
 target the exact-axisymmetric seed is a saddle where finite differences stall,
-and for QP the implicit path reaches a far better basin than FD. The implicit
-Jacobian is **CPU-pinned by default** — it is launch-bound (one preconditioned
-GMRES per boundary dof), so a `max_mode`-2 (24-dof) Jacobian evaluates in
-~101 s on CPU versus >37 min hung in a single kernel-launch on the GPU. That
-pin is what makes the deep QH `max_mode` 3→5 continuation (to precise QS
-5.8e-5) tractable; the whole campaign is a multi-hour CPU run. The forward
-solve is a host callback, so the small fixed-boundary solve does not benefit
-from a GPU (cold solve ~2× faster on CPU); per stage the wall is dominated by
-a one-time XLA compile of the implicit Jacobian.
+and for QP the implicit path reaches a far better basin than FD. Three
+measured accelerations make the minutes-scale campaigns above possible: the
+residual Jacobian is solved through a **block-tridiagonal factorization** of
+the force linearization (33× over per-dof GMRES), each trial equilibrium is
+seeded with a **first-order perturbation prediction** from that same
+factorization (3.7× fewer solver iterations), and a converged-state memo means
+the Jacobian never re-solves the point the residual just converged. The
+implicit path is **CPU-pinned by default** (it is kernel-launch-bound; GPUs
+lose at every production size measured), while forward solves at high radial
+resolution are GPU-competitive — the device policy picks per stage.
 
 ## vmec-jax vs DESC
 
