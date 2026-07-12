@@ -584,7 +584,14 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   occupies the box).
 
 **R26. FINAL PRE-VMEX SWEEP (user 2026-07-12; the last content pass — after R24/R25 conclude, before
-R9 release and the VMEX rename R21).** Ten items:
+R9 release and the VMEX rename R21).** Ten items (+k added 2026-07-12):
+  k. **Single-stage ESS examples (user, DO NEXT):** two example scripts — one QA, one QI — that do
+     NOT use the max_mode continuation for-loop: a SINGLE least_squares call directly at large
+     max_mode (>=5) with Exponential Spectral Scaling as the trust-region x_scale (use_ess=True /
+     _ess_scale — higher-|m|,|n| dofs get exponentially smaller trust radii, which is what makes the
+     ladder unnecessary). Simsopt-style, CI-smoke-tested, indexed in examples/README.md; QI version
+     uses the new traceable omnigenity residual (h2) once landed. Compare achieved QS/QI and wall vs
+     the laddered examples in the docstrings.
   a. **Trim + simplify the code** — one more dead-code/duplication/altitude sweep over vmec_jax/core.
   b. **Port more functionality to SOLVAX** — anything generic-solver-shaped still in vmec_jax
      (candidates: the R25.2 block-tridiagonal Jacobian machinery, chunk_map, adjoint GMRES wrappers)
