@@ -373,6 +373,32 @@ the differentiable lane pays a bounded callback cost and supplies the
 iteration-independent reverse solve. Complete scaling values are in
 ``benchmarks/mirror_performance.json``.
 
+.. image:: _static/figures/mirror_performance.png
+   :alt: Mirror CLI and differentiable timing, CPU and GPU timing, and 3D scaling
+   :width: 100%
+
+Mirror release audit
+--------------------
+
+Coverage must run without ``--source=vmec_jax.mirror``; that coverage option
+pre-imports the package and can trigger a duplicate NumPy extension import on
+macOS before pytest collection. The equivalent report restriction is applied
+after execution::
+
+   coverage erase
+   PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 coverage run -m pytest \
+       tests/mirror -m "not full" -q
+   RUN_FULL=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 coverage run --append \
+       -m pytest tests/mirror/test_implicit.py \
+       tests/mirror/test_free_boundary_implicit.py -q
+   coverage report --include="*/vmec_jax/mirror/*" --fail-under=95
+
+The completed audit covers 3,269 statements with 157 misses, or 95%.
+The tracked checkout is 6.4 MiB; generated MOUT files and figures remain
+ignored, while three compressed mirror documentation figures are tracked.
+Source, test, and repository measurements are recorded in
+``benchmarks/mirror_m10_audit.json``.
+
 .. image:: _static/figures/mirror_fixed_boundary_3d.png
    :alt: Fixed-boundary helical mirror refinement, force residuals, and CPU/GPU timing
    :width: 100%

@@ -1939,10 +1939,14 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        forward path. The launch-bound `(15,5,15)` fixed case remains faster on CPU than A4000
        (`35.21/44.20 s`). Fixed scaling through 3,805 unknowns and the rejected M7 BIE scaling are
        consolidated in `benchmarks/mirror_performance.json`.
-       Coverage instrumentation is an explicit promotion gate: the dedicated mirror shard passes,
-       but coverage.py currently aborts when tracing nested JAX/BIE solves. The release-core 95%
-       report transparently omits `vmec_jax/mirror/*` until that crash is fixed; no mirror coverage
-       percentage is claimed meanwhile.
+       Coverage instrumentation is closed. The failure was coverage `--source` pre-importing the
+       package and colliding with NumPy extension loading on macOS, not nested JAX/BIE tracing.
+       Running coverage without `--source`, then restricting the report with `--include`, passes
+       the focused release gate: 3,269 statements, 157 missed, 95% with `--fail-under=95`.
+       This combines the non-nightly shard, full fixed/free adjoints, and compact input/diagnostic
+       contract tests. The ordinary core CI combine still omits mirror because those artifacts
+       intentionally exclude nightly adjoints. Exact commands and size/test evidence live in
+       `benchmarks/mirror_m10_audit.json`.
 
    **5.5 Convergence, validation, and presentation gates**
 

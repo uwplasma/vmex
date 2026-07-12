@@ -43,5 +43,6 @@
     "peak_rss_mib": [2807.38, 4677.04, 7524.89],
     "assessment": "Dense host Jacobian scaling is prohibitive and the local-mode gate fails; this lane is deferred."
   },
+  "figure": "docs/_static/figures/mirror_performance.png",
   "assessment": "The CLI remains the fastest forward path. The custom-VJP forward pays modest callback overhead and adds the iteration-independent reverse derivative. GPU use is retained for large BIE studies, not selected blindly for launch-bound fixed-boundary solves."
 }

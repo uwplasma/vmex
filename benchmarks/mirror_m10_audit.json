@@ -1,0 +1,36 @@
+{
+  "schema": "vmec_jax.benchmark.mirror_m10_audit/1",
+  "source": {
+    "vmec_jax_python_files": 59,
+    "vmec_jax_python_lines": 31044,
+    "mirror_python_files": 19,
+    "mirror_python_lines": 7846,
+    "largest_mirror_module_lines": 855,
+    "tracked_tree_kib": 6364,
+    "plan_bytes": 187904
+  },
+  "coverage": {
+    "statements": 3269,
+    "missed": 157,
+    "percent": 95,
+    "fail_under": 95,
+    "fast_shard": "94 passed, 12 deselected in 646.39 s before promotion-guard additions",
+    "full_adjoint_append": "10 passed in 305.53 s",
+    "promotion_guards": "11 passed in 5.23 s",
+    "measurement": "coverage run without --source; report restricted with --include"
+  },
+  "validation": {
+    "noncoverage_fast_shard": "93 passed, 11 deselected in 536.51 s before promotion-guard additions",
+    "free_boundary_adjoint": "1 passed in 141.83 s",
+    "strict_sphinx": "passed",
+    "ruff": "passed",
+    "plot_cli": "50% MOUT rendered summary, cross sections, |B|, and horizontal 3D products"
+  },
+  "repository": {
+    "tracked_outputs": "one small example mgrid; generated mirror results are ignored",
+    "documentation_figures_mib": 2.7,
+    "git_directory_mib": 88,
+    "git_history_status": "repository-wide release-history rewrite remains outside the mirror feature branch"
+  },
+  "assessment": "M10 mirror-specific performance, output, plotting, documentation, size, and focused coverage gates pass. The ordinary core CI coverage combine continues to omit mirror because it intentionally excludes nightly adjoint tests; the reproducible mirror release audit is separate."
+}

@@ -276,8 +276,10 @@ jobs:
       - name: Combine shards and enforce the gate
         run: |
           coverage combine coverage.parity-a coverage.parity-b coverage.gradient coverage.examples
-          # The development mirror backend has its own test shard; coverage.py
-          # currently aborts while tracing its nested JAX/BIE solves.
+          # The mirror release audit reaches 95% only after appending nightly
+          # fixed/free adjoint tests. These fast core artifacts intentionally
+          # exclude those tests, so do not mix a partial mirror number into
+          # the ordinary core gate.
           coverage report --omit='vmec_jax/mirror/*' --fail-under=95
 
   cli-smoke:
