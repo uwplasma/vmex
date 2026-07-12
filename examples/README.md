@@ -27,6 +27,8 @@ All runnable examples live under this single `examples/` tree.
     calibrated per point so the *actual* wout `betatotal` hits 0/1/2/3 %.
   - `take_free_boundary_gradients.py` — differentiate a free-boundary field
     diagnostic through the virtual-casing vacuum field.
+  - `single_stage_free_boundary_opt.py` — optimize coil currents to confine a
+    target plasma by minimizing <(B.n)^2> with the exact virtual-casing gradient.
 - `optimization/`: precise QA/QH/QP/QI from a circular torus — one file each,
   plus `QA_optimization_ess.py` / `QI_optimization_ess.py`: the SINGLE-call
   variants — all large-max_mode harmonics at once, Exponential Spectral

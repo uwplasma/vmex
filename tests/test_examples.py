@@ -256,3 +256,14 @@ def test_bootstrap_selfconsistent_examples(case, tmp_path):
     assert m is not None and float(m.group(1)) < 5e-2, f"{case} f_boot: {out[-400:]}"
     assert (tmp_path / f"output_{case}_bootstrap_selfconsistent"
             / f"wout_{case}_bootstrap_selfconsistent.nc").exists()
+
+
+@pytest.mark.full
+def test_single_stage_free_boundary_opt(tmp_path):
+    pytest.importorskip("virtual_casing_jax")
+    wout = EXAMPLES / "data" / "single_grid" / "wout_cth_like_free_bdy.nc"
+    if not wout.exists() or not (EXAMPLES / "data" / "mgrid_cth_like.nc").exists():
+        pytest.skip("fetched free-boundary assets absent (tools/fetch_assets.py)")
+    out = _run_example(EXAMPLES / "single_stage_free_boundary_opt.py", tmp_path, timeout=900)
+    m = re.search(r"recovered to ([0-9.]+)% of the confining", out)
+    assert m is not None and float(m.group(1)) < 5.0, f"coil recovery: {out[-400:]}"
