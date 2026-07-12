@@ -30,7 +30,7 @@ import pytest
 from vmec_jax.core.input import VmecInput
 from vmec_jax.core import solver
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 from conftest import resolve_golden_dir
 
 GOLDEN_DIR = resolve_golden_dir()

@@ -238,7 +238,15 @@ Steps:
      colormap** (the STELLOPT/Boozer convention). Update `core.plotting`/`core.boozer` plot helpers as
      needed (add a `cmap` arg + a boozer-|B|-on-LCFS plot).
 
-**R12. Rename `tests/core_new/` → `tests/`.** "new" is meaningless to users and the legacy `tests/`
+**R12. Rename `tests/core_new/` → `tests/`.**
+  **(R12 DONE 2026-07-11.)** `git mv` of all 38 test modules + `data/` up one level; merged the golden-fixture
+  + `_module_jit_enabled` machinery from `core_new/conftest.py` into the root `tests/conftest.py`; decremented
+  the 28 `Path(__file__).resolve().parents[N]` depth anchors (27×[2]→[1], 1×[1]→[0]) while leaving
+  `DATA_DIR.parents[1]` and the unmoved conftest untouched; updated every `tests/core_new` path in ci.yml
+  (shard lists, ignores, the golden-prefetch import), benchmarks, docs, examples, and core docstrings.
+  Verified: 513 tests collect, golden prefetch resolves via `tests/conftest.py`, golden parity test passes.
+  Done standalone (decoupled from R21 per the 2026-07-11 reordering). Original note follows:
+  "new" is meaningless to users and the legacy `tests/`
 is gone. Steps: `git mv tests/core_new/* tests/` (handle conftest.py merge — root `tests/conftest.py`
 already exists with the RUN_FULL/jit gates; merge the core_new conftest fixtures into it), update
 every CI path in `.github/workflows/ci.yml` (parity shard file lists, ignores, prefetch), update the
@@ -504,8 +512,11 @@ work is **bidirectional** and the net effect is a SLIMMER, better-integrated vme
     (R13) + a tutorial page (R14). Gate: README/docs enumerate the differentiators with evidence;
     each important new capability has an example.
 
-**R21. Rename everything `vmec_jax` → VMEX (user 2026-07-10; DO AFTER the current feature lanes, as
-the clean atomic cutover right before the v0.1.0 release R9).** Names: GitHub repo
+**R21. Rename everything `vmec_jax` → VMEX (user 2026-07-10).**
+  **ORDERING (user 2026-07-11): R21 is now the ABSOLUTE LAST step — do everything else in the plan first
+  (R12 tests rename, R14 docs, R9 v0.1.0 release), THEN the VMEX rename as a standalone cutover.** R21 is
+  decoupled from R12 (do R12 now, standalone) and no longer "right before R9" — v0.1.0 releases as
+  `vmec-jax`, and VMEX becomes a later renamed version with a `vmec_jax` compatibility shim. Names: GitHub repo
 `uwplasma/vmec_jax` → `uwplasma/VMEX`; Python import package `vmec_jax` → **`vmex`** (lowercase,
 PEP 8; `import vmex`); PyPI distribution `vmec-jax` → **`vmex`** (verified AVAILABLE on PyPI
 2026-07-10, HTTP 404); CLI command → **`vmex`** (keep `vmec` as an alias — do NOT rename the output

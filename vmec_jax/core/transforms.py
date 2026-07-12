@@ -28,7 +28,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 ``vmec_jax/kernels/tomnsp.py`` (``tomnsps_rzl``/``tomnspa_rzl``) and
 ``vmec_jax/kernels/realspace.py`` (``vmec_realspace_synthesis*`` /
 ``vmec_realspace_analysis``); equivalence is enforced in
-``tests/core_new/test_fourier_transforms_ab.py``.
+``tests/test_fourier_transforms_ab.py``.
 """
 
 from __future__ import annotations

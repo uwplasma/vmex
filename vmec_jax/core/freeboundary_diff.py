@@ -34,7 +34,7 @@ dofs, so it is precomputed **once** via the accurate on-surface virtual-casing
 integral and frozen as a constant.  The residual is then a smooth JAX function of
 the external-field dofs alone — a ``CoilSet``'s Fourier dofs / currents or an
 ``MgridField``'s ``extcur`` — and FD-validates to ~1e-9 (see
-``tests/core_new/test_freeboundary_diff.py``).
+``tests/test_freeboundary_diff.py``).
 
 The remaining single-stage piece (letting the boundary *shape* dofs vary, which
 makes the plasma field itself depend on them through a re-solve) is discussed in

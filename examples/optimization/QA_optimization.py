@@ -82,7 +82,7 @@ objective_terms = [
     (qs, 0.0, 1.0),                       # quasisymmetry ratio residual
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.mean_iota, IOTA_TARGET, 10.0),
-    # Extra physics terms, CI-tested (tests/core_new/test_examples.py runs
+    # Extra physics terms, CI-tested (tests/test_examples.py runs
     # them uncommented).  magnetic_well works with JAC="implicit"; d_merc and
     # l_grad_b are wout-engine (host) objectives -> set JAC = None for those.
     # (opt.magnetic_well, 0.05, 1.0),

@@ -27,7 +27,7 @@ from vmec_jax.core.wout import wout_from_state
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solve: run jitted
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 @pytest.fixture(scope="module")

@@ -8,7 +8,7 @@ Produces (into ``docs/_static/figures/``):
   ``benchmarks/gpu_baseline.json``.  Run ``benchmarks/run_baseline.py`` first.
 - ``readme_parity.png``               — iteration-for-iteration parity table
   vs the golden VMEC2000 fixtures (solves the five cases; needs the golden
-  bundle, see ``tests/core_new/conftest.py``).
+  bundle, see ``tests/conftest.py``).
 - ``readme_convergence.png``          — force residual vs iteration for one
   representative case (nfp4_QH_warm_start at ns=51) in vmec_jax, VMEC2000
   (NSTEP=1 stdout trace), and VMEC++ (wout ``fsqt``).  Traces are cached in
@@ -221,7 +221,7 @@ def collect_parity() -> dict:
     import sys
     import netCDF4
 
-    sys.path.insert(0, str(REPO / "tests" / "core_new"))
+    sys.path.insert(0, str(REPO / "tests"))
     from conftest import resolve_golden_dir
 
     from vmec_jax.core.input import VmecInput

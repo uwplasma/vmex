@@ -79,7 +79,7 @@ All functions are pure ``jax.numpy`` (jit-friendly, no host round-trips);
 resolution parameters (``ns/mpol/ntor/nfp/...``) are Python ints/bools and
 must be static under ``jax.jit``.  The numerics are ported verbatim from the
 parity-proven legacy module :mod:`vmec_jax.preconditioner_1d_jax`; equivalence
-is enforced in ``tests/core_new/test_preconditioner_ab.py``.
+is enforced in ``tests/test_preconditioner_ab.py``.
 """
 
 from __future__ import annotations

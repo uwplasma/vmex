@@ -53,7 +53,7 @@ Gradient accuracy is validated in CI against central finite differences for
 **fixed-boundary** degrees of freedom: boundary Fourier coefficients,
 ``phiedge``, and profile parameters (``pres_scale``), on a 2D (solovev) and
 a 3D (li383) case — the gradient table lives in
-``tests/core_new/test_implicit_grad.py``, with agreement at the 1e-6
+``tests/test_implicit_grad.py``, with agreement at the 1e-6
 relative level (2D) and at the finite-difference noise floor (3D).
 
 .. code-block:: python

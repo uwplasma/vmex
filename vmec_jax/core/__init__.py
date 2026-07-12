@@ -21,7 +21,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
 Every module is validated by A/B equivalence tests against the legacy
-parity-proven implementation in ``tests/core_new/``; the solve loop is
+parity-proven implementation in ``tests/``; the solve loop is
 validated end-to-end against VMEC2000 golden runs
-(``tests/core_new/test_solver_end_to_end.py``).
+(``tests/test_solver_end_to_end.py``).
 """

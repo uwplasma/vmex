@@ -58,17 +58,17 @@ jobs:
           JAX_ENABLE_X64: "1"
         run: |
           pytest -q -n 4 -m "not full" \
-            tests/core_new/test_packaging_metadata.py \
-            tests/core_new/test_fetch_assets.py \
-            tests/core_new/test_input_profiles.py \
-            tests/core_new/test_profiles.py \
-            tests/core_new/test_step_control.py \
-            tests/core_new/test_printing.py \
-            tests/core_new/test_fourier_transforms.py \
-            tests/core_new/test_preconditioner.py \
-            tests/core_new/test_setup.py \
-            tests/core_new/test_mgrid.py \
-            tests/core_new/test_coils.py \
+            tests/test_packaging_metadata.py \
+            tests/test_fetch_assets.py \
+            tests/test_input_profiles.py \
+            tests/test_profiles.py \
+            tests/test_step_control.py \
+            tests/test_printing.py \
+            tests/test_fourier_transforms.py \
+            tests/test_preconditioner.py \
+            tests/test_setup.py \
+            tests/test_mgrid.py \
+            tests/test_coils.py \
             --durations=25
 
   parity:
@@ -105,14 +105,14 @@ jobs:
           python - <<'EOF'
           import importlib.util
           spec = importlib.util.spec_from_file_location(
-              "core_new_conftest", "tests/core_new/conftest.py")
+              "tests_conftest", "tests/conftest.py")
           mod = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(mod)
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
       # Shard a runs the heavy solver-golden modules; shard b runs the rest
-      # (everything in tests/core_new except implicit, examples, and shard a).
+      # (everything in tests except implicit, examples, and shard a).
       # Together they cover the whole non-gradient, non-example suite once.
       - name: Run parity shard ${{ matrix.shard }} with coverage
         env:
@@ -121,19 +121,19 @@ jobs:
           # Shard a = heaviest solver-golden modules; rebalanced 2026-07-10
           # (moved test_optimize + test_multigrid_interp to b after the 2D
           # preconditioner import pushed a over the 9-min budget).
-          A_FILES="tests/core_new/test_parity_breadth.py \
-                   tests/core_new/test_multigrid_ladder.py \
-                   tests/core_new/test_optimize_traceable_qs.py \
-                   tests/core_new/test_freeboundary.py \
-                   tests/core_new/test_cli_freeboundary.py \
-                   tests/core_new/test_solver_end_to_end.py"
+          A_FILES="tests/test_parity_breadth.py \
+                   tests/test_multigrid_ladder.py \
+                   tests/test_optimize_traceable_qs.py \
+                   tests/test_freeboundary.py \
+                   tests/test_cli_freeboundary.py \
+                   tests/test_solver_end_to_end.py"
           if [ "${{ matrix.shard }}" = "a" ]; then
             pytest -q -n 4 $A_FILES --durations=15 --cov=vmec_jax --cov-report=term
           else
             IGNORES=$(for f in $A_FILES; do echo "--ignore=$f"; done)
-            pytest -q -n 4 tests/core_new \
-              --ignore=tests/core_new/test_implicit_grad.py \
-              --ignore=tests/core_new/test_examples.py \
+            pytest -q -n 4 tests \
+              --ignore=tests/test_implicit_grad.py \
+              --ignore=tests/test_examples.py \
               $IGNORES \
               --durations=15 --cov=vmec_jax --cov-report=term
           fi
@@ -173,13 +173,13 @@ jobs:
           path: /tmp/vmec_jax_implicit_fd_cache.pkl
           # entries are keyed by (case, dof, step, ftol, ns) inside the pickle,
           # so hash the test file: changed FD parameters invalidate the cache.
-          key: implicit-fd-v1-${{ hashFiles('tests/core_new/test_implicit_grad.py') }}
+          key: implicit-fd-v1-${{ hashFiles('tests/test_implicit_grad.py') }}
 
       - name: Run implicit-gradient tests with coverage
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q tests/core_new/test_implicit_grad.py \
+          pytest -q tests/test_implicit_grad.py \
             --durations=0 \
             --cov=vmec_jax --cov-report=term
 
@@ -216,7 +216,7 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q tests/core_new/test_examples.py \
+          pytest -q tests/test_examples.py \
             --durations=10 \
             --cov=vmec_jax --cov-report=term
 
@@ -351,4 +351,4 @@ jobs:
           JAX_ENABLE_X64: "1"
           RUN_FULL: "1"
         run: |
-          pytest -q tests/core_new --durations=25
+          pytest -q tests --durations=25

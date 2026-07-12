@@ -39,7 +39,7 @@ from vmec_jax.core.solver import (
     evaluate_forces, prepare_runtime, resolution_from_input, solve,
 )
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 _ALL = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
 

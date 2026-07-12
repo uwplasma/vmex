@@ -81,7 +81,7 @@ from vmec_jax.core.multigrid import solve_multigrid
 
 from conftest import resolve_golden_dir
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark = [
     pytest.mark.skipif(
@@ -134,7 +134,7 @@ def _git_describe() -> str:
     try:
         out = subprocess.run(
             ["git", "describe", "--always", "--dirty"],
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=Path(__file__).resolve().parents[1],
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout.strip()
         return re.sub(r"[^A-Za-z0-9._-]", "_", out) or "nogit"

@@ -38,7 +38,7 @@ from vmec_jax.core.wout import read_wout
 
 from conftest import resolve_golden_dir
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SOLOVEV_DECK = DATA_DIR / "input.solovev"
 GOLDEN_DIR = resolve_golden_dir()
 

@@ -122,7 +122,7 @@ def test_mode_matrix_layouts_and_errors():
         opt._mode_matrix(SimpleNamespace(bad=np.zeros((2, 2))), "bad", ns=ns, mn=mn)
 
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 def test_least_squares_rejects_unknown_jac():

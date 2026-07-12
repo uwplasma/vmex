@@ -22,7 +22,7 @@ import jax.numpy as jnp  # noqa: E402
 from vmec_jax.core.errors import MgridNotFoundError  # noqa: E402
 from vmec_jax.core.mgrid import MgridData, MgridField, read_mgrid, write_mgrid  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 MGRID_PATH = REPO / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"
 
 assert MGRID_PATH.is_file(), f"missing fixture {MGRID_PATH}"

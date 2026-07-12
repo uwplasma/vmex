@@ -52,7 +52,7 @@ from vmec_jax.core import implicit as im
 from vmec_jax.core import solver
 from vmec_jax.core.input import VmecInput
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 FD_CACHE = Path(tempfile.gettempdir()) / "vmec_jax_implicit_fd_cache.pkl"
 
 

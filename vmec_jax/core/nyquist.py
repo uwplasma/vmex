@@ -22,7 +22,7 @@ VMEC2000 counterparts
 
 The math is extracted from the parity-proven legacy modules
 ``vmec_jax.io.wout_files.{nyquist,jxbforce,mercier,bsubs}`` (validated against
-golden VMEC2000 ``wout`` files in ``tests/core_new/test_wout_golden.py``),
+golden VMEC2000 ``wout`` files in ``tests/test_wout_golden.py``),
 re-hosted on the core types: :class:`vmec_jax.core.geometry.RealSpaceGeometry`
 / :class:`~vmec_jax.core.geometry.HalfMeshJacobian` supply the parity
 geometry channels, :class:`vmec_jax.core.fields.MagneticFields` the half-mesh

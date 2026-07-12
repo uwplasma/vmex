@@ -45,7 +45,7 @@ and :func:`interior_guess` — the state-producing path — is jit-compatible.
 Ported from the parity-proven legacy implementation
 (``vmec_jax.init_guess``, ``vmec_jax.boundary``, ``vmec_jax.energy``,
 ``vmec_jax.solvers.fixed_boundary.profiles``); equivalence is enforced in
-``tests/core_new/test_setup_ab.py``.
+``tests/test_setup_ab.py``.
 """
 
 from __future__ import annotations

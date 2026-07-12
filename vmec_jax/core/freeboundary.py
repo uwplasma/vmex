@@ -394,7 +394,7 @@ def _resolve_mgrid(inp: VmecInput, mgrid_path: str | Path | None) -> Path:
 # reference used by the operator tests.  The ``*_jax`` mirrors below are their
 # pure-``jnp`` equivalents so the whole per-iteration vacuum update can run as
 # ONE jitted program (``_make_fused_vacuum``) with no NumPy<->JAX round-trips
-# (``tests/core_new/test_freeboundary.py::test_fused_vacuum_matches_reference``
+# (``tests/test_freeboundary.py::test_fused_vacuum_matches_reference``
 # A/B-locks them to the NumPy path at machine precision).
 
 

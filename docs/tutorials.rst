@@ -3,7 +3,7 @@ Tutorials
 
 Every tutorial below is a runnable script in the repository's ``examples/``
 directory: parameters at the top, no ``main()``, only the public API, and each
-is smoke-tested in CI (``tests/core_new/test_examples.py``) so the code on this
+is smoke-tested in CI (``tests/test_examples.py``) so the code on this
 page always runs.  Copy a script, edit the parameter block, and go.
 
 Run any of them directly::

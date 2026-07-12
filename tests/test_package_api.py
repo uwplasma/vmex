@@ -34,7 +34,7 @@ def test_version_matches_pyproject():
 
 
 def test_source_tree_version_parses_pyproject():
-    pyproject = Path(vmec_jax.__file__).resolve().parents[1] / "pyproject.toml"
+    pyproject = Path(vmec_jax.__file__).resolve().parents[0] / "pyproject.toml"
     expected = None
     in_project = False
     for line in pyproject.read_text().splitlines():
@@ -181,14 +181,14 @@ def test_cli_wout_and_boozmn_require_plot_or_booz(tmp_path):
 def test_cli_coils_flag_requires_free_boundary_deck(capsys, tmp_path):
     coils = tmp_path / "coils.json"
     coils.write_text(json.dumps(_coils_payload()))
-    deck = Path(__file__).resolve().parents[2] / "examples" / "data" / "input.solovev"
+    deck = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.solovev"
     rc = cli.main([str(deck), "--coils", str(coils), "--outdir", str(tmp_path)])
     assert rc != 0
     assert "LFREEB = T" in capsys.readouterr().out
 
 
 def test_cli_direct_coils_requires_coils_argument(capsys, tmp_path):
-    src = (Path(__file__).resolve().parents[2] / "examples" / "data"
+    src = (Path(__file__).resolve().parents[1] / "examples" / "data"
            / "input.cth_like_free_bdy_lasym_small")
     text = src.read_text()
     assert "MGRID_FILE" in text

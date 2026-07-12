@@ -59,7 +59,7 @@ input — it is discrete), the ``profil1d.f`` flux/pressure/current profiles,
 and the ``funct3d.f`` constraint baselines ``rcon0/zcon0`` (which depend on
 the boundary only — the edge row of any admissible state).  Its output is
 verified against :func:`~vmec_jax.core.setup.run_setup` in
-``tests/core_new/test_implicit_grad.py``.
+``tests/test_implicit_grad.py``.
 """
 
 from __future__ import annotations

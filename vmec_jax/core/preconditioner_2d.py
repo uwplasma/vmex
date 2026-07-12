@@ -37,7 +37,7 @@ check ``block_dsave * x = -gc_save``).
 
 The module is deliberately VMEC-agnostic: :func:`newton_direction` takes any
 pytree-valued force map and a linearization point, so it is unit-testable
-against a dense reference (``tests/core_new/test_preconditioner_2d.py``) and
+against a dense reference (``tests/test_preconditioner_2d.py``) and
 could equally drive the block-tridiagonal :func:`solvax.block_thomas_truncated`
 route if the blocks were assembled explicitly (they are not, by design — the
 matrix-free HVP keeps peak memory at one force graph).

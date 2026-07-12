@@ -26,7 +26,7 @@ caching is the solver's job.
 The numerics are ported verbatim from the parity-proven legacy kernels
 ``vmec_jax.kernels.bcovar``, ``vmec_jax.kernels.residue``,
 ``vmec_jax.kernels.lforbal`` and ``vmec_jax.kernels.constraints``; equivalence
-is enforced in ``tests/core_new/test_geometry_fields_ab.py``.
+is enforced in ``tests/test_geometry_fields_ab.py``.
 """
 
 from __future__ import annotations

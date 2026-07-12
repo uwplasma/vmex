@@ -33,7 +33,7 @@ pytest.importorskip("jax")
 from vmec_jax.core.input import VmecInput
 from vmec_jax.core import optimize as opt
 
-DATA = __import__("pathlib").Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA = __import__("pathlib").Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 def _nfp2_seed(kick: float = 0.0) -> VmecInput:

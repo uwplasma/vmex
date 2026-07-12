@@ -40,7 +40,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 ``_constraint_kernels_from_state``), ``vmec_jax.kernels.bcovar``
 (``_compute_bcovar_lambda_force_assembly``) and
 ``vmec_jax.kernels.constraints`` (``alias_gcon``/``faccon_from_signgs``);
-equivalence is enforced in ``tests/core_new/test_forces_residuals_ab.py``.
+equivalence is enforced in ``tests/test_forces_residuals_ab.py``.
 All functions are pure ``jax.numpy`` (jit-friendly, no host round-trips).
 """
 

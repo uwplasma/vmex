@@ -25,7 +25,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 ``vmec_jax.kernels.jacobian`` and the geometry stage of
 ``vmec_jax.kernels.bcovar`` (``_compute_bcovar_parity_channels`` with
 ``use_vmec_synthesis=True``); equivalence is enforced in
-``tests/core_new/test_geometry_fields_ab.py``.
+``tests/test_geometry_fields_ab.py``.
 """
 
 from __future__ import annotations

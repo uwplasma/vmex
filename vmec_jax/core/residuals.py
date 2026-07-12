@@ -36,7 +36,7 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 ``vmec_jax.kernels.residue``, ``vmec_jax.kernels.parity`` and the solver
 modules ``solvers/fixed_boundary/residual/payload_blocks.py`` /
 ``preconditioning/operators.py``; equivalence is enforced in
-``tests/core_new/test_forces_residuals_ab.py``.
+``tests/test_forces_residuals_ab.py``.
 """
 
 from __future__ import annotations

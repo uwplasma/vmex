@@ -11,7 +11,7 @@ The remaining top-level legacy modules are being removed in an ongoing
 deletion sweep; new code, tests, and documentation should target
 ``vmec_jax.core`` only. Every core module was validated by A/B equivalence
 tests against the parity-proven legacy implementation
-(``tests/core_new/``) and end to end against VMEC2000 golden runs.
+(``tests/``) and end to end against VMEC2000 golden runs.
 
 Workflow
 --------

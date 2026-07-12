@@ -37,7 +37,7 @@ from vmec_jax.core.errors import INPUT_ERROR_FLAG, MORE_ITER_FLAG
 from vmec_jax.core.mgrid import read_mgrid
 from vmec_jax.core.wout import read_wout
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = DATA_DIR / "input.cth_like_free_bdy_lasym_small"
 MGRID = DATA_DIR / "mgrid_cth_like_lasym_small.nc"
 CASE = "cth_like_free_bdy_lasym_small"

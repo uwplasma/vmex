@@ -48,7 +48,7 @@ from vmec_jax.core.solver import (  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # vacuum solves: run jitted
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 DECK = REPO / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
 MGRID = REPO / "examples" / "data" / "mgrid_cth_like_lasym_small.nc"
 CASE = "cth_like_free_bdy_lasym_small"

@@ -17,7 +17,7 @@ import pytest
 
 from vmec_jax.core.input import VmecInput
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "examples" / "data"
 DECKS = sorted(DATA.glob("input.*"))
 FIXTURES = Path(__file__).parent / "data"

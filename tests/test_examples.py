@@ -30,7 +30,7 @@ import pytest
 pytest.importorskip("jax")
 pytest.importorskip("netCDF4")
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO / "examples"
 DATA_DIR = EXAMPLES / "data"
 

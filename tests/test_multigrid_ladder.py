@@ -67,7 +67,7 @@ from vmec_jax.core.input import VmecInput
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmec_jax_ladder_cache")
 
 #: xvmec2000 ladder results (see module docstring for provenance).

@@ -58,7 +58,7 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
     - ``xm``, ``xn``: static NumPy mode-number arrays (``xn`` carries the
       ``nfp`` factor, wout convention).
 
-    Validation (tests/core_new/test_boozer_tables.py, and the sfincs_jax
+    Validation (tests/test_boozer_tables.py, and the sfincs_jax
     flagship-example tests where this function originated): ``bmnc`` and the
     parity-interpolated ``rmnc/zmns`` match the host wout engine to
     ~1e-15..1e-10 relative (identical quadrature); ``bsubumnc/bsubvmnc`` and

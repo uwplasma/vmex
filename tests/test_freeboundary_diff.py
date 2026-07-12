@@ -46,7 +46,7 @@ from vmec_jax.core.wout import read_wout  # noqa: E402
 # jit-enable the whole module: virtual casing is far too slow interpreted.
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 WOUT = REPO / "examples" / "data" / "single_grid" / "wout_cth_like_free_bdy.nc"
 MGRID = REPO / "examples" / "data" / "mgrid_cth_like.nc"
 

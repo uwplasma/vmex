@@ -34,7 +34,7 @@ from vmec_jax.core.solver import (
     resolution_from_input,
 )
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 RTOL = 1e-12
 ATOL = 1e-13

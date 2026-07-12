@@ -7,7 +7,7 @@ solver. All numbers come from checked-in benchmark artifacts —
 ``benchmarks/run_baseline.py``) and ``benchmarks/gpu_baseline.json`` (GPU
 matrix, ``benchmarks/run_gpu_matrix.py``; 2x NVIDIA RTX A4000, jax 0.6.2
 cuda12) — and from the end-to-end parity suite in
-``tests/core_new/test_parity_breadth.py``.
+``tests/test_parity_breadth.py``.
 
 Benchmark suite (CPU)
 ---------------------
@@ -345,7 +345,7 @@ Reproducing the numbers
 
    python benchmarks/run_baseline.py       # CPU suite -> benchmarks/baseline.json
    python benchmarks/run_gpu_matrix.py     # GPU matrix -> benchmarks/gpu_baseline.json
-   pytest tests/core_new/test_parity_breadth.py   # end-to-end parity suite
+   pytest tests/test_parity_breadth.py   # end-to-end parity suite
 
 The parity suite needs the golden VMEC2000 fixtures (fetched release assets);
 it is skipped automatically when they are unavailable.

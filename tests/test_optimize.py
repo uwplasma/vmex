@@ -45,7 +45,7 @@ pytestmark = [
         GOLDEN_DIR is None, reason="golden VMEC2000 fixtures unavailable (offline?)"),
     pytest.mark.usefixtures("_module_jit_enabled"),  # full solves: run jitted
 ]
-DATA_DIR = Path(__file__).resolve().parents[2] / "examples" / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 CACHE_DIR = Path("/tmp/vmec_jax_test_cache_optimize")
 
 SURFACES = [0.25, 0.5, 0.75, 1.0]
