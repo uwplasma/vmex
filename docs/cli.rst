@@ -89,8 +89,8 @@ For ``LFREEB = T`` decks:
 
 Known divergences of the current free-boundary lane: it is single-grid (only
 the final ``NS_ARRAY`` stage runs; multi-stage decks print a note), and the
-NESTOR potential is not yet exported to the wout ``potsin``/``xmpot``/
-``xnpot``/``*_sur`` variables (written as netCDF fill). An NITER-exhausted
+NESTOR surface-field ``*_sur`` tables remain netCDF fill. The retained vacuum
+state now populates ``potsin``/``potcos`` and ``xmpot``/``xnpot``. An NITER-exhausted
 free-boundary run still writes the wout (VMEC2000 behavior) and exits with
 ``ier_flag = 2``.
 

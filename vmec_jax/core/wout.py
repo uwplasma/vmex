@@ -543,6 +543,7 @@ def wout_from_state(
     extcur=None,
     mgrid_mode: str = "",
     curlabel=None,
+    vacuum_state=None,
 ) -> WoutData:
     """Build a complete :class:`WoutData` from a solved fixed-boundary state.
 
@@ -569,8 +570,8 @@ def wout_from_state(
     ``potcos``/``xmpot``/``xnpot`` and the ``*_sur`` surface-field tables
     stay ``None`` (netCDF fill) because
     :func:`vmec_jax.core.freeboundary.solve_free_boundary` does not return
-    its :class:`~vmec_jax.core.freeboundary.FreeBoundaryState` (which holds
-    ``potvac``) — a documented gap until the solver exposes it.
+    Pass ``result.vacuum_state`` from :func:`solve_free_boundary` to populate
+    the NESTOR ``potsin``/``potcos`` and ``xmpot``/``xnpot`` tables.
     """
     import jax
 
@@ -783,6 +784,15 @@ def wout_from_state(
     if itfsq <= 0:
         itfsq = int(np.count_nonzero(fsqt_out)) or 1
 
+    potvac = getattr(vacuum_state, "potvac", None)
+    xmpot = getattr(vacuum_state, "xmpot", None)
+    xnpot = getattr(vacuum_state, "xnpot", None)
+    mnpot = 0 if xmpot is None else int(np.asarray(xmpot).size)
+    potsin = None if potvac is None or mnpot == 0 else np.asarray(potvac)[:mnpot]
+    potcos = None
+    if lasym and potvac is not None and np.asarray(potvac).size >= 2 * mnpot:
+        potcos = np.asarray(potvac)[mnpot:2 * mnpot]
+
     return WoutData(
         version_=float(version),
         input_extension=str(input_extension),
@@ -816,6 +826,11 @@ def wout_from_state(
                 else np.zeros((1,), dtype=float)),
         mgrid_mode=str(mgrid_mode),
         curlabel=(tuple(str(lbl) for lbl in curlabel) if curlabel else None),
+        mnmaxpot=mnpot if mnpot else None,
+        potsin=potsin,
+        potcos=potcos,
+        xmpot=None if xmpot is None else np.asarray(xmpot, dtype=float),
+        xnpot=None if xnpot is None else np.asarray(xnpot, dtype=float),
         xm=xm, xn=xn,
         xm_nyq=np.asarray(xm_nyq, dtype=float),
         xn_nyq=np.asarray(xn_nyq, dtype=float),

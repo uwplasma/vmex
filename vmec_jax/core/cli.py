@@ -500,6 +500,7 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
         niter=int(result.iterations),
         converged=bool(result.converged),
         input_extension=case_from_input(input_path),
+        vacuum_state=getattr(result, "vacuum_state", None),
         **freeb_kwargs,
     )
     write_wout(wout_path, wout)

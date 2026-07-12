@@ -46,6 +46,7 @@ from vmec_jax.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmec_jax.core.solver import (  # noqa: E402
     _initial_state, prepare_runtime, resolution_from_input,
 )
+from vmec_jax.core.wout import read_wout, wout_from_state, write_wout  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # vacuum solves: run jitted
 
@@ -341,6 +342,38 @@ CONV_CASE = "cth_like_free_bdy"
 
 
 @pytest.mark.full
+def test_converged_result_retains_vacuum_state(tmp_path):
+    """A production free-boundary result retains its final NESTOR state."""
+    if not CONV_MGRID.exists():
+        pytest.skip("real mgrid_cth_like.nc unavailable (run tools/fetch_assets.py)")
+    inp = VmecInput.from_file(CONV_DECK)
+    result = FB.solve_free_boundary(
+        inp,
+        mgrid_path=CONV_MGRID,
+        max_iterations=2500,
+        error_on_no_convergence=False,
+    )
+    vacuum = result.vacuum_state
+    assert result.converged and vacuum is not None and vacuum.turned_on
+    assert vacuum.vacuum_calls > 0 and vacuum.full_updates > 0
+    assert vacuum.potvac is not None
+    assert np.all(np.isfinite(np.asarray(vacuum.potvac)))
+
+    wout = wout_from_state(
+        inp=inp, state=result.state,
+        fsqr=result.fsqr, fsqz=result.fsqz, fsql=result.fsql,
+        niter=result.iterations, converged=result.converged,
+        vacuum_state=vacuum,
+    )
+    assert wout.potsin is not None and wout.xmpot is not None and wout.xnpot is not None
+    assert len(wout.potsin) == len(wout.xmpot) == len(wout.xnpot)
+    reread = read_wout(write_wout(tmp_path / "wout_freeb.nc", wout))
+    np.testing.assert_array_equal(reread.potsin, wout.potsin)
+    np.testing.assert_array_equal(reread.xmpot, wout.xmpot)
+    np.testing.assert_array_equal(reread.xnpot, wout.xnpot)
+
+
+@pytest.mark.full
 def test_free_boundary_converged_golden(golden_dir):
     """Free boundary converges to VMEC2000's fsq level with wout parity.
 
@@ -375,6 +408,10 @@ def test_free_boundary_converged_golden(golden_dir):
     ftol = float(inp.ftol_array[-1])
     assert result.converged, f"free boundary did not converge (fsqr={result.fsqr:.2e})"
     assert result.fsqr <= ftol and result.fsqz <= ftol and result.fsql <= ftol
+    assert result.vacuum_state is not None
+    assert result.vacuum_state.turned_on
+    assert result.vacuum_state.potvac is not None
+    assert np.all(np.isfinite(np.asarray(result.vacuum_state.potvac)))
 
     # 2. Vacuum turn-on matches the golden stdout (53) modulo float jitter.
     m = re.search(r"VACUUM PRESSURE TURNED ON AT\s+(\d+)\s+ITERATIONS", out)

@@ -4,7 +4,8 @@
 vmec_jax can take the external field of a free-boundary solve straight from a
 coil set: ``CoilSet.b_cyl`` evaluates a JAX Biot-Savart at exactly the points
 NESTOR asks for, every vacuum iteration.  No field grid, no interpolation
-error, no intermediate file -- and the coils stay differentiable end-to-end.
+error, no intermediate file. The Biot-Savart field is differentiable; the
+coupled solved-boundary adjoint is still an explicit roadmap item.
 (The classic two-step route still works: tabulate the coil field once with
 ``vmec_jax.core.coils.to_mgrid_data`` + ``vmec_jax.core.mgrid.write_mgrid``
 and pass ``mgrid_path=...`` instead of ``external_field=...``.)
@@ -13,7 +14,7 @@ The coils are the Landreman & Paul (2021) precise-QA set as optimized in
 ESSOS (github.com/uwplasma/ESSOS), bundled here as a 3 KB JSON.  Holding
 their currents fixed, we ramp a parabolic pressure ``p(s) = PRES_SCALE(1-s)``
 and *calibrate* PRES_SCALE at each step so the converged equilibrium's actual
-volume-average beta (wout ``betatotal``) lands on 0, 1, 2, 3 % -- a nominal
+volume-average beta (wout ``betatotal``) lands on 0, 1, 2 % -- a nominal
 pressure is not enough, because at fixed coil currents the plasma dilates and
 shifts as beta rises, feeding back on <B^2>.  Each pressure step warm-starts
 from the previous accepted boundary (how experiments ramp, and much more
@@ -38,7 +39,7 @@ DATA = Path(__file__).resolve().parent / "data"
 COILS_JSON = DATA / "ESSOS_biot_savart_LandremanPaulQA.json"  # ESSOS coil DOFs
 INPUT_FILE = DATA / "input.LandremanPaul2021_QA_lowres"       # plasma seed deck
 OUT_DIR = Path("output_free_boundary_essos_coils")
-TARGET_BETAS = [0.0, 1.0, 2.0, 3.0]   # actual volume-average beta targets [%]
+TARGET_BETAS = [0.0, 1.0, 2.0]  # repeatably converged actual beta targets [%]
 BETA_TOL = 0.15                       # accept |betatotal - target| below this [%]
 SLOPE = 1.45e-3                       # first-guess beta[%] per unit PRES_SCALE
 NS, MPOL, NTOR = 51, 5, 5
@@ -88,17 +89,23 @@ def warm_boundary(inp_i, wout):
 # --------------------------- calibrated pressure ramp -----------------------
 print(f"\n{'nominal':>8s} {'PRES_SCALE':>11s} {'actual beta':>12s} {'iters':>6s} "
       f"{'fsq':>9s} {'aspect':>7s} {'axis R':>8s}")
-rows, current = [], base
+rows, current, state = [], base, None
 for target in TARGET_BETAS:
     ps = target / SLOPE
     for attempt in range(3):  # solve, read actual beta, rescale (~linear)
         inp_i = dataclasses.replace(current, pres_scale=ps)
-        res = vj.solve_free_boundary(inp_i, external_field=coils,
-                                     error_on_no_convergence=False)
+        res = vj.solve_free_boundary(
+            inp_i, external_field=coils, initial_state=state,
+            error_on_no_convergence=False)
+        if not res.converged:
+            raise RuntimeError(
+                f"beta={target:.1f}% attempt {attempt + 1} did not converge: "
+                f"fsq={float(res.fsqr + res.fsqz + res.fsql):.3e}")
+        state = res.state
         wout = vj.wout_from_state(
             inp=inp_i, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
             fsql=float(res.fsql), niter=int(res.iterations),
-            converged=bool(res.converged))
+            converged=bool(res.converged), vacuum_state=res.vacuum_state)
         beta = 100.0 * float(wout.betatotal)
         if target == 0.0 or abs(beta - target) <= BETA_TOL:
             break
@@ -126,7 +133,7 @@ if not CI:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(8.4, 4.8), dpi=110, width_ratios=[1.1, 1.0])
     theta = np.linspace(0.0, 2.0 * np.pi, 361)
-    shades = ["#b5cde3", "#6d9dc9", "#2e6da4", "#0c3766"]  # light -> dark = rising beta
+    shades = plt.cm.Blues(np.linspace(0.35, 0.95, len(rows)))
     for (_target, _ps, beta, axis_r, wout), color in zip(rows, shades):
         R, Z = surface_rz(wout, s_index=-1, theta=theta, phi=np.array([0.0]))
         ax.plot(R[:, 0], Z[:, 0], color=color, lw=2.0,

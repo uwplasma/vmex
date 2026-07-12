@@ -55,7 +55,7 @@ for ps in PRES_SCALES:
     wout = vj.wout_from_state(
         inp=inp, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
         fsql=float(res.fsql), niter=int(res.iterations),
-        converged=bool(res.converged))
+        converged=bool(res.converged), vacuum_state=res.vacuum_state)
     beta = float(wout.betatotal)
     betas.append(beta)
     print(f"{ps:11.1f} {beta:10.3e} {float(wout.volume_p):12.4f} {int(res.iterations):6d}")

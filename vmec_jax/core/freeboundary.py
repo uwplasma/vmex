@@ -375,6 +375,8 @@ class FreeBoundaryState:
     mode_matrix: Any = None
     bvec_nonsing: Any = None
     potvac: np.ndarray | None = None
+    xmpot: np.ndarray | None = None
+    xnpot: np.ndarray | None = None
     ctor: float = 0.0
     rbtor: float = 0.0
     vacuum_calls: int = 0
@@ -905,6 +907,8 @@ def solve_free_boundary(
         ivac=-1,
         nvacskip=max(1, int(inp.nvacskip)),
         nvskip0=max(1, int(inp.nvacskip)),
+        xmpot=np.asarray(basis.xmpot, dtype=int),
+        xnpot=np.asarray(basis.n_raw * basis.nfp, dtype=int),
     )
 
     if verbose:
@@ -1023,9 +1027,15 @@ def solve_free_boundary(
 
     _emit_due(final=True)
     ier = int(carry.ier)
+    vacuum_state = replace(fb)
     if ier == MORE_ITER_FLAG and not error_on_no_convergence:
         result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-        return replace(result, converged=False, ier_flag=MORE_ITER_FLAG)
+        return replace(
+            result, converged=False, ier_flag=MORE_ITER_FLAG,
+            vacuum_state=vacuum_state,
+        )
     if ier == SUCCESSFUL_TERM_FLAG:
-        return _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-    return _finalize(carry, rt_freeb if fb.turned_on else rt_fixed)
+        result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
+        return replace(result, vacuum_state=vacuum_state)
+    result = _finalize(carry, rt_freeb if fb.turned_on else rt_fixed)
+    return replace(result, vacuum_state=vacuum_state)

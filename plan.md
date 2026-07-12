@@ -127,13 +127,21 @@ _R1 status (2026-07-12, office 36-core CPU):_
   converged axis coefficients. The compact restart is the supported reproduction path until the
   generic interior guess is improved. Evidence is in `benchmarks/qi_compact.json`.
 
-**R2. Free boundary to production.** Current: CTH free-bdy stops at NITER (fsq~9e-2), not converged;
-warm 14.4 s ≫ Fortran 1.95 s; coil derivatives unsupported by the implicit residual. Gate: a
-*converged* free-boundary golden fixture (raise NITER; validate wout vs VMEC2000), NESTOR/vacuum
-performance profiled and tuned (target within ~3x Fortran warm), then free-boundary implicit
-derivatives (coil dofs → boundary/QS) FD-validated. β-scan showcase example (ESSOS Landreman-Paul QA
-coils + a tokamak coil set; β=0..5% hot-restarted; mgrid vs direct Biot-Savart agreement) → one
-compressed README panel. Do NOT promote coil-derivative claims before the converged fixture exists.
+**R2. Free boundary to production.** Forward parity/performance are complete: the CTH golden
+converges with per-variable VMEC2000 gates, the fused NESTOR path is bit-equivalent, and the ns=201
+benchmark measures vmec-jax warm `24.86 s` versus VMEC2000 `26.74 s` (the former 3x target is
+passed). The remaining gate is a coupled solved-boundary derivative (coil/extcur → LCFS/QS), not
+only the existing fixed-surface virtual-casing residual derivative, followed by a validated ESSOS
+Landreman-Paul QA + tokamak beta=0..5% showcase with mgrid/direct-Biot-Savart agreement and one
+compressed README panel.
+
+_R2 status (2026-07-12):_ the direct ESSOS Landreman-Paul scan is repeatably converged at actual
+beta 0, 1, 2% (`fsq <=2.4e-10`, ns=51) with full-state hot restarts. Attempts to promote 3--5%
+expose a trajectory-sensitive continuation barrier: direct 2→3% and midpoint schedules stall or
+change Jacobian sign under the strict convergence check. The example therefore stops honestly at
+2%; 3--5% remains part of the coupled-globalization gate, not a plotted extrapolation. The forward
+result now retains its final NESTOR cache/potential and CLI/library WOUT files populate
+`potsin`/`potcos` plus `xmpot`/`xnpot`; the `*_sur` tables and coupled adjoint remain open.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate
@@ -325,8 +333,8 @@ gradients without a NESTOR adjoint and matches central FD to `2.2e-13..1.2e-10`.
 `feature/jax-vmec-extender` branch, not its PyPI 0.0.2 release. Production differentiation remains
 open until that API is released and an IFT/adjoint propagates coil changes through the solved
 free-boundary state; add the cth golden and mgrid path to CI only after those gates.)*
-show it).** Current: CTH free-bdy stops at NITER (fsq~9e-2, unconverged), warm 17 s ≫ Fortran 6.6 s,
-coil derivatives unsupported. Steps:
+show it).** Forward solve and performance steps 1--2 are complete; coupled solved-boundary coil
+derivatives and the final showcase remain. Steps:
   1. **Converge as well as VMEC2000.** Diagnose why the free-bdy solve stalls (nvacskip cadence, ivac
      activation threshold, edge-force/preconditioner interaction at js=ns, delt policy) vs VMEC2000 on
      the same deck; raise NITER and match VMEC2000's converged fsq. Produce a **converged

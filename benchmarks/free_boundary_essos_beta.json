@@ -1,0 +1,48 @@
+{
+  "schema": "vmec_jax.benchmark.free_boundary_essos_beta/1",
+  "date": "2026-07-12",
+  "source": "examples/free_boundary_essos_coils.py",
+  "configuration": {
+    "coils": "Landreman-Paul QA, 16 ESSOS filaments",
+    "field": "direct JAX Biot-Savart, no mgrid",
+    "ns": 51,
+    "mpol": 5,
+    "ntor": 5,
+    "ftol": 1e-10,
+    "max_iterations": 20000
+  },
+  "accepted": [
+    {
+      "target_beta_percent": 0.0,
+      "actual_beta_percent": 0.0,
+      "iterations": 947,
+      "force_residual_sum": 1.6e-10,
+      "aspect": 6.011,
+      "axis_r_m": 1.2134
+    },
+    {
+      "target_beta_percent": 1.0,
+      "actual_beta_percent": 1.012,
+      "iterations": 838,
+      "force_residual_sum": 1.9e-10,
+      "aspect": 6.084,
+      "axis_r_m": 1.2335
+    },
+    {
+      "target_beta_percent": 2.0,
+      "actual_beta_percent": 1.978,
+      "iterations": 512,
+      "force_residual_sum": 1.7e-10,
+      "aspect": 6.172,
+      "axis_r_m": 1.2638
+    }
+  ],
+  "maximum_beta_error_percent": 0.022,
+  "axis_shift_cm": 5.04,
+  "promotion_attempt": {
+    "requested_beta_percent": [3.0, 4.0, 5.0],
+    "passed": false,
+    "assessment": "Direct 2->3%, full-state hot restart, cold-interior fallback, and midpoint schedules either stalled above the strict force gate or changed Jacobian sign. No 3-5% equilibrium is plotted or claimed."
+  },
+  "figure": "docs/_static/figures/readme_essos_beta_scan.png"
+}

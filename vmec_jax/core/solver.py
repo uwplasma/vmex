@@ -1386,7 +1386,9 @@ class SolveResult:
     ``WMHD = (wb + wp/(gamma-1)) * (2 pi)^2``. ``newton_history`` stores
     ``(accepted_step, linear_residual, lambda_row_scale)``; step ``-1`` means
     no attempt and ``0`` means a rejected correction followed by the regular
-    VMEC update.
+    VMEC update. Free-boundary solves additionally retain their final NESTOR
+    cadence/cache object in ``vacuum_state``; fixed-boundary solves leave it
+    ``None``.
     """
 
     converged: bool; iterations: int; ier_flag: int
@@ -1398,6 +1400,7 @@ class SolveResult:
     rmnc: np.ndarray; zmns: np.ndarray
     rmns: np.ndarray | None; zmnc: np.ndarray | None
     iotaf: np.ndarray; fsq_history: np.ndarray; newton_history: np.ndarray
+    vacuum_state: Any | None = None
 
 
 def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
