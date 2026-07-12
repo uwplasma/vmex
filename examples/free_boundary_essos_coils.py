@@ -46,6 +46,7 @@ REPORT_BETAS = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]  # review/plot targets [%]
 TARGET_BETAS = REPORT_BETAS[:3] + [round(x, 1) for x in np.arange(2.1, 5.01, 0.1)]
 BETA_TOL = 0.15                       # accept |betatotal - target| below this [%]
 MIN_BETA_STEP = 0.0125                # stop rather than cross a branch blindly [%]
+REQUIRE_ALL_TARGETS = False           # True makes a branch limit fail the run
 SLOPE = 1.45e-3                       # first-guess beta[%] per unit PRES_SCALE
 NS, MPOL, NTOR = 51, 5, 5
 NITER, FTOL = 20000, 1e-10
@@ -95,7 +96,7 @@ def warm_boundary(inp_i, wout):
 # --------------------------- calibrated pressure ramp -----------------------
 print(f"\n{'nominal':>8s} {'PRES_SCALE':>11s} {'actual beta':>12s} {'iters':>6s} "
       f"{'fsq':>9s} {'aspect':>7s} {'axis R':>8s}")
-rows, current, state = [], base, None
+rows, current, state, branch_limit = [], base, None, None
 targets = deque(TARGET_BETAS)
 while targets:
     target = targets.popleft()
@@ -130,9 +131,15 @@ while targets:
         previous = rows[-1][0] if rows else 0.0
         step = target - previous
         if step <= MIN_BETA_STEP:
-            raise RuntimeError(
+            message = (
                 f"beta={target:.4f}% did not converge at the minimum continuation "
-                f"step {step:.4f}%: fsq={failed_fsq:.3e}")
+                f"step {step:.4f}%: fsq={failed_fsq:.3e}"
+            )
+            if REQUIRE_ALL_TARGETS:
+                raise RuntimeError(message)
+            branch_limit = message
+            print(f"  stopping adaptive scan: {message}")
+            break
         midpoint = round(previous + 0.5 * step, 6)
         targets.appendleft(target)
         targets.appendleft(midpoint)
@@ -147,6 +154,8 @@ while targets:
 
 dev = max(abs(beta - target) for target, _ps, beta, _ar, _w in rows)
 print(f"\nactual betatotal within {dev:.3f}% of every nominal target (tolerance {BETA_TOL}%)")
+if branch_limit is not None:
+    print(f"highest accepted target {rows[-1][0]:.4f}%; requested endpoint was {REPORT_BETAS[-1]:.1f}%")
 if len(rows) > 1:
     shift = rows[-1][3] - rows[0][3]
     print(f"magnetic axis Shafranov-shifted {shift * 100:+.2f} cm at fixed coil currents")
