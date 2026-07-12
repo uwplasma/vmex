@@ -89,7 +89,10 @@ import jax
 import jax.numpy as jnp
 
 from .solver import SolverRuntime, SpectralState
-from .stability import _ballooning_context, _parabola, _theta_vmec_from_pest
+from .stability import (
+    _ballooning_context, _parabola, _theta_vmec_from_pest,
+    _validate_surface_index,
+)
 
 __all__ = [
     "GK_GEOMETRY_FIELDS",
@@ -214,13 +217,7 @@ def _make_gk_point_fn(m: Array, xn: Array, rtab: Array, ztab: Array,
 def _resolve_surface(s_index, ns: int) -> int:
     if s_index is None:
         s_index = min(max(int(round(0.6 * (ns - 1))), 2), ns - 2)
-    j = int(s_index)
-    if not 2 <= j <= ns - 2:
-        raise ValueError(
-            f"surface index {j} out of range [2, {ns - 2}] (full-mesh interior; "
-            "the radial parabola needs both neighbours and the near-axis "
-            "surfaces carry the usual VMEC noise)")
-    return j
+    return _validate_surface_index(s_index, ns)
 
 
 def _line_arrays(ctx: dict, j: int, alpha: float, zeta0: float, x: Array):

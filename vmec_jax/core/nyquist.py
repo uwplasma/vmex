@@ -150,26 +150,6 @@ def symoutput_split(*, f: np.ndarray, trig: TrigTables, reversed_sym: bool = Fal
     return 0.5 * (f_half + f_ref), 0.5 * (f_half - f_ref)
 
 
-def _symoutput_expand(*, sym: np.ndarray, asym: np.ndarray | None, trig: TrigTables) -> np.ndarray:
-    """Extend reduced-grid symmetric/antisymmetric parts to the full theta grid."""
-    sym = np.asarray(sym, dtype=float)
-    asym = np.zeros_like(sym) if asym is None else np.asarray(asym, dtype=float)
-    ns, nt2, nzeta = sym.shape
-    nt1 = int(trig.ntheta1)
-    nt3 = max(int(trig.ntheta3), nt2)
-    full = np.zeros((ns, nt3, nzeta), dtype=float)
-    full[:, :nt2, :] = sym + asym
-    if nt3 == nt2:
-        return full
-    i0 = np.arange(nt2, dtype=int)
-    ir0 = np.where(i0 == 0, 0, nt1 - i0)
-    kk = (nzeta - np.arange(nzeta, dtype=int)) % nzeta
-    mask = ir0 >= nt2
-    if np.any(mask):
-        full[:, ir0[mask], :] = sym[:, mask, :][:, :, kk] - asym[:, mask, :][:, :, kk]
-    return full
-
-
 # ---------------------------------------------------------------------------
 # wrout.f Nyquist analysis (cos/sin coefficient tables)
 # ---------------------------------------------------------------------------

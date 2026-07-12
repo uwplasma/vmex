@@ -88,14 +88,20 @@ from .solver import (
     SolveResult,
     SolverRuntime,
     SpectralState,
-    _geometry,
     prepare_runtime,
     resolution_from_input,
 )
-from .geometry import half_mesh_jacobian
-from .fields import (
-    energies_and_force_norms, magnetic_fields, metric_elements,
-    surface_currents,
+from .fields import surface_currents
+# Shared state-physics primitives (statephysics.py, R26a).  Re-exported here
+# for backward compatibility: external user code and tests reach them as
+# ``vmec_jax.core.optimize._as_1d`` etc.
+from .statephysics import (
+    _as_1d,
+    _field_chain,
+    _half_grid,
+    _interp_half_grid,
+    _iotas_half,
+    _mode_matrix,
 )
 from .wout import WoutData, wout_from_state
 
@@ -125,8 +131,8 @@ Array = Any
 
 
 def __getattr__(name: str):  # PEP 562 lazy re-export
-    # bootstrap.py imports this module's private helpers at import time, so
-    # the f_boot objective is re-exported lazily to avoid the import cycle.
+    # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
+    # so the f_boot objective is re-exported lazily to keep the two decoupled.
     if name == "RedlBootstrapMismatch":
         from .bootstrap import RedlBootstrapMismatch
         return RedlBootstrapMismatch
@@ -190,46 +196,6 @@ def solve_equilibrium(
 # ===========================================================================
 # Quasisymmetry ratio residual (simsopt convention; legacy parity port)
 # ===========================================================================
-
-
-def _as_1d(values, dtype=np.float64) -> jnp.ndarray:
-    try:
-        seq = list(values)  # type: ignore[arg-type]
-    except TypeError:
-        seq = [values]
-    return jnp.asarray(np.asarray(seq, dtype=dtype))
-
-
-def _half_grid(ns: int, dtype) -> jnp.ndarray:
-    s_full = jnp.linspace(0.0, 1.0, ns, dtype=dtype)
-    return 0.5 * (s_full[:-1] + s_full[1:])
-
-
-def _interp_half_grid(samples: jnp.ndarray, surfaces: jnp.ndarray, s_half: jnp.ndarray) -> jnp.ndarray:
-    """Linear interpolation of half-mesh radial samples onto ``surfaces``."""
-    if int(s_half.shape[0]) == 1:
-        return jnp.broadcast_to(samples[:1], (surfaces.shape[0],) + samples.shape[1:])
-    idx_hi = jnp.clip(jnp.searchsorted(s_half, surfaces, side="left"), 1, s_half.shape[0] - 1)
-    idx_lo = idx_hi - 1
-    x0, x1 = s_half[idx_lo], s_half[idx_hi]
-    denom = jnp.where(x1 != x0, x1 - x0, jnp.ones_like(x1))
-    t = ((surfaces - x0) / denom).reshape((surfaces.shape[0],) + (1,) * (samples.ndim - 1))
-    return samples[idx_lo] + t * (samples[idx_hi] - samples[idx_lo])
-
-
-def _mode_matrix(wout, name: str, *, ns: int, mn: int, optional: bool = False) -> jnp.ndarray:
-    """A ``(ns, mn)`` coefficient table from a wout-like object (either layout)."""
-    value = getattr(wout, name, None)
-    if value is None:
-        if optional:
-            return jnp.zeros((ns, mn), dtype=jnp.float64)
-        raise AttributeError(f"wout-like object lacks required table {name!r}")
-    arr = jnp.asarray(np.ascontiguousarray(np.asarray(value, dtype=np.float64)))
-    if arr.shape == (ns, mn):
-        return arr
-    if arr.shape == (mn, ns):
-        return arr.T
-    raise ValueError(f"{name}: unexpected shape {arr.shape}, expected {(ns, mn)}")
 
 
 class QuasisymmetryRatioResidual:
@@ -524,26 +490,6 @@ class QuasisymmetryRatioResidual:
 # ===========================================================================
 
 
-def _field_chain(state: SpectralState, rt: SolverRuntime):
-    """Geometry -> Jacobian -> metric -> fields -> energies of a core state."""
-    setup = rt.setup
-    s = setup.s_full
-    _, geometry = _geometry(state, rt)
-    jacobian = half_mesh_jacobian(geometry, s=s)
-    metrics = metric_elements(geometry, s=s)
-    fields = magnetic_fields(
-        geometry=geometry, jacobian=jacobian, metrics=metrics, trig=rt.trig,
-        s=s, phips=setup.phips, phipf=setup.phipf, chips=setup.chips,
-        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
-        ncurr=setup.ncurr, enclosed_current=setup.icurv,
-    )
-    energies = energies_and_force_norms(
-        jacobian=jacobian, metrics=metrics, fields=fields, trig=rt.trig,
-        s=s, signgs=setup.signgs,
-    )
-    return geometry, jacobian, metrics, fields, energies
-
-
 def _aspect_scalars(state: SpectralState, rt: SolverRuntime):
     """``aspectratio.f`` scalars ``(Aminor_p, Rmajor_p, aspect, volume_p)``.
 
@@ -578,22 +524,6 @@ def aspect_ratio(state: SpectralState, rt: SolverRuntime) -> Array:
 def volume(state: SpectralState, rt: SolverRuntime) -> Array:
     """Plasma volume ``volume_p`` [m^3] (wout convention, boundary quadrature)."""
     return _aspect_scalars(state, rt)[3]
-
-
-def _iotas_half(state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
-    """Half-mesh rotational transform (``add_fluxes.f90`` conventions).
-
-    ``ncurr = 0``: the prescribed profile; ``ncurr = 1``: reconstructed from
-    the current-constrained ``chips`` of the solved state (differentiable),
-    exactly as the solver/wout writer do.  Index 0 is the (zeroed) axis slot.
-    """
-    setup = rt.setup
-    if int(setup.ncurr) != 1:
-        return jnp.asarray(setup.iotas)
-    _, _, _, fields, _ = _field_chain(state, rt)
-    phips = jnp.asarray(setup.phips)
-    safe = jnp.where(phips != 0.0, phips, 1.0)
-    return jnp.where(phips != 0.0, fields.chips / safe, 0.0)
 
 
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:

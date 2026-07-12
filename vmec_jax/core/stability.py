@@ -61,9 +61,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .fields import magnetic_fields, metric_elements
-from .geometry import half_mesh_jacobian
-from .solver import SolverRuntime, SpectralState, _geometry
+from .solver import SolverRuntime, SpectralState, _physical_coefficients
+from .statephysics import _field_chain, _iotas_half_from_fields
 from .transforms import physical_to_internal_scale
 
 __all__ = [
@@ -102,25 +101,16 @@ def _ballooning_context(state: SpectralState, rt: SolverRuntime) -> dict:
     if ns < 5:
         raise ValueError(f"ballooning stability needs ns >= 5, got ns = {ns}")
 
-    (R_cos, _R_sin, _Z_cos, Z_sin), geometry = _geometry(state, rt)
-
-    # Field state: pressure profile (mass closure) and the current-constrained
-    # chips for the ncurr = 1 iota (the small traceable chain used by the
-    # optimize.py scalar targets, kept local to avoid coupling to that module).
-    jacobian = half_mesh_jacobian(geometry, s=s)
-    metrics = metric_elements(geometry, s=s)
-    fields = magnetic_fields(
-        geometry=geometry, jacobian=jacobian, metrics=metrics, trig=rt.trig,
-        s=s, phips=setup.phips, phipf=setup.phipf, chips=setup.chips,
-        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
-        ncurr=setup.ncurr, enclosed_current=setup.icurv,
+    # Field state (pressure profile via the mass closure; the
+    # current-constrained chips feed the ncurr = 1 iota) from the shared
+    # geometry->fields chain (statephysics.py); the physical coefficient
+    # tables come straight from the m=1-constraint inverse (cheap, spectral).
+    R_cos, _R_sin, _Z_cos, Z_sin = _physical_coefficients(
+        state, modes=rt.modes, lthreed=setup.lthreed, lasym=setup.lasym,
+        lconm1=setup.lconm1,
     )
-    if int(setup.ncurr) == 1:
-        phips = jnp.asarray(setup.phips)
-        safe = jnp.where(phips != 0.0, phips, 1.0)
-        iotas = jnp.where(phips != 0.0, jnp.asarray(fields.chips) / safe, 0.0)
-    else:
-        iotas = jnp.asarray(setup.iotas)
+    geometry, _, _, fields, _ = _field_chain(state, rt)
+    iotas = _iotas_half_from_fields(setup, fields)
 
     # Physical (wout) coefficient tables from the internal-normalized,
     # m=1-constraint-undone spectra (wrout.f conventions; lambda carries the
@@ -336,18 +326,22 @@ def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
 # ---------------------------------------------------------------------------
 
 
+def _validate_surface_index(s_index, ns: int) -> int:
+    """Validate one full-mesh interior surface index (shared with turbulence)."""
+    j = int(s_index)
+    if not 2 <= j <= ns - 2:
+        raise ValueError(
+            f"surface index {j} out of range [2, {ns - 2}] (full-mesh interior; "
+            "the radial parabola needs both neighbours and the near-axis "
+            "surfaces carry the usual VMEC noise)")
+    return j
+
+
 def _resolve_surfaces(s_indices, ns: int) -> tuple[int, ...]:
     if s_indices is None:
         fractions = (0.35, 0.6, 0.85)
         s_indices = sorted({min(max(int(round(f * (ns - 1))), 2), ns - 2) for f in fractions})
-    js = tuple(int(j) for j in s_indices)
-    for j in js:
-        if not 2 <= j <= ns - 2:
-            raise ValueError(
-                f"surface index {j} out of range [2, {ns - 2}] (full-mesh interior; "
-                "the radial parabola needs both neighbours and the near-axis "
-                "surfaces carry the usual VMEC noise)")
-    return js
+    return tuple(_validate_surface_index(j, ns) for j in s_indices)
 
 
 def ballooning_lambda(

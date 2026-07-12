@@ -35,11 +35,10 @@ from typing import Any
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from .fourier import ModeTable, TrigTables
-from .transforms import fourier_to_real
+from .transforms import fourier_to_real, register_pytree_dataclass as _register
 
 __all__ = [
     "RealSpaceGeometry",
@@ -188,14 +187,6 @@ class HalfMeshJacobian:
     tau: Array
     sqrt_g: Array
     jacobian_sign_changed: Array
-
-
-def _register(cls):
-    """Register a result dataclass as a JAX pytree (all fields are leaves)."""
-    from dataclasses import fields as dataclass_fields
-
-    names = [f.name for f in dataclass_fields(cls)]
-    return jax.tree_util.register_dataclass(cls, data_fields=names, meta_fields=[])
 
 
 for _cls in (RealSpaceGeometry, HalfMeshJacobian):

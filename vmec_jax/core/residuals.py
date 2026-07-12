@@ -41,17 +41,19 @@ modules ``solvers/fixed_boundary/residual/payload_blocks.py`` /
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from .fourier import ModeTable
 from .preconditioner import RadialPreconditionerCoefficients, TridiagonalMatrices, scalfor
-from .transforms import SpectralForce, odd_m_sqrt_s_scaling
+from .transforms import (
+    SpectralForce, odd_m_sqrt_s_scaling,
+    register_pytree_dataclass as _register,
+)
 
 __all__ = [
     "M1_FSQZ_RELEASE_THRESHOLD",
@@ -98,12 +100,6 @@ _LAMBDA_BLOCKS = (
     "force_lambda_cc",
     "force_lambda_ss",
 )
-
-
-def _register(cls):
-    """Register a result dataclass as a JAX pytree (all fields are leaves)."""
-    names = [f.name for f in dataclass_fields(cls)]
-    return jax.tree_util.register_dataclass(cls, data_fields=names, meta_fields=[])
 
 
 @dataclass(frozen=True)

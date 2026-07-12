@@ -33,17 +33,19 @@ The numerics are ported verbatim from the parity-proven legacy kernels
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields
 from typing import Any, Sequence
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 from jax import lax
 
 from .fourier import ModeTable, TrigTables
 
 __all__ = [
+    "register_pytree_dataclass",
     "SpectralForce",
     "fourier_to_real",
     "real_to_fourier",
@@ -57,6 +59,18 @@ __all__ = [
 Array = Any
 
 _DERIVATIVES = ("value", "dtheta", "dzeta")
+
+
+def register_pytree_dataclass(cls, *, meta: tuple[str, ...] = ()):
+    """Register a result dataclass as a JAX pytree (``meta`` fields static).
+
+    The one shared registration helper of all core result containers (R26a;
+    formerly copied in fields/forces/geometry/residuals/setup/solver/implicit).
+    """
+    names = [f.name for f in dataclass_fields(cls) if f.name not in meta]
+    return jax.tree_util.register_dataclass(
+        cls, data_fields=names, meta_fields=list(meta)
+    )
 
 
 def _einsum(expr: str, *operands: Array) -> Array:

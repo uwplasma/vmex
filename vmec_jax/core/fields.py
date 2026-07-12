@@ -31,16 +31,16 @@ is enforced in ``tests/test_geometry_fields_ab.py``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from .fourier import ModeTable, TrigTables
 from .geometry import HalfMeshJacobian, RealSpaceGeometry, sqrt_s_half_mesh
+from .transforms import register_pytree_dataclass as _register
 
 __all__ = [
     "MetricElements",
@@ -59,12 +59,6 @@ __all__ = [
 Array = Any
 
 TWO_PI = 2.0 * np.pi
-
-
-def _register(cls):
-    """Register a result dataclass as a JAX pytree (all fields are leaves)."""
-    names = [f.name for f in dataclass_fields(cls)]
-    return jax.tree_util.register_dataclass(cls, data_fields=names, meta_fields=[])
 
 
 def _r0scale(trig: TrigTables) -> float:

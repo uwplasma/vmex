@@ -57,7 +57,7 @@ restart), and the stage machinery is factored into :func:`_solve_stage`/
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields, replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 import functools
@@ -158,7 +158,10 @@ from .step import (
     JACOBIAN_RESET_FACTOR, NDAMP, RESTART_GROWTH, RESTART_JACOBIAN, STEP_OK,
     StepControl, damping_coefficients, momentum_update,
 )
-from .transforms import SpectralForce, physical_to_internal_scale
+from .transforms import (
+    SpectralForce, physical_to_internal_scale,
+    register_pytree_dataclass as _register,
+)
 
 __all__ = [
     "NS4", "SpectralState", "PreconditionerCache", "FunctDiagnostics",
@@ -180,14 +183,6 @@ BLOCK_SIZE = 10
 _TRAJ_COLS = 11
 
 _TWO_PI_SQ = (2.0 * np.pi) ** 2
-
-
-def _register(cls, *, meta: tuple[str, ...] = ()):
-    """Register a dataclass as a JAX pytree (``meta`` fields static)."""
-    names = [f.name for f in dataclass_fields(cls) if f.name not in meta]
-    return jax.tree_util.register_dataclass(
-        cls, data_fields=names, meta_fields=list(meta)
-    )
 
 
 def _select(mask: Array, new, old):

@@ -46,12 +46,11 @@ All functions are pure ``jax.numpy`` (jit-friendly, no host round-trips).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields, replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 from jax import lax
 
@@ -61,6 +60,7 @@ from .geometry import HalfMeshJacobian, RealSpaceGeometry, sqrt_s_half_mesh
 from .transforms import (
     SpectralForce,
     fourier_to_real,
+    register_pytree_dataclass as _register,
     symforce_split,
     tomnspa,
     tomnsps,
@@ -92,12 +92,6 @@ _LAMBDA_FORCE_PDAMP = 0.05
 def _einsum(expr: str, *operands: Array) -> Array:
     """Einsum with HIGHEST precision (parity with the legacy kernels)."""
     return jnp.einsum(expr, *operands, precision=lax.Precision.HIGHEST)
-
-
-def _register(cls):
-    """Register a result dataclass as a JAX pytree (all fields are leaves)."""
-    names = [f.name for f in dataclass_fields(cls)]
-    return jax.tree_util.register_dataclass(cls, data_fields=names, meta_fields=[])
 
 
 # ---------------------------------------------------------------------------

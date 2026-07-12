@@ -80,7 +80,7 @@ from jax.flatten_util import ravel_pytree
 from solvax import gcrot as _solvax_gcrot
 from solvax import gmres as _solvax_gmres
 
-from .fields import energies_and_force_norms, magnetic_fields, metric_elements
+from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
 from .geometry import half_mesh_jacobian
 from .input import VmecInput
@@ -98,7 +98,11 @@ from .solver import (
 )
 from .fields import constraint_scaling
 from .forces import mhd_forces, spectral_mhd_forces
-from .transforms import physical_to_internal_scale
+from .statephysics import _field_chain as _field_chain_shared
+from .transforms import (
+    physical_to_internal_scale,
+    register_pytree_dataclass as _register,
+)
 
 __all__ = [
     "ImplicitParams", "ImplicitConfig", "ImplicitSolution",
@@ -111,13 +115,6 @@ __all__ = [
 Array = Any
 
 _STATE_FIELDS = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
-
-
-def _register(cls, *, meta: tuple[str, ...] = ()):
-    names = [f.name for f in dataclasses.fields(cls) if f.name not in meta]
-    return jax.tree_util.register_dataclass(
-        cls, data_fields=names, meta_fields=list(meta)
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -883,29 +880,13 @@ def adjoint_matvec(cfg: ImplicitConfig, params: ImplicitParams,
 # ---------------------------------------------------------------------------
 
 
-@jax.jit
-def _field_chain(state: SpectralState, rt: SolverRuntime):
-    # jitted for the same reason as the implicit residual (see ``residual_fn``):
-    # the derived-quantity objectives (:func:`mhd_energy`, :func:`aspect_ratio`,
-    # ...) all route through this geometry->fields->energies pipeline, so
-    # compiling it once as a reusable sub-computation cuts the enclosing
-    # ``jax.grad``/``jacrev`` compile working set (R16/R17.2 memory profiling).
-    setup = rt.setup
-    s = setup.s_full
-    _, geometry = _geometry(state, rt)
-    jacobian = half_mesh_jacobian(geometry, s=s)
-    metrics = metric_elements(geometry, s=s)
-    fields = magnetic_fields(
-        geometry=geometry, jacobian=jacobian, metrics=metrics, trig=rt.trig,
-        s=s, phips=setup.phips, phipf=setup.phipf, chips=setup.chips,
-        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
-        ncurr=setup.ncurr, enclosed_current=setup.icurv,
-    )
-    energies = energies_and_force_norms(
-        jacobian=jacobian, metrics=metrics, fields=fields, trig=rt.trig,
-        s=s, signgs=setup.signgs,
-    )
-    return geometry, jacobian, metrics, fields, energies
+# The shared geometry->fields->energies pipeline (statephysics.py), jitted
+# here for the same reason as the implicit residual (see ``residual_fn``):
+# the derived-quantity objectives (:func:`mhd_energy`, :func:`aspect_ratio`,
+# ...) all route through it, so compiling it once as a reusable
+# sub-computation cuts the enclosing ``jax.grad``/``jacrev`` compile working
+# set (R16/R17.2 memory profiling).
+_field_chain = jax.jit(_field_chain_shared)
 
 
 def mhd_energy(state: SpectralState, rt: SolverRuntime) -> tuple[Array, Array]:

@@ -57,10 +57,8 @@ Units follow simsopt/the spec: ``ne`` [1/m^3], ``Te/Ti`` [eV], ``G/I/R``
 
 Note (spec section 6.1b): the spec's stated decision was to hoist
 ``_field_chain``/``_iotas_half``/``_half_grid``/``_interp_half_grid`` into a
-shared ``core/_state_diag.py``; because ``core/optimize.py`` is frozen while
-this module lands, we take the spec's stated alternative and import the
-private helpers from :mod:`vmec_jax.core.optimize` directly (no import cycle:
-``optimize`` does not import this module).
+shared module; since R26a they live in :mod:`vmec_jax.core.statephysics`
+(``optimize`` re-exports them for backward compatibility).
 """
 
 from __future__ import annotations
@@ -77,7 +75,9 @@ import jax.numpy as jnp
 
 from .fields import surface_currents
 from .input import VmecInput
-from .optimize import (
+from .profiles import MU0
+from .solver import SolverRuntime, SpectralState
+from .statephysics import (
     _as_1d,
     _field_chain,
     _half_grid,
@@ -85,8 +85,6 @@ from .optimize import (
     _iotas_half,
     _mode_matrix,
 )
-from .profiles import MU0
-from .solver import SolverRuntime, SpectralState
 from .wout import read_wout
 
 __all__ = [

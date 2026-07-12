@@ -74,6 +74,7 @@ import jax.numpy as jnp
 from .fields import magnetic_fields, metric_elements, surface_currents
 from .geometry import half_mesh_jacobian
 from .solver import SolverRuntime, SpectralState, _geometry
+from .statephysics import _as_1d
 from .transforms import physical_to_internal_scale
 
 __all__ = [
@@ -88,14 +89,6 @@ Array = Any
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
-
-
-def _as_1d(values, dtype=np.float64) -> jnp.ndarray:
-    try:
-        seq = list(values)  # type: ignore[arg-type]
-    except TypeError:
-        seq = [values]
-    return jnp.asarray(np.asarray(seq, dtype=dtype))
 
 
 def _pad_spectrum_axis(hat: jnp.ndarray, axis: int, n_fine: int) -> jnp.ndarray:

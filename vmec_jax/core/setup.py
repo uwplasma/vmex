@@ -50,12 +50,11 @@ Ported from the parity-proven legacy implementation
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields as dataclass_fields
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from . import profiles as prof
@@ -63,7 +62,10 @@ from .fourier import ModeTable, Resolution, TrigTables, mode_table, trig_tables
 from .geometry import RealSpaceGeometry, apply_lambda_axis_closure, real_space_geometry
 from .input import VmecInput
 from .residuals import m1_constrained_to_physical, m1_physical_to_constrained
-from .transforms import odd_m_sqrt_s_scaling, physical_to_internal_scale
+from .transforms import (
+    odd_m_sqrt_s_scaling, physical_to_internal_scale,
+    register_pytree_dataclass as _register,
+)
 
 __all__ = [
     "RadialGrids",
@@ -82,14 +84,6 @@ Array = Any
 
 #: guess_axis.f ``limpts``: grid points per direction in the axis scan.
 GUESS_AXIS_GRID_POINTS = 61
-
-
-def _register(cls, *, meta: tuple[str, ...] = ()):
-    """Register a result dataclass as a JAX pytree (``meta`` fields static)."""
-    names = [f.name for f in dataclass_fields(cls) if f.name not in meta]
-    return jax.tree_util.register_dataclass(
-        cls, data_fields=names, meta_fields=list(meta)
-    )
 
 
 # ---------------------------------------------------------------------------

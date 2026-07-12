@@ -16,6 +16,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``step``            Richardson stepping + restart control (evolve.f, restart.f)
 - ``setup``           radial profiles + initial guess (profil1d/3d.f, readin.f)
 - ``solver``          single-grid fixed-boundary solve loop (funct3d.f, eqsolve.f)
+- ``statephysics``    shared state-physics primitives (_field_chain, half-mesh iota/sampling)
 - ``implicit``        implicit differentiation of the equilibrium (custom VJP + adjoint GMRES)
 - ``stability``       differentiable ideal-MHD stability (infinite-n ballooning; COBRA port)
 - ``freeboundary_diff`` differentiable free-boundary residual via virtual casing (R15.3/R19)
