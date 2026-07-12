@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [a, b, c]
+        shard: [a, b, c, d]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -111,10 +111,14 @@ jobs:
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
-      # Three shards keep each under the 9-min budget as the suite grows:
+      # Four shards keep each under the 10-min budget: the R26 physics-objective
+      # modules each trigger distinct, memory-heavy XLA compiles, and running
+      # too many in one shard thrashes the 4-vCPU / 16 GB runner under xdist
+      # (measured: 6 objective files = 10:16 on CI vs 2:39 locally).  So they
+      # are split across two shards:
       #   a = heaviest solver-golden modules;
-      #   b = the physics-objective modules (bootstrap/stability/omnigenity/
-      #       turbulence/digests/optimize) added in R26;
+      #   b = omnigenity + turbulence + golden_digests;
+      #   d = optimize + bootstrap + stability;
       #   c = everything else (except the implicit + examples jobs).
       # Together they cover the whole non-gradient, non-example suite once.
       - name: Run parity shard ${{ matrix.shard }} with coverage
@@ -127,18 +131,20 @@ jobs:
                    tests/test_freeboundary.py \
                    tests/test_cli_freeboundary.py \
                    tests/test_solver_end_to_end.py"
-          B_FILES="tests/test_bootstrap.py \
-                   tests/test_stability.py \
-                   tests/test_omnigenity.py \
+          B_FILES="tests/test_omnigenity.py \
                    tests/test_turbulence.py \
-                   tests/test_golden_digests.py \
-                   tests/test_optimize.py"
+                   tests/test_golden_digests.py"
+          D_FILES="tests/test_optimize.py \
+                   tests/test_bootstrap.py \
+                   tests/test_stability.py"
           if [ "${{ matrix.shard }}" = "a" ]; then
             pytest -q -n 4 $A_FILES --durations=15 --cov=vmec_jax --cov-report=term
           elif [ "${{ matrix.shard }}" = "b" ]; then
             pytest -q -n 4 $B_FILES --durations=15 --cov=vmec_jax --cov-report=term
+          elif [ "${{ matrix.shard }}" = "d" ]; then
+            pytest -q -n 4 $D_FILES --durations=15 --cov=vmec_jax --cov-report=term
           else
-            IGNORES=$(for f in $A_FILES $B_FILES; do echo "--ignore=$f"; done)
+            IGNORES=$(for f in $A_FILES $B_FILES $D_FILES; do echo "--ignore=$f"; done)
             pytest -q -n 4 tests \
               --ignore=tests/test_implicit_grad.py \
               --ignore=tests/test_examples.py \
@@ -263,7 +269,7 @@ jobs:
 
       - name: Combine shards and enforce the gate
         run: |
-          coverage combine coverage.parity-a coverage.parity-b coverage.parity-c coverage.gradient coverage.examples
+          coverage combine coverage.parity-a coverage.parity-b coverage.parity-c coverage.parity-d coverage.gradient coverage.examples
           coverage report --fail-under=95
 
   cli-smoke:
