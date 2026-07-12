@@ -1719,7 +1719,9 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
       attempt from that midpoint also exhausts 1,000 iterations; bisecting again to 0.81875%
       converges in 746 iterations and releases at achieved beta 0.8333%. Accepted increments have
       collapsed to `6.25e-5`, so the matrix-free path is not viable to extrapolate to 1--50%.
-      Retain a coarse radial/channel Schur correction only if it beats the exact 0.825% barrier.
+      A residual-weighted radial/channel exact-JVP coarse Schur correction fails the exact 0.825%
+      barrier at `1.229e-8/8.12e-10/1.219e-8` after 1,000 iterations, worse than the baseline.
+      It is removed. Any future preconditioner must retain radial, channel, and Fourier coupling.
       The previous block-preconditioner
       requirement was premature: use the staged widths 80/120/160 and continue through a refined
       ladder to 1%. Implement a larger block/Schur method only if these simpler settings reach

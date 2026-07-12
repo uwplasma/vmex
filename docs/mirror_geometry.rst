@@ -189,8 +189,11 @@ releases at achieved beta 0.8272%, selecting target-beta increments of
 from that midpoint also exhausts 1,000 iterations. Bisecting again to 0.81875%
 converges in 746 iterations and releases at achieved beta 0.8333%. Because the
 accepted increment has collapsed to ``6.25e-5``, the matrix-free path is not
-extrapolated to 1--50%; an opt-in coarse radial/channel Schur correction must
-beat the exact 0.825% barrier before it is retained.
+extrapolated to 1--50%. A residual-weighted radial/channel exact-JVP coarse
+Schur correction reaches only
+``(1.229e-8, 8.12e-10, 1.219e-8)`` after 1,000 iterations on the exact 0.825%
+barrier, worse than the baseline, and is removed. A future preconditioner must
+retain radial, channel, and Fourier coupling.
 The refined continuation therefore stages widths 80, 120, and 160; a coupled
 block or Schur preconditioner is deferred until these simpler bases encounter
 a new measured barrier.

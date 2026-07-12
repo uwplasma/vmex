@@ -36,6 +36,15 @@
     {"target_beta": 0.0072, "gmres_restart": 120, "gmres_max_restarts": 3, "converged_by_578_seconds": false},
     {"target_beta": 0.0072, "gmres_restart": 160, "gmres_max_restarts": 3, "converged_after_171": true, "corrector_residuals": [9.732848575886954e-9, 8.622680103392719e-10, 9.901270687558404e-9], "wall_seconds": 277.87}
   ],
+  "coarse_block_screen": {
+    "from_target_beta": 0.008125,
+    "target_beta": 0.00825,
+    "basis": "residual-weighted channel by radial-surface exact-JVP projection",
+    "gmres_restart": 160,
+    "corrector_iterations": 1000,
+    "residuals": [1.2293782746037529e-8, 8.117753131401212e-10, 1.2189365118429552e-8],
+    "assessment": "rejected: slower and less accurate than the unpreconditioned matrix-free corrector"
+  },
   "rejected_step_examples": [
     {"from_target_beta": 0.005, "target_beta": 0.0055, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [2.1482004262961658e-8, 1.547161233909098e-9, 7.690856349249837e-9]},
     {"from_target_beta": 0.005, "target_beta": 0.00525, "lambda_row_scale": 0.01, "corrector_iterations": 1000, "residuals": [1.9660782267945982e-8, 1.5766451610779146e-9, 7.310534559762974e-9]},
@@ -68,5 +77,5 @@
     "lcfs_delta_from_target_beta_0p003_max_m": 7.819948555385524e-8,
     "lcfs_delta_from_target_beta_0p003_rms_m": 2.1610656093927775e-8
   },
-  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.833%. The limiting physical components shift between FSQR and FSQL, requiring static then norm-derived lambda scaling. Cadence 20 remains the best globalization screen. At target beta 0.7040625%, increasing total Krylov work at restart 80 does not converge, while expanding the Arnoldi basis to 120 converges in 121 corrector iterations. At target 0.72%, width 120 remains GPU-bound after 578 seconds, while width 160 converges in 171 iterations and releases through NESTOR in 3. Width 160 then accepts targets through 0.8%. Direct steps to 0.825% fail after 1,000 iterations from both 0.8% and 0.8125%; the accepted step collapses first to 1.25e-4 and then 6.25e-5, with the 0.81875% midpoint requiring 746 iterations. This matrix-free path is again too expensive to extrapolate to 1--50%; the coarse radial/channel Schur experiment must beat the exact 0.825% barrier to be retained."
+  "assessment": "Equation balancing converts the isolated 0.35% result into a genuine adaptive free-boundary branch through achieved beta 0.833%. The limiting physical components shift between FSQR and FSQL, requiring static then norm-derived lambda scaling. Cadence 20 remains the best globalization screen. At target beta 0.7040625%, increasing total Krylov work at restart 80 does not converge, while expanding the Arnoldi basis to 120 converges in 121 corrector iterations. At target 0.72%, width 120 remains GPU-bound after 578 seconds, while width 160 converges in 171 iterations and releases through NESTOR in 3. Width 160 then accepts targets through 0.8%. Direct steps to 0.825% fail after 1,000 iterations from both 0.8% and 0.8125%; the accepted step collapses first to 1.25e-4 and then 6.25e-5, with the 0.81875% midpoint requiring 746 iterations. A residual-weighted radial/channel coarse Schur correction is worse at the exact barrier and is removed. This matrix-free path is too expensive to extrapolate to 1--50%; a future preconditioner must retain radial, channel, and Fourier coupling rather than applying only a coarse radial/channel projection."
 }
