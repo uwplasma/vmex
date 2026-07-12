@@ -77,6 +77,7 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
+from solvax import gcrot as _solvax_gcrot
 from solvax import gmres as _solvax_gmres
 
 from .fields import energies_and_force_norms, magnetic_fields, metric_elements
@@ -151,8 +152,23 @@ _register(ImplicitParams)
 
 
 def params_from_input(inp: VmecInput) -> ImplicitParams:
-    """Extract the differentiable parameters of an input as a pytree."""
-    arr = lambda a: jnp.asarray(np.asarray(a, dtype=np.float64))  # noqa: E731
+    """Extract the differentiable parameters of an input as a pytree.
+
+    On an accelerator box the pytree is *committed* to the CPU
+    (:func:`vmec_jax.core.device.resolve_implicit_device`): every eager op of
+    a ``jax.grad``/``jax.jacrev`` over :func:`run` then executes there, which
+    is where the launch-bound implicit adjoint is fastest — measured 57 s
+    (GPU) vs seconds (CPU) for one solovev ``value_and_grad`` (plan.md R24).
+    A user ``JAX_PLATFORMS`` pin or an already-CPU backend stands the pin
+    down; ``optimize.least_squares`` applies the same rule to its dof vector.
+    """
+    from .device import resolve_implicit_device
+
+    dev = resolve_implicit_device(None, None)
+    if dev is None:
+        arr = lambda a: jnp.asarray(np.asarray(a, dtype=np.float64))  # noqa: E731
+    else:
+        arr = lambda a: jax.device_put(np.asarray(a, dtype=np.float64), dev)  # noqa: E731
     return ImplicitParams(
         rbc=arr(inp.rbc), rbs=arr(inp.rbs), zbc=arr(inp.zbc), zbs=arr(inp.zbs),
         phiedge=arr(inp.phiedge), pres_scale=arr(inp.pres_scale),
@@ -633,8 +649,23 @@ def _dof_mask(x_star: SpectralState, rt: SolverRuntime,
 
 _HOT_CACHE = weakref.WeakKeyDictionary()  # cfg -> last converged SpectralState
 
+# cfg -> (params-bytes key, SolveResult): one-entry memo of the LAST solve.
+# scipy trust-region drivers evaluate jac(x) at exactly the x that fun(x)
+# just converged (DESC's ``_update_equilibrium``/``f_where_x`` pattern), so
+# this removes one full equilibrium solve per accepted iterate (plan R25.1).
+_LAST_SOLVE = weakref.WeakKeyDictionary()
+
+
+def _params_key(params: ImplicitParams) -> bytes:
+    return b"".join(np.asarray(leaf, dtype=np.float64).tobytes()
+                    for leaf in jax.tree.leaves(params))
+
 
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
+    key = _params_key(params)
+    hit = _LAST_SOLVE.get(cfg)
+    if hit is not None and hit[0] == key:
+        return hit[1]
     inp2 = input_with_params(cfg.inp, params)
     seed = _HOT_CACHE.get(cfg) if cfg.hot_restart else None
     if cfg.multigrid:
@@ -661,6 +692,7 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
         result = run(None)  # a bad hot seed must not fail the trial
     if cfg.hot_restart and bool(result.converged):
         _HOT_CACHE[cfg] = result.state
+    _LAST_SOLVE[cfg] = (key, result)
     return result
 
 
@@ -735,6 +767,40 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig):
     sol = _solvax_gmres(
         matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
         restart=cfg.adjoint_restart, max_restarts=cfg.adjoint_maxiter,
+    )
+    return unravel(sol.x), sol
+
+
+# Recycle-space width for _recycled_solve (plan R25.3).  GCROT keeps k
+# deflation directions in a fixed-shape (n, k) pair, so k trades warm-start
+# overhead (k re-orthonormalization matvecs per solve) against deflation
+# depth; 10 matches the solvax default and the GCRO-DR literature.
+_RECYCLE_K = 10
+
+
+def _recycled_solve(A, b, cfg: ImplicitConfig, recycle):
+    """Linearized solve via :func:`solvax.gcrot` with subspace recycling.
+
+    Same operator wrapping, tolerance (``rtol = adjoint_tol``, ``atol = 0``),
+    cycle size and restart budget as :func:`_adjoint_solve`; check
+    ``sol.converged`` — a warm recycle pair changes the iteration path, and
+    a solve that exhausts ``adjoint_maxiter`` returns whatever residual it
+    reached.  ``recycle`` is a ``(C, U)`` pair of shape ``(n, _RECYCLE_K)``
+    (an all-zero pair degenerates to a cold start); the updated pair is
+    returned on ``sol.recycle`` so callers can thread it through a sequence
+    of solves sharing (or slowly varying) the operator — the plan R25.3
+    per-dof implicit-Jacobian loop (opt-in via
+    ``least_squares(..., recycle=True)``; see the measured caveat there).
+    """
+    b_flat, unravel = ravel_pytree(b)
+
+    def matvec(v):
+        return ravel_pytree(A(unravel(v)))[0]
+
+    sol = _solvax_gcrot(
+        matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
+        m=cfg.adjoint_restart, k=_RECYCLE_K,
+        max_restarts=cfg.adjoint_maxiter, recycle=recycle,
     )
     return unravel(sol.x), sol
 

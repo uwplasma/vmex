@@ -295,6 +295,12 @@ docs tutorial (R14.3). Target set:
   example smoke-passes in CI; each maps to a docs tutorial.
 
 **R14. Complete the documentation (full theory + algorithms + tutorials, not an overview).**
+  **(R14 DONE 2026-07-12, commit 8681e25d.)** R14.1 theory complete: +536 lines across
+  theory/equations/algorithms/architecture — energy functional + Hirshman-Whitson moment method,
+  parities/lasym, metric→|B| pipeline, force kernels + spectral condensation, 1D preconditioner
+  derivation + NEW 2D block-preconditioner section, NESTOR Green's-function formulation,
+  virtual-casing free bdy, full IFT/adjoint math with the O(1)-memory argument, device-policy section.
+  Every :mod:/:func: ref verified; sphinx -W green. R14.2 reference already substantial; R14.3 below.
   **(R14.3 DONE 2026-07-11.)** `docs/tutorials.rst` rewritten from a "coming soon" stub into a real
   gallery: every R13 example (`literalinclude` so the page stays in sync with the tested code) grouped
   by theme — getting started (fixed run, plot+Boozer, JSON), profiles & finite-beta, hot restart,
@@ -553,6 +559,118 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
      stray `vmec_jax` identifiers** remain except the intentional compat shim. Verify on a fresh clone.
   Gate: fresh clone installs as `vmex`, CLI/docs/CI all green, no stray identifiers, PyPI `vmex`
   published; then proceed to R9 release under the VMEX name.
+
+**R24. Full production profiling (CPU + GPU) + runtime/memory/simplicity pass (user 2026-07-12).**
+  Harness: `benchmarks/profile_production.py` — five production workflows (fixed ns=201, multigrid
+  51/101/201, NESTOR free boundary, implicit value_and_grad, least_squares opt step), each reporting
+  cold (compile) vs warm wall, iterations, ms/iter, peak RSS, and GPU device memory. Run with
+  `JAX_PLATFORMS=cpu` for the CPU profile; plain on a GPU box for the GPU profile.
+  **Finding #1 (2026-07-12, HIGH):** on a GPU box the QA/QH/QP optimization examples ran the hot loop
+  on the GPU by default and took HOURS per stage vs MINUTES pinned to `JAX_PLATFORMS=cpu` (office 2x
+  A4000: capped QH still in stage 2 after 100+ min on GPU; QA stage 1 in ~minutes on CPU). The
+  forward-solve policy (`device.recommended_device`, 100k iteration-work threshold) and the implicit
+  pin (`resolve_implicit_device` → CPU) exist, but something in the `least_squares(jac="implicit")`
+  hot path still lands on the accelerator — diagnose with the GPU-vs-CPU profile pair and either fix
+  the placement or make the optimizer pin its whole session to the recommended backend. Also: JAX had
+  preallocated 13.3 GB VRAM (default 75%) — consider XLA_PYTHON_CLIENT_PREALLOCATE=false guidance.
+  **Finding #2:** `opt_step` (2-nfev max_mode-1 least_squares, minimal_seed_nfp2) warm ~63 s / peak
+  RSS ~6 GB on a contended local CPU — the heaviest per-call production path; profile where the time
+  goes (per-dof implicit JVP solves vs forward solves vs trf overhead) and cut it.
+  **CPU profile (local M-series, idle, post-R25.1, 2026-07-12):** fixed ns=201 warm 5.5 s
+  (4.3 ms/iter), multigrid 7.8 s, implicit_grad warm 17.3 s (cold 59.9 — compile is 42 s, an R26c
+  target), opt_step warm 88.8 s (the R25 baseline number on idle hardware). **CPU beats the A4000 GPU
+  on every case even at ns=201** (GPU: 6.9/9.3/27.8/151 s) — on fast desktop CPUs the accelerator adds
+  nothing at production sizes; the device policy's GPU wins were vs the office box's slower cores.
+  **Measured (office 2x A4000, CPU contended by QA/QP):** before-fix GPU warm — fixed ns=201 6.9 s
+  (5.4 ms/iter), multigrid 9.3 s, free-bdy 8.0 s (13.9 ms/iter) → forward solves ARE GPU-competitive at
+  ns=201; implicit_grad 57 s, opt_step 151 s → gradients pathological on GPU. **After the params-pin fix
+  (9f239620): implicit_grad 57→27.8 s (2×+, on contended cores; more when idle). opt_step unchanged
+  (152 s) — its dof vector was already pinned; the remaining cost is ALGORITHMIC:** scipy trf's fun(x0)
+  + jac(x0) each trigger a separate solve_implicit at the same x, and least_squares re-solves the final
+  equilibrium via solve_equilibrium for the .equilibrium attribute (no hot restart). Next levers: share
+  the frozen solve between fun/jac at the same x (hot-restart makes the 2nd cheap but not free), reuse
+  the last trial state for result.equilibrium, and re-measure. CPU profile still pending (local bench
+  occupies the box).
+
+**R26. FINAL PRE-VMEX SWEEP (user 2026-07-12; the last content pass — after R24/R25 conclude, before
+R9 release and the VMEX rename R21).** Ten items:
+  a. **Trim + simplify the code** — one more dead-code/duplication/altitude sweep over vmec_jax/core.
+  b. **Port more functionality to SOLVAX** — anything generic-solver-shaped still in vmec_jax
+     (candidates: the R25.2 block-tridiagonal Jacobian machinery, chunk_map, adjoint GMRES wrappers)
+     moves to SOLVAX with a release + import back.
+  c. **Performance:** (i) COLD STARTS — cut first-call JIT wall (compile-cache persistence across
+     processes, smaller graphs, jit-factoring); (ii) FREE BOUNDARY with and without mgrid, with and
+     without NESTOR (direct-coil lane) — profile + tune both.
+  d. **Faster optimizations/gradients** — continue past the R25 gate (block-tridiag amortization,
+     recycling, perturbation warm starts all landed and measured together).
+  e. **Memory reduction with DEFAULT controls** — good defaults, no advanced user knobs required.
+  f. **README example: free boundary from ESSOS coils** — Landreman-Paul QA with increasing pressure,
+     vol-avg beta = 0%, 1%, 2%, 3% (needs a coil set reproducing the LP QA boundary).
+  g. **README: QA (nfp 2) + QH (nfp 4) optimization with SELF-CONSISTENT BOOTSTRAP CURRENT**,
+     reproducing arXiv:2205.02914 (Landreman-Buller-Drevlak) against the Zenodo data in
+     /Users/rogerio/local/20220708-01-zenodo_for_QS_optimization_with_self_consistent_bootstrap_current
+     (calculations/ + configurations/). Requires the **Redl (2021) bootstrap formula in vmec_jax,
+     DIFFERENTIABLE**, + a loop iterating the current profile to self-consistency with the equilibrium.
+  h. **Literature/code deep dive — DONE + USER-APPROVED SCOPE (2026-07-12).** Proposal in
+     notes_r26h_research_proposal.md. User approved for implementation (in this order, respecting
+     file-conflict windows):
+       h1. **Stability objectives**: infinite-n ballooning (JAX COBRA port, batched 1D eigh; blueprint
+           arXiv:2302.07673) + differentiable Mercier/magnetic-well optimization terms. NEW module
+           core/stability.py + tests; no conflicts — START FIRST.
+       h2. **General omnigenity residual** (Dudt arXiv:2305.08026) + constructed-QI targets (Goodman
+           arXiv:2211.09829), reusing the in-tree Boozer transform — fixes the documented "QI not
+           precise" weakness. Touches optimize.py — AFTER R25.3 merges.
+       h3. **Single-stage plasma–coil optimization with exact gradients**, using ESSOS from
+           github.com/uwplasma/ESSOS for the coil side (differentiable Biot-Savart already in-tree via
+           CoilSet.from_essos) + virtual casing + implicit diff composed end-to-end.
+       h4. **Turbulence proxies from spectrax-gk (github.com/uwplasma/spectrax-gk)** — its available
+           LINEAR, NONLINEAR and QUASILINEAR proxies wired as optimization objectives on vmec_jax
+           geometry.
+     NOT selected: bounce-averaged eps_eff/Gamma_c module (deferred).
+  i. **Docs upgrade** — deeper algorithms/performance/differentiability/equations explanations, more
+     engaging with plots; better tutorials/examples/use cases; user-friendly.
+  j. **Release hygiene:** repo <= 10 MB; coverage >= 95% with SIMPLE, CONCISE tests in a SMALL number
+     of files covering every functionality; future-proof; literature-anchored; real physics + numerical
+     testing; a VMEC2000 parity/accuracy check that does NOT require storing large wout files (scalar
+     digests of golden quantities); then release v0.1.0 (R9) with all of it.
+
+**R25. Optimization wall-time: multi-hour → under one hour (user 2026-07-12; DO BEFORE the VMEX
+rename R21).** Same modes and resolution — the win must come from a more efficient/performant
+GRADIENT, not from shrinking the problem. Ground it in the literature (papers, preprints, reports,
+docs and source of DESC / SIMSOPT / VMEC++ / adjoint-stellarator work) and pick the best fast,
+accurate gradient strategy. Candidate directions to evaluate against the measured R24 profile
+(opt_step cost is algorithmic — one solve_implicit per fun(x) AND per jac(x), one GMRES per dof per
+Jacobian, redundant final solve_equilibrium):
+  1. Reuse/share solves: one frozen solve per trust-region iterate serving both fun and jac; reuse
+     the last trial state for result.equilibrium; deeper hot restarts across trials.
+  2. Krylov recycling across Jacobian evals (SOLVAX gcrot — nearby systems share spectrum) and/or
+     block-GMRES over all dof right-hand-sides at once instead of one GMRES per dof.
+  3. Quasi-Newton Jacobian recycling: Broyden secant updates between exact implicit Jacobians
+     (recompute exactly only every k-th iterate or on trust-region step rejection).
+  4. trf internals: LSMR with a Jacobian LinearOperator built from JVP/VJP closures (no dense J
+     assembly), scipy tr_solver options.
+  5. Literature scan: DESC chunked-jacfwd + Levenberg-Marquardt practice, SIMSOPT MPI-FD baselines,
+     Landreman-Paul analytic shape-gradient adjoints, one-shot (SAND) simultaneous optimization,
+     VMEC++ perturbation/hot-restart papers.
+  **RESEARCHED (2026-07-12, notes_r25_gradient_research.md — DESC source-verified, papers cited).
+  Ranked implementation order:**
+  1. **Memoize the converged state + perturbation warm start** (DESC `_update_equilibrium`/`f_where_x`
+     pattern): jac(x) never re-solves at the x fun(x) just converged (~20 lines, zero accuracy risk);
+     seed trial solves with the first-order perturbation z-(dF/dz)^-1(dF/dp)dp (arXiv:2203.15927).
+     ~1.5-2x on the solve phase. DO FIRST.
+  2. **Amortized block-tridiagonal factorization of dF/dz**: assemble the radial blocks with 3-colored
+     jax.jvp probes (cost independent of dof count), solvax.block_thomas factor once, backsolve all
+     24-120 dof RHS, keep a 2-3-iter GMRES corrector for exactness. 2-5x on the jac phase; also reuses
+     as forward Newton preconditioner + perturbation seed.
+  3. **GCROT recycle-space carry — LANDED AS OPT-IN, NEGATIVE RESULT (f1fdd509).** Plumbing exact
+     (lax.scan carry, vmap-shared within chunks) but solvax v0.1's FIFO cycle-correction recycle space
+     POISONS later solves (1.7-3.4x more iterations, Jacobian drift 1.6e-2): needs harmonic-Ritz
+     GCRO-DR in SOLVAX (→ R26b item). Default recycle=False keeps the exact path; flip when SOLVAX
+     upgrades.
+  Runner-up Broyden secant (only option that weakens the per-iterate exactness); long-term: one-shot/
+  SAND (~4x one solve for a whole optimization, needs replacing the scipy driver).
+  Gate: a QA/QH-class max_mode-5 campaign (same schedule as R1) completes in <1 h on the office CPU
+  box; gradient accuracy still FD-validated (rel <=1e-4); CI gradient shard green.
 
 **R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
 as a longer refactor).**

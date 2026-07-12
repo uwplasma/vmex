@@ -53,6 +53,48 @@ VMEC represents a surface in cylindrical coordinates using Fourier series:
 ``(ns, K)`` where ``K`` is the number of ``(m,n)`` modes in the main VMEC
 ordering (see :mod:`vmec_jax.core.fourier` for the mode bookkeeping).
 
+Parities and stellarator symmetry (``lasym``)
+---------------------------------------------
+
+A *stellarator-symmetric* equilibrium is invariant under
+:math:`(\theta,\zeta) \to (-\theta,-\zeta)` with :math:`R \to R`,
+:math:`Z \to -Z`. Each field therefore keeps only one Fourier parity:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 30
+
+   * - Field
+     - symmetric (``lasym = F``)
+     - antisymmetric partner (``lasym = T`` only)
+   * - :math:`R`
+     - :math:`\cos(m\theta-n\zeta)` (``rmnc``)
+     - :math:`\sin` (``rmns``)
+   * - :math:`Z`
+     - :math:`\sin(m\theta-n\zeta)` (``zmns``)
+     - :math:`\cos` (``zmnc``)
+   * - :math:`\lambda`
+     - :math:`\sin(m\theta-n\zeta)` (``lmns``)
+     - :math:`\cos` (``lmnc``)
+
+:class:`~vmec_jax.core.solver.SpectralState` always carries all six blocks
+(``R_cos, R_sin, Z_cos, Z_sin, L_cos, L_sin``); in symmetric runs the
+antisymmetric partners are structurally zero and do not evolve. The synthesis
+:func:`~vmec_jax.core.transforms.fourier_to_real` (VMEC ``totzsps`` +
+``totzspa``) handles both parities in one signed-:math:`(m,n)` cos/sin
+packing.
+
+Stellarator symmetry also halves the angular grid: the stored poloidal extent
+is :math:`\theta \in [0,\pi]` (``ntheta2``) for symmetric runs and the full
+:math:`[0, 2\pi)` (``ntheta1``) when ``lasym`` — the ``ntheta3`` property of
+:class:`~vmec_jax.core.fourier.Resolution`. For ``lasym`` runs, the force
+kernels are first split into symmetric/antisymmetric parts on the reduced
+interval (VMEC ``symforce.f``, :func:`~vmec_jax.core.transforms.symforce_split`,
+applied by :func:`~vmec_jax.core.forces.symmetrize_forces`) and each part is
+projected with the matching analysis transform
+(:func:`~vmec_jax.core.transforms.tomnsps` /
+:func:`~vmec_jax.core.transforms.tomnspa`).
+
 Regularity and internal storage
 -------------------------------
 
@@ -160,6 +202,35 @@ Note that :math:`\partial_\zeta \lambda` is w.r.t. the field-period coordinate
 :math:`\zeta`, while the geometry kernel returns
 :math:`\partial_{\phi_{\mathrm{phys}}}\lambda`, so we convert using
 :math:`\partial_\zeta = (1/\mathrm{NFP})\,\partial_{\phi_{\mathrm{phys}}}`.
+
+Covariant components and :math:`|B|`
+------------------------------------
+
+Because :math:`B^s = 0`, lowering the index needs only the angular metric
+block:
+
+.. math::
+
+   B_u = g_{uu} B^u + g_{uv} B^v, \qquad
+   B_v = g_{uv} B^u + g_{vv} B^v,
+
+and the field magnitude follows without ever forming Cartesian components:
+
+.. math::
+
+   |B|^2 = B^u B_u + B^v B_v.
+
+The computation chain per iteration is:
+
+1. :func:`~vmec_jax.core.geometry.real_space_geometry` — synthesize
+   :math:`R, Z, \lambda` and their angular derivatives (even/odd-m planes);
+2. :func:`~vmec_jax.core.geometry.half_mesh_jacobian` — half-mesh
+   :math:`\sqrt{g}` and the :math:`\tau` sign proxy;
+3. :func:`~vmec_jax.core.fields.metric_elements` — half-mesh
+   ``guu, guv, gvv``;
+4. :func:`~vmec_jax.core.fields.magnetic_fields` — ``bsupu/bsupv`` from the
+   flux profiles and :math:`\lambda` derivatives, then ``bsubu/bsubv`` and
+   the total pressure :math:`|B|^2/2 + p` (VMEC ``bsq``).
 
 Energy scalars (``wb`` and ``wp``)
 ----------------------------------

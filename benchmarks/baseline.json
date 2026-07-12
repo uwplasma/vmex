@@ -1,283 +1,288 @@
 {
- "solovev[ns51]": {
-  "ns": 51,
+ "solovev[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 0.31,
-   "peak_rss_mb": 27.9,
+   "wall_s": 1.41,
+   "peak_rss_mb": 30.6,
    "stderr": "",
    "converged": true,
-   "iterations": 388
+   "iterations": 850
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 6.71,
-   "peak_rss_mb": 716.9,
+   "wall_s": 11.51,
+   "peak_rss_mb": 764.3,
    "stderr": "",
    "converged": true,
-   "iterations": 388
+   "iterations": 850
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 3.848,
-   "warm_s": 0.081,
-   "peak_rss_mb": 651.9
+   "cold_inproc_s": 5.936,
+   "warm_s": 0.624,
+   "peak_rss_mb": 652.9
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 0.448,
-   "peak_rss_mb": 66.3,
-   "iterations": 389,
+   "wall_s": 1.445,
+   "peak_rss_mb": 70.0,
+   "iterations": 824,
    "converged": true
   }
  },
- "DSHAPE[input]": {
-  "ns": 128,
+ "DSHAPE[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 1.34,
-   "peak_rss_mb": 32.0,
+   "wall_s": 2.31,
+   "peak_rss_mb": 34.7,
    "stderr": "",
    "converged": true,
-   "iterations": 908
+   "iterations": 1103
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 18.72,
-   "peak_rss_mb": 1487.0,
+   "wall_s": 32.69,
+   "peak_rss_mb": 1506.8,
    "stderr": "",
    "converged": true,
-   "iterations": 908
+   "iterations": 1103
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 13.627,
-   "warm_s": 0.613,
-   "peak_rss_mb": 1291.9
+   "cold_inproc_s": 29.15,
+   "warm_s": 2.37,
+   "peak_rss_mb": 1273.1
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 2.066,
-   "peak_rss_mb": 70.4,
-   "iterations": 871,
+   "wall_s": 5.451,
+   "peak_rss_mb": 73.7,
+   "iterations": 1182,
    "converged": true
   }
  },
- "circular_tokamak[ns51]": {
-  "ns": 51,
+ "circular_tokamak[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 0.26,
-   "peak_rss_mb": 28.1,
+   "wall_s": 2.02,
+   "peak_rss_mb": 31.8,
    "stderr": "",
    "converged": true,
-   "iterations": 459
+   "iterations": 1062
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 9.54,
-   "peak_rss_mb": 1005.9,
+   "wall_s": 22.58,
+   "peak_rss_mb": 1063.2,
    "stderr": "",
    "converged": true,
-   "iterations": 459
+   "iterations": 1062
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 6.147,
-   "warm_s": 0.133,
-   "peak_rss_mb": 879.6
+   "cold_inproc_s": 14.221,
+   "warm_s": 1.627,
+   "peak_rss_mb": 875.8
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 0.772,
-   "peak_rss_mb": 66.7,
-   "iterations": 460,
+   "wall_s": 3.699,
+   "peak_rss_mb": 71.4,
+   "iterations": 1096,
    "converged": true
   }
  },
- "cth_like_fixed_bdy[ns51]": {
-  "ns": 51,
+ "cth_like_fixed_bdy[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 1.16,
-   "peak_rss_mb": 44.4,
+   "wall_s": 13.17,
+   "peak_rss_mb": 93.2,
    "stderr": "",
    "converged": true,
-   "iterations": 542
+   "iterations": 857
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 7.59,
-   "peak_rss_mb": 812.3,
+   "wall_s": 27.96,
+   "peak_rss_mb": 908.3,
    "stderr": "",
    "converged": true,
-   "iterations": 542
+   "iterations": 857
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 5.591,
-   "warm_s": 0.817,
-   "peak_rss_mb": 742.8
+   "cold_inproc_s": 22.585,
+   "warm_s": 9.506,
+   "peak_rss_mb": 795.6
   },
   "vmecpp": {
    "ok": false,
    "converged": false,
-   "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 9:\n\tFATAL ERROR in thread=9. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 2:\n\tFATAL ERROR in thread=2. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
+   "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 7:\n\tFATAL ERROR in thread=7. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 1:\n\tFATAL ERROR in thread=1. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
   }
  },
  "cth_like_fixed_bdy[multigrid]": {
-  "ns": 51,
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 1.09,
-   "peak_rss_mb": 44.7,
+   "wall_s": 10.2,
+   "peak_rss_mb": 91.7,
    "stderr": "",
    "converged": true,
-   "iterations": 430
+   "iterations": 880
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 14.16,
-   "peak_rss_mb": 1234.3,
+   "wall_s": 38.49,
+   "peak_rss_mb": 1811.9,
    "stderr": "",
    "converged": true,
-   "iterations": 430
+   "iterations": 880
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 11.864,
-   "warm_s": 0.69,
-   "peak_rss_mb": 1166.1
+   "cold_inproc_s": 30.676,
+   "warm_s": 7.759,
+   "peak_rss_mb": 1679.2
   },
   "vmecpp": {
    "ok": false,
    "converged": false,
-   "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 1:\n\tFATAL ERROR in thread=1. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 2:\n\tFATAL ERROR in thread=2. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
+   "error": "undary is poorly shaped or if it isn't spectrally condensed enough.Thread 5:\n\tFATAL ERROR in thread=5. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 1:\n\tFATAL ERROR in thread=1. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 2:\n\tFATAL ERROR in thread=2. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.Thread 6:\n\tFATAL ERROR in thread=6. The solver failed during the first iterations. This may happen if the initial boundary is poorly shaped or if it isn't spectrally condensed enough.\n"
   }
  },
- "li383_low_res[ns51]": {
-  "ns": 51,
+ "li383_low_res[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 0.24,
-   "peak_rss_mb": 32.2,
+   "wall_s": 1.06,
+   "peak_rss_mb": 45.7,
    "stderr": "",
    "converged": true,
-   "iterations": 143
+   "iterations": 198
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 5.47,
-   "peak_rss_mb": 791.1,
+   "wall_s": 8.25,
+   "peak_rss_mb": 819.9,
    "stderr": "",
    "converged": true,
-   "iterations": 143
+   "iterations": 198
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 5.053,
-   "warm_s": 0.172,
-   "peak_rss_mb": 771.5
+   "cold_inproc_s": 7.051,
+   "warm_s": 0.686,
+   "peak_rss_mb": 775.0
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 0.175,
-   "peak_rss_mb": 73.8,
-   "iterations": 134,
+   "wall_s": 0.534,
+   "peak_rss_mb": 95.4,
+   "iterations": 227,
    "converged": true
   }
  },
- "LandremanPaul2021_QA_lowres[ns51]": {
-  "ns": 51,
+ "LandremanPaul2021_QA_lowres[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 5.11,
-   "peak_rss_mb": 42.6,
+   "wall_s": 45.01,
+   "peak_rss_mb": 84.5,
    "stderr": "",
    "converged": true,
-   "iterations": 1000
+   "iterations": 2785
   },
   "vmec_jax_cold": {
-   "ok": false,
-   "wall_s": 21.25,
-   "peak_rss_mb": 1399.6,
-   "stderr": "       21.25 real        51.94 user         1.78 sys\n          1467629568  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              125566  page reclaims\n                  40  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n              268387  involuntary context switches\n        505289166334  instructions retired\n        184574516413  cycles elapsed\n          1070696248  peak memory footprint\n",
-   "converged": false,
-   "iterations": 1000
+   "ok": true,
+   "wall_s": 72.26,
+   "peak_rss_mb": 1667.2,
+   "stderr": "",
+   "converged": true,
+   "iterations": 2785
   },
   "vmec_jax_warm": {
-   "ok": false,
-   "error": "Traceback (most recent call last):\n  File \"<string>\", line 24, in <module>\n    t0 = time.time(); run(path); t1 = time.time()\n                      ~~~^^^^^^\n  File \"<string>\", line 21, in run\n    return solve_multigrid(inp)\n  File \"/Users/rogerio/local/vmec_jax/vmec_jax/core/multigrid.py\", line 294, in solve_multigrid\n    _finalize(carry, rt)  # raises the typed error for this stage\n    ~~~~~~~~~^^^^^^^^^^^\n  File \"/Users/rogerio/local/vmec_jax/vmec_jax/core/solver.py\", line 1434, in _finalize\n    raise VmecConvergenceError(\n    ...<3 lines>...\n    )\nvmec_jax.core.errors.VmecConvergenceError: MORE ITERATIONS REQUIRED\n"
+   "ok": true,
+   "converged": true,
+   "cold_inproc_s": 58.114,
+   "warm_s": 42.678,
+   "peak_rss_mb": 1300.9
   },
   "vmecpp": {
-   "ok": false,
-   "converged": false,
-   "error": "Traceback (most recent call last):\n  File \"<string>\", line 6, in <module>\n    out = vmecpp.run(inp)\n  File \"/Users/rogerio/.venvs/vmecpp/lib/python3.13/site-packages/vmecpp/__init__.py\", line 1846, in run\n    cpp_output_quantities = _vmecpp.run(\n        cpp_indata,\n    ...<2 lines>...\n        verbose=_verbose.value,\n    )\nRuntimeError: VMEC++ did not converge\n"
+   "ok": true,
+   "wall_s": 24.679,
+   "peak_rss_mb": 113.9,
+   "iterations": 3261,
+   "converged": true
   }
  },
  "LandremanPaul2021_QA_lowres[multigrid]": {
-  "ns": 51,
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 6.77,
-   "peak_rss_mb": 43.2,
+   "wall_s": 73.66,
+   "peak_rss_mb": 77.7,
    "stderr": "",
    "converged": true,
-   "iterations": 1654
+   "iterations": 4425
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 23.92,
-   "peak_rss_mb": 1461.3,
+   "wall_s": 103.44,
+   "peak_rss_mb": 1604.1,
    "stderr": "",
    "converged": true,
-   "iterations": 1654
+   "iterations": 4426
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 20.677,
-   "warm_s": 7.503,
-   "peak_rss_mb": 1256.3
+   "cold_inproc_s": 87.389,
+   "warm_s": 68.084,
+   "peak_rss_mb": 992.5
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 5.153,
-   "peak_rss_mb": 95.2,
-   "iterations": 1850,
+   "wall_s": 30.908,
+   "peak_rss_mb": 124.0,
+   "iterations": 4523,
    "converged": true
   }
  },
- "LandremanPaul2021_QH_reactorScale_lowres[ns51]": {
-  "ns": 51,
+ "LandremanPaul2021_QH_reactorScale_lowres[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 12.36,
-   "peak_rss_mb": 44.0,
+   "wall_s": 64.79,
+   "peak_rss_mb": 84.6,
    "stderr": "",
    "converged": true,
-   "iterations": 2927
+   "iterations": 5222
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 33.43,
-   "peak_rss_mb": 1461.4,
+   "wall_s": 76.82,
+   "peak_rss_mb": 1964.8,
    "stderr": "",
    "converged": true,
-   "iterations": 2927
+   "iterations": 5238
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 21.604,
-   "warm_s": 11.981,
-   "peak_rss_mb": 1071.3
+   "cold_inproc_s": 78.595,
+   "warm_s": 65.587,
+   "peak_rss_mb": 1092.4
   },
   "vmecpp": {
    "ok": false,
@@ -285,69 +290,69 @@
    "error": "init__.py\", line 1915, in ensure_vmecpp_input\n    vmecpp_input_path = _util.indata_to_json(\n        input_path, output_override=output_file\n    )\n  File \"/Users/rogerio/.venvs/vmecpp/lib/python3.13/site-packages/vmecpp/_util.py\", line 142, in indata_to_json\n    result = subprocess.run(command, check=True)\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.7/Frameworks/Python.framework/Versions/3.13/lib/python3.13/subprocess.py\", line 577, in run\n    raise CalledProcessError(retcode, process.args,\n                             output=stdout, stderr=stderr)\nsubprocess.CalledProcessError: Command '[PosixPath('/Users/rogerio/.venvs/vmecpp/lib/python3.13/site-packages/vmecpp/cpp/third_party/indata2json/indata2json'), 'input.LandremanPaul2021_QH_reactorScale_lowres']' returned non-zero exit status 5.\n"
   }
  },
- "nfp4_QH_warm_start[ns51]": {
-  "ns": 51,
+ "nfp4_QH_warm_start[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 0.4,
-   "peak_rss_mb": 30.2,
+   "wall_s": 1.91,
+   "peak_rss_mb": 38.8,
    "stderr": "",
    "converged": true,
-   "iterations": 502
+   "iterations": 672
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 6.3,
-   "peak_rss_mb": 792.1,
+   "wall_s": 10.86,
+   "peak_rss_mb": 867.1,
    "stderr": "",
    "converged": true,
-   "iterations": 502
+   "iterations": 672
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 5.494,
-   "warm_s": 0.296,
-   "peak_rss_mb": 736.3
+   "cold_inproc_s": 8.194,
+   "warm_s": 1.323,
+   "peak_rss_mb": 759.0
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 0.811,
-   "peak_rss_mb": 70.5,
-   "iterations": 503,
+   "wall_s": 1.353,
+   "peak_rss_mb": 83.8,
+   "iterations": 673,
    "converged": true
   }
  },
  "nfp4_QH_warm_start[multigrid]": {
-  "ns": 51,
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 0.37,
-   "peak_rss_mb": 32.8,
+   "wall_s": 1.89,
+   "peak_rss_mb": 41.8,
    "stderr": "",
    "converged": true,
-   "iterations": 401
+   "iterations": 617
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 16.91,
-   "peak_rss_mb": 1232.2,
+   "wall_s": 29.09,
+   "peak_rss_mb": 1718.5,
    "stderr": "",
    "converged": true,
-   "iterations": 401
+   "iterations": 617
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 14.235,
-   "warm_s": 0.376,
-   "peak_rss_mb": 1202.5
+   "cold_inproc_s": 24.145,
+   "warm_s": 1.438,
+   "peak_rss_mb": 1631.2
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 1.0,
-   "peak_rss_mb": 71.5,
-   "iterations": 402,
+   "wall_s": 1.563,
+   "peak_rss_mb": 89.7,
+   "iterations": 618,
    "converged": true
   }
  },
@@ -355,16 +360,16 @@
   "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 144.0,
-   "peak_rss_mb": 102.4,
+   "wall_s": 137.34,
+   "peak_rss_mb": 101.6,
    "stderr": "",
    "converged": true,
    "iterations": 2829
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 192.59,
-   "peak_rss_mb": 2815.2,
+   "wall_s": 107.52,
+   "peak_rss_mb": 3424.2,
    "stderr": "",
    "converged": true,
    "iterations": 1681
@@ -372,75 +377,75 @@
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 143.672,
-   "warm_s": 113.989,
-   "peak_rss_mb": 1806.6
+   "cold_inproc_s": 118.707,
+   "warm_s": 76.818,
+   "peak_rss_mb": 2190.6
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 94.544,
-   "peak_rss_mb": 151.9,
+   "wall_s": 72.653,
+   "peak_rss_mb": 217.4,
    "iterations": 5771,
    "converged": true
   }
  },
- "cth_like_free_bdy[ns51]": {
-  "ns": 51,
+ "cth_like_free_bdy[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 2.93,
-   "peak_rss_mb": 74.1,
+   "wall_s": 26.74,
+   "peak_rss_mb": 121.0,
    "stderr": "",
    "converged": true,
-   "iterations": 642
+   "iterations": 1652
   },
   "vmec_jax_cold": {
    "ok": true,
-   "wall_s": 34.6,
-   "peak_rss_mb": 1900.3,
+   "wall_s": 71.26,
+   "peak_rss_mb": 3117.2,
    "stderr": "",
    "converged": true,
-   "iterations": 703
+   "iterations": 1499
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 19.242,
-   "warm_s": 5.106,
-   "peak_rss_mb": 1161.6
+   "cold_inproc_s": 36.029,
+   "warm_s": 24.864,
+   "peak_rss_mb": 1285.7
   },
   "vmecpp": {
    "ok": true,
-   "wall_s": 2.707,
-   "peak_rss_mb": 125.2,
-   "iterations": 636,
+   "wall_s": 6.905,
+   "peak_rss_mb": 178.8,
+   "iterations": 1488,
    "converged": true
   }
  },
- "cth_like_free_bdy_lasym_small[ns51]": {
-  "ns": 51,
+ "cth_like_free_bdy_lasym_small[ns201]": {
+  "ns": 201,
   "vmec2000": {
    "ok": true,
-   "wall_s": 8.44,
-   "peak_rss_mb": 46.6,
+   "wall_s": 227.91,
+   "peak_rss_mb": 93.0,
    "stderr": "",
    "converged": true,
-   "iterations": 1000
+   "iterations": 10000
   },
   "vmec_jax_cold": {
    "ok": false,
-   "wall_s": 57.0,
-   "peak_rss_mb": 2536.3,
-   "stderr": "       57.00 real        88.91 user         5.49 sys\n          2659516416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              461749  page reclaims\n                6552  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                 993  voluntary context switches\n              828577  involuntary context switches\n        826193937703  instructions retired\n        324422871150  cycles elapsed\n          3015838960  peak memory footprint\n",
+   "wall_s": 606.9,
+   "peak_rss_mb": 4155.2,
+   "stderr": "      606.90 real      1177.64 user        49.32 sys\n          4357029888  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n             2531437  page reclaims\n                6855  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                1542  voluntary context switches\n             6439814  involuntary context switches\n       7871595422190  instructions retired\n       4185297740610  cycles elapsed\n          4997714744  peak memory footprint\n",
    "converged": false,
-   "iterations": 1000
+   "iterations": 10000
   },
   "vmec_jax_warm": {
    "ok": true,
    "converged": true,
-   "cold_inproc_s": 34.143,
-   "warm_s": 13.221,
-   "peak_rss_mb": 1686.9
+   "cold_inproc_s": 251.754,
+   "warm_s": 196.318,
+   "peak_rss_mb": 2214.9
   },
   "vmecpp": {
    "ok": false,

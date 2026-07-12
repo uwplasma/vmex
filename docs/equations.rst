@@ -121,16 +121,69 @@ VMEC input profiles. VMEC (and ``vmec_jax``) use pressure in units of
 Energy principle (VMEC formulation)
 -----------------------------------
 
-VMEC solves for a stationary point of the ideal-MHD energy functional in
-straight-field-line coordinates:
+VMEC solves for a stationary point of the ideal-MHD energy functional. In
+physical units,
 
 .. math::
 
-   W = \frac{1}{(2\pi)^2}\int \left(\frac{B^2}{2} + \frac{p}{\gamma-1}\right) dV,
+   W = \int \left(\frac{B^2}{2\mu_0} + \frac{p}{\gamma-1}\right) dV,
 
-where :math:`\gamma` is the ratio of specific heats (VMEC input ``GAMMA``).
-The VMEC fixed-boundary update loop can be viewed as a (preconditioned)
-steepest-descent method that drives the force residuals to zero.
+where :math:`\gamma` is the ratio of specific heats (VMEC input ``GAMMA``;
+``GAMMA = 0`` selects the prescribed-pressure limit). In VMEC's internal
+units (:math:`p` in :math:`\mu_0\,\mathrm{Pa}`, angles normalized by
+:math:`2\pi`) this becomes
+
+.. math::
+
+   W = \frac{1}{(2\pi)^2}\int \left(\frac{B^2}{2} + \frac{p}{\gamma-1}\right) dV.
+
+For fixed boundary and fixed flux profiles, the first variation of :math:`W`
+with respect to a displacement :math:`\boldsymbol{\xi}` of the flux surfaces
+is
+
+.. math::
+
+   \delta W = -\int \left(\mathbf{J}\times\mathbf{B} - \nabla p\right)
+              \cdot \boldsymbol{\xi}\; dV,
+
+so :math:`W` is stationary exactly at ideal-MHD force balance.
+
+The Hirshman–Whitson moment method
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Hirshman & Whitson (1983) discretize this variational problem in *inverse*
+form: the unknowns are the Fourier **moments**
+:math:`R_{mn}(s), Z_{mn}(s), \lambda_{mn}(s)` of the flux-surface geometry,
+not field values on a spatial grid. Varying :math:`W` with respect to each
+moment gives one Euler–Lagrange equation per ``(m,n)`` mode and radial
+surface — the *spectral force residuals*
+
+.. math::
+
+   F_{R,mn}(s) = -\frac{\delta W}{\delta R_{mn}(s)}, \qquad
+   F_{Z,mn}(s) = -\frac{\delta W}{\delta Z_{mn}(s)}, \qquad
+   F_{\lambda,mn}(s) = -\frac{\delta W}{\delta \lambda_{mn}(s)},
+
+and the equilibrium is the root :math:`F = 0`. Practically, the residuals
+are evaluated by synthesizing the geometry on the angular grid
+(:func:`~vmec_jax.core.transforms.fourier_to_real`), forming the real-space
+force kernels (:func:`~vmec_jax.core.forces.mhd_force_kernels`), and
+projecting back onto the Fourier basis with the weighted DFT
+(:func:`~vmec_jax.core.transforms.tomnsps`); the full pipeline is
+:func:`~vmec_jax.core.forces.spectral_mhd_forces`.
+
+The iteration is a preconditioned steepest descent on :math:`W` — a damped
+second-order Richardson ("momentum") scheme
+
+.. math::
+
+   \ddot{\mathbf{x}} + \frac{1}{\tau}\dot{\mathbf{x}} = P^{-1} F(\mathbf{x}),
+
+with :math:`\mathbf{x}` the stacked moments and :math:`P` the preconditioner
+(:mod:`vmec_jax.core.step`; discretization in :doc:`algorithms`). Because
+:math:`F = -\nabla_{\mathbf{x}} W`, every accepted step decreases :math:`W`
+monotonically (up to the momentum transient) and the descent stops only at a
+stationary point of the energy.
 See References [1-3] for the original VMEC formulation.
 
 Flux coordinates and straight-field-line angle
@@ -254,6 +307,47 @@ where :math:`g_{ij}` is the covariant metric and
 :math:`\mathbf{e}_i = \partial_i \mathbf{r}`.
 VMEC stores these as ``bsub*`` in ``wout``.
 
+From metric elements to :math:`|B|`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Since :math:`B^s = 0`, only the angular metric block enters. On the half
+mesh, with the even/odd-m decomposition
+:math:`X = X_{\mathrm{even}} + \sqrt{s}\,X_{\mathrm{odd}}`,
+
+.. math::
+
+   g_{uu} = R_u^2 + Z_u^2, \qquad
+   g_{uv} = R_u R_v + Z_u Z_v, \qquad
+   g_{vv} = R_v^2 + Z_v^2 + R^2
+
+(:func:`~vmec_jax.core.fields.metric_elements`; the :math:`R^2` term is the
+cylindrical toroidal metric at unit
+:math:`d\phi_{\mathrm{phys}}/d\zeta`). Lowering the index and contracting,
+
+.. math::
+
+   B_u = g_{uu} B^u + g_{uv} B^v, \qquad
+   B_v = g_{uv} B^u + g_{vv} B^v,
+
+.. math::
+
+   |B|^2 = B^u B_u + B^v B_v.
+
+The chain — angular derivatives of :math:`(R, Z, \lambda)` from
+:func:`~vmec_jax.core.geometry.real_space_geometry`, half-mesh
+:math:`\sqrt{g}` from :func:`~vmec_jax.core.geometry.half_mesh_jacobian`,
+metric elements, then :math:`B^u, B^v \to B_u, B_v \to |B|^2` — is assembled
+in :func:`~vmec_jax.core.fields.magnetic_fields`, which returns the
+contravariant/covariant components together with the total pressure
+:math:`\mathrm{bsq} = |B|^2/2 + p` and the differential volume
+:math:`vp = \mathrm{signgs}\,\langle\sqrt{g}\rangle`. The ``lamscale``
+normalization of the :math:`\lambda` derivatives is
+:func:`~vmec_jax.core.fields.lambda_scale`
+(``lamscale`` :math:`= \sqrt{h_s \sum_{js} \mathrm{phips}^2}`, ``profil1d.f``),
+and the energy scalars ``wb/wp`` with the force normalizations
+``fnorm/fnorm1/fnormL`` follow in
+:func:`~vmec_jax.core.fields.energies_and_force_norms`.
+
 ``bcovar`` + ``add_fluxes`` (poloidal flux correction)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -374,6 +468,69 @@ forces back to Fourier space. In VMEC2000, these residuals are packaged as
 - :math:`F_R`: radial (R) force balance residual,
 - :math:`F_Z`: vertical (Z) force balance residual,
 - :math:`F_\lambda`: stream-function (lambda) residual.
+
+Real-space force kernels (``forces.f``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each real-space residual is assembled from three kernels in the
+Hirshman–Whitson "A/B/C" form,
+
+.. math::
+
+   F_R = A_R - \partial_\theta B_R + \partial_\zeta C_R, \qquad
+   F_Z = A_Z - \partial_\theta B_Z + \partial_\zeta C_Z,
+
+.. math::
+
+   F_\lambda = -\partial_\theta B_\lambda + \partial_\zeta C_\lambda,
+
+where the angular derivatives are taken **spectrally**: the kernels are
+projected onto the Fourier basis with the derivative trig tables of
+``tomnsps``, so :math:`\partial_\theta \to m` and
+:math:`\partial_\zeta \to n\,\mathrm{NFP}` multiplications. In terms of the
+half-mesh quantities of ``bcovar.f`` — the total pressure
+:math:`\mathrm{bsq} = |B|^2/2 + p`, the interpolated radius :math:`r_{12}`,
+the Jacobian factor :math:`\tau`, and the products
+:math:`\sqrt{g}\,B^uB^u,\ \sqrt{g}\,B^uB^v,\ \sqrt{g}\,B^vB^v` — the
+:math:`A` kernels (VMEC ``armn/azmn``) carry the radial finite difference of
+the magnetic + thermal energy flux plus the toroidal-curvature term
+:math:`-\sqrt{g}\,B^vB^v\,R`; the :math:`B` kernels (``brmn/bzmn``) the
+poloidal-metric couplings; and the :math:`C` kernels (``crmn/czmn``) the
+toroidal-metric couplings. Odd-m planes carry the internal :math:`\sqrt{s}`
+representation and its chain-rule terms (the discrete
+:math:`d\sqrt{s}/ds` factor ``dshalfds = 0.25``). Implemented in
+:func:`~vmec_jax.core.forces.mhd_force_kernels` (R/Z blocks) and
+:func:`~vmec_jax.core.forces.lambda_force_kernels` (the covariant
+:math:`B_u, B_v` lambda-force block of ``bcovar.f``); the full real-space
+pipeline is :func:`~vmec_jax.core.forces.mhd_forces` and the projection to
+spectral residuals is :func:`~vmec_jax.core.forces.spectral_mhd_forces`.
+
+Spectral condensation (``alias.f``, ``tcon``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The angle parameterization of each flux surface has a tangential null space
+(relabeling :math:`\theta` changes no physics). VMEC fixes it by *spectral
+condensation*: a constraint force that pushes the poloidal-angle freedom
+toward the minimal-spectral-width parameterization. The scalar constraint
+kernel is
+
+.. math::
+
+   z_{\mathrm{temp}} = (r_{\mathrm{con}} - r_{\mathrm{con},0})\,r_{\theta,0}
+                     + (z_{\mathrm{con}} - z_{\mathrm{con},0})\,z_{\theta,0},
+
+built from the m-profiled geometry channels ``rcon/zcon`` and their frozen
+references ``rcon0/zcon0``. It is band-limited to
+:math:`m \in [1, \mathrm{mpol}-2]` with the ``faccon(m)`` weights
+(:func:`~vmec_jax.core.forces.faccon`,
+:func:`~vmec_jax.core.forces.alias_constraint_force`), converted back to a
+real-space force contribution
+(:func:`~vmec_jax.core.forces.constraint_force`), and scaled per surface by
+the strength profile :math:`\mathrm{tcon}(s)` computed from the ratio of the
+preconditioner diagonals to the angular force norms
+(:func:`~vmec_jax.core.fields.constraint_scaling`; the ``tcon`` formula is
+given in :doc:`algorithms`). The constraint vanishes at convergence — it
+never shifts the equilibrium, only the angle representation.
 
 These are combined into scalar norms that appear in the VMEC screen output:
 
@@ -529,8 +686,16 @@ Key :mod:`vmec_jax.core` modules that directly implement the equations above
   and the spectral-condensation constraint force (``forces.f``, ``alias.f``).
 - :mod:`vmec_jax.core.residuals` — scalar residuals ``fsqr/fsqz/fsql`` and the
   m=1 constraint (``residue.f90``).
+- :mod:`vmec_jax.core.preconditioner` — 1D radial preconditioner
+  (``precondn.f``, ``scalfor.f``, ``lamcal.f90``).
+- :mod:`vmec_jax.core.preconditioner_2d` — 2D block preconditioner / Newton
+  step (``Hessian/precon2d.f``).
+- :mod:`vmec_jax.core.step` — Richardson update and restart control
+  (``evolve.f``, ``restart.f``).
 - :mod:`vmec_jax.core.solver` — the fixed-boundary iteration loop
   (``funct3d.f``, ``eqsolve.f``).
+- :mod:`vmec_jax.core.implicit` — implicit differentiation of the converged
+  equilibrium (no VMEC2000 counterpart).
 
 References (local)
 ------------------

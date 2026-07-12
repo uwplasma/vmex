@@ -1159,6 +1159,7 @@ def least_squares(
     x0: np.ndarray | None = None,
     jac: str | None = None,
     jac_chunk_size: int | str | None = "auto",
+    recycle: bool = False,
     hot_restart: bool = True,
     use_ess: bool = False,
     ess_alpha: float = 1.2,
@@ -1219,6 +1220,23 @@ def least_squares(
     (~1e-15) across chunk sizes.  It is inert for ``jac=None`` (scipy computes
     the finite-difference Jacobian itself).
 
+    ``recycle`` (plan R25.3, ``jac="implicit"`` only) carries a GCROT
+    deflation pair across the per-dof implicit-Jacobian solves — a
+    ``lax.scan`` over dof chunks (vmapped within a chunk) threads the
+    :func:`solvax.gcrot` recycle space ``(C, U)`` between chunks and, via a
+    Python-side holder, between successive trust-region Jacobian
+    evaluations.  Recycled solves keep the exact ``adjoint_tol`` /
+    ``adjoint_maxiter`` budget of the default path.  **Default False**:
+    measured on the nfp2 minimal-seed max_mode-2 operator (2026-07-11), the
+    solvax v0.1 recycle space (FIFO cycle corrections, not the harmonic
+    Ritz vectors of GCRO-DR) *slows* warm-started columns — e.g. 140 (cold
+    GMRES) -> 236/347/479 iterations at k = 2/5/10 — so columns that then
+    exhaust ``adjoint_maxiter`` return larger residuals.  Enable only after
+    benchmarking per-column iteration counts on your operator.
+    ``recycle=False`` uses the independent per-column :func:`solvax.gmres`
+    path (identical columns across chunk sizes to float64 round-off).
+    Inert for ``jac=None``.
+
     ``hot_restart`` seeds each trial solve from the previous converged state
     (both modes; in implicit mode via the per-config host-solve cache).
     Remaining keywords go to :func:`scipy.optimize.least_squares` (e.g.
@@ -1242,7 +1260,7 @@ def least_squares(
         for mm in modes_schedule:
             result = least_squares(
                 objective_terms, current, max_mode=mm, jac=jac,
-                jac_chunk_size=jac_chunk_size,
+                jac_chunk_size=jac_chunk_size, recycle=recycle,
                 hot_restart=hot_restart, use_ess=use_ess, ess_alpha=ess_alpha,
                 device=device, solve_kwargs=solve_kwargs, verbose=verbose,
                 **scipy_kwargs)
@@ -1258,7 +1276,7 @@ def least_squares(
                 "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
-            jac_chunk_size=jac_chunk_size,
+            jac_chunk_size=jac_chunk_size, recycle=recycle,
             solve_kwargs=dict(solve_kwargs or {}), device=device,
             verbose=verbose, **scipy_kwargs)
     if jac is not None:
@@ -1345,6 +1363,7 @@ def _least_squares_implicit(
     max_mode: int,
     x0: np.ndarray | None,
     jac_chunk_size: int | str | None = "auto",
+    recycle: bool = False,
     solve_kwargs: dict,
     device: Any = None,
     verbose: int = 0,
@@ -1459,17 +1478,16 @@ def _least_squares_implicit(
             "jac_chunk_size must be None, a positive int, or 'auto', "
             f"got {jac_chunk_size!r}")
 
-    def jacobian_rows(x: jnp.ndarray) -> jnp.ndarray:
-        """Exact residual Jacobian by *forward* implicit differentiation.
+    def _jac_parts(x: jnp.ndarray):
+        """Shared per-x setup of the implicit-Jacobian maps.
 
         At the fixed point, ``dz_j = -(dF/dz)^{-1} dF/dp t_j`` per boundary
-        dof tangent ``t_j`` (one batched preconditioned GMRES over all dofs —
-        F's linearization is plain JAX, so forward mode is available even
-        though the solve itself is an opaque custom-VJP callback), then
-        ``J[:, j] = G_z dz_j + G_p t_j`` with ``G`` the residual rows of the
-        assembled state.  Cost: ~one GMRES per dof — far below one forward
-        solve per dof (finite differences) — while exposing the *full*
-        pointwise Gauss-Newton geometry to scipy.
+        dof tangent ``t_j`` (F's linearization is plain JAX, so forward mode
+        is available even though the solve itself is an opaque custom-VJP
+        callback), then ``J[:, j] = G_z dz_j + G_p t_j`` with ``G`` the
+        residual rows of the assembled state.  Returns the linearized
+        operator ``Fz`` plus the per-dof tangent/RHS/column maps shared by
+        both Jacobian variants below.
         """
         params = params_of(x)
         frozen = jax.lax.stop_gradient(imp.solve_implicit(params, cfg))
@@ -1485,18 +1503,97 @@ def _least_squares_implicit(
         def Fz(dz):
             return jax.jvp(lambda z: F(z, params), (z_star,), (dz,))[1]
 
-        def column(tp_pair):
-            tp = dataclasses.replace(zerop, rbc=tp_pair[0], zbs=tp_pair[1])
+        def tangent_of(tp_pair):
+            return dataclasses.replace(zerop, rbc=tp_pair[0], zbs=tp_pair[1])
+
+        def rhs_of(tp):
             b = jax.jvp(lambda prm: F(z_star, prm), (params,), (tp,))[1]
-            dz, _ = imp._adjoint_solve(Fz, jax.tree.map(jnp.negative, b), cfg)
+            return jax.tree.map(jnp.negative, b)
+
+        def column_of(dz, tp):
             return jax.jvp(G, (z_star, params), (P(dz), tp))[1]
+
+        return Fz, tangent_of, rhs_of, column_of
+
+    def jacobian_rows(x: jnp.ndarray) -> jnp.ndarray:
+        """Exact residual Jacobian by *forward* implicit differentiation.
+
+        One batched preconditioned GMRES per boundary dof (see
+        ``_jac_parts``) — far below one forward solve per dof (finite
+        differences) — while exposing the *full* pointwise Gauss-Newton
+        geometry to scipy.  Columns are mathematically independent, so the
+        result is identical across chunk sizes to float64 round-off.
+        """
+        Fz, tangent_of, rhs_of, column_of = _jac_parts(x)
+
+        def column(tp_pair):
+            tp = tangent_of(tp_pair)
+            dz, _ = imp._adjoint_solve(Fz, rhs_of(tp), cfg)
+            return column_of(dz, tp)
 
         cols = chunk_map(column, (tangent_rbc, tangent_zbs), chunk_size=chunk)
         return jnp.transpose(cols)
 
-    jac_jit = jax.jit(jacobian_rows)
+    # R25.3 recycled variant: all 2*nm solves share the operator Fz (and Fz
+    # drifts slowly between accepted trust-region iterates), so a GCROT
+    # deflation pair (C, U) is threaded through a lax.scan over fixed-size
+    # dof chunks — vmapped *within* a chunk with the incoming pair shared
+    # read-only, then advanced from one representative (first) lane — and
+    # returned to the caller, which stashes it between jac_jit calls.  The
+    # dof axis is zero-padded to a whole number of chunks; padded columns
+    # have zero RHS (gcrot converges in zero cycles) and are discarded.
+    n_flat = sum(int(np.prod(s.shape))
+                 for s in jax.tree.leaves(imp._state_struct(cfg)))
+    csize = int(chunk) if chunk else 2 * nm
+    nchunks = -(-(2 * nm) // csize)
+    pad = nchunks * csize - 2 * nm
+
+    def jacobian_rows_recycled(x: jnp.ndarray, C: jnp.ndarray,
+                               U: jnp.ndarray):
+        """``jacobian_rows`` with GCROT recycle carry (plan R25.3).
+
+        Same ``cfg.adjoint_tol`` / ``cfg.adjoint_maxiter`` budget per solve
+        as the default path; the Jacobian matches to solver tolerance *when
+        the solves converge within budget*.  See the ``recycle`` note in
+        :func:`least_squares` for why this is opt-in: the solvax v0.1
+        recycle space measurably slows warm-started columns on the
+        production operator, so budget-capped columns can come back with
+        larger residuals than the GMRES path.
+        """
+        Fz, tangent_of, rhs_of, column_of = _jac_parts(x)
+
+        def column(tp_pair, rec):
+            tp = tangent_of(tp_pair)
+            dz, sol = imp._recycled_solve(Fz, rhs_of(tp), cfg, rec)
+            return column_of(dz, tp), sol.recycle
+
+        def scan_body(carry, tp_chunk):
+            cols_chunk, recs = jax.vmap(
+                column, in_axes=(0, None))(tp_chunk, carry)
+            # Lane 0 is always a real dof (pad < csize): its updated pair
+            # seeds the next chunk / the next Jacobian evaluation.
+            return jax.tree.map(lambda a: a[0], recs), cols_chunk
+
+        def pad_stack(t):
+            t = jnp.concatenate(
+                [t, jnp.zeros((pad,) + t.shape[1:], t.dtype)])
+            return t.reshape((nchunks, csize) + t.shape[1:])
+
+        (C, U), cols = jax.lax.scan(
+            scan_body, (C, U),
+            (pad_stack(tangent_rbc), pad_stack(tangent_zbs)))
+        cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:2 * nm]
+        return jnp.transpose(cols), C, U
+
+    jac_jit = jax.jit(jacobian_rows_recycled if recycle else jacobian_rows)
 
     holder: dict[str, Any] = {"nres": None}
+    if recycle:
+        # An all-zero pair is a cold start (gcrot's warm-start QR masks the
+        # rank-deficient columns out); shapes are static so jac_jit compiles
+        # once and the carried pair never triggers a re-trace.
+        holder["recycle"] = (_place(np.zeros((n_flat, imp._RECYCLE_K))),
+                             _place(np.zeros((n_flat, imp._RECYCLE_K))))
 
     def fun(x: np.ndarray) -> np.ndarray:
         try:
@@ -1516,13 +1613,30 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
+        if recycle:
+            rows, C, U = jac_jit(_place(x), *holder["recycle"])
+            holder["recycle"] = (C, U)  # deflate the next jac evaluation
+            return np.asarray(jax.device_get(rows), dtype=float)
         return np.asarray(jax.device_get(jac_jit(_place(x))), dtype=float)
 
     result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
                                           jac=jac_fn, **scipy_kwargs)
     result.input = unpack_boundary(inp, result.x, max_mode)
     try:
-        result.equilibrium = solve_equilibrium(result.input, **solve_kwargs)
+        # Hot-seed the diagnostic re-solve from the stage's last converged
+        # trial state (plan R25.1): the optimizer's final x was just solved
+        # by the implicit path, so this converges in ~1 sweep instead of
+        # repeating a full cold solve per continuation stage.
+        seed = imp._HOT_CACHE.get(cfg)
+        try:
+            result.equilibrium = solve_equilibrium(
+                result.input, initial_state=seed, **solve_kwargs)
+        except Exception:
+            if seed is None:
+                raise
+            # ns-mismatched seed (different ladder) must not cost the
+            # diagnostic: fall back to the plain cold solve.
+            result.equilibrium = solve_equilibrium(result.input, **solve_kwargs)
     except Exception:  # pragma: no cover - diagnostic attribute only
         result.equilibrium = None
     return result

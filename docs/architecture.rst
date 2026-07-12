@@ -48,6 +48,10 @@ Module map
    * - :mod:`~vmec_jax.core.preconditioner`
      - 1D radial preconditioner, vectorized tridiagonal (Thomas) solve
      - ``precondn.f``, ``scalfor.f``, ``lamcal.f90``, ``tridslv``
+   * - :mod:`~vmec_jax.core.preconditioner_2d`
+     - 2D block preconditioner: matrix-free Newton step (``jax.jvp``
+       Hessian-vector products + SOLVAX GMRES)
+     - ``Hessian/precon2d.f`` (jog-free)
    * - :mod:`~vmec_jax.core.step`
      - damped 2nd-order Richardson step, ``dtau`` damping (``ndamp=10``),
        ``irst`` back-off
@@ -69,6 +73,9 @@ Module map
      - free-boundary iteration, ``ivac``/``nvacskip`` cadence, external-field
        protocol
      - ``funct3d.f`` (free-boundary block)
+   * - :mod:`~vmec_jax.core.freeboundary_diff`
+     - differentiable free-boundary residual via virtual casing
+     - (no VMEC2000 equivalent)
    * - :mod:`~vmec_jax.core.mgrid`
      - mgrid netCDF read/write, differentiable interpolated field
      - MAKEGRID file format, ``mgrid_mod.f90``
@@ -136,6 +143,45 @@ Two lanes, one physics
 
 Both lanes call identical physics kernels; a regression test asserts
 per-block state agreement to machine precision.
+
+Device policy (CPU/GPU)
+-----------------------
+
+:mod:`vmec_jax.core.device` implements a *measured* CPU/GPU placement policy
+for the solve lanes (calibrated against ``benchmarks/gpu_baseline.json``).
+The cost driver of one iteration is the ``totzsps/tomnsps`` batched-matmul
+work, proxied by
+
+.. math::
+
+   w = \mathrm{ns} \times \mathrm{mnmax} \times \mathrm{nznt}
+
+(:func:`~vmec_jax.core.device.iteration_work`). Per-iteration throughput
+favours the GPU at every tested size, but the GPU pays fixed per-solve
+overheads (dispatch/transfer floor plus compile or cache load), so small
+decks finish faster on the CPU. The measured crossover is
+:data:`~vmec_jax.core.device.GPU_MIN_ITERATION_WORK` (``100_000``):
+:func:`~vmec_jax.core.device.recommended_device` returns ``"cpu"`` below it
+and ``"gpu"`` at or above it, per multigrid stage.
+
+:func:`~vmec_jax.core.device.resolve_device` turns this into a concrete
+placement with strict precedence rules: an explicit ``device=`` argument to
+``solve``/``solve_multigrid`` always wins; a user pin via ``JAX_PLATFORMS``
+or ``JAX_PLATFORM_NAME`` makes the automatic policy stand down entirely; and
+the recommendation is applied only when the recommended platform is actually
+available. :func:`~vmec_jax.core.device.device_context` wraps a stage in the
+corresponding ``jax.default_device``.
+
+The optimization path is different:
+:func:`~vmec_jax.core.device.resolve_implicit_device` **always pins the
+implicit-gradient work to the CPU** by default. The ``jac="implicit"``
+Jacobian builds a per-dof vmapped forward-implicit-differentiation graph —
+dozens of preconditioned GMRES solves with inner control flow — whose XLA
+compile time grows with the dof count and whose execution is
+kernel-launch-bound; measured on GPU it is slower than the CPU at every
+optimization size tested, while the forward equilibrium solve inside it is a
+host callback that never touches the accelerator anyway. Explicit
+``device=`` arguments and user platform pins are still honored.
 
 Naming conventions
 ------------------
