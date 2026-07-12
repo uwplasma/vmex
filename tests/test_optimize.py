@@ -408,6 +408,30 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
                                    err_msg=f"chunk={chunk!r}")
 
 
+def test_least_squares_implicit_jac_solver_block(solovev_eq):
+    """The R25.2 block-tridiagonal Jacobian matches the per-dof GMRES one.
+
+    ``jac_solver="block"`` (default) assembles the raw force Jacobian's
+    radial blocks by colored jvp probes, factors once
+    (:func:`solvax.block_thomas_factor`) and backsolves every dof column,
+    then certifies each column with a short warm-started GMRES pass against
+    the same preconditioned system the ``"gmres"`` path solves — so the two
+    Jacobians must agree to the solver tolerance (``adjoint_tol = 1e-6``).
+    """
+    jax.config.update("jax_disable_jit", False)
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    obj = [(opt.aspect_ratio, 4.0, 1.0)]
+    ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                            jac_solver="gmres", max_nfev=1)
+    got = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                            jac_solver="block", max_nfev=1)
+    assert got.jac.shape == ref.jac.shape
+    np.testing.assert_allclose(got.jac, ref.jac, rtol=1e-6, atol=1e-8)
+    with pytest.raises(ValueError, match="jac_solver"):
+        opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                          jac_solver="svd", max_nfev=1)
+
+
 def test_least_squares_max_mode_schedule():
     """Staged max_mode continuation: stages chain through result.input.
 

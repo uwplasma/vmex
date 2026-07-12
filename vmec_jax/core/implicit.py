@@ -747,7 +747,7 @@ def _solve_implicit_fwd(params, cfg):
     return state, (params, state, mask)
 
 
-def _adjoint_solve(A, b, cfg: ImplicitConfig):
+def _adjoint_solve(A, b, cfg: ImplicitConfig, *, x0=None, max_restarts=None):
     """Adjoint linear solve ``(dF/dz)^T lambda = b`` via ``solvax.gmres``.
 
     ``solvax.gmres`` (roadmap R18b shared-solver consolidation) operates on
@@ -758,6 +758,12 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig):
     ``jax.scipy.sparse.linalg.gmres`` call (``rtol = adjoint_tol``, ``atol =
     0``, Arnoldi cycle size ``adjoint_restart``, up to ``adjoint_maxiter``
     restarts), so the adjoint accuracy is unchanged.
+
+    ``x0`` (pytree like ``b``) warm-starts GMRES — solvax checks the initial
+    residual before the first Arnoldi cycle, so a warm start that already
+    meets the tolerance costs exactly one matvec (the plan R25.2 corrector
+    pass over the block-tridiagonal direct solve).  ``max_restarts``
+    overrides ``cfg.adjoint_maxiter`` for such short corrector budgets.
     """
     b_flat, unravel = ravel_pytree(b)
 
@@ -765,8 +771,11 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig):
         return ravel_pytree(A(unravel(v)))[0]
 
     sol = _solvax_gmres(
-        matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
-        restart=cfg.adjoint_restart, max_restarts=cfg.adjoint_maxiter,
+        matvec, b_flat,
+        x0=None if x0 is None else ravel_pytree(x0)[0],
+        rtol=cfg.adjoint_tol, atol=0.0, restart=cfg.adjoint_restart,
+        max_restarts=(cfg.adjoint_maxiter if max_restarts is None
+                      else int(max_restarts)),
     )
     return unravel(sol.x), sol
 

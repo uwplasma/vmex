@@ -75,7 +75,12 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from solvax import auto_chunk_size, chunk_map
+from solvax import (
+    auto_chunk_size,
+    block_thomas_factor,
+    block_thomas_solve,
+    chunk_map,
+)
 
 from .input import VmecInput
 from .multigrid import solve_multigrid
@@ -1159,6 +1164,7 @@ def least_squares(
     x0: np.ndarray | None = None,
     jac: str | None = None,
     jac_chunk_size: int | str | None = "auto",
+    jac_solver: str = "block",
     recycle: bool = False,
     hot_restart: bool = True,
     use_ess: bool = False,
@@ -1220,6 +1226,22 @@ def least_squares(
     (~1e-15) across chunk sizes.  It is inert for ``jac=None`` (scipy computes
     the finite-difference Jacobian itself).
 
+    ``jac_solver`` (plan R25.2, ``jac="implicit"`` only) selects the linear
+    solver behind the per-dof implicit-Jacobian columns.  ``"block"``
+    (default) amortizes one block-tridiagonal factorization of the *raw*
+    force Jacobian — whose radial coupling is exactly nearest-neighbor, so
+    ns dense ``(3*mn, 3*mn)`` blocks assembled by 3-colored ``jax.jvp``
+    probes capture it completely at a cost independent of the dof count —
+    then backsolves every dof right-hand side directly
+    (:func:`solvax.block_thomas_factor` / :func:`solvax.block_thomas_solve`)
+    and certifies each column with a short warm-started GMRES pass against
+    the preconditioned system (same ``adjoint_tol`` norm as the default
+    path; columns already at tolerance cost one matvec).  ``"gmres"`` is the
+    pre-R25.2 path: one independent preconditioned GMRES per dof column.
+    Both produce the same Jacobian to solver tolerance; ``"gmres"`` is the
+    fallback if the block path misbehaves on an exotic configuration.
+    Inert for ``jac=None``; ``recycle=True`` takes precedence.
+
     ``recycle`` (plan R25.3, ``jac="implicit"`` only) carries a GCROT
     deflation pair across the per-dof implicit-Jacobian solves — a
     ``lax.scan`` over dof chunks (vmapped within a chunk) threads the
@@ -1260,10 +1282,10 @@ def least_squares(
         for mm in modes_schedule:
             result = least_squares(
                 objective_terms, current, max_mode=mm, jac=jac,
-                jac_chunk_size=jac_chunk_size, recycle=recycle,
-                hot_restart=hot_restart, use_ess=use_ess, ess_alpha=ess_alpha,
-                device=device, solve_kwargs=solve_kwargs, verbose=verbose,
-                **scipy_kwargs)
+                jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
+                recycle=recycle, hot_restart=hot_restart, use_ess=use_ess,
+                ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
+                verbose=verbose, **scipy_kwargs)
             stage_results.append(result)
             current = result.input
         result.stage_results = stage_results
@@ -1276,9 +1298,9 @@ def least_squares(
                 "x_scale", _ess_scale(inp, max_mode, float(ess_alpha)))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
-            jac_chunk_size=jac_chunk_size, recycle=recycle,
-            solve_kwargs=dict(solve_kwargs or {}), device=device,
-            verbose=verbose, **scipy_kwargs)
+            jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
+            recycle=recycle, solve_kwargs=dict(solve_kwargs or {}),
+            device=device, verbose=verbose, **scipy_kwargs)
     if jac is not None:
         raise ValueError(f"jac must be None or 'implicit', got {jac!r}")
 
@@ -1363,6 +1385,7 @@ def _least_squares_implicit(
     max_mode: int,
     x0: np.ndarray | None,
     jac_chunk_size: int | str | None = "auto",
+    jac_solver: str = "block",
     recycle: bool = False,
     solve_kwargs: dict,
     device: Any = None,
@@ -1376,9 +1399,12 @@ def _least_squares_implicit(
     ``pure_callback``, hot-restarted) ->
     :func:`~vmec_jax.core.implicit.runtime_from_params` -> the stacked
     objective rows: one warm host solve per trial ``x``.  ``jac`` computes
-    the exact residual Jacobian by *forward* implicit differentiation (see
-    ``jacobian_rows``): one preconditioned GMRES per boundary dof, batched —
-    versus one full equilibrium solve per dof for finite differences — while
+    the exact residual Jacobian by *forward* implicit differentiation:
+    by default (``jac_solver="block"``, see ``jacobian_rows_block``) one
+    amortized block-tridiagonal factorization backsolves every boundary-dof
+    column at once; ``jac_solver="gmres"`` (see ``jacobian_rows``) runs one
+    preconditioned GMRES per boundary dof, batched.  Either way this is far
+    below one full equilibrium solve per dof (finite differences) while
     keeping the full pointwise Gauss-Newton residual geometry.  Both are
     jit-compiled once per stage.
 
@@ -1487,7 +1513,9 @@ def _least_squares_implicit(
         callback), then ``J[:, j] = G_z dz_j + G_p t_j`` with ``G`` the
         residual rows of the assembled state.  Returns the linearized
         operator ``Fz`` plus the per-dof tangent/RHS/column maps shared by
-        both Jacobian variants below.
+        all Jacobian variants below, and the ``(params, frozen, P, z_star)``
+        linearization point (the block variant re-linearizes the *raw*
+        residual formulation there).
         """
         params = params_of(x)
         frozen = jax.lax.stop_gradient(imp.solve_implicit(params, cfg))
@@ -1513,7 +1541,7 @@ def _least_squares_implicit(
         def column_of(dz, tp):
             return jax.jvp(G, (z_star, params), (P(dz), tp))[1]
 
-        return Fz, tangent_of, rhs_of, column_of
+        return Fz, tangent_of, rhs_of, column_of, (params, frozen, P, z_star)
 
     def jacobian_rows(x: jnp.ndarray) -> jnp.ndarray:
         """Exact residual Jacobian by *forward* implicit differentiation.
@@ -1524,7 +1552,7 @@ def _least_squares_implicit(
         geometry to scipy.  Columns are mathematically independent, so the
         result is identical across chunk sizes to float64 round-off.
         """
-        Fz, tangent_of, rhs_of, column_of = _jac_parts(x)
+        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
 
         def column(tp_pair):
             tp = tangent_of(tp_pair)
@@ -1532,6 +1560,121 @@ def _least_squares_implicit(
             return column_of(dz, tp)
 
         cols = chunk_map(column, (tangent_rbc, tangent_zbs), chunk_size=chunk)
+        return jnp.transpose(cols)
+
+    # R25.2 amortized block-tridiagonal variant.  The *raw* residual
+    # formulation (un-preconditioned scalxc-scaled spectral force; see
+    # implicit.residual_fn) has a Jacobian that is exactly block-tridiagonal
+    # in the radial index (verified numerically: per-surface probe response
+    # is 0.0 beyond |i-j| = 1 — the radial coupling is the nearest-neighbor
+    # full/half-mesh FD stencil; the *preconditioned* formulation is dense
+    # in radius because the 1D preconditioner applies per-mode radial
+    # tridiagonal *solves*).  Both formulations share the fixed point, so
+    #   dz_j = -(dF/dz)^{-1} dF/dp t_j
+    # is the same solution through either: assemble the raw blocks once with
+    # 3-colored jvp probes (cost ~3*(3*mn) residual linearizations,
+    # independent of the dof count), factor once (solvax block Thomas), and
+    # backsolve all 2*nm right-hand sides — then one short preconditioned
+    # GMRES pass per column (warm-started at the direct solution) certifies
+    # cfg.adjoint_tol in the same norm as the default path: solvax checks
+    # the initial residual before the first Arnoldi cycle, so columns whose
+    # direct solve already meets tolerance cost one matvec.
+    mn_state = int(np.asarray(mask_np.R_cos).shape[1])
+    ns_state = int(cfg.resolution.ns)
+    active_fields = tuple(f for f in imp._STATE_FIELDS
+                          if np.asarray(getattr(mask_np, f)).any())
+    n_act = len(active_fields)
+    m_block = n_act * mn_state
+    # Probe (color, field, column) index triples, color-major so the probe
+    # axis reshapes to (3, m_block, ...) below.
+    probe_color = jnp.asarray(np.repeat(np.arange(3), m_block))
+    probe_field = jnp.asarray(np.tile(np.repeat(np.arange(n_act), mn_state), 3))
+    probe_col = jnp.asarray(np.tile(np.tile(np.arange(mn_state), n_act), 3))
+    if jac_chunk_size == "auto":
+        probe_chunk = int(auto_chunk_size(3 * m_block))
+    else:
+        probe_chunk = chunk
+
+    def _pack(t) -> jnp.ndarray:
+        """SpectralState -> (ns, m_block): active fields side by side."""
+        return jnp.concatenate([getattr(t, f) for f in active_fields], axis=1)
+
+    def _unpack(mat: jnp.ndarray) -> SpectralState:
+        """(ns, m_block) -> SpectralState (structurally-zero fields zero)."""
+        parts = dict(zip(active_fields, jnp.split(mat, n_act, axis=1)))
+        return SpectralState(**{
+            f: parts.get(f, jnp.zeros((ns_state, mn_state), mat.dtype))
+            for f in imp._STATE_FIELDS})
+
+    def jacobian_rows_block(x: jnp.ndarray) -> jnp.ndarray:
+        """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
+
+        Same Jacobian as the default path to ``cfg.adjoint_tol`` (the GMRES
+        corrector runs against the identical preconditioned system) at a
+        cost that does not grow with the boundary-dof count.
+        """
+        Fz, tangent_of, rhs_of, column_of, (params, frozen, P, z_star) = \
+            _jac_parts(x)
+        F_raw = imp.residual_fn(cfg, frozen, mask_const, formulation="raw")
+
+        def Fz_raw(dz):
+            return jax.jvp(lambda z: F_raw(z, params), (z_star,), (dz,))[1]
+
+        def probe_response(spec):
+            c, fi, k = spec
+            rows = (jnp.arange(ns_state) % 3 == c)
+            mat = jnp.where(rows[:, None],
+                            jax.nn.one_hot(k, mn_state, dtype=x.dtype)[None, :],
+                            0.0)
+            stack = (jax.nn.one_hot(fi, n_act, dtype=x.dtype)[:, None, None]
+                     * mat[None])
+            dz = _unpack(jnp.concatenate(
+                [stack[i] for i in range(n_act)], axis=1))
+            # F_raw projects both sides onto the evolved-dof subspace, so
+            # its linearization is singular on the (I - P) complement; the
+            # identity fill (dz - P(dz)) makes the assembled blocks
+            # invertible without changing the solution for P-masked RHS.
+            return _pack(jax.tree.map(lambda a, b, p: a + (b - p),
+                                      Fz_raw(dz), dz, P(dz)))
+
+        probes = chunk_map(probe_response,
+                           (probe_color, probe_field, probe_col),
+                           chunk_size=probe_chunk)
+        # probes[c*m_block + q, i, :] = rows i of A(dz) for the color-c
+        # one-hot-q tangent; for row i the unique in-stencil source surface
+        # of color c is j = i + d with d = the offset satisfying
+        # (i + d) % 3 == c, so gathering at color (i + d) % 3 reads off the
+        # d-band blocks A[i, i+d] for every surface at once.
+        probes = probes.reshape((3, m_block, ns_state, m_block))
+        ii = jnp.arange(ns_state)
+
+        def band(d):
+            g = probes[(ii + d) % 3, :, ii, :]  # (ns, col q, row)
+            return jnp.swapaxes(g, 1, 2)  # (ns, row, col)
+
+        # lower[0] / upper[-1] gather out-of-stencil (zero) responses and
+        # are ignored by the factorization anyway.
+        factors = block_thomas_factor(band(-1), band(0), band(1))
+
+        def raw_rhs(tp_pair):
+            tp = tangent_of(tp_pair)
+            b = jax.jvp(lambda prm: F_raw(z_star, prm), (params,), (tp,))[1]
+            return _pack(jax.tree.map(jnp.negative, b))
+
+        rhs = chunk_map(raw_rhs, (tangent_rbc, tangent_zbs), chunk_size=chunk)
+        dz0 = block_thomas_solve(factors, jnp.moveaxis(rhs, 0, -1))
+
+        def column(args):
+            t_rbc, t_zbs, dz0_mat = args
+            tp = tangent_of((t_rbc, t_zbs))
+            dz, _ = imp._adjoint_solve(
+                Fz, rhs_of(tp), cfg, x0=_unpack(dz0_mat),
+                max_restarts=min(3, cfg.adjoint_maxiter))
+            return column_of(dz, tp)
+
+        cols = chunk_map(
+            column, (tangent_rbc, tangent_zbs, jnp.moveaxis(dz0, -1, 0)),
+            chunk_size=chunk)
         return jnp.transpose(cols)
 
     # R25.3 recycled variant: all 2*nm solves share the operator Fz (and Fz
@@ -1560,7 +1703,7 @@ def _least_squares_implicit(
         production operator, so budget-capped columns can come back with
         larger residuals than the GMRES path.
         """
-        Fz, tangent_of, rhs_of, column_of = _jac_parts(x)
+        Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
 
         def column(tp_pair, rec):
             tp = tangent_of(tp_pair)
@@ -1585,7 +1728,16 @@ def _least_squares_implicit(
         cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:2 * nm]
         return jnp.transpose(cols), C, U
 
-    jac_jit = jax.jit(jacobian_rows_recycled if recycle else jacobian_rows)
+    if jac_solver not in ("block", "gmres"):
+        raise ValueError(
+            f"jac_solver must be 'block' or 'gmres', got {jac_solver!r}")
+    if recycle:
+        jac_impl = jacobian_rows_recycled  # opt-in R25.3 experiment wins
+    elif jac_solver == "block":
+        jac_impl = jacobian_rows_block
+    else:
+        jac_impl = jacobian_rows
+    jac_jit = jax.jit(jac_impl)
 
     holder: dict[str, Any] = {"nres": None}
     if recycle:

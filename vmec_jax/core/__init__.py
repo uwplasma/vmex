@@ -17,6 +17,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``setup``           radial profiles + initial guess (profil1d/3d.f, readin.f)
 - ``solver``          single-grid fixed-boundary solve loop (funct3d.f, eqsolve.f)
 - ``implicit``        implicit differentiation of the equilibrium (custom VJP + adjoint GMRES)
+- ``stability``       differentiable ideal-MHD stability (infinite-n ballooning; COBRA port)
 - ``freeboundary_diff`` differentiable free-boundary residual via virtual casing (R15.3/R19)
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
