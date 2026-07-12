@@ -101,6 +101,10 @@ targets = deque(TARGET_BETAS)
 while targets:
     target = targets.popleft()
     accepted_state = state
+    previous_target = rows[-1][0] if rows else target
+    target_tol = min(
+        BETA_TOL, max(0.25 * abs(target - previous_target), 0.005)
+    )
     # Local secant predictor. Resetting every point from the global SLOPE
     # made a nominal 0.1% beta step jump pressure by 13% near beta=2.6%.
     ps = (
@@ -123,17 +127,34 @@ while targets:
             fsql=float(res.fsql), niter=int(res.iterations),
             converged=bool(res.converged), vacuum_state=res.vacuum_state)
         beta = 100.0 * float(wout.betatotal)
-        if target == 0.0 or abs(beta - target) <= BETA_TOL:
+        if target == 0.0 or abs(beta - target) <= target_tol:
             break
-        ps *= target / max(beta, 1e-6)  # pressure rescale toward the target
-    if failed_fsq is not None:
+        if rows and abs(beta - rows[-1][2]) > 1e-8:
+            # Local secant in (pressure, achieved beta). Proportional scaling
+            # jumped across the sharp response near 2.8% and then stepped back.
+            previous_ps, previous_beta = rows[-1][1], rows[-1][2]
+            candidate = previous_ps + (
+                (target - previous_beta) * (ps - previous_ps) / (beta - previous_beta)
+            )
+            ps = candidate if np.isfinite(candidate) and candidate > 0.0 else ps * target / beta
+        else:
+            ps *= target / max(beta, 1e-6)
+    calibration_failed = (
+        failed_fsq is None and target != 0.0 and abs(beta - target) > target_tol
+    )
+    if failed_fsq is not None or calibration_failed:
         state = accepted_state
         previous = rows[-1][0] if rows else 0.0
         step = target - previous
+        detail = (
+            f"fsq={failed_fsq:.3e}"
+            if failed_fsq is not None
+            else f"actual beta={beta:.4f}% missed tolerance {target_tol:.4f}%"
+        )
         if step <= MIN_BETA_STEP:
             message = (
                 f"beta={target:.4f}% did not converge at the minimum continuation "
-                f"step {step:.4f}%: fsq={failed_fsq:.3e}"
+                f"step {step:.4f}%: {detail}"
             )
             if REQUIRE_ALL_TARGETS:
                 raise RuntimeError(message)
@@ -143,7 +164,7 @@ while targets:
         midpoint = round(previous + 0.5 * step, 6)
         targets.appendleft(target)
         targets.appendleft(midpoint)
-        print(f"  retrying through beta={midpoint:.4f}% after fsq={failed_fsq:.3e}")
+        print(f"  retrying through beta={midpoint:.4f}% after {detail}")
         continue
     fsq = float(res.fsqr) + float(res.fsqz) + float(res.fsql)
     axis_r = float(np.sum(np.asarray(wout.raxis_cc)))  # axis R at phi = 0
@@ -153,7 +174,7 @@ while targets:
     current = warm_boundary(current, wout)  # ramp continuation
 
 dev = max(abs(beta - target) for target, _ps, beta, _ar, _w in rows)
-print(f"\nactual betatotal within {dev:.3f}% of every nominal target (tolerance {BETA_TOL}%)")
+print(f"\nmaximum |actual - target| beta was {dev:.3f}%")
 if branch_limit is not None:
     print(f"highest accepted target {rows[-1][0]:.4f}%; requested endpoint was {REPORT_BETAS[-1]:.1f}%")
 if len(rows) > 1:
