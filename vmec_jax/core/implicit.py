@@ -107,7 +107,8 @@ from .transforms import (
 __all__ = [
     "ImplicitParams", "ImplicitConfig", "ImplicitSolution",
     "params_from_input", "input_with_params", "runtime_from_params",
-    "make_config", "solve_implicit", "run",
+    "make_config", "solve_implicit", "solve_implicit_with_aux",
+    "implicit_state_pullback_multi_rhs", "run",
     "mhd_energy", "plasma_volume", "aspect_ratio", "iota_profile",
     "iota_axis", "iota_edge", "residual_fn", "adjoint_matvec",
 ]
@@ -769,6 +770,15 @@ def _solve_implicit_fwd(params, cfg):
     return state, (params, state, mask)
 
 
+def solve_implicit_with_aux(params: ImplicitParams, cfg: ImplicitConfig):
+    """Return ``(state, dof_mask)`` using the same callback as solve_implicit."""
+    state, mask = jax.pure_callback(
+        functools.partial(_host_solve_and_mask, cfg),
+        (_state_struct(cfg), _state_struct(cfg)), params,
+    )
+    return state, mask
+
+
 def _adjoint_solve(A, b, cfg: ImplicitConfig, *, x0=None, max_restarts=None):
     """Adjoint linear solve ``(dF/dz)^T lambda = b`` via ``solvax.gmres``.
 
@@ -862,6 +872,41 @@ def _solve_implicit_bwd(cfg, res, gbar):
 
 
 solve_implicit.defvjp(_solve_implicit_fwd, _solve_implicit_bwd)
+
+
+def implicit_state_pullback_multi_rhs(
+    params: ImplicitParams,
+    cfg: ImplicitConfig,
+    x_star: SpectralState,
+    dof_mask: SpectralState,
+    gbar_batch: SpectralState,
+) -> ImplicitParams:
+    """Batched state-cotangent pullback with shared implicit-linearization setup.
+
+    This preserves the scalar solve_implicit VJP and only adds a helper for
+    callers that already have several state cotangents for the same fixed
+    point.  It reuses the residual/projector/VJP setup once, then applies the
+    existing single-RHS GMRES per row.
+    """
+    frozen = jax.lax.stop_gradient(x_star)
+    edge_mask = _edge_mask(cfg)
+    P = _dof_projector(cfg, dof_mask)
+    F = residual_fn(cfg, frozen, dof_mask)
+    z_star = P(x_star)
+
+    _, vjp_z = jax.vjp(lambda z: F(z, params), z_star)
+    _, vjp_p = jax.vjp(lambda prm: F(z_star, prm), params)
+    _, vjp_p2 = jax.vjp(
+        lambda prm: _assemble(z_star, runtime_from_params(prm, cfg),
+                              frozen, P, edge_mask), params)
+
+    rhs_batch = jax.vmap(P)(gbar_batch)
+    lam_batch = jax.vmap(
+        lambda rhs: _adjoint_solve(lambda v: vjp_z(v)[0], rhs, cfg)[0]
+    )(rhs_batch)
+    g1_batch = jax.vmap(lambda lam: vjp_p(jax.tree.map(jnp.negative, lam))[0])(lam_batch)
+    g2_batch = jax.vmap(lambda gbar: vjp_p2(gbar)[0])(gbar_batch)
+    return jax.tree.map(jnp.add, g1_batch, g2_batch)
 
 
 def adjoint_matvec(cfg: ImplicitConfig, params: ImplicitParams,
