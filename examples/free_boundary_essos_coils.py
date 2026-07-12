@@ -29,6 +29,7 @@ coarsely.
 
 import dataclasses
 import os
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,7 @@ REPORT_BETAS = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]  # review/plot targets [%]
 # The local pressure response steepens above 2%, so retain 0.1% branch steps.
 TARGET_BETAS = REPORT_BETAS[:3] + [round(x, 1) for x in np.arange(2.1, 5.01, 0.1)]
 BETA_TOL = 0.15                       # accept |betatotal - target| below this [%]
+MIN_BETA_STEP = 0.0125                # stop rather than cross a branch blindly [%]
 SLOPE = 1.45e-3                       # first-guess beta[%] per unit PRES_SCALE
 NS, MPOL, NTOR = 51, 5, 5
 NITER, FTOL = 20000, 1e-10
@@ -94,7 +96,10 @@ def warm_boundary(inp_i, wout):
 print(f"\n{'nominal':>8s} {'PRES_SCALE':>11s} {'actual beta':>12s} {'iters':>6s} "
       f"{'fsq':>9s} {'aspect':>7s} {'axis R':>8s}")
 rows, current, state = [], base, None
-for target in TARGET_BETAS:
+targets = deque(TARGET_BETAS)
+while targets:
+    target = targets.popleft()
+    accepted_state = state
     # Local secant predictor. Resetting every point from the global SLOPE
     # made a nominal 0.1% beta step jump pressure by 13% near beta=2.6%.
     ps = (
@@ -102,15 +107,15 @@ for target in TARGET_BETAS:
         if rows and target > 0.0 and rows[-1][2] > 0.0
         else target / SLOPE
     )
+    failed_fsq = None
     for attempt in range(3):  # solve, read actual beta, rescale (~linear)
         inp_i = dataclasses.replace(current, pres_scale=ps)
         res = vj.solve_free_boundary(
             inp_i, external_field=coils, initial_state=state,
             error_on_no_convergence=False)
         if not res.converged:
-            raise RuntimeError(
-                f"beta={target:.1f}% attempt {attempt + 1} did not converge: "
-                f"fsq={float(res.fsqr + res.fsqz + res.fsql):.3e}")
+            failed_fsq = float(res.fsqr + res.fsqz + res.fsql)
+            break
         state = res.state
         wout = vj.wout_from_state(
             inp=inp_i, state=res.state, fsqr=float(res.fsqr), fsqz=float(res.fsqz),
@@ -120,6 +125,19 @@ for target in TARGET_BETAS:
         if target == 0.0 or abs(beta - target) <= BETA_TOL:
             break
         ps *= target / max(beta, 1e-6)  # pressure rescale toward the target
+    if failed_fsq is not None:
+        state = accepted_state
+        previous = rows[-1][0] if rows else 0.0
+        step = target - previous
+        if step <= MIN_BETA_STEP:
+            raise RuntimeError(
+                f"beta={target:.4f}% did not converge at the minimum continuation "
+                f"step {step:.4f}%: fsq={failed_fsq:.3e}")
+        midpoint = round(previous + 0.5 * step, 6)
+        targets.appendleft(target)
+        targets.appendleft(midpoint)
+        print(f"  retrying through beta={midpoint:.4f}% after fsq={failed_fsq:.3e}")
+        continue
     fsq = float(res.fsqr) + float(res.fsqz) + float(res.fsql)
     axis_r = float(np.sum(np.asarray(wout.raxis_cc)))  # axis R at phi = 0
     print(f"{target:7.1f}% {ps:11.1f} {beta:11.3f}% {int(res.iterations):6d} "

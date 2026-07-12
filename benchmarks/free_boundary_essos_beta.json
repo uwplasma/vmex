@@ -5,52 +5,39 @@
   "configuration": {
     "coils": "Landreman-Paul QA, 16 ESSOS filaments",
     "field": "direct JAX Biot-Savart, no mgrid",
+    "hardware": "office RTX A4000 (CUDA_VISIBLE_DEVICES=1)",
     "ns": 51,
     "mpol": 5,
     "ntor": 5,
     "ftol": 1e-10,
-    "max_iterations": 20000
+    "max_iterations": 20000,
+    "preconditioner": "1d"
   },
   "accepted": [
-    {
-      "target_beta_percent": 0.0,
-      "actual_beta_percent": 0.0,
-      "iterations": 947,
-      "force_residual_sum": 1.6e-10,
-      "aspect": 6.011,
-      "axis_r_m": 1.2134
-    },
-    {
-      "target_beta_percent": 1.0,
-      "actual_beta_percent": 1.012,
-      "iterations": 838,
-      "force_residual_sum": 1.9e-10,
-      "aspect": 6.084,
-      "axis_r_m": 1.2335
-    },
-    {
-      "target_beta_percent": 2.0,
-      "actual_beta_percent": 2.131,
-      "iterations": 1244,
-      "force_residual_sum": 1.5e-10,
-      "aspect": 6.186,
-      "axis_r_m": 1.2683
-    },
-    {
-      "target_beta_percent": 3.0,
-      "actual_beta_percent": 3.059,
-      "iterations": 8784,
-      "force_residual_sum": 1.2e-10,
-      "aspect": 6.378,
-      "axis_r_m": 1.362
-    }
+    {"target_beta_percent": 0.0, "actual_beta_percent": 0.0, "pres_scale": 0.0, "iterations": 947, "force_residual_sum": 1.6e-10, "aspect": 6.011, "axis_r_m": 1.2134},
+    {"target_beta_percent": 1.0, "actual_beta_percent": 1.012, "pres_scale": 689.7, "iterations": 838, "force_residual_sum": 1.9e-10, "aspect": 6.084, "axis_r_m": 1.2335},
+    {"target_beta_percent": 2.0, "actual_beta_percent": 2.131, "pres_scale": 1362.6, "iterations": 1244, "force_residual_sum": 1.5e-10, "aspect": 6.186, "axis_r_m": 1.2683},
+    {"target_beta_percent": 2.1, "actual_beta_percent": 2.096, "pres_scale": 1342.9, "iterations": 443, "force_residual_sum": 1.7e-10, "aspect": 6.183, "axis_r_m": 1.2674},
+    {"target_beta_percent": 2.2, "actual_beta_percent": 2.216, "pres_scale": 1409.7, "iterations": 567, "force_residual_sum": 2.1e-10, "aspect": 6.195, "axis_r_m": 1.2714},
+    {"target_beta_percent": 2.3, "actual_beta_percent": 2.316, "pres_scale": 1462.9, "iterations": 564, "force_residual_sum": 2.1e-10, "aspect": 6.206, "axis_r_m": 1.2758},
+    {"target_beta_percent": 2.4, "actual_beta_percent": 2.419, "pres_scale": 1516.1, "iterations": 598, "force_residual_sum": 2.1e-10, "aspect": 6.219, "axis_r_m": 1.2812},
+    {"target_beta_percent": 2.5, "actual_beta_percent": 2.522, "pres_scale": 1567.1, "iterations": 723, "force_residual_sum": 1.8e-10, "aspect": 6.233, "axis_r_m": 1.2882},
+    {"target_beta_percent": 2.6, "actual_beta_percent": 2.63, "pres_scale": 1615.6, "iterations": 1300, "force_residual_sum": 1.5e-10, "aspect": 6.25, "axis_r_m": 1.2995},
+    {"target_beta_percent": 2.7, "actual_beta_percent": 2.738, "pres_scale": 1658.6, "iterations": 2462, "force_residual_sum": 1.5e-10, "aspect": 6.272, "axis_r_m": 1.3134},
+    {"target_beta_percent": 2.8, "actual_beta_percent": 2.927, "pres_scale": 1696.2, "iterations": 15675, "force_residual_sum": 1.3e-10, "aspect": 6.346, "axis_r_m": 1.3537},
+    {"target_beta_percent": 2.9, "actual_beta_percent": 2.891, "pres_scale": 1680.3, "iterations": 2187, "force_residual_sum": 1.4e-10, "aspect": 6.34, "axis_r_m": 1.3519},
+    {"target_beta_percent": 3.0, "actual_beta_percent": 3.059, "pres_scale": 1743.7, "iterations": 8784, "force_residual_sum": 1.2e-10, "aspect": 6.378, "axis_r_m": 1.362},
+    {"target_beta_percent": 3.1, "actual_beta_percent": 3.12, "pres_scale": 1767.3, "iterations": 11319, "force_residual_sum": 1.3e-10, "aspect": 6.391, "axis_r_m": 1.3651}
   ],
   "maximum_beta_error_percent": 0.131,
-  "axis_shift_cm": 14.87,
+  "axis_shift_cm": 15.17,
   "promotion_attempt": {
     "requested_beta_percent": [4.0, 5.0],
     "passed": false,
-    "assessment": "A local pressure predictor plus 0.1% beta continuation crosses the old 2->3% barrier. Critical slowing is strong (15675 iterations near actual beta 2.927%); 4-5% remains unvalidated and is not plotted."
+    "first_rejected_target_beta_percent": 3.2,
+    "rejected_iterations": 20000,
+    "rejected_force_residual_sum": 1.677e-10,
+    "assessment": "Fixed 0.1% steps reach actual beta 3.120% but stall at the next target. Use bounded adaptive step halving to 0.0125% instead of more blind iterations; 4-5% remains unvalidated and is not plotted."
   },
   "figure": "docs/_static/figures/readme_essos_beta_scan.png"
 }

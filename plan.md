@@ -140,9 +140,12 @@ beta 0, 1, 2, 3% (`fsq <=2.1e-10`, ns=51) with full-state hot restarts. The form
 was a continuation-driver bug: each point reset pressure from a crude global slope, producing a
 13% pressure jump for a nominal 0.1% beta step. A local predictor and 0.1% internal steps reach
 actual beta 3.059%, though critical slowing reaches 15,675 iterations near beta 2.927%. The public
-example now expresses the full 0--5% target with internal 0.1% continuation steps above 2%, while
-plotting only the six requested equilibria. The 4--5% endpoints remain part of the
-coupled-globalization gate until the running branch converges and is recorded. The forward
+example now expresses the full 0--5% target and plots only the six requested equilibria. An office
+A4000 run reached actual beta 3.120% in 11,319 iterations, then the next 3.2% target stalled after
+20,000 iterations at summed ``fsq=1.677e-10``. The driver now halves a failed continuation step
+down to a documented 0.0125% floor instead of blindly increasing ``NITER``. The 4--5% endpoints
+remain part of the coupled-globalization gate until that adaptive branch converges and is recorded
+in ``benchmarks/free_boundary_essos_beta.json``. The forward
 result now retains its final NESTOR cache/potential and CLI/library WOUT files populate
 ``potsin``/``potcos`` plus ``xmpot``/``xnpot`` and all covariant/contravariant ``*_sur`` tables.
 The surface tables reconstruct the retained real-space fields to transform roundoff and match a
