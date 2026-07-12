@@ -192,9 +192,14 @@ solver types/modes/geometries not yet benchmarked. Gate: `benchmarks/gpu_baselin
 office to fixed+free, sym+lasym, single+multigrid, small→large ns, with the crossover documented and
 the auto device policy validated end-to-end; README/docs GPU section updated.
 
-**R5. Finite-beta + diagnostics parity.** Validate finite-beta wout channels (currents, `DMerc`,
-`D_R`/Glasser, jdotb) against VMEC2000 and their AD-vs-central-FD gradients; add golden fixtures for a
-finite-beta case. Gate: per-variable tolerances met; gradient tests permanent.
+**R5. Finite-beta + diagnostics parity. FORWARD COMPLETE; PROFILE AD DEFERRED.** The four-case
+golden WOUT suite passes all 12 completeness/value/roundtrip tests and checks current harmonics,
+``jdotb/bdotb/bdotgradv``, every Mercier component, and beta scalars against VMEC2000. Main's compact
+digest gate adds DSHAPE, CTH, li383, and finite-beta QA/QH references through 4.26% beta. Evidence and
+the exact command are in ``benchmarks/finite_beta_diagnostics_parity.json``. ``DMerc`` and current
+profile gradients remain finite-difference-only: their parity engine is intentionally host NumPy,
+and a full traceable rewrite of derivative-amplified diagnostics is deferred until a concrete
+optimization requires it. This does not block equilibrium or mirror promotion.
 
 **R6. Refactor + docstring hygiene.** Split the 4 files >1000 lines when next touched (optimize 1482,
 solver 1308, nyquist 1046, setup 1005); close the **71/355 public-def docstring gap**. Gate: no core
