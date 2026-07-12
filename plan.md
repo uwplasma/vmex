@@ -578,6 +578,35 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   the last trial state for result.equilibrium, and re-measure. CPU profile still pending (local bench
   occupies the box).
 
+**R26. FINAL PRE-VMEX SWEEP (user 2026-07-12; the last content pass — after R24/R25 conclude, before
+R9 release and the VMEX rename R21).** Ten items:
+  a. **Trim + simplify the code** — one more dead-code/duplication/altitude sweep over vmec_jax/core.
+  b. **Port more functionality to SOLVAX** — anything generic-solver-shaped still in vmec_jax
+     (candidates: the R25.2 block-tridiagonal Jacobian machinery, chunk_map, adjoint GMRES wrappers)
+     moves to SOLVAX with a release + import back.
+  c. **Performance:** (i) COLD STARTS — cut first-call JIT wall (compile-cache persistence across
+     processes, smaller graphs, jit-factoring); (ii) FREE BOUNDARY with and without mgrid, with and
+     without NESTOR (direct-coil lane) — profile + tune both.
+  d. **Faster optimizations/gradients** — continue past the R25 gate (block-tridiag amortization,
+     recycling, perturbation warm starts all landed and measured together).
+  e. **Memory reduction with DEFAULT controls** — good defaults, no advanced user knobs required.
+  f. **README example: free boundary from ESSOS coils** — Landreman-Paul QA with increasing pressure,
+     vol-avg beta = 0%, 1%, 2%, 3% (needs a coil set reproducing the LP QA boundary).
+  g. **README: QA (nfp 2) + QH (nfp 4) optimization with SELF-CONSISTENT BOOTSTRAP CURRENT**,
+     reproducing arXiv:2205.02914 (Landreman-Buller-Drevlak) against the Zenodo data in
+     /Users/rogerio/local/20220708-01-zenodo_for_QS_optimization_with_self_consistent_bootstrap_current
+     (calculations/ + configurations/). Requires the **Redl (2021) bootstrap formula in vmec_jax,
+     DIFFERENTIABLE**, + a loop iterating the current profile to self-consistency with the equilibrium.
+  h. **Literature/code deep dive** (papers, preprints, reports, docs, textbooks; DESC and others) for
+     better implementations of existing functionality AND new research-grade functionality — produce a
+     proposal document and RUN IT BY THE USER before implementing anything.
+  i. **Docs upgrade** — deeper algorithms/performance/differentiability/equations explanations, more
+     engaging with plots; better tutorials/examples/use cases; user-friendly.
+  j. **Release hygiene:** repo <= 10 MB; coverage >= 95% with SIMPLE, CONCISE tests in a SMALL number
+     of files covering every functionality; future-proof; literature-anchored; real physics + numerical
+     testing; a VMEC2000 parity/accuracy check that does NOT require storing large wout files (scalar
+     digests of golden quantities); then release v0.1.0 (R9) with all of it.
+
 **R25. Optimization wall-time: multi-hour → under one hour (user 2026-07-12; DO BEFORE the VMEX
 rename R21).** Same modes and resolution — the win must come from a more efficient/performant
 GRADIENT, not from shrinking the problem. Ground it in the literature (papers, preprints, reports,
