@@ -596,6 +596,20 @@ Jacobian, redundant final solve_equilibrium):
   5. Literature scan: DESC chunked-jacfwd + Levenberg-Marquardt practice, SIMSOPT MPI-FD baselines,
      Landreman-Paul analytic shape-gradient adjoints, one-shot (SAND) simultaneous optimization,
      VMEC++ perturbation/hot-restart papers.
+  **RESEARCHED (2026-07-12, notes_r25_gradient_research.md — DESC source-verified, papers cited).
+  Ranked implementation order:**
+  1. **Memoize the converged state + perturbation warm start** (DESC `_update_equilibrium`/`f_where_x`
+     pattern): jac(x) never re-solves at the x fun(x) just converged (~20 lines, zero accuracy risk);
+     seed trial solves with the first-order perturbation z-(dF/dz)^-1(dF/dp)dp (arXiv:2203.15927).
+     ~1.5-2x on the solve phase. DO FIRST.
+  2. **Amortized block-tridiagonal factorization of dF/dz**: assemble the radial blocks with 3-colored
+     jax.jvp probes (cost independent of dof count), solvax.block_thomas factor once, backsolve all
+     24-120 dof RHS, keep a 2-3-iter GMRES corrector for exactness. 2-5x on the jac phase; also reuses
+     as forward Newton preconditioner + perturbation seed.
+  3. **GCROT recycle-space carry across dof chunks and iterates** (SOLVAX gcrot already returns (C,U);
+     lax.scan over chunks carrying the pair). ~1.3-2x on jac, stacks with 1+2.
+  Runner-up Broyden secant (only option that weakens the per-iterate exactness); long-term: one-shot/
+  SAND (~4x one solve for a whole optimization, needs replacing the scipy driver).
   Gate: a QA/QH-class max_mode-5 campaign (same schedule as R1) completes in <1 h on the office CPU
   box; gradient accuracy still FD-validated (rel <=1e-4); CI gradient shard green.
 
