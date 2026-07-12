@@ -648,8 +648,23 @@ def _dof_mask(x_star: SpectralState, rt: SolverRuntime,
 
 _HOT_CACHE = weakref.WeakKeyDictionary()  # cfg -> last converged SpectralState
 
+# cfg -> (params-bytes key, SolveResult): one-entry memo of the LAST solve.
+# scipy trust-region drivers evaluate jac(x) at exactly the x that fun(x)
+# just converged (DESC's ``_update_equilibrium``/``f_where_x`` pattern), so
+# this removes one full equilibrium solve per accepted iterate (plan R25.1).
+_LAST_SOLVE = weakref.WeakKeyDictionary()
+
+
+def _params_key(params: ImplicitParams) -> bytes:
+    return b"".join(np.asarray(leaf, dtype=np.float64).tobytes()
+                    for leaf in jax.tree.leaves(params))
+
 
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
+    key = _params_key(params)
+    hit = _LAST_SOLVE.get(cfg)
+    if hit is not None and hit[0] == key:
+        return hit[1]
     inp2 = input_with_params(cfg.inp, params)
     seed = _HOT_CACHE.get(cfg) if cfg.hot_restart else None
     if cfg.multigrid:
@@ -676,6 +691,7 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
         result = run(None)  # a bad hot seed must not fail the trial
     if cfg.hot_restart and bool(result.converged):
         _HOT_CACHE[cfg] = result.state
+    _LAST_SOLVE[cfg] = (key, result)
     return result
 
 

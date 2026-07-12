@@ -1522,7 +1522,20 @@ def _least_squares_implicit(
                                           jac=jac_fn, **scipy_kwargs)
     result.input = unpack_boundary(inp, result.x, max_mode)
     try:
-        result.equilibrium = solve_equilibrium(result.input, **solve_kwargs)
+        # Hot-seed the diagnostic re-solve from the stage's last converged
+        # trial state (plan R25.1): the optimizer's final x was just solved
+        # by the implicit path, so this converges in ~1 sweep instead of
+        # repeating a full cold solve per continuation stage.
+        seed = imp._HOT_CACHE.get(cfg)
+        try:
+            result.equilibrium = solve_equilibrium(
+                result.input, initial_state=seed, **solve_kwargs)
+        except Exception:
+            if seed is None:
+                raise
+            # ns-mismatched seed (different ladder) must not cost the
+            # diagnostic: fall back to the plain cold solve.
+            result.equilibrium = solve_equilibrium(result.input, **solve_kwargs)
     except Exception:  # pragma: no cover - diagnostic attribute only
         result.equilibrium = None
     return result
