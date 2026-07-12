@@ -145,6 +145,10 @@ result now retains its final NESTOR cache/potential and CLI/library WOUT files p
 coupled NESTOR-MHD fixed-point residual now reconstructs the retained final constraint state,
 keeps the LCFS edge active, and passes a converged CTH residual gate plus ``extcur`` JVP vs central
 finite difference (2026-07-12). Next is the structural-dof projection and adjoint Krylov solve.
+An initial generic reverse-mode trace through the full CTH NESTOR rebuild was rejected after
+reaching 10.8 GiB RSS while still compilation-bound after three minutes. The production adjoint
+must use an implicit/custom VJP for the NESTOR linear solve and reuse its factorization; enforce a
+small-resolution peak-memory gate before repeating the production CTH run.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate
