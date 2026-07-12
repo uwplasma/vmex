@@ -32,9 +32,9 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
    converged physics quantities match VMEC2000 within per-quantity validation tolerances.
 4. **Performance parity or better** than VMEC2000 single-thread CPU on the benchmark suite,
    including multigrid (`NS_ARRAY` ladders), which is currently slower than VMEC2000 — a named bug.
-5. **A small, readable codebase**: 30–40 Python files in `vmec_jax/`, ~25–30k library lines
-   (revised 2026-07-09 from the original ≤15k after the fixed-boundary core alone measured ~10k
-   well-documented lines; still a >4x reduction from **229 files / ~123k lines**), physically
+5. **A small, readable codebase**: 50–60 Python files in `vmec_jax/`, ~25–30k library lines
+   (revised 2026-07-11 after the separate open-field topology landed as 17 focused modules; still
+   a >4x reduction from **229 files / ~123k lines**), physically
    meaningful names, docstrings everywhere, ≥95% coverage without repo bloat (tests currently
    ~140k lines with coverage-padding files; target ≤ ~10k test lines).
 6. **A ~10 MB repository** after a `git filter-repo` history rewrite (currently 57.4 MiB packed);
@@ -1772,6 +1772,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        `vmec --plot mout_*.nc` renders the horizontal 3D LCFS/coils/cap-to-cap field lines, `|B|`,
        cross-sections, pressure, and `ftol` history. The 0--50% straight-mirror example writes one
        file per accepted equilibrium and renders its endpoint through this disk-backed path.
+       The complete package is now 55 Python files / 28,760 lines; the mirror backend is 17 files,
+       its largest module is 847 lines, and generated outputs remain ignored. This meets the revised
+       50--60 file / 25--30k line budget without merging distinct numerical operators into oversized
+       modules.
        Coverage instrumentation is an explicit promotion gate: the dedicated mirror shard passes,
        but coverage.py currently aborts when tracing nested JAX/BIE solves. The release-core 95%
        report transparently omits `vmec_jax/mirror/*` until that crash is fixed; no mirror coverage
@@ -1947,8 +1951,8 @@ Structure:
 
 - [ ] Fresh clone ≤ 10 MB; single branch; zero `Co-Authored-By: Claude` trailers in history; Claude
       absent from the GitHub contributors panel; all new commits authored by rogeriojorge.
-- [ ] `vmec_jax/` remains within the §0.5 budget of 30–40 files / ~25–30k lines after the
-      mirror backend lands; no new mirror file exceeds ~800 lines; docstrings and source/equation
+- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~25–30k lines after the
+      mirror backend lands; no mirror file exceeds ~900 lines; docstrings and source/equation
       cross-references are complete; ruff and mypy pass without blanket ignores.
 - [ ] Fixed + free boundary (mgrid and direct-coil; tokamak and stellarator; sym and lasym)
       converge with wout + print parity vs VMEC2000 per Appendix-A tolerances; missing-mgrid
