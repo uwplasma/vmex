@@ -1887,7 +1887,9 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        finite-pressure gauge-free-lambda case converges the adjoint in four iterations at
        `8.85e-16` relative linear residual; its combined directional derivative matches two fully
        reconverged central-difference equilibria to `1.10e-7` relative. The root example writes
-       MOUT and reviewed geometry/field/residual/sensitivity plots. Anisotropic controls, a public
+       MOUT and reviewed geometry/field/residual/sensitivity plots. A 585-unknown matrix-free case
+       reaches `9.23e-10` adjoint residual in 171 iterations and 3.41 s versus 8.61 s for the primal;
+       the scheduled full test keeps it above the dense-reference threshold. Anisotropic controls, a public
        custom-VJP solve wrapper, and free-boundary coil derivatives remain before M9 promotion.
    11. **M10 — performance, outputs, and promotion.** Benchmark CPU/GPU cold/warm time, memory,
        scaling, and CLI versus JAX lanes; add mirror-native `mout` output, restart, `--plot`, docs,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import numpy as np
 import pytest
 
@@ -19,6 +20,14 @@ from vmec_jax.mirror import (  # noqa: E402
     project_fixed_boundary_state,
     solve_fixed_boundary_cli,
 )
+
+
+@pytest.fixture(autouse=True)
+def _enable_solver_jit():
+    previous = bool(jax.config.jax_disable_jit)
+    jax.config.update("jax_disable_jit", False)
+    yield
+    jax.config.update("jax_disable_jit", previous)
 
 
 def test_fixed_boundary_adjoint_matches_reconverged_central_difference() -> None:
@@ -123,3 +132,43 @@ def test_fixed_boundary_adjoint_rejects_unconverged_state() -> None:
             grid,
             lambda state, energy: energy.total,
         )
+
+
+@pytest.mark.full
+def test_fixed_boundary_adjoint_closes_above_dense_reference_limit() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=17, nxi=41),
+        ftol=1.0e-12,
+        max_iterations=300,
+    )
+    grid = config.build_grid()
+    boundary = MirrorBoundary.from_radius(0.3, grid)
+    base = MirrorState.from_boundary(boundary, grid)
+    s = jnp.asarray(grid.s)[:, None, None]
+    xi = jnp.asarray(grid.xi)[None, None, :]
+    initial = replace(
+        base,
+        radius_scale=base.radius_scale + 0.03 * s * (1.0 - s) * (1.0 - xi**2),
+    )
+    result = solve_fixed_boundary_cli(
+        initial,
+        boundary,
+        grid,
+        config,
+        axial_flux_derivative=0.1,
+        require_convergence=True,
+    )
+    adjoint = fixed_boundary_adjoint(
+        result,
+        fixed_boundary_parameters(boundary, axial_flux_derivative=0.1),
+        grid,
+        lambda state, _energy: state.radius_scale[
+            grid.ns // 2, 0, grid.nxi // 2
+        ],
+        rtol=1.0e-9,
+    )
+
+    assert (grid.ns - 2) * (grid.nxi - 2) > 512
+    assert adjoint.converged
+    assert adjoint.iterations < 250
+    assert adjoint.relative_residual < 1.0e-8

@@ -1,0 +1,27 @@
+{
+  "schema": "vmec_jax.benchmark.mirror_fixed_boundary_implicit/1",
+  "method": "reverse implicit adjoint of the packed energy-gradient residual",
+  "device": "local macOS arm64 CPU",
+  "correctness_case": {
+    "grid": {"ns": 3, "ntheta": 1, "nxi": 5},
+    "physics": "finite isotropic pressure, finite axial current, gauge-free lambda",
+    "controls": ["boundary", "axial_flux", "mass_profile", "current_derivative"],
+    "adjoint_iterations": 4,
+    "adjoint_relative_residual": 8.849988569620835e-16,
+    "directional_derivative": 0.002876927056522377,
+    "central_finite_difference": 0.0028769273738293855,
+    "relative_error": 1.1029371517885357e-7
+  },
+  "matrix_free_case": {
+    "grid": {"ns": 17, "ntheta": 1, "nxi": 41},
+    "active_unknowns": 585,
+    "primal_wall_s": 8.6126,
+    "primal_iterations": 129,
+    "primal_linear_iterations": 951,
+    "adjoint_wall_s": 3.4138,
+    "adjoint_iterations": 171,
+    "adjoint_relative_residual": 9.2273e-10,
+    "process_peak_rss_mib": 983.6
+  },
+  "assessment": "The exact reverse solve is independent of the number of physical controls. It is FD-validated with all four control groups active and remains matrix-free above the dense reference threshold. Anisotropic and coupled free-boundary adjoints remain open."
+}

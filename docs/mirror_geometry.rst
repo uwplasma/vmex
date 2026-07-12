@@ -303,8 +303,13 @@ For the finite-pressure, finite-current flared tube, the primal reaches
 residual ``8.85e-16`` and the combined directional derivative agrees with
 central differences to ``1.10e-7`` relative. The example writes mirror-native
 MOUT and horizontal 3D, ``|B|``, cross-section, pressure, residual, and
-sensitivity figures. Anisotropic closure parameters and coupled free-boundary
-coil derivatives remain M9 promotion gates.
+sensitivity figures. Above the dense-reference threshold, an ``ns=17,
+nxi=41`` case with 585 active unknowns takes 3.41 seconds and 171 adjoint
+iterations to reach ``9.23e-10`` relative residual; its primal polish takes
+8.61 seconds and 951 linear iterations. Compact evidence is in
+``benchmarks/mirror_fixed_boundary_implicit.json``. Anisotropic closure
+parameters and coupled free-boundary coil derivatives remain M9 promotion
+gates.
 
 ``device=None`` uses the shared measured device policy. On the office host,
 the corrected ``15x15`` case took 35.2 seconds on CPU and 44.2 seconds on one
