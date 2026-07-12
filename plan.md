@@ -578,6 +578,27 @@ everything), paired with R12 (`tests/core_new/` → `tests/`):
   the last trial state for result.equilibrium, and re-measure. CPU profile still pending (local bench
   occupies the box).
 
+**R25. Optimization wall-time: multi-hour → under one hour (user 2026-07-12; DO BEFORE the VMEX
+rename R21).** Same modes and resolution — the win must come from a more efficient/performant
+GRADIENT, not from shrinking the problem. Ground it in the literature (papers, preprints, reports,
+docs and source of DESC / SIMSOPT / VMEC++ / adjoint-stellarator work) and pick the best fast,
+accurate gradient strategy. Candidate directions to evaluate against the measured R24 profile
+(opt_step cost is algorithmic — one solve_implicit per fun(x) AND per jac(x), one GMRES per dof per
+Jacobian, redundant final solve_equilibrium):
+  1. Reuse/share solves: one frozen solve per trust-region iterate serving both fun and jac; reuse
+     the last trial state for result.equilibrium; deeper hot restarts across trials.
+  2. Krylov recycling across Jacobian evals (SOLVAX gcrot — nearby systems share spectrum) and/or
+     block-GMRES over all dof right-hand-sides at once instead of one GMRES per dof.
+  3. Quasi-Newton Jacobian recycling: Broyden secant updates between exact implicit Jacobians
+     (recompute exactly only every k-th iterate or on trust-region step rejection).
+  4. trf internals: LSMR with a Jacobian LinearOperator built from JVP/VJP closures (no dense J
+     assembly), scipy tr_solver options.
+  5. Literature scan: DESC chunked-jacfwd + Levenberg-Marquardt practice, SIMSOPT MPI-FD baselines,
+     Landreman-Paul analytic shape-gradient adjoints, one-shot (SAND) simultaneous optimization,
+     VMEC++ perturbation/hot-restart papers.
+  Gate: a QA/QH-class max_mode-5 campaign (same schedule as R1) completes in <1 h on the office CPU
+  box; gradient accuracy still FD-validated (rel <=1e-4); CI gradient shard green.
+
 **R22. README/showcase refinement round 2 (user 2026-07-11; DO these before R21/R9; VMEX rename deferred
 as a longer refactor).**
   **(R22 DONE 2026-07-11 except the ns=201 figure regen, which is folded into R9.)** Commits caf…→3e8296b2:
