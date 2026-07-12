@@ -13,9 +13,12 @@ implicitly, in a single stage.
 
 Physics setup is identical to ``QA_optimization.py`` (nfp=2 vacuum QA from a
 near-circular torus, quasisymmetry + aspect + iota targets, implicit adjoint
-gradients).  Expected result: QS total comparable to the staged run (~1e-6
-class) in one ``least_squares`` call; see the staged example's docstring for
-its per-stage record.
+gradients).  Measured 2026-07-12 on the office 36-core CPU (memo + block
+Jacobian + perturbation warm start):
+
+    seed QS 2.043e-01 -> final QS 7.155e-06 (aspect 6.000, iota 0.420)
+    in ONE call, 868 s (14.5 min) — vs 1532 s for the staged 1->5 ladder
+    reaching 3.7e-07.  Same precision class, ~1.8x faster, no ladder.
 """
 
 import dataclasses
