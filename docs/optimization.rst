@@ -68,13 +68,15 @@ relative level (2D) and at the finite-difference noise floor (3D).
    sol = implicit.run(inp, p0)                        # ImplicitSolution pytree
    grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)   # adjoint gradient
 
-**Free boundary** is differentiable through a different route
+For a **fixed trial free boundary**, coil objectives are differentiable through
+a different route
 (:mod:`vmec_jax.core.freeboundary_diff`): rather than differentiating the
 NESTOR vacuum solve, the plasma boundary contribution to the vacuum field is
 computed by **virtual casing**, which is a smooth function of the coil /
-``extcur`` parameters and the plasma surface. Coil-parameter derivatives of
-free-boundary outputs are obtained end-to-end this way and are
-finite-difference-validated. (The two scopes are complementary: the
+``extcur`` parameters and the plasma surface. These fixed-surface derivatives
+are finite-difference-validated. The coupled solved-LCFS residual now lives in
+:mod:`vmec_jax.core.freeboundary_implicit`; its adjoint solve is not yet a
+public optimization path. (The two scopes are complementary: the
 fixed-boundary implicit adjoint is validated to ~1e-6 relative; the
 free-boundary virtual-casing path is FD-validated.)
 

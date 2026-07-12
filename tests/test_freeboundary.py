@@ -40,6 +40,7 @@ import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.core import freeboundary as FB  # noqa: E402
 from vmec_jax.core import vacuum as V  # noqa: E402
+from vmec_jax.core.freeboundary_implicit import CoupledFreeBoundaryProblem  # noqa: E402
 from vmec_jax.core.errors import MgridNotFoundError  # noqa: E402
 from vmec_jax.core.input import VmecInput  # noqa: E402
 from vmec_jax.core.mgrid import MgridField, read_mgrid  # noqa: E402
@@ -358,6 +359,29 @@ def test_converged_result_retains_vacuum_state(tmp_path):
     assert vacuum.vacuum_calls > 0 and vacuum.full_updates > 0
     assert vacuum.potvac is not None
     assert np.all(np.isfinite(np.asarray(vacuum.potvac)))
+    assert vacuum.rcon0 is not None and vacuum.zcon0 is not None
+
+    data = read_mgrid(CONV_MGRID)
+    field = MgridField.from_mgrid_data(data, extcur=np.asarray(inp.extcur)[: data.nextcur])
+    problem = CoupledFreeBoundaryProblem.from_result(inp, result, field)
+    residuals = problem.force_residuals(result.state, field.extcur)
+    assert float(residuals.fsqr) <= float(inp.ftol_array[-1])
+    assert float(residuals.fsqz) <= float(inp.ftol_array[-1])
+    assert float(residuals.fsql) <= float(inp.ftol_array[-1])
+
+    direction = jnp.ones_like(field.extcur)
+    tangent = jax.jvp(
+        lambda current: problem.residual(result.state, current),
+        (field.extcur,),
+        (direction,),
+    )[1]
+    step = 0.1
+    plus = problem.residual(result.state, field.extcur + step * direction)
+    minus = problem.residual(result.state, field.extcur - step * direction)
+    finite_difference = jax.tree.map(lambda a, b: (a - b) / (2.0 * step), plus, minus)
+    tangent_flat = np.concatenate([np.asarray(x).ravel() for x in jax.tree.leaves(tangent)])
+    fd_flat = np.concatenate([np.asarray(x).ravel() for x in jax.tree.leaves(finite_difference)])
+    np.testing.assert_allclose(tangent_flat, fd_flat, rtol=2e-5, atol=2e-10)
 
     wout = wout_from_state(
         inp=inp, state=result.state,

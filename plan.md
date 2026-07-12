@@ -141,7 +141,10 @@ expose a trajectory-sensitive continuation barrier: direct 2→3% and midpoint s
 change Jacobian sign under the strict convergence check. The example therefore stops honestly at
 2%; 3--5% remains part of the coupled-globalization gate, not a plotted extrapolation. The forward
 result now retains its final NESTOR cache/potential and CLI/library WOUT files populate
-`potsin`/`potcos` plus `xmpot`/`xnpot`; the `*_sur` tables and coupled adjoint remain open.
+`potsin`/`potcos` plus `xmpot`/`xnpot`; the `*_sur` tables and coupled adjoint remain open. The
+coupled NESTOR-MHD fixed-point residual now reconstructs the retained final constraint state,
+keeps the LCFS edge active, and passes a converged CTH residual gate plus ``extcur`` JVP vs central
+finite difference (2026-07-12). Next is the structural-dof projection and adjoint Krylov solve.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate

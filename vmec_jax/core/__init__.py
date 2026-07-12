@@ -19,6 +19,7 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``implicit``        implicit differentiation of the equilibrium (custom VJP + adjoint GMRES)
 - ``stability``       differentiable ideal-MHD stability (infinite-n ballooning; COBRA port)
 - ``freeboundary_diff`` differentiable free-boundary residual via virtual casing (R15.3/R19)
+- ``freeboundary_implicit`` coupled solved-LCFS residual for implicit differentiation
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
 Every module is validated by A/B equivalence tests against the legacy

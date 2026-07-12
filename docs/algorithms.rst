@@ -375,6 +375,20 @@ coefficients/currents via
 ``extcur``), and its ``value_and_grad_bnormal`` helper returns gradients
 validated against finite differences — no NESTOR adjoint is required.
 
+Coupled solved-boundary residual
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For derivatives of the *solved LCFS*,
+:class:`~vmec_jax.core.freeboundary_implicit.CoupledFreeBoundaryProblem`
+re-evaluates the fused NESTOR solve on the current edge and inserts its
+magnetic pressure into the same MHD force residual used by the forward solve.
+The final damped constraint baselines are retained with the forward result,
+so this reconstructs the same discrete fixed point rather than a nearby
+approximation. Both state and ``extcur`` Jacobian actions are pure JAX; the
+CTH golden verifies the residual at the converged state and validates the
+``extcur`` JVP against central finite differences. The projected adjoint
+linear solve and solved-output gradient remain under development.
+
 Implicit differentiation
 ------------------------
 

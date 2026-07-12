@@ -84,6 +84,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve": (".core.solver", "solve"),
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
+    "CoupledFreeBoundaryProblem": (
+        ".core.freeboundary_implicit",
+        "CoupledFreeBoundaryProblem",
+    ),
     "solve_square_coil_free_boundary_scan": (
         ".core.hybrid_free_boundary",
         "solve_square_coil_free_boundary_scan",

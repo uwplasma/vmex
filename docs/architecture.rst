@@ -76,6 +76,9 @@ Module map
    * - :mod:`~vmec_jax.core.freeboundary_diff`
      - differentiable free-boundary residual via virtual casing
      - (no VMEC2000 equivalent)
+   * - :mod:`~vmec_jax.core.freeboundary_implicit`
+     - coupled NESTOR-MHD residual for solved-LCFS implicit derivatives
+     - (no VMEC2000 equivalent)
    * - :mod:`~vmec_jax.core.mgrid`
      - mgrid netCDF read/write, differentiable interpolated field
      - MAKEGRID file format, ``mgrid_mod.f90``
