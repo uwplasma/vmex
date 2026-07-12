@@ -1,9 +1,8 @@
 API reference
 =============
 
-The production API is :mod:`vmec_jax.core`. Modules are grouped as in
-:doc:`/architecture`; every docstring names the VMEC2000 counterpart it
-ports.
+The toroidal production API is :mod:`vmec_jax.core`; the open-field-line API
+is :mod:`vmec_jax.mirror`. Modules are grouped as in :doc:`/architecture`.
 
 Inputs and profiles
 -------------------
@@ -99,6 +98,21 @@ Outputs
    :members:
 
 .. automodule:: vmec_jax.core.boozer
+   :members:
+
+Straight-axis mirrors
+---------------------
+
+.. automodule:: vmec_jax.mirror.model
+   :members:
+
+.. automodule:: vmec_jax.mirror.solver
+   :members:
+
+.. automodule:: vmec_jax.mirror.free_boundary
+   :members:
+
+.. automodule:: vmec_jax.mirror.output
    :members:
 
 Errors and CLI
