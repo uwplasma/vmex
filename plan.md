@@ -285,6 +285,12 @@ docs tutorial (R14.3). Target set:
   example smoke-passes in CI; each maps to a docs tutorial.
 
 **R14. Complete the documentation (full theory + algorithms + tutorials, not an overview).**
+  **(R14 DONE 2026-07-12, commit 8681e25d.)** R14.1 theory complete: +536 lines across
+  theory/equations/algorithms/architecture — energy functional + Hirshman-Whitson moment method,
+  parities/lasym, metric→|B| pipeline, force kernels + spectral condensation, 1D preconditioner
+  derivation + NEW 2D block-preconditioner section, NESTOR Green's-function formulation,
+  virtual-casing free bdy, full IFT/adjoint math with the O(1)-memory argument, device-policy section.
+  Every :mod:/:func: ref verified; sphinx -W green. R14.2 reference already substantial; R14.3 below.
   **(R14.3 DONE 2026-07-11.)** `docs/tutorials.rst` rewritten from a "coming soon" stub into a real
   gallery: every R13 example (`literalinclude` so the page stays in sync with the tested code) grouped
   by theme — getting started (fixed run, plot+Boozer, JSON), profiles & finite-beta, hot restart,
