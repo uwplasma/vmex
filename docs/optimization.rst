@@ -75,8 +75,9 @@ NESTOR vacuum solve, the plasma boundary contribution to the vacuum field is
 computed by **virtual casing**, which is a smooth function of the coil /
 ``extcur`` parameters and the plasma surface. These fixed-surface derivatives
 are finite-difference-validated. The coupled solved-LCFS residual now lives in
-:mod:`vmec_jax.core.freeboundary_implicit`; its adjoint solve is not yet a
-public optimization path. (The two scopes are complementary: the
+:mod:`vmec_jax.core.freeboundary_implicit`; forward implicit sensitivities
+for a small number of ``extcur`` directions are FD-validated, while its
+many-parameter adjoint is not yet a public optimization path. (The two scopes are complementary: the
 fixed-boundary implicit adjoint is validated to ~1e-6 relative; the
 free-boundary virtual-casing path is FD-validated.)
 

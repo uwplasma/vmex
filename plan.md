@@ -149,6 +149,11 @@ An initial generic reverse-mode trace through the full CTH NESTOR rebuild was re
 reaching 10.8 GiB RSS while still compilation-bound after three minutes. The production adjoint
 must use an implicit/custom VJP for the NESTOR linear solve and reuse its factorization; enforce a
 small-resolution peak-memory gate before repeating the production CTH run.
+The accepted small-parameter method is forward implicit sensitivity: JVP-only Krylov avoids that
+reverse graph and passes solved-LCFS central differences on 3D CTH (0.33%) and axisymmetric DIII-D
+(0.42%). Measured peaks are 4.7 and 3.3 GiB; records and reproduction live in
+``benchmarks/free_boundary_sensitivity.json`` and ``profile_production.py``. Remaining R2 derivative
+work is the many-parameter coil-shape adjoint and coupled-Krylov memory/preconditioning reduction.
 
 **R3. Memory + cold-start workstream.** Current: solves 0.7-1.5 GB (Fortran 27-43 MB), implicit grad
 3.4 GB; cold CLI pays 5-25 s XLA setup. Gate: profile XLA graph construction + peak buffers; donate

@@ -386,8 +386,13 @@ The final damped constraint baselines are retained with the forward result,
 so this reconstructs the same discrete fixed point rather than a nearby
 approximation. Both state and ``extcur`` Jacobian actions are pure JAX; the
 CTH golden verifies the residual at the converged state and validates the
-``extcur`` JVP against central finite differences. The projected adjoint
-linear solve and solved-output gradient remain under development.
+``extcur`` JVP against central finite differences. For the common case of a
+small number of current groups, :meth:`~vmec_jax.core.freeboundary_implicit.CoupledFreeBoundaryProblem.extcur_sensitivity`
+uses the implicit function theorem in forward mode: matrix-free JVPs solve
+one preconditioned fixed-point system per current direction without unrolling
+the equilibrium iterations. CTH and axisymmetric DIII-D directional LCFS
+derivatives agree with strict central re-solves to 0.33% and 0.42%,
+respectively. A many-parameter coil-shape adjoint remains under development.
 
 Implicit differentiation
 ------------------------

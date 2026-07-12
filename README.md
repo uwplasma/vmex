@@ -26,8 +26,9 @@ original, it is differentiable and runs on GPUs.
   unrolling — validated against central finite differences to ~1e-6 relative
   (see the gradient table in the docs), with an O(1)-memory adjoint. **Free
   boundary** fixed-surface coil objectives are differentiable through virtual
-  casing. The solved-LCFS NESTOR-MHD residual and its `extcur` JVP are now
-  finite-difference-validated; the projected adjoint solve remains in progress.
+  casing. Solved-LCFS `extcur` sensitivities use a matrix-free forward
+  implicit solve and agree with strict central re-solves to 0.33–0.42%; the
+  many-parameter coil-shape adjoint remains in progress.
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.

@@ -1,0 +1,36 @@
+{
+  "date": "2026-07-12",
+  "method": "matrix-free forward implicit sensitivity through coupled NESTOR-MHD residual",
+  "platform": "Apple CPU, JAX x64",
+  "cth_3d": {
+    "ftol": 1e-12,
+    "forward_iterations": 921,
+    "krylov_iterations": 1302,
+    "krylov_residual": 3.004478819554289e-14,
+    "peak_rss_gb_approx": 4.7,
+    "quantity": "directional derivative of edge internal R_cos(0,0)",
+    "direction": "all extcur groups +1 A",
+    "implicit": -0.0001624192025861426,
+    "central_fd_ftol_1e-14_step_1A": -0.00016188787777454694,
+    "relative_error": 0.0032820543384700154
+  },
+  "diii_d_axisymmetric": {
+    "ns": 16,
+    "ftol": 1e-12,
+    "forward_iterations": 1414,
+    "krylov_iterations": 2270,
+    "krylov_residual": 7.772623288891003e-10,
+    "peak_rss_gb_approx": 3.3,
+    "quantity": "directional derivative of edge internal R_cos(0,0)",
+    "direction": "uniform relative scaling of all extcur groups",
+    "implicit": -1.0680464396517866,
+    "central_fd_step": 0.0001,
+    "central_fd": -1.0725809624301252,
+    "relative_error": 0.004227674121741709
+  },
+  "rejected_reverse_mode": {
+    "peak_rss_gb_approx": 10.8,
+    "elapsed_before_stop_s": 189,
+    "reason": "reverse trace through geometry-dependent NESTOR Green-matrix assembly remained compilation-bound"
+  }
+}

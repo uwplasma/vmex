@@ -88,6 +88,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.freeboundary_implicit",
         "CoupledFreeBoundaryProblem",
     ),
+    "CoupledSensitivityResult": (
+        ".core.freeboundary_implicit",
+        "CoupledSensitivityResult",
+    ),
     "solve_square_coil_free_boundary_scan": (
         ".core.hybrid_free_boundary",
         "solve_square_coil_free_boundary_scan",
