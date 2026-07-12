@@ -77,6 +77,7 @@ import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
 
+from solvax import gcrot as _solvax_gcrot
 from solvax import gmres as _solvax_gmres
 
 from .fields import energies_and_force_norms, magnetic_fields, metric_elements
@@ -766,6 +767,40 @@ def _adjoint_solve(A, b, cfg: ImplicitConfig):
     sol = _solvax_gmres(
         matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
         restart=cfg.adjoint_restart, max_restarts=cfg.adjoint_maxiter,
+    )
+    return unravel(sol.x), sol
+
+
+# Recycle-space width for _recycled_solve (plan R25.3).  GCROT keeps k
+# deflation directions in a fixed-shape (n, k) pair, so k trades warm-start
+# overhead (k re-orthonormalization matvecs per solve) against deflation
+# depth; 10 matches the solvax default and the GCRO-DR literature.
+_RECYCLE_K = 10
+
+
+def _recycled_solve(A, b, cfg: ImplicitConfig, recycle):
+    """Linearized solve via :func:`solvax.gcrot` with subspace recycling.
+
+    Same operator wrapping, tolerance (``rtol = adjoint_tol``, ``atol = 0``),
+    cycle size and restart budget as :func:`_adjoint_solve`; check
+    ``sol.converged`` — a warm recycle pair changes the iteration path, and
+    a solve that exhausts ``adjoint_maxiter`` returns whatever residual it
+    reached.  ``recycle`` is a ``(C, U)`` pair of shape ``(n, _RECYCLE_K)``
+    (an all-zero pair degenerates to a cold start); the updated pair is
+    returned on ``sol.recycle`` so callers can thread it through a sequence
+    of solves sharing (or slowly varying) the operator — the plan R25.3
+    per-dof implicit-Jacobian loop (opt-in via
+    ``least_squares(..., recycle=True)``; see the measured caveat there).
+    """
+    b_flat, unravel = ravel_pytree(b)
+
+    def matvec(v):
+        return ravel_pytree(A(unravel(v)))[0]
+
+    sol = _solvax_gcrot(
+        matvec, b_flat, rtol=cfg.adjoint_tol, atol=0.0,
+        m=cfg.adjoint_restart, k=_RECYCLE_K,
+        max_restarts=cfg.adjoint_maxiter, recycle=recycle,
     )
     return unravel(sol.x), sol
 
