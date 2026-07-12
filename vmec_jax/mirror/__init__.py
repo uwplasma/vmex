@@ -102,10 +102,13 @@ from .restart import (
 )
 from .output import MoutData, mout_from_result, read_mout, write_mout
 from .implicit import (
+    FixedBoundaryImplicitConfig,
     FixedBoundaryParameters,
     MirrorAdjointResult,
     fixed_boundary_adjoint,
     fixed_boundary_parameters,
+    make_fixed_boundary_implicit_config,
+    solve_fixed_boundary_implicit,
 )
 from .free_boundary import (
     FreeBoundaryMirrorResult,
@@ -173,6 +176,7 @@ __all__ = [
     "FreeBoundaryMirrorResult",
     "FreeBoundaryRestart",
     "FixedBoundaryParameters",
+    "FixedBoundaryImplicitConfig",
     "MirrorAdjointResult",
     "VacuumGeometry",
     "VacuumGrid",
@@ -198,6 +202,7 @@ __all__ = [
     "fixed_boundary_energy_gradient",
     "fixed_boundary_adjoint",
     "fixed_boundary_parameters",
+    "make_fixed_boundary_implicit_config",
     "fixed_boundary_variational_residual",
     "isotropic_force_residual",
     "interface_residual",
@@ -226,6 +231,7 @@ __all__ = [
     "project_fixed_boundary_state",
     "solve_anisotropic_fixed_boundary_cli",
     "solve_fixed_boundary_cli",
+    "solve_fixed_boundary_implicit",
     "solve_vacuum_potential",
     "solve_axisymmetric_free_boundary_cli",
     "solve_free_boundary_cli",

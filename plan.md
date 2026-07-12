@@ -32,8 +32,9 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
    converged physics quantities match VMEC2000 within per-quantity validation tolerances.
 4. **Performance parity or better** than VMEC2000 single-thread CPU on the benchmark suite,
    including multigrid (`NS_ARRAY` ladders), which is currently slower than VMEC2000 — a named bug.
-5. **A small, readable codebase**: 50–60 Python files in `vmec_jax/`, ~25–30k library lines
-   (revised 2026-07-11 after the separate open-field topology landed as 17 focused modules; still
+5. **A small, readable codebase**: 50–60 Python files in `vmec_jax/`, ~30–31k library lines
+   (revised 2026-07-12 after main added bootstrap/stability numerics and the open-field topology
+   landed as focused modules; still
    a >4x reduction from **229 files / ~123k lines**), physically
    meaningful names, docstrings everywhere, ≥95% coverage without repo bloat (tests currently
    ~140k lines with coverage-padding files; target ≤ ~10k test lines).
@@ -1897,8 +1898,10 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        current match reconverged FD to `5.22e-9` through the anisotropic functional. Dedicated
        bi-Maxwellian mass/hot-fraction gradients pass at `2.99e-9` with positive ellipticity.
        Tabulated pressure-value gradients pass at `5.34e-8`; interpolation knots are correctly
-       static pytree metadata. A public custom-VJP solve wrapper and free-boundary coil derivatives
-       remain before M9 promotion.
+       static pytree metadata. The public `solve_fixed_boundary_implicit` custom VJP now runs the
+       host nonlinear solve through `pure_callback` and applies the matrix-free adjoint in reverse;
+       isotropic and registered anisotropic gradients match the explicit adjoint at `2e-9` rtol.
+       Free-boundary coil derivatives remain before M9 promotion.
    11. **M10 — performance, outputs, and promotion.** Benchmark CPU/GPU cold/warm time, memory,
        scaling, and CLI versus JAX lanes; add mirror-native `mout` output, restart, `--plot`, docs,
        and short root examples. Remove obsolete archived implementations only after parity data are
@@ -1909,9 +1912,9 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        `vmec --plot mout_*.nc` renders the horizontal 3D LCFS/coils/cap-to-cap field lines, `|B|`,
        cross-sections, pressure, and `ftol` history. The 0--50% straight-mirror example writes one
        file per accepted equilibrium and renders its endpoint through this disk-backed path.
-       The complete package is now 55 Python files / 28,760 lines; the mirror backend is 17 files,
-       its largest module is 847 lines, and generated outputs remain ignored. This meets the revised
-       50--60 file / 25--30k line budget without merging distinct numerical operators into oversized
+       The complete package is now 58 Python files / 30,679 lines; the mirror backend is 18 files /
+       7,481 lines, its largest module is 855 lines, and generated outputs remain ignored. This meets
+       the revised 50--60 file / 30--31k line budget without merging distinct operators into oversized
        modules.
        Coverage instrumentation is an explicit promotion gate: the dedicated mirror shard passes,
        but coverage.py currently aborts when tracing nested JAX/BIE solves. The release-core 95%
@@ -2088,7 +2091,7 @@ Structure:
 
 - [ ] Fresh clone ≤ 10 MB; single branch; zero `Co-Authored-By: Claude` trailers in history; Claude
       absent from the GitHub contributors panel; all new commits authored by rogeriojorge.
-- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~25–30k lines after the
+- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~30–31k lines after the
       mirror backend lands; no mirror file exceeds ~900 lines; docstrings and source/equation
       cross-references are complete; ruff and mypy pass without blanket ignores.
 - [ ] Fixed + free boundary (mgrid and direct-coil; tokamak and stellarator; sym and lasym)

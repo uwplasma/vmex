@@ -318,8 +318,24 @@ current together to ``5.22e-9`` relative against reconverged finite
 differences. A bi-Maxwellian case with positive ellipticity indicators also
 validates mass and hot-fraction coefficient gradients to ``2.99e-9``.
 A tabulated closure keeps its interpolation knots static and validates pressure
-table-value gradients to ``5.34e-8``. A public custom-VJP solve and coupled
-free-boundary coil derivatives remain M9 promotion gates.
+table-value gradients to ``5.34e-8``.
+
+``solve_fixed_boundary_implicit`` exposes the same converged state directly
+to JAX objectives. Its static context keeps the host solver out of the AD tape::
+
+   implicit_config = make_fixed_boundary_implicit_config(
+       initial_state, grid, config, solve_lambda=True
+   )
+   state = solve_fixed_boundary_implicit(parameters, implicit_config)
+   gradient = jax.grad(
+       lambda controls: solve_fixed_boundary_implicit(
+           controls, implicit_config
+       ).radius_scale[1, 0, grid.nxi // 2]
+   )(parameters)
+
+The custom VJP matches the explicit adjoint for both isotropic and registered
+anisotropic controls. Coupled free-boundary coil derivatives remain the M9
+promotion gate.
 
 ``device=None`` uses the shared measured device policy. On the office host,
 the corrected ``15x15`` case took 35.2 seconds on CPU and 44.2 seconds on one

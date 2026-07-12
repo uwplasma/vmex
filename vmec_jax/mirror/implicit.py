@@ -8,6 +8,8 @@ the number of nonlinear iterations and one adjoint solve per scalar quantity.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import functools
+from types import SimpleNamespace
 from typing import Any, Callable
 
 import jax
@@ -23,7 +25,12 @@ from .forces import (
     mirror_energy,
 )
 from .model import MirrorBoundary, MirrorState, project_fixed_boundary_state
-from .solver import _MirrorStateVectorizer, _packed_preconditioner
+from .solver import (
+    _MirrorStateVectorizer,
+    _packed_preconditioner,
+    solve_anisotropic_fixed_boundary_cli,
+    solve_fixed_boundary_cli,
+)
 
 Array = Any
 MirrorQuantity = Callable[[MirrorState, MirrorEnergy | AnisotropicMirrorEnergy], Array]
@@ -50,6 +57,20 @@ class MirrorAdjointResult:
     relative_residual: float
     converged: bool
     linear_solver: str
+
+
+@dataclass(frozen=True, eq=False)
+class FixedBoundaryImplicitConfig:
+    """Static numerical context for a differentiable fixed-boundary solve."""
+
+    initial_state: MirrorState
+    grid: Any
+    config: Any
+    gamma: float = 5.0 / 3.0
+    solve_lambda: bool = False
+    gradient_tolerance: float = 1.0e-11
+    adjoint_rtol: float = 1.0e-10
+    adjoint_max_restarts: int = 20
 
 
 jax.tree_util.register_dataclass(
@@ -86,6 +107,31 @@ def fixed_boundary_parameters(
         mass_profile=jnp.asarray(mass_profile),
         current_derivative=jnp.asarray(current_derivative),
         pressure_closure=pressure_closure,
+    )
+
+
+def make_fixed_boundary_implicit_config(
+    initial_state: MirrorState,
+    grid: Any,
+    config: Any,
+    *,
+    gamma: float = 5.0 / 3.0,
+    solve_lambda: bool = False,
+    gradient_tolerance: float = 1.0e-11,
+    adjoint_rtol: float = 1.0e-10,
+    adjoint_max_restarts: int = 20,
+) -> FixedBoundaryImplicitConfig:
+    """Build the static context used by :func:`solve_fixed_boundary_implicit`."""
+
+    return FixedBoundaryImplicitConfig(
+        initial_state=initial_state,
+        grid=grid,
+        config=config,
+        gamma=gamma,
+        solve_lambda=solve_lambda,
+        gradient_tolerance=gradient_tolerance,
+        adjoint_rtol=adjoint_rtol,
+        adjoint_max_restarts=adjoint_max_restarts,
     )
 
 
@@ -285,9 +331,151 @@ def fixed_boundary_adjoint(
     )
 
 
+def _state_shape(config: FixedBoundaryImplicitConfig) -> MirrorState:
+    shape = config.grid.shape
+    field = jax.ShapeDtypeStruct(shape, jnp.float64)
+    return MirrorState(radius_scale=field, lambda_stream=field)
+
+
+def _parameter_shape(parameters: FixedBoundaryParameters) -> FixedBoundaryParameters:
+    return jax.tree.map(
+        lambda value: jax.ShapeDtypeStruct(value.shape, value.dtype), parameters
+    )
+
+
+def _host_fixed_boundary_solve(
+    config: FixedBoundaryImplicitConfig, parameters: FixedBoundaryParameters
+) -> MirrorState:
+    parameters = jax.tree.map(jnp.asarray, parameters)
+    boundary = MirrorBoundary(parameters.boundary_radius)
+    initial = project_fixed_boundary_state(config.initial_state, boundary, config.grid)
+    common = dict(
+        axial_flux_derivative=parameters.axial_flux_derivative,
+        current_derivative=parameters.current_derivative,
+        solve_lambda=config.solve_lambda,
+        gradient_tolerance=config.gradient_tolerance,
+        require_convergence=True,
+    )
+    if parameters.pressure_closure is None:
+        result = solve_fixed_boundary_cli(
+            initial,
+            boundary,
+            config.grid,
+            config.config,
+            mass_profile=parameters.mass_profile,
+            gamma=config.gamma,
+            **common,
+        )
+    else:
+        result = solve_anisotropic_fixed_boundary_cli(
+            initial,
+            boundary,
+            config.grid,
+            config.config,
+            parameters.pressure_closure,
+            **common,
+        )
+    return jax.tree.map(lambda value: np.asarray(value, dtype=np.float64), result.state)
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(1,))
+def solve_fixed_boundary_implicit(
+    parameters: FixedBoundaryParameters, config: FixedBoundaryImplicitConfig
+) -> MirrorState:
+    """Return a converged state with an implicit reverse derivative.
+
+    The host nonlinear iterations run through :func:`jax.pure_callback` and
+    are absent from the AD tape. Reverse mode solves the converged equilibrium
+    adjoint, so its memory does not grow with the number of primal iterations.
+    """
+
+    return jax.pure_callback(
+        functools.partial(_host_fixed_boundary_solve, config),
+        _state_shape(config),
+        parameters,
+    )
+
+
+def _solve_fixed_boundary_implicit_fwd(parameters, config):
+    state = jax.pure_callback(
+        functools.partial(_host_fixed_boundary_solve, config),
+        _state_shape(config),
+        parameters,
+    )
+    return state, (parameters, state)
+
+
+def _host_fixed_boundary_pullback(config, parameters, state, cotangent):
+    parameters = jax.tree.map(jnp.asarray, parameters)
+    state = jax.tree.map(jnp.asarray, state)
+    cotangent = jax.tree.map(jnp.asarray, cotangent)
+    if parameters.pressure_closure is None:
+        energy = mirror_energy(
+            state,
+            config.grid,
+            axial_flux_derivative=parameters.axial_flux_derivative,
+            mass_profile=parameters.mass_profile,
+            current_derivative=parameters.current_derivative,
+            gamma=config.gamma,
+        )
+    else:
+        energy = anisotropic_mirror_energy(
+            state,
+            config.grid,
+            parameters.pressure_closure,
+            axial_flux_derivative=parameters.axial_flux_derivative,
+            current_derivative=parameters.current_derivative,
+        )
+
+    def cotangent_quantity(candidate, _energy):
+        return sum(
+            jnp.vdot(value, weight)
+            for value, weight in zip(
+                jax.tree.leaves(candidate), jax.tree.leaves(cotangent), strict=True
+            )
+        )
+
+    result = SimpleNamespace(converged=True, state=state, energy=energy)
+    adjoint = fixed_boundary_adjoint(
+        result,
+        parameters,
+        config.grid,
+        cotangent_quantity,
+        gamma=config.gamma,
+        solve_lambda=config.solve_lambda,
+        rtol=config.adjoint_rtol,
+        max_restarts=config.adjoint_max_restarts,
+    )
+    if not adjoint.converged:
+        raise RuntimeError(
+            f"fixed-boundary adjoint failed at residual {adjoint.relative_residual:.3e}"
+        )
+    return jax.tree.map(lambda value: np.asarray(value, dtype=np.float64), adjoint.gradient)
+
+
+def _solve_fixed_boundary_implicit_bwd(config, residual, cotangent):
+    parameters, state = residual
+    gradient = jax.pure_callback(
+        functools.partial(_host_fixed_boundary_pullback, config),
+        _parameter_shape(parameters),
+        parameters,
+        state,
+        cotangent,
+    )
+    return (gradient,)
+
+
+solve_fixed_boundary_implicit.defvjp(
+    _solve_fixed_boundary_implicit_fwd, _solve_fixed_boundary_implicit_bwd
+)
+
+
 __all__ = [
+    "FixedBoundaryImplicitConfig",
     "FixedBoundaryParameters",
     "MirrorAdjointResult",
     "fixed_boundary_adjoint",
     "fixed_boundary_parameters",
+    "make_fixed_boundary_implicit_config",
+    "solve_fixed_boundary_implicit",
 ]

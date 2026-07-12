@@ -45,6 +45,14 @@
     "central_finite_difference": 1.4394224701064218e-6,
     "relative_error": 5.337280053520721e-8
   },
+  "custom_vjp_case": {
+    "forward": "opaque converged host solve through jax.pure_callback",
+    "reverse": "matrix-free implicit adjoint",
+    "closures": ["isotropic functional", "registered anisotropic functional"],
+    "comparison": "explicit fixed_boundary_adjoint",
+    "gradient_rtol": 2.0e-9,
+    "gradient_atol": 2.0e-11
+  },
   "matrix_free_case": {
     "grid": {"ns": 17, "ntheta": 1, "nxi": 41},
     "active_unknowns": 585,
@@ -59,5 +67,5 @@
     "block_adjoint_relative_residual": 2.6913e-15,
     "process_peak_rss_mib": 983.6
   },
-  "assessment": "The exact reverse solve is independent of the number of physical controls. It is FD-validated with all four isotropic control groups active, with registered closure coefficients through the anisotropic functional, with bi-Maxwellian mass/hot-fraction coefficients under a valid ellipticity gate, and with tabulated parallel-pressure values while interpolation knots remain static. It remains matrix-free above the dense reference threshold. Three-color block Thomas is exact but takes 4.79 s versus 3.41 s for one preconditioned-GMRES right-hand side, so GMRES remains the scalar-adjoint default; block mode is retained for future batched sensitivities. A public custom-VJP solve and coupled free-boundary adjoints remain open."
+  "assessment": "The exact reverse solve is independent of the number of physical controls. It is FD-validated with all four isotropic control groups active, with registered closure coefficients through the anisotropic functional, with bi-Maxwellian mass/hot-fraction coefficients under a valid ellipticity gate, and with tabulated parallel-pressure values while interpolation knots remain static. The public custom VJP composes the opaque host solve with the same adjoint for isotropic and anisotropic objectives. It remains matrix-free above the dense reference threshold. Three-color block Thomas is exact but takes 4.79 s versus 3.41 s for one preconditioned-GMRES right-hand side, so GMRES remains the scalar-adjoint default; block mode is retained for future batched sensitivities. Coupled free-boundary adjoints remain open."
 }

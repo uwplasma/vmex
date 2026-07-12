@@ -20,8 +20,10 @@ from vmec_jax.mirror import (  # noqa: E402
     TabulatedPressureClosure,
     fixed_boundary_adjoint,
     fixed_boundary_parameters,
+    make_fixed_boundary_implicit_config,
     project_fixed_boundary_state,
     solve_fixed_boundary_cli,
+    solve_fixed_boundary_implicit,
     solve_anisotropic_fixed_boundary_cli,
 )
 
@@ -124,6 +126,68 @@ def test_fixed_boundary_adjoint_rejects_unconverged_state() -> None:
         fixed_boundary_adjoint(
             Result(), parameters, grid, lambda state, energy: energy.total
         )
+
+
+@pytest.mark.parametrize(
+    "closure",
+    [None, IsotropicPressureClosure(jnp.asarray([2.0e3, -2.0e3]))],
+)
+def test_custom_vjp_matches_explicit_fixed_boundary_adjoint(closure) -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=3, nxi=5), ftol=1.0e-12, max_iterations=500
+    )
+    grid = config.build_grid()
+    xi, s = jnp.asarray(grid.xi), jnp.asarray(grid.s)
+    boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.1 * (1.0 - xi**2)), grid)
+    parameters = fixed_boundary_parameters(
+        boundary,
+        axial_flux_derivative=0.1,
+        mass_profile=2.0e-4 * (1.0 - s) if closure is None else 0.0,
+        current_derivative=1.0e-3 * s,
+        pressure_closure=closure,
+    )
+    initial = MirrorState.from_boundary(boundary, grid)
+    common = dict(
+        axial_flux_derivative=parameters.axial_flux_derivative,
+        current_derivative=parameters.current_derivative,
+        solve_lambda=True,
+        require_convergence=True,
+    )
+    if closure is None:
+        result = solve_fixed_boundary_cli(
+            initial,
+            boundary,
+            grid,
+            config,
+            mass_profile=parameters.mass_profile,
+            **common,
+        )
+    else:
+        result = solve_anisotropic_fixed_boundary_cli(
+            initial, boundary, grid, config, closure, **common
+        )
+
+    def quantity(state, _energy):
+        return state.radius_scale[1, 0, grid.nxi // 2]
+
+    reference = fixed_boundary_adjoint(
+        result, parameters, grid, quantity, solve_lambda=True, rtol=1.0e-10
+    )
+    implicit_config = make_fixed_boundary_implicit_config(
+        initial, grid, config, solve_lambda=True
+    )
+    gradient = jax.jit(
+        jax.grad(
+            lambda controls: solve_fixed_boundary_implicit(
+                controls, implicit_config
+            ).radius_scale[1, 0, grid.nxi // 2]
+        )
+    )(parameters)
+
+    for actual, expected in zip(
+        jax.tree.leaves(gradient), jax.tree.leaves(reference.gradient), strict=True
+    ):
+        np.testing.assert_allclose(actual, expected, rtol=2.0e-9, atol=2.0e-11)
 
 
 @pytest.mark.parametrize(
