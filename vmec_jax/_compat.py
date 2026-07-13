@@ -102,6 +102,20 @@ def _cache_machine_fingerprint() -> str:
                         seen.add(key)
     except Exception:
         pass
+    # macOS has no /proc/cpuinfo — capture the CPU brand + microarchitecture via
+    # sysctl so Intel/Apple-Silicon (and different chip generations) never share
+    # an XLA:CPU AOT cache entry.
+    if platform.system() == "Darwin":
+        try:
+            import subprocess
+            for key in ("machdep.cpu.brand_string", "hw.optional.arm.FEAT_SME",
+                        "hw.cpufamily"):
+                out = subprocess.run(["sysctl", "-n", key], capture_output=True,
+                                     text=True, timeout=2)
+                if out.returncode == 0 and out.stdout.strip():
+                    parts.append(f"{key}={out.stdout.strip()}")
+        except Exception:
+            pass
     if not any(str(part).strip() for part in parts[:3]):
         try:
             parts.append(platform.node())
@@ -116,12 +130,16 @@ def _cache_machine_fingerprint() -> str:
 def _default_compilation_cache_dir() -> str | None:
     """Return the configured JAX compilation-cache directory.
 
-    The persistent cache is enabled automatically for accelerator-requested
-    runs so cold-process CLI/API runs can reuse compiled kernels across
-    invocations.  CPU persistent-cache entries are native AOT executables and
-    can emit host-feature mismatch errors on some XLA/JAX versions, so CPU cache
-    use is opt-in with ``VMEC_JAX_COMPILATION_CACHE=1`` unless the user provides
-    an explicit cache directory.
+    The persistent cache is enabled **by default on every backend** (CPU too)
+    so that repeated cold-process CLI/API runs reuse compiled kernels instead
+    of recompiling — a solovev CLI run drops 4.3 s -> 1.2 s on the second
+    invocation (plan.md R26c).  The XLA:CPU host-feature-mismatch hazard (AOT
+    executables tied to a specific instruction set, dangerous on shared home
+    filesystems) is handled by :func:`_cache_machine_fingerprint`, whose
+    per-machine suffix hashes the CPU model + feature flags (AVX2/AVX512/...),
+    so heterogeneous machines never share a cache entry.  Opt out with
+    ``VMEC_JAX_COMPILATION_CACHE=disabled`` (or ``VMEC_JAX_COMPILATION_CACHE_DIR=
+    disabled``); point it elsewhere with ``JAX_COMPILATION_CACHE_DIR=/path``.
     """
     # Already set by the user — respect it.
     if "JAX_COMPILATION_CACHE_DIR" in os.environ:
@@ -140,23 +158,11 @@ def _default_compilation_cache_dir() -> str | None:
     cache_flag = os.environ.get("VMEC_JAX_COMPILATION_CACHE", "").strip().lower()
     if cache_flag in ("disabled", "0", "false", "no", "off"):
         return None
-    cache_forced = cache_flag in ("1", "true", "yes", "on")
-
-    platform_name = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
-    platforms = os.environ.get("JAX_PLATFORMS", "").strip().lower()
-    accelerator_requested = (
-        platform_name in ("gpu", "cuda", "rocm", "tpu")
-        or any(
-            part.strip() in ("gpu", "cuda", "rocm", "tpu")
-            for part in platforms.split(",")
-        )
-    )
-    if not (cache_forced or accelerator_requested):
-        return None
 
     # Default cache location: ~/.cache/vmec_jax/jax_cache/<machine-fingerprint>
-    # The host-specific suffix prevents unsafe XLA:CPU AOT reuse on shared home
-    # filesystems where different machines see the same ~/.cache directory.
+    # The host-specific suffix (CPU model + feature flags) prevents unsafe
+    # XLA:CPU AOT reuse on shared home filesystems where different machines see
+    # the same ~/.cache directory.
     try:
         import pathlib
         return str(

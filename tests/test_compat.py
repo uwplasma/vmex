@@ -66,8 +66,10 @@ def clean_cache_env(monkeypatch):
 
 def test_cache_dir_env_precedence(clean_cache_env):
     mp = clean_cache_env
-    # nothing requested on CPU -> no cache
-    assert _compat._default_compilation_cache_dir() is None
+    # default on every backend now (R26c cold-start fix): CPU gets a
+    # machine-scoped cache under ~/.cache with no env var required.
+    path = _compat._default_compilation_cache_dir()
+    assert path is not None and "vmec_jax" in path and "jax_cache" in path
 
     # explicit JAX var wins verbatim; 'disabled' turns it off
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/tmp/jaxcache")

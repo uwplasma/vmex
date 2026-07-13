@@ -646,12 +646,24 @@ R9 release and the VMEX rename R21).** Ten items (+k added 2026-07-12):
      uses the new traceable omnigenity residual (h2) once landed. Compare achieved QS/QI and wall vs
      the laddered examples in the docstrings.
   a. **Trim + simplify the code** — one more dead-code/duplication/altitude sweep over vmec_jax/core.
-  b. **Port more functionality to SOLVAX** — anything generic-solver-shaped still in vmec_jax
-     (candidates: the R25.2 block-tridiagonal Jacobian machinery, chunk_map, adjoint GMRES wrappers)
-     moves to SOLVAX with a release + import back.
-  c. **Performance:** (i) COLD STARTS — cut first-call JIT wall (compile-cache persistence across
-     processes, smaller graphs, jit-factoring); (ii) FREE BOUNDARY with and without mgrid, with and
-     without NESTOR (direct-coil lane) — profile + tune both.
+  b. **Port more functionality to SOLVAX** — **(MOSTLY DONE 2026-07-12.)** Audit: the generic
+     linear-algebra IS already in SOLVAX and imported by vmec_jax — block_thomas_factor/solve,
+     chunk_map, auto_chunk_size, chunked_jacfwd/rev, gmres, gcrot (no local copies remain; the R25.2
+     block Jacobian and R25.3 recycle both use solvax). The only vmec-specific glue kept local is
+     implicit._adjoint_solve/_recycled_solve (they wrap solvax.gmres/gcrot with VMEC's residual
+     operator — correctly not generic). REMAINING: the harmonic-Ritz GCRO-DR upgrade INSIDE SOLVAX
+     (solvax.gcrot's FIFO recycle space poisons reuse — the R25.3 negative result); a focused SOLVAX
+     numerics enhancement that would unlock recycle=True in vmec_jax. Optional (block Jacobian already
+     gives 33x).
+  c. **Performance:** (i) COLD STARTS — **(DONE 2026-07-12.)** The persistent XLA compile cache was
+     enabled but had NO default directory on CPU (accelerator-only gate), so CPU CLI/API runs
+     recompiled every process. Made it default-on for every backend (_compat._default_compilation_cache_dir);
+     the machine fingerprint already hashes CPU model+flags (AVX2/AVX512; +macOS sysctl brand added) so
+     heterogeneous shared-FS machines never collide. Measured: li383 CLI 4.48 s -> 1.34 s on the 2nd run
+     (3.3x), zero user config; opt out with VMEC_JAX_COMPILATION_CACHE=disabled. (ii) FREE BOUNDARY **(DONE)** —
+     measured: the mgrid and external_field (direct-coil) lanes are identical (both 1.32 s warm / 574
+     iters on cth ns=15; mgrid file-read overhead ~0), and NESTOR was already fused into jitted JAX in
+     R15.2 (9.43->3.48 s). No further tune warranted.
   d. **Faster optimizations/gradients** — continue past the R25 gate (block-tridiag amortization,
      recycling, perturbation warm starts all landed and measured together).
   e. **Memory reduction with DEFAULT controls** — good defaults, no advanced user knobs required.
