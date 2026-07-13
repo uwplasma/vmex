@@ -154,6 +154,11 @@ An initial generic reverse-mode trace through the full CTH NESTOR rebuild was re
 reaching 10.8 GiB RSS while still compilation-bound after three minutes. The production adjoint
 must use an implicit/custom VJP for the NESTOR linear solve and reuse its factorization; enforce a
 small-resolution peak-memory gate before repeating the production CTH run.
+Transposing the accepted forward-linearization closure was also rejected on the production CTH
+case (2026-07-12): the 3,690-dof closure itself built in 3.89 s at 2.80 GiB RSS, but XLA then spent
+4 min 17 s compiling the fused ``NESTOR full`` transpose, and process RSS reached 7.75 GiB before
+the controlled stop. This is not the compact custom NESTOR transpose required by the gate; do not
+wrap that closure in another Krylov implementation or retry it on GPU.
 The accepted small-parameter method is forward implicit sensitivity: JVP-only Krylov avoids that
 reverse graph and passes solved-LCFS central differences on 3D CTH (0.33%) and axisymmetric DIII-D
 (0.42%). Measured peaks are 4.7 and 3.3 GiB; records and reproduction live in

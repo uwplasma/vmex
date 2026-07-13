@@ -7,8 +7,8 @@
     "mirror_python_lines": 8072,
     "largest_mirror_module_lines": 862,
     "test_python_lines": 14054,
-    "tracked_tree_kib": 8205,
-    "plan_bytes": 197661,
+    "tracked_tree_kib": 8206,
+    "plan_bytes": 198123,
     "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, moving mirror plotting to its owning package, and promoting three reviewed documentation figures on 2026-07-12"
   },
   "coverage": {

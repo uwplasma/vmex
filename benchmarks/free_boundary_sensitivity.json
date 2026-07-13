@@ -33,6 +33,17 @@
     "elapsed_before_stop_s": 189,
     "reason": "reverse trace through geometry-dependent NESTOR Green-matrix assembly remained compilation-bound"
   },
+  "rejected_linearized_transpose": {
+    "case": "CTH 3D, 3690 projected structural dofs",
+    "forward_iterations": 921,
+    "forward_wall_s_warm": 6.55,
+    "linearize_and_transpose_closure_wall_s": 3.89,
+    "rss_after_closure_gb": 2.8,
+    "peak_rss_gb_at_stop": 7.75,
+    "xla_compile_alarm_s": 257.46,
+    "completed": false,
+    "reason": "jax.linear_transpose of the accepted forward JVP avoided the original retained reverse graph, but solvax GMRES still forced compilation of the complete geometry-dependent fused NESTOR full transpose. The production route requires a compact custom transpose at the NESTOR operator boundary, not another outer Krylov wrapper."
+  },
   "rejected_radial_block_warm_start": {
     "case": "diii_d_axisymmetric_ns16",
     "date": "2026-07-12",
