@@ -131,22 +131,17 @@ _R1 status (2026-07-12, office 36-core CPU):_
 **R2. Free boundary to production.** Forward parity/performance are complete: the CTH golden
 converges with per-variable VMEC2000 gates, the fused NESTOR path is bit-equivalent, and the ns=201
 benchmark measures vmec-jax warm `24.86 s` versus VMEC2000 `26.74 s` (the former 3x target is
-passed). The remaining gate is a coupled solved-boundary derivative (coil/extcur → LCFS/QS), not
-only the existing fixed-surface virtual-casing residual derivative, followed by a validated ESSOS
-Landreman-Paul QA + tokamak beta=0..5% showcase with mgrid/direct-Biot-Savart agreement and one
-compressed README panel.
+passed). The remaining gate is a memory-bounded many-parameter coupled solved-boundary adjoint;
+small-parameter forward implicit sensitivities and the scoped coil showcases are complete.
 
-_R2 status (2026-07-12):_ the direct ESSOS Landreman-Paul scan is repeatably converged at actual
-beta 0, 1, 2, 3% (`fsq <=2.1e-10`, ns=51) with full-state hot restarts. The former 2→3% barrier
-was a continuation-driver bug: each point reset pressure from a crude global slope, producing a
-13% pressure jump for a nominal 0.1% beta step. A local predictor and 0.1% internal steps reach
-actual beta 3.059%, though critical slowing reaches 15,675 iterations near beta 2.927%. The public
-example now expresses the full 0--5% target and plots only the six requested equilibria. An office
-A4000 run reached actual beta 3.120% in 11,319 iterations, then the next 3.2% target stalled after
-20,000 iterations at summed ``fsq=1.677e-10``. The driver now halves a failed continuation step
-down to a documented 0.0125% floor instead of blindly increasing ``NITER``. The 4--5% endpoints
-remain part of the coupled-globalization gate until that adaptive branch converges and is recorded
-in ``benchmarks/free_boundary_essos_beta.json``. The forward
+_R2 status (2026-07-12):_ the direct ESSOS Landreman-Paul scan reaches actual beta 3.350% at
+``ftol=1e-10``; 3.3625% fails at the documented minimum continuation step, so 4--5% is not claimed.
+Generated-mgrid equilibrium parity for those same LP-QA coils is rejected after grid refinement,
+even though off-grid interpolation converges. Positive same-coil parity is instead established for
+the reconstructed DIII-D tokamak at actual beta 0, 1.496%, and 3.009%, with direct/generated LCFS
+coefficient differences ``2.25e-4--6.31e-4`` and reviewed figures. Evidence is in
+``benchmarks/free_boundary_essos_beta.json``, ``free_boundary_essos_mgrid_parity.json``, and
+``free_boundary_tokamak_coil_parity.json``. The forward
 result now retains its final NESTOR cache/potential and CLI/library WOUT files populate
 ``potsin``/``potcos`` plus ``xmpot``/``xnpot`` and all covariant/contravariant ``*_sur`` tables.
 The surface tables reconstruct the retained real-space fields to transform roundoff and match a
@@ -215,7 +210,7 @@ and a full traceable rewrite of derivative-amplified diagnostics is deferred unt
 optimization requires it. This does not block equilibrium or mirror promotion.
 
 **R6. Refactor + docstring hygiene.** Public API-like docstrings are complete: an AST audit finds
-0 missing across 564 top-level definitions and public class members (``daadbf47``). Oversized core
+0 missing across 565 top-level definitions and public class members (``daadbf47``). Oversized core
 modules remain ``optimize`` 1,960, ``solver`` 1,706, ``freeboundary`` 1,055, ``implicit`` 1,042,
 and ``nyquist`` 1,026 lines. Mirror plotting moved intact to its owning package, reducing core
 ``plotting`` from 1,039 to 888 lines. Split the rest only along existing ownership boundaries;
@@ -228,9 +223,12 @@ splits for the five remaining large numerical modules remain release cleanup.
 (every equation linked to its implementing function); `docs/glossary.rst` (VMEC2000↔vmec_jax names).
 Gate: docs `-W` green; each example has a tutorial; glossary present.
 
-**R8. Mirror geometry (dev).** Rebase/port PR #22 (codex/mirror-geometry) onto the core, or implement
-the `docs/mirrors.rst` design + xfail scaffolds per §7 Phase 5.5. Gate: design doc + a fixed-boundary
-axisymmetric mirror smoke.
+**R8. Mirror geometry COMPLETE WITH DOCUMENTED RESEARCH LIMITS.** PR #22 is integrated with current main
+and provides axisymmetric fixed/free straight mirrors through beta 50%, anisotropic closures,
+external coils, mirror-native output/plotting, and implicit derivatives. Nonaxisymmetric straight
+free boundary remains research-only after failing its local-mode refinement gate. The toroidal
+Fourier hybrid is reproducible through achieved beta 0.8333%; higher beta and a native spline state
+are deferred. Gates and evidence are consolidated in §8 Phase 5.5 and ``benchmarks/mirror_*.json``.
 
 **R9. Release v0.1.0.** After R1-R5: regenerate benchmarks/README, refresh the release asset bundle,
 tag, publish PyPI + conda-forge, verify `pip install vmec-jax && vmec --test` on a clean machine.
