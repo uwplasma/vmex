@@ -74,7 +74,7 @@ import jax.numpy as jnp
 from .fields import magnetic_fields, metric_elements, surface_currents
 from .geometry import half_mesh_jacobian
 from .solver import SolverRuntime, SpectralState, _geometry
-from .statephysics import _as_1d
+from .statephysics import _as_1d, _iotas_half_from_fields
 from .transforms import physical_to_internal_scale
 
 __all__ = [
@@ -245,12 +245,7 @@ def boozer_bmnc_state(
         signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
         ncurr=setup.ncurr, enclosed_current=setup.icurv,
     )
-    if int(setup.ncurr) == 1:
-        phips = jnp.asarray(setup.phips)
-        safe = jnp.where(phips != 0.0, phips, 1.0)
-        iota_prof = jnp.where(phips != 0.0, jnp.asarray(fields.chips) / safe, 0.0)
-    else:
-        iota_prof = jnp.asarray(setup.iotas)
+    iota_prof = _iotas_half_from_fields(setup, fields)
     cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
                            trig=rt.trig, s=s, signgs=setup.signgs)
     G_prof, I_prof = jnp.asarray(cur.bvco), jnp.asarray(cur.buco)

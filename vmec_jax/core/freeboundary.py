@@ -593,7 +593,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
     two_pi = 2.0 * float(np.pi)
     sgn = float(int(signgs))
 
-    def _pipeline(state, rt, field, boundary, ctor, axis_r, axis_z):
+    def _pipeline(field, boundary, ctor, axis_r, axis_z):
         br_c, bp_c, bz_c = field.b_cyl(boundary.R, phi_geom, boundary.Z)
         br_a, bp_a, bz_a = _axis_current_field_jax(
             boundary.R, boundary.Z, axis_r, axis_z, ctor / MU0, axis_tb
@@ -618,7 +618,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         boundary = _boundary_from_coefficients_jax(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
-        ext = _pipeline(state, rt, field, boundary, ctor, axis_r, axis_z)
+        ext = _pipeline(field, boundary, ctor, axis_r, axis_z)
         potvac, mode_matrix, bvec_nonsing, _rhs, _gsrc, _grp = solver_vac.full(
             boundary, ext["bexni"]
         )
@@ -643,7 +643,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         boundary = _boundary_from_coefficients_jax(
             rmnc, zmns, rmns, zmnc, modes=modes, basis=basis
         )
-        ext = _pipeline(state, rt, field, boundary, ctor, axis_r, axis_z)
+        ext = _pipeline(field, boundary, ctor, axis_r, axis_z)
         potvac, _rhs = solver_vac.skip(
             boundary, ext["bexni"], bvec_nonsing, mode_matrix
         )
@@ -890,7 +890,7 @@ def solve_free_boundary(
         emit(FORCE_ITERATIONS_BANNER, end="")
         emit(screen_header(lasym=resolution.lasym, lfreeb=True), end="")
 
-    carry = _initial_carry(_initial_state(rt.setup), rt_fixed, ijacob=0)
+    carry = _initial_carry(_init_state, rt_fixed, ijacob=0)
     printed: set[int] = set()
 
     def _emit_due(final: bool) -> None:
