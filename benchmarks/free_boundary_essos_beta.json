@@ -44,6 +44,7 @@
   ],
   "maximum_beta_error_percent": 0.131,
   "axis_shift_cm": 16.2,
+  "summary_precision": "beta error and axis shift use full-precision WOUT values; accepted rows reproduce the console-rounded table",
   "wall_time_minutes": 149.0,
   "adaptive_retries": [
     {"target_beta_percent": 2.8, "reason": "calibration", "actual_beta_percent": 2.7671, "tolerance_percent": 0.025},
