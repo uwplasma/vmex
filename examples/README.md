@@ -26,6 +26,9 @@ All runnable examples live under this single `examples/` tree.
     ESSOS coils (direct JAX Biot-Savart, no mgrid file); `PRES_SCALE` is
     calibrated per point so the *actual* wout `betatotal` targets 0--5 % with
     bounded adaptive continuation.
+  - `free_boundary_tokamak_coils.py` — construct circular tokamak TF/PF coils,
+    generate their mgrid, and solve the same finite-beta LCFS through direct
+    Biot-Savart and mgrid backends with a quantitative boundary comparison.
   - `take_free_boundary_gradients.py` — differentiate a free-boundary field
     diagnostic through the virtual-casing vacuum field.
   - `mirror_free_boundary_beta_scan.py` — solve the straight-axis two-coil

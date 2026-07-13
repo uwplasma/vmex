@@ -186,6 +186,25 @@ def test_free_boundary_essos_coils(tmp_path):
     assert fsq < 1e-7, f"free-boundary point should converge, fsq={fsq}"
 
 
+@pytest.mark.full  # DIII-D predictor plus direct/generated-mgrid NESTOR releases
+def test_free_boundary_tokamak_coils(tmp_path):
+    out = _run_example(
+        EXAMPLES / "free_boundary_tokamak_coils.py", tmp_path, timeout=1200
+    )
+    row = re.search(
+        r"^\s*1\.50%\s+([0-9.]+)%\s+[0-9.]+\s+\d+\s+\d+\s+([0-9.eE+-]+)",
+        out,
+        re.M,
+    )
+    assert row is not None, out
+    assert abs(float(row.group(1)) - 1.5) < 0.03
+    assert float(row.group(2)) < 1.0e-3
+    outdir = tmp_path / "output_free_boundary_tokamak_coils"
+    assert (outdir / "tokamak_beta_parity.csv").exists()
+    assert (outdir / "wout_direct_beta_1p5.nc").exists()
+    assert (outdir / "wout_mgrid_beta_1p5.nc").exists()
+
+
 def test_finite_beta_scan(tmp_path):
     out = _run_example(EXAMPLES / "finite_beta_scan.py", tmp_path, timeout=900)
     # rows: pres_scale  beta_tot  R_axis  Shafranov  minDMerc
