@@ -111,18 +111,28 @@ jobs:
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
-      # Four shards keep each under the 10-min budget.  --dist loadscope is
-      # essential: it groups a whole test module onto ONE xdist worker, so
-      # module-scoped equilibrium fixtures (omnigenity's qi_eq/tok_eq, etc.)
-      # are solved once instead of once PER WORKER under the default `load`
-      # distribution (measured: omnigenity 29 s -> 14 s locally).  The R26
-      # physics-objective modules each trigger distinct memory-heavy XLA
-      # compiles, so they are also split across two shards:
+      # Four shards, each well under the 10-min budget.  The xdist dist MODE is
+      # chosen PER SHARD by whether its modules share an expensive fixture:
+      #   * loadscope groups a whole module onto ONE worker, so module-scoped
+      #     equilibrium fixtures (omnigenity qi_eq/tok_eq, bootstrap eq,
+      #     stability vacuum/highbeta/shaped) are solved ONCE, not once-per-
+      #     worker (measured: omnigenity 29 s -> 14 s).  But it SERIALISES a
+      #     module's independent heavy tests onto that single worker.
+      #   * load spreads individual tests across all 4 workers -- right for a
+      #     module with many independent heavy tests and NO shared fixture (or
+      #     a cheap /tmp-cached one), which otherwise bottlenecks its shard.
+      # The two independent-heavy modules therefore run under `load`:
+      #   b = golden_digests  (2 full VMEC2000-parity solves; no fixture;
+      #                         loadscope serialised these to 484 s on 1 worker)
+      #   d = optimize        (many least-squares runs; solovev_eq fixture is
+      #                         cheap + /tmp-cached, so per-worker re-solve is
+      #                         negligible; loadscope serialised 383 s)
+      # The fixture-sharing modules stay on loadscope:
       #   a = heaviest solver-golden modules;
-      #   b = omnigenity + turbulence + golden_digests;
-      #   d = optimize + bootstrap + stability;
-      #   c = everything else (except the implicit + examples jobs).
-      # Together they cover the whole non-gradient, non-example suite once.
+      #   c = everything else, incl. omnigenity/turbulence/bootstrap/stability.
+      # Together they cover the whole non-gradient, non-example suite once, and
+      # every test file appears in exactly one shard (coverage gate combines
+      # a+b+c+d), so coverage is invariant under this reshuffle.
       - name: Run parity shard ${{ matrix.shard }} with coverage
         env:
           JAX_ENABLE_X64: "1"
@@ -133,18 +143,14 @@ jobs:
                    tests/test_freeboundary.py \
                    tests/test_cli_freeboundary.py \
                    tests/test_solver_end_to_end.py"
-          B_FILES="tests/test_omnigenity.py \
-                   tests/test_turbulence.py \
-                   tests/test_golden_digests.py"
-          D_FILES="tests/test_optimize.py \
-                   tests/test_bootstrap.py \
-                   tests/test_stability.py"
+          B_FILES="tests/test_golden_digests.py"
+          D_FILES="tests/test_optimize.py"
           if [ "${{ matrix.shard }}" = "a" ]; then
             pytest -q -n 4 --dist loadscope $A_FILES --durations=15 --cov=vmec_jax --cov-report=term
           elif [ "${{ matrix.shard }}" = "b" ]; then
-            pytest -q -n 4 --dist loadscope $B_FILES --durations=15 --cov=vmec_jax --cov-report=term
+            pytest -q -n 4 --dist load $B_FILES --durations=15 --cov=vmec_jax --cov-report=term
           elif [ "${{ matrix.shard }}" = "d" ]; then
-            pytest -q -n 4 --dist loadscope $D_FILES --durations=15 --cov=vmec_jax --cov-report=term
+            pytest -q -n 4 --dist load $D_FILES --durations=15 --cov=vmec_jax --cov-report=term
           else
             IGNORES=$(for f in $A_FILES $B_FILES $D_FILES; do echo "--ignore=$f"; done)
             pytest -q -n 4 --dist loadscope tests \
