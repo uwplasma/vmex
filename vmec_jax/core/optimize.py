@@ -1910,14 +1910,37 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
-        if recycle:
-            rows, C, U = jac_jit(_place(x), *holder["recycle"])
-            holder["recycle"] = (C, U)  # deflate the next jac evaluation
-            return np.asarray(jax.device_get(rows), dtype=float)
-        rows, dz_cols = jac_jit(_place(x))
-        if warm_start == "perturbation":
-            _stash_linearization(np.asarray(x, dtype=float), dz_cols)
-        return np.asarray(jax.device_get(rows), dtype=float)
+        try:
+            if recycle:
+                rows, C, U = jac_jit(_place(x), *holder["recycle"])
+                holder["recycle"] = (C, U)  # deflate the next jac evaluation
+                jac = np.asarray(jax.device_get(rows), dtype=float)
+            else:
+                rows, dz_cols = jac_jit(_place(x))
+                if warm_start == "perturbation":
+                    _stash_linearization(np.asarray(x, dtype=float), dz_cols)
+                jac = np.asarray(jax.device_get(rows), dtype=float)
+        except Exception as exc:  # zero-crash policy (mirrors fun): a trial whose
+            # equilibrium fails (e.g. VmecJacobianError from a self-intersecting
+            # boundary) must be *rejected*, not crash the optimization.  Reuse
+            # the last valid Jacobian so scipy's trust region steps back off the
+            # bad point (fun already returns a large penalty residual there).
+            if holder.get("last_jac") is None:
+                raise
+            if verbose:
+                print(f"[least_squares] trial jacobian failed: {exc}")
+            return holder["last_jac"]
+        if np.all(np.isfinite(jac)):
+            holder["last_jac"] = jac
+        return jac
+
+    # Pre-size the residual from the (converged) seed so a *first*-iteration
+    # trial failure penalizes like any later one instead of re-raising.
+    if holder["nres"] is None:
+        try:
+            holder["nres"] = int(np.asarray(jax.device_get(rows_jit(_place(x0)))).size)
+        except Exception:  # the seed itself does not converge -> fun raises clearly
+            pass
 
     result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
                                           jac=jac_fn, **scipy_kwargs)
