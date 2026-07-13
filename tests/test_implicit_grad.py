@@ -22,7 +22,12 @@ against central finite differences through the full host solver):
 6. the gradient is independent of the iteration policy (max_iterations cap)
    — only the fixed point defines the derivative — with informational
    peak-RSS prints for the O(1)-memory claim (the backward pass costs a
-   handful of residual linearizations, never a per-iteration tape).
+   handful of residual linearizations, never a per-iteration tape);
+7. a solver-sensitive metric (li383 ``ncurr=1`` ``d(iota_edge)/d(boundary)``):
+   the implicit adjoint equals the *frozen-path* central FD
+   (``frozen_path_directional_fd``) to solver accuracy on the m=1 modes,
+   where a *naive* full re-solve FD sign-flips (adjoint -0.773 vs naive
+   +0.045) — the adjoint is the correct frozen-logic gradient.
 
 FD steps (documented choices): central differences with the *same* ftol and
 iteration policy on both sides, converged outputs cached on disk (``/tmp``)
@@ -328,3 +333,52 @@ def test_gradient_independent_of_iteration_policy(solovev):
     b = np.asarray(grads[5000].rbc)
     np.testing.assert_allclose(a, b, rtol=1e-9, atol=1e-14)
     assert np.all(np.isfinite(a))
+
+
+# ---------------------------------------------------------------------------
+# 7. solver-sensitive metric (iota_edge, ncurr=1): the implicit adjoint equals
+#    the FROZEN-PATH FD; a naive full re-solve FD is NOT a valid reference.
+# ---------------------------------------------------------------------------
+
+
+def test_iota_edge_gradient_vs_frozen_path_fd():
+    """``d(iota_edge)/d(boundary)`` on the 3D ``ncurr=1`` case — the hard case
+    from the collaborator AD-vs-FD feedback.  ``iota`` is derived from the
+    current-constrained ``chips``, so the metric reads the converged solver
+    state and is *solver-sensitive*: a naive re-solve FD at ``p ± h`` lets the
+    convergence logic re-form and gives the wrong answer (measured, ``h=1e-4``):
+
+        RBC(n=-1,m=1):  adjoint -0.77343,  frozen-path FD -0.77343,  naive FD +0.04543  (sign flip)
+        RBC(n=+1,m=1):  adjoint -1.26567,  frozen-path FD -1.26567,  naive FD -2.14135  (69% off)
+
+    The implicit adjoint linearizes the *frozen* fixed point; this test locks in
+    that it reproduces the frozen-path central FD
+    (:func:`im.frozen_path_directional_fd`, Newton-solving the frozen residual
+    at ``p ± h``) to solver accuracy — i.e. the adjoint is the correct
+    frozen-logic gradient, and the naive FD is deliberately not the reference.
+    """
+    name = "li383_low_res"
+    inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
+    cfg = im.make_config(inp, **CASES[name])
+    p0 = im.params_from_input(inp)
+    ntor = int(inp.ntor)
+    assert int(inp.ncurr) == 1  # derived-iota case where the effect is largest
+
+    grad = jax.grad(
+        lambda p: im.run(inp, p, ftol=cfg.ftol,
+                         max_iterations=cfg.max_iterations).iota_edge)(p0)
+    zero = jax.tree.map(jnp.zeros_like, p0)
+    print(f"\n[{name}] d(iota_edge)/d(RBC): implicit adjoint vs frozen-path FD")
+    for n in (ntor - 1, ntor + 1):          # m=1, n=-1 (naive-FD sign flip) and n=+1
+        ad = float(np.asarray(grad.rbc)[n, 1])
+        tangent = dataclasses.replace(zero, rbc=zero.rbc.at[n, 1].set(1.0))
+        fd, info = im.frozen_path_directional_fd(
+            p0, cfg, im.iota_edge, tangent, h=1e-4)
+        res = max(info["newton_res"])
+        rel = abs(ad / fd - 1.0) if fd else abs(ad - fd)
+        print(f"  RBC(n={n - ntor:+d},m=1): AD={ad:+.9e}  frozen-FD={fd:+.9e}  "
+              f"rel={rel:.2e}  (Newton res {res:.0e})")
+        assert res < 1e-8, f"n={n - ntor}: frozen solve not converged (res {res:.1e})"
+        assert rel <= 3e-4, (
+            f"RBC(n={n - ntor},1): adjoint {ad:.5e} vs frozen-path FD {fd:.5e} "
+            f"(rel {rel:.2e}) — the implicit gradient must match the frozen path")

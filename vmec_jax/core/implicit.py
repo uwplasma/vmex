@@ -50,6 +50,23 @@ solve from the *exact structural zero patterns* of ``gc`` (row support) and
 of the ``x``-dependence of ``gc`` (column support, one VJP with a random
 cotangent) at a generically perturbed state — see ``_dof_mask``.
 
+Gradient checking solver-sensitive metrics
+------------------------------------------
+The adjoint gradient is the derivative of the fixed point of the *frozen*
+residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
+once at the base parameters, not re-derived.  For a smooth bulk integral
+(``wb``, ``aspect``) a naive central FD through the full host solver already
+matches ``jax.grad`` to ``rtol <= 1e-6``.  But a **solver-sensitive** metric —
+``iota`` (derived from the current-constrained ``chips`` at ``ncurr=1``), the
+mirror ratio, the magnetic well, the Boozer/QI residual — reads the converged
+state directly, and a naive re-solve at ``p ± h`` lets that convergence logic
+re-form slightly differently on each side, an O(1) path perturbation that can
+sign-flip the FD (``d(iota_edge)/d(RBC(-1,1))`` on ``li383_low_res``: adjoint
+``-0.773``, naive FD ``+0.045``).  The naive FD is therefore *not* a valid
+reference for these metrics; :func:`frozen_path_directional_fd` provides the
+correct one (Newton-solve the frozen ``F`` at ``p ± h``), and it reproduces the
+adjoint to solver accuracy — see ``tests/test_implicit_grad.py``.
+
 Parameter map
 -------------
 ``runtime_from_params`` rebuilds every p-dependent
@@ -1081,3 +1098,83 @@ def run(
         aspect=aspect_ratio(state, rt),
         iota_axis=iota_axis(state, rt), iota_edge=iota_edge(state, rt),
     )
+
+
+# ---------------------------------------------------------------------------
+# Gradient diagnostics
+# ---------------------------------------------------------------------------
+
+
+def frozen_path_directional_fd(
+    params: ImplicitParams,
+    cfg: ImplicitConfig,
+    metric_fn: Callable[[SpectralState, SolverRuntime], Array],
+    tangent: ImplicitParams,
+    *,
+    h: float = 1e-4,
+    newton_steps: int = 20,
+    newton_rtol: float = 1e-11,
+) -> tuple[float, dict]:
+    """Central FD of ``metric_fn`` along ``tangent`` on the *frozen* solve path.
+
+    The correct finite-difference reference for **solver-sensitive** metrics --
+    ``iota`` (derived from the current-constrained ``chips`` at ``ncurr=1``),
+    the mirror ratio, the magnetic well, the Boozer/QI residual -- whose value
+    reads the converged solver state directly rather than through a smooth bulk
+    integral (``wb``, ``aspect``, for which a naive re-solve FD is already
+    exact and :func:`jax.grad` matches it to ``rtol <= 1e-6``).
+
+    A naive full re-solve at ``params +/- h*tangent`` lets the solver's internal
+    convergence logic -- the ``bcovar`` preconditioner, the ``tcon`` constraint
+    scaling, the m=1 ``gcz`` zeroing branch (``residue.f90``), the dof mask, the
+    multigrid schedule, and exactly where the ``ftol`` crossing lands -- re-form
+    slightly differently at each perturbed point.  For a solver-sensitive metric
+    that path variation is an O(1) contribution that can inflate or even
+    sign-flip the finite difference (measured on ``li383_low_res``:
+    ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
+    central FD reads ``+0.045`` -- wrong sign).
+
+    The implicit adjoint deliberately does *not* differentiate through that
+    logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
+    preconditioner / mask / branch captured once at ``params``; see the module
+    docstring), which is the stable, physical gradient.  This helper reproduces
+    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
+    ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
+    adjoint uses) from the converged ``z*`` before central-differencing
+    ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
+    contracted with ``tangent`` to solver accuracy -- the gradient check a naive
+    re-solve FD cannot provide for these metrics.
+
+    Returns ``(fd, info)`` where ``info['newton_res']`` are the two frozen-solve
+    residual norms; confirm they are small (an unconverged frozen solve
+    invalidates the comparison).
+    """
+    x_star, dof_mask = solve_implicit_with_aux(params, cfg)
+    frozen = jax.lax.stop_gradient(x_star)
+    P = _dof_projector(cfg, dof_mask)
+    edge_mask = _edge_mask(cfg)
+    F = residual_fn(cfg, frozen, dof_mask)
+    z_star = P(x_star)
+
+    def _norm(t: SpectralState) -> float:
+        return float(jnp.sqrt(sum(jnp.vdot(v, v).real for v in jax.tree.leaves(t))))
+
+    def _eval(sign: float) -> tuple[float, float]:
+        p_h = jax.tree.map(lambda a, d: a + sign * h * d, params, tangent)
+        z = z_star
+        r0 = max(_norm(F(z, p_h)), 1.0)
+        for _ in range(newton_steps):
+            fz = F(z, p_h)
+            if _norm(fz) <= newton_rtol * r0:
+                break
+            # Newton step (dF/dz) delta = F(z, p_h), matrix-free forward solve.
+            _, jvp = jax.linearize(lambda zz: F(zz, p_h), z)
+            delta, _ = _adjoint_solve(jvp, fz, cfg)
+            z = jax.tree.map(lambda a, b: a - b, z, delta)
+        rt = runtime_from_params(p_h, cfg)
+        x = _assemble(z, rt, frozen, P, edge_mask)
+        return float(metric_fn(x, rt)), _norm(F(z, p_h))
+
+    val_p, res_p = _eval(+1.0)
+    val_m, res_m = _eval(-1.0)
+    return (val_p - val_m) / (2.0 * h), {"newton_res": (res_p, res_m), "h": h}
