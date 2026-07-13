@@ -111,6 +111,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "CoilSet": (".core.coils", "CoilSet"),
     "planar_ellipse_coils": (".core.coils", "planar_ellipse_coils"),
     "square_mirror_coils": (".core.coils", "square_mirror_coils"),
+    "tokamak_coils": (".core.coils", "tokamak_coils"),
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),

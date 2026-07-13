@@ -23,9 +23,11 @@ from vmec_jax.core.coils import (  # noqa: E402
     b_cyl,
     biot_savart,
     circular_loop_on_axis_bz,
+    coil_geometry,
     field_on_cylindrical_grid,
     planar_ellipse_coils,
     square_mirror_coils,
+    tokamak_coils,
     two_coil_on_axis_bz,
     to_mgrid_data,
 )
@@ -316,6 +318,45 @@ def test_mgrid_off_grid_error_converges_for_smooth_loop_field() -> None:
     np.testing.assert_allclose(errors, [1.1613121e-3, 2.1271369e-4, 3.3976697e-5], rtol=2e-5)
     assert errors[1] < errors[0] / 4.0
     assert errors[2] < errors[1] / 4.0
+
+
+def test_tokamak_coils_build_tf_and_pf_geometry() -> None:
+    coils = tokamak_coils(
+        major_radius=2.0,
+        tf_coil_radius=0.8,
+        tf_current=3.0e5,
+        pf_coils=[[1.2, 1.0, -2.0e5], [1.2, -1.0, -2.0e5]],
+        n_tf_coils=8,
+        n_segments=48,
+    )
+    assert coils.n_base_coils == 10
+    np.testing.assert_allclose(np.asarray(coils.base_currents[:8]), 3.0e5)
+    np.testing.assert_allclose(np.asarray(coils.base_currents[8:]), -2.0e5)
+    gamma, _gamma_dash, _currents = coil_geometry(coils)
+    centers = np.mean(np.asarray(gamma), axis=1)
+    np.testing.assert_allclose(np.linalg.norm(centers[:8, :2], axis=1), 2.0, atol=1e-14)
+    np.testing.assert_allclose(centers[8:, 2], [1.0, -1.0], atol=1e-14)
+
+
+@pytest.mark.parametrize(
+    "changes, match",
+    [
+        ({"n_tf_coils": 3}, "at least 4"),
+        ({"pf_coils": [[1.0, 0.0]]}, "shape"),
+        ({"pf_coils": [[-1.0, 0.0, 1.0]]}, "radii"),
+    ],
+)
+def test_tokamak_coils_validates_inputs(changes, match) -> None:
+    args = dict(
+        major_radius=2.0,
+        tf_coil_radius=0.8,
+        tf_current=3.0e5,
+        pf_coils=[],
+        n_tf_coils=8,
+    )
+    args.update(changes)
+    with pytest.raises(ValueError, match=match):
+        tokamak_coils(**args)
 
 
 # ---------------------------------------------------------------------------

@@ -383,6 +383,84 @@ def square_mirror_coils(
     )
 
 
+def tokamak_coils(
+    *,
+    major_radius: float,
+    tf_coil_radius: float,
+    tf_current: float,
+    pf_coils: Any,
+    n_tf_coils: int = 64,
+    n_segments: int = 96,
+    regularization_epsilon: float = 0.0,
+    chunk_size: int | None = None,
+) -> CoilSet:
+    """Build circular toroidal-field coils plus axisymmetric PF loops.
+
+    ``pf_coils`` has one ``(radius, z, current)`` row per horizontal
+    poloidal-field loop. The toroidal-field coils are equally spaced around
+    ``major_radius`` and lie in vertical planes, each enclosing the plasma
+    cross-section with radius ``tf_coil_radius``. Currents follow the
+    right-hand rule about each coil normal.
+
+    This is a geometric coil model, not an equilibrium fit: callers remain
+    responsible for choosing currents that balance the target plasma.
+    """
+
+    n_tf_coils = int(n_tf_coils)
+    major_radius = float(major_radius)
+    tf_coil_radius = float(tf_coil_radius)
+    tf_current = float(tf_current)
+    pf = np.asarray(pf_coils, dtype=float)
+    if pf.size == 0:
+        pf = np.empty((0, 3), dtype=float)
+    if pf.ndim != 2 or pf.shape[1] != 3:
+        raise ValueError("pf_coils must have shape (n_pf_coils, 3)")
+    if n_tf_coils < 4:
+        raise ValueError("n_tf_coils must be at least 4")
+    if major_radius <= 0.0 or tf_coil_radius <= 0.0:
+        raise ValueError("major_radius and tf_coil_radius must be positive")
+    if np.any(~np.isfinite(pf)) or not np.isfinite(tf_current):
+        raise ValueError("coil geometry and currents must be finite")
+    if np.any(pf[:, 0] <= 0.0):
+        raise ValueError("PF coil radii must be positive")
+
+    angle = (np.arange(n_tf_coils) + 0.5) * (2.0 * np.pi / n_tf_coils)
+    tf_centers = np.stack(
+        [
+            major_radius * np.cos(angle),
+            major_radius * np.sin(angle),
+            np.zeros(n_tf_coils),
+        ],
+        axis=1,
+    )
+    tf_normals = np.stack(
+        [-np.sin(angle), np.cos(angle), np.zeros(n_tf_coils)], axis=1
+    )
+    tf_major_axes = np.broadcast_to([0.0, 0.0, 1.0], (n_tf_coils, 3))
+
+    n_pf = len(pf)
+    pf_centers = np.stack(
+        [np.zeros(n_pf), np.zeros(n_pf), pf[:, 1]], axis=1
+    )
+    pf_normals = np.broadcast_to([0.0, 0.0, 1.0], (n_pf, 3))
+    pf_major_axes = np.broadcast_to([1.0, 0.0, 0.0], (n_pf, 3))
+    return planar_ellipse_coils(
+        np.concatenate([tf_centers, pf_centers]),
+        np.concatenate([tf_normals, pf_normals]),
+        np.concatenate([tf_major_axes, pf_major_axes]),
+        semi_major=np.concatenate(
+            [np.full(n_tf_coils, tf_coil_radius), pf[:, 0]]
+        ),
+        semi_minor=np.concatenate(
+            [np.full(n_tf_coils, tf_coil_radius), pf[:, 0]]
+        ),
+        currents=np.concatenate([np.full(n_tf_coils, tf_current), pf[:, 2]]),
+        n_segments=n_segments,
+        regularization_epsilon=regularization_epsilon,
+        chunk_size=chunk_size,
+    )
+
+
 # Pytree registration: dofs/currents are leaves, everything else is static.
 jax.tree_util.register_dataclass(
     CoilSet,
@@ -794,5 +872,6 @@ __all__ = [
     "field_on_cylindrical_grid",
     "planar_ellipse_coils",
     "square_mirror_coils",
+    "tokamak_coils",
     "to_mgrid_data",
 ]
