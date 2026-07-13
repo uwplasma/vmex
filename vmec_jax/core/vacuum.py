@@ -187,35 +187,6 @@ class VacuumBasis:
     cosui: np.ndarray
     sinui: np.ndarray
 
-    def as_legacy_basis(self) -> dict[str, Any]:
-        """The legacy ``build_vmec_mode_basis`` dict view (for A/B tests)."""
-        return {
-            "xmpot": self.xmpot,
-            "xnpot": np.asarray(self.n_raw * self.nfp, dtype=np.int64),
-            "n_raw": self.n_raw,
-            "sin_phase": self.sin_phase,
-            "cos_phase": self.cos_phase,
-            "sinmni": self.sinmni,
-            "cosmni": self.cosmni,
-            "wint": self.wint,
-            "imirr": self.imirr,
-            "imirr_full": self.imirr_full,
-            "mnpd": self.mnpd,
-            "mnpd2": self.mnpd2,
-            "nuv3": self.nuv3,
-            "nuv_full": self.nuv_full,
-            "mn0": self.mn0,
-            "onp": self.onp,
-            "nfp": self.nfp,
-            "mf": self.mf,
-            "nf": self.nf,
-            "nu_full": self.nu_full,
-            "lasym": self.lasym,
-            "theta": self.theta,
-            "zeta": self.zeta,
-            "cmns": self.cmns,
-        }
-
 
 def vacuum_basis(
     *,

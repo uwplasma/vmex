@@ -101,6 +101,7 @@ from .statephysics import (
     _half_grid,
     _interp_half_grid,
     _iotas_half,
+    _iotas_half_from_fields,
     _mode_matrix,
 )
 from .wout import WoutData, wout_from_state
@@ -406,12 +407,7 @@ class QuasisymmetryRatioResidual:
         dB_dphi = jnp.real(jnp.fft.ifft2(1j * kz[None, None, :] * bhat, axes=(1, 2)))
 
         # Profiles: iota (add_fluxes.f), Boozer covariant averages G/I (fbal.f).
-        phips = jnp.asarray(setup.phips)
-        if int(setup.ncurr) == 1:
-            safe = jnp.where(phips != 0.0, phips, 1.0)
-            iota = jnp.where(phips != 0.0, jnp.asarray(fields.chips) / safe, 0.0)
-        else:
-            iota = jnp.asarray(setup.iotas)
+        iota = _iotas_half_from_fields(setup, fields)
         cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
                                trig=rt.trig, s=s, signgs=setup.signgs)
         G, I = jnp.asarray(cur.bvco), jnp.asarray(cur.buco)  # noqa: E741

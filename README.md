@@ -197,18 +197,18 @@ the coils never move. Reproduce with
 
 ## Code size
 
-vmec-jax delivers that superset of capabilities in roughly **half the code**,
-and is the most densely documented of the three. Solver source only (tests,
+vmec-jax delivers that superset of capabilities in little more than **half the
+code**, and is the most densely documented of the three. Solver source only (tests,
 language bindings, and vendored third-party excluded), counted with
 [`pygount`](https://pypi.org/project/pygount/) 3.2:
 
 | code base | language | files | code (SLOC) | comments / docstrings | doc-to-code |
 |---|---|---:|---:|---:|---:|
-| **vmec-jax** | Python | 36 | **11,789** | 5,532 | **0.47** |
+| **vmec-jax** | Python | 41 | **13,326** | 6,744 | **0.51** |
 | VMEC2000 (PARVMEC) | Fortran | 115 | 24,190 | 8,425 | 0.35 |
 | VMEC++ | C++ / Python | 117 | 22,824 | 7,646 | 0.34 |
 
-vmec-jax is under half the SLOC of VMEC2000 and about half of VMEC++, while
+vmec-jax is little more than half the SLOC of VMEC2000 and VMEC++, while
 *adding* differentiability, GPU execution, direct-coil free boundary, and a
 built-in Boozer transform — and it carries the highest comment/docstring
 density of the three (reproduce with
