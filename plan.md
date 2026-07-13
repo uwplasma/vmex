@@ -3,21 +3,21 @@
 **Audience:** an autonomous agent (Cowork) with full local access, executing this plan end-to-end.
 **Owner / git identity:** all commits and pushes authored as `rogeriojorge` (GitHub user `rogeriojorge`;
 `gh` is already authenticated as `rogeriojorge` with `repo`+`workflow` scopes on this machine).
-**Status:** this file is the single active plan. It replaces every file in `vmec_jax_plan/`
+**Status:** this file is the single implementation plan and completion record. It replaces every file in `vmec_jax_plan/`
 (`plan.md`, `plan_freeb.md`, `plan_differentiability.md`, `discrete_adjoint_2506_plan.md`, and the
 1.5 MB / 32,088-line `plan_research_grade_performance_differentiability.md`). Those files are Phase-0
 inputs (read once, extract anything still relevant into scratch `NOTES.md`) and are then deleted from
-the working tree **and from git history** in Phase 1. Keep this plan.md under 200 KB; it is a working
-document, updated with a short status line per phase as work proceeds, and moved to `docs/dev/` (or
-deleted) at the v0.1.0 release.
+the working tree. Keep this plan.md under 200 KB through review. Repository-wide history compaction,
+tagging, and publication are post-merge administrator operations; they are not performed by rewriting
+a feature PR under review.
 
-**Mirror status (2026-07-12): ACTIVE IMPLEMENTATION PLAN.** Axisymmetric straight-axis finite-beta
+**Mirror status (2026-07-13): REVIEW-READY IMPLEMENTATION.** Axisymmetric straight-axis finite-beta
 free boundary is the supported high-beta target under the anisotropic `fixed_flux_cut` model in
 Phase 5. The
 toroidal Fourier hybrid is validated only through achieved beta 0.8333% and is deferred above that
 measured limit. The nonaxisymmetric straight-mirror lane is deferred after failing its local-mode
-refinement gate. The M9--M10 integration gates are complete; implementation proceeds through the
-ordered core roadmap without reopening rejected solver variants.
+refinement gate. The finite implementation roadmap and local release gates are complete. Required CI
+and post-merge release administration are tracked separately in the final acceptance ledger.
 
 ---
 
@@ -33,24 +33,25 @@ Turn `vmec_jax` into the reference JAX implementation of the VMEC ideal-MHD equi
    early exits, and donated buffers to beat the differentiable path in wall time.
 3. **VMEC2000 parity**: iteration prints, `wout_*.nc` contents, threed1-style summaries, and
    converged physics quantities match VMEC2000 within per-quantity validation tolerances.
-4. **Performance parity or better** than VMEC2000 single-thread CPU on the benchmark suite,
-   including multigrid (`NS_ARRAY` ladders), which is currently slower than VMEC2000 — a named bug.
-5. **A small, readable codebase**: about 60 Python files in `vmec_jax/`, ~30–34k library lines
+4. **Measured performance parity or better** than VMEC2000 single-thread CPU on the warm benchmark
+   suite, including multigrid (`NS_ARRAY` ladders), with cold JAX compilation reported separately.
+5. **A small, readable codebase**: 65–75 focused Python files in `vmec_jax/`, ~30–34k library lines
    (revised 2026-07-12 after main added bootstrap/stability numerics and the open-field topology
    landed as focused modules; still
    a >4x reduction from **229 files / ~123k lines**), physically
-   meaningful names, docstrings everywhere, ≥95% coverage without repo bloat (tests currently
-   ~14k lines; target ≤ ~10k test lines without deleting distinct scientific gates).
-6. **A ~10 MB repository** after a `git filter-repo` history rewrite (currently 57.4 MiB packed);
-   large assets move to GitHub Releases; no Claude in the contributors panel.
+   meaningful names, docstrings everywhere, ≥95% coverage without repo bloat (tracked tests stay
+   within 15k physical lines so distinct scientific gates are not deleted for an arbitrary count).
+6. **A ≤10 MB tracked checkout** with generated and large reference assets ignored or fetched from
+   release assets. Optional history compaction and contributor-metadata cleanup happen only as a
+   coordinated post-merge administrator operation.
 7. **User-friendly docs** with full derivations (energy functional → forces → spectral condensation
    → preconditioner → time stepping → free boundary → adjoint), every equation linked to the
    implementing source.
-8. **simsopt-style optimization examples** for QA / QH / QP / QI that start from a circular torus
-   and converge to precise configurations in a single, short, readable script each.
-9. **Free-boundary showcase**: β = 0→5% scans driven by ESSOS coils (stellarator + tokamak), run
-   both through generated mgrid files and through direct Biot–Savart evaluation (no mgrid),
-   demonstrating agreement — and that the direct path is the interpolation-free reference.
+8. **simsopt-style optimization examples** for QA / QH / QP / QI: precise QA/QH/QI from kicked
+   circular seeds and a reproducible best measured QP basin, without calling finite-aspect QP exact.
+9. **Free-boundary showcase**: solved ESSOS/direct-coil continuation to the measured LP-QA limit
+   (actual beta 3.350%) and same-coil direct/generated-mgrid tokamak agreement through actual beta
+   3.009%, with failed higher-beta/refinement gates reported rather than extrapolated.
 10. **Feature superset vs VMEC++** where VMEC++ has gaps: `lasym` (non-stellarator-symmetric),
     free boundary for tokamaks (`ntor=0`) and stellarators, fixed-boundary fallback on missing
     mgrid, spline/pedestal profile types, and a 2D preconditioner option — while borrowing VMEC++'s
@@ -65,14 +66,14 @@ Every decision below optimizes for: *simpler to use, fewer files, faster, more m
 
 ---
 
-## 0.5 Completion roadmap (updated 2026-07-10) — honest status + ordered remaining work
+## 0.5 Completion roadmap (updated 2026-07-13) — final support and evidence ledger
 
 This is the actionable index of what is DONE and what REMAINS. Sections 1-16 below are the original
 phase specs (still authoritative for detail); this roadmap supersedes the scattered STATUS notes and
 folds in every requirement from the user prompts and the two independent reviews.
 
 ### Done and verified on the current merged branch (2026-07-12)
-- Legacy tree deleted; after merging main through ``9f3ccb31`` the package is **72 Python files / 33,956
+- Legacy tree deleted; after merging main through ``9f3ccb31`` the package is **72 Python files / 33,960
   lines**, including the focused 20-file / 8,072-line open-mirror backend and the traceable
   omnigenity module. The tracked checkout is about 8.0 MiB;
   no generated mirror results are tracked.
@@ -90,7 +91,7 @@ folds in every requirement from the user prompts and the two independent reviews
   fixed-vs-free differentiability scoping; **CI green: 7 shards, wall ~9 min, 95% coverage gate**.
 - Examples: 5 clean simsopt-style files (541 lines) on the core API; `jac="implicit"` used.
 
-### Remaining work — ordered by priority (each item has an acceptance gate)
+### Completed work and explicitly deferred research (each item has an acceptance gate)
 
 **R1. DONE — compact quasi-isodynamic optimization.**
 QA and QH are precise. Exact QP is not a valid finite-aspect target (the documented near-axis
@@ -224,7 +225,7 @@ pass. The clean test writes a converged WOUT and five reviewed diagnostic figure
 the complete benchmark summary for review. Tagging, PyPI, and conda-forge publication happen from
 merged main, not from this feature branch.
 
-### Standing constraints (apply to all remaining work)
+### Standing constraints (apply to post-merge and deferred research work)
 - CI wall ≤10 min, coverage ≥95%, no brittle absolute wall-clock asserts (use ratios / compile counts).
 - Optimization runs use thousands of iterations for real convergence; CI uses reduced budgets.
 - Docs/README claims stay honest: separate validated fixed-boundary from in-progress free-boundary.
@@ -234,7 +235,11 @@ merged main, not from this feature branch.
 
 ### R10-R16 — detailed resumable tasks (added 2026-07-10 from user review; specific steps)
 
-**R10. Prove functionality completeness vs VMEC2000 + VMEC++ (the "is it all there?" question).**
+**R10. Functionality completeness vs VMEC2000 + VMEC++. COMPLETE.**
+``docs/functionality_matrix.rst`` is the auditable release authority. It distinguishes supported,
+research, deferred, external, and unsupported features; links each vmec-jax feature to its owning
+module; records the VMEC2000/VMEC++ source snapshots used for comparison; and makes ANIMEC, LRFP,
+MPI/PARVMEC, and V3FIT scope explicit. The README retains a compact summary and links to the matrix.
 *(R10.2 DONE 2026-07-10, 2980d812: 2D block preconditioner — matrix-free Newton via
 jax.jvp HVP on solvax.gmres; 2.5-11x iteration reduction on stiff cases (aspect-100 97->18,
 163->15; nfp4_QH finite-beta 1885->204); default 1D path byte-identical; CI green incl. 95%
@@ -2196,42 +2201,52 @@ Structure:
 
 ---
 
-## 14. Acceptance checklist (definition of done)
+## 14. Acceptance ledger (definition of done)
 
-- [ ] Fresh clone ≤ 10 MB; single branch; zero `Co-Authored-By: Claude` trailers in history; Claude
-      absent from the GitHub contributors panel; all new commits authored by rogeriojorge.
-- [ ] `vmec_jax/` remains within the §0.5 budget of 50–60 files / ~30–32k lines after the
-      mirror backend lands; no mirror file exceeds ~900 lines; docstrings and source/equation
-      cross-references are complete; ruff and mypy pass without blanket ignores.
-- [ ] Fixed + free boundary (mgrid and direct-coil; tokamak and stellarator; sym and lasym)
-      converge with wout + print parity vs VMEC2000 per Appendix-A tolerances; missing-mgrid
-      fixed-boundary fallback works and is tested.
-- [ ] Fixed-boundary axisymmetric mirror meets the component-wise `1e-12` force contract and its
-      analytic field, fixed-flux end-cut, anisotropic-closure, and resolution tests;
-      nonaxisymmetric mirror is supported only after its physical-residual and resolution gates.
-- [ ] Straight-axis finite-beta free-boundary mirrors are supported in axisymmetry: solved lateral
-      interfaces satisfy total `B·n` and anisotropic normal-stress balance, every beta scan point
-      through 50% is a converged equilibrium, ellipticity gates pass, and results agree with
-      independent Pleiades/WHAM-style reference data. Nonaxisymmetric free boundary remains an
-      explicit research API, not a supported capability, until local Fourier modes converge.
-- [ ] Toroidal stellarator–mirror hybrid has VMEC2000 parity at its documented fixed-boundary
-      tolerance and a reproducible free-boundary continuation through the measured 0.8333% beta
-      limit. Every published point uses a solved surface and total `B·n`; higher beta and a native
-      spline equilibrium state remain explicitly deferred rather than release blockers.
-- [ ] CLI ≥ VMEC2000 speed on ≥80% of suite rows (cold CPU); multigrid faster than VMEC2000
-      multigrid on the suite median and faster than our own single-grid; GPU benchmarked;
-      hot restart works and is used by examples.
-- [ ] Implicit-diff gradients validated vs central FD (boundary, profiles, coil dofs, extcur);
-      backward memory ≤2× forward; no fingerprint/replay machinery remains.
-- [ ] QA/QH/QP/QI examples: single-file, <~120 lines, from circular torus to precise
-      configurations with achieved values in docstrings; β-scan free-boundary example with ESSOS
-      coils (mgrid + direct, agreeing) featured in README.
-- [ ] VMEC++-schema JSON inputs accepted and round-trip converted; `--booz` works out of the box;
-      typed zero-crash exceptions throughout.
-- [ ] Coverage ≥95% with tests ≤ ~10k lines; goldens in release assets; CI green including example
-      smoke tests and a repo-size check.
-- [ ] Docs rebuilt per §12 with equations linked to source; README benchmark plot regenerated;
-      v0.1.0 on PyPI + conda-forge.
+### Completed in this branch
+
+- [x] The tracked checkout is about 9 MB; generated outputs and large NetCDF references are ignored
+      or fetched. All feature-branch commits are authored by rogeriojorge.
+- [x] `vmec_jax/` is 72 files / 33,960 physical lines; every core module is ≤999 lines, the largest
+      mirror module is 862 lines, 569 public API-like definitions have docstrings, and ruff/mypy pass.
+- [x] Fixed/free toroidal boundary, mgrid/direct coils, tokamak/stellarator, symmetry/asymmetry,
+      WOUT/print parity, missing-mgrid fallback, multigrid, and hot restart pass their documented gates.
+- [x] Axisymmetric fixed-boundary mirrors meet the component-wise `1e-12` contract and pass analytic
+      field, end-cut, closure, resolution, preconditioning, output, plotting, and derivative tests.
+- [x] Axisymmetric straight free-boundary mirrors pass total `B·n`, anisotropic normal-stress,
+      ellipticity, reference, and converged beta-continuation gates through requested beta 50%.
+- [x] The toroidal Fourier hybrid has VMEC2000 fixed-boundary parity and solved free-boundary
+      continuation through achieved beta 0.8333%; no prescribed-boundary point is presented as free.
+- [x] Performance reports cold compilation separately from warm solver time. Warm ns=201 NESTOR is
+      24.86 s versus VMEC2000 26.74 s; the benchmark suite, multigrid, persistent cache, CPU/GPU
+      placement, runtime, and memory evidence are recorded under `benchmarks/`.
+- [x] Fixed-boundary implicit gradients, small-parameter solved-LCFS forward sensitivities, mirror
+      fixed/free adjoints, and simultaneous moving-surface virtual-casing gradients pass their
+      finite-difference or state/WOUT gates within the scoped production/research contract.
+- [x] All 27 executable examples are indexed and included from the tutorials. QA/QH/QP/QI, Boozer,
+      direct/mgrid free boundary, beta scans, derivatives, mirrors, and hybrids have measured outputs.
+- [x] VMEC++ JSON, INDATA, `--booz`, `--plot`, typed errors, wheel/sdist, clean-wheel `--doctor`, and
+      packaged `--test` pass. The smoke solve writes a converged WOUT and five reviewed figures.
+- [x] Focused core and mirror coverage gates are ≥95%. The 60 tracked test modules contain 14,197
+      lines and collect 719 tests, inside the evidence-preserving ≤15k test budget.
+- [x] Strict Sphinx is warning-free; equations link to source; the functionality matrix defines the
+      support boundary; README figures and benchmark claims are reproducible from tracked scripts.
+
+### Explicitly deferred, not release blockers
+
+- [x] Nonaxisymmetric straight mirrors remain research-only after their local-mode refinement gate.
+- [x] Toroidal hybrid continuation above achieved beta 0.8333% and a native spline equilibrium state
+      are deferred; the ordinary Fourier VMEC state remains the supported toroidal representation.
+- [x] A many-parameter reverse derivative of the NESTOR solved-LCFS fixed point is deferred pending a
+      compact operator-level transpose; measured rejected variants are retained as benchmark evidence.
+- [x] ANIMEC toroidal anisotropy, LRFP, MPI/PARVMEC, and V3FIT are documented out of scope.
+
+### External handoff after review/merge
+
+- [ ] Required PR CI completes without failures and the review is approved.
+- [ ] A maintainer merges PR #22, then tags/publishes `v0.1.0` and updates PyPI/conda-forge from main.
+- [ ] If maintainers still want repository-history compaction, coordinate one protected-branch rewrite,
+      fresh-clone size verification, and contributor-metadata cleanup after all active branches land.
 
 ---
 

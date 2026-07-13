@@ -1,10 +1,11 @@
-Mirror geometry research path
-=============================
+Mirror geometry
+===============
 
-``vmec_jax.mirror`` is the open-field-line equilibrium backend under active
-development. It uses coordinates ``(s, theta, xi)`` with a nonperiodic axial
-coordinate and fixed-flux end cuts. It does not reinterpret a straight mirror
-as a periodic torus.
+``vmec_jax.mirror`` is the open-field-line equilibrium backend. It uses
+coordinates ``(s, theta, xi)`` with a nonperiodic axial coordinate and
+fixed-flux end cuts. It does not reinterpret a straight mirror as a periodic
+torus. Axisymmetric fixed- and free-boundary equilibria are supported;
+nonaxisymmetric straight mirrors remain a research API.
 
 Current capability
 ------------------
@@ -24,16 +25,14 @@ The branch currently includes:
   current and nonaxisymmetric coils, and
 * component-wise nonlinear convergence checks at a requested ``ftol=1e-12``.
 
-The axisymmetric free-boundary path is a research capability with completed
-annulus and unbounded-exterior resolution studies through 50% requested beta.
-Higher-order exterior traces and additional independent boundary references
-remain promotion gates. The nonaxisymmetric path also converges through 50%,
-but its point observables are not yet monotone under spatial refinement, so it
-remains a development capability. The toroidal stellarator-mirror hybrid now
-has a converged coil-informed fixed-boundary path, independent VMEC2000 restart
-parity, and a genuine NESTOR branch through achieved beta 0.7190% at
-``ftol=1e-8``. Stricter preconditioning and the 1--50% toroidal free-boundary
-gate remain open.
+The axisymmetric free-boundary path has completed annulus and
+unbounded-exterior resolution studies through 50% requested beta. The
+nonaxisymmetric path also converges through 50%, but its point observables are
+not monotone under spatial refinement, so it is not promoted. The toroidal
+stellarator-mirror hybrid has a converged coil-informed fixed-boundary path,
+independent VMEC2000 restart parity, and a genuine NESTOR continuation through
+achieved beta 0.8333%. Higher beta and a native spline equilibrium state are
+explicitly deferred rather than implied capabilities.
 
 Toroidal hybrid foundation
 --------------------------

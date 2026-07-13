@@ -4,9 +4,10 @@ vmec-jax
 ``vmec-jax`` is a clean-room, JAX-native reimplementation of the **VMEC2000**
 ideal-MHD equilibrium code for stellarators and tokamaks. It solves fixed- and
 free-boundary equilibria with VMEC2000-parity numerics, writes standard
-``wout_*.nc`` output, and — unlike the Fortran original — is differentiable
-(fixed boundary by implicit differentiation, free boundary through the
-virtual-casing vacuum field) and runs on CPUs and GPUs.
+``wout_*.nc`` output, and — unlike the Fortran original — provides implicit
+fixed-boundary derivatives plus scoped free-boundary sensitivities and runs
+on CPUs and GPUs. The exact support boundary is tabulated in
+:doc:`functionality_matrix`.
 
 Why vmec-jax?
 -------------
@@ -24,9 +25,10 @@ Why vmec-jax?
   (:mod:`vmec_jax.core.implicit`) — no finite differences, no iteration
   unrolling — validated against central finite differences (see
   :doc:`optimization`), with an O(1)-memory adjoint. Free-boundary
-  equilibria are differentiable end-to-end through the virtual-casing vacuum
-  field (coil / ``extcur`` derivatives), finite-difference-validated
-  (:mod:`vmec_jax.core.freeboundary_diff`). A growing :doc:`objectives
+  free-boundary tools provide fixed-surface virtual-casing design gradients
+  and forward solved-LCFS sensitivities for a few current groups, both
+  finite-difference-validated; a many-parameter NESTOR reverse solve is not a
+  production claim (:mod:`vmec_jax.core.freeboundary_diff`). A growing :doc:`objectives
   library <objectives>` — quasisymmetry, omnigenity, Redl bootstrap,
   ballooning stability, gyrokinetic turbulence proxies — plugs straight
   into a least-squares driver with those exact gradients, reaching precise
@@ -100,6 +102,7 @@ Documentation
       cli
       input_reference
       wout_reference
+      functionality_matrix
       glossary
 
    .. toctree::

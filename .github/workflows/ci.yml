@@ -72,9 +72,13 @@ jobs:
             --durations=25
 
   mirror:
-    name: Mirror unit and equilibrium tests
+    name: Mirror ${{ matrix.shard }} tests
     runs-on: ubuntu-latest
     timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [field, equilibrium]
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6.2.0
@@ -89,7 +93,23 @@ jobs:
       - name: Run mirror tests
         env:
           JAX_ENABLE_X64: "1"
-        run: pytest -q -n 2 -m "not full" tests/mirror --durations=20
+        run: |
+          if [ "${{ matrix.shard }}" = "field" ]; then
+            FILES="tests/mirror/test_exterior.py \
+                   tests/mirror/test_vacuum.py \
+                   tests/mirror/test_free_boundary_implicit.py"
+          else
+            FILES="tests/mirror/test_continuation.py \
+                   tests/mirror/test_fixed_boundary_3d.py \
+                   tests/mirror/test_geometry_fields.py \
+                   tests/mirror/test_implicit.py \
+                   tests/mirror/test_isotropic_forces.py \
+                   tests/mirror/test_model_basis.py \
+                   tests/mirror/test_output.py \
+                   tests/mirror/test_pressure_closures.py \
+                   tests/mirror/test_promotion_guards.py"
+          fi
+          pytest -q -n 2 -m "not full" $FILES --durations=20
 
   parity:
     name: Parity suite ${{ matrix.shard }} (goldens, coverage)
@@ -150,7 +170,8 @@ jobs:
       # The fixture-sharing modules stay on loadscope:
       #   a = heaviest solver-golden modules;
       #   c = everything else, incl. omnigenity/turbulence/bootstrap/stability.
-      # Together they cover the whole non-gradient, non-example suite once, and
+      # Together they cover the whole non-gradient, non-example core suite once;
+      # the separate mirror matrix owns tests/mirror. Therefore
       # every test file appears in exactly one shard (coverage gate combines
       # a+b+c+d), so coverage is invariant under this reshuffle.
       - name: Run parity shard ${{ matrix.shard }} with coverage
@@ -174,6 +195,7 @@ jobs:
           else
             IGNORES=$(for f in $A_FILES $B_FILES $D_FILES; do echo "--ignore=$f"; done)
             pytest -q -n 4 --dist loadscope tests \
+              --ignore=tests/mirror \
               --ignore=tests/test_implicit_grad.py \
               --ignore=tests/test_examples.py \
               $IGNORES \

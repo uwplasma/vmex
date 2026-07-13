@@ -28,7 +28,8 @@ original, it is differentiable and runs on GPUs.
   boundary** fixed-surface coil objectives are differentiable through virtual
   casing. Solved-LCFS `extcur` sensitivities use a matrix-free forward
   implicit solve and agree with strict central re-solves to 0.33–0.42%; the
-  many-parameter coil-shape adjoint remains in progress.
+  many-parameter reverse derivative of the NESTOR solved-LCFS fixed point is
+  deferred pending a compact operator-level transpose.
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.
@@ -163,7 +164,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Free-boundary tokamaks (`ntor = 0`) | ✅ | ✅ | ❌ |
 | Non-stellarator-symmetric (`LASYM = T`) | ✅ | ✅ | ❌ |
 | Fixed-boundary fallback on missing mgrid | ✅ | ✅ | ❌ |
-| Spline profiles (cubic / Akima) | ✅ | ✅ | ❌ |
+| Spline profiles (cubic / Akima) | ✅ | ✅ | ✅ |
 | VMEC++-schema JSON input | ✅ | ❌ | ✅ |
 | Hot restart from a previous state | ✅ | ❌ | ✅ |
 | Typed zero-crash errors | ✅ | ❌ | ✅ |
@@ -172,7 +173,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | GPU execution | ✅ | ❌ | ❌ |
 | Differentiable fixed boundary (implicit diff, O(1) memory) | ✅ | ❌ | ❌ |
 | Differentiable free boundary (virtual casing) | ✅ | ❌ | ❌ |
-| 2D block preconditioner (stiff-case speedup) | ✅ | ❌ | ❌ |
+| 2D block preconditioner (stiff-case speedup) | ✅ | ✅ | ❌ |
 | Near-axis (pyQSC / pyQIC) optimization seed | ✅ | ❌ | ❌ |
 
 ### Free boundary straight from coils
@@ -182,8 +183,10 @@ pass a `CoilSet` as `external_field=` and the NESTOR vacuum solve evaluates a
 JAX Biot-Savart at exactly the boundary points it needs, every iteration — no
 mgrid file and no grid-interpolation error. The field evaluation is
 JAX-differentiable. Solved-LCFS mgrid-current sensitivities are now available
-through forward implicit differentiation; the many-parameter direct-coil
-shape adjoint remains the explicit R2 task.
+through forward implicit differentiation. The many-parameter direct-coil
+shape reverse solve is explicitly deferred after the profiled operator-level
+alternatives exceeded the release memory/runtime envelope. See the full
+[functionality and support matrix](docs/functionality_matrix.rst).
 
 ![Free-boundary Landreman-Paul QA pressure scan directly from ESSOS coils](docs/_static/figures/readme_essos_beta_scan.png)
 

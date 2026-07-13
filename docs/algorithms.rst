@@ -375,6 +375,8 @@ coefficients/currents via
 ``extcur``), and its ``value_and_grad_bnormal`` helper returns gradients
 validated against finite differences — no NESTOR adjoint is required.
 
+.. _free-boundary-derivative-scope:
+
 Coupled solved-boundary residual
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -392,7 +394,10 @@ uses the implicit function theorem in forward mode: matrix-free JVPs solve
 one preconditioned fixed-point system per current direction without unrolling
 the equilibrium iterations. CTH and axisymmetric DIII-D directional LCFS
 derivatives agree with strict central re-solves to 0.33% and 0.42%,
-respectively. A many-parameter coil-shape adjoint remains under development.
+respectively. A many-parameter NESTOR fixed-point reverse solve is deferred:
+the profiled generic reverse and transpose formulations exceed the release
+memory/runtime envelope. It requires a compact operator-level transpose and a
+new independent finite-difference gate before it can become supported.
 
 Implicit differentiation
 ------------------------

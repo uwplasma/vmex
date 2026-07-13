@@ -619,7 +619,7 @@ def plot_hybrid_free_boundary_scan(scan, outdir: str | Path) -> dict[str, Path]:
 # ==========================================================================
 
 def plot_mout(mout, outdir: str | Path, *, name: str | None = None) -> dict[str, Path]:
-    """Render mirror diagnostics via :mod:\`vmec_jax.mirror.plotting\`."""
+    """Render mirror diagnostics via :mod:`vmec_jax.mirror.plotting`."""
 
     from vmec_jax.mirror.plotting import plot_mout as plot_mirror_output
 

@@ -77,6 +77,7 @@ import jax.numpy as jnp
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .optimization_parameters import (
+    _CURTOR_SCALE,  # noqa: F401 - pre-split compatibility export
     _apply_current,
     _current_dof_setup,
     _dof_modes,
@@ -144,6 +145,9 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
     if name == "RedlBootstrapMismatch":
         from .bootstrap import RedlBootstrapMismatch
         return RedlBootstrapMismatch
+    if name == "_traceable_term":
+        from .optimization_implicit import _traceable_term
+        return _traceable_term
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
