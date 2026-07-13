@@ -1,15 +1,15 @@
 {
   "schema": "vmec_jax.benchmark.mirror_m10_audit/1",
   "source": {
-    "vmec_jax_python_files": 63,
-    "vmec_jax_python_lines": 33427,
-    "mirror_python_files": 19,
-    "mirror_python_lines": 7874,
+    "vmec_jax_python_files": 64,
+    "vmec_jax_python_lines": 33473,
+    "mirror_python_files": 20,
+    "mirror_python_lines": 8071,
     "largest_mirror_module_lines": 862,
     "test_python_lines": 14052,
-    "tracked_tree_kib": 7434,
-    "plan_bytes": 197266,
-    "count_context": "Recounted after merging main through 2f75914f and completing public helper docstrings on 2026-07-12"
+    "tracked_tree_kib": 7435,
+    "plan_bytes": 197343,
+    "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, and moving mirror plotting to its owning package on 2026-07-12"
   },
   "coverage": {
     "statements": 3269,
@@ -34,5 +34,5 @@
     "git_directory_mib": 88,
     "git_history_status": "repository-wide release-history rewrite remains outside the mirror feature branch"
   },
-  "assessment": "M10 mirror-specific performance, output, plotting, documentation, and focused coverage gates pass. The 19-file mirror backend remains within its module budget and all 564 public API-like definitions have docstrings. The aggregate package is inside the revised evidence-based 30-34k line budget; tests remain 4,052 lines above their target, so evidence-preserving test simplification remains a release cleanup lane. The ordinary core CI coverage combine continues to omit mirror because it intentionally excludes nightly adjoint tests; the reproducible mirror release audit is separate."
+  "assessment": "M10 mirror-specific performance, output, plotting, documentation, and focused coverage gates pass. The 20-file mirror backend remains within its module budget and all 565 public API-like definitions have docstrings. Mirror plotting now lives with mirror output while its former core import remains compatible. The aggregate package is inside the revised evidence-based 30-34k line budget; tests remain 4,052 lines above their target, so evidence-preserving test simplification remains a release cleanup lane. The ordinary core CI coverage combine continues to omit mirror because it intentionally excludes nightly adjoint tests; the reproducible mirror release audit is separate."
 }

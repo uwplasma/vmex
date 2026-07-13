@@ -101,6 +101,7 @@ from .restart import (
     save_free_boundary_restart,
 )
 from .output import MoutData, mout_from_result, read_mout, write_mout
+from .plotting import plot_mout
 from .implicit import (
     FixedBoundaryImplicitConfig,
     FixedBoundaryParameters,
@@ -194,6 +195,7 @@ __all__ = [
     "SeparableMirrorPreconditioner",
     "build_mirror_grid",
     "build_closed_mirror_surface",
+    "plot_mout",
     "build_vacuum_grid",
     "boundary_fourier_amplitudes",
     "boundary_fourier_norms",

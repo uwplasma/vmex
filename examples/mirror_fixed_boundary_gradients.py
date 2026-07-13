@@ -13,7 +13,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from vmec_jax.core.plotting import plot_mout  # noqa: E402
+from vmec_jax import plot_mout  # noqa: E402
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,

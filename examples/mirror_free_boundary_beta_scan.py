@@ -43,7 +43,7 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_axisymmetric_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
 )
-from vmec_jax.core.plotting import plot_mout  # noqa: E402
+from vmec_jax import plot_mout  # noqa: E402
 
 # Inputs: edit these values, then run the file directly.
 BETAS = np.asarray([0.0, 0.01, 0.03, 0.10, 0.25, 0.50])

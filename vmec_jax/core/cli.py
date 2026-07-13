@@ -610,7 +610,7 @@ def _plot_wout_file(wout_path: Path, outdir: Path, *, emit, quiet: bool) -> None
 
 
 def _plot_mout_file(mout_path: Path, outdir: Path, *, emit, quiet: bool) -> None:
-    from .plotting import plot_mout
+    from vmec_jax.mirror.plotting import plot_mout
 
     if not quiet:
         emit(f" Plotting mirror output {mout_path.name} -> {outdir}/")

@@ -104,7 +104,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # plotting + Boozer
     "plot_wout": (".core.plotting", "plot_wout"),
     "plot_boozmn": (".core.plotting", "plot_boozmn"),
-    "plot_mout": (".core.plotting", "plot_mout"),
+    "plot_mout": (".mirror.plotting", "plot_mout"),
     "plot_hybrid_free_boundary_scan": (".core.plotting", "plot_hybrid_free_boundary_scan"),
     "run_booz_xform": (".core.boozer", "run_booz_xform"),
     # external fields

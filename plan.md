@@ -71,8 +71,8 @@ phase specs (still authoritative for detail); this roadmap supersedes the scatte
 folds in every requirement from the user prompts and the two independent reviews.
 
 ### Done and verified on the current merged branch (2026-07-12)
-- Legacy tree deleted; after merging main at ``2f75914f`` the package is **63 Python files / 33,427
-  lines**, including the focused 19-file / 7,874-line open-mirror backend and the traceable
+- Legacy tree deleted; after merging main at ``2f75914f`` the package is **64 Python files / 33,473
+  lines**, including the focused 20-file / 8,071-line open-mirror backend and the traceable
   omnigenity module. The tracked checkout is 7.3 MiB;
   no generated mirror results are tracked.
 - Fixed-boundary equilibrium at **VMEC2000 machine-precision parity** across the 9 golden fixtures
@@ -216,8 +216,9 @@ optimization requires it. This does not block equilibrium or mirror promotion.
 
 **R6. Refactor + docstring hygiene.** Public API-like docstrings are complete: an AST audit finds
 0 missing across 564 top-level definitions and public class members (``daadbf47``). Oversized core
-modules remain ``optimize`` 1,960, ``solver`` 1,699, ``freeboundary`` 1,055, ``implicit`` 1,042,
-``plotting`` 1,039, and ``nyquist`` 1,026 lines. Split them only along existing ownership boundaries;
+modules remain ``optimize`` 1,960, ``solver`` 1,706, ``freeboundary`` 1,055, ``implicit`` 1,042,
+and ``nyquist`` 1,026 lines. Mirror plotting moved intact to its owning package, reducing core
+``plotting`` from 1,039 to 888 lines. Split the rest only along existing ownership boundaries;
 do not create forwarding modules or disturb validated numerical kernels solely to meet a line target.
 Gate: no core file >~1000 lines; 0 public definitions without docstrings; ruff+mypy clean without
 blanket ignores.
@@ -1085,7 +1086,7 @@ mirror design doc.
    Profile buffers, donate in the CLI lane, audit temporaries; targets in §7.7.
 5. **Optimization convergence budgets**: examples run as many iterations as needed (thousands)
    for genuine convergence; CI smoke uses reduced budgets via VMEC_JAX_EXAMPLES_CI.
-6. Line/docstring hygiene: public API-like docstrings are complete as of ``daadbf47``. Six core
+6. Line/docstring hygiene: public API-like docstrings are complete as of ``daadbf47``. Five core
    files remain above ~1000 lines; split only where a coherent existing subsystem can move intact.
 
 *(superseded status of 2026-07-09:)* core landed, integration/perf hardening next. `vmec_jax/core/` has 20
@@ -2004,8 +2005,8 @@ symptom: vmec_jax is sometimes SLOWER on GPU than CPU — cause unknown. Plan:
        cross-sections, pressure, and `ftol` history. The 0--50% straight-mirror example writes one
        file per accepted equilibrium and renders its endpoint through this disk-backed path.
        Before the latest main integration the complete package was 59 Python files / 31,044 lines.
-       The post-merge/docstring recount is 63 files / 33,427 lines, while the mirror backend remains
-       19 files / 7,874 lines and its largest module is 862 lines. Tests total 14,052 Python lines.
+       The post-refactor recount is 64 files / 33,473 lines, while the mirror backend is 20 files /
+       8,071 lines and its largest module is 862 lines. Tests total 14,052 Python lines.
        Generated outputs remain ignored and the tracked tree is 7.3 MiB. The mirror structure meets
        its bound and aggregate source is inside the revised evidence-based budget; tests are 4,052
        lines above target. Keep evidence-preserving test simplification as a release cleanup lane;
