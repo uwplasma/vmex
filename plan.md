@@ -214,8 +214,9 @@ profile gradients remain finite-difference-only: their parity engine is intentio
 and a full traceable rewrite of derivative-amplified diagnostics is deferred until a concrete
 optimization requires it. This does not block equilibrium or mirror promotion.
 
-**R6. Refactor + docstring hygiene.** Public API-like docstrings are complete: an AST audit finds
-0 missing across 565 top-level definitions and public class members (``daadbf47``). Mirror plotting
+**R6. Refactor + docstring hygiene. COMPLETE.** Public API-like docstrings are complete: the
+original audit fixed all omissions in ``daadbf47``; the current AST audit finds 0 missing across
+567 top-level definitions and public class members. Mirror plotting
 moved intact to its owning package, reducing core ``plotting`` from 1,039 to 888 lines. The NumPy
 NESTOR parity path now lives in ``freeboundary_reference`` (232 lines), leaving the production
 free-boundary driver at 832 lines with nine net source lines added. Differentiable observables now
@@ -223,12 +224,13 @@ live in ``implicit_quantities`` (123 lines), leaving custom-VJP/adjoint orchestr
 at 958 lines. Nyquist grid conventions now live in ``nyquist_grid`` (60 lines), leaving field,
 current, and Mercier output in ``nyquist`` at 972 lines. Optimization now separates the public
 objective/driver (``optimize``, 995 lines), implicit Jacobian backend (583), Boozer/QI objective
-(333), and boundary/current parameterization (150). ``solver`` at 1,706 lines is the only remaining
-oversized core module. Split it only along an existing ownership boundary; do not create forwarding
-modules or disturb validated numerical kernels solely to meet a line target.
-Gate: no core file >~1000 lines; 0 public definitions without docstrings; ruff+mypy clean without
-blanket ignores. Ruff and mypy are clean across all 70 source files; the coherent solver split is
-the final module-size release cleanup.
+(333), and boundary/current parameterization (150). The fixed-boundary solver now separates
+numerical kernels (``solver``, 885 lines), state/setup (``solver_runtime``, 553), and host
+orchestration/result assembly (``solver_driver``, 387), while preserving public and tested private
+import paths. Every core module is now at or below 999 lines. Gate: no core file >~1000 lines;
+0 public definitions without docstrings; ruff+mypy clean without blanket ignores. Ruff and mypy
+are clean across all 72 source files; solver, multigrid, free-boundary, CLI, package, and
+golden-digest regression gates pass.
 
 **R7. Docs completion COMPLETE.** The VMEC2000↔vmec-jax glossary is complete, all 26 executable
 examples are referenced from the tutorials, and the final equation-to-source audit links the
@@ -1099,8 +1101,9 @@ mirror design doc.
    Profile buffers, donate in the CLI lane, audit temporaries; targets in §7.7.
 5. **Optimization convergence budgets**: examples run as many iterations as needed (thousands)
    for genuine convergence; CI smoke uses reduced budgets via VMEC_JAX_EXAMPLES_CI.
-6. Line/docstring hygiene: public API-like docstrings are complete as of ``daadbf47``. Five core
-   files remain above ~1000 lines; split only where a coherent existing subsystem can move intact.
+6. Line/docstring hygiene: complete. Public API-like docstrings have no omissions, and every core
+   module is at or below 999 lines after ownership-preserving splits of free boundary, implicit
+   quantities, Nyquist conventions, optimization support, and solver runtime/orchestration.
 
 *(superseded status of 2026-07-09:)* core landed, integration/perf hardening next. `vmec_jax/core/` has 20
 modules (~10k lines), each A/B-proven vs the legacy kernels (420+ tests) — including the solve
