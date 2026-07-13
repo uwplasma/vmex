@@ -36,10 +36,13 @@ the external-field dofs alone — a ``CoilSet``'s Fourier dofs / currents or an
 ``MgridField``'s ``extcur`` — and FD-validates to ~1e-9 (see
 ``tests/test_freeboundary_diff.py``).
 
-The remaining single-stage piece (letting the boundary *shape* dofs vary, which
-makes the plasma field itself depend on them through a re-solve) is discussed in
-the module ``README``/plan notes; it is an implicit-function-theorem wrap around
-this residual and is intentionally out of scope here.
+The full single-stage piece — letting the boundary *shape* dofs vary, so the
+plasma field itself depends on them through a re-solve — is now supported:
+:func:`surface_field_data_from_state` rebuilds the virtual-casing surface field
+traceably from a live equilibrium state, so ``jax.grad`` threads through the
+implicit adjoint (boundary) and virtual casing (coils) at once.  See
+``examples/single_stage_simultaneous_opt.py`` and the *True single-stage*
+section of ``docs/optimization.rst``.
 
 ``virtual_casing_jax`` is an optional dependency (``pip install vmec-jax[freeb]``
 or ``pip install -e /path/to/virtual_casing_jax``).  Importing this module raises

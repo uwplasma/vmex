@@ -269,6 +269,35 @@ def _try_import_jax() -> Tuple[Any, Any, Callable[[Callable[..., Any]], Callable
         if _cache_dir is not None:
             os.environ.setdefault("JAX_COMPILATION_CACHE_DIR", _cache_dir)
 
+        # XLA:CPU compile-time flags.  The differentiable/optimization pipeline
+        # is COMPILE-dominated (the fused adjoint VJP + GMRES graph is ~21 s of a
+        # ~24 s cold ``value_and_grad``); XLA's default backend optimization
+        # level (3) spends most of that in expensive LLVM passes.  Level 1 plus
+        # disabling the expensive passes typically cuts compile wall-time
+        # ~1.3-2x, at the cost of slightly slower *warm* kernels -- a good trade
+        # for this compile-bound workload.  Applied on CPU only (LLVM codegen),
+        # never with fast-math (that would break float64 parity/determinism),
+        # skipped if the user set XLA_FLAGS, and opt-out via
+        # VMEC_JAX_FAST_COMPILE=0 (e.g. a very long single-process opt loop that
+        # amortizes compile over many warm calls prefers level 3).
+        _fast_compile = os.environ.get("VMEC_JAX_FAST_COMPILE", "1").strip().lower()
+        _accel_req = os.environ.get("JAX_PLATFORM_NAME", "").strip().lower()
+        _accel_reqs = os.environ.get("JAX_PLATFORMS", "").strip().lower()
+        _cuda_vis = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+        _on_accel = (
+            any(a in f"{_accel_req} {_accel_reqs}" for a in ("cuda", "gpu", "tpu", "rocm"))
+            or (_cuda_vis not in ("", "-1"))
+        )
+        if (
+            _fast_compile not in ("0", "false", "no", "off")
+            and "XLA_FLAGS" not in os.environ
+            and not _on_accel
+        ):
+            os.environ["XLA_FLAGS"] = (
+                "--xla_backend_optimization_level=1 "
+                "--xla_llvm_disable_expensive_passes=true"
+            )
+
         import jax
 
         # If Sphinx (or other tooling) has inserted a mock, treat JAX as unavailable.
