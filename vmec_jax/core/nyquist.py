@@ -50,6 +50,12 @@ import numpy as np
 
 from .fourier import ModeTable, TrigTables, mode_table
 from .geometry import HalfMeshJacobian, RealSpaceGeometry
+from .nyquist_grid import (
+    _analysis_theta_tables,
+    _pshalf_from_s,
+    nyquist_limits,
+    nyquist_mode_table_from_grid,
+)
 
 __all__ = [
     "WoutFieldTables",
@@ -63,66 +69,6 @@ __all__ = [
 ]
 
 MU0 = 4.0e-7 * np.pi
-
-
-# ---------------------------------------------------------------------------
-# Mode/trig bookkeeping (fixaray.f Nyquist limits)
-# ---------------------------------------------------------------------------
-
-
-def nyquist_limits(trig: TrigTables) -> tuple[int, int]:
-    """Grid Nyquist cutoffs ``(mnyq, nnyq)`` (``fixaray.f``).
-
-    ``mnyq = ntheta2 - 1 = ntheta1/2`` and ``nnyq = nzeta/2`` — geometric grid
-    limits, independent of the retained solver modes.
-    """
-    ntheta2 = int(trig.ntheta2)
-    nzeta = int(np.asarray(trig.cosnv).shape[0])
-    return max(ntheta2 - 1, 0), max(nzeta // 2, 0)
-
-
-def nyquist_mode_table_from_grid(*, mpol: int, ntor: int, ntheta: int, nzeta: int) -> ModeTable:
-    """Nyquist (m, n) mode table from the angular grid sizes (``fixaray.f``).
-
-    ``mnyq = max(ntheta1/2, mpol - 1)``, ``nnyq = max(nzeta/2, ntor)`` with
-    ``ntheta1 = 2*(ntheta//2)``; ordering matches :func:`mode_table`.
-    """
-    ntheta1 = 2 * (int(ntheta) // 2)
-    mnyq = max(ntheta1 // 2, max(int(mpol) - 1, 0))
-    nnyq = max(int(nzeta) // 2, max(int(ntor), 0))
-    return mode_table(mnyq + 1, nnyq)
-
-
-def _analysis_theta_tables(trig: TrigTables) -> tuple[np.ndarray, np.ndarray]:
-    """Integration-weighted theta tables in the *output* dnorm convention.
-
-    ``fixaray.f``: ``dnorm = 1/(nzeta*ntheta1)`` on the full grid for lasym
-    runs (SPH012314), ``1/(nzeta*(ntheta2-1))`` on the endpoint-half-weighted
-    reduced grid otherwise; ``cosmui`` rows 0 and ``ntheta2-1`` carry the
-    half-weights in both modes.  Returns ``(cosmui, sinmui)`` restricted to
-    the reduced grid, shape ``(ntheta2, mnyq+1)``.
-    """
-    nt2 = int(trig.ntheta2)
-    nt3 = int(trig.ntheta3)
-    nzeta = int(np.asarray(trig.cosnv).shape[0])
-    if nt3 > nt2:  # lasym
-        dnorm = 1.0 / (nzeta * nt3)
-    else:
-        dnorm = 1.0 / (nzeta * (nt2 - 1))
-    cosmui = dnorm * np.asarray(trig.cosmu, dtype=float)[:nt2, :].copy()
-    sinmui = dnorm * np.asarray(trig.sinmu, dtype=float)[:nt2, :].copy()
-    cosmui[0, :] *= 0.5
-    cosmui[nt2 - 1, :] *= 0.5
-    return cosmui, sinmui
-
-
-def _pshalf_from_s(s_full: np.ndarray) -> np.ndarray:
-    """Half-mesh ``sqrt(s)`` with the axis slot repeating the first interior."""
-    s_arr = np.asarray(s_full, dtype=float)
-    if s_arr.shape[0] < 2:
-        return np.sqrt(np.maximum(s_arr, 0.0))
-    sh = 0.5 * (s_arr[1:] + s_arr[:-1])
-    return np.sqrt(np.maximum(np.concatenate([sh[:1], sh], axis=0), 0.0))
 
 
 # ---------------------------------------------------------------------------

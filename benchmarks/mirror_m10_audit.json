@@ -1,15 +1,15 @@
 {
   "schema": "vmec_jax.benchmark.mirror_m10_audit/1",
   "source": {
-    "vmec_jax_python_files": 66,
-    "vmec_jax_python_lines": 33522,
+    "vmec_jax_python_files": 67,
+    "vmec_jax_python_lines": 33528,
     "mirror_python_files": 20,
     "mirror_python_lines": 8072,
     "largest_mirror_module_lines": 862,
     "test_python_lines": 14054,
     "tracked_tree_kib": 8206,
-    "plan_bytes": 198385,
-    "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, moving mirror plotting to its owning package, separating the NumPy NESTOR reference path from the production driver, separating differentiable quantities from implicit-solver orchestration, and promoting three reviewed documentation figures on 2026-07-12"
+    "plan_bytes": 198487,
+    "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, moving mirror plotting to its owning package, separating the NumPy NESTOR reference path from the production driver, separating differentiable quantities from implicit-solver orchestration, separating Nyquist grid conventions from output physics, and promoting three reviewed documentation figures on 2026-07-12"
   },
   "coverage": {
     "statements": 3269,
@@ -26,9 +26,9 @@
     "free_boundary_adjoint": "1 passed in 141.83 s",
     "strict_sphinx": "passed after mirror plotting ownership refactor, glossary addition, 26/26 public-example tutorial audit, and final equation-to-source link audit",
     "tutorial_coverage": "26/26 executable example scripts referenced; three reviewed mirror/hybrid result figures promoted to documentation",
-    "mypy": "passed across 66 source files",
+    "mypy": "passed across 67 source files",
     "package_build": "wheel and sdist passed; mirror/plotting.py and core/freeboundary_reference.py included in both",
-    "refactor_tests": "47 passed, 3 skipped across solver, step-control, and exterior; NumPy NESTOR reference split 8 passed, 3 skipped; differentiable quantity/API split 21 passed; plotting/package API 29 passed; CLI/output/package API 35 passed; fixed-gradient example passed",
+    "refactor_tests": "47 passed, 3 skipped across solver, step-control, and exterior; NumPy NESTOR reference split 8 passed, 3 skipped; differentiable quantity/API split 21 passed; Nyquist/WOUT parity split 30 passed, 3 skipped; plotting/package API 29 passed; CLI/output/package API 35 passed; fixed-gradient example passed",
     "aggregate_collection": "719 tests collected after packaging tests/ and tests/mirror/ to avoid duplicate test_geometry_fields module names",
     "aggregate_default_run": "638 passed, 79 skipped, 2 xfailed, 1 path failure in 1212.15 s; the root-test parents[2] bug and its two nightly siblings were corrected, then the validation file passed 20 tests with 2 skips and --lf passed",
     "ruff": "passed",
