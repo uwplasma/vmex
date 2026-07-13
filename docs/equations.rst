@@ -55,9 +55,12 @@ terms, include the field-period multiplier :math:`n\,\mathrm{NFP}`:
    \mathrm{cosnvn}_{k,n} = (n\,\mathrm{NFP})\,\mathrm{cosnv}_{k,n}, \qquad
    \mathrm{sinnvn}_{k,n} = -(n\,\mathrm{NFP})\,\mathrm{sinnv}_{k,n}.
 
-``vmec_jax`` uses these tables in ``tomnsps`` so that the Fourier-space force
-arrays exactly match VMEC2000. See References [4-6] for the original VMEC2000
-tables and the VMEC++ DFT/basis discussion.
+``vmec_jax`` builds the mode and trigonometric tables in
+:func:`~vmec_jax.core.fourier.mode_table` and
+:func:`~vmec_jax.core.fourier.trig_tables`; the symmetry-aware integration
+weights are :func:`~vmec_jax.core.preconditioner.angular_integration_weights`.
+These tables make the Fourier-space force arrays exactly match VMEC2000. See
+References [4-6] for the original tables and the VMEC++ DFT discussion.
 
 Two-stage DFT for ``tomnsps``
 -----------------------------
@@ -92,6 +95,10 @@ analytic factor :math:`n\,\mathrm{NFP}` after the zeta contraction for the
 derivative blocks. This reduces the number of dot-product contractions while
 preserving VMEC2000 parity exactly.
 
+The complete weighted projection is
+:func:`~vmec_jax.core.transforms.tomnsps`; synthesis uses
+:func:`~vmec_jax.core.transforms.fourier_to_real`.
+
 Implementation detail: the theta contractions for multiple force kernels are
 **stacked** into a single batched ``dot_general`` call (GEMM), and the zeta
 contractions are likewise stacked by basis type (cosine vs sine). This follows
@@ -115,9 +122,6 @@ with Maxwell's equations (in magnetostatic form):
    \mathbf{J} = \frac{1}{\mu_0}\nabla \times \mathbf{B}.
 
 The pressure is a **flux function**: :math:`p = p(s)` and is specified by the
-VMEC input profiles. VMEC (and ``vmec_jax``) use pressure in units of
-:math:`\mu_0\,\mathrm{Pa}` so that :math:`p` has the same units as :math:`B^2`.
-
 Energy principle (VMEC formulation)
 -----------------------------------
 
@@ -147,6 +151,10 @@ is
               \cdot \boldsymbol{\xi}\; dV,
 
 so :math:`W` is stationary exactly at ideal-MHD force balance.
+
+The forward energy and normalization terms are evaluated by
+:func:`~vmec_jax.core.fields.energies_and_force_norms`; the traceable
+optimization quantity is :func:`~vmec_jax.core.implicit.mhd_energy`.
 
 The Hirshman–Whitson moment method
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -204,6 +212,10 @@ Field lines are straight in :math:`(u,\zeta)`:
 
 where :math:`\iota(s)` is the rotational transform.
 
+The straight-field-line correction enters
+:func:`~vmec_jax.core.fields.magnetic_fields` through the lambda harmonics in
+:class:`~vmec_jax.core.solver.SpectralState`.
+
 Internal scaling and regularity (``scalxc``)
 --------------------------------------------
 
@@ -226,6 +238,8 @@ VMEC implements this via the ``scalxc`` array, which is 1 for even-m harmonics
 and :math:`1/\sqrt{s}` for odd-m harmonics. ``scalxc`` is applied when
 interpolating coefficients between radial grids and when assembling
 preconditioned residuals (VMEC2000 ``profil3d`` / ``interp`` / ``scalxc``).
+The executable scale is
+:func:`~vmec_jax.core.transforms.odd_m_sqrt_s_scaling`.
 
 On the axis, VMEC applies *odd-m* rules:
 
@@ -249,6 +263,11 @@ This transformation is applied in VMEC2000 ``readin`` and inverted when
 converting to physical coefficients for diagnostics. ``vmec_jax`` uses the same
 internal basis so that boundary handling and multigrid interpolation match
 VMEC2000.
+
+The two basis directions are
+:func:`~vmec_jax.core.residuals.m1_physical_to_constrained` and
+:func:`~vmec_jax.core.residuals.m1_constrained_to_physical`; force rotation is
+:func:`~vmec_jax.core.residuals.m1_residue_rotation`.
 
 Magnetic field representation
 -----------------------------
@@ -402,6 +421,10 @@ flux-coordinate components flattened over the selected surfaces and angular
 grid.  ``vj.BVector`` returns the corresponding Cartesian magnetic-field vector
 ``(B_x,B_y,B_z)`` on one selected radial surface.
 
+WOUT current harmonics are reconstructed by
+:func:`~vmec_jax.core.postprocess.compute_currents`; the force-path surface
+currents are :func:`~vmec_jax.core.fields.surface_currents`.
+
 Redl Bootstrap-Current Mismatch
 -------------------------------
 
@@ -457,6 +480,11 @@ in the standard integral
 This differs from SIMSOPT's post-processing routine, which refines angular
 extrema with splines.  The vmec_jax form is intentionally fixed-shape and
 differentiable for use inside exact-Jacobian optimization.
+
+The Redl model is :func:`~vmec_jax.core.bootstrap.j_dot_B_redl`, VMEC's
+comparison quantity is :func:`~vmec_jax.core.bootstrap.vmec_j_dot_B`, and the
+optimization residual is
+:class:`~vmec_jax.core.bootstrap.RedlBootstrapMismatch`.
 
 Force balance in VMEC (residual form)
 -------------------------------------
@@ -582,6 +610,11 @@ VMEC’s ``TimeStepControl`` tracks the minimum of the preconditioned residual
 ``DELT`` by a factor of 1.03. ``vmec_jax`` mirrors this logic to reproduce the
 VMEC2000 iteration trace.
 
+The damping and update equations are
+:func:`~vmec_jax.core.step.damping_coefficients` and
+:func:`~vmec_jax.core.step.momentum_update`; restart decisions are implemented
+by :func:`~vmec_jax.core.step.restart_decision`.
+
 Multigrid interpolation (``interp.f``)
 --------------------------------------
 
@@ -601,6 +634,10 @@ After linear interpolation on a uniform radial grid, coefficients are unscaled:
 ``vmec_jax`` implements this exact pipeline so that stage-to-stage coefficient
 transfer matches VMEC2000.
 
+The coefficient and complete-state transfers are
+:func:`~vmec_jax.core.multigrid.interpolate_coefficients` and
+:func:`~vmec_jax.core.multigrid.interpolate_state`.
+
 Pressure and beta
 -----------------
 
@@ -618,6 +655,9 @@ The total volume-averaged beta is computed by VMEC as:
    \beta_{\mathrm{total}} = \frac{W_P}{W_B}.
 
 ``vmec_jax`` follows the same normalization when emitting ``wout`` files.
+The scalar calculation is :func:`~vmec_jax.core.postprocess.eqfor_beta_scalars`,
+with radial beta profiles from
+:func:`~vmec_jax.core.postprocess.beta_volume_profiles`.
 
 Geometric embedding and Jacobian
 --------------------------------
@@ -651,6 +691,9 @@ The Jacobian is:
    \sqrt{g} = \mathbf{e}_s \cdot (\mathbf{e}_\theta \times \mathbf{e}_{\phi}).
 
 VMEC's sign convention enforces ``signgs*sqrtg > 0`` away from the axis.
+The embedding and half-mesh Jacobian are
+:func:`~vmec_jax.core.geometry.real_space_geometry` and
+:func:`~vmec_jax.core.geometry.half_mesh_jacobian`.
 
 Jacobian sign check (``tau``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -667,6 +710,10 @@ If :math:`\tau` changes sign away from the axis, VMEC flags a bad Jacobian and
 restarts the iteration with a refined axis guess. ``vmec_jax`` reproduces the
 same parity split, half-mesh averaging, and sign check so that Jacobian-reset
 behavior matches VMEC2000.
+
+The sign test is returned by
+:func:`~vmec_jax.core.geometry.half_mesh_jacobian` and consumed by the restart
+path in :mod:`vmec_jax.core.solver`.
 
 Implementation mapping (``vmec_jax``)
 -------------------------------------

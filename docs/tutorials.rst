@@ -2,9 +2,11 @@ Tutorials
 =========
 
 Every tutorial below is a runnable script in the repository's ``examples/``
-directory: parameters at the top, no ``main()``, only the public API, and each
-is smoke-tested in CI (``tests/test_examples.py``) so the code on this
-page always runs.  Copy a script, edit the parameter block, and go.
+directory: parameters at the top, no ``main()``, and only the public API.
+Fast workflows are smoke-tested on pull requests; expensive optimization and
+free-boundary workflows run in nightly CI, and external-code validation
+scripts state their pinned dependency explicitly. Copy a script, edit the
+parameter block, and go.
 
 Run any of them directly::
 
@@ -132,6 +134,23 @@ surface is an output, not an input.
 .. literalinclude:: ../examples/free_boundary_mgrid.py
    :language: python
 
+Direct ESSOS coils
+~~~~~~~~~~~~~~~~~~
+
+``free_boundary_essos_coils.py`` replaces mgrid interpolation with direct,
+differentiable Biot--Savart evaluation of the Landreman--Paul QA coils. It
+calibrates pressure against *achieved* WOUT beta and uses bounded adaptive
+continuation. The validated branch reaches 3.350% actual beta; the failed
+3.3625% minimum-step trial is retained as a conditioning limit rather than
+shown as a converged surface.
+
+.. image:: _static/figures/readme_essos_beta_scan.png
+   :alt: Direct-coil Landreman-Paul free-boundary beta continuation
+   :width: 95%
+
+.. literalinclude:: ../examples/free_boundary_essos_coils.py
+   :language: python
+
 Direct coils and their generated mgrid
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -161,6 +180,87 @@ external field. Each converged state seeds the next pressure point, including
 its solved LCFS.
 
 .. literalinclude:: ../examples/free_boundary_beta_scan.py
+   :language: python
+
+Single-stage free-boundary coil optimization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Optimize external-current amplitudes against the virtual-casing normal-field
+residual using its exact gradient. This example requires the fetched CTH WOUT
+and mgrid assets; it skips cleanly when those optional validation files are not
+installed.
+
+.. literalinclude:: ../examples/single_stage_free_boundary_opt.py
+   :language: python
+
+
+Straight mirrors and toroidal hybrids
+-------------------------------------
+
+Fixed-boundary mirror gradients
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Solve a finite-pressure, finite-current flared mirror at ``ftol=1e-12`` and
+differentiate an interior radius with the mirror implicit adjoint. Boundary,
+flux, pressure, and current derivatives are checked against independently
+reconverged central differences before MOUT and the standard plots are written.
+
+.. image:: _static/figures/mirror_fixed_boundary_3d.png
+   :alt: Fixed-boundary mirror geometry and magnetic field
+   :width: 82%
+
+.. literalinclude:: ../examples/mirror_fixed_boundary_gradients.py
+   :language: python
+
+Free-boundary mirror through 50% beta
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two circular end coils drive an open-field equilibrium whose lateral LCFS is
+solved jointly with the exterior vacuum. Every accepted beta point is a
+converged equilibrium, and the endpoint plots include the horizontal mirror,
+coils, cap-to-cap field lines, ``|B|``, pressure, cross-sections, and force
+history. The default exterior solve is intentionally a full/nightly workflow.
+
+.. image:: _static/figures/mirror_free_boundary_beta50_summary.png
+   :alt: Solved 50 percent beta mirror boundary, field, pressure, and convergence
+   :width: 95%
+
+.. literalinclude:: ../examples/mirror_free_boundary_beta_scan.py
+   :language: python
+
+Toroidal stellarator--mirror hybrid
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Four straight mirror-like sides and four rotating-ellipse stellarator corners
+remain a closed torus. The fixed-boundary script traces the 16-coil vacuum
+axis, continues corner shaping, and solves the finite-current equilibrium.
+The free-boundary script uses the same coils and publishes only accepted NESTOR
+surfaces; its Fourier corrector currently stops at the documented 0.8333%
+achieved-beta limit.
+
+.. image:: _static/figures/hybrid_fixed_coils_fieldlines.png
+   :alt: Sixteen coils, fixed-boundary hybrid LCFS, and field lines
+   :width: 82%
+
+.. literalinclude:: ../examples/toroidal_stellarator_mirror_hybrid.py
+   :language: python
+
+.. image:: _static/figures/hybrid_free_coils_fieldlines.png
+   :alt: Sixteen coils and solved free-boundary hybrid LCFS with field lines
+   :width: 82%
+
+.. literalinclude:: ../examples/toroidal_stellarator_mirror_hybrid_free_boundary.py
+   :language: python
+
+Independent Pleiades reference
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The resolution-qualified two-coil beta trend is independently regenerated
+with Pleiades at pinned commit ``0161abb3``. Set ``PLEIADES_ROOT`` at the top;
+the script writes ignored review output and never silently replaces the bundled
+CSV benchmark.
+
+.. literalinclude:: ../examples/validation/pleiades_mirror_reference.py
    :language: python
 
 
@@ -193,6 +293,9 @@ Goodman constructed-QI residual (:class:`~vmec_jax.core.omnigenity.QIResidual`)
 plus practical targets, one call at ``max_mode = 6`` (25x residual
 reduction in 17.3 minutes).
 
+.. literalinclude:: ../examples/optimization/QI_optimization_ess.py
+   :language: python
+
 Staged ``max_mode`` continuation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -205,6 +308,33 @@ twice the wall time; the scripts stay side by side so the comparison is
 reproducible.
 
 .. literalinclude:: ../examples/optimization/QA_optimization.py
+   :language: python
+
+.. literalinclude:: ../examples/optimization/QH_optimization.py
+   :language: python
+
+.. literalinclude:: ../examples/optimization/QP_optimization.py
+   :language: python
+
+.. literalinclude:: ../examples/optimization/QI_optimization.py
+   :language: python
+
+Self-consistent bootstrap current
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The QA and QH bootstrap examples alternate the equilibrium with the
+differentiable Redl current model until the current-profile mismatch closes.
+They reproduce the workflow of Landreman, Buller, and Drevlak (2022) against
+the optional Zenodo archive selected by ``VMEC_JAX_ZENODO_2205_02914``.
+
+.. image:: _static/figures/readme_bootstrap.png
+   :alt: Self-consistent QA and QH bootstrap-current validation
+   :width: 95%
+
+.. literalinclude:: ../examples/optimization/QA_bootstrap_selfconsistent.py
+   :language: python
+
+.. literalinclude:: ../examples/optimization/QH_bootstrap_selfconsistent.py
    :language: python
 
 These are the heaviest examples (hundreds to thousands of solves) and are

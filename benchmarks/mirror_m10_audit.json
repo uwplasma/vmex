@@ -7,9 +7,9 @@
     "mirror_python_lines": 8072,
     "largest_mirror_module_lines": 862,
     "test_python_lines": 14054,
-    "tracked_tree_kib": 7441,
-    "plan_bytes": 197406,
-    "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, and moving mirror plotting to its owning package on 2026-07-12"
+    "tracked_tree_kib": 8205,
+    "plan_bytes": 197661,
+    "count_context": "Recounted after merging main through 2f75914f, completing public helper docstrings, moving mirror plotting to its owning package, and promoting three reviewed documentation figures on 2026-07-12"
   },
   "coverage": {
     "statements": 3269,
@@ -24,7 +24,8 @@
   "validation": {
     "noncoverage_fast_shard": "93 passed, 11 deselected in 536.51 s before promotion-guard additions",
     "free_boundary_adjoint": "1 passed in 141.83 s",
-    "strict_sphinx": "passed after mirror plotting ownership refactor and glossary addition",
+    "strict_sphinx": "passed after mirror plotting ownership refactor, glossary addition, 26/26 public-example tutorial audit, and final equation-to-source link audit",
+    "tutorial_coverage": "26/26 executable example scripts referenced; three reviewed mirror/hybrid result figures promoted to documentation",
     "mypy": "passed across 64 source files",
     "package_build": "wheel and sdist passed; mirror/plotting.py included in both",
     "refactor_tests": "47 passed, 3 skipped across solver, step-control, and exterior; plotting/package API 29 passed; CLI/output/package API 35 passed; fixed-gradient example passed",
@@ -35,9 +36,9 @@
   },
   "repository": {
     "tracked_outputs": "one small example mgrid; generated mirror results are ignored",
-    "documentation_figures_mib": 2.7,
+    "documentation_figures_mib": 4.61,
     "git_directory_mib": 88,
     "git_history_status": "repository-wide release-history rewrite remains outside the mirror feature branch"
   },
-  "assessment": "M10 mirror-specific performance, output, plotting, documentation, and focused coverage gates pass. The 20-file mirror backend remains within its module budget and all 565 public API-like definitions have docstrings. Mirror plotting now lives with mirror output while its former core import remains compatible. The aggregate package is inside the revised evidence-based 30-34k line budget; tests remain 4,054 lines above their target, so evidence-preserving test simplification remains a release cleanup lane. The ordinary core CI coverage combine continues to omit mirror because it intentionally excludes nightly adjoint tests; the reproducible mirror release audit is separate."
+  "assessment": "M10 mirror-specific performance, output, plotting, documentation, and focused coverage gates pass. The 20-file mirror backend remains within its module budget and all 565 public API-like definitions have docstrings. Mirror plotting now lives with mirror output while its former core import remains compatible. Every executable example is indexed from the tutorials and the documented equations link to their implementations. The aggregate package is inside the revised evidence-based 30-34k line budget; tests remain 4,054 lines above their target, so evidence-preserving test simplification remains a release cleanup lane. The ordinary core CI coverage combine continues to omit mirror because it intentionally excludes nightly adjoint tests; the reproducible mirror release audit is separate."
 }
