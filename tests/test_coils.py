@@ -29,7 +29,7 @@ from vmec_jax.core.coils import (  # noqa: E402
     two_coil_on_axis_bz,
     to_mgrid_data,
 )
-from vmec_jax.core.mgrid import read_mgrid, write_mgrid  # noqa: E402
+from vmec_jax.core.mgrid import MgridField, read_mgrid, write_mgrid  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -284,6 +284,38 @@ def test_per_group_mgrid_modes_consistent() -> None:
     br1, bp1, bz1 = field_on_cylindrical_grid(cs, ir=ir, jz=jz, kp=kp, single_group=True, **grid)
     total_br = np.sum(np.asarray(br_raw), axis=0)
     np.testing.assert_allclose(total_br, np.asarray(br1[0]), rtol=1e-12, atol=1e-15 * np.max(np.abs(total_br)))
+
+
+def test_mgrid_off_grid_error_converges_for_smooth_loop_field() -> None:
+    """Trilinear mgrid error decreases under refinement away from coils."""
+
+    coils = planar_ellipse_coils(
+        [[0.0, 0.0, 0.0]],
+        [[0.0, 0.0, 1.0]],
+        [[1.0, 0.0, 0.0]],
+        semi_major=1.0,
+        semi_minor=1.0,
+        currents=1.0e5,
+        n_segments=128,
+    )
+    r = np.array([0.13, 0.21, 0.34, 0.47, 0.59])
+    phi = np.array([0.1, 0.7, 1.4, 2.1, 3.0])
+    z = np.array([0.16, 0.23, 0.31, 0.42, 0.54])
+    direct = np.stack([np.asarray(x) for x in coils.b_cyl(r, phi, z)], axis=-1)
+    scale = np.linalg.norm(direct)
+
+    errors = []
+    for n in (9, 17, 33):
+        data = to_mgrid_data(
+            coils, 0.0, 0.7, 0.1, 0.6, ir=n, jz=n, kp=4, mgrid_mode="S"
+        )
+        field = MgridField.from_mgrid_data(data)
+        sampled = np.stack([np.asarray(x) for x in field.b_cyl(r, phi, z)], axis=-1)
+        errors.append(np.linalg.norm(sampled - direct) / scale)
+
+    np.testing.assert_allclose(errors, [1.1613121e-3, 2.1271369e-4, 3.3976697e-5], rtol=2e-5)
+    assert errors[1] < errors[0] / 4.0
+    assert errors[2] < errors[1] / 4.0
 
 
 # ---------------------------------------------------------------------------

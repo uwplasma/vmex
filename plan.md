@@ -2136,6 +2136,14 @@ the old 3.120% endpoint to target/actual beta 3.350% in 149 minutes. The final a
 WOUT for requested equilibria and the measured endpoint. Targets 4% and 5%, the mgrid/direct parity
 overlay, and the second tokamak machine remain open; do not substitute prescribed high-beta
 surfaces. Compact accepted and rejected histories are in `benchmarks/free_boundary_essos_beta.json`.
+The LP-QA generated-mgrid parity attempt is now closed as a negative result. Scaled-group and raw
+single-group fields agree with direct Biot--Savart at grid nodes to `1.4e-15`, and refining from
+`96x96x48` to `160x160x160` lowers off-grid field RMS error from `7.09e-3` to `6.40e-4`. Nevertheless,
+an `ns=16` mgrid solve leaves an already converged direct-coil state on its first NESTOR releases
+and becomes non-finite within 6,000 iterations. This is the expected uniform-trilinear limitation
+for tightly fitting modular coils, not a file-layout defect. Evidence is in
+`benchmarks/free_boundary_essos_mgrid_parity.json`. Do not spend a multi-GB grid on this case;
+positive equilibrium-level mgrid/direct parity moves to the well-separated tokamak coil example.
 
 ---
 
