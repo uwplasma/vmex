@@ -221,12 +221,14 @@ NESTOR parity path now lives in ``freeboundary_reference`` (232 lines), leaving 
 free-boundary driver at 832 lines with nine net source lines added. Differentiable observables now
 live in ``implicit_quantities`` (123 lines), leaving custom-VJP/adjoint orchestration in ``implicit``
 at 958 lines. Nyquist grid conventions now live in ``nyquist_grid`` (60 lines), leaving field,
-current, and Mercier output in ``nyquist`` at 972 lines. Oversized core modules remain ``optimize``
-1,960 and ``solver`` 1,706. Split them only along existing ownership boundaries; do not create
-forwarding modules or disturb validated numerical kernels solely to meet a line target.
+current, and Mercier output in ``nyquist`` at 972 lines. Optimization now separates the public
+objective/driver (``optimize``, 995 lines), implicit Jacobian backend (583), Boozer/QI objective
+(333), and boundary/current parameterization (150). ``solver`` at 1,706 lines is the only remaining
+oversized core module. Split it only along an existing ownership boundary; do not create forwarding
+modules or disturb validated numerical kernels solely to meet a line target.
 Gate: no core file >~1000 lines; 0 public definitions without docstrings; ruff+mypy clean without
-blanket ignores. Ruff and mypy are clean across all 67 source files; coherent splits for the two
-remaining large numerical modules remain release cleanup.
+blanket ignores. Ruff and mypy are clean across all 70 source files; the coherent solver split is
+the final module-size release cleanup.
 
 **R7. Docs completion COMPLETE.** The VMEC2000↔vmec-jax glossary is complete, all 26 executable
 examples are referenced from the tutorials, and the final equation-to-source audit links the
