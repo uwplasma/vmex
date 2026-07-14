@@ -10,8 +10,8 @@ import numpy as np
 
 from .forces import MU0, mass_profile_from_pressure, mirror_energy
 from .model import MirrorBoundary, MirrorConfig, MirrorState, PressureClosure, project_fixed_boundary_state
-from .restart import FreeBoundaryRestart
 from .free_boundary import FreeBoundaryMirrorResult, solve_axisymmetric_free_boundary_cli
+from .output import FreeBoundaryRestart
 from .vacuum import VacuumGrid
 
 Array = Any

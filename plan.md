@@ -195,7 +195,7 @@ The initial audit relative to `origin/main` found 137 changed files, 24,370
 added lines, and 4,255 deleted lines. The first Phase 1 restoration reduces the
 working diff to 71 files, 19,378 added lines, and 1,610 deleted lines: 66
 unrelated files and about 5,000 added lines are gone. `vmec_jax/mirror` now
-contains 10,291 lines in 22 modules and now exposes 24 lazy names. Its largest files
+contains 10,224 lines in 21 modules and now exposes 24 lazy names. Its largest files
 are `forces.py` (1,098), `solver.py` (1,001), `splines.py` (983),
 `exterior_bie.py` (812), and `exterior_mesh.py` (737). There are 159 collected
 mirror tests.
@@ -430,7 +430,7 @@ closing Phase 0 globally.
 Execution status (2026-07-14): items 1 and 2 are complete in the first
 restoration tranche. The remaining 71-file diff contains only mirror-owned
 source, tests, examples, evidence, documentation, and narrow shared integration
-hooks. The public-API target is complete; the 22-module package, duplicate
+hooks. The public-API target is complete; the 21-module package, duplicate
 exterior variants, and large solver/force files remain the active reduction
 work.
 

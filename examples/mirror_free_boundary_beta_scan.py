@@ -42,7 +42,7 @@ from vmec_jax.mirror.continuation import solve_axisymmetric_beta_scan_cli  # noq
 from vmec_jax.mirror.diagnostics import (  # noqa: E402
     summarize_axisymmetric_beta_scan,
 )
-from vmec_jax.mirror.restart import (  # noqa: E402
+from vmec_jax.mirror.output import (  # noqa: E402
     FreeBoundaryRestart,
     load_free_boundary_restart,
     save_free_boundary_restart,

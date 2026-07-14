@@ -449,7 +449,7 @@ that closure. In the anisotropic lane the solved beta target is midplane
 the firehose/mirror ellipticity indicators to remain valid.
 
 Set ``SAVE_RESTARTS = True`` to write one compressed ``.npz`` hot-start per
-beta point. :func:`vmec_jax.mirror.load_free_boundary_restart` checks its
+beta point. :func:`vmec_jax.mirror.output.load_free_boundary_restart` checks its
 schema and both plasma/vacuum grid shapes before returning the boundary,
 plasma state, vacuum potential, and calibrated mass scale.
 Set ``RESTART_FROM`` and trim ``BETAS`` to resume only the unfinished suffix;
