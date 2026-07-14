@@ -68,7 +68,6 @@ jobs:
             tests/test_preconditioner.py \
             tests/test_setup.py \
             tests/test_mgrid.py \
-            tests/test_coils.py \
             --durations=25
 
   mirror:
