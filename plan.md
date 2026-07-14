@@ -403,9 +403,12 @@ explicit domain of validity.
 
 ### Milestone 4: native B-spline axial state
 
-Status: basis layer complete locally. Clamped and periodic cubic values,
-derivatives, quadrature, fitting, exact open-knot insertion, and JVP/VJP tests
-pass. Coefficient-native equilibrium state and Chebyshev parity remain open.
+Status: basis and coefficient-state layers complete locally. Clamped and
+periodic cubic values, derivatives, quadrature, fitting, exact open-knot
+insertion, and JVP/VJP tests pass. Coefficient-native state/boundary projection
+uses endpoint-augmented Gauss evaluation and matches a 41-node Chebyshev energy
+with 9 controls to ``5.0e-13`` relative. Nonlinear solve/preconditioner parity
+and converged Milestone 1 cases remain open.
 
 Add only `mirror/splines.py`; keep the basis protocol in `basis.py` small.
 

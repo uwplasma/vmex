@@ -13,12 +13,32 @@ Boyd, *Chebyshev and Fourier Spectral Methods*.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import jax.numpy as jnp
 import numpy as np
 
 Array = Any
+
+
+class AxialBasis(Protocol):
+    """Small operator contract shared by Chebyshev and spline evaluation grids."""
+
+    nodes: np.ndarray
+    weights: np.ndarray
+
+    @property
+    def size(self) -> int: ...
+
+    def differentiate(self, values: Array, *, axis: int = -1) -> Array: ...
+
+    def differentiate_transpose(self, values: Array, *, axis: int = -1) -> Array: ...
+
+    def differentiate_twice(self, values: Array, *, axis: int = -1) -> Array: ...
+
+    def integrate(self, values: Array, *, axis: int = -1) -> Array: ...
+
+    def interpolation_matrix(self, target_nodes: Array) -> np.ndarray: ...
 
 
 def _require_nxi(nxi: int) -> int:
@@ -240,7 +260,7 @@ class MirrorGrid:
     s_half: np.ndarray
     radial_weights: np.ndarray
     theta_basis: ThetaBasis
-    axial_basis: ChebyshevBasis
+    axial_basis: AxialBasis
     z: np.ndarray
     dz_dxi: float
 

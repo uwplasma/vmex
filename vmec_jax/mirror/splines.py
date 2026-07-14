@@ -10,8 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import jax
 import jax.numpy as jnp
 import numpy as np
+
+from .basis import MirrorGrid, ThetaBasis
+from .model import MirrorBoundary, MirrorConfig, MirrorState
 
 Array = Any
 _DEGREE = 3
@@ -239,4 +243,200 @@ class CubicBSplineBasis:
         return refined, jnp.moveaxis(updated, 0, axis)
 
 
-__all__ = ["CubicBSplineBasis"]
+@dataclass(frozen=True, eq=False)
+class _SplineEvaluationBasis:
+    """Endpoint-augmented Gauss grid acting on evaluated spline values."""
+
+    spline: CubicBSplineBasis
+    nodes: np.ndarray
+    weights: np.ndarray
+    recovery_matrix: np.ndarray
+    derivative_matrix: np.ndarray
+    second_derivative_matrix: np.ndarray
+
+    @classmethod
+    def build(cls, spline: CubicBSplineBasis) -> "_SplineEvaluationBasis":
+        nodes = np.concatenate(([spline.domain[0]], spline.quadrature_nodes, [spline.domain[1]]))
+        weights = np.concatenate(([0.0], spline.quadrature_weights, [0.0]))
+        values = np.asarray(spline.basis_matrix(nodes))
+        recovery = np.linalg.pinv(values, rcond=1.0e-14)
+        derivative = np.asarray(spline.basis_matrix(nodes, derivative=1)) @ recovery
+        second = np.asarray(spline.basis_matrix(nodes, derivative=2)) @ recovery
+        return cls(spline, nodes, weights, recovery, derivative, second)
+
+    @property
+    def size(self) -> int:
+        return int(self.nodes.size)
+
+    @staticmethod
+    def _apply(matrix: Array, values: Array, axis: int) -> Array:
+        values = jnp.asarray(values)
+        moved = jnp.moveaxis(values, axis, 0)
+        result = jnp.tensordot(jnp.asarray(matrix), moved, axes=((1,), (0,)))
+        return jnp.moveaxis(result, 0, axis)
+
+    def differentiate(self, values: Array, *, axis: int = -1) -> Array:
+        return self._apply(self.derivative_matrix, values, axis)
+
+    def differentiate_transpose(self, values: Array, *, axis: int = -1) -> Array:
+        return self._apply(self.derivative_matrix.T, values, axis)
+
+    def differentiate_twice(self, values: Array, *, axis: int = -1) -> Array:
+        return self._apply(self.second_derivative_matrix, values, axis)
+
+    def integrate(self, values: Array, *, axis: int = -1) -> Array:
+        moved = jnp.moveaxis(jnp.asarray(values), axis, -1)
+        return jnp.tensordot(moved, jnp.asarray(self.weights), axes=((-1,), (0,)))
+
+    def interpolation_matrix(self, target_nodes: Array) -> np.ndarray:
+        return np.asarray(self.spline.basis_matrix(target_nodes)) @ self.recovery_matrix
+
+    def interpolate(self, values: Array, target_nodes: Array, *, axis: int = -1) -> Array:
+        return self._apply(self.interpolation_matrix(target_nodes), values, axis)
+
+
+@dataclass(frozen=True)
+class SplineMirrorBoundary:
+    """Lateral mirror boundary stored as axial B-spline coefficients."""
+
+    radius_coefficients: Array
+
+
+@dataclass(frozen=True)
+class SplineMirrorState:
+    """Geometry and stream-function B-spline coefficients."""
+
+    radius_coefficients: Array
+    lambda_coefficients: Array
+
+
+@dataclass(frozen=True, eq=False)
+class SplineMirrorDiscretization:
+    """Coefficient-to-quadrature map for a fixed mirror configuration."""
+
+    spline: CubicBSplineBasis
+    grid: MirrorGrid
+    evaluation_matrix: np.ndarray
+
+    @classmethod
+    def build(
+        cls,
+        config: MirrorConfig,
+        *,
+        elements: int,
+        quadrature_order: int = 4,
+    ) -> "SplineMirrorDiscretization":
+        """Build a clamped spline and endpoint-augmented Gauss mirror grid."""
+
+        elements = int(elements)
+        if elements < 1:
+            raise ValueError("spline discretization requires elements >= 1")
+        spline = CubicBSplineBasis.clamped(
+            np.linspace(-1.0, 1.0, elements + 1), quadrature_order=quadrature_order
+        )
+        axial = _SplineEvaluationBasis.build(spline)
+        resolution = config.resolution
+        s = np.linspace(0.0, 1.0, resolution.ns)
+        ds = 1.0 / (resolution.ns - 1)
+        radial_weights = np.full(resolution.ns, ds)
+        radial_weights[[0, -1]] *= 0.5
+        z_mid = 0.5 * (config.z_min + config.z_max)
+        dz_dxi = 0.5 * (config.z_max - config.z_min)
+        grid = MirrorGrid(
+            s=s,
+            s_half=0.5 * (s[:-1] + s[1:]),
+            radial_weights=radial_weights,
+            theta_basis=ThetaBasis.build(resolution.ntheta, resolution.mpol),
+            axial_basis=axial,
+            z=z_mid + dz_dxi * axial.nodes,
+            dz_dxi=dz_dxi,
+        )
+        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)))
+
+    @property
+    def coefficient_count(self) -> int:
+        """Return the number of axial coefficients per scalar field."""
+
+        return self.spline.size
+
+    def evaluate_boundary(self, boundary: SplineMirrorBoundary) -> MirrorBoundary:
+        """Evaluate boundary coefficients on the solver quadrature grid."""
+
+        coefficients = jnp.asarray(boundary.radius_coefficients)
+        expected = (self.grid.ntheta, self.coefficient_count)
+        if coefficients.shape != expected:
+            raise ValueError(f"boundary coefficient shape {coefficients.shape} must be {expected}")
+        values = jnp.tensordot(coefficients, jnp.asarray(self.evaluation_matrix).T, axes=((-1,), (0,)))
+        return MirrorBoundary(values)
+
+    def evaluate_state(self, state: SplineMirrorState) -> MirrorState:
+        """Evaluate state coefficients on the solver quadrature grid."""
+
+        expected = (self.grid.ns, self.grid.ntheta, self.coefficient_count)
+        if state.radius_coefficients.shape != expected or state.lambda_coefficients.shape != expected:
+            raise ValueError(f"state coefficient arrays must have shape {expected}")
+        matrix = jnp.asarray(self.evaluation_matrix)
+        return MirrorState(
+            radius_scale=jnp.tensordot(state.radius_coefficients, matrix.T, axes=((-1,), (0,))),
+            lambda_stream=jnp.tensordot(state.lambda_coefficients, matrix.T, axes=((-1,), (0,))),
+        )
+
+    def fit_boundary(self, boundary: MirrorBoundary, source_grid: MirrorGrid) -> SplineMirrorBoundary:
+        """Fit a nodal boundary once to initialize coefficient-native solves."""
+
+        samples = source_grid.axial_basis.interpolate(
+            boundary.radius_scale, self.spline.collocation_nodes, axis=-1
+        )
+        return SplineMirrorBoundary(self.spline.fit(samples, axis=-1))
+
+    def fit_state(self, state: MirrorState, source_grid: MirrorGrid) -> SplineMirrorState:
+        """Fit a nodal state once to initialize coefficient-native solves."""
+
+        radius = source_grid.axial_basis.interpolate(
+            state.radius_scale, self.spline.collocation_nodes, axis=-1
+        )
+        lam = source_grid.axial_basis.interpolate(
+            state.lambda_stream, self.spline.collocation_nodes, axis=-1
+        )
+        return SplineMirrorState(
+            self.spline.fit(radius, axis=-1), self.spline.fit(lam, axis=-1)
+        )
+
+    def project_fixed_boundary(
+        self,
+        state: SplineMirrorState,
+        boundary: SplineMirrorBoundary,
+    ) -> SplineMirrorState:
+        """Apply side/end geometry, axis regularity, and the lambda gauge in coefficient space."""
+
+        radius = jnp.asarray(state.radius_coefficients)
+        boundary_radius = jnp.asarray(boundary.radius_coefficients)
+        radius = radius.at[-1].set(boundary_radius)
+        radius = radius.at[:, :, 0].set(boundary_radius[:, 0][None, :])
+        radius = radius.at[:, :, -1].set(boundary_radius[:, -1][None, :])
+        radius = radius.at[0].set(radius[1])
+        lam = jnp.asarray(state.lambda_coefficients).at[0].set(state.lambda_coefficients[1])
+        evaluated = jnp.tensordot(lam, jnp.asarray(self.evaluation_matrix).T, axes=((-1,), (0,)))
+        theta_weights = jnp.asarray(self.grid.theta_basis.weights)
+        axial_weights = jnp.asarray(self.grid.axial_basis.weights)
+        mean = jnp.einsum("j,k,ijk->i", theta_weights, axial_weights, evaluated)
+        mean /= jnp.sum(theta_weights) * jnp.sum(axial_weights)
+        return SplineMirrorState(radius, lam - mean[:, None, None])
+
+
+jax.tree_util.register_dataclass(
+    SplineMirrorBoundary, data_fields=["radius_coefficients"], meta_fields=[]
+)
+jax.tree_util.register_dataclass(
+    SplineMirrorState,
+    data_fields=["radius_coefficients", "lambda_coefficients"],
+    meta_fields=[],
+)
+
+
+__all__ = [
+    "CubicBSplineBasis",
+    "SplineMirrorBoundary",
+    "SplineMirrorDiscretization",
+    "SplineMirrorState",
+]

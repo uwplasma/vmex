@@ -149,9 +149,18 @@ two derivatives, and has tested JVP/VJP actions. For a smooth periodic fixture,
 maximum errors at 8, 16, 32, and 64 controls are ``5.06e-3``, ``2.76e-4``,
 ``1.65e-5``, and ``1.02e-6``.
 
-This basis is not yet the equilibrium state. Until coefficient-native geometry,
-force, and boundary variations pass Chebyshev parity, ``MirrorConfig`` keeps
-the Chebyshev collocation path as the supported solver.
+``SplineMirrorState`` and ``SplineMirrorBoundary`` store geometry and stream
+function coefficients rather than sampled values. ``SplineMirrorDiscretization``
+evaluates them on endpoint-augmented Gauss nodes before calling the shared
+geometry and energy kernels, and applies side/end constraints plus the lambda
+gauge in coefficient space. A quadratic flared tube uses 9 coefficients and 26
+evaluation nodes versus 41 Chebyshev nodes; volume agrees to roundoff, total
+energy agrees to ``5.0e-13`` relative, and an energy directional derivative
+agrees with finite differences to ``1.9e-8`` relative.
+
+The nonlinear solver is not yet coefficient-native. Until its active-variable
+packing, residual normalization, and preconditioner pass Chebyshev parity,
+``MirrorConfig`` keeps Chebyshev collocation as the supported solve path.
 
 Fixed-boundary implicit gradients
 ---------------------------------
