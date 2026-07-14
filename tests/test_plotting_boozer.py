@@ -24,13 +24,9 @@ netCDF4 = pytest.importorskip("netCDF4")
 pytest.importorskip("matplotlib")
 
 from vmec_jax.core.boozer import run_booz_xform  # noqa: E402
-from vmec_jax.core.plotting import (  # noqa: E402
-    plot_boozmn,
-    plot_boundary_3d,
-    plot_wout,
-)
+from vmec_jax.core.plotting import plot_boozmn, plot_wout  # noqa: E402
 
-from .conftest import resolve_golden_dir
+from conftest import resolve_golden_dir
 
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark = pytest.mark.skipif(
@@ -80,17 +76,6 @@ def test_plot_wout_accepts_woutdata_and_subset(tmp_path: Path) -> None:
     paths = plot_wout(data, tmp_path, which=("profiles", "modB"), name="solovev_mem")
     _check_figures(paths, ("profiles", "modB"))
     assert paths["profiles"].name == "solovev_mem_profiles.png"
-
-
-def test_plot_boundary_3d_accepts_coil_overlay(tmp_path: Path) -> None:
-    angle = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
-    coils = np.stack(
-        [np.stack([6.0 * np.cos(angle), 6.0 * np.sin(angle), np.zeros_like(angle)], axis=-1)]
-    )
-    path = plot_boundary_3d(
-        _golden_wout("solovev"), tmp_path / "coils_3d.png", coils=coils
-    )
-    assert path.exists() and path.stat().st_size > 1000
 
 
 def test_plot_wout_rejects_unknown_figure(tmp_path: Path) -> None:

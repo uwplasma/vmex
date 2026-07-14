@@ -15,18 +15,11 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``preconditioner``  1D radial tridiagonal preconditioner (precondn.f, scalfor.f)
 - ``step``            Richardson stepping + restart control (evolve.f, restart.f)
 - ``setup``           radial profiles + initial guess (profil1d/3d.f, readin.f)
-- ``solver``          fixed-boundary force evaluation and iteration kernels (funct3d.f)
-- ``solver_runtime``  spectral state, cached tables, and solve-stage setup (eqsolve.f)
-- ``solver_driver``   single-grid iteration orchestration and public solve result (eqsolve.f)
+- ``solver``          single-grid fixed-boundary solve loop (funct3d.f, eqsolve.f)
 - ``statephysics``    shared state-physics primitives (_field_chain, half-mesh iota/sampling)
 - ``implicit``        implicit differentiation of the equilibrium (custom VJP + adjoint GMRES)
 - ``stability``       differentiable ideal-MHD stability (infinite-n ballooning; COBRA port)
 - ``freeboundary_diff`` differentiable free-boundary residual via virtual casing (R15.3/R19)
-- ``freeboundary_implicit`` coupled solved-LCFS residual for implicit differentiation
-- ``optimize``        public equilibrium objectives and optimization driver
-- ``optimization_implicit`` implicit-Jacobian differentiation backend
-- ``optimization_parameters`` boundary/current parameter packing
-- ``optimization_qi`` Boozer-space quasi-isodynamic objective
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
 Every module is validated by A/B equivalence tests against the legacy

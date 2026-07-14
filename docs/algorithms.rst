@@ -322,17 +322,6 @@ with the VMEC2000 cadence (``funct3d.f``):
   ``rbsq = bsqvac + presf(ns)`` at ``js = ns``, and the constraint reference
   surfaces ``rcon0, zcon0`` ramp by 0.9 per iteration.
 
-Pressure and coil-current scans pass the preceding equilibrium as
-``initial_state``. The evolved LCFS is retained and ``rcon0, zcon0`` are
-rebound to that state before the next NESTOR solve, avoiding a cold INDATA
-restart at every scan point. A hot start cannot terminate before vacuum
-pressure turns on, and its best-residual checkpoint is reset at that turn-on
-so the prescribed seed cannot suppress legitimate LCFS motion.
-
-The optional ``max_vacuum_skip`` API cap leaves VMEC2000 cadence unchanged by
-default. Setting it to 1 is the expensive reference that recomputes NESTOR on
-every iteration when diagnosing incremental-update stalls.
-
 The external field comes either from an ``mgrid`` file
 (:mod:`vmec_jax.core.mgrid`, trilinear interpolation weighted by ``EXTCUR``)
 or from any ``xyz -> B`` callable — e.g. an ESSOS ``essos.coils.Coils``
@@ -375,30 +364,6 @@ coefficients/currents of a callable ESSOS coil field via
 :func:`~vmec_jax.core.freeboundary_diff.external_B_cartesian`, or
 ``extcur``), and its ``value_and_grad_bnormal`` helper returns gradients
 validated against finite differences — no NESTOR adjoint is required.
-
-.. _free-boundary-derivative-scope:
-
-Coupled solved-boundary residual
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-For derivatives of the *solved LCFS*,
-:class:`~vmec_jax.core.freeboundary_implicit.CoupledFreeBoundaryProblem`
-re-evaluates the fused NESTOR solve on the current edge and inserts its
-magnetic pressure into the same MHD force residual used by the forward solve.
-The final damped constraint baselines are retained with the forward result,
-so this reconstructs the same discrete fixed point rather than a nearby
-approximation. Both state and ``extcur`` Jacobian actions are pure JAX; the
-CTH golden verifies the residual at the converged state and validates the
-``extcur`` JVP against central finite differences. For the common case of a
-small number of current groups, :meth:`~vmec_jax.core.freeboundary_implicit.CoupledFreeBoundaryProblem.extcur_sensitivity`
-uses the implicit function theorem in forward mode: matrix-free JVPs solve
-one preconditioned fixed-point system per current direction without unrolling
-the equilibrium iterations. CTH and axisymmetric DIII-D directional LCFS
-derivatives agree with strict central re-solves to 0.33% and 0.42%,
-respectively. A many-parameter NESTOR fixed-point reverse solve is deferred:
-the profiled generic reverse and transpose formulations exceed the release
-memory/runtime envelope. It requires a compact operator-level transpose and a
-new independent finite-difference gate before it can become supported.
 
 Implicit differentiation
 ------------------------

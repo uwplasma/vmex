@@ -10,7 +10,6 @@ the override for the GPU profile):
 3. ``free_boundary``    — NESTOR free boundary (cth_like_free_bdy, deck ns)
 4. ``implicit_grad``    — value_and_grad of aspect via the implicit adjoint
 5. ``opt_step``         — two least_squares iterations, jac="implicit"
-6. ``freeb_sensitivity`` — coupled solved-LCFS forward implicit sensitivity
 
 For each: cold wall (first call, includes XLA compile), warm wall (second
 call, compiled), iterations, per-iteration ms, and peak RSS.  On GPU also
@@ -132,33 +131,12 @@ def profile_opt_step():
     return {"cold_s": cold, "warm_s": warm}
 
 
-def profile_freeb_sensitivity():
-    inp = vj.VmecInput.from_file(DATA / "input.cth_like_free_bdy")
-    data = vj.read_mgrid(DATA / "mgrid_cth_like.nc")
-    current = np.asarray(inp.extcur)[:data.nextcur]
-    field = vj.MgridField.from_mgrid_data(data, extcur=current)
-    equilibrium = vj.solve_free_boundary(
-        inp, external_field=field, ftol=1e-12, max_iterations=5000)
-    problem = vj.CoupledFreeBoundaryProblem.from_result(inp, equilibrium, field)
-    sensitivity, wall = _timed(lambda: problem.extcur_sensitivity(
-        np.ones_like(current), rtol=1e-9, max_restarts=100))
-    return {
-        "wall_s": wall,
-        "forward_iters": int(equilibrium.iterations),
-        "krylov_iters": int(sensitivity.iterations),
-        "linear_residual": float(sensitivity.residual_norm),
-        "converged": bool(sensitivity.converged),
-        "edge_r00_directional_derivative": float(sensitivity.state.R_cos[-1, 0]),
-    }
-
-
 CASES = {
     "fixed_ns201": profile_fixed,
     "multigrid_ns201": profile_multigrid,
     "free_boundary": profile_free_boundary,
     "implicit_grad": profile_implicit_grad,
     "opt_step": profile_opt_step,
-    "freeb_sensitivity": profile_freeb_sensitivity,
 }
 
 

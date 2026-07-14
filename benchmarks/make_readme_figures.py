@@ -10,10 +10,6 @@ Produces (into ``docs/_static/figures/``):
   representative case (nfp4_QH_warm_start at ns=51) in vmec_jax, VMEC2000
   (NSTEP=1 stdout trace), and VMEC++ (wout ``fsqt``).  Traces are cached in
   ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
-- ``readme_equilibrium_showcase.png`` — flux surfaces + boundary ``|B|`` of
-  the bundled quick-start case (solves it in-process).
-- ``mirror_fixed_boundary_3d.png`` — 3D mirror refinement, force closure,
-  and measured CPU/GPU placement from ``mirror_fixed_boundary_3d.json``.
 - ``readme_optimization.png``         — quasisymmetry (QA/QH/QP) seed vs
   optimized boundary cross-sections, 3-D LCFS geometry coloured by ``|B|``, and
   ``|B|`` in Boozer coordinates on the LCFS (jet line contours), from the decks
@@ -30,10 +26,18 @@ Produces (into ``docs/_static/figures/``):
 - ``readme_equilibrium_showcase.png`` — flux surfaces, 3-D boundary geometry
   coloured by ``|B|``, and ``|B|`` in Boozer coordinates on the LCFS (jet),
   for the bundled quick-start case (solves it in-process).
+- ``mirror_fixed_boundary_3d.png`` — fixed-boundary mirror refinement,
+  variational residuals, and measured CPU/GPU placement.
+- ``readme_single_stage.png``         — single-stage plasma + coil optimization
+  (vacuum and finite-beta columns): boundary initial-vs-final, and the final
+  LCFS coloured by ``|B|`` inside the ESSOS coil filaments.  Runs
+  ``examples/single_stage_essos_coils_opt.py`` once at full budget (~5-8
+  min/case, NOT a CI budget) and caches its outputs under
+  ``benchmarks/output_single_stage_essos_coils_opt/``.
 
 Usage:
     python benchmarks/make_readme_figures.py
-        [--only runtime,parity,convergence,optimization,qi,precond,showcase,mirror,single_stage]
+        [--only runtime,convergence,optimization,qi,precond,showcase,mirror,single_stage]
         [--outdir docs/_static/figures]
 
 Figures are written uncompressed; compress before committing:
@@ -189,7 +193,7 @@ def make_runtime_figure(out: Path) -> None:
               fontsize=8.5, columnspacing=1.4, handletextpad=0.25,
               borderaxespad=0.0, labelspacing=0.35)
     fig.tight_layout()
-    fig.savefig(out, dpi=160, facecolor=SURFACE, transparent=False)
+    fig.savefig(out, dpi=160)
     plt.close(fig)
     print("wrote", out)
 
@@ -426,59 +430,75 @@ def make_convergence_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 4. Fixed-boundary 3D mirror convergence
+# 4. Fixed-boundary mirror convergence
 # --------------------------------------------------------------------------
 
 def make_mirror_figure(out: Path) -> None:
-    data = json.loads((REPO / "benchmarks" / "mirror_fixed_boundary_3d.json").read_text())
+    data = json.loads(
+        (REPO / "benchmarks" / "mirror_fixed_boundary_3d.json").read_text()
+    )
     runs = data["radial_runs"]
     profiles = data["profile_comparison"]
     s = np.asarray(profiles["s"])
-    legacy, gauss = profiles["legacy_midpoint"], profiles["gauss2"]
+    legacy = profiles["legacy_midpoint"]
+    gauss = profiles["gauss2"]
 
     fig, axes = plt.subplots(2, 2, figsize=(8.6, 6.3), dpi=160)
     ax = axes[0, 0]
-    ax.plot(s, legacy["lambda_rms"], "o--", color=RED, lw=1.4, ms=4, label="midpoint (rejected)")
-    ax.plot(s, gauss["lambda_rms"], "o-", color=BLUE, lw=1.8, ms=4, label="two-point Gauss")
+    ax.plot(s, legacy["lambda_rms"], "o--", color=RED, lw=1.4, ms=4,
+            label="midpoint (rejected)")
+    ax.plot(s, gauss["lambda_rms"], "o-", color=BLUE, lw=1.8, ms=4,
+            label="two-point Gauss")
     ax.set(xlabel="normalized flux  s", ylabel="RMS stream function")
     ax.set_title("Radial hourglass removed", loc="left", fontsize=11)
-    ax.grid(True); ax.legend(fontsize=8)
+    ax.grid(True)
+    ax.legend(fontsize=8)
 
     ax = axes[0, 1]
-    ax.plot(s, legacy["pitch_rms"], "o--", color=RED, lw=1.4, ms=4, label="midpoint (rejected)")
-    ax.plot(s, gauss["pitch_rms"], "o-", color=YELLOW, lw=1.8, ms=4, label="two-point Gauss")
+    ax.plot(s, legacy["pitch_rms"], "o--", color=RED, lw=1.4, ms=4,
+            label="midpoint (rejected)")
+    ax.plot(s, gauss["pitch_rms"], "o-", color=YELLOW, lw=1.8, ms=4,
+            label="two-point Gauss")
     ax.set(xlabel="normalized flux  s", ylabel="RMS field-line pitch")
     ax.set_title("Physical pitch profile restored", loc="left", fontsize=11)
-    ax.grid(True); ax.legend(fontsize=8)
+    ax.grid(True)
+    ax.legend(fontsize=8)
 
     ax = axes[1, 0]
-    ns = [r["ns"] for r in runs]
+    ns = [run["ns"] for run in runs]
     for key, label, color in (
         ("force_axis", "axis region", RED),
         ("force_all", "all active rows", INK2),
         ("force_bulk", "bulk  s >= 0.2", BLUE),
         ("variational", "variational fsq", GREEN_TEXT),
     ):
-        ax.semilogy(ns, [r[key] for r in runs], "o-", color=color, lw=1.7, ms=4, label=label)
+        ax.semilogy(ns, [run[key] for run in runs], "o-", color=color,
+                    lw=1.7, ms=4, label=label)
     ax.axhline(1.0e-12, color=BASELINE, ls="--", lw=1.0)
     ax.set(xlabel="radial surfaces  ns", ylabel="normalized force residual")
-    ax.set_title("Bulk force converges; axis stencil remains", loc="left", fontsize=11)
-    ax.grid(True); ax.legend(fontsize=7.5, ncols=2)
+    ax.set_title("Bulk force converges; axis stencil remains", loc="left",
+                 fontsize=11)
+    ax.grid(True)
+    ax.legend(fontsize=7.5, ncols=2)
 
     ax = axes[1, 1]
-    device = {r["device"]: r for r in data["device_runs"]}
-    labels = ["midpoint CPU\n13k Krylov", "Gauss CPU\n2k Krylov", "Gauss A4000\n2k Krylov"]
-    times = [legacy["wall_s"], device["office_cpu"]["wall_s"], device["office_gpu"]["wall_s"]]
+    device = {run["device"]: run for run in data["device_runs"]}
+    labels = ["midpoint CPU\n13k Krylov", "Gauss CPU\n2k Krylov",
+              "Gauss A4000\n2k Krylov"]
+    times = [legacy["wall_s"], device["office_cpu"]["wall_s"],
+             device["office_gpu"]["wall_s"]]
     bars = ax.bar(labels, times, color=[RED, BLUE, VIOLET], width=0.58)
     ax.bar_label(bars, fmt="%.1f s", padding=4, color=INK2, fontsize=9)
     ax.set_ylabel("wall time (s)")
     ax.set_title("Correct quadrature is also faster", loc="left", fontsize=11)
-    ax.grid(axis="y"); ax.set_ylim(0, 72)
+    ax.grid(axis="y")
+    ax.set_ylim(0, 72)
 
-    for ax in axes.ravel():
+    for panel in axes.ravel():
         for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
-    fig.suptitle("Fixed-boundary helical mirror: corrected radial convergence", x=0.07, ha="left", fontsize=13)
+            panel.spines[side].set_visible(False)
+    fig.suptitle("Fixed-boundary helical mirror: corrected radial convergence",
+                 x=0.07, ha="left", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     fig.savefig(out, dpi=160, facecolor=SURFACE, transparent=False)
     plt.close(fig)
@@ -790,7 +810,7 @@ def make_qi_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 6. 2D preconditioner: iteration reduction on stiff cases (R10.2)
+# 5. 2D preconditioner: iteration reduction on stiff cases (R10.2)
 # --------------------------------------------------------------------------
 
 # Measured 2026-07-10 (plan.md R10.2, commit 2980d812): matrix-free 2D block
@@ -840,7 +860,7 @@ def make_precond_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 7. Equilibrium showcase (solves the bundled quick-start case)
+# 6. Equilibrium showcase (solves the bundled quick-start case)
 # --------------------------------------------------------------------------
 
 def make_showcase_figure(out: Path) -> None:
@@ -942,93 +962,154 @@ def make_showcase_figure(out: Path) -> None:
     print("wrote", out)
 
 
-# The expensive optimization output is intentionally cached outside tracked
-# files. The compact reviewed PNG in docs is the artifact committed to git.
+# --------------------------------------------------------------------------
+# 7. Single-stage plasma + coil optimization.  Runs the coil-agnostic example
+#    (examples/single_stage_essos_coils_opt.py) once at full budget to produce
+#    the saved initial/final wout + the fixed ESSOS coil geometry, then draws
+#    two columns (vacuum, finite beta): boundary initial-vs-final, and the final
+#    LCFS coloured by |B| inside the ESSOS coil filaments.
+# --------------------------------------------------------------------------
+
 SINGLE_STAGE_EXAMPLE = REPO / "examples" / "single_stage_essos_coils_opt.py"
 SINGLE_STAGE_OUT = REPO / "benchmarks" / "output_single_stage_essos_coils_opt"
-SINGLE_STAGE_CASES = [("A_vacuum", "QA - vacuum"),
-                      ("B_finite_beta", "QA - finite $\\beta$")]
+SINGLE_STAGE_CASES = [
+    ("A_vacuum", "QA  ·  vacuum"),
+    ("B_finite_beta", "QA  ·  finite $\\beta$"),
+]
 
 
 def _ensure_single_stage_outputs() -> dict:
-    """Read cached single-stage outputs, creating them at the full example budget."""
+    """Return the example's summary, running it once (full budget) if absent.
+
+    The single-stage optimization is ~5-8 min/case, so its converged outputs are
+    cached under ``benchmarks/output_single_stage_essos_coils_opt/``; delete that
+    directory to re-optimize.  Returns ``{case_name: summary_row}``.
+    """
     import subprocess
     import sys
 
-    summary = SINGLE_STAGE_OUT / "summary.json"
-    needed = [summary, SINGLE_STAGE_OUT / "coils_gamma.npy"]
+    summ = SINGLE_STAGE_OUT / "summary.json"
+    need = [summ, SINGLE_STAGE_OUT / "coils_gamma.npy"]
     for name, _ in SINGLE_STAGE_CASES:
-        needed += [SINGLE_STAGE_OUT / f"wout_{name}_initial.nc",
-                   SINGLE_STAGE_OUT / f"wout_{name}_final.nc"]
-    if not all(path.exists() for path in needed):
+        need += [SINGLE_STAGE_OUT / f"wout_{name}_initial.nc",
+                 SINGLE_STAGE_OUT / f"wout_{name}_final.nc"]
+    if not all(p.exists() for p in need):
+        print("  optimizing single-stage cases (~5-8 min each, not a CI budget)...",
+              flush=True)
         env = dict(os.environ)
-        env.pop("VMEC_JAX_EXAMPLES_CI", None)
-        run = subprocess.run([sys.executable, str(SINGLE_STAGE_EXAMPLE)],
-                             cwd=str(REPO / "benchmarks"), env=env,
-                             capture_output=True, text=True, timeout=3600)
-        if run.returncode:
+        env.pop("VMEC_JAX_EXAMPLES_CI", None)   # full budget, not the smoke run
+        proc = subprocess.run([sys.executable, str(SINGLE_STAGE_EXAMPLE)],
+                              cwd=str(REPO / "benchmarks"), env=env,
+                              capture_output=True, text=True, timeout=3600)
+        if proc.returncode != 0:
             raise RuntimeError("single-stage example failed:\n"
-                               f"{run.stdout[-3000:]}\n{run.stderr[-2000:]}")
-    return {row["name"]: row for row in json.loads(summary.read_text())}
+                               f"{proc.stdout[-3000:]}\n{proc.stderr[-2000:]}")
+    return {r["name"]: r for r in json.loads(summ.read_text())}
+
+
+def _plot_coils_and_lcfs(fig, ax3d, wout, gamma, nfp):
+    """Final LCFS coloured by |B| inside the fixed ESSOS coil filaments.
+
+    Same |B| surface recipe as :func:`_plot_3d_modB`, but the view is scaled to
+    the (larger) coil bounding box and the ESSOS filaments (``coils.gamma``, one
+    closed loop per coil) are overlaid.  Returns the (min, max) of |B|.
+    """
+    from matplotlib import cm
+    from matplotlib.colors import Normalize
+
+    from vmec_jax.core.plotting import surface_modB, surface_rz
+
+    ns = int(wout.ns)
+    thg = np.linspace(0, 2 * np.pi, 64)
+    phg = np.linspace(0, 2 * np.pi, min(240, 70 * nfp))
+    Rg, Zg = surface_rz(wout, s_index=ns - 1, theta=thg, phi=phg)
+    Bg = surface_modB(wout, s_index=ns - 1, theta=thg, phi=phg)
+    phi2d = np.meshgrid(phg, thg)[0]
+    Xg, Yg = Rg * np.cos(phi2d), Rg * np.sin(phi2d)
+    Bn = (Bg - Bg.min()) / (Bg.max() - Bg.min() + 1e-30)
+    ax3d.plot_surface(Xg, Yg, Zg, facecolors=cm.jet(Bn), rstride=1, cstride=1,
+                      antialiased=False, linewidth=0.0, shade=False)
+    for k in range(gamma.shape[0]):  # ESSOS filaments, closed loops (copper)
+        g = np.vstack([gamma[k], gamma[k, :1]])
+        ax3d.plot(g[:, 0], g[:, 1], g[:, 2], color="#b06a34", lw=1.0, alpha=0.9)
+    scale = 1.03 * float(max(np.abs(gamma[:, :, 0]).max(), np.abs(gamma[:, :, 1]).max()))
+    zmax = 1.05 * float(np.abs(gamma[:, :, 2]).max())
+    try:
+        ax3d.set_box_aspect((1, 1, zmax / scale), zoom=1.5)
+    except TypeError:  # older matplotlib without the zoom kwarg
+        ax3d.set_box_aspect((1, 1, zmax / scale))
+    ax3d.auto_scale_xyz([-scale, scale], [-scale, scale], [-zmax, zmax])
+    ax3d.view_init(elev=32, azim=-60)
+    ax3d.set_axis_off()
+    sm = cm.ScalarMappable(cmap="jet",
+                           norm=Normalize(float(Bg.min()), float(Bg.max())))
+    sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax3d, pad=0.0, fraction=0.04, shrink=0.6)
+    cb.ax.tick_params(labelsize=6, colors=MUTED)
+    cb.outline.set_visible(False)
+    return float(Bg.min()), float(Bg.max())
 
 
 def make_single_stage_figure(out: Path) -> None:
-    """Plot cached ESSOS coil/plasma joint-optimization results for the README."""
-    from matplotlib import cm
-    from matplotlib.colors import Normalize
     import vmec_jax as vj
-    from vmec_jax.core.plotting import surface_modB, surface_rz
+    from vmec_jax.core.plotting import surface_rz
 
     summary = _ensure_single_stage_outputs()
     gamma = np.load(SINGLE_STAGE_OUT / "coils_gamma.npy")
-    fig = plt.figure(figsize=(6.2, 7.3), dpi=150)
-    grid = fig.add_gridspec(2, 2, height_ratios=[1, 1.35], hspace=0.34, wspace=0.3)
-    theta = np.linspace(0, 2 * np.pi, 241)
-    for col, (name, title) in enumerate(SINGLE_STAGE_CASES):
-        row = summary[name]
-        initial = vj.read_wout(SINGLE_STAGE_OUT / f"wout_{name}_initial.nc")
-        final = vj.read_wout(SINGLE_STAGE_OUT / f"wout_{name}_final.nc")
-        phi = np.array([0.0, np.pi / int(final.nfp)])
-        ax = fig.add_subplot(grid[0, col])
-        Ri, Zi = surface_rz(initial, s_index=-1, theta=theta, phi=phi)
-        Rf, Zf = surface_rz(final, s_index=-1, theta=theta, phi=phi)
-        for R, Z, color, style, label in ((Ri, Zi, MUTED, (0, (4, 3)), "initial"),
-                                           (Rf, Zf, BLUE, "-", "final")):
-            for k in range(phi.size):
-                ax.plot(R[:, k], Z[:, k], color=color, lw=1.6, ls=style,
-                        alpha=1 if k == 0 else 0.55, label=label if k == 0 else None)
-        ax.set_aspect("equal", adjustable="datalim")
-        ax.set_title(title, loc="left", fontsize=10.5, color=INK)
-        ax.set_xlabel("R (m)", fontsize=8.5)
-        if col == 0:
-            ax.set_ylabel("Z (m)", fontsize=8.5)
-        ax.legend(fontsize=6.5, frameon=False)
-        ax.tick_params(labelsize=7)
-        ax.text(0.5, -0.22, f"J: {row['J0']:.2e} -> {row['Jf']:.2e} ({row['ratio']:.1f}x)",
-                transform=ax.transAxes, ha="center", fontsize=8, color=GREEN_TEXT)
 
-        ax3 = fig.add_subplot(grid[1, col], projection="3d")
-        ph = np.linspace(0, 2 * np.pi, min(240, 70 * int(final.nfp)))
-        th = np.linspace(0, 2 * np.pi, 64)
-        R, Z = surface_rz(final, s_index=-1, theta=th, phi=ph)
-        B = surface_modB(final, s_index=-1, theta=th, phi=ph)
-        phi_2d = np.meshgrid(ph, th)[0]
-        X, Y = R * np.cos(phi_2d), R * np.sin(phi_2d)
-        norm = Normalize(float(B.min()), float(B.max()))
-        ax3.plot_surface(X, Y, Z, facecolors=cm.jet(norm(B)), linewidth=0, shade=False)
-        for filament in gamma:
-            closed = np.vstack([filament, filament[:1]])
-            ax3.plot(*closed.T, color="#b06a34", lw=1, alpha=0.9)
-        scale = 1.03 * float(max(np.abs(gamma[..., 0]).max(), np.abs(gamma[..., 1]).max()))
-        zmax = 1.05 * float(np.abs(gamma[..., 2]).max())
-        ax3.auto_scale_xyz([-scale, scale], [-scale, scale], [-zmax, zmax])
-        ax3.set_axis_off()
-        ax3.view_init(elev=32, azim=-60)
-        mapper = cm.ScalarMappable(cmap="jet", norm=norm)
-        mapper.set_array([])
-        fig.colorbar(mapper, ax=ax3, pad=0.0, fraction=0.04, shrink=0.6)
-    fig.suptitle("Single-stage plasma + coil optimization", fontsize=12.5, color=INK)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    ncol = len(SINGLE_STAGE_CASES)
+    fig = plt.figure(figsize=(3.1 * ncol, 7.3), dpi=150)
+    gs = fig.add_gridspec(2, ncol, height_ratios=[1.0, 1.35], hspace=0.34,
+                          wspace=0.30)
+    theta = np.linspace(0, 2 * np.pi, 241)
+
+    for col, (name, title) in enumerate(SINGLE_STAGE_CASES):
+        r = summary[name]
+        w_init = vj.read_wout(SINGLE_STAGE_OUT / f"wout_{name}_initial.nc")
+        w_final = vj.read_wout(SINGLE_STAGE_OUT / f"wout_{name}_final.nc")
+        nfp = int(w_final.nfp)
+        phi_arr = np.array([0.0, np.pi / nfp])  # phi = 0 and half field period
+
+        # -- row 0: boundary cross-sections, initial (grey) vs final (blue) ----
+        axb = fig.add_subplot(gs[0, col])
+        Ri, Zi = surface_rz(w_init, s_index=-1, theta=theta, phi=phi_arr)
+        Rf, Zf = surface_rz(w_final, s_index=-1, theta=theta, phi=phi_arr)
+        for k in range(phi_arr.size):
+            axb.plot(Ri[:, k], Zi[:, k], color=MUTED, lw=1.0, ls=(0, (4, 3)),
+                     alpha=0.85, label="initial" if k == 0 else None)
+        for k in range(phi_arr.size):
+            axb.plot(Rf[:, k], Zf[:, k], color=BLUE, lw=1.7,
+                     alpha=1.0 if k == 0 else 0.55,
+                     label=("final, $\\phi=0$" if k == 0 else "final, half period"))
+        axb.set_aspect("equal", adjustable="datalim")
+        axb.set_title(title, loc="left", fontsize=10.5, color=INK, pad=3)
+        axb.tick_params(labelsize=7)
+        for s in ("top", "right"):
+            axb.spines[s].set_visible(False)
+        if col == 0:
+            axb.set_ylabel("Z (m)", fontsize=8.5)
+        axb.set_xlabel("R (m)", fontsize=8.5)
+        axb.legend(loc="upper right", fontsize=6.5, handlelength=1.4,
+                   labelspacing=0.25, borderaxespad=0.1)
+        axb.annotate(f"J: {r['J0']:.2e} $\\to$ {r['Jf']:.2e}  ({r['ratio']:.1f}x)",
+                     xy=(0.5, -0.22), xycoords="axes fraction", ha="center",
+                     va="top", fontsize=8.5, color=GREEN_TEXT, fontweight="bold")
+        axb.annotate(f"$\\langle\\beta\\rangle$ = {r['beta']:.2f}%",
+                     xy=(0.98, 1.02), xycoords="axes fraction", ha="right",
+                     va="bottom", fontsize=8, color=MUTED)
+
+        # -- row 1: final LCFS coloured by |B| inside the ESSOS coils ----------
+        ax3d = fig.add_subplot(gs[1, col], projection="3d")
+        b_lo, b_hi = _plot_coils_and_lcfs(fig, ax3d, w_final, gamma, nfp)
+        print(f"  {name}: J {r['J0']:.3e} -> {r['Jf']:.3e} ({r['ratio']:.1f}x)  "
+              f"beta={r['beta']:.2f}%  |B|=[{b_lo:.2f},{b_hi:.2f}]T", flush=True)
+
+    fig.suptitle("Single-stage plasma + coil optimization", x=0.5, ha="center",
+                 fontsize=12.5, color=INK, y=0.995)
+    fig.text(0.5, 0.945, "top: boundary initial (grey) vs final (blue)   ·   "
+             "bottom: final LCFS |B| inside the ESSOS coil filaments",
+             ha="center", fontsize=8, color=MUTED)
+    fig.tight_layout(rect=(0, 0, 1, 0.925))
     fig.savefig(out, dpi=150)
     plt.close(fig)
     _compress_png(out)
@@ -1039,7 +1120,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--only",
-        default="runtime,parity,convergence,optimization,qi,precond,showcase,mirror,single_stage")
+        default="runtime,convergence,optimization,qi,precond,showcase,mirror,single_stage")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
     args = ap.parse_args()
     outdir = Path(args.outdir)

@@ -46,11 +46,6 @@ Wiring lives in :mod:`vmec_jax.core.solver` (``_make_body``): when
 ``precon_type != "NONE"`` the traced iteration replaces the 1D force direction
 by :func:`newton_direction` under a ``lax.cond`` gated on the activation
 predicate, so the default 1D-only path is untouched.
-
-The solver packs only entries that Richardson can physically evolve. Fixed
-R/Z boundary rows, axis-null harmonics, lambda-axis values, and zero/gauge
-modes are excluded from GMRES and reconstructed with zero Newton updates.
-This avoids singular or nonphysical columns without changing the force map.
 """
 
 from __future__ import annotations
@@ -83,21 +78,6 @@ class Prec2DConfig:
     start_iteration:
         Earliest iteration at which the Newton step may activate (VMEC2000
         skips the first 10 iterations: ``IF (iter2 < 10) ictrl_prec2d = 0``).
-    interval:
-        Number of nonlinear iterations between Newton attempts. ``1`` tries
-        every iteration; larger values let inexpensive VMEC updates advance
-        between costly matrix-free GMRES solves.
-    row_scales:
-        Static left scaling for the inner ``(R, Z, lambda)`` equations. It
-        changes GMRES conditioning and inexact-solve priorities but not the
-        exact Newton direction. The physical-force line search is unscaled.
-    auto_balance_lambda:
-        If true, replace the static lambda row scale at every Newton attempt
-        by ``lambda_balance_target * max(||g_R||, ||g_Z||) / ||g_lambda||``,
-        clipped to ``lambda_scale_bounds`` and then frozen during GMRES.
-    lambda_balance_target, lambda_scale_bounds:
-        Target scaled lambda-to-geometry norm ratio and safety bounds for
-        automatic balancing.
     step:
         Damping applied to the (full) Newton step, ``state += step * delta``.
         ``1.0`` is the undamped Newton update; VMEC2000 instead folds the step
@@ -115,28 +95,16 @@ class Prec2DConfig:
         Whether this runtime is the finest multigrid stage (VMEC2000
         ``ns == ns_maxval``).  Single-grid solves are always finest; only the
         last multigrid stage sets this ``True``.
-    backtracking:
-        If true, try a short geometric sequence below ``step`` and retain the
-        update with the smallest maximum normalized physical force component,
-        rejecting sign-changing Jacobians. If no Newton candidate descends,
-        the iteration falls back to the regular 1D-preconditioned VMEC update.
-        Disabled by default to preserve the measured VMEC-style fixed-step path.
     """
 
     threshold: float
     start_iteration: int = 10
-    interval: int = 1
-    row_scales: tuple[float, float, float] = (1.0, 1.0, 1.0)
-    auto_balance_lambda: bool = False
-    lambda_balance_target: float = 0.1
-    lambda_scale_bounds: tuple[float, float] = (1.0e-4, 1.0)
     step: float = 1.0
     gmres_restart: int = 40
     gmres_max_restarts: int = 3
     gmres_rtol: float = 1.0e-2
     gmres_atol: float = 0.0
     finest: bool = True
-    backtracking: bool = False
 
 
 def flat_operator(

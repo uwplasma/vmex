@@ -581,9 +581,7 @@ def test_least_squares_current_dofs_implicit():
                                     surfaces=np.linspace(0.2, 0.9, 6),
                                     n_lambda=32)
     terms = [(boot.residuals_state, 0.0, 1.0), (opt.aspect_ratio, 3.2, 0.1)]
-    initial_state = opt.solve_equilibrium(inp).state
     res = opt.least_squares(terms, inp, max_mode=1, jac="implicit",
-                            initial_state=initial_state,
                             current_dofs=2, max_nfev=2)
     nb = 2 * len(opt._dof_modes(inp, 1))
     assert res.x.size == nb + 3

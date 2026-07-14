@@ -61,7 +61,8 @@ GPU_MIN_ITERATION_WORK = 100_000
 
 
 def iteration_work(resolution: Any) -> int:
-    """Per-iteration work proxy for toroidal or mirror resolutions."""
+    """Return the collocation-work proxy for toroidal or mirror resolution."""
+
     if hasattr(resolution, "mnmax") and hasattr(resolution, "nznt"):
         return int(resolution.ns) * int(resolution.mnmax) * int(resolution.nznt)
     if hasattr(resolution, "ntheta") and hasattr(resolution, "nxi"):

@@ -77,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [field, equilibrium]
+        shard: [field, equilibrium, spline]
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: actions/setup-python@v6.2.0
@@ -97,7 +97,7 @@ jobs:
             FILES="tests/mirror/test_exterior.py \
                    tests/mirror/test_vacuum.py \
                    tests/mirror/test_free_boundary_implicit.py"
-          else
+          elif [ "${{ matrix.shard }}" = "equilibrium" ]; then
             FILES="tests/mirror/test_continuation.py \
                    tests/mirror/test_fixed_boundary_3d.py \
                    tests/mirror/test_geometry_fields.py \
@@ -107,6 +107,9 @@ jobs:
                    tests/mirror/test_output.py \
                    tests/mirror/test_pressure_closures.py \
                    tests/mirror/test_promotion_guards.py"
+          else
+            FILES="tests/mirror/test_analytic.py \
+                   tests/mirror/test_splines.py"
           fi
           pytest -q -n 2 -m "not full" $FILES --durations=20
 

@@ -37,7 +37,7 @@ from vmec_jax.core.input import VmecInput  # noqa: E402
 from vmec_jax.core.wout import read_wout  # noqa: E402
 from vmec_jax.core import optimize as opt  # noqa: E402
 
-from .conftest import resolve_golden_dir  # noqa: E402
+from conftest import resolve_golden_dir  # noqa: E402
 
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark = [
@@ -372,9 +372,8 @@ def test_least_squares_implicit_smoke(solovev_eq):
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     aspect0 = float(opt.aspect_ratio(solovev_eq.state, solovev_eq.runtime))
     cost0 = 0.5 * (aspect0 - 4.0) ** 2
-    res = opt.least_squares(
-        [(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=1,
-        initial_state=solovev_eq.state, jac="implicit", max_nfev=3)
+    res = opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=1,
+                            jac="implicit", max_nfev=3)
     assert res.cost < cost0
     best = opt.solve_equilibrium(res.input)
     aspect1 = float(opt.aspect_ratio(best.state, best.runtime))

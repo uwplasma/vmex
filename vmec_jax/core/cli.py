@@ -37,9 +37,9 @@ Documented divergences of the free-boundary lane:
   with no warm-start seam, so only the *final* ``NS_ARRAY`` stage is run
   (from the standard interior guess); VMEC2000 runs the whole ladder with
   vacuum re-activating per stage.  Multi-stage decks print a note.
-- The final NESTOR state is retained and exported to wout
-  ``potsin``/``potcos``/``xmpot``/``xnpot`` and ``*_sur`` variables (see
-  :func:`vmec_jax.core.wout.wout_from_state`).
+- The NESTOR vacuum potential is not returned by the solver, so the wout
+  ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` variables are written as
+  netCDF fill (see :func:`vmec_jax.core.wout.wout_from_state`).
 - An NITER-exhausted free-boundary run still writes the wout (VMEC2000
   behavior) and exits with ``ier_flag = 2`` (MORE ITERATIONS REQUIRED).
 """
@@ -342,6 +342,8 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     yielding the very same :class:`~vmec_jax.core.mgrid.MgridField` the mgrid-file
     lane produces.  Requires ESSOS (``pip install essos``).
     """
+    import tempfile
+
     import numpy as np
 
     try:
@@ -352,7 +354,7 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
             hint="--coils requires essos (pip install essos)",
         ) from exc
 
-    from .mgrid import MgridData, MgridField
+    from .mgrid import MgridField, read_mgrid
 
     try:
         if path.suffix.lower() == ".npz":
@@ -387,33 +389,11 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     rmin, rmax = max(1.0e-2, float(r.min()) - rpad), float(r.max()) + rpad
     zmin, zmax = float(z.min()) - zpad, float(z.max()) + zpad
 
-    # ESSOS versions prior to its mgrid convenience API expose only the
-    # canonical Biot--Savart evaluator.  Sampling that API here is both faster
-    # than a temporary NetCDF round trip and keeps ``--coils`` compatible with
-    # every supported ESSOS release.
-    import jax
-    import jax.numpy as jnp
-    from essos.fields import BiotSavart
-
-    nfp = int(coils.nfp)
-    r_grid = np.linspace(rmin, rmax, int(nr))
-    z_grid = np.linspace(zmin, zmax, int(nz))
-    phi_grid = np.arange(int(nphi)) * (2.0 * np.pi / (nfp * int(nphi)))
-    phi, z_grid_3d, r_grid_3d = np.meshgrid(
-        phi_grid, z_grid, r_grid, indexing="ij")
-    points = np.stack(
-        [r_grid_3d * np.cos(phi), r_grid_3d * np.sin(phi), z_grid_3d], axis=-1)
-    B = np.asarray(jax.vmap(BiotSavart(coils).B)(
-        jnp.asarray(points.reshape(-1, 3)))).reshape(int(nphi), int(nz), int(nr), 3)
-    br = B[..., 0] * np.cos(phi) + B[..., 1] * np.sin(phi)
-    bp = -B[..., 0] * np.sin(phi) + B[..., 1] * np.cos(phi)
-    data = MgridData(
-        rmin=rmin, rmax=rmax, zmin=zmin, zmax=zmax,
-        ir=int(nr), jz=int(nz), kp=int(nphi), nfp=nfp, nextcur=1,
-        mgrid_mode="N", coil_groups=("essos_coils",), raw_coil_cur=(1.0,),
-        br=br[None, ...], bp=bp[None, ...], bz=B[..., 2][None, ...],
-    )
-    return MgridField.from_mgrid_data(data)
+    with tempfile.TemporaryDirectory() as tmp:
+        mgrid_path = Path(tmp) / "essos_coils_mgrid.nc"
+        coils.to_mgrid(str(mgrid_path), nr=int(nr), nphi=int(nphi), nz=int(nz),
+                       rmin=rmin, rmax=rmax, zmin=zmin, zmax=zmax)
+        return MgridField.from_mgrid_data(read_mgrid(mgrid_path))
 
 
 def _free_boundary_plan(args, inp, input_path: Path, *, emit):
@@ -550,7 +530,6 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
         niter=int(result.iterations),
         converged=bool(result.converged),
         input_extension=case_from_input(input_path),
-        vacuum_state=getattr(result, "vacuum_state", None),
         **freeb_kwargs,
     )
     write_wout(wout_path, wout)

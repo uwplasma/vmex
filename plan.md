@@ -191,16 +191,19 @@ their owning module and are not flattened into `vmec_jax.mirror`.
 
 ### 4.1 Branch footprint
 
-Relative to `origin/main`, the branch changes 137 files, adds 24,370 lines, and
-deletes 4,255 lines. `vmec_jax/mirror` contains 10,146 lines in 22 modules and
-exposes 47 lazy names. Its largest files are `forces.py` (1,049), `solver.py`
-(987), `splines.py` (907), `exterior_bie.py` (809), and `exterior_mesh.py`
-(737). There are 148 collected mirror tests.
+The initial audit relative to `origin/main` found 137 changed files, 24,370
+added lines, and 4,255 deleted lines. The first Phase 1 restoration reduces the
+working diff to 71 files, 19,378 added lines, and 1,610 deleted lines: 66
+unrelated files and about 5,000 added lines are gone. `vmec_jax/mirror` now
+contains 10,291 lines in 22 modules and exposes 50 lazy names. Its largest files
+are `forces.py` (1,098), `solver.py` (1,001), `splines.py` (983),
+`exterior_bie.py` (812), and `exterior_mesh.py` (737). There are 159 collected
+mirror tests.
 
-The branch also carries earlier QI, direct-coil, optimization, and core-refactor
-work that is unrelated to the final mirror diff. This is the first
-simplification blocker. Local ruff and strict Sphinx pass. `git diff --check`
-currently reports four blank-line-at-EOF errors, three in unrelated core files.
+The earlier QI, direct-coil, optimization, and core-refactor work is restored to
+`origin/main`. Only the mirror package, mirror evidence, and small CLI, device,
+packaging, and documentation integration hooks remain. Local ruff, strict
+Sphinx, and both branch-wide whitespace checks pass.
 
 ### 4.2 Results that are credible
 
@@ -402,6 +405,9 @@ core-only coverage gate is `94%` versus `95%` because inherited branch-only core
 modules add untested statements; do not lower the threshold. Phase 1 must
 restore that unrelated core diff before Phase 0 can be declared globally green.
 The branch-wide whitespace check and all focused local tests now pass.
+The Phase 1 restoration has also put the unrelated core implementation back at
+`origin/main`; aggregate coverage is the remaining post-push confirmation for
+closing Phase 0 globally.
 
 ### Phase 1: reduce the PR before adding physics
 
@@ -420,6 +426,12 @@ The branch-wide whitespace check and all focused local tests now pass.
    lines without a written reason.
 6. Delete stale benchmarks, generated outputs, duplicate examples, and docs for
    removed paths.
+
+Execution status (2026-07-14): items 1 and 2 are complete in the first
+restoration tranche. The remaining 71-file diff contains only mirror-owned
+source, tests, examples, evidence, documentation, and narrow shared integration
+hooks. The 50-name flattened namespace, 22-module package, duplicate exterior
+variants, and large solver/force files remain the active reduction work.
 
 Gate: the diff is materially smaller, all retained benchmark claims reproduce,
 and no physics result depends on an unrelated branch-only core refactor.
@@ -583,7 +595,7 @@ Percentages measure accepted promotion evidence, not code written.
 | Preconditioning | 45% | periodic blocks and bounded Krylov scaling |
 | Implicit derivatives | 74% | spline forward tangent, hybrid and retained free lanes |
 | ANIMEC | 50% | source parity and independent finite-beta benchmark |
-| Source/API simplification | 25% | remove inherited diff, vacuum variants, modules, and exports |
+| Source/API simplification | 45% | prune 50-name API, vacuum variants, modules, and exports |
 | ESSOS ownership cleanup | 100% | retain interchange tests only |
 
 ## 8. Explicit deferrals

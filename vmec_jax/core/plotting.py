@@ -40,7 +40,6 @@ __all__ = [
     "plot_modB",
     "plot_profiles",
     "plot_boundary_3d",
-    "plot_mout",
     "plot_boozmn_modB",
     "plot_boozmn_spectrum",
     "plot_boozmn_mode_profiles",
@@ -113,18 +112,6 @@ def _eval_modes(cos_coeff, sin_coeff, xm, xn, theta, phi):
     )
     return np.tensordot(np.asarray(cos_coeff, dtype=float), np.cos(angle), axes=(0, 0)) + np.tensordot(
         np.asarray(sin_coeff, dtype=float), np.sin(angle), axes=(0, 0)
-    )
-
-
-def _eval_modes_paired(cos_coeff, sin_coeff, xm, xn, theta, phi):
-    """Evaluate modes at paired ``(theta[i], phi[i])`` points."""
-    angle = (
-        np.asarray(xm, dtype=float)[:, None] * np.asarray(theta)[None]
-        - np.asarray(xn, dtype=float)[:, None] * np.asarray(phi)[None]
-    )
-    return (
-        np.asarray(cos_coeff, dtype=float) @ np.cos(angle)
-        + np.asarray(sin_coeff, dtype=float) @ np.sin(angle)
     )
 
 
@@ -406,10 +393,8 @@ def plot_boundary_3d(
     *,
     ntheta: int = 60,
     nzeta: int | None = None,
-    coils=None,
-    coil_indices: Sequence[int] | None = None,
 ) -> Path:
-    """3-D ``|B|`` boundary and field lines, optionally with coil centerlines."""
+    """3-D plasma boundary colored by ``|B|`` (full torus)."""
     plt = _import_matplotlib()
     from matplotlib import cm
     from matplotlib.colors import Normalize
@@ -425,45 +410,14 @@ def plot_boundary_3d(
     phi2d = np.meshgrid(phi, theta)[0]
     X, Y = R * np.cos(phi2d), R * np.sin(phi2d)
     B_scaled = (B - B.min()) / (B.max() - B.min() + 1e-30)
-    surface_colors = cm.viridis(B_scaled)
-    surface_colors[..., 3] = 0.82
 
     fig = plt.figure(figsize=(5.2, 4.4), frameon=False)
-    ax = fig.add_subplot(111, projection="3d", computed_zorder=False)
+    ax = fig.add_subplot(111, projection="3d")
     ax.plot_surface(
-        X, Y, Z, facecolors=surface_colors, rstride=1, cstride=1,
-        antialiased=False, linewidth=0.0, zorder=1,
+        X, Y, Z, facecolors=cm.viridis(B_scaled), rstride=1, cstride=1,
+        antialiased=False, linewidth=0.0,
     )
-    line_phi = np.linspace(0.0, 4.0 * np.pi, 720)
-    axis_r, axis_z = axis_rz(wout, line_phi)
-    for alpha in np.linspace(0.0, 2.0 * np.pi, 7, endpoint=False):
-        line_r, line_z = _field_line_rz(wout, alpha, line_phi)
-        line_r = axis_r + 1.015 * (line_r - axis_r)
-        line_z = axis_z + 1.015 * (line_z - axis_z)
-        line_x, line_y = line_r * np.cos(line_phi), line_r * np.sin(line_phi)
-        ax.plot(line_x, line_y, line_z, color="white", lw=1.8, alpha=0.8, zorder=2)
-        ax.plot(line_x, line_y, line_z, color="#111111", lw=0.65, zorder=3)
-    coil_extent = 0.0
-    if coils is not None:
-        gamma = np.asarray(getattr(coils, "gamma", coils), dtype=float)
-        if gamma.ndim != 3 or gamma.shape[-1] != 3:
-            raise ValueError("coils must provide centerlines with shape (ncoil, npoint, 3)")
-        indices = (
-            np.arange(len(gamma))
-            if coil_indices is None
-            else np.asarray(coil_indices, dtype=int)
-        )
-        if np.any((indices < 0) | (indices >= len(gamma))):
-            raise ValueError("coil_indices contains an index outside the coil array")
-        for index in indices:
-            curve = np.concatenate([gamma[index], gamma[index, :1]], axis=0)
-            ax.plot(
-                curve[:, 0], curve[:, 1], curve[:, 2],
-                color="#D55E00", lw=0.6, alpha=0.58, zorder=4,
-            )
-        coil_extent = float(np.max(np.abs(gamma[indices]))) if indices.size else 0.0
-    surface_scale = 0.7 * max(np.abs(X).max(), np.abs(Y).max())
-    scale = max(surface_scale, 1.05 * coil_extent)
+    scale = 0.7 * max(np.abs(X).max(), np.abs(Y).max())
     ax.auto_scale_xyz([-scale, scale], [-scale, scale], [-scale, scale])
     ax.set_box_aspect([1, 1, 1])
     ax.set_axis_off()
@@ -475,37 +429,6 @@ def plot_boundary_3d(
     fig.savefig(out_path, dpi=_DPI, bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
     return out_path
-
-
-def _field_line_rz(wout, alpha: float, phi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Trace one VMEC field line by inverting ``theta* = theta + lambda``."""
-
-    iota = float(np.asarray(wout.iotaf)[-1])
-    theta_star = alpha + iota * phi
-    theta = theta_star.copy()
-    if hasattr(wout, "lmns"):
-        lmns, lmnc = _coeff_pair(wout, "lmns", "lmnc", -1)
-        for _ in range(10):
-            angle = np.asarray(wout.xm)[:, None] * theta[None] - np.asarray(wout.xn)[:, None] * phi[None]
-            lam = np.sum(lmnc[:, None] * np.cos(angle) + lmns[:, None] * np.sin(angle), axis=0)
-            theta = theta_star - lam
-    rmnc, rmns = _coeff_pair(wout, "rmnc", "rmns", -1)
-    zmns, zmnc = _coeff_pair(wout, "zmns", "zmnc", -1)
-    radius = _eval_modes_paired(rmnc, rmns, wout.xm, wout.xn, theta, phi)
-    height = _eval_modes_paired(zmnc, zmns, wout.xm, wout.xn, theta, phi)
-    return radius, height
-
-
-# ==========================================================================
-# Straight-axis mirror output compatibility
-# ==========================================================================
-
-def plot_mout(mout, outdir: str | Path, *, name: str | None = None) -> dict[str, Path]:
-    """Render mirror diagnostics via :mod:`vmec_jax.mirror.plotting`."""
-
-    from vmec_jax.mirror.plotting import plot_mout as plot_mirror_output
-
-    return plot_mirror_output(mout, outdir, name=name)
 
 
 # ==========================================================================

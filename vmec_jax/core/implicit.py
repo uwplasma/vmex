@@ -101,14 +101,6 @@ from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
 from .geometry import half_mesh_jacobian
 from .input import VmecInput
-from .implicit_quantities import (
-    aspect_ratio,
-    iota_axis,
-    iota_edge,
-    iota_profile,
-    mhd_energy,
-    plasma_volume,
-)
 from .multigrid import solve_multigrid
 from .residuals import (
     m1_physical_to_constrained, m1_residue_rotation, scalxc_scale_force,
@@ -117,12 +109,13 @@ from .residuals import (
 from .setup import RadialGrids, flux_profiles, interior_guess
 from .solver import (
     SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
-    _force_to_state, _geometry, _initial_state,
+    _force_to_state, _geometry, _initial_state, _physical_coefficients,
     _static_tables, evaluate_forces, prepare_runtime, resolution_from_input,
     solve,
 )
 from .fields import constraint_scaling
 from .forces import mhd_forces, spectral_mhd_forces
+from .statephysics import _field_chain as _field_chain_shared
 from .transforms import (
     physical_to_internal_scale,
     register_pytree_dataclass as _register,
@@ -948,6 +941,93 @@ def adjoint_matvec(cfg: ImplicitConfig, params: ImplicitParams,
 # ---------------------------------------------------------------------------
 # Differentiable derived quantities (objective building blocks)
 # ---------------------------------------------------------------------------
+
+
+# The shared geometry->fields->energies pipeline (statephysics.py), jitted
+# here for the same reason as the implicit residual (see ``residual_fn``):
+# the derived-quantity objectives (:func:`mhd_energy`, :func:`aspect_ratio`,
+# ...) all route through it, so compiling it once as a reusable
+# sub-computation cuts the enclosing ``jax.grad``/``jacrev`` compile working
+# set (R16/R17.2 memory profiling).
+_field_chain = jax.jit(_field_chain_shared)
+
+
+def mhd_energy(state: SpectralState, rt: SolverRuntime) -> tuple[Array, Array]:
+    """``(wb, wp)`` in the wout normalization (``bcovar.f``), differentiable."""
+    _, _, _, _, energies = _field_chain(state, rt)
+    return energies.wb, energies.wp
+
+
+def plasma_volume(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Plasma volume ``volume_p`` [m^3] (``= (2 pi)^2 * hs * sum vp``)."""
+    _, _, _, _, energies = _field_chain(state, rt)
+    return (2.0 * jnp.pi) ** 2 * jnp.abs(energies.volume)
+
+
+def _edge_physical(state: SpectralState, rt: SolverRuntime):
+    R_cos, R_sin, Z_cos, Z_sin = _physical_coefficients(
+        state, modes=rt.modes, lthreed=rt.setup.lthreed,
+        lasym=rt.setup.lasym, lconm1=rt.setup.lconm1,
+    )
+    scale = jnp.asarray(1.0 / physical_to_internal_scale(rt.modes, rt.trig))
+    return (R_cos[-1] * scale, R_sin[-1] * scale,
+            Z_cos[-1] * scale, Z_sin[-1] * scale)
+
+
+def aspect_ratio(state: SpectralState, rt: SolverRuntime,
+                 *, ntheta: int = 128, nzeta: int = 32) -> Array:
+    """VMEC-convention aspect ratio ``Rmajor_p / Aminor_p`` (differentiable).
+
+    ``Aminor_p = sqrt(<cross-section area>_zeta / pi)`` with the area from
+    the shoelace integral ``-oint Z dR/dtheta dtheta`` on the boundary, and
+    ``Rmajor_p = volume_p / (2 pi^2 Aminor_p^2)`` (``aspectratio.f``).
+    """
+    rmnc, rmns, zmnc, zmns = _edge_physical(state, rt)
+    m = jnp.asarray(np.asarray(rt.modes.m, dtype=float))
+    n = jnp.asarray(np.asarray(rt.modes.n, dtype=float) * rt.resolution.nfp)
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, ntheta, endpoint=False)
+    zeta = jnp.linspace(0.0, 2.0 * jnp.pi / rt.resolution.nfp, nzeta,
+                        endpoint=False)
+    ang = (m[:, None, None] * theta[None, :, None]
+           - n[:, None, None] * zeta[None, None, :])
+    cos, sin = jnp.cos(ang), jnp.sin(ang)
+    Z = jnp.einsum("k,ktz->tz", zmns, sin) + jnp.einsum("k,ktz->tz", zmnc, cos)
+    dRdt = (-jnp.einsum("k,ktz->tz", m * rmnc, sin)
+            + jnp.einsum("k,ktz->tz", m * rmns, cos))
+    area = jnp.abs(jnp.mean(jnp.sum(-Z * dRdt, axis=0) * (2.0 * jnp.pi / ntheta)))
+    aminor = jnp.sqrt(area / jnp.pi)
+    vol = plasma_volume(state, rt)
+    rmajor = vol / (2.0 * jnp.pi ** 2 * aminor ** 2)
+    return rmajor / aminor
+
+
+def iota_profile(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Full-mesh ``iotaf`` (``add_fluxes.f90``), differentiable.
+
+    ``ncurr = 0``: the prescribed profile (p-dependent through ``ai``);
+    ``ncurr = 1``: reconstructed from the converged current-constrained
+    ``chips`` exactly as in the solver's result assembly.
+    """
+    setup = rt.setup
+    if int(setup.ncurr) != 1:
+        return jnp.asarray(setup.iotaf)
+    _, _, _, fields, _ = _field_chain(state, rt)
+    chips = fields.chips
+    phips = jnp.asarray(setup.phips)
+    safe = jnp.where(phips != 0.0, phips, 1.0)
+    iotas = jnp.where(phips != 0.0, chips / safe, 0.0)
+    iotaf = 0.5 * (iotas + jnp.roll(iotas, -1))
+    iotaf = iotaf.at[0].set(1.5 * iotas[1] - 0.5 * iotas[2])
+    iotaf = iotaf.at[-1].set(1.5 * iotas[-1] - 0.5 * iotas[-2])
+    return iotaf
+
+
+def iota_axis(state: SpectralState, rt: SolverRuntime) -> Array:
+    return iota_profile(state, rt)[0]
+
+
+def iota_edge(state: SpectralState, rt: SolverRuntime) -> Array:
+    return iota_profile(state, rt)[-1]
 
 
 # ---------------------------------------------------------------------------

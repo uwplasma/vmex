@@ -543,7 +543,6 @@ def wout_from_state(
     extcur=None,
     mgrid_mode: str = "",
     curlabel=None,
-    vacuum_state=None,
 ) -> WoutData:
     """Build a complete :class:`WoutData` from a solved fixed-boundary state.
 
@@ -566,9 +565,12 @@ def wout_from_state(
     Free-boundary metadata: ``nextcur``/``extcur``/``mgrid_mode``/
     ``curlabel`` are caller-supplied (the CLI reads them from the mgrid file;
     ``extcur`` is the input EXTCUR array in Amperes, as ``wrout.f`` writes
-    it). Pass ``result.vacuum_state`` from :func:`solve_free_boundary` to
-    populate the NESTOR potential and covariant/contravariant ``*_sur``
-    surface-field tables.
+    it).  The NESTOR vacuum potential is NOT populated: ``potsin``/
+    ``potcos``/``xmpot``/``xnpot`` and the ``*_sur`` surface-field tables
+    stay ``None`` (netCDF fill) because
+    :func:`vmec_jax.core.freeboundary.solve_free_boundary` does not return
+    its :class:`~vmec_jax.core.freeboundary.FreeBoundaryState` (which holds
+    ``potvac``) — a documented gap until the solver exposes it.
     """
     import jax
 
@@ -781,58 +783,6 @@ def wout_from_state(
     if itfsq <= 0:
         itfsq = int(np.count_nonzero(fsqt_out)) or 1
 
-    potvac = getattr(vacuum_state, "potvac", None)
-    xmpot = getattr(vacuum_state, "xmpot", None)
-    xnpot = getattr(vacuum_state, "xnpot", None)
-    mnpot = 0 if xmpot is None else int(np.asarray(xmpot).size)
-    potsin = None if potvac is None or mnpot == 0 else np.asarray(potvac)[:mnpot]
-    potcos = None
-    if lasym and potvac is not None and np.asarray(potvac).size >= 2 * mnpot:
-        potcos = np.asarray(potvac)[mnpot:2 * mnpot]
-
-    surface_tables = {name: None for name in _SUR_SYM + _SUR_ASYM}
-    surface_fields = {
-        "bsubu": getattr(vacuum_state, "bsubu_sur", None),
-        "bsubv": getattr(vacuum_state, "bsubv_sur", None),
-        "bsupu": getattr(vacuum_state, "bsupu_sur", None),
-        "bsupv": getattr(vacuum_state, "bsupv_sur", None),
-    }
-    if all(value is not None for value in surface_fields.values()):
-        xm_surface = np.asarray(tabs.xm_nyq, dtype=float)
-        xn_surface = np.asarray(tabs.xn_nyq, dtype=float)
-        surface_modes = mode_table(
-            int(np.max(xm_surface)) + 1,
-            int(np.max(np.abs(xn_surface))) // nfp,
-        )
-        if not (
-            np.array_equal(np.asarray(surface_modes.m), xm_surface.astype(int))
-            and np.array_equal(np.asarray(surface_modes.n) * nfp, xn_surface.astype(int))
-        ):
-            raise RuntimeError("NESTOR surface mode ordering differs from WOUT Nyquist ordering")
-
-        for stem, values in surface_fields.items():
-            field = np.asarray(values, dtype=float)[None, :, :]
-            if field.shape[1:] != (int(trig.ntheta3), int(res.nzeta)):
-                raise ValueError(
-                    f"vacuum {stem}_sur grid {field.shape[1:]} does not match "
-                    f"solver grid {(int(trig.ntheta3), int(res.nzeta))}"
-                )
-            if lasym:
-                symmetric, asymmetric = _nyq.symoutput_split(f=field, trig=trig)
-            else:
-                symmetric, asymmetric = field, None
-            cosine = np.asarray(_nyq.wrout_cos_coeffs(
-                f=symmetric, modes=surface_modes, trig=trig))[0]
-            cosine = _pp.expand_mode_columns(
-                cosine[None, :], xm_surface, xn_surface, xm_nyq, xn_nyq)[0]
-            surface_tables[f"{stem}mnc_sur"] = cosine
-            if lasym:
-                sine = np.asarray(_nyq.wrout_sin_coeffs(
-                    f=asymmetric, modes=surface_modes, trig=trig))[0]
-                sine = _pp.expand_mode_columns(
-                    sine[None, :], xm_surface, xn_surface, xm_nyq, xn_nyq)[0]
-                surface_tables[f"{stem}mns_sur"] = sine
-
     return WoutData(
         version_=float(version),
         input_extension=str(input_extension),
@@ -866,12 +816,6 @@ def wout_from_state(
                 else np.zeros((1,), dtype=float)),
         mgrid_mode=str(mgrid_mode),
         curlabel=(tuple(str(lbl) for lbl in curlabel) if curlabel else None),
-        mnmaxpot=mnpot if mnpot else None,
-        potsin=potsin,
-        potcos=potcos,
-        xmpot=None if xmpot is None else np.asarray(xmpot, dtype=float),
-        xnpot=None if xnpot is None else np.asarray(xnpot, dtype=float),
-        **surface_tables,
         xm=xm, xn=xn,
         xm_nyq=np.asarray(xm_nyq, dtype=float),
         xn_nyq=np.asarray(xn_nyq, dtype=float),

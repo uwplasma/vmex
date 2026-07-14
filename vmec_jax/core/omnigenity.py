@@ -455,33 +455,32 @@ def omnigenity_residual(
     env_r = jax.lax.cummax(raw_r, axis=raw_r.ndim - 1)
 
     sqrt_w = jnp.sqrt(w_arr)[:, None, None]
+    pieces: list[jnp.ndarray] = []
+
     # -- bounce-distance uniformity (Cary-Shasharina / Goodman "shuffle") ----
     levels = jnp.linspace(0.0, 1.0, int(n_levels) + 2, dtype=dtype)[1:-1]
     occ_l = jax.nn.sigmoid((levels[None, None, None, :] - env_l[..., None]) / eps)
     occ_r = jax.nn.sigmoid((levels[None, None, None, :] - env_r[..., None]) / eps)
     delta = (jnp.sum(occ_l, axis=2) + jnp.sum(occ_r, axis=2)) / float(nphi)
     well_res = (delta - jnp.mean(delta, axis=1, keepdims=True)) * sqrt_w * float(well_weight)
-    well_1d = jnp.ravel(well_res) / np.sqrt(float(nalpha * n_levels))
+    pieces.append(jnp.ravel(well_res) / np.sqrt(float(nalpha * n_levels)))
 
     # -- extremum alignment (poloidally closed B_min / B_max contours) -------
     line_min = env_l[..., 0]                                  # = bhat at the minimum
     line_max = jnp.maximum(env_l[..., -1], env_r[..., -1])
     ext = jnp.stack([line_min, line_max], axis=-1)            # (nsurf, nalpha, 2)
     ext_res = (ext - jnp.mean(ext, axis=1, keepdims=True)) * sqrt_w * float(extremum_weight)
-    extremum_1d = jnp.ravel(ext_res) / np.sqrt(float(2 * nalpha))
+    pieces.append(jnp.ravel(ext_res) / np.sqrt(float(2 * nalpha)))
 
     # -- single-well monotonicity (Goodman "squash" distance) ----------------
     squash = jnp.concatenate([env_l - raw_l, (env_r - raw_r)[..., 1:]], axis=-1)
     squash_res = squash * sqrt_w * float(squash_weight)
-    squash_1d = jnp.ravel(squash_res) / np.sqrt(float(nalpha * (2 * nk - 1)))
+    pieces.append(jnp.ravel(squash_res) / np.sqrt(float(nalpha * (2 * nk - 1))))
 
-    residuals1d = jnp.concatenate([well_1d, extremum_1d, squash_1d])
+    residuals1d = jnp.concatenate(pieces)
     return {
         "residuals1d": residuals1d,
         "total": jnp.sum(residuals1d * residuals1d),
-        "well_total": jnp.sum(well_1d * well_1d),
-        "extremum_total": jnp.sum(extremum_1d * extremum_1d),
-        "squash_total": jnp.sum(squash_1d * squash_1d),
         "bhat": bhat,
         "delta": delta,
         "line_min": line_min,

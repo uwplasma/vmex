@@ -28,7 +28,6 @@ structural + coarse:
 
 from __future__ import annotations
 
-from dataclasses import replace
 import re
 from pathlib import Path
 
@@ -40,14 +39,12 @@ import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.core import freeboundary as FB  # noqa: E402
 from vmec_jax.core import vacuum as V  # noqa: E402
-from vmec_jax.core.freeboundary_implicit import CoupledFreeBoundaryProblem  # noqa: E402
 from vmec_jax.core.errors import MgridNotFoundError  # noqa: E402
 from vmec_jax.core.input import VmecInput  # noqa: E402
 from vmec_jax.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmec_jax.core.solver import (  # noqa: E402
     _initial_state, prepare_runtime, resolution_from_input,
 )
-from vmec_jax.core.wout import read_wout, wout_from_state, write_wout  # noqa: E402
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # vacuum solves: run jitted
 
@@ -150,28 +147,6 @@ def test_vacuum_first_call_diagnostics(ab_inputs):
     state = _initial_state(ab_inputs["rt"].setup)
     ctor, *_rest = FB._vacuum_scalars(state, ab_inputs["rt"])
     assert float(ctor) * fac == pytest.approx(4.32e-2, abs=2e-4)
-
-
-def test_free_boundary_hot_state_requires_matching_resolution(ab_inputs):
-    """A scan restart cannot silently reinterpret a different radial grid."""
-    state = _initial_state(ab_inputs["rt"].setup)
-    bad = replace(state, R_cos=state.R_cos[:-1])
-    with pytest.raises(ValueError, match="initial_state has shape"):
-        FB.solve_free_boundary(
-            ab_inputs["inp"],
-            external_field=object(),
-            initial_state=bad,
-            max_iterations=1,
-        )
-
-
-def test_free_boundary_rejects_invalid_vacuum_skip_cap(ab_inputs):
-    with pytest.raises(ValueError, match="max_vacuum_skip must be >= 1"):
-        FB.solve_free_boundary(
-            ab_inputs["inp"],
-            external_field=object(),
-            max_vacuum_skip=0,
-        )
 
 
 def test_fused_vacuum_matches_reference(ab_inputs):
@@ -343,84 +318,6 @@ CONV_CASE = "cth_like_free_bdy"
 
 
 @pytest.mark.full
-def test_converged_result_retains_vacuum_state(tmp_path):
-    """A production free-boundary result retains its final NESTOR state."""
-    if not CONV_MGRID.exists():
-        pytest.skip("real mgrid_cth_like.nc unavailable (run tools/fetch_assets.py)")
-    inp = VmecInput.from_file(CONV_DECK)
-    result = FB.solve_free_boundary(
-        inp,
-        mgrid_path=CONV_MGRID,
-        max_iterations=2500,
-        error_on_no_convergence=False,
-    )
-    vacuum = result.vacuum_state
-    assert result.converged and vacuum is not None and vacuum.turned_on
-    assert vacuum.vacuum_calls > 0 and vacuum.full_updates > 0
-    assert vacuum.potvac is not None
-    assert np.all(np.isfinite(np.asarray(vacuum.potvac)))
-    assert vacuum.rcon0 is not None and vacuum.zcon0 is not None
-
-    data = read_mgrid(CONV_MGRID)
-    field = MgridField.from_mgrid_data(data, extcur=np.asarray(inp.extcur)[: data.nextcur])
-    problem = CoupledFreeBoundaryProblem.from_result(inp, result, field)
-    residuals = problem.force_residuals(result.state, field.extcur)
-    assert float(residuals.fsqr) <= float(inp.ftol_array[-1])
-    assert float(residuals.fsqz) <= float(inp.ftol_array[-1])
-    assert float(residuals.fsql) <= float(inp.ftol_array[-1])
-
-    direction = jnp.ones_like(field.extcur)
-    tangent = jax.jvp(
-        lambda current: problem.residual(result.state, current),
-        (field.extcur,),
-        (direction,),
-    )[1]
-    step = 0.1
-    plus = problem.residual(result.state, field.extcur + step * direction)
-    minus = problem.residual(result.state, field.extcur - step * direction)
-    finite_difference = jax.tree.map(lambda a, b: (a - b) / (2.0 * step), plus, minus)
-    tangent_flat = np.concatenate([np.asarray(x).ravel() for x in jax.tree.leaves(tangent)])
-    fd_flat = np.concatenate([np.asarray(x).ravel() for x in jax.tree.leaves(finite_difference)])
-    np.testing.assert_allclose(tangent_flat, fd_flat, rtol=2e-5, atol=2e-10)
-
-    wout = wout_from_state(
-        inp=inp, state=result.state,
-        fsqr=result.fsqr, fsqz=result.fsqz, fsql=result.fsql,
-        niter=result.iterations, converged=result.converged,
-        vacuum_state=vacuum,
-    )
-    assert wout.potsin is not None and wout.xmpot is not None and wout.xnpot is not None
-    assert len(wout.potsin) == len(wout.xmpot) == len(wout.xnpot)
-    for name in ("bsubumnc_sur", "bsubvmnc_sur", "bsupumnc_sur", "bsupvmnc_sur"):
-        values = getattr(wout, name)
-        assert values is not None and values.shape == wout.xm_nyq.shape
-        assert np.all(np.isfinite(values))
-    from vmec_jax.core.postprocess import fourier_synthesis, internal_angle_grid
-    surface_shape = np.asarray(vacuum.bsubu_sur).shape
-    ntheta = surface_shape[0] if inp.lasym else 2 * (surface_shape[0] - 1)
-    theta, zeta, _weights = internal_angle_grid(
-        ntheta=ntheta, nzeta=surface_shape[1], nfp=inp.nfp, lasym=inp.lasym)
-    for real_name, coeff_name in (
-        ("bsubu_sur", "bsubumnc_sur"),
-        ("bsubv_sur", "bsubvmnc_sur"),
-        ("bsupu_sur", "bsupumnc_sur"),
-        ("bsupv_sur", "bsupvmnc_sur"),
-    ):
-        reconstructed = fourier_synthesis(
-            getattr(wout, coeff_name)[None, :], None,
-            wout.xm_nyq, wout.xn_nyq, theta, zeta)[0]
-        np.testing.assert_allclose(
-            reconstructed, np.asarray(getattr(vacuum, real_name)),
-            rtol=2e-11, atol=2e-12)
-    reread = read_wout(write_wout(tmp_path / "wout_freeb.nc", wout))
-    np.testing.assert_array_equal(reread.potsin, wout.potsin)
-    np.testing.assert_array_equal(reread.xmpot, wout.xmpot)
-    np.testing.assert_array_equal(reread.xnpot, wout.xnpot)
-    for name in ("bsubumnc_sur", "bsubvmnc_sur", "bsupumnc_sur", "bsupvmnc_sur"):
-        np.testing.assert_array_equal(getattr(reread, name), getattr(wout, name))
-
-
-@pytest.mark.full
 def test_free_boundary_converged_golden(golden_dir):
     """Free boundary converges to VMEC2000's fsq level with wout parity.
 
@@ -455,10 +352,6 @@ def test_free_boundary_converged_golden(golden_dir):
     ftol = float(inp.ftol_array[-1])
     assert result.converged, f"free boundary did not converge (fsqr={result.fsqr:.2e})"
     assert result.fsqr <= ftol and result.fsqz <= ftol and result.fsql <= ftol
-    assert result.vacuum_state is not None
-    assert result.vacuum_state.turned_on
-    assert result.vacuum_state.potvac is not None
-    assert np.all(np.isfinite(np.asarray(result.vacuum_state.potvac)))
 
     # 2. Vacuum turn-on matches the golden stdout (53) modulo float jitter.
     m = re.search(r"VACUUM PRESSURE TURNED ON AT\s+(\d+)\s+ITERATIONS", out)
@@ -490,24 +383,6 @@ def test_free_boundary_converged_golden(golden_dir):
     assert r_err < 1e-3, f"rmnc scale-relative error {r_err}"
     assert z_err < 1e-3, f"zmns scale-relative error {z_err}"
     assert iota_err < 1e-3, f"iotaf scale-relative error {iota_err}"
-
-    # 4. Same-resolution continuation retains the solved LCFS and should be
-    #    materially cheaper than rebuilding the equilibrium from INDATA.
-    warm_lines: list[str] = []
-    warm = FB.solve_free_boundary(
-        inp,
-        mgrid_path=CONV_MGRID,
-        initial_state=result.state,
-        max_iterations=1000,
-        verbose=True,
-        emit=lambda *a, **k: warm_lines.append(a[0] if a else ""),
-        error_on_no_convergence=False,
-    )
-    assert warm.converged
-    assert warm.iterations > 2
-    assert warm.iterations < result.iterations
-    assert "VACUUM PRESSURE TURNED ON" in "".join(warm_lines)
-    assert abs(warm.wb - result.wb) <= 1e-6 * abs(result.wb) + 1e-12
 
 
 # ---------------------------------------------------------------------------

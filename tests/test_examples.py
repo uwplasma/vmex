@@ -40,9 +40,6 @@ _COST_RE = re.compile(r"\[least_squares\] cost = ([0-9.eE+-]+)")
 
 def _run_example(script: Path, cwd: Path, timeout: int = 2400) -> str:
     env = dict(os.environ, VMEC_JAX_EXAMPLES_CI="1")
-    source_root = str(EXAMPLES.parent)
-    env["PYTHONPATH"] = os.pathsep.join(
-        part for part in (source_root, env.get("PYTHONPATH")) if part)
     env.pop("JAX_DISABLE_JIT", None)
     proc = subprocess.run(
         [sys.executable, str(script)], cwd=cwd, env=env,
@@ -125,10 +122,6 @@ def test_take_free_boundary_gradients(tmp_path):
     # skips where the optional virtual_casing_jax dep is absent (core CI);
     # validates the FD-checked coil/extcur gradients where it is installed.
     pytest.importorskip("virtual_casing_jax")
-    from vmec_jax.core import freeboundary_diff
-
-    if not freeboundary_diff.have_virtual_casing_jax():
-        pytest.skip("installed virtual_casing_jax lacks the optional extender API")
     out = _run_example(EXAMPLES / "take_free_boundary_gradients.py", tmp_path, timeout=900)
     # each gradient row ends with its AD-vs-FD relative error in scientific notation
     rels = [float(m) for m in re.findall(r"\s([0-9.]+e[+-]\d+)\s*$", out, re.M)]
@@ -157,7 +150,7 @@ def test_mirror_fixed_boundary_gradients_example(tmp_path):
     assert (outdir / "mirror_fixed_gradient_sensitivity.png").exists()
 
 
-@pytest.mark.full  # nightly: two five-stage spline continuations (~100s)
+@pytest.mark.full
 def test_mirror_fixed_boundary_nonaxisymmetric_example(tmp_path):
     _run_example(
         EXAMPLES / "mirror_fixed_boundary_nonaxisymmetric.py",
@@ -170,13 +163,9 @@ def test_mirror_fixed_boundary_nonaxisymmetric_example(tmp_path):
     assert summary["rotating_ellipse"]["forbidden_m1_max"] < 1.0e-12
     assert summary["straight_field_line"]["variational_max"] < 1.0e-12
     assert summary["straight_field_line"]["minimum_mean_direction_cosine"] > 0.997
-    for case in summary:
-        assert (outdir / f"mout_{case}.nc").exists()
-        for suffix in ("summary", "cross_sections", "modB", "3d", "validation"):
-            assert (outdir / f"{case}_{suffix}.png").exists()
 
 
-@pytest.mark.full  # nightly: ESSOS-to-MGRID free-boundary solve (~30s)
+@pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~30s)
 def test_free_boundary_essos_coils(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(EXAMPLES / "free_boundary_essos_coils.py", tmp_path, timeout=900)
@@ -220,19 +209,13 @@ def test_qs_optimization_examples(case, tmp_path):
     assert match is not None and np.isfinite(float(match.group(2)))
 
 
-@pytest.mark.full  # nightly smoke: one ESS call in CI mode, no max_mode ladder
+@pytest.mark.full  # nightly: single-stage ESS variants (one least_squares call, no ladder)
 @pytest.mark.parametrize("case", ["QA", "QI"])
 def test_ess_optimization_examples(case, tmp_path):
     script = EXAMPLES / "optimization" / f"{case}_optimization_ess.py"
     out = _run_example(script, tmp_path)
     _assert_cost_decreased(out, f"{case}-ESS")
     assert "one call, no max_mode ladder" in out
-    outdir = tmp_path / f"output_{case}_optimization_ess"
-    assert (outdir / f"input.{case}_ess_optimized").exists()
-    assert (outdir / f"wout_{case}_ess_optimized.nc").exists()
-    if case == "QI":
-        assert "components =" in out
-        assert (outdir / "QI_ess_optimized_summary.png").exists()
 
 
 @pytest.mark.full  # nightly: QP-basin + QI stages + Boozer, subprocess cold-start heavy

@@ -20,7 +20,8 @@ Usage
    vmec --test                 — run and plot the bundled quick-start case
 
 The positional argument is a VMEC input file (``input.*`` namelist or a
-VMEC++-style ``.json`` deck), or a ``wout_*.nc``/``mout_*.nc``/``boozmn_*.nc`` file for
+VMEC++-style ``.json`` deck), or a ``wout_*.nc``/``mout_*.nc``/``boozmn_*.nc``
+file for
 ``--plot``/``--booz``.
 
 Options
@@ -89,9 +90,9 @@ For ``LFREEB = T`` decks:
   :class:`vmec_jax.core.mgrid.MgridField` (requires ESSOS).
 
 Known divergences of the current free-boundary lane: it is single-grid (only
-the final ``NS_ARRAY`` stage runs; multi-stage decks print a note). The retained
-vacuum state populates ``potsin``/``potcos``, ``xmpot``/``xnpot``, and all
-covariant/contravariant ``*_sur`` surface-field tables. An NITER-exhausted
+the final ``NS_ARRAY`` stage runs; multi-stage decks print a note), and the
+NESTOR potential is not yet exported to the wout ``potsin``/``xmpot``/
+``xnpot``/``*_sur`` variables (written as netCDF fill). An NITER-exhausted
 free-boundary run still writes the wout (VMEC2000 behavior) and exits with
 ``ier_flag = 2``.
 

@@ -25,28 +25,29 @@ The virtual-casing math is reused verbatim from ``uwplasma/virtual_casing_jax``
 singular-quadrature integral ``VirtualCasingJAX.compute_internal_B``).  This
 module only (a) adapts a converged/trial ``vmec_jax`` boundary + total field into
 the package's :class:`VmecSurfaceFieldData` and (b) wires the resulting plasma
-field to an :class:`~vmec_jax.core.mgrid.MgridField` or a plain
-``xyz -> B`` callable (for example, an ESSOS Biot--Savart field) to form the
+field to an :class:`~vmec_jax.core.mgrid.MgridField` or a plain ``xyz->B``
+callable (e.g. an ESSOS ``essos.coils.Coils`` Biot-Savart field) to form the
 differentiable residual.
 
 Key structural fact that makes this cheap and well-posed: for a **fixed trial
 boundary** the plasma's own field on that boundary does not depend on the coil
 dofs, so it is precomputed **once** via the accurate on-surface virtual-casing
 integral and frozen as a constant.  The residual is then a smooth JAX function of
-the external-field dofs alone — an ESSOS callable's coil dofs or an
-``MgridField``'s ``extcur`` — and FD-validates to ~1e-9 (see
-``tests/test_freeboundary_diff.py``).
+the external-field dofs alone — an ``MgridField``'s ``extcur``, or the dofs of a
+callable coil field (e.g. an ESSOS ``Coils``' Fourier dofs / currents) — and
+FD-validates to ~1e-9 (see ``tests/test_freeboundary_diff.py``).
 
-For simultaneous plasma-boundary and coil optimization,
-:func:`surface_field_data_from_state` keeps the moving-boundary virtual-casing
-field traceable through the fixed-boundary implicit solve. Freeze adaptive
-quadrature with :func:`plan_vc_precision` before entering ``jax.grad``; the
-single-stage example and regression tests exercise both derivative blocks.
+The full single-stage piece — letting the boundary *shape* dofs vary, so the
+plasma field itself depends on them through a re-solve — is now supported:
+:func:`surface_field_data_from_state` rebuilds the virtual-casing surface field
+traceably from a live equilibrium state, so ``jax.grad`` threads through the
+implicit adjoint (boundary) and virtual casing (coils) at once.  See
+``examples/single_stage_simultaneous_opt.py`` and the *True single-stage*
+section of ``docs/optimization.rst``.
 
-``virtual_casing_jax`` is an optional dependency. Until the extender API is
-released, install commit ``195c425`` from the ``feature/jax-vmec-extender`` branch with
-``pip install -e /path/to/virtual_casing_jax``. Importing this module raises a
-clear error when that API is missing.
+``virtual_casing_jax`` is an optional dependency (``pip install vmec-jax[freeb]``
+or ``pip install -e /path/to/virtual_casing_jax``).  Importing this module raises
+a clear error if it is missing.
 """
 
 from __future__ import annotations
@@ -81,7 +82,6 @@ __all__ = [
     "MU0",
     "surface_field_data_from_wout",
     "surface_field_data_from_state",
-    "plan_vc_precision",
     "plasma_field_on_boundary",
     "FreeBoundaryDiffProblem",
     "external_B_cartesian",
@@ -428,7 +428,6 @@ def plan_vc_precision(
     *,
     digits: int = 4,
     chunk_size: int = 1024,
-    target_chunk_size: int | str | None = "auto",
     quad_nt: int | None = None,
     quad_np: int | None = None,
 ):
@@ -446,7 +445,7 @@ def plan_vc_precision(
         digits=int(digits),
         levels=_default_levels(int(surface_data.gamma.shape[1]), int(surface_data.gamma.shape[2])),
         chunk_size=chunk_size,
-        target_chunk_size=target_chunk_size,
+        target_chunk_size=8,
         dtype="float64",
     )
     field = VirtualCasingExteriorField(surface_data, cfg)
@@ -458,11 +457,9 @@ def plasma_field_on_boundary(
     *,
     digits: int = 4,
     chunk_size: int = 1024,
-    target_chunk_size: int | str | None = "auto",
     quad_nt: int | None = None,
     quad_np: int | None = None,
     precision=None,
-    remat: bool | None = None,
 ) -> jax.Array:
     """Plasma's own Cartesian field on its boundary via on-surface virtual casing.
 
@@ -475,9 +472,6 @@ def plasma_field_on_boundary(
     This is the ``internal`` virtual-casing branch (currents inside the LCFS =
     the plasma current), i.e. the SIMSOPT ``VirtualCasing.B_external_normal``
     convention: the coils must supply ``-B_plasma . n`` for ``B_out . n = 0``.
-
-    Set ``remat=True`` for moving-surface reverse mode to recompute singular
-    quadrature blocks in the backward pass instead of retaining their full tape.
     """
 
     _require_vcj()
@@ -485,23 +479,17 @@ def plasma_field_on_boundary(
         digits=int(digits),
         levels=_default_levels(int(surface_data.gamma.shape[1]), int(surface_data.gamma.shape[2])),
         chunk_size=chunk_size,
-        target_chunk_size=target_chunk_size,
+        target_chunk_size=8,
         dtype="float64",
     )
     field = VirtualCasingExteriorField(surface_data, cfg)
-    kwargs: dict[str, Any] = dict(
-        digits=int(digits),
-        chunk_size=int(chunk_size),
-        target_chunk_size=target_chunk_size,
-    )
+    kwargs: dict[str, Any] = dict(digits=int(digits), chunk_size=int(chunk_size))
     if quad_nt is not None:
         kwargs["quad_nt"] = int(quad_nt)
     if quad_np is not None:
         kwargs["quad_np"] = int(quad_np)
     if precision is not None:
         kwargs["precision"] = precision
-    if remat is not None:
-        kwargs["remat"] = bool(remat)
     return field._vc.compute_internal_B(field.B_total, **kwargs)
 
 
@@ -521,8 +509,8 @@ def external_B_cartesian(
 
     - :class:`~vmec_jax.core.mgrid.MgridField` -> trilinear mgrid (diff. in
       ``extcur``),
-    - a plain callable ``xyz(..., 3) -> B(..., 3)``, including an ESSOS
-      Biot--Savart evaluator (diff. in its coil dofs and currents).
+    - a plain callable ``xyz(..., 3) -> B(..., 3)`` (e.g. an ESSOS ``Coils``
+      Biot-Savart field, ``lambda pts: coils.B(pts)``; diff. in its own dofs).
 
     Returns ``(3, nphi, ntheta)``.
     """
@@ -601,11 +589,9 @@ class FreeBoundaryDiffProblem:
         p_edge: float = 0.0,
         digits: int = 4,
         chunk_size: int = 1024,
-        target_chunk_size: int | str | None = "auto",
         quad_nt: int | None = None,
         quad_np: int | None = None,
         precision=None,
-        remat: bool | None = None,
     ) -> "FreeBoundaryDiffProblem":
         """Precompute the constants (virtual-casing plasma field) from surface data.
 
@@ -613,7 +599,6 @@ class FreeBoundaryDiffProblem:
         concrete surface) when this runs inside a ``jax.grad`` over the boundary
         geometry, so the virtual-casing plasma field is differentiable in the
         surface rather than tripping the precision auto-selection's concretization.
-        ``remat=True`` trades backward recomputation for lower peak memory.
         """
 
         _require_vcj()
@@ -625,8 +610,7 @@ class FreeBoundaryDiffProblem:
 
         B_plasma = plasma_field_on_boundary(
             surface_data, digits=digits, chunk_size=chunk_size,
-            target_chunk_size=target_chunk_size, quad_nt=quad_nt, quad_np=quad_np,
-            precision=precision, remat=remat,
+            quad_nt=quad_nt, quad_np=quad_np, precision=precision,
         )
         Bn_plasma = jnp.sum(B_plasma * normal, axis=0)
         Bin_mag2 = jnp.sum(jnp.asarray(surface_data.B_total) ** 2, axis=0)
@@ -733,9 +717,8 @@ def value_and_grad_bnormal(
 ) -> tuple[jax.Array, Any]:
     """``(J, dJ/d external_field)`` of the normal-field objective via ``jax.value_and_grad``.
 
-    ``external_field`` is an ``MgridField`` or a pytree captured by a callable;
-    the gradient follows its differentiable leaves (for example, ESSOS coil dofs
-    and currents, or mgrid ``extcur``).
+    ``external_field`` is a pytree (an ``MgridField``, or a callable closing over
+    coil dofs); the gradient has the same structure (``extcur``, or the coil dofs).
     """
 
     def fun(ef: Any) -> jax.Array:

@@ -36,7 +36,7 @@ from vmec_jax.core.errors import INPUT_ERROR_FLAG, MORE_ITER_FLAG, WERROR_MESSAG
 from vmec_jax.core.input import VmecInput
 from vmec_jax.core.wout import read_wout
 
-from .conftest import resolve_golden_dir
+from conftest import resolve_golden_dir
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 SOLOVEV_DECK = DATA_DIR / "input.solovev"

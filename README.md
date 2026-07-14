@@ -222,10 +222,22 @@ coil-agnostic. Reproduce with
 
 ## Code size
 
-The open-mirror backend is being reduced toward the supported fixed/free
-straight-axis model. Generated WOUT, mgrid, and raw plotting output are
-ignored. Coil geometry and Biot-Savart evaluation belong to ESSOS; vmec_jax
-consumes only MGRID data or a magnetic-field callable.
+vmec-jax delivers that superset of capabilities in little more than **half the
+code**, and is the most densely documented of the three. Solver source only (tests,
+language bindings, and vendored third-party excluded), counted with
+[`pygount`](https://pypi.org/project/pygount/) 3.2:
+
+| code base | language | files | code (SLOC) | comments / docstrings | doc-to-code |
+|---|---|---:|---:|---:|---:|
+| **vmec-jax** | Python | 41 | **13,326** | 6,744 | **0.51** |
+| VMEC2000 (PARVMEC) | Fortran | 115 | 24,190 | 8,425 | 0.35 |
+| VMEC++ | C++ / Python | 117 | 22,824 | 7,646 | 0.34 |
+
+vmec-jax is little more than half the SLOC of VMEC2000 and VMEC++, while
+*adding* differentiability, GPU execution, direct-coil free boundary, and a
+built-in Boozer transform — and it carries the highest comment/docstring
+density of the three (reproduce with
+`pygount --format=summary vmec_jax`).
 
 ## Python API
 

@@ -45,15 +45,9 @@ import jax
 import jax.numpy as jnp
 
 from . import profiles as _profiles
-from .errors import MORE_ITER_FLAG, NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG
+from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
-from .freeboundary_reference import (
-    _edge_fourier as _edge_fourier,
-    axis_current_field as axis_current_field,
-    boundary_from_coefficients,
-    external_field_channels as external_field_channels,
-)
 from .geometry import half_mesh_jacobian
 from .input import VmecInput
 from .mgrid import MgridField
@@ -65,7 +59,6 @@ from .solver import (
     SolveResult, SolverRuntime, SpectralState,
     _finalize, _geometry, _initial_carry, _initial_state, _make_body,
     _result_from_carry, _zero_cache, prepare_runtime, resolution_from_input,
-    runtime_with_baselines,
 )
 from .vacuum import (
     VacuumBasis, VacuumBoundary, make_vacuum_solver, vacuum_basis,
@@ -83,6 +76,235 @@ MU0 = 4.0e-7 * np.pi
 
 #: funct3d.f vacuum activation threshold on fsqr + fsqz.
 ACTIVATION_FSQ = 1.0e-3
+
+
+# ---------------------------------------------------------------------------
+# Boundary surface synthesis (NESTOR surface.f)
+# ---------------------------------------------------------------------------
+
+
+def boundary_from_coefficients(
+    *,
+    rmnc: np.ndarray,
+    zmns: np.ndarray,
+    rmns: np.ndarray | None,
+    zmnc: np.ndarray | None,
+    modes: ModeTable,
+    basis: VacuumBasis,
+) -> VacuumBoundary:
+    """Sample the boundary surface on the NESTOR grid (``surface.f``).
+
+    ``rmnc``... are wout-convention edge coefficients over the signed
+    ``modes`` table.  Angles: ``theta/zeta`` from ``basis`` (per-period
+    ``zeta``); ``xn = n*nfp`` so all v-derivatives are geometric-phi
+    derivatives, exactly as ``surface.f``.
+    """
+    xm = np.asarray(modes.m, dtype=float)
+    xn = np.asarray(modes.n, dtype=float) * float(basis.nfp)
+    th = np.asarray(basis.theta, dtype=float)[:, None]
+    # ``basis.zeta`` spans [0, 2*pi) per field period; the geometric toroidal
+    # angle is ``phi = zeta * onp`` (onp = 1/nfp).  The wout-convention phase
+    # is ``m*theta - xn*phi`` with ``xn = n*nfp`` (so all v-derivatives below
+    # are geometric-phi derivatives, matching surface.f and the ``onp`` folding
+    # in ``vacuum.py``/``external_field_channels``).  Using ``zeta`` directly
+    # here double-counts nfp and mis-places every n != 0 harmonic toroidally.
+    ze = np.asarray(basis.zeta, dtype=float)[:, None] * float(basis.onp)
+    arg = th * xm[None, :] - ze * xn[None, :]
+    cosmn = np.cos(arg)
+    sinmn = np.sin(arg)
+
+    rc = np.asarray(rmnc, dtype=float)
+    zs = np.asarray(zmns, dtype=float)
+    R = cosmn @ rc
+    Z = sinmn @ zs
+    Ru = -(sinmn * xm[None, :]) @ rc
+    Rv = (sinmn * xn[None, :]) @ rc
+    Zu = (cosmn * xm[None, :]) @ zs
+    Zv = -(cosmn * xn[None, :]) @ zs
+    ruu = -(cosmn * (xm * xm)[None, :]) @ rc
+    ruv = (cosmn * (xm * xn)[None, :]) @ rc
+    rvv = -(cosmn * (xn * xn)[None, :]) @ rc
+    zuu = -(sinmn * (xm * xm)[None, :]) @ zs
+    zuv = (sinmn * (xm * xn)[None, :]) @ zs
+    zvv = -(sinmn * (xn * xn)[None, :]) @ zs
+    if rmns is not None and zmnc is not None:
+        rs = np.asarray(rmns, dtype=float)
+        zc = np.asarray(zmnc, dtype=float)
+        R = R + sinmn @ rs
+        Z = Z + cosmn @ zc
+        Ru = Ru + (cosmn * xm[None, :]) @ rs
+        Rv = Rv - (cosmn * xn[None, :]) @ rs
+        Zu = Zu - (sinmn * xm[None, :]) @ zc
+        Zv = Zv + (sinmn * xn[None, :]) @ zc
+        ruu = ruu - (sinmn * (xm * xm)[None, :]) @ rs
+        ruv = ruv + (sinmn * (xm * xn)[None, :]) @ rs
+        rvv = rvv - (sinmn * (xn * xn)[None, :]) @ rs
+        zuu = zuu - (cosmn * (xm * xm)[None, :]) @ zc
+        zuv = zuv + (cosmn * (xm * xn)[None, :]) @ zc
+        zvv = zvv - (cosmn * (xn * xn)[None, :]) @ zc
+
+    shape = (int(basis.ntheta3), int(basis.nzeta))
+    return VacuumBoundary(
+        R=R.reshape(shape), Z=Z.reshape(shape),
+        Ru=Ru.reshape(shape), Zu=Zu.reshape(shape),
+        Rv=Rv.reshape(shape), Zv=Zv.reshape(shape),
+        ruu=ruu.reshape(shape), ruv=ruv.reshape(shape), rvv=rvv.reshape(shape),
+        zuu=zuu.reshape(shape), zuv=zuv.reshape(shape), zvv=zvv.reshape(shape),
+    )
+
+
+def _edge_fourier(state: SpectralState, rt: SolverRuntime):
+    """Edge-row wout-convention coefficients (``convert.f`` before vacuum)."""
+    from .residuals import m1_constrained_to_physical
+    from .transforms import physical_to_internal_scale
+
+    setup = rt.setup
+    R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=rt.modes, lthreed=setup.lthreed, lasym=setup.lasym,
+        lconm1=setup.lconm1,
+    )
+    scale = 1.0 / physical_to_internal_scale(rt.modes, rt.trig)
+    rmnc = np.asarray(R_cos)[-1] * scale
+    zmns = np.asarray(Z_sin)[-1] * scale
+    if setup.lasym:
+        rmns = np.asarray(R_sin)[-1] * scale
+        zmnc = np.asarray(Z_cos)[-1] * scale
+    else:
+        rmns = zmnc = None
+    return rmnc, zmns, rmns, zmnc
+
+
+# ---------------------------------------------------------------------------
+# Axis-filament plasma-current field (tolicu.f + belicu.f)
+# ---------------------------------------------------------------------------
+
+
+def axis_current_field(
+    *,
+    R: np.ndarray,
+    Z: np.ndarray,
+    axis_r: np.ndarray,
+    axis_z: np.ndarray,
+    nfp: int,
+    plascur: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Biot-Savart field of the net toroidal current on the magnetic axis.
+
+    Port of the legacy parity-proven ``axis_current_field_vmec_filament``
+    (VMEC ``tolicu.f`` axis filament across field periods + LIBSTELL
+    ``bsc_b`` segment kernel with ``eps_sq`` regularization).  ``plascur``
+    is VMEC's ``ctor`` (mu0*A, ``bcovar.f`` sign convention); the filament
+    current is ``+plascur/mu0`` exactly as ``tolicu.f`` (the legacy port
+    used the opposite sign because its ``plascur_edge_from_bcovar`` carried
+    ``-signgs`` instead of ``bcovar.f``'s ``+signgs``).
+    """
+    R = np.asarray(R, dtype=float)
+    Z = np.asarray(Z, dtype=float)
+    axis_r = np.asarray(axis_r, dtype=float).reshape(-1)
+    axis_z = np.asarray(axis_z, dtype=float).reshape(-1)
+    ntheta, nv = R.shape
+    current = float(plascur) / MU0
+    if (not np.isfinite(current)) or current == 0.0:
+        z = np.zeros_like(R)
+        return z, z, z
+
+    nfper = max(1, int(nfp))
+    nvper = 64 if nv == 1 else nfper
+    alvp = (2.0 * np.pi / float(max(1, nv))) / float(nfper)
+    cosuv = np.cos(alvp * np.arange(nv, dtype=float))
+    sinuv = np.sin(alvp * np.arange(nv, dtype=float))
+    alp_per = 2.0 * np.pi / float(nvper)
+    cosper = np.cos(alp_per * np.arange(nvper, dtype=float))
+    sinper = np.sin(alp_per * np.arange(nvper, dtype=float))
+
+    # tolicu.f: axis points over all periods (loop closed below).
+    x0 = axis_r[None, :] * cosuv[None, :]
+    y0 = axis_r[None, :] * sinuv[None, :]
+    xpts = np.zeros((3, nvper * nv), dtype=float)
+    for kper in range(nvper):
+        sl = slice(kper * nv, (kper + 1) * nv)
+        xpts[0, sl] = cosper[kper] * x0 - sinper[kper] * y0
+        xpts[1, sl] = sinper[kper] * x0 + cosper[kper] * y0
+        xpts[2, sl] = axis_z
+    # bsc_construct('fil_loop'): drop zero-length segments, close the loop.
+    keep = [0]
+    for i in range(1, xpts.shape[1]):
+        d = xpts[:, keep[-1]] - xpts[:, i]
+        if float(d @ d) != 0.0:
+            keep.append(i)
+    xnod = xpts[:, keep]
+    if float((xnod[:, -1] - xpts[:, 0]) @ (xnod[:, -1] - xpts[:, 0])) != 0.0:
+        xnod = np.concatenate([xnod, xpts[:, :1]], axis=1)
+    if xnod.shape[1] < 2:
+        z = np.zeros_like(R)
+        return z, z, z
+
+    dxnod = xnod[:, 1:] - xnod[:, :-1]
+    lsqnod = np.sum(dxnod * dxnod, axis=0)
+    eps_sq = max(np.finfo(float).eps * float(np.min(lsqnod[lsqnod > 0.0])), np.finfo(float).tiny)
+
+    cos1 = np.broadcast_to(cosuv[None, :], (ntheta, nv)).reshape(-1)
+    sin1 = np.broadcast_to(sinuv[None, :], (ntheta, nv)).reshape(-1)
+    rp = R.reshape(-1)
+    xobs = np.stack([rp * cos1, rp * sin1, Z.reshape(-1)], axis=1)
+
+    capRv = xobs[:, None, :] - xnod.T[None, :, :]
+    capR = np.sqrt(np.maximum(eps_sq, np.sum(capRv * capRv, axis=2)))
+    R1p2 = capR[:, :-1] + capR[:, 1:]
+    denom = np.maximum(R1p2 * R1p2 - lsqnod[None, :], eps_sq)
+    Rfactor = 2.0 * R1p2 / (capR[:, :-1] * capR[:, 1:] * denom)
+    crossv = np.cross(dxnod.T[None, :, :], capRv[:, :-1, :])
+    bxyz = (current * 1.0e-7) * np.sum(crossv * Rfactor[:, :, None], axis=1)
+
+    br = cos1 * bxyz[:, 0] + sin1 * bxyz[:, 1]
+    bp = -sin1 * bxyz[:, 0] + cos1 * bxyz[:, 1]
+    return br.reshape((ntheta, nv)), bp.reshape((ntheta, nv)), bxyz[:, 2].reshape((ntheta, nv))
+
+
+# ---------------------------------------------------------------------------
+# External-field projection (bextern.f)
+# ---------------------------------------------------------------------------
+
+
+def external_field_channels(
+    *,
+    boundary: VacuumBoundary,
+    br: np.ndarray,
+    bp: np.ndarray,
+    bz: np.ndarray,
+    basis: VacuumBasis,
+    signgs: int,
+) -> dict[str, np.ndarray]:
+    """``bextern.f``: covariant components, normal source, and metric.
+
+    Returns ``bexu/bexv`` (covariant, geometric-phi convention), ``bexni``
+    (the weighted normal source ``-B.n * wint * (2*pi)^2``), and the
+    physical surface metric ``guu/guv/gvv``.
+    """
+    R = np.asarray(boundary.R, dtype=float)
+    Ru = np.asarray(boundary.Ru, dtype=float)
+    Zu = np.asarray(boundary.Zu, dtype=float)
+    Rv = np.asarray(boundary.Rv, dtype=float)
+    Zv = np.asarray(boundary.Zv, dtype=float)
+    sgn = float(int(signgs))
+    snr = sgn * R * Zu
+    snv = sgn * (Ru * Zv - Rv * Zu)
+    snz = -sgn * R * Ru
+    bexu = Ru * br + Zu * bz
+    bexv = Rv * br + Zv * bz + R * bp
+    bexn = -(br * snr + bp * snv + bz * snz)
+    wint2 = np.asarray(basis.wint, dtype=float).reshape(R.shape)
+    bexni = bexn * wint2 * ((2.0 * np.pi) ** 2)
+    return {
+        "bexu": bexu,
+        "bexv": bexv,
+        "bexn": bexn,
+        "bexni": bexni,
+        "guu": Ru * Ru + Zu * Zu,
+        "guv": Ru * Rv + Zu * Zv,
+        "gvv": R * R + Rv * Rv + Zv * Zv,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +374,6 @@ class FreeBoundaryState:
     mode_matrix: Any = None
     bvec_nonsing: Any = None
     potvac: np.ndarray | None = None
-    xmpot: np.ndarray | None = None
-    xnpot: np.ndarray | None = None
-    bsubu_sur: Any = None
-    bsubv_sur: Any = None
-    bsupu_sur: Any = None
-    bsupv_sur: Any = None
-    rcon0: Any = None
-    zcon0: Any = None
     ctor: float = 0.0
     rbtor: float = 0.0
     vacuum_calls: int = 0
@@ -408,7 +622,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         potvac, mode_matrix, bvec_nonsing, _rhs, _gsrc, _grp = solver_vac.full(
             boundary, ext["bexni"]
         )
-        bsqvac, bsubu_s, bsubv_s, bsupu_s, bsupv_s = vacuum_channels(
+        bsqvac, bsubu_s, bsubv_s, _bu, _bv = vacuum_channels(
             basis=basis, potvac=potvac, bexu=ext["bexu"], bexv=ext["bexv"],
             guu=ext["guu"], guv=ext["guv"], gvv=ext["gvv"],
         )
@@ -418,8 +632,6 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         return {
             "bsqvac": bsqvac, "ctor": ctor, "rbtor": rbtor, "potvac": potvac,
             "mode_matrix": mode_matrix, "bvec_nonsing": bvec_nonsing,
-            "bsubu_sur": bsubu_s, "bsubv_sur": bsubv_s,
-            "bsupu_sur": bsupu_s, "bsupv_sur": bsupv_s,
             "delbsq_num": delbsq_num, "delbsq_den": delbsq_den,
             "bsubuvac": bsubuvac, "bsubvvac": bsubvvac,
         }
@@ -435,7 +647,7 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         potvac, _rhs = solver_vac.skip(
             boundary, ext["bexni"], bvec_nonsing, mode_matrix
         )
-        bsqvac, bsubu_s, bsubv_s, bsupu_s, bsupv_s = vacuum_channels(
+        bsqvac, bsubu_s, bsubv_s, _bu, _bv = vacuum_channels(
             basis=basis, potvac=potvac, bexu=ext["bexu"], bexv=ext["bexv"],
             guu=ext["guu"], guv=ext["guv"], gvv=ext["gvv"],
         )
@@ -444,8 +656,6 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         )
         return {
             "bsqvac": bsqvac, "ctor": ctor, "rbtor": rbtor, "potvac": potvac,
-            "bsubu_sur": bsubu_s, "bsubv_sur": bsubv_s,
-            "bsupu_sur": bsupu_s, "bsupv_sur": bsupv_s,
             "delbsq_num": delbsq_num, "delbsq_den": delbsq_den,
             "bsubuvac": bsubuvac, "bsubvvac": bsubvvac,
         }
@@ -559,10 +769,6 @@ def _vacuum_step(
         out = fused_vac.skip(carry.state, rt, field, fb.bvec_nonsing, fb.mode_matrix)
     bsqvac = out["bsqvac"]
     fb.potvac = out["potvac"]
-    fb.bsubu_sur = out["bsubu_sur"]
-    fb.bsubv_sur = out["bsubv_sur"]
-    fb.bsupu_sur = out["bsupu_sur"]
-    fb.bsupv_sur = out["bsupv_sur"]
     fb.ctor = float(out["ctor"])
     fb.rbtor = float(out["rbtor"])
     fb.vacuum_calls += 1
@@ -622,8 +828,6 @@ def solve_free_boundary(
     verbose: bool = False,
     emit=print,
     error_on_no_convergence: bool = True,
-    initial_state: SpectralState | None = None,
-    max_vacuum_skip: int | None = None,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
@@ -636,20 +840,9 @@ def solve_free_boundary(
 
     ``error_on_no_convergence=False`` returns the final state instead of
     raising when NITER is exhausted (useful against unconverged goldens).
-
-    ``initial_state`` starts from a previous free-boundary equilibrium at the
-    same resolution. Its edge is retained because the LCFS is an evolved
-    unknown; constraint baselines are recomputed from that state. This is the
-    efficient continuation path for pressure and coil-current scans.
-
-    ``max_vacuum_skip`` optionally caps the adaptive ``NVACSKIP`` cadence.
-    ``1`` recomputes the full NESTOR solution every iteration and is useful as
-    a high-cost reference; ``None`` preserves VMEC2000's uncapped behavior.
     """
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary requires an LFREEB=T input")
-    if max_vacuum_skip is not None and int(max_vacuum_skip) < 1:
-        raise ValueError("max_vacuum_skip must be >= 1")
     if external_field is None:
         path = _resolve_mgrid(inp, mgrid_path)
         data_extcur = np.atleast_1d(np.asarray(inp.extcur if inp.extcur is not None else [], dtype=float))
@@ -670,16 +863,8 @@ def solve_free_boundary(
     ns = int(resolution.ns)
     dtype = rt.setup.s_full.dtype
 
-    start_state = _initial_state(rt.setup) if initial_state is None else initial_state
-    expected = (ns, rt.modes.mnmax)
-    if tuple(start_state.R_cos.shape) != expected:
-        raise ValueError(
-            f"initial_state has shape {tuple(start_state.R_cos.shape)}, expected {expected}; "
-            "interpolate it to the requested radial resolution first"
-        )
-    if initial_state is not None:
-        rt = runtime_with_baselines(rt, start_state)
-    _axis_r0, _axis_z0 = _vacuum_scalars(start_state, rt)[2:4]
+    _init_state = _initial_state(rt.setup)
+    _axis_r0, _axis_z0 = _vacuum_scalars(_init_state, rt)[2:4]
     basis, fused_vac = _vacuum_executables(
         resolution, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
         signgs=int(rt.setup.signgs), wint=np.asarray(rt.trig.wint, dtype=float),
@@ -698,8 +883,6 @@ def solve_free_boundary(
         ivac=-1,
         nvacskip=max(1, int(inp.nvacskip)),
         nvskip0=max(1, int(inp.nvacskip)),
-        xmpot=np.asarray(basis.xmpot, dtype=int),
-        xnpot=np.asarray(basis.n_raw * basis.nfp, dtype=int),
     )
 
     if verbose:
@@ -707,7 +890,7 @@ def solve_free_boundary(
         emit(FORCE_ITERATIONS_BANNER, end="")
         emit(screen_header(lasym=resolution.lasym, lfreeb=True), end="")
 
-    carry = _initial_carry(start_state, rt_fixed, ijacob=0)
+    carry = _initial_carry(_init_state, rt_fixed, ijacob=0)
     printed: set[int] = set()
 
     def _emit_due(final: bool) -> None:
@@ -750,12 +933,7 @@ def solve_free_boundary(
             if fb.ivac <= 2:
                 ivacskip = 0
             if ivacskip == 0:
-                adaptive_skip = max(fb.nvskip0, int(1.0 / max(1.0e-1, 1.0e11 * fsq_rz)))
-                fb.nvacskip = (
-                    adaptive_skip
-                    if max_vacuum_skip is None
-                    else min(adaptive_skip, int(max_vacuum_skip))
-                )
+                fb.nvacskip = max(fb.nvskip0, int(1.0 / max(1.0e-1, 1.0e11 * fsq_rz)))
             bsqvac = _vacuum_step(
                 carry=carry, rt=rt_freeb, fb=fb, basis=basis,
                 fused_vac=fused_vac, field=external_field,
@@ -769,15 +947,6 @@ def solve_free_boundary(
                 # iteration's force evaluation).
                 fb.turned_on = True
                 fb.banner_pending = True
-                hot_reset = (
-                    {
-                        "fsq": jnp.asarray(1.0, dtype=dtype),
-                        "res0": jnp.asarray(jnp.inf, dtype=dtype),
-                        "res1": jnp.asarray(jnp.inf, dtype=dtype),
-                    }
-                    if initial_state is not None
-                    else {}
-                )
                 carry = replace(
                     carry,
                     state=carry.xstore,
@@ -789,25 +958,12 @@ def solve_free_boundary(
                     # iter1 = iteration forces an immediate ns4 refresh, so
                     # the zeroed cache is never consumed.
                     cache=_zero_cache(rt_freeb),
-                    **hot_reset,
                 )
             if fb.ivac >= 1:
                 rt_freeb = replace(rt_freeb, bsqvac_edge=jnp.asarray(bsqvac, dtype=dtype))
                 rt_use = rt_freeb
 
         carry = _iter_lane(carry, rt_use)
-
-        # A converged fixed-boundary hot start can satisfy FTOL before IVAC0
-        # has evaluated the vacuum pressure. Keep stepping through the normal
-        # two-call NESTOR turn-on sequence; otherwise a prescribed LCFS would
-        # be mislabeled as a solved free boundary.
-        if bool(carry.done) and int(carry.ier) == SUCCESSFUL_TERM_FLAG and not fb.turned_on:
-            carry = replace(
-                carry,
-                iteration=carry.iteration + jnp.asarray(1, dtype=carry.iteration.dtype),
-                done=jnp.zeros((), dtype=bool),
-                ier=jnp.asarray(NORM_TERM_FLAG, dtype=carry.ier.dtype),
-            )
 
         if fb.banner_pending:
             if verbose:
@@ -818,15 +974,9 @@ def solve_free_boundary(
 
     _emit_due(final=True)
     ier = int(carry.ier)
-    vacuum_state = replace(fb, rcon0=rt_freeb.rcon0, zcon0=rt_freeb.zcon0)
     if ier == MORE_ITER_FLAG and not error_on_no_convergence:
         result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-        return replace(
-            result, converged=False, ier_flag=MORE_ITER_FLAG,
-            vacuum_state=vacuum_state,
-        )
+        return replace(result, converged=False, ier_flag=MORE_ITER_FLAG)
     if ier == SUCCESSFUL_TERM_FLAG:
-        result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-        return replace(result, vacuum_state=vacuum_state)
-    result = _finalize(carry, rt_freeb if fb.turned_on else rt_fixed)
-    return replace(result, vacuum_state=vacuum_state)
+        return _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
+    return _finalize(carry, rt_freeb if fb.turned_on else rt_fixed)

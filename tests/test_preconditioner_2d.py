@@ -35,7 +35,7 @@ from vmec_jax.core.preconditioner_2d import (
     Prec2DConfig, flat_operator, newton_direction,
 )
 from vmec_jax.core.solver import (
-    SpectralState, _initial_state, _newton_active_indices, _preconditioned_force_signed,
+    SpectralState, _initial_state, _preconditioned_force_signed,
     evaluate_forces, prepare_runtime, resolution_from_input, solve,
 )
 
@@ -132,28 +132,6 @@ def test_prec2d_config_is_hashable():
     cfg = Prec2DConfig(threshold=1e-6)
     assert hash(cfg) == hash(Prec2DConfig(threshold=1e-6))
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-7))
-    assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, backtracking=True))
-    assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, interval=10))
-    assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, row_scales=(1.0, 1.0, 0.1)))
-    assert hash(cfg) != hash(Prec2DConfig(threshold=1e-6, auto_balance_lambda=True))
-
-
-def test_newton_system_contains_only_evolved_physical_entries():
-    """Fixed edge, axis-null, and lambda-gauge coordinates are not GMRES unknowns."""
-    inp = VmecInput.from_file(str(DATA_DIR / "input.circular_tokamak"))
-    rt = prepare_runtime(inp, Resolution(mpol=4, ntor=0, ntheta=8, nzeta=1, nfp=1, lasym=False, ns=6))
-    active = _newton_active_indices(rt, ("R_cos", "Z_sin", "L_sin"))
-    mnmax = rt.modes.mnmax
-
-    r_rows, r_modes = np.divmod(active["R_cos"], mnmax)
-    assert np.all(r_rows < rt.resolution.ns - 1)
-    assert np.all(rt.modes.m[r_modes[r_rows == 0]] == 0)
-
-    for channel in ("Z_sin", "L_sin"):
-        rows, modes = np.divmod(active[channel], mnmax)
-        if channel == "L_sin":
-            assert np.all(rows > 0)
-        assert not np.any((rt.modes.m[modes] == 0) & (rt.modes.n[modes] == 0))
 
 
 @pytest.mark.full
@@ -187,26 +165,3 @@ def test_2d_fewer_iterations_same_equilibrium():
     np.testing.assert_allclose(r2.zmns, r1.zmns, rtol=1e-4, atol=1e-5 * scale)
     # fewer iterations (comfortable margin; measured ~5x on this case)
     assert r2.iterations < 0.75 * r1.iterations
-
-
-@pytest.mark.full
-@pytest.mark.usefixtures("_module_jit_enabled")
-def test_2d_backtracking_converges_stiff_equilibrium():
-    """The opt-in line search executes and preserves strict force convergence."""
-    inp = VmecInput.from_file(str(DATA_DIR / "input.circular_tokamak_aspect_100"))
-    r0 = resolution_from_input(inp)
-    res = Resolution(mpol=r0.mpol, ntor=r0.ntor, ntheta=r0.ntheta, nzeta=r0.nzeta,
-                     nfp=r0.nfp, lasym=r0.lasym, ns=21)
-    cfg = Prec2DConfig(threshold=1e-4, gmres_restart=40, gmres_max_restarts=2,
-                       gmres_rtol=3e-3, backtracking=True,
-                       auto_balance_lambda=True)
-
-    result = solve(inp, res, mode="jit", ftol=1e-9, max_iterations=2000, prec2d=cfg)
-
-    assert result.converged
-    assert max(result.fsqr, result.fsqz, result.fsql) < 1e-9
-    attempted = result.newton_history[:, 0] >= 0.0
-    assert np.any(result.newton_history[:, 0] > 0.0)
-    assert np.all(np.isfinite(result.newton_history[attempted, 1]))
-    scales = result.newton_history[attempted, 2]
-    assert np.all((scales >= 1e-4) & (scales <= 1.0))

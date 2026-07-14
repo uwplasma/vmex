@@ -8,7 +8,6 @@ optimize table adapters) must implement their documented conventions.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,8 +18,7 @@ import jax.numpy as jnp
 
 from vmec_jax.core import boozer, optimize as opt
 from vmec_jax.core.fourier import Resolution
-from vmec_jax.core.input import VmecInput, _read_indata_text, _parse_scalar
-from vmec_jax.core.solver import prepare_runtime, solve
+from vmec_jax.core.input import _read_indata_text, _parse_scalar
 
 
 # ---------------------------------------------------------------------------
@@ -54,50 +52,6 @@ def test_parse_scalar_fortran_conventions():
     assert _parse_scalar("42") == 42
     assert _parse_scalar("1.5D-3") == pytest.approx(1.5e-3)
     assert _parse_scalar("'text'") == "'text'" or isinstance(_parse_scalar("'text'"), str)
-
-
-def test_boundary_from_initial_state_requires_state():
-    inp = VmecInput.from_file(str(
-        Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
-    ))
-    with pytest.raises(ValueError, match="requires initial_state"):
-        solve(inp, boundary_from_initial_state=True)
-
-
-@pytest.mark.full
-def test_fixed_solve_can_return_unconverged_checkpoint():
-    inp = VmecInput.from_file(str(
-        Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
-    ))
-    result = solve(inp, max_iterations=1, error_on_no_convergence=False)
-    assert not result.converged
-    assert result.ier_flag == 2
-    assert result.iterations == 1
-
-
-@pytest.mark.full
-def test_boundary_from_initial_state_holds_supplied_edge():
-    inp = VmecInput.from_file(str(
-        Path(__file__).resolve().parents[1] / "examples/data/input.circular_tokamak"
-    ))
-    base = solve(inp, ftol=1e-9, max_iterations=3000)
-    runtime = prepare_runtime(inp)
-    zero_mode = int(np.flatnonzero((runtime.modes.m == 0) & (runtime.modes.n == 0))[0])
-    delta = 1e-4 * jnp.asarray(runtime.setup.s_full)
-    state = replace(
-        base.state,
-        R_cos=base.state.R_cos.at[:, zero_mode].add(delta),
-    )
-
-    result = solve(
-        inp, ftol=1e-8, max_iterations=3000, initial_state=state,
-        boundary_from_initial_state=True,
-    )
-
-    assert result.converged
-    np.testing.assert_allclose(
-        result.state.R_cos[-1], state.R_cos[-1], rtol=0.0, atol=1e-14,
-    )
 
 
 # ---------------------------------------------------------------------------

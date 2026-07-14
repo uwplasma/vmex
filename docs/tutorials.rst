@@ -2,11 +2,9 @@ Tutorials
 =========
 
 Every tutorial below is a runnable script in the repository's ``examples/``
-directory: parameters at the top, no ``main()``, and only the public API.
-Fast workflows are smoke-tested on pull requests; expensive optimization and
-free-boundary workflows run in nightly CI, and external-code validation
-scripts state their pinned dependency explicitly. Copy a script, edit the
-parameter block, and go.
+directory: parameters at the top, no ``main()``, only the public API, and each
+is smoke-tested in CI (``tests/test_examples.py``) so the code on this
+page always runs.  Copy a script, edit the parameter block, and go.
 
 Run any of them directly::
 
@@ -38,7 +36,7 @@ All diagnostics and the Boozer transform
 
 vmec-jax ships its plotting and its Boozer transform in the box.  This produces
 every ``plot_wout`` figure (flux-surface summary, cross-sections, ``|B|``,
-profiles, and a 3D ``|B|`` render with LCFS field lines) and the straight-field-line Boozer ``|B|`` spectrum on the last closed
+profiles, 3D render) and the straight-field-line Boozer ``|B|`` spectrum on the last closed
 flux surface — the view used to judge quasisymmetry.
 
 .. literalinclude:: ../examples/plot_and_boozer.py
@@ -134,56 +132,28 @@ surface is an output, not an input.
 .. literalinclude:: ../examples/free_boundary_mgrid.py
    :language: python
 
-Direct ESSOS coils
-~~~~~~~~~~~~~~~~~~
-
-``free_boundary_essos_coils.py`` keeps coil ownership in ESSOS.  It tabulates
-the Landreman--Paul QA coil Biot--Savart field once into an in-memory
-``MgridField`` for the NESTOR forward solve, with no mgrid file to manage.
-Its virtual-casing objective separately accepts the same ESSOS ``xyz -> B``
-callable for differentiation.  The scan calibrates pressure against *achieved*
-WOUT beta and uses bounded adaptive continuation. The validated branch reaches
-3.350% actual beta; the failed 3.3625% minimum-step trial is retained as a
-conditioning limit rather than shown as a converged surface.
-
-.. image:: _static/figures/readme_essos_beta_scan.png
-   :alt: Direct-coil Landreman-Paul free-boundary beta continuation
-   :width: 95%
-
-.. literalinclude:: ../examples/free_boundary_essos_coils.py
-   :language: python
-
 Free-boundary beta scan
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 Ramp the pressure of the free-boundary case at fixed coil currents; the boundary
 is re-solved by NESTOR at every step as the plasma pushes outward against the
-external field. Each converged state seeds the next pressure point, including
-its solved LCFS.
+external field.
 
 .. literalinclude:: ../examples/free_boundary_beta_scan.py
    :language: python
 
-Single-stage free-boundary coil optimization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Directly from ESSOS coils (no mgrid file)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Optimize external-current amplitudes against the virtual-casing normal-field
-residual using its exact gradient. This example requires the fetched CTH WOUT
-and mgrid assets; it skips cleanly when those optional validation files are not
-installed.
+vmec-jax is coil-agnostic: the free-boundary solver consumes only a magnetic
+field, so coils can come from ESSOS (``essos.coils.Coils``) instead of a
+tabulated mgrid file.  This takes the Landreman–Paul precise-QA modular coil
+set, tabulates its Biot–Savart field once into an in-memory
+:class:`~vmec_jax.core.mgrid.MgridField`, and runs a free-boundary beta scan
+against it — calibrating ``PRES_SCALE`` per step so the converged wout
+``betatotal`` lands on 0/1/2/3 %.
 
-.. literalinclude:: ../examples/single_stage_free_boundary_opt.py
-   :language: python
-
-Simultaneous plasma-boundary and coil optimization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Optimize low-order plasma-boundary modes and external-current amplitudes in one
-objective. The exact joint gradient combines the fixed-boundary implicit adjoint
-with the moving-surface virtual-casing derivative, while a frozen precision plan
-keeps adaptive quadrature outside the traced calculation.
-
-.. literalinclude:: ../examples/single_stage_simultaneous_opt.py
+.. literalinclude:: ../examples/free_boundary_essos_coils.py
    :language: python
 
 
@@ -262,9 +232,6 @@ Goodman constructed-QI residual (:class:`~vmec_jax.core.omnigenity.QIResidual`)
 plus practical targets, one call at ``max_mode = 6`` (25x residual
 reduction in 17.3 minutes).
 
-.. literalinclude:: ../examples/optimization/QI_optimization_ess.py
-   :language: python
-
 Staged ``max_mode`` continuation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -279,32 +246,23 @@ reproducible.
 .. literalinclude:: ../examples/optimization/QA_optimization.py
    :language: python
 
-.. literalinclude:: ../examples/optimization/QH_optimization.py
-   :language: python
-
-.. literalinclude:: ../examples/optimization/QP_optimization.py
-   :language: python
-
-.. literalinclude:: ../examples/optimization/QI_optimization.py
-   :language: python
+These are the heaviest examples (hundreds to thousands of solves) and are
+exercised in the nightly CI run.
 
 Self-consistent bootstrap current
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The QA and QH bootstrap examples alternate the equilibrium with the
-differentiable Redl current model until the current-profile mismatch closes.
-They reproduce the workflow of Landreman, Buller, and Drevlak (2022) against
-the optional Zenodo archive selected by ``VMEC_JAX_ZENODO_2205_02914``.
-
-.. image:: _static/figures/readme_bootstrap.png
-   :alt: Self-consistent QA and QH bootstrap-current validation
-   :width: 95%
+A different loop: instead of reshaping the boundary, regenerate the *current
+profile* until it is consistent with the bootstrap current the plasma itself
+drives.  ``QA_bootstrap_selfconsistent.py`` (and its sibling
+``QH_bootstrap_selfconsistent.py``)
+reproduces the quasi-axisymmetric configuration of Landreman–Buller–Drevlak
+(arXiv:2205.02914): it erases the deck's current profile and lets the
+fixed-boundary Picard loop
+:func:`~vmec_jax.core.bootstrap.self_consistent_bootstrap` rebuild it from the
+Redl formula, converging to the paper's mismatch ``f_boot = 2e-6`` in a
+handful of hot-restarted iterations.  The physics of the Redl closure is on
+:doc:`confinement`.
 
 .. literalinclude:: ../examples/optimization/QA_bootstrap_selfconsistent.py
    :language: python
-
-.. literalinclude:: ../examples/optimization/QH_bootstrap_selfconsistent.py
-   :language: python
-
-These are the heaviest examples (hundreds to thousands of solves) and are
-exercised in the nightly CI run.

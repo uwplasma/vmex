@@ -158,7 +158,13 @@ fixed-boundary degrees of freedom — boundary Fourier coefficients,
 ``phiedge``, and profile parameters (``pres_scale``) — on a 2D (solovev)
 and a 3D (li383) case, with agreement at the 1e-6 relative level (2D) and
 at the finite-difference noise floor (3D)
-(``tests/test_implicit_grad.py``).
+(``tests/test_implicit_grad.py``).  For *solver-sensitive* metrics (iota,
+mirror ratio, magnetic well, the QI residual) a naive re-solving finite
+difference is **not** a valid reference — it perturbs the solver's discrete
+convergence path, not just the fixed point — and the frozen-path FD
+(:func:`~vmec_jax.core.implicit.frozen_path_directional_fd`) must be used
+instead; see *Gradient checking: solver-sensitive metrics and the frozen
+path* in :doc:`algorithms`.
 
 Implicit gradients are not merely faster than finite differences here —
 on the flagship campaigns they are *necessary*: the exact-axisymmetric seed
@@ -225,17 +231,13 @@ versus GPU placement question are quantified in :doc:`performance`.
 Free-boundary gradients (virtual casing)
 ----------------------------------------
 
-For a **fixed trial free boundary**, coil objectives are differentiable through
-a different route
+**Free boundary** is differentiable through a different route
 (:mod:`vmec_jax.core.freeboundary_diff`): rather than differentiating the
 NESTOR vacuum solve, the plasma-boundary contribution to the vacuum field
 is computed by **virtual casing**, which is a smooth function of the coil /
-``extcur`` parameters and the plasma surface. These fixed-surface derivatives
-are finite-difference-validated. The coupled solved-LCFS residual lives in
-:mod:`vmec_jax.core.freeboundary_implicit`; forward implicit sensitivities for
-a small number of ``extcur`` directions are also FD-validated, while its
-many-parameter adjoint is not yet a public optimization path. (The two scopes
-are complementary: the
+``extcur`` parameters and the plasma surface.  Coil-parameter derivatives
+of free-boundary outputs are obtained end-to-end this way and are
+finite-difference-validated.  (The two scopes are complementary: the
 fixed-boundary implicit adjoint is validated to ~1e-6 relative; the
 free-boundary virtual-casing path is FD-validated.)  See the
 *Differentiable free boundary* section of :doc:`algorithms`.
@@ -269,12 +271,13 @@ values).  ``examples/single_stage_simultaneous_opt.py`` runs the full loop:
 from the bundled CTH-like free-boundary equilibrium it reshapes the boundary to
 move the edge rotational transform while re-tuning the coils to keep
 ``<(B.n)^2>`` small — one exact gradient over both dof families.
-
-``examples/single_stage_essos_coils_opt.py`` is the coil-agnostic variant:
-its coil half is an ESSOS ``essos.coils.Coils`` Biot--Savart callable, while
-the forward NESTOR solve remains an ``MgridField`` calculation.  This keeps the
-production equilibrium backend independent of any particular coil package
-without breaking the differentiable coil path.
+``examples/single_stage_essos_coils_opt.py`` is the coil-agnostic variant of
+the same loop, driving the coil half straight from an ESSOS
+``essos.coils.Coils`` Biot–Savart callable (no mgrid file), and
+``examples/single_stage_free_boundary_opt.py`` is the coil-only half in
+isolation — perturb the confining coil currents of the bundled CTH-like case
+and recover them by minimizing ``<(B.n)^2>`` with the exact virtual-casing
+gradient (finite-difference-validated to ~1e-9).
 
 Worked results
 --------------
@@ -284,31 +287,10 @@ precise quasisymmetry and strong quasi-isodynamicity (measured on an office
 CPU): QA (nfp 2) QS **7.2e-6** in one 14.5-minute call (the staged ladder
 reaches 3.7e-7 in 25.5 min), QH (nfp 4) QS **5.83e-5**, QP (nfp 2) QS
 9.4e-2 (honestly the hardest class — basin-limited), and QI (nfp 1)
-compact omnigenity residual **9.58e-3** after three fixed-weight restoration
-calls. Implicit gradients are necessary here: the exact-axisymmetric seed is
-a saddle of the QS residual where finite differences stall, and for QP the
-implicit path selects a better basin. The complete scripts are in
-``examples/optimization/``
+omnigenity residual **1.81e-2**, 25x below the seed, in one 17.3-minute
+call.  The complete scripts are in ``examples/optimization/``
 (``QA``/``QH``/``QP``/``QI``, each with an ``_ess`` single-call variant
 where measured).
-
-.. figure:: _static/figures/qi_compact_convergence.png
-   :alt: Compact QI trust-region convergence and QI/aspect continuation path
-   :align: center
-   :width: 92%
-
-   The QI ESS solve releases all max-mode-6 harmonics at once. Three
-   fixed-weight continuation calls restore the measured acceptance region
-   without a mode ladder. The accepted restart reconverges to
-   ``fsqr=9.99e-14`` and is guarded by a permanent full test; see
-   ``benchmarks/qi_compact.json`` for timings, memory, and residual components.
-
-.. figure:: _static/figures/qi_compact_3d.png
-   :alt: Compact quasi-isodynamic LCFS colored by magnetic-field strength with field lines
-   :align: center
-   :width: 58%
-
-   Accepted compact-QI LCFS coloured by ``|B|`` with pitched field lines.
 
 .. figure:: _static/figures/readme_optimization.png
    :alt: QA/QH/QP seed vs optimized boundary, 3-D |B|, and Boozer |B| on the LCFS

@@ -79,7 +79,7 @@ from vmec_jax.core.input import VmecInput
 from vmec_jax.core import solver
 from vmec_jax.core.multigrid import solve_multigrid
 
-from .conftest import resolve_golden_dir
+from conftest import resolve_golden_dir
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 GOLDEN_DIR = resolve_golden_dir()

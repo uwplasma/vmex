@@ -114,8 +114,7 @@ Reading the table:
   fire-and-forget run is slower than Fortran — except on the biggest deck
   (NuhrenbergZille at ns=201), where even the cold run, compile included,
   beats VMEC2000. The persistent compilation cache removes most of the
-  compile cost on subsequent processes. vmec_jax enables a machine-fingerprinted
-  CPU/GPU cache by default; set ``VMEC_JAX_COMPILATION_CACHE=disabled`` to opt out.
+  compile cost on subsequent processes.
 - **VMEC++** is genuinely faster on some converged large decks (free
   boundary, LandremanPaul QA) but *failed* rows aborted during the first
   iterations; ``vmec_jax`` converges on the full suite (zero-crash policy).
@@ -125,7 +124,7 @@ Reading the table:
 Production workflows: CPU vs GPU
 --------------------------------
 
-``benchmarks/profile_production.py`` times the production workflows a design
+``benchmarks/profile_production.py`` times the five workflows a design
 loop actually runs, at production resolution. Warm wall-clock, measured
 2026-07-12 (CPU: local Apple-Silicon, idle; GPU: office 2x NVIDIA RTX
 A4000, jax cuda12 — different hosts, so read each column on its own terms):
@@ -145,13 +144,10 @@ A4000, jax cuda12 — different hosts, so read each column on its own terms):
      - 9.3 s
    * - implicit ``value_and_grad`` (boundary dofs)
      - **17.3 s**
-     - 24.3 s
+     - 27.8 s
    * - ``least_squares`` opt step (2 nfev)
-     - **34.3 s**
-     - 85.2 s
-   * - CTH free-boundary solve (574 iterations)
-     - n/a
-     - 7.40 s (12.9 ms/iter)
+     - **88.8 s**
+     - 151 s
 
 The headline: **a fast desktop CPU beats the A4000 GPU on every production
 workflow, even at ns = 201.** Forward solves are close (the GPU is
@@ -162,12 +158,6 @@ implicit-gradient work to the CPU by default (an earlier placement leak
 here cost 2x on GPU boxes — fixed, and the pin is now automatic). The
 GPU's wins come against slower server cores and larger-than-production
 problem sizes (see the GPU guidance below).
-
-Cold GPU walls are much larger: 31.3 s fixed, 60.2 s multigrid, 83.4 s
-implicit gradient, 93.4 s free boundary, and 203 s for the optimization
-case. Coupled free-boundary sensitivity exceeded a five-minute case cap.
-See ``benchmarks/production_gpu_2026-07-12.json``; never compare a cold GPU
-number with a warm CPU number.
 
 Optimization wall time
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -314,23 +304,6 @@ tokamak, a tie even on the aspect-100 case) — and peak memory is ≈30% higher
 to ~1e-10, so it changes the path, not the fixed point. Reach for it when the
 1D iteration count is the bottleneck or stalls, not as a blanket default.
 
-For safeguarded runs, ``SolveResult.newton_history`` records the effective
-accepted Newton step and the inner GMRES residual at every nonlinear
-iteration. A step of ``-1`` means no Newton attempt was scheduled, while
-``0`` means the physical-force line search rejected the correction and the
-regular VMEC update was used. This keeps convergence plots and stall reports
-based on recorded solver diagnostics rather than console parsing.
-
-``Prec2DConfig.row_scales`` optionally left-scales the inner ``(R, Z,
-lambda)`` equations. This does not change an exact Newton direction and is
-never used by the physical-force line search; it only conditions a truncated
-GMRES solve. Keep the default ``(1, 1, 1)`` unless channel diagnostics show a
-clear imbalance and a convergence study validates the alternative.
-``auto_balance_lambda=True`` instead derives a bounded lambda scale from the
-current active channel norms at each Newton attempt and freezes it for that
-GMRES solve. The used value is the third column of
-``SolveResult.newton_history``.
-
 Memory
 ------
 
@@ -349,10 +322,7 @@ solves. Two knobs bound the optimization-time footprint:
   wall time, bit-identically (plan.md R16).
 - The converged-state memo (plan.md R25.1) removed a redundant equilibrium
   solve per accepted optimizer iterate and cut the profiled ``opt_step``
-  peak RSS from 6.0 to 3.5 GB. The faster block-Jacobian default trades this
-  to about 4.9 GB CPU compile peak for a 33x Jacobian-phase speedup;
-  ``jac_solver="gmres"`` remains the lower-memory fallback. The office GPU
-  optimization process peaked at 8.64 GB host RSS.
+  peak RSS from 6.0 to 3.5 GB.
 
 GPU guidance
 ------------
@@ -394,14 +364,9 @@ only:
 Persistent compilation cache
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``vmec-jax`` enables a machine-fingerprinted persistent XLA compilation cache
-on CPU and accelerators, so the multi-second compile cost is paid once per
-machine, not once per process. The CLI advances in 50-iteration compiled blocks:
-the converged body freezes exactly at the accepted iteration, while fewer host
-round trips reduce cached circular-tokamak solver time from 2.26 to 1.95 s.
-Its current cached computational time is 2.13 s and complete process wall is
-2.74 s; the whole-device ``jit`` lane has the same process wall, establishing
-that the remaining 0.61 s is import/process overhead rather than block dispatch.
+``vmec-jax`` enables JAX's persistent XLA compilation cache on accelerators,
+so the multi-second compile cost is paid once per machine, not once per
+process.
 
 .. warning::
 
@@ -428,7 +393,6 @@ Reproducing the numbers
    python benchmarks/run_baseline.py         # CPU suite -> benchmarks/baseline.json
    python benchmarks/run_gpu_matrix.py       # GPU matrix -> benchmarks/gpu_baseline.json
    python benchmarks/profile_production.py   # the five production workflows
-   python benchmarks/profile_cold_start.py   # isolated cache, first + second process
    pytest tests/test_parity_breadth.py     # end-to-end parity suite
 
 The parity suite needs the golden VMEC2000 fixtures (fetched release assets);
