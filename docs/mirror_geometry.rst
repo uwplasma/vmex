@@ -44,9 +44,13 @@ sections. The first geometry gate now provides a periodic cubic B-spline
 racetrack and a rotation-minimizing frame with periodic holonomy correction.
 Circle tests cover curvature, arc length, frame closure, and centerline
 coefficient gradients; a 32-control racetrack retains exact straight interiors
-over 56% of its sampled axis. Surface metrics and an equilibrium solve remain
-unimplemented, so ordinary toroidal Fourier projection and the spline geometry
-are not presented as supported equilibrium models.
+over 56% of its sampled axis. The shared geometry metric now embeds circular
+and rotating-ellipse sections around that frame without end cuts. Its circular
+limit recovers analytic torus volume to ``2e-5`` relative and keeps discrete
+``div(B)`` below ``2e-14``; the racetrack ellipse rotates 90 degrees between
+the long legs and matches its area-times-axis-length volume to ``3e-4``.
+An equilibrium solve remains unimplemented, so ordinary toroidal Fourier
+projection and the spline geometry are not presented as supported models.
 
 Plotting and output scope
 -------------------------

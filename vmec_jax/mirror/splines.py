@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .basis import MirrorGrid, ThetaBasis
-from .model import MirrorBoundary, MirrorConfig, MirrorState
+from .model import MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState
 
 Array = Any
 _DEGREE = 3
@@ -238,7 +238,7 @@ class CubicBSplineBasis:
 
 @dataclass(frozen=True, eq=False)
 class _SplineEvaluationBasis:
-    """Endpoint-augmented Gauss grid acting on evaluated spline values."""
+    """Gauss grid acting on evaluated open or periodic spline values."""
 
     spline: CubicBSplineBasis
     nodes: np.ndarray
@@ -249,8 +249,12 @@ class _SplineEvaluationBasis:
 
     @classmethod
     def build(cls, spline: CubicBSplineBasis) -> "_SplineEvaluationBasis":
-        nodes = np.concatenate(([spline.domain[0]], spline.quadrature_nodes, [spline.domain[1]]))
-        weights = np.concatenate(([0.0], spline.quadrature_weights, [0.0]))
+        if spline.periodic:
+            nodes = spline.quadrature_nodes
+            weights = spline.quadrature_weights
+        else:
+            nodes = np.concatenate(([spline.domain[0]], spline.quadrature_nodes, [spline.domain[1]]))
+            weights = np.concatenate(([0.0], spline.quadrature_weights, [0.0]))
         values = np.asarray(spline.basis_matrix(nodes))
         recovery = np.linalg.pinv(values, rcond=1.0e-14)
         derivative = np.asarray(spline.basis_matrix(nodes, derivative=1)) @ recovery
@@ -310,6 +314,7 @@ class SplineMirrorDiscretization:
     spline: CubicBSplineBasis
     grid: MirrorGrid
     evaluation_matrix: np.ndarray
+    closed: bool = False
 
     @classmethod
     def build(
@@ -342,7 +347,37 @@ class SplineMirrorDiscretization:
             z=z_mid + dz_dxi * axial.nodes,
             dz_dxi=dz_dxi,
         )
-        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)))
+        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), False)
+
+    @classmethod
+    def build_closed(
+        cls,
+        resolution: MirrorResolution,
+        *,
+        coefficient_count: int,
+        quadrature_order: int = 4,
+    ) -> "SplineMirrorDiscretization":
+        """Build a periodic spline grid for a closed mirror-hybrid axis."""
+
+        spline = CubicBSplineBasis.periodic_uniform(
+            coefficient_count,
+            quadrature_order=quadrature_order,
+        )
+        axial = _SplineEvaluationBasis.build(spline)
+        s = np.linspace(0.0, 1.0, resolution.ns)
+        ds = 1.0 / (resolution.ns - 1)
+        radial_weights = np.full(resolution.ns, ds)
+        radial_weights[[0, -1]] *= 0.5
+        grid = MirrorGrid(
+            s=s,
+            s_half=0.5 * (s[:-1] + s[1:]),
+            radial_weights=radial_weights,
+            theta_basis=ThetaBasis.build(resolution.ntheta, resolution.mpol),
+            axial_basis=axial,
+            z=np.asarray(axial.nodes),
+            dz_dxi=1.0,
+        )
+        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), True)
 
     @property
     def coefficient_count(self) -> int:
@@ -395,8 +430,9 @@ class SplineMirrorDiscretization:
         radius = jnp.asarray(state.radius_coefficients)
         boundary_radius = jnp.asarray(boundary.radius_coefficients)
         radius = radius.at[-1].set(boundary_radius)
-        radius = radius.at[:, :, 0].set(boundary_radius[:, 0][None, :])
-        radius = radius.at[:, :, -1].set(boundary_radius[:, -1][None, :])
+        if not self.closed:
+            radius = radius.at[:, :, 0].set(boundary_radius[:, 0][None, :])
+            radius = radius.at[:, :, -1].set(boundary_radius[:, -1][None, :])
         radius = radius.at[0].set(radius[1])
         lam = jnp.asarray(state.lambda_coefficients).at[0].set(state.lambda_coefficients[1])
         evaluated = jnp.tensordot(lam, jnp.asarray(self.evaluation_matrix).T, axes=((-1,), (0,)))

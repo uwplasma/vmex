@@ -281,8 +281,8 @@ The exact numerical contracts and failed promotion gates are in
        native spline axis and surface state
    * - Native spline-state toroidal hybrid
      - Deferred
-     - Periodic centerline and closure-corrected frame are validated; the
-       closed surface metric and equilibrium solve are not yet implemented
+     - Periodic centerline, frame, rotating ellipse, and torus metric are
+       validated; the closed equilibrium solve is not yet implemented
 
 Code and validation footprint
 -----------------------------

@@ -202,7 +202,7 @@ equilibrium criterion.
 | Implicit derivatives | 74% | nodal/free VJP plus spline nonaxisymmetric adjoint FD checks | forward spline tangent and SOLVAX scaling |
 | Preconditioning | 45% | separable prototype and Newton-GMRES | no bounded-iteration basis/resolution study |
 | Native B-spline open mirror | 70% | basis/state/transfer, fixed solve, knot convergence, coefficient preconditioner and adjoint | free-boundary state and forward tangent |
-| Native B-spline closed hybrid | 12% | periodic racetrack centerline, closure-corrected frame, coefficient gradients | surface metric, residual, fixed solve, limits, derivatives |
+| Native B-spline closed hybrid | 25% | periodic racetrack/frame, rotating ellipse, analytic torus metric, `div(B)`, geometry gradients | energy residual, fixed solve, limits, implicit derivatives |
 | ESSOS ownership cleanup | 100% | MGRID/callable contract and live ESSOS smoke | none |
 | Source simplification | 40% | Fourier-hybrid and coil ownership removed | public API and large mirror modules remain |
 
@@ -547,6 +547,18 @@ limit verifies curvature, arc length, C2 endpoint continuity, orthonormality,
 and finite nonzero reverse derivatives with respect to every centerline
 coefficient. This is geometry evidence only; no equilibrium capability is
 claimed until the metric and fixed-boundary gates below pass.
+
+The second geometry gate reuses ``MirrorGeometry`` by storing its Cartesian
+coordinate basis vectors, so straight and closed embeddings share field
+conversion and metric contraction. The periodic spline discretization has no
+artificial end cuts. A circular-axis, circular-section limit recovers analytic
+torus volume to ``2e-5`` relative, keeps ``div(B)`` below ``2e-14``, and agrees
+between Cartesian and covariant ``|B|^2`` below ``3e-14``. On the racetrack,
+an ellipse represented in the same periodic spline state rotates 90 degrees
+between opposite straight legs, returns with up/down symmetry, preserves
+positive Jacobian, matches ``pi*a*b*axis_length`` to ``3e-4``, and has finite
+reverse derivatives with respect to centerline controls. The remaining metric
+gate is an independent finite-difference derivative check before solving MHD.
 
 1. Define a periodic cubic B-spline Cartesian centerline with two long straight
    legs and two smooth curved returns; enforce closure and at least C2 continuity.

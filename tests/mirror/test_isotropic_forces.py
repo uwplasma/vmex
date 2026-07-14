@@ -401,7 +401,7 @@ def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None
     np.testing.assert_allclose(result.state.radius_scale, 0.3, atol=2.0e-13)
 
 
-def test_matrix_free_solver_closes_large_system_dense_reference_limit() -> None:
+def test_host_reference_closes_medium_system_above_old_dense_limit() -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=17, mpol=0, ntheta=1, nxi=41),
         z_min=-1.2,
@@ -418,7 +418,8 @@ def test_matrix_free_solver_closes_large_system_dense_reference_limit() -> None:
         base,
         radius_scale=base.radius_scale + 0.03 * s * (1.0 - s) * (1.0 - xi**2),
     )
-    assert (grid.ns - 2) * (grid.nxi - 2) > 512
+    active_size = (grid.ns - 2) * (grid.nxi - 2)
+    assert 512 < active_size < 1024
 
     result = solve_fixed_boundary_cli(
         initial,
@@ -430,8 +431,8 @@ def test_matrix_free_solver_closes_large_system_dense_reference_limit() -> None:
         require_convergence=True,
     )
     assert result.converged
-    assert result.linear_iterations > 0
-    assert result.final_linear_residual < 1.0e-8
+    assert result.linear_iterations == 0
+    assert result.final_linear_residual == 0.0
     assert float(result.variational.maximum) <= config.ftol
     assert float(result.force.normalized_rms) < 1.0e-11
 

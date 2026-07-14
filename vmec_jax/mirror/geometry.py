@@ -57,6 +57,9 @@ class MirrorGeometry:
     sqrt_g: Array
     volume: Array
     jacobian_sign_changed: Array
+    e_s_xyz: Array
+    e_theta_xyz: Array
+    e_xi_xyz: Array
 
 
 @dataclass(frozen=True)
@@ -281,6 +284,25 @@ def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometr
         ],
         axis=-1,
     )
+    cosine, sine = jnp.cos(theta), jnp.sin(theta)
+    zeros = jnp.zeros_like(radius)
+    e_s = jnp.stack([r_s * cosine, r_s * sine, zeros], axis=-1)
+    e_theta = jnp.stack(
+        [
+            d_radius_dtheta * cosine - radius * sine,
+            d_radius_dtheta * sine + radius * cosine,
+            zeros,
+        ],
+        axis=-1,
+    )
+    e_xi = jnp.stack(
+        [
+            d_radius_dxi * cosine,
+            d_radius_dxi * sine,
+            jnp.full_like(radius, float(grid.dz_dxi)),
+        ],
+        axis=-1,
+    )
     volume = jnp.einsum(
         "i,j,k,ijk->",
         jnp.asarray(grid.radial_weights),
@@ -305,6 +327,93 @@ def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometr
         sqrt_g=sqrt_g,
         volume=volume,
         jacobian_sign_changed=sign_changed,
+        e_s_xyz=e_s,
+        e_theta_xyz=e_theta,
+        e_xi_xyz=e_xi,
+    )
+
+
+def evaluate_closed_geometry(
+    state: "MirrorState",
+    grid: "MirrorGrid",
+    axis: ClosedAxisGeometry,
+) -> MirrorGeometry:
+    """Embed a mirror state around a periodic spline centerline.
+
+    The poloidal radius remains ``sqrt(s) * a(s, theta, xi)``. The axis frame
+    carries that cross-section through long straight legs and curved returns;
+    its derivatives include both centerline curvature and periodic frame twist.
+    """
+
+    state.validate_shape(grid)
+    if axis.centerline.shape != (grid.nxi, 3):
+        raise ValueError(f"closed axis shape {axis.centerline.shape} must be ({grid.nxi}, 3)")
+    a = jnp.asarray(state.radius_scale)
+    sqrt_s = jnp.sqrt(jnp.asarray(grid.s))[:, None, None]
+    radius = sqrt_s * a
+    d_a_dtheta = grid.theta_basis.differentiate(a, axis=1)
+    d_a_dxi = grid.axial_basis.differentiate(a, axis=2)
+    d_radius_dtheta = sqrt_s * d_a_dtheta
+    d_radius_dxi = sqrt_s * d_a_dxi
+
+    ds = float(grid.s[1] - grid.s[0])
+    r_r_s = 0.5 * radial_derivative(radius * radius, ds)
+    r_s = _safe_divide(r_r_s, radius).at[0].set(_safe_divide(r_r_s, radius)[1])
+
+    theta = jnp.asarray(grid.theta)[None, :, None, None]
+    normal = jnp.asarray(axis.normal)[None, None, :, :]
+    binormal = jnp.asarray(axis.binormal)[None, None, :, :]
+    radial_direction = jnp.cos(theta) * normal + jnp.sin(theta) * binormal
+    poloidal_direction = -jnp.sin(theta) * normal + jnp.cos(theta) * binormal
+    normal_derivative = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[None, None]
+    binormal_derivative = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[None, None]
+    radial_direction_derivative = jnp.cos(theta) * normal_derivative + jnp.sin(theta) * binormal_derivative
+    centerline_derivative = (jnp.asarray(axis.tangent) * jnp.asarray(axis.speed)[:, None])[None, None]
+
+    e_s = r_s[..., None] * radial_direction
+    e_theta = d_radius_dtheta[..., None] * radial_direction + radius[..., None] * poloidal_direction
+    e_xi = (
+        centerline_derivative
+        + d_radius_dxi[..., None] * radial_direction
+        + radius[..., None] * radial_direction_derivative
+    )
+    xyz = jnp.asarray(axis.centerline)[None, None] + radius[..., None] * radial_direction
+
+    g_ss = jnp.sum(e_s * e_s, axis=-1)
+    g_stheta = jnp.sum(e_s * e_theta, axis=-1)
+    g_sxi = jnp.sum(e_s * e_xi, axis=-1)
+    g_thetatheta = jnp.sum(e_theta * e_theta, axis=-1)
+    g_thetaxi = jnp.sum(e_theta * e_xi, axis=-1)
+    g_xixi = jnp.sum(e_xi * e_xi, axis=-1)
+    orientation = jnp.sum(radial_direction * jnp.cross(poloidal_direction, e_xi), axis=-1)
+    sqrt_g = r_r_s * orientation
+    volume = jnp.einsum(
+        "i,j,k,ijk->",
+        jnp.asarray(grid.radial_weights),
+        jnp.asarray(grid.theta_basis.weights),
+        jnp.asarray(grid.axial_basis.weights),
+        sqrt_g,
+    )
+    interior = sqrt_g[1:]
+    sign_changed = (jnp.min(interior) <= 0.0) | (jnp.max(interior) <= 0.0)
+    return MirrorGeometry(
+        xyz=xyz,
+        radius=radius,
+        d_radius_ds_regular=r_r_s,
+        d_radius_dtheta=d_radius_dtheta,
+        d_radius_dxi=d_radius_dxi,
+        g_ss=g_ss,
+        g_stheta=g_stheta,
+        g_sxi=g_sxi,
+        g_thetatheta=g_thetatheta,
+        g_thetaxi=g_thetaxi,
+        g_xixi=g_xixi,
+        sqrt_g=sqrt_g,
+        volume=volume,
+        jacobian_sign_changed=sign_changed,
+        e_s_xyz=e_s,
+        e_theta_xyz=e_theta,
+        e_xi_xyz=e_xi,
     )
 
 
@@ -403,39 +512,10 @@ def magnetic_field_squared(field: ContravariantField, geometry: MirrorGeometry) 
 
 def magnetic_field_xyz(field: ContravariantField, geometry: MirrorGeometry) -> Array:
     """Convert contravariant magnetic components to Cartesian components."""
-
-    radius = geometry.radius
-    radius_s = _safe_divide(geometry.d_radius_ds_regular, radius)
-    radius_s = radius_s.at[0].set(radius_s[1])
-    theta = jnp.arctan2(geometry.xyz[..., 1], geometry.xyz[..., 0])
-    cosine, sine = jnp.cos(theta), jnp.sin(theta)
-    zeros = jnp.zeros_like(radius)
-    e_s = jnp.stack([radius_s * cosine, radius_s * sine, zeros], axis=-1)
-    e_theta = jnp.stack(
-        [
-            geometry.d_radius_dtheta * cosine - radius * sine,
-            geometry.d_radius_dtheta * sine + radius * cosine,
-            zeros,
-        ],
-        axis=-1,
-    )
-    e_xi = jnp.stack(
-        [
-            geometry.d_radius_dxi * cosine,
-            geometry.d_radius_dxi * sine,
-            jnp.sqrt(
-                jnp.maximum(
-                    geometry.g_xixi - geometry.d_radius_dxi**2,
-                    0.0,
-                )
-            ),
-        ],
-        axis=-1,
-    )
     return (
-        field.b_sup_s[..., None] * e_s
-        + field.b_sup_theta[..., None] * e_theta
-        + field.b_sup_xi[..., None] * e_xi
+        field.b_sup_s[..., None] * geometry.e_s_xyz
+        + field.b_sup_theta[..., None] * geometry.e_theta_xyz
+        + field.b_sup_xi[..., None] * geometry.e_xi_xyz
     )
 
 
