@@ -9,13 +9,6 @@ from typing import Any
 import jax.numpy as jnp
 import jax
 import numpy as np
-from .basis import _cgl_derivative_matrix
-from .exterior_cap_panels import (
-    curved_cap_geometry as _curved_cap_geometry,
-    curved_cap_gradient_sum as _curved_cap_gradient_sum,
-    curved_cap_layer_sum as _curved_cap_layer_sum,
-    spectral_cap_samples as _spectral_cap_samples,
-)
 from .exterior_interpolation import (
     cgl_interpolation_weights as _cgl_interpolation_weights,
     periodic_interpolation_weights as _periodic_interpolation_weights,
@@ -193,124 +186,6 @@ def _spectral_side_density_samples(
     return samples[0] if scalar_input else samples
 
 
-def _curved_side_geometry(
-    triangle_indices: Array,
-    lateral_xyz: Array,
-    *,
-    order: int,
-    axisymmetric: bool,
-) -> tuple[Array, Array]:
-    """Evaluate the spectral side surface and oriented ``dX/du x dX/dv``."""
-
-    lateral_xyz = jnp.asarray(lateral_xyz)
-    ntheta, nxi = lateral_xyz.shape[:2]
-    theta, axial, theta_u, theta_v, axial_u, axial_v = _side_parameter_data(
-        triangle_indices,
-        ntheta=ntheta,
-        nxi=nxi,
-        order=order,
-        dtype=lateral_xyz.dtype,
-    )
-    radius = jnp.linalg.norm(lateral_xyz[..., :2], axis=-1)
-    modes = jnp.fft.fftfreq(ntheta, d=1.0 / ntheta)
-    radius_theta = jnp.fft.ifft(1j * modes[:, None] * jnp.fft.fft(radius, axis=0), axis=0).real
-    derivative = jnp.asarray(_cgl_derivative_matrix(nxi), dtype=radius.dtype)
-    radius_axial = jnp.einsum("kl,jl->jk", derivative, radius)
-    radius_samples = _spectral_side_density_samples(
-        triangle_indices,
-        jnp.stack([radius, radius_theta, radius_axial]).reshape(3, -1),
-        ntheta=ntheta,
-        nxi=nxi,
-        order=order,
-        axisymmetric=axisymmetric,
-    )
-    sampled_radius, sampled_theta, sampled_axial = radius_samples
-    cosine, sine = jnp.cos(theta), jnp.sin(theta)
-    z_nodes = lateral_xyz[0, :, 2]
-    z_mid = 0.5 * (z_nodes[0] + z_nodes[-1])
-    dz_dxi = 0.5 * (z_nodes[-1] - z_nodes[0])
-    source = jnp.stack(
-        [sampled_radius * cosine, sampled_radius * sine, z_mid + dz_dxi * axial],
-        axis=-1,
-    )
-    tangent_theta = jnp.stack(
-        [
-            sampled_theta * cosine - sampled_radius * sine,
-            sampled_theta * sine + sampled_radius * cosine,
-            jnp.zeros_like(sampled_radius),
-        ],
-        axis=-1,
-    )
-    tangent_axial = jnp.stack(
-        [sampled_axial * cosine, sampled_axial * sine, jnp.full_like(sampled_radius, dz_dxi)],
-        axis=-1,
-    )
-    tangent_u = tangent_theta * theta_u[..., None] + tangent_axial * axial_u[..., None]
-    tangent_v = tangent_theta * theta_v[..., None] + tangent_axial * axial_v[..., None]
-    return source, jnp.cross(tangent_u, tangent_v)
-
-
-@partial(jax.jit, static_argnames=("order", "axisymmetric"))
-def _curved_side_layer_sum(
-    target: Array,
-    triangle_indices: Array,
-    lateral_xyz: Array,
-    dirichlet: Array,
-    neumann: Array,
-    *,
-    order: int,
-    axisymmetric: bool,
-) -> Array:
-    """Sum Green layers on the curved lateral surface."""
-
-    nodes, weights = _unit_gauss_legendre(order)
-    source, area_vectors = _curved_side_geometry(triangle_indices, lateral_xyz, order=order, axisymmetric=axisymmetric)
-    displacement = target[None, None, None, :] - source
-    inverse_radius = jax.lax.rsqrt(jnp.sum(displacement**2, axis=-1))
-    area_scale = jnp.linalg.norm(area_vectors, axis=-1)
-    normal_displacement_area = jnp.sum(area_vectors * displacement, axis=-1)
-    weights_2d = (
-        jnp.asarray(weights, dtype=source.dtype)[None, :, None]
-        * jnp.asarray(weights, dtype=source.dtype)[None, None, :]
-    )
-    integrand = (neumann * area_scale * inverse_radius - dirichlet * normal_displacement_area * inverse_radius**3) / (
-        4.0 * jnp.pi
-    )
-    return jnp.sum(weights_2d * integrand)
-
-
-@partial(jax.jit, static_argnames=("order", "axisymmetric"))
-def _curved_side_gradient_sum(
-    target: Array,
-    triangle_indices: Array,
-    lateral_xyz: Array,
-    dirichlet: Array,
-    neumann: Array,
-    *,
-    order: int,
-    axisymmetric: bool,
-) -> Array:
-    """Evaluate the Green-layer gradient on the curved lateral surface."""
-
-    _, weights = _unit_gauss_legendre(order)
-    source, area_vectors = _curved_side_geometry(triangle_indices, lateral_xyz, order=order, axisymmetric=axisymmetric)
-    displacement = target[None, None, None, :] - source
-    radius_squared = jnp.sum(displacement**2, axis=-1)
-    inverse_radius3 = jax.lax.rsqrt(radius_squared) ** 3
-    area_scale = jnp.linalg.norm(area_vectors, axis=-1)
-    normal_displacement_area = jnp.sum(area_vectors * displacement, axis=-1)
-    single = -neumann[..., None] * area_scale[..., None] * displacement * inverse_radius3[..., None]
-    double = dirichlet[..., None] * (
-        -area_vectors * inverse_radius3[..., None]
-        + 3.0 * normal_displacement_area[..., None] * displacement * (inverse_radius3 / radius_squared)[..., None]
-    )
-    weights_2d = (
-        jnp.asarray(weights, dtype=source.dtype)[None, :, None, None]
-        * jnp.asarray(weights, dtype=source.dtype)[None, None, :, None]
-    )
-    return jnp.sum(weights_2d * (single + double), axis=(0, 1, 2)) / (4.0 * jnp.pi)
-
-
 @partial(jax.jit, static_argnames=("order",))
 def _triangle_layer_sum(
     target: Array,
@@ -410,12 +285,7 @@ def panel_green_gradient_off_surface(
     *,
     order: int = 8,
     lateral_shape: tuple[int, int] | None = None,
-    lateral_xyz: Array | None = None,
-    lower_cap_xyz: Array | None = None,
-    upper_cap_xyz: Array | None = None,
     spectral_side_density: bool = False,
-    spectral_cap_density: bool = False,
-    curved_side_geometry: bool = False,
     axisymmetric_side: bool = False,
 ) -> Array:
     """Evaluate Green-layer gradients using triangular panels."""
@@ -448,100 +318,6 @@ def panel_green_gradient_off_surface(
             _linear_density_samples(triangle_dirichlet, order=order).at[:side_count].set(side_samples[0])
         )
         triangle_neumann = _linear_density_samples(triangle_neumann, order=order).at[:side_count].set(side_samples[1])
-    elif curved_side_geometry:
-        raise ValueError("curved side geometry requires spectral side density")
-    if spectral_cap_density:
-        if lateral_shape is None or lower_cap_xyz is None or upper_cap_xyz is None:
-            raise ValueError("cap geometry is required for spectral cap density")
-        ntheta, nxi = lateral_shape
-        side_count = 2 * ntheta * (nxi - 1)
-        cap_count = (triangles.shape[0] - side_count) // 2
-        lower_triangles = triangles[side_count : side_count + cap_count]
-        upper_triangles = triangles[side_count + cap_count :]
-        lower_source, _ = _curved_cap_geometry(lower_triangles, lower_cap_xyz, nxi=nxi, upper=False, order=order)
-        upper_source, _ = _curved_cap_geometry(upper_triangles, upper_cap_xyz, nxi=nxi, upper=True, order=order)
-        if triangle_dirichlet.ndim == 2:
-            triangle_dirichlet = _linear_density_samples(triangle_dirichlet, order=order)
-            triangle_neumann = _linear_density_samples(triangle_neumann, order=order)
-        cap_samples = _spectral_cap_samples(
-            vertices,
-            dirichlet,
-            neumann,
-            lower_cap_xyz,
-            upper_cap_xyz,
-            side_count=side_count,
-            ntheta=ntheta,
-            nxi=nxi,
-            order=order,
-            lower_source=lower_source,
-            upper_source=upper_source,
-        )
-        triangle_dirichlet = triangle_dirichlet.at[side_count:].set(cap_samples[0])
-        triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
-
-    if curved_side_geometry or spectral_cap_density:
-        if lateral_xyz is None:
-            raise ValueError("lateral_xyz is required for curved side geometry")
-        side_vertices = vertices[:side_count]
-        side_gradient = jnp.stack(
-            [
-                _curved_side_gradient_sum(
-                    target,
-                    triangles[:side_count],
-                    lateral_xyz,
-                    triangle_dirichlet[:side_count],
-                    triangle_neumann[:side_count],
-                    order=order,
-                    axisymmetric=axisymmetric_side,
-                )
-                if curved_side_geometry
-                else _triangle_gradient_sum(
-                    target,
-                    side_vertices,
-                    triangle_dirichlet[:side_count],
-                    triangle_neumann[:side_count],
-                    order=order,
-                )
-                for target in targets
-            ]
-        )
-        cap_vertices = vertices[side_count:]
-        cap_dirichlet = triangle_dirichlet[side_count:]
-        cap_neumann = triangle_neumann[side_count:]
-        cap_gradient = jnp.stack(
-            [
-                _curved_cap_gradient_sum(
-                    target,
-                    lower_triangles,
-                    lower_cap_xyz,
-                    cap_dirichlet[:cap_count],
-                    cap_neumann[:cap_count],
-                    nxi=nxi,
-                    upper=False,
-                    order=order,
-                )
-                + _curved_cap_gradient_sum(
-                    target,
-                    upper_triangles,
-                    upper_cap_xyz,
-                    cap_dirichlet[cap_count:],
-                    cap_neumann[cap_count:],
-                    nxi=nxi,
-                    upper=True,
-                    order=order,
-                )
-                if spectral_cap_density
-                else _triangle_gradient_sum(
-                    target,
-                    cap_vertices,
-                    cap_dirichlet,
-                    cap_neumann,
-                    order=order,
-                )
-                for target in targets
-            ]
-        )
-        return side_gradient + cap_gradient
     return jnp.stack(
         [
             _triangle_gradient_sum(
@@ -565,12 +341,7 @@ def panel_green_boundary_residual(
     order: int = 8,
     target_indices: np.ndarray | None = None,
     lateral_shape: tuple[int, int] | None = None,
-    lateral_xyz: Array | None = None,
-    lower_cap_xyz: Array | None = None,
-    upper_cap_xyz: Array | None = None,
     spectral_side_density: bool = False,
-    spectral_cap_density: bool = False,
-    curved_side_geometry: bool = False,
     axisymmetric_side: bool = False,
 ) -> Array:
     """Evaluate ``S(q) + K(u-u_target)`` at all mesh vertices.
@@ -629,102 +400,6 @@ def panel_green_boundary_residual(
             triangle_neumann = (
                 _linear_density_samples(triangle_neumann, order=order).at[:side_count].set(side_samples[1])
             )
-        elif curved_side_geometry:
-            raise ValueError("curved side geometry requires spectral side density")
-        if spectral_cap_density:
-            if lateral_shape is None or lower_cap_xyz is None or upper_cap_xyz is None:
-                raise ValueError("cap geometry is required for spectral cap density")
-            ntheta, nxi = lateral_shape
-            side_count = 2 * ntheta * (nxi - 1)
-            cap_count = (triangle_indices.shape[0] - side_count) // 2
-            lower_triangles = triangle_indices[side_count : side_count + cap_count]
-            upper_triangles = triangle_indices[side_count + cap_count :]
-            lower_source, _ = _curved_cap_geometry(
-                lower_triangles,
-                lower_cap_xyz,
-                nxi=nxi,
-                upper=False,
-                order=order,
-            )
-            upper_source, _ = _curved_cap_geometry(
-                upper_triangles,
-                upper_cap_xyz,
-                nxi=nxi,
-                upper=True,
-                order=order,
-            )
-            if triangle_dirichlet.ndim == 2:
-                triangle_dirichlet = _linear_density_samples(triangle_dirichlet, order=order)
-                triangle_neumann = _linear_density_samples(triangle_neumann, order=order)
-            cap_samples = _spectral_cap_samples(
-                xyz[triangle_indices],
-                dirichlet,
-                neumann,
-                lower_cap_xyz,
-                upper_cap_xyz,
-                side_count=side_count,
-                ntheta=ntheta,
-                nxi=nxi,
-                order=order,
-                lower_source=lower_source,
-                upper_source=upper_source,
-            )
-            triangle_dirichlet = triangle_dirichlet.at[side_count:].set(cap_samples[0] - dirichlet[target_index])
-            triangle_neumann = triangle_neumann.at[side_count:].set(cap_samples[1])
-        if curved_side_geometry or spectral_cap_density:
-            if lateral_xyz is None:
-                raise ValueError("lateral_xyz is required for curved side geometry")
-            side_integral = (
-                _curved_side_layer_sum(
-                    xyz[target_index],
-                    triangle_indices[:side_count],
-                    lateral_xyz,
-                    triangle_dirichlet[:side_count],
-                    triangle_neumann[:side_count],
-                    order=order,
-                    axisymmetric=axisymmetric_side,
-                )
-                if curved_side_geometry
-                else _triangle_layer_sum(
-                    xyz[target_index],
-                    xyz[triangle_indices[:side_count]],
-                    triangle_dirichlet[:side_count],
-                    triangle_neumann[:side_count],
-                    order=order,
-                )
-            )
-            cap_integral = (
-                _curved_cap_layer_sum(
-                    xyz[target_index],
-                    lower_triangles,
-                    lower_cap_xyz,
-                    triangle_dirichlet[side_count : side_count + cap_count],
-                    triangle_neumann[side_count : side_count + cap_count],
-                    nxi=nxi,
-                    upper=False,
-                    order=order,
-                )
-                + _curved_cap_layer_sum(
-                    xyz[target_index],
-                    upper_triangles,
-                    upper_cap_xyz,
-                    triangle_dirichlet[side_count + cap_count :],
-                    triangle_neumann[side_count + cap_count :],
-                    nxi=nxi,
-                    upper=True,
-                    order=order,
-                )
-                if spectral_cap_density
-                else _triangle_layer_sum(
-                    xyz[target_index],
-                    xyz[triangle_indices[side_count:]],
-                    triangle_dirichlet[side_count:],
-                    triangle_neumann[side_count:],
-                    order=order,
-                )
-            )
-            residual.append(side_integral + cap_integral)
-            continue
         residual.append(
             _triangle_layer_sum(
                 xyz[target_index],

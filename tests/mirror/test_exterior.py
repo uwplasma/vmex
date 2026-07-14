@@ -21,14 +21,6 @@ from vmec_jax.mirror.exterior_mesh import (  # noqa: E402
     _unit_gauss_legendre,
     duffy_triangle_single_layer,
 )
-from vmec_jax.mirror.exterior_interpolation import (  # noqa: E402
-    spectral_cap_density_samples,
-)
-from vmec_jax.mirror.exterior_cap_panels import (  # noqa: E402
-    _unit_rule,
-    curved_cap_geometry,
-)
-
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
@@ -100,27 +92,6 @@ def test_closed_cylinder_has_exact_area_volume_and_orientation() -> None:
     np.testing.assert_allclose(jnp.sum(surface.weighted_normals, axis=0), 0.0, atol=3.0e-15)
     assert np.all(np.asarray(surface.lower_cap_weighted_normals[..., 2]) < 0.0)
     assert np.all(np.asarray(surface.upper_cap_weighted_normals[..., 2]) > 0.0)
-
-
-def test_curved_cap_panels_integrate_exact_circular_disks() -> None:
-    grid = _grid(ns=7, nxi=9)
-    radius = 0.37
-    surface = build_closed_mirror_surface(MirrorBoundary.from_radius(radius, grid), grid, axisymmetric_ntheta=12)
-    side_count = 2 * 12 * (grid.nxi - 1)
-    cap_count = (surface.triangles.shape[0] - side_count) // 2
-    _, weights = _unit_rule(8)
-    for upper, cap_xyz, triangles in (
-        (False, surface.lower_cap_xyz, surface.triangles[side_count : side_count + cap_count]),
-        (True, surface.upper_cap_xyz, surface.triangles[side_count + cap_count :]),
-    ):
-        _, area_vectors = curved_cap_geometry(triangles, cap_xyz, nxi=grid.nxi, upper=upper, order=8)
-        area = jnp.sum(
-            jnp.asarray(weights)[None, :, None]
-            * jnp.asarray(weights)[None, None, :]
-            * jnp.linalg.norm(area_vectors, axis=-1)
-        )
-        np.testing.assert_allclose(area, np.pi * radius**2, rtol=2.0e-14)
-        assert np.all(np.sign(np.asarray(area_vectors[..., 2])) == (1 if upper else -1))
 
 
 def test_shaped_surface_satisfies_divergence_theorem_moments() -> None:
@@ -340,22 +311,12 @@ def test_spectral_side_density_improves_exterior_dipole() -> None:
         axis=1,
     )
     neumann = surface.reduce_collocation_values(jnp.sum(gradient * surface.collocation_normals, axis=1))
-    with pytest.raises(ValueError, match="requires spectral side density"):
-        solve_reduced_exterior_laplace_neumann(surface, neumann, curved_side_geometry=True)
-
     errors = []
-    for spectral, cap, curved in (
-        (False, False, False),
-        (True, False, False),
-        (True, False, True),
-        (True, True, True),
-    ):
+    for spectral in (False, True):
         result = solve_reduced_exterior_laplace_neumann(
             surface,
             neumann,
             spectral_side_density=spectral,
-            spectral_cap_density=cap,
-            curved_side_geometry=curved,
         )
         boundary_error = jnp.linalg.norm(result.boundary_potential - exact) / jnp.linalg.norm(exact)
         recovered = laplace_reduced_exterior_gradient_off_surface(
@@ -364,8 +325,6 @@ def test_spectral_side_density_improves_exterior_dipole() -> None:
             neumann,
             jnp.asarray([[0.0, 0.0, 2.0]]),
             spectral_side_density=spectral,
-            spectral_cap_density=cap,
-            curved_side_geometry=curved,
         )
         field_error = jnp.abs(recovered[0, 2] + 0.25) / 0.25
         errors.append((float(boundary_error), float(field_error)))
@@ -374,8 +333,6 @@ def test_spectral_side_density_improves_exterior_dipole() -> None:
 
     assert errors[1][0] < 0.3 * errors[0][0]
     assert errors[1][1] < 0.7 * errors[0][1]
-    assert errors[2][0] < 0.7 * errors[1][0]
-    assert errors[3][0] < errors[2][0]
 
 
 def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:
@@ -495,43 +452,6 @@ def test_spectral_side_density_reproduces_fourier_chebyshev_data(ntheta: int) ->
             ** 2
         )
     )(jnp.asarray(values).reshape(-1))
-    assert np.all(np.isfinite(np.asarray(derivative)))
-
-
-def test_spectral_cap_density_reproduces_radial_fourier_data() -> None:
-    ns, ntheta = 11, 8
-    radial_nodes = jnp.asarray(np.linspace(0.0, 1.0, ns) ** 2)
-    theta_nodes = 2.0 * jnp.pi * jnp.arange(ntheta) / ntheta
-    rho, theta = jnp.meshgrid(radial_nodes, theta_nodes, indexing="ij")
-    cap_xyz = jnp.stack(
-        [0.3 * rho * jnp.cos(theta), 0.3 * rho * jnp.sin(theta), jnp.ones_like(rho)],
-        axis=-1,
-    )
-    values = jnp.stack(
-        [
-            1.0 + 0.2 * jnp.cos(theta) + 0.3 * rho**2,
-            -0.4 + 0.1 * jnp.sin(2.0 * theta) - 0.2 * rho**3,
-        ]
-    )
-    target_rho = jnp.asarray([[0.07, 0.28], [0.61, 0.93]])
-    target_theta = jnp.asarray([[0.13, 1.2], [3.4, 5.7]])
-    source = jnp.stack(
-        [
-            0.3 * target_rho * jnp.cos(target_theta),
-            0.3 * target_rho * jnp.sin(target_theta),
-            jnp.ones_like(target_rho),
-        ],
-        axis=-1,
-    )
-    samples = spectral_cap_density_samples(source, values, cap_xyz)
-    expected = jnp.stack(
-        [
-            1.0 + 0.2 * jnp.cos(target_theta) + 0.3 * target_rho**2,
-            -0.4 + 0.1 * jnp.sin(2.0 * target_theta) - 0.2 * target_rho**3,
-        ]
-    )
-    np.testing.assert_allclose(samples, expected, rtol=2.0e-12, atol=2.0e-12)
-    derivative = jax.grad(lambda data: jnp.sum(spectral_cap_density_samples(source, data, cap_xyz) ** 2))(values)
     assert np.all(np.isfinite(np.asarray(derivative)))
 
 
@@ -778,8 +698,6 @@ def test_axisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
             cap_rim_grade=3.0,
             order=6,
             spectral_side_density=True,
-            spectral_cap_density=True,
-            curved_side_geometry=True,
         ).lateral_field_xyz
 
     _, tangent = jax.jvp(
@@ -822,8 +740,6 @@ def test_nonaxisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
             cap_rim_grade=2.5,
             order=4,
             spectral_side_density=True,
-            spectral_cap_density=True,
-            curved_side_geometry=True,
         ).lateral_field_xyz
 
     _, tangent = jax.jvp(

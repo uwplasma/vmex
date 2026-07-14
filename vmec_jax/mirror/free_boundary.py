@@ -130,8 +130,6 @@ def solve_free_boundary_cli(
     exterior_ntheta: int = 40,
     exterior_order: int = 8,
     exterior_spectral_side_density: bool = False,
-    exterior_high_order_cap_panels: bool = False,
-    exterior_curved_side_geometry: bool = False,
     exterior_jacobian_chunk_size: int = 6,
     require_convergence: bool = False,
 ) -> FreeBoundaryMirrorResult:
@@ -151,8 +149,6 @@ def solve_free_boundary_cli(
     if vacuum_backend not in {"annulus", "exterior"}:
         raise ValueError("vacuum_backend must be 'annulus' or 'exterior'")
     use_exterior = vacuum_backend == "exterior"
-    if exterior_curved_side_geometry and not exterior_spectral_side_density:
-        raise ValueError("curved side geometry requires spectral side density")
     if plasma_grid.ntheta != 1 and not use_exterior:
         raise ValueError("nonaxisymmetric free boundary requires vacuum_backend='exterior'")
     if solve_lambda is None:
@@ -303,8 +299,6 @@ def solve_free_boundary_cli(
                     axisymmetric_ntheta=exterior_ntheta,
                     order=exterior_order,
                     spectral_side_density=exterior_spectral_side_density,
-                    spectral_cap_density=exterior_high_order_cap_panels,
-                    curved_side_geometry=exterior_curved_side_geometry,
                 )
             else:
                 vacuum_field = solve_nonaxisymmetric_exterior_vacuum(
@@ -315,8 +309,6 @@ def solve_free_boundary_cli(
                     external_field,
                     order=exterior_order,
                     spectral_side_density=exterior_spectral_side_density,
-                    spectral_cap_density=exterior_high_order_cap_panels,
-                    curved_side_geometry=exterior_curved_side_geometry,
                 )
             vacuum_geometry = vacuum_field.surface
             vacuum_functional = jnp.asarray(0.0, dtype=state.radius_scale.dtype)

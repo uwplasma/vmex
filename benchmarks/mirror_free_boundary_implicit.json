@@ -1,5 +1,5 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_implicit/1",
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_implicit/2",
   "case": {
     "topology": "axisymmetric straight mirror",
     "grid": {"ns": 5, "ntheta": 1, "nxi": 7},
@@ -7,31 +7,30 @@
     "exterior_ntheta": 8,
     "exterior_order": 6,
     "spectral_side_density": true,
-    "spectral_cap_density": true,
-    "curved_side_geometry": true,
     "ftol": 1e-12,
-    "coils": "two circular radius-0.9 m coils at z=+-1 m",
-    "controls": ["coil currents", "axisymmetric coil radii"],
+    "external_field": "divergence-free paraxial mirror field",
+    "controls": ["central field", "axial curvature"],
     "quantity": "midplane LCFS radius"
   },
   "primal": {
-    "iterations": 7,
-    "variational_max": 1.633128815494171e-15,
-    "exterior_compatibility": 1.0701670004594862e-8
+    "iterations": 5,
+    "variational_max": 2.143403804821411e-15,
+    "exterior_compatibility": 2.988720841930378e-9
   },
   "adjoint": {
-    "iterations": 19,
-    "relative_residual": 3.679426967807246e-10,
+    "iterations": 23,
+    "relative_residual": 1.3684929332774624e-9,
     "matrix": "exact reverse-AD action",
     "preconditioner": "boundary scale plus shared separable plasma preconditioner"
   },
   "validation": {
     "method": "central difference of two fully reconverged equilibria",
     "epsilon": 1e-4,
-    "pytest_wall_s": 141.83,
-    "directional_derivative": -0.0026780836378729757,
-    "central_finite_difference": -0.002678083639018336,
-    "relative_error": 4.276790558833229e-10
+    "pytest_wall_s": 37.36,
+    "measured_workflow_wall_s": 21.84,
+    "directional_derivative": -0.015994840014899116,
+    "central_finite_difference": -0.015994840016630985,
+    "relative_error": 1.0827667668664404e-10
   },
-  "assessment": "The supported axisymmetric exterior equilibrium has a matrix-free implicit coil adjoint. End-cut radii and the physical pressure profile are held fixed. The nonaxisymmetric free-boundary derivative lane is deferred with M7."
+  "assessment": "The supported axisymmetric exterior equilibrium has a matrix-free implicit external-field adjoint on the retained spectral-side, linear-panel formulation. End-cut radii and the physical pressure profile are held fixed. The nonaxisymmetric free-boundary derivative lane is deferred with M7."
 }

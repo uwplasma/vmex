@@ -198,10 +198,6 @@ def test_free_boundary_rejects_inconsistent_static_inputs() -> None:
 
     with pytest.raises(ValueError, match="vacuum_backend"):
         solve_free_boundary_cli(**common, vacuum_backend="invalid")
-    with pytest.raises(ValueError, match="curved side"):
-        solve_free_boundary_cli(
-            **common, vacuum_backend="exterior", exterior_curved_side_geometry=True
-        )
     with pytest.raises(ValueError, match="chunk"):
         solve_free_boundary_cli(
             **common, vacuum_backend="exterior", exterior_jacobian_chunk_size=0

@@ -588,25 +588,19 @@ boundary-potential error from 5.44% to 1.19% and far-field gradient error from
 example to exercise it. The default is false because the coupled 3D study
 below shows that density order alone is insufficient.
 
-``exterior_high_order_cap_panels=True`` pairs exact polar/star-shaped cap
-geometry with Fourier interpolation in angle and a resolution-aware radial
-rule: linear below seven rings, quadratic through ten rings, and local cubic
-thereafter. This avoids the ill-conditioning of cubic interpolation on a
-five-ring, strongly rim-graded cap. Circular disk area and orientation are
-exact to roundoff, and both axisymmetric and 3D boundary-shape JVPs are finite.
-On the medium dipole MMS, the paired side-and-cap method reduces the boundary
-potential error from 0.786% to 0.725% and the off-surface field error from
-1.056% to 0.121%, with condition number 4.89. Coarse conditions remain 3.07
-axisymmetrically and 2.73 in 3D. Coupled beta scans through 50% pass at
-``ftol=1e-12``; the option remains off by default pending medium/fine cost and
-local-mode convergence evidence.
+An experimental curved-side and high-order-cap variant was removed after its
+bounded nonaxisymmetric endpoint run failed to complete in 690 seconds. Its
+medium manufactured improvement did not justify roughly 400 lines of extra
+geometry, interpolation, and differentiation code. The retained production
+path uses linear Duffy panels, with optional Fourier-Chebyshev interpolation
+of side density. Cap disks only close the end cuts for the Green identity and
+use the same linear panel rule.
 
 Source ownership is kept narrow: ``exterior.py`` builds geometry and reduction
 maps, ``exterior_mesh.py`` owns side-panel topology and Duffy assembly,
-``exterior_cap_panels.py`` owns exact polar cap kernels,
 ``exterior_interpolation.py`` owns reusable density interpolation, and
-``exterior_bie.py`` owns Neumann solves. Public functions remain exported from
-``vmec_jax.mirror``.
+``exterior_bie.py`` owns Neumann solves. These numerical kernels remain in
+their owning modules rather than the flattened public namespace.
 ``solve_axisymmetric_exterior_vacuum`` now owns the complete M6 adapter:
 it closes the moving boundary, continues the plasma field through both end
 cuts, cancels the supplied external normal field on the side, solves the exterior

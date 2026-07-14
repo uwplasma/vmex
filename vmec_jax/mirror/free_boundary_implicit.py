@@ -50,8 +50,6 @@ class FreeBoundaryAdjointConfig:
     axisymmetric_ntheta: int = 40
     exterior_order: int = 8
     spectral_side_density: bool = False
-    spectral_cap_density: bool = False
-    curved_side_geometry: bool = False
     gamma: float = 5.0 / 3.0
     rtol: float = 1.0e-9
     max_restarts: int = 30
@@ -208,8 +206,6 @@ def free_boundary_adjoint(
             axisymmetric_ntheta=config.axisymmetric_ntheta,
             order=config.exterior_order,
             spectral_side_density=config.spectral_side_density,
-            spectral_cap_density=config.spectral_cap_density,
-            curved_side_geometry=config.curved_side_geometry,
         )
         return boundary, state, plasma, pressure, plasma_b_squared, vacuum
 

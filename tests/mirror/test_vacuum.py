@@ -405,8 +405,6 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
         exterior_ntheta=8,
         exterior_order=6,
         exterior_spectral_side_density=True,
-        exterior_high_order_cap_panels=True,
-        exterior_curved_side_geometry=True,
     )
 
     assert all(result.converged for result in results)
@@ -474,8 +472,6 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
         vacuum_backend="exterior",
         exterior_order=6,
         exterior_spectral_side_density=True,
-        exterior_high_order_cap_panels=False,
-        exterior_curved_side_geometry=True,
     )
 
     assert all(result.converged for result in results)

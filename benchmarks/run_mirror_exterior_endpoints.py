@@ -33,7 +33,6 @@ def run(
     ntheta: int,
     nxi: int,
     *,
-    high_order: bool,
     jacobian_chunk_size: int,
     axisymmetric: bool,
     beta_values: tuple[float, ...] = (0.0, 0.50),
@@ -103,8 +102,6 @@ def run(
         exterior_ntheta=ntheta,
         exterior_order=6,
         exterior_spectral_side_density=True,
-        exterior_high_order_cap_panels=high_order,
-        exterior_curved_side_geometry=True,
         exterior_jacobian_chunk_size=jacobian_chunk_size,
     )
     wall = time.perf_counter() - start
@@ -156,7 +153,6 @@ def run(
         rows.append(row)
     return {
         "grid": {"ns": ns, "ntheta": ntheta, "nxi": nxi},
-        "high_order_cap_panels": high_order,
         "axisymmetric": axisymmetric,
         "jacobian_chunk_size": jacobian_chunk_size,
         "device": str(jax.devices()[0]),
@@ -171,7 +167,6 @@ def main() -> None:
     parser.add_argument("--ns", type=int, required=True)
     parser.add_argument("--ntheta", type=int, required=True)
     parser.add_argument("--nxi", type=int, required=True)
-    parser.add_argument("--linear-cap", action="store_true")
     parser.add_argument("--jacobian-chunk-size", type=int, default=1)
     parser.add_argument("--axisymmetric", action="store_true")
     parser.add_argument("--beta-zero-only", action="store_true")
@@ -181,7 +176,6 @@ def main() -> None:
         args.ns,
         args.ntheta,
         args.nxi,
-        high_order=not args.linear_cap,
         jacobian_chunk_size=args.jacobian_chunk_size,
         axisymmetric=args.axisymmetric,
         beta_values=(0.0,) if args.beta_zero_only else (0.0, 0.50),

@@ -110,8 +110,6 @@ def test_free_boundary_field_adjoint_matches_central_difference() -> None:
         exterior_ntheta=8,
         exterior_order=6,
         exterior_spectral_side_density=True,
-        exterior_high_order_cap_panels=True,
-        exterior_curved_side_geometry=True,
         require_convergence=True,
     )
     result = solve_free_boundary_cli(
@@ -131,8 +129,6 @@ def test_free_boundary_field_adjoint_matches_central_difference() -> None:
             axisymmetric_ntheta=8,
             exterior_order=6,
             spectral_side_density=True,
-            spectral_cap_density=True,
-            curved_side_geometry=True,
             rtol=1.0e-8,
         ),
     )
