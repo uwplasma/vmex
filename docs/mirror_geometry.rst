@@ -33,15 +33,20 @@ not monotone under spatial refinement, so it is not promoted. A toroidal
 stellarator-mirror hybrid is deferred until a native spline equilibrium state
 exists; the removed Fourier experiment is not a supported capability.
 
-Toroidal hybrid deferral
-------------------------
+Toroidal hybrid foundation
+--------------------------
 
 The former square-axis Fourier target, continuation driver, examples, and
 benchmarks were experimental and have been removed. A toroidal
 stellarator-mirror hybrid requires a native spline axis and surface state
 that can represent long straight sections joined by rotating-ellipse curved
-sections. That work starts only after the straight-mirror promotion gates;
-ordinary toroidal Fourier projection is not presented as a supported model.
+sections. The first geometry gate now provides a periodic cubic B-spline
+racetrack and a rotation-minimizing frame with periodic holonomy correction.
+Circle tests cover curvature, arc length, frame closure, and centerline
+coefficient gradients; a 32-control racetrack retains exact straight interiors
+over 56% of its sampled axis. Surface metrics and an equilibrium solve remain
+unimplemented, so ordinary toroidal Fourier projection and the spline geometry
+are not presented as supported equilibrium models.
 
 Plotting and output scope
 -------------------------

@@ -202,7 +202,7 @@ equilibrium criterion.
 | Implicit derivatives | 74% | nodal/free VJP plus spline nonaxisymmetric adjoint FD checks | forward spline tangent and SOLVAX scaling |
 | Preconditioning | 45% | separable prototype and Newton-GMRES | no bounded-iteration basis/resolution study |
 | Native B-spline open mirror | 70% | basis/state/transfer, fixed solve, knot convergence, coefficient preconditioner and adjoint | free-boundary state and forward tangent |
-| Native B-spline closed hybrid | 0% | Fourier target is not reusable physics | centerline/frame/metric/residual implementation |
+| Native B-spline closed hybrid | 12% | periodic racetrack centerline, closure-corrected frame, coefficient gradients | surface metric, residual, fixed solve, limits, derivatives |
 | ESSOS ownership cleanup | 100% | MGRID/callable contract and live ESSOS smoke | none |
 | Source simplification | 40% | Fourier-hybrid and coil ownership removed | public API and large mirror modules remain |
 
@@ -537,6 +537,16 @@ compact negative benchmark is retained, and its public solve claim is removed.
 
 The hybrid is implemented in the mirror geometry/state family, not under
 `core/hybrid*.py`.
+
+Status: geometry foundation active. A periodic cubic B-spline racetrack with
+two long ``z``-directed legs and smooth returns now evaluates through a
+rotation-minimizing frame with explicit holonomy correction. A 32-control test
+has 56% zero-curvature samples on the straight-leg interiors, minimum parameter
+speed 2.78, and centerline, tangent, and frame closure at machine zero. A circle
+limit verifies curvature, arc length, C2 endpoint continuity, orthonormality,
+and finite nonzero reverse derivatives with respect to every centerline
+coefficient. This is geometry evidence only; no equilibrium capability is
+claimed until the metric and fixed-boundary gates below pass.
 
 1. Define a periodic cubic B-spline Cartesian centerline with two long straight
    legs and two smooth curved returns; enforce closure and at least C2 continuity.

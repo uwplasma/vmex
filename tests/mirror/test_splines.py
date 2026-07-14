@@ -19,7 +19,11 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_fixed_boundary_cli,
 )
 from vmec_jax.mirror.forces import mirror_energy  # noqa: E402
-from vmec_jax.mirror.geometry import evaluate_geometry  # noqa: E402
+from vmec_jax.mirror.geometry import (  # noqa: E402
+    evaluate_closed_spline_axis,
+    evaluate_geometry,
+    racetrack_centerline_coefficients,
+)
 from vmec_jax.mirror.solver import SeparableMirrorPreconditioner  # noqa: E402
 from vmec_jax.mirror.splines import (  # noqa: E402
     SplineMirrorDiscretization,
@@ -100,6 +104,68 @@ def test_periodic_fit_converges_and_is_differentiable() -> None:
         assert np.isfinite(float(derivative))
     assert errors[1] < 0.08 * errors[0]
     assert errors[2] < 0.08 * errors[1]
+
+
+def test_closed_circle_axis_has_periodic_rotation_minimizing_frame() -> None:
+    radius = 1.7
+    basis = CubicBSplineBasis.periodic_uniform(24)
+    nodes = jnp.asarray(basis.collocation_nodes)
+    samples = jnp.stack(
+        (radius * jnp.cos(nodes), jnp.zeros_like(nodes), radius * jnp.sin(nodes)),
+        axis=-1,
+    )
+    coefficients = basis.fit(samples, axis=0)
+    points = np.linspace(*basis.domain, 193, endpoint=False)
+    axis = evaluate_closed_spline_axis(
+        coefficients,
+        basis,
+        points,
+        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+    )
+
+    np.testing.assert_allclose(np.linalg.norm(axis.tangent, axis=-1), 1.0, atol=2.0e-14)
+    np.testing.assert_allclose(np.linalg.norm(axis.normal, axis=-1), 1.0, atol=2.0e-14)
+    np.testing.assert_allclose(np.sum(axis.tangent * axis.normal, axis=-1), 0.0, atol=2.0e-14)
+    np.testing.assert_allclose(axis.curvature, 1.0 / radius, rtol=6.0e-3)
+    np.testing.assert_allclose(axis.arc_length, 2.0 * np.pi * radius, rtol=2.0e-5)
+    assert float(axis.closure_error) < 2.0e-14
+    assert float(axis.tangent_closure_error) < 2.0e-14
+    assert float(axis.frame_closure_error) < 2.0e-14
+    assert abs(float(axis.frame_holonomy)) < 2.0e-13
+
+    gradient = jax.grad(
+        lambda values: evaluate_closed_spline_axis(
+            values,
+            basis,
+            points,
+            initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+        ).arc_length
+    )(coefficients)
+    assert np.all(np.isfinite(gradient))
+    assert float(jnp.linalg.norm(gradient)) > 1.0
+
+
+def test_racetrack_spline_has_long_straight_legs_and_c2_closure() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(32)
+    coefficients = racetrack_centerline_coefficients(
+        basis.size,
+        straight_length=6.0,
+        return_radius=1.0,
+    )
+    points = np.linspace(*basis.domain, 257, endpoint=False)
+    axis = evaluate_closed_spline_axis(
+        coefficients,
+        basis,
+        points,
+        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+    )
+
+    straight = np.asarray(axis.curvature) < 1.0e-10
+    assert np.count_nonzero(straight) > 0.25 * points.size
+    assert float(axis.closure_error) < 2.0e-14
+    assert float(axis.tangent_closure_error) < 2.0e-14
+    assert float(axis.frame_closure_error) < 2.0e-14
+    assert float(jnp.min(axis.speed)) > 0.1
 
 
 def _spline_polynomial_state():

@@ -17,6 +17,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 Array = Any
 
@@ -69,11 +70,178 @@ class ContravariantField:
     jac_b_xi: Array
 
 
-for _cls in (MirrorGeometry, ContravariantField):
+@dataclass(frozen=True)
+class ClosedAxisGeometry:
+    """Periodic centerline and a closure-corrected normal frame."""
+
+    centerline: Array
+    tangent: Array
+    normal: Array
+    binormal: Array
+    speed: Array
+    curvature: Array
+    arc_length: Array
+    frame_holonomy: Array
+    closure_error: Array
+    tangent_closure_error: Array
+    frame_closure_error: Array
+
+
+for _cls in (MirrorGeometry, ContravariantField, ClosedAxisGeometry):
     jax.tree_util.register_dataclass(
         _cls,
         data_fields=[field.name for field in fields(_cls)],
         meta_fields=[],
+    )
+
+
+def racetrack_centerline_coefficients(
+    size: int,
+    *,
+    straight_length: float,
+    return_radius: float,
+) -> Array:
+    """Return periodic cubic-spline controls for a planar racetrack axis.
+
+    The two long legs are parallel to ``z`` at ``x=+/-return_radius``. The
+    remaining controls follow semicircular returns. Four or more consecutive
+    collinear controls make the interior of each leg exactly straight; the
+    periodic cubic basis smooths the joins to C2 continuity.
+    """
+
+    size = int(size)
+    straight_length = float(straight_length)
+    return_radius = float(return_radius)
+    if size < 16:
+        raise ValueError("racetrack centerline requires at least 16 coefficients")
+    if straight_length <= 0.0 or return_radius <= 0.0:
+        raise ValueError("racetrack dimensions must be positive")
+
+    leg_count = max(4, int(round(size * straight_length / (2.0 * straight_length + 2.0 * np.pi * return_radius))))
+    leg_count = min(leg_count, (size - 8) // 2)
+    return_count = (size - 2 * leg_count) // 2
+    counts = [leg_count, return_count, leg_count, size - 2 * leg_count - return_count]
+    half = 0.5 * straight_length
+
+    right_z = np.linspace(-half, half, counts[0], endpoint=False)
+    top_angle = np.linspace(0.0, np.pi, counts[1], endpoint=False)
+    left_z = np.linspace(half, -half, counts[2], endpoint=False)
+    bottom_angle = np.linspace(np.pi, 2.0 * np.pi, counts[3], endpoint=False)
+    right = np.stack((np.full_like(right_z, return_radius), np.zeros_like(right_z), right_z), axis=-1)
+    top = np.stack(
+        (
+            return_radius * np.cos(top_angle),
+            np.zeros_like(top_angle),
+            half + return_radius * np.sin(top_angle),
+        ),
+        axis=-1,
+    )
+    left = np.stack((np.full_like(left_z, -return_radius), np.zeros_like(left_z), left_z), axis=-1)
+    bottom = np.stack(
+        (
+            return_radius * np.cos(bottom_angle),
+            np.zeros_like(bottom_angle),
+            -half + return_radius * np.sin(bottom_angle),
+        ),
+        axis=-1,
+    )
+    return jnp.asarray(np.concatenate((right, top, left, bottom), axis=0))
+
+
+def _minimal_rotation(vector: Array, tangent_from: Array, tangent_to: Array) -> Array:
+    """Parallel-transport ``vector`` through the shortest tangent rotation."""
+
+    cross = jnp.cross(tangent_from, tangent_to)
+    cosine = jnp.clip(jnp.dot(tangent_from, tangent_to), -1.0, 1.0)
+    denominator = jnp.maximum(1.0 + cosine, 64.0 * jnp.finfo(cosine.dtype).eps)
+    return vector + jnp.cross(cross, vector) + jnp.cross(cross, jnp.cross(cross, vector)) / denominator
+
+
+def _rotate_about_axis(vector: Array, axis: Array, angle: Array) -> Array:
+    cosine, sine = jnp.cos(angle), jnp.sin(angle)
+    return vector * cosine + jnp.cross(axis, vector) * sine + axis * jnp.dot(axis, vector) * (1.0 - cosine)
+
+
+def evaluate_closed_spline_axis(
+    coefficients: Array,
+    basis: Any,
+    points: Array,
+    *,
+    initial_normal: Array | None = None,
+) -> ClosedAxisGeometry:
+    """Evaluate a periodic spline centerline and rotation-minimizing frame.
+
+    ``basis`` must be a periodic :class:`CubicBSplineBasis`. The raw Bishop
+    frame is parallel transported once around the curve. Its measured holonomy
+    is then distributed uniformly over the period, producing a continuous
+    periodic frame suitable for closed flux-surface coordinates.
+    """
+
+    if not getattr(basis, "periodic", False):
+        raise ValueError("closed centerline requires a periodic spline basis")
+    coefficients = jnp.asarray(coefficients)
+    if coefficients.shape != (basis.size, 3):
+        raise ValueError(f"centerline coefficients must have shape ({basis.size}, 3)")
+    point_values = np.asarray(points, dtype=float)
+    start, stop = basis.domain
+    if point_values.ndim != 1 or point_values.size < 4:
+        raise ValueError("closed centerline points must be a one-dimensional array of length >= 4")
+    if np.any(np.diff(point_values) <= 0.0) or point_values[0] < start or point_values[-1] >= stop:
+        raise ValueError("closed centerline points must increase within one fundamental period")
+
+    period = stop - start
+    extended_points = jnp.asarray(np.concatenate((point_values, [point_values[0] + period])))
+    centerline = basis.evaluate(coefficients, extended_points, axis=0)
+    first = basis.evaluate(coefficients, extended_points, derivative=1, axis=0)
+    second = basis.evaluate(coefficients, extended_points, derivative=2, axis=0)
+    speed = jnp.linalg.norm(first, axis=-1)
+    if not isinstance(speed, jax.core.Tracer) and bool(jnp.any(speed <= 0.0)):
+        raise ValueError("centerline derivative must not vanish")
+    tangent = first / speed[:, None]
+
+    if initial_normal is None:
+        reference = jax.nn.one_hot(jnp.argmin(jnp.abs(tangent[0])), 3, dtype=tangent.dtype)
+    else:
+        reference = jnp.asarray(initial_normal, dtype=tangent.dtype)
+        if reference.shape != (3,):
+            raise ValueError("initial_normal must have shape (3,)")
+    normal0 = reference - jnp.dot(reference, tangent[0]) * tangent[0]
+    normal0 /= jnp.linalg.norm(normal0)
+
+    def transport(normal, next_tangent):
+        previous_tangent, previous_normal = normal
+        next_normal = _minimal_rotation(previous_normal, previous_tangent, next_tangent)
+        next_normal -= jnp.dot(next_normal, next_tangent) * next_tangent
+        next_normal /= jnp.linalg.norm(next_normal)
+        return (next_tangent, next_normal), next_normal
+
+    (_, _), transported = jax.lax.scan(transport, (tangent[0], normal0), tangent[1:])
+    raw_normal = jnp.concatenate((normal0[None], transported), axis=0)
+    holonomy = jnp.arctan2(
+        jnp.dot(tangent[0], jnp.cross(raw_normal[-1], normal0)),
+        jnp.dot(raw_normal[-1], normal0),
+    )
+    fraction = (extended_points - extended_points[0]) / period
+    normal = jax.vmap(_rotate_about_axis)(raw_normal, tangent, -holonomy * fraction)
+    normal -= jnp.sum(normal * tangent, axis=-1)[:, None] * tangent
+    normal /= jnp.linalg.norm(normal, axis=-1)[:, None]
+    binormal = jnp.cross(tangent, normal)
+
+    delta = jnp.diff(extended_points)
+    arc_length = jnp.sum(0.5 * (speed[:-1] + speed[1:]) * delta)
+    curvature = jnp.linalg.norm(jnp.cross(first, second), axis=-1) / speed**3
+    return ClosedAxisGeometry(
+        centerline=centerline[:-1],
+        tangent=tangent[:-1],
+        normal=normal[:-1],
+        binormal=binormal[:-1],
+        speed=speed[:-1],
+        curvature=curvature[:-1],
+        arc_length=arc_length,
+        frame_holonomy=holonomy,
+        closure_error=jnp.linalg.norm(centerline[-1] - centerline[0]),
+        tangent_closure_error=jnp.linalg.norm(tangent[-1] - tangent[0]),
+        frame_closure_error=jnp.linalg.norm(normal[-1] - normal[0]),
     )
 
 
