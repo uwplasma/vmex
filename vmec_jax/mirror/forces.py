@@ -168,6 +168,28 @@ def staggered_magnetic_terms(
     return magnetic_density_cell / jacobian_cell, jacobian_cell
 
 
+def staggered_field_strength(
+    state: MirrorState,
+    grid: "MirrorGrid",
+    *,
+    axial_flux_derivative: Array,
+    current_derivative: Array = 0.0,
+) -> Array:
+    """Reconstruct full-surface ``|B|`` from the radial Gauss energy kernel."""
+
+    b_squared, _ = staggered_magnetic_terms(
+        state,
+        grid,
+        axial_flux_derivative=axial_flux_derivative,
+        current_derivative=current_derivative,
+    )
+    half = jnp.sqrt(jnp.maximum(b_squared, 0.0))
+    first = 1.5 * half[0] - 0.5 * half[1]
+    interior = 0.5 * (half[:-1] + half[1:])
+    last = 1.5 * half[-1] - 0.5 * half[-2]
+    return jnp.concatenate((first[None], interior, last[None]), axis=0)
+
+
 def isotropic_staggered_energy_gradient(
     state: MirrorState,
     grid: "MirrorGrid",

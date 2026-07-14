@@ -29,7 +29,7 @@ def _as_mout(mout):
 
 
 def _theta_samples(data, values, theta_dense):
-    """Periodically interpolate a ``(ntheta, nxi)`` mirror table."""
+    """Periodically resample a ``(ntheta, nxi)`` mirror table."""
 
     values = np.asarray(values, dtype=float)
     theta = np.asarray(data.theta, dtype=float)
@@ -38,6 +38,12 @@ def _theta_samples(data, values, theta_dense):
     order = np.argsort(np.mod(theta, 2.0 * np.pi))
     theta = np.mod(theta[order], 2.0 * np.pi)
     table = values[order]
+    spacing = 2.0 * np.pi / theta.size
+    if np.allclose(np.diff(np.r_[theta, theta[0] + 2.0 * np.pi]), spacing):
+        modes = np.fft.fftfreq(theta.size, d=1.0 / theta.size)
+        coefficients = np.fft.fft(table, axis=0) / theta.size
+        phase = np.exp(1j * (np.asarray(theta_dense)[:, None] - theta[0]) * modes[None, :])
+        return np.real(phase @ coefficients)
     theta_extended = np.concatenate([theta, [theta[0] + 2.0 * np.pi]])
     table_extended = np.concatenate([table, table[:1]], axis=0)
     return np.stack([

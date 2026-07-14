@@ -95,9 +95,7 @@ class RotatingEllipseParaxial:
         """Map ``(cos(alpha), sin(alpha))`` to normalized ``(x, y)``."""
 
         scale = jnp.sqrt(self.reference_field / self.axis_field(z))
-        axes = scale * jnp.asarray(
-            ((jnp.sqrt(self.elongation), 0.0), (0.0, 1.0 / jnp.sqrt(self.elongation)))
-        )
+        axes = scale * jnp.asarray(((jnp.sqrt(self.elongation), 0.0), (0.0, 1.0 / jnp.sqrt(self.elongation))))
         return _rotation(self.orientation(z)) @ axes @ _rotation(self.label_angle(z))
 
     def first_order(self, z: Array) -> FirstOrderSection:
@@ -119,6 +117,16 @@ class RotatingEllipseParaxial:
         axial = jnp.broadcast_to(z, jnp.shape(alpha))
         return jnp.stack((xy[0], xy[1], axial), axis=-1)
 
+    def boundary_radius(self, midplane_radius: Array, theta: Array, z: Array) -> Array:
+        """Return the physical polar radius of the rotating elliptical tube."""
+
+        scale = jnp.sqrt(self.reference_field / self.axis_field(z))
+        semi_major = midplane_radius * jnp.sqrt(self.elongation) * scale
+        semi_minor = midplane_radius / jnp.sqrt(self.elongation) * scale
+        angle = jnp.asarray(theta) - self.orientation(z)
+        denominator = jnp.sqrt((semi_minor * jnp.cos(angle)) ** 2 + (semi_major * jnp.sin(angle)) ** 2)
+        return semi_major * semi_minor / denominator
+
     def consistency_residual(self, z: Array) -> Array:
         """Return the Appendix-C first-order vacuum consistency identity."""
 
@@ -137,7 +145,7 @@ class RotatingEllipseParaxial:
         xc_z, xs_z, _, _ = derivative
         sigma = yc / ys
         sigma_z = jax.grad(lambda zz: self.first_order(zz).y_cos / self.first_order(zz).y_sin)(z)
-        rhs = -(xc - xs * sigma) ** 2 * (self.axis_field(z) / self.reference_field) ** 2
+        rhs = -((xc - xs * sigma) ** 2) * (self.axis_field(z) / self.reference_field) ** 2
         rhs *= xs * xc_z - xc * xs_z
         return sigma_z - rhs
 
@@ -153,13 +161,13 @@ class RotatingEllipseParaxial:
         mixed_y = xs * yc_z + xc * ys_z
         b0 = self.axis_field(z)
         phi20 = 0.25 * b0 * (x_norm * mixed_x + y_norm * mixed_y) / denominator
-        phi2c = 0.25 * b0 * (
-            (xc**2 - xs**2) * mixed_x + (yc**2 - ys**2) * mixed_y
-        ) / denominator
-        phi2s = 0.25 * b0 * (
-            xc * yc * (2.0 * xs * xs_z + 2.0 * ys * ys_z)
-            + xs * ys * (2.0 * xc * xc_z + 2.0 * yc * yc_z)
-        ) / denominator
+        phi2c = 0.25 * b0 * ((xc**2 - xs**2) * mixed_x + (yc**2 - ys**2) * mixed_y) / denominator
+        phi2s = (
+            0.25
+            * b0
+            * (xc * yc * (2.0 * xs * xs_z + 2.0 * ys * ys_z) + xs * ys * (2.0 * xc * xc_z + 2.0 * yc * yc_z))
+            / denominator
+        )
         phi2s += 0.5 * self.reference_field * (xc * xs_z - xs * xc_z) / denominator
         return jnp.asarray((phi20, phi2c, phi2s))
 
@@ -188,12 +196,8 @@ class RotatingEllipseParaxial:
         b0 = self.axis_field(z)
         b0_zz = jax.grad(jax.grad(self.axis_field))(z)
         shear = (xc_z / xc**2) ** 2 + xs_z**2
-        average = 0.25 * b0 * (
-            -b0_zz / (b0 * xc**2) + 2.0 * shear + xc_zz * xc * (1.0 - xc**-4)
-        )
-        cosine = 0.25 * b0 * (
-            b0_zz / (b0 * xc**2) - 2.0 * shear + xc_zz * xc * (1.0 + xc**-4)
-        )
+        average = 0.25 * b0 * (-b0_zz / (b0 * xc**2) + 2.0 * shear + xc_zz * xc * (1.0 - xc**-4))
+        cosine = 0.25 * b0 * (b0_zz / (b0 * xc**2) - 2.0 * shear + xc_zz * xc * (1.0 + xc**-4))
         sine = 0.5 * b0 * xc * xs_zz
         return QuadrupoleField(average, cosine, sine)
 
@@ -265,6 +269,15 @@ class StraightFieldLineMirror:
         x = midplane_radius * (1.0 + s) * jnp.cos(alpha)
         y = midplane_radius * (1.0 - s) * jnp.sin(alpha)
         return jnp.stack((x, y, jnp.broadcast_to(z, jnp.shape(alpha))), axis=-1)
+
+    def boundary_radius(self, midplane_radius: Array, theta: Array, z: Array) -> Array:
+        """Return the physical polar radius of its elliptical flux tube."""
+
+        normalized_z = jnp.asarray(z) / self.axial_scale
+        semi_x = midplane_radius * (1.0 + normalized_z)
+        semi_y = midplane_radius * (1.0 - normalized_z)
+        denominator = jnp.sqrt((semi_y * jnp.cos(theta)) ** 2 + (semi_x * jnp.sin(theta)) ** 2)
+        return semi_x * semi_y / denominator
 
     def ellipticity(self, z: Array) -> Array:
         """Return the major/minor axis ratio of the analytic section."""

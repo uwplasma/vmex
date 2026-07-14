@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 
+from .forces import staggered_field_strength
 from .geometry import contravariant_field, evaluate_geometry, magnetic_field_xyz
 from .model import MIRROR_OUTPUT_SCHEMA
 
@@ -82,25 +83,23 @@ def mout_from_result(
         current_derivative=current_derivative,
     )
     b_xyz = np.asarray(magnetic_field_xyz(field, geometry))
+    mod_b = np.asarray(
+        staggered_field_strength(
+            state,
+            grid,
+            axial_flux_derivative=axial_flux_derivative,
+            current_derivative=current_derivative,
+        )
+    )
     shape = tuple(state.radius_scale.shape)
     if perpendicular_pressure is None:
         perpendicular_pressure = getattr(result, "perpendicular_pressure", None)
     if perpendicular_pressure is None and hasattr(result.energy, "pressure"):
-        perpendicular_pressure = np.broadcast_to(
-            np.asarray(result.energy.pressure)[:, None, None], shape
-        )
-    perpendicular = (
-        np.full(shape, np.nan)
-        if perpendicular_pressure is None
-        else np.asarray(perpendicular_pressure)
-    )
+        perpendicular_pressure = np.broadcast_to(np.asarray(result.energy.pressure)[:, None, None], shape)
+    perpendicular = np.full(shape, np.nan) if perpendicular_pressure is None else np.asarray(perpendicular_pressure)
     if parallel_pressure is None and closure == "isotropic":
         parallel_pressure = perpendicular
-    parallel = (
-        np.full(shape, np.nan)
-        if parallel_pressure is None
-        else np.asarray(parallel_pressure)
-    )
+    parallel = np.full(shape, np.nan) if parallel_pressure is None else np.asarray(parallel_pressure)
     if perpendicular.shape != shape:
         raise ValueError("perpendicular_pressure must match the solved state")
     if parallel.shape != perpendicular.shape:
@@ -130,7 +129,7 @@ def mout_from_result(
         boundary_radius=np.asarray(solved_boundary.radius_scale),
         radius_scale=np.asarray(state.radius_scale),
         lambda_stream=np.asarray(state.lambda_stream),
-        mod_b=np.linalg.norm(b_xyz, axis=-1),
+        mod_b=mod_b,
         b_xyz=b_xyz,
         p_perpendicular=perpendicular,
         p_parallel=parallel,
@@ -141,21 +140,11 @@ def mout_from_result(
         converged=bool(result.converged),
         mass_scale=float(getattr(result, "mass_scale", 1.0)),
         variational_max=float(variational_max),
-        normal_stress_rms=(
-            float(interface.normal_stress_rms) if interface is not None else np.nan
-        ),
-        b_normal_rms=(
-            float(interface.vacuum_b_normal_rms) if interface is not None else np.nan
-        ),
-        staggered_weak_max=(
-            float(weak_force.maximum) if weak_force is not None else np.nan
-        ),
-        pointwise_force_rms=(
-            float(force.normalized_rms) if force is not None else np.nan
-        ),
-        normalized_divergence_rms=float(
-            getattr(result, "normalized_divergence_rms", np.nan)
-        ),
+        normal_stress_rms=(float(interface.normal_stress_rms) if interface is not None else np.nan),
+        b_normal_rms=(float(interface.vacuum_b_normal_rms) if interface is not None else np.nan),
+        staggered_weak_max=(float(weak_force.maximum) if weak_force is not None else np.nan),
+        pointwise_force_rms=(float(force.normalized_rms) if force is not None else np.nan),
+        normalized_divergence_rms=float(getattr(result, "normalized_divergence_rms", np.nan)),
         closure=str(closure),
         message=str(result.message),
     )
@@ -203,17 +192,30 @@ def write_mout(path: str | Path, data: MoutData, *, overwrite: bool = True) -> P
     with netCDF4.Dataset(path, "w", format="NETCDF4") as dataset:
         dataset.setncattr("schema", data.schema)
         for name in (
-            "ftol", "iterations", "converged", "mass_scale", "variational_max",
-            "normal_stress_rms", "b_normal_rms", "staggered_weak_max",
-            "pointwise_force_rms", "normalized_divergence_rms", "closure",
+            "ftol",
+            "iterations",
+            "converged",
+            "mass_scale",
+            "variational_max",
+            "normal_stress_rms",
+            "b_normal_rms",
+            "staggered_weak_max",
+            "pointwise_force_rms",
+            "normalized_divergence_rms",
+            "closure",
             "message",
         ):
             value = getattr(data, name)
             dataset.setncattr(name, int(value) if isinstance(value, (bool, np.bool_)) else value)
         for name, size in (
-            ("s", ns), ("theta", ntheta), ("xi", nxi), ("xyz", 3),
-            ("history_row", history.shape[0]), ("history_column", history.shape[1]),
-            ("coil", coils.shape[0]), ("coil_point", coils.shape[1]),
+            ("s", ns),
+            ("theta", ntheta),
+            ("xi", nxi),
+            ("xyz", 3),
+            ("history_row", history.shape[0]),
+            ("history_column", history.shape[1]),
+            ("coil", coils.shape[0]),
+            ("coil_point", coils.shape[1]),
         ):
             dataset.createDimension(name, size)
         variables = {
@@ -246,11 +248,24 @@ def read_mout(path: str | Path) -> MoutData:
         schema = str(dataset.getncattr("schema"))
         if schema != MIRROR_OUTPUT_SCHEMA:
             raise ValueError(f"unsupported mirror output schema: {schema}")
-        arrays = {name: np.asarray(dataset[name][:]) for name in (
-            "s", "theta", "xi", "z", "boundary_radius", "radius_scale",
-            "lambda_stream", "mod_b", "b_xyz", "p_perpendicular", "p_parallel",
-            "history", "coil_xyz",
-        )}
+        arrays = {
+            name: np.asarray(dataset[name][:])
+            for name in (
+                "s",
+                "theta",
+                "xi",
+                "z",
+                "boundary_radius",
+                "radius_scale",
+                "lambda_stream",
+                "mod_b",
+                "b_xyz",
+                "p_perpendicular",
+                "p_parallel",
+                "history",
+                "coil_xyz",
+            )
+        }
         attributes = {}
         for field in fields(MoutData):
             if field.name in arrays or field.name == "schema":
@@ -260,9 +275,7 @@ def read_mout(path: str | Path) -> MoutData:
             elif field.default is not MISSING:
                 attributes[field.name] = field.default
             else:
-                raise ValueError(
-                    f"mout file is missing required attribute: {field.name}"
-                )
+                raise ValueError(f"mout file is missing required attribute: {field.name}")
     attributes["converged"] = bool(attributes["converged"])
     attributes["iterations"] = int(attributes["iterations"])
     data = MoutData(**arrays, **attributes, schema=schema)

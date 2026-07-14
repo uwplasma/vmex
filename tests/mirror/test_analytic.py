@@ -52,9 +52,10 @@ def test_rotating_ellipse_general_and_center_quadrupole_agree() -> None:
     alpha = jnp.linspace(0.0, 2.0 * jnp.pi, 17, endpoint=False)
     radii = jnp.asarray([2.0e-3, 1.0e-3, 5.0e-4])
     recovered = jax.vmap(
-        lambda radius: (jax.vmap(lambda angle: fixture.field_strength(radius, angle, 0.0))(alpha)
-                        - fixture.axis_field(0.0))
-        / radius**2
+        lambda radius: (
+            (jax.vmap(lambda angle: fixture.field_strength(radius, angle, 0.0))(alpha) - fixture.axis_field(0.0))
+            / radius**2
+        )
     )(radii)
     design = closed[0] + closed[1] * np.cos(2.0 * np.asarray(alpha))
     design += closed[2] * np.sin(2.0 * np.asarray(alpha))
@@ -68,6 +69,9 @@ def test_rotating_ellipse_general_and_center_quadrupole_agree() -> None:
     np.testing.assert_allclose(first_order, 0.0, atol=2.0e-12)
     section = fixture.section(0.1, alpha, 0.2)
     assert section.shape == (alpha.size, 3)
+    polar_angle = jnp.arctan2(section[:, 1], section[:, 0])
+    polar_radius = jnp.linalg.norm(section[:, :2], axis=1)
+    np.testing.assert_allclose(fixture.boundary_radius(0.1, polar_angle, 0.2), polar_radius, atol=3.0e-16)
     assert np.isfinite(float(jax.grad(lambda zz: fixture.field_strength(0.01, 0.3, zz))(0.1)))
 
 
@@ -110,6 +114,13 @@ def test_sflm_labels_sections_and_field_line_error_have_expected_order() -> None
     np.testing.assert_allclose(semi_x / semi_y, fixture.ellipticity(0.8), rtol=5.0e-4)
     area_factor = (semi_x * semi_y) / 0.05**2
     np.testing.assert_allclose(area_factor * fixture.axis_field(0.8), fixture.center_field, rtol=5.0e-4)
+    polar_angle = jnp.arctan2(section[:, 1], section[:, 0])
+    polar_radius = jnp.linalg.norm(section[:, :2], axis=1)
+    np.testing.assert_allclose(
+        fixture.boundary_radius(0.05, polar_angle, 0.8),
+        polar_radius,
+        atol=3.0e-16,
+    )
 
     def tangent_error(radius):
         point = fixture.field_line(radius, 0.6 * radius, jnp.asarray([0.4]))[0]

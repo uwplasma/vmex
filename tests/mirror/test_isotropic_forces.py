@@ -31,6 +31,7 @@ from vmec_jax.mirror.forces import (  # noqa: E402
     isotropic_staggered_weak_residual,
     mass_profile_from_pressure,
     mirror_energy,
+    staggered_field_strength,
 )
 from vmec_jax.mirror.solver import (  # noqa: E402
     SeparableMirrorPreconditioner,
@@ -141,6 +142,13 @@ def test_optimizer_merit_rejects_crossed_flux_surfaces() -> None:
     assert bool(invalid_energy.geometry.jacobian_sign_changed)
     np.testing.assert_allclose(_valid_energy_objective(valid_energy, float(valid_energy.total)), 1.0)
     assert np.isinf(float(_valid_energy_objective(invalid_energy, 1.0)))
+
+
+def test_staggered_field_strength_is_exact_for_uniform_cylinder() -> None:
+    grid, _, state = _cylinder(ns=7, nxi=13)
+    mod_b = staggered_field_strength(state, grid, axial_flux_derivative=0.1)
+
+    np.testing.assert_allclose(mod_b, mod_b[0, 0, 0], rtol=3.0e-15, atol=3.0e-15)
 
 
 def test_energy_gradient_matches_central_difference_for_interior_shape() -> None:

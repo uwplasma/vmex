@@ -24,6 +24,7 @@ from vmec_jax.mirror import (
     write_mout,
 )
 from vmec_jax.mirror.forces import mirror_energy
+from vmec_jax.mirror.plotting import _theta_samples
 
 
 def _sample_mout() -> MoutData:
@@ -85,6 +86,16 @@ def test_mout_roundtrip(tmp_path) -> None:
     assert loaded.normalized_divergence_rms == pytest.approx(5.0e-13)
     np.testing.assert_allclose(loaded.boundary_radius, _sample_mout().boundary_radius)
     np.testing.assert_allclose(loaded.b_xyz, _sample_mout().b_xyz)
+
+
+def test_plot_resampling_preserves_resolved_fourier_modes() -> None:
+    data = _sample_mout()
+    theta_dense = np.linspace(0.0, 2.0 * np.pi, 101)
+    values = np.cos(2.0 * data.theta)[:, None]
+
+    sampled = _theta_samples(data, values, theta_dense)
+
+    np.testing.assert_allclose(sampled[:, 0], np.cos(2.0 * theta_dense), atol=2.0e-15)
 
 
 def test_mout_reads_files_before_independent_diagnostics(tmp_path) -> None:

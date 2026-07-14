@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import numpy as np
 import pytest
 
 jax = pytest.importorskip("jax")
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
+
+requires_virtual_casing = pytest.mark.skipif(
+    importlib.util.find_spec("virtual_casing_jax") is None,
+    reason="off-surface Laplace kernels require virtual_casing_jax",
+)
 
 from vmec_jax.mirror.exterior_mesh import (  # noqa: E402
     _spectral_side_density_samples,
@@ -542,6 +549,7 @@ def test_closed_surface_volume_is_differentiable() -> None:
     jax.make_jaxpr(volume)(radius)
 
 
+@requires_virtual_casing
 def test_constant_double_layer_distinguishes_inside_and_outside() -> None:
     """The closed-surface solid angle is one inside and zero outside."""
 
@@ -558,6 +566,7 @@ def test_constant_double_layer_distinguishes_inside_and_outside() -> None:
     np.testing.assert_allclose(values[1], [1.0, 0.0], atol=2.0e-5)
 
 
+@requires_virtual_casing
 def test_single_layer_gradient_has_far_field_monopole_limit() -> None:
     grid = _grid(ns=25, nxi=41)
     surface = build_closed_mirror_surface(MirrorBoundary.from_radius(0.31, grid), grid)
@@ -572,6 +581,7 @@ def test_single_layer_gradient_has_far_field_monopole_limit() -> None:
     np.testing.assert_allclose(field[:, :2], 0.0, atol=2.0e-16)
 
 
+@requires_virtual_casing
 def test_green_gradient_matches_finite_difference_on_axis() -> None:
     grid = _grid(ns=13, nxi=21)
     surface = build_closed_mirror_surface(MirrorBoundary.from_radius(0.31, grid), grid, cap_rim_grade=2.0)
@@ -825,6 +835,7 @@ def test_nonaxisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
     assert float(jnp.linalg.norm(tangent)) > 0.0
 
 
+@requires_virtual_casing
 def test_green_representation_converges_for_harmonic_polynomials() -> None:
     targets = jnp.asarray([[0.1, 0.05, 0.2], [0.0, 0.0, 4.0]])
     errors = []

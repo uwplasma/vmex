@@ -18,6 +18,7 @@ iteration each, plus the traceable magnetic-well term through
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -154,6 +155,25 @@ def test_mirror_fixed_boundary_gradients_example(tmp_path):
     assert (outdir / "mirror_fixed_gradient_3d.png").exists()
     assert (outdir / "mirror_fixed_gradient_modB.png").exists()
     assert (outdir / "mirror_fixed_gradient_sensitivity.png").exists()
+
+
+@pytest.mark.full  # nightly: two five-stage spline continuations (~100s)
+def test_mirror_fixed_boundary_nonaxisymmetric_example(tmp_path):
+    _run_example(
+        EXAMPLES / "mirror_fixed_boundary_nonaxisymmetric.py",
+        tmp_path,
+        timeout=1200,
+    )
+    outdir = tmp_path / "results" / "mirror_fixed_boundary_nonaxisymmetric"
+    summary = json.loads((outdir / "summary.json").read_text())
+    assert summary["rotating_ellipse"]["variational_max"] < 1.0e-12
+    assert summary["rotating_ellipse"]["forbidden_m1_max"] < 1.0e-12
+    assert summary["straight_field_line"]["variational_max"] < 1.0e-12
+    assert summary["straight_field_line"]["minimum_mean_direction_cosine"] > 0.997
+    for case in summary:
+        assert (outdir / f"mout_{case}.nc").exists()
+        for suffix in ("summary", "cross_sections", "modB", "3d", "validation"):
+            assert (outdir / f"{case}_{suffix}.png").exists()
 
 
 @pytest.mark.full  # nightly: ESSOS-to-MGRID free-boundary solve (~30s)

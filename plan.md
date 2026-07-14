@@ -194,14 +194,14 @@ equilibrium criterion.
 
 | Lane | Completion | Evidence retained | Blocking evidence |
 |---|---:|---|---|
-| Axisymmetric fixed mirror | 85% | real solve, `ftol=1e-12`, MMS, independent weak force, gradients | B-spline parity |
-| Axisymmetric free mirror | 80% | coupled solve, beta 0--50%, `B.n`, stress, weak force, three-grid paraxial trend | dense-Jacobian scaling and B-spline parity |
-| Nonaxisymmetric fixed mirror | 55% | theta-dependent solve plus independent rotating-ellipse/SFLM coefficient oracles | no B-spline solve against either oracle |
+| Axisymmetric fixed mirror | 90% | real solve, `ftol=1e-12`, MMS, weak force, gradients, spline parity | spline implicit derivatives and final release evidence |
+| Axisymmetric free mirror | 80% | coupled solve, beta 0--50%, `B.n`, stress, weak force, three-grid paraxial trend | dense-Jacobian scaling and spline coupling |
+| Nonaxisymmetric fixed mirror | 72% | native-spline rotating ellipse and SFLM below `ftol`, symmetry/direction oracles, plotted example | amplitude/refinement, finite beta, derivatives |
 | Nonaxisymmetric free mirror | 30% | theta-dependent BIE and residual exist | no converged analytic fixture or panel study |
 | ANIMEC model | 55% | functional, moments, isotropic limit, indicators | source-equation audit and independent finite-beta case |
 | Implicit derivatives | 65% | fixed and axisymmetric-free FD checks | duplicated Krylov path and missing spline/nonaxisymmetric scaling |
 | Preconditioning | 45% | separable prototype and Newton-GMRES | no bounded-iteration basis/resolution study |
-| Native B-spline open mirror | 0% | design only | basis, coefficient state, transfer, parity |
+| Native B-spline open mirror | 65% | tested basis/state/transfer, fixed solve, knot convergence, coefficient preconditioner | free-boundary state and derivative parity |
 | Native B-spline closed hybrid | 0% | Fourier target is not reusable physics | centerline/frame/metric/residual implementation |
 | ESSOS ownership cleanup | 100% | MGRID/callable contract and live ESSOS smoke | none |
 | Source simplification | 40% | Fourier-hybrid and coil ownership removed | public API and large mirror modules remain |
@@ -451,7 +451,10 @@ memory scaling.
 
 ### Milestone 5: nonaxisymmetric fixed-boundary mirrors
 
-Status: active. A five-stage native-spline continuation reaches the full
+Status: active. A parser-free root example now runs five-stage native-spline
+continuations for both independent fixtures and writes solved MOUT files plus
+horizontal 3-D field-line, section, ``|B|``, convergence, and validation plots.
+The rotating-ellipse continuation reaches the full
 90-degree, elongation-1.5 thin tube at ``ns=5`` with discrete/weak residuals
 below ``1.2e-16`` and ``div(B)<7.4e-15``. Even theta quadrature is mandatory:
 12 nodes preserve half-turn symmetry and reduce the forbidden ``m=1`` signal
@@ -466,7 +469,8 @@ solve stays nested only
 after invalid-Jacobian states receive infinite optimizer merit; it reaches
 ``ftol`` but requires 2,500--17,017 inner GMRES iterations. Thus equilibrium
 existence and symmetry pass, while paraxial amplitude and preconditioner gates
-remain open.
+remain open. MOUT ``|B|`` now uses the compatible radial-Gauss reconstruction,
+while Cartesian full-mesh samples are retained for field-line direction.
 
 1. Solve the 90-degree rotating ellipse with the common scalar-pressure
    residual and B-spline axial state.
@@ -629,7 +633,14 @@ meets its size budget, and draft PR #22 is ready for scientific review.
 
 ## 8. Immediate execution order
 
-Commit and push Milestone 0, then execute Milestone 1. Do not implement B-splines
-or add another physics lane until the staggered weak-force contract and the
-axisymmetric three-resolution table pass. After Milestone 1, delete the known
-misowned/false lanes before adding new source.
+1. Finish Milestone 5 with a bounded radial/poloidal/knot study, finite-beta
+   continuation, and spline implicit JVP/VJP validation. Promote the converged
+   coefficients and observables; retain full-mesh magnitude only as non-gating.
+2. Attempt Milestone 6 on the existing theta-dependent exterior solve with a
+   coefficient-native plasma state. Run the two bounded vacuum formulations and
+   either promote converged refinement evidence or defer the public lane.
+3. Implement and gate the fixed closed hybrid in Milestone 7. Attempt its free
+   boundary only after the fixed limits pass.
+4. Complete the structured preconditioner, derivative, and ANIMEC decisions in
+   Milestone 8, then execute the deletion, documentation, GPU, and CI gates in
+   Milestone 9. No new physics lane is added before these finite decisions.

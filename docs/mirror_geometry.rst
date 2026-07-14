@@ -60,6 +60,12 @@ same constrained solver variables. The pointwise force reconstructs
 diagnostic. ``div(B)`` checks the field representation. Straight-axis mirror
 data are never encoded as a toroidal WOUT file.
 
+The saved ``|B|`` array is reconstructed from the same radial Gauss cells used
+by the magnetic-energy functional. Cartesian field samples remain separate for
+field-line direction. Plots resample the uniformly spaced poloidal data with
+their resolved Fourier modes, so low-order ellipses are not displayed as
+polygons.
+
 The compact six-point isotropic reference data are recorded in
 ``benchmarks/mirror_free_boundary_axisymmetric.json``. At 50% requested and
 achieved central beta, the solve reaches variational and staggered-weak
@@ -211,6 +217,20 @@ scalar potential. Halving the radius improves these to ``0.999988`` and
 field magnitude does not converge under the same study, so magnitude promotion
 awaits a staggered comparison. Compact positive and negative evidence is in
 ``benchmarks/mirror_spline_nonaxisymmetric.json``.
+
+The parser-free root example runs both fixtures through five coefficient-space
+continuation stages and writes MOUT plus horizontal 3-D, cross-section,
+``|B|``, residual, symmetry, and analytic-direction figures::
+
+   python examples/mirror_fixed_boundary_nonaxisymmetric.py
+
+At its compact demonstration resolution, the rotating ellipse reaches a
+variational/staggered-weak residual of ``7.91e-17/7.71e-17``, normalized
+``div(B)=7.37e-15``, and forbidden ``m=1`` amplitude below ``5e-15``. The SFLM
+reaches ``9.68e-17/9.69e-17`` and ``div(B)=7.86e-15``; its mean field-direction
+cosine remains above ``0.9974`` including the fixed-flux end cuts. The figures
+show the actual solved nested surfaces and field lines, not the analytic target
+alone.
 
 Fixed-boundary implicit gradients
 ---------------------------------
