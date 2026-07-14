@@ -1,5 +1,5 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_spline_fixed_boundary/1",
+  "schema": "vmec_jax.benchmark.mirror_spline_fixed_boundary/2",
   "case": {
     "ns": 5,
     "mpol": 0,
@@ -71,6 +71,34 @@
       {"elements": 6, "coefficients": 9, "active_dofs": 45, "energy_relative_error": 1.2184e-7, "volume_relative_error": 3.7789e-6, "variational_max": 2.3178e-15, "staggered_weak_max": 2.3141e-15},
       {"elements": 8, "coefficients": 11, "active_dofs": 59, "energy_relative_error": 5.1387e-8, "volume_relative_error": 2.1794e-6, "variational_max": 5.4311e-16, "staggered_weak_max": 5.7782e-16}
     ]
+  },
+  "closed_circular_torus": {
+    "case": {
+      "mpol": 1,
+      "ntheta": 6,
+      "periodic_spline_coefficients": 8,
+      "major_radius": 2.5,
+      "minor_radius": 0.25,
+      "axial_flux_derivative": 0.03,
+      "solve_lambda": true,
+      "ftol": 1e-12
+    },
+    "initializer": "axial average of sqrt(g)/g_xixi; circular limit gives B proportional to 1/R",
+    "ns5": {
+      "iterations": 27,
+      "variational_max": 1.8839e-15,
+      "staggered_weak_max": 1.8332e-15,
+      "normalized_divb": 4.6389e-15,
+      "pointwise_force_normalized_rms": 0.70902
+    },
+    "ns7": {
+      "iterations": 90,
+      "variational_max": 1.9003e-15,
+      "staggered_weak_max": 2.9977e-15,
+      "normalized_divb": 1.9024e-14,
+      "pointwise_force_normalized_rms": 0.57024
+    },
+    "status": "complete radius-plus-stream-function equilibrium; discrete and weak residuals pass, while pointwise force still requires radial refinement"
   },
   "note": "Sequential local cold timings include representation-specific JAX compilation and are evidence, not a steady-state speed claim."
 }

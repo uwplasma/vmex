@@ -1,10 +1,13 @@
 """Closed-surface quadrature for the unbounded mirror vacuum.
 
 The plasma side wall alone is not a closed boundary: the two axial cuts must
-be filled by disks before a free-space boundary integral is well posed.  This
-module builds that geometric adapter.  It deliberately contains no Laplace
-solver; the quadrature identities are validated first, then the kernels from
-``virtual_casing_jax`` can be attached without duplicating geometry logic.
+be filled by disks before a free-space boundary integral is well posed. The
+cuts carry magnetic through-flux and are not plasma-vacuum interfaces; the
+disks only close the Green integration surface and do not impose ``B.n=0`` or
+pressure balance. This module builds that geometric adapter. It deliberately
+contains no Laplace solver; the quadrature identities are validated first,
+then the kernels from ``virtual_casing_jax`` can be attached without
+duplicating geometry logic.
 """
 
 from __future__ import annotations

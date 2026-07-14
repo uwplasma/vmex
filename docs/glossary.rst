@@ -137,4 +137,3 @@ output represented by :class:`~vmec_jax.mirror.output.MoutData`. A converged
 toroidal API result is :class:`~vmec_jax.core.optimize.Equilibrium`; a
 straight-mirror result is :class:`~vmec_jax.mirror.solver.MirrorSolveResult`
 or :class:`~vmec_jax.mirror.free_boundary.FreeBoundaryMirrorResult`.
-

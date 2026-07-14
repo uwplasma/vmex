@@ -7,6 +7,29 @@ fixed-flux end cuts. It does not reinterpret a straight mirror as a periodic
 torus. Axisymmetric fixed- and free-boundary equilibria are supported;
 nonaxisymmetric straight mirrors remain a research API.
 
+Open topology and end cuts
+--------------------------
+
+The open coordinates are
+:math:`(s,\theta,\xi)\in[0,1]\times[0,2\pi)\times[-1,1]`. The lateral
+surface :math:`s=1` is the plasma-vacuum interface. The planes
+:math:`\xi=\pm1` are prescribed computational cuts through the flux tube;
+magnetic flux passes through them, so they are neither material interfaces nor
+``B.n=0`` boundaries. The divergence-free representation is
+
+.. math::
+
+   \sqrt{g}B^\theta = I'(s)-\partial_\xi\lambda, \qquad
+   \sqrt{g}B^\xi = \Psi'(s)+\partial_\theta\lambda,
+
+with :math:`B^s=0` and a zero-surface-mean gauge for :math:`\lambda`.
+
+An unbounded exterior Green solve requires a geometrically closed integration
+surface, so disks temporarily close the two cuts. Their Neumann data continue
+the nonzero plasma and applied-field through-flux across each cut. The disks do
+not close the plasma or acquire an interface pressure-balance equation.
+Tangency and total-pressure continuity are enforced only on the lateral LCFS.
+
 Current capability
 ------------------
 
@@ -29,9 +52,10 @@ The branch currently includes:
 The axisymmetric free-boundary path has completed annulus and
 unbounded-exterior resolution studies through 50% requested beta. The
 nonaxisymmetric path also converges through 50%, but its point observables are
-not monotone under spatial refinement, so it is not promoted. A toroidal
-stellarator-mirror hybrid is deferred until a native spline equilibrium state
-exists; the removed Fourier experiment is not a supported capability.
+not monotone under spatial refinement, so it is not promoted. A native periodic
+B-spline hybrid geometry and fixed-boundary research solve now exist. The
+removed Fourier projection is not a supported capability, and the hybrid still
+requires the residual, limiting-case, and derivative gates below.
 
 Toroidal hybrid foundation
 --------------------------
@@ -50,13 +74,20 @@ limit recovers analytic torus volume to ``2e-5`` relative and keeps discrete
 ``div(B)`` below ``2e-14``; the racetrack ellipse rotates 90 degrees between
 the long legs and matches its area-times-axis-length volume to ``3e-4``.
 The coefficient-native solver now applies the same radial-Gauss energy and
-``ftol=1e-12`` variational contract. A circular torus converges in 23
-evaluations with residual ``1.05e-16`` and normalized ``div(B)=1.79e-15``. A
-finite-current racetrack with solved stream function converges in 65 evaluations
-with residual ``3.11e-15`` and ``div(B)=3.50e-13``. Its 90-degree ellipse is an
-actual solved fixed boundary, not a Fourier projection. Pointwise force and
-resolution gates remain open, so this is a research implementation and is not
-yet exported as a supported equilibrium model.
+``ftol=1e-12`` variational contract. The current-free initializer obtains the
+poloidal stream function from the axial average of
+:math:`\sqrt{g}/g_{\xi\xi}`; on concentric circular surfaces this produces the
+vacuum :math:`1/R` field and fixes its sign and zero-mean gauge. The complete
+circular-torus solve jointly advances radius and stream function in 27
+residual-Newton evaluations. Its variational/staggered-weak residuals are
+``1.88e-15/1.83e-15`` and normalized ``div(B)=4.64e-15``. The independently
+reconstructed pointwise-force norm improves from ``0.709`` at ``ns=5`` to
+``0.570`` at ``ns=7`` but is not yet small, so it remains an explicit
+refinement blocker. The finite-current racetrack also solves its stream
+function and its 90-degree ellipse is an actual fixed-boundary equilibrium,
+not a Fourier projection. The closed limiting-case and derivative gates remain
+open, so this is a research implementation and is not yet exported as a
+supported equilibrium model.
 
 Plotting and output scope
 -------------------------

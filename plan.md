@@ -225,16 +225,17 @@ currently reports four blank-line-at-EOF errors, three in unrelated core files.
   derivatives pass circle/racetrack closure, volume, metric, and `div(B)` tests.
 - A finite-current rotating-ellipse racetrack solve reaches variational
   `3.11e-15` and normalized `div(B)=3.50e-13` with solved `lambda`.
+- The complete circular-torus solve now advances radius and `lambda` from a
+  tested `1/R` initializer. At `ns=5` it reaches variational/independent weak
+  residuals `1.88e-15/1.83e-15` in 27 residual-Newton evaluations; at `ns=7`
+  they remain below `3.0e-15`.
 
 ### 4.3 Results that are not promotion evidence
 
-- The current circular-torus test freezes `lambda`. Its 23-iteration,
-  `1.05e-16` variational result is only a radius subproblem and is not a
-  complete vacuum equilibrium. With `solve_lambda=True`, a zero-lambda start
-  requires about 812 evaluations at `ns=5` but lowers the pointwise force from
-  about 4.90 to 0.71; at `ns=7` it falls to 0.57. The plan and docs must not
-  cite the frozen-lambda result as a solved torus.
-- Closed spline solves have no independent staggered weak residual yet.
+- The complete circular torus still has a pointwise reconstructed force of
+  `0.709` at `ns=5`, improving to `0.570` at `ns=7`. The independent discrete
+  residual is closed, but the pointwise reconstruction remains a refinement
+  blocker rather than promotion evidence.
 - Closed periodic preconditioning is disabled.
 - The open pointwise `J x B - grad(p)` reconstruction does not converge
   monotonically even where the discrete and weak residuals are at roundoff. It
@@ -391,6 +392,16 @@ after every commit. No new physics lane is added.
 
 Gate: the baseline is scientifically honest and locally green. No later hybrid
 claim uses an incomplete state.
+
+Execution status (2026-07-14): items 2--4 are implemented. The former
+radius-only torus test is now a complete 27-evaluation solve with an independent
+closed weak residual, the stale documentation claim is removed, and the cap
+through-flux contract is explicit. The grouped run confirms both repaired fast
+shards and every build, example, mirror, implicit, and parity job. The aggregate
+core-only coverage gate is `94%` versus `95%` because inherited branch-only core
+modules add untested statements; do not lower the threshold. Phase 1 must
+restore that unrelated core diff before Phase 0 can be declared globally green.
+The branch-wide whitespace check and all focused local tests now pass.
 
 ### Phase 1: reduce the PR before adding physics
 
@@ -567,7 +578,7 @@ Percentages measure accepted promotion evidence, not code written.
 | Nonaxisymmetric fixed mirror | 82% | amplitude, forward tangent, preconditioned refinement |
 | Nonaxisymmetric free mirror | 55% | structured-solver retry and local-mode convergence |
 | Open native B-splines | 70% | free-boundary coefficients and public-default decision |
-| Fixed closed B-spline hybrid | 32% | complete torus, weak force, limits, iota, derivatives |
+| Fixed closed B-spline hybrid | 40% | pointwise refinement, limits, iota, derivatives |
 | Free closed hybrid | 10% | conditional after fixed promotion |
 | Preconditioning | 45% | periodic blocks and bounded Krylov scaling |
 | Implicit derivatives | 74% | spline forward tangent, hybrid and retained free lanes |
@@ -633,9 +644,10 @@ The following do not block completion:
 
 ## 10. Immediate execution order
 
-1. Execute Phase 0: fix CI, the incomplete torus claim, and the open-cap
-   boundary contract.
-2. Execute Phase 1 before adding another solver or geometry path.
+1. Execute Phase 1's unrelated-core restoration, then close Phase 0 by
+   confirming the unchanged `95%` aggregate coverage gate.
+2. Finish the remaining API/module reduction in Phase 1 before adding another
+   solver or geometry path.
 3. Finish the promoted open scalar/B-spline lanes in Phase 2.
 4. Complete structured linear algebra in Phase 3, then make the one bounded
    nonaxisymmetric free-boundary decision in Phase 4.

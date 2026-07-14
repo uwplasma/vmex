@@ -557,8 +557,15 @@ def _optimize_fixed_boundary(
     config: MirrorConfig,
     gradient_tolerance: float,
     matrix_free_context: tuple[Any, tuple[Any, np.ndarray]] | None,
+    start_with_residual_newton: bool = False,
 ) -> _OptimizationOutcome:
-    """Run the common host L-BFGS and residual-Newton solve policy."""
+    """Run the common host L-BFGS and residual-Newton solve policy.
+
+    Small closed spline systems can start with residual Newton when their
+    geometry initializer is already in a valid local basin. This avoids
+    hundreds of relative-energy L-BFGS steps before the same Newton polish;
+    larger systems retain the matrix-free policy.
+    """
 
     callback_iterations = 0
     use_matrix_free = x0.size > _HOST_REFERENCE_MAX_SIZE
@@ -578,24 +585,31 @@ def _optimize_fixed_boundary(
     polish_reserve = min(polish_cap, max(1, int(config.max_iterations) // 4))
     available = int(config.max_iterations) - polish_reserve
     lbfgs_budget = max(10, available // 2) if use_matrix_free else max(1, available)
-    optimization = minimize(
-        fun=lambda x: evaluate(x)[0],
-        x0=x0,
-        jac=lambda x: evaluate(x)[1],
-        method="L-BFGS-B",
-        bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
-        callback=callback,
-        options={
-            "maxiter": lbfgs_budget,
-            "gtol": float(gradient_tolerance),
-            "ftol": np.finfo(float).eps,
-            "maxls": 50,
-            "maxcor": 20,
-        },
-    )
-    final_x = np.asarray(optimization.x)
-    optimizer_success = bool(optimization.success)
-    optimizer_message = str(optimization.message)
+    if start_with_residual_newton and not use_matrix_free:
+        final_x = np.asarray(x0)
+        optimizer_success = False
+        optimizer_message = "started with residual-Newton"
+        lbfgs_iterations = 0
+    else:
+        optimization = minimize(
+            fun=lambda x: evaluate(x)[0],
+            x0=x0,
+            jac=lambda x: evaluate(x)[1],
+            method="L-BFGS-B",
+            bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
+            callback=callback,
+            options={
+                "maxiter": lbfgs_budget,
+                "gtol": float(gradient_tolerance),
+                "ftol": np.finfo(float).eps,
+                "maxls": 50,
+                "maxcor": 20,
+            },
+        )
+        final_x = np.asarray(optimization.x)
+        optimizer_success = bool(optimization.success)
+        optimizer_message = str(optimization.message)
+        lbfgs_iterations = int(optimization.nit)
     polish_evaluations = 0
     newton_steps = 0
     linear_iterations = 0
@@ -610,7 +624,7 @@ def _optimize_fixed_boundary(
         remaining = max(
             1,
             int(config.max_iterations)
-            - int(optimization.nit)
+            - lbfgs_iterations
             - polish_evaluations
             - newton_steps,
         )
@@ -650,7 +664,7 @@ def _optimize_fixed_boundary(
     # A bounded dense fallback is the robust reference lane up to 2048 dofs.
     if float(candidate_variational.maximum) > config.ftol and final_x.size <= 2048:
         hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
-        remaining = max(1, int(config.max_iterations) - int(optimization.nit) - newton_steps)
+        remaining = max(1, int(config.max_iterations) - lbfgs_iterations - newton_steps)
         polish = least_squares(
             fun=lambda x: np.asarray(gradient_function(jnp.asarray(x)), dtype=float),
             x0=final_x,
@@ -681,7 +695,7 @@ def _optimize_fixed_boundary(
 
     return _OptimizationOutcome(
         vector=final_x,
-        iterations=int(optimization.nit) + newton_steps + polish_evaluations,
+        iterations=lbfgs_iterations + newton_steps + polish_evaluations,
         optimizer_success=optimizer_success,
         linear_iterations=linear_iterations,
         final_linear_residual=final_linear_residual,

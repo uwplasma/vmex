@@ -91,10 +91,12 @@ def plasma_external_neumann(
     plasma_grid: "MirrorGrid",
     external_field: Any,
 ) -> Array:
-    """Build ``(B_plasma-B_external) dot n`` on the closed mirror boundary.
+    """Build ``(B_plasma-B_external) dot n`` on the Green surface.
 
     The lateral plasma trace is sampled directly. End-cut ``Bz`` is
-    interpolated in ``s=r^2/a_end^2`` onto the graded cap rings.
+    interpolated in ``s=r^2/a_end^2`` onto the graded cap rings. The cap values
+    continue physical through-flux; they are not zero-normal plasma boundary
+    conditions.
     """
 
     ntheta, nxi = surface.lateral_xyz.shape[:2]
@@ -316,10 +318,11 @@ def solve_axisymmetric_exterior_vacuum(
 ) -> AxisymmetricExteriorVacuum:
     """Solve the unbounded vacuum field and reconstruct its lateral trace.
 
-    The two end cuts are closed by graded disks. Their Neumann data continue
-    the plasma axial field into free space, while the lateral data cancel the
-    supplied external normal field. The returned trace is sampled at theta zero on
-    the plasma grid's axial nodes.
+    The two end cuts are closed geometrically by graded disks. Their Neumann
+    data continue the plasma axial field into free space, while the lateral
+    data cancel the supplied external normal field. The caps are not material
+    interfaces. The returned trace is sampled at theta zero on the plasma
+    grid's axial nodes.
     """
 
     surface = build_closed_mirror_surface(

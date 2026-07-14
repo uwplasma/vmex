@@ -330,4 +330,3 @@ def quasi_isodynamic_residual_from_wout(
     return quasi_isodynamic_residual(
         bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
         iota_b=booz["iota_b"], nfp=booz["nfp"], **qi_kwargs)
-

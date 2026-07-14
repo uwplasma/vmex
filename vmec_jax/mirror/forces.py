@@ -255,6 +255,7 @@ def isotropic_staggered_energy_gradient(
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     mu0: float = float(MU0),
+    axis: ClosedAxisGeometry | None = None,
 ) -> MirrorState:
     """Assemble the isotropic discrete first variation without autodiff.
 
@@ -276,10 +277,33 @@ def isotropic_staggered_energy_gradient(
     radius_xi = samples.d_radius_dxi
     field_theta = samples.field_theta_numerator
     field_xi = samples.field_xi_numerator
-    jacobian = samples.jacobian
-    g_thetatheta = radius_theta**2 + radius**2
-    g_thetaxi = radius_theta * radius_xi
-    g_xixi = radius_xi**2 + float(grid.dz_dxi) ** 2
+    if axis is None:
+        jacobian = samples.jacobian
+        g_thetatheta = radius_theta**2 + radius**2
+        g_thetaxi = radius_theta * radius_xi
+        g_xixi = radius_xi**2 + float(grid.dz_dxi) ** 2
+        e_theta = e_xi = radial_direction = poloidal_direction = None
+        radial_direction_xi = orientation = None
+    else:
+        theta = jnp.asarray(grid.theta)[None, None, :, None, None]
+        normal = jnp.asarray(axis.normal)[None, None, None, :, :]
+        binormal = jnp.asarray(axis.binormal)[None, None, None, :, :]
+        radial_direction = jnp.cos(theta) * normal + jnp.sin(theta) * binormal
+        poloidal_direction = -jnp.sin(theta) * normal + jnp.cos(theta) * binormal
+        normal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[None, None, None]
+        binormal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[None, None, None]
+        radial_direction_xi = jnp.cos(theta) * normal_xi + jnp.sin(theta) * binormal_xi
+        centerline_xi = (jnp.asarray(axis.tangent) * jnp.asarray(axis.speed)[:, None])[None, None, None]
+        e_theta = radius_theta[..., None] * radial_direction + radius[..., None] * poloidal_direction
+        e_xi = centerline_xi + radius_xi[..., None] * radial_direction + radius[..., None] * radial_direction_xi
+        orientation = jnp.sum(
+            radial_direction * jnp.cross(poloidal_direction, e_xi),
+            axis=-1,
+        )
+        jacobian = samples.radius_radius_s * orientation
+        g_thetatheta = jnp.sum(e_theta * e_theta, axis=-1)
+        g_thetaxi = jnp.sum(e_theta * e_xi, axis=-1)
+        g_xixi = jnp.sum(e_xi * e_xi, axis=-1)
     numerator = g_thetatheta * field_theta**2 + 2.0 * g_thetaxi * field_theta * field_xi + g_xixi * field_xi**2
 
     surface_weights = (
@@ -300,11 +324,37 @@ def isotropic_staggered_energy_gradient(
 
     numerator_bar = sample_weights / (2.0 * float(mu0) * jacobian)
     jacobian_bar = sample_weights * (-numerator / (2.0 * float(mu0) * jacobian**2) - pressure_half[None, :, None, None])
-    radius_bar = numerator_bar * (2.0 * radius * field_theta**2)
-    radius_theta_bar = numerator_bar * (2.0 * radius_theta * field_theta**2 + 2.0 * radius_xi * field_theta * field_xi)
-    radius_xi_bar = numerator_bar * (2.0 * radius_theta * field_theta * field_xi + 2.0 * radius_xi * field_xi**2)
     field_theta_bar = numerator_bar * (2.0 * g_thetatheta * field_theta + 2.0 * g_thetaxi * field_xi)
     field_xi_bar = numerator_bar * (2.0 * g_thetaxi * field_theta + 2.0 * g_xixi * field_xi)
+
+    if axis is None:
+        radius_bar = numerator_bar * (2.0 * radius * field_theta**2)
+        radius_theta_bar = numerator_bar * (
+            2.0 * radius_theta * field_theta**2
+            + 2.0 * radius_xi * field_theta * field_xi
+        )
+        radius_xi_bar = numerator_bar * (
+            2.0 * radius_theta * field_theta * field_xi
+            + 2.0 * radius_xi * field_xi**2
+        )
+        radius_radius_s_bar = jacobian_bar * float(grid.dz_dxi)
+    else:
+        e_theta_bar = numerator_bar[..., None] * (
+            2.0 * field_theta[..., None] ** 2 * e_theta
+            + 2.0 * (field_theta * field_xi)[..., None] * e_xi
+        )
+        e_xi_bar = numerator_bar[..., None] * (
+            2.0 * field_xi[..., None] ** 2 * e_xi
+            + 2.0 * (field_theta * field_xi)[..., None] * e_theta
+        )
+        e_xi_bar += (
+            jacobian_bar * samples.radius_radius_s
+        )[..., None] * jnp.cross(radial_direction, poloidal_direction)
+        radius_bar = jnp.sum(e_theta_bar * poloidal_direction, axis=-1)
+        radius_bar += jnp.sum(e_xi_bar * radial_direction_xi, axis=-1)
+        radius_theta_bar = jnp.sum(e_theta_bar * radial_direction, axis=-1)
+        radius_xi_bar = jnp.sum(e_xi_bar * radial_direction, axis=-1)
+        radius_radius_s_bar = jacobian_bar * orientation
 
     radius_bar += grid.theta_basis.differentiate_transpose(radius_theta_bar, axis=2)
     radius_bar += grid.axial_basis.differentiate_transpose(radius_xi_bar, axis=3)
@@ -312,7 +362,6 @@ def isotropic_staggered_energy_gradient(
     lambda_quadrature_bar += grid.theta_basis.differentiate_transpose(field_xi_bar, axis=2)
 
     radius_scale_bar = radius_bar * (samples.s * samples.radius_scale / radius)
-    radius_radius_s_bar = jacobian_bar * float(grid.dz_dxi)
     radius_scale_bar += radius_radius_s_bar * (samples.radius_scale + samples.s * samples.d_radius_scale_ds)
     d_radius_scale_ds_bar = radius_radius_s_bar * samples.s * samples.radius_scale
 

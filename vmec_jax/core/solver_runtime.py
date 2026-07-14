@@ -550,4 +550,3 @@ def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
         coefficients_R=coeffs, coefficients_Z=coeffs,
         matrices_R=mats, matrices_Z=mats, faclam=z((ns, mpol, nr)),
     )
-

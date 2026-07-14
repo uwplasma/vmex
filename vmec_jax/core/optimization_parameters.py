@@ -146,5 +146,3 @@ def _ess_scale(inp: VmecInput, max_mode: int, alpha: float) -> np.ndarray:
     if alpha <= 0.0:
         return np.ones_like(levels)
     return np.exp(-alpha * levels) / np.exp(-alpha)
-
-

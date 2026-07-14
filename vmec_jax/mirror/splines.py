@@ -460,6 +460,78 @@ class SplineMirrorDiscretization:
         return self.project_fixed_boundary(SplineMirrorState(transferred, state.lambda_coefficients), target)
 
 
+def initialize_closed_vacuum_stream_function(
+    state: SplineMirrorState,
+    discretization: SplineMirrorDiscretization,
+    axis: Any,
+    *,
+    axial_flux_derivative: Array,
+) -> SplineMirrorState:
+    """Seed a current-free closed solve with the toroidal ``1/R`` field.
+
+    The axial average of ``sqrt(g) / g_uu`` gives the poloidal flux-density
+    variation for a field with constant covariant axial component. For
+    concentric circular surfaces this is exactly proportional to ``1/R``.
+    The returned periodic stream function has zero surface mean and is only an
+    initializer; nonaxisymmetric equilibria still solve all lambda coefficients.
+    """
+
+    if not discretization.closed:
+        raise ValueError("the closed vacuum initializer requires a periodic spline discretization")
+    from .geometry import evaluate_closed_geometry
+
+    evaluated = discretization.evaluate_state(state)
+    geometry = evaluate_closed_geometry(evaluated, discretization.grid, axis)
+    if bool(geometry.jacobian_sign_changed):
+        raise ValueError("the closed vacuum initializer requires a positive Jacobian")
+    flux = jnp.asarray(axial_flux_derivative, dtype=evaluated.radius_scale.dtype)
+    if flux.ndim == 0:
+        flux = jnp.broadcast_to(flux, (discretization.grid.ns,))
+    if flux.shape != (discretization.grid.ns,):
+        raise ValueError(
+            "axial_flux_derivative must be scalar or have one value per radial surface"
+        )
+
+    axial_weights = jnp.asarray(discretization.grid.axial_basis.weights)
+    theta_weights = jnp.asarray(discretization.grid.theta_basis.weights)
+    metric_weight = geometry.sqrt_g / geometry.g_xixi
+    metric_weight = jnp.einsum("ijk,k->ij", metric_weight, axial_weights)
+    metric_weight /= jnp.sum(axial_weights)
+    theta_mean = jnp.einsum("ij,j->i", metric_weight, theta_weights)
+    theta_mean /= jnp.sum(theta_weights)
+    if not np.all(np.isfinite(np.asarray(theta_mean))) or np.any(
+        np.asarray(theta_mean) <= 0.0
+    ):
+        raise ValueError("the closed vacuum metric weight must be positive and finite")
+    target_derivative = flux[:, None] * (
+        metric_weight / theta_mean[:, None] - 1.0
+    )
+
+    ntheta = discretization.grid.ntheta
+    if ntheta == 1:
+        lam = jnp.zeros_like(target_derivative)
+    else:
+        modes = np.fft.fftfreq(ntheta, d=1.0 / ntheta)
+        inverse_derivative = np.zeros(ntheta, dtype=complex)
+        nonzero = modes != 0.0
+        inverse_derivative[nonzero] = 1.0 / (1j * modes[nonzero])
+        if ntheta % 2 == 0:
+            inverse_derivative[ntheta // 2] = 0.0
+        lam = jnp.fft.ifft(
+            jnp.fft.fft(target_derivative, axis=1)
+            * jnp.asarray(inverse_derivative)[None],
+            axis=1,
+        ).real
+    surface_mean = jnp.einsum("ij,j->i", lam, theta_weights)
+    lam -= (surface_mean / jnp.sum(theta_weights))[:, None]
+    coefficients = jnp.broadcast_to(
+        lam[:, :, None],
+        state.lambda_coefficients.shape,
+    )
+    coefficients = coefficients.at[0].set(coefficients[1])
+    return SplineMirrorState(state.radius_coefficients, coefficients)
+
+
 @dataclass(frozen=True)
 class SplineMirrorSolveResult:
     """Converged coefficient state and its evaluated mirror result."""
@@ -775,10 +847,13 @@ def solve_spline_fixed_boundary_cli(
             maximum=jnp.asarray(np.max(np.abs(packed))),
         )
 
-    def packed_weak(state: MirrorState) -> VariationalResidual | None:
-        if discretization.closed:
-            return None
-        gradient = isotropic_staggered_energy_gradient(state, grid, **energy_kwargs)
+    def packed_weak(state: MirrorState) -> VariationalResidual:
+        gradient = isotropic_staggered_energy_gradient(
+            state,
+            grid,
+            axis=axis,
+            **energy_kwargs,
+        )
         packed = vectorizer.pullback_evaluated_gradient(gradient) / energy_scale
         radius = packed[: vectorizer.radius_size]
         lam = packed[vectorizer.radius_size :]
@@ -836,6 +911,7 @@ def solve_spline_fixed_boundary_cli(
             record=record,
             config=config,
             gradient_tolerance=gradient_tolerance,
+            start_with_residual_newton=discretization.closed,
             matrix_free_context=(
                 None
                 if discretization.closed
