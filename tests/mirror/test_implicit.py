@@ -19,15 +19,17 @@ from vmec_jax.mirror import (  # noqa: E402
     BiMaxwellianPressureClosure,
     TabulatedPressureClosure,
     fixed_boundary_adjoint,
-    fixed_boundary_parameters,
-    make_fixed_boundary_implicit_config,
-    project_fixed_boundary_state,
     solve_fixed_boundary_cli,
     solve_fixed_boundary_implicit,
-    solve_anisotropic_fixed_boundary_cli,
     spline_fixed_boundary_adjoint,
+)
+from vmec_jax.mirror.implicit import (  # noqa: E402
+    fixed_boundary_parameters,
+    make_fixed_boundary_implicit_config,
     spline_fixed_boundary_parameters,
 )
+from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
+from vmec_jax.mirror.solver import solve_anisotropic_fixed_boundary_cli  # noqa: E402
 from vmec_jax.mirror.splines import (  # noqa: E402
     SplineMirrorBoundary,
     SplineMirrorDiscretization,

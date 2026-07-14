@@ -15,10 +15,8 @@ import jax.numpy as jnp  # noqa: E402
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
-    MirrorConvergenceError,
     MirrorResolution,
     MirrorState,
-    project_fixed_boundary_state,
     solve_fixed_boundary_cli,
 )
 from vmec_jax.mirror.forces import (  # noqa: E402
@@ -34,9 +32,11 @@ from vmec_jax.mirror.forces import (  # noqa: E402
     staggered_field_strength,
 )
 from vmec_jax.mirror.solver import (  # noqa: E402
+    MirrorConvergenceError,
     SeparableMirrorPreconditioner,
     _valid_energy_objective,
 )
+from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)

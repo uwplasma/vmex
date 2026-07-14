@@ -29,19 +29,23 @@ if str(REPO_ROOT) not in sys.path:
 
 from vmec_jax.mirror import (  # noqa: E402
     BiMaxwellianPressureClosure,
-    FreeBoundaryRestart,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
     TabulatedPressureClosure,
     build_vacuum_grid,
-    load_free_boundary_restart,
     mout_from_result,
     plot_mout,
     write_mout,
-    save_free_boundary_restart,
-    solve_axisymmetric_beta_scan_cli,
+)
+from vmec_jax.mirror.continuation import solve_axisymmetric_beta_scan_cli  # noqa: E402
+from vmec_jax.mirror.diagnostics import (  # noqa: E402
     summarize_axisymmetric_beta_scan,
+)
+from vmec_jax.mirror.restart import (  # noqa: E402
+    FreeBoundaryRestart,
+    load_free_boundary_restart,
+    save_free_boundary_restart,
 )
 
 # Inputs: edit these values, then run the file directly.

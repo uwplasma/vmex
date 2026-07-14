@@ -16,9 +16,11 @@ from vmec_jax.mirror import (
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
-    boundary_fourier_amplitudes,
     build_vacuum_grid,
     solve_beta_scan_cli,
+)
+from vmec_jax.mirror.diagnostics import (
+    boundary_fourier_amplitudes,
     summarize_axisymmetric_beta_scan,
     summarize_nonaxisymmetric_beta_scan,
 )

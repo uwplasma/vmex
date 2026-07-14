@@ -19,13 +19,13 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorResolution,
     MirrorState,
     fixed_boundary_adjoint,
-    fixed_boundary_parameters,
     mout_from_result,
     plot_mout,
-    project_fixed_boundary_state,
     solve_fixed_boundary_cli,
     write_mout,
 )
+from vmec_jax.mirror.implicit import fixed_boundary_parameters  # noqa: E402
+from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
 
 # Inputs: edit these values, then run this file directly.
 NS, NXI = 3, 5

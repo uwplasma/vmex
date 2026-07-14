@@ -19,8 +19,6 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorResolution,
     MirrorState,
     TabulatedPressureClosure,
-    project_fixed_boundary_state,
-    solve_anisotropic_fixed_boundary_cli,
 )
 from vmec_jax.mirror.forces import (  # noqa: E402
     MU0,
@@ -29,7 +27,11 @@ from vmec_jax.mirror.forces import (  # noqa: E402
     anisotropic_mirror_energy,
     interface_residual,
 )
-from vmec_jax.mirror.model import anisotropy_indicators  # noqa: E402
+from vmec_jax.mirror.model import (  # noqa: E402
+    anisotropy_indicators,
+    project_fixed_boundary_state,
+)
+from vmec_jax.mirror.solver import solve_anisotropic_fixed_boundary_cli  # noqa: E402
 
 
 def test_isotropic_closure_is_exact_limit_and_has_positive_indicators() -> None:

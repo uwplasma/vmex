@@ -11,22 +11,26 @@ import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
     BiMaxwellianPressureClosure,
-    FreeBoundaryRestart,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
     MirrorState,
     TabulatedPressureClosure,
     build_vacuum_grid,
+    solve_beta_scan_cli,
+)
+from vmec_jax.mirror.continuation import solve_axisymmetric_beta_scan_cli  # noqa: E402
+from vmec_jax.mirror.diagnostics import (  # noqa: E402
     boundary_fourier_amplitudes,
     boundary_fourier_norms,
-    load_free_boundary_restart,
-    save_free_boundary_restart,
-    solve_axisymmetric_free_boundary_cli,
-    solve_axisymmetric_beta_scan_cli,
-    solve_beta_scan_cli,
     summarize_axisymmetric_beta_scan,
     summarize_nonaxisymmetric_beta_scan,
+)
+from vmec_jax.mirror.free_boundary import solve_axisymmetric_free_boundary_cli  # noqa: E402
+from vmec_jax.mirror.restart import (  # noqa: E402
+    FreeBoundaryRestart,
+    load_free_boundary_restart,
+    save_free_boundary_restart,
 )
 from vmec_jax.mirror.forces import MU0, mass_profile_from_pressure, mirror_energy  # noqa: E402
 from vmec_jax.mirror.geometry import magnetic_field_squared  # noqa: E402

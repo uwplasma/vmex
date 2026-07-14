@@ -11,8 +11,6 @@ import jax.numpy as jnp  # noqa: E402
 import vmec_jax.mirror as mirror_api  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
-    MIRROR_INPUT_SCHEMA,
-    MIRROR_OUTPUT_SCHEMA,
     EndCondition,
     MirrorBoundary,
     MirrorConfig,
@@ -20,6 +18,10 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorState,
 )
 from vmec_jax.mirror.basis import ChebyshevBasis, ThetaBasis  # noqa: E402
+from vmec_jax.mirror.model import (  # noqa: E402
+    MIRROR_INPUT_SCHEMA,
+    MIRROR_OUTPUT_SCHEMA,
+)
 
 
 def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
@@ -31,8 +33,6 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
         "solve_beta_scan_cli",
         "solve_fixed_boundary_implicit",
         "spline_fixed_boundary_adjoint",
-        "spline_fixed_boundary_parameters",
-        "SplineFixedBoundaryParameters",
         "write_mout",
         "plot_mout",
     }
@@ -44,7 +44,7 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
     }
     assert required <= set(mirror_api.__all__)
     assert internal.isdisjoint(mirror_api.__all__)
-    assert len(mirror_api.__all__) == 50
+    assert len(mirror_api.__all__) == 24
 
 
 def test_mirror_config_freezes_supported_end_and_convergence_contract() -> None:

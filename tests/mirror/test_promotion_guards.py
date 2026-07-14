@@ -19,15 +19,17 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorResolution,
     MirrorState,
     TabulatedPressureClosure,
+    build_vacuum_grid,
+    solve_free_boundary_cli,
+)
+from vmec_jax.mirror.diagnostics import (  # noqa: E402
     boundary_fourier_amplitudes,
     boundary_fourier_norms,
-    build_vacuum_grid,
-    project_fixed_boundary_state,
-    solve_free_boundary_cli,
     summarize_axisymmetric_beta_scan,
     summarize_nonaxisymmetric_beta_scan,
 )
 from vmec_jax.mirror.forces import mirror_energy  # noqa: E402
+from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
 
 
 def _grid(*, ntheta: int = 1, nxi: int = 5):

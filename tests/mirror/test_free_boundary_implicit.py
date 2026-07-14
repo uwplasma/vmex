@@ -12,14 +12,16 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
-    FreeBoundaryAdjointConfig,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
     build_vacuum_grid,
     free_boundary_adjoint,
-    free_boundary_parameters,
     solve_free_boundary_cli,
+)
+from vmec_jax.mirror.free_boundary_implicit import (  # noqa: E402
+    FreeBoundaryAdjointConfig,
+    free_boundary_parameters,
 )
 
 
