@@ -537,6 +537,19 @@ If the energy, finite-volume, and Maxwell routes do not agree and refine, the
 coefficient-native free boundary is deferred and the promoted nodal free solve
 remains the public path. No third discretization strategy is permitted.
 
+Final decision (2026-07-14): defer coefficient-native open-spline free
+boundary. The second attempt derived and tested the exterior correction,
+fixed-source, and excluded-volume terms. A decaying dipole agreed with an
+independent unbounded cylindrical volume integral within 5%, and AD agreed
+with centered shape differences to `2e-6` relative. The independent Maxwell
+virtual-work comparison did not reach a promotion-quality limit: its mismatch
+decreased only from 4.30% to 2.83% over 8--32 angular panels, from 3.71% to
+3.55% over singular orders 4--12, and from 3.00% to 2.53% over axial grids
+9--17. The cap-edge trace is therefore still the accuracy limiter. The unused
+energy adapter and tests were removed, leaving the converged nodal free solve
+as the sole supported path. This closes the two-attempt stop rule; do not add a
+third projected-stress or energy scaffold in PR #22.
+
 ### Phase 3: structured solver and preconditioner
 
 1. Define one packed residual/vectorizer contract for nodal and spline open or
@@ -662,10 +675,10 @@ Percentages measure accepted promotion evidence, not code written.
 | Lane | Current | Required remaining evidence |
 |---|---:|---|
 | Axisymmetric fixed mirror | 90% | spline derivative/release evidence |
-| Axisymmetric free mirror | 80% | native spline coupling and scaling |
+| Axisymmetric free mirror | 84% | exterior observable refinement and scaling |
 | Nonaxisymmetric fixed mirror | 82% | amplitude, forward tangent, preconditioned refinement |
 | Nonaxisymmetric free mirror | 55% | structured-solver retry and local-mode convergence |
-| Open native B-splines | 70% | free-boundary coefficients and public-default decision |
+| Open native B-splines | 78% | fixed-boundary release evidence; free boundary deferred |
 | Fixed closed B-spline hybrid | 40% | pointwise refinement, limits, iota, derivatives |
 | Free closed hybrid | 10% | conditional after fixed promotion |
 | Preconditioning | 45% | periodic blocks and bounded Krylov scaling |
@@ -682,6 +695,7 @@ The following do not block completion:
 - arbitrary curved open axes;
 - radial B-splines or poloidal finite elements;
 - differentiating CLI iteration histories or initial guesses;
+- coefficient-native open-spline free boundary with the current cap-edge BIE;
 - classic toroidal WOUT for open mirrors;
 - VMEC2000 parity for open topology;
 - coil optimization or field-line tracing inside vmec_jax;
@@ -734,9 +748,8 @@ The following do not block completion:
 
 1. Close the current capability-gate CI run, then finish the remaining
    API/module reduction in Phase 1 without changing physics.
-2. Execute the four exterior-energy gates above and finish the promoted open
-   scalar/B-spline lanes in Phase 2; defer native free splines immediately if
-   the independent shape-gradient gate fails.
+2. Finish the retained nodal-free and fixed-spline evidence in Phase 2; the
+   native free-spline shape-gradient gate failed and that lane is closed.
 3. Establish a clean SOLVAX 0.8.3 parity environment, complete structured
    linear algebra in Phase 3, then make the one bounded
    nonaxisymmetric free-boundary decision in Phase 4.
