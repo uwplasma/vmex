@@ -91,6 +91,25 @@ def test_dense_residual_newton_rejects_invalid_root() -> None:
     assert all(candidate[0] >= 0.0 for candidate in accepted)
 
 
+def test_dense_residual_newton_honors_iteration_limit() -> None:
+    solution, iterations, _, converged, message = _dense_residual_newton(
+        np.asarray([1.0]),
+        lambda x: x,
+        lambda _: 2.0 * jnp.ones((1, 1)),
+        lambda x: x[0] ** 2,
+        ftol=1.0e-100,
+        max_steps=51,
+        record_step=lambda _: None,
+        lower_bounds=np.asarray([-np.inf]),
+        upper_bounds=np.asarray([np.inf]),
+    )
+
+    assert not converged
+    assert message == "dense residual Newton iteration limit"
+    assert iterations == 51
+    assert solution[0] == pytest.approx(2.0**-51)
+
+
 def test_clamped_derivatives_and_cubic_reproduction() -> None:
     basis = CubicBSplineBasis.clamped(np.linspace(-1.0, 1.0, 8))
 

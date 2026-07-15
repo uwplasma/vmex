@@ -404,7 +404,8 @@ def _dense_residual_newton(
 
     x = np.asarray(x0, dtype=float)
     final_linear_residual = np.inf
-    for iteration in range(max(0, min(int(max_steps), 50))):
+    step_limit = max(0, int(max_steps))
+    for iteration in range(step_limit):
         residual = np.asarray(gradient_function(jnp.asarray(x)), dtype=float)
         maximum = float(np.max(np.abs(residual)))
         if maximum <= float(ftol):
@@ -436,7 +437,7 @@ def _dense_residual_newton(
     converged = float(np.max(np.abs(residual))) <= float(ftol)
     return (
         x,
-        min(int(max_steps), 50),
+        step_limit,
         final_linear_residual,
         converged,
         "dense residual Newton converged" if converged else "dense residual Newton iteration limit",
