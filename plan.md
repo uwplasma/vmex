@@ -200,10 +200,12 @@ The initial audit relative to `origin/main` found 137 changed files, 24,370
 added lines, and 4,255 deleted lines. Phase 1 and the current cleanup reduce the
 working diff to 71 files, 18,538 added lines, and 1,633 deleted lines: 66
 unrelated files and about 5,000 added lines are gone. `vmec_jax/mirror` now
-contains 9,491 lines in 19 modules and exposes 24 lazy names. Its largest files
-are `forces.py` (1,098), `solver.py` (1,001), `splines.py` (983), and
-`exterior_bie.py` (764). `exterior_mesh.py` is down to 412 lines. There are 148
-collected mirror tests.
+contains 9,534 lines in 16 modules and exposes 24 lazy names. Continuation lives
+with the free-boundary workflow, restart/plot/diagnostic output lives in one
+output module, and exterior interpolation lives with the BIE solve. The largest
+files remain `forces.py` (1,098), `solver.py` (1,001), `splines.py` (983), and
+`output.py` (925), so the module-count gate is met but the line and oversized-
+file gates are not. There are 148 collected mirror tests.
 
 The earlier QI, direct-coil, optimization, and core-refactor work is restored to
 `origin/main`. Only the mirror package, mirror evidence, and small CLI, device,
@@ -461,8 +463,20 @@ source, tests, examples, evidence, documentation, and narrow shared integration
 hooks. The public-API target is complete. The failed curved-side/high-order-cap
 exterior option and its module are deleted after its bounded endpoint run did
 not complete in 690 seconds; the retained spectral-side, linear-panel path
-passes its exterior and shape-derivative tests. The 19-module package and large
-solver/force/spline files remain the active reduction work.
+passes its exterior and shape-derivative tests. Continuation, plotting, exterior
+interpolation, and scalar diagnostics are now colocated with their owning
+workflows, reducing the package to 16 modules. The source-line and oversized-
+file gates remain active; the next reduction removes or demotes the annulus
+backend before splitting any large physics kernel by habit.
+
+A 2026-07-14 full three-resolution beta gate reached the requested nonlinear
+`ftol <= 1e-12` at every point but did not meet its independent discretization
+thresholds. For the unbounded exterior solve, the medium-to-fine beta-10% center
+field changed by `8.38e-4` against a `5e-4` threshold. For the annulus solve it
+changed by `6.12e-4` against `1e-4`. These are unresolved spatial-convergence
+failures, not optimizer failures. Do not loosen the tests: remove the annulus as
+a production backend after bounded parity, and refine the exterior panel,
+radial, and axial studies until physical observables converge.
 
 Gate: the diff is materially smaller, all retained benchmark claims reproduce,
 and no physics result depends on an unrelated branch-only core refactor.
@@ -653,7 +667,7 @@ Percentages measure accepted promotion evidence, not code written.
 | Preconditioning | 45% | periodic blocks and bounded Krylov scaling |
 | Implicit derivatives | 74% | spline forward tangent, hybrid and retained free lanes |
 | ANIMEC | 50% | source parity and independent finite-beta benchmark |
-| Source/API simplification | 70% | reduce remaining modules and oversized solver files |
+| Source/API simplification | 74% | remove annulus production path and reduce oversized files |
 | ESSOS ownership cleanup | 100% | retain interchange tests only |
 
 ## 8. Explicit deferrals

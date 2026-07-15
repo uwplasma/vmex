@@ -19,7 +19,7 @@ from vmec_jax.mirror import (
     build_vacuum_grid,
     solve_beta_scan_cli,
 )
-from vmec_jax.mirror.diagnostics import (
+from vmec_jax.mirror.output import (
     boundary_fourier_amplitudes,
     summarize_axisymmetric_beta_scan,
     summarize_nonaxisymmetric_beta_scan,
