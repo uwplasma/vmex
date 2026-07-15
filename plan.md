@@ -727,6 +727,19 @@ floor bump were reverted. Retain SciPy's tested host GMRES and SOLVAX's existing
 block-Thomas use. A future SOLVAX integration requires explicit left/right
 preconditioner parity and a faster full-solve result; it does not block this PR.
 
+Periodic decision (2026-07-14): the all-coefficient cyclic Galerkin block is
+implemented and passes gauge-free packing/linearity plus the existing circular
+torus and finite-current racetrack tests. It does not pass the primal scaling
+gate. On the identical 892-variable racetrack, forced GMRES is faster than the
+dense reference (`5.81 s` versus `8.71 s`) and preserves energy to `3.3e-16`
+and radius to `9.5e-11`, but takes 3,000 Krylov iterations and leaves linear
+residual `0.136`. Bounded CG and MINRES variants still leave `1.67e-2` and
+`1.58e-2` after 2,000 and 1,852 iterations. The likely missing term is the
+geometry--stream coupling, not the periodic axial stiffness. Do not enable the
+matrix-free closed primal path in this PR. Retain the periodic block for the
+bounded closed-adjoint gate and keep promoted closed studies below the 1,024
+variable dense limit.
+
 ### Phase 4: deferred nonaxisymmetric free-boundary record
 
 The attempted route was:

@@ -248,6 +248,17 @@ stiffness. It converges both variational and staggered residuals to
 GMRES iterations expose conditioning work still assigned to Milestone 8; this
 result establishes a working matrix-free path, not a final scaling claim.
 
+The periodic coefficient block uses every cyclic B-spline coefficient and
+passes its gauge-free shape and linearity tests. It is not enabled for closed
+primal solves. On the 892-variable finite-current racetrack, forced
+matrix-free GMRES matches dense energy to ``3.3e-16`` and radius to
+``9.5e-11`` while reducing wall time from 8.71 to 5.81 seconds, but requires
+3,000 Krylov iterations and leaves relative linear residual 0.136. CG and
+MINRES improve that residual only to 0.0167 and 0.0158 after 2,000 and 1,852
+iterations. This fails the structured-solver gate: closed production studies
+remain below the 1,024-variable dense limit, and the periodic block is retained
+only for the bounded closed-adjoint work.
+
 On the flared finite-beta case, knot refinement from 5 to 11 coefficients
 reduces relative energy error against an ``nxi=17`` Chebyshev oracle from
 ``1.09e-6`` to ``5.14e-8`` and volume error from ``1.19e-5`` to ``2.18e-6``.

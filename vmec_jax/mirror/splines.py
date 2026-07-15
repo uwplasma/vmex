@@ -982,8 +982,12 @@ def solve_spline_fixed_boundary_cli(
             gradient_tolerance=gradient_tolerance,
             start_with_residual_newton=discretization.closed,
             matrix_free_context=(
-                vectorizer,
-                _packed_spline_preconditioner(discretization, vectorizer),
+                None
+                if discretization.closed
+                else (
+                    vectorizer,
+                    _packed_spline_preconditioner(discretization, vectorizer),
+                )
             ),
         )
         final_x = optimization.vector

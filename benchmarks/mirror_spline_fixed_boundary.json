@@ -82,6 +82,16 @@
     "test": "all observable and physical-field errors decrease monotonically; both variational residuals and independent weak residuals remain below 1e-14",
     "timing_note": "sequential local JAX-enabled cold timings; representation evidence, not steady-state benchmarking"
   },
+  "periodic_preconditioner_attempt": {
+    "case": "892-variable finite-current rotating-ellipse racetrack at 16 periodic coefficients",
+    "dense_reference": {"wall_s": 8.7107, "variational_max": 2.7917e-14, "energy": 1641053.444989587},
+    "gmres": {"wall_s": 5.8097, "krylov_iterations": 3000, "final_linear_residual": 0.13591, "variational_max": 2.9974e-13},
+    "cg": {"wall_s": 4.1957, "krylov_iterations": 2000, "final_linear_residual": 0.016706, "variational_max": 2.4766e-13},
+    "minres": {"wall_s": 4.0389, "krylov_iterations": 1852, "final_linear_residual": 0.015838, "variational_max": 3.0629e-14},
+    "parity": {"gmres_energy_relative_difference": 3.3307e-16, "gmres_radius_relative_rms": 9.4677e-11},
+    "peak_rss_mib": 2454.7,
+    "decision": "periodic tensor block is dimensionally correct but fails the linear-residual and Krylov-growth gates; retain it for adjoint research, keep closed primal solves below the dense threshold"
+  },
   "closed_circular_torus": {
     "case": {
       "mpol": 1,
