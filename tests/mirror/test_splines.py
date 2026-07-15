@@ -352,6 +352,15 @@ def test_closed_hybrid_ellipse_twists_only_in_returns() -> None:
         axis=-1,
     )
     assert float(jnp.max(jnp.abs(longitudinal_derivative))) < 2.0e-14
+    for derivative in range(3):
+        closure = basis.evaluate(
+            boundary.radius_coefficients,
+            jnp.asarray([0.0, 2.0 * jnp.pi]),
+            derivative=derivative,
+            axis=-1,
+        )
+        np.testing.assert_allclose(closure[:, 0], closure[:, 1], atol=2.0e-14)
+    assert semi_major < 1.0
 
     coefficient_state = SplineMirrorState(
         radius_coefficients=jnp.broadcast_to(
@@ -368,6 +377,36 @@ def test_closed_hybrid_ellipse_twists_only_in_returns() -> None:
         rtol=5.0e-4,
     )
     assert not bool(geometry.jacobian_sign_changed)
+
+    direction = jnp.reshape(
+        jnp.linspace(-0.2, 0.3, boundary.radius_coefficients.size),
+        boundary.radius_coefficients.shape,
+    )
+
+    def section_volume(coefficients):
+        trial_radius = jnp.broadcast_to(
+            coefficients[None],
+            (resolution.ns,) + coefficients.shape,
+        )
+        trial = discretization.evaluate_state(
+            discretization.project_fixed_boundary(
+                SplineMirrorState(trial_radius, jnp.zeros_like(trial_radius)),
+                SplineMirrorBoundary(coefficients),
+            )
+        )
+        return evaluate_closed_geometry(trial, discretization.grid, axis).volume
+
+    automatic = jax.jvp(
+        section_volume,
+        (boundary.radius_coefficients,),
+        (direction,),
+    )[1]
+    step = 2.0e-5
+    finite_difference = (
+        section_volume(boundary.radius_coefficients + step * direction)
+        - section_volume(boundary.radius_coefficients - step * direction)
+    ) / (2.0 * step)
+    np.testing.assert_allclose(automatic, finite_difference, rtol=3.0e-8)
 
     volume_gradient = jax.grad(
         lambda coefficients: (
@@ -741,7 +780,7 @@ def test_large_closed_torus_uses_cyclic_sparse_factor() -> None:
 
 
 @pytest.mark.full
-def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
+def test_closed_hybrid_finite_current_and_lambda_converge() -> None:
     resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     config = MirrorConfig(
         resolution=resolution,
