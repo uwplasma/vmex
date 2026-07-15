@@ -174,6 +174,17 @@ def test_geometry_volume_is_jax_differentiable_with_analytic_cylinder_gradient()
     jax.make_jaxpr(volume)(radius)
 
 
+def test_axisymmetric_essos_benchmark_uses_concentric_coils() -> None:
+    """Keep the direct-coil axisymmetric promotion case rotationally symmetric."""
+
+    from benchmarks.run_mirror_exterior_endpoints import _two_coil_dofs
+
+    axisymmetric = _two_coil_dofs(axisymmetric=True)
+    nonaxisymmetric = _two_coil_dofs(axisymmetric=False)
+    np.testing.assert_array_equal(axisymmetric[:, 0, 0], 0.0)
+    np.testing.assert_allclose(nonaxisymmetric[:, 0, 0], [0.04, -0.04])
+
+
 def test_two_coil_flux_tube_has_high_field_throats_and_correct_on_axis_field() -> None:
     grid = _axisymmetric_grid(ns=13, nxi=41, half_length=1.0)
     coil_radius, separation, current = 0.8, 2.0, 2.0e5
