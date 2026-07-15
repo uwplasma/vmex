@@ -4,9 +4,10 @@ Mirror geometry
 ``vmec_jax.mirror`` is the open-field-line equilibrium backend. It uses
 coordinates ``(s, theta, xi)`` with a nonperiodic axial coordinate and
 fixed-flux end cuts. It does not reinterpret a straight mirror as a periodic
-torus. Axisymmetric and nonaxisymmetric fixed-boundary lanes are supported.
-Free boundary and the periodic hybrid remain research lanes until their
-independent strong-force and refinement gates in ``plan.md`` pass.
+torus. Axisymmetric and nonaxisymmetric fixed-boundary lanes are supported,
+as is axisymmetric free boundary through 10% requested beta. Higher-beta,
+nonaxisymmetric free-boundary, and periodic-hybrid states remain research
+lanes until their independent strong-force and refinement gates pass.
 
 Open topology and end cuts
 --------------------------
@@ -148,22 +149,28 @@ The coefficient-native solver now applies the same radial-Gauss energy and
 poloidal stream function from the axial average of
 :math:`\sqrt{g}/g_{\xi\xi}`; on concentric circular surfaces this produces the
 vacuum :math:`1/R` field and fixes its sign and zero-mean gauge. The complete
-circular-torus solve jointly advances radius and stream function in 27
-residual-Newton evaluations. Its variational/staggered-weak residuals are
-``1.88e-15/1.83e-15`` and normalized ``div(B)=4.64e-15``. The independently
-reconstructed pointwise-force norm improves from ``0.709`` at ``ns=5`` to
-``0.570`` at ``ns=7`` but is not yet small. It does not define nonlinear
-``ftol``, but it blocks promotion until a manufactured half-to-full force
-reconstruction refines. The finite-current racetrack also solves its stream
-function and its 90-degree ellipse is an actual fixed-boundary equilibrium,
-not a Fourier projection. Its variational and staggered-weak residuals reach
-``ftol=1e-12`` and normalized ``div(B)`` is below ``2e-12``. A differentiable
-periodic RK4 tracer follows the solved contravariant field for multiple
-circuits and measures nonzero iota. On the circular analytic fixture it
-recovers ``iota=I'/Psi'`` and its current derivative to ``2e-13`` relative.
-VMEC limit parity, beta refinement, hybrid solver adjoints, and release plots
-remain open, so this is a research implementation and is not yet exported as
-a supported equilibrium model.
+circular-torus solve jointly advances radius and stream function. Matched
+``APHI``/``PHIEDGE`` inputs agree with ordinary ``vmec_jax``, VMEC2000, and
+WOUT conventions. Its ``ns=5,9,17`` all-volume force sequence is
+``4.72e-6, 7.35e-7, 1.25e-7``; fine bulk force is ``3.44e-9`` and every solve
+reaches ``ftol=1e-12``.
+
+Closed stream coordinates fix one physical coefficient on each radial surface
+while solving and restore the weighted-mean convention on output. This keeps
+the periodic spline Hessian local. Disjoint-support coloring reduces the
+refined 16-control graph from 712 columns to 145 probes. Cold finite-racetrack
+linearization and sparse factor setup take 1.99 seconds at 1.21 GiB on an Apple
+M3 Max; the greater-than-1,024-variable circular residual test takes 13.2
+seconds and passes the ``1e-8`` true-linear-residual gate.
+
+The finite-current rotating-ellipse racetrack now converges in 60 nonlinear
+and 1,339 Krylov iterations, taking 56.1 seconds below 3 GiB. Its variational
+and staggered-weak residuals are ``7.37e-17`` and ``7.68e-17``, true linear
+residual is ``5.29e-11``, and a three-turn field line gives iota ``0.0422``.
+However, all-volume strong force is ``0.548``. The state is therefore a solver
+and field-line smoke test, not a promoted hybrid equilibrium. Staged
+shape/current continuation, strong-force refinement, the open-leg limit, beta
+refinement, hybrid adjoints, and release plots remain open.
 
 Plotting and output scope
 -------------------------

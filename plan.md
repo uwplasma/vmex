@@ -18,8 +18,9 @@ T8 and the T7 promotion record):
   and one parity shard was still running. CI is inspected in batches, not
   polled between implementation steps;
 - the pushed diff has 53 files, 17,505 insertions, and 1,616 deletions. The
-  mirror package has 13 modules and 7,956 lines; mirror tests have 10 files and
-  4,386 lines; `splines.py` has 1,011 lines; the lazy public API has 20 names.
+  mirror package has 13 modules and, after T9a, 8,052 lines; mirror tests have
+  10 files and 4,492 lines; `splines.py` has 1,087 lines; the lazy public API
+  has 20 names.
   All exceed at least one final reduction target, so T11 is mandatory;
 - the reviewed T7 promotion tranche contains only the schema-5 benchmark,
   example labels,
@@ -57,24 +58,31 @@ T8 and the T7 promotion record):
   unresolved even harmonics into retained odd modes. The SFLM regression uses
   an oversampled projection through the declared modes and retains an explicit
   aliasing test;
-- the only measured T9 blocker is factor construction for the finite-current
-  16-control racetrack. CPU direct/mixed attempts exceeded two minutes and the
-  dense route reached about 6.2 GiB. RTX A4000 runs with 32- and 128-column
-  batches exceeded 7 and 5 minutes with low device utilization; even the
-  current-free 128-column case exceeded 2.7 minutes. Larger JVP batches are
-  rejected. T9 must restore local gauge sparsity and use graph-colored Hessian
-  probing before current continuation.
+- T9a replaces the global weighted-pivot solve coordinate with one fixed
+  physical stream coefficient per closed radial surface and restores the
+  weighted mean only on output. Disjoint-support coloring reduces a refined
+  16-control graph from 712 columns to 145 probes (`4.91x`). The finite-current
+  graph uses 433 rather than 1,004 probes; cold linearization plus sparse
+  factor setup takes 1.99 s at 1.21 GiB. The complete finite-current racetrack
+  smoke reaches `ftol=1e-12` in 56.1 s below 3 GiB with nonzero iota, but its
+  all-volume strong force is `0.548`. T9's blocker is now staged physical
+  continuation and refinement, not factor construction.
 
-Execution update (2026-07-15): T1--T8 are complete. They established one
+Execution update (2026-07-15): T1--T9a are complete. They established one
 matrix-free coefficient path, physical supplied-field initialization, the
 local spline factor, promoted fixed-open analytic/paraxial records, the square
 free residual and implicit derivative, the 10% axisymmetric free-boundary
-ceiling, matched VMEC circular parity, and the closed-axis regularity repair.
-The remaining sequence is T9 closed-hybrid promotion, T10 bounded 3D
+ceiling, matched VMEC circular parity, closed-axis regularity, and the scalable
+colored closed factor. The remaining sequence is T9b--T9d closed-hybrid
+promotion, T10 bounded 3D
 free-boundary disposition, T11 deletion, and T12 release audit.
+After T9a, the complete normal mirror suite passes 109 tests with 9 expected
+full/nightly skips in 242.60 s; the finite-current racetrack and large circular
+full gates pass separately in 55.92 s and 13.20 s.
 
-The branch is not release-ready. Its remaining physics blocker is the
-finite-current closed hybrid; its conditional research blocker is the 3D free
+The branch is not release-ready. Its remaining physics blocker is strong-force
+and refinement evidence for the finite-current closed hybrid; its conditional
+research blocker is the 3D free
 boundary; and its repository blocker is excess files, tests, public names, and
 figures. Artificial end disks remain only exterior integration closures and
 are tested by cap compatibility and cut-location independence; they are not
@@ -390,12 +398,11 @@ only the lanes that pass their final gates.
   negative evidence only; the supplied-field initializer and T5 refinement
   sequences supersede them.
 - The old periodic preconditioner stalled at 3,000 GMRES iterations with
-  linear residual about 0.136; CG/MINRES reached only about 0.016. T8 repairs
-  the circular current-free path, but the finite-current 16-control racetrack
-  factor still exceeds two minutes on CPU and about 6.2 GiB through the dense
-  route. RTX A4000 batches also exceed the T9 resource gates. The scalable
-  finite-current closed path therefore remains disabled pending graph-colored
-  probing.
+  linear residual about 0.136; CG/MINRES reached only about 0.016. T9a
+  supersedes it with the local-gauge colored factor. The finite-current
+  racetrack now reaches true linear residual `5.29e-11` and iota `0.0422`, but
+  its all-volume strong force is `0.548`; this is computational convergence,
+  not T9b physics promotion.
 - Circular hybrid VMEC parity is accepted. There is still no accepted
   racetrack/current continuation, open-leg limit, release MOUT, or hybrid
   implicit-derivative benchmark.
@@ -980,9 +987,9 @@ new independent force/refinement pass; weak convergence alone is insufficient.
 
 ### M5. Promote the fixed-boundary closed hybrid
 
-Status: circular parity and axis regularity are complete; the racetrack
-continuation, open-leg limit, beta/current physics, derivatives, and MOUT are
-not yet promoted.
+Status: circular parity, axis regularity, and the scalable colored factor are
+complete. The racetrack continuation, open-leg limit, beta/current physics,
+derivatives, and MOUT are not yet promoted.
 
 1. Maintain the completed circular-axis gate. For major radius `R0`, minor
    radius `a`, and area coordinate `s`, the concentric vacuum fixture uses
@@ -1026,6 +1033,12 @@ not yet promoted.
    reference CPU, and the circular true linear residual remains at most
    `1e-8`. A/B SOLVAX periodic/banded primitives only where the block structure
    matches; keep the lower-runtime, lower-memory, shorter path.
+   T9a meets these gates. The refined graph uses 145 probes for 712 columns,
+   cold closed factor setup is 1.99 s at 1.21 GiB, and the greater-than-1,024
+   circular true-residual test passes. The finite-current smoke finishes in
+   56.1 s below 3 GiB, so continuation may proceed; its `0.548` strong force
+   remains an explicit T9b failure to resolve by staged continuation and
+   refinement.
 5. Compare a fixed central fraction of each leg with the promoted fixed open
    B-spline mirror along a three-member sequence of increasing
    leg-length/return-radius separation. Match local flux, pressure, current,
@@ -1119,7 +1132,7 @@ recorded as compact negative evidence.
 | T6c (complete) | Reuse the primal coefficient residual in the free tangent/adjoint and delete all nodal production packing | external-field and finite-pressure reconverged-FD gradients; true transpose residual; 103 normal and 3 representative full tests pass; source `7,880`, tests `4,227`, `splines.py 999`; strict docs/static checks pass |
 | T7 (complete) | Set the supported ceiling and regenerate the nested-cut axisymmetric beta record | schema-5 record supports through 10%; 25%/50% retained as research; independent/combined force, observable, interface, and Pleiades gates recorded |
 | T8 (complete) | Land matched-flux circular parity and axis-regular strong-force repair | `94addb68`; APHI/VMEC/WOUT parity; `ns=5,9,17` force sequence; 105 passed/9 skipped; strict docs/static gates |
-| T9a | Restore local closed-stream gauge sparsity and color the frozen Hessian graph | exact tiny Hessian/scatter/transpose parity; at least 4x fewer HVPs; setup below 60 s and 4 GiB; circular true residual `<=1e-8` |
+| T9a (complete) | Restore local closed-stream gauge sparsity and color the frozen Hessian graph | exact tiny Hessian/scatter/transpose/gauge parity; `4.91x` refined probe reduction; 1.99 s/1.21 GiB setup; circular true residual `<=1e-8` |
 | T9b | Continue the periodic B-spline axis from circle to symmetric racetrack, rotating returns, and finite current | positive map and clearance; C2 joins; target-current `ftol<=1e-12`; circuit-spanning lines and nonzero iota |
 | T9c | Establish the three-member open-leg limit and fixed-LCFS beta continuation | central-leg observables converge to fixed open mirror; 0--10% beta force/refinement gates; 25% labeled research at most |
 | T9d | Validate hybrid tangents/adjoints, MOUT, plots, benchmark, and root example | reconverged FD agreement; true transpose residual `<=1e-8`; round trip; polished horizontal-leg geometry/field/profile/convergence figures |
@@ -1188,15 +1201,15 @@ Percentages measure promotion evidence, not lines written:
 | Open fixed B-spline representation | 100% | maintain coefficient and cut-location gates |
 | Free open axisymmetric | 100% | maintain the 10% support gates; 25%/50% remain research until a later refinement pass |
 | Free open nonaxisymmetric | 35% | conditional three-grid local-mode promotion attempt after M5 |
-| Fixed closed B-spline hybrid | 68% | color/reuse racetrack factor; current/shape continuation; open-leg limit, beta, derivatives, MOUT |
+| Fixed closed B-spline hybrid | 74% | staged current/shape continuation; strong-force refinement; open-leg limit, beta, derivatives, MOUT |
 | Strong-force diagnostic | 100% | maintain gates in promoted equilibrium lanes |
-| Structured preconditioning | 85% | replace every-column closed-factor assembly with local-gauge graph coloring and meet T9a resource gates |
+| Structured preconditioning | 100% | maintain open and closed true-residual/resource gates during continuation |
 | Implicit differentiation | 90% | rerun hybrid derivatives only after primal promotion |
-| Code/API simplification | 66% | current 53-file/7,956-source/4,386-test/20-name tree must meet all T11 budgets |
-| Docs/examples/artifacts | 72% | free support-ceiling figure is current; hybrid showcase and final README/API reduction remain |
+| Code/API simplification | 64% | current 53-file/8,052-source/4,492-test/20-name tree must meet all T11 budgets |
+| Docs/examples/artifacts | 73% | free support-ceiling figure and T9a record are current; hybrid showcase and final README/API reduction remain |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned benchmark runner; retain field-callable integration only |
 
-Weighted completion of the required release models is approximately 87%.
+Weighted completion of the required release models is approximately 88%.
 Free closed hybrid and ANIMEC are deferred and excluded from that percentage.
 
 ## 9. Primary references

@@ -43,6 +43,8 @@ from vmec_jax.mirror.splines import (  # noqa: E402
     SplineMirrorDiscretization,
     SplineMirrorState,
     _SplineStateVectorizer,
+    _closed_hessian_supports,
+    _disjoint_support_groups,
     _packed_spline_preconditioner,
     initialize_from_cartesian_field,
     initialize_closed_vacuum_stream_function,
@@ -1222,6 +1224,110 @@ def test_local_spline_preconditioner_builds_from_bounded_hessian_chunks() -> Non
     np.testing.assert_allclose(apply(matrix @ exact), exact, rtol=3.0e-14, atol=3.0e-14)
     assert max(batch_sizes) <= 32
     assert sum(batch_sizes) >= size
+
+
+def test_closed_vectorizer_fixes_one_local_stream_gauge_coefficient() -> None:
+    resolution = MirrorResolution(ns=5, mpol=1, nxi=4)
+    discretization, _, boundary, state = _closed_circular_torus(
+        resolution,
+        coefficient_count=8,
+    )
+    theta = jnp.asarray(discretization.grid.theta)[None, :, None]
+    axial = jnp.asarray(discretization.spline.collocation_nodes)[None, None, :]
+    lam = 0.02 * jnp.cos(theta - axial)
+    lam = jnp.broadcast_to(lam, state.lambda_coefficients.shape)
+    state = SplineMirrorState(state.radius_coefficients, lam)
+    vectorizer = _SplineStateVectorizer.build(
+        state,
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+    offsets = jnp.linspace(-0.03, 0.04, resolution.ns)[:, None, None]
+    shifted = _SplineStateVectorizer.build(
+        SplineMirrorState(state.radius_coefficients, state.lambda_coefficients + offsets),
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+
+    assert vectorizer.lambda_local_gauge
+    vector = vectorizer.pack()
+    np.testing.assert_allclose(shifted.pack(), vector, atol=2.0e-16)
+    start = vectorizer.radius_size + (resolution.ns - 2) * vectorizer.lambda_free_indices.size
+    perturbed = vector.copy()
+    perturbed[start] += 0.125
+    base = np.asarray(vectorizer.unpack(vector).lambda_coefficients)
+    changed = np.asarray(vectorizer.unpack(perturbed).lambda_coefficients) - base
+
+    assert np.all(base[1:, 0, 0] == 0.0)
+    assert np.count_nonzero(np.abs(changed) > 1.0e-14) == 1
+
+
+def test_closed_colored_hessian_probing_reconstructs_local_symmetric_matrix() -> None:
+    resolution = MirrorResolution(ns=5, mpol=1, nxi=4)
+    discretization, _, boundary, state = _closed_circular_torus(
+        resolution,
+        coefficient_count=8,
+    )
+    vectorizer = _SplineStateVectorizer.build(
+        state,
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+    _, _, build_local = _packed_spline_preconditioner(discretization, vectorizer)
+    size = vectorizer.pack().size
+    supports = _closed_hessian_supports(discretization, vectorizer)
+    matrix = np.zeros((size, size))
+    rng = np.random.default_rng(17)
+    for column, rows in enumerate(supports):
+        upper = rows[rows > column]
+        matrix[upper, column] = rng.uniform(-2.0e-3, 2.0e-3, upper.size)
+    matrix += matrix.T
+    matrix[np.diag_indices(size)] = 1.0 + np.sum(np.abs(matrix), axis=1)
+    probe_batches = []
+
+    def matrix_columns(directions):
+        probe_batches.append(directions.shape[0])
+        return directions @ matrix.T
+
+    assert build_local is not None
+    apply = build_local(matrix_columns)
+    exact = rng.normal(size=size)
+    left = rng.normal(size=size)
+    right = rng.normal(size=size)
+
+    np.testing.assert_allclose(apply(matrix @ exact), exact, rtol=2.0e-13, atol=2.0e-13)
+    np.testing.assert_allclose(left @ apply(right), right @ apply(left), rtol=2.0e-13, atol=2.0e-13)
+    assert sum(probe_batches) == apply.hessian_probe_count
+    assert apply.hessian_probe_count < apply.hessian_column_count
+
+
+def test_closed_hessian_coloring_reduces_refined_probe_count_fourfold() -> None:
+    resolution = MirrorResolution(ns=9, mpol=1, nxi=4)
+    discretization, _, boundary, state = _closed_circular_torus(
+        resolution,
+        coefficient_count=16,
+    )
+    vectorizer = _SplineStateVectorizer.build(
+        state,
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+    size = vectorizer.pack().size
+    supports = _closed_hessian_supports(discretization, vectorizer)
+    groups = _disjoint_support_groups(supports, size)
+
+    assert size >= 4 * len(groups)
+    for group in groups:
+        rows = np.concatenate([supports[column] for column in group])
+        assert np.unique(rows).size == rows.size
 
 
 def test_periodic_spline_preconditioner_factors_cyclic_support() -> None:

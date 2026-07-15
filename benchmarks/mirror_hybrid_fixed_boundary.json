@@ -1,78 +1,99 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_hybrid_fixed_boundary/2",
+  "schema": "vmec_jax.benchmark.mirror_hybrid_fixed_boundary/3",
   "provenance": {
-    "measurement_commit": "ae97b8af5847aa8df7fc14347d5c1250c36fdc9e",
-    "input_schema": "vmec_jax.mirror.input/1",
-    "basis": "periodic cubic B-spline longitudinal geometry; legacy uniform theta collocation",
-    "represented_modes": "legacy closed case declares mpol=1 with ntheta=6",
+    "measurement_commit": "122546cf0c9890f488c2d29e594aa244bb19c4d5",
+    "measurement_patch": "T9a local closed gauge, colored Hessian probing, and reusable closed linearization",
+    "input_schema": "vmec_jax.mirror.input/2",
+    "basis": "periodic cubic B-spline longitudinal geometry and exact modes through mpol",
+    "represented_modes": "ntheta=2*mpol+1; no longitudinal Fourier projection",
     "grid": "see each case",
-    "hardware_class": "office CPU",
-    "promotion_status": "stale_research",
-    "stale_sections": [
-      "periodic_preconditioner_attempt",
-      "closed_circular_torus"
+    "hardware_class": "local CPU: Apple M3 Max, macOS 14.4.1",
+    "promotion_status": "t9a_complete_t9b_research",
+    "stale_sections": [],
+    "stale_reason": ""
+  },
+  "circular_parity": {
+    "measurement_commit": "94addb682c180b6f72c85f7fa5b0c68554116315",
+    "comparators": [
+      "ordinary vmec_jax",
+      "VMEC2000",
+      "WOUT APHI/PHIEDGE"
     ],
-    "stale_reason": "all shaped states predate axis regularity and input/2; mpol=1 with ntheta=6 cannot be reproduced by the current exact-mpol collocation"
+    "ns": [
+      5,
+      9,
+      17
+    ],
+    "all_volume_strong_force": [
+      4.72e-06,
+      7.35e-07,
+      1.25e-07
+    ],
+    "ns17_bulk_strong_force": 3.44e-09,
+    "nonlinear_ftol": 1e-12,
+    "large_cyclic_test": {
+      "variables": "greater than 1024",
+      "wall_s": 13.2,
+      "true_linear_residual_gate": 1e-08,
+      "passed": true
+    },
+    "status": "promoted circular limit"
   },
-  "periodic_preconditioner_attempt": {
-    "case": "892-variable finite-current rotating-ellipse racetrack at 16 periodic coefficients",
-    "dense_reference": {
-      "wall_s": 8.7107,
-      "variational_max": 2.7917e-14,
-      "energy": 1641053.444989587
+  "t9a_structured_factor": {
+    "closed_stream_gauge": "fix theta=0, axial-coefficient=0 on each radial surface; restore the weighted mean only for output",
+    "retained_structure": "neighboring radial cells, exact periodic cubic-spline support overlap, full represented poloidal coupling, and local radius-lambda cross blocks",
+    "finite_racetrack_graph": {
+      "ns": 5,
+      "mpol": 4,
+      "ntheta": 9,
+      "periodic_coefficients": 16,
+      "variables": 1004,
+      "colored_probes": 433,
+      "probe_reduction": 2.3187066974595845
     },
-    "gmres": {
-      "wall_s": 5.8097,
-      "krylov_iterations": 3000,
-      "final_linear_residual": 0.13591,
-      "variational_max": 2.9974e-13
-    },
-    "cg": {
-      "wall_s": 4.1957,
-      "krylov_iterations": 2000,
-      "final_linear_residual": 0.016706,
-      "variational_max": 2.4766e-13
-    },
-    "minres": {
-      "wall_s": 4.0389,
-      "krylov_iterations": 1852,
-      "final_linear_residual": 0.015838,
-      "variational_max": 3.0629e-14
-    },
-    "parity": {
-      "gmres_energy_relative_difference": 3.3307e-16,
-      "gmres_radius_relative_rms": 9.4677e-11
-    },
-    "peak_rss_mib": 2454.7,
-    "decision": "periodic tensor block is dimensionally correct but fails the linear-residual and Krylov-growth gates; retain it for adjoint research, keep closed primal solves below the dense threshold"
-  },
-  "closed_circular_torus": {
-    "case": {
+    "refined_graph_gate": {
+      "ns": 9,
       "mpol": 1,
-      "ntheta": 6,
-      "periodic_spline_coefficients": 8,
-      "major_radius": 2.5,
-      "minor_radius": 0.25,
-      "axial_flux_derivative": 0.03,
-      "solve_lambda": true,
-      "ftol": 1e-12
+      "ntheta": 3,
+      "periodic_coefficients": 16,
+      "variables": 712,
+      "colored_probes": 145,
+      "probe_reduction": 4.910344827586207
     },
-    "initializer": "axial average of sqrt(g)/g_xixi; circular limit gives B proportional to 1/R",
-    "ns5": {
-      "iterations": 27,
-      "variational_max": 1.8839e-15,
-      "staggered_weak_max": 1.8332e-15,
-      "normalized_divb": 4.6389e-15,
-      "pointwise_force_normalized_rms": 0.70902
+    "cold_finite_racetrack_factor": {
+      "linearization_s": 0.6755,
+      "colored_assembly_and_splu_s": 1.3173,
+      "total_setup_s": 1.9928,
+      "peak_rss_mib": 1239.5
     },
-    "ns7": {
-      "iterations": 90,
-      "variational_max": 1.9003e-15,
-      "staggered_weak_max": 2.9977e-15,
-      "normalized_divb": 1.9024e-14,
-      "pointwise_force_normalized_rms": 0.57024
+    "gates": {
+      "exact_local_matrix_reconstruction": true,
+      "transpose_symmetry": true,
+      "gauge_invariance": true,
+      "at_least_fourfold_refined_probe_reduction": true,
+      "setup_below_60_s": true,
+      "peak_below_4_gib": true,
+      "circular_true_linear_residual_below_1e-8": true
     },
-    "status": "complete radius-plus-stream-function equilibrium; discrete and weak residuals pass, while pointwise force still requires radial refinement"
+    "status": "promoted preconditioner"
   },
-  "assessment": "The periodic geometry and dense bounded solve are retained research evidence. Pointwise force, scalable preconditioning, circular VMEC parity, and open-leg convergence remain promotion gates."
+  "finite_current_racetrack_smoke": {
+    "case": "rotating elliptical 16-control racetrack at finite toroidal current",
+    "ns": 5,
+    "mpol": 4,
+    "ntheta": 9,
+    "variables": 1004,
+    "ftol": 1e-12,
+    "wall_s": 56.12,
+    "maximum_rss_gib": 2.8165,
+    "nonlinear_iterations": 60,
+    "krylov_iterations": 1339,
+    "true_linear_residual": 5.285066732587397e-11,
+    "variational_max": 7.373666984407082e-17,
+    "staggered_weak_max": 7.680435682590312e-17,
+    "all_volume_strong_force": 0.5475684285069001,
+    "lcfs_iota_three_turns": 0.04215424509588961,
+    "status": "converged research smoke; not promoted because strong force, staged continuation, and refinement gates remain"
+  },
+  "assessment": "T9a is complete. The scalable closed factor passes exactness, resource, probe-count, and circular residual gates. The final racetrack state now converges efficiently and has nonzero transform, but its strong force is not acceptable evidence for T9b; staged shape/current continuation and refinement remain required."
 }

@@ -260,30 +260,48 @@ def _matrix_free_newton_polish(
 
     hessian_vector = jax.jit(lambda point, direction: jax.jvp(gradient_function, (point,), (direction,))[1])
     hessian_columns = jax.jit(
-        lambda point, directions: jax.vmap(lambda direction: jax.jvp(gradient_function, (point,), (direction,))[1])(
-            directions
-        )
+        lambda point, directions: jax.vmap(
+            lambda direction: jax.jvp(gradient_function, (point,), (direction,))[1]
+        )(directions)
     )
+    reuse_linearization = bool(getattr(build_local, "reuse_linearization", False))
     linear_iterations = 0
     final_linear_residual = np.inf
     damping = 1.0e-8
     local_preconditioner = None
 
     for step_index in range(max(0, int(max_steps))):
-        gradient = np.asarray(gradient_function(jnp.asarray(x)), dtype=float)
+        linear_hessian = None
+        if reuse_linearization:
+            gradient_value, linear_hessian = jax.linearize(gradient_function, jnp.asarray(x))
+            hessian_action = jax.jit(linear_hessian)
+        else:
+            gradient_value = gradient_function(jnp.asarray(x))
+            hessian_action = None
+        gradient = np.asarray(gradient_value, dtype=float)
         gradient_max = float(np.max(np.abs(gradient)))
         if gradient_max <= float(ftol):
             return x, step_index, linear_iterations, final_linear_residual, True, "Newton-GMRES converged"
 
         def matrix_vector(direction: np.ndarray) -> np.ndarray:
-            product = np.asarray(hessian_vector(jnp.asarray(x), jnp.asarray(direction)), dtype=float)
+            if hessian_action is None:
+                product = np.asarray(hessian_vector(jnp.asarray(x), jnp.asarray(direction)), dtype=float)
+            else:
+                product = np.asarray(hessian_action(jnp.asarray(direction)), dtype=float)
             return product + damping * np.asarray(direction)
 
-        if local_preconditioner is None and build_local is not None:
+        rebuild_local = local_preconditioner is None or bool(
+            getattr(local_preconditioner, "rebuild_each_step", False)
+        )
+        if rebuild_local and build_local is not None:
+            frozen_columns = jax.jit(jax.vmap(linear_hessian)) if reuse_linearization else None
 
             def matrix_columns(directions: np.ndarray) -> np.ndarray:
                 directions = np.asarray(directions, dtype=float)
-                products = hessian_columns(jnp.asarray(x), jnp.asarray(directions))
+                if frozen_columns is None:
+                    products = hessian_columns(jnp.asarray(x), jnp.asarray(directions))
+                else:
+                    products = frozen_columns(jnp.asarray(directions))
                 return np.asarray(products, dtype=float) + damping * directions
 
             try:
@@ -394,14 +412,13 @@ def _optimize_fixed_boundary(
     config: MirrorConfig,
     gradient_tolerance: float,
     matrix_free_context: tuple[Any, tuple[Any, np.ndarray, Any]] | None,
-    start_with_residual_newton: bool = False,
+    start_with_newton: bool = False,
 ) -> _OptimizationOutcome:
     """Run the common host L-BFGS and residual-Newton solve policy.
 
-    Small closed spline systems can start with residual Newton when their
-    geometry initializer is already in a valid local basin. Open systems use
-    their matrix-free preconditioner at every size; the dense residual solve is
-    only a bounded rescue when matrix-free Newton does not reach ``ftol``.
+    L-BFGS globalizes production-size states before the exact Newton polish.
+    Tiny closed references may start directly with Newton. The dense residual
+    solve is only a bounded rescue when matrix-free Newton misses ``ftol``.
     """
 
     callback_iterations = 0
@@ -422,10 +439,12 @@ def _optimize_fixed_boundary(
     polish_reserve = min(polish_cap, max(1, int(config.max_iterations) // 4))
     available = int(config.max_iterations) - polish_reserve
     lbfgs_budget = max(10, available // 2) if use_matrix_free else max(1, available)
-    if start_with_residual_newton:
+    if use_matrix_free and bool(getattr(matrix_free_context[1][2], "reuse_linearization", False)):
+        lbfgs_budget = min(50, lbfgs_budget)
+    if start_with_newton:
         final_x = np.asarray(x0)
         optimizer_success = False
-        optimizer_message = "started with residual-Newton"
+        optimizer_message = "small-system Newton start"
         lbfgs_iterations = 0
     else:
         optimization = minimize(
@@ -466,7 +485,8 @@ def _optimize_fixed_boundary(
         def record_newton(x: np.ndarray) -> None:
             nonlocal newton_steps
             newton_steps += 1
-            record(callback_iterations + polish_evaluations + newton_steps, x)
+            if newton_steps == 1 or newton_steps % history_stride == 0:
+                record(callback_iterations + polish_evaluations + newton_steps, x)
 
         vectorizer, preconditioner = matrix_free_context
         (

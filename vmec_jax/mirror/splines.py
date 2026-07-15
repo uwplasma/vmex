@@ -489,6 +489,7 @@ class _SplineStateVectorizer:
     lambda_pivot: int
     lambda_weights: np.ndarray
     lambda_fixed_weighted_sum: np.ndarray
+    lambda_local_gauge: bool
     solve_lambda: bool
 
     @classmethod
@@ -528,7 +529,8 @@ class _SplineStateVectorizer:
         ).reshape(-1)
         if solve_lambda and interior_weights.size < 2:
             raise ValueError("lambda solve requires at least two interior coefficients")
-        pivot = int(np.argmax(interior_weights)) if interior_weights.size else 0
+        local_gauge = bool(discretization.closed and solve_lambda)
+        pivot = 0 if local_gauge else int(np.argmax(interior_weights)) if interior_weights.size else 0
         free_indices = np.delete(np.arange(interior_weights.size), pivot)
         endpoint_weights = np.zeros((shape[1], shape[2]))
         if not discretization.closed:
@@ -536,6 +538,11 @@ class _SplineStateVectorizer:
                 np.asarray(discretization.grid.theta_basis.weights)[:, None] * coefficient_weights[None, [0, -1]]
             )
         fixed_sum = np.einsum("jk,ijk->i", endpoint_weights, np.asarray(base.lambda_coefficients)[1:])
+        if local_gauge:
+            coefficients = jnp.asarray(base.lambda_coefficients)
+            constants = coefficients[1:, 0, 0]
+            constants = jnp.concatenate((constants[:1], constants))
+            base = SplineMirrorState(base.radius_coefficients, coefficients - constants[:, None, None])
         return cls(
             base=base,
             evaluation_matrix=np.asarray(discretization.evaluation_matrix),
@@ -547,6 +554,7 @@ class _SplineStateVectorizer:
             lambda_pivot=pivot,
             lambda_weights=interior_weights,
             lambda_fixed_weighted_sum=fixed_sum,
+            lambda_local_gauge=local_gauge,
             solve_lambda=bool(solve_lambda),
         )
 
@@ -589,14 +597,15 @@ class _SplineStateVectorizer:
         free = vector[self.radius_size :].reshape(shape[0] - 1, self.lambda_free_indices.size) * self.flux_scale
         interior = self.base.lambda_coefficients[1:, :, self.lambda_axial_indices].reshape(shape[0] - 1, -1)
         interior = interior.at[:, jnp.asarray(self.lambda_free_indices)].set(free)
-        weighted_free = jnp.sum(
-            free * jnp.asarray(self.lambda_weights[self.lambda_free_indices])[None, :],
-            axis=1,
-        )
-        pivot_value = -(jnp.asarray(self.lambda_fixed_weighted_sum) + weighted_free) / float(
-            self.lambda_weights[self.lambda_pivot]
-        )
-        interior = interior.at[:, self.lambda_pivot].set(pivot_value)
+        if not self.lambda_local_gauge:
+            weighted_free = jnp.sum(
+                free * jnp.asarray(self.lambda_weights[self.lambda_free_indices])[None, :],
+                axis=1,
+            )
+            pivot_value = -(jnp.asarray(self.lambda_fixed_weighted_sum) + weighted_free) / float(
+                self.lambda_weights[self.lambda_pivot]
+            )
+            interior = interior.at[:, self.lambda_pivot].set(pivot_value)
         lam = self.base.lambda_coefficients.at[1:, :, self.lambda_axial_indices].set(
             interior.reshape(shape[0] - 1, shape[1], self.lambda_axial_indices.size)
         )
@@ -630,6 +639,9 @@ class _SplineStateVectorizer:
             lambda_coefficients.shape[0] - 1,
             -1,
         )
+        if self.lambda_local_gauge:
+            free = interior[:, self.lambda_free_indices]
+            return np.concatenate((radius, (free * self.flux_scale).reshape(-1)))
         pivot_gradient = interior[:, self.lambda_pivot]
         free = interior[:, self.lambda_free_indices] - (
             pivot_gradient[:, None]
@@ -637,6 +649,73 @@ class _SplineStateVectorizer:
             / self.lambda_weights[self.lambda_pivot]
         )
         return np.concatenate((radius, (free * self.flux_scale).reshape(-1)))
+
+
+def _packed_spline_layout(
+    discretization: SplineMirrorDiscretization,
+    vectorizer: _SplineStateVectorizer,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return channel, radial, and axial labels for solve variables."""
+
+    channels = np.concatenate(
+        (np.zeros(vectorizer.radius_size, dtype=int), np.ones(vectorizer.lambda_size, dtype=int))
+    )
+    radial = np.asarray(vectorizer.radius_indices[0], dtype=int)
+    axial = np.asarray(vectorizer.radius_indices[2], dtype=int)
+    if vectorizer.lambda_size:
+        axial_count = vectorizer.lambda_axial_indices.size
+        free = vectorizer.lambda_free_indices
+        radial = np.concatenate(
+            (radial, np.repeat(np.arange(1, discretization.grid.ns), free.size))
+        )
+        axial = np.concatenate(
+            (
+                axial,
+                np.tile(
+                    vectorizer.lambda_axial_indices[free % axial_count],
+                    discretization.grid.ns - 1,
+                ),
+            )
+        )
+    return channels, radial, axial
+
+
+def _closed_hessian_supports(
+    discretization: SplineMirrorDiscretization,
+    vectorizer: _SplineStateVectorizer,
+) -> list[np.ndarray]:
+    """Build the structural rows of the local closed-spline Hessian model."""
+
+    _, radial, axial = _packed_spline_layout(discretization, vectorizer)
+    nodes = discretization.grid.axial_basis.nodes
+    values = np.asarray(discretization.spline.basis_matrix(nodes))
+    derivatives = np.asarray(discretization.spline.basis_matrix(nodes, derivative=1))
+    scale = max(float(np.max(np.abs(derivatives))), 1.0)
+    active = (np.abs(values) > 1.0e-13) | (np.abs(derivatives) > 1.0e-13 * scale)
+    overlap = active.T.astype(np.int16) @ active.astype(np.int16) > 0
+    return [
+        np.flatnonzero((np.abs(radial - radial[column]) <= 1) & overlap[axial, axial[column]])
+        for column in range(radial.size)
+    ]
+
+
+def _disjoint_support_groups(supports: list[np.ndarray], size: int) -> list[np.ndarray]:
+    """Greedily group columns whose retained response rows cannot overlap."""
+
+    occupied: list[np.ndarray] = []
+    groups: list[list[int]] = []
+    for column, rows in enumerate(supports):
+        for color, used in enumerate(occupied):
+            if not np.any(used[rows]):
+                used[rows] = True
+                groups[color].append(column)
+                break
+        else:
+            used = np.zeros(size, dtype=bool)
+            used[rows] = True
+            occupied.append(used)
+            groups.append([column])
+    return [np.asarray(group, dtype=int) for group in groups]
 
 
 def _packed_spline_preconditioner(
@@ -668,15 +747,22 @@ def _packed_spline_preconditioner(
         result = np.array(vector, copy=True)
         result[: vectorizer.radius_size] = geometry.apply(vector[: vectorizer.radius_size]) * scales[0]
         if stream is not None:
-            result[vectorizer.radius_size :] = (
-                stream.apply_gauge_free(
-                    vector[vectorizer.radius_size :],
+            reduced = vector[vectorizer.radius_size :]
+            if vectorizer.lambda_local_gauge:
+                lifted = np.zeros((stream.active_shape[0], vectorizer.lambda_weights.size))
+                lifted[:, vectorizer.lambda_free_indices] = reduced.reshape(
+                    stream.active_shape[0], vectorizer.lambda_free_indices.size
+                )
+                solved = stream.apply(lifted.reshape(-1)).reshape(lifted.shape)
+                reduced = solved[:, vectorizer.lambda_free_indices].reshape(reduced.shape)
+            else:
+                reduced = stream.apply_gauge_free(
+                    reduced,
                     free_indices=vectorizer.lambda_free_indices,
                     pivot=vectorizer.lambda_pivot,
                     weights=vectorizer.lambda_weights,
                 )
-                * scales[1]
-            )
+            result[vectorizer.radius_size :] = reduced * scales[1]
         return result
 
     def build_local(matrix_columns: Callable[[np.ndarray], np.ndarray]) -> Any:
@@ -685,65 +771,43 @@ def _packed_spline_preconditioner(
         from scipy.sparse import coo_matrix
         from scipy.sparse.linalg import splu
 
-        channels = np.concatenate(
-            (
-                np.zeros(vectorizer.radius_size, dtype=int),
-                np.ones(vectorizer.lambda_size, dtype=int),
-            )
-        )
-        radial = np.asarray(vectorizer.radius_indices[0], dtype=int)
-        axial = np.asarray(vectorizer.radius_indices[2], dtype=int)
-        if vectorizer.lambda_size:
-            active_axial = vectorizer.lambda_axial_indices.size
-            lambda_axial = vectorizer.lambda_axial_indices[vectorizer.lambda_free_indices % active_axial]
-            radial = np.concatenate(
-                (
-                    radial,
-                    np.repeat(
-                        np.arange(1, discretization.grid.ns),
-                        vectorizer.lambda_free_indices.size,
-                    ),
-                )
-            )
-            axial = np.concatenate(
-                (
-                    axial,
-                    np.tile(lambda_axial, discretization.grid.ns - 1),
-                )
-            )
-
         size = vectorizer.radius_size + vectorizer.lambda_size
         row_parts: list[np.ndarray] = []
         column_parts: list[np.ndarray] = []
         value_parts: list[np.ndarray] = []
         chunk_size = min(32, size)
-        for start in range(0, size, chunk_size):
-            columns = np.arange(start, min(start + chunk_size, size))
-            directions = np.zeros((chunk_size, size))
-            directions[np.arange(columns.size), columns] = 1.0
-            responses = np.asarray(matrix_columns(directions), dtype=float)
-            for local_index, column in enumerate(columns):
-                axial_distance = np.abs(axial - axial[column])
-                if discretization.closed:
-                    axial_distance = np.minimum(
-                        axial_distance,
-                        discretization.coefficient_count - axial_distance,
+        if discretization.closed:
+            supports = _closed_hessian_supports(discretization, vectorizer)
+            groups = _disjoint_support_groups(supports, size)
+            for start in range(0, len(groups), chunk_size):
+                batch = groups[start : start + chunk_size]
+                directions = np.zeros((len(batch), size))
+                for local_index, columns in enumerate(batch):
+                    directions[local_index, columns] = 1.0
+                responses = np.asarray(matrix_columns(directions), dtype=float)
+                for local_index, columns in enumerate(batch):
+                    for column in columns:
+                        rows = supports[column]
+                        row_parts.append(rows)
+                        column_parts.append(np.full(rows.size, column, dtype=int))
+                        value_parts.append(responses[local_index, rows])
+        else:
+            channels, radial, axial = _packed_spline_layout(discretization, vectorizer)
+            for start in range(0, size, chunk_size):
+                columns = np.arange(start, min(start + chunk_size, size))
+                directions = np.zeros((columns.size, size))
+                directions[np.arange(columns.size), columns] = 1.0
+                responses = np.asarray(matrix_columns(directions), dtype=float)
+                for local_index, column in enumerate(columns):
+                    axial_neighbors = np.abs(axial - axial[column]) <= 4
+                    if channels[column] == 1:
+                        axial_neighbors = np.where(channels == 1, True, axial_neighbors)
+                    rows = np.flatnonzero(
+                        (np.abs(radial - radial[column]) <= 2) & axial_neighbors
                     )
-                axial_neighbors = axial_distance <= 4
-                same_channel = channels == channels[column]
-                if channels[column] == 1:
-                    # Eliminating the weighted lambda gauge introduces a
-                    # rank-one coupling across every axial coefficient.
-                    axial_neighbors = np.where(same_channel, True, axial_neighbors)
-                # The regular odd-mode coefficient at the axis is extrapolated
-                # from the next two radial rows, so its Hessian stencil spans
-                # two coefficient rows there.
-                rows = np.flatnonzero(
-                    (np.abs(radial - radial[column]) <= 2) & axial_neighbors
-                )
-                row_parts.append(rows)
-                column_parts.append(np.full(rows.size, column, dtype=int))
-                value_parts.append(responses[local_index, rows])
+                    row_parts.append(rows)
+                    column_parts.append(np.full(rows.size, column, dtype=int))
+                    value_parts.append(responses[local_index, rows])
         matrix = coo_matrix(
             (
                 np.concatenate(value_parts),
@@ -753,9 +817,18 @@ def _packed_spline_preconditioner(
         ).tocsc()
         matrix = 0.5 * (matrix + matrix.T)
         factor = splu(matrix)
-        return factor.solve
+
+        def solve(vector: np.ndarray) -> np.ndarray:
+            return factor.solve(vector)
+
+        solve.hessian_probe_count = len(groups) if discretization.closed else size  # type: ignore[attr-defined]
+        solve.hessian_column_count = size  # type: ignore[attr-defined]
+        solve.rebuild_each_step = discretization.closed  # type: ignore[attr-defined]
+        return solve
 
     local_builder = build_local if vectorizer.lambda_size else None
+    if local_builder is not None:
+        local_builder.reuse_linearization = discretization.closed  # type: ignore[attr-defined]
     return apply, scales, local_builder
 
 
@@ -928,7 +1001,7 @@ def solve_fixed_boundary_cli(
             record=record,
             config=config,
             gradient_tolerance=gradient_tolerance,
-            start_with_residual_newton=discretization.closed,
+            start_with_newton=discretization.closed and x0.size <= 512,
             matrix_free_context=(
                 vectorizer,
                 _packed_spline_preconditioner(discretization, vectorizer),
@@ -941,7 +1014,10 @@ def solve_fixed_boundary_cli(
         final_linear_residual = optimization.final_linear_residual
         message = optimization.message
 
-    coefficient_state = unpack_coefficients(jnp.asarray(final_x))
+    coefficient_state = discretization.project_fixed_boundary(
+        unpack_coefficients(jnp.asarray(final_x)),
+        boundary,
+    )
     final_state = regularize_axis_stream_function(
         discretization.evaluate_state(coefficient_state),
         grid,
