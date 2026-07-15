@@ -20,6 +20,7 @@ from vmec_jax.mirror import (  # noqa: E402
 )
 from vmec_jax.mirror.forces import (  # noqa: E402
     MU0,
+    _interpolate_radius_scale,
     fixed_boundary_energy_gradient,
     fixed_boundary_variational_residual,
     isotropic_force_residual,
@@ -71,9 +72,13 @@ def test_fixed_boundary_projection_enforces_geometry_and_lambda_gauge() -> None:
     np.testing.assert_allclose(projected.radius_scale[-1], boundary.radius_scale)
     expected_cut = np.asarray(state.radius_scale[:, :, 0]).copy()
     expected_cut[-1] = np.asarray(boundary.radius_scale[:, 0])
-    expected_cut[0] = expected_cut[1]
+    first_ring_modes = np.fft.fft(expected_cut[1])
+    modes = np.rint(np.fft.fftfreq(grid.ntheta, d=1.0 / grid.ntheta)).astype(int)
+    first_ring_modes[np.abs(modes) % 2 == 1] = 0.0
+    expected_cut[0] = np.fft.ifft(first_ring_modes).real
     np.testing.assert_allclose(projected.radius_scale[:, :, 0], expected_cut)
-    np.testing.assert_allclose(projected.radius_scale[0], projected.radius_scale[1])
+    axis_modes = np.fft.fft(np.asarray(projected.radius_scale[0]), axis=0)
+    np.testing.assert_allclose(axis_modes[np.abs(modes) % 2 == 1], 0.0, atol=2.0e-16)
     np.testing.assert_allclose(projected.lambda_stream[0], projected.lambda_stream[1])
     surface_mean = np.einsum(
         "j,k,ijk->i",
@@ -82,6 +87,34 @@ def test_fixed_boundary_projection_enforces_geometry_and_lambda_gauge() -> None:
         np.asarray(projected.lambda_stream),
     ) / (4.0 * np.pi)
     np.testing.assert_allclose(surface_mean, 0.0, atol=1.0e-15)
+
+
+def test_radius_interpolation_respects_odd_mode_axis_regularity() -> None:
+    grid = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=3, nxi=5)).build_grid()
+    s = jnp.asarray(grid.s)[:, None, None]
+    theta = jnp.asarray(grid.theta)[None, :, None]
+    radius_scale = 0.25 + 0.03 * jnp.sqrt(s) * jnp.cos(theta) + 0.02 * s * jnp.cos(2.0 * theta)
+    radius_scale = jnp.broadcast_to(radius_scale, grid.shape)
+    fraction = jnp.asarray([0.2, 0.7])[:, None, None, None]
+
+    values, derivatives = _interpolate_radius_scale(radius_scale, grid, fraction)
+    s_quadrature = jnp.asarray(grid.s[:-1])[None, :, None, None] + fraction * (grid.s[1] - grid.s[0])
+    theta_quadrature = jnp.asarray(grid.theta)[None, None, :, None]
+    expected_values = 0.25 + 0.03 * jnp.sqrt(s_quadrature) * jnp.cos(theta_quadrature)
+    expected_values += 0.02 * s_quadrature * jnp.cos(2.0 * theta_quadrature)
+    expected_derivatives = 0.015 / jnp.sqrt(s_quadrature) * jnp.cos(theta_quadrature)
+    expected_derivatives += 0.02 * jnp.cos(2.0 * theta_quadrature)
+    expected_values = jnp.broadcast_to(expected_values, values.shape)
+    expected_derivatives = jnp.broadcast_to(expected_derivatives, derivatives.shape)
+
+    np.testing.assert_allclose(values, expected_values, rtol=2.0e-14, atol=2.0e-14)
+    np.testing.assert_allclose(derivatives, expected_derivatives, rtol=3.0e-13, atol=3.0e-13)
+    tangent = jax.jvp(
+        lambda scale: _interpolate_radius_scale(scale * radius_scale, grid, fraction)[0],
+        (1.0,),
+        (0.4,),
+    )[1]
+    np.testing.assert_allclose(tangent, 0.4 * values, rtol=2.0e-14, atol=2.0e-14)
 
 
 def test_vacuum_cylinder_has_exact_energy_and_negligible_physical_force() -> None:
@@ -278,7 +311,7 @@ def test_nonaxisymmetric_coordinates_recover_uniform_cartesian_field() -> None:
     )
     grid = config.build_grid()
     theta = jnp.asarray(grid.theta)
-    radius_scale = 0.3 * (1.0 + 0.12 * jnp.cos(theta))
+    radius_scale = 0.3 * (1.0 + 0.12 * jnp.cos(2.0 * theta))
     radial_jacobian = 0.5 * radius_scale**2
     axial_flux = jnp.sum(jnp.asarray(grid.theta_basis.weights) * radial_jacobian) / (2.0 * jnp.pi)
     stream_derivative = radial_jacobian - axial_flux

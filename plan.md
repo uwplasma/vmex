@@ -6,26 +6,35 @@ supersedes the original `/Users/rogeriojorge/Downloads/plan_mirror.md` and
 every earlier version of this plan. Do not create parallel roadmaps. Commits,
 tests, and the four compact benchmark JSON files are the execution log.
 
-Audit baseline (2026-07-15 CDT, final source/literature/worktree review through T8 setup):
+Audit baseline (2026-07-15 CDT, final source/literature/worktree review through the T7 matrix and T8 axis diagnosis):
 
-- the reviewed head is `4f3a481a` on `codex/mirror-geometry`. T1--T6c and the
-  T7 cut-profile repair are committed and pushed; T7 is the active evidence
-  gate and T8 circular normalization is being resolved in parallel;
-- base `origin/main` is `ed4ac7ac`; the branch is zero commits behind and 331
+- the reviewed pushed head is `7fcf0777` on `codex/mirror-geometry`. T1--T6c,
+  the T7 cut-profile repair, cyclic closed preconditioner, final roadmap, and
+  nonuniform-APHI WOUT repair are committed and pushed. The worktree contains
+  the focused T8 axis-regularity experiment described below and is not a
+  promotion record until its complete gate passes;
+- base `origin/main` is `ed4ac7ac`; the branch is zero commits behind and 333
   commits ahead, so no main-branch merge is pending. It includes the
   coil-ownership cleanup from PR #26, simultaneous boundary/coil derivatives
   from PR #28, and solver-sensitive gradient documentation from PR #29;
-- draft PR #22 is open, mergeable, and remains draft. Every completed CI job
-  inspected on `4f3a481a` passed; several long shards were still running. Do
+- draft PR #22 is open, mergeable, and remains draft. Every CI job on
+  `7fcf0777` passed, including mirror, parity, implicit-gradient, example,
+  package/docs, and the 95% coverage gate; the manual full-physics job was
+  intentionally skipped. Do
   not poll CI while implementing; inspect the accumulated result before each
   major push;
-- the pushed diff is 50 files, 17,256 insertions, and 1,608 deletions. This is
+- the pushed diff is 53 files, 17,331 insertions, and 1,616 deletions. This is
   above the final 46-file budget and makes T11 deletion mandatory;
-- the active worktree contains 13 mirror modules, 7,891 physical lines, 20
-  lazy public names, and 4,329 mirror-test lines. `splines.py` is 1,006 lines.
+- the active worktree contains 13 mirror modules, 7,956 physical lines, 20
+  lazy public names, and 4,375 mirror-test lines. `splines.py` is 1,011 lines.
   T6c has removed the obsolete nodal vectorizer, preconditioner, interpolation
   path, rejected cached linearization, and duplicate test setup. T11 still
   must reach the final 7,200/4,000 and 46-file/API/artifact budgets;
+- the T8 axis-regularity worktree passes all 105 bounded mirror tests with 9
+  expected full/nightly skips in 245.34 seconds. The explicit circular
+  strong-force and greater-than-1,024-variable cyclic-factor gates pass
+  together in 10.39 seconds. Changed-file pre-commit, `git diff --check`, and
+  full strict Sphinx pass;
 - the coefficient-API worktree passes 106 tests and skips 10 in 321.53 seconds;
   the later regional-force change passes its focused tests; strict Sphinx,
   changed-file pre-commit, and `git diff --check` pass;
@@ -106,9 +115,24 @@ Audit baseline (2026-07-15 CDT, final source/literature/worktree review through 
   `4.74e-2`/`7.55e-2`. The corrected contract preserves the initial state's
   nested cut profiles. Initializing all radial surfaces from enclosed ESSOS
   flux reduces those values to `3.41e-3`/`5.26e-3`, with bulk force
-  `1.30e-3` and variational residual `2.33e-14`. T7 must now establish this
-  decrease on the independent and combined refinement matrix before promoting
-  finite-beta evidence.
+  `1.30e-3` and variational residual `2.33e-14`.
+- T7's completed GPU matrix independently varies radial, axial, angular,
+  exterior, and radial-quadrature resolution and includes a combined fine
+  grid. Angular, exterior, and quadrature changes are negligible at the
+  medium grid, so they are not the error bottleneck. The combined
+  `(ns,ntheta,nxi)=(5,8,7) -> (7,12,13) -> (9,16,17)` sequence reduces
+  all-volume normalized force at beta 0 from `4.21e-2 -> 3.41e-3 -> 2.08e-3`
+  and at beta 0.50 from `1.30e-1 -> 1.11e-1 -> 6.69e-2`; the corresponding
+  fine bulk values are `1.10e-3` and `1.50e-2`. Fine-grid `B_center/B_vac`
+  is `0.99569, 0.98702, 0.95620, 0.88734, 0.76269` at beta
+  `0.01,0.03,0.10,0.25,0.50`. The low-beta field trend agrees with the pinned
+  Pleiades values to about `0.03%, 0.10%, 0.36%`. The matrix therefore proves
+  a physical beta response and identifies axial/radial discretization as the
+  remaining force error, but it does not support claiming high-beta
+  pointwise-force convergence. T7 must set the supported beta ceiling from
+  these declared force/observable gates before regenerating the canonical
+  record; it may not label 50% promoted merely because the weak residual is
+  below `1e-12`.
 - The T8 circular baseline maps VMEC ``PHIEDGE`` to
   `2*pi*axial_flux_derivative`. Ordinary VMEC-JAX and VMEC2000 agree to
   roundoff at `ns=17` for volume, magnetic energy, axis/volume field, flux,
@@ -139,6 +163,39 @@ Audit baseline (2026-07-15 CDT, final source/literature/worktree review through 
   between the radial Gauss variational operator and the independently
   staggered force, not on APHI normalization, cyclic Krylov convergence, or a
   simple fixed-axis shift.
+- The T8 virtual-work audit localizes that inconsistency to the leading axis
+  treatment. For a smooth polar section, leading even harmonics describe the
+  centered limiting section while odd harmonics enter one power of
+  `rho=sqrt(s)` later. Projecting the axis row onto the even subspace and
+  interpolating odd radius-scale modes as `sqrt(s)` changes the solved
+  matched-flux circular sequence at `ns=5,9,17` to all-volume strong force
+  `4.72e-6, 7.35e-7, 1.25e-7`; bulk force at `ns=17` is `3.44e-9`, and all
+  three solves reach variational `ftol <= 1e-12`. The new two-row axis stencil
+  also requires local radius--lambda Hessian blocks: with them the existing
+  greater-than-1,024-variable cyclic factor gate passes in 7.4 seconds, while
+  a channel-separated factor takes 6,197 Krylov iterations and misses the
+  `1e-8` true-linear-residual gate.
+- Because `ntheta=2*mpol+1` is odd, directly sampled analytic sections can
+  alias unresolved even harmonics into resolved odd modes. The SFLM fixture at
+  `mpol=8` had an aliased odd coefficient of `1.17e-3`; oversampled Fourier
+  projection through the retained mode set restores normalized force
+  `4.35e-3` and bulk force `2.76e-3` without relaxing its `6e-3` gate. T8 must
+  retain this explicit projection test and document that sampled analytic
+  boundaries require a resolved/dealiased convergence study.
+- The 16-control finite-current racetrack remains a performance gate. On the
+  local CPU, direct sparse Newton and a 25-step L-BFGS handoff each exceeded
+  two minutes; dense residual Newton reached about 6.2 GiB before termination.
+  On two RTX A4000 GPUs, the 32-column finite-current run exceeded seven
+  minutes, a 128-column run exceeded five minutes, and the corresponding
+  current-free run exceeded 2.7 minutes, all with low device utilization; the
+  larger batch reduced neither setup nor solve time enough to retain it.
+  The bounded normal suite already covers nonaxisymmetric finite-current open
+  solves. T9 must replace one-HVP-per-column frozen-factor assembly with a
+  measured sparse-coloring or reusable-factor construction before running
+  current continuation. Then initialize the metric-consistent vacuum state,
+  continue current in declared steps, require `ftol <= 1e-12`, true linear
+  residual below `1e-8`, and record runtime/memory. Failure is a T9 blocker,
+  not grounds to weaken the test.
 
 Execution update (2026-07-15): T1 enforced the matrix-free open policy and
 compacted its evidence; T2 removed the nodal fixed solver, custom VJP, and
@@ -397,7 +454,9 @@ pressure is strongly anisotropic.
   force below `1e-12`.
 - The coefficient-native SFLM field initializer accepts callable or sampled
   Cartesian fields, infers the analytic flux within `6.3e-5` relative, passes
-  a field-amplitude JVP, and reaches field/force errors of `3.42e-4`/`5.12e-3`.
+  a field-amplitude JVP, and reaches field/force errors below
+  `5e-4`/`6e-3`. Its analytic polar section is oversampled before truncation
+  so unresolved even harmonics do not alias into axis-regular odd modes.
 - The equal-end polynomial vacuum mirror is exactly curl-free and
   divergence-free. Moving its cuts through half-lengths `0.6, 0.8, 1.0` changes
   central radius by only `1.6e-9` relative and central field by `1.0e-5`, while
@@ -448,10 +507,11 @@ that pass their final gates.
 
 ### 3.3 Rejected or incomplete evidence
 
-- In the corrected axisymmetric free beta scan, the pointwise normalized force
-  at beta 50% changes approximately `0.155 -> 0.197 -> 0.216`; it is not
-  converging and blocks promotion despite small variational and boundary
-  residuals.
+- In the regenerated nested-cut axisymmetric free beta scan, combined
+  refinement reduces beta-50% pointwise force
+  `0.130 -> 0.111 -> 0.0669`, but this is not yet a demonstrated zero-limit;
+  the high-beta point remains unpromoted despite small variational and
+  boundary residuals.
 - The medium/fine central radius differs by about 0.083%, while the central
   field differs by about 0.473%. The old 0.05% field target was unjustified;
   the replacement is the observed-order/extrapolation gate in section 1.1.
@@ -911,7 +971,9 @@ decreases on three grids for accepted fixed equilibria.
    a callable; it does not construct coils or perform Biot--Savart integration.
 4. Pin the initializer with the analytic SFLM: reconstructed field relative
    RMS below `5e-4`, all-volume strong force below `6e-3`, correct flux, finite
-   lambda, and positive geometry.
+   lambda, and positive geometry. Project analytic polar sections from an
+   oversampled theta grid through exactly the retained Fourier modes; direct
+   collocation samples are an aliasing test, not the reference fixture.
 5. Use the projected initializer in the root SFLM example and continuation.
    Retain the failed homothetic continuation as compact negative evidence, not
    as a default path.
@@ -932,9 +994,11 @@ cut-location study. M2 is complete.
    blocks rather than unrelated flat slices.
 2. Freeze a local approximate Hessian retaining neighboring radial coupling,
    axial B-spline support, and the poloidal-mode coupling required by
-   nonaxisymmetric geometry. The T4 oracle shows that radius--stream cross
-   blocks do not improve convergence, while full poloidal coupling is
-   decisive; omit the cross blocks and retain separate sparse field channels.
+   nonaxisymmetric geometry. T4 showed that radius--stream cross blocks were
+   unnecessary before the axis correction. T8 supersedes that conclusion:
+   the regular odd-mode extrapolation spans two radial rows and its local
+   radius--stream blocks are required by the cyclic true-residual gate. Keep
+   those local blocks, but no dense global channel coupling.
 3. A/B test the then-current SciPy/SOLVAX `0.7.3` path and current-main SOLVAX
    pytree GMRES/Newton--Krylov in an isolated environment. Keep SciPy's host
    optimizer for the nondifferentiable CLI when faster. Upgrade the dependency
@@ -979,11 +1043,10 @@ first-order reason recorded in section 3.3.
 
 ### M4. Promote axisymmetric open free boundary through beta 50%
 
-Implementation status: steps 1--8 are complete and pass their operator,
-restart, continuation, memory, and reconverged-adjoint tests. Steps 9--13 are
-the active T7 work and must regenerate all physics evidence because the
-existing benchmark predates the accepted strong-force reconstruction,
-coefficient residual, and nested finite-radius cut initialization.
+Implementation status: steps 1--12 are complete. The independent and combined
+T7 matrix now identifies radial/axial error and a clear beta response. Step 13
+is blocked only on applying the declared support ceiling: beta 50% has useful
+research evidence but does not yet pass the strong-force promotion gate.
 
 1. Represent boundary, interior geometry, and lambda with the same clamped
    axial spline coefficients used by fixed boundary. Evaluate them on the
@@ -1086,8 +1149,8 @@ are labeled scalar-pressure equilibria, not ANIMEC or kinetic predictions.
    require a solve from the analytic state to retain a strong force below
    `1e-4` and to decrease under `ns=5,9,17` refinement while reaching
    variational `ftol <= 1e-12`. Do not loosen `ftol`, accept a stationary
-   discrete state with worsening physical force, or add axis optimization
-   until this virtual-work identity passes.
+  discrete state with worsening physical force, or add axis optimization
+  until this virtual-work identity passes.
    Compare volume, energy terms, axis/edge `iota`, magnetic well, `|B|`, and
    independently reconstructed force on three grids; do not compare only
    output coefficients with different basis conventions.
@@ -1197,8 +1260,8 @@ recorded as compact negative evidence.
 | T6a (complete) | Add the composed free coefficient map and Galerkin boundary-work residual | 3 focused and 28 non-full spline tests; directional JAX/FD work parity; square coefficient map; pre-commit pass |
 | T6b (complete) | Replace the coupled Jacobian with measured-memory JVP/VJP `LinearOperator` actions and migrate result/restart schema | dense tiny-case and transpose parity; repeated actions selected by memory/runtime A/B; no full coupled Jacobian above threshold; schema-3 restart and continuation pass |
 | T6c (complete) | Reuse the primal coefficient residual in the free tangent/adjoint and delete all nodal production packing | external-field and finite-pressure reconverged-FD gradients; true transpose residual; 103 normal and 3 representative full tests pass; source `7,880`, tests `4,227`, `splines.py 999`; strict docs/static checks pass |
-| T7 | Complete the nested-cut axisymmetric beta scan through 50% | independent radial/axial/angular/exterior/quadrature and combined refinement; interface/force gates; low-beta Pleiades field; high-beta trend |
-| T8 | Establish matched-flux circular hybrid parity and long-leg/open limit | analytic ``APHI``/spline flux mapping; ordinary VMEC-JAX and VMEC2000 three-grid parity; cyclic linear and strong-force refinement |
+| T7 (matrix complete) | Set the supported ceiling and regenerate the nested-cut axisymmetric beta record | completed independent/combined GPU matrix; retain 50% as research-only unless the declared strong-force extrapolation passes; low-beta Pleiades field parity |
+| T8 (active) | Land matched-flux circular parity and axis-regular strong-force repair | completed APHI/VMEC/WOUT parity and `ns=5,9,17` force sequence; finish dealiased fixtures, full normal gate, docs, and commit |
 | T9 | Promote the spline racetrack/rotating-return hybrid | positive map, nonzero iota, beta profiles, derivatives, MOUT round trip |
 | T10 | Run the bounded nonaxisymmetric free-boundary attempt | promotion or explicit negative record within stated budget |
 | T11 | Remove the ESSOS-owned runner, compatibility paths, redundant figures/tests, and stale records | at most 46 changed files, 7,200 mirror source lines, 4,000 mirror-test lines, 18 public names, 4 JSON records, and 3 root examples/figures |
@@ -1263,17 +1326,17 @@ Percentages measure promotion evidence, not lines written:
 | Fixed open axisymmetric | 100% | maintain gates while shared solver code changes |
 | Fixed open nonaxisymmetric | 100% | maintain gates during shared-core changes |
 | Open fixed B-spline representation | 100% | maintain coefficient and cut-location gates |
-| Free open axisymmetric | 88% | finish nested-cut independent/combined force, interface, and beta refinement matrix |
+| Free open axisymmetric | 94% | apply the completed matrix to the support ceiling and regenerate the canonical record/figure |
 | Free open nonaxisymmetric | 35% | conditional three-grid local-mode promotion attempt after M4 |
-| Fixed closed B-spline hybrid | 50% | matched-flux circular parity, open-leg limit, racetrack continuation, force, derivatives |
+| Fixed closed B-spline hybrid | 62% | commit circular axis-force parity; color/reuse racetrack factor, then GPU current continuation; open-leg limit, beta, derivatives |
 | Strong-force diagnostic | 100% | maintain gates in promoted equilibrium lanes |
-| Structured preconditioning | 97% | cyclic sparse factor is active; A/B periodic solve and retain only the winning generic wrapper |
+| Structured preconditioning | 98% | land the two-row/cross-block cyclic factor and GPU-gate finite-current racetrack scaling |
 | Implicit differentiation | 90% | rerun hybrid derivatives only after primal promotion |
-| Code/API simplification | 70% | current 50-file/7,891-source/4,329-test/20-name tree must meet all T11 budgets |
+| Code/API simplification | 66% | current 53-file/7,956-source/4,375-test/20-name tree must meet all T11 budgets |
 | Docs/examples/artifacts | 68% | correct coefficient-adjoint text; regenerate free/hybrid showcases after physics gates |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned benchmark runner; retain field-callable integration only |
 
-Weighted completion of the four required release models is approximately 83%.
+Weighted completion of the required release models is approximately 85%.
 Free closed hybrid and ANIMEC are deferred and excluded from that percentage.
 
 ## 9. Primary references

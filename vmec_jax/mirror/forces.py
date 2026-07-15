@@ -132,6 +132,50 @@ def _interpolate_stream_function(lam: Array, grid: "MirrorGrid", fraction: Array
     return jnp.fft.ifft(lambda_modes, axis=2).real
 
 
+def _interpolate_radius_scale(
+    radius_scale: Array,
+    grid: "MirrorGrid",
+    fraction: Array,
+) -> tuple[Array, Array]:
+    """Interpolate the radius scale and derivative with axis regularity.
+
+    Odd poloidal modes translate a centered section, so their leading radial
+    behavior is proportional to ``rho = sqrt(s)``. Even modes can describe
+    the limiting centered ellipse and remain finite on axis.
+    """
+
+    radius_scale = jnp.asarray(radius_scale)
+    ds = float(grid.s[1] - grid.s[0])
+    if grid.ntheta == 1:
+        left, right = radius_scale[:-1][None], radius_scale[1:][None]
+        return (1.0 - fraction) * left + fraction * right, (right - left) / ds
+
+    modes = jnp.rint(jnp.fft.fftfreq(grid.ntheta, d=1.0 / grid.ntheta)).astype(int)
+    power = 0.5 * (jnp.abs(modes) % 2)[:, None]
+    radial_s = jnp.asarray(grid.s, dtype=radius_scale.dtype)
+    safe_s = jnp.where(radial_s == 0.0, 1.0, radial_s)
+    radius_modes = jnp.fft.fft(radius_scale, axis=1)
+    regular_modes = radius_modes / safe_s[:, None, None] ** power[None]
+    extrapolated_axis = 2.0 * regular_modes[1] - regular_modes[2]
+    regular_modes = regular_modes.at[0].set(
+        jnp.where(power == 0.0, regular_modes[0], extrapolated_axis)
+    )
+    regular_quadrature = (
+        (1.0 - fraction) * regular_modes[:-1][None]
+        + fraction * regular_modes[1:][None]
+    )
+    regular_derivative = (regular_modes[1:] - regular_modes[:-1])[None] / ds
+    s_quadrature = jnp.asarray(grid.s[:-1])[None, :, None, None] + fraction * ds
+    scale = s_quadrature ** power[None, None]
+    scale_derivative = power[None, None] * s_quadrature ** (power[None, None] - 1.0)
+    radius_quadrature = jnp.fft.ifft(scale * regular_quadrature, axis=2).real
+    derivative_quadrature = jnp.fft.ifft(
+        scale_derivative * regular_quadrature + scale * regular_derivative,
+        axis=2,
+    ).real
+    return radius_quadrature, derivative_quadrature
+
+
 def _half_mesh_samples(
     state: MirrorState, grid: "MirrorGrid", axial_flux_derivative: Array, current_derivative: Array
 ) -> _HalfMeshSamples:
@@ -144,9 +188,7 @@ def _half_mesh_samples(
     fraction = gauss[:, None, None, None]
     s_left = jnp.asarray(grid.s[:-1])[None, :, None, None]
     s_quadrature = s_left + fraction * ds
-    a_left, a_right = a[:-1][None], a[1:][None]
-    a_quadrature = (1.0 - fraction) * a_left + fraction * a_right
-    da_ds = (a_right - a_left) / ds
+    a_quadrature, da_ds = _interpolate_radius_scale(a, grid, fraction)
     radius = jnp.sqrt(jnp.maximum(s_quadrature * a_quadrature**2, 0.0))
     radius_radius_s = 0.5 * (a_quadrature**2 + 2.0 * s_quadrature * a_quadrature * da_ds)
     jacobian = radius_radius_s * float(grid.dz_dxi)

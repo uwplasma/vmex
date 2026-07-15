@@ -422,7 +422,7 @@ def _optimize_fixed_boundary(
     polish_reserve = min(polish_cap, max(1, int(config.max_iterations) // 4))
     available = int(config.max_iterations) - polish_reserve
     lbfgs_budget = max(10, available // 2) if use_matrix_free else max(1, available)
-    if start_with_residual_newton and not use_matrix_free:
+    if start_with_residual_newton:
         final_x = np.asarray(x0)
         optimizer_success = False
         optimizer_message = "started with residual-Newton"

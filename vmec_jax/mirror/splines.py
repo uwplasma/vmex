@@ -16,7 +16,7 @@ import numpy as np
 
 from .basis import CubicBSplineBasis, MirrorGrid, ThetaBasis
 from .geometry import evaluate_geometry, regularize_axis_stream_function
-from .model import MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState
+from .model import _regularize_axis_radius, MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState
 
 Array = Any
 
@@ -256,7 +256,7 @@ class SplineMirrorDiscretization:
         radius = jnp.asarray(state.radius_coefficients)
         boundary_radius = jnp.asarray(boundary.radius_coefficients)
         radius = radius.at[-1].set(boundary_radius)
-        radius = radius.at[0].set(radius[1])
+        radius = _regularize_axis_radius(radius)
         lam = jnp.asarray(state.lambda_coefficients).at[0].set(state.lambda_coefficients[1])
         evaluated = jnp.tensordot(lam, jnp.asarray(self.evaluation_matrix).T, axes=((-1,), (0,)))
         theta_weights = jnp.asarray(self.grid.theta_basis.weights)
@@ -581,7 +581,7 @@ class _SplineStateVectorizer:
         radius = self.base.radius_coefficients.at[self.radius_indices].set(
             vector[: self.radius_size] * self.radius_scale
         )
-        radius = radius.at[0].set(radius[1])
+        radius = _regularize_axis_radius(radius)
         if not self.solve_lambda:
             return SplineMirrorState(radius, self.base.lambda_coefficients)
 
@@ -614,7 +614,12 @@ class _SplineStateVectorizer:
 
         matrix = np.asarray(self.evaluation_matrix)
         radius_coefficients = np.tensordot(np.asarray(gradient.radius_scale), matrix, axes=((-1,), (0,)))
-        radius_coefficients[1] += radius_coefficients[0]
+        axis_gradient = np.fft.fft(radius_coefficients[0], axis=0)
+        modes = np.rint(np.fft.fftfreq(radius_coefficients.shape[1], d=1.0 / radius_coefficients.shape[1])).astype(
+            int
+        )
+        axis_gradient[np.abs(modes) % 2 == 1] = 0.0
+        radius_coefficients[1] += np.fft.ifft(axis_gradient, axis=0).real
         radius = radius_coefficients[self.radius_indices] * self.radius_scale
         if not self.solve_lambda:
             return radius
@@ -725,12 +730,16 @@ def _packed_spline_preconditioner(
                         discretization.coefficient_count - axial_distance,
                     )
                 axial_neighbors = axial_distance <= 4
+                same_channel = channels == channels[column]
                 if channels[column] == 1:
                     # Eliminating the weighted lambda gauge introduces a
                     # rank-one coupling across every axial coefficient.
-                    axial_neighbors = np.ones(size, dtype=bool)
+                    axial_neighbors = np.where(same_channel, True, axial_neighbors)
+                # The regular odd-mode coefficient at the axis is extrapolated
+                # from the next two radial rows, so its Hessian stencil spans
+                # two coefficient rows there.
                 rows = np.flatnonzero(
-                    (channels == channels[column]) & (np.abs(radial - radial[column]) <= 1) & axial_neighbors
+                    (np.abs(radial - radial[column]) <= 2) & axial_neighbors
                 )
                 row_parts.append(rows)
                 column_parts.append(np.full(rows.size, column, dtype=int))
@@ -921,12 +930,8 @@ def solve_fixed_boundary_cli(
             gradient_tolerance=gradient_tolerance,
             start_with_residual_newton=discretization.closed,
             matrix_free_context=(
-                None
-                if discretization.closed and x0.size <= 1024
-                else (
-                    vectorizer,
-                    _packed_spline_preconditioner(discretization, vectorizer),
-                )
+                vectorizer,
+                _packed_spline_preconditioner(discretization, vectorizer),
             ),
         )
         final_x = optimization.vector

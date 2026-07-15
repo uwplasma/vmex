@@ -625,6 +625,7 @@ def test_large_closed_torus_uses_cyclic_sparse_factor() -> None:
     assert result.final_linear_residual < 1.0e-8
 
 
+@pytest.mark.full
 def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
     resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     config = MirrorConfig(
@@ -663,7 +664,12 @@ def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
         boundary.radius_coefficients[None],
         (resolution.ns,) + boundary.radius_coefficients.shape,
     )
-    initial = SplineMirrorState(radius, jnp.zeros_like(radius))
+    initial = initialize_closed_vacuum_stream_function(
+        SplineMirrorState(radius, jnp.zeros_like(radius)),
+        discretization,
+        axis,
+        axial_flux_derivative=0.02,
+    )
 
     result = solve_spline_fixed_boundary_cli(
         initial,
@@ -749,7 +755,7 @@ def test_clamped_projection_preserves_prescribed_nested_cut_profiles() -> None:
 
 
 def test_boundary_transfer_preserves_nested_self_similarity() -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=1, nxi=9))
+    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=2, nxi=9))
     source_grid = config.build_grid()
     theta = jnp.asarray(source_grid.theta)[:, None]
     xi = jnp.asarray(source_grid.xi)[None, :]
@@ -800,14 +806,14 @@ def test_coefficient_native_energy_gradient_matches_central_difference() -> None
 
 def _free_boundary_spline_fixture():
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, nxi=9),
+        resolution=MirrorResolution(ns=5, mpol=2, nxi=9),
         z_min=-1.4,
         z_max=1.4,
     )
     discretization = SplineMirrorDiscretization.build(config, elements=3, quadrature_order=5)
     theta = jnp.asarray(discretization.grid.theta)[:, None]
     nodes = jnp.asarray(discretization.spline.collocation_nodes)[None, :]
-    coefficients = 0.28 * (1.0 + 0.08 * jnp.cos(theta) * (1.0 - nodes**2))
+    coefficients = 0.28 * (1.0 + 0.08 * jnp.cos(2.0 * theta) * (1.0 - nodes**2))
     boundary = SplineMirrorBoundary(coefficients)
     radius = jnp.broadcast_to(
         coefficients,
@@ -1029,8 +1035,15 @@ def test_supplied_field_initializer_recovers_straight_field_line_mirror() -> Non
     fixture = StraightFieldLineMirror(center_field=1.0, axial_scale=2.5)
     theta = jnp.asarray(source_grid.theta)[:, None]
     z = jnp.asarray(source_grid.z)[None, :]
+    oversampled_count = 8 * source_grid.ntheta
+    oversampled_theta = jnp.linspace(0.0, 2.0 * jnp.pi, oversampled_count, endpoint=False)[:, None]
+    oversampled_radius = fixture.boundary_radius(0.03, oversampled_theta, z)
+    oversampled_modes = np.rint(np.fft.fftfreq(oversampled_count, d=1.0 / oversampled_count)).astype(int)
+    retained = np.abs(oversampled_modes) <= config.resolution.mpol
+    coefficients = jnp.fft.fft(oversampled_radius, axis=0)[retained] / oversampled_count
+    phase = jnp.exp(1j * theta * jnp.asarray(oversampled_modes[retained])[None])
     boundary = MirrorBoundary.from_radius(
-        fixture.boundary_radius(0.03, theta, z),
+        (phase @ coefficients).real,
         source_grid,
     )
     spline_boundary = discretization.fit_boundary(boundary, source_grid)

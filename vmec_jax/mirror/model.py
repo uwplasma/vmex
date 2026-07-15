@@ -195,6 +195,24 @@ class MirrorState:
             raise ValueError(f"lambda_stream shape {self.lambda_stream.shape} does not match {expected}")
 
 
+def _regularize_axis_radius(radius_scale: Array) -> Array:
+    """Remove odd leading poloidal radius modes at the magnetic axis.
+
+    Even modes describe the centered limiting cross-section. Odd radial-shape
+    modes translate that section and must vanish as ``sqrt(s)`` for a
+    single-valued axis.
+    """
+
+    radius_scale = jnp.asarray(radius_scale)
+    ntheta = int(radius_scale.shape[1])
+    if ntheta == 1:
+        return radius_scale.at[0].set(radius_scale[1])
+    modes = jnp.rint(jnp.fft.fftfreq(ntheta, d=1.0 / ntheta)).astype(int)
+    axis_modes = jnp.fft.fft(radius_scale[1], axis=0)
+    centered = jnp.where((jnp.abs(modes) % 2 == 0)[:, None], axis_modes, 0.0)
+    return radius_scale.at[0].set(jnp.fft.ifft(centered, axis=0).real)
+
+
 def project_fixed_boundary_state(
     state: MirrorState,
     boundary: MirrorBoundary,
@@ -213,7 +231,7 @@ def project_fixed_boundary_state(
         raise ValueError("boundary shape does not match mirror grid")
     radius_scale = jnp.asarray(state.radius_scale)
     radius_scale = radius_scale.at[-1].set(boundary_radius)
-    radius_scale = radius_scale.at[0].set(radius_scale[1])
+    radius_scale = _regularize_axis_radius(radius_scale)
 
     lam = jnp.asarray(state.lambda_stream)
     lam = lam.at[0].set(lam[1])
