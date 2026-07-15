@@ -70,6 +70,10 @@ two-point Gauss energy rule:
 * the magnetic axis, fixed LCFS, and open end cuts are reported separately
   from the unconstrained physical-volume norm.
 
+For open mirrors, ``bulk`` and radial-axis diagnostics use the central 80% of
+the axial coordinate. ``end_collar`` uses the outer 20% nearest the two fixed
+cuts. The all-volume norm retains both regions.
+
 In particular, radial curl and pressure terms use conservative cell
 differences,
 

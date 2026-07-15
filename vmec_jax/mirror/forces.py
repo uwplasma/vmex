@@ -852,11 +852,14 @@ def isotropic_force_residual(
         regional_reference = jnp.sqrt(jnp.sum(regional_weights * magnetic_force_scale**2) / denominator)
         return regional_force / jnp.maximum(regional_reference, jnp.finfo(physical_rms.dtype).tiny)
 
-    bulk_normalized_rms = regional_normalized_rms(active_s >= 0.2)
-    axis_normalized_rms = regional_normalized_rms((active_s < 0.2) | (jnp.arange(active_s.size) == 0))
-    first_row_normalized_rms = regional_normalized_rms(jnp.arange(active_s.size) == 0)
     active_xi = jnp.arange(force_active.shape[2])
-    end_collar = (active_xi == 0) | (active_xi == active_xi.size - 1)
+    end_collar = jnp.zeros_like(active_xi, dtype=bool) if closed else jnp.abs(jnp.asarray(grid.xi)[1:-1]) >= 0.8
+    axial_core = ~end_collar
+    bulk_normalized_rms = regional_normalized_rms(active_s >= 0.2, axial_core)
+    axis_normalized_rms = regional_normalized_rms(
+        (active_s < 0.2) | (jnp.arange(active_s.size) == 0), axial_core
+    )
+    first_row_normalized_rms = regional_normalized_rms(jnp.arange(active_s.size) == 0, axial_core)
     end_collar_normalized_rms = regional_normalized_rms(jnp.ones_like(active_s), end_collar)
     axis_field = jnp.sqrt(jnp.maximum(energy.b_squared[0], 0.0))
     theta_weights = jnp.asarray(grid.theta_basis.weights)[:, None]
