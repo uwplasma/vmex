@@ -33,9 +33,192 @@ from .exterior_bie import (
 from .model import MirrorBoundary, MirrorConfig, MirrorState, project_fixed_boundary_state
 from .output import FreeBoundaryRestart
 from .solver import _MirrorStateVectorizer
+from .splines import (
+    SplineMirrorBoundary,
+    SplineMirrorDiscretization,
+    SplineMirrorState,
+    _SplineStateVectorizer,
+)
 
 Array = Any
 _MONOLITHIC_JACOBIAN_MAX_SIZE = 80
+
+
+@dataclass(frozen=True, eq=False)
+class _SplineFreeBoundaryVectorizer:
+    """Compose free boundary coefficients with the shared spline state map."""
+
+    base_boundary: SplineMirrorBoundary
+    state_vectorizer: _SplineStateVectorizer
+    discretization: SplineMirrorDiscretization
+    boundary_indices: tuple[np.ndarray, np.ndarray]
+    boundary_scale: float
+    calibrate_pressure: bool
+    initial_mass_scale: float
+
+    @classmethod
+    def build(
+        cls,
+        boundary: SplineMirrorBoundary,
+        state: SplineMirrorState,
+        discretization: SplineMirrorDiscretization,
+        *,
+        axial_flux_derivative: Array,
+        solve_lambda: bool,
+        calibrate_pressure: bool = False,
+        initial_mass_scale: float = 1.0,
+    ) -> "_SplineFreeBoundaryVectorizer":
+        """Build the square free-equilibrium coefficient layout."""
+
+        if discretization.closed:
+            raise ValueError("open free boundary requires a clamped spline discretization")
+        coefficients = np.asarray(boundary.radius_coefficients, dtype=float)
+        expected = (discretization.grid.ntheta, discretization.coefficient_count)
+        if coefficients.shape != expected:
+            raise ValueError(f"boundary coefficient shape {coefficients.shape} must be {expected}")
+        evaluated = np.asarray(discretization.evaluate_boundary(boundary).radius_scale)
+        boundary_scale = float(np.mean(evaluated))
+        if not np.isfinite(boundary_scale) or boundary_scale <= 0.0:
+            raise ValueError("mean boundary radius must be positive and finite")
+        initial_mass_scale = float(initial_mass_scale)
+        if not np.isfinite(initial_mass_scale) or initial_mass_scale <= 0.0:
+            raise ValueError("initial_mass_scale must be positive and finite")
+
+        mask = np.zeros(expected, dtype=bool)
+        mask[:, 1:-1] = True
+        state_vectorizer = _SplineStateVectorizer.build(
+            state,
+            boundary,
+            discretization,
+            axial_flux_derivative=axial_flux_derivative,
+            solve_lambda=solve_lambda,
+        )
+        return cls(
+            base_boundary=boundary,
+            state_vectorizer=state_vectorizer,
+            discretization=discretization,
+            boundary_indices=tuple(np.asarray(index) for index in np.nonzero(mask)),
+            boundary_scale=boundary_scale,
+            calibrate_pressure=bool(calibrate_pressure),
+            initial_mass_scale=initial_mass_scale,
+        )
+
+    @property
+    def boundary_size(self) -> int:
+        """Number of free lateral-boundary coefficients."""
+
+        return int(self.boundary_indices[0].size)
+
+    @property
+    def state_size(self) -> int:
+        """Number of active interior geometry and stream coefficients."""
+
+        return self.state_vectorizer.radius_size + self.state_vectorizer.lambda_size
+
+    @property
+    def size(self) -> int:
+        """Total nonlinear unknown count, including optional pressure scale."""
+
+        return self.boundary_size + self.state_size + int(self.calibrate_pressure)
+
+    def pack(self) -> np.ndarray:
+        """Pack boundary, plasma, and optional mass scale."""
+
+        boundary = np.asarray(self.base_boundary.radius_coefficients)[self.boundary_indices]
+        parts = [boundary / self.boundary_scale, self.state_vectorizer.pack()]
+        if self.calibrate_pressure:
+            parts.append(np.asarray([self.initial_mass_scale]))
+        return np.concatenate(parts)
+
+    def unpack(self, vector: Array) -> tuple[SplineMirrorBoundary, SplineMirrorState, Array]:
+        """Reconstruct a constrained coefficient boundary and plasma state."""
+
+        vector = jnp.asarray(vector)
+        if vector.ndim != 1 or vector.shape[0] != self.size:
+            raise ValueError(f"free-boundary vector shape {vector.shape} must be ({self.size},)")
+        indices = tuple(jnp.asarray(index) for index in self.boundary_indices)
+        boundary_coefficients = jnp.asarray(self.base_boundary.radius_coefficients).at[indices].set(
+            vector[: self.boundary_size] * self.boundary_scale
+        )
+        boundary = SplineMirrorBoundary(boundary_coefficients)
+        start, stop = self.boundary_size, self.boundary_size + self.state_size
+        state = self.state_vectorizer.unpack(vector[start:stop])
+        state = self.discretization.project_fixed_boundary(state, boundary)
+        mass_scale = vector[-1] if self.calibrate_pressure else jnp.asarray(1.0, dtype=vector.dtype)
+        return boundary, state, mass_scale
+
+    def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return normalized positivity and stream-function bounds."""
+
+        state_lower, state_upper = self.state_vectorizer.bounds()
+        lower = [np.full(self.boundary_size, 0.2), state_lower]
+        upper = [np.full(self.boundary_size, np.inf), state_upper]
+        if self.calibrate_pressure:
+            lower.append(np.asarray([np.finfo(float).tiny]))
+            upper.append(np.asarray([np.inf]))
+        return np.concatenate(lower), np.concatenate(upper)
+
+    def boundary_work_residual(
+        self,
+        boundary: SplineMirrorBoundary,
+        jump: Array,
+        stress_scale: Array,
+    ) -> Array:
+        """Pull normalized lateral virtual work to free boundary coefficients."""
+
+        normalized = _spline_boundary_work_residual(
+            boundary,
+            jump,
+            stress_scale,
+            self.discretization,
+        )
+        return normalized[self.boundary_indices]
+
+
+def _spline_boundary_work(
+    boundary: SplineMirrorBoundary,
+    jump: Array,
+    discretization: SplineMirrorDiscretization,
+) -> Array:
+    """Return physical interface work for every boundary coefficient.
+
+    A radial coefficient variation moves the side wall along ``e_r``. For
+    ``x=(a cos(theta), a sin(theta), z)``, its virtual-work measure is
+    ``e_r dot (n dA) = a * dz/dxi * dtheta * dxi``. The endpoint coefficients
+    are returned as well; the free map removes them from the solve.
+    """
+
+    evaluated = discretization.evaluate_boundary(boundary).radius_scale
+    jump = jnp.asarray(jump)
+    expected = (discretization.grid.ntheta, discretization.grid.nxi)
+    if jump.shape != expected:
+        raise ValueError(f"interface jump shape {jump.shape} must be {expected}")
+    weights = (
+        jnp.asarray(discretization.grid.theta_basis.weights)[:, None]
+        * jnp.asarray(discretization.grid.axial_basis.weights)[None, :]
+    )
+    radial_measure = evaluated * abs(float(discretization.grid.dz_dxi)) * weights
+    return jnp.einsum(
+        "jk,kc->jc",
+        jump * radial_measure,
+        jnp.asarray(discretization.evaluation_matrix),
+    )
+
+
+def _spline_boundary_work_residual(
+    boundary: SplineMirrorBoundary,
+    jump: Array,
+    stress_scale: Array,
+    discretization: SplineMirrorDiscretization,
+) -> Array:
+    """Normalize coefficient boundary work without changing its zeros."""
+
+    jump = jnp.asarray(jump)
+    stress_scale = jnp.broadcast_to(jnp.asarray(stress_scale, dtype=jump.dtype), jump.shape)
+    physical = _spline_boundary_work(boundary, jump, discretization)
+    scale = _spline_boundary_work(boundary, jnp.abs(stress_scale), discretization)
+    tiny = jnp.finfo(physical.dtype).tiny
+    return physical / jnp.maximum(scale, tiny)
 
 
 @dataclass(frozen=True)

@@ -22,6 +22,11 @@ from vmec_jax.mirror.forces import (  # noqa: E402
     isotropic_staggered_energy_gradient,
     mirror_energy,
 )
+from vmec_jax.mirror.free_boundary import (  # noqa: E402
+    _SplineFreeBoundaryVectorizer,
+    _spline_boundary_work,
+    _spline_boundary_work_residual,
+)
 from vmec_jax.mirror.geometry import (  # noqa: E402
     contravariant_field,
     divergence_b,
@@ -739,6 +744,107 @@ def test_coefficient_native_energy_gradient_matches_central_difference() -> None
         - objective(projected.radius_coefficients - step * direction)
     ) / (2.0 * step)
     np.testing.assert_allclose(derivative, finite_difference, rtol=2.0e-7, atol=2.0e-7)
+
+
+def _free_boundary_spline_fixture():
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=9),
+        z_min=-1.4,
+        z_max=1.4,
+    )
+    discretization = SplineMirrorDiscretization.build(config, elements=3, quadrature_order=5)
+    theta = jnp.asarray(discretization.grid.theta)[:, None]
+    nodes = jnp.asarray(discretization.spline.collocation_nodes)[None, :]
+    coefficients = 0.28 * (1.0 + 0.08 * jnp.cos(theta) * (1.0 - nodes**2))
+    boundary = SplineMirrorBoundary(coefficients)
+    radius = jnp.broadcast_to(
+        coefficients,
+        (discretization.grid.ns,) + coefficients.shape,
+    )
+    state = SplineMirrorState(radius, jnp.zeros_like(radius))
+    return discretization, boundary, state
+
+
+def test_spline_boundary_work_is_the_discrete_shape_derivative() -> None:
+    discretization, boundary, _ = _free_boundary_spline_fixture()
+    theta = jnp.asarray(discretization.grid.theta)[:, None]
+    xi = jnp.asarray(discretization.grid.xi)[None, :]
+    jump = 1.7 + 0.2 * jnp.cos(theta) * (1.0 - xi**2)
+    direction = jnp.sin(
+        jnp.arange(boundary.radius_coefficients.size, dtype=float)
+    ).reshape(boundary.radius_coefficients.shape)
+    direction = direction.at[:, [0, -1]].set(0.0)
+    weights = (
+        jnp.asarray(discretization.grid.theta_basis.weights)[:, None]
+        * jnp.asarray(discretization.grid.axial_basis.weights)[None, :]
+    )
+
+    def pressure_potential(coefficients):
+        radius = discretization.evaluate_boundary(SplineMirrorBoundary(coefficients)).radius_scale
+        return 0.5 * abs(float(discretization.grid.dz_dxi)) * jnp.sum(jump * radius**2 * weights)
+
+    work = _spline_boundary_work(boundary, jump, discretization)
+    derivative = jnp.vdot(work, direction)
+    automatic = jnp.vdot(jax.grad(pressure_potential)(boundary.radius_coefficients), direction)
+    step = 2.0e-6
+    finite_difference = (
+        pressure_potential(boundary.radius_coefficients + step * direction)
+        - pressure_potential(boundary.radius_coefficients - step * direction)
+    ) / (2.0 * step)
+
+    np.testing.assert_allclose(derivative, automatic, rtol=3.0e-14, atol=3.0e-14)
+    np.testing.assert_allclose(derivative, finite_difference, rtol=2.0e-10, atol=2.0e-10)
+
+
+def test_spline_boundary_work_normalization_preserves_constant_stress_ratio() -> None:
+    discretization, boundary, _ = _free_boundary_spline_fixture()
+    shape = (discretization.grid.ntheta, discretization.grid.nxi)
+    residual = _spline_boundary_work_residual(
+        boundary,
+        2.5 * jnp.ones(shape),
+        5.0 * jnp.ones(shape),
+        discretization,
+    )
+
+    np.testing.assert_allclose(residual[:, 1:-1], 0.5, rtol=2.0e-15, atol=2.0e-15)
+
+
+def test_spline_free_boundary_map_is_square_and_preserves_constraints() -> None:
+    discretization, boundary, state = _free_boundary_spline_fixture()
+    vectorizer = _SplineFreeBoundaryVectorizer.build(
+        boundary,
+        state,
+        discretization,
+        axial_flux_derivative=0.1,
+        solve_lambda=True,
+        calibrate_pressure=True,
+        initial_mass_scale=1.2,
+    )
+    varied = vectorizer.pack()
+    varied[: vectorizer.boundary_size] *= 1.03
+    varied_boundary, varied_state, mass_scale = vectorizer.unpack(varied)
+    evaluated_boundary = discretization.evaluate_boundary(varied_boundary).radius_scale
+    evaluated_state = discretization.evaluate_state(varied_state)
+
+    assert vectorizer.size == vectorizer.boundary_size + vectorizer.state_size + 1
+    assert vectorizer.boundary_size == discretization.grid.ntheta * (discretization.coefficient_count - 2)
+    np.testing.assert_allclose(
+        varied_boundary.radius_coefficients[:, [0, -1]],
+        boundary.radius_coefficients[:, [0, -1]],
+    )
+    np.testing.assert_allclose(evaluated_state.radius_scale[-1], evaluated_boundary, atol=3.0e-15)
+    np.testing.assert_allclose(evaluated_state.radius_scale[0], evaluated_state.radius_scale[1], atol=3.0e-15)
+    np.testing.assert_allclose(
+        jnp.einsum(
+            "j,k,ijk->i",
+            discretization.grid.theta_basis.weights,
+            discretization.grid.axial_basis.weights,
+            evaluated_state.lambda_stream,
+        ),
+        0.0,
+        atol=3.0e-15,
+    )
+    np.testing.assert_allclose(mass_scale, 1.2)
 
 
 def test_spline_fixed_boundary_solver_recovers_cylindrical_equilibrium() -> None:
