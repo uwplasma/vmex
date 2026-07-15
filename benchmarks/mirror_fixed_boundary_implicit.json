@@ -53,6 +53,16 @@
     "gradient_rtol": 2.0e-9,
     "gradient_atol": 2.0e-11
   },
+  "spline_forward_tangent_case": {
+    "grid": {"ns": 5, "ntheta": 4, "spline_coefficients": 6},
+    "physics": "nonaxisymmetric finite-pressure/current equilibrium with gauge-free stream function",
+    "direction": "one boundary spline coefficient",
+    "method": "exact residual JVP and preconditioned implicit solve",
+    "comparison": "two fully reconverged centered-difference equilibria",
+    "radius_and_stream_function_relative_error_limit": 2e-4,
+    "linear_residual_limit": 1e-8,
+    "status": "pass"
+  },
   "matrix_free_case": {
     "grid": {"ns": 17, "ntheta": 1, "nxi": 41},
     "active_unknowns": 585,

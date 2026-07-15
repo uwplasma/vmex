@@ -381,8 +381,13 @@ conserved mass, and current remain differentiable; neither the host iterations
 nor spline evaluation history is stored. A combined axisymmetric direction and
 a nonaxisymmetric ``solve_lambda=True`` boundary direction agree with two
 independently reconverged equilibria to ``3.92e-10`` and ``3.20e-10`` relative.
-This establishes the reverse implicit path. A forward tangent wrapper and the
-final SOLVAX parity study remain Milestone 8 work.
+``spline_fixed_boundary_tangent`` solves the complementary forward system
+``F_u du = -F_p dp`` with exact residual JVPs and the same preconditioner. On a
+nonaxisymmetric finite-current ``solve_lambda=True`` case, both radius and
+stream-function tangents agree with two fully reconverged centered differences
+within ``2e-4`` in relative state norm, with linear residual below ``1e-8``.
+This establishes both open-spline derivative directions. Closed-axis and
+centerline-control derivatives remain part of fixed-hybrid promotion.
 
 Axisymmetric free-boundary implicit gradients
 ---------------------------------------------

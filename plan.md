@@ -228,14 +228,14 @@ their owning module and are not flattened into `vmec_jax.mirror`.
 
 The initial audit relative to `origin/main` found 137 changed files, 24,370
 added lines, and 4,255 deleted lines. Phase 1 and the current cleanup reduce the
-working diff to 67 files, 17,673 added lines, and 1,632 deleted lines: 70
+working diff to 67 files, 17,941 added lines, and 1,632 deleted lines: 70
 unrelated files and about 6,600 added lines are gone. `vmec_jax/mirror` now
-contains 8,824 lines in 15 modules and exposes 23 lazy names. Continuation lives
+contains 8,977 lines in 15 modules and exposes 24 lazy names. Continuation lives
 with the free-boundary workflow, restart/plot/diagnostic output lives in one
 output module, and exterior interpolation lives with the BIE solve. The largest
 files remain `forces.py` (1,098), `splines.py` (1,063), `solver.py` (1,001), and
 `output.py` (912), so the module-count gate is met but the line and oversized-
-file gates are not. There are 133 collected mirror tests; the removed tests
+file gates are not. There are 134 collected mirror tests; the removed tests
 exercised only deleted finite-cylinder, generic interior-Laplace, or full-node
 virtual-casing paths.
 
@@ -584,9 +584,10 @@ virtual-casing adapters, the unused interior Neumann solve, and duplicate
 axisymmetric/nonaxisymmetric result records. The retained reduced exterior
 operator passes its analytic dipole, singular identity, spectral-density,
 axisymmetric/nonaxisymmetric coupling, and shape-JVP tests. This removes 252
-production lines and left 8,781 lines before the next feature. The explicit
-raw/corrected Neumann diagnostics subsequently bring the current count to
-8,824. The source-line and oversized-file gates remain active. The bounded
+production lines and left 8,781 lines before the next feature. Explicit
+raw/corrected Neumann diagnostics and the shared forward/reverse implicit
+linear solve subsequently bring the current count to 8,977. The source-line
+and oversized-file gates remain active. The bounded
 reduction order is: share open/closed
 staggered magnetic assembly, share primal/adjoint packing and linear-solve
 diagnostics, then simplify output serialization. Do not split a large file
@@ -881,13 +882,13 @@ Percentages measure accepted promotion evidence, not code written.
 |---|---:|---|
 | Axisymmetric fixed mirror | 90% | spline derivative/release evidence |
 | Axisymmetric free mirror | 84% | exterior observable refinement and scaling |
-| Nonaxisymmetric fixed mirror | 82% | amplitude, forward tangent, preconditioned refinement |
+| Nonaxisymmetric fixed mirror | 86% | amplitude and preconditioned refinement |
 | Nonaxisymmetric free mirror | 55% | deferred after failed local-mode and spline-shape gates |
 | Open native B-splines | 82% | fixed-boundary release evidence; free boundary deferred |
 | Fixed closed B-spline hybrid | 58% | limiting cases, beta refinement, derivatives, release evidence |
 | Free closed hybrid | 10% | conditional after fixed promotion |
-| Preconditioning | 45% | periodic spline blocks and bounded Krylov scaling |
-| Implicit derivatives | 74% | spline forward tangent and closed-axis adjoint contract |
+| Preconditioning | 55% | geometry--stream coupled model; periodic primal attempt bounded/deferred |
+| Implicit derivatives | 80% | closed-axis and centerline-control tangent/adjoint contract |
 | ANIMEC | 50% | source parity and independent finite-beta benchmark |
 | Source/API simplification | 82% | reduce duplicated assembly and oversized files |
 | ESSOS ownership cleanup | 100% | retain interchange tests only |

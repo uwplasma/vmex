@@ -22,6 +22,7 @@ from vmec_jax.mirror import (  # noqa: E402
     solve_fixed_boundary_cli,
     solve_fixed_boundary_implicit,
     spline_fixed_boundary_adjoint,
+    spline_fixed_boundary_tangent,
 )
 from vmec_jax.mirror.implicit import (  # noqa: E402
     fixed_boundary_parameters,
@@ -270,8 +271,18 @@ def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
         rtol=1.0e-9,
     )
     direction = jnp.zeros_like(spline_boundary.radius_coefficients).at[0, 2].set(0.01)
+    zero_tangent = jax.tree.map(jnp.zeros_like, parameters)
+    tangent = spline_fixed_boundary_tangent(
+        result,
+        parameters,
+        replace(zero_tangent, boundary_coefficients=direction),
+        discretization,
+        solve_lambda=True,
+        rtol=1.0e-9,
+    )
     predicted = float(jnp.vdot(adjoint.gradient.boundary_coefficients, direction))
     values = []
+    states = []
     epsilon = 2.0e-4
     for sign in (-1.0, 1.0):
         varied_boundary = SplineMirrorBoundary(
@@ -292,12 +303,29 @@ def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
             require_convergence=True,
         )
         values.append(float(varied.evaluated.energy.geometry.volume))
+        states.append(varied.evaluated.state)
     finite_difference = (values[1] - values[0]) / (2.0 * epsilon)
+    state_difference = jax.tree.map(
+        lambda upper, lower: (upper - lower) / (2.0 * epsilon),
+        states[1],
+        states[0],
+    )
 
     assert adjoint.converged
     assert adjoint.relative_residual < 1.0e-8
+    assert tangent.converged
+    assert tangent.relative_residual < 1.0e-8
     assert float(jnp.max(jnp.abs(result.evaluated.state.lambda_stream))) > 1.0e-4
     np.testing.assert_allclose(predicted, finite_difference, rtol=2.0e-5, atol=1.0e-9)
+    for actual, expected in zip(
+        jax.tree.leaves(tangent.tangent),
+        jax.tree.leaves(state_difference),
+        strict=True,
+    ):
+        relative_error = jnp.linalg.norm(actual - expected) / jnp.maximum(
+            jnp.linalg.norm(expected), jnp.finfo(expected.dtype).tiny
+        )
+        assert float(relative_error) < 2.0e-4
 
 
 @pytest.mark.parametrize(

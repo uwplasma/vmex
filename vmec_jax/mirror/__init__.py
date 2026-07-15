@@ -39,6 +39,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".implicit",
         "spline_fixed_boundary_adjoint",
     ),
+    "spline_fixed_boundary_tangent": (
+        ".implicit",
+        "spline_fixed_boundary_tangent",
+    ),
     "free_boundary_adjoint": (
         ".free_boundary_implicit",
         "free_boundary_adjoint",

@@ -69,6 +69,16 @@ class MirrorAdjointResult:
     linear_solver: str
 
 
+@dataclass(frozen=True)
+class MirrorTangentResult:
+    """Equilibrium state tangent and linear-solve diagnostics."""
+
+    tangent: MirrorState
+    iterations: int
+    relative_residual: float
+    converged: bool
+
+
 @dataclass(frozen=True, eq=False)
 class FixedBoundaryImplicitConfig:
     """Static numerical context for a differentiable fixed-boundary solve."""
@@ -108,6 +118,11 @@ jax.tree_util.register_dataclass(
     MirrorAdjointResult,
     data_fields=["value", "gradient"],
     meta_fields=["iterations", "relative_residual", "converged", "linear_solver"],
+)
+jax.tree_util.register_dataclass(
+    MirrorTangentResult,
+    data_fields=["tangent"],
+    meta_fields=["iterations", "relative_residual", "converged"],
 )
 
 
@@ -172,6 +187,73 @@ def make_fixed_boundary_implicit_config(
     )
 
 
+def _solve_implicit_system(
+    matrix_vector: Callable[[np.ndarray], np.ndarray],
+    right_hand_side: np.ndarray,
+    apply_preconditioner: Callable[[np.ndarray], np.ndarray],
+    scales: np.ndarray,
+    block_slices: tuple[slice, ...],
+    *,
+    rtol: float,
+    max_restarts: int,
+    initial: np.ndarray | None = None,
+) -> tuple[np.ndarray, int, float, bool]:
+    """Solve one preconditioned implicit linear system on the host."""
+
+    size = right_hand_side.size
+    probe = np.random.default_rng(0).choice((-1.0, 1.0), size=size)
+    for block, active in enumerate(block_slices):
+        direction = np.zeros_like(probe)
+        direction[active] = probe[active]
+        response = apply_preconditioner(matrix_vector(direction))
+        denominator = abs(float(np.dot(direction, response)))
+        if denominator > np.finfo(float).tiny:
+            scales[block] = np.clip(
+                np.dot(direction, direction) / denominator, 1.0e-8, 1.0e8
+            )
+
+    operator = LinearOperator((size, size), matvec=matrix_vector, dtype=float)
+    inverse = LinearOperator((size, size), matvec=apply_preconditioner, dtype=float)
+    if initial is None:
+        initial_relative_residual = np.inf
+    else:
+        initial_error = matrix_vector(initial) - right_hand_side
+        initial_relative_residual = float(
+            np.linalg.norm(initial_error)
+            / max(np.linalg.norm(right_hand_side), np.finfo(float).tiny)
+        )
+    iterations = 0
+
+    def count_iteration(_residual: float) -> None:
+        nonlocal iterations
+        iterations += 1
+
+    if initial_relative_residual <= rtol:
+        solution, info = initial, 0
+    else:
+        solution, info = gmres(
+            operator,
+            right_hand_side,
+            x0=initial,
+            M=inverse,
+            restart=min(50, size),
+            maxiter=min(3, max_restarts) if initial is not None else max_restarts,
+            rtol=rtol,
+            atol=0.0,
+            callback=count_iteration,
+            callback_type="pr_norm",
+        )
+    linear_error = matrix_vector(solution) - right_hand_side
+    relative_residual = float(
+        np.linalg.norm(linear_error)
+        / max(np.linalg.norm(right_hand_side), np.finfo(float).tiny)
+    )
+    converged = bool(
+        info == 0 and relative_residual <= max(10.0 * rtol, 1.0e-12)
+    )
+    return solution, iterations, relative_residual, converged
+
+
 def _implicit_adjoint(
     x_star: Array,
     parameters: Any,
@@ -196,65 +278,21 @@ def _implicit_adjoint(
     def matrix_vector(vector: np.ndarray) -> np.ndarray:
         return np.asarray(transpose_action(jnp.asarray(vector)), dtype=float)
 
-    probe = np.random.default_rng(0).choice((-1.0, 1.0), size=x_star.size)
-    for block, active in enumerate(block_slices):
-        direction = np.zeros_like(probe)
-        direction[active] = probe[active]
-        response = apply_preconditioner(matrix_vector(direction))
-        denominator = abs(float(np.dot(direction, response)))
-        if denominator > np.finfo(float).tiny:
-            scales[block] = np.clip(
-                np.dot(direction, direction) / denominator, 1.0e-8, 1.0e8
-            )
-
-    operator = LinearOperator((x_star.size, x_star.size), matvec=matrix_vector, dtype=float)
-    inverse = LinearOperator(
-        (x_star.size, x_star.size), matvec=apply_preconditioner, dtype=float
-    )
     right_hand_side = np.asarray(quantity_x, dtype=float)
     initial_adjoint, solver_used = (
         (None, "gmres")
         if initializer is None
         else initializer(transpose_action, right_hand_side)
     )
-    if initial_adjoint is None:
-        initial_relative_residual = np.inf
-    else:
-        initial_error = matrix_vector(initial_adjoint) - right_hand_side
-        initial_relative_residual = float(
-            np.linalg.norm(initial_error)
-            / max(np.linalg.norm(right_hand_side), np.finfo(float).tiny)
-        )
-
-    iterations = 0
-
-    def count_iteration(_residual: float) -> None:
-        nonlocal iterations
-        iterations += 1
-
-    if initial_relative_residual <= rtol:
-        adjoint, info = initial_adjoint, 0
-    else:
-        adjoint, info = gmres(
-            operator,
-            right_hand_side,
-            x0=initial_adjoint,
-            M=inverse,
-            restart=min(50, x_star.size),
-            maxiter=(
-                min(3, int(max_restarts))
-                if initial_adjoint is not None
-                else int(max_restarts)
-            ),
-            rtol=float(rtol),
-            atol=0.0,
-            callback=count_iteration,
-            callback_type="pr_norm",
-        )
-    linear_error = matrix_vector(adjoint) - right_hand_side
-    relative_residual = float(
-        np.linalg.norm(linear_error)
-        / max(np.linalg.norm(right_hand_side), np.finfo(float).tiny)
+    adjoint, iterations, relative_residual, converged = _solve_implicit_system(
+        matrix_vector,
+        right_hand_side,
+        apply_preconditioner,
+        scales,
+        block_slices,
+        rtol=rtol,
+        max_restarts=max_restarts,
+        initial=initial_adjoint,
     )
     _, parameter_pullback = jax.vjp(lambda p: residual(x_star, p), parameters)
     residual_parameter_gradient = parameter_pullback(jnp.asarray(adjoint))[0]
@@ -268,9 +306,7 @@ def _implicit_adjoint(
         gradient=total_gradient,
         iterations=iterations,
         relative_residual=relative_residual,
-        converged=bool(
-            info == 0 and relative_residual <= max(10.0 * rtol, 1.0e-12)
-        ),
+        converged=converged,
         linear_solver=solver_used,
     )
 
@@ -412,18 +448,15 @@ def fixed_boundary_adjoint(
     )
 
 
-def spline_fixed_boundary_adjoint(
+def _spline_implicit_problem(
     result: Any,
     parameters: SplineFixedBoundaryParameters,
     discretization: Any,
-    quantity: MirrorQuantity,
     *,
-    gamma: float = 5.0 / 3.0,
-    solve_lambda: bool = False,
-    rtol: float = 1.0e-10,
-    max_restarts: int = 20,
-) -> MirrorAdjointResult:
-    """Differentiate a scalar through a converged spline equilibrium."""
+    gamma: float,
+    solve_lambda: bool,
+):
+    """Build the converged spline residual and its packed linear model."""
 
     from .splines import (
         SplineMirrorBoundary,
@@ -435,9 +468,7 @@ def spline_fixed_boundary_adjoint(
     if not bool(evaluated.converged):
         raise ValueError("implicit differentiation requires a converged mirror result")
     if not isinstance(evaluated.energy, MirrorEnergy):
-        raise ValueError("spline adjoints currently require the isotropic energy")
-    if rtol <= 0.0 or max_restarts < 1:
-        raise ValueError("rtol and max_restarts must be positive")
+        raise ValueError("spline implicit derivatives require the isotropic energy")
     boundary = SplineMirrorBoundary(jnp.asarray(parameters.boundary_coefficients))
     vectorizer = _SplineStateVectorizer.build(
         result.coefficient_state,
@@ -469,6 +500,52 @@ def spline_fixed_boundary_adjoint(
     def residual(x: Array, controls: SplineFixedBoundaryParameters) -> Array:
         return jax.grad(lambda vector: energy_at(vector, controls).total / energy_scale)(x)
 
+    apply_preconditioner, scales = _packed_spline_preconditioner(
+        discretization, vectorizer
+    )
+    split = (slice(0, vectorizer.radius_size), slice(vectorizer.radius_size, None))
+    return (
+        x_star,
+        state_at,
+        energy_at,
+        residual,
+        apply_preconditioner,
+        scales,
+        split[: 2 if vectorizer.lambda_size else 1],
+    )
+
+
+def spline_fixed_boundary_adjoint(
+    result: Any,
+    parameters: SplineFixedBoundaryParameters,
+    discretization: Any,
+    quantity: MirrorQuantity,
+    *,
+    gamma: float = 5.0 / 3.0,
+    solve_lambda: bool = False,
+    rtol: float = 1.0e-10,
+    max_restarts: int = 20,
+) -> MirrorAdjointResult:
+    """Differentiate a scalar through a converged spline equilibrium."""
+
+    if rtol <= 0.0 or max_restarts < 1:
+        raise ValueError("rtol and max_restarts must be positive")
+    (
+        x_star,
+        state_at,
+        energy_at,
+        residual,
+        apply_preconditioner,
+        scales,
+        split,
+    ) = _spline_implicit_problem(
+        result,
+        parameters,
+        discretization,
+        gamma=gamma,
+        solve_lambda=solve_lambda,
+    )
+
     def evaluate_quantity(x: Array, controls: SplineFixedBoundaryParameters) -> Array:
         state = state_at(x, controls)
         value = jnp.asarray(quantity(state, energy_at(x, controls)))
@@ -476,10 +553,6 @@ def spline_fixed_boundary_adjoint(
             raise ValueError("mirror adjoint quantity must return a scalar")
         return value
 
-    apply_preconditioner, scales = _packed_spline_preconditioner(
-        discretization, vectorizer
-    )
-    split = (slice(0, vectorizer.radius_size), slice(vectorizer.radius_size, None))
     return _implicit_adjoint(
         x_star,
         parameters,
@@ -487,9 +560,80 @@ def spline_fixed_boundary_adjoint(
         evaluate_quantity,
         apply_preconditioner,
         scales,
-        split[: 2 if vectorizer.lambda_size else 1],
+        split,
         rtol=rtol,
         max_restarts=max_restarts,
+    )
+
+
+def spline_fixed_boundary_tangent(
+    result: Any,
+    parameters: SplineFixedBoundaryParameters,
+    parameter_tangent: SplineFixedBoundaryParameters,
+    discretization: Any,
+    *,
+    gamma: float = 5.0 / 3.0,
+    solve_lambda: bool = False,
+    rtol: float = 1.0e-10,
+    max_restarts: int = 20,
+) -> MirrorTangentResult:
+    """Differentiate a converged spline state in one control direction."""
+
+    if rtol <= 0.0 or max_restarts < 1:
+        raise ValueError("rtol and max_restarts must be positive")
+    (
+        x_star,
+        state_at,
+        _,
+        residual,
+        apply_preconditioner,
+        scales,
+        split,
+    ) = _spline_implicit_problem(
+        result,
+        parameters,
+        discretization,
+        gamma=gamma,
+        solve_lambda=solve_lambda,
+    )
+    parameter_tangent = jax.tree.map(jnp.asarray, parameter_tangent)
+    residual_tangent = jax.jvp(
+        lambda controls: residual(x_star, controls),
+        (parameters,),
+        (parameter_tangent,),
+    )[1]
+    tangent_action = jax.jit(
+        lambda direction: jax.jvp(
+            lambda x: residual(x, parameters),
+            (x_star,),
+            (direction,),
+        )[1]
+    )
+
+    def matrix_vector(vector: np.ndarray) -> np.ndarray:
+        return np.asarray(tangent_action(jnp.asarray(vector)), dtype=float)
+
+    packed_tangent, iterations, relative_residual, converged = (
+        _solve_implicit_system(
+            matrix_vector,
+            -np.asarray(residual_tangent, dtype=float),
+            apply_preconditioner,
+            scales,
+            split,
+            rtol=rtol,
+            max_restarts=max_restarts,
+        )
+    )
+    state_tangent = jax.jvp(
+        state_at,
+        (x_star, parameters),
+        (jnp.asarray(packed_tangent), parameter_tangent),
+    )[1]
+    return MirrorTangentResult(
+        tangent=state_tangent,
+        iterations=iterations,
+        relative_residual=relative_residual,
+        converged=converged,
     )
 
 
@@ -636,11 +780,13 @@ __all__ = [
     "FixedBoundaryImplicitConfig",
     "FixedBoundaryParameters",
     "MirrorAdjointResult",
+    "MirrorTangentResult",
     "SplineFixedBoundaryParameters",
     "fixed_boundary_adjoint",
     "fixed_boundary_parameters",
     "make_fixed_boundary_implicit_config",
     "spline_fixed_boundary_adjoint",
+    "spline_fixed_boundary_tangent",
     "spline_fixed_boundary_parameters",
     "solve_fixed_boundary_implicit",
 ]
