@@ -282,6 +282,27 @@ class SplineMirrorDiscretization:
         transferred = self.spline.fit(radius * target_radius[None] / source_radius[None])
         return self.project_fixed_boundary(SplineMirrorState(transferred, state.lambda_coefficients), target)
 
+    def transfer_closed_state(
+        self,
+        state: SplineMirrorState,
+        source: "SplineMirrorDiscretization",
+        boundary: SplineMirrorBoundary,
+    ) -> SplineMirrorState:
+        """Interpolate a periodic restart onto this coefficient count."""
+
+        if not self.closed or not source.closed:
+            raise ValueError("closed state transfer requires two periodic discretizations")
+        if self.grid.ns != source.grid.ns or self.grid.ntheta != source.grid.ntheta:
+            raise ValueError("closed state transfer requires matching radial and poloidal grids")
+        nodes = jnp.asarray(self.spline.collocation_nodes)
+        radius = source.spline.evaluate(state.radius_coefficients, nodes, axis=-1)
+        lam = source.spline.evaluate(state.lambda_coefficients, nodes, axis=-1)
+        transferred = SplineMirrorState(
+            self.spline.fit(radius, axis=-1),
+            self.spline.fit(lam, axis=-1),
+        )
+        return self.project_fixed_boundary(transferred, boundary)
+
 
 def initialize_from_cartesian_field(
     initial_state: SplineMirrorState,
