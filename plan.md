@@ -17,26 +17,25 @@ claimed, and expose one simple documented workflow.
 
 Repository state at this revision:
 
-- branch: `codex/mirror-geometry` at `b2eb72ef`;
-- base: `origin/main` at `ed4ac7ac`; branch is 0 behind and 339 ahead;
+- branch: `codex/mirror-geometry` at `296a0b82`;
+- base: `origin/main` at `ed4ac7ac`; branch is 0 behind and 348 ahead;
 - PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open, mergeable, draft;
 - CI on `b2eb72ef`: all 14 required checks pass; the manual/nightly full job is
   skipped as intended;
-- diff against fetched `origin/main`: 53 files, 17,587 insertions, 1,602
+- diff against fetched `origin/main`: 53 files, 18,617 insertions, 1,602
   deletions. Never use a stale local `main` for branch-size accounting;
-- mirror source: 13 modules, 8,147 lines at pushed HEAD;
-- mirror tests: 10 files, 4,642 lines;
+- mirror source: 13 modules, 8,697 lines at pushed HEAD;
+- mirror tests: 10 files, 4,985 lines;
 - public mirror API: 20 lazy names;
-- normal mirror suite after the accepted T9b geometry tests: 110 passed and 9
-  expected full/nightly skips in 264.34 s. Strict Sphinx, pre-commit, and
+- normal mirror suite after the refined center-map solver tests: 118 passed
+  and 10 expected full/nightly skips in 261.70 s. Strict Sphinx, pre-commit, and
   `git diff --check` pass;
 - no coil constructor or Biot-Savart implementation is part of the mirror
   package. Those belong to ESSOS.
 
-The dirty worktree contains one unaccepted C2-return/control-allocation
-experiment and its full-test parameter change. It is diagnostic evidence, not
-part of the pushed implementation, and must not be committed until the solved
-center-map state below passes its physical gates.
+The pushed worktree is clean. Earlier C2-return/control-allocation experiments
+remain rejected diagnostic evidence outside the repository; no experimental
+geometry helper or generated output was retained.
 
 ### 1.1 What is already achieved
 
@@ -49,7 +48,7 @@ center-map state below passes its physical gates.
 | Free open, nonaxisymmetric | solver exists, local-mode refinement has not passed | conditional research |
 | Fixed closed circular limit | VMEC2000/ordinary-vmec_jax flux parity, axis regularity, `ns=5,9,17` force refinement | supported validation limit |
 | Fixed closed hybrid | periodic B-spline geometry, Bishop frame, rotating section, finite-current solve, field-line tracer | not promoted |
-| Preconditioning | open local sparse factor and closed colored cyclic factor pass true-residual/resource gates | supported |
+| Preconditioning | open local sparse factor and center-free closed coloring pass; 2,664-variable center map takes 200,000 GMRES iterations | center-map scale blocked |
 | Differentiation | converged-residual open tangents/adjoints and free-axisymmetric adjoint | supported for promoted open lanes |
 
 Important measured results:
@@ -82,9 +81,10 @@ Important measured results:
   iota to `5.3e-9`. The force defect is geometric/discretization error, while
   the observed endpoint transform is currently current-driven.
 - T9b's return-localized fixture exposed the missing closed-equilibrium degree
-  of freedom. The current closed vectorizer fixes the supplied centerline and
-  activates only radial rows `1:-1`; unlike VMEC, it cannot move the magnetic
-  axis while holding the physical LCFS fixed. On the same `ns=5` grid a
+  of freedom. Before the center map, the closed vectorizer fixed the supplied
+  centerline and activated only radial rows `1:-1`; unlike VMEC, it could not
+  move the magnetic axis while holding the physical LCFS fixed. On the same
+  `ns=5` grid a
   circular axis has strong force `2.55e-3`, but half-straightening raises it to
   `0.602`. Ellipticity changes the endpoint by only about `0.014`, return twist
   adds about `0.279`, and current continuation from zero to target changes
@@ -101,10 +101,42 @@ Important measured results:
   strong force remains `0.19547` (`0.25158` on axis). Tight nonlinear
   tolerance and acceleration therefore do not repair the missing physical
   variation.
+- The two-component center map now fixes that missing degree of freedom. The
+  displaced circular reference reaches variational and weak residuals below
+  `5e-13` at `ftol=1e-12`, keeps the Cartesian LCFS fixed, and has positive
+  Jacobian. Poloidal refinement `mpol=3,5,7` reduces normalized strong force
+  from `2.82e-3` to `5.71e-6` to `1.24e-7`. At `ns=17, mpol=3`, bulk strong
+  force is `1.32e-4`; the all-volume `3.05e-3` remains axis-dominated because
+  `mpol=3` is under-resolved.
+- Periodic control counts 8, 12, and 16 all reach `ftol=1e-12`. Dense residual
+  Newton now uses rank-revealing QR, rejects invalid geometry, bounds numerical
+  stagnation, honors `MirrorConfig.max_iterations`, and is retained through
+  2,048 packed variables. Differentiable radial/axial restart transfer is part
+  of the existing spline method rather than a continuation subsystem.
+- Warm radial refinement resolves the circular map within the resource gate.
+  At `mpol=7`, `ns=9 -> 17` reduces strong force `7.53e-8 -> 4.85e-8` in
+  43 s and 212 s. At `mpol=5`, the same warm transfer reaches `1.8e-14` in
+  120 s instead of the rejected greater-than-30-minute cold matrix-free path.
+  Peak memory remains below 2.5 GiB.
+- The zero-current half-straight state now genuinely solves. With 24 controls,
+  `mpol=5`, all stages through fraction 0.5 reach `ftol=1e-12`; the endpoint
+  takes 30.0 s, has positive Jacobian, and strong force `0.06565`. With 16
+  controls it has strong force `0.05277`. Transferring that state from
+  `ns=5 -> 9` changes force only to `0.05262` but stalls at variational
+  `2.39e-10` after 200,000 GMRES iterations with true linear residual `0.391`.
+  The physical gate and scalable linear solve therefore both remain open.
+- Directly regenerating the control-polygon axis at 16, 24, and 32 controls is
+  not a valid same-geometry refinement: arc length and curvature change while
+  strong force rises. A resolution-independent C2 Hermite return converges but
+  raises half-straight force to `0.44854`; increasing return radius to 4 raises
+  it to `0.14858`. Both experiments were removed. Future longitudinal evidence
+  must refine one 16-control physical axis into nested 32/64 spline spaces.
 
-The release is blocked by closed-hybrid strong-force/refinement evidence and
-then by code reduction. The conditional nonaxisymmetric free-boundary attempt
-must not delay those required steps.
+The release is blocked by scalable center-map preconditioning and a
+same-geometry half-straight strong-force refinement below `5e-2`, then code
+reduction. The
+conditional nonaxisymmetric free-boundary attempt must not delay those required
+steps.
 
 ## 2. Release scope
 
@@ -445,9 +477,8 @@ after each accepted tranche. Do not expand scope between tranches.
 
 1. Retain the accepted shared-phase circle-to-racetrack family,
    return-localized section twist, geometry closure tests, and exact periodic
-   state transfer. Hold the dirty fixed-C2/return-weighted experiment until
-   the center-map implementation passes; then keep it only if its staged
-   endpoint improves over the pushed geometry.
+   state transfer. The C2/return-weighted and enlarged-return experiments are
+   rejected and must not re-enter source without new physical evidence.
 2. Add the missing fixed-boundary transverse center map
 
    ```
@@ -486,15 +517,17 @@ after each accepted tranche. Do not expand scope between tranches.
 6. At every accepted stage record variational, weak, strong, bulk/axis force,
    true linear residual, Jacobian, energy, volume, `|B|`, and iota. Reject a
    stage if only the variational residual converges.
-7. Run independent longitudinal refinement with at least 16, 24, and 32
-   controls using staged state transfer, then one higher return-resolved case
-   only if the 32-control trend predicts the gate. Refine radial resolution and
-   quadrature independently. The fixed-axis `0.344 -> 0.140 -> 0.126` sequence
-   is negative baseline evidence, not acceptance.
+7. Define one physical 16-control axis and transfer it exactly into nested
+   32- and 64-control periodic spaces. Regenerating a control polygon at each
+   count is prohibited because it changes the geometry. Refine radial,
+   poloidal, and quadrature resolution independently. The fixed-axis
+   `0.344 -> 0.140 -> 0.126` sequence is negative baseline evidence, not
+   acceptance.
 8. If the center-map circular and half-straight stages do not reduce the
    independently reconstructed force under both longitudinal and radial
-   refinement, stop before the full endpoint and repair only the map/force
-   formulation. If those stages pass but the full endpoint does not converge
+   refinement, stop before the full endpoint and repair only the linear solve
+   or same-geometry representation. If those stages pass but the full endpoint
+   does not converge
    monotonically below `5e-2` within 64 controls, 8 GiB, and 30 minutes per
    state, remove the fixed hybrid from release scope, retain one compact
    negative record, and skip T9c/T9d. Do not preserve a public scaffold.
@@ -655,10 +688,10 @@ ownership, next steps, lane percentages, and concrete user input needed.
 
 ### 9.1 Center-map execution checkpoint (2026-07-15)
 
-Commit `b8895aa0` adds the optional two-component closed-volume map through the
-existing state, spline, geometry, force, solver, free-boundary-diagnostic, and
-implicit block contracts. It introduces no module or public facade. Accepted
-evidence is:
+Commits `b8895aa0` through `296a0b82` add and converge the optional
+two-component closed-volume map through the existing state, spline, geometry,
+force, solver, free-boundary-diagnostic, and implicit block contracts. They
+introduce no module or public facade. Accepted evidence is:
 
 - zero-map metric and Cartesian parity is bitwise exact;
 - the Cartesian LCFS is fixed while the represented magnetic axis moves;
@@ -668,11 +701,14 @@ evidence is:
 - all three separable preconditioner blocks are finite;
 - commit `f3da1f67` removes the interior radius field's real `m=1` translation
   mode whenever center variables are active, defining a unique section center;
-- the same commit adds a residual-norm dense Newton lane only for center-map
-  systems of at most 512 variables. Larger states retain matrix-free Newton;
-- pre-commit passes, the focused map lane is `5 passed, 1 full skipped`, and
-  the normal mirror suite is `113 passed, 10 skipped` in 238.36 s on the local
-  JAX 0.10.2 CPU environment.
+- the dense residual Newton lane covers center-map systems through 2,048
+  variables. Larger states retain matrix-free Newton;
+- invalid infinite-energy trial states are rejected before line-search
+  acceptance, and the configured nonlinear iteration limit is honored;
+- rank-revealing QR and radial restart transfer recover refined circular solves
+  below five minutes without adding a module or public name;
+- pre-commit passes, the normal mirror suite is `118 passed, 10 skipped` in
+  261.70 s on the local JAX 0.10.2 CPU environment.
 
 The early `mpol=0` nonlinear diagnostics were invalid for a closed torus:
 without poloidal stream-function modes, center virtual work was `0.953` and
@@ -685,25 +721,36 @@ Dense Hessians at zero and small displacement are symmetric to `2e-16`; manual
 and autodiff center work agree from `2e-16` (`mpol=0`) to `1e-13` (`mpol=1`).
 They expose strong radius-center coupling and lambda-dominated small modes.
 Removing the radius `m=1` gauge reduces the accepted `ns=5`, `mpol=3`,
-four-control system to 200 variables. Direct dense residual Newton then reaches
+four-control system to 200 variables. Direct dense residual Newton reaches
 variational `4.24e-13`, true linear residual `1.78e-13`, strong force
 `2.82e-3`, center shift `8.62e-3`, and positive Jacobian in four steps. The
-integrated full test passes in 60.08 s on one RTX A4000 with CUDA JAX 0.6.2;
-peak host memory is 2.96 GiB and `max_iterations=1000` is honored.
+12-control full test passes in 33.75 s on one RTX A4000 with CUDA JAX 0.6.2;
+peak host memory is 2.68 GiB.
 
-The circular center-map formulation is accepted at one resolution, but its
-refinement gate remains open. Continue in this order:
+The circular center-map formulation passes independent poloidal, radial, and
+periodic-control trends. The half-straight state converges at the coarse level,
+but its strong force plateaus just above `5e-2` and its 2,664-variable radial
+restart exposes the matrix-free blocker. Continue in this order:
 
-1. Repeat the displaced-circle solve at poloidal modes `3,5,7`, periodic
-   controls `4,8,12`, and radial nodes `5,9,17`, changing one resolution at a
-   time and using coefficient/radial warm starts.
-2. Require monotone strong-force convergence, unsaturated center coefficients,
-   fixed Cartesian LCFS, positive Jacobian, weak parity, `ftol<=1e-12`, and
-   true linear residual `<=1e-8`. Do not count under-resolved `mpol=1` runs.
-3. Compare the constrained map's Cartesian virtual work with VMEC2000 `R/Z`
-   variations and GVEC's two-coordinate map before the half-straight stage.
-4. Only after those gates, resume T9b continuation through axis aspect,
-   straight length, return curvature, ellipse, twist, and current.
+1. Profile one `ns=9, mpol=5`, 16-control Newton step by setup, JVP,
+   preconditioner, host transfer, and GMRES iteration count. The measured
+   baseline is 200,000 Krylov iterations and relative residual `0.391`.
+2. Enable a coupled local radius/center/stream factor only if its sparse
+   support oracle matches a dense tiny Hessian. Otherwise use a two-level
+   coarse correction built from the accepted `ns=5` dense factor. Require
+   `ftol<=1e-12`, true linear residual `<=1e-8`, less than 30 minutes/8 GiB,
+   and fewer than 5,000 Krylov iterations.
+3. Freeze the 16-control physical axis and transfer it into nested 32- and
+   64-control periodic spline spaces. Do not regenerate a different stadium at
+   each count. Transfer boundary and state with the same knot hierarchy.
+4. Repeat half-straight `ns=5,9`, `mpol=5,7` refinement. Require positive
+   geometry, weak parity, `ftol`, and monotone same-geometry strong force below
+   `5e-2`. Compare the center map's Cartesian work with VMEC2000 `R/Z` and
+   GVEC's two-coordinate map in this tranche.
+5. If the gate still fails at 64 controls after the scalable solve, remove the
+   fixed closed hybrid from release scope, retain one compact negative record,
+   and skip T9c/T9d as required by T9b. Otherwise continue ellipse, twist, and
+   current continuation.
 
 ## 10. Completion estimate
 
@@ -715,14 +762,14 @@ Percentages represent promotion evidence, not implementation volume.
 | Fixed open nonaxisymmetric | 100% | maintain shared-core gates |
 | Free open axisymmetric through 10% | 100% | maintain support ceiling |
 | Free open nonaxisymmetric | 35% | bounded three-grid disposition |
-| Fixed closed B-spline hybrid | 63% | circular-map refinement, staged geometry/current continuation, open limit, beta, derivatives/output |
-| Structured preconditioning | 100% | maintain resource and true-residual gates |
+| Fixed closed B-spline hybrid | 70% | scalable same-geometry half-straight gate, then section/current or explicit deferral |
+| Structured preconditioning | 84% | reduce 200,000-iteration center-map solve below resource/true-residual gates |
 | Implicit differentiation | 90% | closed-hybrid derivatives after primal promotion |
-| Code/API simplification | 62% | 53/8,147/4,642/20 must meet T11 budgets |
+| Code/API simplification | 59% | 53/8,697/4,985/20 must meet T11 budgets |
 | Docs/examples/artifacts | 73% | hybrid showcase and final README/docs reduction |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned runner |
 
-Weighted completion of required release models is approximately 83%.
+Weighted completion of required release models is approximately 82%.
 Free closed hybrid and ANIMEC are excluded because they are explicitly
 deferred.
 
