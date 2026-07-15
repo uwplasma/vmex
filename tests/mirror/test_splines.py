@@ -654,6 +654,35 @@ def test_closed_center_coefficients_vectorize_and_transfer() -> None:
     np.testing.assert_array_equal(transferred.center_coefficients[-1], 0.0)
 
 
+def test_closed_center_vectorizer_removes_radius_translation_gauge() -> None:
+    resolution = MirrorResolution(ns=5, mpol=3, nxi=4)
+    discretization, _, boundary, base = _closed_circular_torus(
+        resolution,
+        coefficient_count=4,
+    )
+    radial = jnp.asarray(discretization.grid.s)[:, None, None]
+    theta = jnp.asarray(discretization.grid.theta)[None, :, None]
+    translated_radius = base.radius_coefficients + 0.02 * radial * (1.0 - radial) * jnp.cos(theta)
+    center = jnp.zeros((resolution.ns, 2, discretization.coefficient_count))
+    vectorizer = _SplineStateVectorizer.build(
+        SplineMirrorState(translated_radius, base.lambda_coefficients, center),
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+    restored = vectorizer.unpack(vectorizer.pack())
+
+    modes = np.fft.fft(np.asarray(restored.radius_coefficients[1:-1]), axis=1)
+    np.testing.assert_allclose(modes[:, [1, -1]], 0.0, atol=2.0e-16)
+    np.testing.assert_allclose(restored.radius_coefficients[-1], boundary.radius_coefficients)
+    assert vectorizer.radius_size == (
+        (resolution.ns - 2)
+        * (resolution.ntheta - 2)
+        * discretization.coefficient_count
+    )
+
+
 def test_closed_field_line_recovers_constant_iota_and_derivative() -> None:
     resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     discretization, axis, _, state = _closed_circular_torus(resolution)
@@ -865,18 +894,20 @@ def test_closed_spline_fixed_boundary_torus_converges_to_ftol() -> None:
 
 @pytest.mark.full
 def test_displaced_closed_center_map_reconverges_to_ftol() -> None:
-    resolution = MirrorResolution(ns=3, mpol=0, nxi=4)
-    config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=100)
+    resolution = MirrorResolution(ns=5, mpol=3, nxi=4)
+    config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
     discretization, axis, boundary, base = _closed_circular_torus(
         resolution,
         coefficient_count=4,
     )
     radial = jnp.asarray(discretization.grid.s)[:, None]
-    axial = jnp.asarray(discretization.spline.collocation_nodes)[None, :]
     center = jnp.stack(
         (
-            0.002 * (1.0 - radial) * jnp.cos(axial),
-            -0.0015 * (1.0 - radial) * jnp.sin(axial),
+            jnp.zeros((resolution.ns, discretization.coefficient_count)),
+            jnp.broadcast_to(
+                0.002 * (1.0 - radial),
+                (resolution.ns, discretization.coefficient_count),
+            ),
         ),
         axis=1,
     )
@@ -899,8 +930,10 @@ def test_displaced_closed_center_map_reconverges_to_ftol() -> None:
     ).evaluated
 
     assert result.converged
+    assert result.iterations < 10
     assert float(result.variational.maximum) <= config.ftol
     assert float(result.staggered_weak_force.maximum) <= 1.1 * config.ftol
+    assert float(result.force.normalized_rms) < 5.0e-3
     assert result.final_linear_residual < 1.0e-8
     assert not bool(result.energy.geometry.jacobian_sign_changed)
     assert result.state.center_shift is not None

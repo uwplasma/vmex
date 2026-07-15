@@ -560,6 +560,7 @@ class _SplineStateVectorizer:
     base: SplineMirrorState
     evaluation_matrix: np.ndarray
     radius_indices: tuple[np.ndarray, np.ndarray, np.ndarray]
+    radius_theta_basis: np.ndarray | None
     radius_scale: float
     center_scale: float
     flux_scale: float
@@ -598,6 +599,36 @@ class _SplineStateVectorizer:
             radius_mask[1:-1, :, 1:-1] = True
             lambda_axial_indices = np.arange(1, shape[2] - 1)
         radius_indices = tuple(np.asarray(index) for index in np.nonzero(radius_mask))
+        radius_theta_basis = None
+        if discretization.closed and base.center_coefficients is not None:
+            if discretization.grid.ntheta < 3:
+                raise ValueError("closed center-map solves require mpol >= 1")
+            theta = np.asarray(discretization.grid.theta)
+            columns = [np.ones(theta.size) / np.sqrt(theta.size)]
+            normalization = np.sqrt(2.0 / theta.size)
+            for mode in range(2, discretization.grid.theta_basis.mpol + 1):
+                columns.extend(
+                    (
+                        normalization * np.cos(mode * theta),
+                        normalization * np.sin(mode * theta),
+                    )
+                )
+            radius_theta_basis = np.column_stack(columns)
+            coordinates = jnp.einsum(
+                "ta,rtn->ran",
+                jnp.asarray(radius_theta_basis),
+                base.radius_coefficients,
+            )
+            centered_radius = jnp.einsum(
+                "ta,ran->rtn",
+                jnp.asarray(radius_theta_basis),
+                coordinates,
+            )
+            base = SplineMirrorState(
+                base.radius_coefficients.at[1:-1].set(centered_radius[1:-1]),
+                base.lambda_coefficients,
+                base.center_coefficients,
+            )
 
         coefficient_weights = np.asarray(discretization.evaluation_matrix).T @ np.asarray(
             discretization.grid.axial_basis.weights
@@ -630,6 +661,7 @@ class _SplineStateVectorizer:
             base=base,
             evaluation_matrix=np.asarray(discretization.evaluation_matrix),
             radius_indices=radius_indices,
+            radius_theta_basis=radius_theta_basis,
             radius_scale=radius_scale,
             center_scale=radius_scale,
             flux_scale=flux_scale,
@@ -644,7 +676,18 @@ class _SplineStateVectorizer:
 
     @property
     def radius_size(self) -> int:
+        if self.radius_theta_basis is not None:
+            shape = self.base.radius_coefficients.shape
+            return int((shape[0] - 2) * self.radius_theta_basis.shape[1] * shape[2])
         return int(self.radius_indices[0].size)
+
+    @property
+    def radius_poloidal_nodes(self) -> int:
+        """Return the active radial-shape coordinates per axial coefficient."""
+
+        if self.radius_theta_basis is not None:
+            return int(self.radius_theta_basis.shape[1])
+        return int(self.base.radius_coefficients.shape[1])
 
     @property
     def lambda_size(self) -> int:
@@ -679,7 +722,15 @@ class _SplineStateVectorizer:
     def pack(self) -> np.ndarray:
         """Pack the projected coefficient state."""
 
-        radius = np.asarray(self.base.radius_coefficients)[self.radius_indices] / self.radius_scale
+        if self.radius_theta_basis is None:
+            radius = np.asarray(self.base.radius_coefficients)[self.radius_indices]
+        else:
+            radius = np.einsum(
+                "ta,rtn->ran",
+                self.radius_theta_basis,
+                np.asarray(self.base.radius_coefficients)[1:-1],
+            ).reshape(-1)
+        radius = radius / self.radius_scale
         blocks = [radius]
         if self.center_size:
             center = np.asarray(self.base.center_coefficients)[:-1].reshape(-1) / self.center_scale
@@ -697,9 +748,23 @@ class _SplineStateVectorizer:
         """Reconstruct constrained coefficients from normalized variables."""
 
         vector = jnp.asarray(vector)
-        radius = self.base.radius_coefficients.at[self.radius_indices].set(
-            vector[: self.radius_size] * self.radius_scale
-        )
+        if self.radius_theta_basis is None:
+            radius = self.base.radius_coefficients.at[self.radius_indices].set(
+                vector[: self.radius_size] * self.radius_scale
+            )
+        else:
+            shape = self.base.radius_coefficients.shape
+            coordinates = vector[: self.radius_size].reshape(
+                shape[0] - 2,
+                self.radius_theta_basis.shape[1],
+                shape[2],
+            )
+            interior = jnp.einsum(
+                "ta,ran->rtn",
+                jnp.asarray(self.radius_theta_basis),
+                coordinates * self.radius_scale,
+            )
+            radius = self.base.radius_coefficients.at[1:-1].set(interior)
         radius = _regularize_axis_radius(radius)
         offset = self.radius_size
         center = self.base.center_coefficients
@@ -734,16 +799,30 @@ class _SplineStateVectorizer:
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
         """Return conservative normalized coefficient bounds."""
 
+        radius_lower = np.full(self.radius_size, 0.2)
+        radius_upper = np.full(self.radius_size, 5.0)
+        if self.radius_theta_basis is not None:
+            shape = (
+                self.base.radius_coefficients.shape[0] - 2,
+                self.radius_theta_basis.shape[1],
+                self.base.radius_coefficients.shape[2],
+            )
+            radius_lower = np.full(shape, -2.0)
+            radius_upper = np.full(shape, 2.0)
+            radius_lower[:, 0] = 0.2
+            radius_upper[:, 0] = 5.0
+            radius_lower = radius_lower.reshape(-1)
+            radius_upper = radius_upper.reshape(-1)
         lower = np.concatenate(
             (
-                np.full(self.radius_size, 0.2),
+                radius_lower,
                 np.full(self.center_size, -2.0),
                 np.full(self.lambda_size, -np.inf),
             )
         )
         upper = np.concatenate(
             (
-                np.full(self.radius_size, 5.0),
+                radius_upper,
                 np.full(self.center_size, 2.0),
                 np.full(self.lambda_size, np.inf),
             )
@@ -761,7 +840,15 @@ class _SplineStateVectorizer:
         )
         axis_gradient[np.abs(modes) % 2 == 1] = 0.0
         radius_coefficients[1] += np.fft.ifft(axis_gradient, axis=0).real
-        radius = radius_coefficients[self.radius_indices] * self.radius_scale
+        if self.radius_theta_basis is None:
+            radius = radius_coefficients[self.radius_indices]
+        else:
+            radius = np.einsum(
+                "ta,rtn->ran",
+                self.radius_theta_basis,
+                radius_coefficients[1:-1],
+            ).reshape(-1)
+        radius = radius * self.radius_scale
         blocks = [radius]
         if self.center_size:
             if gradient.center_shift is None:
@@ -802,8 +889,20 @@ def _packed_spline_layout(
     """Return channel, radial, and axial labels for solve variables."""
 
     channels = np.zeros(vectorizer.radius_size, dtype=int)
-    radial = np.asarray(vectorizer.radius_indices[0], dtype=int)
-    axial = np.asarray(vectorizer.radius_indices[2], dtype=int)
+    if vectorizer.radius_theta_basis is None:
+        radial = np.asarray(vectorizer.radius_indices[0], dtype=int)
+        axial = np.asarray(vectorizer.radius_indices[2], dtype=int)
+    else:
+        poloidal = vectorizer.radius_theta_basis.shape[1]
+        coefficient_count = discretization.coefficient_count
+        radial = np.repeat(
+            np.arange(1, discretization.grid.ns - 1),
+            poloidal * coefficient_count,
+        )
+        axial = np.tile(
+            np.tile(np.arange(coefficient_count), poloidal),
+            discretization.grid.ns - 2,
+        )
     if vectorizer.center_size:
         coefficient_count = discretization.coefficient_count
         center_channels = np.tile(
@@ -902,7 +1001,11 @@ def _packed_spline_preconditioner(
     weights = np.asarray(discretization.grid.axial_basis.weights)
     active_derivative = derivative if discretization.closed else derivative[:, 1:-1]
     stiffness = active_derivative.T @ (weights[:, None] * active_derivative)
-    geometry = SeparableMirrorPreconditioner.build_from_axial_stiffness(discretization.grid, stiffness)
+    geometry = SeparableMirrorPreconditioner.build_from_axial_stiffness(
+        discretization.grid,
+        stiffness,
+        poloidal_nodes=vectorizer.radius_poloidal_nodes,
+    )
     center = None
     if vectorizer.center_size:
         center = SeparableMirrorPreconditioner.build_from_axial_stiffness(
@@ -1209,7 +1312,10 @@ def solve_fixed_boundary_cli(
             record=record,
             config=config,
             gradient_tolerance=gradient_tolerance,
-            start_with_newton=discretization.closed and x0.size <= 512,
+            start_with_newton=(
+                discretization.closed and not vectorizer.center_size and x0.size <= 512
+            ),
+            start_with_dense_root=bool(vectorizer.center_size and x0.size <= 512),
             matrix_free_context=(
                 vectorizer,
                 _packed_spline_preconditioner(discretization, vectorizer),
