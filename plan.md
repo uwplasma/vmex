@@ -575,6 +575,17 @@ Gate: medium cases avoid dense Jacobian materialization, Krylov growth is
 bounded or slowly growing, converged states are unchanged, and the
 nonaxisymmetric medium solve no longer requires an 800-second dense path.
 
+SOLVAX decision (2026-07-14): do not replace the host Krylov path in PR #22.
+A clean editable v0.8.3 checkout passed exact tensor-preconditioner parity, and
+the existing preconditioner was made traceable for the trial. On the established
+large spline gate, however, right-preconditioned SOLVAX GMRES returned relative
+linear residual `3.48e-5` against the existing `<1e-5` contract, reported a
+breakdown, and forced the residual-Newton fallback; the second rotating-ellipse
+case exceeded five minutes and was terminated. The trial code and dependency
+floor bump were reverted. Retain SciPy's tested host GMRES and SOLVAX's existing
+block-Thomas use. A future SOLVAX integration requires explicit left/right
+preconditioner parity and a faster full-solve result; it does not block this PR.
+
 ### Phase 4: one bounded nonaxisymmetric free-boundary retry
 
 1. Use the coefficient-native spline plasma state and the single retained
@@ -593,6 +604,11 @@ Stop rule: run at most two bounded exterior discretization strategies after the
 structured solver exists. If local observables still fail or runtime/memory
 remain impractical, keep one compact negative benchmark, remove the public
 claim, and defer the lane.
+
+Decision: Phase 4 is deferred because its required coefficient-native open
+spline state failed the Phase-2 shape-gradient gate. The existing nodal
+nonaxisymmetric result remains research evidence, not a supported free-boundary
+lane. Do not substitute a Fourier or projected-stress retry.
 
 ### Phase 5: promote the fixed B-spline hybrid
 
@@ -696,6 +712,8 @@ The following do not block completion:
 - radial B-splines or poloidal finite elements;
 - differentiating CLI iteration histories or initial guesses;
 - coefficient-native open-spline free boundary with the current cap-edge BIE;
+- nonaxisymmetric free boundary pending a promoted native open-spline state;
+- SOLVAX GMRES replacement of the tested SciPy host path;
 - classic toroidal WOUT for open mirrors;
 - VMEC2000 parity for open topology;
 - coil optimization or field-line tracing inside vmec_jax;
@@ -750,9 +768,8 @@ The following do not block completion:
    API/module reduction in Phase 1 without changing physics.
 2. Finish the retained nodal-free and fixed-spline evidence in Phase 2; the
    native free-spline shape-gradient gate failed and that lane is closed.
-3. Establish a clean SOLVAX 0.8.3 parity environment, complete structured
-   linear algebra in Phase 3, then make the one bounded
-   nonaxisymmetric free-boundary decision in Phase 4.
+3. Keep the tested SciPy host Krylov path after the SOLVAX 0.8.3 parity failure;
+   Phase 4 is deferred with its failed spline prerequisite.
 4. Promote the fixed closed hybrid in Phase 5; attempt free hybrid only after
    that gate.
 5. Close derivative and ANIMEC decisions in Phase 6.
