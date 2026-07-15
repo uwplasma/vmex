@@ -49,7 +49,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "mout_from_result": (".output", "mout_from_result"),
     "read_mout": (".output", "read_mout"),
     "write_mout": (".output", "write_mout"),
-    "plot_mout": (".plotting", "plot_mout"),
+    "plot_mout": (".output", "plot_mout"),
 }
 
 __all__ = sorted(_LAZY_ATTRS)

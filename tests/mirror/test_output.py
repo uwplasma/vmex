@@ -24,7 +24,7 @@ from vmec_jax.mirror import (
     write_mout,
 )
 from vmec_jax.mirror.forces import mirror_energy
-from vmec_jax.mirror.plotting import _theta_samples
+from vmec_jax.mirror.output import _theta_samples
 
 
 def _sample_mout() -> MoutData:
