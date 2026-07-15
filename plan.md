@@ -7,15 +7,15 @@ four compact benchmark JSON files are the execution log.
 
 Audit baseline (2026-07-15 CDT, final source/literature review):
 
-- audit started from branch `codex/mirror-geometry` at `51c9fd12`, with the T5
-  fixed-open evidence, analytic fixtures, example, documentation, and test edits
-  active in the worktree;
+- audit ends on clean branch `codex/mirror-geometry` at `85de75c1`; T5 is
+  committed and pushed, not an active worktree tranche;
 - base `origin/main` is `ed4ac7ac`; the branch is zero commits behind and 316
-  ahead, so no main-branch merge is currently pending;
-- draft PR #22 is open and GitHub reports it mergeable. Its latest completed
-  checks pass except for a cancelled spline shard; the focused local spline
-  tests pass, so the shard must be rerun once after T5 is pushed rather than
-  polled during implementation;
+  ahead at the start of the audit and 317 ahead after T5, so no main-branch
+  merge is currently pending;
+- draft PR #22 is open, mergeable, and contains 100 GitHub commits. At the
+  final check, all completed jobs pass and the spline, two parity, implicit,
+  and example jobs are still running; inspect them once before T6 starts, but
+  do not poll them while implementing;
 - the active diff is 50 files, 16,464 insertions, and 1,608 deletions. This is
   above the final 46-file budget and makes T11 deletion mandatory;
 - `vmec_jax/mirror` contains 13 modules, 7,701 physical lines, and 20 lazy
@@ -50,11 +50,13 @@ Audit baseline (2026-07-15 CDT, final source/literature review):
   from `51.7` to `4.08e-2`, but the linear solve stalled at `0.842`. The T4
   factor resolves that blocker; the historical result remains the evidence
   that initialization and preconditioning were both necessary.
-- the environment currently uses SOLVAX `0.7.3`. SOLVAX current `main` at
-  `255d280` was tested in isolation; its right-preconditioned FGMRES follows
-  the same mirror iteration curve, so no dependency upgrade is justified by
-  T4. A `release/0.8.4` branch exists at `4808695`, but no `v0.8.4` tag exists
-  in the remote as of this audit.
+- the environment now uses the published SOLVAX `0.8.3`; its matrix-free
+  Newton--Krylov, periodic banded solve, and pytree GMRES APIs are available.
+  SOLVAX current `main` is `255d280`, and an untagged `release/0.8.4` branch
+  exists at `4808695`. The earlier fixed-SFLM A/B trial found no FGMRES
+  iteration benefit. T6 therefore tests the released generic root solver only
+  where it can delete local code; it does not replace the bounded SciPy
+  trust-region CLI merely for API uniformity.
 - the local review reran seven analytic tests, two focused spline
   preconditioner tests, and three implicit tests successfully, validated the
   benchmark JSON and Python syntax, and rendered the revised fixed-mirror
@@ -100,7 +102,7 @@ decisions. They are constraints on the milestones, not optional alternatives.
 | Closed hybrid representation | Keep periodic cubic B-splines along a smooth racetrack axis and Fourier only around each section | A transported frame represents long straight legs and rotating elliptical returns with few section modes. VMEC-like longitudinal Fourier projection is used only for circular-limit parity, never as the production hybrid state. |
 | Primal CLI solver | Keep SciPy host L-BFGS/least-squares, GMRES, and sparse LU where measured faster | The CLI is explicitly nondifferentiable. T4 reduces the SFLM true linear residual from `7.83e-2` to `9.18e-11`, cuts Krylov work from 2,000 to 660, and reduces wall time from 4.53 s to 4.14 s. |
 | Differentiation | Differentiate only the converged coefficient residual with exact JVP/VJP actions | Forward implicit tangents serve few controls; reverse adjoints serve scalar outputs/many controls. Unrolled solver AD and derivatives of unconverged states are rejected. |
-| Generic solver ownership | Use SOLVAX only when a tagged release removes local generic code and passes the same benchmark gates | Current-main FGMRES gives no iteration benefit. Mirror geometry, gauges, residuals, continuation, and sparsity remain in `vmec_jax`; generic Krylov/direct wrappers may move to SOLVAX later. Do not add JAXopt, Lineax, Optimistix, Optax, or Equinox in this PR. |
+| Generic solver ownership | Use released SOLVAX APIs only when an A/B change is a net deletion and preserves safeguards and diagnostics | SOLVAX 0.8.3 supplies matrix-free Newton--Krylov, pytree GMRES, and cyclic/banded operators, but its root solver has no bounds or line search. The bounded free-boundary CLI may therefore retain SciPy trust-region least squares; primal/transpose Krylov wrappers should move to SOLVAX when parity and true-residual gates pass. Mirror geometry, gauges, residuals, continuation, and sparsity remain in `vmec_jax`. Do not add JAXopt, Lineax, Optimistix, Optax, or a direct Equinox dependency in this PR. |
 | Physics scope | Finish scalar-pressure fixed open, axisymmetric free open, and fixed closed hybrid; bound the 3D free-open attempt; defer ANIMEC | ANIMEC changes the energy, pressure closure, effective current, interface stress, and stability constraints. It is not a second pressure array and cannot be added safely inside this PR. |
 
 The go/no-go outcomes are therefore explicit:
@@ -184,6 +186,9 @@ Every supported lane must pass all applicable gates:
   by observed order or Richardson extrapolation and a predeclared tolerance;
 - for open free boundary, separately reported area-weighted `B.n`, total
   pressure jump, and artificial-cap compatibility residuals;
+- for open free boundary, a quadrature-weighted boundary-work residual pulled
+  back to the free spline coefficients. Pointwise pressure jump remains an
+  independent diagnostic and is never substituted for discrete stationarity;
 - an analytic, asymptotic, or independent-code comparison;
 - forward and reverse implicit derivatives for every advertised control,
   checked against reconverged centered finite differences after the primal
@@ -391,27 +396,35 @@ reason and rerunning all comparison grids.
 The final review used source, tests, and branch history rather than project
 descriptions alone:
 
+Each source has one evidence role. A **design reference** can justify a
+discretization or algorithm but cannot validate mirror physics. A
+**comparator** must solve the same physical model on reproducible matched
+inputs. A **physics reference** supplies an exact or asymptotic observable only
+inside its stated ordering. No result changes role merely because its plot
+looks similar.
+
 | Source | Revision reviewed | Adopt | Reject or defer |
 | --- | --- | --- | --- |
 | `vmec_jax` main | `ed4ac7ac`; mirror branch is 0 behind | existing VMEC residual separation, continuation diagnostics, exact JVP actions, SOLVAX-backed toroidal Krylov patterns | forcing open topology through toroidal Fourier/WOUT conventions |
-| VMEC2000/ANIMEC in STELLOPT | local `512375ce3582`; `forces.f`, `residue.f90`, `bcovar.f`, `fbal.f`, `jxbforce.f`, `precon2d.f` | radial staggering, separate raw/preconditioned diagnostics, neighboring-radial block physics, explicit one-sided axis/edge handling | VMEC closed-LCFS boundary conditions on open cuts; partial ANIMEC closure |
+| VMEC2000/ANIMEC in STELLOPT | current `develop` `7255751d`; ANIMEC branch `91bfd08e`; `forces.f`, `residue.f90`, `bcovar.f`, `fbal.f`, `jxbforce.f`, `precon2d.f` | radial staggering, separate raw/preconditioned diagnostics, neighboring-radial block physics, explicit one-sided axis/edge handling | VMEC closed-LCFS boundary conditions on open cuts; partial ANIMEC closure |
 | DESC master/release | `24aa7b9dc`; latest release `v0.17.2` | released continuation, matrix-free JVP memory lessons, and closed-interface boundary-condition separation | importing another optimizer/objective stack into this PR |
 | DESC `mirror` | `0dba071da` | Chebyshev--Zernike formulas and the need for explicit cap constraints as review material | direct code transfer: 2,255-line equilibrium and 1,393-line objective modules, placeholder end-cap helpers, assertion-free cap test, disabled upstream tests |
 | DESC `mirror_anisotropy` | `805b77fc0` | confirms that mirror anisotropy is a distinct closure problem | treating branch results as validated ANIMEC parity |
 | DESC `dd/cylindrical` | `6f85f50ae` | double-nonperiodic-Chebyshev/Fourier basis formulas | changing basis: branch has initial basis tests but no mirror solve, cap, axis, force, or free-boundary evidence |
 | DESC finite-element branches | `829e2db0f`, `fb90e65ab` | none required | incomplete JAX integration, debugging artifacts, and no validated mirror equilibrium |
-| SOLVAX | installed `0.7.3`; main `255d280`; release branch `4808695` | generic JAX Krylov/direct/implicit wrappers when benchmarked and tagged | dependency upgrade for feature count alone; current-main FGMRES has no SFLM benefit |
+| SOLVAX | installed and published `0.8.3`; main `255d280`; untagged release branch `4808695` | generic JAX Krylov/direct/implicit wrappers when they delete local code and preserve safeguards | replacing bounded/trust-region physics drivers with an unsafeguarded root step; upgrade for feature count alone |
 | GVEC/G-frame work | arXiv:2410.17595 and current docs | transported-frame geometry, independent quadrature, compact section coordinates | claiming its radial B-splines validate longitudinal splines directly |
 | VEPEC report | UCRL-53099 | divergence-preserving potential variables and spline interpolation precedent | numerical parity without reproducible inputs/code |
 
 The review also inspected the current mirror modules, tests, examples, four
-benchmark records, documentation, complete plan history, draft PR metadata,
-and latest CI. External formulas become tests only after their assumptions,
-normalization, and reproducible input are recorded.
+benchmark records, documentation, original Chebyshev plan, complete branch
+history, draft PR metadata, and latest CI. External formulas become tests only
+after their assumptions, normalization, and reproducible input are recorded.
 
 ### 4.1 VMEC2000, VMEC++, and ANIMEC
 
-VMEC2000 source at local STELLOPT commit `512375ce3582` was reviewed through
+VMEC2000 source at current STELLOPT `develop` commit `7255751de36f` was
+reviewed through
 `forces.f`, `residue.f90`, `bcovar.f`, `fbal.f`, `jxbforce.f`, `precon2d.f`,
 and the block-tridiagonal solvers. It separates raw force assembly from
 preconditioned residuals and uses radial staggering consistently.
@@ -436,8 +449,11 @@ lessons: restartable continuation, explicit residual history, bounded retries,
 and broad VMEC2000 parity.
 
 Cooper's 1992 variational formulation, the 2009 free-boundary ANIMEC paper,
-later LHD reports, and the `_ANIMEC` source paths confirm the scope decision in
-section 2.3. The source computes `p_parallel(s,B)` and `p_perpendicular`, uses
+later LHD reports, ANIMEC branch `91bfd08e`, and the current `_ANIMEC` source
+paths confirm the scope decision in section 2.3. The implementation touches
+the pressure profile construction, covariant field, force balance, strong
+force diagnostic, interface condition, timestep path, and output schema. It
+computes `p_parallel(s,B)` and `p_perpendicular`, uses
 `sigma = 1 + (p_perpendicular-p_parallel)/(B^2/mu0)` in the effective current
 `curl(sigma B)`, and adds profile derivatives evaluated at fixed `B` to radial
 force balance. Its free-boundary condition is continuity of
@@ -567,26 +583,31 @@ not a claim of a diamagnetic-bubble model.
 
 ### 4.4 SOLVAX and differentiation
 
-The branch currently runs with SOLVAX `v0.7.3`. SOLVAX current `main`
-(`255d280`, 2026-07-15) and the untagged `release/0.8.4` branch (`4808695`)
-add pytree GMRES, matrix-free Newton--Krylov, cyclic tridiagonal solves,
-symmetric additive and Galerkin preconditioners, elliptic helpers, host
-SuperLU wrappers, independent transpose solvers, and extended diagnostics.
-`vmec_jax` already uses SOLVAX block Thomas in the toroidal path. Generic
-linear algebra belongs in SOLVAX, but mirror-specific geometry, residuals,
-gauges, coefficient maps, continuation, and physics sparsity stay here.
+The branch environment now runs the published SOLVAX `v0.8.3`. SOLVAX current
+`main` (`255d280`, 2026-07-14) and the untagged `release/0.8.4` branch
+(`4808695`) add pytree GMRES, matrix-free Newton--Krylov, cyclic tridiagonal
+solves, symmetric additive and Galerkin preconditioners, elliptic helpers,
+host SuperLU wrappers, independent transpose solvers, and extended
+diagnostics. `vmec_jax` already uses SOLVAX block Thomas in the toroidal path.
+Generic linear algebra belongs in SOLVAX, but mirror-specific geometry,
+residuals, gauges, coefficient maps, continuation, and physics sparsity stay
+here.
 
-The T4 isolated trial applied current-main SOLVAX right-preconditioned FGMRES to the
-same 591-variable SFLM Hessian and tensor inverse. Its true-residual iteration
-curve matches SciPy's host GMRES and does not justify a dependency upgrade.
-The nondifferentiable CLI therefore keeps faster host sparse LU and GMRES;
-exact JAX JVP/VJP actions retain differentiability in the implicit layer.
+The T4 isolated trial applied current-main SOLVAX right-preconditioned FGMRES
+to the same 591-variable SFLM Hessian and tensor inverse. Its true-residual
+iteration curve matches SciPy's host GMRES. SOLVAX 0.8.3
+`newton_krylov` is fully matrix-free but takes unconstrained full Newton steps;
+it does not replace the bound-preserving, trust-region free-boundary CLI
+without a measured basin-of-attraction study. The nondifferentiable CLI may
+therefore keep faster host sparse LU, GMRES, and bounded least squares. Exact
+JAX JVP/VJP actions retain differentiability in the implicit layer.
 
-Once a compatible SOLVAX release is tagged, T11 may replace local generic
-host-factor and implicit-linear wrappers only if the change is a net deletion,
-preserves auxiliary convergence diagnostics, supports an independent
-transpose solver, and passes the same primal/tangent/adjoint A/B records. The
-mirror sparse pattern builder is physics-specific and remains here.
+T6/T11 may replace local generic host-factor and implicit-linear wrappers with
+released SOLVAX APIs only if the change is a net deletion, preserves auxiliary
+convergence diagnostics and independent transpose control, and passes the
+same primal/tangent/adjoint A/B records. SOLVAX 0.8.4 is not used until it is a
+tagged package. The mirror sparse pattern builder is physics-specific and
+remains here.
 
 The production derivative strategy remains:
 
@@ -656,7 +677,16 @@ The source audit identifies the exact reductions:
   then replace it with the spline coefficient map and delete it;
 - split the 342-line free-boundary workflow into residual assembly, operator
   solve, and result assembly without creating new public modules;
-- replace the free solver's materialized Jacobian columns with JVP/VJP actions;
+- build the free-boundary residual once in `free_boundary.py` and reuse that
+  exact object in the primal, tangent, and adjoint paths. The residual blocks
+  are coefficient-space boundary work, interior variational force, and the
+  optional pressure-calibration equation;
+- replace the free solver's materialized coupled-Jacobian columns with JVP/VJP
+  actions. The exterior Laplace BIE remains a dense globally coupled operator;
+  it is measured separately and is not mislabeled matrix-free;
+- make free-boundary results and restarts coefficient-native. Evaluated CGL
+  arrays have explicit `evaluated_*` names and exist for diagnostics/MOUT, not
+  as a second restart state;
 - retain one exterior BIE. `exterior.py` owns closed panels and quadrature;
   `exterior_bie.py` owns the Laplace solve and field coupling;
 - retain externally supplied `coil_xyz` only as optional output metadata.
@@ -666,6 +696,13 @@ The source audit identifies the exact reductions:
 - remove compatibility aliases and private imports from root examples. A root
   example uses the public equilibrium API and submodule diagnostic kernels only
   when no public workflow exists.
+
+The current source hot spots are `splines.py` (997 lines), `forces.py` (893),
+`output.py` (829), `exterior.py` (773), `solver.py` (694), `implicit.py` (651),
+and `free_boundary.py` (536). T6 must delete `_MirrorStateVectorizer`, its
+nodal packed preconditioner, duplicated free-adjoint packing, and nodal restart
+logic in the same commits that add coefficient free boundary. Moving the same
+logic to new files does not satisfy the reduction gate.
 
 Concrete branch budgets at merge:
 
@@ -762,15 +799,16 @@ cut-location study. M2 is complete.
 
 ### M3. Build the structured solver and promote fixed open mirrors -- complete
 
-1. Define one coefficient map used by fixed/free primal, tangent, and adjoint
-   solves. Radius, stream function, gauge, fixed ends, and scaling are explicit
+1. Define the shared spline state coefficient map used by fixed primal,
+   tangent, and adjoint solves and designed for free-boundary composition in
+   M4. Radius, stream function, gauge, fixed ends, and scaling are explicit
    blocks rather than unrelated flat slices.
 2. Freeze a local approximate Hessian retaining neighboring radial coupling,
    axial B-spline support, and the poloidal-mode coupling required by
    nonaxisymmetric geometry. The T4 oracle shows that radius--stream cross
    blocks do not improve convergence, while full poloidal coupling is
    decisive; omit the cross blocks and retain separate sparse field channels.
-3. A/B test the current SciPy/SOLVAX `0.7.3` path and current-main SOLVAX
+3. A/B test the then-current SciPy/SOLVAX `0.7.3` path and current-main SOLVAX
    pytree GMRES/Newton--Krylov in an isolated environment. Keep SciPy's host
    optimizer for the nondifferentiable CLI when faster. Upgrade the dependency
    only if the release gates improve.
@@ -817,34 +855,61 @@ first-order reason recorded in section 3.3.
 1. Represent boundary, interior geometry, and lambda with the same clamped
    axial spline coefficients used by fixed boundary. Evaluate them on the
    existing CGL/panel nodes and differentiate through that linear map.
-2. Replace `_MirrorStateVectorizer` and materialized full free-boundary
-   Jacobian columns with the shared coefficient map and a SciPy
-   `LinearOperator`: `matvec` is an exact JAX JVP and `rmatvec` is an exact JAX
-   VJP. Use the trust-region iterative least-squares path for production and
-   keep a dense Jacobian only below the tiny-test threshold. Gate peak memory
-   with resident-set measurements; chunking a full identity is not
-   matrix-free and does not pass this step.
-3. Preserve the one cap-aware exterior BIE and separately monitor lateral
+2. Form the lateral interface equation as virtual boundary work. Multiply the
+   total-pressure jump by lateral quadrature, area, and the normal component of
+   each radial boundary basis variation, then pull it back through the spline
+   evaluation map. This produces exactly one residual per free boundary
+   coefficient. Retain the pointwise pressure jump as an independent
+   refinement diagnostic. A raw list of CGL stress values is not the
+   coefficient equilibrium equation.
+3. In `free_boundary.py`, compose one private free-boundary coefficient map
+   from the existing spline state map. It owns free boundary coefficients,
+   interior radius/lambda
+   coefficients, gauges, fixed ends, physical scales, bounds, and the optional
+   mass scale. The same map is used by primal solve, weak pullback, restart,
+   tangent, and adjoint code; no copied index masks are allowed.
+4. Build one private free-equilibrium problem object in `free_boundary.py`
+   containing pack/unpack, residual blocks, exact JVP/VJP actions, scaling, and
+   result assembly. Replace materialized full coupled-Jacobian columns with a
+   SciPy `LinearOperator`: `matvec` is a cached JAX linearization and `rmatvec`
+   is its exact JAX transpose. Use bounded trust-region iterative least squares
+   for production and keep a dense Jacobian only below the tiny-test threshold.
+   Gate peak memory with resident-set measurements; chunking a full identity is
+   not matrix-free and does not pass this step.
+5. Prove the discrete formulation before production runs: compare the
+   coefficient boundary-work residual with directional finite differences,
+   compare dense `jacfwd` with operator JVP/VJP on a tiny square problem, verify
+   the transpose identity, and show nodal/coefficient parity for a basis that
+   spans the nodal fixture. Above the threshold, a test must fail if `np.eye`,
+   full `jacfwd`, or a dense coupled Jacobian is reached.
+6. Preserve the one cap-aware exterior BIE and separately monitor lateral
    tangency, pressure jump, raw/corrected cap compatibility, cap-rim continuity,
    equal symmetric end data, endpoint shape constraints, cut-location
-   independence, and shape gauge.
-4. Continue one physical equilibrium through beta
+   independence, and shape gauge. Report the dense BIE matrix memory separately
+   from the coupled-equilibrium operator memory.
+7. Make restart schema 3 coefficient-native and migrate schema 2 exactly once
+   through a tested nodal-to-spline fit. Results own coefficient boundary/state;
+   evaluated arrays are clearly named diagnostic/output data. Resume and direct
+   continuation must converge to the same coefficient solution.
+8. Move the free adjoint onto the same square coefficient residual and map.
+   Delete its reconstructed nodal residual and copied masks. Validate the
+   pressure-amplitude and external-field-scale gradients against fully
+   reconverged centered finite differences, not frozen-boundary differences.
+9. Continue one physical equilibrium through beta
    `0, 0.01, 0.03, 0.10, 0.25, 0.50`, warm-starting only between adjacent
    values and recording retries. The external field comes from an ESSOS
    callable or MGRID; no coil representation enters mirror source code.
-5. Run three independently refined radial, axial, exterior, and angular grids;
+10. Run three independently refined radial, axial, exterior, and angular grids;
    refine one family at a time before the combined study.
-6. Compare 1%, 3%, and 10% with Pleiades. Compare high-beta radius expansion
+11. Compare 1%, 3%, and 10% with Pleiades. Compare high-beta radius expansion
    and on-axis field depression only to declared paraxial/diamagnetic trends,
    including `B/B_vacuum approximately sqrt(1-beta)` where its ordering is
    valid.
-7. Diagnose any beta-insensitive result by checking pressure normalization,
+12. Diagnose any beta-insensitive result by checking pressure normalization,
    enclosed volume, boundary work, field-energy balance, and profile
    interpolation before changing geometry.
-8. Revalidate derivatives with respect to pressure amplitude and external-field
-   scale; regenerate the free-boundary benchmark and example figures.
-   The derivative residual must use the same coefficient map and transpose
-   operator as the primal solve; do not retain a second nodal adjoint path.
+13. Regenerate the free-boundary benchmark and example figures only after the
+   coefficient, operator, physics, and derivative gates pass.
 
 Exit: all beta states satisfy variational, weak, strong-force, interface,
 geometry, and three-grid observable gates, or the first failing beta becomes
@@ -856,6 +921,9 @@ are labeled scalar-pressure equilibria, not ANIMEC or kinetic predictions.
 
 1. Establish exact circular-axis parity with ordinary `vmec_jax` and VMEC2000
    using matched boundary, pressure, current, resolution, and normalization.
+   Compare volume, energy terms, axis/edge `iota`, magnetic well, `|B|`, and
+   independently reconstructed force on three grids; do not compare only
+   output coefficients with different basis conventions.
 2. Keep the entire longitudinal representation in periodic cubic B-spline
    coefficients: centerline, transported frame controls, section amplitudes,
    and stream function. Fourier is used only in the periodic cross-section
@@ -866,23 +934,33 @@ are labeled scalar-pressure equilibria, not ANIMEC or kinetic predictions.
    Frame closure and derivatives must converge when only the axis quadrature is
    refined; otherwise the discrete transport is part of the geometry error and
    the equilibrium study does not start.
-4. Continue from circular torus to a racetrack with two curved returns, then
-   lengthen both straight legs, and finally impose the rotating-ellipse
-   stellarator shaping in the returns. At least half of each straight leg must
-   remain below the declared curvature tolerance.
+4. Define one coefficient-generated geometry family with two symmetry-related
+   straight legs and two symmetry-related curved returns. Continue from the
+   circular torus by changing one control group at a time: racetrack aspect,
+   straight-leg length, return curvature, section ellipticity, then 90-degree
+   section rotation. At least half of each straight leg must remain below the
+   declared curvature tolerance. Symmetry is enforced by coefficient maps,
+   never by copying sampled points.
    Before this continuation, extend the T4 local factor with periodic axial
    distance and cyclic support. Reject dense periodic Newton above the tiny
    threshold and require a true linear residual at most `1e-8` on the circular
-   case.
-5. Compare a central long-leg window with the promoted fixed open B-spline
-   mirror as curvature approaches zero.
+   case. A/B the physics-specific cyclic sparse factor against SOLVAX 0.8.3
+   periodic/banded primitives only where the operator block structure matches;
+   keep the path with lower runtime/memory and fewer local generic lines.
+5. Compare a fixed central fraction of each leg with the promoted fixed open
+   B-spline mirror along a three-member sequence of increasing
+   leg-length/return-radius separation. Match local flux, pressure, current,
+   section shape, and axis field before comparing geometry, `|B|`, and force.
+   The local differences must converge toward zero; global closed-circuit iota
+   is not an open-limit observable.
 6. Demonstrate nonzero rotational transform and circuit-spanning field lines
    from the solved equilibrium, without
    attributing vacuum-coil physics to the equilibrium solver.
 7. Run fixed-LCFS beta continuation and show interior surface, `|B|`, iota,
    magnetic-well, weak-residual, strong-force, and convergence plots.
    Compare low-beta displacement/section trends with the linked-mirror report
-   only in its asymptotic regime.
+   only in its asymptotic regime. The LCFS must not move in this fixed-boundary
+   lane; any beta-dependent boundary shown in an artifact is a bug.
 8. Revalidate forward/reverse derivatives and produce a periodic MOUT that is
    explicitly distinct from WOUT.
 9. Regenerate `mirror_hybrid_fixed_boundary.json` and the root hybrid example.
@@ -945,7 +1023,9 @@ recorded as compact negative evidence.
 | T3 (complete) | Add supplied-field-to-Clebsch spline initializer and use it for SFLM | analytic field error `<5e-4`; force `<6e-3`; example smoke |
 | T4 (complete) | Implement and A/B the frozen local spline preconditioner, including current-main SOLVAX trial and stale-CI-path repair | 100 passed/6 skipped; strict docs; true linear residual `9.18e-11`; Krylov work 2,000 to 660 |
 | T5 (complete) | Regenerate rotating-ellipse and SFLM fixed-boundary evidence | 102 passed/7 skipped; full physics regressions, strict docs, pre-commit, and promoted record pass |
-| T6 (next) | Move free boundary to the shared spline coefficient map and operator Jacobian | dense tiny-case parity; no full Jacobian above threshold; lower peak memory |
+| T6a (next) | Add the composed free coefficient map and Galerkin boundary-work residual | directional-FD boundary work; square residual; tiny nodal/coefficient parity |
+| T6b | Replace the coupled Jacobian with cached JVP/VJP `LinearOperator` actions and migrate result/restart schema | dense tiny-case and transpose parity; no full coupled Jacobian above threshold; lower peak memory; exact restart continuation |
+| T6c | Reuse the primal coefficient residual in the free tangent/adjoint and delete all nodal production packing | reconverged-FD gradients; true transpose residual; net source/test line deletion |
 | T7 | Regenerate the axisymmetric beta scan through 50% | three-grid physics, interface, force, Pleiades, and trend gates |
 | T8 | Establish circular hybrid parity and long-leg/open limit | ordinary VMEC-JAX and VMEC2000 parity; force refinement |
 | T9 | Promote the spline racetrack/rotating-return hybrid | positive map, nonzero iota, beta profiles, derivatives, MOUT round trip |
@@ -956,6 +1036,26 @@ recorded as compact negative evidence.
 No additional physics lane enters this PR. ANIMEC, free-boundary hybrid,
 arbitrary curved open axes, stability, and mirror Boozer work begin only in a
 new plan after T12.
+
+### Immediate T6 file contract
+
+T6 changes existing owners only:
+
+| File | Required change | Required deletion |
+| --- | --- | --- |
+| `vmec_jax/mirror/splines.py` | expose only the minimal private coefficient/evaluation pullbacks needed by free boundary | no duplicate radius/lambda gauge or bounds implementation; remain below 1,000 lines |
+| `vmec_jax/mirror/free_boundary.py` | compose the free map and assemble one square coefficient residual, boundary work, cached JVP/VJP operator, continuation, and result | nodal masks, `np.eye`, batched identity columns, public axisymmetric aliases |
+| `vmec_jax/mirror/implicit.py` | consume the primal free problem and coefficient residual | reconstructed nodal free residual, copied masks, second pack/unpack path |
+| `vmec_jax/mirror/output.py` | write/read coefficient restart schema 3 and one tested schema-2 migration | nodal production restart state after migration coverage passes |
+| `vmec_jax/mirror/solver.py` | retain fixed-driver orchestration only | `_MirrorStateVectorizer` and nodal packed preconditioner once no references remain |
+| `tests/mirror/test_free_boundary.py` | boundary-work FD, dense/operator parity, no-dense threshold, restart continuation, beta smoke | nodal algorithm-choice assertions |
+| `tests/mirror/test_implicit.py` | coefficient free adjoint and reconverged FD | nodal free adjoint fixture |
+| `tests/mirror/test_output.py` | schema-3 round trip and schema-2 migration | duplicate raw-array restart tests |
+| `examples/mirror_free_boundary_beta_scan.py` | public coefficient API and evaluated plotting only | private imports and nodal interpolation helpers |
+| `benchmarks/mirror_free_boundary_axisymmetric.json` | mark old record stale in T6; regenerate only in T7 | incompatible positive status |
+
+No T6 source module is added. The tranche fails simplification if mirror
+source or test lines increase after obsolete nodal code is removed.
 
 ## 7. Canonical artifacts and reporting
 
