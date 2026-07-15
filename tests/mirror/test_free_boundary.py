@@ -46,7 +46,7 @@ def _enable_solver_jit():
 
 
 def test_free_boundary_restart_roundtrip_is_compact_and_grid_checked(tmp_path) -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9))
+    config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=0, nxi=9))
     plasma_grid = config.build_grid()
     boundary = MirrorBoundary.from_radius(0.3, plasma_grid)
     state = MirrorState.from_boundary(boundary, plasma_grid)
@@ -66,7 +66,7 @@ def test_free_boundary_restart_roundtrip_is_compact_and_grid_checked(tmp_path) -
     np.testing.assert_array_equal(loaded.plasma_state.lambda_stream, state.lambda_stream)
     assert loaded.mass_scale == restart.mass_scale
 
-    mismatched = MirrorConfig(resolution=MirrorResolution(ns=9, mpol=0, ntheta=1, nxi=9)).build_grid()
+    mismatched = MirrorConfig(resolution=MirrorResolution(ns=9, mpol=0, nxi=9)).build_grid()
     with pytest.raises(ValueError, match="plasma state"):
         load_free_boundary_restart(path, mismatched)
 
@@ -84,7 +84,7 @@ def test_boundary_fourier_amplitudes_are_grid_independent() -> None:
 
 
 def test_boundary_fourier_norms_do_not_use_a_symmetry_zero() -> None:
-    grid = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=3, ntheta=7, nxi=9)).build_grid()
+    grid = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=3, nxi=9)).build_grid()
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     boundary = MirrorBoundary(0.2 + 0.03 * xi * jnp.cos(theta))
@@ -128,7 +128,7 @@ def _nonaxisymmetric_mirror_field(points):
 @pytest.mark.full
 def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=7),
+        resolution=MirrorResolution(ns=5, mpol=0, nxi=7),
         z_min=-0.8,
         z_max=0.8,
         ftol=1.0e-12,
@@ -185,7 +185,7 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
 @pytest.mark.full
 def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=5),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=5),
         z_min=-0.8,
         z_max=0.8,
         ftol=1.0e-12,
@@ -261,7 +261,7 @@ def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
     betas = jnp.asarray([0.0, 0.10, 0.50])
     for ns, nxi, ntheta_panel in ((5, 7, 8), (7, 13, 12), (9, 17, 16)):
         config = MirrorConfig(
-            resolution=MirrorResolution(ns=ns, mpol=0, ntheta=1, nxi=nxi),
+            resolution=MirrorResolution(ns=ns, mpol=0, nxi=nxi),
             z_min=-0.8,
             z_max=0.8,
             ftol=1.0e-12,
@@ -315,7 +315,7 @@ def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
 
 
 def _grid(ns: int, nxi: int):
-    return MirrorConfig(resolution=MirrorResolution(ns=ns, mpol=1, ntheta=3, nxi=nxi)).build_grid()
+    return MirrorConfig(resolution=MirrorResolution(ns=ns, mpol=1, nxi=nxi)).build_grid()
 
 
 def test_fixed_boundary_state_interpolation_roundtrips_and_preserves_constraints() -> None:
@@ -364,7 +364,7 @@ def test_fixed_boundary_state_interpolation_is_differentiable() -> None:
 
 
 def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=5))
+    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=0, nxi=5))
     grid = config.build_grid()
     reference = MirrorBoundary.from_radius(0.3, grid)
     restart_boundary = MirrorBoundary.from_radius(0.31, grid)

@@ -1,5 +1,19 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_hybrid_fixed_boundary/1",
+  "schema": "vmec_jax.benchmark.mirror_hybrid_fixed_boundary/2",
+  "provenance": {
+    "measurement_commit": "ae97b8af5847aa8df7fc14347d5c1250c36fdc9e",
+    "input_schema": "vmec_jax.mirror.input/1",
+    "basis": "periodic cubic B-spline longitudinal geometry; legacy uniform theta collocation",
+    "represented_modes": "legacy closed case declares mpol=1 with ntheta=6",
+    "grid": "see each case",
+    "hardware_class": "office CPU",
+    "promotion_status": "stale_research",
+    "stale_sections": [
+      "periodic_preconditioner_attempt",
+      "closed_circular_torus"
+    ],
+    "stale_reason": "all shaped states predate axis regularity and input/2; mpol=1 with ntheta=6 cannot be reproduced by the current exact-mpol collocation"
+  },
   "periodic_preconditioner_attempt": {
     "case": "892-variable finite-current rotating-ellipse racetrack at 16 periodic coefficients",
     "dense_reference": {

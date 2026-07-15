@@ -104,7 +104,6 @@ def run(
         resolution=MirrorResolution(
             ns=ns,
             mpol=0 if axisymmetric else (ntheta - 1) // 2,
-            ntheta=1 if axisymmetric else ntheta,
             nxi=nxi,
         ),
         z_min=-0.8,

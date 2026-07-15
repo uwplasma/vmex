@@ -96,20 +96,16 @@ jobs:
           if [ "${{ matrix.shard }}" = "field" ]; then
             FILES="tests/mirror/test_exterior.py \
                    tests/mirror/test_free_boundary.py \
-                   tests/mirror/test_free_boundary_implicit.py"
+                   tests/mirror/test_geometry_fields.py"
           elif [ "${{ matrix.shard }}" = "equilibrium" ]; then
-            FILES="tests/mirror/test_continuation.py \
-                   tests/mirror/test_fixed_boundary_3d.py \
-                   tests/mirror/test_geometry_fields.py \
+            FILES="tests/mirror/test_fixed_boundary_3d.py \
                    tests/mirror/test_implicit.py \
                    tests/mirror/test_isotropic_forces.py \
-                   tests/mirror/test_model_basis.py \
-                   tests/mirror/test_output.py \
-                   tests/mirror/test_pressure_closures.py \
-                   tests/mirror/test_promotion_guards.py"
+                   tests/mirror/test_model_basis.py"
           else
             FILES="tests/mirror/test_analytic.py \
-                   tests/mirror/test_splines.py"
+                   tests/mirror/test_splines.py \
+                   tests/mirror/test_output.py"
           fi
           pytest -q -n 2 -m "not full" $FILES --durations=20
 

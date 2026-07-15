@@ -216,7 +216,7 @@ def test_spline_adjoint_matches_reconverged_central_difference() -> None:
 
 def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=7),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=7),
         ftol=1.0e-12,
         max_iterations=1000,
     )
@@ -444,7 +444,7 @@ def test_free_boundary_adjoint_rejects_unconverged_and_3d_results() -> None:
             lambda *_: 0.0,
         )
 
-    nonaxisymmetric_grid = MirrorConfig(resolution=MirrorResolution(ns=3, mpol=1, ntheta=3, nxi=5)).build_grid()
+    nonaxisymmetric_grid = MirrorConfig(resolution=MirrorResolution(ns=3, mpol=1, nxi=5)).build_grid()
     with pytest.raises(ValueError, match="axisymmetry"):
         free_boundary_adjoint(
             type("Result", (), {"converged": True})(),

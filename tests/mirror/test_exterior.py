@@ -39,9 +39,9 @@ from vmec_jax.mirror.geometry import (  # noqa: E402
 )
 
 
-def _grid(*, ns: int = 17, mpol: int = 0, ntheta: int = 1, nxi: int = 25):
+def _grid(*, ns: int = 17, mpol: int = 0, nxi: int = 25):
     return MirrorConfig(
-        resolution=MirrorResolution(ns=ns, mpol=mpol, ntheta=ntheta, nxi=nxi),
+        resolution=MirrorResolution(ns=ns, mpol=mpol, nxi=nxi),
         z_min=-1.4,
         z_max=1.4,
     ).build_grid()
@@ -81,7 +81,7 @@ def test_closed_cylinder_has_exact_area_volume_and_orientation() -> None:
 
 
 def test_shaped_surface_satisfies_divergence_theorem_moments() -> None:
-    grid = _grid(ns=21, mpol=4, ntheta=9, nxi=33)
+    grid = _grid(ns=21, mpol=4, nxi=33)
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     radius = 0.31 * (1.0 + 0.08 * xi**2 + 0.04 * jnp.cos(2.0 * theta) * (1.0 - xi**2))
@@ -94,7 +94,7 @@ def test_shaped_surface_satisfies_divergence_theorem_moments() -> None:
 
 
 def test_caps_share_the_lateral_end_rings() -> None:
-    grid = _grid(ns=13, mpol=3, ntheta=7, nxi=17)
+    grid = _grid(ns=13, mpol=3, nxi=17)
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.05 * jnp.cos(theta) * (1.0 + xi)), grid)
@@ -105,7 +105,7 @@ def test_caps_share_the_lateral_end_rings() -> None:
 
 
 def test_collocation_map_identifies_cap_centers_and_rims() -> None:
-    grid = _grid(ns=13, mpol=3, ntheta=7, nxi=17)
+    grid = _grid(ns=13, mpol=3, nxi=17)
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     surface = build_closed_mirror_surface(
@@ -334,7 +334,7 @@ def test_duffy_rule_is_differentiable_in_geometry_and_density() -> None:
 
 @pytest.mark.parametrize("ntheta", [5, 7])
 def test_spectral_side_density_reproduces_fourier_chebyshev_data(ntheta: int) -> None:
-    grid = _grid(ns=7, mpol=(ntheta - 1) // 2, ntheta=ntheta, nxi=7)
+    grid = _grid(ns=7, mpol=(ntheta - 1) // 2, nxi=7)
     surface = build_closed_mirror_surface(MirrorBoundary.from_radius(0.3, grid), grid)
     nside = 2 * grid.ntheta * (grid.nxi - 1)
     triangles = np.asarray(surface.triangles[:nside])
@@ -401,7 +401,7 @@ def test_closed_surface_volume_is_differentiable() -> None:
 
 def test_plasma_external_neumann_adapter_matches_uniform_field_data() -> None:
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=13, mpol=0, ntheta=1, nxi=21),
+        resolution=MirrorResolution(ns=13, mpol=0, nxi=21),
         z_min=-0.6,
         z_max=0.6,
     ).build_grid()
@@ -447,7 +447,7 @@ def test_plasma_external_neumann_adapter_matches_uniform_field_data() -> None:
 
 def test_axisymmetric_neumann_balance_changes_only_artificial_caps() -> None:
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=9),
+        resolution=MirrorResolution(ns=5, mpol=0, nxi=9),
         z_min=-0.6,
         z_max=0.6,
     ).build_grid()
@@ -507,7 +507,7 @@ def test_axisymmetric_neumann_balance_changes_only_artificial_caps() -> None:
 
 def test_nonaxisymmetric_plasma_neumann_data_preserves_closed_flux() -> None:
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=7),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=7),
         z_min=-0.6,
         z_max=0.6,
     ).build_grid()
@@ -563,7 +563,7 @@ def test_nonaxisymmetric_plasma_neumann_data_preserves_closed_flux() -> None:
 
 def test_axisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=7),
+        resolution=MirrorResolution(ns=5, mpol=0, nxi=7),
         z_min=-0.6,
         z_max=0.6,
     ).build_grid()
@@ -599,7 +599,7 @@ def test_axisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
 
 def test_nonaxisymmetric_exterior_vacuum_is_shape_differentiable() -> None:
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=5),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=5),
         z_min=-0.5,
         z_max=0.5,
     ).build_grid()

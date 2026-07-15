@@ -184,7 +184,7 @@ def test_racetrack_spline_has_long_straight_legs_and_c2_closure() -> None:
 def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> None:
     major_radius = 2.0
     minor_radius = 0.23
-    resolution = MirrorResolution(ns=9, mpol=0, ntheta=1, nxi=4)
+    resolution = MirrorResolution(ns=9, mpol=0, nxi=4)
     discretization = SplineMirrorDiscretization.build_closed(
         resolution,
         coefficient_count=24,
@@ -271,7 +271,7 @@ def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> Non
 
 def test_racetrack_ellipse_rotates_ninety_degrees_between_straight_legs() -> None:
     semi_major, semi_minor = 0.18, 0.12
-    resolution = MirrorResolution(ns=7, mpol=6, ntheta=13, nxi=4)
+    resolution = MirrorResolution(ns=7, mpol=6, nxi=4)
     discretization = SplineMirrorDiscretization.build_closed(
         resolution,
         coefficient_count=32,
@@ -383,7 +383,7 @@ def _closed_circular_torus(resolution, *, coefficient_count=8):
 
 
 def test_closed_field_line_recovers_constant_iota_and_derivative() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, ntheta=9, nxi=4)
+    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     discretization, axis, _, state = _closed_circular_torus(resolution)
     evaluated = discretization.evaluate_state(state)
     geometry = evaluate_closed_geometry(evaluated, discretization.grid, axis)
@@ -412,7 +412,7 @@ def test_closed_field_line_recovers_constant_iota_and_derivative() -> None:
 
 
 def test_closed_vacuum_initializer_recovers_one_over_r_field() -> None:
-    resolution = MirrorResolution(ns=7, mpol=6, ntheta=13, nxi=4)
+    resolution = MirrorResolution(ns=7, mpol=6, nxi=4)
     discretization, axis, _, zero = _closed_circular_torus(resolution)
     initialized = initialize_closed_vacuum_stream_function(
         zero,
@@ -459,7 +459,7 @@ def test_closed_vacuum_initializer_recovers_one_over_r_field() -> None:
 
 
 def test_closed_staggered_first_variation_matches_autodiff() -> None:
-    resolution = MirrorResolution(ns=5, mpol=3, ntheta=7, nxi=4)
+    resolution = MirrorResolution(ns=5, mpol=3, nxi=4)
     discretization, axis, _, _ = _closed_circular_torus(resolution)
     grid = discretization.grid
     s = jnp.asarray(grid.s)[:, None, None]
@@ -495,7 +495,7 @@ def test_closed_staggered_first_variation_matches_autodiff() -> None:
 
 
 def test_closed_spline_fixed_boundary_torus_converges_to_ftol() -> None:
-    resolution = MirrorResolution(ns=5, mpol=3, ntheta=7, nxi=4)
+    resolution = MirrorResolution(ns=5, mpol=3, nxi=4)
     config = MirrorConfig(
         resolution=resolution,
         ftol=1.0e-12,
@@ -533,7 +533,7 @@ def test_closed_spline_fixed_boundary_torus_converges_to_ftol() -> None:
 
 
 def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, ntheta=9, nxi=4)
+    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     config = MirrorConfig(
         resolution=resolution,
         ftol=1.0e-12,
@@ -606,7 +606,7 @@ def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
 
 def _spline_polynomial_state():
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=41),
+        resolution=MirrorResolution(ns=7, mpol=0, nxi=41),
         z_min=-1.4,
         z_max=1.4,
     )
@@ -639,7 +639,7 @@ def test_coefficient_native_state_matches_chebyshev_polynomial_geometry_and_ener
 
 
 def test_boundary_transfer_preserves_nested_self_similarity() -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=9))
+    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=1, nxi=9))
     source_grid = config.build_grid()
     theta = jnp.asarray(source_grid.theta)[:, None]
     xi = jnp.asarray(source_grid.xi)[None, :]
@@ -690,7 +690,7 @@ def test_coefficient_native_energy_gradient_matches_central_difference() -> None
 
 def test_spline_fixed_boundary_solver_recovers_cylindrical_equilibrium() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9),
+        resolution=MirrorResolution(ns=7, mpol=0, nxi=9),
         z_min=-1.2,
         z_max=1.2,
         ftol=1.0e-12,
@@ -729,7 +729,7 @@ def test_spline_fixed_boundary_solver_recovers_cylindrical_equilibrium() -> None
 
 def test_spline_solver_converges_nonaxisymmetric_finite_current_state() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=7),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=7),
         z_min=-1.0,
         z_max=1.0,
         ftol=1.0e-12,
@@ -774,7 +774,7 @@ def test_spline_solver_converges_nonaxisymmetric_finite_current_state() -> None:
 
 
 def test_spline_coefficient_preconditioner_inverts_tensor_model() -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=9, mpol=3, ntheta=7, nxi=9))
+    config = MirrorConfig(resolution=MirrorResolution(ns=9, mpol=3, nxi=9))
     discretization = SplineMirrorDiscretization.build(config, elements=8)
     derivative = np.asarray(
         discretization.spline.basis_matrix(discretization.grid.axial_basis.nodes, derivative=1)
@@ -794,7 +794,7 @@ def test_spline_coefficient_preconditioner_inverts_tensor_model() -> None:
 
 
 def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, ntheta=9, nxi=4)
+    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
     discretization, _, boundary, state = _closed_circular_torus(
         resolution, coefficient_count=12
     )
@@ -823,7 +823,7 @@ def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> No
 @pytest.mark.full
 def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=29, mpol=1, ntheta=3, nxi=25),
+        resolution=MirrorResolution(ns=29, mpol=1, nxi=25),
         z_min=-1.2,
         z_max=1.2,
         ftol=1.0e-12,
@@ -864,7 +864,7 @@ def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue() -> None:
     from vmec_jax.mirror.analytic import RotatingEllipseParaxial
 
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=8, ntheta=17, nxi=17),
+        resolution=MirrorResolution(ns=5, mpol=8, nxi=17),
         ftol=1.0e-12,
         max_iterations=2000,
     )
@@ -912,7 +912,7 @@ def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue() -> None:
 @pytest.mark.full
 def test_finite_beta_spline_knot_refinement_converges_to_chebyshev() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=17),
+        resolution=MirrorResolution(ns=5, mpol=0, nxi=17),
         ftol=1.0e-12,
         max_iterations=1000,
     )
@@ -961,7 +961,7 @@ def test_open_spline_and_chebyshev_states_converge_across_grids() -> None:
     strength_errors = []
     for ns, nxi, elements in ((5, 9, 4), (7, 13, 6), (9, 17, 8)):
         config = MirrorConfig(
-            resolution=MirrorResolution(ns=ns, mpol=0, ntheta=1, nxi=nxi),
+            resolution=MirrorResolution(ns=ns, mpol=0, nxi=nxi),
             ftol=1.0e-12,
             max_iterations=1000,
         )

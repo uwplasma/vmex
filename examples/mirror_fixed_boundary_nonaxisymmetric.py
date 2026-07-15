@@ -38,7 +38,7 @@ from vmec_jax.mirror.splines import (  # noqa: E402
 
 # Inputs: edit these constants, then run this file directly.
 CASES = ("rotating_ellipse", "straight_field_line")
-NS, MPOL, NTHETA, SOURCE_NXI = 5, 8, 17, 17
+NS, MPOL, SOURCE_NXI = 5, 8, 17
 SPLINE_ELEMENTS = 4
 SHAPE_STAGES = (0.0, 0.25, 0.5, 0.75, 1.0)
 FTOL = 1.0e-12
@@ -53,7 +53,7 @@ AXIAL_FLUX_DERIVATIVE = {"rotating_ellipse": 0.01, "straight_field_line": 0.005}
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 config = MirrorConfig(
-    resolution=MirrorResolution(ns=NS, mpol=MPOL, ntheta=NTHETA, nxi=SOURCE_NXI),
+    resolution=MirrorResolution(ns=NS, mpol=MPOL, nxi=SOURCE_NXI),
     z_min=-1.0,
     z_max=1.0,
     ftol=FTOL,

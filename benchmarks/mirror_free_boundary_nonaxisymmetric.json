@@ -1,5 +1,21 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/4",
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/5",
+  "provenance": {
+    "measurement_commit": "f9eb6a4443d9c92ba0bff36aa1c1cfb77bd5bf21",
+    "input_schema": "vmec_jax.mirror.input/1",
+    "basis": "CGL in xi; legacy uniform theta collocation",
+    "represented_modes": "coarse mpol=1; medium mpol=2",
+    "grid": "coarse and medium grids only",
+    "hardware_class": "office NVIDIA RTX A4000",
+    "promotion_status": "stale_negative_evidence",
+    "stale_sections": [
+      "coarse",
+      "medium",
+      "coarse_to_medium_relative_change"
+    ],
+    "stale_reason": "states predate the corrected magnetic-axis regularity map",
+    "promotion_blocker": "no third-grid local-mode convergence and excessive runtime/memory"
+  },
   "case": {
     "external_field": "ESSOS two-coil mirror with opposite x offsets",
     "axial_current_derivative": "1e-3 * s",

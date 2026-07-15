@@ -30,7 +30,7 @@ def _enable_solver_jit():
 
 def test_helical_finite_current_solve_converges_with_gauge_free_lambda() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=1, ntheta=3, nxi=5),
+        resolution=MirrorResolution(ns=5, mpol=1, nxi=5),
         z_min=-1.0,
         z_max=1.0,
         ftol=1.0e-12,
@@ -91,7 +91,7 @@ def test_helical_finite_current_solve_converges_with_gauge_free_lambda() -> None
 
 def test_mode_aware_preconditioner_preserves_lambda_gauge_subspace() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=3, ntheta=7, nxi=9)
+        resolution=MirrorResolution(ns=7, mpol=3, nxi=9)
     )
     grid = config.build_grid()
     preconditioner = SeparableMirrorPreconditioner.build(
@@ -122,7 +122,7 @@ def test_mode_aware_preconditioner_preserves_lambda_gauge_subspace() -> None:
 
 def test_mode_aware_tensor_operator_is_inverted_to_roundoff() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=9, mpol=4, ntheta=9, nxi=13)
+        resolution=MirrorResolution(ns=9, mpol=4, nxi=13)
     )
     preconditioner = SeparableMirrorPreconditioner.build(config.build_grid())
     exact = np.random.default_rng(8).normal(size=preconditioner.size)
@@ -140,7 +140,7 @@ def test_helical_equilibrium_radial_axial_refinement() -> None:
     energies = []
     for ns, nxi in ((5, 5), (7, 7), (9, 9)):
         config = MirrorConfig(
-            resolution=MirrorResolution(ns=ns, mpol=1, ntheta=3, nxi=nxi),
+            resolution=MirrorResolution(ns=ns, mpol=1, nxi=nxi),
             z_min=-1.0,
             z_max=1.0,
             ftol=1.0e-12,

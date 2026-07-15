@@ -51,7 +51,7 @@ def _enable_solver_jit():
 
 def _cylinder(*, ns: int = 11, nxi: int = 21, radius: float = 0.3, half_length: float = 1.2):
     grid = MirrorConfig(
-        resolution=MirrorResolution(ns=ns, mpol=0, ntheta=1, nxi=nxi),
+        resolution=MirrorResolution(ns=ns, mpol=0, nxi=nxi),
         z_min=-half_length,
         z_max=half_length,
     ).build_grid()
@@ -60,7 +60,7 @@ def _cylinder(*, ns: int = 11, nxi: int = 21, radius: float = 0.3, half_length: 
 
 
 def test_fixed_boundary_projection_enforces_geometry_and_lambda_gauge() -> None:
-    grid = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=3, ntheta=7, nxi=13)).build_grid()
+    grid = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=3, nxi=13)).build_grid()
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.05 * jnp.cos(2.0 * theta) * xi**2), grid)
@@ -170,7 +170,7 @@ def test_nonaxisymmetric_coordinates_recover_uniform_cartesian_field() -> None:
     """A shaped self-similar tube must not create a spurious Lorentz force."""
 
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=9, mpol=4, ntheta=9, nxi=9),
+        resolution=MirrorResolution(ns=9, mpol=4, nxi=9),
     )
     grid = config.build_grid()
     theta = jnp.asarray(grid.theta)
@@ -244,7 +244,7 @@ def test_energy_gradient_matches_central_difference_for_interior_shape() -> None
 
 def test_staggered_first_variation_matches_autodiff_for_3d_finite_beta() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=3, ntheta=7, nxi=11),
+        resolution=MirrorResolution(ns=7, mpol=3, nxi=11),
         z_min=-1.3,
         z_max=1.1,
     )
@@ -278,7 +278,7 @@ def test_staggered_first_variation_matches_autodiff_for_3d_finite_beta() -> None
 
 def test_staggered_weak_force_matches_fixed_boundary_projection() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=3, ntheta=7, nxi=11),
+        resolution=MirrorResolution(ns=7, mpol=3, nxi=11),
         z_min=-1.3,
         z_max=1.1,
     )
@@ -333,7 +333,7 @@ def test_staggered_weak_force_matches_fixed_boundary_projection() -> None:
 
 
 def test_radial_gauss_quadrature_controls_lambda_checkerboard_mode() -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=15, mpol=1, ntheta=3, nxi=15))
+    config = MirrorConfig(resolution=MirrorResolution(ns=15, mpol=1, nxi=15))
     grid = config.build_grid()
     boundary = MirrorBoundary.from_radius(0.3, grid)
     base = MirrorState.from_boundary(boundary, grid)
@@ -430,7 +430,7 @@ def test_separable_preconditioner_is_exact_for_its_model_and_reduces_gmres_work(
 
 def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9),
+        resolution=MirrorResolution(ns=7, mpol=0, nxi=9),
         z_min=-1.2,
         z_max=1.2,
         ftol=1.0e-12,
@@ -468,7 +468,7 @@ def test_reference_solver_polishes_perturbed_cylinder_to_physical_ftol() -> None
 
 def test_host_reference_closes_medium_system_above_old_dense_limit() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=17, mpol=0, ntheta=1, nxi=41),
+        resolution=MirrorResolution(ns=17, mpol=0, nxi=41),
         z_min=-1.2,
         z_max=1.2,
         ftol=1.0e-12,
@@ -504,7 +504,7 @@ def test_host_reference_closes_medium_system_above_old_dense_limit() -> None:
 
 def test_reference_solver_raises_instead_of_returning_best_unconverged_state() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=0, ntheta=1, nxi=9),
+        resolution=MirrorResolution(ns=7, mpol=0, nxi=9),
         ftol=1.0e-14,
         max_iterations=1,
     )

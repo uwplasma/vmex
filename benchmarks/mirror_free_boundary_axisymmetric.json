@@ -1,5 +1,17 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_axisymmetric/3",
+  "schema": "vmec_jax.benchmark.mirror_free_boundary_axisymmetric/4",
+  "provenance": {
+    "measurement_commit": "6ca2821ddad23c2d0b4ac272fc89c568287e100d",
+    "input_schema": "vmec_jax.mirror.input/1",
+    "basis": "CGL in xi; axisymmetric plasma state",
+    "represented_modes": "plasma m=0; per-scan ntheta is exterior quadrature, not plasma collocation",
+    "grid": "three radial, axial, and exterior-quadrature grids in scans",
+    "hardware_class": "NVIDIA RTX A4000",
+    "promotion_status": "research_blocked",
+    "stale_sections": [],
+    "stale_reason": null,
+    "promotion_blocker": "pointwise force is nonmonotone under refinement"
+  },
   "case": {
     "source_commit": "6ca2821d",
     "essos_commit": "4f27d6ed9b9ca094559d5f36084548e32c459420",

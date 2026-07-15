@@ -1,5 +1,20 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_fixed_boundary/1",
+  "schema": "vmec_jax.benchmark.mirror_fixed_boundary/2",
+  "provenance": {
+    "measurement_commit": "ae97b8af5847aa8df7fc14347d5c1250c36fdc9e",
+    "input_schema": "vmec_jax.mirror.input/1",
+    "basis": "CGL or clamped cubic B-spline in xi; legacy uniform theta collocation",
+    "represented_modes": "mixed; see each section",
+    "grid": "see each run",
+    "hardware_class": "office CPU and NVIDIA RTX A4000",
+    "promotion_status": "partially_stale",
+    "stale_sections": [
+      "nodal_3d",
+      "nonaxisymmetric_validation",
+      "implicit_derivatives shaped cases"
+    ],
+    "stale_reason": "shaped states predate axis regularity and input/2; nodal_3d declares mpol=1 with ntheta=5, which is a different represented space under the current exact-mpol contract"
+  },
   "nodal_3d": {
     "case": {
       "mpol": 1,

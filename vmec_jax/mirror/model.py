@@ -15,7 +15,7 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 
-MIRROR_INPUT_SCHEMA = "vmec_jax.mirror.input/1"
+MIRROR_INPUT_SCHEMA = "vmec_jax.mirror.input/2"
 MIRROR_OUTPUT_SCHEMA = "vmec_jax.mirror.mout/1"
 
 Array = Any
@@ -37,13 +37,12 @@ class MirrorResolution:
     """Static resolution for ``(s, theta, xi)`` mirror coordinates.
 
     ``mpol`` is the largest retained theta Fourier mode. Axisymmetry uses
-    ``mpol=0, ntheta=1``; three-dimensional collocation uses exactly
-    ``ntheta=2*mpol+1`` so no undeclared or Nyquist mode enters the state.
+    ``mpol=0``. The collocation size is derived as ``2*mpol+1`` so no
+    undeclared or Nyquist mode enters the state.
     """
 
     ns: int = 17
     mpol: int = 0
-    ntheta: int = 1
     nxi: int = 33
 
     def __post_init__(self) -> None:
@@ -53,12 +52,12 @@ class MirrorResolution:
             raise ValueError("mirror mpol must be >= 0")
         if self.nxi < 2:
             raise ValueError("mirror nxi must be >= 2")
-        minimum_theta = 1 if self.mpol == 0 else 2 * self.mpol + 1
-        if self.ntheta != minimum_theta:
-            raise ValueError(
-                f"mirror collocation requires ntheta=2*mpol+1; got "
-                f"mpol={self.mpol}, ntheta={self.ntheta}"
-            )
+
+    @property
+    def ntheta(self) -> int:
+        """Number of nodal values required to represent modes through ``mpol``."""
+
+        return 2 * self.mpol + 1
 
     @property
     def axisymmetric(self) -> bool:

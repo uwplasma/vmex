@@ -93,7 +93,7 @@ def external_field(points):
     return jax.vmap(biot_savart.B)(points.reshape(-1, 3)).reshape(points.shape)
 
 config = MirrorConfig(
-    resolution=MirrorResolution(ns=NS, mpol=0, ntheta=1, nxi=NXI),
+    resolution=MirrorResolution(ns=NS, mpol=0, nxi=NXI),
     z_min=Z_MIN,
     z_max=Z_MAX,
     ftol=FTOL,

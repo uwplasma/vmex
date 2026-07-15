@@ -4,8 +4,9 @@ Mirror geometry
 ``vmec_jax.mirror`` is the open-field-line equilibrium backend. It uses
 coordinates ``(s, theta, xi)`` with a nonperiodic axial coordinate and
 fixed-flux end cuts. It does not reinterpret a straight mirror as a periodic
-torus. Axisymmetric fixed- and free-boundary equilibria are supported;
-nonaxisymmetric straight mirrors remain a research API.
+torus. Fixed- and free-boundary solvers are implemented, but every mirror lane
+remains research status until the independent strong-force and refinement
+gates in ``plan.md`` pass.
 
 Open topology and end cuts
 --------------------------
@@ -40,6 +41,17 @@ surface, so disks temporarily close the two cuts. Their Neumann data continue
 the nonzero plasma and applied-field through-flux across each cut. The disks do
 not close the plasma or acquire an interface pressure-balance equation.
 Tangency and total-pressure continuity are enforced only on the lateral LCFS.
+
+Resolution contract
+-------------------
+
+``MirrorResolution(ns=..., mpol=..., nxi=...)`` has one angular-resolution
+input: ``mpol`` is the largest represented Fourier mode. The plasma
+collocation size is the read-only value ``ntheta = 2*mpol + 1``; therefore
+``mpol=0`` has one theta node and ``mpol=4`` has nine. Users cannot request an
+inconsistent node/mode pair or accidentally introduce a Nyquist mode.
+Exterior angular quadrature remains an independent argument because it
+integrates the vacuum boundary rather than defining plasma unknowns.
 
 Current capability
 ------------------
@@ -127,8 +139,9 @@ field-line direction. Plots resample the uniformly spaced poloidal data with
 their resolved Fourier modes, so low-order ellipses are not displayed as
 polygons.
 
-The compact six-point isotropic reference data are recorded in
-``benchmarks/mirror_free_boundary_axisymmetric.json``. At 50% requested and
+The compact six-point isotropic research data are recorded in
+``benchmarks/mirror_free_boundary_axisymmetric.json`` with
+``promotion_status=research_blocked``. At 50% requested and
 achieved central beta, the solve reaches variational and staggered-weak
 residuals of ``5.38e-15`` and ``7.08e-16`` in 10 iterations. The center radius
 increases by 7.64% and the
@@ -168,15 +181,13 @@ condition: the old state varied ``|B|`` by 9--20% over theta at ``s=0`` even
 though those samples are one physical point. That freedom has been removed;
 all earlier shaped pointwise-force values must be regenerated before use.
 
-At ``ns=15,nxi=15,ntheta=5``, the variational force is ``2.25e-13`` and the
-independently differenced all-row/axis/bulk force residuals are
-``0.0430/0.107/0.00972``. The split is intentional: the first two off-axis
-rows expose the still-open mode-regular axis stencil instead of contaminating
-the bulk convergence measure. At ``ns=31`` (3,805 unknowns), the matrix-free
-solve reaches ``6.81e-13`` in 141 seconds and bulk force falls to ``0.00628``.
-The axis residual and 10,500 Krylov iterations remain promotion blockers.
-Systems through 2,048 unknowns have a bounded dense reference polish; larger
-systems report matrix-free convergence honestly.
+The historical ``ns=15,nxi=15,ntheta=5`` shaped record reached variational
+force ``2.25e-13``, but declared ``mpol=1``. Under the current input schema,
+five nodes represent modes through ``mpol=2``. That section of
+``benchmarks/mirror_fixed_boundary.json`` is explicitly stale and its force,
+runtime, and Krylov values are not current validation evidence. The corrected
+study will be regenerated only after the staggered strong-force reconstruction
+passes its manufactured tests.
 
 Independent nonaxisymmetric analytic fixtures
 ----------------------------------------------
@@ -310,8 +321,9 @@ semi-axis scale 0.03 m, the solved Cartesian field has mean direction cosine
 scalar potential. Halving the radius improves these to ``0.999988`` and
 ``0.999810``, consistent with paraxial directional convergence. Full-mesh
 field magnitude does not converge under the same study, so magnitude promotion
-awaits a staggered comparison. Compact positive and negative evidence is in
-the ``nonaxisymmetric_validation`` section of
+awaits a staggered comparison. These shaped values predate the corrected
+axis-regularity map and are retained only as stale research history. Compact
+positive and negative data are in the ``nonaxisymmetric_validation`` section of
 ``benchmarks/mirror_fixed_boundary.json``.
 
 A fixed-boundary pressure continuation calibrates conserved mass from the
@@ -693,7 +705,7 @@ interior radius and gauge-free stream function together. Earlier refinement
 runs held the stream function fixed; those incomplete-equilibrium rows have
 been removed rather than used as validation evidence.
 
-The corrected finite-current endpoint case uses two oppositely offset end-coil
+The historical finite-current endpoint case uses two oppositely offset end-coil
 fields supplied by ESSOS. At ``(ns,ntheta,nxi)=(5,3,5)`` and ``(7,5,7)``, beta
 0 and 50% all converge at requested ``ftol=1e-12``. Variational and independent
 weak-force residuals, normalized ``div(B)``, normal stress, and ``B.n`` remain
@@ -708,8 +720,10 @@ at beta zero and 73% at beta 50%, however. The medium endpoint pair takes
 800.7 s and 4.25 GiB host RSS on one RTX A4000. A second formulation using
 high-order cap panels did not complete a bounded 690.7 s coarse scan. The lane
 therefore remains research-only: no third brute-force grid is scheduled before
-structured Jacobian solves make local-mode refinement practical. Compact input,
-residual, observable, runtime, and memory evidence is retained in
+structured Jacobian solves make local-mode refinement practical. These states
+also predate the corrected axis-regularity map, so they are stale negative
+evidence rather than current equilibria. Compact input, residual, observable,
+runtime, and memory evidence is retained in
 ``benchmarks/mirror_free_boundary_nonaxisymmetric.json``.
 
 ``solve_beta_scan_cli`` remains the topology-independent hot-start driver and

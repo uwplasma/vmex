@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import matplotlib.image as mpimg
@@ -25,6 +27,36 @@ from vmec_jax.mirror import (
 )
 from vmec_jax.mirror.forces import mirror_energy
 from vmec_jax.mirror.output import _theta_samples
+
+
+REPO = Path(__file__).resolve().parents[2]
+
+
+def test_canonical_benchmarks_declare_provenance_and_promotion_status() -> None:
+    paths = sorted((REPO / "benchmarks").glob("mirror_*.json"))
+    assert [path.name for path in paths] == [
+        "mirror_fixed_boundary.json",
+        "mirror_free_boundary_axisymmetric.json",
+        "mirror_free_boundary_nonaxisymmetric.json",
+        "mirror_hybrid_fixed_boundary.json",
+    ]
+    required = {
+        "measurement_commit",
+        "input_schema",
+        "basis",
+        "represented_modes",
+        "grid",
+        "hardware_class",
+        "promotion_status",
+        "stale_sections",
+        "stale_reason",
+    }
+    for path in paths:
+        record = json.loads(path.read_text())
+        assert required <= record["provenance"].keys(), path.name
+        commit = record["provenance"]["measurement_commit"]
+        assert len(commit) == 40 and int(commit, 16) >= 0, path.name
+        assert record["provenance"]["promotion_status"] != "supported", path.name
 
 
 def _sample_mout() -> MoutData:

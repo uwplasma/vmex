@@ -64,15 +64,13 @@ def test_mirror_config_freezes_supported_end_and_convergence_contract() -> None:
     assert config.end_condition is EndCondition.FIXED_FLUX_CUT
     assert config.ftol == 1.0e-12
     assert config.max_iterations == 2000
-    assert MIRROR_INPUT_SCHEMA == "vmec_jax.mirror.input/1"
+    assert MIRROR_INPUT_SCHEMA == "vmec_jax.mirror.input/2"
     assert MIRROR_OUTPUT_SCHEMA == "vmec_jax.mirror.mout/1"
 
-    with pytest.raises(ValueError, match=r"ntheta=2\*mpol\+1"):
-        MirrorResolution(ns=5, mpol=2, ntheta=4, nxi=9)
-    with pytest.raises(ValueError, match=r"ntheta=2\*mpol\+1"):
-        MirrorResolution(ns=5, mpol=0, ntheta=3, nxi=9)
-    with pytest.raises(ValueError, match=r"ntheta=2\*mpol\+1"):
-        MirrorResolution(ns=5, mpol=2, ntheta=7, nxi=9)
+    assert MirrorResolution(mpol=0).ntheta == 1
+    assert MirrorResolution(mpol=4).ntheta == 9
+    with pytest.raises(TypeError, match="ntheta"):
+        MirrorResolution(ns=5, mpol=2, ntheta=5, nxi=9)
     with pytest.raises(ValueError, match="z_max"):
         MirrorConfig(z_min=1.0, z_max=1.0)
     with pytest.raises(ValueError, match="ftol"):
@@ -81,7 +79,7 @@ def test_mirror_config_freezes_supported_end_and_convergence_contract() -> None:
 
 def test_grid_and_state_shapes_are_explicit_and_pytree_compatible() -> None:
     config = MirrorConfig(
-        resolution=MirrorResolution(ns=7, mpol=3, ntheta=7, nxi=13),
+        resolution=MirrorResolution(ns=7, mpol=3, nxi=13),
         z_min=-2.0,
         z_max=3.0,
     )
@@ -176,7 +174,7 @@ def test_theta_fft_derivative_and_quadrature_resolve_requested_modes() -> None:
 
 def _grid(*, ntheta: int = 1, nxi: int = 5):
     return MirrorConfig(
-        resolution=MirrorResolution(ns=3, mpol=(ntheta - 1) // 2, ntheta=ntheta, nxi=nxi)
+        resolution=MirrorResolution(ns=3, mpol=(ntheta - 1) // 2, nxi=nxi)
     ).build_grid()
 
 
@@ -185,7 +183,6 @@ def test_model_constructors_reject_invalid_static_contracts() -> None:
         ({"ns": 2}, "ns"),
         ({"mpol": -1}, "mpol"),
         ({"nxi": 1}, "nxi"),
-        ({"mpol": 1, "ntheta": 2}, "collocation"),
     ):
         with pytest.raises(ValueError, match=message):
             MirrorResolution(**arguments)
