@@ -32,8 +32,7 @@ def _two_loop_axis_field(z, *, radius: float, separation: float, current: float)
 
     z = jnp.asarray(z)
     return sum(
-        4.0e-7 * jnp.pi * current * radius**2
-        / (2.0 * (radius**2 + (z - position) ** 2) ** 1.5)
+        4.0e-7 * jnp.pi * current * radius**2 / (2.0 * (radius**2 + (z - position) ** 2) ** 1.5)
         for position in (-0.5 * separation, 0.5 * separation)
     )
 
@@ -95,9 +94,7 @@ def test_polynomial_flared_tube_matches_exact_jacobian_and_volume() -> None:
         geometry.sqrt_g.shape,
     )
     np.testing.assert_allclose(geometry.sqrt_g, expected_jacobian, rtol=3.0e-13, atol=3.0e-13)
-    expected_volume = np.pi * half_length * np.dot(
-        grid.axial_basis.weights, np.asarray(boundary_radius) ** 2
-    )
+    expected_volume = np.pi * half_length * np.dot(grid.axial_basis.weights, np.asarray(boundary_radius) ** 2)
     np.testing.assert_allclose(geometry.volume, expected_volume, rtol=3.0e-13, atol=3.0e-13)
 
 
@@ -118,11 +115,15 @@ def test_theta_shaped_geometry_is_positive_and_has_correct_mean_volume() -> None
 
     assert np.all(np.asarray(geometry.sqrt_g) > 0.0)
     assert not bool(geometry.jacobian_sign_changed)
-    expected_volume = 0.5 * half_length * np.einsum(
-        "j,k,jk->",
-        grid.theta_basis.weights,
-        grid.axial_basis.weights,
-        np.asarray(boundary_radius) ** 2,
+    expected_volume = (
+        0.5
+        * half_length
+        * np.einsum(
+            "j,k,jk->",
+            grid.theta_basis.weights,
+            grid.axial_basis.weights,
+            np.asarray(boundary_radius) ** 2,
+        )
     )
     np.testing.assert_allclose(geometry.volume, expected_volume, rtol=4.0e-13, atol=4.0e-13)
     assert np.max(np.abs(np.asarray(geometry.g_stheta))) > 0.0
@@ -154,9 +155,7 @@ def test_stream_function_field_is_discretely_divergence_free_and_conserves_flux(
 
     np.testing.assert_allclose(divergence_b(field, geometry, grid), 0.0, rtol=0.0, atol=3.0e-12)
     axial_flux_density = grid.theta_basis.integrate(field.jac_b_xi, axis=1)
-    expected_flux = np.broadcast_to(
-        2.0 * np.pi * np.asarray(psi_prime)[:, None], axial_flux_density.shape
-    )
+    expected_flux = np.broadcast_to(2.0 * np.pi * np.asarray(psi_prime)[:, None], axial_flux_density.shape)
     np.testing.assert_allclose(axial_flux_density, expected_flux, rtol=3.0e-13, atol=3.0e-13)
 
 
@@ -183,6 +182,32 @@ def test_axisymmetric_essos_benchmark_uses_concentric_coils() -> None:
     nonaxisymmetric = _two_coil_dofs(axisymmetric=False)
     np.testing.assert_array_equal(axisymmetric[:, 0, 0], 0.0)
     np.testing.assert_allclose(nonaxisymmetric[:, 0, 0], [0.04, -0.04])
+
+
+def test_axisymmetric_benchmark_initializer_traces_finite_radius_flux() -> None:
+    from benchmarks.run_mirror_exterior_endpoints import _axisymmetric_flux_surface_radii
+
+    z = np.linspace(-0.8, 0.8, 7)
+    center_field, curvature, flux = 0.08, 0.02, 0.0025
+
+    def field(points):
+        x, y, axial = jnp.moveaxis(jnp.asarray(points), -1, 0)
+        return jnp.stack(
+            (
+                -curvature * x * axial,
+                -curvature * y * axial,
+                center_field + curvature * (axial**2 - 0.5 * (x**2 + y**2)),
+            ),
+            axis=-1,
+        )
+
+    paraxial = np.sqrt(2.0 * flux / (center_field + curvature * z**2))
+    radii, metrics = _axisymmetric_flux_surface_radii(field, z, flux, paraxial)
+    enclosed = 0.5 * (center_field + curvature * z**2) * radii**2 - 0.125 * curvature * radii**4
+
+    np.testing.assert_allclose(enclosed, flux, rtol=2.0e-13)
+    assert metrics["maximum_relative_flux_error"] < 2.0e-13
+    assert metrics["maximum_paraxial_radius_correction"] > 1.0e-3
 
 
 def test_two_coil_flux_tube_has_high_field_throats_and_correct_on_axis_field() -> None:

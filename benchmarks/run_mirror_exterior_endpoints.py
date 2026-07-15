@@ -12,6 +12,7 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
+from scipy.optimize import brentq
 
 from vmec_jax.mirror import (
     MirrorBoundary,
@@ -87,6 +88,53 @@ def _axisymmetric_field_preflight(external_field, z: np.ndarray) -> dict[str, fl
     return metrics
 
 
+def _axisymmetric_flux_surface_radii(
+    external_field,
+    z: np.ndarray,
+    axial_flux_derivative: float,
+    initial_radii: np.ndarray,
+    *,
+    order: int = 16,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """Trace one axisymmetric flux surface from a supplied field callable."""
+
+    nodes, weights = np.polynomial.legendre.leggauss(order)
+    radial_nodes = 0.5 * (nodes + 1.0)
+    radial_weights = 0.5 * weights
+
+    def enclosed_flux(radius: float, axial: float) -> float:
+        points = np.column_stack((radius * radial_nodes, np.zeros(order), np.full(order, axial)))
+        bz = np.asarray(external_field(jnp.asarray(points)))[:, 2]
+        return float(radius**2 * np.sum(radial_weights * radial_nodes * bz))
+
+    radii = []
+    for axial, initial in zip(np.asarray(z), np.asarray(initial_radii), strict=True):
+        upper = 2.0 * float(initial)
+        while enclosed_flux(upper, float(axial)) < axial_flux_derivative:
+            upper *= 2.0
+            if upper > 16.0 * float(initial):
+                raise ValueError("failed to bracket the supplied-field flux surface")
+        radii.append(
+            brentq(
+                lambda radius: enclosed_flux(radius, float(axial)) - axial_flux_derivative,
+                0.0,
+                upper,
+                xtol=1.0e-13,
+                rtol=1.0e-13,
+            )
+        )
+    radii = np.asarray(radii)
+    flux_error = max(
+        abs(enclosed_flux(radius, axial) / axial_flux_derivative - 1.0)
+        for radius, axial in zip(radii, np.asarray(z), strict=True)
+    )
+    return radii, {
+        "quadrature_order": order,
+        "maximum_relative_flux_error": float(flux_error),
+        "maximum_paraxial_radius_correction": float(np.max(np.abs(radii / np.asarray(initial_radii) - 1.0))),
+    }
+
+
 def run(
     ns: int,
     ntheta: int,
@@ -144,11 +192,19 @@ def run(
     )
     center = grid.nxi // 2
     flux = 0.5 * on_axis[center] * center_radius**2
-    base = MirrorBoundary.from_axis_field(flux, on_axis, grid)
-    boundary = base
-    if not axisymmetric:
+    paraxial = MirrorBoundary.from_axis_field(flux, on_axis, grid)
+    flux_preflight = None
+    if axisymmetric:
+        exact_radii, flux_preflight = _axisymmetric_flux_surface_radii(
+            external_field,
+            np.asarray(grid.z),
+            float(flux),
+            np.asarray(paraxial.radius_scale[0]),
+        )
+        boundary = MirrorBoundary.from_radius(exact_radii, grid)
+    else:
         boundary = MirrorBoundary(
-            base.radius_scale + 0.03 * jnp.asarray(grid.xi)[None, :] * jnp.cos(jnp.asarray(grid.theta)[:, None])
+            paraxial.radius_scale + 0.03 * jnp.asarray(grid.xi)[None, :] * jnp.cos(jnp.asarray(grid.theta)[:, None])
         )
     betas = jnp.asarray(beta_values)
     start = time.perf_counter()
@@ -234,6 +290,7 @@ def run(
         "grid": {"ns": ns, "ntheta": ntheta, "nxi": nxi},
         "axisymmetric": axisymmetric,
         "field_preflight": field_preflight,
+        "flux_surface_preflight": flux_preflight,
         "initial_center_radius_m": center_radius,
         "exterior_order": exterior_order,
         "spline_elements": spline_elements,
