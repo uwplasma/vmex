@@ -10,12 +10,12 @@ Audit baseline (2026-07-15 CDT, final source/literature review):
 - the implementation audit ends on clean branch `codex/mirror-geometry` at
   `85de75c1`; T5 is committed and pushed, not an active worktree tranche. The
   final plan-only revision is `e9a0f124`;
-- base `origin/main` is `ed4ac7ac`; the final plan head is zero commits behind
-  and 318 ahead, so no main-branch merge is currently pending;
-- draft PR #22 is open, mergeable, and contains 101 GitHub commits. The
-  completed implementation-head jobs pass; the plan-only head was awaiting
-  workflow scheduling at the final check. Inspect CI once before T6 starts,
-  but do not poll it while implementing;
+- base `origin/main` is `ed4ac7ac`; the branch is zero commits behind, so no
+  main-branch merge is currently pending;
+- draft PR #22 is open and mergeable. The completed implementation-head jobs
+  pass; the plan-only head was awaiting workflow scheduling at the final
+  check. Inspect CI once before T6 starts, but do not poll it while
+  implementing;
 - the active diff is 50 files, 16,564 insertions, and 1,608 deletions. This is
   above the final 46-file budget and makes T11 deletion mandatory;
 - `vmec_jax/mirror` contains 13 modules, 7,701 physical lines, and 20 lazy
