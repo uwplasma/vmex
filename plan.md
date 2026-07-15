@@ -1,10 +1,11 @@
 # Mirror equilibrium release plan
 
 Status: final authoritative plan for draft PR #22. Revised 2026-07-15 after
-auditing the pushed branch, current `origin/main`, VMEC2000/ANIMEC, DESC and
-its experimental mirror/Chebyshev branches, SOLVAX 0.8.3, Pleiades, primary
-mirror literature, and differentiable-solver literature. This file replaces
-all earlier plans, including `plan_mirror.md`. Do not create another roadmap.
+auditing the pushed branch and dirty research worktree, current `origin/main`,
+VMEC2000/ANIMEC, DESC and its experimental mirror/Chebyshev branches, GVEC,
+SOLVAX 0.8.3, Pleiades, primary mirror literature, and differentiable-solver
+literature. This file replaces all earlier plans, including `plan_mirror.md`.
+Do not create another roadmap.
 
 The objective is a small, research-grade mirror-equilibrium extension of
 `vmec_jax`, not a collection of geometry demonstrations. A promoted lane must
@@ -16,20 +17,26 @@ claimed, and expose one simple documented workflow.
 
 Repository state at this revision:
 
-- branch: `codex/mirror-geometry` at `e35bea02`;
-- base: `origin/main` at `ed4ac7ac`; branch is 0 behind and 336 ahead;
+- branch: `codex/mirror-geometry` at `b2eb72ef`;
+- base: `origin/main` at `ed4ac7ac`; branch is 0 behind and 339 ahead;
 - PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open, mergeable, draft;
-- CI on `e35bea02`: all 14 required checks pass; the manual/nightly full job is
+- CI on `b2eb72ef`: all 14 required checks pass; the manual/nightly full job is
   skipped as intended;
-- diff against fetched `origin/main`: 53 files, 17,996 insertions, 1,616
+- diff against fetched `origin/main`: 53 files, 17,587 insertions, 1,602
   deletions. Never use a stale local `main` for branch-size accounting;
-- mirror source: 13 modules, 8,052 lines at pushed HEAD;
-- mirror tests: 10 files, 4,492 lines;
+- mirror source: 13 modules, 8,147 lines at pushed HEAD;
+- mirror tests: 10 files, 4,642 lines;
 - public mirror API: 20 lazy names;
-- normal mirror suite after T9a: 109 passed, 9 expected full/nightly skips in
-  242.60 s. Strict Sphinx, pre-commit, and `git diff --check` pass;
+- normal mirror suite after the accepted T9b geometry tests: 110 passed and 9
+  expected full/nightly skips in 264.34 s. Strict Sphinx, pre-commit, and
+  `git diff --check` pass;
 - no coil constructor or Biot-Savart implementation is part of the mirror
   package. Those belong to ESSOS.
+
+The dirty worktree contains one unaccepted C2-return/control-allocation
+experiment and its full-test parameter change. It is diagnostic evidence, not
+part of the pushed implementation, and must not be committed until the solved
+center-map state below passes its physical gates.
 
 ### 1.1 What is already achieved
 
@@ -74,6 +81,26 @@ Important measured results:
 - Setting the racetrack current to zero leaves force near `0.54733` and reduces
   iota to `5.3e-9`. The force defect is geometric/discretization error, while
   the observed endpoint transform is currently current-driven.
+- T9b's return-localized fixture exposed the missing closed-equilibrium degree
+  of freedom. The current closed vectorizer fixes the supplied centerline and
+  activates only radial rows `1:-1`; unlike VMEC, it cannot move the magnetic
+  axis while holding the physical LCFS fixed. On the same `ns=5` grid a
+  circular axis has strong force `2.55e-3`, but half-straightening raises it to
+  `0.602`. Ellipticity changes the endpoint by only about `0.014`, return twist
+  adds about `0.279`, and current continuation from zero to target changes
+  force by only `3e-4` while driving iota from zero to `0.04013`.
+- A fixed C2 Hermite return and return-weighted controls improve the
+  current-free circular-section sequence from `0.34424` at 16 controls to
+  `0.14032` at 32 and `0.12603` at 64. Refining `ns=5 -> 9` at 64 controls
+  changes force only to `0.11033`. The `<5e-2` gate therefore fails within the
+  64-control limit. Direct 24-control endpoint solving also exceeds the
+  30-minute state budget; production refinement must use staged restarts.
+- On GPU, the dirty 32-control C2/return-weighted finite-current endpoint
+  reaches variational `1.11e-14` in 56 nonlinear and 1,095 linear iterations
+  in 64.7 s, with divergence `9.13e-15` and iota `0.04346`, but normalized
+  strong force remains `0.19547` (`0.25158` on axis). Tight nonlinear
+  tolerance and acceleration therefore do not repair the missing physical
+  variation.
 
 The release is blocked by closed-hybrid strong-force/refinement evidence and
 then by code reduction. The conditional nonaxisymmetric free-boundary attempt
@@ -162,16 +189,24 @@ independence, panel refinement, and field reconstruction are required tests.
 
 ### 3.2 Closed stellarator-mirror hybrid
 
-The hybrid is toroidal even though most of its axis is straight. Its map is
+The hybrid is toroidal even though most of its reference curve is straight.
+Its fixed-boundary map is
 
 ```
-x(s, theta, u) = c(u) + r(s, theta, u)
-                 [cos(theta) n(u) + sin(theta) b(u)],
+x(s, theta, u) = c_ref(u) + q1(s,u) n(u) + q2(s,u) b(u)
+                 + r(s,theta,u)
+                   [cos(theta) n(u) + sin(theta) b(u)],
+q1(1,u) = q2(1,u) = 0.
 ```
 
-where `c(u)` is a periodic cubic B-spline centerline and `(n,b)` is a
+Here `c_ref(u)` is a periodic cubic B-spline reference curve and `(n,b)` is a
 rotation-minimizing frame with a distributed periodic holonomy correction.
-The same Clebsch field and energy are used with periodic `u`.
+The solved magnetic axis is
+`c_mag(u)=c_ref(u)+q1(0,u)n(u)+q2(0,u)b(u)`. The two transverse fields move
+interior surface centers while preserving the Cartesian LCFS. A tangent shift
+is excluded because it only reparameterizes `u`; this follows VMEC's
+fixed-toroidal-label geometry and GVEC's two-coordinate flexible mapping. The
+same Clebsch field and energy are used with periodic `u`.
 
 The target family is precise:
 
@@ -247,12 +282,24 @@ DESC master remains a strong reference for continuation, exact JVP/VJP
 objectives, and differentiation discipline, but its toroidal Fourier-Zernike
 state does not solve the representation problem addressed here.
 
-### 4.3 VMEC2000 and Pleiades roles
+### 4.3 VMEC2000, GVEC, and Pleiades roles
 
 VMEC2000 validates only the smooth circular closed limit: flux conventions,
 half/full-mesh force structure, axis regularity, and output normalization.
 Standard VMEC's global toroidal Fourier representation is not the production
-hybrid basis.
+hybrid basis. Its fixed-boundary residual sets only the edge geometry force to
+zero; interior Cartesian geometry remains active and the magnetic axis is
+read from the solved innermost geometry. This is the structural behavior the
+current fixed-reference hybrid is missing.
+
+GVEC is the closest production design analogue for the closed hybrid: its
+fixed map can be a generalized moving frame, while two cross-section
+coordinates and `lambda` are solved with a fixed boundary. Its radial
+B-splines and linear polar-axis constraints confirm that the magnetic axis is
+part of the volume state, not the supplied frame. This PR retains its tested
+VMEC-like radial full/half mesh rather than starting a second radial rewrite;
+only the two transverse center fields are adopted. GVEC is a design and
+circular-limit comparison source, not a racetrack parity oracle.
 
 The pinned 2021 Pleiades Green-function solve is an independent low-beta
 axisymmetric comparator for on-axis diamagnetic field through 10%. It is not a
@@ -312,9 +359,12 @@ consolidated GMRES/implicit-wrapper A/B during the deletion phase, not while
 hybrid physics is changing. If a SOLVAX 0.8.3 API is adopted, raise the package
 minimum from the stale `>=0.2.0` declaration.
 
-Do not add JAXopt, Lineax, Optimistix, Optax, or Equinox in this PR. Their
-generic wrappers do not supply mirror residuals, end conditions, shape
-calculus, or the local factors already required here.
+Do not add JAXopt, Lineax, Optimistix, Optax, or Equinox in this PR. JAXopt and
+Optimistix both recommend implicit differentiation for converged roots, and
+Lineax supplies reusable transpose-aware linear solves, but their generic
+wrappers do not supply mirror residuals, end conditions, shape calculus, or
+the local factors already required here. Replacing a proven local wrapper is
+allowed only in T11 when it removes net code and preserves diagnostics.
 
 ### 5.3 Differentiation
 
@@ -393,19 +443,41 @@ after each accepted tranche. Do not expand scope between tranches.
 
 ### T9b. Converge the closed hybrid primal
 
-1. Add one geometry-owned circle-to-racetrack coefficient family. The circle
-   and racetrack use the same periodic parameter orientation so coefficient
-   interpolation is well-conditioned.
-2. Replace the global sinusoidal section-angle fixture with a return-localized
-   twist profile. Orientation is constant over the central 50% of each leg and
-   rotates by 90 degrees only in each return.
-3. Allocate longitudinal resolution by physics: keep the minimum controls
-   needed for exact straight interiors and place the remaining controls in the
-   returns. Compare this return-weighted parameterization with the current
-   arc-length-weighted 16/32-control family.
-4. Validate value/first/second derivative closure, frame closure, holonomy,
+1. Retain the accepted shared-phase circle-to-racetrack family,
+   return-localized section twist, geometry closure tests, and exact periodic
+   state transfer. Hold the dirty fixed-C2/return-weighted experiment until
+   the center-map implementation passes; then keep it only if its staged
+   endpoint improves over the pushed geometry.
+2. Add the missing fixed-boundary transverse center map
+
+   ```
+   d(s,u) = q1(s,u) n(u) + q2(s,u) b(u),
+   x(s,theta,u) = c_ref(u) + d(s,u) + r(s,theta,u) e_r(theta,u),
+   q1(1,u) = q2(1,u) = 0.
+   ```
+
+   `(q1,q2)` has coefficient shape `(ns,2,n_u)` on the radial full mesh and
+   periodic longitudinal B-spline basis. It keeps the physical LCFS fixed,
+   solves the magnetic axis, and represents theta-independent interior
+   translations without longitudinal Fourier modes. Excluding the tangent
+   component removes the `u`-reparameterization nullspace. Apply half-turn,
+   reflection, and planar symmetry as coefficient maps.
+3. Make this one cross-file state extension, not a new subsystem:
+   `model.py` owns the optional evaluated center map; `splines.py` owns its
+   coefficients, fixed-edge projection, packing, bounds, and transfer;
+   `geometry.py` owns the embedding and metric; `forces.py` owns radial-Gauss
+   energy plus independent weak/strong actions; `solver.py` adds two
+   theta-independent cyclic preconditioner blocks. `implicit.py` and
+   `output.py` change only after primal promotion. Add no module or public
+   name. The stable Jacobian is the regular polar contribution plus
+   `d_s . (x_theta cross x_u)`; never evaluate a singular axis radial vector.
+4. Validate zero-map bitwise parity, fixed Cartesian LCFS, axis uniqueness,
+   value/first/second derivative closure, frame closure, holonomy,
    symmetry maps, curvature, clearance, section area, Jacobian sign, and JAX
-   centerline/section derivatives before solving.
+   center-map/section derivatives before solving. A displaced circular
+   initial axis must reconverge to the symmetric zero-map solution. A dense
+   tiny Hessian must match the packed center blocks, their transpose identity,
+   and the physical work of a transverse displacement.
 5. Continue one control group at a time from the accepted circular solution:
    axis aspect, straight length, return curvature, ellipse aspect ratio,
    return-localized 90-degree twist, then current fractions
@@ -415,19 +487,24 @@ after each accepted tranche. Do not expand scope between tranches.
    true linear residual, Jacobian, energy, volume, `|B|`, and iota. Reject a
    stage if only the variational residual converges.
 7. Run independent longitudinal refinement with at least 16, 24, and 32
-   controls, then one higher return-resolved case only if the 32-control trend
-   predicts the gate. Refine quadrature independently. The measured
-   `0.548 -> 0.279` force reduction is the baseline, not acceptance.
-8. If return-localized controls do not produce monotone force convergence
-   below `5e-2` within 64 controls, 8 GiB, and 30 minutes per state, stop and
-   repair the geometry/strong-force formulation. Do not proceed to beta,
-   derivatives, or plots.
+   controls using staged state transfer, then one higher return-resolved case
+   only if the 32-control trend predicts the gate. Refine radial resolution and
+   quadrature independently. The fixed-axis `0.344 -> 0.140 -> 0.126` sequence
+   is negative baseline evidence, not acceptance.
+8. If the center-map circular and half-straight stages do not reduce the
+   independently reconstructed force under both longitudinal and radial
+   refinement, stop before the full endpoint and repair only the map/force
+   formulation. If those stages pass but the full endpoint does not converge
+   monotonically below `5e-2` within 64 controls, 8 GiB, and 30 minutes per
+   state, remove the fixed hybrid from release scope, retain one compact
+   negative record, and skip T9c/T9d. Do not preserve a public scaffold.
 9. Trace at least four radial/phase labels for at least 20 turns at zero and
    target current. Report geometric and current-driven iota separately and
    verify every line spans both mirror legs and both returns.
 
-Exit: target geometry reaches `ftol <= 1e-12`, weak parity, true linear
-residual `<=1e-8`, positive geometry, and the strong-force refinement gate.
+Exit: the solved magnetic axis and target geometry reach `ftol <= 1e-12`, weak
+parity, true linear residual `<=1e-8`, a fixed physical LCFS, positive
+geometry, and the strong-force refinement gate.
 
 ### T9c. Establish physics limits
 
@@ -586,14 +663,14 @@ Percentages represent promotion evidence, not implementation volume.
 | Fixed open nonaxisymmetric | 100% | maintain shared-core gates |
 | Free open axisymmetric through 10% | 100% | maintain support ceiling |
 | Free open nonaxisymmetric | 35% | bounded three-grid disposition |
-| Fixed closed B-spline hybrid | 75% | staged geometry/current continuation, force refinement, open limit, beta, derivatives/output |
+| Fixed closed B-spline hybrid | 55% | transverse center map, staged geometry/current continuation, force refinement, open limit, beta, derivatives/output |
 | Structured preconditioning | 100% | maintain resource and true-residual gates |
 | Implicit differentiation | 90% | closed-hybrid derivatives after primal promotion |
-| Code/API simplification | 64% | 53/8,052/4,492/20 must meet T11 budgets |
+| Code/API simplification | 62% | 53/8,147/4,642/20 must meet T11 budgets |
 | Docs/examples/artifacts | 73% | hybrid showcase and final README/docs reduction |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned runner |
 
-Weighted completion of required release models remains approximately 88%.
+Weighted completion of required release models is approximately 83%.
 Free closed hybrid and ANIMEC are excluded because they are explicitly
 deferred.
 
@@ -601,13 +678,13 @@ deferred.
 
 Source revisions reviewed locally on 2026-07-15:
 
-- `vmec_jax` main `ed4ac7ac` and mirror HEAD `e35bea02`;
+- `vmec_jax` main `ed4ac7ac` and mirror HEAD `b2eb72ef`;
 - DESC master `24aa7b9d`, mirror `0dba071d`, mirror-anisotropy `805b77fc`,
   racetrack `2014ed0e`, cylindrical/Chebyshev `6f85f50a`, and
   straight-stellarator `8cf50b58`;
 - STELLOPT develop `e03e72e9` plus ANIMEC branches and VMEC2000 force,
   pressure, preconditioner, and output source;
-- SOLVAX 0.8.3 `a904ac20`;
+- SOLVAX 0.8.3 `a904ac20`, including its current scalar-GMRES follow-up;
 - Pleiades `0161abb3` pinned reference script and data.
 
 Primary references:
@@ -620,6 +697,8 @@ Primary references:
   <https://doi.org/10.1585/pfr.6.2403123>
 - DESC source and branches: <https://github.com/PlasmaControl/DESC>
 - DESC free-boundary formulation: <https://arxiv.org/abs/2412.05680>
+- GVEC flexible-coordinate formulation: <https://arxiv.org/abs/2410.17595>
+- GVEC theory and implementation: <https://doi.org/10.21105/joss.09670>
 - SOLVAX: <https://github.com/uwplasma/SOLVAX>
 - Pleiades: <https://github.com/eepeterson/pleiades>
 - WHAM axisymmetric-mirror physics: <https://doi.org/10.1017/S0022377823000806>
@@ -636,6 +715,12 @@ Primary references:
   <https://arxiv.org/abs/2506.14792>
 - Blondel et al., modular implicit differentiation:
   <https://arxiv.org/abs/2105.15183>
+- JAXopt implicit differentiation:
+  <https://jaxopt.github.io/stable/implicit_diff.html>
+- Optimistix implicit adjoints:
+  <https://docs.kidger.site/optimistix/api/adjoints/>
+- Lineax structured and transpose-aware solves:
+  <https://docs.kidger.site/lineax/>
 - JAX custom derivatives:
   <https://docs.jax.dev/en/latest/notebooks/Custom_derivative_rules_for_Python_code.html>
 - JAX `linearize`, `custom_root`, and `custom_linear_solve`:
