@@ -19,7 +19,7 @@ from vmec_jax.mirror import (  # noqa: E402
     build_vacuum_grid,
     solve_beta_scan_cli,
 )
-from vmec_jax.mirror.continuation import solve_axisymmetric_beta_scan_cli  # noqa: E402
+from vmec_jax.mirror.free_boundary import solve_axisymmetric_beta_scan_cli  # noqa: E402
 from vmec_jax.mirror.diagnostics import (  # noqa: E402
     boundary_fourier_amplitudes,
     boundary_fourier_norms,

@@ -18,11 +18,11 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorState,
     build_vacuum_grid,
 )
-from vmec_jax.mirror.continuation import (  # noqa: E402
+from vmec_jax.mirror.free_boundary import (  # noqa: E402
     interpolate_fixed_boundary_state,
     solve_axisymmetric_beta_scan_cli,
 )
-import vmec_jax.mirror.continuation as continuation  # noqa: E402
+import vmec_jax.mirror.free_boundary as continuation  # noqa: E402
 from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
 from vmec_jax.mirror.output import FreeBoundaryRestart  # noqa: E402
 
