@@ -19,11 +19,11 @@ Audit baseline (2026-07-14):
   examples, and parity a/d passed at the audit cutoff. Three inherited core
   shards were still running and are not being polled repeatedly.
 
-Execution checkpoint (2026-07-14, `fe4ade80` plus the pending WP0 evidence
-update):
+Execution checkpoint (2026-07-14, `cf314292` plus the pending axis-regularity
+commit):
 
-- diff: 57 files, meeting the 58-file ceiling;
-- mirror package: 13 modules, 7,826 source lines, 20 public lazy names, and no
+- diff: 51 files, meeting the 58-file ceiling;
+- mirror package: 13 modules, 7,919 source lines, 20 public lazy names, and no
   source file above 931 lines;
 - mirror tests: ten substantive owner-aligned files;
 - benchmark evidence: four compact owner-aligned JSON files;
@@ -35,12 +35,11 @@ update):
   values on three grids, but its independently reconstructed pointwise force
   is nonmonotone under refinement and therefore remains a promotion blocker.
 
-The branch contains real equilibrium work, but it is not release-ready. In
-particular, one nominally axisymmetric ESSOS benchmark offsets the two coils in
-opposite x directions, the closed-hybrid pointwise force reconstruction is not
-converged, the periodic preconditioner omits important geometry-stream
-coupling, and research ANIMEC code lacks source parity. These defects determine
-the order below.
+The branch contains real equilibrium work, but it is not release-ready. The
+remaining blockers are shaped-state pointwise-force convergence, a poloidal
+``mpol`` parameter that does not yet own the retained coefficient space, the
+periodic preconditioner's missing geometry-stream coupling, and incomplete
+closed-hybrid limiting cases. These defects determine the order below.
 
 ## 1. Final product and scope
 
@@ -202,6 +201,10 @@ conditions must match VMEC2000. The current branch does not meet this contract.
   theta-dependent tube carrying an exactly uniform Cartesian field. These
   isolate the remaining defect to shaped solved states rather than the basic
   curl, pressure-gradient, or coordinate formulas.
+- The stream function now enforces a single-valued axial field at the magnetic
+  axis. The constraint's geometry pullback is included in the manual weak
+  variation and in forward/reverse implicit states; focused solve and
+  reconverged-derivative tests pass.
 - The axisymmetric free solver produces finite-beta equilibria with roundoff
   variational/weak residuals, increasing radius, decreasing center field, and
   separate tangency/stress diagnostics in analytic-field tests.
@@ -224,6 +227,9 @@ conditions must match VMEC2000. The current branch does not meet this contract.
    costs roughly 801 seconds and 4.25 GiB. This lane is deferred.
 3. The finite-beta rotating-ellipse `m=2` field-strength amplitude is about 48%
    above the direct paraxial estimate at the finest bounded knot level.
+   Earlier shaped-state pointwise values are additionally invalid because
+   ``|B|`` varied by 9-20% over theta at the single physical axis point; they
+   must be regenerated with the axis constraint.
 4. The periodic preconditioner preserves the state but leaves a relative
    linear residual of `0.136` after 3,000 GMRES iterations on an 892-variable
    racetrack. CG and MINRES are also unacceptably stalled. Closed matrix-free
@@ -490,21 +496,24 @@ are added; ruff, strict Sphinx, focused tests, and `git diff --check` pass.
 
 ### WP2 - Promote open fixed-boundary mirrors
 
-1. Repair the VMEC-like half-to-full pointwise-force reconstruction. Add
+1. Make ``mpol`` own the retained Fourier coefficient space (or remove it from
+   the API); it currently only validates ``ntheta``. Eliminate even-grid
+   Nyquist ambiguity and test independent mode/quadrature refinement.
+2. Repair the VMEC-like half-to-full pointwise-force reconstruction. Add
    manufactured cylinder, flared tube, and nonaxisymmetric fields with known
    force, then require monotone radial and axial convergence. Report axis,
    first-row, bulk, and end-collar norms separately.
-2. Complete three-grid axisymmetric fixed B-spline/Chebyshev parity.
-3. For the rotating ellipse, independently refine tube radius, `ns`, `mpol`,
+3. Complete three-grid axisymmetric fixed B-spline/Chebyshev parity.
+4. For the rotating ellipse, independently refine tube radius, `ns`, `mpol`,
    theta quadrature, and spline knots. Compare the extrapolated low-radius
    `m=2/r^2` coefficient and phase with the paraxial solution; do not hide a
    normalization mismatch by loosening tolerance.
-4. For SFLM, verify Clebsch labels, flux determinant, field direction,
+5. For SFLM, verify Clebsch labels, flux determinant, field direction,
    ellipticity, straight nonparallel field lines, and expected low-radius
    truncation order.
-5. Show pressure-first and shape-first continuation reach the same state and
+6. Show pressure-first and shape-first continuation reach the same state and
    reject crossed surfaces at every trial.
-6. Validate open spline tangents and scalar-objective adjoints for boundary,
+7. Validate open spline tangents and scalar-objective adjoints for boundary,
    pressure, flux, and current over finite-difference step sweeps.
 
 Gate: both axisymmetric and nonaxisymmetric fixed lanes satisfy Section 1.1;

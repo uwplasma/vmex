@@ -15,6 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .basis import CubicBSplineBasis, MirrorGrid, ThetaBasis
+from .geometry import regularize_axis_stream_function
 from .model import MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState
 
 Array = Any
@@ -768,7 +769,11 @@ def solve_spline_fixed_boundary_cli(
         message = optimization.message
 
     coefficient_state = unpack_coefficients(jnp.asarray(final_x))
-    final_state = discretization.evaluate_state(coefficient_state)
+    final_state = regularize_axis_stream_function(
+        discretization.evaluate_state(coefficient_state),
+        grid,
+        energy_kwargs["axial_flux_derivative"],
+    )
     final_energy = evaluate_energy(final_state)
     final_variational = packed_variational(final_x, final_state)
     final_force = force_residual(final_energy)

@@ -23,6 +23,17 @@ magnetic flux passes through them, so they are neither material interfaces nor
    \sqrt{g}B^\xi = \Psi'(s)+\partial_\theta\lambda,
 
 with :math:`B^s=0` and a zero-surface-mean gauge for :math:`\lambda`.
+All theta samples at the magnetic axis denote one physical point. Writing
+:math:`q_0=\lim_{s\to0}r\,\partial_s r`, single-valued axial field requires
+
+.. math::
+
+   \partial_\theta\lambda(0,\theta,\xi)
+   = \Psi'(0)\left[\frac{q_0(\theta,\xi)}{\langle q_0\rangle_\theta}-1\right].
+
+The solver eliminates the axis stream function with this condition and
+includes its geometry dependence in variational and implicit derivatives.
+Axis ``|B|`` nonuniformity is stored as a separate promotion diagnostic.
 
 An unbounded exterior Green solve requires a geometrically closed integration
 surface, so disks temporarily close the two cuts. Their Neumann data continue
@@ -152,6 +163,10 @@ A theta-dependent self-similar tube carrying an exactly uniform Cartesian
 field gives normalized Lorentz force below ``1e-12``. These gates show that
 radial differentiation and nonaxisymmetric coordinates work independently;
 they do not promote shaped solved states whose pointwise force remains large.
+The first corrected rotating-ellipse audit also exposed a missing axis
+condition: the old state varied ``|B|`` by 9--20% over theta at ``s=0`` even
+though those samples are one physical point. That freedom has been removed;
+all earlier shaped pointwise-force values must be regenerated before use.
 
 At ``ns=15,nxi=15,ntheta=5``, the variational force is ``2.25e-13`` and the
 independently differenced all-row/axis/bulk force residuals are

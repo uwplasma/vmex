@@ -29,6 +29,7 @@ from .geometry import (
     evaluate_geometry,
     magnetic_field_squared,
     radial_derivative,
+    regularize_axis_stream_function,
 )
 from .model import MirrorBoundary, MirrorState, project_fixed_boundary_state
 
@@ -79,6 +80,7 @@ def _half_mesh_samples(
 ) -> _HalfMeshSamples:
     """Evaluate the primitive half-mesh quantities used by the energy."""
 
+    state = regularize_axis_stream_function(state, grid, axial_flux_derivative)
     a = jnp.asarray(state.radius_scale)
     ds = float(grid.s[1] - grid.s[0])
     gauss = 0.5 + jnp.asarray([-1.0, 1.0]) / (2.0 * jnp.sqrt(3.0))
@@ -247,6 +249,8 @@ def isotropic_staggered_energy_gradient(
 
     if gamma <= 1.0:
         raise ValueError("gamma must be greater than one")
+    raw_state = state
+    state = regularize_axis_stream_function(state, grid, axial_flux_derivative)
     samples = _half_mesh_samples(
         state,
         grid,
@@ -357,7 +361,16 @@ def isotropic_staggered_energy_gradient(
     lambda_gradient = jnp.zeros_like(state.lambda_stream)
     lambda_gradient = lambda_gradient.at[:-1].add(jnp.sum((1.0 - fraction) * lambda_quadrature_bar, axis=0))
     lambda_gradient = lambda_gradient.at[1:].add(jnp.sum(fraction * lambda_quadrature_bar, axis=0))
-    return MirrorState(radius_gradient, lambda_gradient)
+    gradient = MirrorState(radius_gradient, lambda_gradient)
+    _, pullback = jax.vjp(
+        lambda trial: regularize_axis_stream_function(
+            trial,
+            grid,
+            axial_flux_derivative,
+        ),
+        raw_state,
+    )
+    return pullback(gradient)[0]
 
 
 @dataclass(frozen=True)
@@ -390,6 +403,7 @@ class IsotropicForceResidual:
     axis_normalized_rms: Array
     first_row_normalized_rms: Array
     end_collar_normalized_rms: Array
+    axis_field_nonuniformity: Array
     component_rms: Array
 
 
@@ -455,6 +469,7 @@ def mirror_energy(
 
     if gamma <= 1.0:
         raise ValueError("gamma must be greater than one")
+    state = regularize_axis_stream_function(state, grid, axial_flux_derivative)
     geometry = evaluate_geometry(state, grid) if axis is None else evaluate_closed_geometry(state, grid, axis)
     field = contravariant_field(
         state,
@@ -773,11 +788,19 @@ def isotropic_force_residual(
         return regional_force / jnp.maximum(regional_reference, jnp.finfo(physical_rms.dtype).tiny)
 
     bulk_normalized_rms = regional_normalized_rms(active_s >= 0.2)
-    axis_normalized_rms = regional_normalized_rms(active_s < 0.2)
+    axis_normalized_rms = regional_normalized_rms((active_s < 0.2) | (jnp.arange(active_s.size) == 0))
     first_row_normalized_rms = regional_normalized_rms(jnp.arange(active_s.size) == 0)
     active_xi = jnp.arange(force_active.shape[2])
     end_collar = (active_xi == 0) | (active_xi == active_xi.size - 1)
     end_collar_normalized_rms = regional_normalized_rms(jnp.ones_like(active_s), end_collar)
+    axis_field = jnp.sqrt(jnp.maximum(energy.b_squared[0], 0.0))
+    theta_weights = jnp.asarray(grid.theta_basis.weights)[:, None]
+    axis_mean = jnp.sum(theta_weights * axis_field, axis=0) / jnp.sum(theta_weights)
+    axis_variance = jnp.sum(theta_weights * (axis_field - axis_mean[None, :]) ** 2, axis=0) / jnp.sum(theta_weights)
+    axis_axial_weights = jnp.asarray(grid.axial_basis.weights).at[jnp.asarray([0, -1])].set(0.0)
+    axis_field_nonuniformity = jnp.sqrt(
+        jnp.sum(axis_axial_weights * axis_variance) / jnp.sum(axis_axial_weights * axis_mean**2)
+    )
     return IsotropicForceResidual(
         covariant_s=force_s,
         covariant_theta=force_theta,
@@ -791,6 +814,7 @@ def isotropic_force_residual(
         axis_normalized_rms=axis_normalized_rms,
         first_row_normalized_rms=first_row_normalized_rms,
         end_collar_normalized_rms=end_collar_normalized_rms,
+        axis_field_nonuniformity=axis_field_nonuniformity,
         component_rms=component_rms,
     )
 

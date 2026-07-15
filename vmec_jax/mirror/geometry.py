@@ -263,6 +263,7 @@ def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometr
     ds = float(grid.s[1] - grid.s[0])
     # r * r_s is regular even though r_s itself is singular at s=0.
     r_r_s = 0.5 * radial_derivative(radius * radius, ds)
+    r_r_s = r_r_s.at[0].set(0.5 * a[0] ** 2)
     r_s = _safe_divide(r_r_s, radius)
     r_s = r_s.at[0].set(r_s[1])
 
@@ -358,6 +359,7 @@ def evaluate_closed_geometry(
 
     ds = float(grid.s[1] - grid.s[0])
     r_r_s = 0.5 * radial_derivative(radius * radius, ds)
+    r_r_s = r_r_s.at[0].set(0.5 * a[0] ** 2)
     r_s = _safe_divide(r_r_s, radius).at[0].set(_safe_divide(r_r_s, radius)[1])
 
     theta = jnp.asarray(grid.theta)[None, :, None, None]
@@ -426,6 +428,36 @@ def _radial_profile(values: Array, ns: int, dtype: Any) -> Array:
     return values[:, None, None]
 
 
+def regularize_axis_stream_function(
+    state: "MirrorState",
+    grid: "MirrorGrid",
+    axial_flux_derivative: Array,
+) -> "MirrorState":
+    """Set the axis stream function so the axial field is single-valued.
+
+    Every theta node at ``s=0`` is the same physical point. The axial flux
+    density must therefore be proportional to the polar-coordinate Jacobian
+    there. Its theta average is fixed by ``Psi'``; the zero-mean stream
+    function supplies the remaining angular variation.
+    """
+
+    lam = jnp.asarray(state.lambda_stream)
+    if grid.ntheta == 1:
+        return type(state)(state.radius_scale, lam.at[0].set(0.0))
+
+    radius_scale = jnp.asarray(state.radius_scale)
+    radial_jacobian = 0.5 * radius_scale[0] ** 2
+    theta_weights = jnp.asarray(grid.theta_basis.weights)
+    mean_jacobian = jnp.sum(theta_weights[:, None] * radial_jacobian, axis=0) / jnp.sum(theta_weights)
+    psi_axis = _radial_profile(axial_flux_derivative, grid.ns, lam.dtype)[0, 0, 0]
+    derivative = psi_axis * (radial_jacobian / mean_jacobian[None, :] - 1.0)
+    modes = jnp.fft.fftfreq(grid.ntheta, d=1.0 / grid.ntheta)[:, None]
+    safe_modes = jnp.where(modes == 0.0, 1.0, modes)
+    inverse = jnp.where(modes == 0.0, 0.0, 1.0 / (1j * safe_modes))
+    axis_stream = jnp.fft.ifft(jnp.fft.fft(derivative, axis=0) * inverse, axis=0).real
+    return type(state)(state.radius_scale, lam.at[0].set(axis_stream))
+
+
 def contravariant_field(
     state: "MirrorState",
     geometry: MirrorGeometry,
@@ -441,6 +473,7 @@ def contravariant_field(
     """
 
     state.validate_shape(grid)
+    state = regularize_axis_stream_function(state, grid, axial_flux_derivative)
     lam = jnp.asarray(state.lambda_stream)
     d_lambda_dtheta = grid.theta_basis.differentiate(lam, axis=1)
     d_lambda_dxi = grid.axial_basis.differentiate(lam, axis=2)

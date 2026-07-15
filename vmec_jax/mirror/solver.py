@@ -35,7 +35,7 @@ from .forces import (
     isotropic_staggered_weak_residual,
     mirror_energy,
 )
-from .geometry import normalized_divergence_rms
+from .geometry import normalized_divergence_rms, regularize_axis_stream_function
 from .model import MirrorBoundary, MirrorConfig, MirrorState, project_fixed_boundary_state
 
 Array = Any
@@ -854,6 +854,11 @@ def solve_fixed_boundary_cli(
     if history[-1][4] <= config.ftol and not bool(initial_energy.geometry.jacobian_sign_changed):
         initial_variational = packed_variational(x0, projected_initial)
         initial_weak_force = packed_staggered_weak(projected_initial)
+        projected_initial = regularize_axis_stream_function(
+            projected_initial,
+            grid,
+            axial_flux_derivative,
+        )
         result = MirrorSolveResult(
             state=projected_initial,
             energy=initial_energy,
@@ -886,7 +891,11 @@ def solve_fixed_boundary_cli(
     )
     final_x = optimization.vector
 
-    final_state = unpack(jnp.asarray(final_x))
+    final_state = regularize_axis_stream_function(
+        unpack(jnp.asarray(final_x)),
+        grid,
+        axial_flux_derivative,
+    )
     final_energy = evaluate_energy(final_state)
     final_variational = packed_variational(final_x, final_state)
     final_force = evaluate_force(final_state, final_energy)

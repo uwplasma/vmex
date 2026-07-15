@@ -100,6 +100,7 @@ def test_vacuum_cylinder_has_exact_energy_and_negligible_physical_force() -> Non
     assert float(residual.normalized_rms) < 2.0e-13
     assert float(residual.bulk_normalized_rms) < 2.0e-13
     assert float(residual.axis_normalized_rms) < 2.0e-13
+    assert float(residual.axis_field_nonuniformity) < 2.0e-15
     np.testing.assert_allclose(residual.component_rms[1:], 0.0, atol=2.0e-14)
 
     gradient = fixed_boundary_energy_gradient(
@@ -190,6 +191,7 @@ def test_nonaxisymmetric_coordinates_recover_uniform_cartesian_field() -> None:
 
     np.testing.assert_allclose(energy.b_squared, 1.0, rtol=4.0e-15, atol=4.0e-15)
     assert float(residual.normalized_rms) < 1.0e-12
+    assert float(residual.axis_field_nonuniformity) < 1.0e-14
 
 
 def test_optimizer_merit_rejects_crossed_flux_surfaces() -> None:

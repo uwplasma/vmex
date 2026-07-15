@@ -765,7 +765,12 @@ def test_spline_solver_converges_nonaxisymmetric_finite_current_state() -> None:
     assert float(evaluated.staggered_weak_force.maximum) <= 1.1 * config.ftol
     assert float(jnp.max(jnp.abs(evaluated.state.lambda_stream))) > 1.0e-3
     np.testing.assert_allclose(surface_integrals, 0.0, atol=3.0e-15)
-    np.testing.assert_allclose(evaluated.state.lambda_stream[0], evaluated.state.lambda_stream[1])
+    axis_field = np.sqrt(np.asarray(evaluated.energy.b_squared)[0])
+    np.testing.assert_allclose(
+        axis_field,
+        np.broadcast_to(np.mean(axis_field, axis=0), axis_field.shape),
+        rtol=2.0e-13,
+    )
 
 
 def test_spline_coefficient_preconditioner_inverts_tensor_model() -> None:

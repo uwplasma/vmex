@@ -182,6 +182,7 @@ def run(
             "pointwise_force_first_row_rms": float(result.plasma_force.first_row_normalized_rms),
             "pointwise_force_bulk_rms": float(result.plasma_force.bulk_normalized_rms),
             "pointwise_force_end_collar_rms": float(result.plasma_force.end_collar_normalized_rms),
+            "axis_field_nonuniformity": float(result.plasma_force.axis_field_nonuniformity),
             "normalized_divb": float(result.normalized_divergence_rms),
             "lambda_max": float(jnp.max(jnp.abs(result.plasma_state.lambda_stream))),
             "compatibility": float(result.vacuum_field.neumann_result.compatibility_error),

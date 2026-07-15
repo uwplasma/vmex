@@ -18,7 +18,7 @@ from solvax import block_thomas_factor, block_thomas_solve
 
 from .exterior_bie import AxisymmetricExteriorVacuum, solve_axisymmetric_exterior_vacuum
 from .forces import MU0, MirrorEnergy, mirror_energy
-from .geometry import magnetic_field_squared
+from .geometry import magnetic_field_squared, regularize_axis_stream_function
 from .model import MirrorBoundary, MirrorState, project_fixed_boundary_state
 from .solver import (
     _MirrorStateVectorizer,
@@ -328,7 +328,16 @@ def fixed_boundary_adjoint(
     energy_scale = max(abs(float(result.energy.total)), np.finfo(float).tiny)
 
     def state_at(x: Array, controls: FixedBoundaryParameters) -> MirrorState:
-        return project_fixed_boundary_state(vectorizer.unpack(x), MirrorBoundary(controls.boundary_radius), grid)
+        state = project_fixed_boundary_state(
+            vectorizer.unpack(x),
+            MirrorBoundary(controls.boundary_radius),
+            grid,
+        )
+        return regularize_axis_stream_function(
+            state,
+            grid,
+            controls.axial_flux_derivative,
+        )
 
     def energy_at(x: Array, controls: FixedBoundaryParameters) -> MirrorEnergy:
         state = state_at(x, controls)
@@ -432,7 +441,11 @@ def _spline_implicit_problem(
             vectorizer.unpack(x),
             SplineMirrorBoundary(controls.boundary_coefficients),
         )
-        return discretization.evaluate_state(coefficients)
+        return regularize_axis_stream_function(
+            discretization.evaluate_state(coefficients),
+            discretization.grid,
+            controls.axial_flux_derivative,
+        )
 
     def energy_at(x: Array, controls: SplineFixedBoundaryParameters) -> MirrorEnergy:
         return mirror_energy(
