@@ -81,8 +81,9 @@ circular-torus solve jointly advances radius and stream function in 27
 residual-Newton evaluations. Its variational/staggered-weak residuals are
 ``1.88e-15/1.83e-15`` and normalized ``div(B)=4.64e-15``. The independently
 reconstructed pointwise-force norm improves from ``0.709`` at ``ns=5`` to
-``0.570`` at ``ns=7`` but is not yet small, so it remains an explicit
-refinement blocker. The finite-current racetrack also solves its stream
+``0.570`` at ``ns=7`` but is not yet small. It remains an explicitly
+unconverged, non-gating diagnostic until a manufactured half-to-full force
+reconstruction refines. The finite-current racetrack also solves its stream
 function and its 90-degree ellipse is an actual fixed-boundary equilibrium,
 not a Fourier projection. Its variational and staggered-weak residuals reach
 ``ftol=1e-12`` and normalized ``div(B)`` is below ``2e-12``. A differentiable
