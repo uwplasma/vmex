@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -16,11 +18,20 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorConfig,
     MirrorResolution,
     MirrorState,
+    solve_free_boundary_cli,
 )
 from vmec_jax.mirror.basis import ChebyshevBasis, ThetaBasis  # noqa: E402
+from vmec_jax.mirror.forces import mirror_energy  # noqa: E402
 from vmec_jax.mirror.model import (  # noqa: E402
     MIRROR_INPUT_SCHEMA,
     MIRROR_OUTPUT_SCHEMA,
+    project_fixed_boundary_state,
+)
+from vmec_jax.mirror.output import (  # noqa: E402
+    boundary_fourier_amplitudes,
+    boundary_fourier_norms,
+    summarize_axisymmetric_beta_scan,
+    summarize_nonaxisymmetric_beta_scan,
 )
 
 
@@ -99,9 +110,7 @@ def test_cgl_derivative_and_quadrature_are_polynomial_exact() -> None:
     for power in range(basis.size):
         values = jnp.asarray(x**power)
         expected = np.zeros_like(x) if power == 0 else power * x ** (power - 1)
-        np.testing.assert_allclose(
-            basis.differentiate(values), expected, rtol=2.0e-11, atol=2.0e-11
-        )
+        np.testing.assert_allclose(basis.differentiate(values), expected, rtol=2.0e-11, atol=2.0e-11)
 
     assert np.all(basis.weights > 0.0)
     assert np.isclose(np.sum(basis.weights), 2.0)
@@ -161,3 +170,136 @@ def test_theta_fft_derivative_and_quadrature_resolve_requested_modes() -> None:
 
     axisym = ThetaBasis.build(ntheta=1, mpol=0)
     np.testing.assert_array_equal(axisym.differentiate(jnp.asarray([3.0])), jnp.asarray([0.0]))
+
+
+def _grid(*, ntheta: int = 1, nxi: int = 5):
+    return MirrorConfig(
+        resolution=MirrorResolution(ns=3, mpol=0 if ntheta == 1 else 1, ntheta=ntheta, nxi=nxi)
+    ).build_grid()
+
+
+def test_model_constructors_reject_invalid_static_contracts() -> None:
+    for arguments, message in (
+        ({"ns": 2}, "ns"),
+        ({"mpol": -1}, "mpol"),
+        ({"nxi": 1}, "nxi"),
+        ({"mpol": 1, "ntheta": 2}, "resolve"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            MirrorResolution(**arguments)
+    assert MirrorResolution().axisymmetric
+    with pytest.raises(ValueError, match="end condition"):
+        MirrorConfig(end_condition="invalid")
+    with pytest.raises(ValueError, match="max_iterations"):
+        MirrorConfig(max_iterations=0)
+
+    grid = _grid()
+    integer_boundary = MirrorBoundary.from_radius(1, grid)
+    assert jnp.issubdtype(integer_boundary.radius_scale.dtype, jnp.inexact)
+    with pytest.raises(ValueError, match="radius shape"):
+        MirrorBoundary.from_radius(jnp.ones((2, 2)), grid)
+    with pytest.raises(ValueError, match="on_axis_bz"):
+        MirrorBoundary.from_axis_field(0.1, jnp.ones(2), grid)
+    with pytest.raises(ValueError, match="scalar"):
+        MirrorBoundary.from_axis_field(jnp.ones(2), jnp.ones(grid.nxi), grid)
+    with pytest.raises(ValueError, match="boundary shape"):
+        MirrorState.from_boundary(MirrorBoundary(jnp.ones((2, 2))), grid)
+
+    state = MirrorState.from_boundary(integer_boundary, grid)
+    with pytest.raises(ValueError, match="radius_scale"):
+        MirrorState(jnp.ones(2), state.lambda_stream).validate_shape(grid)
+    with pytest.raises(ValueError, match="lambda_stream"):
+        MirrorState(state.radius_scale, jnp.ones(2)).validate_shape(grid)
+    with pytest.raises(ValueError, match="boundary shape"):
+        project_fixed_boundary_state(state, MirrorBoundary(jnp.ones((2, 2))), grid)
+
+
+def test_fourier_and_beta_diagnostics_validate_inputs() -> None:
+    grid = _grid()
+    with pytest.raises(ValueError, match="shape"):
+        boundary_fourier_amplitudes(MirrorBoundary(jnp.ones(5)))
+    even_theta = jnp.linspace(0.0, 2.0 * jnp.pi, 4, endpoint=False)
+    nyquist = boundary_fourier_amplitudes(MirrorBoundary(0.2 + 0.01 * jnp.cos(2.0 * even_theta)[:, None]))
+    np.testing.assert_allclose(nyquist[2], 0.01)
+    with pytest.raises(ValueError, match="axial size"):
+        boundary_fourier_norms(MirrorBoundary(jnp.ones((1, 4))), grid)
+    with pytest.raises(ValueError, match="central_fraction"):
+        boundary_fourier_norms(MirrorBoundary(jnp.ones((1, 5))), grid, central_fraction=1.0)
+
+    with pytest.raises(ValueError, match="one value"):
+        summarize_axisymmetric_beta_scan((), [0.0], grid, reference_field=1.0)
+    with pytest.raises(ValueError, match="at least one"):
+        summarize_axisymmetric_beta_scan((), [], grid, reference_field=1.0)
+    with pytest.raises(ValueError, match="ntheta=1"):
+        summarize_axisymmetric_beta_scan((object(),), [0.0], _grid(ntheta=3), reference_field=1.0)
+    with pytest.raises(ValueError, match="one value"):
+        summarize_nonaxisymmetric_beta_scan((), [0.0], _grid(ntheta=3), reference_field=1.0)
+    with pytest.raises(ValueError, match="at least one"):
+        summarize_nonaxisymmetric_beta_scan((), [], _grid(ntheta=3), reference_field=1.0)
+    with pytest.raises(ValueError, match="ntheta > 1"):
+        summarize_nonaxisymmetric_beta_scan((object(),), [0.0], grid, reference_field=1.0)
+
+
+@pytest.mark.parametrize("ntheta", [1, 3])
+def test_beta_diagnostics_evaluate_solved_state(ntheta: int) -> None:
+    grid = _grid(ntheta=ntheta)
+    theta = jnp.asarray(grid.theta)[:, None]
+    xi = jnp.asarray(grid.xi)[None, :]
+    radius = 0.3 + (0.0 if ntheta == 1 else 0.01 * xi * jnp.cos(theta))
+    boundary = MirrorBoundary.from_radius(radius, grid)
+    state = MirrorState.from_boundary(boundary, grid)
+    energy = mirror_energy(state, grid, axial_flux_derivative=0.1)
+    pressure = jnp.broadcast_to(energy.pressure[:, None, None], grid.shape)
+    result = SimpleNamespace(
+        boundary=boundary,
+        plasma_energy=energy,
+        plasma_b_squared=energy.b_squared,
+        pressure=pressure,
+        vacuum_field=SimpleNamespace(lateral_field_xyz=jnp.ones((grid.nxi, 3))),
+    )
+    if ntheta == 1:
+        diagnostic = summarize_axisymmetric_beta_scan((result,), [0.0], grid, reference_field=1.0)[0]
+        assert float(diagnostic.center_radius) > 0.0
+        assert float(diagnostic.center_vacuum_side_field) > 0.0
+    else:
+        diagnostic = summarize_nonaxisymmetric_beta_scan((result,), [0.0], grid, reference_field=1.0)[0]
+        assert float(diagnostic.plasma_volume) > 0.0
+        assert float(diagnostic.boundary_mode_core_l2[1]) > 0.0
+
+
+def test_free_boundary_rejects_inconsistent_static_inputs() -> None:
+    grid = _grid()
+    boundary = MirrorBoundary.from_radius(0.2, grid)
+    config = MirrorConfig(resolution=MirrorResolution(ns=3, nxi=5))
+    common = dict(
+        initial_boundary=boundary,
+        plasma_grid=grid,
+        config=config,
+        external_field=object(),
+        axial_flux_derivative=0.1,
+    )
+
+    with pytest.raises(ValueError, match="chunk"):
+        solve_free_boundary_cli(**common, exterior_jacobian_chunk_size=0)
+    with pytest.raises(ValueError, match="target_central_pressure"):
+        solve_free_boundary_cli(**common, target_central_pressure=0.0)
+    with pytest.raises(ValueError, match="initial_mass_scale"):
+        solve_free_boundary_cli(**common, initial_mass_scale=0.0)
+    with pytest.raises(ValueError, match="initial boundary"):
+        solve_free_boundary_cli(**{**common, "initial_boundary": MirrorBoundary(jnp.ones((2, 5)))})
+
+
+def test_free_boundary_rejects_inconsistent_initial_guesses() -> None:
+    grid = _grid()
+    boundary = MirrorBoundary.from_radius(0.2, grid)
+    config = MirrorConfig(resolution=MirrorResolution(ns=3, nxi=5))
+    common = dict(
+        initial_boundary=boundary,
+        plasma_grid=grid,
+        config=config,
+        external_field=object(),
+        axial_flux_derivative=0.1,
+    )
+    wrong_boundary = MirrorBoundary.from_radius(0.3, grid)
+    with pytest.raises(ValueError, match="initial_state boundary"):
+        solve_free_boundary_cli(**common, initial_state=MirrorState.from_boundary(wrong_boundary, grid))

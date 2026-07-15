@@ -431,7 +431,7 @@ after execution::
        tests/mirror -m "not full" -q
    RUN_FULL=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 coverage run --append \
        -m pytest tests/mirror/test_implicit.py \
-       tests/mirror/test_free_boundary_implicit.py -q
+       tests/mirror/test_implicit.py -q
    coverage report --include="*/vmec_jax/mirror/*" --fail-under=95
 
 The completed audit covers 3,269 statements with 157 misses, or 95%.

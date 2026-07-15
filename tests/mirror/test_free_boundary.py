@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -16,7 +18,12 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorState,
     solve_beta_scan_cli,
 )
-from vmec_jax.mirror.free_boundary import solve_axisymmetric_beta_scan_cli  # noqa: E402
+import vmec_jax.mirror.free_boundary as continuation  # noqa: E402
+from vmec_jax.mirror.free_boundary import (  # noqa: E402
+    interpolate_fixed_boundary_state,
+    solve_axisymmetric_beta_scan_cli,
+)
+from vmec_jax.mirror.model import project_fixed_boundary_state  # noqa: E402
 from vmec_jax.mirror.output import (  # noqa: E402
     boundary_fourier_amplitudes,
     boundary_fourier_norms,
@@ -77,17 +84,13 @@ def test_boundary_fourier_amplitudes_are_grid_independent() -> None:
 
 
 def test_boundary_fourier_norms_do_not_use_a_symmetry_zero() -> None:
-    grid = MirrorConfig(
-        resolution=MirrorResolution(ns=5, mpol=2, ntheta=7, nxi=9)
-    ).build_grid()
+    grid = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=2, ntheta=7, nxi=9)).build_grid()
     theta = jnp.asarray(grid.theta)[:, None]
     xi = jnp.asarray(grid.xi)[None, :]
     boundary = MirrorBoundary(0.2 + 0.03 * xi * jnp.cos(theta))
 
     l2, maximum = boundary_fourier_norms(boundary, grid)
-    core_l2, core_maximum = boundary_fourier_norms(
-        boundary, grid, central_fraction=0.75
-    )
+    core_l2, core_maximum = boundary_fourier_norms(boundary, grid, central_fraction=0.75)
 
     np.testing.assert_allclose(l2[1], 0.03 / np.sqrt(3.0), rtol=2.0e-14)
     np.testing.assert_allclose(maximum[1], 0.03, rtol=2.0e-14)
@@ -217,15 +220,9 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
 
     assert all(result.converged for result in results)
     assert all(float(result.variational_max) <= config.ftol for result in results)
-    assert all(
-        float(result.plasma_staggered_weak_force.maximum) <= config.ftol
-        for result in results
-    )
+    assert all(float(result.plasma_staggered_weak_force.maximum) <= config.ftol for result in results)
     assert all(float(result.normalized_divergence_rms) < 1.0e-12 for result in results)
-    assert all(
-        float(jnp.max(jnp.abs(result.plasma_state.lambda_stream))) > 1.0e-5
-        for result in results
-    )
+    assert all(float(jnp.max(jnp.abs(result.plasma_state.lambda_stream))) > 1.0e-5 for result in results)
     assert all(float(result.interface.vacuum_b_normal_rms) < 1.0e-12 for result in results)
     assert all(float(result.interface.normal_stress_rms) < 1.0e-12 for result in results)
     assert all(float(result.vacuum_field.neumann_result.compatibility_error) < 2.0e-3 for result in results)
@@ -244,9 +241,7 @@ def test_nonaxisymmetric_exterior_free_boundary_equilibrium_converges() -> None:
     mode_one = np.asarray([item.center_boundary_modes[1] for item in diagnostics])
     mode_one_l2 = np.asarray([item.boundary_mode_l2[1] for item in diagnostics])
     mode_one_max = np.asarray([item.boundary_mode_max[1] for item in diagnostics])
-    mode_one_core_l2 = np.asarray(
-        [item.boundary_mode_core_l2[1] for item in diagnostics]
-    )
+    mode_one_core_l2 = np.asarray([item.boundary_mode_core_l2[1] for item in diagnostics])
     assert np.all(np.diff(mean_radii) > 0.0)
     assert np.all(np.diff(mean_fields) < 0.0)
     assert np.all(mode_one > 1.0e-4)
@@ -306,14 +301,7 @@ def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
             )
         )
         compatibility.append(
-            np.asarray(
-                [
-                    float(
-                        result.vacuum_field.neumann_result.raw_compatibility_error
-                    )
-                    for result in results
-                ]
-            )
+            np.asarray([float(result.vacuum_field.neumann_result.raw_compatibility_error) for result in results])
         )
 
     relative_change = np.abs((observables[-1] - observables[-2]) / observables[-1])
@@ -324,3 +312,96 @@ def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
     assert float(results[-1].boundary.radius_scale[0, center]) > 1.07 * float(
         results[0].boundary.radius_scale[0, center]
     )
+
+
+def _grid(ns: int, nxi: int):
+    return MirrorConfig(resolution=MirrorResolution(ns=ns, mpol=1, ntheta=3, nxi=nxi)).build_grid()
+
+
+def test_fixed_boundary_state_interpolation_roundtrips_and_preserves_constraints() -> None:
+    coarse, fine = _grid(7, 9), _grid(11, 13)
+
+    def fields(grid):
+        s = jnp.asarray(grid.s)[:, None, None]
+        theta = jnp.asarray(grid.theta)[None, :, None]
+        xi = jnp.asarray(grid.xi)[None, None, :]
+        radius = 0.2 + 0.1 * s + 0.01 * jnp.cos(theta) * (1.0 - xi**2)
+        lam = s * jnp.cos(theta) * (1.0 - xi**2)
+        boundary = MirrorBoundary.from_radius(radius[-1], grid)
+        state = project_fixed_boundary_state(MirrorState(radius, lam), boundary, grid)
+        return boundary, state
+
+    coarse_boundary, coarse_state = fields(coarse)
+    fine_boundary, _ = fields(fine)
+    interpolated = interpolate_fixed_boundary_state(coarse_state, coarse, fine_boundary, fine)
+    roundtrip = interpolate_fixed_boundary_state(interpolated, fine, coarse_boundary, coarse)
+
+    # Axis closure deliberately flattens the first radial interval, so only
+    # surfaces outside that interval are an exact coarse-fine round trip.
+    np.testing.assert_allclose(roundtrip.radius_scale[2:], coarse_state.radius_scale[2:], atol=3.0e-14)
+    np.testing.assert_allclose(roundtrip.lambda_stream[2:], coarse_state.lambda_stream[2:], atol=3.0e-14)
+    np.testing.assert_allclose(interpolated.radius_scale[-1], fine_boundary.radius_scale)
+    np.testing.assert_allclose(interpolated.radius_scale[0], interpolated.radius_scale[1])
+    np.testing.assert_allclose(interpolated.lambda_stream[0], interpolated.lambda_stream[1])
+    np.testing.assert_allclose(interpolated.lambda_stream[:, :, [0, -1]], 0.0, atol=2.0e-15)
+
+
+def test_fixed_boundary_state_interpolation_is_differentiable() -> None:
+    coarse, fine = _grid(5, 7), _grid(7, 9)
+    boundary = MirrorBoundary.from_radius(0.3, coarse)
+    state = MirrorState.from_boundary(boundary, coarse)
+    fine_boundary = MirrorBoundary.from_radius(0.3, fine)
+
+    tangent = jnp.ones(coarse.shape).at[:, :, [0, -1]].set(0.0)
+
+    def interpolate_lambda(scale):
+        varied = MirrorState(state.radius_scale, state.lambda_stream + scale * tangent)
+        return interpolate_fixed_boundary_state(varied, coarse, fine_boundary, fine).lambda_stream
+
+    derivative = jax.jacfwd(interpolate_lambda)(1.0)
+    assert bool(jnp.all(jnp.isfinite(derivative)))
+    assert float(jnp.linalg.norm(derivative)) > 0.0
+
+
+def test_beta_scan_propagates_restart_mass_scale(monkeypatch) -> None:
+    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=0, ntheta=1, nxi=5))
+    grid = config.build_grid()
+    reference = MirrorBoundary.from_radius(0.3, grid)
+    restart_boundary = MirrorBoundary.from_radius(0.31, grid)
+    restart_state = MirrorState.from_boundary(restart_boundary, grid)
+    restart = FreeBoundaryRestart(restart_boundary, restart_state, 2.5)
+    received = []
+
+    def fake_solve(boundary, *_args, **kwargs):
+        received.append(
+            (
+                boundary,
+                kwargs["initial_state"],
+                kwargs["initial_mass_scale"],
+                kwargs["exterior_spectral_side_density"],
+            )
+        )
+        return SimpleNamespace(
+            boundary=boundary,
+            plasma_state=kwargs["initial_state"],
+            mass_scale=jnp.asarray(kwargs["initial_mass_scale"] + 0.5),
+        )
+
+    monkeypatch.setattr(continuation, "solve_axisymmetric_free_boundary_cli", fake_solve)
+    solve_axisymmetric_beta_scan_cli(
+        reference,
+        grid,
+        config,
+        object(),
+        jnp.asarray([0.0, 0.0]),
+        axial_flux_derivative=0.1,
+        reference_field=1.0,
+        initial_restart=restart,
+        exterior_spectral_side_density=True,
+    )
+
+    assert received[0][0] is restart_boundary
+    assert received[0][1] is restart_state
+    assert received[0][2] == 2.5
+    assert received[1][2] == 3.0
+    assert all(item[3] is True for item in received)

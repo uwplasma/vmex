@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import numpy as np
 import pytest
 
@@ -16,13 +16,17 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorResolution,
     MirrorState,
     fixed_boundary_adjoint,
+    free_boundary_adjoint,
     solve_fixed_boundary_cli,
     solve_fixed_boundary_implicit,
+    solve_free_boundary_cli,
     spline_fixed_boundary_adjoint,
     spline_fixed_boundary_tangent,
 )
 from vmec_jax.mirror.implicit import (  # noqa: E402
+    FreeBoundaryAdjointConfig,
     fixed_boundary_parameters,
+    free_boundary_parameters,
     make_fixed_boundary_implicit_config,
     spline_fixed_boundary_parameters,
 )
@@ -96,9 +100,7 @@ def test_fixed_boundary_adjoint_matches_reconverged_central_difference() -> None
     epsilon = 1.0e-4
     values = []
     for sign in (-1.0, 1.0):
-        varied_boundary = MirrorBoundary(
-            boundary.radius_scale + sign * epsilon * boundary_direction
-        )
+        varied_boundary = MirrorBoundary(boundary.radius_scale + sign * epsilon * boundary_direction)
         varied = solve_fixed_boundary_cli(
             project_fixed_boundary_state(result.state, varied_boundary, grid),
             varied_boundary,
@@ -129,9 +131,7 @@ def test_fixed_boundary_adjoint_rejects_unconverged_state() -> None:
     parameters = fixed_boundary_parameters(boundary, axial_flux_derivative=0.1)
 
     with pytest.raises(ValueError, match="converged"):
-        fixed_boundary_adjoint(
-            Result(), parameters, grid, lambda state, energy: energy.total
-        )
+        fixed_boundary_adjoint(Result(), parameters, grid, lambda state, energy: energy.total)
 
 
 def test_spline_adjoint_matches_reconverged_central_difference() -> None:
@@ -142,17 +142,13 @@ def test_spline_adjoint_matches_reconverged_central_difference() -> None:
     )
     source_grid = config.build_grid()
     s, xi = jnp.asarray(source_grid.s), jnp.asarray(source_grid.xi)
-    boundary = MirrorBoundary.from_radius(
-        0.3 * (1.0 + 0.1 * (1.0 - xi**2)), source_grid
-    )
+    boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.1 * (1.0 - xi**2)), source_grid)
     discretization = SplineMirrorDiscretization.build(config, elements=3)
     spline_boundary = discretization.fit_boundary(boundary, source_grid)
     mass = 2.0e3 * (1.0 - s)
     current = 1.0e-2 * s
     result = solve_spline_fixed_boundary_cli(
-        discretization.fit_state(
-            MirrorState.from_boundary(boundary, source_grid), source_grid
-        ),
+        discretization.fit_state(MirrorState.from_boundary(boundary, source_grid), source_grid),
         spline_boundary,
         discretization,
         config,
@@ -195,12 +191,9 @@ def test_spline_adjoint_matches_reconverged_central_difference() -> None:
     epsilon = 1.0e-4
     for sign in (-1.0, 1.0):
         varied_boundary = SplineMirrorBoundary(
-            spline_boundary.radius_coefficients
-            + sign * epsilon * boundary_direction
+            spline_boundary.radius_coefficients + sign * epsilon * boundary_direction
         )
-        initial = discretization.transfer_boundary(
-            result.coefficient_state, spline_boundary, varied_boundary
-        )
+        initial = discretization.transfer_boundary(result.coefficient_state, spline_boundary, varied_boundary)
         varied = solve_spline_fixed_boundary_cli(
             initial,
             varied_boundary,
@@ -231,16 +224,12 @@ def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
     s = jnp.asarray(source_grid.s)
     theta = jnp.asarray(source_grid.theta)[:, None]
     xi = jnp.asarray(source_grid.xi)[None, :]
-    boundary = MirrorBoundary.from_radius(
-        0.3 * (1.0 + 0.02 * jnp.cos(theta) * (1.0 - xi**2)), source_grid
-    )
+    boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.02 * jnp.cos(theta) * (1.0 - xi**2)), source_grid)
     discretization = SplineMirrorDiscretization.build(config, elements=3)
     spline_boundary = discretization.fit_boundary(boundary, source_grid)
     current = 1.0e-3 * s
     result = solve_spline_fixed_boundary_cli(
-        discretization.fit_state(
-            MirrorState.from_boundary(boundary, source_grid), source_grid
-        ),
+        discretization.fit_state(MirrorState.from_boundary(boundary, source_grid), source_grid),
         spline_boundary,
         discretization,
         config,
@@ -281,13 +270,9 @@ def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
     states = []
     epsilon = 2.0e-4
     for sign in (-1.0, 1.0):
-        varied_boundary = SplineMirrorBoundary(
-            spline_boundary.radius_coefficients + sign * epsilon * direction
-        )
+        varied_boundary = SplineMirrorBoundary(spline_boundary.radius_coefficients + sign * epsilon * direction)
         varied = solve_spline_fixed_boundary_cli(
-            discretization.transfer_boundary(
-                result.coefficient_state, spline_boundary, varied_boundary
-            ),
+            discretization.transfer_boundary(result.coefficient_state, spline_boundary, varied_boundary),
             varied_boundary,
             discretization,
             config,
@@ -325,9 +310,7 @@ def test_nonaxisymmetric_spline_adjoint_includes_stream_function() -> None:
 
 
 def test_custom_vjp_matches_explicit_fixed_boundary_adjoint() -> None:
-    config = MirrorConfig(
-        resolution=MirrorResolution(ns=3, nxi=5), ftol=1.0e-12, max_iterations=500
-    )
+    config = MirrorConfig(resolution=MirrorResolution(ns=3, nxi=5), ftol=1.0e-12, max_iterations=500)
     grid = config.build_grid()
     xi, s = jnp.asarray(grid.xi), jnp.asarray(grid.s)
     boundary = MirrorBoundary.from_radius(0.3 * (1.0 + 0.1 * (1.0 - xi**2)), grid)
@@ -356,23 +339,15 @@ def test_custom_vjp_matches_explicit_fixed_boundary_adjoint() -> None:
     def quantity(state, _energy):
         return state.radius_scale[1, 0, grid.nxi // 2]
 
-    reference = fixed_boundary_adjoint(
-        result, parameters, grid, quantity, solve_lambda=True, rtol=1.0e-10
-    )
-    implicit_config = make_fixed_boundary_implicit_config(
-        initial, grid, config, solve_lambda=True
-    )
+    reference = fixed_boundary_adjoint(result, parameters, grid, quantity, solve_lambda=True, rtol=1.0e-10)
+    implicit_config = make_fixed_boundary_implicit_config(initial, grid, config, solve_lambda=True)
     gradient = jax.jit(
         jax.grad(
-            lambda controls: solve_fixed_boundary_implicit(
-                controls, implicit_config
-            ).radius_scale[1, 0, grid.nxi // 2]
+            lambda controls: solve_fixed_boundary_implicit(controls, implicit_config).radius_scale[1, 0, grid.nxi // 2]
         )
     )(parameters)
 
-    for actual, expected in zip(
-        jax.tree.leaves(gradient), jax.tree.leaves(reference.gradient), strict=True
-    ):
+    for actual, expected in zip(jax.tree.leaves(gradient), jax.tree.leaves(reference.gradient), strict=True):
         np.testing.assert_allclose(actual, expected, rtol=2.0e-9, atol=2.0e-11)
 
 
@@ -404,18 +379,14 @@ def test_fixed_boundary_adjoint_closes_above_dense_reference_limit() -> None:
         result,
         fixed_boundary_parameters(boundary, axial_flux_derivative=0.1),
         grid,
-        lambda state, _energy: state.radius_scale[
-            grid.ns // 2, 0, grid.nxi // 2
-        ],
+        lambda state, _energy: state.radius_scale[grid.ns // 2, 0, grid.nxi // 2],
         rtol=1.0e-9,
     )
     block_adjoint = fixed_boundary_adjoint(
         result,
         fixed_boundary_parameters(boundary, axial_flux_derivative=0.1),
         grid,
-        lambda state, _energy: state.radius_scale[
-            grid.ns // 2, 0, grid.nxi // 2
-        ],
+        lambda state, _energy: state.radius_scale[grid.ns // 2, 0, grid.nxi // 2],
         linear_solver="block",
         rtol=1.0e-9,
     )
@@ -433,3 +404,121 @@ def test_fixed_boundary_adjoint_closes_above_dense_reference_limit() -> None:
         rtol=1.0e-5,
         atol=5.0e-10,
     )
+
+
+@dataclass(frozen=True)
+class ParaxialMirrorField:
+    """Differentiable divergence-free field with mirror-like axial strength."""
+
+    center_field: jax.Array
+    curvature: jax.Array
+
+    def __call__(self, points):
+        points = jnp.asarray(points)
+        x, y, z = jnp.moveaxis(points, -1, 0)
+        return jnp.stack(
+            (
+                -self.curvature * x * z,
+                -self.curvature * y * z,
+                self.center_field + self.curvature * z**2,
+            ),
+            axis=-1,
+        )
+
+
+jax.tree_util.register_dataclass(
+    ParaxialMirrorField,
+    data_fields=["center_field", "curvature"],
+    meta_fields=[],
+)
+
+
+def test_free_boundary_adjoint_rejects_unconverged_and_3d_results() -> None:
+    axisymmetric_grid = MirrorConfig(resolution=MirrorResolution(ns=3, nxi=5)).build_grid()
+    parameters = free_boundary_parameters(object(), axial_flux_derivative=0.1)
+    with pytest.raises(ValueError, match="converged"):
+        free_boundary_adjoint(
+            type("Result", (), {"converged": False})(),
+            parameters,
+            axisymmetric_grid,
+            lambda *_: 0.0,
+        )
+
+    nonaxisymmetric_grid = MirrorConfig(resolution=MirrorResolution(ns=3, mpol=1, ntheta=3, nxi=5)).build_grid()
+    with pytest.raises(ValueError, match="axisymmetry"):
+        free_boundary_adjoint(
+            type("Result", (), {"converged": True})(),
+            parameters,
+            nonaxisymmetric_grid,
+            lambda *_: 0.0,
+        )
+
+
+@pytest.mark.full
+def test_free_boundary_field_adjoint_matches_central_difference() -> None:
+    config = MirrorConfig(
+        resolution=MirrorResolution(ns=5, nxi=7),
+        z_min=-0.8,
+        z_max=0.8,
+        ftol=1.0e-12,
+        max_iterations=300,
+    )
+    grid = config.build_grid()
+    field = ParaxialMirrorField(jnp.asarray(0.08), jnp.asarray(0.02))
+    on_axis = field.center_field + field.curvature * jnp.asarray(grid.z) ** 2
+    center = grid.nxi // 2
+    flux = 0.5 * on_axis[center] * 0.25**2
+    initial_boundary = MirrorBoundary.from_axis_field(flux, on_axis, grid)
+    solve_options = dict(
+        axial_flux_derivative=flux,
+        exterior_ntheta=8,
+        exterior_order=6,
+        exterior_spectral_side_density=True,
+        require_convergence=True,
+    )
+    result = solve_free_boundary_cli(initial_boundary, grid, config, field, **solve_options)
+    parameters = free_boundary_parameters(field, axial_flux_derivative=flux)
+
+    def quantity(boundary, _state, _energy, _vacuum):
+        return boundary.radius_scale[0, center]
+
+    adjoint = free_boundary_adjoint(
+        result,
+        parameters,
+        grid,
+        quantity,
+        config=FreeBoundaryAdjointConfig(
+            axisymmetric_ntheta=8,
+            exterior_order=6,
+            spectral_side_density=True,
+            rtol=1.0e-8,
+        ),
+    )
+    direction = ParaxialMirrorField(jnp.asarray(0.01), jnp.asarray(-0.005))
+    predicted = float(
+        adjoint.gradient.external_field.center_field * direction.center_field
+        + adjoint.gradient.external_field.curvature * direction.curvature
+    )
+
+    epsilon = 1.0e-4
+    values = []
+    for sign in (-1.0, 1.0):
+        varied_field = ParaxialMirrorField(
+            field.center_field + sign * epsilon * direction.center_field,
+            field.curvature + sign * epsilon * direction.curvature,
+        )
+        varied = solve_free_boundary_cli(
+            result.boundary,
+            grid,
+            config,
+            varied_field,
+            initial_state=result.plasma_state,
+            **solve_options,
+        )
+        values.append(float(quantity(varied.boundary, None, None, None)))
+    finite_difference = (values[1] - values[0]) / (2.0 * epsilon)
+    assert result.converged
+    assert float(result.variational_max) <= config.ftol
+    assert adjoint.converged
+    assert adjoint.relative_residual < 1.0e-8
+    np.testing.assert_allclose(predicted, finite_difference, rtol=2.0e-4)
