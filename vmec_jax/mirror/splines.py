@@ -718,7 +718,13 @@ def _packed_spline_preconditioner(
             directions[np.arange(columns.size), columns] = 1.0
             responses = np.asarray(matrix_columns(directions), dtype=float)
             for local_index, column in enumerate(columns):
-                axial_neighbors = np.abs(axial - axial[column]) <= 4
+                axial_distance = np.abs(axial - axial[column])
+                if discretization.closed:
+                    axial_distance = np.minimum(
+                        axial_distance,
+                        discretization.coefficient_count - axial_distance,
+                    )
+                axial_neighbors = axial_distance <= 4
                 if channels[column] == 1:
                     # Eliminating the weighted lambda gauge introduces a
                     # rank-one coupling across every axial coefficient.
@@ -740,7 +746,7 @@ def _packed_spline_preconditioner(
         factor = splu(matrix)
         return factor.solve
 
-    local_builder = build_local if vectorizer.lambda_size and not discretization.closed else None
+    local_builder = build_local if vectorizer.lambda_size else None
     return apply, scales, local_builder
 
 
@@ -916,7 +922,7 @@ def solve_fixed_boundary_cli(
             start_with_residual_newton=discretization.closed,
             matrix_free_context=(
                 None
-                if discretization.closed
+                if discretization.closed and x0.size <= 1024
                 else (
                     vectorizer,
                     _packed_spline_preconditioner(discretization, vectorizer),

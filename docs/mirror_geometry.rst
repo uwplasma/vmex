@@ -340,16 +340,15 @@ iteration curve, so the host CLI remains on SciPy GMRES. The same sparse builder
 forward tangent and reverse adjoint systems; closed periodic systems retain
 their existing path until cyclic locality is validated.
 
-The periodic coefficient block uses every cyclic B-spline coefficient and
-passes its gauge-free shape and linearity tests. It is not enabled for closed
-primal solves. On the 892-variable finite-current racetrack, forced
-matrix-free GMRES matches dense energy to ``3.3e-16`` and radius to
-``9.5e-11`` while reducing wall time from 8.71 to 5.81 seconds, but requires
-3,000 Krylov iterations and leaves relative linear residual 0.136. CG and
-MINRES improve that residual only to 0.0167 and 0.0158 after 2,000 and 1,852
-iterations. This fails the structured-solver gate: closed production studies
-remain below the 1,024-variable dense limit, and the periodic block is retained
-only for the bounded closed-adjoint work.
+The periodic coefficient block uses cyclic axial distance, every B-spline
+coefficient, and the same frozen sparse Hessian construction as the open
+solver. Systems through 1,024 variables retain the faster dense small-problem
+path. On the first 1,182-variable circular case, the cyclic factor reaches
+variational ``ftol=1e-12`` in 11.50 seconds and 907 Krylov iterations, with
+true relative linear residual ``7.39e-10``. The previous noncyclic attempt
+left residual 0.136 after 3,000 iterations. This closes the periodic linear
+gate, but the circular strong-force and VMEC-limit refinement gates still
+block hybrid promotion.
 
 On the flared finite-beta case, knot refinement from 5 to 11 coefficients
 reduces relative energy error against an ``nxi=17`` Chebyshev oracle from

@@ -108,6 +108,15 @@ Audit baseline (2026-07-15 CDT, final source/literature/worktree review and T6c 
   `1.30e-3` and variational residual `2.33e-14`. T7 must now establish this
   decrease on the independent and combined refinement matrix before promoting
   finite-beta evidence.
+- The T8 circular baseline maps VMEC ``PHIEDGE`` to
+  `2*pi*axial_flux_derivative`. Ordinary VMEC-JAX and VMEC2000 agree to
+  roundoff at `ns=17` for volume, magnetic energy, axis/volume field, flux,
+  zero iota, convergence residuals, and 123 iterations. Enabling cyclic axial
+  distance in the mirror sparse factor changes the first 1,182-variable closed
+  solve from the stale noncyclic residual `0.136` after 3,000 Krylov iterations
+  to `7.39e-10` after 907; it reaches variational `9.37e-13` in 11.50 seconds.
+  Its strong force is still `8.78e-2`, so circular physics parity remains an
+  active T8 gate rather than a promoted result.
 
 Execution update (2026-07-15): T1 enforced the matrix-free open policy and
 compacted its evidence; T2 removed the nodal fixed solver, custom VJP, and

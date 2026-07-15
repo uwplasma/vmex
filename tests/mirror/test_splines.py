@@ -560,16 +560,17 @@ def test_closed_spline_fixed_boundary_torus_converges_to_ftol() -> None:
         axial_flux_derivative=0.03,
     )
 
-    result = solve_spline_fixed_boundary_cli(
-        initial,
-        boundary,
-        discretization,
-        config,
-        axial_flux_derivative=0.03,
-        solve_lambda=True,
-        axis=axis,
-        require_convergence=True,
-    ).evaluated
+    with jax.disable_jit(False):
+        result = solve_spline_fixed_boundary_cli(
+            initial,
+            boundary,
+            discretization,
+            config,
+            axial_flux_derivative=0.03,
+            solve_lambda=True,
+            axis=axis,
+            require_convergence=True,
+        ).evaluated
 
     assert result.converged
     assert result.iterations < 50
@@ -577,6 +578,51 @@ def test_closed_spline_fixed_boundary_torus_converges_to_ftol() -> None:
     assert float(result.staggered_weak_force.maximum) <= 1.1 * config.ftol
     assert float(result.normalized_divergence_rms) < 1.0e-12
     assert not bool(result.energy.geometry.jacobian_sign_changed)
+
+
+@pytest.mark.full
+def test_large_closed_torus_uses_cyclic_sparse_factor() -> None:
+    resolution = MirrorResolution(ns=7, mpol=4, nxi=4)
+    config = MirrorConfig(
+        resolution=resolution,
+        ftol=1.0e-12,
+        max_iterations=1000,
+    )
+    discretization, axis, boundary, base = _closed_circular_torus(
+        resolution,
+        coefficient_count=12,
+    )
+    initial = initialize_closed_vacuum_stream_function(
+        base,
+        discretization,
+        axis,
+        axial_flux_derivative=0.03,
+    )
+    vectorizer = _SplineStateVectorizer.build(
+        initial,
+        boundary,
+        discretization,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+    )
+    assert vectorizer.pack().size > 1024
+
+    with jax.disable_jit(False):
+        result = solve_spline_fixed_boundary_cli(
+            initial,
+            boundary,
+            discretization,
+            config,
+            axial_flux_derivative=0.03,
+            solve_lambda=True,
+            axis=axis,
+            require_convergence=True,
+        ).evaluated
+
+    assert result.converged
+    assert float(result.variational.maximum) <= config.ftol
+    assert result.linear_iterations < 2000
+    assert result.final_linear_residual < 1.0e-8
 
 
 def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
@@ -1165,9 +1211,9 @@ def test_local_spline_preconditioner_builds_from_bounded_hessian_chunks() -> Non
     assert sum(batch_sizes) >= size
 
 
-def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
-    discretization, _, boundary, state = _closed_circular_torus(resolution, coefficient_count=12)
+def test_periodic_spline_preconditioner_factors_cyclic_support() -> None:
+    resolution = MirrorResolution(ns=5, mpol=1, nxi=4)
+    discretization, _, boundary, state = _closed_circular_torus(resolution, coefficient_count=8)
     vectorizer = _SplineStateVectorizer.build(
         state,
         boundary,
@@ -1175,16 +1221,18 @@ def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> No
         axial_flux_derivative=0.03,
         solve_lambda=True,
     )
-    apply, _, build_local = _packed_spline_preconditioner(discretization, vectorizer)
-    direction = np.random.default_rng(91).normal(size=vectorizer.pack().size)
-    result = apply(direction)
+    _, _, build_local = _packed_spline_preconditioner(discretization, vectorizer)
+    size = vectorizer.pack().size
+    matrix = 4.0 * np.eye(size)
+    first = np.flatnonzero(vectorizer.radius_indices[2] == 0)
+    last = np.flatnonzero(vectorizer.radius_indices[2] == discretization.coefficient_count - 1)
+    for left, right in zip(first, last, strict=True):
+        matrix[left, right] = matrix[right, left] = 0.2
 
-    assert vectorizer.radius_size == (resolution.ns - 2) * resolution.ntheta * 12
-    assert vectorizer.lambda_size == (resolution.ns - 1) * (resolution.ntheta * 12 - 1)
-    assert result.shape == direction.shape
-    assert np.all(np.isfinite(result))
-    assert build_local is None
-    np.testing.assert_allclose(apply(1.7 * direction), 1.7 * result, rtol=3.0e-13, atol=3.0e-13)
+    assert build_local is not None
+    apply = build_local(lambda directions: directions @ matrix.T)
+    exact = np.random.default_rng(91).normal(size=size)
+    np.testing.assert_allclose(apply(matrix @ exact), exact, rtol=3.0e-14, atol=3.0e-14)
 
 
 @pytest.mark.full
