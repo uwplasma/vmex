@@ -6,14 +6,12 @@ supersedes the original `/Users/rogeriojorge/Downloads/plan_mirror.md` and
 every earlier version of this plan. Do not create parallel roadmaps. Commits,
 tests, and the four compact benchmark JSON files are the execution log.
 
-Audit baseline (2026-07-15 CDT, final source/literature/worktree review):
+Audit baseline (2026-07-15 CDT, final source/literature/worktree review and T6c update):
 
-- the pushed implementation head is `8b10700a` on
-  `codex/mirror-geometry`. T1--T6b are committed and pushed. T6c is active in
-  three uncommitted files: `free_boundary.py`, `implicit.py`, and
-  `test_implicit.py`. These edits make the free adjoint consume the exact
-  coefficient residual assembled by the primal instead of reconstructing a
-  nodal problem;
+- the pushed implementation head is `df0b8e54` on
+  `codex/mirror-geometry`. T1--T6b and the primal/adjoint unification part of
+  T6c are committed and pushed. The final T6c reduction removes repeated
+  fixtures and one-use wrappers without removing a physics assertion;
 - base `origin/main` is `ed4ac7ac`; the branch is zero commits behind and 323
   commits ahead, so no main-branch merge is pending. It includes the
   coil-ownership cleanup from PR #26, simultaneous boundary/coil derivatives
@@ -22,13 +20,13 @@ Audit baseline (2026-07-15 CDT, final source/literature/worktree review):
   inspected on the latest pushed head passed; several long shards were still
   running. Do not poll CI while implementing; inspect the accumulated result
   before each major push;
-- the pushed diff is 50 files, 17,330 insertions, and 1,608 deletions. This is
+- the pushed diff is 50 files, 17,123 insertions, and 1,608 deletions. This is
   above the final 46-file budget and makes T11 deletion mandatory;
-- the active worktree contains 13 mirror modules, 8,142 physical lines, 20
-  lazy public names, and 4,379 mirror-test lines. It is temporarily above the
-  8,000-line milestone ceiling; T6c must remove the obsolete nodal vectorizer,
-  preconditioner, interpolation path, and duplicate tests before new physics
-  work starts;
+- the active worktree contains 13 mirror modules, 7,880 physical lines, 20
+  lazy public names, and 4,227 mirror-test lines. `splines.py` is 999 lines.
+  T6c has removed the obsolete nodal vectorizer, preconditioner, interpolation
+  path, rejected cached linearization, and duplicate test setup. T11 still
+  must reach the final 7,200/4,000 and 46-file/API/artifact budgets;
 - the coefficient-API worktree passes 106 tests and skips 10 in 321.53 seconds;
   the later regional-force change passes its focused tests; strict Sphinx,
   changed-file pre-commit, and `git diff --check` pass;
@@ -95,11 +93,12 @@ Audit baseline (2026-07-15 CDT, final source/literature/worktree review):
   and the full nonaxisymmetric endpoint pass their focused gates. The normal
   mirror suite passes 108 tests with 7 expected deselections; strict Sphinx,
   pre-commit, and diff checks pass.
-- the active T6c coefficient-adjoint rewrite passes its three normal tests in
-  11.78 seconds and the existing full external-field finite-difference gate
-  passed before this revision. It is not complete until a finite
-  pressure-control derivative is added and every now-unreferenced nodal
-  production helper is deleted.
+- T6c uses the exact primal coefficient residual and preconditioner in the
+  free adjoint. Reconverged central differences validate both external-field
+  and finite-pressure mass-profile directions. The complete normal mirror
+  suite passes 103 tests with 7 full tests deselected in 323.73 seconds; the
+  finite-pressure adjoint, 0--50% axisymmetric beta scan, and finite-current
+  nonaxisymmetric endpoint pass together in 209.91 seconds.
 
 Execution update (2026-07-15): T1 enforced the matrix-free open policy and
 compacted its evidence; T2 removed the nodal fixed solver, custom VJP, and
@@ -114,9 +113,9 @@ rotating-ellipse initialization, independent and combined refinement studies,
 half-radius studies, and fine-grid tangent/adjoint checks. Its complete local
 gate now passes. T6a established the composed coefficient map and discrete
 boundary-work shape derivative. T6b migrated the free primal, operator,
-result, and restart. T6c now unifies the free implicit residual and performs
-the mandatory deletion pass. T7 is blocked until T6c meets the source/test
-reduction gate.
+result, and restart. T6c unifies the free implicit residual and completes the
+mandatory deletion pass. T7 is next after static and strict-documentation
+checks and the T6c commit.
 
 The branch contains real fixed-open equilibrium solvers and useful validation,
 but it is not release-ready. Dense coupled free-boundary Jacobian storage is
@@ -1123,7 +1122,7 @@ recorded as compact negative evidence.
 | T5 (complete) | Regenerate rotating-ellipse and SFLM fixed-boundary evidence | 102 passed/7 skipped; full physics regressions, strict docs, pre-commit, and promoted record pass |
 | T6a (complete) | Add the composed free coefficient map and Galerkin boundary-work residual | 3 focused and 28 non-full spline tests; directional JAX/FD work parity; square coefficient map; pre-commit pass |
 | T6b (complete) | Replace the coupled Jacobian with measured-memory JVP/VJP `LinearOperator` actions and migrate result/restart schema | dense tiny-case and transpose parity; repeated actions selected by memory/runtime A/B; no full coupled Jacobian above threshold; schema-3 restart and continuation pass |
-| T6c (active) | Reuse the primal coefficient residual in the free tangent/adjoint and delete all nodal production packing | external-field and finite-pressure reconverged-FD gradients; true transpose residual; normal suite/docs/static gates; source `<7,884`, tests `<4,228`, `splines.py <1,000` |
+| T6c (complete) | Reuse the primal coefficient residual in the free tangent/adjoint and delete all nodal production packing | external-field and finite-pressure reconverged-FD gradients; true transpose residual; 103 normal and 3 representative full tests pass; source `7,880`, tests `4,227`, `splines.py 999`; strict docs/static checks pass |
 | T7 | Regenerate the axisymmetric beta scan through 50% | three-grid physics, interface, force, low-beta Pleiades field, and high-beta trend gates |
 | T8 | Establish circular hybrid parity and long-leg/open limit | ordinary VMEC-JAX and VMEC2000 parity; force refinement |
 | T9 | Promote the spline racetrack/rotating-return hybrid | positive map, nonzero iota, beta profiles, derivatives, MOUT round trip |
@@ -1152,9 +1151,11 @@ T6 changes existing owners only:
 | `examples/mirror_free_boundary_beta_scan.py` | no T6c feature growth | private imports and nodal interpolation helpers if any remain |
 | `benchmarks/mirror_free_boundary_axisymmetric.json` | keep explicitly stale/research until T7 regenerates it | incompatible positive status |
 
-No T6 source module is added. T6a's temporary 289-line increase must be more
-than recovered in T6b/T6c; the combined T6 tranche fails simplification unless
-both mirror source and mirror test lines end below their pre-T6 counts.
+No T6 source module is added. T6c must return below the measured post-T6a
+7,884-source/4,228-test baseline after T6b adds the production coefficient
+result, restart, continuation, and implicit controls. This is an intermediate
+deletion gate, not the release budget: T11 still must reduce the complete tree
+below 7,200 source and 4,000 test lines.
 
 ## 7. Canonical artifacts and reporting
 
@@ -1194,17 +1195,17 @@ Percentages measure promotion evidence, not lines written:
 | Fixed open axisymmetric | 100% | maintain gates while shared solver code changes |
 | Fixed open nonaxisymmetric | 100% | maintain gates during shared-core changes |
 | Open fixed B-spline representation | 100% | maintain coefficient and cut-location gates |
-| Free open axisymmetric | 80% | finish coefficient adjoint deletion pass; regenerate three-grid force/interface/beta evidence |
+| Free open axisymmetric | 84% | regenerate three-grid force/interface/beta evidence |
 | Free open nonaxisymmetric | 35% | conditional three-grid local-mode promotion attempt after M4 |
 | Fixed closed B-spline hybrid | 45% | current-semantics VMEC parity, open-leg limit, force, derivatives |
 | Strong-force diagnostic | 100% | maintain gates in promoted equilibrium lanes |
 | Structured preconditioning | 90% | add cyclic structure and close periodic true residual in T8/T9 |
-| Implicit differentiation | 84% | finish finite-pressure free FD; rerun hybrid derivatives only after primal promotion |
-| Code/API simplification | 68% | active tree exceeds line/file/API budgets; T6c and T11 are deletion milestones |
+| Implicit differentiation | 90% | rerun hybrid derivatives only after primal promotion |
+| Code/API simplification | 72% | T6c line gates pass; T11 must meet final file/API/source/test budgets |
 | Docs/examples/artifacts | 68% | correct coefficient-adjoint text; regenerate free/hybrid showcases after physics gates |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned benchmark runner; retain field-callable integration only |
 
-Weighted completion of the four required release models is approximately 81%.
+Weighted completion of the four required release models is approximately 82%.
 Free closed hybrid and ANIMEC are deferred and excluded from that percentage.
 
 ## 9. Primary references

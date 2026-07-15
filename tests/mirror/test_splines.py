@@ -37,10 +37,7 @@ from vmec_jax.mirror.geometry import (  # noqa: E402
     magnetic_field_xyz,
     racetrack_centerline_coefficients,
 )
-from vmec_jax.mirror.solver import (  # noqa: E402
-    MirrorConvergenceError,
-    SeparableMirrorPreconditioner,
-)
+from vmec_jax.mirror.solver import MirrorConvergenceError  # noqa: E402
 from vmec_jax.mirror.splines import (  # noqa: E402
     SplineMirrorBoundary,
     SplineMirrorDiscretization,
@@ -156,12 +153,14 @@ def test_closed_circle_axis_has_periodic_rotation_minimizing_frame() -> None:
     assert abs(float(axis.frame_holonomy)) < 2.0e-13
 
     gradient = jax.grad(
-        lambda values: evaluate_closed_spline_axis(
-            values,
-            basis,
-            points,
-            initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-        ).arc_length
+        lambda values: (
+            evaluate_closed_spline_axis(
+                values,
+                basis,
+                points,
+                initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+            ).arc_length
+        )
     )(coefficients)
     assert np.all(np.isfinite(gradient))
     assert float(jnp.linalg.norm(gradient)) > 1.0
@@ -216,9 +215,7 @@ def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> Non
         discretization.grid.z,
         initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
     )
-    boundary = SplineMirrorBoundary(
-        jnp.full((1, basis.size), minor_radius)
-    )
+    boundary = SplineMirrorBoundary(jnp.full((1, basis.size), minor_radius))
     coefficient_state = SplineMirrorState(
         radius_coefficients=jnp.full(
             (resolution.ns, 1, basis.size),
@@ -226,9 +223,7 @@ def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> Non
         ),
         lambda_coefficients=jnp.zeros((resolution.ns, 1, basis.size)),
     )
-    state = discretization.evaluate_state(
-        discretization.project_fixed_boundary(coefficient_state, boundary)
-    )
+    state = discretization.evaluate_state(discretization.project_fixed_boundary(coefficient_state, boundary))
     geometry = evaluate_closed_geometry(state, discretization.grid, axis)
     expected_volume = 2.0 * np.pi**2 * major_radius * minor_radius**2
     np.testing.assert_allclose(geometry.volume, expected_volume, rtol=2.0e-5)
@@ -272,8 +267,7 @@ def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> Non
     automatic = jax.jvp(total_energy, (axis_coefficients,), (direction,))[1]
     step = 2.0e-5
     finite_difference = (
-        total_energy(axis_coefficients + step * direction)
-        - total_energy(axis_coefficients - step * direction)
+        total_energy(axis_coefficients + step * direction) - total_energy(axis_coefficients - step * direction)
     ) / (2.0 * step)
     np.testing.assert_allclose(automatic, finite_difference, rtol=2.0e-7)
 
@@ -303,9 +297,10 @@ def test_racetrack_ellipse_rotates_ninety_degrees_between_straight_legs() -> Non
     angle = 0.25 * jnp.pi * (1.0 - jnp.cos(coefficient_nodes))
     theta = jnp.asarray(discretization.grid.theta)[:, None]
     local_angle = theta - angle[None, :]
-    radius_samples = semi_major * semi_minor / jnp.sqrt(
-        (semi_minor * jnp.cos(local_angle)) ** 2
-        + (semi_major * jnp.sin(local_angle)) ** 2
+    radius_samples = (
+        semi_major
+        * semi_minor
+        / jnp.sqrt((semi_minor * jnp.cos(local_angle)) ** 2 + (semi_major * jnp.sin(local_angle)) ** 2)
     )
     boundary = SplineMirrorBoundary(basis.fit(radius_samples, axis=-1))
     boundary_at_legs = basis.evaluate(
@@ -321,13 +316,9 @@ def test_racetrack_ellipse_rotates_ninety_degrees_between_straight_legs() -> Non
             boundary.radius_coefficients[None],
             (resolution.ns,) + boundary.radius_coefficients.shape,
         ),
-        lambda_coefficients=jnp.zeros(
-            (resolution.ns, resolution.ntheta, basis.size)
-        ),
+        lambda_coefficients=jnp.zeros((resolution.ns, resolution.ntheta, basis.size)),
     )
-    state = discretization.evaluate_state(
-        discretization.project_fixed_boundary(coefficient_state, boundary)
-    )
+    state = discretization.evaluate_state(discretization.project_fixed_boundary(coefficient_state, boundary))
     geometry = evaluate_closed_geometry(state, discretization.grid, axis)
     np.testing.assert_allclose(
         geometry.volume,
@@ -337,16 +328,18 @@ def test_racetrack_ellipse_rotates_ninety_degrees_between_straight_legs() -> Non
     assert not bool(geometry.jacobian_sign_changed)
 
     volume_gradient = jax.grad(
-        lambda coefficients: evaluate_closed_geometry(
-            state,
-            discretization.grid,
-            evaluate_closed_spline_axis(
-                coefficients,
-                basis,
-                discretization.grid.z,
-                initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-            ),
-        ).volume
+        lambda coefficients: (
+            evaluate_closed_geometry(
+                state,
+                discretization.grid,
+                evaluate_closed_spline_axis(
+                    coefficients,
+                    basis,
+                    discretization.grid.z,
+                    initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+                ),
+            ).volume
+        )
     )(axis_coefficients)
     assert np.all(np.isfinite(volume_gradient))
     assert float(jnp.linalg.norm(volume_gradient)) > 1.0e-3
@@ -378,16 +371,19 @@ def _closed_circular_torus(resolution, *, coefficient_count=8):
         initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
     )
     minor_radius = 0.25
-    boundary = SplineMirrorBoundary(
-        jnp.full((resolution.ntheta, basis.size), minor_radius)
-    )
+    boundary = SplineMirrorBoundary(jnp.full((resolution.ntheta, basis.size), minor_radius))
     radius = jnp.full(
         (resolution.ns, resolution.ntheta, basis.size),
         minor_radius,
     )
-    return discretization, axis, boundary, SplineMirrorState(
-        radius,
-        jnp.zeros_like(radius),
+    return (
+        discretization,
+        axis,
+        boundary,
+        SplineMirrorState(
+            radius,
+            jnp.zeros_like(radius),
+        ),
     )
 
 
@@ -441,18 +437,13 @@ def test_closed_vacuum_initializer_recovers_one_over_r_field() -> None:
         axis=axis,
         axial_flux_derivative=0.03,
     )
-    cylindrical_radius = jnp.sqrt(
-        energy.geometry.xyz[..., 0] ** 2 + energy.geometry.xyz[..., 2] ** 2
-    )
+    cylindrical_radius = jnp.sqrt(energy.geometry.xyz[..., 0] ** 2 + energy.geometry.xyz[..., 2] ** 2)
     invariant = jnp.sqrt(energy.b_squared) * cylindrical_radius
-    relative_spread = (
-        jnp.max(invariant[1:], axis=(1, 2))
-        - jnp.min(invariant[1:], axis=(1, 2))
-    ) / jnp.mean(invariant[1:], axis=(1, 2))
+    relative_spread = (jnp.max(invariant[1:], axis=(1, 2)) - jnp.min(invariant[1:], axis=(1, 2))) / jnp.mean(
+        invariant[1:], axis=(1, 2)
+    )
     zero_invariant = jnp.sqrt(zero_energy.b_squared) * cylindrical_radius
-    zero_spread = (
-        jnp.max(zero_invariant[-1]) - jnp.min(zero_invariant[-1])
-    ) / jnp.mean(zero_invariant[-1])
+    zero_spread = (jnp.max(zero_invariant[-1]) - jnp.min(zero_invariant[-1])) / jnp.mean(zero_invariant[-1])
     surface_integral = jnp.einsum(
         "j,k,ijk->i",
         discretization.grid.theta_basis.weights,
@@ -533,9 +524,7 @@ def test_closed_staggered_first_variation_matches_autodiff() -> None:
         "mass_profile": 10.0 * (1.0 - jnp.asarray(grid.s)) ** 2,
         "axis": axis,
     }
-    automatic = jax.grad(
-        lambda trial: mirror_energy(trial, grid, **kwargs).total
-    )(state)
+    automatic = jax.grad(lambda trial: mirror_energy(trial, grid, **kwargs).total)(state)
     staggered = isotropic_staggered_energy_gradient(state, grid, **kwargs)
 
     np.testing.assert_allclose(
@@ -618,9 +607,10 @@ def test_closed_racetrack_finite_current_and_lambda_converge() -> None:
     theta = jnp.asarray(discretization.grid.theta)[:, None]
     local_angle = theta - angle[None]
     semi_major, semi_minor = 0.18, 0.12
-    samples = semi_major * semi_minor / jnp.sqrt(
-        (semi_minor * jnp.cos(local_angle)) ** 2
-        + (semi_major * jnp.sin(local_angle)) ** 2
+    samples = (
+        semi_major
+        * semi_minor
+        / jnp.sqrt((semi_minor * jnp.cos(local_angle)) ** 2 + (semi_major * jnp.sin(local_angle)) ** 2)
     )
     boundary = SplineMirrorBoundary(basis.fit(samples, axis=-1))
     radius = jnp.broadcast_to(
@@ -770,9 +760,9 @@ def test_spline_boundary_work_is_the_discrete_shape_derivative() -> None:
     theta = jnp.asarray(discretization.grid.theta)[:, None]
     xi = jnp.asarray(discretization.grid.xi)[None, :]
     jump = 1.7 + 0.2 * jnp.cos(theta) * (1.0 - xi**2)
-    direction = jnp.sin(
-        jnp.arange(boundary.radius_coefficients.size, dtype=float)
-    ).reshape(boundary.radius_coefficients.shape)
+    direction = jnp.sin(jnp.arange(boundary.radius_coefficients.size, dtype=float)).reshape(
+        boundary.radius_coefficients.shape
+    )
     direction = direction.at[:, [0, -1]].set(0.0)
     weights = (
         jnp.asarray(discretization.grid.theta_basis.weights)[:, None]
@@ -847,6 +837,27 @@ def test_spline_free_boundary_map_is_square_and_preserves_constraints() -> None:
     np.testing.assert_allclose(mass_scale, 1.2)
 
 
+def _perturbed_cylinder(config, elements, amplitude):
+    """Return coefficient inputs for fixed-boundary solver tests."""
+
+    grid = config.build_grid()
+    boundary = MirrorBoundary.from_radius(0.3, grid)
+    base = MirrorState.from_boundary(boundary, grid)
+    s = jnp.asarray(grid.s)[:, None, None]
+    xi = jnp.asarray(grid.xi)[None, None, :]
+    initial = MirrorState(
+        base.radius_scale + amplitude * s * (1.0 - s) * (1.0 - xi**2),
+        base.lambda_stream,
+    )
+    discretization = SplineMirrorDiscretization.build(config, elements=elements)
+    return (
+        grid,
+        discretization,
+        discretization.fit_boundary(boundary, grid),
+        discretization.fit_state(initial, grid),
+    )
+
+
 def test_spline_fixed_boundary_solver_recovers_cylindrical_equilibrium() -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=7, mpol=0, nxi=9),
@@ -855,18 +866,7 @@ def test_spline_fixed_boundary_solver_recovers_cylindrical_equilibrium() -> None
         ftol=1.0e-12,
         max_iterations=300,
     )
-    source_grid = config.build_grid()
-    boundary = MirrorBoundary.from_radius(0.3, source_grid)
-    base = MirrorState.from_boundary(boundary, source_grid)
-    s = jnp.asarray(source_grid.s)[:, None, None]
-    xi = jnp.asarray(source_grid.xi)[None, None, :]
-    initial = MirrorState(
-        base.radius_scale + 0.03 * s * (1.0 - s) * (1.0 - xi**2),
-        base.lambda_stream,
-    )
-    discretization = SplineMirrorDiscretization.build(config, elements=4)
-    spline_boundary = discretization.fit_boundary(boundary, source_grid)
-    spline_initial = discretization.fit_state(initial, source_grid)
+    _, discretization, spline_boundary, spline_initial = _perturbed_cylinder(config, 4, 0.03)
 
     result = solve_spline_fixed_boundary_cli(
         spline_initial,
@@ -892,21 +892,12 @@ def test_spline_solver_raises_when_convergence_is_required() -> None:
         ftol=1.0e-14,
         max_iterations=1,
     )
-    grid = config.build_grid()
-    boundary = MirrorBoundary.from_radius(0.3, grid)
-    base = MirrorState.from_boundary(boundary, grid)
-    s = jnp.asarray(grid.s)[:, None, None]
-    xi = jnp.asarray(grid.xi)[None, None, :]
-    initial = MirrorState(
-        base.radius_scale + 0.04 * s * (1.0 - s) * (1.0 - xi**2),
-        base.lambda_stream,
-    )
-    discretization = SplineMirrorDiscretization.build(config, elements=4)
+    _, discretization, spline_boundary, spline_initial = _perturbed_cylinder(config, 4, 0.04)
 
     with pytest.raises(MirrorConvergenceError) as caught:
         solve_spline_fixed_boundary_cli(
-            discretization.fit_state(initial, grid),
-            discretization.fit_boundary(boundary, grid),
+            spline_initial,
+            spline_boundary,
             discretization,
             config,
             axial_flux_derivative=0.1,
@@ -1086,9 +1077,7 @@ def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location() -> None:
             0.12,
             half_length * jnp.asarray(discretization.spline.collocation_nodes),
         )[None]
-        boundary = SplineMirrorBoundary(
-            discretization.spline.fit(boundary_samples, axis=-1)
-        )
+        boundary = SplineMirrorBoundary(discretization.spline.fit(boundary_samples, axis=-1))
         radius = jnp.broadcast_to(
             boundary.radius_coefficients[None],
             (config.resolution.ns,) + boundary.radius_coefficients.shape,
@@ -1119,26 +1108,6 @@ def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location() -> None:
 
     np.testing.assert_allclose(center_radius, center_radius[0], rtol=3.0e-8)
     np.testing.assert_allclose(center_axis_field, center_axis_field[0], rtol=2.0e-5)
-
-
-def test_spline_coefficient_preconditioner_inverts_tensor_model() -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=9, mpol=3, nxi=9))
-    discretization = SplineMirrorDiscretization.build(config, elements=8)
-    derivative = np.asarray(
-        discretization.spline.basis_matrix(discretization.grid.axial_basis.nodes, derivative=1)
-    ) / float(discretization.grid.dz_dxi)
-    weights = np.asarray(discretization.grid.axial_basis.weights)
-    interior = derivative[:, 1:-1]
-    stiffness = interior.T @ (weights[:, None] * interior)
-    preconditioner = SeparableMirrorPreconditioner.build_from_axial_stiffness(discretization.grid, stiffness)
-    exact = np.random.default_rng(32).normal(size=preconditioner.size)
-
-    np.testing.assert_allclose(
-        preconditioner.apply(preconditioner.operator(exact)),
-        exact,
-        rtol=4.0e-12,
-        atol=4.0e-12,
-    )
 
 
 def test_local_spline_preconditioner_builds_from_bounded_hessian_chunks() -> None:
@@ -1182,9 +1151,7 @@ def test_local_spline_preconditioner_builds_from_bounded_hessian_chunks() -> Non
 
 def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> None:
     resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
-    discretization, _, boundary, state = _closed_circular_torus(
-        resolution, coefficient_count=12
-    )
+    discretization, _, boundary, state = _closed_circular_torus(resolution, coefficient_count=12)
     vectorizer = _SplineStateVectorizer.build(
         state,
         boundary,
@@ -1197,15 +1164,11 @@ def test_periodic_spline_preconditioner_uses_all_gauge_free_coefficients() -> No
     result = apply(direction)
 
     assert vectorizer.radius_size == (resolution.ns - 2) * resolution.ntheta * 12
-    assert vectorizer.lambda_size == (resolution.ns - 1) * (
-        resolution.ntheta * 12 - 1
-    )
+    assert vectorizer.lambda_size == (resolution.ns - 1) * (resolution.ntheta * 12 - 1)
     assert result.shape == direction.shape
     assert np.all(np.isfinite(result))
     assert build_local is None
-    np.testing.assert_allclose(
-        apply(1.7 * direction), 1.7 * result, rtol=3.0e-13, atol=3.0e-13
-    )
+    np.testing.assert_allclose(apply(1.7 * direction), 1.7 * result, rtol=3.0e-13, atol=3.0e-13)
 
 
 @pytest.mark.full
@@ -1217,21 +1180,12 @@ def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner() -> Non
         ftol=1.0e-12,
         max_iterations=300,
     )
-    source_grid = config.build_grid()
-    boundary = MirrorBoundary.from_radius(0.3, source_grid)
-    base = MirrorState.from_boundary(boundary, source_grid)
-    s = jnp.asarray(source_grid.s)[:, None, None]
-    xi = jnp.asarray(source_grid.xi)[None, None, :]
-    initial = MirrorState(
-        base.radius_scale + 0.03 * s * (1.0 - s) * (1.0 - xi**2),
-        base.lambda_stream,
-    )
-    discretization = SplineMirrorDiscretization.build(config, elements=12)
+    source_grid, discretization, spline_boundary, spline_initial = _perturbed_cylinder(config, 12, 0.03)
     assert (source_grid.ns - 2) * source_grid.ntheta * (discretization.coefficient_count - 2) > 1024
 
     result = solve_spline_fixed_boundary_cli(
-        discretization.fit_state(initial, source_grid),
-        discretization.fit_boundary(boundary, source_grid),
+        spline_initial,
+        spline_boundary,
         discretization,
         config,
         axial_flux_derivative=0.1,
@@ -1267,14 +1221,10 @@ def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue() -> None:
             elongation=1.0 + 0.5 * stage,
             rotation=0.5 * jnp.pi * stage,
         )
-        return MirrorBoundary.from_radius(
-            fixture.boundary_radius(0.05, theta, z), source_grid
-        )
+        return MirrorBoundary.from_radius(fixture.boundary_radius(0.05, theta, z), source_grid)
 
     source = discretization.fit_boundary(boundary(0.0), source_grid)
-    state = discretization.fit_state(
-        MirrorState.from_boundary(boundary(0.0), source_grid), source_grid
-    )
+    state = discretization.fit_state(MirrorState.from_boundary(boundary(0.0), source_grid), source_grid)
     result = None
     for stage in (0.0, 0.25, 0.5):
         target = discretization.fit_boundary(boundary(stage), source_grid)

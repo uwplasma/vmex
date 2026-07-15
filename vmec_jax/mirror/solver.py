@@ -11,7 +11,7 @@ reference.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -526,8 +526,6 @@ def _optimize_fixed_boundary(
         message=optimizer_message,
     )
 
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .basis import MirrorGrid

@@ -455,23 +455,6 @@ jax.tree_util.register_dataclass(
 )
 
 
-def free_boundary_parameters(
-    external_field: Any,
-    *,
-    axial_flux_derivative: Array,
-    mass_profile: Array = 0.0,
-    current_derivative: Array = 0.0,
-) -> FreeBoundaryParameters:
-    """Collect free-boundary controls in a differentiable pytree."""
-
-    return FreeBoundaryParameters(
-        external_field=external_field,
-        axial_flux_derivative=jnp.asarray(axial_flux_derivative),
-        mass_profile=jnp.asarray(mass_profile),
-        current_derivative=jnp.asarray(current_derivative),
-    )
-
-
 def free_boundary_adjoint(
     result: Any,
     parameters: FreeBoundaryParameters,
@@ -560,7 +543,6 @@ __all__ = [
     "MirrorTangentResult",
     "SplineFixedBoundaryParameters",
     "free_boundary_adjoint",
-    "free_boundary_parameters",
     "spline_fixed_boundary_adjoint",
     "spline_fixed_boundary_tangent",
     "spline_fixed_boundary_parameters",

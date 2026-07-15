@@ -332,17 +332,6 @@ def _polish_free_equilibrium(
     )
 
 
-def _build_free_solver_jacobian(
-    problem: _FreeEquilibriumProblem,
-) -> Callable[[np.ndarray], np.ndarray | LinearOperator]:
-    """Select dense differentiation only for explicitly tiny systems."""
-
-    if problem.size > _DENSE_JACOBIAN_MAX_SIZE:
-        return problem.linear_operator
-    dense = jax.jit(jax.jacfwd(problem.residual_function))
-    return lambda vector: np.asarray(dense(jnp.asarray(vector)), dtype=float)
-
-
 def _spline_boundary_work(
     boundary: SplineMirrorBoundary,
     jump: Array,
@@ -678,7 +667,13 @@ def solve_free_boundary_cli(
     x0 = vectorizer.pack()
     lower, upper = vectorizer.bounds()
     matrix_free = problem.size > _DENSE_JACOBIAN_MAX_SIZE
-    solver_jacobian = _build_free_solver_jacobian(problem)
+    if matrix_free:
+        solver_jacobian = problem.linear_operator
+    else:
+        dense_jacobian = jax.jit(jax.jacfwd(problem.residual_function))
+
+        def solver_jacobian(vector: np.ndarray) -> np.ndarray:
+            return np.asarray(dense_jacobian(jnp.asarray(vector)), dtype=float)
 
     history: list[tuple[float, float, float, float, float]] = []
     last_recorded: np.ndarray | None = None

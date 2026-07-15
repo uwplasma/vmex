@@ -128,6 +128,23 @@ class SplineMirrorDiscretization:
     evaluation_matrix: np.ndarray
     closed: bool = False
 
+    @staticmethod
+    def _grid(resolution: MirrorResolution, axial: Any, z: np.ndarray, dz_dxi: float) -> MirrorGrid:
+        """Build the radial and poloidal tensor factors shared by spline grids."""
+
+        s = np.linspace(0.0, 1.0, resolution.ns)
+        radial_weights = np.full(resolution.ns, 1.0 / (resolution.ns - 1))
+        radial_weights[[0, -1]] *= 0.5
+        return MirrorGrid(
+            s=s,
+            s_half=0.5 * (s[:-1] + s[1:]),
+            radial_weights=radial_weights,
+            theta_basis=ThetaBasis.build(resolution.ntheta, resolution.mpol),
+            axial_basis=axial,
+            z=z,
+            dz_dxi=dz_dxi,
+        )
+
     @classmethod
     def build(
         cls,
@@ -143,22 +160,9 @@ class SplineMirrorDiscretization:
             raise ValueError("spline discretization requires elements >= 1")
         spline = CubicBSplineBasis.clamped(np.linspace(-1.0, 1.0, elements + 1), quadrature_order=quadrature_order)
         axial = _SplineEvaluationBasis.build(spline)
-        resolution = config.resolution
-        s = np.linspace(0.0, 1.0, resolution.ns)
-        ds = 1.0 / (resolution.ns - 1)
-        radial_weights = np.full(resolution.ns, ds)
-        radial_weights[[0, -1]] *= 0.5
         z_mid = 0.5 * (config.z_min + config.z_max)
         dz_dxi = 0.5 * (config.z_max - config.z_min)
-        grid = MirrorGrid(
-            s=s,
-            s_half=0.5 * (s[:-1] + s[1:]),
-            radial_weights=radial_weights,
-            theta_basis=ThetaBasis.build(resolution.ntheta, resolution.mpol),
-            axial_basis=axial,
-            z=z_mid + dz_dxi * axial.nodes,
-            dz_dxi=dz_dxi,
-        )
+        grid = cls._grid(config.resolution, axial, z_mid + dz_dxi * axial.nodes, dz_dxi)
         return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), False)
 
     @classmethod
@@ -196,25 +200,11 @@ class SplineMirrorDiscretization:
             quadrature_order=quadrature_order,
         )
         axial = _SplineEvaluationBasis.build(spline)
-        s = np.linspace(0.0, 1.0, resolution.ns)
-        ds = 1.0 / (resolution.ns - 1)
-        radial_weights = np.full(resolution.ns, ds)
-        radial_weights[[0, -1]] *= 0.5
-        grid = MirrorGrid(
-            s=s,
-            s_half=0.5 * (s[:-1] + s[1:]),
-            radial_weights=radial_weights,
-            theta_basis=ThetaBasis.build(resolution.ntheta, resolution.mpol),
-            axial_basis=axial,
-            z=np.asarray(axial.nodes),
-            dz_dxi=1.0,
-        )
+        grid = cls._grid(resolution, axial, np.asarray(axial.nodes), 1.0)
         return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), True)
 
     @property
     def coefficient_count(self) -> int:
-        """Return the number of axial coefficients per scalar field."""
-
         return self.spline.size
 
     def evaluate_boundary(self, boundary: SplineMirrorBoundary) -> MirrorBoundary:
@@ -561,8 +551,6 @@ class _SplineStateVectorizer:
 
     @property
     def radius_size(self) -> int:
-        """Return the number of active geometry coefficients."""
-
         return int(self.radius_indices[0].size)
 
     @property
