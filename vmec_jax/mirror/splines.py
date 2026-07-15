@@ -1315,7 +1315,7 @@ def solve_fixed_boundary_cli(
             start_with_newton=(
                 discretization.closed and not vectorizer.center_size and x0.size <= 512
             ),
-            start_with_dense_root=bool(vectorizer.center_size and x0.size <= 512),
+            start_with_dense_root=bool(vectorizer.center_size and x0.size <= 768),
             matrix_free_context=(
                 vectorizer,
                 _packed_spline_preconditioner(discretization, vectorizer),

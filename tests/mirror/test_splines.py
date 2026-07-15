@@ -898,7 +898,7 @@ def test_displaced_closed_center_map_reconverges_to_ftol() -> None:
     config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
     discretization, axis, boundary, base = _closed_circular_torus(
         resolution,
-        coefficient_count=4,
+        coefficient_count=12,
     )
     radial = jnp.asarray(discretization.grid.s)[:, None]
     center = jnp.stack(
