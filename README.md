@@ -85,6 +85,63 @@ vmec --booz wout_nfp4_QH_warm_start.nc     # Boozer transform -> boozmn_*.nc
 vmec --plot boozmn_nfp4_QH_warm_start.nc   # Boozer |B| contours + spectrum
 ```
 
+## Straight-axis mirrors
+
+The separate `vmec_jax.mirror` backend supports three scalar-pressure,
+nested-surface models at `ftol=1e-12`: fixed-boundary axisymmetric mirrors,
+fixed-boundary nonaxisymmetric mirrors, and axisymmetric free-boundary mirrors
+through 10% central beta. It uses cubic B-splines along the nonperiodic axis
+and Fourier modes in the cross-section. Coils and Biot-Savart fields remain in
+[ESSOS](https://github.com/uwplasma/ESSOS); vmec-jax consumes a supplied
+`xyz -> B` field.
+
+For `r=sqrt(s) a(s,theta,z)`, the divergence-free field and scalar-pressure
+energy are
+
+```text
+sqrt(g) B^theta = I'(s) - partial_z lambda
+sqrt(g) B^z     = Psi'(s) + partial_theta lambda
+W = integral [B^2/(2 mu0) + p/(gamma - 1)] dV
+```
+
+The fixed-boundary workflow is coefficient-native:
+
+```python
+from vmec_jax.mirror import (
+    MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState,
+    SplineMirrorDiscretization, solve_fixed_boundary_cli,
+)
+
+config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=4, nxi=17))
+source_grid = config.build_grid()
+boundary = MirrorBoundary.from_radius(0.3, source_grid)
+discretization = SplineMirrorDiscretization.build(config, elements=6)
+boundary_coefficients = discretization.fit_boundary(boundary, source_grid)
+initial_coefficients = discretization.fit_state(
+    MirrorState.from_boundary(boundary, source_grid), source_grid
+)
+result = solve_fixed_boundary_cli(
+    initial_coefficients, boundary_coefficients, discretization, config,
+    axial_flux_derivative=0.01, solve_lambda=True,
+    require_convergence=True,
+)
+```
+
+![Fixed-boundary axisymmetric and nonaxisymmetric mirror refinement](docs/_static/figures/mirror_fixed_boundary_3d.png)
+
+The free-boundary solver jointly updates the spline LCFS, plasma state, and
+unbounded exterior vacuum. Independent force and grid-refinement gates support
+the 0%, 1%, 3%, and 10% sequence. The converged 25% and 50% continuations are
+kept as research evidence because their independent force gates fail.
+
+![Axisymmetric free-boundary beta support ceiling](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
+
+Run `python examples/mirror_fixed_boundary_nonaxisymmetric.py` or
+`python examples/mirror_free_boundary_beta_scan.py`. MOUT files can be plotted
+with `vmec --plot mout_*.nc`. The [mirror documentation](docs/mirror_geometry.rst)
+defines the end-cut boundary conditions, residuals, validation matrix,
+derivatives, and deferred closed-hybrid/nonaxisymmetric-free lanes.
+
 ## Parity with VMEC2000
 
 vmec-jax is validated end-to-end against golden VMEC2000 (PARVMEC 9.0) runs:
