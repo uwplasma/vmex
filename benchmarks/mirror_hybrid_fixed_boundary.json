@@ -67,7 +67,16 @@
     ],
     "monotone_completed_radial_poloidal_force": true,
     "radial_poloidal_strong_force_below_0.05": false,
-    "radial_poloidal_resource_limit": false
+    "radial_poloidal_resource_limit": false,
+    "beta_zero_ablation": {
+      "resolution": {"ns": 5, "mpol": 3, "controls": 32},
+      "rotating_ellipse_finite_current": 0.429726,
+      "rotating_ellipse_current_free": 0.423698,
+      "fixed_ellipse_current_free": 0.164067,
+      "circular_section_current_free": 0.157547,
+      "circular_axis_and_section_current_free": 0.00832,
+      "conclusion": "racetrack curvature creates the baseline; longitudinal section rotation creates the additional force floor; current is negligible"
+    }
   },
   "preconditioner": {
     "variables": 2524,

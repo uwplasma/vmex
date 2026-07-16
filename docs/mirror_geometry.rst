@@ -209,6 +209,12 @@ variational residual reaches ``3.90e-16``. The ``ns=9, mpol=5`` state exceeded
 the 30-minute resource gate with 12,672 variables and was terminated. Thus
 both the absolute-force and resource gates fail; finite-beta continuation and
 implicit derivatives are deferred until the beta-zero residual is corrected.
+At the default 32-control resolution, removing current changes strong force
+only from ``0.430`` to ``0.424``. Keeping the racetrack but replacing the
+rotating ellipse by a circular section gives ``0.158``; a fixed ellipse gives
+``0.164``. The passing circular-axis/circular-section limit gives ``0.0083``.
+The remaining diagnostic is therefore localized to racetrack curvature plus
+longitudinal section rotation, not pressure or imposed current.
 The earlier nonmonotone sequence is retained in
 ``benchmarks/mirror_hybrid_fixed_boundary.json`` so a new result cannot erase
 the failed refinement history. The default 32-control figure and this transfer

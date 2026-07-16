@@ -921,6 +921,13 @@ promotion status. N1 and A1 remain deferred.
   30-minute state limit at 12,672 variables and 2.11 GiB RSS. H1 therefore
   fails the beta-zero absolute-force and fine-resource gates. Finite-beta and
   derivative work is deferred rather than run on an unvalidated primal model.
+  A beta-zero ablation gives strong force ``0.424`` without current, ``0.158``
+  with a circular racetrack section, and ``0.164`` with a fixed ellipse,
+  compared with ``0.430`` for the rotating ellipse. The defect is localized
+  to racetrack curvature plus longitudinal section rotation, not current. A
+  nearest skew-connection projection of the sampled frame derivative changed
+  the result only from ``0.42973`` to ``0.42874`` and was reverted rather than
+  retain extra code without material diagnostic value.
 - Tests: the 32-control example completed locally; the focused circular and
   hybrid solves pass; 20 model/output tests and strict Sphinx pass; every PNG
   passed visual, size, and nonblank checks. The API-budget CI failure was a
@@ -930,9 +937,10 @@ promotion status. N1 and A1 remain deferred.
   3,665 mirror-test lines, 20 public names, three parser-free root examples,
   three compressed figures, and four compact benchmark records. No coil or
   Biot-Savart implementation was added.
-- Best next step: isolate the closed-axis/first-row strong-force reconstruction
-  against the passing circular limit and the open rotating ellipse. Continue
-  H1 only if a bounded correction makes the beta-zero three-grid gate pass;
+- Best next step: compare the closed metric/strong-force axial derivatives for
+  the circular, fixed-ellipse, and rotating-ellipse racetracks, especially the
+  radial covariant force through the return transitions. Continue H1 only if a
+  bounded correction makes the beta-zero three-grid gate pass;
   otherwise retain the current hybrid as an explicit validation example and
   close the lane without derivatives or finite-beta claims.
 - Open lanes: open fixed/free physics, derivatives, and preconditioning 100%;
