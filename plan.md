@@ -4,8 +4,9 @@ Status: final authoritative plan for draft PR #22. Revised 2026-07-15 after
 auditing the pushed branch and clean research worktree, current `origin/main`,
 VMEC2000/ANIMEC, DESC and its experimental mirror/Chebyshev branches, GVEC,
 SOLVAX 0.8.3/current main, Pleiades, primary mirror literature, and differentiable-solver
-literature. This file replaces all earlier plans, including `plan_mirror.md`.
-Do not create another roadmap.
+literature, and completing the decisive T9b same-geometry matrix. This file
+replaces all earlier plans, including `plan_mirror.md`. Do not create another
+roadmap.
 
 The objective is a small, research-grade mirror-equilibrium extension of
 `vmec_jax`, not a collection of geometry demonstrations. A promoted lane must
@@ -18,7 +19,7 @@ claimed, and expose one simple documented workflow.
 Repository state at this revision:
 
 - audited scientific source checkpoint: `codex/mirror-geometry` at
-  `9e2c171d`; this plan-only revision follows it;
+  `09fb4f4b`; this plan-only revision follows it;
 - base: `origin/main` at `ed4ac7ac`; the source checkpoint is 0 behind and
   350 ahead;
 - PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open, mergeable, draft;
@@ -50,8 +51,8 @@ geometry helper or generated output was retained.
 | Free open, 25%/50% beta | converged scalar-pressure states but failed independent force/refinement ceiling | research only |
 | Free open, nonaxisymmetric | solver exists, local-mode refinement has not passed | conditional research |
 | Fixed closed circular limit | VMEC2000/ordinary-vmec_jax flux parity, axis regularity, `ns=5,9,17` force refinement | supported validation limit |
-| Fixed closed hybrid | periodic B-spline geometry, Bishop frame, rotating section, finite-current solve, field-line tracer | not promoted |
-| Preconditioning | coupled sparse local factor passes dense-oracle tests; the 2,664-variable center map converges in 4,300 GMRES iterations | supported through the half-straight radial restart |
+| Fixed closed hybrid | exact same-geometry T9b matrix passes every absolute gate but fails monotone 16/32/64 strong-force refinement | explicitly deferred; remove hybrid scaffolds |
+| Preconditioning | physical-Hessian support test and coupled sparse factor reduce the 32-control solve from 7,383 to 37 Krylov iterations | supported |
 | Differentiation | converged-residual open tangents/adjoints and free-axisymmetric adjoint | supported for promoted open lanes |
 
 Important measured results:
@@ -140,11 +141,28 @@ Important measured results:
   raises half-straight force to `0.44854`; increasing return radius to 4 raises
   it to `0.14858`. Both experiments were removed. Future longitudinal evidence
   must refine one 16-control physical axis into nested 32/64 spline spaces.
+- Exact periodic subdivision now preserves the 16-control axis, LCFS, radius,
+  center map, and stream function through 32 and 64 controls to at most
+  `2.01e-13` in value and two derivatives. Exact trigonometric interpolation
+  supplies differentiable `mpol=5 -> 7` restarts through the same state
+  transfer path.
+- The corrected closed Hessian graph includes the nonlocal radial couplings
+  created by axis regularization. On the 2,524-variable production state its
+  factor-action residual is `3.1e-11`. At 32 controls, linear work falls from
+  7,383 iterations and true residual `1.27e-2` to 37 iterations and
+  `9.75e-11`. At `ns=9, mpol=5`, runtime falls from 1,106 s to 136 s and the
+  true residual from `0.755` to `3.37e-10`.
+- T9b's exact same-geometry strong-force sequence is
+  `0.052770, 0.107562, 0.023653` at quadrature order 3 and
+  `0.052796, 0.107140, 0.023534` at order 4. The finest `ns=9, mpol=7`
+  values are `0.023392` and `0.023265`; all states pass `ftol`, weak parity,
+  linear residual, Jacobian, 30-minute, and 8-GiB gates. Both quadrature
+  orders reproduce the nonmonotone 32-control spike, so the declared T9b
+  refinement gate fails and the fixed closed hybrid is deferred.
 
-The release is blocked by a same-geometry half-straight strong-force
-refinement below `5e-2`, then code reduction. The
-conditional nonaxisymmetric free-boundary attempt must not delay those required
-steps.
+The release is now blocked by the T9b code-reducing deferral, the bounded
+nonaxisymmetric free-boundary disposition, and T11/T12 simplification and
+release audit. No further closed-hybrid tuning is allowed in this PR.
 
 ## 2. Release scope
 
@@ -155,9 +173,6 @@ models:
 2. fixed-boundary straight-axis nonaxisymmetric mirrors;
 3. free-boundary straight-axis axisymmetric mirrors in a supplied external
    field through central beta 10%;
-4. fixed-boundary toroidal stellarator-mirror hybrids with two straight mirror
-   legs and two smooth stellarator returns, only if the decisive T9b
-   same-geometry refinement passes.
 
 One bounded attempt is allowed:
 
@@ -167,6 +182,7 @@ One bounded attempt is allowed:
 
 Explicitly deferred to later PRs:
 
+- fixed-boundary toroidal stellarator-mirror hybrids;
 - free-boundary closed hybrids and coil-plasma optimization;
 - anisotropic pressure, ANIMEC, kinetic pressure closures, end losses, sheaths,
   transport, and stability;
@@ -508,51 +524,32 @@ Every promoted equilibrium lane must satisfy all applicable gates.
 
 ## 7. Finite execution plan
 
-The remaining work is six tranches. Finish them in order. Commit and push
-after each accepted tranche. Do not expand scope between tranches.
+The remaining work is four tranches: finish the T9b deferral, then T10, T11,
+and T12. Commit and push after each accepted tranche. Do not expand scope
+between tranches.
 
-### T9b. Converge the closed hybrid primal
+### T9b. Apply the closed-hybrid deferral
 
-The center map, its independent weak work, the radius-translation gauge, dense
-oracle, radial transfer, and coupled sparse factor are complete. Do not reopen
-their design unless a regression is demonstrated. The remaining work is:
+The complete same-geometry matrix is recorded in
+`benchmarks/mirror_hybrid_fixed_boundary.json`. Every absolute gate passes,
+but the required monotone strong-force refinement fails at both quadrature
+orders. The scientific decision is final for this PR. Complete only this
+code-reducing disposition:
 
-1. Freeze the accepted 16-control half-straight physical axis. Refine its
-   periodic cubic spline space to 32 and 64 controls without regenerating a
-   control polygon. Because the knot sets are nested under doubling, transfer
-   by exact periodic knot insertion. A collocation fit is acceptable only if
-   dense value, first-derivative, and second-derivative parity all pass at
-   `2e-12`; otherwise implement periodic Boehm insertion in `basis.py`.
-2. Transfer the LCFS, interior radius, center map, and stream function through
-   the same nested hierarchy. Add one coefficient-transfer behavior test and
-   reuse it for every state block; do not add a continuation module or public
-   helper merely for this experiment.
-3. Solve the unchanged half-straight geometry at controls `16,32,64`, radial
-   grids `ns=5,9`, poloidal orders `mpol=5,7`, and two longitudinal quadrature
-   orders. Use warm starts and midpoint continuation. Record represented
-   geometry error, variational/weak/strong force, axis/bulk force, true linear
-   residual, Jacobian, time, and peak memory.
-4. Require `ftol<=1e-12`, weak parity, linear residual `<=1e-8`, positive
-   geometry, monotonically decreasing same-geometry strong force, finest
-   all-volume force `<5e-2`, and stable observables. Compare circular-limit
-   center work and magnetic-axis motion with ordinary vmec_jax/VMEC2000 and
-   the GVEC two-coordinate map; there is no racetrack parity oracle.
-5. Stop after 64 controls, 30 minutes, or 8 GiB per state. If the gate fails,
-   remove the closed hybrid from release scope and skip T9c/T9d. Retain the
-   circular closed validation and one compact negative benchmark, but delete
-   hybrid public API, example, output, and plotting scaffolds.
-6. Only after the half-straight gate passes, continue ellipse aspect ratio,
-   return-localized 90-degree section rotation, and current fractions
-   `0,0.25,0.5,0.75,1`. The straight central 50% must keep zero section-twist
-   rate to tolerance. Trace at least four radial/phase labels for 20 turns at
-   zero and target current; each line must traverse both straight legs and both
-   returns. Report geometric and current-driven iota separately.
+1. Retain exact periodic B-spline refinement, the physical-Hessian support
+   regression, and the circular closed VMEC2000/ordinary-vmec_jax validation.
+2. Remove the racetrack/rotating-section generators, finite-current hybrid
+   smoke, field-line tracer, and hybrid-only tests and documentation.
+3. Confirm that no hybrid root example, public name, MOUT path, plot branch,
+   or generated artifact remains. Keep the compact negative benchmark.
+4. Run the circular closed and open spline suites to prove that the retained
+   basis, center-map, and preconditioner code still serves validated lanes.
 
-Exit: the solved magnetic axis and target geometry reach `ftol <= 1e-12`, weak
-parity, true linear residual `<=1e-8`, a fixed physical LCFS, positive
-geometry, and the strong-force refinement gate.
+Exit: fixed closed hybrid is absent from supported API/docs/examples, its
+negative evidence is reproducible, and circular closed validation still
+passes.
 
-### T9c. Establish physics limits
+### T9c. Establish physics limits (deferred)
 
 1. Build three hybrids with increasing straight-leg-to-return scale, using
    the same central-leg flux, pressure, current, and section data.
@@ -575,7 +572,7 @@ geometry, and the strong-force refinement gate.
 Exit: the three-member open-leg limit and 0-10% fixed-LCFS sequence pass
 independent refinement and observable gates.
 
-### T9d. Promote derivatives, output, and the example
+### T9d. Promote derivatives, output, and the example (deferred)
 
 1. Validate closed-hybrid tangents and adjoints for pressure, current, section
    coefficients, and centerline B-spline controls against reconverged finite
@@ -757,26 +754,34 @@ variational `4.24e-13`, true linear residual `1.78e-13`, strong force
 peak host memory is 2.68 GiB.
 
 The circular center-map formulation passes independent poloidal, radial, and
-periodic-control trends. The coupled colored sparse factor resolves the
-2,664-variable matrix-free blocker: the half-straight radial restart now
-converges in 4,300 rather than 200,000 Krylov iterations. Its strong force
-still plateaus just above `5e-2`. Continue in this order:
+periodic-control trends. The coupled colored sparse factor resolved the first
+2,664-variable matrix-free blocker, but its original local graph omitted
+axis-regularization couplings exposed by the larger T9b matrix.
 
-1. Preserve the accepted sparse support oracle and frozen center-map local
-   factor. The measured `ns=9, mpol=5`, 16-control result is 4,300 Krylov
-   iterations, true linear residual `4.98e-10`, 54.3 s, and less than 2.4 GiB;
-   regressions above 5,000 iterations, 30 minutes, or 8 GiB fail this gate.
-2. Freeze the 16-control physical axis and transfer it into nested 32- and
-   64-control periodic spline spaces. Do not regenerate a different stadium at
-   each count. Transfer boundary and state with the same knot hierarchy.
-3. Repeat half-straight `ns=5,9`, `mpol=5,7` refinement. Require positive
-   geometry, weak parity, `ftol`, and monotone same-geometry strong force below
-   `5e-2`. Compare the center map's Cartesian work with VMEC2000 `R/Z` and
-   GVEC's two-coordinate map in this tranche.
-4. If the gate still fails at 64 controls after the scalable solve, remove the
-   fixed closed hybrid from release scope, retain one compact negative record,
-   and skip T9c/T9d as required by T9b. Otherwise continue ellipse, twist, and
-   current continuation.
+### 9.2 T9b execution checkpoint (2026-07-15)
+
+Commits `60fff0f9`, `b77d88ba`, and `09fb4f4b` complete exact periodic and
+poloidal transfer and correct the physical Hessian graph without adding a
+module or public name. Accepted implementation evidence is:
+
+- periodic cubic subdivision preserves every state block and the represented
+  axis through 16/32/64 controls in value and two derivatives;
+- the real-energy Hessian has negligible action outside the declared graph;
+- production coloring uses 634 probes for 2,524 columns, and random factor
+  actions have true residual below `3.1e-11`;
+- the 32-control solve uses 37 rather than 7,383 linear iterations, and the
+  `ns=9, mpol=5` solve takes 136 s rather than 1,106 s;
+- qorders 3/4, `mpol=5/7`, and `ns=5/9` agree on the finest force to within
+  `3.9e-4` relative between poloidal orders and `5.5e-3` between quadrature
+  orders; all nonlinear, weak, linear, geometry, time, and memory gates pass;
+- same-geometry 16/32/64 force is nonmonotone for both quadrature orders, so
+  the declared promotion gate fails even though the finest force is below
+  `5e-2`.
+
+The required disposition is fixed: retain the exact transfer and scalable
+preconditioner as validated numerical infrastructure, retain the circular
+closed parity limit, remove hybrid-only scaffolds, and skip T9c/T9d. Do not
+replace the failed gate with a 128-control experiment in this PR.
 
 ## 10. Completion estimate
 
@@ -788,15 +793,15 @@ Percentages represent promotion evidence, not implementation volume.
 | Fixed open nonaxisymmetric | 100% | maintain shared-core gates |
 | Free open axisymmetric through 10% | 100% | maintain support ceiling |
 | Free open nonaxisymmetric | 35% | bounded three-grid disposition |
-| Fixed closed B-spline hybrid | 75% | same-geometry half-straight gate, then section/current or explicit deferral |
-| Structured preconditioning | 98% | retain the accepted center-map regression gates during refinement |
-| Implicit differentiation | 90% | closed-hybrid derivatives after primal promotion |
+| Fixed closed B-spline hybrid | 90% | remove hybrid-only scaffolds and retain the compact negative record |
+| Structured preconditioning | 100% | maintain physical-support and resource regression gates |
+| Implicit differentiation | 100% | promoted open-lane derivative scope complete; closed derivatives deferred |
 | Code/API simplification | 55% | 53 files, 8,696 source lines, 5,007 test lines, and 20 names must meet T11 budgets |
 | Docs/examples/artifacts | 73% | hybrid showcase and final README/docs reduction |
 | ESSOS ownership separation | 90% | remove the remaining ESSOS-owned runner |
 
-Weighted completion of required release models is approximately 82%.
-Free closed hybrid and ANIMEC are excluded because they are explicitly
+Weighted completion of required release models is approximately 86%.
+Fixed/free closed hybrids and ANIMEC are excluded because they are explicitly
 deferred.
 
 ## 11. Reviewed sources
