@@ -17,13 +17,16 @@ claimed, and expose one simple documented workflow.
 
 Repository state at this revision:
 
-- branch: `codex/mirror-geometry` at `9e2c171d`;
-- base: `origin/main` at `ed4ac7ac`; branch is 0 behind and 350 ahead;
+- audited scientific source checkpoint: `codex/mirror-geometry` at
+  `9e2c171d`; this plan-only revision follows it;
+- base: `origin/main` at `ed4ac7ac`; the source checkpoint is 0 behind and
+  350 ahead;
 - PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open, mergeable, draft;
 - CI on `b2eb72ef`: all 14 required checks pass; the manual/nightly full job is
   skipped as intended;
-- diff against fetched `origin/main`: 53 files, 18,687 insertions, 1,602
-  deletions. Never use a stale local `main` for branch-size accounting;
+- source-checkpoint diff against fetched `origin/main`: 53 files, 18,687
+  insertions, 1,602 deletions. Never use a stale local `main` for branch-size
+  accounting;
 - mirror source: 13 modules, 8,696 lines at pushed HEAD;
 - mirror tests: 10 files, 5,007 lines;
 - public mirror API: 20 lazy names;
@@ -800,7 +803,7 @@ deferred.
 
 Source revisions reviewed locally on 2026-07-15:
 
-- `vmec_jax` main `ed4ac7ac` and mirror HEAD `9e2c171d`;
+- `vmec_jax` main `ed4ac7ac` and audited mirror source `9e2c171d`;
 - DESC master `24aa7b9d`, mirror `0dba071d`, mirror-anisotropy `805b77fc`,
   racetrack `2014ed0e`, cylindrical/Chebyshev `6f85f50a`, and
   straight-stellarator `8cf50b58`, plus finite-element branches `829e2db0`
