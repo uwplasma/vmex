@@ -531,6 +531,54 @@ class CubicBSplineBasis:
         )
         return refined, jnp.moveaxis(updated, 0, axis)
 
+    def refine_periodic_uniform(
+        self,
+        coefficients: Array,
+        target_size: int,
+        *,
+        axis: int = -1,
+    ) -> tuple["CubicBSplineBasis", Array]:
+        """Exactly refine periodic cubic coefficients by repeated doubling.
+
+        The target knot sequence must be a dyadic refinement of this uniform
+        periodic basis. The cubic subdivision mask is equivalent to inserting
+        every midpoint knot and preserves values and two derivatives.
+        """
+
+        if not self.periodic:
+            raise ValueError("uniform periodic refinement requires a periodic basis")
+        target_size = int(target_size)
+        if target_size < self.size or target_size % self.size:
+            raise ValueError("target size must be a dyadic multiple of the source size")
+        ratio = target_size // self.size
+        if ratio & (ratio - 1):
+            raise ValueError("target size must be a dyadic multiple of the source size")
+
+        values = jnp.moveaxis(jnp.asarray(coefficients), axis, 0)
+        if values.shape[0] != self.size:
+            raise ValueError(f"coefficient axis has size {values.shape[0]}; expected {self.size}")
+        size = self.size
+        while size < target_size:
+            updated = jnp.empty((2 * size,) + values.shape[1:], dtype=values.dtype)
+            updated = updated.at[0::2].set(
+                0.125 * jnp.roll(values, 2, axis=0)
+                + 0.75 * jnp.roll(values, 1, axis=0)
+                + 0.125 * values
+            )
+            updated = updated.at[1::2].set(
+                0.5 * (jnp.roll(values, 1, axis=0) + values)
+            )
+            values = updated
+            size *= 2
+
+        quadrature_order = self.quadrature_weights.size // self.size
+        refined = CubicBSplineBasis.periodic_uniform(
+            target_size,
+            self.domain,
+            quadrature_order=quadrature_order,
+        )
+        return refined, jnp.moveaxis(values, 0, axis)
+
 
 from typing import TYPE_CHECKING
 

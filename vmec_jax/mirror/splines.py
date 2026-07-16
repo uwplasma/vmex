@@ -333,12 +333,22 @@ class SplineMirrorDiscretization:
         source: "SplineMirrorDiscretization",
         boundary: SplineMirrorBoundary,
     ) -> SplineMirrorState:
-        """Interpolate a periodic restart onto this radial and axial grid."""
+        """Transfer a periodic restart onto a nested radial and axial grid."""
 
         if not self.closed or not source.closed:
             raise ValueError("closed state transfer requires two periodic discretizations")
         if self.grid.ntheta != source.grid.ntheta:
             raise ValueError("closed state transfer requires matching poloidal grids")
+        if self.spline.domain != source.spline.domain:
+            raise ValueError("closed state transfer requires matching periodic domains")
+
+        def transfer_axial(values: Array) -> Array:
+            _, transferred = source.spline.refine_periodic_uniform(
+                values,
+                self.coefficient_count,
+                axis=-1,
+            )
+            return transferred
 
         def transfer_radial(values: Array) -> Array:
             moved = jnp.moveaxis(jnp.asarray(values), 0, -1)
@@ -349,16 +359,15 @@ class SplineMirrorDiscretization:
             )(rows)
             return jnp.moveaxis(transferred.reshape(shape + (self.grid.ns,)), -1, 0)
 
-        nodes = jnp.asarray(self.spline.collocation_nodes)
-        radius = source.spline.evaluate(state.radius_coefficients, nodes, axis=-1)
-        lam = source.spline.evaluate(state.lambda_coefficients, nodes, axis=-1)
+        radius = transfer_axial(state.radius_coefficients)
+        lam = transfer_axial(state.lambda_coefficients)
         center = state.center_coefficients
         if center is not None:
-            center = source.spline.evaluate(center, nodes, axis=-1)
+            center = transfer_axial(center)
         transferred = SplineMirrorState(
-            transfer_radial(self.spline.fit(radius, axis=-1)),
-            transfer_radial(self.spline.fit(lam, axis=-1)),
-            None if center is None else transfer_radial(self.spline.fit(center, axis=-1)),
+            transfer_radial(radius),
+            transfer_radial(lam),
+            None if center is None else transfer_radial(center),
         )
         return self.project_fixed_boundary(transferred, boundary)
 

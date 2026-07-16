@@ -209,6 +209,47 @@ def test_periodic_fit_converges_and_is_differentiable() -> None:
     assert errors[2] < 0.08 * errors[1]
 
 
+def test_periodic_uniform_refinement_preserves_all_hybrid_blocks() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(16, quadrature_order=5)
+    points = jnp.linspace(0.0, 2.0 * jnp.pi, 1025, endpoint=False)
+    rng = np.random.default_rng(73)
+    blocks = (
+        (rng.normal(size=16), -1),  # one scalar axis component
+        (rng.normal(size=(16, 3)), 0),  # Cartesian reference axis
+        (rng.normal(size=(7, 16)), -1),  # LCFS section
+        (rng.normal(size=(5, 7, 16)), -1),  # radius or stream state
+        (rng.normal(size=(5, 2, 16)), -1),  # transverse center map
+    )
+
+    for target_size in (32, 64):
+        for coefficients, axis in blocks:
+            refined, transferred = basis.refine_periodic_uniform(
+                coefficients,
+                target_size,
+                axis=axis,
+            )
+            for derivative in range(3):
+                np.testing.assert_allclose(
+                    refined.evaluate(
+                        transferred,
+                        points,
+                        derivative=derivative,
+                        axis=axis,
+                    ),
+                    basis.evaluate(
+                        coefficients,
+                        points,
+                        derivative=derivative,
+                        axis=axis,
+                    ),
+                    rtol=2.0e-12,
+                    atol=2.0e-12,
+                )
+
+    with pytest.raises(ValueError, match="dyadic multiple"):
+        basis.refine_periodic_uniform(blocks[0][0], 24)
+
+
 def test_closed_circle_axis_has_periodic_rotation_minimizing_frame() -> None:
     radius = 1.7
     basis = CubicBSplineBasis.periodic_uniform(24)
@@ -777,7 +818,7 @@ def test_closed_center_coefficients_vectorize_and_transfer() -> None:
 
     fine = SplineMirrorDiscretization.build_closed(
         resolution,
-        coefficient_count=12,
+        coefficient_count=16,
         quadrature_order=3,
     )
     fine_boundary = SplineMirrorBoundary(
