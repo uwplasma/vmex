@@ -337,8 +337,8 @@ class SplineMirrorDiscretization:
 
         if not self.closed or not source.closed:
             raise ValueError("closed state transfer requires two periodic discretizations")
-        if self.grid.ntheta != source.grid.ntheta:
-            raise ValueError("closed state transfer requires matching poloidal grids")
+        if self.grid.theta_basis.mpol < source.grid.theta_basis.mpol:
+            raise ValueError("closed state transfer cannot reduce poloidal resolution")
         if self.spline.domain != source.spline.domain:
             raise ValueError("closed state transfer requires matching periodic domains")
 
@@ -359,8 +359,15 @@ class SplineMirrorDiscretization:
             )(rows)
             return jnp.moveaxis(transferred.reshape(shape + (self.grid.ns,)), -1, 0)
 
-        radius = transfer_axial(state.radius_coefficients)
-        lam = transfer_axial(state.lambda_coefficients)
+        def transfer_poloidal(values: Array) -> Array:
+            return source.grid.theta_basis.interpolate(
+                values,
+                self.grid.theta,
+                axis=1,
+            )
+
+        radius = transfer_poloidal(transfer_axial(state.radius_coefficients))
+        lam = transfer_poloidal(transfer_axial(state.lambda_coefficients))
         center = state.center_coefficients
         if center is not None:
             center = transfer_axial(center)

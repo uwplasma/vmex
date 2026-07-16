@@ -623,7 +623,7 @@ def test_closed_hybrid_section_stages_preserve_area_and_periodic_transfer() -> N
 
 def test_closed_state_transfer_refines_radial_grid_and_center_tangent() -> None:
     coarse_resolution = MirrorResolution(ns=5, mpol=3, nxi=4)
-    fine_resolution = MirrorResolution(ns=9, mpol=3, nxi=4)
+    fine_resolution = MirrorResolution(ns=9, mpol=5, nxi=4)
     coarse = SplineMirrorDiscretization.build_closed(
         coarse_resolution,
         coefficient_count=4,
@@ -636,7 +636,10 @@ def test_closed_state_transfer_refines_radial_grid_and_center_tangent() -> None:
     )
     source_s = jnp.asarray(coarse.grid.s)[:, None, None]
     theta = jnp.asarray(coarse.grid.theta)[None, :, None]
-    radius = jnp.broadcast_to(0.25 + 0.01 * source_s, (coarse.grid.ns, coarse.grid.ntheta, 4))
+    radius = jnp.broadcast_to(
+        0.25 + 0.01 * source_s + 0.004 * source_s * jnp.cos(2.0 * theta),
+        (coarse.grid.ns, coarse.grid.ntheta, 4),
+    )
     lam = jnp.broadcast_to(0.002 * source_s * jnp.sin(theta), radius.shape)
     center_shape = (coarse.grid.ns, 4)
     center = jnp.stack(
@@ -651,12 +654,25 @@ def test_closed_state_transfer_refines_radial_grid_and_center_tangent() -> None:
 
     transferred = fine.transfer_closed_state(state, coarse, boundary)
     target_s = jnp.asarray(fine.grid.s)
-    expected_radius = 0.25 + 0.01 * target_s
+    target_theta = jnp.asarray(fine.grid.theta)[None, :]
+    expected_radius = (
+        0.25
+        + 0.01 * target_s[:, None]
+        + 0.004 * target_s[:, None] * jnp.cos(2.0 * target_theta)
+    )
     expected_radius = expected_radius.at[0].set(expected_radius[1])
+    expected_radius = expected_radius.at[-1].set(0.26)
     np.testing.assert_allclose(
-        transferred.radius_coefficients[:, 0, 0],
+        transferred.radius_coefficients[:, :, 0],
         expected_radius,
-        atol=2.0e-16,
+        atol=3.0e-16,
+    )
+    expected_lambda = 0.002 * target_s[:, None] * jnp.sin(target_theta)
+    expected_lambda = expected_lambda.at[0].set(expected_lambda[1])
+    np.testing.assert_allclose(
+        transferred.lambda_coefficients[:, :, 0],
+        expected_lambda,
+        atol=3.0e-16,
     )
     np.testing.assert_allclose(
         transferred.center_coefficients[:, 0, 0],

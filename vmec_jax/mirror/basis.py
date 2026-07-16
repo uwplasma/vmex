@@ -251,6 +251,22 @@ class ThetaBasis:
         moved = jnp.moveaxis(values, axis, -1)
         return jnp.tensordot(moved, jnp.asarray(self.weights), axes=((-1,), (0,)))
 
+    def interpolate(self, values: Array, target_nodes: Array, *, axis: int = -1) -> Array:
+        """Evaluate the resolved trigonometric interpolant at target angles."""
+
+        values = jnp.asarray(values)
+        axis %= values.ndim
+        moved = jnp.moveaxis(values, axis, 0)
+        if moved.shape[0] != self.size:
+            raise ValueError(f"interpolation axis has size {moved.shape[0]}, expected {self.size}")
+        modes = jnp.fft.fftfreq(self.size, d=1.0 / self.size)
+        coefficients = jnp.fft.fft(moved, axis=0) / self.size
+        matrix = jnp.exp(1j * jnp.asarray(target_nodes)[:, None] * modes[None])
+        result = jnp.tensordot(matrix, coefficients, axes=((1,), (0,)))
+        if not jnp.iscomplexobj(values):
+            result = result.real
+        return jnp.moveaxis(result, 0, axis)
+
 
 @dataclass(frozen=True, eq=False)
 class MirrorGrid:

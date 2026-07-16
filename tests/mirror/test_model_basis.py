@@ -174,6 +174,15 @@ def test_theta_fft_derivative_and_quadrature_resolve_requested_modes() -> None:
         atol=2.0e-13,
     )
 
+    targets = jnp.linspace(0.0, 2.0 * jnp.pi, 31, endpoint=False)
+    expected_targets = 0.7 + 0.4 * jnp.cos(3.0 * targets) - 0.2 * jnp.sin(5.0 * targets)
+    np.testing.assert_allclose(
+        basis.interpolate(values, targets),
+        expected_targets,
+        rtol=2.0e-13,
+        atol=2.0e-13,
+    )
+
     axisym = ThetaBasis.build(ntheta=1, mpol=0)
     np.testing.assert_array_equal(axisym.differentiate(jnp.asarray([3.0])), jnp.asarray([0.0]))
 
