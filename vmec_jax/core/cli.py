@@ -27,8 +27,7 @@ Free-boundary routing (``LFREEB = T``):
   (VMEC2000 behavior, dropped by VMEC++);
 - ``MGRID_FILE = 'DIRECT_COILS'`` (or the ``--coils`` flag) builds the external
   field from an ESSOS coils file (``essos.coils.Coils``): the coils are tabulated
-  into an in-memory mgrid (``Coils.to_mgrid``) and read back as an
-  :class:`vmec_jax.core.mgrid.MgridField`
+  by ESSOS into an in-memory :class:`vmec_jax.core.mgrid.MgridField`
   (``solve_free_boundary(inp, external_field=mgrid_field)``); requires ESSOS.
 
 Documented divergences of the free-boundary lane:
@@ -337,24 +336,24 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     (``dofs_curves`` with shape ``(n_base_coils, 3, 2*order + 1)``,
     ``dofs_currents``, ``n_segments``, ``nfp``, ``stellsym``, optional
     ``currents_scale``), tabulates the coil field onto a cylindrical grid
-    spanning the coil bounding box (:meth:`essos.coils.Coils.to_mgrid`), and
-    reads it back with vmec_jax's own :func:`~vmec_jax.core.mgrid.read_mgrid` —
-    yielding the very same :class:`~vmec_jax.core.mgrid.MgridField` the mgrid-file
-    lane produces.  Requires ESSOS (``pip install essos``).
+    spanning the coil bounding box, yielding the same
+    :class:`~vmec_jax.core.mgrid.MgridField` contract as the mgrid-file lane.
+    Requires ESSOS (``pip install essos``).
     """
-    import tempfile
-
+    import jax
+    import jax.numpy as jnp
     import numpy as np
 
     try:
         from essos.coils import Coils, Coils_from_json, Curves
+        from essos.fields import BiotSavart
     except ImportError as exc:
         raise VmecInputError(
             WERROR_MESSAGES[INPUT_ERROR_FLAG],
             hint="--coils requires essos (pip install essos)",
         ) from exc
 
-    from .mgrid import MgridField, read_mgrid
+    from .mgrid import MgridField
 
     try:
         if path.suffix.lower() == ".npz":
@@ -389,11 +388,26 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     rmin, rmax = max(1.0e-2, float(r.min()) - rpad), float(r.max()) + rpad
     zmin, zmax = float(z.min()) - zpad, float(z.max()) + zpad
 
-    with tempfile.TemporaryDirectory() as tmp:
-        mgrid_path = Path(tmp) / "essos_coils_mgrid.nc"
-        coils.to_mgrid(str(mgrid_path), nr=int(nr), nphi=int(nphi), nz=int(nz),
-                       rmin=rmin, rmax=rmax, zmin=zmin, zmax=zmax)
-        return MgridField.from_mgrid_data(read_mgrid(mgrid_path))
+    phi = np.linspace(0.0, 2.0 * np.pi / int(coils.nfp), int(nphi), endpoint=False)
+    radius = np.linspace(rmin, rmax, int(nr))
+    vertical = np.linspace(zmin, zmax, int(nz))
+    pp, zz, rr = np.meshgrid(phi, vertical, radius, indexing="ij")
+    points = np.stack((rr * np.cos(pp), rr * np.sin(pp), zz), axis=-1)
+    cartesian = np.asarray(jax.vmap(BiotSavart(coils).B)(jnp.asarray(points.reshape(-1, 3))))
+    cartesian = cartesian.reshape(int(nphi), int(nz), int(nr), 3)
+    br = cartesian[..., 0] * np.cos(pp) + cartesian[..., 1] * np.sin(pp)
+    bp = -cartesian[..., 0] * np.sin(pp) + cartesian[..., 1] * np.cos(pp)
+    return MgridField(
+        br=jnp.asarray(br[None]),
+        bp=jnp.asarray(bp[None]),
+        bz=jnp.asarray(cartesian[None, ..., 2]),
+        extcur=jnp.ones(1),
+        rmin=rmin,
+        rmax=rmax,
+        zmin=zmin,
+        zmax=zmax,
+        nfp=int(coils.nfp),
+    )
 
 
 def _free_boundary_plan(args, inp, input_path: Path, *, emit):
