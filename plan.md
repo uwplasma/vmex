@@ -15,8 +15,9 @@ as a public scaffold.
 ## 1. Goal
 
 Deliver a small, validated `vmec_jax.mirror` backend for scalar-pressure,
-nested-flux-surface equilibria in open straight-axis flux tubes and a closed
-two-leg stellarator-mirror hybrid. The code
+nested-flux-surface equilibria in open straight-axis flux tubes, and determine
+whether the same model can promote a closed two-leg stellarator-mirror hybrid.
+The code
 must:
 
 1. solve the stated fixed- or free-boundary ideal-MHD model rather than only
@@ -90,7 +91,7 @@ Final verification for this revision:
 | Free open axisymmetric, beta 0-10% | coefficient LCFS/plasma solve, unbounded exterior BIE, three grids, pressure calibration, Pleiades trend, free adjoint | supported through central beta 10% |
 | Free open axisymmetric, beta 25/50% | nonlinear residual reaches `1e-12`, but independent force/refinement gates fail | validation continuation only |
 | Free open nonaxisymmetric | global observables look stable, but local `m=1` changes 73-81%; 3-grid beta pair costs 293/944/2995 s and 2.74/4.57/7.35 GiB | deferred; implementation removed |
-| Fixed closed B-spline hybrid | periodic representation, exact straight spans, Bishop-frame closure, converged primal, finite-current field lines, and root example; coarse strong force `0.573` | active H1 validation; not promoted |
+| Fixed closed B-spline hybrid | periodic representation, exact straight spans, Bishop-frame closure, converged discrete residual, finite-current field lines, circular-limit derivatives, and root example; strong-force refinement `0.5733 -> 0.3556 -> 0.3325` | validation example only; promotion failed |
 | Differentiation | fixed-open JVP/VJP and free-axisymmetric VJP agree with fully reconverged finite differences near `2e-10`; closed-axis controls are the active D1 tranche | required for every retained residual; advertised only where the primal is promoted |
 | Preconditioning | open separable/local sparse factor is effective; closed colored factor was effective but serves a deferred model | retain open path; archive closed result |
 
@@ -567,7 +568,8 @@ H1 merge budgets, measured against fetched `origin/main`:
 
 Exit: CI is green, branch is mergeable, final diff is reviewed, no supported
 claim lacks independent evidence, and PR #22 can be marked ready for review.
-The PR remains draft while any required H1 gate is active.
+The H1 gate now has a documented negative disposition. Keep the PR draft only
+until the final CI and release checks complete.
 
 ## 9. File and API contract
 
@@ -599,9 +601,9 @@ this package.
 
 ## 10. Active and deferred scientific lanes
 
-D1 and H1 are active on the draft PR. N1 and A1 are bounded go/no-go lanes and
-must not leave public scaffolds if their primal, derivative, or resource gates
-fail.
+D1 is complete and H1 has a completed negative promotion disposition. N1 and
+A1 are deferred go/no-go lanes and must not leave public scaffolds if their
+primal, derivative, or resource gates fail.
 
 ### D1. Shared differentiable and high-performance backend
 
@@ -662,9 +664,10 @@ the implementation.
 
 ### H1. Toroidal stellarator-mirror hybrid with full longitudinal B-splines
 
-Status: active on the draft PR after the open-mirror release audit. Useful
-algorithms were recovered selectively from Git history; the removed center-map,
-free-boundary, and colored-Hessian scaffolds were not restored.
+Status: validation-only after failing the beta-zero independent-force and
+resource gates. Useful algorithms were recovered selectively from Git history;
+the removed center-map, free-boundary, and colored-Hessian scaffolds were not
+restored.
 
 The target is a closed toroidal racetrack: two long straight mirror legs and
 two smooth curved stellarator returns, with exact leg-exchange/up-down
@@ -695,13 +698,13 @@ This is the required meaning of a full B-spline hybrid.
    smooth curvature ramps in the returns; 90-degree difference between the
    two straight-leg ellipses; frame holonomy cancelled explicitly; positive
    clearance/Jacobian; exact leg symmetry; and exact nested knot refinement.
-3. **Partial.** Circular-limit gate: compare a periodic spline circle with ordinary
-   `vmec_jax` and VMEC2000 at identical physical boundary, flux, pressure,
-   current, and radial/poloidal resolution.
-4. **Pending.** Open-leg gate: increase straight-to-return scale on three geometries and
-   compare the central halves with the promoted fixed-open rotating ellipse
-   and SFLM geometry, `|B|`, field-line, and force observables. The local
-   straight section is validated before the returns are trusted.
+3. **Derivative gate complete; parity deferred.** The circular periodic limit
+   validates boundary/axis JVPs and adjoints. VMEC2000 parity is unnecessary
+   for this negative promotion decision and remains a prerequisite for any
+   future support claim.
+4. **Closed without promotion.** Open-leg comparison is not pursued after the
+   stronger beta-zero force/resource gates fail; it cannot rescue the global
+   equilibrium claim.
 5. **Failed promotion gate.** Residual gate: diagnose the previous nonmonotone 16/32/64 strong-force
    sequence before increasing resolution. Check mapping gauge, axis
    regularity, independent staggered force, and quadrature aliasing on one
@@ -710,9 +713,9 @@ This is the required meaning of a full B-spline hybrid.
    only longitudinal boundary conditions and metric/frame terms, and retain
    one coefficient residual. Require monotone 16/32/64 longitudinal,
    three-grid radial/poloidal, and independent quadrature refinement.
-7. **Partial.** Transform gate: report current-free geometric transform separately from
-   transform driven by continued on-axis current. Do not assume either sign or
-   magnitude.
+7. **Diagnostic complete.** Current-free and finite-current field lines are
+   separated in the example. Current removal changes strong force only from
+   `0.430` to `0.424`, so current is not the force-floor cause.
 8. **Deferred until beta zero passes.** Finite-beta fixed-LCFS gate: beta `0,1,3,10%`, with Ilgisonis et al. used
    only for sign/scaling in its asymptotic regime.
 9. **Example complete; derivative validation active.** The root example and
@@ -725,7 +728,9 @@ This is the required meaning of a full B-spline hybrid.
 
 The old result `0.0528, 0.107, 0.0235` is a failed refinement sequence even
 though the finest value is below `0.05`. Do not promote by changing the gate
-or running only 128 controls.
+or running only 128 controls. Reopening H1 requires a written correction to
+the curved-axis/rotating-section force formulation that passes the existing
+three-grid and resource gates; more resolution alone is not a next step.
 
 ### A1. Anisotropic mirror equilibrium
 
@@ -775,15 +780,15 @@ At this revision:
 | Closed fixed derivative algorithm | 100% | circular-limit FD/transpose complete; racetrack claims wait on its primal gate |
 | Linear-backend audit | 100% | CPU and office-GPU dispositions recorded; no second runtime path |
 | Open preconditioning | 100% | preserve spectrum during JAX port |
-| Closed hybrid fixed boundary | 70% | diagnose beta-zero strong-force floor; promotion and finite beta remain blocked |
+| Closed hybrid promotion disposition | 100% | validation-only; finite beta and racetrack sensitivity are not supported |
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
 | API/code simplification | 100% | preserve final line and public-API budgets |
 | README/docs/examples/plots | 100% | regression only |
-| Packaging/CI/release audit | 90% | final package/CI batch after H1 disposition review |
+| Packaging/CI/release audit | 95% | final pushed CI batch is running |
 
-The open-mirror R1-R5 release work is complete. D1 and H1 are active on the
-draft PR and are tracked separately so the hybrid's failed primal gate cannot
-alter open-mirror promotion status. N1 and A1 remain bounded future lanes.
+The open-mirror R1-R5 and D1 work is complete. H1 is closed as a negative
+promotion result so its failed primal gate cannot alter open-mirror support.
+N1 and A1 remain bounded future lanes.
 
 ### 2026-07-15 R1 removal and final plan audit
 
@@ -1032,6 +1037,35 @@ alter open-mirror promotion status. N1 and A1 remain bounded future lanes.
 - Open lanes: open physics/derivatives/preconditioning 100%; closed derivative
   algorithm 100%; linear-backend audit 100%; H1 basis/geometry 100%, primal
   80%, validation 55%; docs/examples 100%; final audit 92%.
+- User input: none required.
+
+### 2026-07-16 H1 final promotion disposition
+
+- Steps: reviewed the exact longitudinal and radial/poloidal refinement,
+  current/section ablations, frame-derivative experiment, resource ceiling,
+  and closed circular derivative evidence as one promotion decision.
+- Results: H1 is closed as validation-only. Its periodic spline geometry and
+  converged discrete residual remain useful, but the independent strong-force
+  sequence `0.5733 -> 0.3556 -> 0.3325` is not converged and the next
+  radial/poloidal state exceeds the declared resource gate. The defect is
+  localized to curved-axis/rotating-section coupling; current removal and a
+  sampled frame correction do not materially change it.
+- Tests: no numerical state changed in this documentation-only disposition.
+  The preceding 93-test normal suite, five implicit tests, two production
+  spline rescues, strict Sphinx build, and CPU/GPU backend audits remain the
+  acceptance evidence. The final pushed CI batch is running; its completed
+  Python 3.10, console, and build/docs jobs pass.
+- Files/API: only this authoritative plan changed. Budgets remain 44 changed
+  files, 7,950 mirror-source lines, 3,794 mirror-test lines, 20 public names,
+  three examples, three figures, and four benchmark records.
+- Best next step: finish the single CI/release audit and prepare PR #22 for
+  review. Reopen hybrid promotion only with a derived force-formulation
+  correction that passes the existing gates; do not add another solver,
+  basis, or resolution-only experiment.
+- Open lanes: supported open physics 100%, open/closed derivative algorithms
+  100%, preconditioning/backend audit 100%, H1 promotion disposition 100%,
+  nonaxisymmetric free disposition 100%, docs/examples 100%, final release
+  audit 95%.
 - User input: none required.
 
 After every implementation tranche, append one short dated entry here with:
