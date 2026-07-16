@@ -7,11 +7,6 @@ from pathlib import Path
 
 import jax
 import jax.numpy as jnp
-import matplotlib
-import numpy as np
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
@@ -30,8 +25,6 @@ from vmec_jax.mirror.analytic import (  # noqa: E402
     RotatingEllipseParaxial,
     StraightFieldLineMirror,
 )
-from vmec_jax.mirror.forces import staggered_field_strength  # noqa: E402
-from vmec_jax.mirror.geometry import magnetic_field_xyz  # noqa: E402
 from vmec_jax.mirror.implicit import spline_fixed_boundary_parameters  # noqa: E402
 from vmec_jax.mirror.splines import initialize_from_cartesian_field  # noqa: E402
 
@@ -83,103 +76,6 @@ def boundary_for(case: str, stage: float) -> MirrorBoundary:
     else:
         raise ValueError(f"unknown mirror case {case!r}")
     return MirrorBoundary.from_radius(values, source_grid)
-
-
-def plot_validation(
-    case: str,
-    result,
-    coefficient_state,
-    boundary_state,
-    axial_flux_derivative,
-    path: Path,
-) -> dict[str, float]:
-    """Plot the independent symmetry or field-direction check."""
-
-    grid = discretization.grid
-    boundary = discretization.evaluate_boundary(boundary_state).radius_scale
-    fig, axes = plt.subplots(1, 3, figsize=(13.2, 3.8), constrained_layout=True)
-    theta_dense = np.linspace(0.0, 2.0 * np.pi, 257)
-    poloidal_modes = np.fft.fftfreq(grid.ntheta, d=1.0 / grid.ntheta)
-    for axial_index, color in zip(
-        (0, int(np.argmin(np.abs(grid.z))), grid.nxi - 1),
-        ("#0072B2", "#009E73", "#D55E00"),
-        strict=True,
-    ):
-        polar_samples = np.asarray(boundary[:, axial_index])
-        polar = np.real(
-            np.exp(1j * theta_dense[:, None] * poloidal_modes[None, :]) @ (np.fft.fft(polar_samples) / grid.ntheta)
-        )
-        axes[0].plot(
-            polar * np.cos(theta_dense),
-            polar * np.sin(theta_dense),
-            color=color,
-            label=f"z={grid.z[axial_index]:.2f}",
-        )
-    axes[0].set(title="Solved LCFS sections", xlabel="x [m]", ylabel="y [m]", aspect="equal")
-    axes[0].legend()
-
-    history = np.asarray(result.history)
-    axes[1].semilogy(
-        history[:, 0],
-        np.maximum(history[:, 4], 1.0e-18),
-        "o-",
-        color="#0072B2",
-        label="Variational",
-    )
-    axes[1].semilogy(
-        history[:, 0],
-        np.maximum(history[:, 5], 1.0e-18),
-        color="#D55E00",
-        label="Strong force",
-    )
-    axes[1].axhline(FTOL, color="0.25", ls="--", label="ftol")
-    axes[1].set(title="Final-stage convergence", xlabel="Iteration", ylabel="Normalized residual")
-    axes[1].legend()
-
-    diagnostics: dict[str, float] = {}
-    if case == "rotating_ellipse":
-        mod_b = np.asarray(
-            staggered_field_strength(
-                result.state,
-                grid,
-                axial_flux_derivative=axial_flux_derivative,
-            )
-        )
-        center = int(np.argmin(np.abs(grid.z)))
-        modes = np.fft.rfft(mod_b[:, :, center], axis=1) / grid.ntheta
-        m1 = 2.0 * np.abs(modes[:, 1])
-        m2 = 2.0 * np.abs(modes[:, 2])
-        axes[2].plot(grid.s, m1, "o-", color="#D55E00", label="m=1")
-        axes[2].plot(grid.s, m2, "s-", color="#0072B2", label="m=2")
-        axes[2].set(title="Midplane |B| modes", xlabel="Normalized flux s", ylabel="Amplitude [T]")
-        axes[2].legend()
-        diagnostics["forbidden_m1_max"] = float(np.max(m1))
-    else:
-        fixture = StraightFieldLineMirror(center_field=1.0, axial_scale=2.5)
-        solved = np.asarray(magnetic_field_xyz(result.energy.field, result.energy.geometry))
-        points = np.asarray(result.energy.geometry.xyz)
-        cosine_by_z = []
-        for axial_index in range(grid.nxi):
-            analytic = np.asarray(jax.vmap(fixture.field)(jnp.asarray(points[1:, :, axial_index].reshape(-1, 3))))
-            sampled = solved[1:, :, axial_index].reshape(-1, 3)
-            cosine = np.sum(sampled * analytic, axis=1)
-            cosine /= np.linalg.norm(sampled, axis=1) * np.linalg.norm(analytic, axis=1)
-            cosine_by_z.append(np.mean(cosine))
-        direction_error = np.maximum(1.0 - np.asarray(cosine_by_z), 1.0e-16)
-        axes[2].semilogy(grid.z, direction_error, "o-", color="#009E73")
-        axes[2].set(
-            title="Analytic field-direction error",
-            xlabel="Axial position z [m]",
-            ylabel="1 - mean cosine",
-        )
-        diagnostics["minimum_mean_direction_cosine"] = float(np.min(cosine_by_z))
-
-    for axis in axes:
-        axis.grid(alpha=0.22)
-    fig.savefig(path, dpi=130, bbox_inches="tight")
-    plt.close(fig)
-    diagnostics["lambda_max"] = float(jnp.max(jnp.abs(coefficient_state.lambda_coefficients)))
-    return diagnostics
 
 
 summaries = {}
@@ -245,14 +141,7 @@ for case in CASES:
         ),
     )
     plot_mout(mout_path, OUTPUT_DIR, name=case)
-    validation = plot_validation(
-        case,
-        result,
-        coefficient_state,
-        final_boundary,
-        axial_flux_derivative,
-        OUTPUT_DIR / f"{case}_validation.png",
-    )
+    validation = {"lambda_max": float(jnp.max(jnp.abs(coefficient_state.lambda_coefficients)))}
     if case == "rotating_ellipse" and RUN_GRADIENT_CHECK:
         parameters = spline_fixed_boundary_parameters(
             final_boundary,

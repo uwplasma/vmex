@@ -67,14 +67,15 @@ Fresh local verification during this revision:
 - Ruff lint and `git diff --check`: passed. The repository's existing format
   baseline is not globally Ruff-format clean, so R1 does not reformat
   unrelated code;
-- changing the fixed-nonaxisymmetric example to the benchmark's medium
-  `(ns,mpol,elements)=(7,6,6)` setting reached optimizer `ftol`, but selected
-  a bad SFLM continuation basin: rotating-ellipse strong force was `0.0418`,
-  while SFLM strong force was `1.09`, dominated by the fixed-end collars;
-- the attempted fine example default (`9,8,8`) remained in Newton-GMRES after
-  five minutes on the local CPU. It is a valid standalone refinement setting,
-  not a practical continuation-example default. Keep `(5,8,4)` only as a
-  runtime smoke until R2 establishes a resolution-robust continuation.
+- the corrected-cut medium `(ns,mpol,elements)=(7,6,6)` example reaches
+  variational `ftol`; rotating-ellipse strong force is `0.0418`, while the
+  SFLM strong force is `1.09`, dominated by the fixed-end collars. Starting
+  directly with Newton reproduces the same state, so this is not merely an
+  L-BFGS basin failure;
+- the attempted fine `(9,8,8)` combined example exceeded ten minutes on the
+  local CPU. It remains a standalone refinement setting, not a practical
+  default. The medium example completes in about 90 seconds and explicitly
+  labels the failed SFLM lane.
 
 The pushed CI result validates the pre-R1 tree; R1's full tests and final
 packaging are recorded separately in section 12 and repeated from a clean tree
@@ -727,11 +728,11 @@ At this revision:
 | Open preconditioning | 90% | post-removal A/B record |
 | Closed hybrid disposition | 100% | negative record retained; future H1 is separate |
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
-| API/code simplification | 90% | finish R2 benchmark/full audit; preserve final line budget |
-| README/docs/examples/plots | 90% | simplify examples, strict docs, and final CLI visual audit |
-| Packaging/CI/release audit | 78% | office full shard and R5 clean audit |
+| API/code simplification | 97% | full audit; preserve final line and public-API budgets |
+| README/docs/examples/plots | 98% | final clean-tree documentation and CLI smoke |
+| Packaging/CI/release audit | 82% | office full shard and R5 clean packaging audit |
 
-Weighted completion of PR #22 is approximately 88%. Deferred N1/H1/A1 work
+Weighted completion of PR #22 is approximately 91%. Deferred N1/H1/A1 work
 is not included in that percentage.
 
 ### 2026-07-15 R1 removal and final plan audit
@@ -815,6 +816,32 @@ is not included in that percentage.
   research 55%, free axisymmetric 97%, derivatives 97%, preconditioning 95%,
   simplification 92%, docs/examples 90%, release audit 78%.
 - User input: none required for R1-R5.
+
+### 2026-07-16 R3/R4 example and documentation simplification
+
+- Steps: deleted both example-private plotting implementations and routed all
+  retained figures through `plot_mout`; replaced the private CSV table with a
+  compact JSON summary; updated nightly example contracts; removed stale
+  SFLM, free-adjoint, exterior-module, and code-size documentation claims.
+- Results: the fixed example is `322 -> 211` lines and the free example is
+  `298 -> 180`. Both rerun from the repository root: fixed completes in about
+  90 seconds and the six-state beta scan in about 9.5 minutes. The two README
+  figures use only standard MOUT outputs, are visually reviewed, and are 307
+  and 182 kB.
+- Tests: 87 normal mirror tests pass with six full deselections in 155.46
+  seconds on Apple CPU. Strict Sphinx, Ruff, compileall, output pixel checks,
+  and `git diff --check` pass. The exact `e02dcea7` full shard remains active
+  on office GPU 0 with `RUN_FULL=1`.
+- Files/API: the branch is exactly 42 files against main, has exactly two root
+  mirror examples and two tracked mirror figures, retains 17 public names,
+  and has 6,996 mirror source lines. No source file or dependency was added.
+- Best next step: accept or diagnose the office full shard, rerun the final
+  source commit in a clean tree, then execute R5 packaging, install, CLI,
+  coverage, CI, and final-diff gates.
+- Open lanes: fixed axisymmetric 100%, fixed rotating-ellipse 92%, SFLM
+  research 55%, free axisymmetric 98%, derivatives 97%, preconditioning 95%,
+  simplification 97%, docs/examples 98%, release audit 82%.
+- User input: none required.
 
 After every implementation tranche, append one short dated entry here with:
 

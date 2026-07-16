@@ -618,6 +618,8 @@ def plot_mout(
     if history.size:
         axes[1, 1].semilogy(history[:, 0], np.maximum(history[:, -1], 1.0e-18), color="#0072B2")
     axes[1, 1].axhline(float(data.ftol), color="0.25", ls="--", lw=1, label="ftol")
+    if np.isfinite(data.pointwise_force_rms):
+        axes[1, 1].axhline(data.pointwise_force_rms, color="#D55E00", lw=1.5, label="strong force")
     axes[1, 1].set(
         title=f"Convergence ({int(data.iterations)} iterations)",
         xlabel="Residual evaluation",

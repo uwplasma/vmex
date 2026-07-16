@@ -141,7 +141,7 @@ unbounded exterior vacuum. Independent force and grid-refinement gates support
 the 0%, 1%, 3%, and 10% sequence. The converged 25% and 50% continuations are
 kept as research evidence because their independent force gates fail.
 
-![Solved free-boundary beta scan with ESSOS coils, field lines, LCFS displacement, magnetic field, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
+![Solved free-boundary beta scan with ESSOS coils, field lines, LCFS, magnetic field, pressure, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
 
 Every displayed beta uses its own solved MOUT state. At 50% requested beta the
 central radius grows by 7.52% and the on-axis field falls by 22.94% from the

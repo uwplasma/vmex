@@ -163,10 +163,11 @@ Straight mirrors
 Fixed-boundary nonaxisymmetric mirrors and gradients
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Solve rotating-ellipse and Straight Field Line Mirror cases with native axial
-B-splines at ``ftol=1e-12``. The rotating-ellipse volume derivative with
-respect to a spline boundary coefficient is checked against independently
-reconverged central differences before MOUT and the standard plots are written.
+Solve the supported rotating ellipse and the research Straight Field Line
+Mirror target with native axial B-splines at ``ftol=1e-12``. The example
+asserts every rotating-ellipse gate and reports the SFLM corrected-cut force
+failure. Its volume derivative is checked against independently reconverged
+central differences before MOUT and the standard plots are written.
 
 .. image:: _static/figures/mirror_fixed_boundary_3d.png
    :alt: Fixed-boundary mirror geometry and magnetic field

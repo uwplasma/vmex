@@ -610,10 +610,9 @@ path uses linear Duffy panels, with optional Fourier-Chebyshev interpolation
 of side density. Cap disks only close the end cuts for the Green identity and
 use the same linear panel rule.
 
-Source ownership is kept narrow: ``exterior.py`` builds geometry and reduction
-maps, ``exterior_mesh.py`` owns side-panel topology and Duffy assembly,
-including its density interpolation, and ``exterior_bie.py`` owns Neumann
-solves. These numerical kernels remain in
+Source ownership is kept narrow: ``exterior.py`` owns geometry, reduction
+maps, side-panel topology, Duffy assembly, and density interpolation;
+``exterior_bie.py`` owns Neumann solves. These numerical kernels remain in
 their owning modules rather than the flattened public namespace.
 ``solve_axisymmetric_exterior_vacuum`` now owns the complete M6 adapter:
 it closes the moving boundary, continues the plasma field through both end
@@ -685,9 +684,10 @@ Those states also predate the corrected magnetic-axis regularity map. The
 unsupported theta-dependent exterior and diagnostics have therefore been
 removed rather than presented as an equilibrium model. Compact negative
 evidence remains in
-``benchmarks/mirror_free_boundary_nonaxisymmetric.json``. Fixed-boundary
-nonaxisymmetric mirrors remain supported; free-boundary promotion requires a
-structured exterior Jacobian and a new three-grid local-mode study.
+``benchmarks/mirror_free_boundary_nonaxisymmetric.json``. The fixed-boundary
+rotating ellipse remains the supported nonaxisymmetric lane; free-boundary
+promotion requires a structured exterior Jacobian and a new three-grid
+local-mode study.
 
 ``solve_beta_scan_cli`` is the axisymmetric coefficient-native hot-start driver.
 

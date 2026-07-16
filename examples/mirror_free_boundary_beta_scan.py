@@ -11,16 +11,13 @@ plasma-boundary-vacuum equilibrium solve with residual tolerance ``FTOL``; no
 prescribed finite-beta boundary is plotted.
 """
 
+import json
 from pathlib import Path
 import sys
 
 import jax
 import jax.numpy as jnp
-import matplotlib
 import numpy as np
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -64,7 +61,6 @@ CENTER_RADIUS = 0.25
 OUTPUT_DIR = Path("results/mirror_free_boundary_beta_scan")
 SAVE_RESTARTS = True
 RESTART_FROM = None  # e.g. OUTPUT_DIR / "beta_003p0pct.npz"; then trim BETAS
-PLEIADES_REFERENCE = Path(__file__).resolve().parent / "data" / "pleiades_two_coil_beta_reference.csv"
 
 jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -159,129 +155,19 @@ diagnostics = summarize_axisymmetric_beta_scan(
 )
 
 
-def beta_label(beta):
-    """Label points above the validated ceiling as research results."""
-
-    suffix = "" if beta <= SUPPORTED_BETA_MAX else " (research)"
-    return f"{100 * beta:g}%{suffix}"
-
-summary = np.asarray(
-    [
-        [
-            float(item.requested_beta),
-            float(item.achieved_reference_beta),
-            float(item.volume_averaged_beta),
-            float(item.center_radius),
-            float(item.center_axis_field),
-            float(item.diamagnetic_field_ratio),
-            float(item.paraxial_field_ratio),
-            float(item.paraxial_relative_error),
-            float(result.variational_max),
-            float(result.plasma_staggered_weak_force.maximum),
-            float(result.plasma_force.normalized_rms),
-            float(result.normalized_divergence_rms),
-            float(result.interface.normal_stress_rms),
-            float(result.interface.vacuum_b_normal_rms),
-            float(result.mass_scale),
-            float(result.iterations),
-            float(result.vacuum_field.neumann_result.compatibility_error),
-            float(result.vacuum_field.neumann_result.condition_number),
-            float(item.requested_beta <= SUPPORTED_BETA_MAX),
-        ]
-        for item, result in zip(diagnostics, results, strict=True)
-    ]
-)
-header = (
-    "requested_beta,achieved_reference_beta,volume_averaged_beta,center_radius_m,"
-    "center_axis_field_T,diamagnetic_field_ratio,paraxial_field_ratio,"
-    "paraxial_relative_error,variational_max,staggered_weak_max,pointwise_force_rms,"
-    "normalized_divergence_rms,normal_stress_rms,bnormal_rms_normalized,"
-    "mass_scale,iterations,exterior_compatibility,exterior_condition_number,supported_lane"
-)
-np.savetxt(OUTPUT_DIR / "beta_scan.csv", summary, delimiter=",", header=header, comments="")
-
-colors_beta = plt.cm.viridis(np.linspace(0.08, 0.92, BETAS.size))
-display_xi = np.linspace(-1.0, 1.0, 121)
-display_matrix = np.asarray(grid.axial_basis.interpolation_matrix(display_xi))
-z = 0.5 * (Z_MIN + Z_MAX) + 0.5 * (Z_MAX - Z_MIN) * display_xi
-fig, axes = plt.subplots(2, 3, figsize=(14.4, 8.4), constrained_layout=True)
-for beta, result, color in zip(BETAS, results, colors_beta, strict=True):
-    radius = display_matrix @ np.asarray(result.boundary.radius_scale[0])
-    b_axis = display_matrix @ np.sqrt(np.asarray(result.plasma_b_squared[0, 0]))
-    b_lcfs = display_matrix @ np.sqrt(np.asarray(result.plasma_b_squared[-1, 0]))
-    axes[0, 0].plot(z, radius, color=color, lw=2, label=beta_label(beta))
-    baseline_radius = display_matrix @ np.asarray(results[0].boundary.radius_scale[0])
-    axes[0, 1].plot(z, 1e3 * (radius - baseline_radius), color=color, lw=2)
-    axes[0, 2].plot(z, b_axis, color=color, lw=2)
-    axes[1, 0].plot(z, b_lcfs, color=color, lw=2)
-axes[0, 2].plot(z, display_matrix @ np.asarray(vacuum_axis_field), "k--", lw=1.6, label="analytic coil vacuum")
-axes[0, 0].set(title="Solved LCFS", xlabel="Axial position z [m]", ylabel="Radius [m]")
-axes[0, 0].legend(title="Requested beta", ncol=2, fontsize=8)
-axes[0, 1].set(title="LCFS displacement from beta=0", xlabel="Axial position z [m]", ylabel="Delta radius [mm]")
-axes[0, 2].set(title="On-axis |B|", xlabel="Axial position z [m]", ylabel="Magnetic field [T]")
-axes[0, 2].legend(fontsize=8)
-axes[1, 0].set(title="LCFS |B|", xlabel="Axial position z [m]", ylabel="Magnetic field [T]")
-
-achieved = summary[:, 1]
-axes[1, 1].plot(100 * achieved, summary[:, 5], "o-", color="#0072B2", lw=2, label="coupled solve")
-axes[1, 1].plot(100 * achieved, summary[:, 6], "--", color="#D55E00", lw=2, label=r"$\sqrt{1-\beta}$")
-pleiades = np.genfromtxt(PLEIADES_REFERENCE, delimiter=",", names=True, comments="#", skip_header=4)
-pleiades = pleiades[pleiades["nr"] == np.max(pleiades["nr"])]
-axes[1, 1].plot(
-    100 * np.concatenate([[0.0], pleiades["beta"]]),
-    np.concatenate([[1.0], pleiades["field_ratio"]]),
-    "s:",
-    color="#009E73",
-    lw=1.8,
-    label="Pleiades 51x101",
-)
-axes[1, 1].set(title="Central diamagnetic response", xlabel="Achieved central beta [%]", ylabel=r"$B(\beta)/B(0)$")
-axes[1, 1].legend(fontsize=8)
-
-for beta, result, color in zip(BETAS, results, colors_beta, strict=True):
-    history = np.asarray(result.history)
-    axes[1, 2].semilogy(
-        history[:, 0],
-        np.maximum(history[:, -1], 1e-18),
-        color=color,
-        lw=1.5,
-        label=beta_label(beta),
-    )
-axes[1, 2].axhline(FTOL, color="0.25", ls="--", lw=1, label="ftol")
-axes[1, 2].set(title="Coupled residual history", xlabel="Residual evaluation", ylabel="Maximum normalized residual")
-axes[1, 2].legend(ncol=2, fontsize=8)
-for ax in axes.flat:
-    ax.grid(alpha=0.22)
-fig.savefig(OUTPUT_DIR / "beta_scan_diagnostics.png", dpi=180)
-plt.close(fig)
+summary = [
+    {key: float(value) for key, value in vars(item).items()}
+    | {
+        "variational_max": float(result.variational_max),
+        "pointwise_force_rms": float(result.plasma_force.normalized_rms),
+        "supported_lane": bool(item.requested_beta <= SUPPORTED_BETA_MAX),
+    }
+    for item, result in zip(diagnostics, results, strict=True)
+]
+(OUTPUT_DIR / "beta_scan_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
 
 middle_beta = min(0.10, 0.5 * float(BETAS[-1]))
 display_indices = sorted({0, int(np.argmin(np.abs(BETAS - middle_beta))), len(BETAS) - 1})
-fig, axes = plt.subplots(1, 3, figsize=(14.2, 4.2), constrained_layout=True)
-radial_coordinate = np.sqrt(np.asarray(grid.s))
-for index in display_indices:
-    result = results[index]
-    pressure = np.asarray(result.pressure[:, 0, center])
-    magnetic_pressure = np.asarray(result.plasma_b_squared[:, 0, center]) / (2.0 * 4.0e-7 * np.pi)
-    color = colors_beta[index]
-    label = beta_label(BETAS[index])
-    axes[0].plot(radial_coordinate, pressure / 1e3, "o-", color=color, lw=2, label=label)
-    axes[1].plot(radial_coordinate, magnetic_pressure / 1e3, "o-", color=color, lw=2, label=label)
-    axes[1].plot(radial_coordinate, (pressure + magnetic_pressure) / 1e3, "--", color=color, lw=1.5)
-axes[0].set(title="Midplane pressure", xlabel=r"Normalized radius $\sqrt{s}$", ylabel="Pressure [kPa]")
-axes[1].set(title="Midplane pressure balance", xlabel=r"Normalized radius $\sqrt{s}$", ylabel="Pressure [kPa]")
-axes[0].legend(title="Requested beta", fontsize=8)
-axes[1].legend(["magnetic", "total"], fontsize=8)
-axes[2].plot(100 * BETAS, 100 * summary[:, 1], "o-", color="#0072B2", lw=2, label="achieved central")
-axes[2].plot(100 * BETAS, 100 * summary[:, 2], "s-", color="#D55E00", lw=2, label="volume averaged")
-axes[2].plot(100 * BETAS, 100 * BETAS, "k--", lw=1.2, label="requested")
-axes[2].set(title="Beta definitions", xlabel="Requested beta [%]", ylabel="Solved beta [%]")
-axes[2].legend(fontsize=8)
-for ax in axes:
-    ax.grid(alpha=0.22)
-fig.savefig(OUTPUT_DIR / "beta_scan_pressure.png", dpi=180)
-plt.close(fig)
-
 for index in display_indices:
     label = f"beta_{100 * BETAS[index]:05.1f}pct".replace(".", "p")
     plot_mout(
@@ -290,9 +176,5 @@ for index in display_indices:
         name=f"mirror_{label}",
     )
 
-np.set_printoptions(precision=6, suppress=False)
-print(header)
-print(summary)
-print(f"Wrote {OUTPUT_DIR / 'beta_scan_diagnostics.png'}")
-print(f"Wrote {OUTPUT_DIR / 'beta_scan_pressure.png'}")
+print(json.dumps(summary, indent=2))
 print(f"Wrote solved-state 3D, cross-section, |B|, and summary plots in {OUTPUT_DIR}")
