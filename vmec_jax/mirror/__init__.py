@@ -1,9 +1,9 @@
-"""Public API for straight-axis magnetic-mirror equilibria.
+"""Public API for open and closed magnetic-mirror equilibria.
 
-The mirror backend uses a nonperiodic axial coordinate and is separate from
-toroidal VMEC.  Its public surface is intentionally small: inputs and state,
-fixed/free-boundary solves, continuation, implicit derivatives, MOUT I/O, and
-plotting.  Numerical kernels remain available from their owning submodules.
+Open mirrors use a nonperiodic straight axis; stellarator-mirror hybrids use a
+periodic B-spline axis. Its public surface is intentionally small: inputs and
+state, solves, continuation, implicit derivatives, MOUT I/O, and plotting.
+Numerical kernels remain available from their owning submodules.
 """
 
 from importlib import import_module as _import_module
@@ -21,6 +21,11 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "SplineMirrorBoundary": (".splines", "SplineMirrorBoundary"),
     "SplineMirrorDiscretization": (".splines", "SplineMirrorDiscretization"),
     "SplineMirrorState": (".splines", "SplineMirrorState"),
+    "build_stellarator_mirror_hybrid": (
+        ".splines",
+        "build_stellarator_mirror_hybrid",
+    ),
+    "trace_closed_field_line": (".splines", "trace_closed_field_line"),
     "solve_fixed_boundary_cli": (".splines", "solve_fixed_boundary_cli"),
     "solve_free_boundary_cli": (".free_boundary", "solve_free_boundary_cli"),
     # Continuation.

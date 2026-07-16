@@ -384,8 +384,6 @@ def evaluate_closed_geometry(
     """Embed nested surfaces around a periodic spline centerline."""
 
     state.validate_shape(grid)
-    if state.center_shift is not None:
-        raise ValueError("closed hybrid geometry does not use a transverse center map")
     if axis.centerline.shape != (grid.nxi, 3):
         raise ValueError(f"closed axis shape {axis.centerline.shape} must be ({grid.nxi}, 3)")
     a = jnp.asarray(state.radius_scale)
@@ -537,6 +535,9 @@ def normalized_divergence_rms(
     field: ContravariantField,
     geometry: MirrorGeometry,
     grid: "MirrorGrid",
+    *,
+    closed: bool = False,
+    characteristic_length: Array | None = None,
 ) -> Array:
     """Return the volume-weighted RMS of ``div(B)`` normalized by ``B/L``.
 
@@ -545,17 +546,22 @@ def normalized_divergence_rms(
     comparisons across field strengths and mirror lengths.
     """
 
-    divergence = divergence_b(field, geometry, grid)[1:, :, 1:-1]
-    b_squared = magnetic_field_squared(field, geometry)[1:, :, 1:-1]
+    axial_slice = slice(None) if closed else slice(1, -1)
+    divergence = divergence_b(field, geometry, grid)[1:, :, axial_slice]
+    b_squared = magnetic_field_squared(field, geometry)[1:, :, axial_slice]
     weights = (
         jnp.asarray(grid.radial_weights[1:])[:, None, None]
         * jnp.asarray(grid.theta_basis.weights)[None, :, None]
-        * jnp.asarray(grid.axial_basis.weights)[None, None, 1:-1]
-        * geometry.sqrt_g[1:, :, 1:-1]
+        * jnp.asarray(grid.axial_basis.weights)[None, None, axial_slice]
+        * geometry.sqrt_g[1:, :, axial_slice]
     )
     weight_sum = jnp.sum(weights)
     divergence_rms = jnp.sqrt(jnp.sum(weights * divergence**2) / weight_sum)
-    length = float(grid.z[-1] - grid.z[0])
+    length = (
+        jnp.asarray(characteristic_length)
+        if characteristic_length is not None
+        else jnp.asarray(float(grid.z[-1] - grid.z[0]))
+    )
     field_gradient_rms = jnp.sqrt(jnp.sum(weights * b_squared / length**2) / weight_sum)
     return divergence_rms / jnp.maximum(field_gradient_rms, jnp.finfo(divergence_rms.dtype).tiny)
 

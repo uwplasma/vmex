@@ -27,6 +27,9 @@ from vmec_jax.mirror.free_boundary import (  # noqa: E402
     _spline_boundary_work_residual,
 )
 from vmec_jax.mirror.geometry import (  # noqa: E402
+    contravariant_field,
+    divergence_b,
+    evaluate_closed_geometry,
     evaluate_closed_spline_axis,
     evaluate_geometry,
     magnetic_field_xyz,
@@ -40,8 +43,11 @@ from vmec_jax.mirror.splines import (  # noqa: E402
     SplineMirrorState,
     _SplineStateVectorizer,
     _packed_spline_preconditioner,
+    build_stellarator_mirror_hybrid,
+    _initialize_closed_vacuum_stream_function,
     initialize_from_cartesian_field,
     solve_fixed_boundary_cli as solve_spline_fixed_boundary_cli,
+    trace_closed_field_line,
 )
 
 
@@ -180,6 +186,121 @@ def test_stellarator_mirror_ellipse_rotates_ninety_degrees_between_legs() -> Non
     minor_index = int(jnp.argmin(jnp.abs(theta - 0.5 * jnp.pi)))
     np.testing.assert_allclose(leg_radii[major_index], [0.45, 0.30], rtol=3.0e-13)
     np.testing.assert_allclose(leg_radii[minor_index], [0.30, 0.45], rtol=3.0e-3)
+
+
+def test_stellarator_mirror_builder_has_positive_nested_spline_geometry() -> None:
+    resolution = MirrorResolution(ns=7, mpol=8, nxi=4)
+    setup = build_stellarator_mirror_hybrid(resolution)
+    state = setup.discretization.evaluate_state(setup.initial_state)
+    geometry = evaluate_closed_geometry(state, setup.discretization.grid, setup.axis)
+    expected_volume = np.pi * 0.45 * 0.30 * float(setup.axis.arc_length)
+    np.testing.assert_allclose(geometry.volume, expected_volume, rtol=3.0e-3)
+    assert not bool(geometry.jacobian_sign_changed)
+    assert float(setup.axis.closure_error) < 2.0e-14
+    assert float(setup.axis.frame_closure_error) < 2.0e-14
+
+    field = contravariant_field(
+        state,
+        geometry,
+        setup.discretization.grid,
+        axial_flux_derivative=0.02,
+        current_derivative=0.002,
+    )
+    np.testing.assert_allclose(
+        divergence_b(field, geometry, setup.discretization.grid)[1:],
+        0.0,
+        atol=7.0e-13,
+    )
+
+
+@pytest.mark.full
+@pytest.mark.usefixtures("_module_jit_enabled")
+def test_closed_circular_limit_reaches_ftol_with_independent_strong_force() -> None:
+    resolution = MirrorResolution(ns=5, mpol=1, nxi=4)
+    config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
+    discretization = SplineMirrorDiscretization.build_closed(
+        resolution,
+        coefficient_count=8,
+        quadrature_order=3,
+    )
+    basis = discretization.spline
+    points = jnp.asarray(basis.collocation_nodes)
+    axis = evaluate_closed_spline_axis(
+        basis.fit(
+            jnp.stack(
+                (2.5 * jnp.cos(points), jnp.zeros_like(points), 2.5 * jnp.sin(points)),
+                axis=-1,
+            ),
+            axis=0,
+        ),
+        basis,
+        discretization.grid.z,
+        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+    )
+    boundary = SplineMirrorBoundary(jnp.full((resolution.ntheta, basis.size), 0.25))
+    radius = jnp.full((resolution.ns, resolution.ntheta, basis.size), 0.25)
+    initial = _initialize_closed_vacuum_stream_function(
+        SplineMirrorState(radius, jnp.zeros_like(radius)),
+        discretization,
+        axis,
+        axial_flux_derivative=0.03,
+    )
+    result = solve_spline_fixed_boundary_cli(
+        initial,
+        boundary,
+        discretization,
+        config,
+        axial_flux_derivative=0.03,
+        solve_lambda=True,
+        axis=axis,
+        require_convergence=True,
+    ).evaluated
+    assert result.converged
+    assert float(result.variational.maximum) <= config.ftol
+    assert float(result.staggered_weak_force.maximum) <= config.ftol
+    assert float(result.force.normalized_rms) < 1.0e-2
+    assert float(result.normalized_divergence_rms) < 1.0e-12
+
+
+@pytest.mark.full
+@pytest.mark.usefixtures("_module_jit_enabled")
+def test_stellarator_mirror_fixed_boundary_reaches_ftol() -> None:
+    resolution = MirrorResolution(ns=5, mpol=2, nxi=4)
+    config = MirrorConfig(resolution=resolution, ftol=1.0e-12, max_iterations=1000)
+    setup = build_stellarator_mirror_hybrid(
+        resolution,
+        coefficient_count=16,
+        straight_length=8.0,
+        return_radius=2.5,
+        semi_major=0.45,
+        semi_minor=0.30,
+        quadrature_order=3,
+    )
+    result = solve_spline_fixed_boundary_cli(
+        setup.initial_state,
+        setup.boundary,
+        setup.discretization,
+        config,
+        axial_flux_derivative=0.02,
+        current_derivative=0.002,
+        solve_lambda=True,
+        axis=setup.axis,
+        require_convergence=True,
+    ).evaluated
+    assert result.converged
+    assert float(result.variational.maximum) <= config.ftol
+    assert float(result.staggered_weak_force.maximum) <= config.ftol
+    assert float(result.normalized_divergence_rms) < 1.0e-12
+    assert not bool(result.energy.geometry.jacobian_sign_changed)
+    line = trace_closed_field_line(
+        result.energy.field,
+        setup.discretization,
+        radial_index=resolution.ns - 1,
+        turns=2,
+    )
+    assert line.theta.shape == (513,)
+    assert np.isfinite(float(line.iota))
+    assert abs(float(line.iota)) > 1.0e-3
 
 
 def _spline_polynomial_state():

@@ -1,4 +1,4 @@
-"""Clamped cubic B-spline coefficients for open mirror equilibria.
+"""Cubic B-spline coefficients for open and closed mirror equilibria.
 
 Knot locations are static NumPy data; coefficient evaluation and transfer are
 differentiable JAX operations.
@@ -14,7 +14,13 @@ import jax.numpy as jnp
 import numpy as np
 
 from .basis import CubicBSplineBasis, MirrorGrid, ThetaBasis
-from .geometry import evaluate_geometry, regularize_axis_stream_function
+from .geometry import (
+    evaluate_closed_spline_axis,
+    evaluate_geometry,
+    regularize_axis_stream_function,
+    stellarator_mirror_axis_coefficients,
+    stellarator_mirror_section_coefficients,
+)
 from .model import _regularize_axis_radius, MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState
 
 Array = Any
@@ -22,7 +28,7 @@ Array = Any
 
 @dataclass(frozen=True, eq=False)
 class _SplineEvaluationBasis:
-    """Endpoint-augmented Gauss grid acting on evaluated spline values."""
+    """Gauss grid acting on evaluated open or periodic spline values."""
 
     spline: CubicBSplineBasis
     nodes: np.ndarray
@@ -33,8 +39,11 @@ class _SplineEvaluationBasis:
 
     @classmethod
     def build(cls, spline: CubicBSplineBasis) -> "_SplineEvaluationBasis":
-        nodes = np.concatenate(([spline.domain[0]], spline.quadrature_nodes, [spline.domain[1]]))
-        weights = np.concatenate(([0.0], spline.quadrature_weights, [0.0]))
+        if spline.periodic:
+            nodes, weights = spline.quadrature_nodes, spline.quadrature_weights
+        else:
+            nodes = np.concatenate(([spline.domain[0]], spline.quadrature_nodes, [spline.domain[1]]))
+            weights = np.concatenate(([0.0], spline.quadrature_weights, [0.0]))
         values = np.asarray(spline.basis_matrix(nodes))
         recovery = np.linalg.pinv(values, rcond=1.0e-14)
         derivative = np.asarray(spline.basis_matrix(nodes, derivative=1)) @ recovery
@@ -95,6 +104,25 @@ class SuppliedFieldInitialization:
     axial_flux_derivative: Array
 
 
+@dataclass(frozen=True)
+class StellaratorMirrorSetup:
+    """Periodic spline discretization, axis, LCFS, and nested initial state."""
+
+    discretization: Any
+    axis: Any
+    boundary: SplineMirrorBoundary
+    initial_state: SplineMirrorState
+
+
+@dataclass(frozen=True)
+class ClosedFieldLine:
+    """One field line traced through a periodic spline equilibrium."""
+
+    axial_parameter: Array
+    theta: Array
+    iota: Array
+
+
 def _integrate_poloidal_derivative(derivative: Array) -> Array:
     """Invert a resolved theta derivative with a zero-mean gauge."""
 
@@ -121,6 +149,7 @@ class SplineMirrorDiscretization:
     spline: CubicBSplineBasis
     grid: MirrorGrid
     evaluation_matrix: np.ndarray
+    closed: bool = False
 
     @staticmethod
     def _grid(resolution: MirrorResolution, axial: Any, z: np.ndarray, dz_dxi: float) -> MirrorGrid:
@@ -157,7 +186,7 @@ class SplineMirrorDiscretization:
         z_mid = 0.5 * (config.z_min + config.z_max)
         dz_dxi = 0.5 * (config.z_max - config.z_min)
         grid = cls._grid(config.resolution, axial, z_mid + dz_dxi * axial.nodes, dz_dxi)
-        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)))
+        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), False)
 
     @classmethod
     def build_cgl(
@@ -177,7 +206,25 @@ class SplineMirrorDiscretization:
             quadrature_order=quadrature_order,
         )
         grid = config.build_grid()
-        return cls(spline, grid, np.asarray(spline.basis_matrix(grid.xi)))
+        return cls(spline, grid, np.asarray(spline.basis_matrix(grid.xi)), False)
+
+    @classmethod
+    def build_closed(
+        cls,
+        resolution: MirrorResolution,
+        *,
+        coefficient_count: int,
+        quadrature_order: int = 4,
+    ) -> "SplineMirrorDiscretization":
+        """Build a periodic longitudinal spline grid for a closed hybrid."""
+
+        spline = CubicBSplineBasis.periodic_uniform(
+            coefficient_count,
+            quadrature_order=quadrature_order,
+        )
+        axial = _SplineEvaluationBasis.build(spline)
+        grid = cls._grid(resolution, axial, np.asarray(axial.nodes), 1.0)
+        return cls(spline, grid, np.asarray(spline.basis_matrix(axial.nodes)), True)
 
     @property
     def coefficient_count(self) -> int:
@@ -228,8 +275,8 @@ class SplineMirrorDiscretization:
     ) -> SplineMirrorState:
         """Apply side geometry, axis regularity, and the lambda gauge.
 
-        Clamped endpoint coefficients remain the prescribed cut profiles from
-        ``state``. The coefficient vectorizer excludes them from every solve.
+        Open endpoint coefficients remain prescribed cut profiles. Periodic
+        states have no distinguished end coefficients.
         """
 
         radius = jnp.asarray(state.radius_coefficients)
@@ -256,6 +303,8 @@ class SplineMirrorDiscretization:
         remains supplied by the field initializer.
         """
 
+        if self.closed:
+            raise ValueError("closed periodic mirrors do not have end cuts")
         radius = jnp.asarray(state.radius_coefficients)
         edge = jnp.asarray(boundary.radius_coefficients)
         radius = radius.at[:, :, 0].set(edge[:, 0][None, :])
@@ -287,6 +336,153 @@ class SplineMirrorDiscretization:
             ),
             target,
         )
+
+
+def build_stellarator_mirror_hybrid(
+    resolution: MirrorResolution,
+    *,
+    coefficient_count: int = 32,
+    straight_length: float = 8.0,
+    return_radius: float = 2.5,
+    semi_major: float = 0.45,
+    semi_minor: float = 0.30,
+    axial_flux_derivative: Array = 0.02,
+    quadrature_order: int = 4,
+) -> StellaratorMirrorSetup:
+    """Build a closed two-leg mirror with rotating stellarator returns."""
+
+    discretization = SplineMirrorDiscretization.build_closed(
+        resolution,
+        coefficient_count=coefficient_count,
+        quadrature_order=quadrature_order,
+    )
+    basis = discretization.spline
+    axis = evaluate_closed_spline_axis(
+        stellarator_mirror_axis_coefficients(
+            basis,
+            straight_length=straight_length,
+            return_radius=return_radius,
+        ),
+        basis,
+        discretization.grid.z,
+        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+    )
+    edge = stellarator_mirror_section_coefficients(
+        basis,
+        jnp.asarray(discretization.grid.theta),
+        semi_major=semi_major,
+        semi_minor=semi_minor,
+    )
+    boundary = SplineMirrorBoundary(edge)
+    radius = jnp.broadcast_to(
+        edge[None],
+        (resolution.ns,) + edge.shape,
+    )
+    nested_state = discretization.project_fixed_boundary(
+        SplineMirrorState(radius, jnp.zeros_like(radius)),
+        boundary,
+    )
+    initial_state = _initialize_closed_vacuum_stream_function(
+        nested_state,
+        discretization,
+        axis,
+        axial_flux_derivative=axial_flux_derivative,
+    )
+    return StellaratorMirrorSetup(discretization, axis, boundary, initial_state)
+
+
+def _initialize_closed_vacuum_stream_function(
+    state: SplineMirrorState,
+    discretization: SplineMirrorDiscretization,
+    axis: Any,
+    *,
+    axial_flux_derivative: Array,
+) -> SplineMirrorState:
+    """Seed the minimum-energy periodic field for a prescribed flux."""
+
+    if not discretization.closed:
+        raise ValueError("closed vacuum initialization requires a periodic discretization")
+    from .geometry import evaluate_closed_geometry
+
+    evaluated = discretization.evaluate_state(state)
+    geometry = evaluate_closed_geometry(evaluated, discretization.grid, axis)
+    if bool(geometry.jacobian_sign_changed):
+        raise ValueError("closed vacuum initialization requires a positive Jacobian")
+    flux = jnp.asarray(axial_flux_derivative, dtype=evaluated.radius_scale.dtype)
+    if flux.ndim == 0:
+        flux = jnp.broadcast_to(flux, (discretization.grid.ns,))
+    if flux.shape != (discretization.grid.ns,):
+        raise ValueError("axial_flux_derivative must be scalar or have one value per surface")
+
+    axial_weights = jnp.asarray(discretization.grid.axial_basis.weights)
+    theta_weights = jnp.asarray(discretization.grid.theta_basis.weights)
+    metric_weight = jnp.einsum("ijk,k->ij", geometry.sqrt_g / geometry.g_xixi, axial_weights)
+    metric_weight /= jnp.sum(axial_weights)
+    theta_mean = jnp.einsum("ij,j->i", metric_weight, theta_weights) / jnp.sum(theta_weights)
+    target_derivative = flux[:, None] * (metric_weight / theta_mean[:, None] - 1.0)
+    lam = _integrate_poloidal_derivative(target_derivative)
+    lam -= (
+        jnp.einsum("ij,j->i", lam, theta_weights) / jnp.sum(theta_weights)
+    )[:, None]
+    coefficients = jnp.broadcast_to(lam[:, :, None], state.lambda_coefficients.shape)
+    coefficients = coefficients.at[0].set(coefficients[1])
+    return SplineMirrorState(state.radius_coefficients, coefficients)
+
+
+def trace_closed_field_line(
+    field: Any,
+    discretization: SplineMirrorDiscretization,
+    *,
+    radial_index: int,
+    theta0: float = 0.0,
+    turns: int = 1,
+    steps_per_turn: int = 256,
+) -> ClosedFieldLine:
+    """Integrate ``dtheta/du = B^theta/B^u`` with periodic RK4 steps."""
+
+    if not discretization.closed:
+        raise ValueError("closed field-line tracing requires a periodic discretization")
+    radial_index, turns, steps_per_turn = int(radial_index), int(turns), int(steps_per_turn)
+    if not 0 <= radial_index < discretization.grid.ns:
+        raise ValueError("radial_index is outside the spline grid")
+    if turns < 1 or steps_per_turn < 4:
+        raise ValueError("turns must be positive and steps_per_turn must be at least four")
+
+    denominator = field.jac_b_xi[radial_index]
+    tiny = jnp.finfo(denominator.dtype).tiny
+    ratio = field.jac_b_theta[radial_index] / jnp.where(
+        jnp.abs(denominator) > tiny,
+        denominator,
+        jnp.inf,
+    )
+    recovery = jnp.asarray(discretization.grid.axial_basis.recovery_matrix)
+    axial_coefficients = jnp.tensordot(ratio, recovery.T, axes=((-1,), (0,)))
+    modes = jnp.asarray(np.fft.fftfreq(discretization.grid.ntheta, d=1.0 / discretization.grid.ntheta))
+    start, stop = discretization.spline.domain
+    period = float(stop - start)
+    step = period / steps_per_turn
+
+    def pitch(theta, axial_parameter):
+        samples = discretization.spline.evaluate(axial_coefficients, axial_parameter)
+        coefficients = jnp.fft.fft(samples) / discretization.grid.ntheta
+        return jnp.real(jnp.sum(coefficients * jnp.exp(1j * modes * theta)))
+
+    def advance(theta, index):
+        axial_parameter = float(start) + step * (index % steps_per_turn)
+        k1 = pitch(theta, axial_parameter)
+        k2 = pitch(theta + 0.5 * step * k1, axial_parameter + 0.5 * step)
+        k3 = pitch(theta + 0.5 * step * k2, axial_parameter + 0.5 * step)
+        k4 = pitch(theta + step * k3, axial_parameter + step)
+        updated = theta + step * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
+        return updated, updated
+
+    count = turns * steps_per_turn
+    final_theta, traced = jax.lax.scan(advance, jnp.asarray(theta0), jnp.arange(count))
+    return ClosedFieldLine(
+        axial_parameter=float(start) + step * jnp.arange(count + 1),
+        theta=jnp.concatenate((jnp.asarray([theta0]), traced)),
+        iota=(final_theta - float(theta0)) / (2.0 * jnp.pi * turns),
+    )
 
 
 def initialize_from_cartesian_field(
@@ -401,8 +597,12 @@ class _SplineStateVectorizer:
 
         shape = np.asarray(base.radius_coefficients).shape
         radius_mask = np.zeros(shape, dtype=bool)
-        radius_mask[1:-1, :, 1:-1] = True
-        lambda_axial_indices = np.arange(1, shape[2] - 1)
+        if discretization.closed:
+            radius_mask[1:-1] = True
+            lambda_axial_indices = np.arange(shape[2])
+        else:
+            radius_mask[1:-1, :, 1:-1] = True
+            lambda_axial_indices = np.arange(1, shape[2] - 1)
         radius_indices = tuple(np.asarray(index) for index in np.nonzero(radius_mask))
 
         coefficient_weights = np.asarray(discretization.evaluation_matrix).T @ np.asarray(
@@ -417,10 +617,11 @@ class _SplineStateVectorizer:
         pivot = int(np.argmax(interior_weights)) if interior_weights.size else 0
         free_indices = np.delete(np.arange(interior_weights.size), pivot)
         endpoint_weights = np.zeros((shape[1], shape[2]))
-        endpoint_weights[:, [0, -1]] = (
-            np.asarray(discretization.grid.theta_basis.weights)[:, None]
-            * coefficient_weights[None, [0, -1]]
-        )
+        if not discretization.closed:
+            endpoint_weights[:, [0, -1]] = (
+                np.asarray(discretization.grid.theta_basis.weights)[:, None]
+                * coefficient_weights[None, [0, -1]]
+            )
         fixed_sum = np.einsum("jk,ijk->i", endpoint_weights, np.asarray(base.lambda_coefficients)[1:])
         return cls(
             base=base,
@@ -602,7 +803,7 @@ def _packed_spline_preconditioner(
         discretization.spline.basis_matrix(discretization.grid.axial_basis.nodes, derivative=1)
     ) / float(discretization.grid.dz_dxi)
     weights = np.asarray(discretization.grid.axial_basis.weights)
-    active_derivative = derivative[:, 1:-1]
+    active_derivative = derivative if discretization.closed else derivative[:, 1:-1]
     stiffness = active_derivative.T @ (weights[:, None] * active_derivative)
     geometry = SeparableMirrorPreconditioner.build_from_axial_stiffness(
         discretization.grid,
@@ -678,7 +879,7 @@ def _packed_spline_preconditioner(
         solve.hessian_column_count = size  # type: ignore[attr-defined]
         return solve
 
-    local_builder = build_local if vectorizer.lambda_size else None
+    local_builder = build_local if vectorizer.lambda_size and not discretization.closed else None
     return apply, scales, local_builder
 
 
@@ -693,10 +894,11 @@ def solve_fixed_boundary_cli(
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     solve_lambda: bool = False,
+    axis: Any | None = None,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
 ) -> SplineMirrorSolveResult:
-    """Solve a scalar-pressure, fixed-cut open mirror equilibrium."""
+    """Solve an open or periodic closed scalar-pressure equilibrium."""
 
     from .forces import (
         VariationalResidual,
@@ -717,6 +919,8 @@ def solve_fixed_boundary_cli(
         raise ValueError("spline radial and poloidal resolution must match MirrorConfig")
     if gradient_tolerance <= 0.0:
         raise ValueError("gradient_tolerance must be positive")
+    if discretization.closed != (axis is not None):
+        raise ValueError("closed discretizations require an axis; open ones do not")
     vectorizer = _SplineStateVectorizer.build(
         initial_state,
         boundary,
@@ -740,7 +944,7 @@ def solve_fixed_boundary_cli(
         return discretization.evaluate_state(unpack_coefficients(vector))
 
     def evaluate_energy(state: MirrorState):
-        return mirror_energy(state, grid, **energy_kwargs)
+        return mirror_energy(state, grid, axis=axis, **energy_kwargs)
 
     initial_evaluated = unpack(jnp.asarray(x0))
     initial_energy = evaluate_energy(initial_evaluated)
@@ -781,6 +985,7 @@ def solve_fixed_boundary_cli(
         gradient = isotropic_staggered_energy_gradient(
             state,
             grid,
+            axis=axis,
             **energy_kwargs,
         )
         packed = vectorizer.pullback_evaluated_gradient(gradient) / energy_scale
@@ -799,16 +1004,18 @@ def solve_fixed_boundary_cli(
             energy,
             grid,
             state=state,
+            axis=axis,
+            closed=discretization.closed,
+            characteristic_length=None if axis is None else axis.arc_length,
             **energy_kwargs,
         )
 
-    history: list[tuple[float, float, float, float, float, float]] = []
+    history: list[tuple[float, float, float, float, float]] = []
 
     def record(iteration: int, vector: np.ndarray) -> None:
         state = unpack(jnp.asarray(vector))
         energy = evaluate_energy(state)
         variational = packed_variational(vector, state)
-        force = force_residual(state, energy)
         history.append(
             (
                 float(iteration),
@@ -816,7 +1023,6 @@ def solve_fixed_boundary_cli(
                 float(variational.radius_rms),
                 float(variational.lambda_rms),
                 float(variational.maximum),
-                float(force.normalized_rms),
             )
         )
 
@@ -846,7 +1052,8 @@ def solve_fixed_boundary_cli(
             ),
             # Direct Newton is fast only after continuation enters its local basin.
             start_with_newton=bool(
-                solve_lambda and history[-1][4] <= 1.0e-4 and x0.size <= 4096
+                (discretization.closed and x0.size <= 512)
+                or (solve_lambda and history[-1][4] <= 1.0e-4 and x0.size <= 4096)
             ),
         )
         final_x = optimization.vector
@@ -881,7 +1088,13 @@ def solve_fixed_boundary_cli(
         variational=final_variational,
         force=final_force,
         staggered_weak_force=final_weak,
-        normalized_divergence_rms=normalized_divergence_rms(final_energy.field, final_energy.geometry, grid),
+        normalized_divergence_rms=normalized_divergence_rms(
+            final_energy.field,
+            final_energy.geometry,
+            grid,
+            closed=discretization.closed,
+            characteristic_length=None if axis is None else axis.arc_length,
+        ),
         history=jnp.asarray(history),
         iterations=iterations,
         converged=converged,
@@ -907,10 +1120,14 @@ jax.tree_util.register_dataclass(
     meta_fields=[],
 )
 __all__ = [
+    "ClosedFieldLine",
     "CubicBSplineBasis",
     "SplineMirrorBoundary",
     "SplineMirrorDiscretization",
     "SplineMirrorSolveResult",
     "SplineMirrorState",
+    "StellaratorMirrorSetup",
+    "build_stellarator_mirror_hybrid",
     "solve_fixed_boundary_cli",
+    "trace_closed_field_line",
 ]
