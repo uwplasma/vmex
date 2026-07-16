@@ -8,7 +8,7 @@ coefficient evaluation and transfer are differentiable JAX operations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 import jax
 import jax.numpy as jnp
@@ -198,7 +198,7 @@ class SplineMirrorDiscretization:
         coefficient_count: int,
         quadrature_order: int = 4,
     ) -> "SplineMirrorDiscretization":
-        """Build a periodic spline grid for a closed mirror-hybrid axis."""
+        """Build a periodic spline grid for closed circular validation."""
 
         spline = CubicBSplineBasis.periodic_uniform(
             coefficient_count,
@@ -514,69 +514,6 @@ class SplineMirrorSolveResult:
 
     coefficient_state: SplineMirrorState
     evaluated: Any
-
-
-@dataclass(frozen=True)
-class ClosedFieldLine:
-    """One traced closed-spline field line and its rotational transform."""
-
-    axial_parameter: Array
-    theta: Array
-    iota: Array
-
-
-def trace_closed_field_line(
-    field: "ContravariantField",
-    discretization: SplineMirrorDiscretization,
-    *,
-    radial_index: int,
-    theta0: float = 0.0,
-    turns: int = 1,
-    steps_per_turn: int = 256,
-) -> ClosedFieldLine:
-    """Integrate ``dtheta/du = B^theta/B^u`` on a closed spline surface."""
-
-    if not discretization.closed:
-        raise ValueError("closed field-line tracing requires a periodic discretization")
-    radial_index = int(radial_index)
-    turns = int(turns)
-    steps_per_turn = int(steps_per_turn)
-    if not 0 <= radial_index < discretization.grid.ns:
-        raise ValueError("radial_index is outside the spline grid")
-    if turns < 1 or steps_per_turn < 4:
-        raise ValueError("turns must be positive and steps_per_turn must be at least four")
-
-    denominator = field.jac_b_xi[radial_index]
-    tiny = jnp.finfo(denominator.dtype).tiny
-    ratio = field.jac_b_theta[radial_index] / jnp.where(jnp.abs(denominator) > tiny, denominator, jnp.inf)
-    recovery = jnp.asarray(discretization.grid.axial_basis.recovery_matrix)
-    axial_coefficients = jnp.tensordot(ratio, recovery.T, axes=((-1,), (0,)))
-    modes = jnp.asarray(np.fft.fftfreq(discretization.grid.ntheta, d=1.0 / discretization.grid.ntheta))
-    start, stop = discretization.spline.domain
-    period = float(stop - start)
-    step = period / steps_per_turn
-
-    def pitch(theta, axial_parameter):
-        samples = discretization.spline.evaluate(axial_coefficients, axial_parameter)
-        coefficients = jnp.fft.fft(samples) / discretization.grid.ntheta
-        return jnp.real(jnp.sum(coefficients * jnp.exp(1j * modes * theta)))
-
-    def advance(theta, index):
-        axial_parameter = float(start) + step * (index % steps_per_turn)
-        k1 = pitch(theta, axial_parameter)
-        k2 = pitch(theta + 0.5 * step * k1, axial_parameter + 0.5 * step)
-        k3 = pitch(theta + 0.5 * step * k2, axial_parameter + 0.5 * step)
-        k4 = pitch(theta + step * k3, axial_parameter + step)
-        updated = theta + step * (k1 + 2.0 * k2 + 2.0 * k3 + k4) / 6.0
-        return updated, updated
-
-    count = turns * steps_per_turn
-    indices = jnp.arange(count)
-    final_theta, traced = jax.lax.scan(advance, jnp.asarray(theta0), indices)
-    theta = jnp.concatenate((jnp.asarray([theta0]), traced))
-    axial = float(start) + step * jnp.arange(count + 1)
-    iota = (final_theta - float(theta0)) / (2.0 * jnp.pi * turns)
-    return ClosedFieldLine(axial_parameter=axial, theta=theta, iota=iota)
 
 
 @dataclass(frozen=True)
@@ -1420,24 +1357,11 @@ jax.tree_util.register_dataclass(
     data_fields=["coefficient_state", "evaluated"],
     meta_fields=[],
 )
-jax.tree_util.register_dataclass(
-    ClosedFieldLine,
-    data_fields=["axial_parameter", "theta", "iota"],
-    meta_fields=[],
-)
-
-
 __all__ = [
     "CubicBSplineBasis",
-    "ClosedFieldLine",
     "SplineMirrorBoundary",
     "SplineMirrorDiscretization",
     "SplineMirrorSolveResult",
     "SplineMirrorState",
     "solve_fixed_boundary_cli",
-    "trace_closed_field_line",
 ]
-
-
-if TYPE_CHECKING:
-    from .geometry import ContravariantField

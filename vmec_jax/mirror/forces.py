@@ -955,7 +955,7 @@ def isotropic_force_residual(
     force_covariant = jnp.stack([force_s, force_theta, force_xi], axis=-1)
     axial_slice = slice(None) if closed else slice(1, -1)
     # The axis and side are constrained. Open mirrors also constrain end cuts;
-    # a closed hybrid norms every periodic axial point.
+    # A closed periodic validation case norms every axial point.
     force_active = force_covariant[1:-1, :, axial_slice]
     inverse_metric = jnp.linalg.inv(metric[1:-1, :, axial_slice])
     force_squared = jnp.einsum(

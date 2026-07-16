@@ -5,9 +5,9 @@ Mirror geometry
 coordinates ``(s, theta, xi)`` with a nonperiodic axial coordinate and
 fixed-flux end cuts. It does not reinterpret a straight mirror as a periodic
 torus. Axisymmetric and nonaxisymmetric fixed-boundary lanes are supported,
-as is axisymmetric free boundary through 10% requested beta. Higher-beta,
-nonaxisymmetric free-boundary, and periodic-hybrid states remain research
-lanes until their independent strong-force and refinement gates pass.
+as is axisymmetric free boundary through 10% requested beta. Higher-beta and
+nonaxisymmetric free-boundary states remain research lanes. Periodic hybrids
+are explicitly deferred after failing their same-geometry refinement gate.
 
 Open topology and end cuts
 --------------------------
@@ -121,56 +121,30 @@ The branch currently includes:
 
 The axisymmetric free-boundary path is supported through 10% requested beta
 and retains 25% and 50% as explicitly labeled research scans. The
-nonaxisymmetric free-boundary path is a
-deferred research lane because its point observables were not monotone under
-spatial refinement. A native periodic
-B-spline hybrid geometry and fixed-boundary research solve now exist. The
-removed Fourier projection is not a supported capability, and the hybrid still
-requires the residual, limiting-case, and derivative gates below.
+nonaxisymmetric free-boundary path is a deferred research lane because its
+point observables were not monotone under spatial refinement.
 
-Toroidal hybrid foundation
+Closed circular validation
 --------------------------
 
-The former square-axis Fourier target, continuation driver, examples, and
-benchmarks were experimental and have been removed. A toroidal
-stellarator-mirror hybrid requires a native spline axis and surface state
-that can represent long straight sections joined by rotating-ellipse curved
-sections. The first geometry gate now provides a periodic cubic B-spline
-racetrack and a rotation-minimizing frame with periodic holonomy correction.
-Circle tests cover curvature, arc length, frame closure, and centerline
-coefficient gradients; a 32-control racetrack retains exact straight interiors
-over 56% of its sampled axis. The shared geometry metric now embeds circular
-and rotating-ellipse sections around that frame without end cuts. Its circular
-limit recovers analytic torus volume to ``2e-5`` relative and keeps discrete
-``div(B)`` below ``2e-14``; the racetrack ellipse rotates 90 degrees between
-the long legs and matches its area-times-axis-length volume to ``3e-4``.
-The coefficient-native solver now applies the same radial-Gauss energy and
-``ftol=1e-12`` variational contract. The current-free initializer obtains the
-poloidal stream function from the axial average of
-:math:`\sqrt{g}/g_{\xi\xi}`; on concentric circular surfaces this produces the
-vacuum :math:`1/R` field and fixes its sign and zero-mean gauge. The complete
-circular-torus solve jointly advances radius and stream function. Matched
-``APHI``/``PHIEDGE`` inputs agree with ordinary ``vmec_jax``, VMEC2000, and
-WOUT conventions. Its ``ns=5,9,17`` all-volume force sequence is
+Periodic cubic B-splines and a rotation-minimizing frame are retained only for
+the independently validated circular closed limit. That limit recovers
+analytic torus volume to ``2e-5`` relative, discrete ``div(B)`` below
+``2e-14``, and the vacuum :math:`1/R` field. Matched ``APHI``/``PHIEDGE``
+inputs agree with ordinary ``vmec_jax``, VMEC2000, and WOUT conventions. Its
+``ns=5,9,17`` all-volume force sequence is
 ``4.72e-6, 7.35e-7, 1.25e-7``; fine bulk force is ``3.44e-9`` and every solve
 reaches ``ftol=1e-12``.
 
-Closed stream coordinates fix one physical coefficient on each radial surface
-while solving and restore the weighted-mean convention on output. This keeps
-the periodic spline Hessian local. Disjoint-support coloring reduces the
-refined 16-control graph from 712 columns to 145 probes. Cold finite-racetrack
-linearization and sparse factor setup take 1.99 seconds at 1.21 GiB on an Apple
-M3 Max; the greater-than-1,024-variable circular residual test takes 13.2
-seconds and passes the ``1e-8`` true-linear-residual gate.
-
-The finite-current rotating-ellipse racetrack now converges in 60 nonlinear
-and 1,339 Krylov iterations, taking 56.1 seconds below 3 GiB. Its variational
-and staggered-weak residuals are ``7.37e-17`` and ``7.68e-17``, true linear
-residual is ``5.29e-11``, and a three-turn field line gives iota ``0.0422``.
-However, all-volume strong force is ``0.548``. The state is therefore a solver
-and field-line smoke test, not a promoted hybrid equilibrium. Staged
-shape/current continuation, strong-force refinement, the open-leg limit, beta
-refinement, hybrid adjoints, and release plots remain open.
+The closed-hybrid research candidate used exact nested 16/32/64-control
+geometry and converged below every nonlinear, linear, geometry, time, and
+memory ceiling. Its strong-force sequence was nevertheless
+``0.05277, 0.10756, 0.02365`` at quadrature order 3 and
+``0.05280, 0.10714, 0.02353`` at order 4. Because both orders reproduce the
+nonmonotone middle state, the candidate fails the declared same-geometry gate.
+Hybrid constructors, tracing, examples, output, and plotting are not supported
+in this PR. The compact negative evidence remains in
+``benchmarks/mirror_hybrid_fixed_boundary.json``.
 
 Plotting and output scope
 -------------------------
@@ -285,8 +259,8 @@ Native spline basis status
 --------------------------
 
 ``vmec_jax.mirror.splines.CubicBSplineBasis`` now supplies the isolated basis
-contract for the next solver state. Open axes use clamped knots; closed hybrid
-centerlines use folded uniform periodic cubics. Values and two derivatives are
+contract for the next solver state. Open axes use clamped knots; closed
+validation axes use folded uniform periodic cubics. Values and two derivatives are
 JAX operations, each nonzero span uses four-point Gauss-Legendre quadrature,
 and open refinement uses exact Boehm knot insertion. The basis matches SciPy,
 reproduces cubics, preserves curves under insertion, closes periodic values and
@@ -345,8 +319,7 @@ seconds. The frozen local factor reaches ``9.18e-11`` in 660 iterations and
 4.14 seconds, with the same final energy and strong force. An isolated
 current-main SOLVAX right-preconditioned FGMRES trial follows the same
 iteration curve, so the host CLI remains on SciPy GMRES. The same sparse builder is used by
-forward tangent and reverse adjoint systems; closed periodic systems retain
-their existing path until cyclic locality is validated.
+forward tangent and reverse adjoint systems.
 
 The periodic coefficient block uses cyclic axial distance, every B-spline
 coefficient, and the same frozen sparse Hessian construction as the open
@@ -354,9 +327,11 @@ solver. Systems through 1,024 variables retain the faster dense small-problem
 path. On the first 1,182-variable circular case, the cyclic factor reaches
 variational ``ftol=1e-12`` in 11.50 seconds and 907 Krylov iterations, with
 true relative linear residual ``7.39e-10``. The previous noncyclic attempt
-left residual 0.136 after 3,000 iterations. This closes the periodic linear
-gate, but the circular strong-force and VMEC-limit refinement gates still
-block hybrid promotion.
+left residual 0.136 after 3,000 iterations. The production graph now also
+includes axis-regularization couplings: a 2,524-variable factor action has
+true residual below ``3.1e-11``, and the corresponding solve falls from 7,383
+to 37 Krylov iterations. This infrastructure remains for circular validation;
+it does not promote the deferred hybrid.
 
 On the flared finite-beta case, knot refinement from 5 to 11 coefficients
 reduces relative energy error against an ``nxi=17`` Chebyshev oracle from
@@ -439,7 +414,7 @@ nonaxisymmetric finite-current ``solve_lambda=True`` case, both radius and
 stream-function tangents agree with two fully reconverged centered differences
 within ``2e-4`` in relative state norm, with linear residual below ``1e-8``.
 This establishes both open-spline derivative directions. Closed-axis and
-centerline-control derivatives remain part of fixed-hybrid promotion.
+centerline-control derivatives are deferred with the closed hybrid.
 
 The former CGL fixed solve, custom VJP, and nodal adjoint have been removed.
 Public fixed-boundary inputs are
@@ -503,10 +478,11 @@ after execution::
    coverage report --include="*/vmec_jax/mirror/*" --fail-under=95
 
 The release audit is rerun from the final branch rather than copied from an
-intermediate repository snapshot. Generated MOUT files, field-line traces, and
-figures remain ignored. Four compact JSON files retain numerical evidence for
-fixed open, free axisymmetric, deferred free nonaxisymmetric, and fixed hybrid
-ownership; repository-shape and promotion gates are maintained in ``plan.md``.
+intermediate repository snapshot. Generated MOUT files and figures remain
+ignored. Four compact JSON files retain numerical evidence for fixed open,
+free axisymmetric, deferred free nonaxisymmetric, and the negative closed
+hybrid disposition; repository-shape and promotion gates are maintained in
+``plan.md``.
 
 .. image:: _static/figures/mirror_fixed_boundary_3d.png
    :alt: Fixed-boundary axisymmetric convergence, nonaxisymmetric force gates, and matrix-free solver evidence

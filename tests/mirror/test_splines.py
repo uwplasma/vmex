@@ -28,8 +28,6 @@ from vmec_jax.mirror.free_boundary import (  # noqa: E402
     _spline_boundary_work_residual,
 )
 from vmec_jax.mirror.geometry import (  # noqa: E402
-    closed_hybrid_axis_coefficients,
-    closed_hybrid_section_coefficients,
     contravariant_field,
     divergence_b,
     evaluate_closed_spline_axis,
@@ -53,7 +51,6 @@ from vmec_jax.mirror.splines import (  # noqa: E402
     initialize_from_cartesian_field,
     initialize_closed_vacuum_stream_function,
     solve_fixed_boundary_cli as solve_spline_fixed_boundary_cli,
-    trace_closed_field_line,
 )
 
 
@@ -209,7 +206,7 @@ def test_periodic_fit_converges_and_is_differentiable() -> None:
     assert errors[2] < 0.08 * errors[1]
 
 
-def test_periodic_uniform_refinement_preserves_all_hybrid_blocks() -> None:
+def test_periodic_uniform_refinement_preserves_all_state_blocks() -> None:
     basis = CubicBSplineBasis.periodic_uniform(16, quadrature_order=5)
     points = jnp.linspace(0.0, 2.0 * jnp.pi, 1025, endpoint=False)
     rng = np.random.default_rng(73)
@@ -289,54 +286,6 @@ def test_closed_circle_axis_has_periodic_rotation_minimizing_frame() -> None:
     )(coefficients)
     assert np.all(np.isfinite(gradient))
     assert float(jnp.linalg.norm(gradient)) > 1.0
-
-
-def test_closed_hybrid_axis_family_has_shared_phase_and_straight_legs() -> None:
-    basis = CubicBSplineBasis.periodic_uniform(32)
-    circle = closed_hybrid_axis_coefficients(
-        basis,
-        straight_length=6.0,
-        return_radius=1.0,
-        racetrack_fraction=0.0,
-    )
-    coefficients = closed_hybrid_axis_coefficients(
-        basis,
-        straight_length=6.0,
-        return_radius=1.0,
-    )
-    midpoint = closed_hybrid_axis_coefficients(
-        basis,
-        straight_length=6.0,
-        return_radius=1.0,
-        racetrack_fraction=0.5,
-    )
-    np.testing.assert_allclose(midpoint, 0.5 * (circle + coefficients), atol=2.0e-15)
-
-    points = np.linspace(*basis.domain, 257, endpoint=False)
-    axis = evaluate_closed_spline_axis(
-        coefficients,
-        basis,
-        points,
-        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-    )
-
-    central_legs = (
-        (points < np.pi / 8.0)
-        | ((points >= 7.0 * np.pi / 8.0) & (points < 9.0 * np.pi / 8.0))
-        | (points >= 15.0 * np.pi / 8.0)
-    )
-    assert float(jnp.max(axis.curvature[central_legs])) < 5.0e-14
-    opposite = basis.evaluate(coefficients, jnp.mod(jnp.asarray(points) + jnp.pi, 2.0 * jnp.pi), axis=0)
-    reflected = basis.evaluate(coefficients, jnp.mod(-jnp.asarray(points), 2.0 * jnp.pi), axis=0)
-    np.testing.assert_allclose(opposite, -axis.centerline, atol=3.0e-15)
-    np.testing.assert_allclose(reflected[:, 0], axis.centerline[:, 0], atol=3.0e-15)
-    np.testing.assert_allclose(reflected[:, 2], -axis.centerline[:, 2], atol=3.0e-15)
-    circle_cardinal = basis.evaluate(circle, jnp.asarray([0.0, 0.5 * jnp.pi]), axis=0)
-    np.testing.assert_allclose(circle_cardinal[:, (0, 2)], [[1.0, 0.0], [0.0, 1.0]], atol=3.0e-15)
-    assert float(axis.closure_error) < 2.0e-14
-    assert float(axis.tangent_closure_error) < 2.0e-14
-    assert float(axis.frame_closure_error) < 2.0e-14
-    assert float(jnp.min(axis.speed)) > 0.1
 
 
 def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> None:
@@ -420,205 +369,6 @@ def test_closed_circular_surface_recovers_torus_volume_and_field_metric() -> Non
         total_energy(axis_coefficients + step * direction) - total_energy(axis_coefficients - step * direction)
     ) / (2.0 * step)
     np.testing.assert_allclose(automatic, finite_difference, rtol=2.0e-7)
-
-
-def test_closed_hybrid_ellipse_twists_only_in_returns() -> None:
-    semi_major, semi_minor = 0.18, 0.12
-    resolution = MirrorResolution(ns=7, mpol=6, nxi=4)
-    discretization = SplineMirrorDiscretization.build_closed(
-        resolution,
-        coefficient_count=32,
-        quadrature_order=4,
-    )
-    basis = discretization.spline
-    axis_coefficients = closed_hybrid_axis_coefficients(
-        basis,
-        straight_length=6.0,
-        return_radius=1.0,
-    )
-    axis = evaluate_closed_spline_axis(
-        axis_coefficients,
-        basis,
-        discretization.grid.z,
-        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-    )
-
-    boundary = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            basis,
-            jnp.asarray(discretization.grid.theta),
-            semi_major=semi_major,
-            semi_minor=semi_minor,
-        )
-    )
-    boundary_at_legs = basis.evaluate(
-        boundary.radius_coefficients,
-        jnp.asarray([0.0, jnp.pi]),
-        axis=-1,
-    )
-    np.testing.assert_allclose(boundary_at_legs[0, 0], semi_major, rtol=2.0e-13)
-    np.testing.assert_allclose(boundary_at_legs[0, 1], semi_minor, rtol=2.0e-13)
-    central_points = jnp.asarray(
-        np.concatenate(
-            (
-                np.linspace(0.0, np.pi / 8.0, 17),
-                np.linspace(7.0 * np.pi / 8.0, 9.0 * np.pi / 8.0, 33),
-                np.linspace(15.0 * np.pi / 8.0, 2.0 * np.pi, 17),
-            )
-        )
-    )
-    longitudinal_derivative = basis.evaluate(
-        boundary.radius_coefficients,
-        central_points,
-        derivative=1,
-        axis=-1,
-    )
-    assert float(jnp.max(jnp.abs(longitudinal_derivative))) < 2.0e-14
-    for derivative in range(3):
-        closure = basis.evaluate(
-            boundary.radius_coefficients,
-            jnp.asarray([0.0, 2.0 * jnp.pi]),
-            derivative=derivative,
-            axis=-1,
-        )
-        np.testing.assert_allclose(closure[:, 0], closure[:, 1], atol=2.0e-14)
-    assert semi_major < 1.0
-
-    coefficient_state = SplineMirrorState(
-        radius_coefficients=jnp.broadcast_to(
-            boundary.radius_coefficients[None],
-            (resolution.ns,) + boundary.radius_coefficients.shape,
-        ),
-        lambda_coefficients=jnp.zeros((resolution.ns, resolution.ntheta, basis.size)),
-    )
-    state = discretization.evaluate_state(discretization.project_fixed_boundary(coefficient_state, boundary))
-    geometry = evaluate_closed_geometry(state, discretization.grid, axis)
-    np.testing.assert_allclose(
-        geometry.volume,
-        np.pi * semi_major * semi_minor * axis.arc_length,
-        rtol=5.0e-4,
-    )
-    assert not bool(geometry.jacobian_sign_changed)
-
-    direction = jnp.reshape(
-        jnp.linspace(-0.2, 0.3, boundary.radius_coefficients.size),
-        boundary.radius_coefficients.shape,
-    )
-
-    def section_volume(coefficients):
-        trial_radius = jnp.broadcast_to(
-            coefficients[None],
-            (resolution.ns,) + coefficients.shape,
-        )
-        trial = discretization.evaluate_state(
-            discretization.project_fixed_boundary(
-                SplineMirrorState(trial_radius, jnp.zeros_like(trial_radius)),
-                SplineMirrorBoundary(coefficients),
-            )
-        )
-        return evaluate_closed_geometry(trial, discretization.grid, axis).volume
-
-    automatic = jax.jvp(
-        section_volume,
-        (boundary.radius_coefficients,),
-        (direction,),
-    )[1]
-    step = 2.0e-5
-    finite_difference = (
-        section_volume(boundary.radius_coefficients + step * direction)
-        - section_volume(boundary.radius_coefficients - step * direction)
-    ) / (2.0 * step)
-    np.testing.assert_allclose(automatic, finite_difference, rtol=3.0e-8)
-
-    volume_gradient = jax.grad(
-        lambda coefficients: (
-            evaluate_closed_geometry(
-                state,
-                discretization.grid,
-                evaluate_closed_spline_axis(
-                    coefficients,
-                    basis,
-                    discretization.grid.z,
-                    initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-                ),
-            ).volume
-        )
-    )(axis_coefficients)
-    assert np.all(np.isfinite(volume_gradient))
-    assert float(jnp.linalg.norm(volume_gradient)) > 1.0e-3
-
-
-def test_closed_hybrid_section_stages_preserve_area_and_periodic_transfer() -> None:
-    resolution = MirrorResolution(ns=5, mpol=6, nxi=4)
-    coarse = SplineMirrorDiscretization.build_closed(
-        resolution,
-        coefficient_count=16,
-        quadrature_order=3,
-    )
-    fine = SplineMirrorDiscretization.build_closed(
-        resolution,
-        coefficient_count=32,
-        quadrature_order=3,
-    )
-    theta = jnp.asarray(coarse.grid.theta)
-    circular = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            coarse.spline,
-            theta,
-            semi_major=0.18,
-            semi_minor=0.12,
-            ellipticity_fraction=0.0,
-            twist_fraction=0.0,
-        )
-    )
-    elliptical = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            coarse.spline,
-            theta,
-            semi_major=0.18,
-            semi_minor=0.12,
-            twist_fraction=0.0,
-        )
-    )
-    twisted = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            coarse.spline,
-            theta,
-            semi_major=0.18,
-            semi_minor=0.12,
-        )
-    )
-    mean_radius = np.sqrt(0.18 * 0.12)
-    np.testing.assert_allclose(circular.radius_coefficients, mean_radius, atol=3.0e-16)
-    np.testing.assert_allclose(
-        coarse.spline.evaluate(elliptical.radius_coefficients, 0.0, axis=-1),
-        coarse.spline.evaluate(twisted.radius_coefficients, 0.0, axis=-1),
-        atol=3.0e-16,
-    )
-
-    radius = jnp.broadcast_to(
-        twisted.radius_coefficients[None],
-        (resolution.ns,) + twisted.radius_coefficients.shape,
-    )
-    lam = 2.0e-3 * jnp.asarray(coarse.grid.s)[:, None, None] * jnp.sin(theta)[None, :, None]
-    lam = jnp.broadcast_to(lam, radius.shape)
-    state = coarse.project_fixed_boundary(SplineMirrorState(radius, lam), twisted)
-    fine_boundary = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            fine.spline,
-            jnp.asarray(fine.grid.theta),
-            semi_major=0.18,
-            semi_minor=0.12,
-        )
-    )
-    transferred = fine.transfer_closed_state(state, coarse, fine_boundary)
-    points = jnp.linspace(0.0, 2.0 * jnp.pi, 193, endpoint=False)
-    np.testing.assert_allclose(
-        fine.spline.evaluate(transferred.lambda_coefficients, points, axis=-1),
-        coarse.spline.evaluate(state.lambda_coefficients, points, axis=-1),
-        atol=2.0e-17,
-    )
-    np.testing.assert_allclose(transferred.radius_coefficients[-1], fine_boundary.radius_coefficients)
 
 
 def test_closed_state_transfer_refines_radial_grid_and_center_tangent() -> None:
@@ -877,35 +627,6 @@ def test_closed_center_vectorizer_removes_radius_translation_gauge() -> None:
         * (resolution.ntheta - 2)
         * discretization.coefficient_count
     )
-
-
-def test_closed_field_line_recovers_constant_iota_and_derivative() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
-    discretization, axis, _, state = _closed_circular_torus(resolution)
-    evaluated = discretization.evaluate_state(state)
-    geometry = evaluate_closed_geometry(evaluated, discretization.grid, axis)
-    flux = 0.02
-
-    def iota(current):
-        field = contravariant_field(
-            evaluated,
-            geometry,
-            discretization.grid,
-            axial_flux_derivative=flux,
-            current_derivative=current,
-        )
-        return trace_closed_field_line(
-            field,
-            discretization,
-            radial_index=2,
-            theta0=0.3,
-            turns=3,
-            steps_per_turn=64,
-        ).iota
-
-    current = 1.0e-3
-    np.testing.assert_allclose(iota(current), current / flux, rtol=2.0e-13)
-    np.testing.assert_allclose(jax.grad(iota)(current), 1.0 / flux, rtol=2.0e-13)
 
 
 def test_closed_vacuum_initializer_recovers_one_over_r_field() -> None:
@@ -1189,83 +910,6 @@ def test_large_closed_torus_uses_cyclic_sparse_factor() -> None:
     assert float(result.variational.maximum) <= config.ftol
     assert result.linear_iterations < 2000
     assert result.final_linear_residual < 1.0e-8
-
-
-@pytest.mark.full
-def test_closed_hybrid_finite_current_and_lambda_converge() -> None:
-    resolution = MirrorResolution(ns=5, mpol=4, nxi=4)
-    config = MirrorConfig(
-        resolution=resolution,
-        ftol=1.0e-12,
-        max_iterations=1000,
-    )
-    discretization = SplineMirrorDiscretization.build_closed(
-        resolution,
-        coefficient_count=16,
-        quadrature_order=3,
-    )
-    basis = discretization.spline
-    axis = evaluate_closed_spline_axis(
-        closed_hybrid_axis_coefficients(
-            basis,
-            straight_length=6.0,
-            return_radius=1.0,
-        ),
-        basis,
-        discretization.grid.z,
-        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
-    )
-    semi_major, semi_minor = 0.18, 0.12
-    boundary = SplineMirrorBoundary(
-        closed_hybrid_section_coefficients(
-            basis,
-            jnp.asarray(discretization.grid.theta),
-            semi_major=semi_major,
-            semi_minor=semi_minor,
-        )
-    )
-    radius = jnp.broadcast_to(
-        boundary.radius_coefficients[None],
-        (resolution.ns,) + boundary.radius_coefficients.shape,
-    )
-    initial = initialize_closed_vacuum_stream_function(
-        SplineMirrorState(radius, jnp.zeros_like(radius)),
-        discretization,
-        axis,
-        axial_flux_derivative=0.02,
-    )
-
-    result = solve_spline_fixed_boundary_cli(
-        initial,
-        boundary,
-        discretization,
-        config,
-        axial_flux_derivative=0.02,
-        current_derivative=1.0e-3 * jnp.asarray(discretization.grid.s),
-        solve_lambda=True,
-        axis=axis,
-        require_convergence=True,
-    ).evaluated
-
-    assert result.converged
-    assert result.iterations < 100
-    assert float(result.variational.maximum) <= config.ftol
-    assert float(result.staggered_weak_force.maximum) <= 1.1 * config.ftol
-    # The Clebsch field is analytically solenoidal; two independently applied
-    # mixed derivative matrices leave an x64 commutator floor near 1e-12.
-    assert float(result.normalized_divergence_rms) < 2.0e-12
-    assert float(jnp.max(jnp.abs(result.state.lambda_stream))) > 1.0e-3
-    assert not bool(result.energy.geometry.jacobian_sign_changed)
-    field_line = trace_closed_field_line(
-        result.energy.field,
-        discretization,
-        radial_index=resolution.ns - 1,
-        theta0=0.2,
-        turns=3,
-        steps_per_turn=64,
-    )
-    assert abs(float(field_line.iota)) > 1.0e-3
-    assert np.all(np.isfinite(field_line.theta))
 
 
 def _spline_polynomial_state():

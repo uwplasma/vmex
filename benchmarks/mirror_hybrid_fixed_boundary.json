@@ -85,7 +85,12 @@
     "controls32_linear_iterations_before": 7383,
     "controls32_linear_iterations_after": 37,
     "controls32_true_linear_residual_before": 0.0127,
-    "controls32_true_linear_residual_after": 9.75e-11
+    "controls32_true_linear_residual_after": 9.75e-11,
+    "ns9_cpu_wall_s": 136.3,
+    "ns9_gpu_wall_s": 773.33,
+    "ns9_gpu_peak_rss_gib": 2.6,
+    "ns9_cpu_gpu_strong_force_absolute_difference": 2.7e-14,
+    "gpu_assessment": "numerically equivalent but slower because SciPy GMRES crosses the device boundary"
   },
   "gates": {
     "exact_same_geometry_transfer": true,

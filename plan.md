@@ -772,8 +772,10 @@ module or public name. Accepted implementation evidence is:
 - the 32-control solve uses 37 rather than 7,383 linear iterations, and the
   `ns=9, mpol=5` solve takes 136 s rather than 1,106 s;
 - qorders 3/4, `mpol=5/7`, and `ns=5/9` agree on the finest force to within
-  `3.9e-4` relative between poloidal orders and `5.5e-3` between quadrature
+  `1.2e-6` relative between poloidal orders and `5.5e-3` between quadrature
   orders; all nonlinear, weak, linear, geometry, time, and memory gates pass;
+- the clean RTX A4000 run matches CPU strong force within `2.7e-14`, but takes
+  773 s versus 136 s because host SciPy GMRES crosses the device boundary;
 - same-geometry 16/32/64 force is nonmonotone for both quadrature orders, so
   the declared promotion gate fails even though the finest force is below
   `5e-2`.
