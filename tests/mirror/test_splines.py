@@ -139,6 +139,27 @@ def test_clamped_projection_preserves_prescribed_nested_cut_profiles() -> None:
     np.testing.assert_allclose(projected.radius_coefficients[0], projected.radius_coefficients[1])
 
 
+def test_self_similar_cut_condition_uses_lcfs_end_sections() -> None:
+    _, _, _, _, discretization, boundary, state = _spline_polynomial_state()
+    varied = state.radius_coefficients.at[1:-1, :, 0].multiply(0.91)
+    varied = varied.at[1:-1, :, -1].multiply(1.07)
+    constrained = discretization.impose_self_similar_cuts(
+        SplineMirrorState(varied, state.lambda_coefficients),
+        boundary,
+    )
+
+    expected_lower = np.broadcast_to(
+        np.asarray(boundary.radius_coefficients[:, 0]),
+        np.asarray(constrained.radius_coefficients[:, :, 0]).shape,
+    )
+    expected_upper = np.broadcast_to(
+        np.asarray(boundary.radius_coefficients[:, -1]),
+        np.asarray(constrained.radius_coefficients[:, :, -1]).shape,
+    )
+    np.testing.assert_allclose(constrained.radius_coefficients[:, :, 0], expected_lower)
+    np.testing.assert_allclose(constrained.radius_coefficients[:, :, -1], expected_upper)
+
+
 def test_boundary_transfer_preserves_nested_self_similarity() -> None:
     config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=2, nxi=9))
     source_grid = config.build_grid()

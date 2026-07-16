@@ -475,6 +475,7 @@ def _optimize_fixed_boundary(
     config: MirrorConfig,
     gradient_tolerance: float,
     matrix_free_context: tuple[Any, tuple[Any, np.ndarray, Any]] | None,
+    start_with_newton: bool = False,
 ) -> _OptimizationOutcome:
     """Run the common host L-BFGS and residual-Newton solve policy.
 
@@ -503,25 +504,31 @@ def _optimize_fixed_boundary(
     lbfgs_budget = max(10, available // 2) if use_matrix_free else max(1, available)
     if use_matrix_free and bool(getattr(matrix_free_context[1][2], "reuse_linearization", False)):
         lbfgs_budget = min(50, lbfgs_budget)
-    optimization = minimize(
-        fun=lambda x: evaluate(x)[0],
-        x0=x0,
-        jac=lambda x: evaluate(x)[1],
-        method="L-BFGS-B",
-        bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
-        callback=callback,
-        options={
-            "maxiter": lbfgs_budget,
-            "gtol": float(gradient_tolerance),
-            "ftol": np.finfo(float).eps,
-            "maxls": 50,
-            "maxcor": 20,
-        },
-    )
-    final_x = np.asarray(optimization.x)
-    optimizer_success = bool(optimization.success)
-    optimizer_message = str(optimization.message)
-    lbfgs_iterations = int(optimization.nit)
+    if start_with_newton:
+        final_x = np.asarray(x0)
+        optimizer_success = False
+        optimizer_message = "supplied-field Newton start"
+        lbfgs_iterations = 0
+    else:
+        optimization = minimize(
+            fun=lambda x: evaluate(x)[0],
+            x0=x0,
+            jac=lambda x: evaluate(x)[1],
+            method="L-BFGS-B",
+            bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
+            callback=callback,
+            options={
+                "maxiter": lbfgs_budget,
+                "gtol": float(gradient_tolerance),
+                "ftol": np.finfo(float).eps,
+                "maxls": 50,
+                "maxcor": 20,
+            },
+        )
+        final_x = np.asarray(optimization.x)
+        optimizer_success = bool(optimization.success)
+        optimizer_message = str(optimization.message)
+        lbfgs_iterations = int(optimization.nit)
     polish_evaluations = 0
     newton_steps = 0
     linear_iterations = 0

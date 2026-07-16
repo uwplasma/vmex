@@ -244,6 +244,27 @@ class SplineMirrorDiscretization:
         mean /= jnp.sum(theta_weights) * jnp.sum(axial_weights)
         return SplineMirrorState(radius, lam - mean[:, None, None])
 
+    def impose_self_similar_cuts(
+        self,
+        state: SplineMirrorState,
+        boundary: SplineMirrorBoundary,
+    ) -> SplineMirrorState:
+        """Fix both end cuts to scaled copies of their LCFS sections.
+
+        ``radius_scale`` is independent of ``s`` on a self-similar cut, while
+        the physical radius still scales as ``sqrt(s)``. The stream function
+        remains supplied by the field initializer.
+        """
+
+        radius = jnp.asarray(state.radius_coefficients)
+        edge = jnp.asarray(boundary.radius_coefficients)
+        radius = radius.at[:, :, 0].set(edge[:, 0][None, :])
+        radius = radius.at[:, :, -1].set(edge[:, -1][None, :])
+        return self.project_fixed_boundary(
+            SplineMirrorState(radius, state.lambda_coefficients),
+            boundary,
+        )
+
     def transfer_boundary(
         self,
         state: SplineMirrorState,
@@ -823,6 +844,7 @@ def solve_fixed_boundary_cli(
                 vectorizer,
                 _packed_spline_preconditioner(discretization, vectorizer),
             ),
+            start_with_newton=bool(solve_lambda and x0.size <= 4096),
         )
         final_x = optimization.vector
         iterations = optimization.iterations

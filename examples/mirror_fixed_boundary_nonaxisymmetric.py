@@ -37,13 +37,14 @@ from vmec_jax.mirror.splines import initialize_from_cartesian_field  # noqa: E40
 
 # Inputs: edit these constants, then run this file directly.
 CASES = ("rotating_ellipse", "straight_field_line")
-NS, MPOL, SOURCE_NXI = 5, 8, 17
-SPLINE_ELEMENTS = 4
+NS, MPOL, SOURCE_NXI = 7, 6, 17
+SPLINE_ELEMENTS = 6
 SHAPE_STAGES = (0.0, 0.25, 0.5, 0.75, 1.0)
 FTOL = 1.0e-12
 MAX_ITERATIONS = 1000
 RUN_GRADIENT_CHECK = True
 FINITE_DIFFERENCE_STEP = 2.0e-4
+STRONG_FORCE_GATE = 5.0e-2
 OUTPUT_DIR = Path("results/mirror_fixed_boundary_nonaxisymmetric")
 
 RADIUS = {"rotating_ellipse": 0.05, "straight_field_line": 0.03}
@@ -211,7 +212,10 @@ for case in CASES:
                 discretization,
                 fixture.field,
             )
-            coefficient_state = initialized.state
+            coefficient_state = discretization.impose_self_similar_cuts(
+                initialized.state,
+                final_boundary,
+            )
             if case == "straight_field_line":
                 axial_flux_derivative = initialized.axial_flux_derivative
         spline_result = solve_fixed_boundary_cli(
@@ -290,7 +294,9 @@ for case in CASES:
         validation["boundary_gradient_finite_difference"] = finite_difference
         validation["boundary_gradient_relative_error"] = abs(predicted - finite_difference) / abs(finite_difference)
         validation["adjoint_relative_residual"] = adjoint.relative_residual
+    supported = case == "rotating_ellipse"
     summaries[case] = {
+        "status": "supported" if supported else "research: corrected-cut refinement pending",
         "stage_iterations": stage_iterations,
         "linear_iterations": result.linear_iterations,
         "final_linear_residual": result.final_linear_residual,
@@ -306,6 +312,11 @@ for case in CASES:
         "axial_flux_derivative_max": float(jnp.max(jnp.asarray(axial_flux_derivative))),
         **validation,
     }
+    if supported:
+        assert float(result.variational.maximum) <= FTOL
+        assert float(result.staggered_weak_force.maximum) <= 1.1 * FTOL
+        assert float(result.force.normalized_rms) < STRONG_FORCE_GATE
+        assert float(result.normalized_divergence_rms) < 1.0e-12
 
 (OUTPUT_DIR / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n")
 print(json.dumps(summaries, indent=2))

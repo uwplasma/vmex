@@ -21,7 +21,6 @@ import numpy as np
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import colors  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -283,74 +282,17 @@ for ax in axes:
 fig.savefig(OUTPUT_DIR / "beta_scan_pressure.png", dpi=180)
 plt.close(fig)
 
-theta = np.linspace(0.0, 2.0 * np.pi, 73)
-surface_fields = [
-    display_matrix @ np.sqrt(np.asarray(results[index].plasma_b_squared[-1, 0])) for index in display_indices
-]
-field_norm = colors.Normalize(
-    min(np.min(value) for value in surface_fields), max(np.max(value) for value in surface_fields)
-)
-fig = plt.figure(figsize=(15, 4.8), constrained_layout=True)
-for panel, index in enumerate(display_indices, start=1):
-    result = results[index]
-    radius = display_matrix @ np.asarray(result.boundary.radius_scale[0])
-    zz, tt = np.meshgrid(z, theta)
-    rr = np.broadcast_to(radius, zz.shape)
-    ax = fig.add_subplot(1, 3, panel, projection="3d")
-    ax.plot_surface(
-        zz,
-        rr * np.cos(tt),
-        rr * np.sin(tt),
-        facecolors=plt.cm.viridis(field_norm(np.broadcast_to(surface_fields[panel - 1], zz.shape))),
-        rstride=2,
-        cstride=1,
-        linewidth=0,
-        antialiased=True,
-        alpha=0.78,
+for index in display_indices:
+    label = f"beta_{100 * BETAS[index]:05.1f}pct".replace(".", "p")
+    plot_mout(
+        OUTPUT_DIR / f"mout_mirror_{label}.nc",
+        OUTPUT_DIR,
+        name=f"mirror_{label}",
     )
-    for curve in gamma:
-        closed = np.vstack([curve, curve[0]])
-        ax.plot(closed[:, 2], closed[:, 0], closed[:, 1], color="#C44E52", lw=2.0)
-    for angle in np.linspace(0.0, 2.0 * np.pi, 10, endpoint=False):
-        line_x = 1.05 * radius * np.cos(angle)
-        line_y = 1.05 * radius * np.sin(angle)
-        ax.plot(z, line_x, line_y, color="black", lw=3.4, alpha=0.9)
-        ax.plot(z, line_x, line_y, color="#00BFC4", lw=1.7, alpha=1.0)
-    arrow_indices = np.arange(12, z.size - 12, 24)
-    radial_slope = np.gradient(radius, z)
-    arrow_norm = np.sqrt(1.0 + radial_slope[arrow_indices] ** 2)
-    for angle in (0.0, np.pi):
-        ax.quiver(
-            z[arrow_indices],
-            1.06 * radius[arrow_indices] * np.cos(angle),
-            1.06 * radius[arrow_indices] * np.sin(angle),
-            0.12 / arrow_norm,
-            0.12 * radial_slope[arrow_indices] * np.cos(angle) / arrow_norm,
-            0.12 * radial_slope[arrow_indices] * np.sin(angle) / arrow_norm,
-            color="#111111",
-            linewidth=1.0,
-            arrow_length_ratio=0.32,
-        )
-    ax.set(title=beta_label(BETAS[index]), xlabel="z [m]", ylabel="x [m]", zlabel="y [m]")
-    ax.set_xlim(-1.15, 1.15)
-    ax.set_ylim(-1.0, 1.0)
-    ax.set_zlim(-1.0, 1.0)
-    ax.set_box_aspect((2.3, 2.0, 2.0))
-    ax.view_init(elev=23, azim=-56)
-colorbar = fig.colorbar(plt.cm.ScalarMappable(norm=field_norm, cmap="viridis"), ax=fig.axes, shrink=0.72, pad=0.03)
-colorbar.set_label("LCFS |B| [T]")
-fig.savefig(OUTPUT_DIR / "beta_scan_3d.png", dpi=180)
-plt.close(fig)
-endpoint_label = f"beta_{100 * BETAS[-1]:05.1f}pct".replace(".", "p")
-plot_mout(
-    OUTPUT_DIR / f"mout_mirror_{endpoint_label}.nc",
-    OUTPUT_DIR,
-    name="mirror_endpoint",
-)
 
 np.set_printoptions(precision=6, suppress=False)
 print(header)
 print(summary)
 print(f"Wrote {OUTPUT_DIR / 'beta_scan_diagnostics.png'}")
 print(f"Wrote {OUTPUT_DIR / 'beta_scan_pressure.png'}")
-print(f"Wrote {OUTPUT_DIR / 'beta_scan_3d.png'}")
+print(f"Wrote solved-state 3D, cross-section, |B|, and summary plots in {OUTPUT_DIR}")

@@ -662,6 +662,7 @@ def plot_mout(
 
     radius_dense = _theta_samples(data, boundary, theta_dense)
     zz, tt = np.meshgrid(z, theta_dense)
+    arrow_length = 0.65 * float(np.max(radius_dense))
     fig = plt.figure(figsize=(11.5, 6.2), constrained_layout=True)
     axis = fig.add_subplot(111, projection="3d")
     norm = plt.Normalize(float(np.min(boundary_b)), float(np.max(boundary_b)))
@@ -671,16 +672,51 @@ def plot_mout(
         radius_dense * np.sin(tt),
         facecolors=plt.cm.viridis(norm(boundary_b)),
         linewidth=0,
-        alpha=0.8,
+        alpha=0.52,
     )
     surface.set_rasterized(True)
-    for coil in np.asarray(data.coil_xyz):
+    for coil_index, coil in enumerate(np.asarray(data.coil_xyz)):
         closed = np.vstack([coil, coil[0]])
-        axis.plot(closed[:, 2], closed[:, 0], closed[:, 1], color="#C44E52", lw=2)
-    for theta0 in np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False):
+        axis.plot(
+            closed[:, 2],
+            closed[:, 0],
+            closed[:, 1],
+            color="#C44E52",
+            lw=2,
+            label="ESSOS coils" if coil_index == 0 else None,
+        )
+    for line_index, theta0 in enumerate(np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)):
         line_z, line_x, line_y = _field_line(data, len(s) - 1, theta0, z_order)
-        axis.plot(line_z, 1.01 * line_x, 1.01 * line_y, color="black", lw=3.2)
-        axis.plot(line_z, 1.01 * line_x, 1.01 * line_y, color="#00BFC4", lw=1.5)
+        axis.plot(line_z, line_x, line_y, color="black", lw=3.5, zorder=20)
+        axis.plot(
+            line_z,
+            line_x,
+            line_y,
+            color="#18C3D6",
+            lw=1.8,
+            label="field lines" if line_index == 0 else None,
+            zorder=21,
+        )
+        if line_index % 2 == 0:
+            center_index = len(line_z) // 2
+            tangent = np.asarray(
+                [
+                    np.gradient(line_z)[center_index],
+                    np.gradient(line_x)[center_index],
+                    np.gradient(line_y)[center_index],
+                ]
+            )
+            tangent /= max(np.linalg.norm(tangent), np.finfo(float).tiny)
+            axis.quiver(
+                line_z[center_index],
+                line_x[center_index],
+                line_y[center_index],
+                *tangent,
+                length=arrow_length,
+                color="#E66100",
+                arrow_length_ratio=0.28,
+                linewidth=1.4,
+            )
     fig.colorbar(
         plt.cm.ScalarMappable(norm=norm, cmap="viridis"),
         ax=axis,
@@ -696,6 +732,7 @@ def plot_mout(
     )
     axis.set_box_aspect((2.2, 1.0, 1.0))
     axis.view_init(elev=22, azim=-57)
+    axis.legend(loc="upper left")
     paths["3d"] = outdir / f"{label}_3d.png"
     fig.savefig(paths["3d"], dpi=_PLOT_DPI, bbox_inches="tight")
     plt.close(fig)

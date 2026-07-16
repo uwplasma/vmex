@@ -221,3 +221,6 @@ def test_cli_plots_mout_without_toroidal_dispatch(tmp_path) -> None:
         pixels = mpimg.imread(tmp_path / name)
         assert pixels.shape[0] > 200 and pixels.shape[1] > 300
         assert float(np.std(pixels)) > 0.03
+    pixels = mpimg.imread(tmp_path / "sample_3d.png")
+    cyan = (pixels[..., 0] < 0.2) & (pixels[..., 1] > 0.6) & (pixels[..., 2] > 0.7)
+    assert int(np.count_nonzero(cyan)) > 200
