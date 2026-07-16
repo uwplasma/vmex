@@ -27,8 +27,11 @@ from vmec_jax.mirror.free_boundary import (  # noqa: E402
     _spline_boundary_work_residual,
 )
 from vmec_jax.mirror.geometry import (  # noqa: E402
+    evaluate_closed_spline_axis,
     evaluate_geometry,
     magnetic_field_xyz,
+    stellarator_mirror_axis_coefficients,
+    stellarator_mirror_section_coefficients,
 )
 from vmec_jax.mirror.solver import MirrorConvergenceError  # noqa: E402
 from vmec_jax.mirror.splines import (  # noqa: E402
@@ -87,6 +90,96 @@ def test_open_knot_insertion_preserves_curve_and_jax_derivatives() -> None:
     cotangent = jnp.cos(points)
     reverse = jax.grad(lambda values: jnp.vdot(basis.evaluate(values, points), cotangent))(coefficients)
     np.testing.assert_allclose(reverse, basis.basis_matrix(points).T @ cotangent, atol=2.0e-14)
+
+
+def test_periodic_spline_closes_through_two_derivatives_and_is_differentiable() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(16)
+    points = jnp.linspace(0.0, 2.0 * jnp.pi, 129)
+    np.testing.assert_allclose(jnp.sum(basis.basis_matrix(points), axis=1), 1.0, atol=2.0e-15)
+    for derivative in range(3):
+        np.testing.assert_allclose(
+            basis.basis_matrix(points[:1], derivative=derivative),
+            basis.basis_matrix(points[-1:], derivative=derivative),
+            atol=3.0e-14,
+        )
+
+    coefficients = jnp.sin(basis.collocation_nodes) + 0.2 * jnp.cos(2.0 * basis.collocation_nodes)
+    direction = jnp.linspace(-0.3, 0.4, basis.size)
+    tangent = jax.jvp(lambda value: basis.evaluate(value, points), (coefficients,), (direction,))[1]
+    np.testing.assert_allclose(tangent, basis.evaluate(direction, points), atol=2.0e-15)
+    cotangent = jnp.cos(points)
+    reverse = jax.grad(lambda value: jnp.vdot(basis.evaluate(value, points), cotangent))(coefficients)
+    np.testing.assert_allclose(reverse, basis.basis_matrix(points).T @ cotangent, atol=3.0e-14)
+
+
+def test_periodic_refinement_preserves_values_and_two_derivatives() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(8)
+    coefficients = jnp.stack(
+        (
+            jnp.cos(basis.collocation_nodes),
+            0.2 * jnp.sin(2.0 * basis.collocation_nodes),
+        ),
+        axis=-1,
+    )
+    refined, values = basis.refine_periodic_uniform(coefficients, 32, axis=0)
+    points = jnp.linspace(0.0, 2.0 * jnp.pi, 193, endpoint=False)
+    for derivative in range(3):
+        np.testing.assert_allclose(
+            refined.evaluate(values, points, derivative=derivative, axis=0),
+            basis.evaluate(coefficients, points, derivative=derivative, axis=0),
+            rtol=2.0e-13,
+            atol=2.0e-13,
+        )
+
+
+def test_stellarator_mirror_axis_has_exact_straights_and_periodic_frame() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(32)
+    coefficients = stellarator_mirror_axis_coefficients(
+        basis,
+        straight_length=6.0,
+        return_radius=1.0,
+    )
+    points = np.linspace(*basis.domain, 257, endpoint=False)
+    axis = evaluate_closed_spline_axis(
+        coefficients,
+        basis,
+        points,
+        initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+    )
+    straight = np.asarray(axis.curvature) < 1.0e-10
+    assert np.count_nonzero(straight) > 0.35 * points.size
+    assert float(axis.closure_error) < 2.0e-14
+    assert float(axis.tangent_closure_error) < 2.0e-14
+    assert float(axis.frame_closure_error) < 2.0e-14
+    np.testing.assert_allclose(jnp.linalg.norm(axis.tangent, axis=-1), 1.0, atol=2.0e-14)
+    np.testing.assert_allclose(jnp.sum(axis.tangent * axis.normal, axis=-1), 0.0, atol=2.0e-14)
+
+    gradient = jax.grad(
+        lambda value: evaluate_closed_spline_axis(
+            value,
+            basis,
+            points,
+            initial_normal=jnp.asarray([0.0, 1.0, 0.0]),
+        ).arc_length
+    )(coefficients)
+    assert np.all(np.isfinite(gradient))
+    assert float(jnp.linalg.norm(gradient)) > 1.0
+
+
+def test_stellarator_mirror_ellipse_rotates_ninety_degrees_between_legs() -> None:
+    basis = CubicBSplineBasis.periodic_uniform(32)
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, 65, endpoint=False)
+    coefficients = stellarator_mirror_section_coefficients(
+        basis,
+        theta,
+        semi_major=0.45,
+        semi_minor=0.30,
+    )
+    leg_radii = basis.evaluate(coefficients, jnp.asarray([0.0, jnp.pi]), axis=-1)
+    major_index = int(jnp.argmin(jnp.abs(theta)))
+    minor_index = int(jnp.argmin(jnp.abs(theta - 0.5 * jnp.pi)))
+    np.testing.assert_allclose(leg_radii[major_index], [0.45, 0.30], rtol=3.0e-13)
+    np.testing.assert_allclose(leg_radii[minor_index], [0.30, 0.45], rtol=3.0e-3)
 
 
 def _spline_polynomial_state():

@@ -17,6 +17,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 Array = Any
 
@@ -72,11 +73,220 @@ class ContravariantField:
     jac_b_xi: Array
 
 
-for _cls in (MirrorGeometry, ContravariantField):
+@dataclass(frozen=True)
+class ClosedAxisGeometry:
+    """Periodic centerline and its closure-corrected normal frame."""
+
+    centerline: Array
+    tangent: Array
+    normal: Array
+    binormal: Array
+    speed: Array
+    curvature: Array
+    arc_length: Array
+    frame_holonomy: Array
+    closure_error: Array
+    tangent_closure_error: Array
+    frame_closure_error: Array
+
+
+for _cls in (MirrorGeometry, ContravariantField, ClosedAxisGeometry):
     jax.tree_util.register_dataclass(
         _cls,
         data_fields=[field.name for field in fields(_cls)],
         meta_fields=[],
+    )
+
+
+def _hybrid_segments(basis: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Label the two straight legs and two returns at spline controls."""
+
+    if not getattr(basis, "periodic", False):
+        raise ValueError("stellarator-mirror geometry requires a periodic spline")
+    if basis.size < 16 or basis.size % 4:
+        raise ValueError("coefficient count must be a multiple of four and at least 16")
+    start, stop = basis.domain
+    if not np.isclose(stop - start, 2.0 * np.pi):
+        raise ValueError("stellarator-mirror parameter must have period 2*pi")
+    phase = np.mod(
+        np.asarray(basis.collocation_nodes) - start + 4.0 * np.pi / basis.size,
+        2.0 * np.pi,
+    )
+    coordinate = np.mod(phase + 0.25 * np.pi, 2.0 * np.pi) / (0.5 * np.pi)
+    segment = np.floor(coordinate).astype(int)
+    return segment, coordinate - segment
+
+
+def stellarator_mirror_axis_coefficients(
+    basis: Any,
+    *,
+    straight_length: float,
+    return_radius: float,
+) -> Array:
+    """Build a closed racetrack axis with exactly straight central leg spans.
+
+    The spline controls are divided equally between a straight leg, a curved
+    return, the opposite straight leg, and the second return. Cubic local
+    support makes every span backed only by collinear leg controls exactly
+    straight; the neighboring spans provide a C2 transition into each return.
+    """
+
+    straight_length = float(straight_length)
+    return_radius = float(return_radius)
+    if straight_length <= 0.0 or return_radius <= 0.0:
+        raise ValueError("axis dimensions must be positive")
+    segment, fraction = _hybrid_segments(basis)
+    half = 0.5 * straight_length
+    top_angle = np.pi * fraction
+    bottom_angle = np.pi * (1.0 + fraction)
+    coefficients = np.empty((basis.size, 3))
+    coefficients[:, 1] = 0.0
+    coefficients[:, 0] = np.select(
+        (segment == 0, segment == 1, segment == 2, segment == 3),
+        (
+            return_radius,
+            return_radius * np.cos(top_angle),
+            -return_radius,
+            return_radius * np.cos(bottom_angle),
+        ),
+    )
+    coefficients[:, 2] = np.select(
+        (segment == 0, segment == 1, segment == 2, segment == 3),
+        (
+            straight_length * (fraction - 0.5),
+            half + return_radius * np.sin(top_angle),
+            half - straight_length * fraction,
+            -half + return_radius * np.sin(bottom_angle),
+        ),
+    )
+    return jnp.asarray(coefficients)
+
+
+def stellarator_mirror_section_coefficients(
+    basis: Any,
+    theta: Array,
+    *,
+    semi_major: float,
+    semi_minor: float,
+) -> Array:
+    """Build ellipse radii that rotate 90 degrees only through the returns."""
+
+    semi_major, semi_minor = float(semi_major), float(semi_minor)
+    if semi_major <= 0.0 or semi_minor <= 0.0:
+        raise ValueError("ellipse semiaxes must be positive")
+    theta = jnp.asarray(theta)
+    if theta.ndim != 1:
+        raise ValueError("theta must be one-dimensional")
+    segment, fraction = _hybrid_segments(basis)
+    fraction = jnp.asarray(fraction)
+    transition = fraction**3 * (10.0 + fraction * (-15.0 + 6.0 * fraction))
+    angle = jnp.select(
+        tuple(jnp.asarray(segment) == value for value in range(4)),
+        (0.0, 0.5 * jnp.pi * transition, 0.5 * jnp.pi, 0.5 * jnp.pi * (1.0 - transition)),
+    )
+    local_angle = theta[:, None] - angle[None]
+    return semi_major * semi_minor / jnp.sqrt(
+        (semi_minor * jnp.cos(local_angle)) ** 2
+        + (semi_major * jnp.sin(local_angle)) ** 2
+    )
+
+
+def _minimal_rotation(vector: Array, tangent_from: Array, tangent_to: Array) -> Array:
+    cross = jnp.cross(tangent_from, tangent_to)
+    cosine = jnp.clip(jnp.dot(tangent_from, tangent_to), -1.0, 1.0)
+    denominator = jnp.maximum(1.0 + cosine, 64.0 * jnp.finfo(cosine.dtype).eps)
+    return vector + jnp.cross(cross, vector) + jnp.cross(cross, jnp.cross(cross, vector)) / denominator
+
+
+def _rotate_about_axis(vector: Array, axis: Array, angle: Array) -> Array:
+    cosine, sine = jnp.cos(angle), jnp.sin(angle)
+    return (
+        vector * cosine
+        + jnp.cross(axis, vector) * sine
+        + axis * jnp.dot(axis, vector) * (1.0 - cosine)
+    )
+
+
+def evaluate_closed_spline_axis(
+    coefficients: Array,
+    basis: Any,
+    points: Array,
+    *,
+    initial_normal: Array | None = None,
+) -> ClosedAxisGeometry:
+    """Evaluate a periodic spline axis and rotation-minimizing frame.
+
+    Parallel transport avoids the undefined Frenet frame on straight legs.
+    The accumulated holonomy is spread smoothly around the period so the
+    normal frame closes exactly.
+    """
+
+    if not getattr(basis, "periodic", False):
+        raise ValueError("closed centerline requires a periodic spline basis")
+    coefficients = jnp.asarray(coefficients)
+    if coefficients.shape != (basis.size, 3):
+        raise ValueError(f"centerline coefficients must have shape ({basis.size}, 3)")
+    point_values = np.asarray(points, dtype=float)
+    start, stop = basis.domain
+    if point_values.ndim != 1 or point_values.size < 4:
+        raise ValueError("closed centerline points must be a one-dimensional array of length >= 4")
+    if (
+        np.any(np.diff(point_values) <= 0.0)
+        or point_values[0] < start
+        or point_values[-1] >= stop
+    ):
+        raise ValueError("closed centerline points must increase within one period")
+
+    period = stop - start
+    extended = jnp.asarray(np.concatenate((point_values, [point_values[0] + period])))
+    centerline = basis.evaluate(coefficients, extended, axis=0)
+    first = basis.evaluate(coefficients, extended, derivative=1, axis=0)
+    second = basis.evaluate(coefficients, extended, derivative=2, axis=0)
+    speed = jnp.linalg.norm(first, axis=-1)
+    if not isinstance(speed, jax.core.Tracer) and bool(jnp.any(speed <= 0.0)):
+        raise ValueError("centerline derivative must not vanish")
+    tangent = first / speed[:, None]
+    if initial_normal is None:
+        reference = jax.nn.one_hot(jnp.argmin(jnp.abs(tangent[0])), 3, dtype=tangent.dtype)
+    else:
+        reference = jnp.asarray(initial_normal, dtype=tangent.dtype)
+        if reference.shape != (3,):
+            raise ValueError("initial_normal must have shape (3,)")
+    normal0 = reference - jnp.dot(reference, tangent[0]) * tangent[0]
+    normal0 /= jnp.linalg.norm(normal0)
+
+    def transport(carry, next_tangent):
+        previous_tangent, previous_normal = carry
+        next_normal = _minimal_rotation(previous_normal, previous_tangent, next_tangent)
+        next_normal -= jnp.dot(next_normal, next_tangent) * next_tangent
+        next_normal /= jnp.linalg.norm(next_normal)
+        return (next_tangent, next_normal), next_normal
+
+    (_, _), transported = jax.lax.scan(transport, (tangent[0], normal0), tangent[1:])
+    raw_normal = jnp.concatenate((normal0[None], transported), axis=0)
+    holonomy = jnp.arctan2(
+        jnp.dot(tangent[0], jnp.cross(raw_normal[-1], normal0)),
+        jnp.dot(raw_normal[-1], normal0),
+    )
+    fraction = (extended - extended[0]) / period
+    normal = jax.vmap(_rotate_about_axis)(raw_normal, tangent, -holonomy * fraction)
+    normal -= jnp.sum(normal * tangent, axis=-1)[:, None] * tangent
+    normal /= jnp.linalg.norm(normal, axis=-1)[:, None]
+    binormal = jnp.cross(tangent, normal)
+    arc_length = jnp.sum(0.5 * (speed[:-1] + speed[1:]) * jnp.diff(extended))
+    curvature = jnp.linalg.norm(jnp.cross(first, second), axis=-1) / speed**3
+    return ClosedAxisGeometry(
+        centerline[:-1],
+        tangent[:-1],
+        normal[:-1],
+        binormal[:-1],
+        speed[:-1],
+        curvature[:-1],
+        arc_length,
+        holonomy,
+        jnp.linalg.norm(centerline[-1] - centerline[0]),
+        jnp.linalg.norm(tangent[-1] - tangent[0]),
+        jnp.linalg.norm(normal[-1] - normal[0]),
     )
 
 
@@ -163,6 +373,84 @@ def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometr
         e_s_xyz=e_s,
         e_theta_xyz=e_theta,
         e_xi_xyz=e_xi,
+    )
+
+
+def evaluate_closed_geometry(
+    state: "MirrorState",
+    grid: "MirrorGrid",
+    axis: ClosedAxisGeometry,
+) -> MirrorGeometry:
+    """Embed nested surfaces around a periodic spline centerline."""
+
+    state.validate_shape(grid)
+    if state.center_shift is not None:
+        raise ValueError("closed hybrid geometry does not use a transverse center map")
+    if axis.centerline.shape != (grid.nxi, 3):
+        raise ValueError(f"closed axis shape {axis.centerline.shape} must be ({grid.nxi}, 3)")
+    a = jnp.asarray(state.radius_scale)
+    sqrt_s = jnp.sqrt(jnp.asarray(grid.s))[:, None, None]
+    radius = sqrt_s * a
+    radius_theta = sqrt_s * grid.theta_basis.differentiate(a, axis=1)
+    radius_xi = sqrt_s * grid.axial_basis.differentiate(a, axis=2)
+    ds = float(grid.s[1] - grid.s[0])
+    radius_radius_s = 0.5 * radial_derivative(radius**2, ds)
+    radius_radius_s = radius_radius_s.at[0].set(0.5 * a[0] ** 2)
+    radius_s = _safe_divide(radius_radius_s, radius)
+    radius_s = radius_s.at[0].set(radius_s[1])
+
+    theta = jnp.asarray(grid.theta)[None, :, None, None]
+    normal = jnp.asarray(axis.normal)[None, None]
+    binormal = jnp.asarray(axis.binormal)[None, None]
+    radial_direction = jnp.cos(theta) * normal + jnp.sin(theta) * binormal
+    poloidal_direction = -jnp.sin(theta) * normal + jnp.cos(theta) * binormal
+    normal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[None, None]
+    binormal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[None, None]
+    radial_direction_xi = jnp.cos(theta) * normal_xi + jnp.sin(theta) * binormal_xi
+    centerline_xi = (jnp.asarray(axis.tangent) * jnp.asarray(axis.speed)[:, None])[None, None]
+
+    e_s = radius_s[..., None] * radial_direction
+    e_theta = radius_theta[..., None] * radial_direction + radius[..., None] * poloidal_direction
+    e_xi = centerline_xi + radius_xi[..., None] * radial_direction + radius[..., None] * radial_direction_xi
+    xyz = jnp.asarray(axis.centerline)[None, None] + radius[..., None] * radial_direction
+    g_ss = jnp.sum(e_s * e_s, axis=-1)
+    g_stheta = jnp.sum(e_s * e_theta, axis=-1)
+    g_sxi = jnp.sum(e_s * e_xi, axis=-1)
+    g_thetatheta = jnp.sum(e_theta * e_theta, axis=-1)
+    g_thetaxi = jnp.sum(e_theta * e_xi, axis=-1)
+    g_xixi = jnp.sum(e_xi * e_xi, axis=-1)
+    orientation = jnp.sum(
+        radial_direction * jnp.cross(poloidal_direction, e_xi),
+        axis=-1,
+    )
+    sqrt_g = radius_radius_s * orientation
+    volume = jnp.einsum(
+        "i,j,k,ijk->",
+        jnp.asarray(grid.radial_weights),
+        jnp.asarray(grid.theta_basis.weights),
+        jnp.asarray(grid.axial_basis.weights),
+        sqrt_g,
+    )
+    interior = sqrt_g[1:]
+    sign_changed = (jnp.min(interior) <= 0.0) | (jnp.max(interior) <= 0.0)
+    return MirrorGeometry(
+        xyz,
+        radius,
+        radius_radius_s,
+        radius_theta,
+        radius_xi,
+        g_ss,
+        g_stheta,
+        g_sxi,
+        g_thetatheta,
+        g_thetaxi,
+        g_xixi,
+        sqrt_g,
+        volume,
+        sign_changed,
+        e_s,
+        e_theta,
+        e_xi,
     )
 
 
