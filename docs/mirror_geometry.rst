@@ -550,6 +550,13 @@ after execution::
        tests/mirror -m "not full" -q
    RUN_FULL=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 coverage run --append \
        -m pytest tests/mirror/test_implicit.py -q
+   repo=$PWD
+   for example in mirror_fixed_boundary_nonaxisymmetric.py \
+                  mirror_free_boundary_beta_scan.py \
+                  stellarator_mirror_hybrid.py; do
+       (cd "$(mktemp -d)" && COVERAGE_FILE="$repo/.coverage" coverage run \
+           --rcfile="$repo/pyproject.toml" --append "$repo/examples/$example")
+   done
    coverage report --include="*/vmec_jax/mirror/*" --fail-under=95
 
 The release audit is rerun from the final branch rather than copied from an
@@ -584,17 +591,16 @@ and must not be presented as promoted merely because the nonlinear solve ends.
 The JSON ``supported_lane`` and ``passes_strong_force_gate`` fields carry that
 distinction for each actual run.
 
-The default free-boundary center radius remains ``0.25 m``. A July 16 audit at
-``0.35 m`` converged all six beta points below ``ftol=1e-12`` and made the
-finite-beta displacement more visible, but its beta-zero medium-grid strong
-force was already ``0.114``. Even the current ``0.25 m`` medium example gives
-``0.0706``, while the older canonical record reports ``0.00341`` on its
-nominal medium grid. The example JSON therefore distinguishes the validated
-beta range from ``passes_strong_force_gate`` for the actual run. The larger
-radius is not committed until that benchmark discrepancy is regenerated on
-identical code and grids. Larger reviewed cross-sections are used in the fixed
-rotating-ellipse and closed-hybrid examples, where their force diagnostics are
-reported from the same runs.
+The default free-boundary center radius remains ``0.25 m``. Before continuation,
+the CLI now traces finite-radius nested vacuum-flux surfaces from the supplied
+axisymmetric field and fits them directly in the spline basis. This selects the
+same physical basin as the three-grid benchmark: the default beta-zero medium
+case has strong force ``0.003411`` rather than ``0.0697`` from the former
+paraxial boundary-only start. The example also uses the benchmark's
+sixth-order spectral side-density exterior. Initialization is a bounded host
+operation; the converged coefficient residual and its implicit derivatives
+remain JAX differentiable. The larger ``0.35 m`` cross-section remains
+unpromoted because its beta-zero force gate fails.
 
 Set ``SAVE_RESTARTS = True`` to write one compressed ``.npz`` hot-start per
 beta point. :func:`vmec_jax.mirror.output.load_free_boundary_restart` checks its

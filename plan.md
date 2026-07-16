@@ -784,7 +784,7 @@ At this revision:
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
 | API/code simplification | 100% | preserve final line and public-API budgets |
 | README/docs/examples/plots | 100% | regression only |
-| Packaging/CI/release audit | 95% | final pushed CI batch is running |
+| Packaging/CI/release audit | 98% | local release gates pass; final pushed CI remains |
 
 The open-mirror R1-R5 and D1 work is complete. H1 is closed as a negative
 promotion result so its failed primal gate cannot alter open-mirror support.
@@ -1066,6 +1066,30 @@ N1 and A1 remain bounded future lanes.
   100%, preconditioning/backend audit 100%, H1 promotion disposition 100%,
   nonaxisymmetric free disposition 100%, docs/examples 100%, final release
   audit 95%.
+- User input: none required.
+
+### 2026-07-16 R5 free-boundary initialization and coverage audit
+
+- Steps: reran the documented mirror-package coverage recipe and all three
+  root examples; traced the free-example force mismatch to its paraxial
+  boundary-only start; and moved finite-radius axisymmetric vacuum-flux
+  initialization into the existing beta-continuation CLI.
+- Results: the unchanged beta-zero medium case moves from strong force
+  `0.0697` to the canonical `0.003411`. The six-point 0-50% example passes in
+  630.35 seconds, marks 0-10% supported and 25/50% validation-only, and retains
+  monotone radius expansion and field depression. Combined normal, full
+  implicit, and root-example execution covers 95% of `vmec_jax.mirror`.
+- Tests: 93 normal tests and five full implicit tests pass under coverage;
+  three normal free-boundary tests pass; the full free-beta root example
+  passes; Ruff and diff checks pass. Final package/CI checks follow the push.
+- Files/API: one private 50-line CLI initializer, no module/public name/test
+  addition, and corrected example/docs/benchmark metadata. Budgets are exactly
+  8,000 mirror-source lines and 3,794 mirror-test lines.
+- Best next step: run clean build/install/CLI/docs checks, push once, review CI
+  once, and mark PR #22 ready only if every required job passes.
+- Open lanes: supported open physics 100%, derivative algorithms 100%,
+  preconditioning/backend audit 100%, H1 and nonaxisymmetric-free dispositions
+  100%, docs/examples 100%, final release audit 98%.
 - User input: none required.
 
 After every implementation tranche, append one short dated entry here with:

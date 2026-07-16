@@ -8,7 +8,7 @@ from typing import Any, Callable
 import jax
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import brentq, least_squares
 from scipy.sparse.linalg import LinearOperator
 
 from .forces import (
@@ -792,6 +792,49 @@ def solve_free_boundary_cli(
     return result
 
 
+def _axisymmetric_flux_initialization(
+    boundary: SplineMirrorBoundary,
+    discretization: SplineMirrorDiscretization,
+    external_field: Callable[[Array], Array],
+    axial_flux_derivative: Array,
+) -> tuple[SplineMirrorBoundary, SplineMirrorState]:
+    """Trace nested axisymmetric vacuum-flux surfaces for a robust CLI start."""
+
+    grid, spline = discretization.grid, discretization.spline
+    flux = float(np.asarray(axial_flux_derivative))
+    nodes, weights = np.polynomial.legendre.leggauss(16)
+    radial_nodes, radial_weights = 0.5 * (nodes + 1.0), 0.5 * weights
+    xi = np.asarray(spline.collocation_nodes)
+    z = 0.5 * (grid.z[0] + grid.z[-1]) + grid.dz_dxi * xi
+    outer = np.asarray(spline.evaluate(boundary.radius_coefficients[0], xi))
+    scales = np.empty((grid.ns, xi.size))
+    scales[0] = outer
+
+    def enclosed(radius: float, axial: float) -> float:
+        points = np.column_stack((radius * radial_nodes, np.zeros(nodes.size), np.full(nodes.size, axial)))
+        field = np.asarray(external_field(jnp.asarray(points)))[:, 2]
+        return float(radius**2 * np.sum(radial_weights * radial_nodes * field))
+
+    for radial_index, s in enumerate(np.asarray(grid.s)[1:], start=1):
+        root_s = np.sqrt(s)
+        for axial_index, (axial, outer_radius) in enumerate(zip(z, outer, strict=True)):
+            guess = root_s * outer_radius
+            upper = 2.0 * guess
+            while enclosed(upper, axial) < s * flux:
+                upper *= 2.0
+                if upper > 16.0 * guess:
+                    raise ValueError("failed to bracket the supplied-field flux surface")
+            scales[radial_index, axial_index] = brentq(
+                lambda radius: enclosed(radius, axial) - s * flux,
+                0.0,
+                upper,
+                xtol=1.0e-13,
+                rtol=1.0e-13,
+            ) / root_s
+    coefficients = jnp.asarray(spline.fit(scales, axis=-1))[:, None]
+    return SplineMirrorBoundary(coefficients[-1]), SplineMirrorState(coefficients, jnp.zeros_like(coefficients))
+
+
 def solve_beta_scan_cli(
     initial_boundary: SplineMirrorBoundary,
     discretization: SplineMirrorDiscretization,
@@ -822,7 +865,14 @@ def solve_beta_scan_cli(
     grid = discretization.grid
     if initial_state is not None and initial_restart is not None:
         raise ValueError("initial_state and initial_restart are mutually exclusive")
-    if initial_state is None:
+    if initial_state is None and initial_restart is None and callable(external_field):
+        initial_boundary, reference_coefficients = _axisymmetric_flux_initialization(
+            initial_boundary,
+            discretization,
+            external_field,
+            axial_flux_derivative,
+        )
+    elif initial_state is None:
         reference_radius = jnp.broadcast_to(
             jnp.asarray(initial_boundary.radius_coefficients),
             (grid.ns, grid.ntheta, discretization.coefficient_count),
