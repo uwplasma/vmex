@@ -27,7 +27,47 @@
     "normalized_divergence": [1.54404e-14, 3.99360e-14, 8.31291e-14],
     "volume": [12.8249023, 12.8249665, 12.8249557],
     "monotone_longitudinal_force": true,
-    "strong_force_below_0.05": false
+    "strong_force_below_0.05": false,
+    "radial_poloidal": [
+      {
+        "ns": 5,
+        "mpol": 3,
+        "variables": 4480,
+        "wall_seconds": 78.5301,
+        "iterations": 454,
+        "variational_max": 5.30053e-14,
+        "strong_force": 0.332521,
+        "normalized_divergence": 8.31291e-14,
+        "volume": 12.8249557,
+        "status": "completed"
+      },
+      {
+        "ns": 7,
+        "mpol": 4,
+        "variables": 8064,
+        "wall_seconds": 437.388,
+        "iterations": 26,
+        "variational_max": 3.89677e-16,
+        "strong_force": 0.227128,
+        "axis_and_first_row_strong_force": 0.444301,
+        "normalized_divergence": 8.30680e-14,
+        "energy": 448878.27,
+        "volume": 12.8254034,
+        "status": "completed"
+      },
+      {
+        "ns": 9,
+        "mpol": 5,
+        "variables": 12672,
+        "wall_seconds_lower_bound": 1800.0,
+        "peak_rss_gib": 2.11,
+        "gpu_memory_gib": 0.26,
+        "status": "terminated-at-resource-gate"
+      }
+    ],
+    "monotone_completed_radial_poloidal_force": true,
+    "radial_poloidal_strong_force_below_0.05": false,
+    "radial_poloidal_resource_limit": false
   },
   "preconditioner": {
     "variables": 2524,
@@ -50,6 +90,8 @@
     "resource_limits": true,
     "monotone_same_geometry_refinement": false,
     "h1_monotone_longitudinal_refinement": true,
-    "h1_absolute_strong_force": false
+    "h1_absolute_strong_force": false,
+    "h1_radial_poloidal_refinement": false,
+    "h1_radial_poloidal_resource_limit": false
   }
 }

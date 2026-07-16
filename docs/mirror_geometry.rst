@@ -202,8 +202,14 @@ monotonically decreasing strong-force sequence. The first H1 office-GPU audit
 now gives ``0.5733 -> 0.3556 -> 0.3325``: unlike the historical run it is
 monotone, but it plateaus far above the ``0.05`` gate. Volumes agree within
 ``5.0e-6`` relative and every variational residual remains below ``6.7e-14``,
-so the next diagnostic is radial/poloidal refinement rather than more
-longitudinal controls. The earlier nonmonotone sequence is retained in
+so radial/poloidal resolution, rather than more longitudinal controls, was
+tested next. At 64 longitudinal controls, increasing from ``ns=5, mpol=3`` to
+``ns=7, mpol=4`` reduces strong force from ``0.333`` to ``0.227`` while the
+variational residual reaches ``3.90e-16``. The ``ns=9, mpol=5`` state exceeded
+the 30-minute resource gate with 12,672 variables and was terminated. Thus
+both the absolute-force and resource gates fail; finite-beta continuation and
+implicit derivatives are deferred until the beta-zero residual is corrected.
+The earlier nonmonotone sequence is retained in
 ``benchmarks/mirror_hybrid_fixed_boundary.json`` so a new result cannot erase
 the failed refinement history. The default 32-control figure and this transfer
 study are deliberately reported separately: rebuilding the control polygon at

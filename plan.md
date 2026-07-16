@@ -55,7 +55,7 @@ The completed open-mirror R1-R5 snapshot was:
 - retained evidence: four compact schema-1 JSON files.
 
 H1 now supersedes only the closed-hybrid disposition. At pushed checkpoint
-``2e77f521`` the branch has 45 changed files, 7,925 mirror-source lines, 3,657
+``7df5056f`` the branch has 44 changed files, 7,915 mirror-source lines, 3,665
 mirror-test lines, 20 public mirror names, three root mirror examples, and
 three nonredundant compressed mirror showcase figures after the current
 documentation trim. No coil/Biot-Savart source or new scientific module was
@@ -641,7 +641,7 @@ This is the required meaning of a full B-spline hybrid.
    band structure, and exact dyadic knot insertion in an isolated module.
    Test partition of unity, local support, periodic closure, JVP/VJP transpose,
    and exact geometry preservation before adding equilibrium code.
-2. **Complete at 16 controls; refinement audit remains.** Geometry-only gate: exact closure of `c`, tangent, frame, and section
+2. **Complete at 32 controls.** Geometry-only gate: exact closure of `c`, tangent, frame, and section
    through two derivatives; at least 50% low-curvature length on each leg;
    smooth curvature ramps in the returns; 90-degree difference between the
    two straight-leg ellipses; frame holonomy cancelled explicitly; positive
@@ -653,20 +653,20 @@ This is the required meaning of a full B-spline hybrid.
    compare the central halves with the promoted fixed-open rotating ellipse
    and SFLM geometry, `|B|`, field-line, and force observables. The local
    straight section is validated before the returns are trusted.
-5. **In progress.** Residual gate: diagnose the previous nonmonotone 16/32/64 strong-force
+5. **Failed promotion gate.** Residual gate: diagnose the previous nonmonotone 16/32/64 strong-force
    sequence before increasing resolution. Check mapping gauge, axis
    regularity, independent staggered force, and quadrature aliasing on one
    exactly preserved geometry.
-6. **Partial.** Solver gate: start from the promoted open residual/preconditioner, replace
+6. **Failed at the fine resource gate.** Solver gate: start from the promoted open residual/preconditioner, replace
    only longitudinal boundary conditions and metric/frame terms, and retain
    one coefficient residual. Require monotone 16/32/64 longitudinal,
    three-grid radial/poloidal, and independent quadrature refinement.
 7. **Partial.** Transform gate: report current-free geometric transform separately from
    transform driven by continued on-axis current. Do not assume either sign or
    magnitude.
-8. **Pending.** Finite-beta fixed-LCFS gate: beta `0,1,3,10%`, with Ilgisonis et al. used
+8. **Deferred until beta zero passes.** Finite-beta fixed-LCFS gate: beta `0,1,3,10%`, with Ilgisonis et al. used
    only for sign/scaling in its asymptotic regime.
-9. **Example complete; derivatives and periodic MOUT remain gated.** The root
+9. **Example complete; derivatives and periodic MOUT are deferred.** The root
    example and solved-state plot were added for review before promotion because
    they expose the failed strong-force gate. Add implicit derivatives and a
    periodic MOUT only after monotone three-grid convergence.
@@ -719,15 +719,15 @@ At this revision:
 | --- | ---: | --- |
 | Fixed open axisymmetric physics | 100% | regression only |
 | Fixed open nonaxisymmetric rotating ellipse | 100% | regression only |
-| SFLM research disposition | 100% | independent-force failure retained; not supported |
+| SFLM validation disposition | 100% | independent-force failure retained; not supported |
 | Free open axisymmetric through 10% | 100% | regression only |
 | Implicit derivatives for supported lanes | 100% | regression only |
 | Open preconditioning | 100% | regression only |
-| Closed hybrid fixed boundary | 55% | same-geometry longitudinal/radial/poloidal refinement, circular/open-leg parity, finite beta |
+| Closed hybrid fixed boundary | 70% | diagnose beta-zero strong-force floor; promotion, finite beta, and derivatives remain blocked |
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
 | API/code simplification | 100% | preserve final line and public-API budgets |
-| README/docs/examples/plots | 90% | final metric refresh and strict Sphinx audit |
-| Packaging/CI/release audit | 80% | rerun after H1 validation disposition |
+| README/docs/examples/plots | 100% | regression only |
+| Packaging/CI/release audit | 85% | rerun after H1 validation disposition |
 
 The open-mirror R1-R5 release work is complete. H1 is now active on the draft
 PR and is tracked separately so its failed gates cannot alter open-mirror
@@ -905,6 +905,40 @@ promotion status. N1 and A1 remain deferred.
   100%, H1 basis 100%, H1 geometry 90%, H1 primal 75%, H1 validation 30%, H1
   derivatives 0%, docs/examples 90%, final audit 80%.
 - User input: none required for the fixed-boundary H1 validation sequence.
+
+### 2026-07-16 H1 refinement disposition and showcase refresh
+
+- Steps: reran the parser-free hybrid example with 32 spline controls;
+  performed exact same-geometry 16/32/64 longitudinal refinement and
+  64-control radial/poloidal refinement on office; inspected and compressed
+  all three README figures; refreshed terminology and metrics; and removed
+  duplicated figure-save code.
+- Results: the default 32-control example converges in 479 residual evaluations
+  to variational ``2.36e-14`` and divergence ``3.14e-14``, with ``iota=0.0851``
+  and strong force ``0.430``. Exact longitudinal refinement gives
+  ``0.5733 -> 0.3556 -> 0.3325``. Increasing to ``ns=7, mpol=4`` gives
+  ``0.2271`` with variational ``3.90e-16``; ``ns=9, mpol=5`` exceeded the
+  30-minute state limit at 12,672 variables and 2.11 GiB RSS. H1 therefore
+  fails the beta-zero absolute-force and fine-resource gates. Finite-beta and
+  derivative work is deferred rather than run on an unvalidated primal model.
+- Tests: the 32-control example completed locally; the focused circular and
+  hybrid solves pass; 20 model/output tests and strict Sphinx pass; every PNG
+  passed visual, size, and nonblank checks. The API-budget CI failure was a
+  stale 17-name assertion and now explicitly covers the three intended hybrid
+  operations within the 20-name ceiling.
+- Files/API: the branch remains at 44 changed files, 7,915 mirror-source lines,
+  3,665 mirror-test lines, 20 public names, three parser-free root examples,
+  three compressed figures, and four compact benchmark records. No coil or
+  Biot-Savart implementation was added.
+- Best next step: isolate the closed-axis/first-row strong-force reconstruction
+  against the passing circular limit and the open rotating ellipse. Continue
+  H1 only if a bounded correction makes the beta-zero three-grid gate pass;
+  otherwise retain the current hybrid as an explicit validation example and
+  close the lane without derivatives or finite-beta claims.
+- Open lanes: open fixed/free physics, derivatives, and preconditioning 100%;
+  H1 basis 100%, geometry 100%, primal 80%, validation 55%, derivatives 0%;
+  docs/examples 100%; final audit 85%.
+- User input: none required for the bounded beta-zero diagnostic.
 
 After every implementation tranche, append one short dated entry here with:
 

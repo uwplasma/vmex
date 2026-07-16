@@ -147,7 +147,9 @@ field lines from the solved field. The default 32-control case reaches
 `2.4e-14` variational residual and `3.1e-14` normalized divergence, but its
 independent strong-force residual is `0.430`. The implementation and example
 are available for refinement and review, but this case is not yet a supported
-equilibrium benchmark.
+equilibrium benchmark. Exact longitudinal and radial/poloidal refinement lower
+the independent residual to `0.227`, while the next grid exceeds the 30-minute
+resource gate; finite-beta and derivative claims are therefore deferred.
 
 ![Solved periodic B-spline hybrid with straight legs, rotating returns, field lines, LCFS |B|, cross-sections, iota, and convergence](docs/_static/figures/stellarator_mirror_hybrid.png)
 
