@@ -17,7 +17,6 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 Array = Any
 
@@ -73,24 +72,7 @@ class ContravariantField:
     jac_b_xi: Array
 
 
-@dataclass(frozen=True)
-class ClosedAxisGeometry:
-    """Periodic centerline and a closure-corrected normal frame."""
-
-    centerline: Array
-    tangent: Array
-    normal: Array
-    binormal: Array
-    speed: Array
-    curvature: Array
-    arc_length: Array
-    frame_holonomy: Array
-    closure_error: Array
-    tangent_closure_error: Array
-    frame_closure_error: Array
-
-
-for _cls in (MirrorGeometry, ContravariantField, ClosedAxisGeometry):
+for _cls in (MirrorGeometry, ContravariantField):
     jax.tree_util.register_dataclass(
         _cls,
         data_fields=[field.name for field in fields(_cls)],
@@ -98,109 +80,10 @@ for _cls in (MirrorGeometry, ContravariantField, ClosedAxisGeometry):
     )
 
 
-def _minimal_rotation(vector: Array, tangent_from: Array, tangent_to: Array) -> Array:
-    """Parallel-transport ``vector`` through the shortest tangent rotation."""
-
-    cross = jnp.cross(tangent_from, tangent_to)
-    cosine = jnp.clip(jnp.dot(tangent_from, tangent_to), -1.0, 1.0)
-    denominator = jnp.maximum(1.0 + cosine, 64.0 * jnp.finfo(cosine.dtype).eps)
-    return vector + jnp.cross(cross, vector) + jnp.cross(cross, jnp.cross(cross, vector)) / denominator
-
-
-def _rotate_about_axis(vector: Array, axis: Array, angle: Array) -> Array:
-    cosine, sine = jnp.cos(angle), jnp.sin(angle)
-    return vector * cosine + jnp.cross(axis, vector) * sine + axis * jnp.dot(axis, vector) * (1.0 - cosine)
-
-
-def evaluate_closed_spline_axis(
-    coefficients: Array,
-    basis: Any,
-    points: Array,
-    *,
-    initial_normal: Array | None = None,
-) -> ClosedAxisGeometry:
-    """Evaluate a periodic spline centerline and rotation-minimizing frame.
-
-    ``basis`` must be a periodic :class:`CubicBSplineBasis`. The raw Bishop
-    frame is parallel transported once around the curve. Its measured holonomy
-    is then distributed uniformly over the period, producing a continuous
-    periodic frame suitable for closed flux-surface coordinates.
-    """
-
-    if not getattr(basis, "periodic", False):
-        raise ValueError("closed centerline requires a periodic spline basis")
-    coefficients = jnp.asarray(coefficients)
-    if coefficients.shape != (basis.size, 3):
-        raise ValueError(f"centerline coefficients must have shape ({basis.size}, 3)")
-    point_values = np.asarray(points, dtype=float)
-    start, stop = basis.domain
-    if point_values.ndim != 1 or point_values.size < 4:
-        raise ValueError("closed centerline points must be a one-dimensional array of length >= 4")
-    if np.any(np.diff(point_values) <= 0.0) or point_values[0] < start or point_values[-1] >= stop:
-        raise ValueError("closed centerline points must increase within one fundamental period")
-
-    period = stop - start
-    extended_points = jnp.asarray(np.concatenate((point_values, [point_values[0] + period])))
-    centerline = basis.evaluate(coefficients, extended_points, axis=0)
-    first = basis.evaluate(coefficients, extended_points, derivative=1, axis=0)
-    second = basis.evaluate(coefficients, extended_points, derivative=2, axis=0)
-    speed = jnp.linalg.norm(first, axis=-1)
-    if not isinstance(speed, jax.core.Tracer) and bool(jnp.any(speed <= 0.0)):
-        raise ValueError("centerline derivative must not vanish")
-    tangent = first / speed[:, None]
-
-    if initial_normal is None:
-        reference = jax.nn.one_hot(jnp.argmin(jnp.abs(tangent[0])), 3, dtype=tangent.dtype)
-    else:
-        reference = jnp.asarray(initial_normal, dtype=tangent.dtype)
-        if reference.shape != (3,):
-            raise ValueError("initial_normal must have shape (3,)")
-    normal0 = reference - jnp.dot(reference, tangent[0]) * tangent[0]
-    normal0 /= jnp.linalg.norm(normal0)
-
-    def transport(normal, next_tangent):
-        previous_tangent, previous_normal = normal
-        next_normal = _minimal_rotation(previous_normal, previous_tangent, next_tangent)
-        next_normal -= jnp.dot(next_normal, next_tangent) * next_tangent
-        next_normal /= jnp.linalg.norm(next_normal)
-        return (next_tangent, next_normal), next_normal
-
-    (_, _), transported = jax.lax.scan(transport, (tangent[0], normal0), tangent[1:])
-    raw_normal = jnp.concatenate((normal0[None], transported), axis=0)
-    holonomy = jnp.arctan2(
-        jnp.dot(tangent[0], jnp.cross(raw_normal[-1], normal0)),
-        jnp.dot(raw_normal[-1], normal0),
-    )
-    fraction = (extended_points - extended_points[0]) / period
-    normal = jax.vmap(_rotate_about_axis)(raw_normal, tangent, -holonomy * fraction)
-    normal -= jnp.sum(normal * tangent, axis=-1)[:, None] * tangent
-    normal /= jnp.linalg.norm(normal, axis=-1)[:, None]
-    binormal = jnp.cross(tangent, normal)
-
-    delta = jnp.diff(extended_points)
-    arc_length = jnp.sum(0.5 * (speed[:-1] + speed[1:]) * delta)
-    curvature = jnp.linalg.norm(jnp.cross(first, second), axis=-1) / speed**3
-    return ClosedAxisGeometry(
-        centerline=centerline[:-1],
-        tangent=tangent[:-1],
-        normal=normal[:-1],
-        binormal=binormal[:-1],
-        speed=speed[:-1],
-        curvature=curvature[:-1],
-        arc_length=arc_length,
-        frame_holonomy=holonomy,
-        closure_error=jnp.linalg.norm(centerline[-1] - centerline[0]),
-        tangent_closure_error=jnp.linalg.norm(tangent[-1] - tangent[0]),
-        frame_closure_error=jnp.linalg.norm(normal[-1] - normal[0]),
-    )
-
-
 def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometry:
     """Evaluate axisymmetric or theta-dependent straight-axis geometry."""
 
     state.validate_shape(grid)
-    if state.center_shift is not None:
-        raise ValueError("straight-axis geometry does not accept a transverse center map")
     a = jnp.asarray(state.radius_scale)
     sqrt_s = jnp.sqrt(jnp.asarray(grid.s))[:, None, None]
     radius = sqrt_s * a
@@ -283,118 +166,6 @@ def evaluate_geometry(state: "MirrorState", grid: "MirrorGrid") -> MirrorGeometr
     )
 
 
-def evaluate_closed_geometry(
-    state: "MirrorState",
-    grid: "MirrorGrid",
-    axis: ClosedAxisGeometry,
-) -> MirrorGeometry:
-    """Embed a mirror state around a periodic spline centerline.
-
-    The poloidal radius remains ``sqrt(s) * a(s, theta, xi)``. The reference
-    frame carries that cross-section through long straight legs and curved
-    returns. Two optional frame components translate interior section centers
-    while the outer boundary remains fixed.
-    """
-
-    state.validate_shape(grid)
-    if axis.centerline.shape != (grid.nxi, 3):
-        raise ValueError(f"closed axis shape {axis.centerline.shape} must be ({grid.nxi}, 3)")
-    a = jnp.asarray(state.radius_scale)
-    sqrt_s = jnp.sqrt(jnp.asarray(grid.s))[:, None, None]
-    radius = sqrt_s * a
-    d_a_dtheta = grid.theta_basis.differentiate(a, axis=1)
-    d_a_dxi = grid.axial_basis.differentiate(a, axis=2)
-    d_radius_dtheta = sqrt_s * d_a_dtheta
-    d_radius_dxi = sqrt_s * d_a_dxi
-
-    ds = float(grid.s[1] - grid.s[0])
-    r_r_s = 0.5 * radial_derivative(radius * radius, ds)
-    r_r_s = r_r_s.at[0].set(0.5 * a[0] ** 2)
-    r_s = _safe_divide(r_r_s, radius).at[0].set(_safe_divide(r_r_s, radius)[1])
-
-    theta = jnp.asarray(grid.theta)[None, :, None, None]
-    normal = jnp.asarray(axis.normal)[None, None, :, :]
-    binormal = jnp.asarray(axis.binormal)[None, None, :, :]
-    radial_direction = jnp.cos(theta) * normal + jnp.sin(theta) * binormal
-    poloidal_direction = -jnp.sin(theta) * normal + jnp.cos(theta) * binormal
-    normal_derivative = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[None, None]
-    binormal_derivative = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[None, None]
-    radial_direction_derivative = jnp.cos(theta) * normal_derivative + jnp.sin(theta) * binormal_derivative
-    centerline_derivative = (jnp.asarray(axis.tangent) * jnp.asarray(axis.speed)[:, None])[None, None]
-
-    center = (
-        jnp.zeros((grid.ns, 2, grid.nxi), dtype=a.dtype)
-        if state.center_shift is None
-        else jnp.asarray(state.center_shift)
-    )
-    center_s = radial_derivative(center, ds)
-    center_xi = grid.axial_basis.differentiate(center, axis=2)
-    normal_surface = normal[0]
-    binormal_surface = binormal[0]
-    normal_xi_surface = normal_derivative[0, 0]
-    binormal_xi_surface = binormal_derivative[0, 0]
-    displacement = center[:, 0, :, None] * normal_surface + center[:, 1, :, None] * binormal_surface
-    displacement_s = center_s[:, 0, :, None] * normal_surface + center_s[:, 1, :, None] * binormal_surface
-    displacement_xi = (
-        center_xi[:, 0, :, None] * normal_surface
-        + center_xi[:, 1, :, None] * binormal_surface
-        + center[:, 0, :, None] * normal_xi_surface
-        + center[:, 1, :, None] * binormal_xi_surface
-    )
-
-    e_s = displacement_s[:, None] + r_s[..., None] * radial_direction
-    e_theta = d_radius_dtheta[..., None] * radial_direction + radius[..., None] * poloidal_direction
-    e_xi = (
-        centerline_derivative
-        + displacement_xi[:, None]
-        + d_radius_dxi[..., None] * radial_direction
-        + radius[..., None] * radial_direction_derivative
-    )
-    xyz = (
-        jnp.asarray(axis.centerline)[None, None]
-        + displacement[:, None]
-        + radius[..., None] * radial_direction
-    )
-
-    g_ss = jnp.sum(e_s * e_s, axis=-1)
-    g_stheta = jnp.sum(e_s * e_theta, axis=-1)
-    g_sxi = jnp.sum(e_s * e_xi, axis=-1)
-    g_thetatheta = jnp.sum(e_theta * e_theta, axis=-1)
-    g_thetaxi = jnp.sum(e_theta * e_xi, axis=-1)
-    g_xixi = jnp.sum(e_xi * e_xi, axis=-1)
-    orientation = jnp.sum(radial_direction * jnp.cross(poloidal_direction, e_xi), axis=-1)
-    sqrt_g = r_r_s * orientation
-    sqrt_g += jnp.sum(displacement_s[:, None] * jnp.cross(e_theta, e_xi), axis=-1)
-    volume = jnp.einsum(
-        "i,j,k,ijk->",
-        jnp.asarray(grid.radial_weights),
-        jnp.asarray(grid.theta_basis.weights),
-        jnp.asarray(grid.axial_basis.weights),
-        sqrt_g,
-    )
-    interior = sqrt_g[1:]
-    sign_changed = (jnp.min(interior) <= 0.0) | (jnp.max(interior) <= 0.0)
-    return MirrorGeometry(
-        xyz=xyz,
-        radius=radius,
-        d_radius_ds_regular=r_r_s,
-        d_radius_dtheta=d_radius_dtheta,
-        d_radius_dxi=d_radius_dxi,
-        g_ss=g_ss,
-        g_stheta=g_stheta,
-        g_sxi=g_sxi,
-        g_thetatheta=g_thetatheta,
-        g_thetaxi=g_thetaxi,
-        g_xixi=g_xixi,
-        sqrt_g=sqrt_g,
-        volume=volume,
-        jacobian_sign_changed=sign_changed,
-        e_s_xyz=e_s,
-        e_theta_xyz=e_theta,
-        e_xi_xyz=e_xi,
-    )
-
-
 def _radial_profile(values: Array, ns: int, dtype: Any) -> Array:
     values = jnp.asarray(values, dtype=dtype)
     if values.ndim == 0:
@@ -419,7 +190,7 @@ def regularize_axis_stream_function(
 
     lam = jnp.asarray(state.lambda_stream)
     if grid.ntheta == 1:
-        return type(state)(state.radius_scale, lam.at[0].set(0.0), state.center_shift)
+        return type(state)(state.radius_scale, lam.at[0].set(0.0))
 
     radius_scale = jnp.asarray(state.radius_scale)
     radial_jacobian = 0.5 * radius_scale[0] ** 2
@@ -431,7 +202,7 @@ def regularize_axis_stream_function(
     safe_modes = jnp.where(modes == 0.0, 1.0, modes)
     inverse = jnp.where(modes == 0.0, 0.0, 1.0 / (1j * safe_modes))
     axis_stream = jnp.fft.ifft(jnp.fft.fft(derivative, axis=0) * inverse, axis=0).real
-    return type(state)(state.radius_scale, lam.at[0].set(axis_stream), state.center_shift)
+    return type(state)(state.radius_scale, lam.at[0].set(axis_stream))
 
 
 def contravariant_field(

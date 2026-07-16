@@ -124,27 +124,22 @@ and retains 25% and 50% as explicitly labeled research scans. The
 nonaxisymmetric free-boundary path is a deferred research lane because its
 point observables were not monotone under spatial refinement.
 
-Closed circular validation
---------------------------
+Deferred closed hybrid
+----------------------
 
-Periodic cubic B-splines and a rotation-minimizing frame are retained only for
-the independently validated circular closed limit. That limit recovers
-analytic torus volume to ``2e-5`` relative, discrete ``div(B)`` below
-``2e-14``, and the vacuum :math:`1/R` field. Matched ``APHI``/``PHIEDGE``
-inputs agree with ordinary ``vmec_jax``, VMEC2000, and WOUT conventions. Its
-``ns=5,9,17`` all-volume force sequence is
-``4.72e-6, 7.35e-7, 1.25e-7``; fine bulk force is ``3.44e-9`` and every solve
-reaches ``ftol=1e-12``.
-
-The closed-hybrid research candidate used exact nested 16/32/64-control
-geometry and converged below every nonlinear, linear, geometry, time, and
-memory ceiling. Its strong-force sequence was nevertheless
+The closed stellarator-mirror candidate failed its declared same-geometry
+refinement gate. Its strong-force sequence was
 ``0.05277, 0.10756, 0.02365`` at quadrature order 3 and
-``0.05280, 0.10714, 0.02353`` at order 4. Because both orders reproduce the
-nonmonotone middle state, the candidate fails the declared same-geometry gate.
-Hybrid constructors, tracing, examples, output, and plotting are not supported
-in this PR. The compact negative evidence remains in
-``benchmarks/mirror_hybrid_fixed_boundary.json``.
+``0.05280, 0.10714, 0.02353`` at order 4. The nonmonotone middle state is
+reproduced at both orders, so it cannot be promoted by considering only the
+finest value.
+
+Periodic splines, moving-frame geometry, center maps, closed initializers,
+and closed nonlinear/preconditioner paths were removed from the release
+runtime. The compact negative evidence remains in
+``benchmarks/mirror_hybrid_fixed_boundary.json``; a future hybrid must start
+from the bounded design in ``plan.md`` and pass its gates before exposing an
+API.
 
 Plotting and output scope
 -------------------------
@@ -210,8 +205,8 @@ they do not promote shaped solved states whose pointwise force remains large.
 The first corrected rotating-ellipse audit also exposed a missing axis
 condition: the old state varied ``|B|`` by 9--20% over theta at ``s=0`` even
 though those samples are one physical point. That freedom has been removed;
-the canonical fixed-open and circular-periodic records have since been
-regenerated with the regular axis, while older shaped values remain invalid.
+the canonical fixed-open records have since been regenerated with the
+regular axis, while older shaped values remain invalid.
 
 Historical shaped records with inconsistent ``mpol`` and ``ntheta`` semantics
 were removed from the compact benchmark rather than labeled as current
@@ -257,15 +252,12 @@ finite-beta solution or ellipticity prediction.
 Native spline basis status
 --------------------------
 
-``vmec_jax.mirror.splines.CubicBSplineBasis`` now supplies the isolated basis
-contract for the next solver state. Open axes use clamped knots; closed
-validation axes use folded uniform periodic cubics. Values and two derivatives are
-JAX operations, each nonzero span uses four-point Gauss-Legendre quadrature,
-and open refinement uses exact Boehm knot insertion. The basis matches SciPy,
-reproduces cubics, preserves curves under insertion, closes periodic values and
-two derivatives, and has tested JVP/VJP actions. For a smooth periodic fixture,
-maximum errors at 8, 16, 32, and 64 controls are ``5.06e-3``, ``2.76e-4``,
-``1.65e-5``, and ``1.02e-6``.
+``vmec_jax.mirror.splines.CubicBSplineBasis`` supplies the longitudinal
+basis for the open solver. It uses clamped knots, exact endpoint values,
+four-point Gauss-Legendre quadrature on every nonzero span, and exact Boehm
+knot insertion. Evaluation and two derivatives are JAX operations. Tests
+match SciPy, reproduce cubics, preserve curves under insertion, and verify
+JVP/VJP actions.
 
 ``SplineMirrorState`` and ``SplineMirrorBoundary`` store geometry and stream
 function coefficients rather than sampled values. ``SplineMirrorDiscretization``
@@ -319,18 +311,6 @@ seconds. The frozen local factor reaches ``9.18e-11`` in 660 iterations and
 current-main SOLVAX right-preconditioned FGMRES trial follows the same
 iteration curve, so the host CLI remains on SciPy GMRES. The same sparse builder is used by
 forward tangent and reverse adjoint systems.
-
-The periodic coefficient block uses cyclic axial distance, every B-spline
-coefficient, and the same frozen sparse Hessian construction as the open
-solver. Systems through 1,024 variables retain the faster dense small-problem
-path. On the first 1,182-variable circular case, the cyclic factor reaches
-variational ``ftol=1e-12`` in 11.50 seconds and 907 Krylov iterations, with
-true relative linear residual ``7.39e-10``. The previous noncyclic attempt
-left residual 0.136 after 3,000 iterations. The production graph now also
-includes axis-regularization couplings: a 2,524-variable factor action has
-true residual below ``3.1e-11``, and the corresponding solve falls from 7,383
-to 37 Krylov iterations. This infrastructure remains for circular validation;
-it does not promote the deferred hybrid.
 
 On the flared finite-beta case, knot refinement from 5 to 11 coefficients
 reduces relative energy error against an ``nxi=17`` Chebyshev oracle from
@@ -412,8 +392,8 @@ fixed-open primal states.
 nonaxisymmetric finite-current ``solve_lambda=True`` case, both radius and
 stream-function tangents agree with two fully reconverged centered differences
 within ``2e-4`` in relative state norm, with linear residual below ``1e-8``.
-This establishes both open-spline derivative directions. Closed-axis and
-centerline-control derivatives are deferred with the closed hybrid.
+This establishes both open-spline derivative directions. The deferred
+closed hybrid has no primal or derivative API.
 
 The former CGL fixed solve, custom VJP, and nodal adjoint have been removed.
 Public fixed-boundary inputs are

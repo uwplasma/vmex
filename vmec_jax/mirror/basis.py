@@ -419,11 +419,10 @@ def _span_quadrature(breakpoints: np.ndarray, order: int) -> tuple[np.ndarray, n
 
 @dataclass(frozen=True, eq=False)
 class CubicBSplineBasis:
-    """Static clamped or periodic cubic basis with JAX evaluation."""
+    """Static clamped cubic basis with JAX evaluation."""
 
     knots: np.ndarray
     breakpoints: np.ndarray
-    periodic: bool
     size: int
     collocation_nodes: np.ndarray
     quadrature_nodes: np.ndarray
@@ -438,34 +437,11 @@ class CubicBSplineBasis:
         size = knots.size - _DEGREE - 1
         collocation = np.asarray([np.mean(knots[index + 1 : index + _DEGREE + 1]) for index in range(size)])
         quadrature_nodes, quadrature_weights = _span_quadrature(breaks, quadrature_order)
-        return cls(knots, breaks, False, size, collocation, quadrature_nodes, quadrature_weights)
-
-    @classmethod
-    def periodic_uniform(
-        cls,
-        size: int,
-        domain: tuple[float, float] = (0.0, 2.0 * np.pi),
-        *,
-        quadrature_order: int = 4,
-    ) -> "CubicBSplineBasis":
-        """Build ``size`` folded uniform cubic splines on a periodic interval."""
-
-        size = int(size)
-        start, stop = map(float, domain)
-        if size < _DEGREE + 1:
-            raise ValueError("periodic cubic basis requires size >= 4")
-        if not stop > start:
-            raise ValueError("periodic domain must have stop > start")
-        spacing = (stop - start) / size
-        knots = start + spacing * np.arange(-_DEGREE, size + _DEGREE + 1)
-        breaks = np.linspace(start, stop, size + 1)
-        collocation = breaks[:-1]
-        quadrature_nodes, quadrature_weights = _span_quadrature(breaks, quadrature_order)
-        return cls(knots, breaks, True, size, collocation, quadrature_nodes, quadrature_weights)
+        return cls(knots, breaks, size, collocation, quadrature_nodes, quadrature_weights)
 
     @property
     def domain(self) -> tuple[float, float]:
-        """Return the open or fundamental periodic interval."""
+        """Return the open spline interval."""
 
         return float(self.breakpoints[0]), float(self.breakpoints[-1])
 
@@ -475,17 +451,7 @@ class CubicBSplineBasis:
         points = jnp.asarray(points)
         original_shape = points.shape
         evaluation_points = points.reshape(-1)
-        if self.periodic:
-            start, stop = self.domain
-            period = stop - start
-            evaluation_points = jnp.mod(evaluation_points - start, period) + start
-            raw = _basis_matrix(self.knots, evaluation_points, _DEGREE, derivative)
-            folded = jnp.zeros((evaluation_points.size, self.size), dtype=raw.dtype)
-            for column in range(raw.shape[1]):
-                folded = folded.at[:, (column - _DEGREE) % self.size].add(raw[:, column])
-            matrix = folded
-        else:
-            matrix = _basis_matrix(self.knots, evaluation_points, _DEGREE, derivative)
+        matrix = _basis_matrix(self.knots, evaluation_points, _DEGREE, derivative)
         return matrix.reshape(original_shape + (self.size,))
 
     def evaluate(self, coefficients: Array, points: Array, *, derivative: int = 0, axis: int = -1) -> Array:
@@ -522,8 +488,6 @@ class CubicBSplineBasis:
     def insert_knot(self, coefficients: Array, knot: float, *, axis: int = -1) -> tuple["CubicBSplineBasis", Array]:
         """Insert one open knot exactly with the Boehm coefficient update."""
 
-        if self.periodic:
-            raise ValueError("periodic knot insertion is not supported; refine the uniform basis")
         knot = float(knot)
         start, stop = self.domain
         if not start < knot < stop:
@@ -546,55 +510,6 @@ class CubicBSplineBasis:
             new_breakpoints, quadrature_order=self.quadrature_weights.size // (self.breakpoints.size - 1)
         )
         return refined, jnp.moveaxis(updated, 0, axis)
-
-    def refine_periodic_uniform(
-        self,
-        coefficients: Array,
-        target_size: int,
-        *,
-        axis: int = -1,
-    ) -> tuple["CubicBSplineBasis", Array]:
-        """Exactly refine periodic cubic coefficients by repeated doubling.
-
-        The target knot sequence must be a dyadic refinement of this uniform
-        periodic basis. The cubic subdivision mask is equivalent to inserting
-        every midpoint knot and preserves values and two derivatives.
-        """
-
-        if not self.periodic:
-            raise ValueError("uniform periodic refinement requires a periodic basis")
-        target_size = int(target_size)
-        if target_size < self.size or target_size % self.size:
-            raise ValueError("target size must be a dyadic multiple of the source size")
-        ratio = target_size // self.size
-        if ratio & (ratio - 1):
-            raise ValueError("target size must be a dyadic multiple of the source size")
-
-        values = jnp.moveaxis(jnp.asarray(coefficients), axis, 0)
-        if values.shape[0] != self.size:
-            raise ValueError(f"coefficient axis has size {values.shape[0]}; expected {self.size}")
-        size = self.size
-        while size < target_size:
-            updated = jnp.empty((2 * size,) + values.shape[1:], dtype=values.dtype)
-            updated = updated.at[0::2].set(
-                0.125 * jnp.roll(values, 2, axis=0)
-                + 0.75 * jnp.roll(values, 1, axis=0)
-                + 0.125 * values
-            )
-            updated = updated.at[1::2].set(
-                0.5 * (jnp.roll(values, 1, axis=0) + values)
-            )
-            values = updated
-            size *= 2
-
-        quadrature_order = self.quadrature_weights.size // self.size
-        refined = CubicBSplineBasis.periodic_uniform(
-            target_size,
-            self.domain,
-            quadrature_order=quadrature_order,
-        )
-        return refined, jnp.moveaxis(values, 0, axis)
-
 
 from typing import TYPE_CHECKING
 

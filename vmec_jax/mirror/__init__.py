@@ -13,7 +13,6 @@ from importlib import import_module as _import_module
 # every exterior-vacuum and solver dependency.
 _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # Model and configuration.
-    "EndCondition": (".model", "EndCondition"),
     "MirrorBoundary": (".model", "MirrorBoundary"),
     "MirrorConfig": (".model", "MirrorConfig"),
     "MirrorResolution": (".model", "MirrorResolution"),

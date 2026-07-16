@@ -13,7 +13,6 @@ import jax.numpy as jnp  # noqa: E402
 import vmec_jax.mirror as mirror_api  # noqa: E402
 
 from vmec_jax.mirror import (  # noqa: E402
-    EndCondition,
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
@@ -56,13 +55,12 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
     }
     assert required <= set(mirror_api.__all__)
     assert internal.isdisjoint(mirror_api.__all__)
-    assert len(mirror_api.__all__) == 18
+    assert len(mirror_api.__all__) == 17
     assert mirror_api.solve_fixed_boundary_cli.__module__ == "vmec_jax.mirror.splines"
 
 
 def test_mirror_config_freezes_supported_end_and_convergence_contract() -> None:
     config = MirrorConfig()
-    assert config.end_condition is EndCondition.FIXED_FLUX_CUT
     assert config.ftol == 1.0e-12
     assert config.max_iterations == 2000
     assert MIRROR_INPUT_SCHEMA == "vmec_jax.mirror.input/2"
@@ -195,8 +193,6 @@ def test_model_constructors_reject_invalid_static_contracts() -> None:
         with pytest.raises(ValueError, match=message):
             MirrorResolution(**arguments)
     assert MirrorResolution().axisymmetric
-    with pytest.raises(ValueError, match="end condition"):
-        MirrorConfig(end_condition="invalid")
     with pytest.raises(ValueError, match="max_iterations"):
         MirrorConfig(max_iterations=0)
 

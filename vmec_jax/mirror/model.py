@@ -9,7 +9,6 @@ plasma boundary.  See ``plan.md`` Phase 5.1-5.2.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 import jax
@@ -19,17 +18,6 @@ MIRROR_INPUT_SCHEMA = "vmec_jax.mirror.input/2"
 MIRROR_OUTPUT_SCHEMA = "vmec_jax.mirror.mout/1"
 
 Array = Any
-
-
-class EndCondition(str, Enum):
-    """Supported axial boundary policies.
-
-    ``FIXED_FLUX_CUT`` fixes geometry and normal flux at both axial cuts while
-    allowing magnetic field lines to cross them.  End loss, sheath, sources,
-    and transport are outside the equilibrium model.
-    """
-
-    FIXED_FLUX_CUT = "fixed_flux_cut"
 
 
 @dataclass(frozen=True)
@@ -70,6 +58,10 @@ class MirrorResolution:
 class MirrorConfig:
     """Numerical and boundary contract for a mirror equilibrium.
 
+    Geometry and normal flux are fixed at both axial cuts while field lines
+    may cross them. End losses, sheaths, sources, and transport are outside
+    this equilibrium model.
+
     The default nonlinear tolerance is the requested component-wise physical
     force tolerance.  It is not an optimizer objective tolerance.
     """
@@ -77,16 +69,10 @@ class MirrorConfig:
     resolution: MirrorResolution = MirrorResolution()
     z_min: float = -1.0
     z_max: float = 1.0
-    end_condition: EndCondition = EndCondition.FIXED_FLUX_CUT
     ftol: float = 1.0e-12
     max_iterations: int = 2000
 
     def __post_init__(self) -> None:
-        try:
-            end_condition = EndCondition(self.end_condition)
-        except ValueError as error:
-            raise ValueError(f"unsupported mirror end condition: {self.end_condition}") from error
-        object.__setattr__(self, "end_condition", end_condition)
         if not self.z_max > self.z_min:
             raise ValueError("z_max must be greater than z_min")
         if not self.ftol > 0.0:
@@ -165,15 +151,11 @@ class MirrorState:
     ``r=sqrt(s)*radius_scale``; storing the regular scale rather than ``r``
     avoids evolving a singular radial derivative at the magnetic axis.
     ``lambda_stream`` is the divergence-free field stream function and uses a
-    zero surface-average gauge in the solver lane. Closed moving-frame states
-    additionally use ``center_shift`` with shape ``(ns, 2, nxi)`` for the two
-    transverse section-center coordinates. Straight-axis states leave it
-    ``None``.
+    zero surface-average gauge in the solver lane.
     """
 
     radius_scale: Array
     lambda_stream: Array
-    center_shift: Array | None = None
 
     @classmethod
     def from_boundary(cls, boundary: MirrorBoundary, grid: "MirrorGrid") -> "MirrorState":
@@ -197,10 +179,6 @@ class MirrorState:
             raise ValueError(f"radius_scale shape {self.radius_scale.shape} does not match {expected}")
         if self.lambda_stream.shape != expected:
             raise ValueError(f"lambda_stream shape {self.lambda_stream.shape} does not match {expected}")
-        if self.center_shift is not None:
-            center_expected = (grid.ns, 2, grid.nxi)
-            if self.center_shift.shape != center_expected:
-                raise ValueError(f"center_shift shape {self.center_shift.shape} does not match {center_expected}")
 
 
 def _regularize_axis_radius(radius_scale: Array) -> Array:
@@ -248,17 +226,13 @@ def project_fixed_boundary_state(
     denominator = jnp.sum(theta_weights) * jnp.sum(xi_weights)
     surface_mean = jnp.einsum("j,k,ijk->i", theta_weights, xi_weights, lam) / denominator
     lam = lam - surface_mean[:, None, None]
-    return MirrorState(
-        radius_scale=radius_scale,
-        lambda_stream=lam,
-        center_shift=state.center_shift,
-    )
+    return MirrorState(radius_scale=radius_scale, lambda_stream=lam)
 
 
 jax.tree_util.register_dataclass(MirrorBoundary, data_fields=["radius_scale"], meta_fields=[])
 jax.tree_util.register_dataclass(
     MirrorState,
-    data_fields=["radius_scale", "lambda_stream", "center_shift"],
+    data_fields=["radius_scale", "lambda_stream"],
     meta_fields=[],
 )
 

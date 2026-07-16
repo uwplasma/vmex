@@ -4,8 +4,7 @@ The coefficient fixed-boundary solver and the nodal free-boundary solver use
 the same convergence contract: optimizer status never substitutes for a
 normalized variational residual below ``MirrorConfig.ftol``. Open systems use
 matrix-free Newton-GMRES at every size, with a bounded dense rescue for small
-stalled systems. Closed periodic spline systems retain an exact dense Newton
-reference.
+stalled systems.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import jax
 import jax.numpy as jnp
 import numpy as np
-from scipy.linalg import eigh, lstsq
+from scipy.linalg import eigh
 from scipy.optimize import least_squares, minimize
 from scipy.sparse.linalg import LinearOperator, gmres
 
@@ -388,83 +387,6 @@ def _matrix_free_newton_polish(
     )
 
 
-def _dense_residual_newton(
-    x0: np.ndarray,
-    gradient_function: Any,
-    hessian_function: Any,
-    objective_function: Any,
-    *,
-    ftol: float,
-    max_steps: int,
-    record_step: Any,
-    lower_bounds: np.ndarray,
-    upper_bounds: np.ndarray,
-) -> tuple[np.ndarray, int, float, bool, str]:
-    """Solve a small indefinite equilibrium as a gradient root."""
-
-    x = np.asarray(x0, dtype=float)
-    final_linear_residual = np.inf
-    stagnation_reference = np.inf
-    stagnation_steps = 0
-    step_limit = max(0, int(max_steps))
-    for iteration in range(step_limit):
-        residual = np.asarray(gradient_function(jnp.asarray(x)), dtype=float)
-        maximum = float(np.max(np.abs(residual)))
-        if not np.isfinite(stagnation_reference):
-            stagnation_reference = maximum
-        if maximum <= float(ftol):
-            return x, iteration, final_linear_residual, True, "dense residual Newton converged"
-
-        hessian = np.asarray(hessian_function(jnp.asarray(x)), dtype=float)
-        direction = lstsq(
-            hessian,
-            -residual,
-            cond=1.0e-13,
-            lapack_driver="gelsy",
-            check_finite=False,
-        )[0]
-        final_linear_residual = float(
-            np.linalg.norm(hessian @ direction + residual)
-            / max(np.linalg.norm(residual), np.finfo(float).tiny)
-        )
-        accepted = False
-        for line_search in range(24):
-            candidate = np.clip(x + 0.5**line_search * direction, lower_bounds, upper_bounds)
-            candidate_residual = np.asarray(
-                gradient_function(jnp.asarray(candidate)),
-                dtype=float,
-            )
-            candidate_value = float(objective_function(jnp.asarray(candidate)))
-            candidate_maximum = float(np.max(np.abs(candidate_residual)))
-            sufficient_decrease = candidate_maximum <= (1.0 - 1.0e-4 * 0.5**line_search) * maximum
-            if np.isfinite(candidate_value) and (
-                candidate_maximum <= float(ftol) or sufficient_decrease
-            ):
-                x = candidate
-                record_step(x)
-                accepted = True
-                if candidate_maximum <= 0.99 * stagnation_reference:
-                    stagnation_reference = candidate_maximum
-                    stagnation_steps = 0
-                else:
-                    stagnation_steps += 1
-                break
-        if not accepted:
-            return x, iteration, final_linear_residual, False, "dense residual Newton stalled"
-        if stagnation_steps >= 20:
-            return x, iteration + 1, final_linear_residual, False, "dense residual Newton stalled"
-
-    residual = np.asarray(gradient_function(jnp.asarray(x)), dtype=float)
-    converged = float(np.max(np.abs(residual))) <= float(ftol)
-    return (
-        x,
-        step_limit,
-        final_linear_residual,
-        converged,
-        "dense residual Newton converged" if converged else "dense residual Newton iteration limit",
-    )
-
-
 @dataclass(frozen=True)
 class _OptimizationOutcome:
     """Representation-independent result from the host nonlinear driver."""
@@ -490,14 +412,12 @@ def _optimize_fixed_boundary(
     config: MirrorConfig,
     gradient_tolerance: float,
     matrix_free_context: tuple[Any, tuple[Any, np.ndarray, Any]] | None,
-    start_with_newton: bool = False,
-    start_with_dense_root: bool = False,
 ) -> _OptimizationOutcome:
     """Run the common host L-BFGS and residual-Newton solve policy.
 
     L-BFGS globalizes production-size states before the exact Newton polish.
-    Tiny closed references may start directly with Newton. The dense residual
-    solve is only a bounded rescue when matrix-free Newton misses ``ftol``.
+    The dense residual solve is only a bounded rescue when matrix-free Newton
+    misses ``ftol``.
     """
 
     callback_iterations = 0
@@ -510,35 +430,6 @@ def _optimize_fixed_boundary(
         if callback_iterations == 1 or callback_iterations % history_stride == 0:
             record(callback_iterations, x)
 
-    if start_with_dense_root:
-        gradient_function = jax.jit(jax.grad(objective))
-        hessian_function = jax.jit(jax.jacfwd(jax.grad(objective)))
-
-        def record_dense_root(x: np.ndarray) -> None:
-            nonlocal callback_iterations
-            callback_iterations += 1
-            record(callback_iterations, x)
-
-        final_x, iterations, linear_residual, success, message = _dense_residual_newton(
-            x0,
-            gradient_function,
-            hessian_function,
-            objective,
-            ftol=config.ftol,
-            max_steps=config.max_iterations,
-            record_step=record_dense_root,
-            lower_bounds=lower_bounds,
-            upper_bounds=upper_bounds,
-        )
-        return _OptimizationOutcome(
-            vector=final_x,
-            iterations=iterations,
-            optimizer_success=success,
-            linear_iterations=iterations,
-            final_linear_residual=linear_residual,
-            message=message,
-        )
-
     # Reserve iterations for Newton: L-BFGS can stall on relative energy while
     # physical forces are still large.
     polish_cap = 100 if x0.size > 2048 else 50
@@ -549,31 +440,25 @@ def _optimize_fixed_boundary(
     lbfgs_budget = max(10, available // 2) if use_matrix_free else max(1, available)
     if use_matrix_free and bool(getattr(matrix_free_context[1][2], "reuse_linearization", False)):
         lbfgs_budget = min(50, lbfgs_budget)
-    if start_with_newton:
-        final_x = np.asarray(x0)
-        optimizer_success = False
-        optimizer_message = "small-system Newton start"
-        lbfgs_iterations = 0
-    else:
-        optimization = minimize(
-            fun=lambda x: evaluate(x)[0],
-            x0=x0,
-            jac=lambda x: evaluate(x)[1],
-            method="L-BFGS-B",
-            bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
-            callback=callback,
-            options={
-                "maxiter": lbfgs_budget,
-                "gtol": float(gradient_tolerance),
-                "ftol": np.finfo(float).eps,
-                "maxls": 50,
-                "maxcor": 20,
-            },
-        )
-        final_x = np.asarray(optimization.x)
-        optimizer_success = bool(optimization.success)
-        optimizer_message = str(optimization.message)
-        lbfgs_iterations = int(optimization.nit)
+    optimization = minimize(
+        fun=lambda x: evaluate(x)[0],
+        x0=x0,
+        jac=lambda x: evaluate(x)[1],
+        method="L-BFGS-B",
+        bounds=list(zip(lower_bounds, upper_bounds, strict=True)),
+        callback=callback,
+        options={
+            "maxiter": lbfgs_budget,
+            "gtol": float(gradient_tolerance),
+            "ftol": np.finfo(float).eps,
+            "maxls": 50,
+            "maxcor": 20,
+        },
+    )
+    final_x = np.asarray(optimization.x)
+    optimizer_success = bool(optimization.success)
+    optimizer_message = str(optimization.message)
+    lbfgs_iterations = int(optimization.nit)
     polish_evaluations = 0
     newton_steps = 0
     linear_iterations = 0

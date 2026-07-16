@@ -21,11 +21,9 @@ import jax
 import jax.numpy as jnp
 
 from .geometry import (
-    ClosedAxisGeometry,
     ContravariantField,
     MirrorGeometry,
     contravariant_field,
-    evaluate_closed_geometry,
     evaluate_geometry,
     magnetic_field_squared,
     regularize_axis_stream_function,
@@ -64,8 +62,6 @@ class _HalfMeshSamples:
     d_radius_scale_ds: Array
     radius: Array
     radius_radius_s: Array
-    center_shift: Array
-    d_center_shift_ds: Array
     jacobian: Array
     d_radius_dtheta: Array
     d_radius_dxi: Array
@@ -87,19 +83,12 @@ class _HalfMeshForceFields:
 
 @dataclass(frozen=True)
 class _HalfMeshMetric:
-    """Metric terms and optional closed-axis vectors at Gauss points."""
+    """Straight-axis metric terms at radial Gauss points."""
 
     jacobian: Array
     g_thetatheta: Array
     g_thetaxi: Array
     g_xixi: Array
-    e_theta: Array | None = None
-    e_xi: Array | None = None
-    radial_direction: Array | None = None
-    poloidal_direction: Array | None = None
-    radial_direction_xi: Array | None = None
-    center_shift_s_xyz: Array | None = None
-    orientation: Array | None = None
 
 
 def _interpolate_stream_function(lam: Array, grid: "MirrorGrid", fraction: Array) -> Array:
@@ -194,17 +183,6 @@ def _half_mesh_samples(
     a_quadrature, da_ds = _interpolate_radius_scale(a, grid, fraction)
     radius = jnp.sqrt(jnp.maximum(s_quadrature * a_quadrature**2, 0.0))
     radius_radius_s = 0.5 * (a_quadrature**2 + 2.0 * s_quadrature * a_quadrature * da_ds)
-    center = (
-        jnp.zeros((grid.ns, 2, grid.nxi), dtype=a.dtype)
-        if state.center_shift is None
-        else jnp.asarray(state.center_shift)
-    )
-    center_left, center_right = center[:-1][None], center[1:][None]
-    center_quadrature = (1.0 - fraction) * center_left + fraction * center_right
-    center_derivative = jnp.broadcast_to(
-        (center_right - center_left) / ds,
-        center_quadrature.shape,
-    )
     jacobian = radius_radius_s * float(grid.dz_dxi)
     d_radius_dtheta = grid.theta_basis.differentiate(radius, axis=2)
     d_radius_dxi = grid.axial_basis.differentiate(radius, axis=3)
@@ -234,8 +212,6 @@ def _half_mesh_samples(
         d_radius_scale_ds=da_ds,
         radius=radius,
         radius_radius_s=radius_radius_s,
-        center_shift=center_quadrature,
-        d_center_shift_ds=center_derivative,
         jacobian=jacobian,
         d_radius_dtheta=d_radius_dtheta,
         d_radius_dxi=d_radius_dxi,
@@ -244,84 +220,17 @@ def _half_mesh_samples(
     )
 
 
-def _closed_center_vectors(
-    samples: _HalfMeshSamples,
-    grid: "MirrorGrid",
-    axis: ClosedAxisGeometry,
-) -> tuple[Array, Array, Array]:
-    """Return center displacement and its radial and axial derivatives."""
-
-    center = samples.center_shift
-    center_s = samples.d_center_shift_ds
-    center_xi = grid.axial_basis.differentiate(center, axis=3)
-    normal = jnp.asarray(axis.normal)[None, None, None]
-    binormal = jnp.asarray(axis.binormal)[None, None, None]
-    normal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[
-        None, None, None
-    ]
-    binormal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[
-        None, None, None
-    ]
-
-    def combine(components: Array, first: Array, second: Array) -> Array:
-        return (
-            components[:, :, 0, :][:, :, None, :, None] * first
-            + components[:, :, 1, :][:, :, None, :, None] * second
-        )
-
-    displacement = combine(center, normal, binormal)
-    displacement_s = combine(center_s, normal, binormal)
-    displacement_xi = combine(center_xi, normal, binormal)
-    displacement_xi += combine(center, normal_xi, binormal_xi)
-    return displacement, displacement_s, displacement_xi
-
-
 def _half_mesh_metric(
-    samples: _HalfMeshSamples, grid: "MirrorGrid", axis: ClosedAxisGeometry | None
+    samples: _HalfMeshSamples, grid: "MirrorGrid"
 ) -> _HalfMeshMetric:
-    """Build the straight or closed-axis metric once for all force kernels."""
+    """Build the straight-axis metric once for all force kernels."""
 
     radius, radius_theta, radius_xi = samples.radius, samples.d_radius_dtheta, samples.d_radius_dxi
-    if axis is None:
-        return _HalfMeshMetric(
-            samples.jacobian,
-            radius_theta**2 + radius**2,
-            radius_theta * radius_xi,
-            radius_xi**2 + float(grid.dz_dxi) ** 2,
-        )
-
-    theta = jnp.asarray(grid.theta)[None, None, :, None, None]
-    normal = jnp.asarray(axis.normal)[None, None, None, :, :]
-    binormal = jnp.asarray(axis.binormal)[None, None, None, :, :]
-    radial = jnp.cos(theta) * normal + jnp.sin(theta) * binormal
-    poloidal = -jnp.sin(theta) * normal + jnp.cos(theta) * binormal
-    normal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.normal), axis=0)[None, None, None]
-    binormal_xi = grid.axial_basis.differentiate(jnp.asarray(axis.binormal), axis=0)[None, None, None]
-    radial_xi = jnp.cos(theta) * normal_xi + jnp.sin(theta) * binormal_xi
-    centerline_xi = (jnp.asarray(axis.tangent) * jnp.asarray(axis.speed)[:, None])[None, None, None]
-    _, displacement_s, displacement_xi = _closed_center_vectors(samples, grid, axis)
-    e_theta = radius_theta[..., None] * radial + radius[..., None] * poloidal
-    e_xi = (
-        centerline_xi
-        + displacement_xi
-        + radius_xi[..., None] * radial
-        + radius[..., None] * radial_xi
-    )
-    orientation = jnp.sum(radial * jnp.cross(poloidal, e_xi), axis=-1)
-    jacobian = samples.radius_radius_s * orientation
-    jacobian += jnp.sum(displacement_s * jnp.cross(e_theta, e_xi), axis=-1)
     return _HalfMeshMetric(
-        jacobian,
-        jnp.sum(e_theta * e_theta, axis=-1),
-        jnp.sum(e_theta * e_xi, axis=-1),
-        jnp.sum(e_xi * e_xi, axis=-1),
-        e_theta,
-        e_xi,
-        radial,
-        poloidal,
-        radial_xi,
-        displacement_s,
-        orientation,
+        samples.jacobian,
+        radius_theta**2 + radius**2,
+        radius_theta * radius_xi,
+        radius_xi**2 + float(grid.dz_dxi) ** 2,
     )
 
 
@@ -330,8 +239,6 @@ def staggered_magnetic_terms(
     grid: "MirrorGrid",
     axial_flux_derivative: Array,
     current_derivative: Array,
-    *,
-    axis: ClosedAxisGeometry | None = None,
 ) -> tuple[Array, Array]:
     """Return radially integrated ``(B^2, J)`` on each half cell.
 
@@ -347,7 +254,7 @@ def staggered_magnetic_terms(
         axial_flux_derivative,
         current_derivative,
     )
-    metric = _half_mesh_metric(samples, grid, axis)
+    metric = _half_mesh_metric(samples, grid)
     jacobian = metric.jacobian
     b_theta = samples.field_theta_numerator / jacobian
     b_xi = samples.field_xi_numerator / jacobian
@@ -369,7 +276,6 @@ def _half_mesh_force_fields(
     mass_profile: Array,
     current_derivative: Array,
     gamma: float,
-    axis: ClosedAxisGeometry | None,
 ) -> _HalfMeshForceFields:
     """Evaluate covariant field and pressure on radial energy cells."""
 
@@ -379,7 +285,7 @@ def _half_mesh_force_fields(
         axial_flux_derivative,
         current_derivative,
     )
-    metric = _half_mesh_metric(samples, grid, axis)
+    metric = _half_mesh_metric(samples, grid)
     jacobian = metric.jacobian
     b_theta = samples.field_theta_numerator / jacobian
     b_xi = samples.field_xi_numerator / jacobian
@@ -430,7 +336,6 @@ def isotropic_staggered_energy_gradient(
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     mu0: float = float(MU0),
-    axis: ClosedAxisGeometry | None = None,
 ) -> MirrorState:
     """Assemble the isotropic discrete first variation without autodiff.
 
@@ -452,7 +357,7 @@ def isotropic_staggered_energy_gradient(
     radius_xi = samples.d_radius_dxi
     field_theta = samples.field_theta_numerator
     field_xi = samples.field_xi_numerator
-    metric = _half_mesh_metric(samples, grid, axis)
+    metric = _half_mesh_metric(samples, grid)
     jacobian = metric.jacobian
     g_thetatheta = metric.g_thetatheta
     g_thetaxi = metric.g_thetaxi
@@ -480,54 +385,23 @@ def isotropic_staggered_energy_gradient(
     field_theta_bar = numerator_bar * (2.0 * g_thetatheta * field_theta + 2.0 * g_thetaxi * field_xi)
     field_xi_bar = numerator_bar * (2.0 * g_thetaxi * field_theta + 2.0 * g_xixi * field_xi)
 
-    if axis is None:
-        radius_bar = numerator_bar * (2.0 * radius * field_theta**2)
-        radius_theta_bar = numerator_bar * (
-            2.0 * radius_theta * field_theta**2 + 2.0 * radius_xi * field_theta * field_xi
-        )
-        radius_xi_bar = numerator_bar * (2.0 * radius_theta * field_theta * field_xi + 2.0 * radius_xi * field_xi**2)
-        radius_radius_s_bar = jacobian_bar * float(grid.dz_dxi)
-    else:
-        e_theta = metric.e_theta
-        e_xi = metric.e_xi
-        radial_direction = metric.radial_direction
-        poloidal_direction = metric.poloidal_direction
-        radial_direction_xi = metric.radial_direction_xi
-        center_shift_s_xyz = metric.center_shift_s_xyz
-        e_theta_bar = numerator_bar[..., None] * (
-            2.0 * field_theta[..., None] ** 2 * e_theta + 2.0 * (field_theta * field_xi)[..., None] * e_xi
-        )
-        e_xi_bar = numerator_bar[..., None] * (
-            2.0 * field_xi[..., None] ** 2 * e_xi + 2.0 * (field_theta * field_xi)[..., None] * e_theta
-        )
-        e_xi_bar += (jacobian_bar * samples.radius_radius_s)[..., None] * jnp.cross(
-            radial_direction, poloidal_direction
-        )
-        e_theta_bar += jacobian_bar[..., None] * jnp.cross(e_xi, center_shift_s_xyz)
-        e_xi_bar += jacobian_bar[..., None] * jnp.cross(center_shift_s_xyz, e_theta)
-        center_shift_s_bar = jacobian_bar[..., None] * jnp.cross(e_theta, e_xi)
-        radius_bar = jnp.sum(e_theta_bar * poloidal_direction, axis=-1)
-        radius_bar += jnp.sum(e_xi_bar * radial_direction_xi, axis=-1)
-        radius_theta_bar = jnp.sum(e_theta_bar * radial_direction, axis=-1)
-        radius_xi_bar = jnp.sum(e_xi_bar * radial_direction, axis=-1)
-        radius_radius_s_bar = jacobian_bar * metric.orientation
+    radius_bar = numerator_bar * (2.0 * radius * field_theta**2)
+    radius_theta_bar = numerator_bar * (
+        2.0 * radius_theta * field_theta**2 + 2.0 * radius_xi * field_theta * field_xi
+    )
+    radius_xi_bar = numerator_bar * (
+        2.0 * radius_theta * field_theta * field_xi + 2.0 * radius_xi * field_xi**2
+    )
+    radius_radius_s_bar = jacobian_bar * float(grid.dz_dxi)
 
     def radial_primitives(trial: MirrorState) -> tuple[Array, ...]:
         trial_samples = _half_mesh_samples(trial, grid, axial_flux_derivative, current_derivative)
-        primitives = (
+        return (
             trial_samples.radius, trial_samples.radius_radius_s,
             trial_samples.d_radius_dtheta, trial_samples.d_radius_dxi,
             trial_samples.field_theta_numerator,
             trial_samples.field_xi_numerator,
         )
-        if axis is not None:
-            _, trial_center_s, trial_center_xi = _closed_center_vectors(
-                trial_samples,
-                grid,
-                axis,
-            )
-            primitives += (trial_center_s, trial_center_xi)
-        return primitives
 
     _, pullback = jax.vjp(radial_primitives, state)
     primitive_bars = (
@@ -538,11 +412,6 @@ def isotropic_staggered_energy_gradient(
         field_theta_bar,
         field_xi_bar,
     )
-    if axis is not None:
-        primitive_bars += (
-            jnp.sum(center_shift_s_bar, axis=2, keepdims=True),
-            jnp.sum(e_xi_bar, axis=2, keepdims=True),
-        )
     return pullback(primitive_bars)[0]
 
 
@@ -585,10 +454,8 @@ class VariationalResidual:
     """Nondimensional generalized forces used for nonlinear convergence."""
 
     radius_gradient: Array
-    center_gradient: Array
     lambda_gradient: Array
     radius_rms: Array
-    center_rms: Array
     lambda_rms: Array
     maximum: Array
 
@@ -638,14 +505,13 @@ def mirror_energy(
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
     mu0: float = float(MU0),
-    axis: ClosedAxisGeometry | None = None,
 ) -> MirrorEnergy:
     """Evaluate mass-conserving isotropic mirror energy."""
 
     if gamma <= 1.0:
         raise ValueError("gamma must be greater than one")
     state = regularize_axis_stream_function(state, grid, axial_flux_derivative)
-    geometry = evaluate_geometry(state, grid) if axis is None else evaluate_closed_geometry(state, grid, axis)
+    geometry = evaluate_geometry(state, grid)
     field = contravariant_field(
         state,
         geometry,
@@ -663,7 +529,6 @@ def mirror_energy(
         grid,
         axial_flux_derivative,
         current_derivative,
-        axis=axis,
     )
     volume_derivative_half = _surface_integral(jacobian_half, grid)
     mass_half = 0.5 * (mass[1:] + mass[:-1])
@@ -798,30 +663,14 @@ def _normalized_variational_residual(
     )
     flux_scale = jnp.maximum(jnp.max(jnp.abs(psi)), jnp.finfo(psi.dtype).tiny)
     lambda_gradient = gradient.lambda_stream * flux_scale / energy_scale
-    center_gradient = (
-        jnp.zeros((0,), dtype=radius_gradient.dtype)
-        if gradient.center_shift is None
-        else gradient.center_shift * radius_scale / energy_scale
-    )
-
     radius_free = radius_gradient[1:-1, :, 1:-1]
-    center_free = center_gradient[:-1] if center_gradient.size else center_gradient
     radius_rms = jnp.sqrt(jnp.mean(radius_free**2))
-    center_rms = (
-        jnp.sqrt(jnp.mean(center_free**2))
-        if center_free.size
-        else jnp.asarray(0.0, dtype=radius_gradient.dtype)
-    )
     lambda_rms = jnp.sqrt(jnp.mean(lambda_gradient**2))
     maximum = jnp.maximum(jnp.max(jnp.abs(radius_free)), jnp.max(jnp.abs(lambda_gradient)))
-    if center_free.size:
-        maximum = jnp.maximum(maximum, jnp.max(jnp.abs(center_free)))
     return VariationalResidual(
         radius_gradient=radius_gradient,
-        center_gradient=center_gradient,
         lambda_gradient=lambda_gradient,
         radius_rms=radius_rms,
-        center_rms=center_rms,
         lambda_rms=lambda_rms,
         maximum=maximum,
     )
@@ -836,10 +685,7 @@ def isotropic_force_residual(
     mass_profile: Array = 0.0,
     current_derivative: Array = 0.0,
     gamma: float = 5.0 / 3.0,
-    axis: ClosedAxisGeometry | None = None,
     mu0: float = float(MU0),
-    closed: bool = False,
-    characteristic_length: float | Array | None = None,
 ) -> IsotropicForceResidual:
     """Reconstruct ``curl(B)/mu0 x B - grad(p)`` on full radial surfaces.
 
@@ -850,8 +696,6 @@ def isotropic_force_residual(
 
     if gamma <= 1.0:
         raise ValueError("gamma must be greater than one")
-    if closed != (axis is not None):
-        raise ValueError("closed force reconstruction requires its closed-axis geometry")
 
     geometry, field = energy.geometry, energy.field
     half = _half_mesh_force_fields(
@@ -861,7 +705,6 @@ def isotropic_force_residual(
         mass_profile=mass_profile,
         current_derivative=current_derivative,
         gamma=gamma,
-        axis=axis,
     )
     ds = float(grid.s[1] - grid.s[0])
     jacobian = 0.5 * (half.jacobian[:-1] + half.jacobian[1:])
@@ -912,9 +755,8 @@ def isotropic_force_residual(
         axis=-2,
     )
     force_covariant = jnp.stack([force_s, force_theta, force_xi], axis=-1)
-    axial_slice = slice(None) if closed else slice(1, -1)
-    # The axis and side are constrained. Open mirrors also constrain end cuts;
-    # A closed periodic validation case norms every axial point.
+    axial_slice = slice(1, -1)
+    # The magnetic axis, lateral boundary, and open end cuts are constrained.
     force_active = force_covariant[1:-1, :, axial_slice]
     inverse_metric = jnp.linalg.inv(metric[1:-1, :, axial_slice])
     force_squared = jnp.einsum(
@@ -931,11 +773,7 @@ def isotropic_force_residual(
     )
     physical_rms = jnp.sqrt(jnp.sum(weights * force_squared) / jnp.sum(weights))
     component_rms = jnp.sqrt(jnp.sum(weights[..., None] * force_active**2, axis=(0, 1, 2)) / jnp.sum(weights))
-    length = (
-        jnp.asarray(characteristic_length)
-        if characteristic_length is not None
-        else jnp.asarray(float(grid.z[-1] - grid.z[0]))
-    )
+    length = jnp.asarray(float(grid.z[-1] - grid.z[0]))
     magnetic_force_scale = energy.b_squared[1:-1, :, axial_slice] / (float(mu0) * length)
     reference_rms = jnp.sqrt(jnp.sum(weights * magnetic_force_scale**2) / jnp.sum(weights))
     normalized_rms = physical_rms / jnp.maximum(reference_rms, jnp.finfo(physical_rms.dtype).tiny)
@@ -950,8 +788,7 @@ def isotropic_force_residual(
         regional_reference = jnp.sqrt(jnp.sum(regional_weights * magnetic_force_scale**2) / denominator)
         return regional_force / jnp.maximum(regional_reference, jnp.finfo(physical_rms.dtype).tiny)
 
-    active_xi = jnp.arange(force_active.shape[2])
-    end_collar = jnp.zeros_like(active_xi, dtype=bool) if closed else jnp.abs(jnp.asarray(grid.xi)[1:-1]) >= 0.8
+    end_collar = jnp.abs(jnp.asarray(grid.xi)[1:-1]) >= 0.8
     axial_core = ~end_collar
     bulk_normalized_rms = regional_normalized_rms(active_s >= 0.2, axial_core)
     axis_normalized_rms = regional_normalized_rms(

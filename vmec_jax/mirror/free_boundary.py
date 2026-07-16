@@ -86,8 +86,6 @@ class _SplineFreeBoundaryVectorizer:
     ) -> "_SplineFreeBoundaryVectorizer":
         """Build the square free-equilibrium coefficient layout."""
 
-        if discretization.closed:
-            raise ValueError("open free boundary requires a clamped spline discretization")
         coefficients = np.asarray(boundary.radius_coefficients, dtype=float)
         expected = (discretization.grid.ntheta, discretization.coefficient_count)
         if coefficients.shape != expected:
@@ -601,8 +599,6 @@ def solve_free_boundary_cli(
     """Solve an open free-boundary mirror in longitudinal B-spline coefficients."""
 
     grid = discretization.grid
-    if discretization.closed:
-        raise ValueError("free-boundary mirrors require an open spline discretization")
     if grid.ntheta != 1:
         raise ValueError("free-boundary mirrors currently support only axisymmetric geometry")
     if grid.ns != config.resolution.ns or grid.ntheta != config.resolution.ntheta:
@@ -790,10 +786,8 @@ def solve_free_boundary_cli(
     lambda_weak = active_weak[vectorizer.state_vectorizer.radius_size :]
     plasma_staggered_weak_force = VariationalResidual(
         radius_gradient=full_weak_force.radius_gradient,
-        center_gradient=full_weak_force.center_gradient,
         lambda_gradient=full_weak_force.lambda_gradient,
         radius_rms=jnp.asarray(np.sqrt(np.mean(radius_weak**2))),
-        center_rms=jnp.asarray(0.0),
         lambda_rms=jnp.asarray(np.sqrt(np.mean(lambda_weak**2)) if lambda_weak.size else 0.0),
         maximum=jnp.asarray(np.max(np.abs(active_weak))),
     )
