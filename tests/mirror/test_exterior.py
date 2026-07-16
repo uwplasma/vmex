@@ -12,7 +12,6 @@ import jax.numpy as jnp  # noqa: E402
 from vmec_jax.mirror.exterior import (  # noqa: E402
     _spectral_side_density_samples,
     _unit_gauss_legendre,
-    duffy_triangle_single_layer,
 )
 from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
@@ -25,7 +24,6 @@ from vmec_jax.mirror.exterior_bie import (  # noqa: E402
     axisymmetric_plasma_external_neumann,
     axisymmetric_exterior_lateral_field,
     laplace_reduced_green_boundary_residual,
-    laplace_reduced_exterior_gradient_off_surface,
     solve_reduced_exterior_laplace_neumann,
     solve_axisymmetric_exterior_vacuum,
 )
@@ -148,7 +146,6 @@ def test_cap_grading_clusters_rim_without_changing_cylinder_integrals() -> None:
 
 def test_reduced_exterior_neumann_solve_recovers_decaying_dipole() -> None:
     boundary_errors = []
-    field_errors = []
     lateral_errors = []
     for ns, nxi, ntheta in (
         (9, 13, 16),
@@ -178,13 +175,6 @@ def test_reduced_exterior_neumann_solve_recovers_decaying_dipole() -> None:
         neumann = surface.reduce_collocation_values(jnp.sum(gradient_full * surface.collocation_normals, axis=1))
         result = solve_reduced_exterior_laplace_neumann(surface, neumann)
         boundary_errors.append(float(jnp.linalg.norm(result.boundary_potential - exact) / jnp.linalg.norm(exact)))
-        gradient = laplace_reduced_exterior_gradient_off_surface(
-            surface,
-            result.boundary_potential,
-            neumann,
-            jnp.asarray([[0.0, 0.0, 2.0]]),
-        )
-        field_errors.append(float(jnp.abs(gradient[0, 2] + 0.25) / 0.25))
         lateral = axisymmetric_exterior_lateral_field(
             surface,
             result.boundary_potential,
@@ -204,15 +194,12 @@ def test_reduced_exterior_neumann_solve_recovers_decaying_dipole() -> None:
         )
         lateral_error = jnp.linalg.norm(lateral - exact_lateral) / jnp.linalg.norm(exact_lateral)
         lateral_errors.append(float(lateral_error))
-        np.testing.assert_allclose(gradient[:, :2], 0.0, atol=2.0e-14)
         assert float(result.compatibility_error) < 2.0e-14
         assert float(result.condition_number) < 5.0
         assert float(jnp.linalg.norm(result.residual)) < 3.0e-14
 
     assert all(fine < coarse for coarse, fine in zip(boundary_errors[:-1], boundary_errors[1:], strict=True))
     assert boundary_errors[-1] < 3.5e-2
-    assert all(fine < coarse for coarse, fine in zip(field_errors[:-1], field_errors[1:], strict=True))
-    assert field_errors[-1] < 8.0e-3
     assert all(fine < coarse for coarse, fine in zip(lateral_errors[:-1], lateral_errors[1:], strict=True))
     assert lateral_errors[-1] < 4.0e-2
 
@@ -245,20 +232,11 @@ def test_spectral_side_density_improves_exterior_dipole() -> None:
             spectral_side_density=spectral,
         )
         boundary_error = jnp.linalg.norm(result.boundary_potential - exact) / jnp.linalg.norm(exact)
-        recovered = laplace_reduced_exterior_gradient_off_surface(
-            surface,
-            result.boundary_potential,
-            neumann,
-            jnp.asarray([[0.0, 0.0, 2.0]]),
-            spectral_side_density=spectral,
-        )
-        field_error = jnp.abs(recovered[0, 2] + 0.25) / 0.25
-        errors.append((float(boundary_error), float(field_error)))
+        errors.append(float(boundary_error))
         assert float(result.condition_number) < 5.0
         assert float(jnp.linalg.norm(result.residual)) < 3.0e-14
 
-    assert errors[1][0] < 0.3 * errors[0][0]
-    assert errors[1][1] < 0.7 * errors[0][1]
+    assert errors[1] < 0.3 * errors[0]
 
 
 def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:
@@ -298,34 +276,6 @@ def test_panel_mesh_is_watertight_oriented_and_convergent() -> None:
 
     assert errors[1] < 0.3 * errors[0]
     assert errors[1] < 7.0e-3
-
-
-def test_duffy_rule_converges_for_constant_and_linear_density() -> None:
-    vertices = jnp.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    exact_constant = np.sqrt(2.0) * np.log1p(np.sqrt(2.0)) / (4.0 * np.pi)
-    errors = []
-    for order in (2, 4, 8, 16):
-        constant = duffy_triangle_single_layer(vertices, jnp.ones(3), order=order)
-        linear = duffy_triangle_single_layer(vertices, jnp.asarray([0.0, 1.0, 1.0]), order=order)
-        errors.append(abs(float(constant) - exact_constant))
-        np.testing.assert_allclose(linear, 0.5 * constant, rtol=3.0e-15)
-
-    assert all(right < left for left, right in zip(errors[:-1], errors[1:], strict=True))
-    assert errors[-1] < 2.0e-14
-
-
-def test_duffy_rule_is_differentiable_in_geometry_and_density() -> None:
-    vertices = jnp.asarray([[0.0, 0.0, 0.0], [0.8, 0.1, 0.0], [-0.1, 0.7, 0.2]])
-    density = jnp.asarray([0.4, -0.2, 0.7])
-
-    geometry_gradient, density_gradient = jax.grad(
-        lambda xyz, values: duffy_triangle_single_layer(xyz, values, order=10),
-        argnums=(0, 1),
-    )(vertices, density)
-
-    assert np.all(np.isfinite(np.asarray(geometry_gradient)))
-    assert np.all(np.isfinite(np.asarray(density_gradient)))
-    np.testing.assert_allclose(jnp.sum(geometry_gradient, axis=0), 0.0, atol=3.0e-15)
 
 
 @pytest.mark.parametrize("ntheta", [5, 7])

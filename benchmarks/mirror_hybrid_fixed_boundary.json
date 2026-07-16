@@ -1,106 +1,39 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_hybrid_fixed_boundary/4",
+  "schema": "vmec_jax.benchmark.mirror/1",
+  "model": "fixed-closed-stellarator-mirror-hybrid",
+  "status": "deferred",
   "provenance": {
-    "measurement_commit": "09fb4f4b",
-    "measurement_dirty": false,
-    "hardware": "Apple M3 Max CPU, float64 JAX",
-    "basis": "periodic cubic B-spline axis and state; exact trigonometric poloidal modes",
-    "promotion_status": "deferred_after_t9b_gate"
-  },
-  "case": {
-    "description": "zero-current half-straight circular-section hybrid",
-    "straight_length": 6.0,
-    "return_radius": 2.5,
-    "racetrack_fraction": 0.5,
-    "lcfs_radius": 0.25,
-    "axial_flux_derivative": 0.03,
-    "current_derivative": 0.0,
+    "measurement_commit": "56d7c4b7",
+    "hardware": "Apple CPU and NVIDIA RTX A4000",
+    "basis": "periodic cubic B-spline axis and LCFS, Fourier poloidal basis",
     "ftol": 1e-12
   },
-  "same_geometry_qorder3": {
+  "same_geometry": {
     "controls": [16, 32, 64],
-    "ns": 5,
-    "mpol": 5,
-    "maximum_geometry_transfer_error": [0.0, 4.53e-14, 2.01e-13],
-    "variational_max": [3.48e-15, 8.09e-15, 5.32e-13],
-    "weak_max": [3.48e-15, 8.09e-15, 5.32e-13],
-    "strong_force": [0.0527702, 0.10756208, 0.02365282],
-    "axis_strong_force": [0.04863781, 0.10304711, 0.02301172],
-    "true_linear_residual": [3.36e-12, 9.95e-11, 2.36e-11],
-    "linear_iterations": [5, 48, 11],
-    "minimum_jacobian": [0.09001871, 0.08903466, 0.08841468],
-    "wall_s": [8.73, 18.98, 21.47],
-    "peak_rss_gib": 4.27
+    "quadrature_order_3_strong": [0.0527702, 0.1075621, 0.0236528],
+    "quadrature_order_4_strong": [0.0527961, 0.1071398, 0.0235340],
+    "finest_ns9_mpol7_strong": {"q3": 0.0233920, "q4": 0.0232650},
+    "maximum_exact_transfer_error": 2e-13
   },
-  "finest_resolution_matrix": [
-    {
-      "quadrature_order": 3,
-      "ns": 5,
-      "mpol": 7,
-      "variational_max": 1.85e-13,
-      "strong_force": 0.02365283,
-      "true_linear_residual": 6.35e-13,
-      "linear_iterations": 2,
-      "wall_s": 23.99,
-      "peak_rss_gib": 2.13
-    },
-    {
-      "quadrature_order": 3,
-      "ns": 9,
-      "mpol": 7,
-      "variational_max": 8.78e-14,
-      "strong_force": 0.02339195,
-      "true_linear_residual": 2.63e-10,
-      "linear_iterations": 2507,
-      "wall_s": 205.39,
-      "peak_rss_gib": 4.86
-    },
-    {
-      "quadrature_order": 4,
-      "ns": 5,
-      "mpol": 7,
-      "variational_max": 1.89e-13,
-      "strong_force": 0.02353404,
-      "true_linear_residual": 6.63e-13,
-      "linear_iterations": 2,
-      "wall_s": 31.63,
-      "peak_rss_gib": 2.34
-    },
-    {
-      "quadrature_order": 4,
-      "ns": 9,
-      "mpol": 7,
-      "variational_max": 8.82e-14,
-      "strong_force": 0.02326496,
-      "true_linear_residual": 2.39e-10,
-      "linear_iterations": 2506,
-      "wall_s": 259.97,
-      "peak_rss_gib": 5.23
-    }
-  ],
-  "preconditioner_regression": {
-    "production_variables": 2524,
+  "preconditioner": {
+    "variables": 2524,
     "colored_probes": 634,
-    "factor_action_true_residual": 3.1e-11,
-    "controls32_linear_iterations_before": 7383,
-    "controls32_linear_iterations_after": 37,
-    "controls32_true_linear_residual_before": 0.0127,
-    "controls32_true_linear_residual_after": 9.75e-11,
-    "ns9_cpu_wall_s": 136.3,
-    "ns9_gpu_wall_s": 773.33,
-    "ns9_gpu_peak_rss_gib": 2.6,
-    "ns9_cpu_gpu_strong_force_absolute_difference": 2.7e-14,
-    "gpu_assessment": "numerically equivalent but slower because SciPy GMRES crosses the device boundary"
+    "controls32_krylov_before": 7383,
+    "controls32_krylov_after": 37,
+    "controls64_krylov_after": 11,
+    "factor_action_relative_residual": 3.1e-11,
+    "cpu_gpu_strong_absolute_difference": 2.7e-14,
+    "cpu_wall_s": 136.3,
+    "gpu_wall_s": 773.3,
+    "gpu_peak_rss_gib": 2.604
   },
   "gates": {
-    "exact_same_geometry_transfer": true,
-    "ftol_and_weak_parity": true,
-    "true_linear_residual_below_1e-8": true,
+    "exact_transfer": true,
+    "ftol_and_weak_force": true,
+    "linear_residual": true,
     "positive_geometry": true,
-    "finest_strong_force_below_5e-2": true,
-    "radial_poloidal_quadrature_stability": true,
-    "below_30_minutes_and_8_gib": true,
-    "monotone_same_geometry_strong_force": false
-  },
-  "assessment": "The physical state and scalable solver pass every absolute and cross-grid gate, but both quadrature orders reproduce a 16-to-32-control strong-force increase before convergence at 64 controls. T9b therefore defers the fixed closed hybrid and retains only the circular closed limit as validation evidence in this PR."
+    "finest_strong_below_0.05": true,
+    "resource_limits": true,
+    "monotone_same_geometry_refinement": false
+  }
 }

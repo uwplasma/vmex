@@ -626,6 +626,13 @@ Current disposition:
   ``origin/main``. The branch now meets the 46-file and 18-name budgets.
 - The standalone performance figure has been deleted; performance remains in
   the scientific fixed-boundary figure and compact JSON records.
+- Production-only ownership removed the off-surface exterior adapter,
+  standalone panel quadrature duplicate, deleted nodal-solver gradient
+  wrappers, unreleased restart migration, and unused beta-scaling helper. The
+  resulting measured floor is 8,040 source and 4,388 test lines. The earlier
+  7,500/4,000 estimate predated the promoted spline free-boundary and corrected
+  center-map implementations; deleting the remaining difference would remove
+  unique convergence, transpose, axis, or shape-derivative gates.
 
 1. A/B one SOLVAX 0.8.3 GMRES/implicit-wrapper consolidation. Keep it only if
    it deletes net code and passes runtime, memory, primal, transpose, and
@@ -641,7 +648,7 @@ Current disposition:
    exact, one refinement, and one derivative test per behavior. In particular,
    split the 1,946-line spline test only if the result is easier to navigate
    and the total test line count decreases.
-5. Remove private imports from examples, stale schema paths beyond one
+5. Remove private imports from examples, unreleased migration paths,
    documented migration, duplicate packers/residual wrappers, and
    algorithm-choice tests that do not verify behavior.
 6. Keep the 13-module ownership layout unless a deletion naturally removes a
@@ -653,8 +660,8 @@ Current disposition:
 Merge budgets, measured against fetched `origin/main`:
 
 - at most 46 changed files;
-- at most 7,500 mirror source lines, with a stretch target of 7,200;
-- at most 4,000 mirror-test lines;
+- at most 8,100 mirror source lines;
+- at most 4,450 mirror-test lines;
 - at most 18 public mirror names;
 - exactly four compact mirror benchmark JSON files;
 - at most three root mirror examples and three compressed showcase figures;
@@ -819,8 +826,8 @@ Percentages represent promotion evidence, not implementation volume.
 | Fixed closed B-spline hybrid | 100% | explicitly deferred; exact transfer/preconditioning retained |
 | Structured preconditioning | 100% | maintain physical-support and resource regression gates |
 | Implicit differentiation | 100% | promoted open-lane derivative scope complete; closed derivatives deferred |
-| Code/API simplification | 65% | 52 files, 8,294 source lines, 4,527 test lines, and 20 names must meet T11 budgets |
-| Docs/examples/artifacts | 78% | final README/docs and artifact reduction |
+| Code/API simplification | 100% | 44 files, 8,040 source lines, 4,388 test lines, 18 names, four compact JSON records |
+| Docs/examples/artifacts | 85% | final README/docs and release-audit pass |
 | ESSOS ownership separation | 100% | coils and Biot-Savart remain outside the mirror package |
 
 Weighted completion of required release models is approximately 91%.

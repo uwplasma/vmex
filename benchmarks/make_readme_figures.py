@@ -26,8 +26,6 @@ Produces (into ``docs/_static/figures/``):
 - ``readme_equilibrium_showcase.png`` — flux surfaces, 3-D boundary geometry
   coloured by ``|B|``, and ``|B|`` in Boozer coordinates on the LCFS (jet),
   for the bundled quick-start case (solves it in-process).
-- ``mirror_fixed_boundary_3d.png`` — fixed-boundary mirror refinement,
-  variational residuals, and measured CPU/GPU placement.
 - ``readme_single_stage.png``         — single-stage plasma + coil optimization
   (vacuum and finite-beta columns): boundary initial-vs-final, and the final
   LCFS coloured by ``|B|`` inside the ESSOS coil filaments.  Runs
@@ -37,7 +35,7 @@ Produces (into ``docs/_static/figures/``):
 
 Usage:
     python benchmarks/make_readme_figures.py
-        [--only runtime,convergence,optimization,qi,precond,showcase,mirror,single_stage]
+        [--only runtime,convergence,optimization,qi,precond,showcase,single_stage]
         [--outdir docs/_static/figures]
 
 Figures are written uncompressed; compress before committing:
@@ -430,100 +428,7 @@ def make_convergence_figure(out: Path) -> None:
 
 
 # --------------------------------------------------------------------------
-# 4. Fixed-boundary mirror convergence
-# --------------------------------------------------------------------------
-
-def make_mirror_figure(out: Path) -> None:
-    data = json.loads(
-        (REPO / "benchmarks" / "mirror_fixed_boundary.json").read_text()
-    )
-    axisymmetric = data["axisymmetric_finite_beta"]["runs"]
-    nonaxisymmetric = data["nonaxisymmetric_vacuum"]
-
-    fig, axes = plt.subplots(2, 2, figsize=(8.6, 6.3), dpi=160)
-    ax = axes[0, 0]
-    ns = np.asarray([run["ns"] for run in axisymmetric])
-    ax.semilogy(ns, [run["strong_force_all"] for run in axisymmetric],
-                "o-", color=BLUE, lw=1.8, ms=5, label="strong force")
-    ax.semilogy(ns, [run["field_relative_rms"] for run in axisymmetric],
-                "s-", color=YELLOW, lw=1.6, ms=4.5, label="field parity")
-    ax.semilogy(ns, [run["variational_max"] for run in axisymmetric],
-                "^-", color=GREEN_TEXT, lw=1.4, ms=4.5,
-                label="variational")
-    ax.axhline(1.0e-12, color=BASELINE, ls="--", lw=1.0)
-    ax.set(xlabel="radial surfaces  ns", ylabel="normalized residual / error")
-    ax.set_title("Axisymmetric finite-beta refinement", loc="left", fontsize=11)
-    ax.grid(True)
-    ax.legend(fontsize=7.5)
-
-    ax = axes[0, 1]
-    width = 0.34
-    indices = np.arange(len(axisymmetric))
-    nodal = ax.bar(indices - width / 2,
-                   [run["nodal_wall_s"] for run in axisymmetric],
-                   width, color=BASELINE, label="CGL reference")
-    spline = ax.bar(indices + width / 2,
-                    [run["spline_wall_s"] for run in axisymmetric],
-                    width, color=BLUE, label="B-spline")
-    ax.bar_label(nodal, fmt="%.1f", padding=2, fontsize=7, color=INK2)
-    ax.bar_label(spline, fmt="%.1f", padding=2, fontsize=7, color=INK2)
-    ax.set_xticks(indices, [f"ns={value}" for value in ns])
-    ax.set(ylabel="cold wall time (s)")
-    ax.set_title("Coefficient solve preserves parity", loc="left", fontsize=11)
-    ax.grid(axis="y")
-    ax.legend(fontsize=8)
-
-    ax = axes[1, 0]
-    rotating = nonaxisymmetric["rotating_ellipse"]
-    sflm = nonaxisymmetric["straight_field_line_mirror"]
-    rotating_columns = {name: index for index, name in enumerate(rotating["combined_columns"])}
-    sflm_columns = {name: index for index, name in enumerate(sflm["combined_columns"])}
-    rotating_runs = np.asarray(rotating["combined_runs"])
-    sflm_runs = np.asarray(sflm["combined_runs"])
-    ax.semilogy(rotating_runs[:, rotating_columns["ns"]],
-                rotating_runs[:, rotating_columns["strong_force"]],
-                "o-", color=RED, lw=1.8, ms=5, label="rotating ellipse")
-    ax.semilogy(sflm_runs[:, sflm_columns["ns"]],
-                sflm_runs[:, sflm_columns["strong_force"]],
-                "s-", color=VIOLET, lw=1.8, ms=5, label="SFLM")
-    ax.scatter([rotating_runs[-1, rotating_columns["ns"]]],
-               [rotating["half_radius_fine_grid"]["strong_force_all"]],
-               marker="x", s=45, color=RED, label="ellipse, half radius")
-    ax.scatter([sflm_runs[-2, sflm_columns["ns"]]],
-               [sflm["half_radius_fine_grid"]["strong_force_all"]],
-               marker="x", s=45, color=VIOLET, label="SFLM, half radius")
-    ax.axhline(5.0e-2, color=BASELINE, ls="--", lw=1.0, label="release gate")
-    ax.set(xlabel="radial surfaces  ns", ylabel="normalized strong force")
-    ax.set_title("Nonaxisymmetric force convergence", loc="left", fontsize=11)
-    ax.grid(True)
-    ax.legend(fontsize=7.2, ncols=2)
-
-    ax = axes[1, 1]
-    ax.plot(rotating_runs[:, rotating_columns["ns"]],
-            rotating_runs[:, rotating_columns["linear_iterations"]],
-            "o-", color=RED, lw=1.8, ms=4.5, label="rotating ellipse")
-    ax.plot(sflm_runs[:, sflm_columns["ns"]],
-            sflm_runs[:, sflm_columns["linear_iterations"]],
-            "s-", color=VIOLET, lw=1.8, ms=4.5, label="SFLM")
-    ax.set(xlabel="radial surfaces  ns", ylabel="Krylov iterations")
-    ax.set_title("Structured linear-solve scaling", loc="left", fontsize=11)
-    ax.grid(True)
-    ax.legend(fontsize=8)
-
-    for panel in axes.ravel():
-        for side in ("top", "right"):
-            panel.spines[side].set_visible(False)
-    fig.suptitle("Fixed-boundary mirror: promoted refinement evidence",
-                 x=0.07, ha="left", fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
-    fig.savefig(out, dpi=160, facecolor=SURFACE, transparent=False)
-    plt.close(fig)
-    _compress_png(out)
-    print("wrote", out)
-
-
-# --------------------------------------------------------------------------
-# 5. Optimization panels.  Two figures, both with three rows (boundary, 3-D
+# 4. Optimization panels.  Two figures, both with three rows (boundary, 3-D
 #    LCFS coloured by |B|, and |B| in Boozer coordinates on the LCFS):
 #      readme_optimization.png — quasisymmetry (QA/QH/QP), labelled with the
 #        QS residual;
@@ -1137,7 +1042,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--only",
-        default="runtime,convergence,optimization,qi,precond,showcase,mirror,single_stage")
+        default="runtime,convergence,optimization,qi,precond,showcase,single_stage")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
     args = ap.parse_args()
     outdir = Path(args.outdir)
@@ -1156,8 +1061,6 @@ def main() -> None:
         make_precond_figure(outdir / "readme_precond.png")
     if "showcase" in which:
         make_showcase_figure(outdir / "readme_equilibrium_showcase.png")
-    if "mirror" in which:
-        make_mirror_figure(outdir / "mirror_fixed_boundary_3d.png")
     if "single_stage" in which:
         make_single_stage_figure(outdir / "readme_single_stage.png")
 

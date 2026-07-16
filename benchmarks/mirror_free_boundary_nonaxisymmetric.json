@@ -1,37 +1,24 @@
 {
-  "schema": "vmec_jax.benchmark.mirror_free_boundary_nonaxisymmetric/6",
-  "status": "deferred_negative_evidence",
-  "model": "nonaxisymmetric free-boundary straight-axis mirror",
-  "reason": "local theta-mode observables did not converge and dense host Jacobian scaling is prohibitive",
-  "historical_case": {
-    "external_field": "ESSOS two-coil mirror with opposite transverse offsets",
-    "current_derivative": "1e-3 * s",
-    "betas": [0.0, 0.5],
-    "ftol": 1e-12,
+  "schema": "vmec_jax.benchmark.mirror/1",
+  "model": "free-open-nonaxisymmetric",
+  "status": "deferred",
+  "provenance": {
+    "measurement_commit": "f9eb6a4443d9c92ba0bff36aa1c1cfb77bd5bf21",
     "hardware": "NVIDIA RTX A4000",
-    "note": "states predate the corrected magnetic-axis regularity map"
+    "note": "historical states predate the corrected magnetic-axis map"
   },
   "grid_study": {
     "ns_ntheta_nxi": [[5, 3, 5], [7, 5, 7], [9, 7, 9]],
     "beta_pair_wall_s": [292.699, 943.944, 2994.901],
     "peak_rss_mib": [2807.38, 4677.04, 7524.89],
-    "coarse_to_medium_global_relative_change_max": 0.0096,
-    "coarse_to_medium_center_m1_relative_change": {
-      "beta0": 0.8134,
-      "beta50": 0.7268
-    }
+    "global_relative_change_max": 0.0096,
+    "center_m1_relative_change": {"beta0": 0.8134, "beta50": 0.7268}
   },
   "gates": {
     "nonlinear_residual": true,
     "global_observables": true,
     "local_mode_refinement": false,
-    "runtime_under_30_min_per_beta_pair": false,
-    "memory_under_8_gib": true,
+    "runtime": false,
     "supported_api": false
-  },
-  "promotion_requires": [
-    "structured exterior Jacobian or equivalent matrix-free preconditioner",
-    "corrected-axis three-grid local-mode convergence",
-    "independent force and interface diagnostics"
-  ]
+  }
 }

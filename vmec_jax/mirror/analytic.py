@@ -32,15 +32,6 @@ class QuadrupoleField(NamedTuple):
     sine: Array
 
 
-class LongThinScaling(NamedTuple):
-    """Dimensionless ordering estimates, not a finite-beta equilibrium."""
-
-    beta: Array
-    inverse_aspect_ratio: Array
-    long_thin_order: Array
-    diamagnetic_field_ratio: Array
-
-
 def _rotation(angle: Array) -> Array:
     cosine, sine = jnp.cos(angle), jnp.sin(angle)
     return jnp.asarray(((cosine, -sine), (sine, cosine)))
@@ -368,32 +359,10 @@ class StraightFieldLineMirror:
         return (1.0 + magnitude) / (1.0 - magnitude)
 
 
-def long_thin_beta_scaling(beta: Array, inverse_aspect_ratio: Array) -> LongThinScaling:
-    """Return bounded long-thin order estimates for validation, not a solve.
-
-    The Goodman-Freidberg-Lane ordering treats beta and
-    ``lambda=(radius/length)^2`` as competing small parameters. The SFLM
-    literature reports its first-order beta result only through beta 0.3, so
-    this helper rejects larger values instead of extrapolating it.
-    """
-
-    beta_value = jnp.asarray(beta)
-    epsilon = jnp.asarray(inverse_aspect_ratio)
-    if not isinstance(beta_value, jax.core.Tracer):
-        if bool(jnp.any((beta_value < 0.0) | (beta_value > 0.3))):
-            raise ValueError("long-thin beta scaling is restricted to 0 <= beta <= 0.3")
-    if not isinstance(epsilon, jax.core.Tracer):
-        if bool(jnp.any((epsilon <= 0.0) | (epsilon > 0.2))):
-            raise ValueError("inverse_aspect_ratio must satisfy 0 < epsilon <= 0.2")
-    return LongThinScaling(beta_value, epsilon, epsilon**2, jnp.sqrt(1.0 - beta_value))
-
-
 __all__ = [
     "AxisymmetricPolynomialMirror",
     "FirstOrderSection",
-    "LongThinScaling",
     "QuadrupoleField",
     "RotatingEllipseParaxial",
     "StraightFieldLineMirror",
-    "long_thin_beta_scaling",
 ]

@@ -731,21 +731,6 @@ def interface_residual(
     )
 
 
-def fixed_boundary_energy_gradient(
-    state: MirrorState,
-    boundary: MirrorBoundary,
-    grid: "MirrorGrid",
-    **energy_kwargs: Any,
-) -> MirrorState:
-    """Differentiate total energy through fixed-boundary projection."""
-
-    def objective(trial: MirrorState) -> Array:
-        projected = project_fixed_boundary_state(trial, boundary, grid)
-        return mirror_energy(projected, grid, **energy_kwargs).total
-
-    return jax.grad(objective)(state)
-
-
 def isotropic_staggered_fixed_boundary_gradient(
     state: MirrorState,
     boundary: MirrorBoundary,
@@ -782,32 +767,6 @@ def isotropic_staggered_weak_residual(
         grid,
         **energy_kwargs,
     )
-    return _normalized_variational_residual(
-        gradient,
-        energy.total,
-        boundary,
-        grid,
-        axial_flux_derivative=energy_kwargs["axial_flux_derivative"],
-    )
-
-
-def fixed_boundary_variational_residual(
-    state: MirrorState,
-    boundary: MirrorBoundary,
-    grid: "MirrorGrid",
-    **energy_kwargs: Any,
-) -> VariationalResidual:
-    """Return normalized fixed-boundary energy-gradient force components.
-
-    This is the mirror analogue of VMEC's variational ``fsqr/fsqz/fsql``
-    convergence residual.  The independently differenced tensor force from
-    :func:`isotropic_force_residual` remains a discretization-verification
-    diagnostic and should converge under grid refinement.
-    """
-
-    projected = project_fixed_boundary_state(state, boundary, grid)
-    energy = mirror_energy(projected, grid, **energy_kwargs)
-    gradient = fixed_boundary_energy_gradient(projected, boundary, grid, **energy_kwargs)
     return _normalized_variational_residual(
         gradient,
         energy.total,

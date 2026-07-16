@@ -13,7 +13,6 @@ from .exterior import (
     ClosedMirrorSurface,
     build_closed_mirror_surface,
     panel_green_boundary_residual,
-    panel_green_gradient_off_surface,
 )
 Array = Any
 
@@ -287,30 +286,6 @@ def _exterior_boundary_residual(
         neumann,
         order=order,
         spectral_side_density=spectral_side_density,
-    )
-
-
-def laplace_reduced_exterior_gradient_off_surface(
-    surface: ClosedMirrorSurface,
-    dirichlet: Array,
-    neumann: Array,
-    targets: Array,
-    *,
-    order: int = 8,
-    spectral_side_density: bool = False,
-) -> Array:
-    """Gradient of the decaying exterior representation."""
-
-    return -panel_green_gradient_off_surface(
-        surface.collocation_xyz,
-        np.asarray(surface.triangle_connectivity),
-        surface.expand_reduced_values(dirichlet),
-        surface.expand_reduced_values(neumann),
-        targets,
-        order=order,
-        lateral_shape=surface.lateral_xyz.shape[:2],
-        spectral_side_density=spectral_side_density,
-        axisymmetric_side=surface.reduced_size < surface.collocation_xyz.shape[0],
     )
 
 

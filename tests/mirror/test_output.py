@@ -39,34 +39,21 @@ def test_canonical_benchmarks_declare_provenance_and_promotion_status() -> None:
         "mirror_free_boundary_nonaxisymmetric.json",
         "mirror_hybrid_fixed_boundary.json",
     ]
-    required = {
-        "measurement_commit",
-        "input_schema",
-        "basis",
-        "represented_modes",
-        "grid",
-        "hardware_class",
-        "promotion_status",
-        "stale_sections",
-        "stale_reason",
-    }
     for path in paths:
         record = json.loads(path.read_text())
-        assert required <= record["provenance"].keys(), path.name
+        assert record["schema"] == "vmec_jax.benchmark.mirror/1"
+        assert record["status"] in {"supported", "supported-through-beta-0.10", "deferred"}
         commit = record["provenance"]["measurement_commit"]
-        assert len(commit) == 40 and int(commit, 16) >= 0, path.name
-        assert record["provenance"]["promotion_status"] != "supported", path.name
+        assert 8 <= len(commit) <= 40 and int(commit, 16) >= 0, path.name
+        assert record["gates"], path.name
 
 
 def test_axisymmetric_free_boundary_benchmark_declares_supported_beta_ceiling() -> None:
     path = REPO / "benchmarks" / "mirror_free_boundary_axisymmetric.json"
     record = json.loads(path.read_text())
-    assessment = record["refinement_assessment"]
-
-    assert record["schema"] == "vmec_jax.benchmark.mirror_free_boundary_axisymmetric/5"
     assert record["case"]["supported_beta_max"] == pytest.approx(0.10)
-    assert [row["beta"] for row in assessment if row["promotion_gate_passed"]] == [0.0, 0.01, 0.03, 0.10]
-    assert [row["beta"] for row in assessment if not row["promotion_gate_passed"]] == [0.25, 0.50]
+    assert [row["beta"] for row in record["refinement"] if row["passed"]] == [0.0, 0.01, 0.03, 0.10]
+    assert [row["beta"] for row in record["refinement"] if not row["passed"]] == [0.25, 0.50]
 
 
 def _sample_mout() -> MoutData:

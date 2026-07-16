@@ -249,11 +249,10 @@ flux conservation, and
    B_0(z)=\frac{B_0(0)}{1-z^2/c^2}, \qquad
    \mathcal E(z)=\frac{1+|z/c|}{1-|z/c|}.
 
-Both fixtures require a thin tube and ``|z|<c``. The separate
-``long_thin_beta_scaling`` helper records the simultaneous
-``beta`` and ``lambda=(a/L)^2`` ordering only for ``beta <= 0.3`` and
-``a/L <= 0.2``. Its ``sqrt(1-beta)`` field ratio is an asymptotic pressure-
-balance reference, not a finite-beta solution or ellipticity prediction.
+Both fixtures require a thin tube and ``|z|<c``. The long-thin ordering treats
+``beta`` and ``lambda=(a/L)^2`` as simultaneous small parameters;
+``B/B_vac=sqrt(1-beta)`` is an asymptotic pressure-balance reference, not a
+finite-beta solution or ellipticity prediction.
 
 Native spline basis status
 --------------------------
@@ -301,7 +300,7 @@ physical field is the invariant comparison. Splines use roughly half the
 active radius variables and take 2.70, 3.32, and 4.14 seconds versus 5.77,
 9.29, and 12.15 seconds for the retired CGL migration solves. All variational and
 independent weak residuals remain below ``1.3e-15``. Compact evidence is in
-the ``axisymmetric_finite_beta`` section of
+the ``axisymmetric_refinement`` section of
 ``benchmarks/mirror_fixed_boundary.json``.
 
 Open fixed-boundary systems use exact JAX Hessian-vector products and

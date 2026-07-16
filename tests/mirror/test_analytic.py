@@ -13,7 +13,6 @@ from vmec_jax.mirror.analytic import (  # noqa: E402
     AxisymmetricPolynomialMirror,
     RotatingEllipseParaxial,
     StraightFieldLineMirror,
-    long_thin_beta_scaling,
 )
 
 
@@ -186,15 +185,3 @@ def test_sflm_labels_sections_and_field_line_error_have_expected_order() -> None
     coarse = float(tangent_error(0.05))
     fine = float(tangent_error(0.025))
     assert fine < 0.27 * coarse
-
-
-def test_long_thin_beta_scaling_is_bounded_and_explicitly_asymptotic() -> None:
-    estimate = long_thin_beta_scaling(jnp.asarray([0.0, 0.1, 0.3]), 0.1)
-    np.testing.assert_allclose(estimate.long_thin_order, 0.01)
-    np.testing.assert_allclose(estimate.diamagnetic_field_ratio, jnp.sqrt(1.0 - estimate.beta))
-    with pytest.raises(ValueError, match="beta"):
-        long_thin_beta_scaling(0.31, 0.1)
-    with pytest.raises(ValueError, match="inverse_aspect_ratio"):
-        long_thin_beta_scaling(0.1, 0.25)
-    derivative = jax.grad(lambda value: long_thin_beta_scaling(value, 0.1).diamagnetic_field_ratio)(0.1)
-    np.testing.assert_allclose(derivative, -0.5 / np.sqrt(0.9), rtol=2.0e-14)

@@ -18,11 +18,10 @@ import numpy as np
 
 from .forces import MU0, staggered_field_strength
 from .geometry import contravariant_field, evaluate_geometry, magnetic_field_xyz
-from .model import MIRROR_OUTPUT_SCHEMA, MirrorBoundary, MirrorState
+from .model import MIRROR_OUTPUT_SCHEMA
 from .splines import SplineMirrorBoundary, SplineMirrorDiscretization, SplineMirrorState
 
 RESTART_SCHEMA = "vmec_jax.mirror.free_boundary_restart/3"
-_LEGACY_RESTART_SCHEMA = "vmec_jax.mirror.free_boundary_restart/2"
 
 
 @dataclass(frozen=True)
@@ -434,42 +433,24 @@ def save_free_boundary_restart(path: str | Path, restart: FreeBoundaryRestart | 
 def load_free_boundary_restart(
     path: str | Path,
     discretization: SplineMirrorDiscretization,
-    *,
-    legacy_grid: Any | None = None,
 ) -> FreeBoundaryRestart:
-    """Load schema 3 coefficients or explicitly migrate one schema 2 file."""
+    """Load coefficient-native restart data for ``discretization``."""
 
     path = Path(path)
     with np.load(path, allow_pickle=False) as data:
         schema = str(np.asarray(data["schema"]).item())
-        if schema == RESTART_SCHEMA:
-            boundary = SplineMirrorBoundary(
-                _finite_restart_array(
-                    data["boundary_radius_coefficients"],
-                    name="boundary_radius_coefficients",
-                )
-            )
-            state = SplineMirrorState(
-                _finite_restart_array(data["radius_coefficients"], name="radius_coefficients"),
-                _finite_restart_array(data["lambda_coefficients"], name="lambda_coefficients"),
-            )
-        elif schema == _LEGACY_RESTART_SCHEMA:
-            if legacy_grid is None:
-                raise ValueError("schema 2 restart migration requires legacy_grid")
-            boundary = discretization.fit_boundary(
-                MirrorBoundary(_finite_restart_array(data["boundary_radius"], name="boundary_radius")),
-                legacy_grid,
-            )
-            state = discretization.fit_state(
-                MirrorState(
-                    _finite_restart_array(data["radius_scale"], name="radius_scale"),
-                    _finite_restart_array(data["lambda_stream"], name="lambda_stream"),
-                ),
-                legacy_grid,
-            )
-            state = discretization.project_fixed_boundary(state, boundary)
-        else:
+        if schema != RESTART_SCHEMA:
             raise ValueError(f"unsupported mirror restart schema: {schema!r}")
+        boundary = SplineMirrorBoundary(
+            _finite_restart_array(
+                data["boundary_radius_coefficients"],
+                name="boundary_radius_coefficients",
+            )
+        )
+        state = SplineMirrorState(
+            _finite_restart_array(data["radius_coefficients"], name="radius_coefficients"),
+            _finite_restart_array(data["lambda_coefficients"], name="lambda_coefficients"),
+        )
         mass_scale = float(_finite_restart_array(data["mass_scale"], name="mass_scale"))
 
     expected_boundary = (discretization.grid.ntheta, discretization.coefficient_count)

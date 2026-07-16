@@ -15,7 +15,6 @@ from vmec_jax.mirror import (  # noqa: E402
     MirrorBoundary,
     MirrorConfig,
     MirrorResolution,
-    MirrorState,
     SplineMirrorBoundary,
     SplineMirrorDiscretization,
     SplineMirrorState,
@@ -65,39 +64,6 @@ def test_free_boundary_restart_roundtrip_is_compact_and_grid_checked(tmp_path) -
     )
     with pytest.raises(ValueError, match="state coefficients"):
         load_free_boundary_restart(path, mismatched)
-
-
-def test_schema_two_restart_requires_and_uses_explicit_nodal_grid(tmp_path) -> None:
-    config = MirrorConfig(resolution=MirrorResolution(ns=5, mpol=0, nxi=7))
-    legacy_grid = config.build_grid()
-    discretization = SplineMirrorDiscretization.build_cgl(config, elements=4)
-    boundary = MirrorBoundary.from_radius(0.3 + 0.01 * jnp.asarray(legacy_grid.xi) ** 2, legacy_grid)
-    state = MirrorState.from_boundary(boundary, legacy_grid)
-    path = tmp_path / "schema_2.npz"
-    np.savez_compressed(
-        path,
-        schema="vmec_jax.mirror.free_boundary_restart/2",
-        boundary_radius=boundary.radius_scale,
-        radius_scale=state.radius_scale,
-        lambda_stream=state.lambda_stream,
-        mass_scale=1.1,
-    )
-
-    with pytest.raises(ValueError, match="requires legacy_grid"):
-        load_free_boundary_restart(path, discretization)
-    migrated = load_free_boundary_restart(path, discretization, legacy_grid=legacy_grid)
-
-    np.testing.assert_allclose(
-        discretization.evaluate_boundary(migrated.boundary).radius_scale,
-        boundary.radius_scale,
-        atol=2.0e-15,
-    )
-    np.testing.assert_allclose(
-        discretization.evaluate_state(migrated.plasma_state).radius_scale,
-        state.radius_scale,
-        atol=2.0e-15,
-    )
-    assert migrated.mass_scale == 1.1
 
 
 def _external_mirror_field(points):
