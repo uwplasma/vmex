@@ -844,7 +844,10 @@ def solve_fixed_boundary_cli(
                 vectorizer,
                 _packed_spline_preconditioner(discretization, vectorizer),
             ),
-            start_with_newton=bool(solve_lambda and x0.size <= 4096),
+            # Direct Newton is fast only after continuation enters its local basin.
+            start_with_newton=bool(
+                solve_lambda and history[-1][4] <= 1.0e-4 and x0.size <= 4096
+            ),
         )
         final_x = optimization.vector
         iterations = optimization.iterations

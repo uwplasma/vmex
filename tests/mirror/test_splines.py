@@ -539,7 +539,7 @@ def test_supplied_field_initializer_recovers_straight_field_line_mirror() -> Non
 
 
 @pytest.mark.full
-def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location() -> None:
+def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location(_module_jit_enabled) -> None:
     from vmec_jax.mirror.analytic import AxisymmetricPolynomialMirror
 
     fixture = AxisymmetricPolynomialMirror(mirror_strength=0.5)
@@ -631,7 +631,7 @@ def test_local_spline_preconditioner_builds_from_bounded_hessian_chunks() -> Non
 
 
 @pytest.mark.full
-def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner() -> None:
+def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner(_module_jit_enabled) -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=29, mpol=1, nxi=25),
         z_min=-1.2,
@@ -661,7 +661,7 @@ def test_large_spline_solve_uses_matrix_free_coefficient_preconditioner() -> Non
 
 
 @pytest.mark.full
-def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue() -> None:
+def test_knot_refined_rotating_ellipse_uses_matrix_free_rescue(_module_jit_enabled) -> None:
     from vmec_jax.mirror.analytic import RotatingEllipseParaxial
 
     config = MirrorConfig(

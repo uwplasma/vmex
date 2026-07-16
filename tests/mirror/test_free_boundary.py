@@ -155,7 +155,7 @@ def test_free_coefficient_operator_matches_dense_forward_and_transpose() -> None
 
 
 @pytest.mark.full
-def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
+def test_unbounded_exterior_free_boundary_beta_scan_converges(_module_jit_enabled) -> None:
     config, source_grid, discretization, plasma_grid, on_axis, center, flux, initial_boundary = _free_case(5, 7, 4, 200)
     betas = jnp.asarray([0.0, 0.10, 0.25, 0.50])
     results = solve_beta_scan_cli(
@@ -223,7 +223,7 @@ def test_unbounded_exterior_free_boundary_beta_scan_converges() -> None:
 
 
 @pytest.mark.full
-def test_unbounded_exterior_beta_observables_converge_with_resolution() -> None:
+def test_unbounded_exterior_beta_observables_converge_with_resolution(_module_jit_enabled) -> None:
     observables = []
     compatibility = []
     betas = jnp.asarray([0.0, 0.10, 0.50])

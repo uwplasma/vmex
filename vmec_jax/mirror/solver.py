@@ -507,7 +507,7 @@ def _optimize_fixed_boundary(
     if start_with_newton:
         final_x = np.asarray(x0)
         optimizer_success = False
-        optimizer_message = "supplied-field Newton start"
+        optimizer_message = "local-basin Newton start"
         lbfgs_iterations = 0
     else:
         optimization = minimize(

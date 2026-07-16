@@ -267,7 +267,7 @@ def test_free_boundary_adjoint_rejects_unconverged_and_3d_results() -> None:
 
 
 @pytest.mark.full
-def test_free_boundary_field_adjoint_matches_central_difference() -> None:
+def test_free_boundary_field_adjoint_matches_central_difference(_module_jit_enabled) -> None:
     config = MirrorConfig(
         resolution=MirrorResolution(ns=5, nxi=7),
         z_min=-0.8,
