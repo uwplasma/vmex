@@ -21,10 +21,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # Coefficient-native fixed- and free-boundary solves.
     "SplineMirrorBoundary": (".splines", "SplineMirrorBoundary"),
     "SplineMirrorDiscretization": (".splines", "SplineMirrorDiscretization"),
-    "SplineMirrorSolveResult": (".splines", "SplineMirrorSolveResult"),
     "SplineMirrorState": (".splines", "SplineMirrorState"),
     "solve_fixed_boundary_cli": (".splines", "solve_fixed_boundary_cli"),
-    "FreeBoundaryMirrorResult": (".free_boundary", "FreeBoundaryMirrorResult"),
     "solve_free_boundary_cli": (".free_boundary", "solve_free_boundary_cli"),
     # Continuation.
     "solve_beta_scan_cli": (".free_boundary", "solve_beta_scan_cli"),

@@ -56,7 +56,7 @@ def test_public_api_keeps_numerical_kernels_in_owning_modules() -> None:
     }
     assert required <= set(mirror_api.__all__)
     assert internal.isdisjoint(mirror_api.__all__)
-    assert len(mirror_api.__all__) == 20
+    assert len(mirror_api.__all__) == 18
     assert mirror_api.solve_fixed_boundary_cli.__module__ == "vmec_jax.mirror.splines"
 
 

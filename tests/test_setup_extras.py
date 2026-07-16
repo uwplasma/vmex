@@ -1,7 +1,7 @@
 """Targeted unit tests for :mod:`vmec_jax.core.setup` corner branches.
 
-Covers the ``APHI`` toroidal-flux polynomial map (identity short-circuit,
-a genuine polynomial, and half-mesh output integration), the
+Covers the ``APHI`` toroidal-flux polynomial map (identity short-circuit
+and a genuine polynomial, checked against the exact antiderivative), the
 degenerate ``ns < 2`` radial grid, and the lasym delta-rotation guards
 (``convert_sym``/``convert_asym`` m=1 phase alignment in readin.f).
 """
@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from vmec_jax.core import setup as su
-from vmec_jax.core.postprocess import toroidal_flux_profile
 
 
 def test_torflux_identity_short_circuit():
@@ -33,20 +32,6 @@ def test_torflux_polynomial_matches_antiderivative():
     np.testing.assert_allclose(np.asarray(deriv(x)), 0.5 + x, rtol=1e-14)
     np.testing.assert_allclose(np.asarray(torflux(x)), 0.5 * x + 0.5 * x**2,
                                rtol=1e-12, atol=1e-14)
-
-
-def test_toroidal_flux_output_integrates_half_mesh_derivative():
-    """Match the nonuniform-APHI accumulation in VMEC2000 ``fileout.f``."""
-
-    s = np.linspace(0.0, 1.0, 5)
-    phips = np.asarray([0.0, 1.1, 1.2, 1.3, 1.4])
-    expected = np.concatenate(([0.0], np.cumsum(phips[1:] * np.diff(s))))
-    np.testing.assert_allclose(
-        toroidal_flux_profile(phips_out=phips, s=s),
-        expected,
-        rtol=0.0,
-        atol=0.0,
-    )
 
 
 def test_radial_grids_degenerate_ns():

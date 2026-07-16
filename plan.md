@@ -615,6 +615,18 @@ Exit: promotion with all gates or an explicit, code-reducing deferral.
 
 ### T11. Simplify and consolidate
 
+Current disposition:
+
+- The SOLVAX substitution is rejected for this PR. SOLVAX GMRES is a pure-JAX
+  right-preconditioned solver, while the retained mirror paths use host sparse
+  factors plus SciPy bounds/trust-region globalization. Replacing only GMRES
+  adds array-conversion plumbing and cannot delete the host path; the clean
+  CPU/GPU study already shows that these crossings make the A4000 slower.
+- Six unrelated core/version/device changes have been returned to
+  ``origin/main``. The branch now meets the 46-file and 18-name budgets.
+- The standalone performance figure has been deleted; performance remains in
+  the scientific fixed-boundary figure and compact JSON records.
+
 1. A/B one SOLVAX 0.8.3 GMRES/implicit-wrapper consolidation. Keep it only if
    it deletes net code and passes runtime, memory, primal, transpose, and
    diagnostics parity. Candidate deletions are duplicated SciPy GMRES and

@@ -8,7 +8,6 @@ decision, not the presence of an accelerator.
 from __future__ import annotations
 
 import contextlib
-from types import SimpleNamespace
 
 import jax
 import pytest
@@ -30,15 +29,6 @@ def test_iteration_work_and_recommendation_threshold():
     assert dev.iteration_work(big) >= dev.GPU_MIN_ITERATION_WORK
     assert dev.recommended_device(small) == "cpu"
     assert dev.recommended_device(big) == "gpu"
-
-
-def test_iteration_work_supports_mirror_collocation_resolution():
-    mirror = SimpleNamespace(ns=13, ntheta=3, nxi=13)
-    assert dev.iteration_work(mirror) == 507
-    assert dev.recommended_device(mirror) == "cpu"
-
-    with pytest.raises(TypeError, match="resolution must define"):
-        dev.iteration_work(SimpleNamespace(ns=13))
 
 
 def test_pinned_platform_is_never_overridden(monkeypatch):

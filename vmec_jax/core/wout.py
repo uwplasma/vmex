@@ -661,7 +661,7 @@ def wout_from_state(
     two_pi_sg = 2.0 * np.pi * float(signgs)
     phipf_out = two_pi_sg * phipf_int
     chipf_out = two_pi_sg * chipf_int
-    phi = _pp.toroidal_flux_profile(phips_out=two_pi_sg * phips, s=s)
+    phi = _pp.toroidal_flux_profile(phipf_out=phipf_out, s=s)
 
     # -- main-mode coefficient tables (wout normalization) -------------------
     mode_scale = 1.0 / physical_to_internal_scale(modes, trig)
