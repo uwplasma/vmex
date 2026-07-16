@@ -1,7 +1,7 @@
 # Mirror equilibrium final plan
 
 Status: final authoritative implementation and release plan for draft PR #22.
-Revised 2026-07-15 after a source-level audit of the branch, current
+Revised 2026-07-16 after a source-level audit of the branch, current
 `origin/main`, PR and CI, every mirror source/test/example/result, the original
 15,583-line `plan_mirror.md`, DESC and its mirror/Chebyshev/racetrack branches,
 VMEC2000 and ANIMEC, GVEC, SOLVAX 0.8.4, Pleiades, and the primary literature
@@ -25,8 +25,10 @@ must:
    for open mirrors and a full periodic B-spline representation for hybrids;
 3. reach component-wise equilibrium `ftol <= 1e-12` and independently
    verified weak-force, strong-force, and refinement gates;
-4. provide implicit derivatives of converged supported equilibria;
-5. keep the fast forward CLI independent of differentiability constraints;
+4. make every retained equilibrium residual differentiable, with implicit
+   tangents and adjoints for optimization and no stored nonlinear history;
+5. keep the bounded forward CLI fast while sharing its residual and
+   preconditioner with the differentiable path;
 6. consume external magnetic fields supplied by ESSOS or MGRID without
    owning coils or Biot-Savart calculations;
 7. expose one compact API, three root examples, mirror-native open output, and
@@ -89,7 +91,7 @@ Final verification for this revision:
 | Free open axisymmetric, beta 25/50% | nonlinear residual reaches `1e-12`, but independent force/refinement gates fail | validation continuation only |
 | Free open nonaxisymmetric | global observables look stable, but local `m=1` changes 73-81%; 3-grid beta pair costs 293/944/2995 s and 2.74/4.57/7.35 GiB | deferred; implementation removed |
 | Fixed closed B-spline hybrid | periodic representation, exact straight spans, Bishop-frame closure, converged primal, finite-current field lines, and root example; coarse strong force `0.573` | active H1 validation; not promoted |
-| Differentiation | fixed-open JVP/VJP and free-axisymmetric VJP agree with fully reconverged finite differences near `2e-10` | supported only for promoted lanes |
+| Differentiation | fixed-open JVP/VJP and free-axisymmetric VJP agree with fully reconverged finite differences near `2e-10`; closed-axis controls are the active D1 tranche | required for every retained residual; advertised only where the primal is promoted |
 | Preconditioning | open separable/local sparse factor is effective; closed colored factor was effective but serves a deferred model | retain open path; archive closed result |
 
 The optimizer residual is not the equilibrium acceptance criterion. The
@@ -213,21 +215,21 @@ Use forward mode for a few parameter directions or many outputs. Use an
 adjoint for many controls and one/few scalar objectives. Reuse the primal
 preconditioner for both and always report the true linear residual.
 
-SOLVAX current main (`255d280`, version 0.8.4, audited 2026-07-15) now provides
+SOLVAX current main (`0fcc017`, version 0.8.4, audited 2026-07-16) provides
 pure-JAX FGMRES/GCROT, matrix-free Newton-Krylov, implicit root/linear solves,
 transpose-aware operators, block-tridiagonal factors, bordered Schur
 preconditioners, multigrid helpers, and true-residual diagnostics. It is
 already a vmec_jax dependency through the toroidal core.
 
-SOLVAX still does not provide the bound-constrained trust-region
-globalization or host sparse factorization used by the mirror CLI, and its
-Newton-Krylov path currently takes full steps without a merit line search.
-Therefore R2 uses a measured replacement rule: adopt SOLVAX for a complete
-primal/transpose path only if the spike deletes at least 250 local lines,
-preserves bounds and all physics gates, reports true residuals, avoids new
-host/device crossings, and stays within 10% of the faster wall time and peak
-memory. Otherwise retain SciPy for the fast host CLI and record the negative
-A/B result. Never maintain both production implementations.
+SOLVAX does not provide the bound-constrained globalization or host sparse
+factorization used by the mirror CLI. A complete CPU A/B rejected replacing
+the host path: SOLVAX at restart 200 passed but raised peak RSS 20%; restart 64
+and 128 failed the declared true-linear-residual gates. On three derivative
+fixtures it raised peak RSS 29% at similar wall time. The accepted CPU path is
+therefore matrix-free SciPy GMRES around JAX JVP/VJP actions, with the same
+traceable separable preconditioner and optional host sparse factor. SOLVAX is
+the accelerator candidate only after an office-GPU A/B passes physics, time,
+and memory gates. Do not add an unpreconditioned GPU path or a solver flag.
 
 ### 4.6 Rejected shortcuts
 
@@ -239,7 +241,7 @@ A/B result. Never maintain both production implementations.
 | Fourier projection of the toroidal racetrack hybrid | reject: the longitudinal geometry must remain periodic B-spline-native |
 | Scalar beta 25-50% as a WHAM/high-beta validation | reject: anisotropic kinetic pressure is essential |
 | Unrolled reverse AD through nonlinear iterations | reject: iteration memory/cost and derivative dependence on solver path |
-| Public free-nonaxisymmetric or closed-hybrid scaffolds before promotion | reject: failed refinement/resource gates |
+| Public free-nonaxisymmetric scaffolds before promotion | reject: failed refinement/resource gates |
 | Wholesale SOLVAX replacement without deletion/performance evidence | reject: globalization and host-factor gaps remain |
 
 ## 5. Supported physical model
@@ -341,7 +343,10 @@ The differentiable lane uses the same converged coefficient residual as the
 primal lane and applies the implicit function theorem. It must never
 differentiate the CLI iteration history. A tangent is used for a few control
 directions or many outputs; one adjoint is used for many controls and a scalar
-objective. The primal preconditioner is reused for both transpose directions.
+objective. Boundary, axis, flux, pressure, current, and differentiable applied
+field controls are pytrees. The primal preconditioner is reused for tangent and
+transpose solves. The measured CPU path remains host Krylov around JAX
+matrix-vector actions; a JAX-native accelerator path remains a gated follow-up.
 
 ## 7. Promotion gates
 
@@ -381,7 +386,13 @@ never promotes a state.
 - tangent and adjoint linear residuals pass `1e-8`;
 - gradients agree with centered differences of fully reconverged equilibria;
 - at least three finite-difference steps show a stable error plateau;
-- no derivative is advertised for a deferred primal model.
+- no dense Jacobian is materialized outside the tiny oracle;
+- forward mode is used for few controls and reverse mode for scalar objectives;
+- compile time, warm time, Krylov count, and CPU/GPU peak memory are recorded;
+- derivative peak memory is independent of nonlinear iteration count and must
+  remain within 1.5 times the corresponding converged-primal peak;
+- a deferred primal may retain derivative tests on a promoted limiting fixture,
+  but its gradients are not advertised as equilibrium sensitivities.
 
 ### 7.4 Resource gates
 
@@ -545,7 +556,7 @@ H1 merge budgets, measured against fetched `origin/main`:
 
 - at most 44 changed files;
 - at most 8,000 mirror source lines;
-- at most 3,700 mirror-test lines;
+- at most 3,800 mirror-test lines;
 - at most 20 public mirror names;
 - exactly three root mirror examples and three nonredundant showcase figures;
 - exactly four compact benchmark JSON records;
@@ -587,8 +598,45 @@ this package.
 
 ## 10. Active and deferred scientific lanes
 
-H1 is active on the draft PR. N1 and A1 are deferred go/no-go lanes and must
-not leave public scaffolds if their bounded gates fail.
+D1 and H1 are active on the draft PR. N1 and A1 are bounded go/no-go lanes and
+must not leave public scaffolds if their primal, derivative, or resource gates
+fail.
+
+### D1. Shared differentiable and high-performance backend
+
+The nonlinear CLI and differentiable API share each model's one packed
+coefficient residual. Differentiation is implicit at a converged state, never
+through L-BFGS, Newton, continuation, or line-search histories.
+
+1. **Complete for open fixed and axisymmetric free states.** Validate fixed
+   open tangents/adjoints and free axisymmetric adjoints against fully
+   reconverged central differences, including nonaxisymmetric stream-function
+   response and differentiable applied fields.
+2. **Complete on the circular closed limit.** Put periodic axis B-spline coefficients in the existing fixed
+   parameter pytree and rebuild the closed metric inside the residual. Validate
+   boundary and axis gradients on the promoted circular closed limit before
+   evaluating the failed racetrack candidate.
+3. Add a free-axisymmetric tangent only when a forward-mode use case needs the
+   full state response; do not duplicate the residual or linear solve merely
+   for API symmetry.
+4. **Complete CPU disposition.** Make the separable mirror preconditioner JAX
+   traceable without changing its spectrum. Retain SciPy for CPU after the
+   measured SOLVAX replacement fails the memory/residual gates; do not retain
+   two selectable CPU implementations.
+5. **CPU complete; office GPU deferred.** Benchmark compile and warm primal/JVP/VJP wall time, Krylov count, true
+   residual, RSS, and accelerator memory on the medium open fixtures and the
+   circular closed fixture. Use GCROT recycling only for continuation or
+   batched derivative sequences with measured benefit.
+6. For N1 or a future free hybrid, design the exterior operator and its
+   transpose/shape action together. A primal-only dense BIE cannot become a
+   retained production lane.
+
+Exit: every retained residual has a tested optimization-relevant derivative;
+the production CPU Krylov implementation is single, matrix-free, and
+preconditioned; the host CLI keeps robust bounds/globalization; derivative
+memory is independent of nonlinear iterations; no new public solver option or
+scientific module is added. A JAX-native accelerator path is accepted only
+after measured end-to-end benefit.
 
 ### N1. Free open nonaxisymmetric mirror
 
@@ -605,8 +653,8 @@ refinement.
 4. Continue ellipticity, section rotation, current, and beta independently.
 5. Require three grids, local `m=1/m=2` convergence, all release physics
    gates, under 30 minutes and 8 GiB per state.
-6. Add derivatives and a public entry point only after the primal matrix
-   passes.
+6. Build and test the transpose/shape action with the primal matrix-free BIE.
+   Add a public entry point only after primal, adjoint, and resource gates pass.
 
 If any third-grid or resource gate fails, retain one negative JSON and remove
 the implementation.
@@ -666,10 +714,11 @@ This is the required meaning of a full B-spline hybrid.
    magnitude.
 8. **Deferred until beta zero passes.** Finite-beta fixed-LCFS gate: beta `0,1,3,10%`, with Ilgisonis et al. used
    only for sign/scaling in its asymptotic regime.
-9. **Example complete; derivatives and periodic MOUT are deferred.** The root
-   example and solved-state plot were added for review before promotion because
-   they expose the failed strong-force gate. Add implicit derivatives and a
-   periodic MOUT only after monotone three-grid convergence.
+9. **Example complete; derivative validation active.** The root example and
+   solved-state plot expose the failed strong-force gate. Validate periodic
+   boundary and axis derivatives on the circular closed limit now, because all
+   retained algorithms must be differentiable. Do not advertise racetrack
+   sensitivities or add periodic MOUT until monotone three-grid convergence.
 10. Free boundary and ESSOS coil coupling are later than the fixed hybrid.
     Coils and Biot-Savart remain entirely in ESSOS.
 
@@ -721,17 +770,19 @@ At this revision:
 | Fixed open nonaxisymmetric rotating ellipse | 100% | regression only |
 | SFLM validation disposition | 100% | independent-force failure retained; not supported |
 | Free open axisymmetric through 10% | 100% | regression only |
-| Implicit derivatives for supported lanes | 100% | regression only |
-| Open preconditioning | 100% | regression only |
-| Closed hybrid fixed boundary | 70% | diagnose beta-zero strong-force floor; promotion, finite beta, and derivatives remain blocked |
+| Open fixed/free implicit derivatives | 100% | regression and performance tracking |
+| Closed fixed derivative algorithm | 100% | circular-limit FD/transpose complete; racetrack claims wait on its primal gate |
+| Linear-backend audit | 90% | CPU disposition complete; supplementary office-GPU A/B remains |
+| Open preconditioning | 100% | preserve spectrum during JAX port |
+| Closed hybrid fixed boundary | 70% | diagnose beta-zero strong-force floor; promotion and finite beta remain blocked |
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
 | API/code simplification | 100% | preserve final line and public-API budgets |
 | README/docs/examples/plots | 100% | regression only |
 | Packaging/CI/release audit | 90% | final package/CI batch after H1 disposition review |
 
-The open-mirror R1-R5 release work is complete. H1 is now active on the draft
-PR and is tracked separately so its failed gates cannot alter open-mirror
-promotion status. N1 and A1 remain deferred.
+The open-mirror R1-R5 release work is complete. D1 and H1 are active on the
+draft PR and are tracked separately so the hybrid's failed primal gate cannot
+alter open-mirror promotion status. N1 and A1 remain bounded future lanes.
 
 ### 2026-07-15 R1 removal and final plan audit
 
@@ -944,11 +995,40 @@ promotion status. N1 and A1 remain deferred.
   radial covariant force through the return transitions. Continue H1 only if a
   bounded correction makes the beta-zero three-grid gate pass;
   otherwise retain the current hybrid as an explicit validation example and
-  close the lane without derivatives or finite-beta claims.
+  close the lane without finite-beta or racetrack-sensitivity claims.
 - Open lanes: open fixed/free physics, derivatives, and preconditioning 100%;
   H1 basis 100%, geometry 100%, primal 80%, validation 55%, derivatives 0%;
   docs/examples 100%; final audit 90%.
 - User input: none required for the bounded beta-zero diagnostic.
+
+### 2026-07-16 D1 closed controls and linear-backend audit
+
+- Steps: added periodic axis coefficients to the existing hybrid setup and
+  fixed-control pytree; rebuilt the closed axis inside the converged residual;
+  made the separable preconditioner traceable while retaining its fast NumPy
+  action; and ran complete SciPy/SOLVAX restart, time, and memory A/B tests.
+- Results: closed boundary/axis controls pass the parameter JVP/VJP transpose
+  identity at `2e-12` and a three-step reconverged finite-difference plateau,
+  with the finest adjoint error below `2e-5`. SOLVAX restart 200 passed the
+  primal cases but raised RSS 20%; restarts 64/128 failed linear gates. On the
+  derivative trio SOLVAX raised RSS 29%. The accepted host path matches the
+  pre-tranche primal timing/RSS (`20.80 s`, `2.10 GB` versus `20.87 s`,
+  `2.08 GB`) and derivative timing/RSS (`45.85 s`, `4.65 GB` versus `45.87 s`,
+  `4.71 GB`).
+- Tests: 93 normal mirror tests pass with eight full deselections in 236.25
+  seconds; the two production spline rescues pass in 18.95 seconds; all five
+  implicit tests pass; 19 example/API tests pass with 16 expected skips;
+  strict Sphinx, pre-commit, Ruff, compileall, and diff checks pass.
+- Files/API: implementation commit `6b8f60f2` changes seven existing files,
+  adds no module, dependency, or public name, and keeps branch budgets at 44
+  files, 7,946 source lines, 3,794 test lines, and 20 public names.
+- Best next step: run a non-production SOLVAX A/B on office GPU before adding
+  any accelerator path, then close the H1 racetrack disposition unless a
+  bounded metric/force correction passes its existing beta-zero gates.
+- Open lanes: open physics/derivatives/preconditioning 100%; closed derivative
+  algorithm 100%; linear-backend audit 90%; H1 basis/geometry 100%, primal
+  80%, validation 55%; docs/examples 100%; final audit 92%.
+- User input: none required.
 
 After every implementation tranche, append one short dated entry here with:
 
@@ -973,7 +1053,8 @@ Local source revisions audited on 2026-07-15:
 - STELLOPT develop `e03e72e9`, standalone ANIMEC branch, and integrated
   ANIMEC commits `81379809`, `8ec7875a`, `91bfd08e`;
 - local VMEC2000 `728af8ba`;
-- SOLVAX current main `255d280` (0.8.4), including changes since `005ca387`;
+- SOLVAX current main `0fcc017` (0.8.4), including implicit linear/root solves,
+  FGMRES/GCROT recycling, structured preconditioners, and true residuals;
 - Pleiades pinned reference `0161abb3`.
 
 Primary implementation and physics references:

@@ -208,7 +208,9 @@ tested next. At 64 longitudinal controls, increasing from ``ns=5, mpol=3`` to
 variational residual reaches ``3.90e-16``. The ``ns=9, mpol=5`` state exceeded
 the 30-minute resource gate with 12,672 variables and was terminated. Thus
 both the absolute-force and resource gates fail; finite-beta continuation and
-implicit derivatives are deferred until the beta-zero residual is corrected.
+racetrack sensitivity claims are deferred until the beta-zero residual is
+corrected. The periodic derivative algorithm is validated separately on the
+closed circular limit below.
 At the default 32-control resolution, removing current changes strong force
 only from ``0.430`` to ``0.424``. Keeping the racetrack but replacing the
 rotating ellipse by a circular section gives ``0.158``; a fixed ellipse gives
@@ -403,8 +405,9 @@ Krylov iterations and ends at true relative residual ``7.83e-2`` in 4.53
 seconds. The frozen local factor reaches ``9.18e-11`` in 660 iterations and
 4.14 seconds, with the same final energy and strong force. An isolated
 current-main SOLVAX right-preconditioned FGMRES trial follows the same
-iteration curve, so the host CLI remains on SciPy GMRES. The same sparse builder is used by
-forward tangent and reverse adjoint systems.
+iteration curve, so the host CLI remains on SciPy GMRES. Tangent and adjoint
+systems reuse the traceable separable preconditioner; the host sparse factor
+remains a primal acceleration and is not differentiated.
 
 On the flared finite-beta case, knot refinement from 5 to 11 coefficients
 reduces relative energy error against an ``nxi=17`` Chebyshev oracle from
@@ -458,8 +461,8 @@ Coefficient fixed-boundary gradients
 ------------------------------------
 
 ``spline_fixed_boundary_adjoint`` differentiates a scalar diagnostic through
-the converged coefficient residual. Boundary spline coefficients, flux,
-conserved mass, and current remain differentiable. The transpose Hessian
+the converged coefficient residual. Boundary and periodic-axis spline
+coefficients, flux, conserved mass, and current remain differentiable. The transpose Hessian
 action uses exact JAX reverse AD and the nonlinear iteration history is never
 differentiated or stored. The root example differentiates rotating-ellipse
 volume with respect to a native boundary coefficient and checks it against two
@@ -477,9 +480,12 @@ while its primal independent-force gate fails.
 nonaxisymmetric finite-current ``solve_lambda=True`` case, both radius and
 stream-function tangents agree with two fully reconverged centered differences
 within ``2e-4`` in relative state norm, with linear residual below ``1e-8``.
-This establishes both open-spline derivative directions. The closed hybrid
-has a primal API; implicit derivatives remain deferred until its independent
-strong-force refinement gate passes.
+This establishes both open-spline derivative directions. On the closed
+circular limit, periodic boundary and axis controls pass the parameter
+JVP/VJP transpose identity and an adjoint volume derivative agrees across
+three fully reconverged centered-difference steps. This validates the closed
+algorithm for optimization, but the racetrack hybrid does not acquire a
+sensitivity claim while its independent strong-force refinement gate fails.
 
 The former CGL fixed solve, custom VJP, and nodal adjoint have been removed.
 Public fixed-boundary inputs are
@@ -523,7 +529,11 @@ RTX A4000. Energy and force diagnostics agree to numerical precision. Explicit
 
 The host CLI remains the forward-performance reference. Fixed- and
 free-boundary derivatives solve the linearized converged coefficient residual
-and never retain or differentiate the nonlinear iteration history.
+and never retain or differentiate the nonlinear iteration history. A measured
+SOLVAX CPU replacement preserved wall time but increased derivative peak RSS
+by 29%, so the mirror CPU path remains SciPy GMRES around exact JAX JVP/VJP
+actions. A JAX-native accelerator path remains gated on an end-to-end GPU
+time, memory, and physics comparison rather than exposed as a solver option.
 
 Release evidence
 ----------------

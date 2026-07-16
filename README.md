@@ -149,7 +149,11 @@ independent strong-force residual is `0.430`. The implementation and example
 are available for refinement and review, but this case is not yet a supported
 equilibrium benchmark. Exact longitudinal and radial/poloidal refinement lower
 the independent residual to `0.227`, while the next grid exceeds the 30-minute
-resource gate; finite-beta and derivative claims are therefore deferred.
+resource gate; finite-beta and racetrack-sensitivity claims are therefore
+deferred. The same implicit API differentiates periodic boundary and axis
+B-spline controls and passes reconverged finite differences on the closed
+circular limit, so optimization support is ready when the racetrack primal
+force gate is corrected.
 
 ![Solved periodic B-spline hybrid with straight legs, rotating returns, field lines, LCFS |B|, cross-sections, iota, and convergence](docs/_static/figures/stellarator_mirror_hybrid.png)
 

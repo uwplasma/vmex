@@ -90,6 +90,31 @@
     "gpu_wall_s": 773.3,
     "gpu_peak_rss_gib": 2.604
   },
+  "differentiation_20260716": {
+    "measurement_commit": "6b8f60f2",
+    "fixture": "closed circular limit",
+    "controls": ["boundary spline", "periodic axis spline"],
+    "ftol": 1e-12,
+    "adjoint_relative_residual_below": 1e-8,
+    "parameter_jvp_vjp_rtol": 2e-12,
+    "reconverged_finite_difference_steps": [0.0004, 0.0002, 0.0001],
+    "finite_difference_plateau_rtol": 5e-5,
+    "finest_finite_difference_rtol": 2e-5,
+    "wall_seconds": 24.57,
+    "status": "algorithm-validated-on-promoted-limit"
+  },
+  "linear_backend_audit_20260716": {
+    "hardware": "Apple CPU",
+    "primal_two_case_before": {"wall_seconds": 20.87, "peak_rss_bytes": 2076262400},
+    "primal_two_case_accepted": {"wall_seconds": 20.80, "peak_rss_bytes": 2104442880},
+    "primal_solvax_restart_200": {"wall_seconds": 22.74, "peak_rss_bytes": 2493480960},
+    "primal_solvax_restart_64": {"status": "failed true-linear-residual gates"},
+    "primal_solvax_restart_128": {"status": "failed rotating-ellipse linear-residual gate"},
+    "derivative_three_case_before": {"wall_seconds": 45.87, "peak_rss_bytes": 4713480192},
+    "derivative_three_case_accepted": {"wall_seconds": 45.85, "peak_rss_bytes": 4648026112},
+    "derivative_solvax_restart_100": {"wall_seconds": 49.88, "peak_rss_bytes": 6068355072},
+    "decision": "retain host SciPy GMRES around exact JAX actions; require a separate office-GPU gate before an accelerator path"
+  },
   "gates": {
     "exact_transfer": true,
     "ftol_and_weak_force": true,
@@ -101,6 +126,8 @@
     "h1_monotone_longitudinal_refinement": true,
     "h1_absolute_strong_force": false,
     "h1_radial_poloidal_refinement": false,
-    "h1_radial_poloidal_resource_limit": false
+    "h1_radial_poloidal_resource_limit": false,
+    "closed_limit_derivatives": true,
+    "cpu_linear_backend_time_and_memory": true
   }
 }
