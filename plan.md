@@ -37,69 +37,54 @@ or failed promotion candidates and are separated in section 10.
 
 ## 2. Audited repository state
 
-Pushed source snapshot used for this revision:
+Pushed source snapshot used for the final release audit:
 
-- branch source checkpoint: `codex/mirror-geometry` at `3b5d2715`;
-- fetched base: `origin/main` at `ed4ac7ac`;
-- ancestry: 0 commits behind and 361 commits ahead of `origin/main`;
-- PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open, mergeable, draft;
-- pushed CI at the completed audit: all 13 executed jobs pass, including the
-  implicit-gradient shard and 95% coverage gate; the manual/nightly full
-  physics job is expectedly skipped and remains an R5 local/manual gate;
-- diff at pushed HEAD: 44 files, 15,017 insertions, 1,590 deletions;
-- mirror package: 13 files and 8,040 lines;
-- mirror tests: 10 files and 4,388 lines;
-- public mirror namespace: 18 lazy names;
+- branch source checkpoint: `codex/mirror-geometry` at `5ff15d99`;
+- fetched base: `origin/main` at `ed4ac7ac`, with no commits behind;
+- PR: <https://github.com/uwplasma/vmec_jax/pull/22>, open and mergeable;
+- pushed CI: all executed jobs pass, including mirror, implicit-gradient,
+  packaging, examples, and the 95% coverage gate;
+- diff at the source checkpoint: 42 files, 13,034 insertions, 1,622 deletions;
+- mirror package: 13 files and 6,999 lines;
+- mirror tests: 10 files and 3,443 lines;
+- public mirror namespace: 17 lazy names;
 - retained examples: two root scripts;
 - retained figures: two compressed PNGs;
 - retained evidence: four compact schema-1 JSON files.
 
-The R1 removal implemented in the current worktree changes that release
-candidate to 13 source files / 6,939 lines, 10 test files / 3,373 lines, and
-17 public names. It removes 2,290 lines while adding 154 focused replacement
-lines. These numbers became the new baseline at R1 commit `a08d621b`.
+Final verification for this revision:
 
-Fresh local verification during this revision:
-
-- post-R1 normal mirror suite: 83 passed, 6 expected `full` deselections in
-  186.08 s;
+- normal mirror suite: 87 passed, 6 expected `full` deselections in 185.62 s;
+- all six full mirror tests pass; the office RTX A4000 shard took 23:59, with
+  the corrected three-grid test separately confirmed in 14:36;
+- both root examples pass in clean temporary directories in 9:02 total;
 - strict Sphinx HTML build: passed with warnings treated as errors;
-- Ruff lint and `git diff --check`: passed. The repository's existing format
-  baseline is not globally Ruff-format clean, so R1 does not reformat
-  unrelated code;
+- pre-commit, compileall, package build/install, console smoke, CLI plot
+  round trips, and `git diff --check`: passed;
 - the corrected-cut medium `(ns,mpol,elements)=(7,6,6)` example reaches
   variational `ftol`; rotating-ellipse strong force is `0.0418`, while the
   SFLM strong force is `1.09`, dominated by the fixed-end collars. Starting
   directly with Newton reproduces the same state, so this is not merely an
   L-BFGS basin failure;
-- the attempted fine `(9,8,8)` combined example exceeded ten minutes on the
-  local CPU. It remains a standalone refinement setting, not a practical
-  default. The medium example completes in about 90 seconds and explicitly
-  labels the failed SFLM lane.
-
-The pushed CI result validates the pre-R1 tree; R1's full tests and final
-packaging are recorded separately in section 12 and repeated from a clean tree
-in R5. This release tranche also includes the README showcase and removal of
-one stale figure. Preserve those changes while executing this plan.
+- the two showcase figures and every CLI plot were visually reviewed; all
+  retained figures come from solved MOUT states and remain compressed.
 
 ## 3. What is scientifically achieved
 
 | Lane | Reproduced evidence | Decision |
 | --- | --- | --- |
-| Fixed open axisymmetric | exact polynomial-vacuum fixture; three spline grids; strong force `0.04349 -> 0.03474 -> 0.02873`; field error refines | release candidate |
-| Fixed open nonaxisymmetric rotating ellipse | supplied-field initialization, explicit self-similar end cuts, medium-grid strong force `0.04178`, and reconverged adjoint error `5.0e-10` | release candidate; corrected-cut refinement audit remains |
+| Fixed open axisymmetric | exact polynomial-vacuum fixture; three spline grids; strong force `0.04349 -> 0.03474 -> 0.02873`; field error refines | supported |
+| Fixed open nonaxisymmetric rotating ellipse | supplied-field initialization, explicit self-similar end cuts, medium-grid strong force `0.04178`, knot refinement, and reconverged adjoint error `5.0e-10` | supported |
 | Agren-Savenko straight-field-line target | corrected-cut solve reaches variational `3.1e-16`, but reconstructed strong force is `1.09` and collar force is `2.27` | research only; stale pre-cut promotion removed |
-| Free open axisymmetric, beta 0-10% | coefficient LCFS/plasma solve, unbounded exterior BIE, three grids, pressure calibration, Pleiades trend, free adjoint | release candidate through central beta 10% |
+| Free open axisymmetric, beta 0-10% | coefficient LCFS/plasma solve, unbounded exterior BIE, three grids, pressure calibration, Pleiades trend, free adjoint | supported through central beta 10% |
 | Free open axisymmetric, beta 25/50% | nonlinear residual reaches `1e-12`, but independent force/refinement gates fail; beta 50% gives radius `+7.73%` and center field `-23.73%` | research continuation only |
 | Free open nonaxisymmetric | global observables look stable, but local `m=1` changes 73-81%; 3-grid beta pair costs 293/944/2995 s and 2.74/4.57/7.35 GiB | deferred; implementation removed |
 | Fixed closed B-spline hybrid | exact 16/32/64 transfer and absolute gates pass, but same-geometry strong force is nonmonotone for two quadrature orders | deferred; closed runtime removed in R1 |
 | Differentiation | fixed-open JVP/VJP and free-axisymmetric VJP agree with fully reconverged finite differences near `2e-10` | supported only for promoted lanes |
 | Preconditioning | open separable/local sparse factor is effective; closed colored factor was effective but serves a deferred model | retain open path; archive closed result |
 
-"Release candidate" means that committed numerical evidence passes the
-scientific gate; no model is advertised as released until R5 passes. The
-optimizer residual is not the equilibrium acceptance criterion. The coarse
-example failure demonstrates why the release requires a staggered weak
+The optimizer residual is not the equilibrium acceptance criterion. The
+research-case failures demonstrate why support requires a staggered weak
 variation, reconstructed `J x B - grad(p)`, and grid convergence in addition
 to `ftol`.
 
@@ -410,10 +395,7 @@ The closed hybrid failed its declared same-geometry refinement gate and is not
 in the release scope. Git history and
 `benchmarks/mirror_hybrid_fixed_boundary.json` preserve the work.
 
-Implementation status: code removal complete in the 2026-07-15 R1 worktree;
-acceptance waits only on the full-test shard recorded in section 12. The
-interrupted local shard is being rerun from pushed commit `a08d621b` on the
-office host; an interrupted run is not evidence.
+Implementation status: complete and accepted by the R5 audit in section 12.
 
 1. Remove periodic/closed branches from `basis.py`, `geometry.py`,
    `forces.py`, `splines.py`, `solver.py`, and tests.
@@ -722,18 +704,19 @@ At this revision:
 | Lane | Completion | Remaining work |
 | --- | ---: | --- |
 | Fixed open axisymmetric physics | 100% | regression only |
-| Fixed open nonaxisymmetric physics | 88% | rotating-ellipse corrected-cut refinement; SFLM stays research until its force gate passes |
-| Free open axisymmetric through 10% | 97% | full-suite and clean-example audit |
-| Implicit derivatives for promoted lanes | 95% | final reconverged audit after simplification |
-| Open preconditioning | 90% | post-removal A/B record |
+| Fixed open nonaxisymmetric rotating ellipse | 100% | regression only |
+| SFLM research disposition | 100% | independent-force failure retained; not supported |
+| Free open axisymmetric through 10% | 100% | regression only |
+| Implicit derivatives for supported lanes | 100% | regression only |
+| Open preconditioning | 100% | regression only |
 | Closed hybrid disposition | 100% | negative record retained; future H1 is separate |
 | Nonaxisymmetric free disposition | 100% | compact negative evidence retained |
-| API/code simplification | 97% | full audit; preserve final line and public-API budgets |
-| README/docs/examples/plots | 98% | final clean-tree documentation and CLI smoke |
-| Packaging/CI/release audit | 82% | office full shard and R5 clean packaging audit |
+| API/code simplification | 100% | preserve final line and public-API budgets |
+| README/docs/examples/plots | 100% | keep figures tied to solved MOUT states |
+| Packaging/CI/release audit | 100% | complete |
 
-Weighted completion of PR #22 is approximately 91%. Deferred N1/H1/A1 work
-is not included in that percentage.
+Weighted completion of R1-R5 for PR #22 is 100%. Deferred N1/H1/A1 work is not
+included in that percentage and requires separate go/no-go PRs.
 
 ### 2026-07-15 R1 removal and final plan audit
 
@@ -842,6 +825,36 @@ is not included in that percentage.
   research 55%, free axisymmetric 98%, derivatives 97%, preconditioning 95%,
   simplification 97%, docs/examples 98%, release audit 82%.
 - User input: none required.
+
+### 2026-07-16 R5 release audit
+
+- Steps: restored JIT for all six full-physics tests, limited direct Newton to
+  its measured local basin, aligned free-boundary observable tolerances with
+  the canonical benchmark, rebuilt both examples, and audited CI, packaging,
+  documentation, plots, API, file counts, runtime, and memory.
+- Results: the rotating ellipse remains unchanged at variational
+  `1.72e-16`, strong force `0.04178`, divergence `6.61e-15`, and reconverged
+  derivative error `5.01e-10`. The free medium-to-fine maximum observable
+  changes are `1.28e-3` through 10% beta and `1.11e-2` at research-only 50%.
+  A larger exploratory grid approached the 8 GiB gate and was stopped rather
+  than becoming a release requirement.
+- Tests: 87 normal tests pass in 185.62 s on Apple CPU. Five full tests pass in
+  one 23:59 office RTX A4000 shard and the corrected sixth passes in 14:36;
+  three full spline tests take 40.73 s locally. Both clean temporary examples
+  pass in 9:02. Strict Sphinx, pre-commit, compileall, wheel/sdist build,
+  clean-venv import/console smoke, fixed/free CLI plots, and pushed CI pass.
+- Files/API: final budgets are 42 changed files, 6,999 mirror source lines,
+  3,443 mirror-test lines, 17 public names, 13 modules, two root examples, two
+  compressed figures, and four benchmark records. Generated run products are
+  ignored and the worktree is clean.
+- Best next step: mark PR #22 ready for review and review only the supported
+  fixed-open and free-axisymmetric lanes. Start N1, H1, or A1 only in a
+  separate PR after an explicit go/no-go decision.
+- Open lanes: every R1-R5 lane is 100%. SFLM, nonaxisymmetric free boundary,
+  and the closed stellarator-mirror hybrid are closed dispositions, not
+  incomplete release lanes.
+- User input: none required for PR #22; post-release model selection is a new
+  decision.
 
 After every implementation tranche, append one short dated entry here with:
 
