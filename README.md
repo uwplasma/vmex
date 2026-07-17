@@ -32,7 +32,7 @@ original, it is differentiable and runs on GPUs.
   that load unchanged in simsopt and booz_xform.
 - **Batteries included.** Plotting (`vmec --plot`), Boozer transform
   (`vmec --booz`), spline profiles, multigrid, hot restart, free boundary
-  from mgrid files *or* directly from coils, near-axis (pyQSC/pyQIC) seeding,
+  from mgrid files *or* directly from coils,
   typed zero-crash errors — with the shared linear/adjoint solver layer
   factored out into [SOLVAX](https://pypi.org/project/solvax/).
 
@@ -84,101 +84,6 @@ vmec --plot wout_nfp4_QH_warm_start.nc     # surfaces, |B|, profiles, 3D
 vmec --booz wout_nfp4_QH_warm_start.nc     # Boozer transform -> boozmn_*.nc
 vmec --plot boozmn_nfp4_QH_warm_start.nc   # Boozer |B| contours + spectrum
 ```
-
-## Mirror equilibria
-
-The separate `vmec_jax.mirror` backend solves scalar-pressure nested surfaces
-at `ftol=1e-12`. Open mirrors use clamped longitudinal B-splines and physical
-fixed-flux end cuts. Closed stellarator-mirror hybrids use periodic B-splines,
-which represent two exactly straight mirror legs and two curved stellarator
-returns without fitting the straight sections with global Fourier modes.
-Fourier modes are used only around each cross-section. Coils and Biot-Savart
-fields remain in [ESSOS](https://github.com/uwplasma/ESSOS); vmec-jax consumes
-a supplied `xyz -> B` field.
-
-For `r=sqrt(s) a(s,theta,z)`, the divergence-free field and scalar-pressure
-energy are
-
-```text
-sqrt(g) B^theta = I'(s) - partial_z lambda
-sqrt(g) B^z     = Psi'(s) + partial_theta lambda
-W = integral [B^2/(2 mu0) + p/(gamma - 1)] dV
-```
-
-The fixed-boundary workflow is coefficient-native:
-
-```python
-from vmec_jax.mirror import (
-    MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState,
-    SplineMirrorDiscretization, solve_fixed_boundary_cli,
-)
-
-config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=4, nxi=17))
-source_grid = config.build_grid()
-boundary = MirrorBoundary.from_radius(0.3, source_grid)
-discretization = SplineMirrorDiscretization.build(config, elements=6)
-boundary_coefficients = discretization.fit_boundary(boundary, source_grid)
-initial_coefficients = discretization.fit_state(
-    MirrorState.from_boundary(boundary, source_grid), source_grid
-)
-result = solve_fixed_boundary_cli(
-    initial_coefficients, boundary_coefficients, discretization, config,
-    axial_flux_derivative=0.01, solve_lambda=True,
-    require_convergence=True,
-)
-```
-
-![Fixed-boundary solved geometry, field lines, cross-sections, convergence, and corrected-cut validation](docs/_static/figures/mirror_fixed_boundary_3d.png)
-
-The rotating ellipse passes the independent reconstructed-force gate and its
-implicit boundary gradient agrees with two fully reconverged finite-difference
-solves to `5.9e-10` relative, providing the derivative needed by an external
-optimizer. With the larger `0.12 m` cross-section, the solved variational,
-strong-force, and divergence residuals are `2.1e-16`, `0.0267`, and `6.7e-15`.
-The Agren-Savenko straight-field-line target is retained as a failed validation
-case: its coefficient residual reaches `1.7e-16`, but its corrected-cut strong
-force is `0.335`, so it is not advertised as an equilibrium.
-
-The periodic hybrid example uses a rotation-minimizing frame around a closed
-B-spline axis. Its central leg spans have zero curvature to roundoff; the
-elliptical section rotates by 90 degrees only in each return. A finite axial
-current produces `iota=0.0851`, and the plotted cyan curves are integrated
-field lines from the solved field. The default 32-control case reaches
-`2.4e-14` variational residual and `3.1e-14` normalized divergence, but its
-independent strong-force residual is `0.430`. The implementation and example
-are available for refinement and review, but this case is not yet a supported
-equilibrium benchmark. Exact longitudinal and radial/poloidal refinement lower
-the independent residual to `0.227`, while the next grid exceeds the 30-minute
-resource gate; finite-beta and racetrack-sensitivity claims are therefore
-deferred. The same implicit API differentiates periodic boundary and axis
-B-spline controls and passes reconverged finite differences on the closed
-circular limit, so optimization support is ready when the racetrack primal
-force gate is corrected.
-
-![Solved periodic B-spline hybrid with straight legs, rotating returns, field lines, LCFS |B|, cross-sections, iota, and convergence](docs/_static/figures/stellarator_mirror_hybrid.png)
-
-The free-boundary solver jointly updates the spline LCFS, plasma state, and
-unbounded exterior vacuum. Independent force and grid-refinement gates support
-the 0%, 1%, 3%, and 10% sequence. The converged 25% and 50% continuation
-states remain unpromoted because their independent force gates fail. The
-default finite-radius vacuum-flux initialization reproduces the canonical
-medium-grid beta-zero strong-force residual of `0.003411` for the enlarged
-`0.25 m` central cross-section.
-
-![Solved free-boundary beta scan with ESSOS coils, field lines, LCFS, magnetic field, pressure, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
-
-Every displayed beta uses its own solved MOUT state. At 50% requested beta the
-central radius grows by 7.52% and the on-axis field falls by 22.94% from the
-vacuum state; this visibly exercises the finite-beta coupling without
-promoting the failed 25/50% force gates.
-
-Run `python examples/mirror_fixed_boundary_nonaxisymmetric.py`,
-`python examples/mirror_free_boundary_beta_scan.py`, or
-`python examples/stellarator_mirror_hybrid.py`. Open-mirror MOUT files can be
-plotted with `vmec --plot mout_*.nc`. The
-[mirror documentation](docs/mirror_geometry.rst) derives the coordinate and
-field models, defines the boundary conditions and residuals, maps those models
-to the source, and records the validation and derivative limits.
 
 ## Parity with VMEC2000
 
@@ -266,7 +171,6 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Differentiable fixed boundary (implicit diff, O(1) memory) | ✅ | ❌ | ❌ |
 | Differentiable free boundary (virtual casing) | ✅ | ❌ | ❌ |
 | 2D block preconditioner (stiff-case speedup) | ✅ | ❌ | ❌ |
-| Near-axis (pyQSC / pyQIC) optimization seed | ✅ | ❌ | ❌ |
 
 ### Free boundary straight from coils
 
@@ -295,25 +199,65 @@ the coils never move. Reproduce with
 
 ### Single-stage plasma + coil optimization
 
-The plasma boundary and the coils can be optimized **simultaneously**, driven by
-one exact gradient. A single `jax.value_and_grad` threads the implicit-adjoint
-derivative of the fixed-boundary equilibrium (boundary → converged VMEC state →
-physics targets) *and* the virtual-casing + Biot-Savart derivative of the coil
-field (coil currents → `B·n` on the *moving* boundary) through one backward
-pass — no finite differences, no nested inner/outer loop.
+Starting **cold** — a circular torus and four circular coils, no warm start —
+the plasma boundary Fourier modes, the coil curve degrees of freedom, *and* the
+coil currents are co-optimized by **one exact gradient**: a single
+`jax.value_and_grad` threads the implicit-adjoint derivative of the
+fixed-boundary equilibrium, the differentiable virtual casing, and Biot–Savart
+off the ESSOS coil filaments through one backward pass. It is benchmarked
+against the classical **two-stage** baseline from the *same* seeds: stage 1
+optimizes the boundary alone for quasi-axisymmetry, stage 2 then fits the coils
+to that frozen boundary. Both approaches get identical coil budgets (same
+length and curvature limits, same number of coils), and both are scored on the
+**coil-realized equilibrium** — a re-solve of each final boundary, with `B·n`
+evaluated from each approach's actual final coils. The finite-β column runs the
+same joint optimization with a pressure profile — a capability with essentially
+no published general-purpose counterpart.
 
-![Single-stage plasma+coil optimization, vacuum and finite beta](docs/_static/figures/readme_single_stage.png)
+The headline use is the literature's canonical one (arXiv:2302.10622 runs
+single-stage as a "stage 3"): **polish the two-stage result** — warm-start the
+joint objective from the stage-1 boundary + stage-2 coils and let both
+co-adapt. In ~10–30 minutes of polish the normal-field error drops **33 %
+(vacuum) / 17 % (finite β)** below the two-stage result at held quasisymmetry
+and on-target iota — the coil↔plasma inconsistency that frozen-boundary
+stage 2 cannot fix. The cold-start column shows what the same joint descent
+does from the crude seeds alone in 50 iterations: it drives ⟨|B·n|⟩ hard
+(coils well inside every budget) but cannot match a dedicated stage-1 on
+quasisymmetry — which is exactly why polish is the recommended pattern.
 
-*The Landreman–Paul QA plasma boundary and the currents of its 16 ESSOS modular
-coils are co-optimized against one functional `J = w·⟨(B_ext·n)²⟩ +
-(ι_edge − ι*)²` — coil↔plasma consistency plus an edge-rotational-transform
-target — for a **vacuum** and a **finite-β** (⟨β⟩ = 1.4 %) case. One L-BFGS-B
-descent over the joint (boundary Fourier modes + coil currents) vector cuts J
-**6.6×** (vacuum) and **2.4×** (finite β): the boundary reshapes (blue vs grey
-dashed) and the coil currents retune together, with the joint gradient
-finite-difference validated. Coils come from ESSOS — vmec_jax stays
-coil-agnostic. Reproduce with
-`python examples/single_stage_essos_coils_opt.py`.*
+![Cold-start single-stage vs two-stage plasma+coil optimization, vacuum and finite beta](docs/_static/figures/readme_single_stage.png)
+
+*Top: seed (grey, dashed) vs two-stage (orange) vs cold-start single-stage
+(blue) boundaries at φ = 0 and a half field period — the polish boundary is
+visually indistinguishable from two-stage (same aspect and iota), so it is not
+drawn. Middle/bottom: each approach's final LCFS coloured by |B| inside its
+own final coils.*
+
+Vacuum (measured; identical seeds and coil budgets across columns):
+
+| metric (vacuum) | two-stage | + single-stage polish | single-stage (cold) |
+|---|---|---|---|
+| QS ratio residual | 9.3e-05 | 1.6e-04 | 2.4e-02 |
+| mean iota (target 0.42) | 0.420 | 0.420 | 0.396 |
+| ⟨\|B·n\|⟩/⟨B⟩ | 2.38e-03 | **1.60e-03** | 3.05e-03 |
+| max\|B·n\|/⟨B⟩ | 1.30e-02 | **7.84e-03** | 1.18e-02 |
+| coil lengths [m] (≤ 4.40) | 4.12–4.39 | 4.11–4.40 | 3.60–3.87 |
+
+Finite β (⟨β⟩ ≈ 1.5 %, same pressure profile in all columns):
+
+| metric (finite β) | two-stage | + single-stage polish | single-stage (cold) |
+|---|---|---|---|
+| QS ratio residual | 4.4e-05 | 2.4e-04 | 2.3e-02 |
+| mean iota (target 0.42) | 0.420 | 0.422 | 0.100 |
+| ⟨\|B·n\|⟩/⟨B⟩ | 2.80e-03 | **2.34e-03** | 6.20e-03 |
+| max\|B·n\|/⟨B⟩ | 1.37e-02 | **1.27e-02** | 1.75e-02 |
+| coil lengths [m] (≤ 4.40) | 3.91–4.18 | 3.91–4.19 | 3.25–3.28 |
+
+Reproduce with `python examples/single_stage_vs_two_stage.py --case vacuum
+--phase all` (and `--case beta`). Measured on a 36-core CPU: stage 1 ≈ 7–9 min,
+stage 2 ≈ 6 min, polish ≈ 10–30 min; the optional cold-start single column is
+the long pole (≈ 1.5 h vacuum, several hours at finite β). The phases are
+resumable, so long runs can be split across sessions.
 
 ## Python API
 
@@ -484,3 +428,116 @@ performance/validation notes — at
 MIT. If you use vmec-jax in published work, please cite this repository and
 the original VMEC papers (Hirshman & Whitson, *Phys. Fluids* 1983;
 Hirshman, van Rij & Merkel, *Comput. Phys. Commun.* 1986).
+
+## Mirror equilibria
+
+The separate `vmec_jax.mirror` backend solves scalar-pressure nested surfaces
+at `ftol=1e-12`. Open mirrors use clamped longitudinal B-splines and physical
+fixed-flux end cuts. Closed stellarator-mirror hybrids use periodic B-splines,
+which represent two exactly straight mirror legs and two curved stellarator
+returns without fitting the straight sections with global Fourier modes.
+Fourier modes are used only around each cross-section. Coils and Biot-Savart
+fields remain in [ESSOS](https://github.com/uwplasma/ESSOS); vmec-jax consumes
+a supplied `xyz -> B` field.
+
+For `r=sqrt(s) a(s,theta,z)`, the divergence-free field and scalar-pressure
+energy are
+
+```text
+sqrt(g) B^theta = I'(s) - partial_z lambda
+sqrt(g) B^z     = Psi'(s) + partial_theta lambda
+W = integral [B^2/(2 mu0) + p/(gamma - 1)] dV
+```
+
+### Fixed-boundary open mirrors
+
+The fixed-boundary workflow is coefficient-native:
+
+```python
+from vmec_jax.mirror import (
+    MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState,
+    SplineMirrorDiscretization, solve_fixed_boundary_cli,
+)
+
+config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=4, nxi=17))
+source_grid = config.build_grid()
+boundary = MirrorBoundary.from_radius(0.3, source_grid)
+discretization = SplineMirrorDiscretization.build(config, elements=6)
+boundary_coefficients = discretization.fit_boundary(boundary, source_grid)
+initial_coefficients = discretization.fit_state(
+    MirrorState.from_boundary(boundary, source_grid), source_grid
+)
+result = solve_fixed_boundary_cli(
+    initial_coefficients, boundary_coefficients, discretization, config,
+    axial_flux_derivative=0.01, solve_lambda=True,
+    require_convergence=True,
+)
+```
+
+<p align="center">
+  <img src="docs/_static/figures/mirror_fixed_boundary_3d.png" width="100%" alt="Fixed-boundary solved geometry, field lines, cross-sections, convergence, and corrected-cut validation">
+</p>
+
+The rotating ellipse passes the independent reconstructed-force gate and its
+implicit boundary gradient agrees with two fully reconverged finite-difference
+solves to `5.9e-10` relative, providing the derivative needed by an external
+optimizer. With the larger `0.12 m` cross-section, the solved variational,
+strong-force, and divergence residuals are `2.1e-16`, `0.0267`, and `6.7e-15`.
+The Agren-Savenko straight-field-line target is retained as a failed validation
+case: its coefficient residual reaches `1.7e-16`, but its corrected-cut strong
+force is `0.335`, so it is not advertised as an equilibrium.
+
+### Free-boundary beta scan
+
+The free-boundary solver jointly updates the spline LCFS, plasma state, and
+unbounded exterior vacuum. Independent force and grid-refinement gates support
+the 0%, 1%, 3%, and 10% sequence. The converged 25% and 50% continuation
+states remain unpromoted because their independent force gates fail. The
+default finite-radius vacuum-flux initialization reproduces the canonical
+medium-grid beta-zero strong-force residual of `0.003411` for the enlarged
+`0.25 m` central cross-section.
+
+<p align="center">
+  <img src="docs/_static/figures/mirror_free_boundary_beta50_summary.png" width="100%" alt="Solved free-boundary beta scan with ESSOS coils, field lines, LCFS, magnetic field, pressure, and residual histories">
+</p>
+
+Every displayed beta uses its own solved MOUT state. At 50% requested beta the
+central radius grows by 7.52% and the on-axis field falls by 22.94% from the
+vacuum state; this visibly exercises the finite-beta coupling without
+promoting the failed 25/50% force gates.
+
+### Stellarator-mirror hybrid
+
+The periodic hybrid example uses a rotation-minimizing frame around a closed
+B-spline axis. Its central leg spans have zero curvature to roundoff; the
+elliptical section rotates by 90 degrees only in each return. A finite axial
+current produces `iota=0.0851`, and the plotted cyan curves are integrated
+field lines from the solved field. The default 32-control case reaches
+`2.4e-14` variational residual and `3.1e-14` normalized divergence, but its
+independent strong-force residual is `0.430`.
+
+<p align="center">
+  <img src="docs/_static/figures/stellarator_mirror_hybrid.png" width="100%" alt="Solved periodic B-spline hybrid with straight legs, rotating returns, field lines, LCFS magnetic field strength, cross-sections, iota, and convergence">
+</p>
+
+The implementation and example are available for refinement and review, but
+this case is not yet a supported equilibrium benchmark. Exact longitudinal
+and radial/poloidal refinement lower the independent residual to `0.227`,
+while the next grid exceeds the 30-minute resource gate; finite-beta and
+racetrack-sensitivity claims are therefore deferred. The same implicit API
+differentiates periodic boundary and axis B-spline controls and passes
+reconverged finite differences on the closed circular limit, so optimization
+support is ready when the racetrack primal force gate is corrected.
+
+### Run the examples
+
+```bash
+python examples/mirror_fixed_boundary_nonaxisymmetric.py
+python examples/mirror_free_boundary_beta_scan.py
+python examples/stellarator_mirror_hybrid.py
+```
+
+Open-mirror MOUT files can be plotted with `vmec --plot mout_*.nc`. The
+[mirror documentation](docs/mirror_geometry.rst) derives the coordinate and
+field models, defines the boundary conditions and residuals, maps those models
+to the source, and records the validation and derivative limits.

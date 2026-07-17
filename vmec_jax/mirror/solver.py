@@ -121,8 +121,8 @@ class SeparableMirrorPreconditioner:
     ) -> "SeparableMirrorPreconditioner":
         """Build the normalized separable stiffness inverse for ``grid``."""
 
-        derivative = np.asarray(grid.axial_basis.derivative_matrix, dtype=float)
-        weights = np.asarray(grid.axial_basis.weights, dtype=float)
+        derivative = np.asarray(grid.axial_basis.derivative_matrix, dtype=np.float64)
+        weights = np.asarray(grid.axial_basis.weights, dtype=np.float64)
         interior_derivative = derivative[:, 1:-1] / float(grid.dz_dxi)
         axial = interior_derivative.T @ (weights[:, None] * interior_derivative)
         return cls.build_from_axial_stiffness(
@@ -557,6 +557,7 @@ def _optimize_fixed_boundary(
     def run_matrix_free_polish() -> None:
         nonlocal final_x, optimizer_success, optimizer_message
         nonlocal newton_steps, linear_iterations, final_linear_residual
+        assert matrix_free_context is not None
         remaining = max(
             1,
             int(config.max_iterations) - lbfgs_iterations - polish_evaluations - newton_steps,
