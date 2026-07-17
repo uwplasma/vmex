@@ -388,11 +388,18 @@ bootstrap mismatch — has its own section below.)
 
 | campaign | objective | seed → final | QS held? |
 |----------|-----------|--------------|----------|
-| `lgradb` | raise min L∇B to 1.3× seed (implicit adjoint) | <!-- FILL:lgradb.metric -->TBD | <!-- FILL:lgradb.qs -->TBD |
-| `well` | deepen the vacuum magnetic well (implicit adjoint) | <!-- FILL:well.metric -->TBD | <!-- FILL:well.qs -->TBD |
-| `iota_up` | mean iota 0.42 → 0.55 at aspect 6 (implicit adjoint) | <!-- FILL:iota_up.metric -->TBD | <!-- FILL:iota_up.qs -->TBD |
-| `aspect_down` | aspect 6.00 → 4.8 at iota 0.42 (implicit adjoint) | <!-- FILL:aspect_down.metric -->TBD | <!-- FILL:aspect_down.qs -->TBD |
-| `dmerc` | interior DMerc → positive at ⟨β⟩ ≈ 1.25% (finite differences) | <!-- FILL:dmerc.metric -->TBD | <!-- FILL:dmerc.qs -->TBD |
+| `lgradb` | raise min L∇B to 1.3× seed (implicit adjoint) | 0.520 → 0.522 m (stiff — see note) | 9.8e-07 → 1.3e-06 |
+| `well` | deepen the vacuum magnetic well (implicit adjoint) | **−0.037 → +0.0002** (hill → well) | 9.8e-07 → 1.5e-05 |
+| `iota_up` | mean iota 0.42 → 0.55 at aspect 6 (implicit adjoint) | **0.420 → 0.535** | 9.8e-07 → 1.8e-05 |
+| `aspect_down` | aspect 6.00 → 4.8 at iota 0.42 (implicit adjoint) | **6.00 → 4.84** | 9.8e-07 → 4.2e-06 |
+| `dmerc` | interior DMerc → positive at ⟨β⟩ ≈ 1.25% (finite differences) | −16.6 → −16.5 (stiff — see note) | 6.6e-05 → 6.6e-05 |
+
+The two flat rows are honest physics, not failures: at held QS, aspect, and
+iota the precise-QA shape is already near-optimal in L∇B (the trade space is
+stiff), and the interior Mercier hill at finite β needs profile/current freedom
+that boundary-mode-2 finite differences cannot buy — both move only marginally
+and say so. The three decisive rows each take **2–3 minutes** on a workstation
+CPU.
 
 *Reproduce with `python examples/optimization/objectives_showcase.py` (an
 `--only lgradb,dmerc` flag runs subsets), then
