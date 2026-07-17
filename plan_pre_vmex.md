@@ -259,8 +259,12 @@ maxiter 300) dominates. Priorities, in measured-value order:
    already fused).
 3. **Document `jax.jit(jax.grad(...))`** — measured 30% on the implicit gradient;
    docs/examples currently don't say it.
-4. Re-run `benchmarks/run_baseline.py` + refresh the performance figure/claims;
-   commit a `profile.json` artifact so "last measured" exists in-tree.
+4. ~~Re-run baselines~~ **DONE (2026-07-17)**: `baseline.json` refreshed —
+   with the F.2 NESTOR lanes, vmec_jax warm now beats VMEC2000 on **every**
+   row (1.26–6.9×), including both free-boundary rows (1.45×/1.28×; the
+   README's old free-boundary caveat is retired). `benchmarks/profile.json`
+   committed as the in-tree "last measured" artifact (free-boundary warm
+   1.57 s / 574 iters / 2.7 ms-per-iter).
 
 ## 8. Item G — Parallelization (#41)
 
