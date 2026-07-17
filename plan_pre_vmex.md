@@ -233,10 +233,16 @@ warm 2.13 s (2.78 ms/iter); **warm implicit gradient of ONE scalar = 32.4 s eage
 / 22.5 s under `jax.jit` (~10-15 forward solves)**; host-callback overhead
 negligible (cached forward 0.02 s). The adjoint GMRES (`adjoint_tol=1e-11`,
 maxiter 300) dominates. Priorities, in measured-value order:
-1. **Adjoint budget**: instrument GMRES iteration counts; sweep `adjoint_tol`
-   1e-11→1e-7 vs gradient accuracy (1e-11 is likely overtight for optimization);
-   adjoint warm-starting across trust-region iterations (GCROT recycle exists —
-   measure, default it if it wins).
+1. **Adjoint budget — tolerance ruled out (measured 2026-07-17)**: sweeping
+   `adjoint_tol` 1e-13→1e-6 leaves the warm gradient wall time FLAT (solovev
+   ~4 s, li383 ~7 s at every tolerance) while accuracy degrades as expected —
+   the preconditioned GMRES hits near-machine residual within its first
+   Arnoldi cycles, so the cost is the FIXED matvec work (each matvec = one
+   residual linearization), not the convergence criterion. Remaining levers,
+   in order: (a) cheaper matvecs (jit/donate the residual linearization),
+   (b) fewer matvecs via cross-eval warm-starting/recycling (GCROT recycle —
+   measure, default it if it wins), (c) the shipped multi-RHS batching for
+   multi-objective campaigns.
 2. **NESTOR loop batching** (freeboundary.py:917-973): per-iteration host
    dispatch with several device→host syncs + per-iteration runtime rebuilds; run
    the `nvacskip` iterations between vacuum updates as one jitted block and move
