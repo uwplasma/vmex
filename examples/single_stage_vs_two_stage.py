@@ -111,7 +111,11 @@ else:
     MAXITER_STAGE2, MAXITER_SINGLE = 150, 50
     SOLVE = dict(ftol=1e-12, max_iterations=3000)
     LS_FTOL = 1e-6
-SINGLE_REL_FTOL = 1e-3       # scipy L-BFGS-B relative-J stop for --phase single
+# scipy L-BFGS-B "ftol" tests the decrease against max(|f|, 1); with J < 1
+# that makes 1e-3 an ABSOLUTE dJ bar which fired after 6 iterations (iota
+# still at 0.02 of the 0.42 target).  1e-6 keeps the 50-iteration cap as
+# the binding constraint, which is the intent of the fast budget.
+SINGLE_REL_FTOL = 1e-6
 
 def solve_kwargs(case: str) -> dict:
     """Per-case solver settings: vacuum = one grid; finite beta = multigrid.
