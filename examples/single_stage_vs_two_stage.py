@@ -97,7 +97,7 @@ CI = os.environ.get("VMEC_JAX_EXAMPLES_CI") == "1"
 if CI:  # smoke budget: coarse everything, a handful of iterations
     NS, NPHI, NTHETA = 12, 8, 8
     MODE_LADDER, MAX_NFEV = (1,), 10
-    MAXITER_STAGE2, MAXITER_SINGLE = 3, 3
+    MAXITER_STAGE2, MAXITER_SINGLE, MAXITER_POLISH = 3, 3, 3
     SOLVE = dict(ftol=1e-9, max_iterations=4000)
     LS_FTOL = 1e-4
 else:
@@ -108,7 +108,7 @@ else:
     # the point is a minutes-scale reproducible comparison, not a polish run.
     NS, NPHI, NTHETA = 31, 16, 16
     MODE_LADDER, MAX_NFEV = (3,), 300          # single ESS call, max_mode 3
-    MAXITER_STAGE2, MAXITER_SINGLE = 150, 50
+    MAXITER_STAGE2, MAXITER_SINGLE, MAXITER_POLISH = 150, 50, 25
     SOLVE = dict(ftol=1e-12, max_iterations=3000)
     LS_FTOL = 1e-6
 # scipy L-BFGS-B "ftol" tests the decrease against max(|f|, 1); with J < 1
@@ -366,15 +366,34 @@ def phase_stage2(case: str, out: Path, args) -> None:
 
 
 # ---------------------------- single stage ----------------------------------
-def phase_single(case: str, out: Path, args) -> None:
-    """Joint cold-start boundary+coil optimization (one exact gradient)."""
+def phase_single(case: str, out: Path, args, *, warm: bool = False) -> None:
+    """Joint boundary+coil optimization by one exact gradient.
+
+    ``warm=False`` (``--phase single``): the cold start -- circular-torus
+    boundary + circular coils.  ``warm=True`` (``--phase polish``): the
+    literature's canonical use (arXiv:2302.10622 runs single-stage as a
+    "stage 3"): start FROM the two-stage result (stage-1 boundary + stage-2
+    coils) and let boundary and coils co-adapt -- fixing the coil<->plasma
+    inconsistency that frozen-boundary stage 2 cannot, at held quasisymmetry.
+    """
+    label = "polish" if warm else "single"
     ps = get_seed_pres_scale(case, out)
-    inp = build_seed_input(ps)
+    if warm:
+        for f in (out / "input.stage1", out / "coils_stage2.npz"):
+            if not f.exists():
+                raise SystemExit(f"missing {f} -- run stage1/stage2 first")
+        inp = load_boundary_input(out / "input.stage1", case, out)
+        dat = np.load(out / "coils_stage2.npz")
+        cdofs0 = jnp.asarray(dat["cdofs"])
+        cur0 = jnp.asarray(dat["currents"])
+        nfp = int(dat["nfp"])
+    else:
+        inp = build_seed_input(ps)
+        cdofs0, cur0, nfp = seed_coils()
     p0 = im.params_from_input(inp)
     ntor = int(inp.ntor)
     nb = len(SS_MODES)
     qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, HELICITY_M, HELICITY_N)
-    cdofs0, cur0, nfp = seed_coils()
     ncd = cdofs0.size
 
     # Freeze the virtual-casing precision plan at the seed so the plasma field
@@ -426,7 +445,7 @@ def phase_single(case: str, out: Path, args) -> None:
     ess = np.array([np.exp(-0.7 * (max(m, abs(n)) - 1)) for m, n in SS_MODES])
     D = np.concatenate([D_BOUNDARY * ess, D_BOUNDARY * ess, np.full(ncd, D_COIL),
                         np.full(N_COILS - 1, D_CURRENT)])
-    print(f"[single:{case}] dofs: {x0.size} (boundary {2 * nb} + "
+    print(f"[{label}:{case}] dofs: {x0.size} (boundary {2 * nb} + "
           f"coil curves {ncd} + currents {N_COILS - 1}), w_bn={args.w_bn}")
 
     # NOTE: jax.jit around this value_and_grad fails today with a
@@ -456,8 +475,8 @@ def phase_single(case: str, out: Path, args) -> None:
     res = scipy.optimize.minimize(
         fun, np.zeros_like(x0), jac=True, method="L-BFGS-B",
         bounds=[(-U_BOUND, U_BOUND)] * x0.size,
-        options={"maxiter": args.maxiter_single, "ftol": SINGLE_REL_FTOL,
-                 "gtol": 1e-12})
+        options={"maxiter": args.maxiter_polish if warm else args.maxiter_single,
+                 "ftol": SINGLE_REL_FTOL, "gtol": 1e-12})
     wall = time.time() - t0
 
     xf = x0 + D * res.x
@@ -471,12 +490,12 @@ def phase_single(case: str, out: Path, args) -> None:
         rbc[ntor + n, m] = float(xf[i])
         zbs[ntor + n, m] = float(xf[nb + i])
     inp_f = dataclasses.replace(inp, rbc=rbc, zbs=zbs)
-    inp_f.to_indata(out / "input.single")
-    np.savez(out / "coils_single.npz",
+    inp_f.to_indata(out / f"input.{label}")
+    np.savez(out / f"coils_{label}.npz",
              cdofs=np.asarray(cdofs_f), currents=np.asarray(cur_f),
              nfp=nfp, n_segments=NSEG)
     eq_f = opt.solve_equilibrium(inp_f)
-    vj.write_wout(out / "wout_single.nc", eq_f.wout)
+    vj.write_wout(out / f"wout_{label}.nc", eq_f.wout)
 
     J0 = next(v for v in hist if np.isfinite(v))
     summary = dict(
@@ -485,12 +504,12 @@ def phase_single(case: str, out: Path, args) -> None:
                              (float(v) for v in auxf))),
         w_bn=args.w_bn, nit=int(res.nit), nev=len(hist), wall_s=wall,
         **coil_metrics(cdofs_f, nfp))
-    (out / "single.json").write_text(json.dumps(summary, indent=2))
-    print(f"[single:{case}] J {J0:.4e} -> {float(Jf):.4e} "
+    (out / f"{label}.json").write_text(json.dumps(summary, indent=2))
+    print(f"[{label}:{case}] J {J0:.4e} -> {float(Jf):.4e} "
           f"({summary['ratio']:.1f}x) in {res.nit} iters, {len(hist)} evals, "
           f"{wall:.0f}s")
-    print(f"wrote {out / 'input.single'}, {out / 'coils_single.npz'}, "
-          f"{out / 'wout_single.nc'}")
+    print(f"wrote {out / f'input.{label}'}, {out / f'coils_{label}.npz'}, "
+          f"{out / f'wout_{label}.nc'}")
 
 
 # ------------------------------ evaluate ------------------------------------
@@ -555,6 +574,11 @@ def phase_evaluate(case: str, out: Path, args) -> None:
         for f in (deck, npz):
             if not f.exists():
                 raise SystemExit(f"missing {f} -- run the earlier phases first")
+    # the single-stage POLISH of the two-stage result is optional but is the
+    # headline column (see phase_single warm=True)
+    if (out / "input.polish").exists() and (out / "coils_polish.npz").exists():
+        needed["single_stage_polish"] = (out / "input.polish",
+                                         out / "coils_polish.npz")
 
     results = {label: evaluate_one(label, deck, npz, case, out)
                for label, (deck, npz) in needed.items()}
@@ -567,19 +591,24 @@ def phase_evaluate(case: str, out: Path, args) -> None:
         ("<|B.n|>/<B>", "avg_Bn_over_B", "{:.3e}"),
         ("max|B.n|/<B>", "max_Bn_over_B", "{:.3e}"),
     ]
-    ts, ss = results["two_stage"], results["single_stage"]
-    lines = [f"| metric ({case}) | two-stage | single-stage |",
-             "|---|---|---|"]
+    order = [k for k in ("two_stage", "single_stage_polish", "single_stage")
+             if k in results]
+    heads = {"two_stage": "two-stage",
+             "single_stage_polish": "two-stage + single-stage polish",
+             "single_stage": "single-stage (cold start)"}
+    lines = ["| metric (" + case + ") | " +
+             " | ".join(heads[k] for k in order) + " |",
+             "|---|" + "---|" * len(order)]
     for name, key, fmt in rows:
-        lines.append(f"| {name} | {fmt.format(ts[key])} | {fmt.format(ss[key])} |")
-    lines.append("| coil lengths [m] (budget {:.2f}) | {} | {} |".format(
-        L_MAX,
-        ", ".join(f"{v:.2f}" for v in ts["lengths"]),
-        ", ".join(f"{v:.2f}" for v in ss["lengths"])))
-    lines.append("| coil max curvature [1/m] (budget {:.1f}) | {} | {} |".format(
+        lines.append("| " + name + " | " +
+                     " | ".join(fmt.format(results[k][key]) for k in order) + " |")
+    lines.append("| coil lengths [m] (budget {:.2f}) | {} |".format(
+        L_MAX, " | ".join(", ".join(f"{v:.2f}" for v in results[k]["lengths"])
+                          for k in order)))
+    lines.append("| coil max curvature [1/m] (budget {:.1f}) | {} |".format(
         KAPPA_MAX,
-        ", ".join(f"{v:.2f}" for v in ts["max_curvatures"]),
-        ", ".join(f"{v:.2f}" for v in ss["max_curvatures"])))
+        " | ".join(", ".join(f"{v:.2f}" for v in results[k]["max_curvatures"])
+                   for k in order)))
     table = "\n".join(lines)
     (out / "comparison.md").write_text(table + "\n")
     print(f"\n{'=' * 72}\nCOMPARISON ({case})\n{'=' * 72}\n{table}")
@@ -587,8 +616,13 @@ def phase_evaluate(case: str, out: Path, args) -> None:
 
 
 # -------------------------------- main --------------------------------------
-PHASES = dict(stage1=phase_stage1, stage2=phase_stage2,
-              single=phase_single, evaluate=phase_evaluate)
+def phase_polish(case: str, out: Path, args) -> None:
+    """Single-stage polish of the two-stage result (phase_single warm=True)."""
+    phase_single(case, out, args, warm=True)
+
+
+PHASES = dict(stage1=phase_stage1, stage2=phase_stage2, single=phase_single,
+              polish=phase_polish, evaluate=phase_evaluate)
 
 
 def main() -> None:
@@ -599,6 +633,7 @@ def main() -> None:
                         help="single-stage normal-field weight (default 300)")
     parser.add_argument("--maxiter-single", type=int, default=MAXITER_SINGLE)
     parser.add_argument("--maxiter-stage2", type=int, default=MAXITER_STAGE2)
+    parser.add_argument("--maxiter-polish", type=int, default=MAXITER_POLISH)
     args = parser.parse_args()
 
     if not FBD.have_virtual_casing_jax():
