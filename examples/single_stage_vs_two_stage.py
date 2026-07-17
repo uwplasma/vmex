@@ -110,6 +110,21 @@ else:
     SOLVE = dict(ftol=1e-10, max_iterations=50000)
     LS_FTOL = 1e-8
 
+def solve_kwargs(case: str) -> dict:
+    """Per-case ``im.run``/``im.make_config`` solver settings.
+
+    The finite-beta case rides the multigrid ladder: the near-circular seed has
+    iota ~ 0, and confining ~1.5% pressure with almost no rotational transform
+    stalls a single-grid steepest descent (measured: > 50k iterations without
+    convergence), while the ns-ladder restarts converge robustly.  Multigrid is
+    AD-safe -- the coarse stages are stop-gradient initializers.
+    """
+    kw = dict(SOLVE)
+    if case == "beta":
+        kw["multigrid"] = True
+    return kw
+
+
 # single-stage boundary dof set: m <= 2, |n| <= 2 (same convention as
 # optimize._dof_modes -- m=0 keeps n >= 1 only, RBC(0,0) fixed)
 SS_MAX_MODE = 2
@@ -278,7 +293,7 @@ def phase_stage2(case: str, out: Path, args) -> None:
         raise SystemExit(f"missing {stage1_deck} -- run --phase stage1 first")
     inp = load_boundary_input(stage1_deck, case, out)
     p = im.params_from_input(inp)
-    sol = im.run(inp, p, **SOLVE)
+    sol = im.run(inp, p, **solve_kwargs(case))
 
     # Build the differentiable free-boundary problem ONCE from the solved
     # stage-1 state: the boundary (and its virtual-casing plasma field) is a
@@ -353,7 +368,7 @@ def phase_single(case: str, out: Path, args) -> None:
 
     # Freeze the virtual-casing precision plan at the seed so the plasma field
     # stays differentiable in the (moving) boundary.
-    sol_seed = im.run(inp, p0, **SOLVE)
+    sol_seed = im.run(inp, p0, **solve_kwargs(case))
     sd_seed = FBD.surface_field_data_from_state(inp, sol_seed.state,
                                                 nphi=NPHI, ntheta=NTHETA)
     plan = FBD.plan_vc_precision(sd_seed, digits=4)
@@ -371,8 +386,8 @@ def phase_single(case: str, out: Path, args) -> None:
 
     def objective(x):
         params, cdofs, cur = unpack(x)
-        sol = im.run(inp, params, **SOLVE)
-        rt = im.runtime_from_params(params, im.make_config(inp, **SOLVE))
+        sol = im.run(inp, params, **solve_kwargs(case))
+        rt = im.runtime_from_params(params, im.make_config(inp, **solve_kwargs(case)))
         j_qs = jnp.sum(qs.residuals_state(sol.state, rt) ** 2)
         sd = FBD.surface_field_data_from_state(inp, sol.state,
                                                nphi=NPHI, ntheta=NTHETA)
