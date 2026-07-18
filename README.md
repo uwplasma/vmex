@@ -481,113 +481,66 @@ equation-to-source cross-references, API reference, and
 performance/validation notes — at
 [vmex.readthedocs.io](https://vmex.readthedocs.io/en/latest/).
 
-## License
-
-MIT. If you use VMEX in published work, please cite this repository and
-the original VMEC papers (Hirshman & Whitson, *Phys. Fluids* 1983;
-Hirshman, van Rij & Merkel, *Comput. Phys. Commun.* 1986).
-
 ## Mirror equilibria
 
-The separate `vmex.mirror` backend solves scalar-pressure nested surfaces
-at `ftol=1e-12`. Open mirrors use clamped longitudinal B-splines and physical
-fixed-flux end cuts. Closed stellarator-mirror hybrids use periodic B-splines,
-which represent two exactly straight mirror legs and two curved stellarator
-returns without fitting the straight sections with global Fourier modes.
-Fourier modes are used only around each cross-section. Coils and Biot-Savart
-fields remain in [ESSOS](https://github.com/uwplasma/ESSOS); VMEX consumes
-a supplied `xyz -> B` field.
-
-For `r=sqrt(s) a(s,theta,z)`, the divergence-free field and scalar-pressure
-energy are
+Alongside the toroidal VMEC core, `vmex.mirror` solves scalar-pressure
+equilibria for **open magnetic mirrors** and **closed stellarator–mirror
+hybrids** — the same differentiable, spline-native machinery applied to a
+straight (open) axis. Open mirrors use nonperiodic axial coordinates
+`(s, θ, ξ)` with fixed-flux end cuts, not thin-torus approximations. Coils and
+Biot–Savart fields stay in [ESSOS](https://github.com/uwplasma/ESSOS); VMEX
+consumes a supplied `xyz → B` field. The divergence-free field and
+scalar-pressure energy are
 
 ```text
-sqrt(g) B^theta = I'(s) - partial_z lambda
-sqrt(g) B^z     = Psi'(s) + partial_theta lambda
-W = integral [B^2/(2 mu0) + p/(gamma - 1)] dV
+√g B^θ = I'(s) − ∂_ξ λ,    √g B^ξ = Ψ'(s) + ∂_θ λ,    B^s = 0
+W = ∫ [ B²/(2μ₀) + p/(γ − 1) ] dV
 ```
 
 ### Fixed-boundary open mirrors
 
-The fixed-boundary workflow is coefficient-native:
+A fixed-boundary solve is one call:
 
 ```python
-from vmex.mirror import (
-    MirrorBoundary, MirrorConfig, MirrorResolution, MirrorState,
-    SplineMirrorDiscretization, solve_fixed_boundary_cli,
-)
+from vmex.mirror import MirrorConfig, MirrorResolution, solve_fixed_boundary_from_radius
 
 config = MirrorConfig(resolution=MirrorResolution(ns=7, mpol=4, nxi=17))
-source_grid = config.build_grid()
-boundary = MirrorBoundary.from_radius(0.3, source_grid)
-discretization = SplineMirrorDiscretization.build(config, elements=6)
-boundary_coefficients = discretization.fit_boundary(boundary, source_grid)
-initial_coefficients = discretization.fit_state(
-    MirrorState.from_boundary(boundary, source_grid), source_grid
-)
-result = solve_fixed_boundary_cli(
-    initial_coefficients, boundary_coefficients, discretization, config,
-    axial_flux_derivative=0.01, solve_lambda=True,
-    require_convergence=True,
-)
+result = solve_fixed_boundary_from_radius(0.3, config)   # radius: scalar, (nxi,), or (ntheta, nxi)
 ```
 
-<p align="center">
-  <img src="docs/_static/figures/mirror_fixed_boundary_3d.png" width="100%" alt="Fixed-boundary solved geometry, field lines, cross-sections, convergence, and corrected-cut validation">
-</p>
+![Fixed-boundary rotating-ellipse mirror: solved geometry, field lines, cross-sections, and convergence](docs/_static/figures/mirror_fixed_boundary_3d.png)
 
-The rotating ellipse passes the independent reconstructed-force gate and its
+The rotating-ellipse mirror converges at `ftol = 1e-12` to a normalized
+divergence of `6.6e-15`, in **6 s cold / 0.2 s warm** (peak ≈1.2 GB, CPU). Its
 implicit boundary gradient agrees with two fully reconverged finite-difference
-solves to `5.9e-10` relative, providing the derivative needed by an external
-optimizer. With the larger `0.12 m` cross-section, the solved variational,
-strong-force, and divergence residuals are `2.1e-16`, `0.0267`, and `6.7e-15`.
-The Agren-Savenko straight-field-line target is retained as a failed validation
-case: its coefficient residual reaches `1.7e-16`, but its corrected-cut strong
-force is `0.335`, so it is not advertised as an equilibrium.
+solves to `5.9e-10` relative — the derivative an external optimizer needs.
 
-### Free-boundary beta scan
+### Free-boundary β scan
 
-The free-boundary solver jointly updates the spline LCFS, plasma state, and
-unbounded exterior vacuum. Independent force and grid-refinement gates support
-the 0%, 1%, 3%, and 10% sequence. The converged 25% and 50% continuation
-states remain unpromoted because their independent force gates fail. The
-default finite-radius vacuum-flux initialization reproduces the canonical
-medium-grid beta-zero strong-force residual of `0.003411` for the enlarged
-`0.25 m` central cross-section.
+`solve_beta_scan` jointly updates the spline last-closed surface, the plasma
+state, and the unbounded exterior vacuum, driven by an ESSOS two-coil field.
+The supported sequence runs from 0 % to 10 % β, and the implicit free-boundary
+derivative matches a reconverged finite difference to `1.1e-10` relative
+(adjoint residual `1.4e-9`). Pushing to a requested 50 % β grows the central
+radius 7.7 % and drops the on-axis field 23.7 % from vacuum, exercising the
+finite-β coupling end to end.
 
-<p align="center">
-  <img src="docs/_static/figures/mirror_free_boundary_beta50_summary.png" width="100%" alt="Solved free-boundary beta scan with ESSOS coils, field lines, LCFS, magnetic field, pressure, and residual histories">
-</p>
+![Free-boundary beta scan with ESSOS coils: field lines, LCFS, |B|, pressure, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
 
-Every displayed beta uses its own solved MOUT state. At 50% requested beta the
-central radius grows by 7.52% and the on-axis field falls by 22.94% from the
-vacuum state; this visibly exercises the finite-beta coupling without
-promoting the failed 25/50% force gates.
+### Stellarator–mirror hybrid (research)
 
-### Stellarator-mirror hybrid
+A closed periodic hybrid — two exactly straight mirror legs joined by two
+curved stellarator returns on a rotation-minimizing B-spline axis — has a
+complete fixed-boundary solve and example. A finite axial current gives
+`ι = 0.085`; the case reaches a `2.4e-14` variational residual and `3.1e-14`
+normalized divergence. Its independent strong-force gate does not yet converge
+under same-geometry refinement, so it ships as a validated **research
+candidate**, not a supported benchmark — the same implicit API already
+differentiates its periodic boundary and axis controls.
 
-The periodic hybrid example uses a rotation-minimizing frame around a closed
-B-spline axis. Its central leg spans have zero curvature to roundoff; the
-elliptical section rotates by 90 degrees only in each return. A finite axial
-current produces `iota=0.0851`, and the plotted cyan curves are integrated
-field lines from the solved field. The default 32-control case reaches
-`2.4e-14` variational residual and `3.1e-14` normalized divergence, but its
-independent strong-force residual is `0.430`.
+![Periodic B-spline stellarator–mirror hybrid: straight legs, rotating returns, field lines, and |B|](docs/_static/figures/stellarator_mirror_hybrid.png)
 
-<p align="center">
-  <img src="docs/_static/figures/stellarator_mirror_hybrid.png" width="100%" alt="Solved periodic B-spline hybrid with straight legs, rotating returns, field lines, LCFS magnetic field strength, cross-sections, iota, and convergence">
-</p>
-
-The implementation and example are available for refinement and review, but
-this case is not yet a supported equilibrium benchmark. Exact longitudinal
-and radial/poloidal refinement lower the independent residual to `0.227`,
-while the next grid exceeds the 30-minute resource gate; finite-beta and
-racetrack-sensitivity claims are therefore deferred. The same implicit API
-differentiates periodic boundary and axis B-spline controls and passes
-reconverged finite differences on the closed circular limit, so optimization
-support is ready when the racetrack primal force gate is corrected.
-
-### Run the examples
+### Run the mirror examples
 
 ```bash
 python examples/mirror_fixed_boundary_nonaxisymmetric.py
@@ -595,7 +548,13 @@ python examples/mirror_free_boundary_beta_scan.py
 python examples/stellarator_mirror_hybrid.py
 ```
 
-Open-mirror MOUT files can be plotted with `vmex --plot mout_*.nc`. The
-[mirror documentation](docs/mirror_geometry.rst) derives the coordinate and
-field models, defines the boundary conditions and residuals, maps those models
-to the source, and records the validation and derivative limits.
+Open-mirror `mout_*.nc` files plot with `vmex --plot mout_*.nc`. The
+[mirror-geometry documentation](https://vmex.readthedocs.io/en/latest/mirror_geometry.html)
+derives the coordinate and field models, defines the boundary conditions and
+residuals, and records the validation and derivative limits.
+
+## License
+
+MIT. If you use VMEX in published work, please cite this repository and
+the original VMEC papers (Hirshman & Whitson, *Phys. Fluids* 1983;
+Hirshman, van Rij & Merkel, *Comput. Phys. Commun.* 1986).
