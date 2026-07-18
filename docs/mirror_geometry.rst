@@ -563,8 +563,7 @@ The release audit is rerun from the final branch rather than copied from an
 intermediate repository snapshot. Generated MOUT files and figures remain
 ignored. Four compact JSON files retain numerical evidence for fixed open,
 free axisymmetric, deferred free nonaxisymmetric, and the negative closed
-hybrid disposition; repository-shape and promotion gates are maintained in
-``plan.md``.
+hybrid disposition.
 
 .. image:: _static/figures/mirror_fixed_boundary_3d.png
    :alt: Fixed-boundary rotating-ellipse mirror with a large cross-section and cap-to-cap field lines

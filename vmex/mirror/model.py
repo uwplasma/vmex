@@ -3,7 +3,7 @@
 The supported open-end model is a finite equilibrium domain between two
 fixed, flux-carrying cuts.  These cuts are not periodic and are not
 plasma-vacuum interfaces.  The lateral ``s=1`` surface is the fixed or free
-plasma boundary.  See ``plan.md`` Phase 5.1-5.2.
+plasma boundary.
 """
 
 from __future__ import annotations
