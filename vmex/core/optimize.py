@@ -1769,9 +1769,12 @@ def _least_squares_implicit(
             # measured drift says the incoming space no longer matches the
             # operator, in which case the next chunk cold-starts.
             drift0 = drifts[0]
+            # recs leaves are vmapped over the chunk (shape (chunk, n, k)); the
+            # carried pair is a single lane (n, k), so gate lane 0 against a
+            # zero of *lane* shape, not the whole stack.
             pair = jax.tree.map(
                 lambda a: jnp.where(drift0 > _RECYCLE_DRIFT_LIMIT,
-                                    jnp.zeros_like(a), a[0]),
+                                    jnp.zeros_like(a[0]), a[0]),
                 recs)
             return pair, (cols_chunk, drift0)
 
