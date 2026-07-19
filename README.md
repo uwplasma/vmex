@@ -529,12 +529,15 @@ solves to `9.3e-10` relative — the derivative an external optimizer needs.
 ### Free-boundary β scan
 
 `solve_beta_scan` jointly updates the spline last-closed surface, the plasma
-state, and the unbounded exterior vacuum, driven by an ESSOS two-coil field.
-The supported sequence runs from 0 % to 10 % β, and the implicit free-boundary
-derivative matches a reconverged finite difference to `1.1e-10` relative
-(adjoint residual `1.4e-9`). Pushing to a requested 50 % β grows the central
-radius 7.7 % and drops the on-axis field 23.7 % from vacuum, exercising the
-finite-β coupling end to end.
+state, and the unbounded exterior vacuum, driven by an ESSOS two-coil field
+(0.5 m loops at z = ±1.0 m, 3.72e5 A: vacuum B(0) = 0.0836 T, mirror
+ratio 4.58). The supported sequence runs from 0 % to 10 % β, and the implicit
+free-boundary derivative matches a reconverged finite difference to `1.1e-10`
+relative (adjoint residual `1.4e-9`). Pushing to a requested 50 % β grows the
+central radius 7.5 % and drops the on-axis field 22.3 % from vacuum — and with
+this compact-coil configuration the 25 % and 50 % continuation states also
+pass the pointwise strong-force gate at the scan resolution, ahead of their
+formal promotion to the supported range.
 
 ![Free-boundary beta scan with ESSOS coils: field lines, LCFS, |B|, pressure, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
 
