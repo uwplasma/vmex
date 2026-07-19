@@ -8,9 +8,12 @@ periodic tori. Closed stellarator-mirror hybrids use a periodic longitudinal
 B-spline around two exactly straight mirror legs and two curved stellarator
 returns. Axisymmetric and rotating-ellipse fixed-boundary open lanes are
 supported, as is axisymmetric free boundary through 10% requested beta. The
-periodic hybrid has a complete fixed-boundary solve and example, but remains a
-validation candidate until its independent strong-force residual converges
-under same-geometry refinement.
+periodic hybrid has a complete fixed-boundary solve and example. Its
+circular-section lane is supported: with the leg-return junction frozen as a
+design parameter, its independent strong-force residual converges monotonically
+under same-geometry refinement. The rotating-elliptical-section hybrid remains
+the single research candidate, held back by a separately scoped near-axis
+representation defect in the rotating section rather than by the junction.
 
 Quickstart
 ----------
@@ -196,12 +199,24 @@ values match the recorded evidence bit-for-bit):
      - 0.00140
      - 0.0169
      - 0.00442
-   * - Hybrid circular section, ``ns=7``, 16 controls
-     - 0.205
-     - 0.00305
-     - 0.00310
+   * - Hybrid circular section, frozen junction, ``ns=5``, 16 controls
+     - 0.204
+     - 0.00304
+     - 0.00304
      - (none)
-     - 0.00281
+     - 0.00261
+   * - Hybrid circular section, frozen junction, ``ns=5``, 32 controls
+     - 0.176
+     - 0.00261
+     - 0.00261
+     - (none)
+     - 0.00196
+   * - Hybrid circular section, frozen junction, ``ns=5``, 64 controls
+     - 0.118
+     - 0.00175
+     - 0.00175
+     - (none)
+     - 0.00084
    * - Free boundary ``(ns,nxi,elements,panels)`` = ``(5,7,4,8)``, beta 0
      - 0.0421
      - 0.00665
@@ -216,10 +231,14 @@ values match the recorded evidence bit-for-bit):
      - 0.00588
 
 The rotating-ellipse ladder stays monotone under the new normalization
-(per-step ratios 2.50 and 1.88), and the hybrid's minor-radius number now
-sits between the coarse and medium open rungs instead of appearing an order
-of magnitude worse: the apparent cross-lane gap was the ``L/a`` disparity,
-not a larger force error. The straight field-line mirror (SFLM) is a
+(per-step ratios 2.50 and 1.88), and the frozen-junction circular-section
+hybrid ladder is likewise monotone (minor-radius bulk
+``0.00304 -> 0.00261 -> 0.00175``, device-normalized all-volume
+``0.204 -> 0.176 -> 0.118``): with the junction geometry held fixed, exact
+refinement of the solve basis drives the force down instead of plateauing.
+Its minor-radius number sits between the coarse and medium open rungs instead
+of appearing an order of magnitude worse: the apparent cross-lane gap was the
+``L/a`` disparity, not a larger force error. The straight field-line mirror (SFLM) is a
 paraxial-accuracy benchmark rather than a failed case: its unconstrained
 bulk force is clean (``0.00259`` minor-normalized, below the ``0.05`` gate)
 and converges under refinement -- the ``(7,6,17,6) -> (9,8,21,8)`` step
@@ -336,34 +355,56 @@ example is::
 
    python examples/stellarator_mirror_hybrid.py
 
-The stellarator-mirror hybrid is a validated research candidate rather than a
-finished benchmark: it reaches a small variational residual and divergence but
-its independent strong-force reconstruction does not yet converge under
-same-geometry refinement. The default ``ns=5``, ``mpol=3``, 32-control case
-reaches variational residual ``2.36e-14`` and normalized ``div(B)=3.14e-14``
-with axis closure ``8.88e-16``, and the solved finite-current state gives
-``iota=0.0851`` at ``s=0.75``. Its reconstructed strong-force residual is
-``0.430``. Exact 16/32/64 spline transfer of one geometry gives a monotone but
-plateauing sequence ``0.5733 -> 0.3556 -> 0.3325`` at fixed volume (agreement
-``5.0e-6`` relative, variational residual below ``6.7e-14``); refining
-radial/poloidal resolution from ``ns=5, mpol=3`` to ``ns=7, mpol=4`` at 64
-controls lowers the strong force from ``0.333`` to ``0.227`` while the
-variational residual reaches ``3.90e-16``. Every hybrid residual in this and
-the next paragraph is arc-length-normalized (the legacy device normalization
-recorded in ``benchmarks/mirror_hybrid_fixed_boundary.json``); the racetrack
-arc length is 67 minor radii, so the same states are roughly 67 times smaller
-under the primary minor-radius normalization -- the re-measured circular
-section below appears in the gate table above. Finite-beta continuation and
-racetrack sensitivity claims are deferred until this beta-zero residual is
-resolved.
+The leg-return junction -- where an exactly straight leg (zero curvature)
+meets a circular return (curvature :math:`1/R`) -- is rounded across the cubic
+spline's local support. Building the axis directly in a finer solve basis
+narrows that rounding and sharpens the junction curvature overshoot as fast as
+refinement helps, so the as-built geometry family does not converge: the
+circular section reads ``0.184`` device-normalized at 32 controls and ``0.218``
+at 64. ``build_stellarator_mirror_hybrid(axis_coefficient_count=...)`` freezes
+the junction as an explicit design parameter of the closed B-spline axis
+family. The racetrack axis and rotating section are constructed at that base
+control count and then exactly refined (``refine_periodic_uniform``, dyadic and
+curve-preserving to roundoff) to the solve ``coefficient_count``, so the
+junction-transition width is held fixed while the equilibrium resolution
+increases. The default ``axis_coefficient_count=None`` keeps the legacy
+behaviour of building the geometry in the solve basis.
 
-A sensitivity study localizes the residual to the racetrack geometry rather
-than to pressure or imposed current. At the default 32-control resolution,
-removing current changes the strong force only from ``0.430`` to ``0.424``;
-replacing the rotating ellipse by a circular section gives ``0.158`` and a
-fixed ellipse ``0.164``, while the circular-axis/circular-section limit gives
-``0.0083``. The periodic derivative algorithm is validated separately on the
-closed circular limit below.
+With the junction frozen at 16 controls, the circular-section hybrid converges
+monotonically under exact 16/32/64 solve refinement: device-normalized
+all-volume force ``0.204 -> 0.176 -> 0.118`` (reproducing the audit ladder) and
+minor-radius bulk force ``0.00304 -> 0.00261 -> 0.00175`` (per-step ratios
+``1.16`` and ``1.49``), every rung below the ``0.05`` gate with variational
+residual below ``3.2e-13`` and normalized ``div(B)`` below ``1e-13``. This
+passes the promotion criterion (absolute gate on the finest rung and monotone
+refinement), so the circular-section hybrid is a supported lane. Every hybrid
+residual in this section is quoted device- (arc-length-) normalized where noted
+(the legacy normalization recorded in
+``benchmarks/mirror_hybrid_fixed_boundary.json``); the racetrack arc length is
+about 67 minor radii, so the device numbers are roughly 67 times the
+minor-radius numbers.
+
+The rotating-elliptical-section hybrid remains the single research candidate.
+Its default ``ns=5``, ``mpol=3``, 32-control case reaches variational residual
+``2.36e-14`` and normalized ``div(B)=3.14e-14`` with axis closure ``8.88e-16``,
+and the solved finite-current state gives ``iota=0.0851`` at ``s=0.75``, but its
+reconstructed strong-force residual is ``0.430`` and does not converge even
+with the junction frozen: exact 16/32/64 spline transfer of one geometry gives
+a monotone but plateauing sequence ``0.5733 -> 0.3556 -> 0.3325`` at fixed
+volume (agreement ``5.0e-6`` relative, variational residual below ``6.7e-14``),
+and refining ``ns=5, mpol=3`` to ``ns=7, mpol=4`` at 64 controls only lowers it
+from ``0.333`` to ``0.227``. That plateau is a separately scoped near-axis
+representation defect in the rotating section, not a junction effect;
+finite-beta continuation and rotating-section sensitivity claims are deferred
+until it is resolved.
+
+A sensitivity study localizes the rotating-section residual to the racetrack
+geometry rather than to pressure or imposed current. At the default 32-control
+resolution, removing current changes the strong force only from ``0.430`` to
+``0.424``; replacing the rotating ellipse by a circular section gives ``0.158``
+and a fixed ellipse ``0.164``, while the circular-axis/circular-section limit
+gives ``0.0083``. The periodic derivative algorithm is validated separately on
+the closed circular limit below.
 
 Source ownership is compact: periodic basis/refinement is in ``basis.py``;
 axis, Bishop frame, and embedding are in ``geometry.py``; coefficient packing,
@@ -646,9 +687,11 @@ This establishes both open-spline derivative directions. On the closed
 circular limit, periodic boundary and axis controls pass the parameter
 JVP/VJP transpose identity and an adjoint volume derivative agrees across
 three fully reconverged centered-difference steps. This validates the closed
-algorithm for optimization, but the racetrack hybrid does not yet carry a
-sensitivity claim while its independent strong-force reconstruction has not
-converged.
+algorithm for optimization. The supported circular-section racetrack, whose
+frozen-junction strong-force reconstruction converges under refinement, is a
+valid sensitivity target; the rotating-elliptical-section racetrack does not
+yet carry a sensitivity claim while its independent strong-force reconstruction
+plateaus on the separately scoped near-axis representation defect.
 
 Public fixed-boundary inputs are
 ``SplineMirrorBoundary``, ``SplineMirrorState``, and

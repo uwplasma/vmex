@@ -543,16 +543,22 @@ formal promotion to the supported range.
 
 ![Free-boundary beta scan with ESSOS coils: field lines, LCFS, |B|, pressure, and residual histories](docs/_static/figures/mirror_free_boundary_beta50_summary.png)
 
-### Stellarator–mirror hybrid (research)
+### Stellarator–mirror hybrid
 
 A closed periodic hybrid — two exactly straight mirror legs joined by two
 curved stellarator returns on a rotation-minimizing B-spline axis — has a
 complete fixed-boundary solve and example. A finite axial current gives
 `ι = 0.085`; the case reaches a `2.4e-14` variational residual and `3.1e-14`
-normalized divergence. Its independent strong-force gate does not yet converge
-under same-geometry refinement, so it ships as a validated **research
-candidate**, not a supported benchmark — the same implicit API already
-differentiates its periodic boundary and axis controls.
+normalized divergence. The leg-return junction is frozen as an explicit design
+parameter (`axis_coefficient_count`): the axis is built at a fixed base control
+count and the solve basis is exactly refined, so the junction stops sharpening.
+With that contract the **circular-section lane is supported** — its strong-force
+gate converges monotonically under same-geometry refinement (device-normalized
+all-volume `0.204 → 0.176 → 0.118`, minor-radius bulk `0.00304 → 0.00261 →
+0.00175`, below the `0.05` gate). The **rotating-elliptical-section hybrid
+remains a research candidate**, held back by a separately scoped near-axis
+representation defect in the rotating section rather than by the junction. The
+same implicit API differentiates the periodic boundary and axis controls.
 
 ![Periodic B-spline stellarator–mirror hybrid: straight legs, rotating returns, B-spline axis, and boundary |B|](docs/_static/figures/stellarator_mirror_hybrid.png)
 
