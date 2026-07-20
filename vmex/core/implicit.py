@@ -196,12 +196,13 @@ def params_from_input(inp: VmecInput) -> ImplicitParams:
     a ``jax.grad``/``jax.jacrev`` over :func:`run` then executes there, which
     is where the launch-bound implicit adjoint is fastest — measured 57 s
     (GPU) vs seconds (CPU) for one solovev ``value_and_grad`` (R24).
-    A user ``JAX_PLATFORMS`` pin or an already-CPU backend stands the pin
-    down; ``optimize.least_squares`` applies the same rule to its dof vector.
+    An active ``jax.default_device`` context, user JAX platform pin, or an
+    already-CPU backend stands the pin down; ``optimize.least_squares``
+    applies the same rule to its dof vector.
     """
-    from .device import resolve_implicit_device
+    from .device import AUTO, resolve_implicit_device
 
-    dev = resolve_implicit_device(None, None)
+    dev = resolve_implicit_device(AUTO, None)
     if dev is None:
         arr = lambda a: jnp.asarray(np.asarray(a, dtype=np.float64))  # noqa: E731
     else:

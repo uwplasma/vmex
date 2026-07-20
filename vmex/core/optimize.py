@@ -85,6 +85,7 @@ from solvax import (
     chunk_map,
 )
 
+from .device import AUTO
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .solver import (
@@ -1136,7 +1137,7 @@ def least_squares(
     warm_start: str | None = "perturbation",
     use_ess: bool = False,
     ess_alpha: float = 1.2,
-    device: Any = None,
+    device: Any = AUTO,
     solve_kwargs: dict | None = None,
     verbose: int = 0,
     **scipy_kwargs,
@@ -1185,7 +1186,8 @@ def least_squares(
     solver reuses one XLA executable across all boundary trials
     (``vmex.core.solver`` Phase-2 cache; only the first solve of
     a stage compiles).  ``device`` is forwarded to the solver
-    (:mod:`vmex.core.device` policy applies when ``None``).
+    (``"auto"`` applies :mod:`vmex.core.device`'s policy; ``None`` follows
+    JAX placement).
 
     ``use_ess`` enables Exponential Spectral Scaling of the trust region
     (:func:`_ess_scale`, ``ess_alpha``), the legacy ``use_ess`` option.
@@ -1331,8 +1333,7 @@ def least_squares(
         raise ValueError(f"jac must be None or 'implicit', got {jac!r}")
 
     solve_kwargs = dict(solve_kwargs or {})
-    if device is not None:
-        solve_kwargs.setdefault("device", device)
+    solve_kwargs.setdefault("device", device)
     if use_ess:
         scipy_kwargs.setdefault("x_scale", _ess_scale_full())
     if x0 is None:
@@ -1428,7 +1429,7 @@ def _least_squares_implicit(
     recycle: bool = False,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
-    device: Any = None,
+    device: Any = AUTO,
     verbose: int = 0,
     **scipy_kwargs,
 ):

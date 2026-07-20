@@ -31,10 +31,48 @@ def test_iteration_work_and_recommendation_threshold():
     assert dev.recommended_device(big) == "gpu"
 
 
-def test_pinned_platform_is_never_overridden(monkeypatch):
-    monkeypatch.setenv("JAX_PLATFORMS", "cpu")
-    # even a GPU-recommended resolution is left alone when the user pinned.
-    assert dev.resolve_device(None, _res(ns=201, mpol=16, ntor=16, nfp=5)) is None
+@pytest.mark.parametrize("key", ["jax_platforms", "jax_platform_name"])
+def test_selected_jax_platform_is_never_overridden(key):
+    previous = jax.config.values.get(key)
+    try:
+        jax.config.update(key, "cpu")
+        # Even a GPU-recommended resolution is left alone when JAX is pinned.
+        assert dev.resolve_device(
+            dev.AUTO, _res(ns=201, mpol=16, ntor=16, nfp=5)
+        ) is None
+    finally:
+        jax.config.update(key, previous)
+
+
+def test_none_leaves_placement_to_jax(monkeypatch):
+    monkeypatch.setattr(dev, "recommended_device", lambda _: pytest.fail("auto policy ran"))
+    assert dev.resolve_device(None, _res(ns=11, mpol=6, ntor=0)) is None
+    assert dev.resolve_implicit_device(None, None) is None
+
+
+def test_omitted_device_uses_auto_policy(monkeypatch):
+    seen = []
+    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
+    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    monkeypatch.setattr(dev, "recommended_device", lambda res: seen.append(res) or "cpu")
+    dev.resolve_device(resolution=_res(ns=11, mpol=6, ntor=0))
+    assert len(seen) == 1
+
+
+def test_auto_without_resolution_has_a_clear_error():
+    with pytest.raises(ValueError, match="resolution is required"):
+        dev.resolve_device()
+    with pytest.raises(ValueError, match="resolution is required"):
+        dev.device_context()
+
+
+def test_default_device_context_is_never_overridden(monkeypatch):
+    # Pretend the process default backend is an accelerator: absent the active
+    # CPU context, AUTO would explicitly return a CPU device for this deck.
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    with jax.default_device(jax.devices("cpu")[0]):
+        assert dev.resolve_device(dev.AUTO, _res(ns=11, mpol=6, ntor=0)) is None
+        assert dev.resolve_implicit_device(dev.AUTO, None) is None
 
 
 def test_auto_cpu_recommendation_is_a_noop_on_cpu(monkeypatch):
@@ -42,7 +80,7 @@ def test_auto_cpu_recommendation_is_a_noop_on_cpu(monkeypatch):
     monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
     # CPU-recommended + default backend already CPU -> nothing to place.
     if jax.default_backend() == "cpu":
-        assert dev.resolve_device(None, _res(ns=11, mpol=6, ntor=0)) is None
+        assert dev.resolve_device(dev.AUTO, _res(ns=11, mpol=6, ntor=0)) is None
 
 
 def test_auto_gpu_recommendation_without_accelerator(monkeypatch):
@@ -50,7 +88,7 @@ def test_auto_gpu_recommendation_without_accelerator(monkeypatch):
     monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
     # GPU-recommended but CPU-only machine -> None (nothing to do).
     if jax.default_backend() == "cpu":
-        assert dev.resolve_device(None, _res(ns=201, mpol=16, ntor=16, nfp=5)) is None
+        assert dev.resolve_device(dev.AUTO, _res(ns=201, mpol=16, ntor=16, nfp=5)) is None
 
 
 def test_explicit_cpu_returns_a_cpu_device():
@@ -79,7 +117,7 @@ def test_resolve_implicit_device_defaults_to_cpu(monkeypatch):
     monkeypatch.delenv("JAX_PLATFORMS", raising=False)
     monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
     res = _res(ns=35, mpol=6, ntor=6, nfp=4)  # a QH-class stage
-    resolved = dev.resolve_implicit_device(None, res)
+    resolved = dev.resolve_implicit_device(dev.AUTO, res)
     if jax.default_backend() == "cpu":
         # already on CPU -> nothing to place (the implicit path stays put).
         assert resolved is None
@@ -88,22 +126,28 @@ def test_resolve_implicit_device_defaults_to_cpu(monkeypatch):
         assert resolved is not None and resolved.platform == "cpu"
 
 
-def test_resolve_implicit_device_honors_explicit_and_pin(monkeypatch):
+def test_resolve_implicit_device_honors_explicit_and_pin():
     res = _res(ns=35, mpol=6, ntor=6, nfp=4)
     # explicit device is honored (delegated to resolve_device).
     explicit = dev.resolve_implicit_device("cpu", res)
     assert explicit is not None and explicit.platform == "cpu"
-    # a user platform pin stands the auto policy down.
-    monkeypatch.setenv("JAX_PLATFORMS", "cpu")
-    assert dev.resolve_implicit_device(None, res) is None
+    # A JAX platform pin stands the auto policy down.
+    previous = jax.config.jax_platforms
+    try:
+        jax.config.update("jax_platforms", "cpu")
+        assert dev.resolve_implicit_device(dev.AUTO, res) is None
+    finally:
+        jax.config.update("jax_platforms", previous)
 
 
 def test_device_context_is_a_nullcontext_when_placement_untouched(monkeypatch):
-    monkeypatch.setenv("JAX_PLATFORMS", "cpu")
-    ctx = dev.device_context(None, _res(ns=11, mpol=6, ntor=0))
-    assert isinstance(ctx, contextlib.nullcontext)
-    with ctx:
-        pass
+    monkeypatch.setattr(dev, "_user_selected_placement", lambda: True)
+    res = _res(ns=11, mpol=6, ntor=0)
+    for choice in (None, dev.AUTO):
+        ctx = dev.device_context(choice, res)
+        assert isinstance(ctx, contextlib.nullcontext)
+        with ctx:
+            pass
 
 
 def test_device_context_wraps_default_device_for_explicit_cpu():

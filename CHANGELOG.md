@@ -7,6 +7,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once past 1.0.
 ## [Unreleased]
 
 ### Changed
+- **Explicit device semantics.** Omitted or ``device="auto"`` placement keeps
+  VMEX's measured policy; explicit ``device=None`` now follows ordinary JAX
+  placement. Explicit platform names and ``jax.Device`` objects always win.
 - **QI-mirror hybrid: tangent-aligned legs at all four symmetry planes.**
   `splice_straight_legs` now inserts each straight mirror leg *along the local
   axis tangent* (rather than a shared transverse "bisector" that produced a

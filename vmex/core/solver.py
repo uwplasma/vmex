@@ -125,7 +125,7 @@ _harden_compilation_cache()
 import jax.numpy as jnp
 from jax import lax
 
-from .device import device_context
+from .device import AUTO, device_context
 from .errors import (
     BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
     NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG, VmecConvergenceError,
@@ -1450,7 +1450,7 @@ def solve(
     gamma: float | None = None, nstep: int | None = None,
     lconm1: bool = True, verbose: bool = False, emit=print,
     initial_state: SpectralState | None = None,
-    device: Any = None,
+    device: Any = AUTO,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
 ) -> SolveResult:
@@ -1484,10 +1484,10 @@ def solve(
     the interior and lambda are kept.
 
     ``device`` places the jitted iteration lanes: ``"cpu"``/``"gpu"``/
-    ``"cuda"``/``"tpu"`` or a ``jax.Device`` (always honored), or ``None``
-    (default) to apply the measured small-work-to-CPU policy of
-    :mod:`vmex.core.device` — which never overrides a user-pinned
-    ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME``.
+    ``"cuda"``/``"tpu"`` or a ``jax.Device`` (always honored), ``"auto"``
+    (default) to apply the measured small-work-to-CPU policy, or ``None`` to
+    follow JAX placement.  The automatic policy never overrides an active
+    ``jax.default_device`` context or user-pinned JAX platform.
 
     ``precon_type`` (``"NONE"`` default) with a finite ``prec2d_threshold`` —
     or an explicit ``prec2d``

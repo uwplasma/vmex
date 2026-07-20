@@ -33,20 +33,20 @@ by 2-3x and increasingly more with size.  The threshold ``100_000`` sits
 between the two clusters (geometric mean of 24.3e3 and 491.5e3 ~ 109e3).
 
 The policy is a *default* only: an explicit ``device=`` argument to
-``solve``/``solve_multigrid`` always wins, and when the user pinned the JAX
-platform themselves (``JAX_PLATFORMS``/``JAX_PLATFORM_NAME``) the automatic
-policy stands down entirely (:func:`resolve_device` returns ``None``).
+``solve``/``solve_multigrid`` always wins, while ``device=None`` follows
+JAX placement.  The automatic policy stands down when the user selected a
+JAX default device or platform themselves.
 """
 
 from __future__ import annotations
 
 import contextlib
-import os
 from typing import Any
 
 import jax
 
 __all__ = [
+    "AUTO",
     "GPU_MIN_ITERATION_WORK",
     "iteration_work",
     "recommended_device",
@@ -54,6 +54,10 @@ __all__ = [
     "resolve_implicit_device",
     "device_context",
 ]
+
+#: Apply VMEX's measured placement policy.  ``None`` deliberately has the
+#: usual JAX meaning: do not add a placement context.
+AUTO = "auto"
 
 #: Minimum ``ns * mnmax * nznt`` per-iteration work for the GPU to be the
 #: recommended default (see the measured table in the module docstring).
@@ -75,29 +79,38 @@ def recommended_device(resolution: Any) -> str:
     return "cpu" if iteration_work(resolution) < GPU_MIN_ITERATION_WORK else "gpu"
 
 
-def _user_pinned_platform() -> bool:
-    """True when the user pinned the JAX platform via the environment."""
-    return bool(
-        os.environ.get("JAX_PLATFORMS", "").strip()
-        or os.environ.get("JAX_PLATFORM_NAME", "").strip()
+def _user_selected_placement() -> bool:
+    """True when the user selected a JAX default device or platform."""
+    return (
+        jax.config.jax_default_device is not None
+        or bool(jax.config.jax_platforms)
+        or bool(jax.config.values.get("jax_platform_name"))
     )
 
 
-def resolve_device(device: Any, resolution: Any):
+def resolve_device(device: Any = AUTO, resolution: Any = None):
     """Map a ``device=`` argument to a concrete ``jax.Device`` (or ``None``).
 
     ``None`` means "leave placement alone" (no ``jax.default_device`` wrap):
 
     - explicit ``device`` (``"cpu"``/``"gpu"``/``"cuda"``/``"rocm"``/``"tpu"``
       or a ``jax.Device``) is always honored — missing hardware raises;
-    - ``device=None`` applies :func:`recommended_device` **unless** the user
-      pinned ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME`` (never override an
-      explicit choice), the recommended platform is not available, or the
-      recommendation already matches the default backend.
+    - ``device=None`` does not intervene in JAX placement;
+    - ``device="auto"`` applies :func:`recommended_device` **unless** the user
+      selected an active :func:`jax.default_device` context or pinned
+      ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME``, the recommended platform is not
+      available, or it already matches the default backend.
     """
     if device is None:
-        if _user_pinned_platform():
+        return None
+    if hasattr(device, "platform"):  # already a jax.Device
+        return device
+    kind = str(device).strip().lower()
+    if kind == AUTO:
+        if _user_selected_placement():
             return None
+        if resolution is None:
+            raise ValueError("resolution is required when device='auto'")
         kind = recommended_device(resolution)
         default = jax.default_backend()
         if kind == "gpu":
@@ -110,20 +123,17 @@ def resolve_device(device: Any, resolution: Any):
         if default == "cpu":
             return None  # already on CPU
         return jax.devices("cpu")[0]
-    if hasattr(device, "platform"):  # already a jax.Device
-        return device
-    kind = str(device).strip().lower()
     if kind in ("gpu", "cuda", "rocm"):
         return jax.devices("gpu")[0]
     if kind in ("cpu", "tpu"):
         return jax.devices(kind)[0]
     raise ValueError(
-        f"unknown device {device!r}; expected 'cpu', 'gpu', 'cuda', 'rocm', "
-        "'tpu' or a jax.Device"
+        f"unknown device {device!r}; expected 'auto', None, 'cpu', 'gpu', "
+        "'cuda', 'rocm', 'tpu' or a jax.Device"
     )
 
 
-def resolve_implicit_device(device: Any, resolution: Any):
+def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
     """Device for the implicit-gradient Jacobian / adjoint GMRES (or ``None``).
 
     Unlike the forward solve, the ``jac="implicit"`` path builds a per-dof
@@ -133,23 +143,24 @@ def resolve_implicit_device(device: Any, resolution: Any):
     bound.  Measured on 2x RTX A4000 (R1, ``benchmarks`` notes) it is
     *slower* on the GPU than on the CPU at every optimization size tested: a
     ``max_mode=2`` QH stage (24 dofs) did not finish a single Jacobian eval in
-    37 min on the GPU, versus minutes on the CPU; the forward solve itself is a
-    host callback that never touches the accelerator.  So the default here is
+    37 min on the GPU, versus minutes on the CPU.  The forward equilibrium
+    callback uses the solver's independent automatic per-stage policy; this
+    resolver controls only the residual/Jacobian work.  So the default here is
     always the CPU:
 
-    - an explicit ``device`` (``"cpu"``/``"gpu"``/... or a ``jax.Device``) is
-      still honored (delegated to :func:`resolve_device`);
-    - a user ``JAX_PLATFORMS``/``JAX_PLATFORM_NAME`` pin stands down
-      (returns ``None`` — leave placement alone);
-    - otherwise pin to the CPU when the default backend is an accelerator, or
-      leave placement untouched (``None``) when already on the CPU.
+    - explicit devices are honored (delegated to :func:`resolve_device`);
+    - ``None`` leaves placement to JAX;
+    - ``"auto"`` stands down for an active JAX device/platform selection and
+      otherwise pins to CPU on an accelerator backend.
 
     ``resolution`` is accepted for signature parity with :func:`resolve_device`
     (and in case a size-dependent rule is wanted later); it is unused today.
     """
-    if device is not None:
+    if device is None:
+        return None
+    if not (isinstance(device, str) and device.strip().lower() == AUTO):
         return resolve_device(device, resolution)
-    if _user_pinned_platform():
+    if _user_selected_placement():
         return None
     if jax.default_backend() == "cpu":
         return None
@@ -159,7 +170,7 @@ def resolve_implicit_device(device: Any, resolution: Any):
         return None
 
 
-def device_context(device: Any, resolution: Any):
+def device_context(device: Any = AUTO, resolution: Any = None):
     """Context manager placing a solve stage on the resolved device.
 
     Returns ``jax.default_device(dev)`` for the :func:`resolve_device` result,

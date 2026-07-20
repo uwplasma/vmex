@@ -353,13 +353,16 @@ only:
 
 - an explicit ``device=`` argument to ``solve``/``solve_multigrid`` always
   wins;
-- if you pinned the platform yourself via ``JAX_PLATFORMS`` (or
-  ``JAX_PLATFORM_NAME``), the automatic policy stands down entirely.
+- ``device=None`` leaves placement to JAX;
+- an active ``jax.default_device`` context or a user-pinned JAX platform makes
+  the default ``device="auto"`` policy stand down entirely.
 
-.. code-block:: bash
+.. code-block:: python
 
-   JAX_PLATFORMS=cpu  vmex input.solovev      # force CPU
-   JAX_PLATFORMS=cuda vmex input.big_case     # force GPU
+   solve(inp, device="cpu")
+   solve(inp, device="gpu")
+   with jax.default_device(jax.devices("gpu")[0]):
+       solve(inp)  # AUTO respects this context
 
 Persistent compilation cache
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

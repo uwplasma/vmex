@@ -177,23 +177,25 @@ decks finish faster on the CPU. The measured crossover is
 and ``"gpu"`` at or above it, per multigrid stage.
 
 :func:`~vmex.core.device.resolve_device` turns this into a concrete
-placement with strict precedence rules: an explicit ``device=`` argument to
-``solve``/``solve_multigrid`` always wins; a user pin via ``JAX_PLATFORMS``
-or ``JAX_PLATFORM_NAME`` makes the automatic policy stand down entirely; and
-the recommendation is applied only when the recommended platform is actually
-available. :func:`~vmex.core.device.device_context` wraps a stage in the
-corresponding ``jax.default_device``.
+placement with strict precedence rules: an explicit device always wins;
+``device=None`` follows JAX placement; and the default ``device="auto"``
+policy stands down for an active ``jax.default_device`` context or a
+user-pinned JAX platform.  The recommendation is applied only when its
+platform is available. :func:`~vmex.core.device.device_context` wraps a stage
+in the corresponding ``jax.default_device``.
 
 The optimization path is different:
-:func:`~vmex.core.device.resolve_implicit_device` **always pins the
-implicit-gradient work to the CPU** by default. The ``jac="implicit"``
-Jacobian builds a per-dof vmapped forward-implicit-differentiation graph —
+:func:`~vmex.core.device.resolve_implicit_device` **pins the
+implicit-gradient work to the CPU by default when VMEX owns placement**. The
+``jac="implicit"`` Jacobian builds a per-dof vmapped
+forward-implicit-differentiation graph —
 dozens of preconditioned GMRES solves with inner control flow — whose XLA
 compile time grows with the dof count and whose execution is
 kernel-launch-bound; measured on GPU it is slower than the CPU at every
-optimization size tested, while the forward equilibrium solve inside it is a
-host callback that never touches the accelerator anyway. Explicit
-``device=`` arguments and user platform pins are still honored.
+optimization size tested. The forward equilibrium callback uses the solver's
+independent automatic per-stage placement policy; the implicit-device choice
+controls the residual and Jacobian graphs. Explicit ``device=`` arguments and
+JAX placement contexts are still honored for those graphs.
 
 Naming conventions
 ------------------

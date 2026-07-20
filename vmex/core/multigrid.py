@@ -40,7 +40,7 @@ import numpy as np
 
 import jax.numpy as jnp
 
-from .device import device_context
+from .device import AUTO, device_context
 from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
 from .fourier import ModeTable
 from .input import VmecInput
@@ -188,7 +188,7 @@ def solve_multigrid(
     initial_state: SpectralState | None = None,
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
-    device: Any = None,
+    device: Any = AUTO,
     raise_on_max_iterations: bool = True,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
@@ -230,9 +230,10 @@ def solve_multigrid(
 
     ``device`` places each stage's jitted lanes (see
     :func:`vmex.core.solver.solve`): an explicit ``"cpu"``/``"gpu"``/
-    ``jax.Device`` is always honored; ``None`` (default) applies the measured
-    per-stage policy of :mod:`vmex.core.device` (small per-iteration work
-    solves on CPU) unless the user pinned ``JAX_PLATFORMS``.
+    ``jax.Device`` is always honored; ``"auto"`` (default) applies the
+    measured per-stage policy of :mod:`vmex.core.device`, while ``None``
+    follows JAX placement.  Auto never overrides an active JAX device or
+    platform selection.
 
     Returns the final stage's :class:`~vmex.core.solver.SolveResult`.
     """
