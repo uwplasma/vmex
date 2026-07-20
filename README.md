@@ -66,7 +66,7 @@ vmex --doctor
 
 VMEX does not require platform-selection environment variables for hardware
 detection. Its automatic policy keeps small solves and implicit gradients on
-CPU when that is faster; the fixed-boundary Python solve APIs also accept an
+CPU when that is faster; the public solve and implicit APIs also accept an
 explicit ``device=`` argument.
 
 Development install from source:
