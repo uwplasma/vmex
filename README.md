@@ -190,7 +190,8 @@ coil code of its own.
 *Free-boundary equilibria of the Landreman–Paul precise-QA configuration held
 by its 16 modular coils as optimized in
 [ESSOS](https://github.com/uwplasma/ESSOS) (3 KB coil JSON bundled in
-`examples/data/`). Pressure is ramped at fixed coil currents with each point
+`examples/data/`; until `Coils.to_mgrid` is merged, use ESSOS branch
+`feature/mgrid-from-coils`). Pressure is ramped at fixed coil currents with each point
 warm-started from the previous boundary, and `PRES_SCALE` is calibrated per
 point so the **actual** volume-average beta of the converged wout
 (`betatotal`) — not a nominal input value — lands on 0, 1, 2, 3 % (all within

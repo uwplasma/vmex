@@ -21,8 +21,10 @@ ramp, and much more robust than re-solving from the vacuum guess).
 
 Physics: nfp=2 precise-QA plasma held by 16 modular coils; watch the
 Shafranov shift (axis moves outboard) and the LCFS response as beta rises.
-Runtime: ~4 min for the full scan (one NESTOR free-boundary solve per
-calibration attempt); the CI budget solves a single beta point coarsely.
+Requires an ESSOS build with ``Coils.to_mgrid`` (currently the
+``feature/mgrid-from-coils`` branch). Runtime: ~4 min for the full scan (one
+NESTOR free-boundary solve per calibration attempt); the CI budget solves a
+single beta point coarsely.
 """
 
 import dataclasses
@@ -51,6 +53,9 @@ if CI:  # smoke budget: one finite-beta point on a coarse grid
 
 # --------------------------- coils -> external field ------------------------
 from essos.coils import Coils  # noqa: E402 (optional heavy import)
+
+if not hasattr(Coils, "to_mgrid"):
+    raise SystemExit("needs ESSOS feature/mgrid-from-coils (Coils.to_mgrid)")
 
 if hasattr(Coils, "from_json"):
     coils = Coils.from_json(str(COILS_JSON))
