@@ -371,7 +371,9 @@ for QP. Three measured optimizations keep each campaign in the minutes range:
 
 The implicit path runs on CPU by default, where it is fastest at production
 sizes; high-resolution forward solves can use the GPU. The device policy
-chooses per stage.
+chooses per stage, and `device="cpu"` / `device="gpu"` explicitly overrides
+it without environment variables. Passing `device=None` leaves placement to
+JAX; omitting it retains VMEX's measured automatic policy.
 
 ### Beyond quasisymmetry: any objective, same gradients
 

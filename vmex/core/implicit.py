@@ -117,6 +117,7 @@ from jax.flatten_util import ravel_pytree
 from solvax import gcrot as _solvax_gcrot
 from solvax import gmres as _solvax_gmres
 
+from .device import AUTO, resolve_implicit_device
 from .errors import VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
@@ -188,7 +189,7 @@ class ImplicitParams:
 _register(ImplicitParams)
 
 
-def params_from_input(inp: VmecInput) -> ImplicitParams:
+def params_from_input(inp: VmecInput, *, device: Any = AUTO) -> ImplicitParams:
     """Extract the differentiable parameters of an input as a pytree.
 
     On an accelerator box the pytree is *committed* to the CPU
@@ -199,10 +200,11 @@ def params_from_input(inp: VmecInput) -> ImplicitParams:
     An active ``jax.default_device`` context, user JAX platform pin, or an
     already-CPU backend stands the pin down; ``optimize.least_squares``
     applies the same rule to its dof vector.
+    Pass ``device="cpu"`` / ``"gpu"`` or a ``jax.Device`` to override
+    the automatic policy without configuring the process environment;
+    ``device=None`` leaves placement to JAX.
     """
-    from .device import AUTO, resolve_implicit_device
-
-    dev = resolve_implicit_device(AUTO, None)
+    dev = resolve_implicit_device(device, None)
     if dev is None:
         arr = lambda a: jnp.asarray(np.asarray(a, dtype=np.float64))  # noqa: E731
     else:
@@ -1384,6 +1386,7 @@ def run(
     adjoint_maxiter: int = 300,
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
+    device: Any = AUTO,
 ) -> ImplicitSolution:
     """Differentiable fixed-boundary equilibrium: input -> outputs pytree.
 
@@ -1391,13 +1394,20 @@ def run(
     traced :class:`ImplicitParams` to differentiate::
 
         inp = VmecInput.from_file("input.solovev")
-        p0 = params_from_input(inp)
+        p0 = params_from_input(inp, device="gpu")
         grad = jax.grad(lambda p: run(inp, p).wb)(p0)
 
     ``wmhd`` follows the printed ``WMHD`` normalization; ``gamma = 1`` inputs
     get ``wmhd = nan`` (as in VMEC).  All outputs are differentiable in
     ``params`` (state via the implicit adjoint; scalars additionally through
     their explicit parameter dependence).
+
+    ``device`` selects where implicit residual and adjoint operations run.
+    It accepts ``"cpu"``, ``"gpu"`` or a ``jax.Device``; ``"auto"`` keeps
+    the default CPU preference for this launch-bound path, while ``None``
+    leaves placement to JAX.  When ``params`` is supplied, an explicit
+    hardware device moves the complete parameter pytree consistently;
+    otherwise its existing placement is preserved.
 
     The returned solution also carries the internally built
     :class:`~vmex.core.solver.SolverRuntime` as ``sol.runtime`` (a
@@ -1414,7 +1424,13 @@ def run(
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
     )
     if params is None:
-        params = params_from_input(inp)
+        params = params_from_input(inp, device=device)
+    elif device is not None and not (
+        isinstance(device, str) and device.strip().lower() == AUTO
+    ):
+        dev = resolve_implicit_device(device, cfg.resolution)
+        if dev is not None:
+            params = jax.tree.map(lambda a: jax.device_put(a, dev), params)
     state = solve_implicit(params, cfg)
     rt = runtime_from_params(params, cfg)
     wb, wp = mhd_energy(state, rt)

@@ -1454,8 +1454,8 @@ def _least_squares_implicit(
     :func:`vmex.core.device.resolve_implicit_device` — the CPU by default,
     where the per-dof vmapped adjoint GMRES is far faster than the
     launch-bound, dof-count-scaling GPU compile (R1); an explicit
-    ``device=`` overrides this.  The forward equilibrium solve is a host
-    callback and always runs on the CPU regardless.
+    ``device=`` overrides this.  The forward equilibrium callback uses the
+    solver's independent automatic per-stage placement policy.
     """
     import scipy.optimize
 
@@ -1513,7 +1513,7 @@ def _least_squares_implicit(
         a = jnp.asarray(x, dtype=jnp.float64)
         return a if jac_device is None else jax.device_put(a, jac_device)
 
-    params0 = imp.params_from_input(inp)
+    params0 = imp.params_from_input(inp, device=jac_device)
     imp._template_runtime(cfg)  # host-built template: warm the per-cfg cache
     # eagerly so runtime_from_params stays traceable under jit below
 

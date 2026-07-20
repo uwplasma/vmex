@@ -148,10 +148,17 @@ of :doc:`algorithms` for the formulation and cost analysis.
    from vmex.core.input import VmecInput
 
    inp = VmecInput.from_file("input.solovev")
-   p0 = implicit.params_from_input(inp)
+   p0 = implicit.params_from_input(inp, device="gpu")
 
    sol = implicit.run(inp, p0)                        # ImplicitSolution pytree
    grad = jax.grad(lambda p: implicit.run(inp, p).wb)(p0)   # adjoint gradient
+
+Pass ``device="cpu"`` / ``"gpu"`` (or a ``jax.Device``) to
+:func:`~vmex.core.implicit.params_from_input` or
+:func:`~vmex.core.implicit.run` to select the implicit-gradient hardware
+without environment variables.  ``device=None`` leaves placement to JAX;
+omitting the argument (or passing ``"auto"``) keeps VMEX's default CPU
+preference for this launch-bound path.
 
 :func:`~vmex.core.implicit.run` is the differentiable member of the
 entry-point family (see *Choosing an entry point* in :doc:`quickstart`; the
