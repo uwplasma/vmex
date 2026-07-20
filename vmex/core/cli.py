@@ -393,6 +393,15 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
     rmin, rmax = max(1.0e-2, float(r.min()) - rpad), float(r.max()) + rpad
     zmin, zmax = float(z.min()) - zpad, float(z.max()) + zpad
 
+    if not hasattr(coils, "to_mgrid"):
+        raise VmecInputError(
+            WERROR_MESSAGES[INPUT_ERROR_FLAG],
+            hint=(
+                "--coils needs an ESSOS build providing Coils.to_mgrid "
+                "(coils->mgrid export); update ESSOS (pip install -U essos)"
+            ),
+        )
+
     with tempfile.TemporaryDirectory() as tmp:
         mgrid_path = Path(tmp) / "essos_coils_mgrid.nc"
         coils.to_mgrid(str(mgrid_path), nr=int(nr), nphi=int(nphi), nz=int(nz),
