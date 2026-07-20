@@ -56,6 +56,19 @@ Install from PyPI:
 pip install vmex
 ```
 
+For NVIDIA GPUs with a current JAX-supported Python and driver 580+, install
+the CUDA 13 wheel and verify the detected devices:
+
+```bash
+pip install -U "jax[cuda13]"
+vmex --doctor
+```
+
+VMEX does not require platform-selection environment variables for hardware
+detection. Its automatic policy keeps small solves and implicit gradients on
+CPU when that is faster; the fixed-boundary Python solve APIs also accept an
+explicit ``device=`` argument.
+
 Development install from source:
 
 ```bash
@@ -483,8 +496,11 @@ options:
 ```
 
 `vmec` detects the available JAX hardware without environment variables and
-uses CPU or GPU according to the measured per-stage policy. Use
-`--device cpu` or `--device gpu` to override it explicitly.
+uses CPU or GPU according to the measured per-stage policy. Use `--device
+cpu` or `--device gpu` to override it explicitly. Implicit-gradient work
+defaults to CPU because it is launch-bound on the tested GPUs; passing
+`device=None` to the Python API follows JAX placement. `vmex --doctor`
+reports the devices and both VMEX placement policies.
 
 ## Documentation
 

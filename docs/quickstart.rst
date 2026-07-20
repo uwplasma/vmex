@@ -13,8 +13,9 @@ Verify the installation
    vmex --doctor
    vmex --test
 
-``vmex --doctor`` prints the active Python, package versions, and the JAX
-backend (CPU/GPU). ``vmex --test`` runs the bundled fixed-boundary QH case
+``vmex --doctor`` prints the active Python, package versions, JAX backend and
+devices, active JAX default device, and VMEX's forward/implicit placement
+policies. ``vmex --test`` runs the bundled fixed-boundary QH case
 end to end: it copies the packaged ``input.nfp4_QH_warm_start`` deck into
 ``./vmex_test/``, solves it (with ``FTOL_ARRAY = 1e-12`` for a fast first
 check), writes ``wout_nfp4_QH_warm_start.nc``, and renders diagnostic figures
