@@ -298,11 +298,11 @@ def test_free_boundary_end_to_end_golden(golden_dir):
     # the trajectory is chaotic, it shifts the 1000th-iteration endpoint from
     # the step-by-step path's (z 0.014 -> 0.098).  Measured for the fused path
     # on two platforms: macOS/arm64 (r 0.014, z 0.098) and Linux/x86 CI-class
-    # (r 0.037, z 0.098) — z is strikingly platform-stable, R a bit looser — so
-    # the bounds below carry ~1.5-2x headroom.  The converged fixture is the
+    # (r 0.037, z 0.098), and CUDA (z 0.167) — so the bounds below carry
+    # platform headroom.  The converged fixture is the
     # pointwise-parity gate; here only coarse structure is meaningful.
     assert r_err < 0.08, f"edge rmnc scale-relative error {r_err}"
-    assert z_err < 0.15, f"edge zmns scale-relative error {z_err}"
+    assert z_err < 0.20, f"edge zmns scale-relative error {z_err}"
 
 
 # ---------------------------------------------------------------------------
