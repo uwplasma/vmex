@@ -48,9 +48,11 @@ hardware.  Its runner must carry the labels ``self-hosted``, ``linux``,
 ``x64``, and ``gpu``, provide an NVIDIA driver 580 or newer for CUDA 13, and
 must not define ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``.  The workflow
 installs the official ``jax[cuda13]`` distribution, verifies that JAX selects
-the GPU by ordinary hardware discovery, then runs focused CPU/GPU forward and
-implicit-gradient parity checks.  A missing or misconfigured accelerator is a
-failure, not a skipped green GPU job.
+the GPU by ordinary hardware discovery, then runs focused placement checks and
+the quick CPU/GPU parity audit for MHD energy, magnetic well, DMerc,
+quasisymmetry, and quasi-isodynamic gradients.  Timing is recorded in the
+uploaded ``device-parity`` artifact but is not a pass/fail gate.  A missing or
+misconfigured accelerator is a failure, not a skipped green GPU job.
 
 Releasing
 ---------

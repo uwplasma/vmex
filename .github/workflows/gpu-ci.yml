@@ -16,7 +16,7 @@ jobs:
   cuda:
     name: CUDA 13 placement and parity
     runs-on: [self-hosted, linux, x64, gpu]
-    timeout-minutes: 20
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -50,3 +50,17 @@ jobs:
 
       - name: Run focused placement, solve, and gradient checks
         run: pytest -q tests/test_gpu_ci.py tests/test_device.py tests/test_implicit_device.py --durations=0
+
+      - name: Audit all physics gradients on CPU and GPU
+        run: |
+          python benchmarks/device_parity.py \
+            --quick \
+            --devices cpu,gpu \
+            --output device-parity.json
+
+      - name: Upload parity measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-parity-${{ github.run_id }}
+          path: device-parity.json
