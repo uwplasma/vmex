@@ -402,10 +402,12 @@ objective at a stiff weight:
 - lower the aspect ratio to 4.8 at fixed iota;
 - push the Mercier criterion `DMerc` toward stability at ⟨β⟩ ≈ 1.25%.
 
-The first four use the implicit adjoint (`jac="implicit"`). `DMerc` has no
-traceable lane yet (it is computed from host-side Mercier tables), so that
-campaign uses finite differences at `max_mode` 2. The self-consistent Redl
-bootstrap objective has its own section below.
+The first four use the implicit adjoint (`jac="implicit"`). The published
+`DMerc` showcase deliberately preserves its legacy host-side reporting lane
+and finite-difference baseline at `max_mode` 2. New campaigns can instead use
+the traceable `mercier_stability_residual` with `jac="implicit"`; see the
+optimization objectives documentation. The self-consistent Redl bootstrap
+objective has its own section below.
 
 ![Objectives showcase: five one-objective campaigns off the precise-QA seed](docs/_static/figures/readme_objectives.png)
 

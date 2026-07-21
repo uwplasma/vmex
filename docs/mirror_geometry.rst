@@ -873,10 +873,10 @@ deliberately unavailable because
 local Fourier-mode refinement failed; it will not be presented as a supported
 gradient.
 
-``device=None`` uses the shared measured device policy. On the office host,
-the corrected ``15x15`` case took 35.2 seconds on CPU and 44.2 seconds on one
-RTX A4000. Energy and force diagnostics agree to numerical precision. Explicit
-``device=`` arguments and JAX platform environment pins are always honored.
+This mirror derivative path does not expose the core solver's ``device=``
+contract. On the office host, the corrected ``15x15`` case took 35.2 seconds
+on CPU and 44.2 seconds on one RTX A4000; energy and force diagnostics agreed
+to numerical precision.
 
 Fixed- and free-boundary derivatives solve the linearized converged coefficient
 residual and never retain or differentiate the nonlinear iteration history. The

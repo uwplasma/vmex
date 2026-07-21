@@ -340,6 +340,7 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable Mercier profile / smooth interior instability hinge
+       (stellarator-symmetric states only)
    * - :func:`~vmex.core.optimize.d_merc`,
        :func:`~vmex.core.optimize.l_grad_b`
      - yes
@@ -357,9 +358,12 @@ Which objectives differentiate how
      - no
      - eigenvector weights have no nonsymmetric-eig derivative
 
-``jac="implicit"`` additionally requires a fixed-boundary,
-stellarator-symmetric problem (``LASYM = F``); see :doc:`optimization` for
-the gradient machinery itself and the measured cost of each piece.
+``jac="implicit"`` requires a fixed-boundary problem. Its boundary parameter
+map supports both symmetric and ``LASYM = T`` equilibria, but individual
+objectives can be symmetry-limited; in particular the traceable Mercier and
+quasisymmetry objectives currently require ``LASYM = F``. See
+:doc:`optimization` for the gradient machinery and measured cost of each
+piece.
 
 Writing your own objective
 --------------------------
