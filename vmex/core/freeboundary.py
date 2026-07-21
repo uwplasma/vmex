@@ -66,6 +66,7 @@ from .solver import (
     SolveResult, SolverRuntime, SpectralState,
     _finalize, _geometry, _initial_carry, _initial_state, _make_body,
     _result_from_carry, _zero_cache, prepare_runtime, resolution_from_input,
+    reguess_initial_axis,
 )
 from .transforms import register_pytree_dataclass as _register
 from .vacuum import (
@@ -1022,6 +1023,32 @@ def _solve_free_boundary_impl(
     dtype = rt.setup.s_full.dtype
 
     _init_state = _initial_state(rt.setup)
+    _initial_ijacob = 0
+    # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
+    # sign.  The fixed-boundary driver already did this in ``_solve_stage``;
+    # free boundary must do it *before* constructing the fused axis-current
+    # filament, otherwise a recoverable bad axis can fail the static-topology
+    # guard before iteration 1.
+    _, _initial_geometry = _geometry(_init_state, rt)
+    _initial_jacobian = half_mesh_jacobian(_initial_geometry, s=rt.setup.s_full)
+    if bool(_initial_jacobian.jacobian_sign_changed) and ns >= 3:
+        if verbose:
+            emit(" INITIAL JACOBIAN CHANGED SIGN!")
+            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
+        rt, _init_state, _axis = reguess_initial_axis(rt, _init_state)
+        _initial_ijacob = 1
+        _, _retry_geometry = _geometry(_init_state, rt)
+        _retry_jacobian = half_mesh_jacobian(_retry_geometry, s=rt.setup.s_full)
+        if bool(_retry_jacobian.jacobian_sign_changed):
+            # Preserve the normal typed solver failure and its remedy hint;
+            # do not let the later axis-filament topology guard obscure it.
+            from .errors import BAD_JACOBIAN_FLAG, VmecJacobianError, WERROR_MESSAGES
+            raise VmecJacobianError(
+                WERROR_MESSAGES[BAD_JACOBIAN_FLAG],
+                hint="decrease DELT or provide a better RAXIS_*/ZAXIS_* guess",
+                ier_flag=BAD_JACOBIAN_FLAG, iteration=1,
+                jacobian_resets=1, fsq=(1.0, 1.0, 1.0),
+            )
     _axis_r0, _axis_z0 = _vacuum_scalars(_init_state, rt)[2:4]
     basis, fused_vac, vacuum_lane = _vacuum_executables(
         resolution, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
@@ -1048,7 +1075,7 @@ def _solve_free_boundary_impl(
         emit(FORCE_ITERATIONS_BANNER, end="")
         emit(screen_header(lasym=resolution.lasym, lfreeb=True), end="")
 
-    carry = _initial_carry(_init_state, rt_fixed, ijacob=0)
+    carry = _initial_carry(_init_state, rt_fixed, ijacob=_initial_ijacob)
     printed: set[int] = set()
     #: per-iteration DEL-BSQ recorded by the batched steady-state lane; rows
     #: not covered (pre-activation, turn-on pass) fall back to ``fb.delbsq``

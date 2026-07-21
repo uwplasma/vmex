@@ -103,6 +103,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "VmecInputError": (".core.errors", "VmecInputError"),
     "VmecJacobianError": (".core.errors", "VmecJacobianError"),
     "VmecConvergenceError": (".core.errors", "VmecConvergenceError"),
+    "VmecNumericalError": (".core.errors", "VmecNumericalError"),
     "MgridNotFoundError": (".core.errors", "MgridNotFoundError"),
     # modules
     "core": (".core", None),

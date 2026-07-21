@@ -28,6 +28,7 @@ structural + coarse:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from pathlib import Path
 
@@ -395,6 +396,23 @@ def test_missing_mgrid_raises(tmp_path):
     inp = VmecInput.from_file(DECK)
     with pytest.raises(MgridNotFoundError):
         FB.solve_free_boundary(inp, mgrid_path=tmp_path / "mgrid_missing.nc")
+
+
+def test_bad_supplied_axis_is_reguessed_before_fused_filament(capsys):
+    """Free boundary must share fixed boundary's first-bad-axis recovery."""
+    inp = VmecInput.from_file(DECK)
+    raxis_c = inp.raxis_c.copy()
+    raxis_c[0] = 2.0  # deliberately outside the CTH-like plasma boundary
+    inp = dataclasses.replace(inp, raxis_c=raxis_c, niter_array=[2], nstep=1)
+    result = FB.solve_free_boundary(
+        inp, mgrid_path=MGRID, max_iterations=2, verbose=True,
+        error_on_no_convergence=False,
+    )
+    output = capsys.readouterr().out
+    assert "TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS" in output
+    assert not result.converged
+    assert np.isfinite(result.fsqr)
+    assert result.r00 < 1.0
 
 
 def test_cli_missing_mgrid_fallback_warns(tmp_path):

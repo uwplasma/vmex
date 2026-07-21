@@ -128,8 +128,9 @@ from jax import lax
 from .device import AUTO, device_context
 from .errors import (
     BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
-    NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG, VmecConvergenceError,
-    VmecJacobianError, WERROR_MESSAGES,
+    NONFINITE_FLAG, NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG,
+    VmecConvergenceError, VmecJacobianError, VmecNumericalError,
+    WERROR_MESSAGES,
 )
 from .fields import (
     constraint_scaling, energies_and_force_norms, magnetic_fields,
@@ -1012,6 +1013,54 @@ def evaluate_forces(
     return result.gc, result.residuals, diagnostics
 
 
+def _evaluation_is_finite(result: _EvalResult) -> Array:
+    """Whether every iteration-driving output of one ``funct3d`` pass is finite."""
+    leaves = jax.tree.leaves((
+        result.gc, result.residuals, result.pre, result.wb, result.wp,
+        result.r00, result.z00, result.cache,
+    ))
+    finite = jnp.asarray(True)
+    for leaf in leaves:
+        finite = finite & jnp.all(jnp.isfinite(jnp.asarray(leaf)))
+    return finite
+
+
+def reguess_initial_axis(
+    rt: SolverRuntime, state: SpectralState
+) -> tuple[SolverRuntime, SpectralState, tuple[Array, Array, Array, Array]]:
+    """Apply the VMEC2000 first-bad-Jacobian magnetic-axis retry.
+
+    Shared by fixed- and free-boundary drivers.  Besides rebuilding the
+    ``profil3d`` state, this updates the setup's axis arrays and rebinds the
+    constraint baselines to that state (``funct3d.f: iter2 == iter1``).
+    """
+    setup = rt.setup
+    _, geometry = _geometry(state, rt)
+    axis = guess_axis(
+        geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs
+    )
+    arrays = interior_guess(
+        boundary_R_cos=setup.boundary_R_cos,
+        boundary_R_sin=setup.boundary_R_sin,
+        boundary_Z_cos=setup.boundary_Z_cos,
+        boundary_Z_sin=setup.boundary_Z_sin,
+        raxis_c=axis[0], raxis_s=axis[1], zaxis_c=axis[2], zaxis_s=axis[3],
+        modes=rt.modes, trig=rt.trig, s=setup.s_full,
+    )
+    new_setup = replace(
+        setup,
+        raxis_c=axis[0], raxis_s=axis[1], zaxis_c=axis[2], zaxis_s=axis[3],
+        R_cos=arrays[0], R_sin=arrays[1], Z_cos=arrays[2], Z_sin=arrays[3],
+        lambda_cos=arrays[4], lambda_sin=arrays[5],
+    )
+    state = SpectralState(
+        R_cos=arrays[0], R_sin=arrays[1], Z_cos=arrays[2], Z_sin=arrays[3],
+        L_cos=arrays[4], L_sin=arrays[5],
+    )
+    rt = runtime_with_baselines(replace(rt, setup=new_setup), state)
+    return rt, state, axis
+
+
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
 
 
@@ -1029,6 +1078,7 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         e1 = _evaluate(carry.state, carry.cache, it, carry.iter1, carry.fsqz, rt,
                        carry.fsqr + carry.fsqz)
         jac1 = e1.jacobian_sign_changed
+        nonfinite1 = (~jac1) & (~_evaluation_is_finite(e1))
         # On irst=2 funct3d skips residue: the module residuals stay stale.
         fsqr_c = jnp.where(jac1, carry.fsqr, e1.residuals.fsqr)
         fsqz_c = jnp.where(jac1, carry.fsqz, e1.residuals.fsqz)
@@ -1037,7 +1087,7 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
 
         converged = (~jac1) & (fsqr_c <= ftol) & (fsqz_c <= ftol) & (fsql_c <= ftol)
         bad_init = jac1 & (it == 1)
-        stepping = running & (~converged) & (~bad_init)
+        stepping = running & (~converged) & (~bad_init) & (~nonfinite1)
 
         # ---- TimeStepControl (evolve.f) ------------------------------------
         first = it == carry.iter1
@@ -1077,6 +1127,8 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
             (state_r, e1.cache, fsqz_c, fsqr_c + fsqz_c),
         )
         reeval_bad = restart & e2.jacobian_sign_changed
+        nonfinite2 = restart & (~e2.jacobian_sign_changed) & (~_evaluation_is_finite(e2))
+        numerical_bad = nonfinite1 | nonfinite2
 
         fsqr_f = jnp.where(restart, e2.residuals.fsqr, fsqr_c)
         fsqz_f = jnp.where(restart, e2.residuals.fsqz, fsqz_c)
@@ -1134,18 +1186,19 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         jac75 = stepping & (ijacob_n >= 75)
         maxed = stepping & (~eq_reset) & (~jac75) & (it >= max_iter)
 
-        stop_now = running & (converged | bad_init) | jac75 | maxed | reeval_bad
+        stop_now = running & (converged | bad_init | numerical_bad) | jac75 | maxed | reeval_bad
         done_n = carry.done | stop_now
         ier_n = jnp.where(
             carry.done, carry.ier,
             jnp.where(running & converged, SUCCESSFUL_TERM_FLAG,
             jnp.where(running & bad_init, BAD_JACOBIAN_FLAG,
+            jnp.where(running & numerical_bad, NONFINITE_FLAG,
             jnp.where(jac75, JAC75_FLAG,
             jnp.where(reeval_bad, MISC_ERROR_FLAG,
-            jnp.where(maxed, MORE_ITER_FLAG, carry.ier))))),
+            jnp.where(maxed, MORE_ITER_FLAG, carry.ier)))))),
         ).astype(carry.ier.dtype)
 
-        advance = stepping & (~eq_reset) & (~jac75) & (~maxed) & (~reeval_bad)
+        advance = stepping & (~eq_reset) & (~jac75) & (~maxed) & (~reeval_bad) & (~numerical_bad)
         iteration_n = jnp.where(advance, it + 1, it)
 
         # ---- trajectory row (printout.f values) ----------------------------
@@ -1402,18 +1455,7 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
         if verbose:
             emit(" INITIAL JACOBIAN CHANGED SIGN!")
             emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
-        _, geometry = _geometry(state0, rt)
-        axis = guess_axis(geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs)
-        new_state = interior_guess(
-            boundary_R_cos=setup.boundary_R_cos, boundary_R_sin=setup.boundary_R_sin,
-            boundary_Z_cos=setup.boundary_Z_cos, boundary_Z_sin=setup.boundary_Z_sin,
-            raxis_c=axis[0], raxis_s=axis[1], zaxis_c=axis[2], zaxis_s=axis[3],
-            modes=rt.modes, trig=rt.trig, s=setup.s_full,
-        )
-        state0 = SpectralState(
-            R_cos=new_state[0], R_sin=new_state[1], Z_cos=new_state[2],
-            Z_sin=new_state[3], L_cos=new_state[4], L_sin=new_state[5],
-        )
+        rt, state0, _axis = reguess_initial_axis(rt, state0)
         carry = _run_loop(state0, rt, mode=mode, ijacob=1, verbose=verbose,
                           emit=emit)
     return carry
@@ -1430,6 +1472,16 @@ def _finalize(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
             WERROR_MESSAGES[MORE_ITER_FLAG],
             hint="increase NITER or loosen FTOL",
             iteration=int(carry.iteration), fsq=fsq, ftol=rt.ftol,
+        )
+    if ier == NONFINITE_FLAG:
+        raise VmecNumericalError(
+            "NON-FINITE FORCE EVALUATION (NaN OR Inf)",
+            hint=(
+                "check parsed PHIEDGE/APHI, profile values, and the initial "
+                "axis/boundary; a zero effective toroidal flux makes the "
+                "VMEC force normalizations singular"
+            ),
+            iteration=int(carry.iteration), fsq=fsq,
         )
     raise VmecJacobianError(
         WERROR_MESSAGES.get(ier, WERROR_MESSAGES[JAC75_FLAG]),

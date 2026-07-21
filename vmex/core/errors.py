@@ -27,6 +27,12 @@ NS_ERROR_FLAG = 8
 MISC_ERROR_FLAG = 9
 SUCCESSFUL_TERM_FLAG = 11
 
+# Internal-only loop status.  VMEC2000 has no dedicated ``ier_flag`` for a
+# non-finite force evaluation; callers still receive ``MISC_ERROR_FLAG`` via
+# :class:`VmecNumericalError`, while this distinct carry value lets
+# ``solver._finalize`` distinguish NaN/Inf from a Jacobian-retry failure.
+NONFINITE_FLAG = 90
+
 #: VMEC2000 termination messages, keyed by ier_flag
 #: (Sources/Input_Output/fileout.f, ``werror`` table).
 WERROR_MESSAGES: dict[int, str] = {
@@ -104,6 +110,22 @@ class VmecConvergenceError(VmecError):
     iteration: int = 0
     fsq: tuple[float, float, float] | None = None
     ftol: float = 0.0
+
+
+@dataclass
+class VmecNumericalError(VmecError):
+    """A force evaluation produced NaN or infinity.
+
+    This is intentionally a fail-fast error: once a non-finite value reaches
+    the Richardson momentum state, later iterations cannot diagnose or repair
+    its source.  Common first-iteration causes are zero effective toroidal
+    flux (``PHIEDGE``/``APHI``), a singular or sign-changing initial geometry,
+    and non-finite profile values.
+    """
+
+    ier_flag: int = MISC_ERROR_FLAG
+    iteration: int = 0
+    fsq: tuple[float, float, float] | None = None
 
 
 @dataclass
