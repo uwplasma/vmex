@@ -6,9 +6,9 @@ These are ``full``-marked (nightly only, ``RUN_FULL=1``): each runs *real*
 implicit-gradient continuation (``jac="implicit"`` + ESS, the exact path the
 ``examples/optimization`` scripts use) and asserts the achieved
 ``QuasisymmetryRatioResidual.total`` bound.  QA runs two continuation stages
-to its precise bound (< 1e-3); QH and QP run a single stage.  QP's exact
-basin is rounding-sensitive, so its nightly guard checks substantial descent
-rather than a machine-specific final residual.  The deep
+to its precise bound (< 1e-3); QH and QP run a single stage.  QP uses a
+bounded ten-evaluation smoke: longer campaigns are basin-sensitive and retain
+too much compilation state for a shared CI worker.  The deep
 implicit Jacobian is launch-bound (one preconditioned GMRES per boundary dof,
 ~101 s/eval at max_mode 2), so the *full* precise campaigns -- QA 1.70e-04
 (max_mode 2) and QH 5.83e-05 (max_mode 5, ~100 min just for the max_mode-2
@@ -113,10 +113,11 @@ def test_qh_implicit_converges():
 def test_qp_implicit_descends():
     """QP (nfp2, helicity (0,1)) descends via implicit to its documented basin.
 
-    Basin-limited (not precise): QS 4.458e-01 -> ~9.4e-02 at max_mode 1, and
-    stays at that basin through max_mode 5 (measured office CPU 2026-07-11;
-    near-axis theory forbids exact QP).  The exact basin is rounding-sensitive,
-    so this single-stage nightly test guards a substantial relative descent.
+    Basin-limited (not precise): a bounded ten-evaluation max-mode-1 smoke
+    reaches QS 4.458e-01 -> 1.393e-01 (office CPU, 2026-07-21). Near-axis
+    theory forbids exact QP, and longer campaigns are rounding-sensitive while
+    retaining tens of GiB of compilation state on CI workers. This test guards
+    substantial descent without turning a physics smoke into a resource test.
     """
     inp = _nfp2_seed()
     qs = opt.QuasisymmetryRatioResidual(np.linspace(0.1, 1.0, 10), 0, 1)
@@ -129,8 +130,9 @@ def test_qp_implicit_descends():
     terms = [(qs, 0.0, 1.0), (opt.aspect_ratio, 6.0, 1.0),
              (iota_shortfall, 0.0, 100.0), (opt.mirror_ratio, 0.20, 10.0)]
     r = opt.least_squares(terms, inp, max_mode=1, jac="implicit", use_ess=True,
-                          max_nfev=60, ftol=1e-9, xtol=1e-10)
+                          max_nfev=10, ftol=1e-9, xtol=1e-10)
     final = float(qs.total(r.equilibrium))
-    assert final < 0.85 * seed, (
-        f"QP QS {seed:.3e} -> {final:.3e} (expected at least 15% descent)"
+    assert final < min(0.85 * seed, 0.20), (
+        f"QP QS {seed:.3e} -> {final:.3e} "
+        "(expected at least 15% descent and final < 0.20)"
     )
