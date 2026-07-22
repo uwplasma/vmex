@@ -5,14 +5,15 @@ Public API (lazily imported; ``import vmex as vj``):
 - :class:`~vmex.core.input.VmecInput` — INDATA / VMEC++-JSON input pytree
 - :func:`~vmex.core.solver.solve` — single-grid fixed-boundary solve
 - :func:`~vmex.core.multigrid.solve_multigrid` — NS_ARRAY ladder (runvmec.f)
+- :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
 - :func:`~vmex.core.wout.read_wout` / :func:`~vmex.core.wout.write_wout`
   / :func:`~vmex.core.wout.wout_from_state` / :class:`~vmex.core.wout.WoutData`
 - :func:`~vmex.core.plotting.plot_wout` / :func:`~vmex.core.plotting.plot_boozmn`
 - :func:`~vmex.core.boozer.run_booz_xform` — Boozer transform (booz_xform_jax)
 - :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
-  / :class:`~vmex.core.mgrid.MgridField` (external field is an mgrid or any
-  ``xyz->B`` callable; coils live in ESSOS, ``essos.coils.Coils``)
+  / :func:`~vmex.core.mgrid.tabulate_cartesian_field`
+  / :class:`~vmex.core.mgrid.MgridField` (mgrid or tabulated direct field)
 - ``vmex.optimize`` — objectives + least-squares driver (module)
 - ``vmex.implicit`` — implicit differentiation of the equilibrium (module)
 - ``vmex.parallel`` — concurrent ensembles of independent solves (module)
@@ -83,6 +84,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # solvers
     "solve": (".core.solver", "solve"),
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
+    "solve_free_boundary_multigrid": (
+        ".core.multigrid", "solve_free_boundary_multigrid"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     # wout IO
     "WoutData": (".core.wout", "WoutData"),
@@ -97,6 +100,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),
+    "tabulate_cartesian_field": (".core.mgrid", "tabulate_cartesian_field"),
     "write_mgrid": (".core.mgrid", "write_mgrid"),
     # errors
     "VmecError": (".core.errors", "VmecError"),

@@ -1198,8 +1198,20 @@ def reguess_initial_axis(
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
 
 
-def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
-    """Build the traced single-iteration body shared by both lanes."""
+def _make_body(
+    rt: SolverRuntime,
+    *,
+    evaluation_state: SpectralState | None = None,
+) -> Callable[[_LoopCarry], _LoopCarry]:
+    """Build the traced single-iteration body shared by both lanes.
+
+    ``evaluation_state`` is the narrowly scoped VMEC2000 free-boundary
+    turn-on seam.  ``funct3d.f`` computes geometry and vacuum pressure, then
+    performs the ``irst=2`` soft restart, and finally evaluates forces using
+    the already-computed geometry.  Supplying the pre-restart state here
+    reproduces that one pass while momentum still evolves ``carry.state``
+    (the restored best state).  Normal iterations leave it as ``None``.
+    """
     ftol = rt.ftol
     max_iter = rt.max_iterations
     gamma = rt.gamma
@@ -1209,7 +1221,8 @@ def _make_body(rt: SolverRuntime) -> Callable[[_LoopCarry], _LoopCarry]:
         running = jnp.logical_not(carry.done)
 
         # ---- funct3d (evolve.f) -------------------------------------------
-        e1 = _evaluate(carry.state, carry.cache, it, carry.iter1, carry.fsqz, rt,
+        state_e1 = carry.state if evaluation_state is None else evaluation_state
+        e1 = _evaluate(state_e1, carry.cache, it, carry.iter1, carry.fsqz, rt,
                        carry.fsqr + carry.fsqz)
         jac1 = e1.jacobian_sign_changed
         nonfinite1 = (~jac1) & (~_evaluation_is_finite(e1))

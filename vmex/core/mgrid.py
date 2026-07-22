@@ -12,6 +12,9 @@ inputs (§8):
 - :class:`MgridField` — a JAX pytree wrapping the field tables plus external
   currents, providing extcur-scaled trilinear interpolation of
   ``B(r, phi, z)`` that is jit- and grad-compatible.
+- :func:`tabulate_cartesian_field` — sample an ESSOS-, SIMSOPT-, or plain
+  callable Cartesian Biot--Savart field into the same one-group mgrid
+  representation used by the fused free-boundary solver.
 
 VMEC2000 counterpart: ``Sources/NESTOR_vacuum/mgrid_mod.f`` (read_mgrid,
 becoil).  The IO layer is ported from the legacy parity-proven
@@ -296,6 +299,93 @@ def write_mgrid(path: str | Path, data: MgridData) -> None:
                 var[:, :, :] = np.asarray(arr[i], dtype=np.float64)
 
 
+def _cartesian_field_values(field: Any, points: np.ndarray) -> np.ndarray:
+    """Evaluate common Cartesian magnetic-field protocols on ``points``.
+
+    Supported inputs are ``callable(points)``, ESSOS-style ``field.B(point)``
+    objects, and SIMSOPT-style mutable ``set_points(points); B()`` objects.
+    ESSOS' ``B`` is normally a single-point JAX function, so a vector call is
+    attempted first and falls back to deterministic pointwise sampling.
+    """
+    pts = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    if hasattr(field, "set_points") and hasattr(field, "B"):
+        field.set_points(pts)
+        values = field.B()
+    else:
+        evaluate = field if callable(field) else getattr(field, "B", None)
+        if evaluate is None:
+            raise TypeError(
+                "Cartesian field must be callable, expose B(points), or "
+                "expose set_points(points) followed by B()"
+            )
+        try:
+            values = evaluate(pts)
+            if np.shape(values) != pts.shape:
+                raise ValueError("field did not return one vector per point")
+        except (TypeError, ValueError, IndexError):
+            values = np.stack([np.asarray(evaluate(p), dtype=float) for p in pts])
+    out = np.asarray(values, dtype=np.float64)
+    if out.shape != pts.shape:
+        raise ValueError(
+            f"Cartesian field returned shape {out.shape}; expected {pts.shape}"
+        )
+    if not np.all(np.isfinite(out)):
+        raise ValueError("Cartesian field returned non-finite values while tabulating")
+    return out
+
+
+def tabulate_cartesian_field(
+    field: Any,
+    *,
+    rmin: float,
+    rmax: float,
+    zmin: float,
+    zmax: float,
+    ir: int,
+    jz: int,
+    kp: int,
+    nfp: int,
+    label: str = "direct_biot_savart",
+) -> MgridData:
+    """Sample a Cartesian field into a one-group MAKEGRID table.
+
+    Toroidal planes cover ``[0, 2*pi/nfp)`` (endpoint excluded), while R and
+    Z include both endpoints.  ``field`` may be an ESSOS ``BiotSavart``
+    object, a SIMSOPT ``BiotSavart`` object, or a callable returning Cartesian
+    ``(Bx, By, Bz)`` vectors.  The result uses ``mgrid_mode='S'`` and unit raw
+    current; multiply it with :meth:`MgridField.from_mgrid_data`'s ``extcur``
+    when a global scale is wanted.
+
+    Tabulation is intentionally host-side and is performed once before a
+    solve.  The returned :class:`MgridField` is JAX differentiable with
+    respect to its table values and scale, but the sampling operation itself
+    does not retain derivatives with respect to coil geometry.  Use
+    :mod:`vmex.core.freeboundary_diff` with a direct JAX field for coil-shape
+    derivatives of the virtual-casing residual.
+    """
+    ir, jz, kp, nfp = int(ir), int(jz), int(kp), int(nfp)
+    if ir < 2 or jz < 2 or kp < 1 or nfp < 1:
+        raise ValueError("ir and jz must be >=2; kp and nfp must be >=1")
+    if not (float(rmax) > float(rmin) and float(zmax) > float(zmin)):
+        raise ValueError("mgrid bounds require rmax>rmin and zmax>zmin")
+
+    r = np.linspace(float(rmin), float(rmax), ir)
+    z = np.linspace(float(zmin), float(zmax), jz)
+    phi = np.arange(kp, dtype=float) * (2.0 * np.pi / (nfp * kp))
+    pp, zz, rr = np.meshgrid(phi, z, r, indexing="ij")
+    xyz = np.stack((rr * np.cos(pp), rr * np.sin(pp), zz), axis=-1)
+    bxyz = _cartesian_field_values(field, xyz.reshape(-1, 3)).reshape(kp, jz, ir, 3)
+    bx, by, bz = np.moveaxis(bxyz, -1, 0)
+    br = bx * np.cos(pp) + by * np.sin(pp)
+    bp = -bx * np.sin(pp) + by * np.cos(pp)
+    return MgridData(
+        rmin=float(rmin), rmax=float(rmax), zmin=float(zmin), zmax=float(zmax),
+        ir=ir, jz=jz, kp=kp, nfp=nfp, nextcur=1, mgrid_mode="S",
+        coil_groups=(str(label),), raw_coil_cur=(1.0,),
+        br=br[None, ...], bp=bp[None, ...], bz=bz[None, ...],
+    )
+
+
 def _interpolate_bfield(
     br: Any,
     bp: Any,
@@ -422,6 +512,29 @@ class MgridField:
 
         return cls.from_mgrid_data(read_mgrid(path), extcur=extcur)
 
+    @classmethod
+    def from_cartesian_field(
+        cls,
+        field: Any,
+        *,
+        rmin: float,
+        rmax: float,
+        zmin: float,
+        zmax: float,
+        ir: int,
+        jz: int,
+        kp: int,
+        nfp: int,
+        scale: float = 1.0,
+        label: str = "direct_biot_savart",
+    ) -> "MgridField":
+        """Tabulate an ESSOS/SIMSOPT/callable Cartesian field for a solve."""
+        data = tabulate_cartesian_field(
+            field, rmin=rmin, rmax=rmax, zmin=zmin, zmax=zmax,
+            ir=ir, jz=jz, kp=kp, nfp=nfp, label=label,
+        )
+        return cls.from_mgrid_data(data, extcur=jnp.asarray([scale]))
+
     def b_cyl(self, r: Any, phi: Any, z: Any) -> tuple[Any, Any, Any]:
         """Return ``(B_r, B_phi, B_z)`` at cylindrical points (broadcastable)."""
 
@@ -453,4 +566,7 @@ jax.tree_util.register_dataclass(
     meta_fields=["rmin", "rmax", "zmin", "zmax", "nfp"],
 )
 
-__all__ = ["MgridData", "MgridField", "read_mgrid", "write_mgrid"]
+__all__ = [
+    "MgridData", "MgridField", "read_mgrid", "tabulate_cartesian_field",
+    "write_mgrid",
+]

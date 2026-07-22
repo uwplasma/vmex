@@ -63,7 +63,8 @@ Module map
      - single-grid solve loop: ``lax.while_loop`` core + host-blocked CLI lane
      - ``funct3d.f``, ``eqsolve.f``
    * - :mod:`~vmex.core.multigrid`
-     - ``NS_ARRAY`` ladder, coarse-to-fine interpolation, hot restart
+     - fixed- and free-boundary ``NS_ARRAY`` ladders, coarse-to-fine
+       interpolation, hot restart, vacuum continuation/rebuild
      - ``runvmec.f``, ``interp.f``
    * - :mod:`~vmex.core.vacuum`
      - NESTOR: Green's function, ``analyt``/``scalpot``, ``potvac`` solve
@@ -77,9 +78,8 @@ Module map
      - differentiable free-boundary residual via virtual casing
      - (no VMEC2000 equivalent)
    * - :mod:`~vmex.core.mgrid`
-     - mgrid netCDF read/write, differentiable interpolated field; external
-       coils live in ESSOS (``essos.coils.Coils``), consumed as an mgrid or
-       ``xyz -> B`` callable
+     - mgrid netCDF read/write, differentiable interpolated field, and
+       ESSOS/SIMSOPT/``xyz -> B`` host-side Biot--Savart tabulation
      - MAKEGRID file format, ``mgrid_mod.f90``
    * - :mod:`~vmex.core.implicit`
      - implicit differentiation of the equilibrium (``custom_vjp`` + adjoint

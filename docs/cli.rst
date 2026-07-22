@@ -93,9 +93,14 @@ For ``LFREEB = T`` decks:
   :class:`vmex.core.mgrid.MgridField` (requires an ESSOS build providing
   ``Coils.to_mgrid``; currently branch ``feature/mgrid-from-coils``).
 
-Known divergences of the current free-boundary lane: it is single-grid (only
-the final ``NS_ARRAY`` stage runs; multi-stage decks print a note), and the
-NESTOR potential is not yet exported to the wout ``potsin``/``xmpot``/
+The free-boundary path runs the complete ``NS_ARRAY`` ladder.  It interpolates
+the stored best plasma state, carries VMEC2000's active-vacuum and adaptive
+``NVACSKIP`` state, and selects fresh resolution-specific NESTOR programs at
+each new grid.  A user-provided ``initial_state`` is also supported by the
+Python API for hot restarts.
+
+The remaining known divergence is that the NESTOR potential is not yet
+exported to the wout ``potsin``/``xmpot``/
 ``xnpot``/``*_sur`` variables (written as netCDF fill). An NITER-exhausted
 free-boundary run still writes the wout (VMEC2000 behavior) and exits with
 ``ier_flag = 2``.

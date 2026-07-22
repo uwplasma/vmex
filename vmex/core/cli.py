@@ -7,7 +7,8 @@ VMEC2000 counterpart: the ``xvmec2000`` executable driver
 
 The solve path is the clean-room core end to end:
 :class:`vmex.core.input.VmecInput` (INDATA or VMEC++-style JSON) ->
-:func:`vmex.core.multigrid.solve_multigrid` ->
+:func:`vmex.core.multigrid.solve_multigrid` (fixed boundary) or
+:func:`vmex.core.multigrid.solve_free_boundary_multigrid` (free boundary) ->
 :func:`vmex.core.wout.wout_from_state` -> :func:`vmex.core.wout.write_wout`,
 plus the core plotting (``--plot``) and Boozer (``--booz``) drivers.
 
@@ -18,8 +19,8 @@ Zero-crash policy (§2.5): every failure maps to a typed
 
 Free-boundary routing (``LFREEB = T``):
 
-- a readable mgrid file goes to
-  :func:`vmex.core.freeboundary.solve_free_boundary` with the VMEC2000
+- a readable mgrid file goes to the full free-boundary ``NS_ARRAY`` ladder
+  with the VMEC2000
   console output (``In VACUUM`` block, ``VACUUM PRESSURE TURNED ON`` banner)
   and free-boundary wout metadata (``nextcur``/``extcur``/``curlabel``/
   ``mgrid_mode``);
@@ -33,10 +34,6 @@ Free-boundary routing (``LFREEB = T``):
 
 Documented divergences of the free-boundary lane:
 
-- :func:`~vmex.core.freeboundary.solve_free_boundary` is single-grid
-  with no warm-start seam, so only the *final* ``NS_ARRAY`` stage is run
-  (from the standard interior guess); VMEC2000 runs the whole ladder with
-  vacuum re-activating per stage.  Multi-stage decks print a note.
 - The NESTOR vacuum potential is not returned by the solver, so the wout
   ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` variables are written as
   netCDF fill (see :func:`vmex.core.wout.wout_from_state`).
@@ -487,24 +484,6 @@ def _free_boundary_plan(args, inp, input_path: Path, *, emit):
     )
 
 
-def _final_stage_params(inp, args) -> tuple[int, float, int]:
-    """Final ``NS_ARRAY`` stage ``(ns, ftol, niter)`` incl. CLI overrides."""
-    import numpy as np
-
-    ns_arr = np.atleast_1d(np.asarray(inp.ns_array, dtype=np.int64)).ravel()
-    positive = ns_arr[ns_arr > 0]
-    ns = int(positive.max()) if positive.size else int(ns_arr[0])
-    ftol = (
-        float(args.ftol) if args.ftol is not None
-        else float(np.atleast_1d(np.asarray(inp.ftol_array, dtype=float)).ravel()[-1])
-    )
-    niter = (
-        int(args.max_iter) if args.max_iter is not None
-        else int(np.atleast_1d(np.asarray(inp.niter_array)).ravel()[-1])
-    )
-    return ns, ftol, niter
-
-
 def _stage_overrides(inp, *, ftol: float | None, max_iter: int | None):
     """Final-stage ftol/niter overrides for the multigrid ladder."""
     import numpy as np
@@ -561,8 +540,6 @@ def _write_wout_from_result(inp, input_path: Path, result, wout_path: Path,
 
 def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> int:
     """Full solve pipeline for one input deck (fixed- or free-boundary)."""
-    import numpy as np
-
     case = case_from_input(input_path)
     verbose = not bool(args.quiet)
 
@@ -576,26 +553,17 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
     t1 = time.perf_counter()
     if freeb_plan is not None:
-        from .freeboundary import solve_free_boundary
-        from .solver import resolution_from_input
+        from .multigrid import solve_free_boundary_multigrid
 
-        ns, ftol, niter = _final_stage_params(inp, args)
-        n_stages = np.atleast_1d(np.asarray(inp.ns_array, dtype=np.int64))
-        if verbose and int(np.count_nonzero(n_stages > 0)) > 1:
-            emit(
-                " NOTE: free-boundary solves are single-grid; running only the "
-                f"final NS_ARRAY stage (NS = {ns})."
-            )
+        ftol_array, niter_array = _stage_overrides(
+            inp, ftol=args.ftol, max_iter=args.max_iter)
         # NITER-exhausted runs return (not raise) so the wout is still
         # written (VMEC2000 behavior); the exit code carries ier_flag = 2.
-        result = solve_free_boundary(
-            inp,
-            resolution=resolution_from_input(inp, ns=ns),
-            ftol=ftol,
-            max_iterations=niter,
+        result = solve_free_boundary_multigrid(
+            inp, ftol_array=ftol_array, niter_array=niter_array,
             verbose=verbose,
             emit=emit,
-            error_on_no_convergence=False,
+            raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             **freeb_plan.solver_kwargs,
         )

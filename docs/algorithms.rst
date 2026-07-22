@@ -322,12 +322,25 @@ with the VMEC2000 cadence (``funct3d.f``):
   ``rbsq = bsqvac + presf(ns)`` at ``js = ns``, and the constraint reference
   surfaces ``rcon0, zcon0`` ramp by 0.9 per iteration.
 
-The external field comes either from an ``mgrid`` file
-(:mod:`vmex.core.mgrid`, trilinear interpolation weighted by ``EXTCUR``)
-or from any ``xyz -> B`` callable — e.g. an ESSOS ``essos.coils.Coils``
-Biot-Savart field (``lambda pts: coils.B(pts)``), interpolation-free and
-differentiable through the coil parameters. vmex itself carries no coil
-code; coils live in ESSOS.
+:func:`vmex.core.multigrid.solve_free_boundary_multigrid` implements
+``runvmec.f``'s radial ladder.  Increasing grids interpolate ``xstore`` using
+the same odd-m :math:`\sqrt{s}` scaling as fixed boundary; equal grids rerun
+the current state and decreasing entries are skipped.  ``ivac``, adaptive
+``nvacskip``, and the last ``bsqvac`` are carried.  Because the free-boundary
+block is guarded by ``iter2 > 1``, a new stage uses that carried pressure on
+iteration 1 and performs its first full update on iteration 2.  The
+resolution-specific NESTOR basis, Green-function program, axis-current
+filament program, cached potential matrix, and traced cadence loop are selected
+or rebuilt for the new stage.  Vacuum activates only once across the ladder.
+
+The forward NESTOR solver consumes a :class:`~vmex.core.mgrid.MgridField`.
+It may be loaded from an ``mgrid`` file (trilinear interpolation weighted by
+``EXTCUR``) or built once with
+:meth:`~vmex.core.mgrid.MgridField.from_cartesian_field`, which tabulates an
+ESSOS/SIMSOPT Biot--Savart object or any ``xyz -> B`` callable.  The resulting
+table and its current scale remain JAX-differentiable; tabulation itself does
+not retain coil-geometry derivatives.  Direct, interpolation-free ESSOS coil
+derivatives use the virtual-casing residual below. vmex carries no coil code.
 
 Differentiable free boundary (virtual casing)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

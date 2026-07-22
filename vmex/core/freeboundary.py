@@ -30,12 +30,10 @@ and the whole post-turn-on steady state — vacuum cadence, constraint damping,
 because it applies the one-time soft restart and prints the banners.  The
 per-iteration numerics are identical to the per-pass host driver.
 
-Known divergence from VMEC2000 (documented): at turn-on VMEC computes the
-turn-on iteration's forces from the pre-restart geometry while evolving the
-restored state; here the restart is applied *before* the turn-on iteration,
-so that iteration's forces come from the restored state.  The golden
-free-boundary fixture is chaotic/unconverged past turn-on, so trajectories
-are compared structurally, not pointwise.
+The one unusual turn-on pass preserves VMEC2000's ordering: its forces use
+the geometry computed before the soft restart while the momentum update
+evolves the restored best state.  Subsequent passes use the ordinary shared
+iteration body.
 """
 
 from __future__ import annotations
@@ -58,6 +56,7 @@ from .fourier import ModeTable
 from .geometry import half_mesh_jacobian
 from .input import VmecInput
 from .mgrid import MgridField
+from .preconditioner_2d import Prec2DConfig
 from .printing import (
     FORCE_ITERATIONS_BANNER, screen_header, screen_line, stage_banner,
     vacuum_banner,
@@ -66,7 +65,7 @@ from .solver import (
     SolveResult, SolverRuntime, SpectralState,
     _finalize, _geometry, _initial_carry, _initial_state, _make_body,
     _result_from_carry, _zero_cache, prepare_runtime, resolution_from_input,
-    reguess_initial_axis,
+    reguess_initial_axis, runtime_with_baselines,
 )
 from .transforms import register_pytree_dataclass as _register
 from .vacuum import (
@@ -363,6 +362,12 @@ def _iter_lane(carry, rt: SolverRuntime):
     return _make_body(rt)(carry)
 
 
+@jax.jit
+def _turnon_iter_lane(carry, rt: SolverRuntime, evaluation_state: SpectralState):
+    """VMEC2000 turn-on pass: old-geometry forces evolve restored ``xc``."""
+    return _make_body(rt, evaluation_state=evaluation_state)(carry)
+
+
 # ---------------------------------------------------------------------------
 # Free-boundary driver state
 # ---------------------------------------------------------------------------
@@ -379,6 +384,7 @@ class FreeBoundaryState:
     banner_pending: bool = False
     delbsq: float = 1.0
     bsqvac: np.ndarray | None = None
+    rbsq: np.ndarray | None = None
     # NESTOR cache (amatsav / bvecsav of scalpot.f):
     mode_matrix: Any = None
     bvec_nonsing: Any = None
@@ -389,9 +395,39 @@ class FreeBoundaryState:
     full_updates: int = 0
 
 
+@dataclass(frozen=True)
+class _FreeBoundaryStageResult:
+    """One radial stage plus the vacuum continuation state for the next grid."""
+
+    result: SolveResult
+    vacuum: FreeBoundaryState
+    continuation_state: SpectralState
+    rcon0: Array
+    zcon0: Array
+
+
 def _resolve_mgrid(inp: VmecInput, mgrid_path: str | Path | None) -> Path:
     p = Path(str(mgrid_path if mgrid_path is not None else inp.mgrid_file)).expanduser()
     return p
+
+
+def _external_field_from_input(
+    inp: VmecInput, mgrid_path: str | Path | None = None,
+) -> MgridField:
+    """Load and scale the deck's external field once for one solve/ladder."""
+    path = _resolve_mgrid(inp, mgrid_path)
+    data_extcur = np.atleast_1d(np.asarray(
+        inp.extcur if inp.extcur is not None else [], dtype=float))
+    from .mgrid import read_mgrid
+
+    data = read_mgrid(path)  # raises MgridNotFoundError when missing
+    extcur = np.zeros((data.nextcur,), dtype=float)
+    n_copy = min(data_extcur.size, data.nextcur)
+    extcur[:n_copy] = data_extcur[:n_copy]
+    if str(data.mgrid_mode).upper().startswith(("R", "N")):
+        raw = np.asarray(data.raw_coil_cur, dtype=float)
+        extcur = np.divide(extcur, raw, out=extcur, where=raw != 0.0)
+    return MgridField.from_mgrid_data(data, extcur=extcur)
 
 
 # ---------------------------------------------------------------------------
@@ -640,6 +676,8 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         )
         return {
             "bsqvac": bsqvac, "ctor": ctor, "rbtor": rbtor, "potvac": potvac,
+            "rbsq": (bsqvac + pres_ns * jnp.asarray(rt.presf_ns_scale))
+                    * boundary.R / jnp.asarray(rt.setup.hs),
             "mode_matrix": mode_matrix, "bvec_nonsing": bvec_nonsing,
             "delbsq_num": delbsq_num, "delbsq_den": delbsq_den,
             "bsubuvac": bsubuvac, "bsubvvac": bsubvvac,
@@ -665,6 +703,8 @@ def _make_fused_vacuum(basis: VacuumBasis, *, modes: ModeTable, signgs: int,
         )
         return {
             "bsqvac": bsqvac, "ctor": ctor, "rbtor": rbtor, "potvac": potvac,
+            "rbsq": (bsqvac + pres_ns * jnp.asarray(rt.presf_ns_scale))
+                    * boundary.R / jnp.asarray(rt.setup.hs),
             "delbsq_num": delbsq_num, "delbsq_den": delbsq_den,
             "bsubuvac": bsubuvac, "bsubvvac": bsubvvac,
         }
@@ -780,6 +820,7 @@ def _vacuum_step(
     else:
         out = fused_vac.skip(carry.state, rt, field, fb.bvec_nonsing, fb.mode_matrix)
     bsqvac = out["bsqvac"]
+    fb.rbsq = out["rbsq"]
     fb.potvac = out["potvac"]
     fb.ctor = float(out["ctor"])
     fb.rbtor = float(out["rbtor"])
@@ -884,6 +925,7 @@ class _VacuumLoopCarry:
     carry: Any                  # solver._LoopCarry
     rcon0: Array; zcon0: Array
     bsqvac: Array               # NESTOR 0.5*|B|^2 on the boundary grid
+    rbsq: Array                 # carried forces.f edge-pressure product
     mode_matrix: Array          # amatsav (scalpot.f)
     bvec_nonsing: Array         # bvecsav (scalpot.f)
     potvac: Array
@@ -932,18 +974,18 @@ def _make_vacuum_lane(fused: FusedVacuum):
 
         def _full(_):
             out = fused.full(c.state, rt_vac, field)
-            return (out["bsqvac"], out["ctor"], out["rbtor"], out["potvac"],
+            return (out["bsqvac"], out["rbsq"], out["ctor"], out["rbtor"], out["potvac"],
                     out["delbsq_num"], out["delbsq_den"],
                     out["mode_matrix"], out["bvec_nonsing"])
 
         def _skip(_):
             out = fused.skip(c.state, rt_vac, field, vc.bvec_nonsing,
                              vc.mode_matrix)
-            return (out["bsqvac"], out["ctor"], out["rbtor"], out["potvac"],
+            return (out["bsqvac"], out["rbsq"], out["ctor"], out["rbtor"], out["potvac"],
                     out["delbsq_num"], out["delbsq_den"],
                     vc.mode_matrix, vc.bvec_nonsing)
 
-        (bsqvac, ctor, rbtor, potvac, num, den, mode_matrix,
+        (bsqvac, rbsq, ctor, rbtor, potvac, num, den, mode_matrix,
          bvec_nonsing) = lax.cond(full, _full, _skip, None)
 
         delbsq = jnp.where(den != 0.0, num / den, vc.delbsq)
@@ -956,6 +998,7 @@ def _make_vacuum_lane(fused: FusedVacuum):
 
         return _VacuumLoopCarry(
             carry=new_carry, rcon0=rcon0, zcon0=zcon0, bsqvac=bsqvac,
+            rbsq=rbsq,
             mode_matrix=mode_matrix, bvec_nonsing=bvec_nonsing, potvac=potvac,
             ivac=ivac, nvacskip=nvacskip, nvskip0=vc.nvskip0,
             delbsq=delbsq, delbsq_traj=delbsq_traj, ctor=ctor, rbtor=rbtor,
@@ -976,7 +1019,7 @@ def _make_vacuum_lane(fused: FusedVacuum):
 # ---------------------------------------------------------------------------
 
 
-def _solve_free_boundary_impl(
+def _solve_free_boundary_stage(
     inp: VmecInput,
     *,
     mgrid_path: str | Path | None = None,
@@ -987,8 +1030,20 @@ def _solve_free_boundary_impl(
     verbose: bool = False,
     emit=print,
     error_on_no_convergence: bool = True,
-) -> SolveResult:
-    """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
+    initial_state: SpectralState | None = None,
+    vacuum_continuation: FreeBoundaryState | None = None,
+    time_step: float | None = None,
+    tcon0: float | None = None,
+    gamma: float | None = None,
+    nstep: int | None = None,
+    lconm1: bool = True,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
+    constraint_continuation: tuple[Array, Array] | None = None,
+    reuse_vacuum_cache: bool = False,
+) -> _FreeBoundaryStageResult:
+    """Internal single-grid free-boundary stage with multigrid continuation.
 
     ``external_field`` overrides the mgrid file (any
     :class:`~vmex.core.mgrid.MgridField`-compatible object with a
@@ -1003,26 +1058,47 @@ def _solve_free_boundary_impl(
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary requires an LFREEB=T input")
     if external_field is None:
-        path = _resolve_mgrid(inp, mgrid_path)
-        data_extcur = np.atleast_1d(np.asarray(inp.extcur if inp.extcur is not None else [], dtype=float))
-        from .mgrid import read_mgrid
-
-        data = read_mgrid(path)  # raises MgridNotFoundError when missing
-        extcur = np.zeros((data.nextcur,), dtype=float)
-        n_copy = min(data_extcur.size, data.nextcur)
-        extcur[:n_copy] = data_extcur[:n_copy]
-        if str(data.mgrid_mode).upper().startswith("R") or str(data.mgrid_mode).upper().startswith("N"):
-            raw = np.asarray(data.raw_coil_cur, dtype=float)
-            extcur = np.divide(extcur, raw, out=extcur, where=raw != 0.0)
-        external_field = MgridField.from_mgrid_data(data, extcur=extcur)
+        external_field = _external_field_from_input(inp, mgrid_path)
 
     if resolution is None:
         resolution = resolution_from_input(inp)
-    rt = prepare_runtime(inp, resolution, ftol=ftol, max_iterations=max_iterations)
+    rt = prepare_runtime(
+        inp, resolution, ftol=ftol, max_iterations=max_iterations,
+        time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+        lconm1=lconm1, precon_type=precon_type,
+        prec2d_threshold=prec2d_threshold, prec2d=prec2d,
+    )
     ns = int(resolution.ns)
     dtype = rt.setup.s_full.dtype
 
-    _init_state = _initial_state(rt.setup)
+    if initial_state is None:
+        _init_state = _initial_state(rt.setup)
+    else:
+        expected = (ns, rt.modes.mnmax)
+        if tuple(initial_state.R_cos.shape) != expected:
+            raise ValueError(
+                f"initial_state has shape {tuple(initial_state.R_cos.shape)}, "
+                f"expected {expected}; interpolate with "
+                "vmex.core.multigrid.interpolate_state first"
+            )
+        _init_state = initial_state
+        # Unlike fixed boundary, do not replace the edge row: it is an evolved
+        # unknown.  On a reset-style start (IVAC=-1), funct3d.f seeds the
+        # constraint baseline from this state at iter2==iter1.  Across an
+        # already-active radial transition, allocate_ns creates new zeroed
+        # rcon0/zcon0 arrays and funct3d deliberately does not reseed them
+        # (the seeding predicate requires IVAC<=0).
+        if constraint_continuation is not None:
+            rt = replace(
+                rt, rcon0=jnp.asarray(constraint_continuation[0]),
+                zcon0=jnp.asarray(constraint_continuation[1]))
+        elif (vacuum_continuation is not None
+              and vacuum_continuation.turned_on):
+            rt = replace(
+                rt, rcon0=jnp.zeros_like(rt.rcon0),
+                zcon0=jnp.zeros_like(rt.zcon0))
+        else:
+            rt = runtime_with_baselines(rt, _init_state)
     _initial_ijacob = 0
     # ``eqsolve.f`` retries a supplied axis when the first Jacobian changes
     # sign.  The fixed-boundary driver already did this in ``_solve_stage``;
@@ -1057,25 +1133,76 @@ def _solve_free_boundary_impl(
     )
 
     zeros_edge = jnp.zeros((basis.ntheta3, basis.nzeta), dtype=dtype)
+    carried_edge = zeros_edge
+    if (vacuum_continuation is not None
+            and vacuum_continuation.turned_on):
+        if vacuum_continuation.rbsq is not None:
+            # rbsq is a persistent angular array in VMEC2000.  At iter2=1
+            # funct3d skips IVAC0, so forces.f consumes the coarse-stage rbsq
+            # verbatim.  Express that product as an equivalent bsqvac on the
+            # new geometry for the shared force seam.
+            _, carried_geometry = _geometry(_init_state, rt)
+            r_edge = carried_geometry.R_even[-1] + carried_geometry.R_odd[-1]
+            pres_ns = _vacuum_scalars(_init_state, rt)[5]
+            rbsq = jnp.asarray(vacuum_continuation.rbsq, dtype=dtype)
+            carried_edge = jnp.where(
+                r_edge != 0.0, rbsq * jnp.asarray(rt.setup.hs) / r_edge,
+                jnp.zeros_like(r_edge),
+            ) - pres_ns * jnp.asarray(_presf_ns_scale(inp, ns), dtype=dtype)
+        elif vacuum_continuation.bsqvac is not None:
+            carried_edge = jnp.asarray(vacuum_continuation.bsqvac, dtype=dtype)
+        if tuple(carried_edge.shape) != tuple(zeros_edge.shape):
+            raise ValueError(
+                "carried vacuum-pressure grid has shape "
+                f"{tuple(carried_edge.shape)}, expected {tuple(zeros_edge.shape)}"
+            )
     rt_fixed = replace(rt, lfreeb=False, bsqvac_edge=zeros_edge,
                        presf_ns_scale=jnp.asarray(0.0, dtype=dtype))
     rt_freeb = replace(
-        rt, lfreeb=True, jmax=ns, bsqvac_edge=zeros_edge,
+        rt, lfreeb=True, jmax=ns, bsqvac_edge=carried_edge,
         presf_ns_scale=jnp.asarray(_presf_ns_scale(inp, ns), dtype=dtype),
     )
 
-    fb = FreeBoundaryState(
-        ivac=-1,
-        nvacskip=max(1, int(inp.nvacskip)),
-        nvskip0=max(1, int(inp.nvacskip)),
-    )
+    if vacuum_continuation is None:
+        fb = FreeBoundaryState(
+            ivac=-1,
+            nvacskip=max(1, int(inp.nvacskip)),
+            nvskip0=max(1, int(inp.nvacskip)),
+        )
+    else:
+        # runvmec.f does not reset IVAC or the adaptive NVACSKIP at an
+        # initialize_radial.f transition.  Carry those scalar controls (and
+        # DEL-BSQ for screen parity).  A changed radial grid discards the
+        # dynamic NESTOR matrix/vector; an equal-grid rerun preserves them,
+        # matching initialize_radial.f's early return.
+        fb = FreeBoundaryState(
+            ivac=int(vacuum_continuation.ivac),
+            nvacskip=max(1, int(vacuum_continuation.nvacskip)),
+            nvskip0=max(1, int(vacuum_continuation.nvskip0)),
+            turned_on=bool(vacuum_continuation.turned_on),
+            delbsq=float(vacuum_continuation.delbsq),
+            bsqvac=vacuum_continuation.bsqvac,
+            rbsq=vacuum_continuation.rbsq,
+            ctor=float(vacuum_continuation.ctor),
+            rbtor=float(vacuum_continuation.rbtor),
+            mode_matrix=(vacuum_continuation.mode_matrix
+                         if reuse_vacuum_cache else None),
+            bvec_nonsing=(vacuum_continuation.bvec_nonsing
+                          if reuse_vacuum_cache else None),
+            potvac=(vacuum_continuation.potvac
+                    if reuse_vacuum_cache else None),
+        )
+    vacuum_active = fb.turned_on
 
     if verbose:
         emit(stage_banner(ns, resolution.mnmax, rt.ftol, rt.max_iterations), end="")
         emit(FORCE_ITERATIONS_BANNER, end="")
         emit(screen_header(lasym=resolution.lasym, lfreeb=True), end="")
 
-    carry = _initial_carry(_init_state, rt_fixed, ijacob=_initial_ijacob)
+    # An already-active multigrid stage evaluates with the free-boundary edge
+    # row on its first pass, so its zero cache must have jmax=ns (not ns-1).
+    rt_initial = rt_freeb if vacuum_active else rt_fixed
+    carry = _initial_carry(_init_state, rt_initial, ijacob=_initial_ijacob)
     printed: set[int] = set()
     #: per-iteration DEL-BSQ recorded by the batched steady-state lane; rows
     #: not covered (pre-activation, turn-on pass) fall back to ``fb.delbsq``
@@ -1117,13 +1244,23 @@ def _solve_free_boundary_impl(
                 break
             # Activation is now due: fall through to the host-stepped
             # turn-on pass (first vacuum call, soft restart, banners).
-        elif fb.turned_on and not fb.banner_pending:
+        elif fb.turned_on and int(carry.iteration) == 1:
+            # funct3d.f wraps the entire IVAC0 block in ``iter2 > 1``.  At a
+            # new radial grid, iteration 1 therefore uses the coarse stage's
+            # carried bsqvac once; iteration 2 performs the first full update
+            # against freshly selected resolution-specific NESTOR programs.
+            carry = _iter_lane(carry, rt_freeb)
+            _emit_due(final=False)
+            continue
+        elif (fb.turned_on and not fb.banner_pending
+              and fb.mode_matrix is not None):
             # F.2: the whole post-turn-on steady state runs as ONE jitted
             # while_loop (vacuum cadence + damping + iteration, traced).
             vc = _VacuumLoopCarry(
                 carry=carry,
                 rcon0=rt_freeb.rcon0, zcon0=rt_freeb.zcon0,
                 bsqvac=rt_freeb.bsqvac_edge,
+                rbsq=jnp.asarray(fb.rbsq, dtype=dtype),
                 mode_matrix=fb.mode_matrix, bvec_nonsing=fb.bvec_nonsing,
                 potvac=fb.potvac,
                 ivac=jnp.asarray(fb.ivac, dtype=int_dtype),
@@ -1144,6 +1281,7 @@ def _solve_free_boundary_impl(
             fb.nvacskip = int(vc.nvacskip)
             fb.delbsq = float(vc.delbsq)
             fb.bsqvac = vc.bsqvac
+            fb.rbsq = vc.rbsq
             fb.mode_matrix = vc.mode_matrix
             fb.bvec_nonsing = vc.bvec_nonsing
             fb.potvac = vc.potvac
@@ -1165,6 +1303,7 @@ def _solve_free_boundary_impl(
         if it > 1 and fsq_rz <= ACTIVATION_FSQ:
             fb.ivac += 1
         rt_use = rt_fixed
+        turnon_evaluation_state = None
         if fb.ivac >= 0:
             # Damp the constraint baselines (funct3d: 0.9 per iteration).
             rt_fixed = replace(rt_fixed, rcon0=0.9 * rt_fixed.rcon0, zcon0=0.9 * rt_fixed.zcon0)
@@ -1182,11 +1321,12 @@ def _solve_free_boundary_impl(
             if fb.ivac >= 1 and not fb.turned_on:
                 # funct3d.f soft start (restart_iter, irst = 2) applied on
                 # the host: best state restored, velocity zeroed, delt*0.9,
-                # iter1 = iter2, ijacob += 1.  Divergence from VMEC noted in
-                # the module docstring (restart applied before this
-                # iteration's force evaluation).
+                # iter1 = iter2, ijacob += 1.  funct3d.f has already computed
+                # geometry at the pre-restart state, so preserve it for this
+                # pass's force evaluation (the momentum base remains xstore).
                 fb.turned_on = True
                 fb.banner_pending = True
+                turnon_evaluation_state = carry.state
                 carry = replace(
                     carry,
                     state=carry.xstore,
@@ -1203,7 +1343,10 @@ def _solve_free_boundary_impl(
                 rt_freeb = replace(rt_freeb, bsqvac_edge=jnp.asarray(bsqvac, dtype=dtype))
                 rt_use = rt_freeb
 
-        carry = _iter_lane(carry, rt_use)
+        if turnon_evaluation_state is None:
+            carry = _iter_lane(carry, rt_use)
+        else:
+            carry = _turnon_iter_lane(carry, rt_use, turnon_evaluation_state)
 
         if fb.banner_pending:
             if verbose:
@@ -1216,10 +1359,19 @@ def _solve_free_boundary_impl(
     ier = int(carry.ier)
     if ier == MORE_ITER_FLAG and not error_on_no_convergence:
         result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-        return replace(result, converged=False, ier_flag=MORE_ITER_FLAG)
+        return _FreeBoundaryStageResult(
+            replace(result, converged=False, ier_flag=MORE_ITER_FLAG), fb,
+            carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
+            rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
     if ier == SUCCESSFUL_TERM_FLAG:
-        return _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
-    return _finalize(carry, rt_freeb if fb.turned_on else rt_fixed)
+        return _FreeBoundaryStageResult(
+            _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed), fb,
+            carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
+            rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
+    return _FreeBoundaryStageResult(
+        _finalize(carry, rt_freeb if fb.turned_on else rt_fixed), fb,
+        carry.xstore, rt_freeb.rcon0 if fb.turned_on else rt_fixed.rcon0,
+        rt_freeb.zcon0 if fb.turned_on else rt_fixed.zcon0)
 
 
 def solve_free_boundary(
@@ -1233,24 +1385,44 @@ def solve_free_boundary(
     verbose: bool = False,
     emit=print,
     error_on_no_convergence: bool = True,
+    initial_state: SpectralState | None = None,
     device: Any = AUTO,
+    time_step: float | None = None,
+    tcon0: float | None = None,
+    gamma: float | None = None,
+    nstep: int | None = None,
+    lconm1: bool = True,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
 ) -> SolveResult:
-    """Run a single-grid free-boundary solve on the selected JAX device.
+    """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
-    ``device`` has the same semantics as :func:`vmex.core.solver.solve`:
-    explicit devices are honored, ``"auto"`` applies VMEX's measured policy,
-    and ``None`` leaves placement to JAX.
+    ``initial_state`` hot-restarts at the same radial resolution.  Its entire
+    plasma state, including the evolved edge, is preserved; use
+    :func:`vmex.core.multigrid.interpolate_state` first when the resolution
+    differs.  As in VMEC2000 reset-file starts, vacuum activation is repeated.
+
+    ``device`` has the same explicit/default placement semantics as
+    :func:`vmex.core.solver.solve`.  Use
+    :func:`vmex.core.multigrid.solve_free_boundary_multigrid` for the complete
+    ``NS_ARRAY`` ladder.  Time-step, constraint, print-cadence, m=1-constraint,
+    and optional 2D-preconditioner overrides mirror
+    :func:`vmex.core.solver.solve`.
     """
-    resolved = resolution if resolution is not None else resolution_from_input(inp)
-    with device_context(device, resolved):
-        return _solve_free_boundary_impl(
-            inp,
-            mgrid_path=mgrid_path,
-            external_field=external_field,
-            resolution=resolved,
-            ftol=ftol,
-            max_iterations=max_iterations,
-            verbose=verbose,
-            emit=emit,
+    if resolution is None:
+        resolution = resolution_from_input(inp)
+    with device_context(device, resolution):
+        stage = _solve_free_boundary_stage(
+            inp, mgrid_path=mgrid_path, external_field=external_field,
+            resolution=resolution, ftol=ftol, max_iterations=max_iterations,
+            verbose=verbose, emit=emit,
             error_on_no_convergence=error_on_no_convergence,
+            initial_state=initial_state, vacuum_continuation=None,
+            time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+            lconm1=lconm1,
+            precon_type=precon_type, prec2d_threshold=prec2d_threshold,
+            prec2d=prec2d,
+            constraint_continuation=None, reuse_vacuum_cache=False,
         )
+    return stage.result

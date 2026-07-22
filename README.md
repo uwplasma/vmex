@@ -172,6 +172,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 |---|:---:|:---:|:---:|
 | Fixed-boundary equilibria | ✅ | ✅ | ✅ |
 | Free boundary from an mgrid file | ✅ | ✅ | ✅ |
+| Free-boundary radial multigrid + hot restart | ✅ | ✅ | ❌ |
 | Free boundary directly from coils (no mgrid) | ✅ | ❌ | ❌ |
 | Free-boundary tokamaks (`ntor = 0`) | ✅ | ✅ | ❌ |
 | Non-stellarator-symmetric (`LASYM = T`) | ✅ | ✅ | ✅ |
@@ -310,8 +311,10 @@ plot_wout(eq.wout, "figures/")
 ```
 
 Choosing an entry point: `optimize.solve_equilibrium` for Python analysis and
-objectives (state + runtime + lazy `.wout`); `multigrid.solve_multigrid` when
-you only need the converged state (the CLI's engine); `implicit.run` for
+objectives (state + runtime + lazy `.wout`); `multigrid.solve_multigrid` for a
+fixed-boundary ladder; `multigrid.solve_free_boundary_multigrid` for a
+free-boundary ladder (including vacuum continuation and hot starts);
+`implicit.run` for
 gradients (`jax.grad`-able `ImplicitSolution`); `solver.solve` as the
 low-level single-grid building block.
 

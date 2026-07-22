@@ -42,8 +42,9 @@ import jax.numpy as jnp
 
 from .device import AUTO, device_context
 from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
-from .fourier import ModeTable
+from .fourier import ModeTable, mode_table
 from .input import VmecInput
+from .preconditioner_2d import Prec2DConfig
 from .solver import (
     SolveResult, SpectralState, _finalize, _result_from_carry, _solve_stage,
     hot_restart_state, prepare_runtime, resolution_from_input,
@@ -51,7 +52,10 @@ from .solver import (
 )
 from .transforms import odd_m_sqrt_s_scaling
 
-__all__ = ["interpolate_coefficients", "interpolate_state", "solve_multigrid"]
+__all__ = [
+    "interpolate_coefficients", "interpolate_state", "solve_multigrid",
+    "solve_free_boundary_multigrid",
+]
 
 Array = Any
 
@@ -298,3 +302,134 @@ def solve_multigrid(
     if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
         return _result_from_carry(carry, rt)
     return _finalize(carry, rt)
+
+
+def solve_free_boundary_multigrid(
+    inp: VmecInput,
+    ns_array=None,
+    ftol_array=None,
+    niter_array=None,
+    *,
+    mgrid_path=None,
+    external_field: Any = None,
+    verbose: bool = False,
+    emit=print,
+    initial_state: SpectralState | None = None,
+    device: Any = None,
+    raise_on_max_iterations: bool = True,
+    time_step: float | None = None,
+    tcon0: float | None = None,
+    gamma: float | None = None,
+    nstep: int | None = None,
+    lconm1: bool = True,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
+) -> SolveResult:
+    """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
+
+    The plasma continuation follows :func:`solve_multigrid`: each increasing
+    grid starts from ``interp.f`` interpolation of the preceding stage's best
+    stored state, equal grids rerun without interpolation, and decreasing
+    entries are skipped.  The external field is loaded once.  Resolution-
+    specific NESTOR bases, Green-function programs, axis-current filament
+    tables and traced vacuum loops are selected/rebuilt when the radial grid
+    changes; equal-grid reruns reuse their dynamic vacuum cache.
+
+    VMEC2000 carries ``ivac`` between grids.  Consequently, after vacuum has
+    activated on a coarse stage, the next stage begins with vacuum active and
+    uses the carried coarse-grid boundary pressure on iteration 1, then performs
+    a full vacuum update on iteration 2 with new caches (no second turn-on
+    banner or soft restart).  If an intermediate stage reaches ``NITER`` before
+    activation, the next stage continues in the pre-activation lane.
+
+    ``initial_state`` hot-starts the first executed stage and must already have
+    that stage's radial shape.  It follows reset-file semantics: the first
+    stage repeats vacuum activation, while subsequent radial stages carry it.
+    The fixed-boundary ladder's solver controls (``time_step``, ``tcon0``,
+    ``gamma``, ``nstep``, ``lconm1``, device placement, and 2D-preconditioner
+    configuration) are accepted and forwarded identically.
+    """
+    if not bool(inp.lfreeb):
+        raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
+
+    ns_arr = np.atleast_1d(np.asarray(
+        inp.ns_array if ns_array is None else ns_array, dtype=np.int64)).ravel()
+    ns_arr = ns_arr[: int(np.argmax(ns_arr <= 0))] if np.any(ns_arr <= 0) else ns_arr
+    if ns_arr.size == 0:
+        raise ValueError("ns_array has no positive stages")
+    n_stages = int(ns_arr.size)
+
+    def _stage_values(values, default, dtype):
+        arr = np.atleast_1d(np.asarray(
+            default if values is None else values, dtype=dtype)).ravel()
+        if arr.size == 0:
+            raise ValueError("empty ftol/niter stage array")
+        if arr.size < n_stages:
+            arr = np.concatenate([
+                arr, np.full(n_stages - arr.size, arr[-1], dtype=dtype),
+            ])
+        return arr[:n_stages]
+
+    ftol_arr = _stage_values(ftol_array, inp.ftol_array, np.float64)
+    niter_arr = _stage_values(niter_array, inp.niter_array, np.int64)
+
+    # Lazy import avoids a module cycle: freeboundary uses SolverRuntime while
+    # this module owns the shared interp.f transfer.
+    from .freeboundary import (
+        _external_field_from_input, _solve_free_boundary_stage,
+    )
+
+    if external_field is None:
+        external_field = _external_field_from_input(inp, mgrid_path)
+
+    state = initial_state
+    interpolation_source = initial_state
+    previous_ns = int(initial_state.R_cos.shape[0]) if initial_state is not None else None
+    vacuum_continuation = None
+    constraint_continuation = None
+    ns_min = 0
+    stage_result = None
+    modes = mode_table(int(inp.mpol), int(inp.ntor))
+    for igrid in range(n_stages):
+        nsval = int(ns_arr[igrid])
+        if nsval < ns_min:
+            continue
+        ns_min = nsval
+        resolution = resolution_from_input(inp, ns=nsval)
+        same_grid = previous_ns == nsval
+        if state is not None and previous_ns != nsval:
+            # initialize_radial.f interpolates pxstore only when ns increases;
+            # an equal-grid entry returns before allocation/interpolation and
+            # therefore reruns the current xc state unchanged.
+            state = interpolate_state(
+                interpolation_source, ns_fine=nsval, modes=modes)
+
+        last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
+        with device_context(device, resolution):
+            stage_result = _solve_free_boundary_stage(
+                inp, external_field=external_field, resolution=resolution,
+                ftol=float(ftol_arr[igrid]),
+                max_iterations=int(niter_arr[igrid]), verbose=verbose,
+                emit=emit,
+                error_on_no_convergence=bool(
+                    last_stage and raise_on_max_iterations),
+                initial_state=state,
+                vacuum_continuation=vacuum_continuation,
+                time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+                lconm1=lconm1,
+                precon_type=precon_type,
+                prec2d_threshold=prec2d_threshold, prec2d=prec2d,
+                constraint_continuation=(
+                    constraint_continuation if same_grid else None),
+                reuse_vacuum_cache=bool(same_grid),
+            )
+        interpolation_source = stage_result.continuation_state
+        state = stage_result.result.state
+        previous_ns = nsval
+        vacuum_continuation = stage_result.vacuum
+        constraint_continuation = (stage_result.rcon0, stage_result.zcon0)
+
+    if stage_result is None:  # defensive; positive ns_arr guarantees a stage
+        raise ValueError("ns_array has no executable stages")
+    return stage_result.result
