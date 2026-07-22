@@ -39,6 +39,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -46,7 +47,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DATA = REPO / "examples" / "data"
 XVMEC2000 = Path("/Users/rogerio/local/STELLOPT/VMEC2000/Release/xvmec2000")
-VMECJAX_PY = Path.home() / ".venvs/vmecjax/bin/python"
+VMEX_PY = Path(sys.executable)
 VMECPP_PY = Path.home() / ".venvs/vmecpp/bin/python"
 
 # (case name, aux files to copy alongside the deck)
@@ -176,13 +177,16 @@ def timed_subprocess(cmd: list[str], cwd: Path, timeout: int) -> dict:
 
 def parse_vmec2000(out: dict) -> dict:
     txt = out.pop("stdout", "")
-    out["converged"] = "EXECUTION TERMINATED NORMALLY" in txt
+    out["converged"] = (
+        "EXECUTION TERMINATED NORMALLY" in txt
+        and "Try increasing NITER" not in txt
+    )
     iters = re.findall(r"^\s*(\d+)\s+[\d.E+-]+\s+[\d.E+-]+", txt, re.M)
     out["iterations"] = int(iters[-1]) if iters else None
     return out
 
 
-def parse_vmecjax(out: dict) -> dict:
+def parse_vmex(out: dict) -> dict:
     txt = out.pop("stdout", "")
     out["converged"] = out["ok"] and ("Wrote WOUT" in txt or "wout" in txt.lower())
     iters = re.findall(r"^\s*(\d+)\s+[\d.E+-]+\s+[\d.E+-]+", txt, re.M)
@@ -199,14 +203,14 @@ def run_vmec2000(deck: Path, aux: list[str], timeout: int) -> dict:
         return parse_vmec2000(timed_subprocess([str(XVMEC2000), deck.name], wd, timeout))
 
 
-def run_vmecjax_cold(deck: Path, aux: list[str], timeout: int) -> dict:
+def run_vmex_cold(deck: Path, aux: list[str], timeout: int) -> dict:
     with tempfile.TemporaryDirectory() as td:
         wd = Path(td)
         shutil.copy(deck, wd)
         for a in aux:
             shutil.copy(DATA / a, wd)
-        vmec = VMECJAX_PY.parent / "vmec"
-        return parse_vmecjax(timed_subprocess([str(vmec), deck.name], wd, timeout))
+        vmec = VMEX_PY.parent / "vmec"
+        return parse_vmex(timed_subprocess([str(vmec), deck.name], wd, timeout))
 
 
 WARM_SNIPPET = r"""
@@ -233,28 +237,30 @@ def run(path):
 
 path = sys.argv[1]
 t0 = time.time(); run(path); t1 = time.time()
-t2 = time.time(); run(path); t3 = time.time()
+t2 = time.time(); r2 = run(path); t3 = time.time()
 rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20
 print(json.dumps({"cold_inproc_s": round(t1-t0,3), "warm_s": round(t3-t2,3),
-                  "peak_rss_mb": round(rss,1)}))
+                  "peak_rss_mb": round(rss,1),
+                  "iterations": int(r2.iterations),
+                  "converged": bool(r2.converged)}))
 """
 
 
-def run_vmecjax_warm(deck: Path, aux: list[str], timeout: int) -> dict:
+def run_vmex_warm(deck: Path, aux: list[str], timeout: int) -> dict:
     with tempfile.TemporaryDirectory() as td:
         wd = Path(td)
         shutil.copy(deck, wd)
         for a in aux:
             shutil.copy(DATA / a, wd)
         try:
-            proc = subprocess.run([str(VMECJAX_PY), "-c", WARM_SNIPPET, deck.name],
+            proc = subprocess.run([str(VMEX_PY), "-c", WARM_SNIPPET, deck.name],
                                   cwd=wd, capture_output=True, text=True, timeout=timeout)
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "timeout"}
         if proc.returncode != 0:
             return {"ok": False, "error": proc.stderr[-1500:]}
         line = proc.stdout.strip().splitlines()[-1]
-        return {"ok": True, "converged": True, **json.loads(line)}
+        return {"ok": True, **json.loads(line)}
 
 
 VMECPP_SNIPPET = r"""
@@ -320,8 +326,8 @@ def main() -> None:
             row: dict[str, dict] = {"ns": read_deck_ns(deck)}
             print(f"=== {key} (ns={row['ns']}) ===", flush=True)
             for solver, fn in [("vmec2000", run_vmec2000),
-                               ("vmex_cold", run_vmecjax_cold),
-                               ("vmex_warm", run_vmecjax_warm),
+                               ("vmex_cold", run_vmex_cold),
+                               ("vmex_warm", run_vmex_warm),
                                ("vmecpp", run_vmecpp)]:
                 if solver in skip:
                     continue

@@ -9,7 +9,7 @@
    "converged": true,
    "iterations": 850
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 4.47,
    "peak_rss_mb": 780.1,
@@ -17,7 +17,7 @@
    "converged": true,
    "iterations": 850
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 0.918,
@@ -42,7 +42,7 @@
    "converged": true,
    "iterations": 1103
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 7.76,
    "peak_rss_mb": 1604.5,
@@ -50,7 +50,7 @@
    "converged": true,
    "iterations": 1103
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 3.069,
@@ -75,7 +75,7 @@
    "converged": true,
    "iterations": 1062
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 4.63,
    "peak_rss_mb": 1124.0,
@@ -83,7 +83,7 @@
    "converged": true,
    "iterations": 1062
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 1.587,
@@ -108,7 +108,7 @@
    "converged": true,
    "iterations": 857
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 7.68,
    "peak_rss_mb": 894.3,
@@ -116,7 +116,7 @@
    "converged": true,
    "iterations": 857
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 3.937,
@@ -139,7 +139,7 @@
    "converged": true,
    "iterations": 880
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 18.02,
    "peak_rss_mb": 1703.0,
@@ -147,7 +147,7 @@
    "converged": true,
    "iterations": 880
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 10.638,
@@ -170,7 +170,7 @@
    "converged": true,
    "iterations": 198
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 4.29,
    "peak_rss_mb": 790.0,
@@ -178,7 +178,7 @@
    "converged": true,
    "iterations": 198
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 1.74,
@@ -203,7 +203,7 @@
    "converged": true,
    "iterations": 2785
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 46.15,
    "peak_rss_mb": 1455.3,
@@ -211,7 +211,7 @@
    "converged": true,
    "iterations": 2785
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 34.347,
@@ -236,7 +236,7 @@
    "converged": true,
    "iterations": 4425
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 50.36,
    "peak_rss_mb": 1941.4,
@@ -244,7 +244,7 @@
    "converged": true,
    "iterations": 4425
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 39.481,
@@ -269,7 +269,7 @@
    "converged": true,
    "iterations": 5222
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 60.85,
    "peak_rss_mb": 1595.3,
@@ -277,7 +277,7 @@
    "converged": true,
    "iterations": 5239
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 56.791,
@@ -300,7 +300,7 @@
    "converged": true,
    "iterations": 672
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 5.75,
    "peak_rss_mb": 770.6,
@@ -308,7 +308,7 @@
    "converged": true,
    "iterations": 672
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 2.207,
@@ -333,7 +333,7 @@
    "converged": true,
    "iterations": 617
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 17.69,
    "peak_rss_mb": 1542.3,
@@ -341,7 +341,7 @@
    "converged": true,
    "iterations": 617
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 6.02,
@@ -366,7 +366,7 @@
    "converged": true,
    "iterations": 2829
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 106.61,
    "peak_rss_mb": 2752.7,
@@ -374,7 +374,7 @@
    "converged": true,
    "iterations": 1681
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 63.397,
@@ -399,7 +399,7 @@
    "converged": true,
    "iterations": 1652
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": true,
    "wall_s": 34.07,
    "peak_rss_mb": 1800.3,
@@ -407,7 +407,7 @@
    "converged": true,
    "iterations": 1499
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
    "converged": true,
    "cold_inproc_s": 23.917,
@@ -429,10 +429,10 @@
    "wall_s": 193.13,
    "peak_rss_mb": 92.7,
    "stderr": "",
-   "converged": true,
+   "converged": false,
    "iterations": 10000
   },
-  "vmec_jax_cold": {
+  "vmex_cold": {
    "ok": false,
    "wall_s": 230.55,
    "peak_rss_mb": 3606.8,
@@ -440,9 +440,9 @@
    "converged": false,
    "iterations": 10000
   },
-  "vmec_jax_warm": {
+  "vmex_warm": {
    "ok": true,
-   "converged": true,
+   "converged": false,
    "cold_inproc_s": 163.268,
    "warm_s": 150.93,
    "peak_rss_mb": 2545.6
