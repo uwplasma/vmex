@@ -47,7 +47,9 @@ def test_format_report_healthy_and_warning_paths():
     assert "Status: no obvious installation problems detected." in text
     assert "JAX backend:" in text
     assert "JAX default device:" in text
+    assert "VMEX forward default:" in text
     assert "VMEX implicit default:" in text
+    assert "VMEX mirror default:" in text
     for name in doctor._CORE_PACKAGES:
         assert name in text
 

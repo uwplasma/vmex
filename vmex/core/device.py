@@ -3,9 +3,10 @@
 Measured basis: ``benchmarks/gpu_baseline.json`` (2026-07-09, 2x RTX A4000,
 jax 0.6.2 cuda12) — see its ``meta.notes`` and commit ``a324f503``:
 
-- Per-*iteration* throughput favours the GPU at every tested size in the
-  legacy lane (0.83 ms vs 1.90 ms at ``ns=35, mpol=2, ntor=2``, up to 3x on
-  NuhrenbergZille-class decks: 90 s vs 277 s wall).
+- Per-*iteration* throughput favours the GPU across the measured low- and
+  moderate-mode legacy lane (0.83 ms vs 1.90 ms at
+  ``ns=35, mpol=2, ntor=2``, up to 3x on NuhrenbergZille-class decks:
+  90 s vs 277 s wall).
 - The GPU pays fixed per-solve overheads (~0.2-0.4 s dispatch/transfer floor
   plus compile/cache-load on cold processes), so *small* decks that converge
   in well under a second of CPU work finish faster on the CPU
@@ -29,8 +30,20 @@ NuhrenbergZille_1988_QHS (11*162*286)      509,652  276.9 / 90.1 s     gpu
 
 Below :data:`GPU_MIN_ITERATION_WORK` the measured difference is < 0.5 s
 either way (the ``*`` misclassification costs ~0.4 s); above it the GPU wins
-by 2-3x and increasingly more with size.  The threshold ``100_000`` sits
-between the two clusters (geometric mean of 24.3e3 and 491.5e3 ~ 109e3).
+by 2-3x within the measured low/moderate-mode cluster.  The threshold
+``100_000`` sits between those two clusters (geometric mean of 24.3e3 and
+491.5e3 ~ 109e3).
+
+Mode count is an independent guard.  On the supplied high-resolution HSX
+deck (``ns=101, mnmax=858, nznt=2200``), a same-host office measurement took
+426.94 s on CPU versus 1468.07 s on an RTX A4000 after its persistent cache
+was populated.  The conservative :data:`GPU_MAX_SPECTRAL_MODES` cutoff of 512
+sits between the largest measured GPU winner (288 modes) and that high-mode
+CPU winner.  The existing measured GPU winners have at most 162 modes; the
+intermediate range is not calibrated.  The round cutoff preserves AUTO for
+common stages through 288 modes while catching the measured HSX regression.
+It is not claimed as a hardware-independent physical crossover; explicit
+placement remains available for users to measure newer hardware.
 
 The policy is a *default* only: an explicit ``device=`` argument to
 ``solve``/``solve_multigrid`` always wins, while ``device=None`` follows
@@ -49,11 +62,14 @@ import numpy as np
 __all__ = [
     "AUTO",
     "GPU_MIN_ITERATION_WORK",
+    "GPU_MAX_SPECTRAL_MODES",
     "iteration_work",
     "recommended_device",
     "resolve_device",
     "resolve_implicit_device",
+    "resolve_mirror_device",
     "device_context",
+    "mirror_device_context",
 ]
 
 #: Apply VMEX's measured placement policy.  ``None`` deliberately has the
@@ -64,6 +80,10 @@ AUTO = "auto"
 #: recommended default (see the measured table in the module docstring).
 GPU_MIN_ITERATION_WORK = 100_000
 
+#: Above this many active Fourier modes, the measured high-mode HSX solve is
+#: faster on the host CPU even though its aggregate work proxy is large.
+GPU_MAX_SPECTRAL_MODES = 512
+
 
 def iteration_work(resolution: Any) -> int:
     """Per-iteration work proxy ``ns * mnmax * nznt`` of a ``Resolution``."""
@@ -73,11 +93,16 @@ def iteration_work(resolution: Any) -> int:
 def recommended_device(resolution: Any) -> str:
     """``"cpu"`` or ``"gpu"``: the measured-rule recommendation for one stage.
 
-    Purely resolution-based (``benchmarks/gpu_baseline.json`` thresholds; see
-    the module docstring); does **not** check what hardware is present — use
+    Purely resolution-based (the benchmark thresholds in the module
+    docstring); does **not** check what hardware is present — use
     :func:`resolve_device` for the availability- and pin-aware decision.
     """
-    return "cpu" if iteration_work(resolution) < GPU_MIN_ITERATION_WORK else "gpu"
+    if (
+        iteration_work(resolution) < GPU_MIN_ITERATION_WORK
+        or int(resolution.mnmax) > GPU_MAX_SPECTRAL_MODES
+    ):
+        return "cpu"
+    return "gpu"
 
 
 def _user_selected_placement() -> bool:
@@ -171,6 +196,24 @@ def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
         return None
 
 
+def resolve_mirror_device(device: Any = AUTO):
+    """Device for mirror solves with host SciPy control flow.
+
+    The mirror fixed/free-boundary solvers repeatedly cross between SciPy and
+    exact JAX value/JVP/VJP callbacks.  The measured ``15x15`` office case is
+    faster on CPU (35.2 s versus 44.2 s on an RTX A4000), so ``"auto"``
+    selects CPU unless the user has chosen a JAX placement.  Explicit devices
+    and ``None`` retain the same meanings as in :func:`resolve_device`.
+    """
+    if device is None:
+        return None
+    if not (isinstance(device, str) and device.strip().lower() == AUTO):
+        return resolve_device(device)
+    if _user_selected_placement() or jax.default_backend() == "cpu":
+        return None
+    return jax.devices("cpu")[0]
+
+
 def device_context(device: Any = AUTO, resolution: Any = None):
     """Context manager placing a solve stage on the resolved device.
 
@@ -183,9 +226,26 @@ def device_context(device: Any = AUTO, resolution: Any = None):
     return jax.default_device(dev)
 
 
+def mirror_device_context(device: Any = AUTO):
+    """Context manager applying :func:`resolve_mirror_device`."""
+    dev = resolve_mirror_device(device)
+    if dev is None:
+        return contextlib.nullcontext()
+    return jax.default_device(dev)
+
+
 def _placement_device(device: Any = AUTO, resolution: Any = None):
     """Concrete target for already-committed input arrays, or ``None``."""
     dev = resolve_device(device, resolution)
+    if dev is not None or device is None:
+        return dev
+    configured = jax.config.jax_default_device
+    return configured if configured is not None else jax.devices()[0]
+
+
+def _mirror_placement_device(device: Any = AUTO):
+    """Concrete mirror target for committed input arrays, or ``None``."""
+    dev = resolve_mirror_device(device)
     if dev is not None or device is None:
         return dev
     configured = jax.config.jax_default_device

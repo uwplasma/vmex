@@ -13,6 +13,13 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from vmex.core.device import (
+    AUTO,
+    _mirror_placement_device,
+    _put_numeric_leaves,
+    mirror_device_context,
+)
+
 from .basis import CubicBSplineBasis, MirrorGrid, ThetaBasis
 from .geometry import (
     evaluate_closed_spline_axis,
@@ -1219,8 +1226,39 @@ def solve_fixed_boundary(
     axis: Any | None = None,
     gradient_tolerance: float = 1.0e-11,
     require_convergence: bool = False,
+    device: Any = AUTO,
 ) -> SplineMirrorSolveResult:
-    """Solve an open or periodic closed scalar-pressure equilibrium."""
+    """Solve an open or periodic closed scalar-pressure equilibrium.
+
+    ``device="auto"`` uses the measured mirror CPU policy; an explicit JAX
+    device/platform wins, while ``device=None`` follows ordinary JAX
+    placement. Numeric values captured by a field callable can be relocated
+    only when the callable is a registered pytree such as
+    :class:`jax.tree_util.Partial`.
+    """
+
+    if device is not None:
+        target = _mirror_placement_device(device)
+        with mirror_device_context(device):
+            return solve_fixed_boundary(
+                _put_numeric_leaves(initial_state, target),
+                _put_numeric_leaves(boundary, target),
+                discretization,
+                config,
+                axial_flux_derivative=_put_numeric_leaves(
+                    axial_flux_derivative, target
+                ),
+                mass_profile=_put_numeric_leaves(mass_profile, target),
+                current_derivative=_put_numeric_leaves(
+                    current_derivative, target
+                ),
+                gamma=gamma,
+                solve_lambda=solve_lambda,
+                axis=_put_numeric_leaves(axis, target),
+                gradient_tolerance=gradient_tolerance,
+                require_convergence=require_convergence,
+                device=None,
+            )
 
     from .forces import (
         VariationalResidual,
@@ -1438,6 +1476,7 @@ def solve_fixed_boundary_from_radius(
     axial_flux_derivative: Array = 0.01,
     solve_lambda: bool = True,
     require_convergence: bool = True,
+    device: Any = AUTO,
     **kwargs: Any,
 ) -> SplineMirrorSolveResult:
     """Solve a fixed-boundary mirror equilibrium directly from a boundary radius.
@@ -1464,6 +1503,7 @@ def solve_fixed_boundary_from_radius(
         axial_flux_derivative=axial_flux_derivative,
         solve_lambda=solve_lambda,
         require_convergence=require_convergence,
+        device=device,
         **kwargs,
     )
 
