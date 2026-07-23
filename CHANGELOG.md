@@ -7,6 +7,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once past 1.0.
 ## [Unreleased]
 
 ### Added
+- **Explicit device selection.** Forward, free-boundary, implicit, and CLI
+  solve paths accept public CPU/GPU/JAX placement controls: omitted or
+  `"auto"` retains VMEX's measured policy, `None` follows JAX, and explicit
+  platform names or `jax.Device` objects win without environment routing.
+- **Differentiable Mercier stability.** `d_merc_state` provides a traceable JAX
+  Mercier profile, and `mercier_stability_residual` exposes its validated
+  interior surfaces to implicit differentiation and optimization.
 - **GPU CI without environment routing.** A manual self-hosted CUDA 13 lane
   fails on CPU fallback and checks explicit CPU/GPU forward-solve and
   implicit-gradient parity without JAX platform environment variables.

@@ -56,6 +56,19 @@ Install from PyPI:
 pip install vmex
 ```
 
+For NVIDIA GPUs with a current JAX-supported Python and driver 580+, install
+the CUDA 13 wheel and verify the detected devices:
+
+```bash
+pip install -U "jax[cuda13]"
+vmex --doctor
+```
+
+VMEX does not require platform-selection environment variables for hardware
+detection. Its automatic policy keeps small solves and implicit gradients on
+CPU when that is faster; the public solve and implicit APIs also accept an
+explicit ``device=`` argument.
+
 Development install from source:
 
 ```bash
@@ -389,10 +402,12 @@ objective at a stiff weight:
 - lower the aspect ratio to 4.8 at fixed iota;
 - push the Mercier criterion `DMerc` toward stability at ⟨β⟩ ≈ 1.25%.
 
-The first four use the implicit adjoint (`jac="implicit"`). `DMerc` has no
-traceable lane yet (it is computed from host-side Mercier tables), so that
-campaign uses finite differences at `max_mode` 2. The self-consistent Redl
-bootstrap objective has its own section below.
+The first four use the implicit adjoint (`jac="implicit"`). The published
+`DMerc` showcase deliberately preserves its legacy host-side reporting lane
+and finite-difference baseline at `max_mode` 2. New campaigns can instead use
+the traceable `mercier_stability_residual` with `jac="implicit"`; see the
+optimization objectives documentation. The self-consistent Redl bootstrap
+objective has its own section below.
 
 ![Objectives showcase: five one-objective campaigns off the precise-QA seed](docs/_static/figures/readme_objectives.png)
 
@@ -483,8 +498,11 @@ options:
 ```
 
 `vmec` detects the available JAX hardware without environment variables and
-uses CPU or GPU according to the measured per-stage policy. Use
-`--device cpu` or `--device gpu` to override it explicitly.
+uses CPU or GPU according to the measured per-stage policy. Use `--device
+cpu` or `--device gpu` to override it explicitly. Implicit-gradient work
+defaults to CPU because it is launch-bound on the tested GPUs; passing
+`device=None` to the Python API follows JAX placement. `vmex --doctor`
+reports the devices and both VMEX placement policies.
 
 ## Documentation
 
