@@ -545,6 +545,7 @@ jobs:
             sleep 60
             if kill -0 "$pytest_pid" 2>/dev/null; then
               echo "pytest shard ${{ matrix.shard }} still running (${SECONDS}s)"
+              awk '/VmRSS|VmHWM/ {print "  " $0}' "/proc/$pytest_pid/status" 2>/dev/null || true
             fi
           done
           wait "$pytest_pid"
