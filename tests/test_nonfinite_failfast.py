@@ -84,6 +84,20 @@ def test_shareable_diagnostic_flags_unsupported_reconstruction(
     assert "RBC" not in output
 
 
+def test_shareable_diagnostic_uses_production_mode_classification(
+    tmp_path: Path, capsys,
+) -> None:
+    """A production-rejected model gets a stable value-free diagnostic code."""
+    path = tmp_path / "input.private_trip3d"
+    path.write_text("&INDATA\nTRIP3D_FILE='private_field_name.nc'\n/\n")
+    assert diagnose(path) == 1
+    output = capsys.readouterr().out
+    assert "input parsing: PASS" in output
+    assert "D00E_TRIP3D_MODE_UNSUPPORTED" in output
+    assert "private_trip3d" not in output
+    assert "private_field_name" not in output
+
+
 def test_shareable_diagnostic_supports_lforbal(
     tmp_path: Path, capsys
 ) -> None:

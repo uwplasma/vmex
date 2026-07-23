@@ -9,9 +9,12 @@ Input file reference
   names.
 
 Both round-trip: ``VmecInput.to_json`` writes a VMEC++-schema JSON deck that
-parses back to the same input. All VMEC2000 defaults and ``readin.f``
+parses back to the same input. Implemented VMEC2000 defaults and ``readin.f``
 normalizations are applied on construction (see the
-:mod:`vmex.core.input` docstring for the exact rules).
+:mod:`vmex.core.input` docstring for the exact rules). Parsing does not imply
+solver support: the complete supported/rejected/no-op classification is in
+:doc:`vmec2000_compatibility`. Unknown names and active unsupported physics
+fail before setup.
 
 INDATA variables
 ----------------
@@ -55,7 +58,8 @@ Multigrid ladder and stepping
      - Meaning
    * - ``NS_ARRAY``
      - ``[31]``
-     - radial surfaces per multigrid stage
+     - radial surfaces per multigrid stage; explicit ``NS_ARRAY(1)=0`` uses
+       the VMEC2000 ``NSIN -> 31`` legacy expansion
    * - ``FTOL_ARRAY``
      - ``[1e-10]``
      - force tolerance per stage (converged when ``fsqr, fsqz, fsql`` are all
@@ -78,6 +82,20 @@ Multigrid ladder and stepping
    * - ``NSTEP``
      - 10
      - iterations between progress prints
+   * - ``TIME_SLICE``
+     - 0
+     - informational value preserved in the VMEC-style run header
+   * - ``LFORBAL``
+     - ``F``
+     - use VMEC2000's non-variational average-force replacement for the
+       ``m=1,n=0`` R/Z channels
+   * - ``LMOVE_AXIS``
+     - ``T``
+     - permit automatic first-pass axis recovery for a large finite force
+   * - ``LFULL3D1OUT``
+     - ``F``
+     - write an unconverged WOUT after NITER exhaustion (fixed or free
+       boundary); fatal numerical/Jacobian failures never write one
 
 Pressure profile
 ~~~~~~~~~~~~~~~~
@@ -181,8 +199,8 @@ Free boundary
      - free-boundary mode; forced ``F`` when ``MGRID_FILE = 'NONE'``
    * - ``MGRID_FILE``
      - ``'NONE'``
-     - MAKEGRID vacuum-field file, or ``'DIRECT_COILS'`` for direct
-       Biot-Savart coil fields (with ``vmex --coils``)
+     - MAKEGRID vacuum-field file, or ``'DIRECT_COILS'`` to ask ESSOS to
+       tabulate a temporary mgrid (with ``vmex --coils``)
    * - ``EXTCUR``
      - —
      - external coil-group currents [A]
@@ -194,12 +212,15 @@ Free boundary
      - boundary spectral filtering
    * - ``PRECON_TYPE`` / ``PREC2D_THRESHOLD``
      - ``NONE`` / 1e-30
-     - 2D preconditioner selection (accepted for compatibility)
+     - ``NONE``/``DEFAULT`` use the 1-D VMEC path; ``GMRES`` selects VMEX's
+       exact-JVP matrix-free Newton--GMRES path. VMEC2000 ``CG``, ``GMRESR``,
+       and ``TFQMR`` are distinct and are rejected, not aliased.
 
 VMEC++-style JSON
 -----------------
 
-The JSON schema follows ``vmecpp.VmecInput`` verbatim: the keys are the
+The JSON schema follows the implemented ``vmecpp.VmecInput`` subset: the keys
+are the
 lower-case INDATA names (``lasym, nfp, mpol, ntor, ntheta, nzeta, ns_array,
 ftol_array, niter_array, delt, tcon0, aphi, phiedge, nstep, pmass_type, am,
 am_aux_s, am_aux_f, pres_scale, adiabatic_index, spres_ped, ncurr,
@@ -235,3 +256,15 @@ length ``ntor + 1``:
 
 Extensions beyond VMEC++ (ignored by VMEC++ but accepted here): the spline
 and pedestal profile types listed above, with the same key names as INDATA.
+``free_boundary_method="nestor"`` is accepted explicitly. ``only_coils`` and
+``biest`` select different models and are rejected. Unknown JSON keys are
+errors rather than silent no-ops.
+
+Unsupported and output-only INDATA controls
+-------------------------------------------
+
+Active reconstruction, RFP, TRIP3D, ANIMEC, target-volume rescaling, and
+unsupported continuation/preconditioner modes fail with a typed error.
+Neutral legacy defaults remain accepted. Legacy output-only switches are
+listed individually in :doc:`vmec2000_compatibility`; they do not alter the
+equilibrium and VMEX does not imply that their auxiliary files are produced.

@@ -37,10 +37,10 @@ Documented divergences of the free-boundary lane:
 - The NESTOR vacuum potential is not returned by the solver, so the wout
   ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` variables are written as
   netCDF fill (see :func:`vmex.core.wout.wout_from_state`).
-- An NITER-exhausted free-boundary run still writes the wout (VMEC2000
-  behavior) and exits with ``ier_flag = 2`` (MORE ITERATIONS REQUIRED).
-- For fixed boundary, ``LFULL3D1OUT = T`` requests the same NITER-exhausted
-  WOUT; fatal numerical/Jacobian errors still do not produce one.
+- ``LFULL3D1OUT = T`` requests a WOUT after NITER exhaustion for either
+  boundary mode.  With the default ``F``, VMEC2000 and VMEX return
+  ``ier_flag = 2`` without a WOUT.  Fatal numerical/Jacobian errors never
+  produce one.
 """
 
 from __future__ import annotations
@@ -254,7 +254,7 @@ def _parse_booz_surfaces(text: str | None):
 # ---------------------------------------------------------------------------
 
 
-def _preamble(case: str) -> str:
+def _preamble(case: str, *, time_slice: float = 0.0) -> str:
     """Run header block (vmec.f banner, structural match to xvmec2000)."""
     import platform
 
@@ -263,7 +263,7 @@ def _preamble(case: str) -> str:
     clock = time.strftime("%H:%M:%S", now)
     return (
         " - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
-        "  SEQ =    1 TIME SLICE  0.0000E+00\n"
+        f"  SEQ =    1 TIME SLICE {float(time_slice):11.4E}\n"
         f"  PROCESSING INPUT.{case}\n"
         f"  THIS IS VMEX, VERSION {_package_version()}\n"
         "  Lambda: Full Radial Mesh. L-Force: hybrid full/half.\n"
@@ -550,8 +550,16 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
     read_s = time.perf_counter() - t0
 
     if verbose:
-        emit(_preamble(case))
+        emit(_preamble(case, time_slice=float(getattr(inp, "time_slice", 0.0))))
     freeb_plan = _free_boundary_plan(args, inp, input_path, emit=emit)
+    # VMEC2000 turns off LFREEB when the requested mgrid cannot be opened.
+    # Use that effective mode in setup and WOUT metadata, not merely in CLI
+    # routing; otherwise a fixed-boundary fallback is mislabeled free-boundary.
+    effective_inp = inp
+    if bool(getattr(inp, "lfreeb", False)) and freeb_plan is None:
+        import dataclasses
+
+        effective_inp = dataclasses.replace(inp, lfreeb=False)
 
     t1 = time.perf_counter()
     if freeb_plan is not None:
@@ -559,13 +567,13 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
         ftol_array, niter_array = _stage_overrides(
             inp, ftol=args.ftol, max_iter=args.max_iter)
-        # NITER-exhausted runs return (not raise) so the wout is still
-        # written (VMEC2000 behavior); the exit code carries ier_flag = 2.
         result = solve_free_boundary_multigrid(
             inp, ftol_array=ftol_array, niter_array=niter_array,
             verbose=verbose,
             emit=emit,
-            raise_on_max_iterations=False,
+            raise_on_max_iterations=not bool(
+                getattr(inp, "lfull3d1out", False)
+            ),
             device=None if args.device == "none" else args.device,
             **freeb_plan.solver_kwargs,
         )
@@ -574,7 +582,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
         ftol_array, niter_array = _stage_overrides(inp, ftol=args.ftol, max_iter=args.max_iter)
         result = solve_multigrid(
-            inp,
+            effective_inp,
             ftol_array=ftol_array,
             niter_array=niter_array,
             mode=str(args.mode),
@@ -590,7 +598,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
     wout_path = resolve_wout_path(input_path=input_path, outdir=outdir)
     wout_path.parent.mkdir(parents=True, exist_ok=True)
     t2 = time.perf_counter()
-    wout = _write_wout_from_result(inp, input_path, result, wout_path,
+    wout = _write_wout_from_result(effective_inp, input_path, result, wout_path,
                                    freeb_plan=freeb_plan)
     wout_s = time.perf_counter() - t2
 

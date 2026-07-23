@@ -585,9 +585,11 @@ def _resolve_prec2d(
     """Resolve the 2D-preconditioner config (``precon2d.f`` / ``evolve.f``).
 
     An explicit ``prec2d`` config wins (used verbatim); otherwise it is built
-    from ``precon_type``/``prec2d_threshold`` (input defaults, overridable) when
-    ``precon_type != "NONE"``.  Returns ``None`` (the default 1D-only path)
-    when the 2D preconditioner is off.
+    from ``precon_type``/``prec2d_threshold`` (input defaults, overridable).
+    ``NONE`` and VMEC2000's ``DEFAULT`` select the parity 1-D path.  ``GMRES``
+    selects VMEX's documented matrix-free JAX/SOLVAX Newton--GMRES path.
+    VMEC2000's distinct ``CG``, ``GMRESR`` and ``TFQMR`` algorithms are
+    rejected rather than silently aliased to GMRES.
     """
     if prec2d is not None:
         return prec2d
@@ -597,8 +599,14 @@ def _resolve_prec2d(
     else:
         pt = "NONE" if precon_type is None else precon_type
         thr = 1e-30 if prec2d_threshold is None else prec2d_threshold
-    if str(pt).strip().upper() == "NONE":
+    pt_normalized = str(pt).strip().upper()
+    if pt_normalized in {"", "NONE", "DEFAULT"}:
         return None
+    if pt_normalized != "GMRES":
+        raise NotImplementedError(
+            "PRECON_TYPE must be NONE/DEFAULT or GMRES; VMEC2000's distinct "
+            "CG, GMRESR, and TFQMR evolution algorithms are not implemented"
+        )
     return Prec2DConfig(threshold=float(thr), finest=bool(finest))
 
 

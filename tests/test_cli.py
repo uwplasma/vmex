@@ -261,4 +261,6 @@ def test_lforbal_iteration_exhaustion_writes_wout(tmp_path):
     ]
     wout_path = tmp_path / "wout_lforbal.nc"
     assert wout_path.exists()
-    assert int(read_wout(wout_path).ier_flag) == MORE_ITER_FLAG
+    wout = read_wout(wout_path)
+    assert int(wout.ier_flag) == MORE_ITER_FLAG
+    assert bool(wout.lmove_axis) is False

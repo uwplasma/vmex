@@ -48,9 +48,11 @@ writes ``wout_circular_tokamak.nc`` next to the input file. Useful flags:
 Free-boundary decks (``LFREEB = T``) route automatically: a readable
 ``MGRID_FILE`` runs the free-boundary solver; a missing mgrid file falls back
 to a fixed-boundary solve with a warning (VMEC2000 behavior); and
-``MGRID_FILE = 'DIRECT_COILS'`` together with ``--coils coils.json`` evaluates
-the external field directly from an ESSOS-style coil set via Biot-Savart —
-no mgrid interpolation at all. See :doc:`cli` for the complete reference.
+``MGRID_FILE = 'DIRECT_COILS'`` together with ``--coils coils.json`` asks ESSOS
+to tabulate the coil field into a temporary mgrid used by NESTOR.  The separate
+virtual-casing residual can evaluate a JAX Biot--Savart callable directly, but
+is not the derivative of the NESTOR equilibrium solve. See :doc:`cli` and
+:doc:`vmec2000_compatibility` for the complete contract.
 
 Plotting
 --------

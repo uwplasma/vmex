@@ -245,18 +245,28 @@ default:
 The end-to-end effect on the profiled production ``opt_step`` and the CPU
 versus GPU placement question are quantified in :doc:`performance`.
 
+For implicit Jacobians, ``jac_chunk_size=None`` means one full-width
+``lax.map`` batch rather than a bare ``vmap``.  This is a correctness
+workaround for JAX 0.6.2: the bare transform produced an incorrect nested
+iterative-solve column, while the full-width batch, smaller chunks, and
+independent central finite differences agree.  The memory meaning remains
+“unchunked”; ``"auto"`` or an integer supplies the research-grade bounded
+path.
+
 Free-boundary gradients (virtual casing)
 ----------------------------------------
 
-**Free boundary** is differentiable through a different route
+External-field optimization on a specified plasma boundary is differentiable
+through a different route
 (:mod:`vmex.core.freeboundary_diff`): rather than differentiating the
 NESTOR vacuum solve, the plasma-boundary contribution to the vacuum field
 is computed by **virtual casing**, which is a smooth function of the coil /
 ``extcur`` parameters and the plasma surface.  Coil-parameter derivatives
-of free-boundary outputs are obtained end-to-end this way and are
-finite-difference-validated.  (The two scopes are complementary: the
+of this boundary residual are finite-difference-validated.  They are not the
+derivative of a fully reconverged NESTOR equilibrium.  (The two scopes are
+complementary: the
 fixed-boundary implicit adjoint is validated to ~1e-6 relative; the
-free-boundary virtual-casing path is FD-validated.)  See the
+virtual-casing residual path is FD-validated.)  See the
 *Differentiable free boundary* section of :doc:`algorithms`.
 
 True single-stage (plasma boundary **and** coils at once)

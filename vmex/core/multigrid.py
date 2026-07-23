@@ -230,8 +230,8 @@ def solve_multigrid(
     like :func:`vmex.core.solver.solve`.  With
     ``raise_on_max_iterations=False`` a final stage that merely hits NITER
     returns its last state instead (``converged=False``, ``ier_flag =
-    more_iter_flag``) — VMEC2000's own behavior, which writes the
-    NITER-exhausted state to the wout file.
+    more_iter_flag``).  This exposes the state to callers; the CLI writes it
+    only when ``LFULL3D1OUT=T``, matching the VMEC2000 driver policy.
 
     Executable reuse: stage runtimes are structural pytrees (solver.py,
     Phase 2 item (1)), so one XLA executable is compiled per distinct

@@ -193,11 +193,14 @@ jogs, no assembled blocks — and the system is solved with matrix-free
 restarted GMRES from SOLVAX (``solvax.gmres``) in
 :func:`~vmex.core.preconditioner_2d.newton_direction`. A loose GMRES
 tolerance yields an inexact Newton step; peak memory stays at one force
-graph. Activation mirrors ``evolve.f``
+graph. Activation mirrors the main ``evolve.f`` gates
 (:class:`~vmex.core.preconditioner_2d.Prec2DConfig`): finest grid only,
 ``iter2 >= 10``, and ``fsqr + fsqz + fsql < prec2d_threshold``; the wiring in
 :mod:`vmex.core.solver` swaps the Newton direction for the 1D force
 direction under a ``lax.cond``, leaving the default 1D-only path untouched.
+It does **not** reproduce VMEC2000's distinct CG/GMRESR/TFQMR evolution
+algorithms or its ``PRE_NITER`` budget mutation; see
+:doc:`vmec2000_compatibility`.
 
 Spectral condensation (``alias.f``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -252,9 +255,10 @@ interpolated in :math:`\sqrt{s}`-internal form to the next finer grid
 the scaled array, interpolate linearly in :math:`s`, unscale, and zero the
 odd-m axis row (:func:`~vmex.core.multigrid.interpolate_coefficients` /
 :func:`~vmex.core.multigrid.interpolate_state`; the equations are in
-:doc:`equations`). Mode and radial arrays are padded to the maximum
-resolution so all stages share one compiled executable — the ladder pays a
-single JIT compile. The same interpolation seam provides hot restart
+:doc:`equations`). Each distinct stage structure may compile once; repeated
+ladders with the same structures reuse those executables. A single
+maximum-resolution masked executable is future work, not current behavior.
+The same interpolation seam provides hot restart
 (:func:`vmex.core.solver.hot_restart_state`): a previous solution (e.g.
 the previous point of a parameter scan) can seed the solve directly, at the
 same or a different radial resolution.

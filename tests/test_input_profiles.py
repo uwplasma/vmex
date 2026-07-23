@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vmex.core.input import VmecInput
+from vmex.core.input import UnsupportedInputModeError, VmecInput
 
 REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "examples" / "data"
@@ -110,6 +110,113 @@ def test_lfull3d1out_default_explicit_true_and_indata_round_trip(
     assert VmecInput.from_file(
         inp.to_indata(tmp_path / "input.lfull3d1out")
     ).lfull3d1out is True
+
+
+def test_legacy_ns_array_zero_expands_via_nsin() -> None:
+    """VMEC2000's explicit old-style sentinel builds the NSIN -> 31 ladder."""
+    inp = VmecInput.from_indata_text(
+        "&INDATA\nNS_ARRAY(1) = 0\nNSIN = 7\n/\n"
+    )
+    np.testing.assert_array_equal(inp.ns_array, [7, 31])
+
+
+def test_legacy_niter_scalar_fills_the_multigrid_ladder() -> None:
+    """NITER is the VMEC2000 fallback only when NITER_ARRAY is unassigned."""
+    inp = VmecInput.from_indata_text(
+        "&INDATA\nNS_ARRAY = 7, 15\nNITER = 321\n/\n"
+    )
+    np.testing.assert_array_equal(inp.niter_array, [321, 321])
+
+
+@pytest.mark.parametrize(
+    ("body", "code"),
+    [
+        ("LRECON=T\nIMSE=1", "D00A_RECONSTRUCTION_MODE_UNSUPPORTED"),
+        ("LRFP=T", "D00B_RFP_MODE_UNSUPPORTED"),
+        ("TRIP3D_FILE='field.nc'", "D00E_TRIP3D_MODE_UNSUPPORTED"),
+        ("AH(0)=0.1", "D00F_ANIMEC_MODE_UNSUPPORTED"),
+        ("AT=0.9", "D00F_ANIMEC_MODE_UNSUPPORTED"),
+        ("TVOLUME=10.0", "D00G_VOLUME_RESCALE_UNSUPPORTED"),
+        ("PRECON_TYPE='CG'", "D00H_PRECONDITIONER_MODE_UNSUPPORTED"),
+        (
+            "PRECON_TYPE='GMRES'\nPRE_NITER=20",
+            "D00I_ITERATION_CONTROL_UNSUPPORTED",
+        ),
+        ("MAX_MAIN_ITERATIONS=2", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
+        ("LGIVEUP=T", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
+        ("LBSUBS=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
+        ("LNYQUIST=F", "D00J_OUTPUT_MODE_UNSUPPORTED"),
+        ("LBOOZ=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
+    ],
+)
+def test_active_unsupported_indata_modes_fail_in_production_parser(
+    body: str, code: str,
+) -> None:
+    """A parsed control must never silently select an ordinary VMEX solve."""
+    with pytest.raises(UnsupportedInputModeError) as caught:
+        VmecInput.from_indata_text(f"&INDATA\n{body}\n/\n")
+    assert caught.value.code == code
+
+
+def test_neutral_legacy_modes_remain_accepted() -> None:
+    """Default-valued legacy controls do not require deck surgery."""
+    inp = VmecInput.from_indata_text(
+        """&INDATA
+        LRECON = T
+        IMSE = -1
+        ITSE = 0
+        LRFP = F
+        TRIP3D_FILE = 'NONE'
+        AH = 0.0
+        AT = 1.0, 0.0
+        TVOLUME = -1.0
+        PRECON_TYPE = 'DEFAULT'
+        PRE_NITER = -1
+        MAX_MAIN_ITERATIONS = 1
+        LGIVEUP = F
+        LBSUBS = F
+        LNYQUIST = T
+        LBOOZ = F
+        LDIAGNO = F
+        /
+        """
+    )
+    assert inp.precon_type == "DEFAULT"
+
+
+def test_time_slice_reaches_vmec_style_run_header() -> None:
+    """The informational VMEC header field must not be parsed and discarded."""
+    from vmex.core.cli import _preamble
+
+    inp = VmecInput.from_indata_text("&INDATA\nTIME_SLICE=1.25\n/\n")
+    assert "TIME SLICE  1.2500E+00" in _preamble(
+        "case", time_slice=inp.time_slice
+    )
+
+
+def test_unimplemented_legacy_artifact_request_warns() -> None:
+    """An output-only compatibility flag is allowed but never silently ignored."""
+    with pytest.warns(RuntimeWarning, match="LDIAGNO.*not implemented"):
+        VmecInput.from_indata_text("&INDATA\nLDIAGNO=T\n/\n")
+
+
+def test_vmecpp_json_modes_and_unknown_keys_are_not_ignored() -> None:
+    """VMEC++ model selection and misspelled keys fail before setup."""
+    with pytest.raises(
+        UnsupportedInputModeError,
+        match="free_boundary_method",
+    ) as caught:
+        VmecInput.from_json_text('{"free_boundary_method": "only_coils"}')
+    assert caught.value.code == "D00K_FREE_BOUNDARY_METHOD_UNSUPPORTED"
+
+    with pytest.raises(ValueError, match="unknown VMEC\\+\\+ JSON input key"):
+        VmecInput.from_json_text('{"free_boundary_method": "nestor", "mpoll": 6}')
+
+
+def test_unknown_indata_name_is_not_ignored() -> None:
+    """A misspelled physics control cannot become an accidental default."""
+    with pytest.raises(ValueError, match="unknown INDATA variable.*PHIEDG"):
+        VmecInput.from_indata_text("&INDATA\nPHIEDG = 0.5\n/\n")
 
 
 def test_indexed_indata_vectors_overlay_vmec_defaults() -> None:

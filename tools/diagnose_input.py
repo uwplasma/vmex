@@ -23,7 +23,7 @@ import jax
 import numpy as np
 
 from vmex.core.geometry import half_mesh_jacobian
-from vmex.core.input import VmecInput, _read_indata_text
+from vmex.core.input import UnsupportedInputModeError, VmecInput
 from vmex.core.solver import _geometry, _initial_state, evaluate_forces, prepare_runtime
 
 
@@ -64,30 +64,6 @@ def _ok(value: Any) -> bool:
     return bool(np.asarray(value))
 
 
-def _unsupported_mode_code(text: str) -> str | None:
-    """Return a value-free code for active VMEC modes VMEX does not solve."""
-    if text.lstrip()[:1] == "{":
-        return None
-    scalars, _indexed = _read_indata_text(text)
-
-    def first(name: str, default: Any = None) -> Any:
-        values = scalars.get(name)
-        return values[0] if values else default
-
-    # vsetup.f starts with LRECON=T, while read_indata.f disables it when
-    # neither diagnostic profile is active.  Reproduce that effective-mode
-    # decision so an inert explicit LRECON=T is not a false positive.
-    reconstruction_requested = bool(first("LRECON", True))
-    reconstruction_active = reconstruction_requested and (
-        int(first("ITSE", 0)) > 0 or int(first("IMSE", -1)) > 0
-    )
-    if reconstruction_active:
-        return "D00A_RECONSTRUCTION_MODE_UNSUPPORTED"
-    if bool(first("LRFP", False)):
-        return "D00B_RFP_MODE_UNSUPPORTED"
-    return None
-
-
 def _print_header() -> None:
     print("VMEX first-iteration diagnostic (shareable, input details redacted)")
     print(
@@ -99,11 +75,14 @@ def _print_header() -> None:
 
 
 def diagnose(path: Path, *, details: bool = False) -> int:
-    text = path.read_text()
     _print_header()
     try:
-        unsupported = _unsupported_mode_code(text)
         inp = VmecInput.from_file(path)
+    except UnsupportedInputModeError as exc:
+        print("input parsing: PASS")
+        print("input physics mode supported: FAIL")
+        print(f"assessment: {exc.code}")
+        return 1
     except ValueError:
         # Keep the default diagnostic shareable: parsing exceptions can quote
         # filenames, namelist designators, and input-derived values.
@@ -112,10 +91,6 @@ def diagnose(path: Path, *, details: bool = False) -> int:
         return 1
 
     print("input parsing: PASS")
-    if unsupported is not None:
-        print("input physics mode supported: FAIL")
-        print(f"assessment: {unsupported}")
-        return 1
 
     rt = prepare_runtime(inp)
     state = _initial_state(rt.setup)

@@ -852,13 +852,21 @@ def test_lasym_adjoint_vs_frozen_path_fd(lasym):
     zero = jax.tree.map(jnp.zeros_like, p0)
     print(f"\n[{name}] lasym adjoint vs frozen-path FD at refined fixed point "
           f"(base |F| = {base_res:.1e}):")
-    for field, idx in (("rbs", (ntor, 2)), ("zbc", (ntor, 2)), ("zbs", (ntor, 1))):
+    directions = (
+        # The zbc direction has the largest O(h^2) truncation coefficient on
+        # JAX 0.6.2.  h=5e-6 keeps that error below the adjoint tolerance while
+        # the other directions retain the less cancellation-sensitive 1e-5.
+        ("zbc", (ntor, 2), 5e-6),
+        ("rbs", (ntor, 2), 1e-5),
+        ("zbs", (ntor, 1), 1e-5),
+    )
+    for field, idx, h in directions:
         tangent = dataclasses.replace(
             zero, **{field: getattr(zero, field).at[idx].set(1.0)})
         an = analytic_dir(tangent)
-        fd = frozen_fd(tangent)
+        fd = frozen_fd(tangent, h=h)
         rel = abs(an / fd - 1.0) if fd else abs(an - fd)
-        print(f"  d(wb)/d({field}{idx}): analytic={an:+.9e} "
+        print(f"  d(wb)/d({field}{idx}), h={h:.0e}: analytic={an:+.9e} "
               f"frozen-FD={fd:+.9e} rel={rel:.2e}")
         assert rel <= 5e-5, f"{field}{idx}: adjoint vs frozen-path FD rel {rel:.2e}"
 

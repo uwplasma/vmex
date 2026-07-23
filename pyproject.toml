@@ -46,7 +46,8 @@ Issues = "https://github.com/uwplasma/vmex/issues"
 Changelog = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
-# Differentiable free boundary via virtual casing (plan.md R15.3 + R19).
+# Differentiable virtual-casing residual on a specified boundary
+# (plan.md R15.3 + R19); this is not a NESTOR equilibrium adjoint.
 # ``virtual_casing_jax`` is a uwplasma package (https://github.com/uwplasma/
 # virtual_casing_jax); it is NOT yet on PyPI, so ``pip install vmex[freeb]``
 # will not resolve it from an index — install it editable alongside vmex:

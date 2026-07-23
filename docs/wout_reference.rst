@@ -1,10 +1,11 @@
 wout file reference
 ===================
 
-:mod:`vmex.core.wout` implements the complete variable set written by
-VMEC2000's ``wrout.f``, with the exact netCDF names, dimensions, dtypes and
-unit conventions of the reference implementation, so the files load unchanged
-in simsopt, booz_xform, and other VMEC-ecosystem tools. Use
+:mod:`vmex.core.wout` implements a VMEC2000-compatible netCDF schema with the
+names, dimensions, dtypes, and unit conventions required by simsopt,
+booz_xform, and other VMEC-ecosystem tools.  A declared variable may still be
+fill-valued where its producer is not implemented; those cases are disclosed
+below and in :doc:`vmec2000_compatibility`. Use
 :func:`vmex.core.wout.read_wout` / :func:`~vmex.core.wout.write_wout`
 for IO and :func:`~vmex.core.wout.wout_from_state` to build the dataset
 from a converged solver state.
@@ -23,7 +24,8 @@ Scalars
 ``pmass_type``, ``piota_type``, ``wb``, ``wp``, ``gamma``, ``rmax_surf``,
 ``rmin_surf``, ``zmax_surf``, ``nfp``, ``ns``, ``mpol``, ``ntor``, ``mnmax``,
 ``mnmax_nyq``, ``niter``, ``itfsq``, ``lasym``, ``lrecon``, ``lfreeb``,
-``lrfp``, ``ier_flag``, ``aspect``, ``betatotal``, ``betapol``, ``betator``,
+``lmove_axis``, ``lrfp``, ``ier_flag``, ``aspect``, ``betatotal``,
+``betapol``, ``betator``,
 ``betaxis``, ``b0``, ``rbtor0``, ``rbtor``, ``signgs``, ``IonLarmor``,
 ``volavgB``, ``ctor``, ``Aminor_p``, ``Rmajor_p``, ``volume_p``, ``ftolv``,
 ``fsql``, ``fsqr``, ``fsqz``, ``nextcur``, ``extcur(:)``, ``mgrid_mode``.
@@ -77,7 +79,9 @@ the free-boundary solver does not yet return the vacuum potential (see
 Parity with VMEC2000
 --------------------
 
-wout parity against VMEC2000 golden runs is asserted per-variable with
+WOUT parity against representative VMEC2000 golden runs is asserted
+per-variable with
 combined relative + absolute tolerances (CompareWOut-style methodology from
 VMEC++ validation), with a documented looser bound for ``currumnc/currvmnc``.
-See :doc:`performance` for the case-by-case parity results.
+This is not a claim that fill-valued or untested modes have parity. See
+:doc:`performance` and :doc:`vmec2000_compatibility`.
