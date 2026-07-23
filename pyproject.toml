@@ -68,7 +68,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "ruff",
+  "ruff<0.16",
   "sphinx",
   "types-setuptools",
 ]
