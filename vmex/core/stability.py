@@ -336,6 +336,8 @@ def _mercier_profiles_state(
     bdotb = average_norm * jnp.einsum("sij,ij->s", sqgb2, wint)
     jdotb_full = jnp.zeros_like(s).at[1:-1].set(jdotb_mu0 / _MU0)
     if bool(setup.lasym):
+        # Match WOUT's four factor-two LASYM output normalizations; see
+        # vmex.core.wout for the VMEC2000 convention and golden comparison.
         jdotb_full = 16.0 * jdotb_full
     jdotb_full = jdotb_full.at[0].set(2.0 * jdotb_full[1] - jdotb_full[2])
     jdotb_full = jdotb_full.at[-1].set(
