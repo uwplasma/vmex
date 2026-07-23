@@ -141,8 +141,12 @@ def test_explicit_free_boundary_multigrid_cpu_gpu_parity(monkeypatch):
         value = vacuum_step(*args, **kwargs)
         fb = kwargs["fb"]
         vacuum_devices[active_platform[0]] = {
-            _platform(getattr(fb, name))
-            for name in ("potvac", "mode_matrix", "bvec_nonsing", "bsqvac")
+            _platform(x)
+            for name in (
+                "potvac", "mode_matrix", "bvec_nonsing", "bsqvac",
+                "surface_fields",
+            )
+            for x in jax.tree.leaves(getattr(fb, name))
         }
         return value
 
@@ -159,8 +163,12 @@ def test_explicit_free_boundary_multigrid_cpu_gpu_parity(monkeypatch):
         vacuum = kwargs["vacuum_continuation"]
         if vacuum is not None:
             record["vacuum"] = {
-                _platform(getattr(vacuum, name))
-                for name in ("bsqvac", "rbsq", "mode_matrix", "bvec_nonsing", "potvac")
+                _platform(x)
+                for name in (
+                    "bsqvac", "rbsq", "mode_matrix", "bvec_nonsing",
+                    "potvac", "surface_fields",
+                )
+                for x in jax.tree.leaves(getattr(vacuum, name))
             }
         stage_devices[active_platform[0]].append(record)
         return solve_stage(*args, **kwargs)
@@ -210,6 +218,25 @@ def test_explicit_free_boundary_multigrid_cpu_gpu_parity(monkeypatch):
     delta = gpu_state - cpu_state
     assert np.linalg.norm(delta) / np.linalg.norm(cpu_state) < 5e-6
     assert np.max(np.abs(delta)) < 1e-6
+    assert results["cpu"].vacuum is not None
+    assert results["gpu"].vacuum is not None
+    for name in ("xmpot", "xnpot"):
+        np.testing.assert_array_equal(
+            getattr(results["gpu"].vacuum, name),
+            getattr(results["cpu"].vacuum, name),
+        )
+    relative_errors = {}
+    for name in ("potsin", "potcos", "bsubu", "bsubv", "bsupu", "bsupv"):
+        gpu_values = np.asarray(getattr(results["gpu"].vacuum, name))
+        cpu_values = np.asarray(getattr(results["cpu"].vacuum, name))
+        scale = max(float(np.max(np.abs(cpu_values))), np.finfo(float).tiny)
+        relative_errors[name] = (
+            float(np.max(np.abs(gpu_values - cpu_values))) / scale)
+    assert max(relative_errors[name] for name in (
+        "potsin", "potcos", "bsubu", "bsubv",
+    )) < 1e-4, relative_errors
+    assert max(relative_errors[name] for name in ("bsupu", "bsupv")) < 5e-4, (
+        relative_errors)
 
     resolution = solver.resolution_from_input(inp, ns=15)
     restart_inputs = []
@@ -265,6 +292,7 @@ def test_free_boundary_multigrid_auto_relocates_every_carry(monkeypatch):
         vacuum = freeboundary.FreeBoundaryState(
             turned_on=True, bsqvac=cache, rbsq=cache, mode_matrix=cache,
             bvec_nonsing=cache, potvac=cache,
+            surface_fields=(cache, cache, cache, cache),
         )
         result = type("Result", (), {"state": state})()
         return freeboundary._FreeBoundaryStageResult(
