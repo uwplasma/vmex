@@ -37,8 +37,8 @@ Why VMEX?
   booz_xform.
 - **Batteries included.** Built-in plotting (``vmex --plot``), Boozer
   transform (``vmex --booz`` via ``booz_xform_jax``), spline profiles,
-  multigrid with hot restart, free boundary from mgrid files *or* directly
-  from coils, and typed
+  multigrid with hot restart, free boundary from mgrid files *or* coil fields
+  tabulated in memory, and typed
   zero-crash error handling. The shared linear/adjoint solver layer is
   factored out into `SOLVAX <https://pypi.org/project/solvax/>`_.
 

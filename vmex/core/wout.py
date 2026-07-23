@@ -1,8 +1,10 @@
-"""Complete VMEC2000-compatible ``wout_*.nc`` schema, writer and reader.
+"""VMEC2000-compatible ``wout_*.nc`` schema, writer and reader.
 
 This module implements the full variable set written by VMEC2000's
-``wrout.f`` (Appendix A), with the exact netCDF names, dimensions,
-dtypes and unit conventions of the reference implementation:
+``wrout.f`` (Appendix A).  Core fixed-boundary fields use the reference
+netCDF names, dimensions, dtypes and unit conventions; NESTOR potential and
+surface fields are currently declared but written as fill values (see the
+free-boundary section of ``docs/wout_reference.rst``):
 
 - ``presf``/``pres``/``mass`` are stored in Pa (``wrout.f`` divides the
   internal ``mu0*Pa`` values by ``mu0`` on write);

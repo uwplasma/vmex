@@ -142,8 +142,8 @@ external field.
 .. literalinclude:: ../examples/free_boundary_beta_scan.py
    :language: python
 
-Directly from ESSOS coils (no mgrid file)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+From ESSOS coils (no mgrid file)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 vmex is coil-agnostic: the free-boundary solver consumes only a magnetic
 field, so coils can come from ESSOS (``essos.coils.Coils``) instead of a

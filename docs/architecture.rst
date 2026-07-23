@@ -110,7 +110,8 @@ Module map
      - derived wout quantities (beta, currents, ``specw``, ``equif``, ...)
      - ``eqfor.f``, ``bcovar.f`` outputs
    * - :mod:`~vmex.core.wout`
-     - complete ``wout_*.nc`` schema, writer and reader
+     - VMEC-compatible ``wout_*.nc`` schema, writer and reader; unsupported
+       NESTOR-only arrays remain declared as fill values
      - ``wrout.f``
    * - :mod:`~vmex.core.printing`
      - VMEC2000-format iteration lines, stage banners, termination summary

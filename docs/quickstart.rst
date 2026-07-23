@@ -48,9 +48,10 @@ writes ``wout_circular_tokamak.nc`` next to the input file. Useful flags:
 Free-boundary decks (``LFREEB = T``) route automatically: a readable
 ``MGRID_FILE`` runs the free-boundary solver; a missing mgrid file falls back
 to a fixed-boundary solve with a warning (VMEC2000 behavior); and
-``MGRID_FILE = 'DIRECT_COILS'`` together with ``--coils coils.json`` evaluates
-the external field directly from an ESSOS-style coil set via Biot-Savart —
-no mgrid interpolation at all. See :doc:`cli` for the complete reference.
+``MGRID_FILE = 'DIRECT_COILS'`` together with ``--coils coils.json`` tabulates
+the ESSOS Biot–Savart field once into an in-memory
+:class:`~vmex.core.mgrid.MgridField`. No pre-generated mgrid file is required.
+See :doc:`cli` for the complete reference.
 
 Plotting
 --------
@@ -164,8 +165,9 @@ Reading wout files
    print("edge iota:   ", float(wout.iotaf[-1]))
    print("beta total:  ", float(wout.betatotal))
 
-The written files carry the full VMEC2000 variable set (:doc:`wout_reference`)
+The written files declare the VMEC2000 variable set (:doc:`wout_reference`)
 and load unchanged in simsopt, booz_xform, and other VMEC-ecosystem tools.
+NESTOR potential and surface arrays are currently emitted as fill values.
 
 Where to go next
 ----------------

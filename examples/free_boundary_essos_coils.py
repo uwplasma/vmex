@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory() as _tmp:
 
 # --------------------------- plasma deck ------------------------------------
 # The fixed-boundary LP-QA deck only seeds the initial guess; truncate it to
-# the scan resolution and switch on free boundary with the direct coil field.
+# the scan resolution and switch on free boundary with the tabulated coil field.
 inp = vj.VmecInput.from_file(INPUT_FILE)
 k = inp.ntor - NTOR
 base = dataclasses.replace(

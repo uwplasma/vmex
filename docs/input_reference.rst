@@ -181,8 +181,8 @@ Free boundary
      - free-boundary mode; forced ``F`` when ``MGRID_FILE = 'NONE'``
    * - ``MGRID_FILE``
      - ``'NONE'``
-     - MAKEGRID vacuum-field file, or ``'DIRECT_COILS'`` for direct
-       Biot-Savart coil fields (with ``vmex --coils``)
+     - MAKEGRID vacuum-field file, or ``'DIRECT_COILS'`` to tabulate a
+       Biot–Savart coil field in memory (with ``vmex --coils``)
    * - ``EXTCUR``
      - —
      - external coil-group currents [A]

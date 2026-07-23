@@ -1,10 +1,11 @@
 wout file reference
 ===================
 
-:mod:`vmex.core.wout` implements the complete variable set written by
-VMEC2000's ``wrout.f``, with the exact netCDF names, dimensions, dtypes and
-unit conventions of the reference implementation, so the files load unchanged
-in simsopt, booz_xform, and other VMEC-ecosystem tools. Use
+:mod:`vmex.core.wout` declares the complete variable set written by
+VMEC2000's ``wrout.f``. Core fixed-boundary fields follow the reference
+netCDF names, dimensions, dtypes and unit conventions, so the files load
+unchanged in simsopt, booz_xform, and other VMEC-ecosystem tools. NESTOR-only
+exceptions are listed under `Free-boundary extras`_. Use
 :func:`vmex.core.wout.read_wout` / :func:`~vmex.core.wout.write_wout`
 for IO and :func:`~vmex.core.wout.wout_from_state` to build the dataset
 from a converged solver state.

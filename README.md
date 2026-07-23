@@ -36,7 +36,7 @@ original, it is differentiable and runs on GPUs.
   that load unchanged in simsopt and booz_xform.
 - **Batteries included.** Plotting (`vmex --plot`), Boozer transform
   (`vmex --booz`), spline profiles, multigrid, hot restart, free boundary
-  from mgrid files *or* directly from coils,
+  from mgrid files *or* coil fields tabulated in memory,
   typed zero-crash errors — with the shared linear/adjoint solver layer
   factored out into [SOLVAX](https://pypi.org/project/solvax/).
 
@@ -173,7 +173,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Fixed-boundary equilibria | ✅ | ✅ | ✅ |
 | Free boundary from an mgrid file | ✅ | ✅ | ✅ |
 | Free-boundary radial multigrid + hot restart | ✅ | ✅ | ❌ |
-| Free boundary directly from coils (no mgrid) | ✅ | ❌ | ❌ |
+| Free boundary from coils (no mgrid file) | ✅ | ❌ | ❌ |
 | Free-boundary tokamaks (`ntor = 0`) | ✅ | ✅ | ❌ |
 | Non-stellarator-symmetric (`LASYM = T`) | ✅ | ✅ | ✅ |
 | Fixed-boundary fallback on missing mgrid | ✅ | ✅ | ❌ |
@@ -188,9 +188,9 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Differentiable free boundary (virtual casing) | ✅ | ❌ | ❌ |
 | 2D block preconditioner (stiff-case speedup) | ✅ | ❌ | ❌ |
 
-### Free boundary straight from coils
+### Free boundary from an in-memory coil field
 
-Free-boundary solves can run directly from a coil set: tabulate an
+Free-boundary solves do not require a pre-generated mgrid file: tabulate an
 [ESSOS](https://github.com/uwplasma/ESSOS) coil set onto the solver grid in
 memory (`essos.coils.Coils.to_mgrid`) and pass it as `external_field=`,
 with no MAKEGRID file involved. For gradients, the differentiable free
@@ -199,7 +199,7 @@ boundary points of each iteration, keeping the coil degrees of freedom
 differentiable end-to-end. All coil geometry lives in ESSOS; vmex has no
 coil code of its own.
 
-![Free-boundary Landreman-Paul QA pressure scan directly from ESSOS coils](docs/_static/figures/readme_essos_beta_scan.png)
+![Free-boundary Landreman-Paul QA pressure scan from an in-memory ESSOS coil field](docs/_static/figures/readme_essos_beta_scan.png)
 
 *Free-boundary equilibria of the Landreman–Paul precise-QA configuration held
 by its 16 modular coils as optimized in
@@ -493,8 +493,8 @@ options:
                          cuda, rocm, or tpu; applies to all solve paths
   --ftol F               override the final-stage FTOL_ARRAY tolerance
   --max-iter N           override the final-stage NITER_ARRAY cap
-  --coils PATH           ESSOS-style coils file: drive an LFREEB = T deck
-                         by direct Biot-Savart instead of an mgrid file
+  --coils PATH           ESSOS-style coils file: tabulate its Biot-Savart
+                         field in memory instead of reading an mgrid file
   --mbooz/--nbooz N      Boozer spectral resolution (default 32/32)
   --booz-surfaces S      Boozer surfaces ('all' or a list of s values)
   --quiet                silence the VMEC-style stdout
