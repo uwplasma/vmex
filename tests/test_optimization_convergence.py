@@ -7,13 +7,12 @@ implicit-gradient continuation (``jac="implicit"`` + ESS, the exact path the
 ``examples/optimization`` scripts use) and asserts the achieved
 ``QuasisymmetryRatioResidual.total`` bound.  QA runs two continuation stages
 to its precise bound (< 1e-3); QH and QP run a single stage.  QP uses a
-bounded ten-evaluation smoke: longer campaigns are basin-sensitive and retain
-too much compilation state for a shared CI worker.  The deep
-implicit Jacobian is launch-bound (one preconditioned GMRES per boundary dof,
-~101 s/eval at max_mode 2), so the *full* precise campaigns -- QA 1.70e-04
-(max_mode 2) and QH 5.83e-05 (max_mode 5, ~100 min just for the max_mode-2
-stage) -- are recorded/guarded in the example scripts + README, and the
-nightly guards bounded campaigns that fit reliably on hosted workers.
+bounded ten-evaluation smoke: longer campaigns are basin-sensitive.  The
+module explicitly enables JIT, matching the example scripts instead of the
+suite-wide interpreted unit-test default.  The *full* precise campaigns -- QA
+1.70e-04 (max_mode 2) and QH 5.83e-05 (max_mode 5, ~100 min just for the
+max_mode-2 stage) -- are recorded/guarded in the example scripts + README, and
+the nightly guards bounded campaigns that fit reliably on hosted workers.
 
 Measured on the office 36-core CPU (2026-07-11, implicit Jacobian CPU-pinned):
 QA 2.043e-01 -> 9.82e-03 (max_mode 1) -> 1.70e-04 (2, precise); QH 6.908e-01
@@ -30,6 +29,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("jax")
+
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 from vmex.core.input import VmecInput
 from vmex.core import optimize as opt
@@ -116,9 +117,9 @@ def test_qp_implicit_descends():
 
     Basin-limited (not precise): a bounded ten-evaluation max-mode-1 smoke at
     ns=25 reaches QS 4.461e-01 -> 1.402e-01 (CPU replay, 2026-07-22). Near-axis
-    theory forbids exact QP, and longer campaigns are rounding-sensitive while
-    retaining tens of GiB of compilation state on CI workers. This test guards
-    substantial descent without turning a physics smoke into a resource test.
+    theory forbids exact QP, and longer campaigns are rounding-sensitive. This
+    test guards substantial descent without turning a physics smoke into a
+    resource test.
     """
     inp = dataclasses.replace(_nfp2_seed(), ns_array=[25])
     qs = opt.QuasisymmetryRatioResidual(np.linspace(0.1, 1.0, 10), 0, 1)

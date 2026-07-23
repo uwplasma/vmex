@@ -20,10 +20,10 @@ env:
 permissions:
   contents: read
 
-# Sharded CI (plan.md Phase-2 review item 1): five parallel test jobs, each
-# well under the 10-minute wall-time budget, plus a fast lint gate (ruff +
-# mypy) and a coverage gate that combines the parity + gradient shards and
-# enforces >= 95% on vmex.
+# Sharded CI (plan.md Phase-2 review item 1): bounded parallel test jobs, plus
+# a fast lint gate (ruff + mypy) and a coverage gate that combines the parity
+# and gradient shards and enforces >= 95% on vmex. Manual/nightly runs add the
+# full-physics tests below.
 jobs:
   lint:
     # Fast fail-first gate (plan Item I.3): ruff + mypy over the whole tree,
@@ -446,15 +446,19 @@ jobs:
     runs-on: ubuntu-latest
     # A sequential whole-suite job reached only 39% before the previous
     # 150-minute limit, and the core job later lost hosted runners three times
-    # after 37/79/81 minutes. Keep exact RUN_FULL coverage, split core
-    # alphabetically, isolate each stateful optimization campaign, and isolate
-    # examples/mirror so every shard stays bounded on a fresh worker.
+    # after 37/79/81 minutes. Keep exact aggregate RUN_FULL coverage, split
+    # core alphabetically, isolate each stateful optimization campaign, and
+    # isolate examples/mirror so every shard stays bounded on a fresh worker.
+    # The ordinary gradient jobs own non-full implicit tests; the dedicated
+    # shard below adds its full-marked case without rerunning that large JAX
+    # suite in one process.
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        shard: [core-a-f, core-g-h, core-i-m, core-n-s, core-t-z, opt-qa, opt-qh,
-                opt-qp, examples, mirror-field, mirror-equilibrium, mirror-spline]
+        shard: [core-a-f, core-g-h, core-i-m, implicit-dmerc, core-n-s,
+                core-t-z, opt-qa, opt-qh, opt-qp, examples, mirror-field,
+                mirror-equilibrium, mirror-spline]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -500,8 +504,14 @@ jobs:
               ;;
             core-i-m)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
+                     --ignore=tests/test_implicit_grad.py \
                      --ignore-glob=tests/test_[a-h]*.py \
                      --ignore-glob=tests/test_[n-z]*.py"
+              ;;
+            implicit-dmerc)
+              # Ordinary gradient a/b/c already own every non-full test in
+              # this module; this is its single nightly-only DMerc AD case.
+              FILES="tests/test_implicit_grad.py -m full"
               ;;
             core-n-s)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
