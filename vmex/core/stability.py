@@ -43,13 +43,9 @@ Scope notes
 - Stellarator-symmetric states only (``lasym = False``), matching the other
   traceable objectives in :mod:`vmex.core.optimize`.
 - Surfaces need ``ι ≠ 0`` (the field-line parameterization divides by ι).
-- A *traceable* Mercier ``DMerc`` was considered for this pass and cut: the
-  parity-proven port (:func:`vmex.core.nyquist.mercier_and_jxb`) needs
-  the jxbforce-filtered covariant field tables and ``bsubs`` synthesis
-  (host-side Nyquist machinery), so a faithful jnp translation is a larger
-  follow-up.  Use :func:`vmex.core.optimize.d_merc` (wout engine,
-  finite-difference-only) and :func:`vmex.core.optimize.magnetic_well`
-  (traceable) for Mercier-adjacent targets meanwhile.
+- :func:`d_merc_state` is the traceable counterpart of the parity-proven
+  wout calculation.  As in VMEC2000, its first two surfaces and edge are not
+  suitable stability targets; use the validated interior profile.
 """
 
 from __future__ import annotations
@@ -66,6 +62,7 @@ from .statephysics import _field_chain, _iotas_half_from_fields
 from .transforms import physical_to_internal_scale
 
 __all__ = [
+    "d_merc_state",
     "ballooning_lambda",
     "ballooning_growth_rate",
 ]
@@ -73,6 +70,156 @@ __all__ = [
 Array = Any
 
 _NEWTON_ITERATIONS = 12  # θ_vmec(θ*) root solve; λ is small, converges fast
+
+
+# ---------------------------------------------------------------------------
+# Mercier profile (mercier.f / jxbforce.f)
+# ---------------------------------------------------------------------------
+
+
+def _mercier_bsubs(geometry, jacobian, fields, s: Array) -> Array:
+    """Traceable ``bss.f`` covariant radial field on the half mesh."""
+    s = jnp.asarray(s)
+    sh = jnp.sqrt(
+        jnp.maximum(
+            jnp.concatenate([0.5 * (s[1:2] + s[:1]), 0.5 * (s[1:] + s[:-1])]),
+            0.0,
+        )
+    )[:, None, None]
+    safe_sh = jnp.where(sh != 0.0, sh, 1.0)
+    rv12 = 0.5 * (
+        geometry.dR_dzeta_even[1:]
+        + geometry.dR_dzeta_even[:-1]
+        + sh[1:] * (geometry.dR_dzeta_odd[1:] + geometry.dR_dzeta_odd[:-1])
+    )
+    zv12 = 0.5 * (
+        geometry.dZ_dzeta_even[1:]
+        + geometry.dZ_dzeta_even[:-1]
+        + sh[1:] * (geometry.dZ_dzeta_odd[1:] + geometry.dZ_dzeta_odd[:-1])
+    )
+    rs12 = jacobian.dR_ds[1:] + 0.25 * (geometry.R_odd[1:] + geometry.R_odd[:-1]) / safe_sh[1:]
+    zs12 = jacobian.dZ_ds[1:] + 0.25 * (geometry.Z_odd[1:] + geometry.Z_odd[:-1]) / safe_sh[1:]
+    rs12 = jnp.concatenate([rs12[:1], rs12])
+    zs12 = jnp.concatenate([zs12[:1], zs12])
+    rv12 = jnp.concatenate([rv12[:1], rv12])
+    zv12 = jnp.concatenate([zv12[:1], zv12])
+    gsu = rs12 * jacobian.ru12 + zs12 * jacobian.zu12
+    gsv = rs12 * rv12 + zs12 * zv12
+    return fields.bsupu * gsu + fields.bsupv * gsv
+
+
+def _mercier_current_tables(bsubu: Array, bsubv: Array, bsubs: Array, rt: SolverRuntime) -> tuple[Array, Array, Array]:
+    """Traceable symmetric jxbforce filter and ``B_s`` derivatives."""
+    trig = rt.trig
+    mmax, nmax = int(rt.resolution.mpol) - 1, int(rt.resolution.ntor)
+    nt2 = int(trig.ntheta2)
+    cosmu = jnp.asarray(trig.cosmu[:nt2, : mmax + 1])
+    sinmu = jnp.asarray(trig.sinmu[:nt2, : mmax + 1])
+    cosmui = jnp.asarray(trig.cosmui[:nt2, : mmax + 1])
+    sinmui = jnp.asarray(trig.sinmui[:nt2, : mmax + 1])
+    cosnv = jnp.asarray(trig.cosnv[:, : nmax + 1])
+    sinnv = jnp.asarray(trig.sinnv[:, : nmax + 1])
+    dmult = jnp.ones((mmax + 1, nmax + 1), dtype=jnp.asarray(bsubu).dtype)
+    mnyq, nnyq = nt2 - 1, int(np.asarray(trig.cosnv).shape[0]) // 2
+    if 0 < mnyq <= mmax:
+        dmult = dmult.at[mnyq].multiply(0.5)
+    if 0 < nnyq <= nmax:
+        dmult = dmult.at[:, nnyq].multiply(0.5)
+
+    def analyze(f, theta, zeta):
+        return jnp.einsum("smk,kn->smn", jnp.einsum("sik,im->smk", f[:, :nt2], theta), zeta) * dmult
+
+    def filter_field(f):
+        c1 = jnp.einsum("smk,kn->smn", jnp.einsum("sik,im->smk", f[:, :nt2], cosmui), cosnv) * dmult
+        c2 = jnp.einsum("smk,kn->smn", jnp.einsum("sik,im->smk", f[:, :nt2], sinmui), sinnv) * dmult
+        return jnp.einsum("smn,im,kn->sik", c1, cosmu, cosnv) + jnp.einsum("smn,im,kn->sik", c2, sinmu, sinnv)
+
+    bsubu, bsubv = filter_field(bsubu), filter_field(bsubv)
+    bsubs_full = bsubs.at[1:-1].set(0.5 * (bsubs[1:-1] + bsubs[2:]))
+    bsubs_full = bsubs_full.at[0].set(0.0)
+    c1 = analyze(bsubs_full[:, :nt2], sinmui, cosnv)
+    c2 = analyze(bsubs_full[:, :nt2], cosmui, sinnv)
+    bsubsu = jnp.einsum("smn,im,kn->sik", c1, jnp.asarray(trig.cosmum[:nt2, : mmax + 1]), cosnv) + jnp.einsum(
+        "smn,im,kn->sik", c2, jnp.asarray(trig.sinmum[:nt2, : mmax + 1]), sinnv
+    )
+    bsubsv = jnp.einsum("smn,im,kn->sik", c1, sinmu, jnp.asarray(trig.sinnvn[:, : nmax + 1])) + jnp.einsum(
+        "smn,im,kn->sik", c2, cosmu, jnp.asarray(trig.cosnvn[:, : nmax + 1])
+    )
+    return bsubu, bsubv, (bsubsu, bsubsv)
+
+
+def d_merc_state(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Traceable VMEC ``DMerc`` profile on the full radial mesh.
+
+    Positive interior values indicate Mercier stability.  This is a pure-JAX
+    port of the symmetric ``jxbforce.f``/``mercier.f`` path used by
+    :func:`vmex.core.nyquist.mercier_and_jxb`; it accepts a live converged
+    ``(state, runtime)`` pair and supports ``jit``, JVP and reverse-mode AD.
+    The axis, first near-axis surface and edge retain VMEC's zero/noisy output
+    convention and should be excluded from objectives (normally ``[2:-1]``).
+    """
+    setup = rt.setup
+    if bool(setup.lasym):
+        raise NotImplementedError("traceable DMerc supports lasym = False only")
+    s = jnp.asarray(setup.s_full)
+    ns = int(s.shape[0])
+    if ns < 3:
+        return jnp.zeros_like(s)
+    geometry, jacobian, _, fields, energies = _field_chain(state, rt)
+    bsubs = _mercier_bsubs(geometry, jacobian, fields, s)
+    bsubu, bsubv, (bsubsu, bsubsv) = _mercier_current_tables(fields.bsubu, fields.bsubv, bsubs, rt)
+
+    hs = 1.0 / float(ns - 1)
+    sign_jac = float(np.sign(setup.signgs)) if int(setup.signgs) != 0 else 1.0
+    wint = jnp.asarray(rt.trig.wint)
+    phip_real = (2.0 * jnp.pi) * jnp.asarray(setup.phips) * sign_jac
+    safe_phip = jnp.where(phip_real != 0.0, phip_real, 1.0)
+    vp_real = sign_jac * (2.0 * jnp.pi) ** 2 * jnp.asarray(energies.vp) / safe_phip
+    vp_real = vp_real.at[0].set(0.0)
+    iotas = _iotas_half_from_fields(setup, fields)
+
+    itheta = jnp.zeros_like(bsubs).at[1:-1].set(bsubsv[1:-1] - (bsubv[2:] - bsubv[1:-1]) / hs)
+    izeta = jnp.zeros_like(bsubs).at[1:-1].set(-bsubsu[1:-1] + (bsubu[2:] - bsubu[1:-1]) / hs)
+    izeta = izeta.at[0].set(2.0 * izeta[1] - izeta[2])
+    izeta = izeta.at[-1].set(2.0 * izeta[-2] - izeta[-3])
+    bdotk = (
+        jnp.zeros_like(bsubs)
+        .at[1:-1]
+        .set(itheta[1:-1] * 0.5 * (bsubu[2:] + bsubu[1:-1]) + izeta[1:-1] * 0.5 * (bsubv[2:] + bsubv[1:-1]))
+    )
+
+    torcur = jnp.zeros_like(s).at[1:].set(sign_jac * (2.0 * jnp.pi) * jnp.einsum("sij,ij->s", bsubu[1:], wint))
+    phip_full = 0.5 * (phip_real[2:] + phip_real[1:-1])
+    denom = 1.0 / (hs * phip_full)
+    shear = (iotas[2:] - iotas[1:-1]) * denom
+    vpp = (vp_real[2:] - vp_real[1:-1]) * denom
+    pres = jnp.asarray(fields.pressure)
+    presp = (pres[2:] - pres[1:-1]) * denom
+    ip = (torcur[2:] - torcur[1:-1]) * denom
+
+    sqs = jnp.sqrt(s[1:-1])[:, None, None]
+    r1f = geometry.R_even[1:-1] + sqs * geometry.R_odd[1:-1]
+    rtf = geometry.dR_dtheta_even[1:-1] + sqs * geometry.dR_dtheta_odd[1:-1]
+    ztf = geometry.dZ_dtheta_even[1:-1] + sqs * geometry.dZ_dtheta_odd[1:-1]
+    rzf = geometry.dR_dzeta_even[1:-1] + sqs * geometry.dR_dzeta_odd[1:-1]
+    zzf = geometry.dZ_dzeta_even[1:-1] + sqs * geometry.dZ_dzeta_odd[1:-1]
+    gsqrt_raw = 0.5 * (jacobian.sqrt_g[1:-1] + jacobian.sqrt_g[2:])
+    gsqrt_full = gsqrt_raw / phip_full[:, None, None]
+    gtt = rtf * rtf + ztf * ztf
+    gpp = gsqrt_full**2 / (gtt * r1f**2 + (rtf * zzf - rzf * ztf) ** 2)
+    b2 = 2.0 * (jnp.asarray(fields.total_pressure) - pres[:, None, None])
+    b2i = 0.5 * (b2[1:-1] + b2[2:])
+    factor = (2.0 * jnp.pi) ** 2
+    tpp = jnp.einsum("sij,ij->s", gsqrt_full / b2i, wint) * factor
+    tbb = jnp.einsum("sij,ij->s", b2i * gsqrt_full * gpp, wint) * factor
+    # ``itheta/izeta`` above omit jxbforce.f's 1/mu0 conversion; mercier.f
+    # multiplies their resulting J.B back by mu0, so the factors cancel.
+    bdotj_norm = jnp.where(gsqrt_raw != 0.0, bdotk[1:-1] / gsqrt_raw, 0.0)
+    jdotb = bdotj_norm * gpp * gsqrt_full
+    tjb = jnp.einsum("sij,ij->s", jdotb, wint) * factor
+    tjj = jnp.einsum("sij,ij->s", jdotb * bdotj_norm / b2i, wint) * factor
+    dmerc = 0.25 * shear**2 - shear * (tjb - ip * tbb) + presp * (vpp - presp * tpp) * tbb + tjb**2 - tbb * tjj
+    return jnp.zeros_like(s).at[1:-1].set(dmerc)
 
 
 # ---------------------------------------------------------------------------

@@ -299,9 +299,12 @@ geodesic term is a manifestly non-positive Schwarz-inequality remainder. Because
 the individual pieces involve radial derivatives of surface averages, the two
 surfaces nearest the axis and the edge carry the usual numerical noise; a
 practical objective penalizes ``min(DMerc[2:-1], 0)``. ``vmex`` exposes the
-profile as :func:`~vmex.core.optimize.d_merc`, evaluated through the
-parity-proven wout engine (host NumPy, hence ``jac=None``); it is validated
-against VMEC2000 golden ``wout`` files.
+reporting profile as :func:`~vmex.core.optimize.d_merc`, evaluated through the
+parity-proven wout engine.  The symmetric live-state counterpart
+:func:`~vmex.core.stability.d_merc_state` is a pure-JAX port of the same
+``jxbforce.f``/``mercier.f`` path for ``jit``/AD use and agrees with the wout
+profile to floating-point round-off.  Both retain VMEC's near-axis and edge
+limitations; the traceable lane does not yet support ``lasym = True``.
 
 Magnetic well
 ~~~~~~~~~~~~~~
@@ -319,10 +322,9 @@ with :math:`V'=dV/ds` extrapolated from the half-mesh differential volume
 :math:`vp` (VMEC ``bcovar.f``). Positive :math:`W` means :math:`V'` decreases
 outward — a magnetic well, favorable for interchange stability — matching
 simsopt's ``vacuum_well``. Being a pure ``(state, runtime)`` function it carries
-exact implicit gradients and is the traceable stand-in whenever the full
-``DMerc`` profile is too expensive or not differentiable. Near-axis analytic
-context for both measures is in Landreman–Jorge (2020) and Kim–Jorge–Dorland
-(2021); see :doc:`references`.
+exact implicit gradients and is a cheaper Mercier-adjacent target. Near-axis
+analytic context for both measures is in Landreman–Jorge (2020) and
+Kim–Jorge–Dorland (2021); see :doc:`references`.
 
 Ideal ballooning
 ~~~~~~~~~~~~~~~~~

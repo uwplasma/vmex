@@ -107,11 +107,13 @@ and composable with both gradient modes:
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
   measure (negative = well, stabilizing).
 
-Two host-side diagnostics complete the set — they run on the wout engine
-(exact VMEC2000 ``mercier.f``/``jxbforce`` tables) and therefore need
-``jac=None``: :func:`~vmex.core.optimize.d_merc` (Mercier interchange
-criterion) and :func:`~vmex.core.optimize.l_grad_b` (the ``L_grad_B``
-coil-complexity proxy).
+Two reporting diagnostics run on the host-side wout engine:
+:func:`~vmex.core.optimize.d_merc` (Mercier interchange criterion) and
+:func:`~vmex.core.optimize.l_grad_b` (the ``L_grad_B`` coil-complexity proxy).
+Their live-state counterparts :func:`~vmex.core.stability.d_merc_state`
+(``lasym = False``) and :func:`~vmex.core.optimize.l_grad_b_state` are pure
+JAX and can be composed with implicit differentiation.  Direct optimizer
+integration of ``d_merc_state`` is not yet provided by ``d_merc`` itself.
 
 ``L_grad_B`` additionally has a fully traceable ``(state, runtime)`` lane,
 :func:`~vmex.core.optimize.l_grad_b_state` — same convention

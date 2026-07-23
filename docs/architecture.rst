@@ -97,8 +97,9 @@ Module map
        self-consistency Picard loop
      - (no VMEC2000 equivalent; BOOTSJ-adjacent scope)
    * - :mod:`~vmex.core.stability`
-     - infinite-n ideal-ballooning eigenvalue objective (COBRA-style)
-     - (no VMEC2000 equivalent; COBRA companion code)
+     - traceable Mercier profile and infinite-n ideal-ballooning eigenvalue
+       objective (COBRA-style)
+     - ``mercier.f`` / ``jxbforce.f``; COBRA companion code
    * - :mod:`~vmex.core.turbulence`
      - GK flux-tube geometry adapter + SPECTRAX-GK turbulence proxies
      - (no VMEC2000 equivalent)

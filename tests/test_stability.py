@@ -24,6 +24,7 @@ import numpy as np
 import pytest
 
 import jax
+import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
@@ -66,6 +67,14 @@ def shaped_eq():
     return eq
 
 
+@pytest.fixture(scope="module")
+def finite_beta_3d_eq():
+    """Small finite-beta, current-constrained stellarator equilibrium."""
+    eq = opt.solve_equilibrium(VmecInput.from_file(DATA_DIR / "input.li383_low_res"))
+    assert eq.result.converged
+    return eq
+
+
 def test_zero_pressure_case_is_ballooning_stable(vacuum_eq):
     lam = np.asarray(stab.ballooning_lambda(vacuum_eq.state, vacuum_eq.runtime, **FAST))
     assert lam.shape == (3, 4, 1)  # default surfaces x alphas x zeta0s
@@ -91,6 +100,45 @@ def test_growth_rate_sign_agrees_with_mercier(shaped_eq):
     lam_max = float(stab.ballooning_growth_rate(
         shaped_eq.state, shaped_eq.runtime, reduction="max", **FAST))
     assert lam_max < 0.0
+
+
+def test_traceable_dmerc_matches_wout_and_has_state_jvp(shaped_eq):
+    """Pure-JAX Mercier profile retains wout parity and a finite tangent."""
+    state, rt = shaped_eq.state, shaped_eq.runtime
+    expected = np.asarray(opt.d_merc(shaped_eq))
+    actual = np.asarray(jax.jit(stab.d_merc_state)(state, rt))
+    np.testing.assert_allclose(actual[2:-1], expected[2:-1], rtol=1e-8,
+                               atol=1e-13)
+
+    tangent = jax.tree.map(jnp.zeros_like, state)
+    tangent = dataclasses.replace(tangent, R_cos=jnp.ones_like(state.R_cos))
+    _, dmerc_tangent = jax.jvp(lambda st: stab.d_merc_state(st, rt),
+                               (state,), (tangent,))
+    interior = np.asarray(dmerc_tangent)[2:-1]
+    assert np.all(np.isfinite(interior))
+    assert np.any(interior != 0.0)
+
+    def total_dmerc(pressure_scale):
+        setup = dataclasses.replace(rt.setup, mass=rt.setup.mass * pressure_scale)
+        return jnp.sum(stab.d_merc_state(
+            state, dataclasses.replace(rt, setup=setup))[2:-1])
+
+    pressure_grad = jax.grad(total_dmerc)(1.0)
+    assert np.isfinite(float(pressure_grad))
+    assert float(pressure_grad) != 0.0
+    h = 1e-3
+    pressure_fd = (total_dmerc(1.0 + h) - total_dmerc(1.0 - h)) / (2.0 * h)
+    np.testing.assert_allclose(pressure_grad, pressure_fd, rtol=1e-7)
+
+
+def test_traceable_dmerc_matches_wout_in_3d(finite_beta_3d_eq):
+    """The traceable current reconstruction retains toroidal-mode parity."""
+    eq = finite_beta_3d_eq
+    actual = np.asarray(stab.d_merc_state(eq.state, eq.runtime))
+    expected = np.asarray(opt.d_merc(eq))
+    scale = np.max(np.abs(expected[2:-1]))
+    np.testing.assert_allclose(actual[2:-1], expected[2:-1], rtol=1e-10,
+                               atol=1e-13 * scale)
 
 
 def test_reductions_hard_and_smooth_max(highbeta_eq):
