@@ -181,14 +181,14 @@ Parity with VMEC2000
 Free-boundary multigrid has a dedicated reproducible artifact,
 ``benchmarks/freeboundary_multigrid.json``.  On the public converged CTH-like
 ``NS_ARRAY = 7, 15`` ladder (Apple Silicon CPU, 2026-07-21), VMEC2000 takes
-239 + 340 iterations in 0.88 s; vmex takes 250 + 340 iterations, 7.60 s cold
-and 1.22 s warm.  Both activate vacuum exactly once.  Against an ns=15
+239 + 340 iterations in 0.98 s; vmex takes 250 + 340 iterations, 10.07 s cold
+and 1.98 s warm.  Both activate vacuum exactly once.  Against an ns=15
 VMEC2000 wout, vmex's final scale-relative maximum errors are
 ``6.10e-5`` (R), ``3.59e-4`` (Z), ``1.52e-6`` (iota), and ``5.94e-8``
 (relative ``wb``).  The first fine-grid raw residual remains a transient
 ordering difference (``FSQR=2.01e-3`` versus VMEC2000's ``1.73``), but both
 then take exactly 340 fine-grid iterations to the same fixed point.  Warm
-execution is within 1.4x of Fortran on this small case; the one-time XLA
+execution is within 2.1x of Fortran on this small case; the one-time XLA
 compile dominates the cold result.
 
 Per-iteration algorithmic parity (same step control, preconditioner cadence,

@@ -37,8 +37,10 @@ def _state(ns: int, mnmax: int, value: float) -> SpectralState:
 
 
 def test_stage_transfer_carries_vacuum_and_interpolates_xstore(monkeypatch) -> None:
-    """Increasing grids use xstore; equal grids use the current xc state."""
+    """User seeds and increasing grids interpolate; equal grids reuse xc."""
     inp = VmecInput.from_file(DECK)
+    modes = mode_table(int(inp.mpol), int(inp.ntor))
+    seed = _state(5, modes.mnmax, 3.0)
     calls = []
     vacua = []
 
@@ -79,19 +81,22 @@ def test_stage_transfer_carries_vacuum_and_interpolates_xstore(monkeypatch) -> N
     field = object()
     result = solve_free_boundary_multigrid(
         inp, ns_array=[7, 15, 15], ftol_array=[1e-4], niter_array=[2],
-        external_field=field, raise_on_max_iterations=False,
+        external_field=field, initial_state=seed,
+        raise_on_max_iterations=False,
         time_step=0.25, tcon0=1.2, gamma=0.1, nstep=17, lconm1=False,
         precon_type="NONE", prec2d_threshold=3e-7,
     )
 
     assert result.marker == 15
     assert [c[0] for c in calls] == [7, 15, 15]
-    assert calls[0][1] is None and calls[0][2] is None
+    expected_seed = interpolate_state(seed, ns_fine=7, modes=modes)
+    np.testing.assert_allclose(
+        np.asarray(calls[0][1].R_cos), np.asarray(expected_seed.R_cos))
+    assert calls[0][2] is None
     assert calls[1][1].R_cos.shape[0] == 15
     # The increasing-grid interpolation came from stage 1 xstore (=21), not
     # its current xc (=11).  Odd-m sqrt(s) scaling makes the expected radial
     # profile non-constant, so compare with the actual interp.f operator.
-    modes = mode_table(int(inp.mpol), int(inp.ntor))
     expected = interpolate_state(
         _state(7, modes.mnmax, 21.0), ns_fine=15, modes=modes)
     np.testing.assert_allclose(
@@ -101,6 +106,16 @@ def test_stage_transfer_carries_vacuum_and_interpolates_xstore(monkeypatch) -> N
     np.testing.assert_allclose(np.asarray(calls[2][1].R_cos), 12.0)
     assert calls[2][2] is vacua[1]
     assert calls[2][1].R_cos.shape[0] == 15
+
+
+def test_vmec2000_niter_exhaustion_is_not_converged() -> None:
+    from benchmarks.run_freeboundary_multigrid import _vmec_converged
+
+    stdout = """\
+ Try increasing NITER or PRE_NITER if the preconditioner is on.
+ EXECUTION TERMINATED NORMALLY
+"""
+    assert not _vmec_converged(stdout)
 
 
 def test_public_two_stage_free_boundary_rebuilds_and_stays_finite() -> None:

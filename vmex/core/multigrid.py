@@ -343,9 +343,10 @@ def solve_free_boundary_multigrid(
     banner or soft restart).  If an intermediate stage reaches ``NITER`` before
     activation, the next stage continues in the pre-activation lane.
 
-    ``initial_state`` hot-starts the first executed stage and must already have
-    that stage's radial shape.  It follows reset-file semantics: the first
-    stage repeats vacuum activation, while subsequent radial stages carry it.
+    ``initial_state`` hot-starts the first executed stage and is interpolated
+    when its radial shape differs from that stage.  It follows reset-file
+    semantics: the first stage repeats vacuum activation, while subsequent
+    radial stages carry it.
     The fixed-boundary ladder's solver controls (``time_step``, ``tcon0``,
     ``gamma``, ``nstep``, ``lconm1``, device placement, and 2D-preconditioner
     configuration) are accepted and forwarded identically.

@@ -83,6 +83,13 @@ def _stage_iterations(stdout: str) -> list[dict]:
     return stages
 
 
+def _vmec_converged(stdout: str) -> bool:
+    return (
+        "EXECUTION TERMINATED NORMALLY" in stdout
+        and "Try increasing NITER" not in stdout
+    )
+
+
 def _normalized_max_error(mine: np.ndarray, reference: np.ndarray) -> float:
     scale = max(float(np.max(np.abs(reference))), np.finfo(float).tiny)
     return float(np.max(np.abs(mine - reference)) / scale)
@@ -186,7 +193,7 @@ def main() -> None:
         },
         "vmec2000": {
             "wall_s": vmec_wall,
-            "converged": "EXECUTION TERMINATED NORMALLY" in vmec.stdout,
+            "converged": _vmec_converged(vmec.stdout),
             "vacuum_turnons": vmec.stdout.count("VACUUM PRESSURE TURNED ON"),
             "stages": _stage_iterations(vmec.stdout),
         },
