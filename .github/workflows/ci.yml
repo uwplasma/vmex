@@ -538,7 +538,7 @@ jobs:
               ;;
           esac
           # Some optimization tests are silent for more than 15 minutes.
-          # Keep the hosted runner live without changing pytest semantics.
+          # Keep long shards observable without changing pytest semantics.
           pytest -q $FILES --durations=25 &
           pytest_pid=$!
           while kill -0 "$pytest_pid" 2>/dev/null; do
