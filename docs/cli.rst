@@ -90,7 +90,8 @@ For ``LFREEB = T`` decks:
 - ``MGRID_FILE = 'DIRECT_COILS'`` (or the ``--coils`` flag) builds the external
   field from an ESSOS coils file (``essos.coils.Coils``): the coils are tabulated
   into an in-memory mgrid (``Coils.to_mgrid``) and read back as an
-  :class:`vmex.core.mgrid.MgridField` (requires ESSOS).
+  :class:`vmex.core.mgrid.MgridField` (requires an ESSOS build providing
+  ``Coils.to_mgrid``; currently branch ``feature/mgrid-from-coils``).
 
 Known divergences of the current free-boundary lane: it is single-grid (only
 the final ``NS_ARRAY`` stage runs; multi-stage decks print a note), and the

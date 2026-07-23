@@ -6,6 +6,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once past 1.0.
 
 ## [Unreleased]
 
+### Added
+- **GPU CI without environment routing.** A manual self-hosted CUDA 13 lane
+  fails on CPU fallback and checks explicit CPU/GPU forward-solve and
+  implicit-gradient parity without JAX platform environment variables.
+
 ### Changed
 - **Explicit device semantics.** Omitted or ``device="auto"`` placement keeps
   VMEX's measured policy; explicit ``device=None`` now follows ordinary JAX

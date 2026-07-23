@@ -84,6 +84,7 @@ vmex = ["resources/input.nfp4_QH_warm_start"]
 [tool.pytest.ini_options]
 markers = [
   "full: slower/full-physics tests; set RUN_FULL=1 to run",
+  "gpu: tests that require a real GPU; skipped when no GPU is available",
 ]
 
 [tool.coverage.run]

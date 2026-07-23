@@ -437,13 +437,18 @@ jobs:
           python -m sphinx -W -j auto -b html docs docs/_build/html
 
   full:
-    name: Full-physics suite (nightly / manual only)
+    name: Full-physics ${{ matrix.shard }} (nightly / manual only)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Includes the compile-heavy optimization-convergence tests (QA precise,
-    # QH/QP descent) and the free-boundary end-to-end; nightly wall time is
-    # not the <=10-min PR budget, so allow generous headroom.
-    timeout-minutes: 150
+    # A sequential whole-suite job reached only 39% before the previous
+    # 150-minute limit on a shared runner. Keep the exact RUN_FULL coverage,
+    # but isolate the compile-heavy examples and mirror families so every
+    # shard completes and one slow lane cannot hide the remaining results.
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, examples, mirror-field, mirror-equilibrium, mirror-spline]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -477,4 +482,28 @@ jobs:
           JAX_ENABLE_X64: "1"
           RUN_FULL: "1"
         run: |
-          pytest -q tests --durations=25
+          case "${{ matrix.shard }}" in
+            core)
+              FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py"
+              ;;
+            examples)
+              FILES="tests/test_examples.py"
+              ;;
+            mirror-field)
+              FILES="tests/mirror/test_exterior.py \
+                     tests/mirror/test_free_boundary.py \
+                     tests/mirror/test_geometry_fields.py"
+              ;;
+            mirror-equilibrium)
+              FILES="tests/mirror/test_implicit.py \
+                     tests/mirror/test_isotropic_forces.py \
+                     tests/mirror/test_model_basis.py"
+              ;;
+            mirror-spline)
+              FILES="tests/mirror/test_analytic.py \
+                     tests/mirror/test_output.py \
+                     tests/mirror/test_qi_hybrid.py \
+                     tests/mirror/test_splines.py"
+              ;;
+          esac
+          pytest -q $FILES --durations=25

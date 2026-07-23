@@ -197,7 +197,9 @@ def test_mirror_free_boundary_beta_scan_example(tmp_path):
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~30s)
 def test_free_boundary_essos_coils(tmp_path):
-    pytest.importorskip("essos")
+    Coils = pytest.importorskip("essos.coils").Coils
+    if not hasattr(Coils, "to_mgrid"):
+        pytest.skip("ESSOS build lacks Coils.to_mgrid (use feature/mgrid-from-coils)")
     out = _run_example(EXAMPLES / "free_boundary_essos_coils.py", tmp_path, timeout=900)
     # table rows: nominal%  PRES_SCALE  actual-beta%  iters  fsq  aspect  axis-R
     rows = re.findall(r"^\s*([0-9.]+)%\s+([0-9.]+)\s+([0-9.]+)%\s+\d+\s+([0-9.eE+-]+)",
@@ -371,7 +373,7 @@ def test_single_stage_vs_two_stage(tmp_path):
                 / "comparison.json")
     assert cmp_path.exists(), "comparison.json not written"
     results = json.loads(cmp_path.read_text())
-    assert set(results) == {"two_stage", "single_stage"}
+    assert set(results) == {"two_stage", "single_stage", "single_stage_polish"}
     for label, metrics in results.items():
         assert np.isfinite(metrics["qs_total"]), f"{label}: non-finite QS"
         assert np.isfinite(metrics["avg_Bn_over_B"]), f"{label}: non-finite B.n"

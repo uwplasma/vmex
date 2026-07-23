@@ -39,6 +39,19 @@ Documentation builds must pass strict mode::
 
   python -m sphinx -W -j auto -b html docs docs/_build/html
 
+GPU CI
+------
+
+``GPU CI`` is a manual workflow because this is a public repository: pull
+requests from forks are never run automatically on persistent self-hosted
+hardware.  Its runner must carry the labels ``self-hosted``, ``linux``,
+``x64``, and ``gpu``, provide an NVIDIA driver 580 or newer for CUDA 13, and
+must not define ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``.  The workflow
+installs the official ``jax[cuda13]`` distribution, verifies that JAX selects
+the GPU by ordinary hardware discovery, then runs focused CPU/GPU forward and
+implicit-gradient parity checks.  A missing or misconfigured accelerator is a
+failure, not a skipped green GPU job.
+
 Releasing
 ---------
 
