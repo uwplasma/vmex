@@ -770,12 +770,13 @@ def _vacuum_executables(resolution, *, mf: int, nf: int, signgs: int, wint,
                         modes: ModeTable, axis_r0, axis_z0) -> tuple[VacuumBasis, FusedVacuum, Any]:
     """Return the cached ``(basis, fused vacuum, steady lane)`` for one resolution/signgs.
 
-    ``wint``/``modes``/``axis_r0``/``axis_z0`` are resolution-determined build
-    inputs (not part of the key); they are consumed only on a cache miss.
+    ``wint``/``modes`` are resolution-determined build inputs consumed only on
+    a cache miss.  The dynamic axis is validated on every call.
     """
     key = (resolution, int(signgs), int(mf), int(nf))
     cached = _VACUUM_EXECUTABLE_CACHE.get(key)
     if cached is not None:
+        _assert_static_filament_topology(cached[0], axis_r0, axis_z0)
         return cached
     basis = vacuum_basis(
         mf=int(mf), nf=int(nf), ntheta3=int(resolution.ntheta3),

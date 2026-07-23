@@ -415,6 +415,26 @@ def test_bad_supplied_axis_is_reguessed_before_fused_filament(capsys):
     assert result.r00 < 1.0
 
 
+def test_cached_vacuum_executable_rechecks_dynamic_axis(monkeypatch):
+    """A structural cache hit must still validate the current magnetic axis."""
+    resolution = object()
+    cached = (object(), object(), object())
+    monkeypatch.setitem(
+        FB._VACUUM_EXECUTABLE_CACHE, (resolution, 1, 2, 3), cached,
+    )
+    seen = []
+    monkeypatch.setattr(
+        FB, "_assert_static_filament_topology", lambda *args: seen.append(args),
+    )
+    result = FB._vacuum_executables(
+        resolution, mf=2, nf=3, signgs=1, wint=None, modes=None,
+        axis_r0="r", axis_z0="z",
+    )
+
+    assert result is cached
+    assert seen == [(cached[0], "r", "z")]
+
+
 def test_cli_missing_mgrid_fallback_warns(tmp_path):
     """CLI policy: missing mgrid -> fixed-boundary fallback warning (VMEC2000)."""
     import types

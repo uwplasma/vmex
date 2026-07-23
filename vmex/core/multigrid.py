@@ -192,6 +192,9 @@ def solve_multigrid(
     initial_state: SpectralState | None = None,
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
     device: Any = AUTO,
     raise_on_max_iterations: bool = True,
 ) -> SolveResult:
@@ -212,6 +215,8 @@ def solve_multigrid(
     given they are broadcast to a common stage count (shorter ``ftol/niter``
     arrays repeat their last entry).  ``initial_state`` seeds the *first*
     executed stage (hot restart; must match that stage's ``ns``).
+    ``precon_type``, ``prec2d_threshold``, and ``prec2d`` override the input's
+    optional 2D-preconditioner configuration at every stage.
 
     Intermediate stages are allowed to exhaust their iteration cap
     (``more_iter_flag`` — VMEC2000 proceeds to the next grid); any other
@@ -274,6 +279,8 @@ def solve_multigrid(
             inp, resolution, ftol=float(ftol_arr[igrid]),
             max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
             time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+            precon_type=precon_type, prec2d_threshold=prec2d_threshold,
+            prec2d=prec2d,
         )
         if state is not None and int(state.R_cos.shape[0]) != nsval:
             state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)

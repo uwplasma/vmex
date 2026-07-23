@@ -253,6 +253,25 @@ def test_ladder_skips_decreasing_stages():
                                rtol=5e-12)
 
 
+def test_ladder_forwards_explicit_2d_preconditioner(monkeypatch):
+    seen = []
+    marker = object()
+
+    def stop_after_prepare(*args, **kwargs):
+        seen.append(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(multigrid, "prepare_runtime", stop_after_prepare)
+    with pytest.raises(RuntimeError, match="stop"):
+        multigrid.solve_multigrid(
+            _load_input("cth_like_fixed_bdy"), ns_array=[5],
+            precon_type="NONE", prec2d_threshold=3e-7, prec2d=marker,
+        )
+    assert seen[0]["precon_type"] == "NONE"
+    assert seen[0]["prec2d_threshold"] == 3e-7
+    assert seen[0]["prec2d"] is marker
+
+
 # ---------------------------------------------------------------------------
 # TASK B: compile counts + wall time (cold subprocesses)
 # ---------------------------------------------------------------------------
