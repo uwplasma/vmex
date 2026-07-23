@@ -100,14 +100,23 @@ def _print_header() -> None:
 
 def diagnose(path: Path, *, details: bool = False) -> int:
     text = path.read_text()
-    unsupported = _unsupported_mode_code(text)
     _print_header()
+    try:
+        unsupported = _unsupported_mode_code(text)
+        inp = VmecInput.from_file(path)
+    except ValueError:
+        # Keep the default diagnostic shareable: parsing exceptions can quote
+        # filenames, namelist designators, and input-derived values.
+        print("input parsing: FAIL")
+        print("assessment: D00C_INPUT_PARSE_ERROR")
+        return 1
+
+    print("input parsing: PASS")
     if unsupported is not None:
         print("input physics mode supported: FAIL")
         print(f"assessment: {unsupported}")
         return 1
 
-    inp = VmecInput.from_file(path)
     rt = prepare_runtime(inp)
     state = _initial_state(rt.setup)
     _, geometry = _geometry(state, rt)

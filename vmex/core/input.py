@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, fields
+from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
@@ -170,35 +171,65 @@ def _read_indata_text(text: str) -> tuple[Dict[str, List[Scalar]], Dict[str, Dic
             continue
         if idx is None:
             scalars[name] = values
+        elif any(isinstance(component, slice) for component in idx):
+            # Fortran fills an array section in column-major order: the first
+            # subscript varies fastest.  This matters for compact VMEC boundary
+            # assignments such as ``RBC(-6:6,0) = ...`` and for sections that
+            # span both Fourier indices.
+            axes: list[list[int]] = []
+            n_slices = sum(isinstance(component, slice) for component in idx)
+            for component in idx:
+                if not isinstance(component, slice):
+                    axes.append([component])
+                    continue
+                step = 1 if component.step is None else component.step
+                if component.start is None:
+                    # The declared bounds of VMEC arrays are not available to
+                    # the generic tokenizer.  ``KEY(:)`` is handled as a dense
+                    # assignment above; mixed sections must state their bound.
+                    raise ValueError(f"array section needs a lower bound: {m.group('key')}")
+                if component.stop is None:
+                    # An open upper bound is unambiguous only when every other
+                    # subscript is scalar, in which case supplied values set
+                    # the section length.
+                    if n_slices != 1:
+                        raise ValueError(
+                            f"ambiguous open multidimensional array section: {m.group('key')}"
+                        )
+                    positions = [
+                        component.start + step * j for j in range(len(values))
+                    ]
+                else:
+                    end = component.stop + (1 if step > 0 else -1)
+                    positions = list(range(component.start, end, step))
+                axes.append(positions)
+
+            # itertools.product varies its last input fastest, so reverse both
+            # the axes and each result to obtain Fortran array-element order.
+            positions_nd = [
+                tuple(reversed(position))
+                for position in product(*reversed(axes))
+            ]
+            if len(values) > len(positions_nd):
+                raise ValueError(
+                    f"too many values for namelist array section: {m.group('key')}"
+                )
+            entries = indexed.setdefault(name, {})
+            for position, value in zip(positions_nd, values):
+                entries[position] = value
         elif len(idx) == 1:
             # A one-dimensional namelist designator identifies the first
             # destination element, not a scalar-only assignment.  Thus
             # ``APHI(1)=0,1`` initializes APHI(1:2), exactly like VMEC2000.
-            # Array sections use inclusive Fortran bounds; an omitted upper
-            # bound consumes as many destinations as values supplied.
-            component = idx[0]
-            if isinstance(component, slice):
-                step = 1 if component.step is None else component.step
-                if component.start is None:
-                    # The only lower-bound-free form accepted here is a whole
-                    # vector, already handled as a dense assignment above.
-                    raise ValueError(f"array section needs a lower bound: {m.group('key')}")
-                if component.stop is None:
-                    positions = [component.start + step * j for j in range(len(values))]
-                else:
-                    end = component.stop + (1 if step > 0 else -1)
-                    positions = list(range(component.start, end, step))
-                if len(values) > len(positions):
-                    raise ValueError(f"too many values for namelist array section: {m.group('key')}")
-            else:
-                positions = [component + j for j in range(len(values))]
+            component = int(idx[0])
+            positions = [component + j for j in range(len(values))]
             entries = indexed.setdefault(name, {})
             for position, value in zip(positions, values):
                 entries[(position,)] = value
         else:
-            if any(isinstance(component, slice) for component in idx):
-                raise ValueError(f"multidimensional array sections are unsupported: {m.group('key')}")
-            indexed.setdefault(name, {})[tuple(int(component) for component in idx)] = values[0]
+            indexed.setdefault(name, {})[
+                tuple(int(component) for component in idx)
+            ] = values[0]
     return scalars, indexed
 
 

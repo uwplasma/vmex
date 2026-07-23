@@ -83,6 +83,28 @@ def test_shareable_diagnostic_flags_unsupported_reconstruction(
     assert "RBC" not in output
 
 
+def test_shareable_diagnostic_redacts_input_parse_error(
+    tmp_path: Path, capsys
+) -> None:
+    """A parser failure gets a useful code without echoing private syntax."""
+    path = tmp_path / "input.private_parse_error"
+    path.write_text(
+        """&INDATA
+        MPOL = 3
+        NTOR = 1
+        RBC(:,0) = 1.0
+        /
+        """
+    )
+
+    assert diagnose(path) == 1
+    output = capsys.readouterr().out
+    assert "D00C_INPUT_PARSE_ERROR" in output
+    assert "private_parse_error" not in output
+    assert "RBC" not in output
+    assert "ValueError" not in output
+
+
 def test_inert_reconstruction_flag_matches_vmec2000_disable(
     tmp_path: Path, capsys
 ) -> None:
@@ -133,4 +155,48 @@ def test_indexed_aphi_multivalue_prevents_false_zero_flux_diagnosis(
     output = capsys.readouterr().out
     assert "R/Z force normalization valid: PASS" in output
     assert "lambda force normalization valid: PASS" in output
+    assert "OK_FIRST_FORCE_PASS_FINITE" in output
+
+
+def test_shareable_diagnostic_accepts_compact_boundary_section(
+    tmp_path: Path, capsys
+) -> None:
+    """A legal ``RBC(nlo:nhi,m)`` section reaches the first force pass."""
+    inp = VmecInput.from_file(DATA / "input.nfp2_QI")
+    path = inp.to_indata(tmp_path / "input.private_boundary_section")
+    text = path.read_text().replace(
+        "&INDATA",
+        "&INDATA\n  RBC(-6:6,0) = 13*0.0",
+    )
+    path.write_text(text)
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "private_boundary_section" not in output
+    assert "RBC" not in output
+    assert "OK_FIRST_FORCE_PASS_FINITE" in output
+
+
+def test_first_force_uses_values_from_compact_boundary_sections(
+    tmp_path: Path, capsys
+) -> None:
+    """Section-only boundary coefficients produce a finite equilibrium state."""
+    path = tmp_path / "input.private_section_only"
+    path.write_text(
+        """&INDATA
+        NFP = 1
+        MPOL = 3
+        NTOR = 1
+        NS_ARRAY = 7
+        RBC(-1:1,0) = 0.0, 1.0, 0.0
+        RBC(-1:1,1) = 0.0, 0.1, 0.0
+        ZBS(-1:1,1) = 0.0, 0.1, 0.0
+        /
+        """
+    )
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "private_section_only" not in output
+    assert "RBC" not in output
     assert "OK_FIRST_FORCE_PASS_FINITE" in output

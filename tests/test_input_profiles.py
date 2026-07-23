@@ -175,6 +175,48 @@ def test_indexed_aphi_section_uses_fortran_inclusive_bounds() -> None:
     np.testing.assert_array_equal(inp.aphi[:4], [1.0, 0.25, 0.5, 0.0])
 
 
+def test_boundary_section_accepts_toroidal_mode_range() -> None:
+    """VMEC boundary rows accept compact ``RBC(nlo:nhi,m)`` assignments."""
+    inp = VmecInput.from_indata_text(
+        """&INDATA
+        MPOL = 2
+        NTOR = 2
+        RBC(-2:2,0) = 1.0, 2.0, 3.0, 4.0, 5.0
+        ZBS(-2:2,1) = -1.0, -2.0, -3.0, -4.0, -5.0
+        /
+        """
+    )
+    np.testing.assert_array_equal(inp.rbc[:, 0], [1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_array_equal(inp.zbs[:, 1], [-1.0, -2.0, -3.0, -4.0, -5.0])
+
+
+def test_boundary_section_uses_fortran_column_major_order() -> None:
+    """The first boundary subscript varies fastest, as in Fortran namelists."""
+    inp = VmecInput.from_indata_text(
+        """&INDATA
+        MPOL = 2
+        NTOR = 1
+        RBC(-1:1,0:1) = 1.0, 2.0, 3.0, 4.0, 5.0, 6.0
+        /
+        """
+    )
+    np.testing.assert_array_equal(inp.rbc[:, 0], [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(inp.rbc[:, 1], [4.0, 5.0, 6.0])
+
+
+def test_boundary_section_accepts_negative_stride() -> None:
+    """Inclusive section bounds and negative strides follow Fortran syntax."""
+    inp = VmecInput.from_indata_text(
+        """&INDATA
+        MPOL = 2
+        NTOR = 2
+        RBC(2:-2:-2,0) = 1.0, 2.0, 3.0
+        /
+        """
+    )
+    np.testing.assert_array_equal(inp.rbc[:, 0], [3.0, 0.0, 2.0, 0.0, 1.0])
+
+
 def test_indexed_legacy_axis_overlays_vmec_axis() -> None:
     """Indexed obsolete RAXIS/ZAXIS entries retain VMEC2000 compatibility."""
     inp = VmecInput.from_indata_text(
