@@ -34,11 +34,13 @@ host round-trips of traced values.
 
 from __future__ import annotations
 
+import gc
 from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from .device import AUTO, _placement_device, _put_numeric_leaves, device_context
@@ -48,7 +50,7 @@ from .input import VmecInput
 from .preconditioner_2d import Prec2DConfig
 from .solver import (
     SolveResult, SpectralState, _finalize, _result_from_carry, _solve_stage,
-    hot_restart_state, prepare_runtime, resolution_from_input,
+    _resolve_use_fft, hot_restart_state, prepare_runtime, resolution_from_input,
     runtime_with_baselines,
 )
 from .transforms import odd_m_sqrt_s_scaling
@@ -198,6 +200,8 @@ def solve_multigrid(
     prec2d: Prec2DConfig | None = None,
     device: Any = AUTO,
     raise_on_max_iterations: bool = True,
+    use_fft: bool | None = None,
+    release_stage_cache: bool = False,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -245,6 +249,15 @@ def solve_multigrid(
     follows JAX placement.  Auto never overrides an active JAX device or
     platform selection.
 
+    ``use_fft`` has the same measured-hardware default and implicit-AD role as in
+    :func:`vmex.core.solver.solve`.
+
+    ``release_stage_cache=True`` clears JAX's in-memory compilation/staging
+    caches between distinct radial grids. This lowers peak RSS for a one-shot
+    high-resolution ladder while leaving the persistent on-disk cache intact.
+    It is false by default so repeated library solves retain warm executables;
+    the standalone CLI enables it.
+
     Returns the final stage's :class:`~vmex.core.solver.SolveResult`.
     """
     ns_arr = np.atleast_1d(np.asarray(
@@ -276,12 +289,13 @@ def solve_multigrid(
             continue
         ns_min = nsval
         resolution = resolution_from_input(inp, ns=nsval)
+        stage_use_fft = _resolve_use_fft(use_fft, device, resolution)
         rt = prepare_runtime(
             inp, resolution, ftol=float(ftol_arr[igrid]),
             max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
             time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
             precon_type=precon_type, prec2d_threshold=prec2d_threshold,
-            prec2d=prec2d,
+            prec2d=prec2d, use_fft=stage_use_fft,
         )
         if state is not None and int(state.R_cos.shape[0]) != nsval:
             state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)
@@ -291,12 +305,13 @@ def solve_multigrid(
                 state = hot_restart_state(rt, state)
             # funct3d.f: rcon0/zcon0 are set from the state at iter2 == iter1,
             # i.e. from THIS stage's starting state, not the interior guess.
-            rt = runtime_with_baselines(rt, state)
+            rt = runtime_with_baselines(rt, state, use_fft=stage_use_fft)
         with device_context(device, resolution):
             carry = _solve_stage(
                 rt, state, mode=mode, verbose=verbose, emit=emit,
                 # the eqsolve.f axis re-guess applies to the fresh interior guess
                 try_axis_reguess=first_executed and state is None,
+                use_fft=stage_use_fft,
             )
         first_executed = False
         ier = int(carry.ier)
@@ -306,6 +321,16 @@ def solve_multigrid(
                 and not (ier == MORE_ITER_FLAG and not raise_on_max_iterations)):
             _finalize(carry, rt)  # raises the typed error for this stage
         state = carry.state
+        future = ns_arr[igrid + 1:]
+        executable = future[future >= nsval]
+        if (
+            release_stage_cache
+            and executable.size
+            and int(executable[0]) != nsval
+        ):
+            jax.block_until_ready(carry)
+            jax.clear_caches()
+            gc.collect()
 
     if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
         return _result_from_carry(carry, rt)

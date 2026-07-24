@@ -579,6 +579,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             verbose=verbose,
             emit=emit,
             device=None if args.device == "none" else args.device,
+            release_stage_cache=True,
         )
     solve_s = time.perf_counter() - t1
 
