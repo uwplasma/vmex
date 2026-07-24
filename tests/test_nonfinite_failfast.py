@@ -41,6 +41,24 @@ def test_shareable_diagnostic_redacts_input_details(capsys) -> None:
     assert "OK_FIRST_FORCE_PASS_FINITE" in output
 
 
+def test_shareable_diagnostic_warns_on_undersampled_angular_grid(
+    tmp_path: Path, capsys
+) -> None:
+    """The aliasing warning discloses no resolution or coefficient values."""
+    inp = VmecInput.from_file(DATA / "input.nfp2_QI")
+    path = dataclasses.replace(inp, ntheta=16, nzeta=14).to_indata(
+        tmp_path / "input.private_undersampled"
+    )
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "angular grid meets VMEC automatic-resolution floor: FAIL" in output
+    assert "assessment: W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT" in output
+    assert "private_undersampled" not in output
+    assert "ntheta=" not in output.lower()
+    assert "nzeta=" not in output.lower()
+
+
 def test_shareable_diagnostic_localizes_zero_energy_scale(
     tmp_path: Path, capsys
 ) -> None:

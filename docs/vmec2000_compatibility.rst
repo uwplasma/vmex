@@ -82,7 +82,10 @@ applies these rules:
 
 The privacy-preserving ``tools/diagnose_input.py`` reports the same
 classification as the production parser.  Its stable ``D00*`` code contains
-no filename, coefficient, input value, or equilibrium result.
+no filename, coefficient, input value, or equilibrium result.  It also reports
+whether explicit angular grids meet VMEC2000's automatic-resolution floor;
+``W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT`` is a convergence-risk warning, not a
+parser or physics-mode rejection.
 
 Equilibrium capability matrix
 -----------------------------
@@ -201,6 +204,10 @@ Core grid, profiles, and geometry
    * - ``DELT, TCON0, NSTEP``
      - implemented
      - Initial time step, spectral-condensation multiplier, and print cadence.
+       VMEX's driver retries a fatal 75-reset stage from its best finite
+       checkpoint with reduced ``DELT`` (two attempts by default); set
+       ``jacobian_retries=0``/``--jacobian-retries 0`` for exact VMEC2000
+       termination behavior.
    * - ``APHI, PHIEDGE``
      - implemented
      - Toroidal-flux map and edge flux.  Indexed and section assignments use
@@ -249,7 +256,10 @@ Force, axis, and iteration controls
    * - ``LMOVE_AXIS``
      - implemented by PR #70
      - Enables the first-pass ``irst=4`` axis re-guess when the finite force sum
-       exceeds the VMEC2000 threshold.  The value is preserved in WOUT.
+       exceeds the VMEC2000 threshold.  Missing/all-zero axis coefficients are
+       not pre-inferred in production: VMEX now follows VMEC2000's supplied
+       zero-axis first pass and exactly one ``eqsolve.f`` recovery transfer.
+       The value is preserved in WOUT.
    * - ``LFULL3D1OUT``
      - implemented
      - On fixed or free NITER exhaustion, ``T`` writes the unconverged WOUT and
@@ -550,9 +560,10 @@ Open-PR ownership and merge preservation
    * - #70
      - Free-boundary multigrid plus collaborator fixes
      - Owns multidimensional namelist sections, APHI/profile parsing, finite
-       first-force diagnosis, axis recovery, LFORBAL, free-boundary vacuum
-       continuation/rebuild, effective fallback metadata, preconditioner
-       semantics, and this compatibility ledger.
+       first-force diagnosis, exact single-transfer axis recovery, LFORBAL,
+       bounded JAC75 best-checkpoint recovery, angular-grid risk diagnostics,
+       free-boundary vacuum continuation/rebuild, effective fallback metadata,
+       preconditioner semantics, and this compatibility ledger.
    * - #71
      - Hot-restart example/documentation
      - Depends on #70's free-boundary multigrid behavior; keep after #70.

@@ -649,7 +649,17 @@ def prepare_runtime(
         if resolution is None:
             resolution = resolution_from_input(inp)
         if setup is None:
-            setup = run_setup(inp, resolution, lconm1=lconm1)
+            # VMEC2000 profil3d.f starts from the axis coefficients exactly as
+            # supplied, including an all-zero/missing axis.  Its eqsolve.f
+            # driver calls guess_axis once only after the first bad-Jacobian
+            # or high-force (irst=4) pass.  The setup helper retains its
+            # explicit legacy inference option for geometry-only callers, but
+            # a production solve must not pre-guess here and then guess a
+            # second time in _solve_stage.
+            setup = run_setup(
+                inp, resolution, lconm1=lconm1,
+                infer_axis_if_missing=False,
+            )
         defaults = dict(ftol=float(inp.ftol_array[0]), niter=int(inp.niter_array[0]),
                         delt=float(inp.delt), tcon0=float(inp.tcon0),
                         gamma=float(inp.gamma), nstep=int(inp.nstep),
@@ -1688,37 +1698,90 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
 
 def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
                  mode: str, verbose: bool, emit,
-                 try_axis_reguess: bool = True) -> _LoopCarry:
+                 try_axis_reguess: bool = True,
+                 jacobian_retries: int = 2) -> _LoopCarry:
     """Run one solve at a fixed runtime, with the eqsolve.f axis-retry.
 
     ``state0=None`` starts from the runtime's ``profil3d.f`` interior guess.
     On a first-iteration Jacobian sign change with ``ijacob == 0``
     (``eqsolve.f``), the axis is re-guessed from the failing geometry and the
-    loop restarted once (``try_axis_reguess``).  Returns the final carry;
-    the caller maps ``carry.ier`` to results/exceptions (:func:`_finalize`).
-    """
-    setup = rt.setup
-    if state0 is None:
-        state0 = _initial_state(setup)
-    carry = _run_loop(state0, rt, mode=mode, ijacob=0, verbose=verbose, emit=emit)
+    loop restarted once (``try_axis_reguess``).
 
-    # eqsolve.f: on a first-iteration Jacobian sign change with ijacob == 0,
-    # re-guess the axis from the current geometry and restart once.
-    retry_reason = int(carry.ier)
-    if try_axis_reguess and retry_reason in (
-            BAD_JACOBIAN_FLAG, AXIS_REGUESS_FLAG) \
-            and int(carry.ijacob) == 0 and rt.resolution.ns >= 3:
+    VMEC2000 stops after 75 Jacobian resets and tells the user to change
+    ``DELT``.  VMEX makes that manual recovery deterministic: up to
+    ``jacobian_retries`` attempts restart the best finite checkpoint with
+    zero velocity and half the preceding initial step, capped at 0.5.  The
+    equilibrium equations and convergence test are unchanged; setting
+    ``jacobian_retries=0`` preserves the exact VMEC2000 fatal-stop policy.
+    Returns the final carry; the caller maps ``carry.ier`` to
+    results/exceptions (:func:`_finalize`).
+    """
+    if int(jacobian_retries) < 0:
+        raise ValueError("jacobian_retries must be non-negative")
+
+    def run_attempt(
+        attempt_rt: SolverRuntime,
+        attempt_state: SpectralState,
+        *,
+        emit_banner: bool,
+    ) -> tuple[_LoopCarry, SolverRuntime]:
+        carry = _run_loop(
+            attempt_state, attempt_rt, mode=mode, ijacob=0,
+            verbose=verbose, emit=emit, emit_banner=emit_banner,
+        )
+
+        # eqsolve.f: on a first-iteration Jacobian sign change with
+        # ijacob == 0, re-guess the axis from the current geometry and restart
+        # once.  A high finite first force uses the same transfer while
+        # preserving the triggering pass's momentum.
+        retry_reason = int(carry.ier)
+        if (
+            try_axis_reguess
+            and retry_reason in (BAD_JACOBIAN_FLAG, AXIS_REGUESS_FLAG)
+            and int(carry.ijacob) == 0
+            and attempt_rt.resolution.ns >= 3
+        ):
+            if verbose:
+                if retry_reason == BAD_JACOBIAN_FLAG:
+                    emit(" INITIAL JACOBIAN CHANGED SIGN!")
+                emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
+            attempt_rt, attempt_state, _axis = reguess_initial_axis(
+                attempt_rt, attempt_state
+            )
+            carry = _run_loop(
+                attempt_state, attempt_rt, mode=mode, ijacob=1,
+                verbose=verbose, emit=emit, emit_banner=False,
+                initial_xcdot=(
+                    carry.xcdot
+                    if retry_reason == AXIS_REGUESS_FLAG else None
+                ),
+            )
+        return carry, attempt_rt
+
+    attempt_state = _initial_state(rt.setup) if state0 is None else state0
+    attempt_rt = rt
+    carry, attempt_rt = run_attempt(
+        attempt_rt, attempt_state, emit_banner=True,
+    )
+    for attempt in range(1, int(jacobian_retries) + 1):
+        if int(carry.ier) != JAC75_FLAG:
+            break
+        retry_step = min(0.5, 0.5 * float(attempt_rt.time_step0))
+        attempt_state = carry.xstore
+        attempt_rt = runtime_with_baselines(
+            replace(attempt_rt, time_step0=retry_step),
+            attempt_state,
+        )
         if verbose:
-            if retry_reason == BAD_JACOBIAN_FLAG:
-                emit(" INITIAL JACOBIAN CHANGED SIGN!")
-            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
-        rt, state0, _axis = reguess_initial_axis(rt, state0)
-        carry = _run_loop(state0, rt, mode=mode, ijacob=1, verbose=verbose,
-                          emit=emit, emit_banner=False,
-                          initial_xcdot=(
-                              carry.xcdot
-                              if retry_reason == AXIS_REGUESS_FLAG else None
-                          ))
+            emit(
+                " JACOBIAN RECOVERY RETRY "
+                f"{attempt}/{int(jacobian_retries)}: "
+                "RESTARTING BEST FINITE STATE WITH "
+                f"DELT = {retry_step:.6g}"
+            )
+        carry, attempt_rt = run_attempt(
+            attempt_rt, attempt_state, emit_banner=False,
+        )
     return carry
 
 
@@ -1766,6 +1829,7 @@ def solve(
     device: Any = AUTO,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
@@ -1780,7 +1844,10 @@ def solve(
     printing (``verbose=True``); ``mode="jit"`` runs one ``lax.while_loop``
     over the same traced body.
 
-    Returns a :class:`SolveResult` on convergence.  Raises
+    Returns a :class:`SolveResult` on convergence.  ``jacobian_retries``
+    (default 2) restarts the best finite checkpoint with a reduced ``DELT``
+    after VMEC2000's 75-reset condition; set it to zero for the exact
+    VMEC2000 fatal-stop policy.  Raises
     :class:`VmecJacobianError` when the initial Jacobian changes sign twice
     (after one ``guess_axis`` retry — the ``eqsolve.f`` ``ijacob == 0`` path)
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
@@ -1829,5 +1896,8 @@ def solve(
         initial_state = hot_restart_state(rt, initial_state)
         rt = runtime_with_baselines(rt, initial_state)  # funct3d.f iter2==iter1
     with device_context(device, rt.resolution):
-        carry = _solve_stage(rt, initial_state, mode=mode, verbose=verbose, emit=emit)
+        carry = _solve_stage(
+            rt, initial_state, mode=mode, verbose=verbose, emit=emit,
+            jacobian_retries=jacobian_retries,
+        )
     return _finalize(carry, rt)

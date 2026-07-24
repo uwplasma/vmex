@@ -40,7 +40,7 @@ import jax.numpy as jnp  # noqa: E402
 
 from vmex.core import freeboundary as FB  # noqa: E402
 from vmex.core import vacuum as V  # noqa: E402
-from vmex.core.errors import MgridNotFoundError  # noqa: E402
+from vmex.core.errors import MgridNotFoundError, VmecJacobianError  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmex.core.solver import (  # noqa: E402
@@ -396,6 +396,34 @@ def test_missing_mgrid_raises(tmp_path):
     inp = VmecInput.from_file(DECK)
     with pytest.raises(MgridNotFoundError):
         FB.solve_free_boundary(inp, mgrid_path=tmp_path / "mgrid_missing.nc")
+
+
+def test_jac75_retry_rebuilds_vacuum_and_converges(capsys):
+    """A recovered free-boundary stage rebuilds NESTOR at its checkpoint."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(CONV_DECK), delt=1.0e4,
+    )
+    with pytest.raises(VmecJacobianError) as exc:
+        FB.solve_free_boundary(
+            inp,
+            mgrid_path=CONV_MGRID,
+            max_iterations=2500,
+            jacobian_retries=0,
+        )
+    assert exc.value.jacobian_resets == 75
+
+    result = FB.solve_free_boundary(
+        inp,
+        mgrid_path=CONV_MGRID,
+        max_iterations=2500,
+        jacobian_retries=2,
+        verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "JACOBIAN RECOVERY RETRY" in output
+    assert "VACUUM PRESSURE TURNED ON" in output
+    assert result.converged
+    assert max(result.fsqr, result.fsqz, result.fsql) <= 1.0e-10
 
 
 def test_bad_supplied_axis_is_reguessed_before_fused_filament(capsys):

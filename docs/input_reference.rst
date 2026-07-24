@@ -44,7 +44,10 @@ Symmetry and resolution
      - toroidal modes ``n = -ntor .. ntor``
    * - ``NTHETA`` / ``NZETA``
      - 0
-     - angular grid points (0 selects the VMEC default)
+     - angular grid points (0 selects the VMEC default).  Explicit values
+       below ``2*MPOL+6`` / ``2*NTOR+4`` remain legal for VMEC2000 parity but
+       can alias nonlinear force products; the privacy-safe diagnostic reports
+       ``W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT`` without printing the values.
 
 Multigrid ladder and stepping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

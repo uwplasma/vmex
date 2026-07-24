@@ -196,6 +196,7 @@ def solve_multigrid(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
     device: Any = AUTO,
     raise_on_max_iterations: bool = True,
 ) -> SolveResult:
@@ -222,6 +223,9 @@ def solve_multigrid(
     executed stage (hot restart; must match that stage's ``ns``).
     ``precon_type``, ``prec2d_threshold``, and ``prec2d`` override the input's
     optional 2D-preconditioner configuration at every stage.
+    ``jacobian_retries`` applies the same bounded best-checkpoint/``DELT``
+    recovery as :func:`vmex.core.solver.solve` independently at each stage;
+    zero preserves VMEC2000's immediate fatal stop after 75 resets.
 
     Intermediate stages are allowed to exhaust their iteration cap
     (``more_iter_flag`` — VMEC2000 proceeds to the next grid); any other
@@ -303,6 +307,7 @@ def solve_multigrid(
                 # both bad-Jacobian and LMOVE_AXIS first-force retries remain
                 # available after interpolation and on hot starts.
                 try_axis_reguess=True,
+                jacobian_retries=jacobian_retries,
             )
         first_executed = False
         ier = int(carry.ier)
@@ -341,6 +346,7 @@ def solve_free_boundary_multigrid(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
 ) -> SolveResult:
     """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
 
@@ -365,7 +371,8 @@ def solve_free_boundary_multigrid(
     radial stages carry it.
     The fixed-boundary ladder's solver controls (``time_step``, ``tcon0``,
     ``gamma``, ``nstep``, ``lconm1``, device placement, and 2D-preconditioner
-    configuration) are accepted and forwarded identically.
+    configuration) are accepted and forwarded identically, including bounded
+    ``jacobian_retries`` recovery (zero restores the VMEC2000 fatal policy).
     ``device="auto"`` (default) applies the measured policy independently at
     each grid and relocates carried plasma/vacuum arrays when the policy changes;
     ``None`` leaves placement to JAX.
@@ -459,6 +466,7 @@ def solve_free_boundary_multigrid(
                 lconm1=lconm1,
                 precon_type=precon_type,
                 prec2d_threshold=prec2d_threshold, prec2d=prec2d,
+                jacobian_retries=jacobian_retries,
                 constraint_continuation=(
                     constraint_continuation if same_grid else None),
                 reuse_vacuum_cache=bool(same_grid),

@@ -63,6 +63,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from vmex.core import multigrid, solver
+from vmex.core.errors import VmecJacobianError
 from vmex.core.input import VmecInput
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
@@ -305,6 +306,45 @@ def test_lmove_axis_high_first_force_retry_and_opt_out(capsys) -> None:
     output = capsys.readouterr().out
     assert "TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS" not in output
     assert not_retried.fsq_history[0, :3].sum() > 1.0e2
+
+
+def test_jac75_best_checkpoint_retry_converges_to_same_equilibrium(
+    capsys,
+) -> None:
+    """VMEX's bounded recovery replaces VMEC's manual change-DELT rerun."""
+    import dataclasses
+
+    base = dataclasses.replace(
+        _load_input("solovev"),
+        lforbal=True,
+        ns_array=np.asarray([11]),
+        ftol_array=np.asarray([1.0e-7]),
+        niter_array=np.asarray([500]),
+        delt=0.5,
+    )
+    reference = multigrid.solve_multigrid(
+        base, device="cpu", jacobian_retries=0,
+    )
+
+    unstable = dataclasses.replace(base, delt=1.0e4)
+    with pytest.raises(VmecJacobianError) as exc:
+        multigrid.solve_multigrid(
+            unstable, device="cpu", jacobian_retries=0,
+        )
+    assert exc.value.jacobian_resets == 75
+
+    recovered = multigrid.solve_multigrid(
+        unstable, device="cpu", jacobian_retries=2, verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "JACOBIAN RECOVERY RETRY 1/2" in output
+    assert recovered.converged
+    np.testing.assert_allclose(
+        [recovered.wb, recovered.wp, recovered.r00],
+        [reference.wb, reference.wp, reference.r00],
+        rtol=2.0e-12,
+        atol=2.0e-14,
+    )
 
 
 def test_lforbal_thirty_rows_and_cache_refresh_match_vmec2000() -> None:

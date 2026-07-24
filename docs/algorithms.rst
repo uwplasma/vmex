@@ -109,7 +109,14 @@ the velocity and rescales ``delt``):
 - **bad Jacobian** (``irst = 2``): restore the checkpoint, zero the velocity,
   ``delt *= 0.90``; on the first bad Jacobian the axis guess is recomputed
   (``guess_axis``), and ``delt`` is reset at ``ijacob = 25, 50`` with a hard
-  stop at 75 (``jac75_flag``);
+  stop at 75 (``jac75_flag``).  VMEX then offers a bounded driver-level
+  recovery (two attempts by default): restart the best finite checkpoint with
+  zero velocity and half the preceding initial ``DELT`` (capped at 0.5).
+  The force equations and stopping tolerance do not change.  Set
+  ``jacobian_retries=0`` (Python) or ``--jacobian-retries 0`` (CLI) for the
+  exact VMEC2000 fatal-stop policy.  Free-boundary recovery rebuilds the
+  axis-current filament and all resolution/geometry-dependent NESTOR
+  structures before continuing;
 - **residual blow-up** (``irst = 3``): if after more than 10 steps the
   residual exceeds :math:`10^4\times` the checkpoint value, restore and
   ``delt /= 1.03``.

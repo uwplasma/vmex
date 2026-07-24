@@ -203,6 +203,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--ftol", type=float, default=None, help="Override the final-stage FTOL_ARRAY tolerance.")
     p.add_argument("--max-iter", type=int, default=None, help="Override the final-stage NITER_ARRAY iteration cap.")
     p.add_argument(
+        "--jacobian-retries",
+        type=int,
+        default=2,
+        help=(
+            "Best-checkpoint retries after 75 Jacobian resets (default: 2; "
+            "0 preserves the VMEC2000 fatal-stop policy)."
+        ),
+    )
+    p.add_argument(
         "--coils",
         metavar="PATH",
         type=str,
@@ -575,6 +584,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
                 getattr(inp, "lfull3d1out", False)
             ),
             device=None if args.device == "none" else args.device,
+            jacobian_retries=int(args.jacobian_retries),
             **freeb_plan.solver_kwargs,
         )
     else:
@@ -592,6 +602,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
                 getattr(inp, "lfull3d1out", False)
             ),
             device=None if args.device == "none" else args.device,
+            jacobian_retries=int(args.jacobian_retries),
         )
     solve_s = time.perf_counter() - t1
 

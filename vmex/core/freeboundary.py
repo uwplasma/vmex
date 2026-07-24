@@ -50,7 +50,12 @@ from jax import lax
 
 from . import profiles as _profiles
 from .device import AUTO, _placement_device, _put_numeric_leaves, device_context
-from .errors import AXIS_REGUESS_FLAG, MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
+from .errors import (
+    AXIS_REGUESS_FLAG,
+    JAC75_FLAG,
+    MORE_ITER_FLAG,
+    SUCCESSFUL_TERM_FLAG,
+)
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
 from .geometry import half_mesh_jacobian
@@ -1041,6 +1046,7 @@ def _solve_free_boundary_stage(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
     constraint_continuation: tuple[Array, Array] | None = None,
     reuse_vacuum_cache: bool = False,
 ) -> _FreeBoundaryStageResult:
@@ -1055,7 +1061,13 @@ def _solve_free_boundary_stage(
 
     ``error_on_no_convergence=False`` returns the final state instead of
     raising when NITER is exhausted (useful against unconverged goldens).
+    After VMEC2000's fatal 75-Jacobian-reset condition,
+    ``jacobian_retries`` restarts the best finite plasma checkpoint with
+    zero velocity and a halved/capped ``DELT``.  Vacuum/NESTOR structures are
+    rebuilt for that checkpoint.  Set zero for the exact VMEC2000 stop.
     """
+    if int(jacobian_retries) < 0:
+        raise ValueError("jacobian_retries must be non-negative")
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary requires an LFREEB=T input")
     if external_field is None:
@@ -1421,6 +1433,43 @@ def _solve_free_boundary_stage(
 
     _emit_due(final=True)
     ier = int(carry.ier)
+    if ier == JAC75_FLAG and int(jacobian_retries) > 0:
+        retry_step = min(0.5, 0.5 * float(rt.time_step0))
+        if verbose:
+            emit(
+                " JACOBIAN RECOVERY RETRY: RESTARTING BEST FINITE "
+                f"STATE WITH DELT = {retry_step:.6g}"
+            )
+        current_rt = rt_freeb if fb.turned_on else rt_fixed
+        return _solve_free_boundary_stage(
+            inp,
+            mgrid_path=mgrid_path,
+            external_field=external_field,
+            resolution=resolution,
+            ftol=ftol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+            emit=emit,
+            error_on_no_convergence=error_on_no_convergence,
+            initial_state=carry.xstore,
+            vacuum_continuation=fb,
+            time_step=retry_step,
+            tcon0=tcon0,
+            gamma=gamma,
+            nstep=nstep,
+            lconm1=lconm1,
+            precon_type=precon_type,
+            prec2d_threshold=prec2d_threshold,
+            prec2d=prec2d,
+            jacobian_retries=int(jacobian_retries) - 1,
+            constraint_continuation=(
+                current_rt.rcon0, current_rt.zcon0
+            ) if fb.turned_on else None,
+            # NESTOR's matrix and axis-current filament depend on the
+            # checkpoint geometry; never reuse the failed attempt's compiled
+            # dynamic cache even at an equal radial resolution.
+            reuse_vacuum_cache=False,
+        )
     if ier == MORE_ITER_FLAG and not error_on_no_convergence:
         result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
         return _FreeBoundaryStageResult(
@@ -1459,6 +1508,7 @@ def solve_free_boundary(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
@@ -1471,8 +1521,8 @@ def solve_free_boundary(
     :func:`vmex.core.solver.solve`.  Use
     :func:`vmex.core.multigrid.solve_free_boundary_multigrid` for the complete
     ``NS_ARRAY`` ladder.  Time-step, constraint, print-cadence, m=1-constraint,
-    and optional 2D-preconditioner overrides mirror
-    :func:`vmex.core.solver.solve`.
+    optional 2D-preconditioner overrides and bounded ``jacobian_retries``
+    recovery mirror :func:`vmex.core.solver.solve`.
     """
     if resolution is None:
         resolution = resolution_from_input(inp)
@@ -1490,6 +1540,7 @@ def solve_free_boundary(
             lconm1=lconm1,
             precon_type=precon_type, prec2d_threshold=prec2d_threshold,
             prec2d=prec2d,
+            jacobian_retries=jacobian_retries,
             constraint_continuation=None, reuse_vacuum_cache=False,
         )
     return stage.result
