@@ -153,6 +153,11 @@ set, tabulates its Biot–Savart field once into an in-memory
 against it — calibrating ``PRES_SCALE`` per step so the converged wout
 ``betatotal`` lands on 0/1/2/3 %.
 
+The same adapter is available independently of the example as
+``MgridField.from_cartesian_field``.  It accepts ESSOS' ``B(points)`` protocol,
+SIMSOPT's ``set_points(points); B()`` protocol, or a plain Cartesian callable;
+the tabulated field can be reused across every radial stage and hot restart.
+
 .. literalinclude:: ../examples/free_boundary_essos_coils.py
    :language: python
 

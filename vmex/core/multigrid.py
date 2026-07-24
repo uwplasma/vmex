@@ -34,16 +34,18 @@ host round-trips of traced values.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
 
 import jax.numpy as jnp
 
-from .device import AUTO, device_context
+from .device import AUTO, _placement_device, _put_numeric_leaves, device_context
 from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
-from .fourier import ModeTable
+from .fourier import ModeTable, mode_table
 from .input import VmecInput
+from .preconditioner_2d import Prec2DConfig
 from .solver import (
     SolveResult, SpectralState, _finalize, _result_from_carry, _solve_stage,
     hot_restart_state, prepare_runtime, resolution_from_input,
@@ -51,7 +53,10 @@ from .solver import (
 )
 from .transforms import odd_m_sqrt_s_scaling
 
-__all__ = ["interpolate_coefficients", "interpolate_state", "solve_multigrid"]
+__all__ = [
+    "interpolate_coefficients", "interpolate_state", "solve_multigrid",
+    "solve_free_boundary_multigrid",
+]
 
 Array = Any
 
@@ -188,6 +193,10 @@ def solve_multigrid(
     initial_state: SpectralState | None = None,
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
     device: Any = AUTO,
     raise_on_max_iterations: bool = True,
 ) -> SolveResult:
@@ -200,7 +209,11 @@ def solve_multigrid(
     (``IF (nsval < ns_min) CYCLE`` — decreasing entries are ignored, equal
     entries re-run), and each executed stage after the first starts from the
     ``interp.f`` coarse -> fine interpolation (:func:`interpolate_state`) of
-    the previous stage's final state.  The time step resets to the input
+    the previous stage's final state.  Although ``initialize_radial.f`` reads
+    ``xstore``, ``allocate_ns.f`` first overwrites it from the old ``xc``;
+    therefore the effective VMEC2000 continuation source is the final
+    iterate, including when the preceding stage exhausts NITER.  The time
+    step resets to the input
     ``DELT`` at every stage, and each stage prints its own ``NS = ...``
     banner (``verbose=True``, ``mode="cli"``).
 
@@ -208,6 +221,11 @@ def solve_multigrid(
     given they are broadcast to a common stage count (shorter ``ftol/niter``
     arrays repeat their last entry).  ``initial_state`` seeds the *first*
     executed stage (hot restart; must match that stage's ``ns``).
+    ``precon_type``, ``prec2d_threshold``, and ``prec2d`` override the input's
+    optional 2D-preconditioner configuration at every stage.
+    ``jacobian_retries`` applies the same bounded best-checkpoint/``DELT``
+    recovery as :func:`vmex.core.solver.solve` independently at each stage;
+    zero preserves VMEC2000's immediate fatal stop after 75 resets.
 
     Intermediate stages are allowed to exhaust their iteration cap
     (``more_iter_flag`` — VMEC2000 proceeds to the next grid); any other
@@ -216,8 +234,8 @@ def solve_multigrid(
     like :func:`vmex.core.solver.solve`.  With
     ``raise_on_max_iterations=False`` a final stage that merely hits NITER
     returns its last state instead (``converged=False``, ``ier_flag =
-    more_iter_flag``) — VMEC2000's own behavior, which writes the
-    NITER-exhausted state to the wout file.
+    more_iter_flag``).  This exposes the state to callers; the CLI writes it
+    only when ``LFULL3D1OUT=T``, matching the VMEC2000 driver policy.
 
     Executable reuse: stage runtimes are structural pytrees (solver.py,
     Phase 2 item (1)), so one XLA executable is compiled per distinct
@@ -270,6 +288,8 @@ def solve_multigrid(
             inp, resolution, ftol=float(ftol_arr[igrid]),
             max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
             time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+            precon_type=precon_type, prec2d_threshold=prec2d_threshold,
+            prec2d=prec2d,
         )
         if state is not None and int(state.R_cos.shape[0]) != nsval:
             state = interpolate_state(state, ns_fine=nsval, modes=rt.modes)
@@ -283,8 +303,11 @@ def solve_multigrid(
         with device_context(device, resolution):
             carry = _solve_stage(
                 rt, state, mode=mode, verbose=verbose, emit=emit,
-                # the eqsolve.f axis re-guess applies to the fresh interior guess
-                try_axis_reguess=first_executed and state is None,
+                # initialize_radial.f resets ijacob at every NS stage, so
+                # both bad-Jacobian and LMOVE_AXIS first-force retries remain
+                # available after interpolation and on hot starts.
+                try_axis_reguess=True,
+                jacobian_retries=jacobian_retries,
             )
         first_executed = False
         ier = int(carry.ier)
@@ -293,8 +316,170 @@ def solve_multigrid(
                 last_stage and ier != SUCCESSFUL_TERM_FLAG
                 and not (ier == MORE_ITER_FLAG and not raise_on_max_iterations)):
             _finalize(carry, rt)  # raises the typed error for this stage
+        # allocate_ns.f saves old xc and copies it into the newly allocated
+        # xstore before initialize_radial.f scales/interpolates that array.
         state = carry.state
 
     if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
         return _result_from_carry(carry, rt)
     return _finalize(carry, rt)
+
+
+def solve_free_boundary_multigrid(
+    inp: VmecInput,
+    ns_array=None,
+    ftol_array=None,
+    niter_array=None,
+    *,
+    mgrid_path=None,
+    external_field: Any = None,
+    verbose: bool = False,
+    emit=print,
+    initial_state: SpectralState | None = None,
+    device: Any = AUTO,
+    raise_on_max_iterations: bool = True,
+    time_step: float | None = None,
+    tcon0: float | None = None,
+    gamma: float | None = None,
+    nstep: int | None = None,
+    lconm1: bool = True,
+    precon_type: str | None = None,
+    prec2d_threshold: float | None = None,
+    prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
+) -> SolveResult:
+    """Free-boundary solve over the VMEC2000 ``NS_ARRAY`` ladder.
+
+    The plasma continuation follows :func:`solve_multigrid`: each increasing
+    grid starts from ``interp.f`` interpolation of the preceding stage's final
+    state, equal grids rerun without interpolation, and decreasing
+    entries are skipped.  The external field is loaded once.  Resolution-
+    specific NESTOR bases, Green-function programs, axis-current filament
+    tables and traced vacuum loops are selected/rebuilt when the radial grid
+    changes; equal-grid reruns reuse their dynamic vacuum cache.
+
+    VMEC2000 carries ``ivac`` between grids.  Consequently, after vacuum has
+    activated on a coarse stage, the next stage begins with vacuum active and
+    uses the carried coarse-grid boundary pressure on iteration 1, then performs
+    a full vacuum update on iteration 2 with new caches (no second turn-on
+    banner or soft restart).  If an intermediate stage reaches ``NITER`` before
+    activation, the next stage continues in the pre-activation lane.
+
+    ``initial_state`` hot-starts the first executed stage and is interpolated
+    when its radial shape differs from that stage.  It follows reset-file
+    semantics: the first stage repeats vacuum activation, while subsequent
+    radial stages carry it.
+    The fixed-boundary ladder's solver controls (``time_step``, ``tcon0``,
+    ``gamma``, ``nstep``, ``lconm1``, device placement, and 2D-preconditioner
+    configuration) are accepted and forwarded identically, including bounded
+    ``jacobian_retries`` recovery (zero restores the VMEC2000 fatal policy).
+    ``device="auto"`` (default) applies the measured policy independently at
+    each grid and relocates carried plasma/vacuum arrays when the policy changes;
+    ``None`` leaves placement to JAX.
+    """
+    if not bool(inp.lfreeb):
+        raise ValueError("solve_free_boundary_multigrid requires an LFREEB=T input")
+
+    ns_arr = np.atleast_1d(np.asarray(
+        inp.ns_array if ns_array is None else ns_array, dtype=np.int64)).ravel()
+    ns_arr = ns_arr[: int(np.argmax(ns_arr <= 0))] if np.any(ns_arr <= 0) else ns_arr
+    if ns_arr.size == 0:
+        raise ValueError("ns_array has no positive stages")
+    n_stages = int(ns_arr.size)
+
+    def _stage_values(values, default, dtype):
+        arr = np.atleast_1d(np.asarray(
+            default if values is None else values, dtype=dtype)).ravel()
+        if arr.size == 0:
+            raise ValueError("empty ftol/niter stage array")
+        if arr.size < n_stages:
+            arr = np.concatenate([
+                arr, np.full(n_stages - arr.size, arr[-1], dtype=dtype),
+            ])
+        return arr[:n_stages]
+
+    ftol_arr = _stage_values(ftol_array, inp.ftol_array, np.float64)
+    niter_arr = _stage_values(niter_array, inp.niter_array, np.int64)
+
+    # Lazy import avoids a module cycle: freeboundary uses SolverRuntime while
+    # this module owns the shared interp.f transfer.
+    from .freeboundary import (
+        _external_field_from_input, _solve_free_boundary_stage,
+    )
+
+    if external_field is None:
+        external_field = _external_field_from_input(inp, mgrid_path)
+
+    state = initial_state
+    interpolation_source = initial_state
+    previous_ns = int(initial_state.R_cos.shape[0]) if initial_state is not None else None
+    vacuum_continuation = None
+    constraint_continuation = None
+    ns_min = 0
+    stage_result = None
+    modes = mode_table(int(inp.mpol), int(inp.ntor))
+    for igrid in range(n_stages):
+        nsval = int(ns_arr[igrid])
+        if nsval < ns_min:
+            continue
+        ns_min = nsval
+        resolution = resolution_from_input(inp, ns=nsval)
+        same_grid = previous_ns == nsval
+        if state is not None and previous_ns != nsval:
+            # initialize_radial.f interpolates pxstore only when ns increases;
+            # an equal-grid entry returns before allocation/interpolation and
+            # therefore reruns the current xc state unchanged.
+            state = interpolate_state(
+                interpolation_source, ns_fine=nsval, modes=modes)
+
+        last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
+        target = _placement_device(device, resolution)
+        external_field = _put_numeric_leaves(external_field, target)
+        state = _put_numeric_leaves(state, target)
+        constraint_continuation = _put_numeric_leaves(
+            constraint_continuation, target)
+        if (vacuum_continuation is not None and target is not None
+                and any(getattr(vacuum_continuation, name) is not None for name in (
+                    "bsqvac", "rbsq", "mode_matrix", "bvec_nonsing", "potvac",
+                ))):
+            vacuum_continuation = replace(
+                vacuum_continuation,
+                bsqvac=_put_numeric_leaves(vacuum_continuation.bsqvac, target),
+                rbsq=_put_numeric_leaves(vacuum_continuation.rbsq, target),
+                mode_matrix=_put_numeric_leaves(
+                    vacuum_continuation.mode_matrix, target),
+                bvec_nonsing=_put_numeric_leaves(
+                    vacuum_continuation.bvec_nonsing, target),
+                potvac=_put_numeric_leaves(vacuum_continuation.potvac, target),
+            )
+        with device_context(device, resolution):
+            stage_result = _solve_free_boundary_stage(
+                inp, external_field=external_field, resolution=resolution,
+                ftol=float(ftol_arr[igrid]),
+                max_iterations=int(niter_arr[igrid]), verbose=verbose,
+                emit=emit,
+                error_on_no_convergence=bool(
+                    last_stage and raise_on_max_iterations),
+                initial_state=state,
+                vacuum_continuation=vacuum_continuation,
+                time_step=time_step, tcon0=tcon0, gamma=gamma, nstep=nstep,
+                lconm1=lconm1,
+                precon_type=precon_type,
+                prec2d_threshold=prec2d_threshold, prec2d=prec2d,
+                jacobian_retries=jacobian_retries,
+                constraint_continuation=(
+                    constraint_continuation if same_grid else None),
+                reuse_vacuum_cache=bool(same_grid),
+            )
+        # allocate_ns.f overwrites xstore from old xc before interp.f, so the
+        # effective VMEC2000 source is the stage's final state, not its
+        # best-residual restart checkpoint.
+        interpolation_source = stage_result.result.state
+        state = stage_result.result.state
+        previous_ns = nsval
+        vacuum_continuation = stage_result.vacuum
+        constraint_continuation = (stage_result.rcon0, stage_result.zcon0)
+
+    if stage_result is None:  # defensive; positive ns_arr guarantees a stage
+        raise ValueError("ns_array has no executable stages")
+    return stage_result.result

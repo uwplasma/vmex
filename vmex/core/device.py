@@ -44,6 +44,7 @@ import contextlib
 from typing import Any
 
 import jax
+import numpy as np
 
 __all__ = [
     "AUTO",
@@ -180,3 +181,23 @@ def device_context(device: Any = AUTO, resolution: Any = None):
     if dev is None:
         return contextlib.nullcontext()
     return jax.default_device(dev)
+
+
+def _placement_device(device: Any = AUTO, resolution: Any = None):
+    """Concrete target for already-committed input arrays, or ``None``."""
+    dev = resolve_device(device, resolution)
+    if dev is not None or device is None:
+        return dev
+    configured = jax.config.jax_default_device
+    return configured if configured is not None else jax.devices()[0]
+
+
+def _put_numeric_leaves(value: Any, device: Any):
+    """Move registered-pytree array leaves while preserving metadata/objects."""
+    if value is None or device is None:
+        return value
+    return jax.tree.map(
+        lambda leaf: jax.device_put(leaf, device)
+        if isinstance(leaf, (jax.Array, np.ndarray)) else leaf,
+        value,
+    )

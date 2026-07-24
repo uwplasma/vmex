@@ -63,6 +63,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 
 from vmex.core import multigrid, solver
+from vmex.core.errors import VmecJacobianError
 from vmex.core.input import VmecInput
 
 pytestmark = pytest.mark.usefixtures("_module_jit_enabled")  # full solves: run jitted
@@ -251,6 +252,183 @@ def test_ladder_skips_decreasing_stages():
     assert result.converged
     np.testing.assert_allclose(result.wb, VMEC2000_LADDER_WB["cth_like_fixed_bdy"],
                                rtol=5e-12)
+
+
+def test_ladder_forwards_explicit_2d_preconditioner(monkeypatch):
+    seen = []
+    marker = object()
+
+    def stop_after_prepare(*args, **kwargs):
+        seen.append(kwargs)
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(multigrid, "prepare_runtime", stop_after_prepare)
+    with pytest.raises(RuntimeError, match="stop"):
+        multigrid.solve_multigrid(
+            _load_input("cth_like_fixed_bdy"), ns_array=[5],
+            precon_type="NONE", prec2d_threshold=3e-7, prec2d=marker,
+        )
+    assert seen[0]["precon_type"] == "NONE"
+    assert seen[0]["prec2d_threshold"] == 3e-7
+    assert seen[0]["prec2d"] is marker
+
+
+def test_lmove_axis_high_first_force_retry_and_opt_out(capsys) -> None:
+    """funct3d.f irst=4: finite first force >1e2 retries the axis once."""
+    import dataclasses
+
+    inp = _load_input("solovev")
+    bad_axis = np.asarray([4.4])
+    enabled = dataclasses.replace(
+        inp, raxis_c=bad_axis, niter_array=np.asarray([2]), nstep=1,
+        lmove_axis=True,
+    )
+    retried = multigrid.solve_multigrid(
+        enabled, raise_on_max_iterations=False, verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS" in output
+    # Local xvmec2000/PARVMEC 9.0 gives these same first two post-retry rows.
+    np.testing.assert_allclose(
+        retried.fsq_history[:, :3],
+        [
+            [0.03502655, 0.00397168, 0.01427437],
+            [0.09080383, 0.08646060, 0.11152927],
+        ],
+        rtol=2e-6,
+    )
+    assert retried.r00 == pytest.approx(3.8237007872, rel=2e-10)
+
+    disabled = dataclasses.replace(enabled, lmove_axis=False)
+    not_retried = multigrid.solve_multigrid(
+        disabled, raise_on_max_iterations=False, verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS" not in output
+    assert not_retried.fsq_history[0, :3].sum() > 1.0e2
+
+
+def test_jac75_best_checkpoint_retry_converges_to_same_equilibrium(
+    capsys,
+) -> None:
+    """VMEX's bounded recovery replaces VMEC's manual change-DELT rerun."""
+    import dataclasses
+
+    base = dataclasses.replace(
+        _load_input("solovev"),
+        lforbal=True,
+        ns_array=np.asarray([11]),
+        ftol_array=np.asarray([1.0e-7]),
+        niter_array=np.asarray([500]),
+        delt=0.5,
+    )
+    reference = multigrid.solve_multigrid(
+        base, device="cpu", jacobian_retries=0,
+    )
+
+    unstable = dataclasses.replace(base, delt=1.0e4)
+    with pytest.raises(VmecJacobianError) as exc:
+        multigrid.solve_multigrid(
+            unstable, device="cpu", jacobian_retries=0,
+        )
+    assert exc.value.jacobian_resets == 75
+
+    recovered = multigrid.solve_multigrid(
+        unstable, device="cpu", jacobian_retries=2, verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "JACOBIAN RECOVERY RETRY 1/2" in output
+    assert recovered.converged
+    np.testing.assert_allclose(
+        [recovered.wb, recovered.wp, recovered.r00],
+        [reference.wb, reference.wp, reference.r00],
+        rtol=2.0e-12,
+        atol=2.0e-14,
+    )
+
+
+def test_lforbal_thirty_rows_and_cache_refresh_match_vmec2000() -> None:
+    """Non-variational m=1 balance matches across the ns4=25 refresh."""
+    import dataclasses
+
+    inp = dataclasses.replace(
+        _load_input("solovev"),
+        lforbal=True,
+        lmove_axis=False,
+        nstep=25,
+        niter_array=np.asarray([30]),
+        ftol_array=np.asarray([1.0e-30]),
+    )
+    result = multigrid.solve_multigrid(
+        inp, raise_on_max_iterations=False, device="cpu"
+    )
+    # Fresh local xvmec2000/PARVMEC 9.0 run of this public deck prints:
+    #   1  8.33E-02  4.94E-04  3.21E-02
+    #   2  6.82E-03  1.41E-03  4.37E-03
+    #   3  1.52E-02  9.15E-04  6.98E-03
+    expected_first = [
+        ["8.33E-02", "4.94E-04", "3.21E-02"],
+        ["6.82E-03", "1.41E-03", "4.37E-03"],
+        ["1.52E-02", "9.15E-04", "6.98E-03"],
+    ]
+    got_first = [
+        [f"{value:.2E}" for value in row[:3]]
+        for row in result.fsq_history[:3]
+    ]
+    assert got_first == expected_first
+    # A fresh local xvmec2000/PARVMEC 9.0 run also prints
+    #  25  4.24E-03  8.46E-04  1.39E-03
+    #  30  6.47E-04  4.25E-04  4.89E-04
+    # so the row after VMEC's iteration-26 cache refresh is covered, not
+    # merely the initial frozen force-balance factors.
+    assert [
+        [f"{value:.2E}" for value in result.fsq_history[i, :3]]
+        for i in (24, 29)
+    ] == [
+        ["4.24E-03", "8.46E-04", "1.39E-03"],
+        ["6.47E-04", "4.25E-04", "4.89E-04"],
+    ]
+    assert result.r00 == pytest.approx(3.9897106225, rel=2e-10)
+    assert result.wmhd == pytest.approx(2.5489005543, rel=2e-10)
+
+    # Collaborator regression: before this port, deleting LFORBAL produced
+    # the same trajectory because the normal solver silently ignored the
+    # flag.  The supported default-F formulation remains the established
+    # VMEC2000 row and is now detectably distinct from the T formulation.
+    variational = multigrid.solve_multigrid(
+        dataclasses.replace(
+            inp,
+            lforbal=False,
+            niter_array=np.asarray([1]),
+        ),
+        raise_on_max_iterations=False,
+        device="cpu",
+    )
+    assert [f"{value:.2E}" for value in variational.fsq_history[0, :3]] == [
+        "9.41E-02", "2.76E-03", "3.21E-02",
+    ]
+    assert not np.allclose(
+        variational.fsq_history[0, :2], result.fsq_history[0, :2]
+    )
+
+
+def test_niter_exhausted_stage_transfers_final_xc_like_vmec2000() -> None:
+    """allocate_ns.f overwrites xstore from old final xc before interp.f."""
+    inp = _load_input("solovev")
+    result = multigrid.solve_multigrid(
+        inp, ns_array=[7, 11], ftol_array=[1e-30, 1e-30],
+        niter_array=[2, 1], raise_on_max_iterations=False,
+    )
+    # Local xvmec2000/PARVMEC 9.0 on this public ladder prints, at the first
+    # ns=11 pass: 1.86E-02, 1.09E-03, 7.46E-03, RAX=3.864.  Interpolating the
+    # best-residual checkpoint instead gives the detectably different
+    # 8.29E-03, 8.16E-04, 4.68E-03, RAX=3.936.
+    np.testing.assert_allclose(
+        result.fsq_history[0, :3],
+        [0.01861506, 0.00108547, 0.00745712],
+        rtol=2e-6,
+    )
+    assert result.r00 == pytest.approx(3.8635255062, rel=2e-10)
 
 
 # ---------------------------------------------------------------------------

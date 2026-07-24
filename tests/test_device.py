@@ -8,12 +8,14 @@ decision, not the presence of an accelerator.
 from __future__ import annotations
 
 import contextlib
+from types import SimpleNamespace
 
 import jax
+import numpy as np
 import pytest
 
 from vmex.core import device as dev
-from vmex.core import freeboundary
+from vmex.core import freeboundary, multigrid
 from vmex.core.fourier import Resolution
 
 
@@ -159,6 +161,17 @@ def test_device_context_wraps_default_device_for_explicit_cpu():
         pass
 
 
+def test_put_numeric_leaves_preserves_metadata_and_none_contract():
+    resolution = _res(ns=11, mpol=6, ntor=0)
+    assert dev._placement_device(None, resolution) is None
+    cpu = jax.devices("cpu")[0]
+    moved = dev._put_numeric_leaves(
+        {"array": np.ones(2), "metadata": "kept"}, cpu,
+    )
+    assert moved["array"].device.platform == "cpu"
+    assert moved["metadata"] == "kept"
+
+
 def test_free_boundary_uses_shared_device_context(monkeypatch):
     resolution = _res(ns=11, mpol=6, ntor=0)
     seen = {}
@@ -170,10 +183,10 @@ def test_free_boundary_uses_shared_device_context(monkeypatch):
 
     def fake_solve(inp, **kwargs):
         seen["solve"] = (inp, kwargs)
-        return "result"
+        return SimpleNamespace(result="result")
 
     monkeypatch.setattr(freeboundary, "device_context", fake_context)
-    monkeypatch.setattr(freeboundary, "_solve_free_boundary_impl", fake_solve)
+    monkeypatch.setattr(freeboundary, "_solve_free_boundary_stage", fake_solve)
     inp = object()
     result = freeboundary.solve_free_boundary(
         inp, resolution=resolution, device="cpu", max_iterations=3
@@ -184,3 +197,5 @@ def test_free_boundary_uses_shared_device_context(monkeypatch):
     assert seen["solve"][0] is inp
     assert seen["solve"][1]["resolution"] is resolution
     assert seen["solve"][1]["max_iterations"] == 3
+    assert freeboundary.solve_free_boundary.__kwdefaults__["device"] == dev.AUTO
+    assert multigrid.solve_free_boundary_multigrid.__kwdefaults__["device"] == dev.AUTO

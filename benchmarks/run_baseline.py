@@ -221,17 +221,13 @@ from vmex.core.input import VmecInput
 from vmex.core.multigrid import solve_multigrid
 
 def run(path):
-    # Same route as the ``vmec`` CLI (core/cli.py): fixed-boundary decks run
-    # the full NS_ARRAY ladder; free-boundary decks run the final stage.
+    # Same route as the ``vmec`` CLI (core/cli.py): both fixed- and
+    # free-boundary decks run the full NS_ARRAY ladder.
     inp = VmecInput.from_file(path)
     if bool(getattr(inp, "lfreeb", False)):
-        from vmex.core.freeboundary import solve_free_boundary
-        from vmex.core.solver import resolution_from_input
-
-        ns = int(np.atleast_1d(np.asarray(inp.ns_array))[-1])
-        return solve_free_boundary(
-            inp, resolution=resolution_from_input(inp, ns=ns),
-            error_on_no_convergence=False,
+        from vmex.core.multigrid import solve_free_boundary_multigrid
+        return solve_free_boundary_multigrid(
+            inp, raise_on_max_iterations=False,
         )
     return solve_multigrid(inp)
 

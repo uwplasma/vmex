@@ -38,6 +38,7 @@ from vmex.core.geometry import (
     real_space_geometry,
 )
 from vmex.core.input import VmecInput
+from vmex.core.setup import run_setup
 from vmex.core.solver import (
     _geometry,
     _initial_state,
@@ -63,7 +64,13 @@ def case(request):
     """Initial state + a pure new-core pipeline closure for one deck."""
     name = request.param
     inp = VmecInput.from_file(DATA_DIR / f"input.{name}")
-    rt = prepare_runtime(inp, resolution_from_input(inp))
+    resolution = resolution_from_input(inp)
+    # These are kernel tests, not production-driver tests: construct a
+    # regular geometry even when a public deck supplies an all-zero axis.
+    # Production intentionally starts from that supplied axis and lets
+    # eqsolve perform its single VMEC2000-compatible recovery transfer.
+    setup = run_setup(inp, resolution, infer_axis_if_missing=True)
+    rt = prepare_runtime(inp, resolution, setup=setup)
     setup = rt.setup
     state = _initial_state(setup)
     s = setup.s_full
