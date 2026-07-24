@@ -272,7 +272,8 @@ def _lgradb_grid(
     wout-lane :func:`vmex.core.optimize.l_grad_b` and the traceable
     :func:`vmex.core.optimize.l_grad_b_state` (via
     :func:`_lgradb_state_tables`), which therefore agree to float round-off.
-    Symmetric configurations only (lasym sine partners are ignored).
+    Symmetric configurations only.  Public callers must reject ``lasym=True``
+    rather than silently omitting the asymmetric Fourier partners.
     """
     ns = int(ns)
     j = max(1, min(int(s_index) % ns, ns - 1))
@@ -426,8 +427,7 @@ def _lgradb_state_tables(state: SpectralState, rt: SolverRuntime) -> dict:
     setup = rt.setup
     if bool(setup.lasym):
         raise NotImplementedError(
-            "l_grad_b_state supports lasym = False only (the wout-lane "
-            "l_grad_b ignores the lasym sine partners too)")
+            "l_grad_b_state supports lasym = False only")
     res = rt.resolution
     nfp = int(res.nfp)
     ns = int(np.shape(state.R_cos)[0])

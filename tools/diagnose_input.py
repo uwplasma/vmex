@@ -23,8 +23,14 @@ import jax
 import numpy as np
 
 from vmex.core.geometry import half_mesh_jacobian
-from vmex.core.input import VmecInput, _read_indata_text
-from vmex.core.solver import _geometry, _initial_state, evaluate_forces, prepare_runtime
+from vmex.core.input import UnsupportedInputModeError, VmecInput
+from vmex.core.solver import (
+    _geometry,
+    _initial_state,
+    evaluate_forces,
+    prepare_runtime,
+    reguess_initial_axis,
+)
 
 
 def _named_arrays(value: Any, prefix: str = ""):
@@ -64,30 +70,6 @@ def _ok(value: Any) -> bool:
     return bool(np.asarray(value))
 
 
-def _unsupported_mode_code(text: str) -> str | None:
-    """Return a value-free code for active VMEC modes VMEX does not solve."""
-    if text.lstrip()[:1] == "{":
-        return None
-    scalars, _indexed = _read_indata_text(text)
-
-    def first(name: str, default: Any = None) -> Any:
-        values = scalars.get(name)
-        return values[0] if values else default
-
-    # vsetup.f starts with LRECON=T, while read_indata.f disables it when
-    # neither diagnostic profile is active.  Reproduce that effective-mode
-    # decision so an inert explicit LRECON=T is not a false positive.
-    reconstruction_requested = bool(first("LRECON", True))
-    reconstruction_active = reconstruction_requested and (
-        int(first("ITSE", 0)) > 0 or int(first("IMSE", -1)) > 0
-    )
-    if reconstruction_active:
-        return "D00A_RECONSTRUCTION_MODE_UNSUPPORTED"
-    if bool(first("LRFP", False)):
-        return "D00B_RFP_MODE_UNSUPPORTED"
-    return None
-
-
 def _print_header() -> None:
     print("VMEX first-iteration diagnostic (shareable, input details redacted)")
     print(
@@ -99,20 +81,61 @@ def _print_header() -> None:
 
 
 def diagnose(path: Path, *, details: bool = False) -> int:
-    text = path.read_text()
-    unsupported = _unsupported_mode_code(text)
     _print_header()
-    if unsupported is not None:
+    try:
+        inp = VmecInput.from_file(path)
+    except UnsupportedInputModeError as exc:
+        print("input parsing: PASS")
         print("input physics mode supported: FAIL")
-        print(f"assessment: {unsupported}")
+        print(f"assessment: {exc.code}")
+        return 1
+    except ValueError:
+        # Keep the default diagnostic shareable: parsing exceptions can quote
+        # filenames, namelist designators, and input-derived values.
+        print("input parsing: FAIL")
+        print("assessment: D00C_INPUT_PARSE_ERROR")
         return 1
 
-    inp = VmecInput.from_file(path)
+    print("input parsing: PASS")
+
     rt = prepare_runtime(inp)
+    theta_floor = 2 * int(inp.mpol) + 6
+    zeta_floor = 1 if int(inp.ntor) == 0 else 2 * int(inp.ntor) + 4
+    angular_grid_ok = (
+        (int(inp.ntheta) <= 0 or int(inp.ntheta) >= theta_floor)
+        and (int(inp.nzeta) <= 0 or int(inp.nzeta) >= zeta_floor)
+    )
     state = _initial_state(rt.setup)
     _, geometry = _geometry(state, rt)
     jacobian = half_mesh_jacobian(geometry, s=rt.setup.s_full)
     gc, residuals, diagnostics = evaluate_forces(state, rt)
+    initial_sqrt_g = np.asarray(jacobian.sqrt_g)[1:]
+    initial_jacobian_good = (
+        np.isfinite(initial_sqrt_g).all()
+        and np.all(initial_sqrt_g != 0.0)
+        and not bool(jacobian.jacobian_sign_changed)
+    )
+    initial_fsq = np.asarray(
+        [residuals.fsqr, residuals.fsqz, residuals.fsql], dtype=float
+    )
+    high_first_force = (
+        initial_jacobian_good
+        and np.isfinite(initial_fsq).all()
+        and float(np.sum(initial_fsq)) > 1.0e2
+    )
+    recovery_required = (
+        not initial_jacobian_good
+        or (high_first_force and bool(inp.lmove_axis))
+    )
+    if recovery_required and rt.resolution.ns >= 3:
+        # Diagnose the effective first force that VMEC2000/VMEX actually
+        # evolve after eqsolve.f's one allowed guess_axis transfer.  The
+        # discarded zero-axis/high-force pass contains no shareable solver
+        # result and must not hide a later normalization failure.
+        rt, state, _ = reguess_initial_axis(rt, state)
+        _, geometry = _geometry(state, rt)
+        jacobian = half_mesh_jacobian(geometry, s=rt.setup.s_full)
+        gc, residuals, diagnostics = evaluate_forces(state, rt)
 
     axis_supplied = any(
         np.any(np.asarray(value) != 0.0)
@@ -135,6 +158,10 @@ def diagnose(path: Path, *, details: bool = False) -> int:
     health = diagnostics.health
 
     print("input physics mode supported: PASS")
+    print(
+        "angular grid meets VMEC automatic-resolution floor: "
+        f"{'PASS' if angular_grid_ok else 'FAIL'}"
+    )
     sqrt_g = np.asarray(jacobian.sqrt_g)[1:]
     jacobian_finite = np.isfinite(sqrt_g).all()
     jacobian_nonzero = _ok(health.jacobian_nonzero)
@@ -157,7 +184,21 @@ def diagnose(path: Path, *, details: bool = False) -> int:
         and _ok(health.raw_lambda_sum_finite)
     )
     print(f"setup arrays finite: {'PASS' if not setup_bad else 'FAIL'}")
-    print(f"initial Jacobian valid: {'PASS' if jacobian_good else 'FAIL'}")
+    print(
+        "initial Jacobian valid: "
+        f"{'PASS' if initial_jacobian_good else 'FAIL'}"
+    )
+    axis_recovery = (
+        "REQUIRED" if recovery_required
+        else "DISABLED" if high_first_force and not inp.lmove_axis
+        else "NOT_REQUIRED"
+    )
+    print(f"automatic first-pass axis recovery: {axis_recovery}")
+    if recovery_required:
+        print(
+            "post-recovery Jacobian valid: "
+            f"{'PASS' if jacobian_good else 'FAIL'}"
+        )
     print(f"magnetic field assembly finite: {'PASS' if _ok(health.fields_finite) else 'FAIL'}")
     print(f"R/Z force normalization valid: {'PASS' if rz_norm_good else 'FAIL'}")
     print(f"lambda force normalization valid: {'PASS' if lambda_norm_good else 'FAIL'}")
@@ -211,7 +252,7 @@ def diagnose(path: Path, *, details: bool = False) -> int:
         )
         print(
             "axis: "
-            f"input={'supplied' if axis_supplied else 'missing -> inferred'} "
+            f"input={'supplied' if axis_supplied else 'missing -> VMEC first-pass recovery'} "
             f"R(0)={float(np.sum(np.asarray(rt.setup.raxis_c))):.6e} "
             f"Z-coeff-max={float(np.max(np.abs(np.asarray(rt.setup.zaxis_s)))):.6e}"
         )
@@ -308,6 +349,8 @@ def diagnose(path: Path, *, details: bool = False) -> int:
         assessment = "D04_PRECONDITIONED_UPDATE_NONFINITE"
     elif diagnostic_bad:
         assessment = "D05_FORCE_DIAGNOSTIC_NONFINITE"
+    elif not angular_grid_ok:
+        assessment = "W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT"
     else:
         assessment = "OK_FIRST_FORCE_PASS_FINITE"
     print(f"assessment: {assessment}")
