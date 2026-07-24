@@ -38,3 +38,10 @@ def test_production_runtime_does_not_preinfer_missing_axis() -> None:
         inp, resolution, infer_axis_if_missing=True,
     )
     assert np.any(np.asarray(inferred.raxis_c) != 0.0)
+
+    # Geometry/force-kernel callers can opt into the setup convenience
+    # explicitly without changing the production default.
+    inferred_runtime = prepare_runtime(inp, resolution, setup=inferred)
+    np.testing.assert_array_equal(
+        inferred_runtime.setup.raxis_c, inferred.raxis_c,
+    )
