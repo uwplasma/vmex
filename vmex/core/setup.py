@@ -934,9 +934,11 @@ def run_setup(
         Apply the m = 1 constraint conversion (VMEC2000 default T).
     infer_axis_if_missing:
         When every input axis coefficient is zero, run :func:`guess_axis` on
-        the zero-axis interior guess and re-blend (the legacy driver default;
-        VMEC2000 itself would start from the zero axis and only call
-        ``guess_axis`` after the first bad-Jacobian restart).
+        the zero-axis interior guess and re-blend.  This is an explicit
+        geometry/setup convenience; production solver construction passes
+        ``False`` because VMEC2000 starts from the supplied zero axis and
+        calls ``guess_axis`` exactly once after its first bad-Jacobian or
+        high-force control transfer.
 
     Returns
     -------

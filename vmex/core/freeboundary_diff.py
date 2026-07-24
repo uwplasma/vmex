@@ -337,10 +337,15 @@ def surface_field_data_from_state(
     ``jax.grad`` threads through both this surface field and the coil field.
 
     ``inp`` supplies the static resolution / profile metadata; ``state`` the
-    (possibly traced) spectral geometry.  Stellarator-symmetric only for now
-    (``lasym`` uses the same path but is untested here).
+    (possibly traced) spectral geometry.  Stellarator-symmetric only for now;
+    ``lasym=True`` is rejected because this path has not been validated with
+    the asymmetric surface-field channels.
     """
     _require_vcj()
+    if bool(inp.lasym):
+        raise NotImplementedError(
+            "surface_field_data_from_state supports lasym = False only"
+        )
     from .fields import magnetic_fields, metric_elements
     from .fourier import Resolution, mode_table, trig_tables
     from .geometry import (

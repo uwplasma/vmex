@@ -7,17 +7,21 @@ VMEC2000 counterparts: ``LIBSTELL/Sources/Modules/vmec_input.f``
 ``{"m": int, "n": int, "value": float}`` lists, dense axis arrays, and
 ``adiabatic_index`` accepted as an alias for ``gamma``.
 
-:class:`VmecInput` is a frozen dataclass holding the full INDATA content this
-code base consumes, with VMEC2000 defaults.  Parsing is host-side NumPy code
-(nothing here needs JAX).
+:class:`VmecInput` is a frozen dataclass holding the INDATA content this code
+base actually consumes, with VMEC2000 defaults.  Parsing is host-side NumPy
+code (nothing here needs JAX).  Controls which would change the mathematical
+problem or iteration contract but are not implemented are rejected by
+:class:`UnsupportedInputModeError`; they are never silently converted into an
+ordinary fixed-/free-boundary solve.
 
 Normalizations applied on construction (all from VMEC2000):
 
 * ``read_indata_namelist``: ``raxis_s[0] = 0`` and ``zaxis_s[0] = 0``; the
   obsolete ``RAXIS``/``ZAXIS`` arrays override ``RAXIS_CC``/``ZAXIS_CS`` where
   nonzero; ``niter_array`` falls back to ``NITER`` when absent.
-* ``readin.f``: ``lfreeb`` is forced ``False`` when ``mgrid_file == 'NONE'``;
-  ``nvacskip <= 0`` falls back to ``nfp``.
+* ``readin.f``: the explicit legacy ``NS_ARRAY(1)=0`` form expands to
+  ``[max(3, NSIN), 31]``; ``lfreeb`` is forced ``False`` when
+  ``mgrid_file == 'NONE'``; ``nvacskip <= 0`` falls back to ``nfp``.
 * Boundary coefficients outside ``|n| <= ntor``, ``0 <= m < mpol`` are
   dropped (VMEC2000 reads them into oversized arrays but never uses them).
 
@@ -30,16 +34,33 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from dataclasses import dataclass, fields
+from itertools import product
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 
-__all__ = ["VmecInput"]
+__all__ = ["UnsupportedInputModeError", "VmecInput"]
 
 Scalar = Union[str, bool, int, float]
 IndexComponent = Union[int, slice]
+
+
+class UnsupportedInputModeError(ValueError):
+    """An input requests semantics which VMEX does not implement.
+
+    ``code`` is a stable, value-free diagnostic code suitable for the
+    privacy-preserving input checker.  ``control`` names the INDATA/JSON
+    control without echoing its value or any equilibrium data.
+    """
+
+    def __init__(self, code: str, control: str, reason: str):
+        self.code = str(code)
+        self.control = str(control)
+        self.reason = str(reason)
+        super().__init__(f"{self.control}: {self.reason}")
 
 # ---------------------------------------------------------------------------
 # Tolerant Fortran-namelist tokenizer (targeted at VMEC &INDATA files)
@@ -49,6 +70,39 @@ _ASSIGN_RE = re.compile(r"(?P<key>[A-Za-z_]\w*(?:\([^\)]*\))?)\s*=", re.MULTILIN
 _REPEAT_RE = re.compile(r"^(?P<count>\d+)\*(?P<value>.+)$")
 _BOOL_TRUE = {"T", ".T.", ".TRUE.", "TRUE"}
 _BOOL_FALSE = {"F", ".F.", ".FALSE.", "FALSE"}
+
+# Complete &INDATA name inventory from
+# STELLOPT/LIBSTELL/Sources/Modules/vmec_input.f, plus the documented VMEX
+# Boozer post-processing extension.  Values may be supported, explicitly
+# rejected when active, or accepted as output-only compatibility controls;
+# an unclassified spelling is always an input error.
+_KNOWN_INDATA_NAMES = {
+    "MGRID_FILE", "TIME_SLICE", "NFP", "NCURR", "NSIN", "NITER", "NSTEP",
+    "NVACSKIP", "DELT", "FTOL", "GAMMA", "BLOAT", "AM", "AI", "AC", "APHI",
+    "PCURR_TYPE", "PMASS_TYPE", "PIOTA_TYPE",
+    "AM_AUX_S", "AM_AUX_F", "AI_AUX_S", "AI_AUX_F", "AC_AUX_S", "AC_AUX_F",
+    "AH", "AT", "BCRIT", "PH_TYPE", "AH_AUX_S", "AH_AUX_F",
+    "PT_TYPE", "AT_AUX_S", "AT_AUX_F",
+    "RBC", "ZBS", "RBS", "ZBC", "SPRES_PED", "PRES_SCALE",
+    "RAXIS_CC", "ZAXIS_CS", "RAXIS_CS", "ZAXIS_CC", "RAXIS", "ZAXIS",
+    "MPOL", "NTOR", "NTHETA", "NZETA", "MFILTER_FBDY", "NFILTER_FBDY",
+    "NITER_ARRAY", "PRE_NITER", "NS_ARRAY", "FTOL_ARRAY", "TCON0",
+    "PRECON_TYPE", "PREC2D_THRESHOLD", "CURTOR", "SIGMA_CURRENT", "EXTCUR",
+    "OMP_NUM_THREADS", "PHIEDGE",
+    "PSA", "PFA", "ISA", "IFA", "IMATCH_PHIEDGE", "IOPT_RAXIS",
+    "TENSI", "TENSP", "MSEANGLE_OFFSET", "MSEANGLE_OFFSETM", "IMSE",
+    "ISNODES", "RSTARK", "DATASTARK", "SIGMA_STARK", "ITSE", "IPNODES",
+    "PRESFAC", "PRES_OFFSET", "RTHOM", "DATATHOM", "SIGMA_THOM", "PHIDIAM",
+    "SIGMA_DELPHID", "TENSI2", "FPOLYI", "NFLXS", "INDXFLX", "DSIOBT",
+    "SIGMA_FLUX", "NBFLD", "INDXBFLD", "BBC", "SIGMA_B", "LPOFR",
+    "LFORBAL", "LFREEB", "LMOVE_AXIS", "LRECON", "LMAC", "LMOVIE",
+    "LASYM", "LEDGE_DUMP", "LSPECTRUM_DUMP", "LOPTIM", "LRFP",
+    "LOLDOUT", "LWOUTTXT", "LDIAGNO", "LFULL3D1OUT",
+    "MAX_MAIN_ITERATIONS", "LGIVEUP", "FGIVEUP", "LBSUBS", "TRIP3D_FILE",
+    "LNYQUIST", "TVOLUME", "LVOLUME_RFIX",
+    # VMEX post-processing spellings found in the repository's input decks.
+    "LBOOZ", "MBOOZ", "NBOOZ", "BOOZ_SURFACES",
+}
 
 
 def _strip_fortran_comments(line: str) -> str:
@@ -170,35 +224,65 @@ def _read_indata_text(text: str) -> tuple[Dict[str, List[Scalar]], Dict[str, Dic
             continue
         if idx is None:
             scalars[name] = values
+        elif any(isinstance(component, slice) for component in idx):
+            # Fortran fills an array section in column-major order: the first
+            # subscript varies fastest.  This matters for compact VMEC boundary
+            # assignments such as ``RBC(-6:6,0) = ...`` and for sections that
+            # span both Fourier indices.
+            axes: list[list[int]] = []
+            n_slices = sum(isinstance(component, slice) for component in idx)
+            for component in idx:
+                if not isinstance(component, slice):
+                    axes.append([component])
+                    continue
+                step = 1 if component.step is None else component.step
+                if component.start is None:
+                    # The declared bounds of VMEC arrays are not available to
+                    # the generic tokenizer.  ``KEY(:)`` is handled as a dense
+                    # assignment above; mixed sections must state their bound.
+                    raise ValueError(f"array section needs a lower bound: {m.group('key')}")
+                if component.stop is None:
+                    # An open upper bound is unambiguous only when every other
+                    # subscript is scalar, in which case supplied values set
+                    # the section length.
+                    if n_slices != 1:
+                        raise ValueError(
+                            f"ambiguous open multidimensional array section: {m.group('key')}"
+                        )
+                    positions = [
+                        component.start + step * j for j in range(len(values))
+                    ]
+                else:
+                    end = component.stop + (1 if step > 0 else -1)
+                    positions = list(range(component.start, end, step))
+                axes.append(positions)
+
+            # itertools.product varies its last input fastest, so reverse both
+            # the axes and each result to obtain Fortran array-element order.
+            positions_nd = [
+                tuple(reversed(position))
+                for position in product(*reversed(axes))
+            ]
+            if len(values) > len(positions_nd):
+                raise ValueError(
+                    f"too many values for namelist array section: {m.group('key')}"
+                )
+            entries = indexed.setdefault(name, {})
+            for position, value in zip(positions_nd, values):
+                entries[position] = value
         elif len(idx) == 1:
             # A one-dimensional namelist designator identifies the first
             # destination element, not a scalar-only assignment.  Thus
             # ``APHI(1)=0,1`` initializes APHI(1:2), exactly like VMEC2000.
-            # Array sections use inclusive Fortran bounds; an omitted upper
-            # bound consumes as many destinations as values supplied.
-            component = idx[0]
-            if isinstance(component, slice):
-                step = 1 if component.step is None else component.step
-                if component.start is None:
-                    # The only lower-bound-free form accepted here is a whole
-                    # vector, already handled as a dense assignment above.
-                    raise ValueError(f"array section needs a lower bound: {m.group('key')}")
-                if component.stop is None:
-                    positions = [component.start + step * j for j in range(len(values))]
-                else:
-                    end = component.stop + (1 if step > 0 else -1)
-                    positions = list(range(component.start, end, step))
-                if len(values) > len(positions):
-                    raise ValueError(f"too many values for namelist array section: {m.group('key')}")
-            else:
-                positions = [component + j for j in range(len(values))]
+            component = int(idx[0])
+            positions = [component + j for j in range(len(values))]
             entries = indexed.setdefault(name, {})
             for position, value in zip(positions, values):
                 entries[(position,)] = value
         else:
-            if any(isinstance(component, slice) for component in idx):
-                raise ValueError(f"multidimensional array sections are unsupported: {m.group('key')}")
-            indexed.setdefault(name, {})[tuple(int(component) for component in idx)] = values[0]
+            indexed.setdefault(name, {})[
+                tuple(int(component) for component in idx)
+            ] = values[0]
     return scalars, indexed
 
 
@@ -252,6 +336,162 @@ def _trim_aux(aux_s, aux_f) -> tuple[np.ndarray, np.ndarray]:
     return s[:n_valid].copy(), f[:n_valid].copy()
 
 
+def _indata_values(
+    name: str,
+    scalars: Dict[str, List[Scalar]],
+    indexed: Dict[str, Dict[Tuple[int, ...], Scalar]],
+) -> list[Scalar]:
+    """All explicitly assigned values for one INDATA variable."""
+    return list(scalars.get(name, ())) + list(indexed.get(name, {}).values())
+
+
+def _validate_indata_modes(
+    scalars: Dict[str, List[Scalar]],
+    indexed: Dict[str, Dict[Tuple[int, ...], Scalar]],
+) -> None:
+    """Reject active VMEC2000 modes that VMEX cannot faithfully execute.
+
+    This check deliberately runs before :class:`VmecInput` construction:
+    parsing a switch is not evidence that the production force/iteration path
+    honors it.  Neutral legacy spellings remain accepted so standard VMEC2000
+    decks need not be edited merely to remove default-valued controls.
+    """
+
+    unknown = sorted((set(scalars) | set(indexed)) - _KNOWN_INDATA_NAMES)
+    if unknown:
+        raise ValueError("unknown INDATA variable(s): " + ", ".join(unknown))
+
+    def first(name: str, default: Scalar) -> Scalar:
+        values = scalars.get(name)
+        return values[0] if values else default
+
+    reconstruction_active = bool(first("LRECON", True)) and (
+        int(first("ITSE", 0)) > 0 or int(first("IMSE", -1)) > 0
+    )
+    if reconstruction_active:
+        raise UnsupportedInputModeError(
+            "D00A_RECONSTRUCTION_MODE_UNSUPPORTED",
+            "LRECON/ITSE/IMSE",
+            "equilibrium reconstruction is not implemented",
+        )
+    if bool(first("LRFP", False)):
+        raise UnsupportedInputModeError(
+            "D00B_RFP_MODE_UNSUPPORTED",
+            "LRFP",
+            "reversed-field-pinch profile and vacuum semantics are not implemented",
+        )
+
+    trip3d_file = str(first("TRIP3D_FILE", "NONE")).strip().strip("'\"")
+    if trip3d_file.upper() not in {"", "NONE"}:
+        raise UnsupportedInputModeError(
+            "D00E_TRIP3D_MODE_UNSUPPORTED",
+            "TRIP3D_FILE",
+            "TRIP3D external-field coupling is not implemented",
+        )
+
+    ah_active = any(float(value) != 0.0 for value in _indata_values("AH", scalars, indexed))
+    at_active = False
+    dense_at = scalars.get("AT", ())
+    if dense_at:
+        at_active = float(dense_at[0]) != 1.0 or any(
+            float(value) != 0.0 for value in dense_at[1:]
+        )
+    for position, value in indexed.get("AT", {}).items():
+        if len(position) == 1:
+            expected = 1.0 if position[0] == 0 else 0.0
+            at_active = at_active or float(value) != expected
+    if ah_active or at_active:
+        raise UnsupportedInputModeError(
+            "D00F_ANIMEC_MODE_UNSUPPORTED",
+            "AH/AT",
+            "anisotropic-pressure/flow (ANIMEC) physics is not implemented",
+        )
+
+    if float(first("TVOLUME", -1.0)) > 0.0:
+        raise UnsupportedInputModeError(
+            "D00G_VOLUME_RESCALE_UNSUPPORTED",
+            "TVOLUME/LVOLUME_RFIX",
+            "VMEC2000 boundary-volume rescaling is not implemented",
+        )
+
+    precon_type = str(first("PRECON_TYPE", "NONE")).strip().upper()
+    if precon_type not in {"", "NONE", "DEFAULT", "GMRES"}:
+        raise UnsupportedInputModeError(
+            "D00H_PRECONDITIONER_MODE_UNSUPPORTED",
+            "PRECON_TYPE",
+            "only NONE/DEFAULT (1-D) and VMEX matrix-free GMRES are implemented",
+        )
+    if precon_type == "GMRES" and int(first("PRE_NITER", -1)) != -1:
+        raise UnsupportedInputModeError(
+            "D00I_ITERATION_CONTROL_UNSUPPORTED",
+            "PRE_NITER",
+            "the VMEC2000 post-activation iteration-budget override is not implemented",
+        )
+    if int(first("MAX_MAIN_ITERATIONS", 1)) > 1:
+        raise UnsupportedInputModeError(
+            "D00I_ITERATION_CONTROL_UNSUPPORTED",
+            "MAX_MAIN_ITERATIONS",
+            "automatic continuation by additional NITER blocks is not implemented",
+        )
+    if bool(first("LGIVEUP", False)):
+        raise UnsupportedInputModeError(
+            "D00I_ITERATION_CONTROL_UNSUPPORTED",
+            "LGIVEUP/FGIVEUP",
+            "VMEC2000 early termination between multigrid stages is not implemented",
+        )
+
+    if bool(first("LBSUBS", False)):
+        raise UnsupportedInputModeError(
+            "D00J_OUTPUT_MODE_UNSUPPORTED",
+            "LBSUBS",
+            "the alternative VMEC2000 B_s WOUT diagnostic is not implemented",
+        )
+    if not bool(first("LNYQUIST", True)):
+        raise UnsupportedInputModeError(
+            "D00J_OUTPUT_MODE_UNSUPPORTED",
+            "LNYQUIST",
+            "suppressing Nyquist WOUT tables is not implemented",
+        )
+    if bool(first("LBOOZ", False)):
+        raise UnsupportedInputModeError(
+            "D00J_OUTPUT_MODE_UNSUPPORTED",
+            "LBOOZ",
+            "INDATA-driven Boozer output is not implemented; use the --booz CLI option",
+        )
+    requested_legacy_artifacts = [
+        name
+        for name in ("LMAC", "LEDGE_DUMP", "LOLDOUT", "LWOUTTXT", "LDIAGNO")
+        if bool(first(name, False))
+    ]
+    if requested_legacy_artifacts:
+        controls = "/".join(requested_legacy_artifacts)
+        warnings.warn(
+            f"{controls}: requested VMEC2000 auxiliary output artifact is not "
+            "implemented; the equilibrium solve will continue",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+
+
+def _validate_json_modes(data: Dict[str, Any]) -> None:
+    """Apply the same no-silent-fallback policy to VMEC++ JSON controls."""
+    method = str(data.get("free_boundary_method", "nestor")).strip().lower()
+    if method != "nestor":
+        raise UnsupportedInputModeError(
+            "D00K_FREE_BOUNDARY_METHOD_UNSUPPORTED",
+            "free_boundary_method",
+            "VMEX JSON solves support NESTOR; only_coils/biest are different models",
+        )
+
+    field_names = {field.name for field in fields(VmecInput)}
+    known = field_names | {"adiabatic_index", "free_boundary_method"}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        raise ValueError(
+            "unknown VMEC++ JSON input key(s): " + ", ".join(unknown)
+        )
+
+
 @dataclass(frozen=True, eq=False)
 class VmecInput:
     """Full ``&INDATA`` content with VMEC2000 semantics and defaults.
@@ -276,9 +516,13 @@ class VmecInput:
     niter_array: Any = None      #: iteration cap per stage (default [100] = NITER)
     delt: float = 1.0            #: initial time step
     tcon0: float = 1.0           #: constraint-force multiplier (bcovar.f)
+    lforbal: bool = False        #: replace m=1,n=0 R/Z forces by average force balance
+    lmove_axis: bool = True      #: improve the axis when the first force sum is > 1e2
+    lfull3d1out: bool = False    #: write a WOUT when the iteration limit is reached
     aphi: Any = None             #: radial-flux remap polynomial (default [1,0,...], len 20)
     phiedge: float = 1.0         #: total enclosed toroidal flux [Wb]
     nstep: int = 10              #: iterations between progress prints
+    time_slice: float = 0.0      #: informational value in the VMEC run header
 
     # -- pressure profile (pmass; Pa before mu0 conversion) --
     pmass_type: str = "power_series"
@@ -329,11 +573,15 @@ class VmecInput:
     def __post_init__(self) -> None:
         set_ = object.__setattr__
         set_(self, "lasym", bool(self.lasym))
+        set_(self, "lforbal", bool(self.lforbal))
+        set_(self, "lmove_axis", bool(self.lmove_axis))
+        set_(self, "lfull3d1out", bool(self.lfull3d1out))
         for name in ("nfp", "mpol", "ntor", "ntheta", "nzeta", "ncurr", "nstep",
                      "nvacskip", "mfilter_fbdy", "nfilter_fbdy"):
             set_(self, name, int(getattr(self, name)))
-        for name in ("delt", "tcon0", "phiedge", "pres_scale", "gamma", "spres_ped",
-                     "curtor", "bloat", "prec2d_threshold"):
+        for name in ("delt", "tcon0", "phiedge", "time_slice", "pres_scale",
+                     "gamma", "spres_ped", "curtor", "bloat",
+                     "prec2d_threshold"):
             set_(self, name, float(getattr(self, name)))
         for name in ("pmass_type", "pcurr_type", "piota_type"):
             set_(self, name, str(getattr(self, name)).strip().lower())
@@ -430,6 +678,7 @@ class VmecInput:
     def from_indata_text(cls, text: str) -> "VmecInput":
         """Build from ``&INDATA`` namelist text (VMEC2000 read_indata_namelist)."""
         scalars, indexed = _read_indata_text(text)
+        _validate_indata_modes(scalars, indexed)
 
         def get(name: str, default=None):
             values = scalars.get(name)
@@ -483,9 +732,11 @@ class VmecInput:
         mpol = int(get("MPOL", 6))
         ntor = int(get("NTOR", 0))
 
-        # ns_array: NS_ARRAY, or legacy NS, or the VMEC default 31.
-        ns_default = [int(get("NS", 31))]
-        ns_array = vector("NS_ARRAY", lower=1, default=ns_default)
+        # vmec_input.f initializes NS_ARRAY(1)=31.  readin.f's explicitly
+        # requested old-style sentinel NS_ARRAY(1)=0 expands to NSIN then 31.
+        ns_array = vector("NS_ARRAY", lower=1, default=[31])
+        if ns_array.size and int(ns_array[0]) == 0:
+            ns_array = np.asarray([max(3, int(get("NSIN", 31))), 31], dtype=np.int64)
         ns_positive = np.asarray(ns_array, dtype=np.int64) > 0
         n_stages = (
             int(np.argmax(~ns_positive)) if np.any(~ns_positive) else len(ns_array)
@@ -548,9 +799,13 @@ class VmecInput:
             niter_array=niter_array,
             delt=float(get("DELT", 1.0)),
             tcon0=float(get("TCON0", 1.0)),
+            lforbal=bool(get("LFORBAL", False)),
+            lmove_axis=bool(get("LMOVE_AXIS", True)),
+            lfull3d1out=bool(get("LFULL3D1OUT", False)),
             aphi=vector("APHI", lower=1, default=aphi_default, size=20),
             phiedge=float(get("PHIEDGE", 1.0)),
             nstep=int(get("NSTEP", 10)),
+            time_slice=float(get("TIME_SLICE", 0.0)),
             pmass_type=str(get("PMASS_TYPE", "power_series")),
             am=vector("AM", lower=0, default=np.zeros((21,)), size=21),
             am_aux_s=vector("AM_AUX_S", lower=1),
@@ -593,10 +848,13 @@ class VmecInput:
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse
-        ``{"m", "n", "value"}`` lists; axis arrays are dense.  Unknown keys
-        (e.g. VMEC++ ``free_boundary_method``) are ignored.
+        ``{"m", "n", "value"}`` lists; axis arrays are dense.  The VMEC++
+        ``free_boundary_method="nestor"`` spelling is accepted.  Other
+        free-boundary methods and unknown keys fail explicitly instead of
+        being silently ignored.
         """
         data = json.loads(text)
+        _validate_json_modes(data)
         if "adiabatic_index" in data and "gamma" not in data:
             data["gamma"] = data["adiabatic_index"]
 
@@ -694,9 +952,13 @@ class VmecInput:
         put("NITER_ARRAY", self.niter_array)
         put("DELT", self.delt)
         put("TCON0", self.tcon0)
+        put("LFORBAL", self.lforbal)
+        put("LMOVE_AXIS", self.lmove_axis)
+        put("LFULL3D1OUT", self.lfull3d1out)
         put("APHI", self.aphi)
         put("PHIEDGE", self.phiedge)
         put("NSTEP", self.nstep)
+        put("TIME_SLICE", self.time_slice)
         put("GAMMA", self.gamma)
         put("SPRES_PED", self.spres_ped)
         put("PRES_SCALE", self.pres_scale)

@@ -20,10 +20,10 @@ env:
 permissions:
   contents: read
 
-# Sharded CI (plan.md Phase-2 review item 1): five parallel test jobs, each
-# well under the 10-minute wall-time budget, plus a fast lint gate (ruff +
-# mypy) and a coverage gate that combines the parity + gradient shards and
-# enforces >= 95% on vmex.
+# Sharded CI (plan.md Phase-2 review item 1): bounded parallel test jobs, plus
+# a fast lint gate (ruff + mypy) and a coverage gate that combines the parity
+# and gradient shards and enforces >= 95% on vmex.  The explicit job limits
+# include dependency setup, coverage handling, and hosted-runner variance.
 jobs:
   lint:
     # Fast fail-first gate (plan Item I.3): ruff + mypy over the whole tree,
@@ -181,8 +181,8 @@ jobs:
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
-      # Four shards, each well under the 10-min budget.  The xdist dist MODE is
-      # chosen PER SHARD by whether its modules share an expensive fixture:
+      # Four bounded shards.  The xdist dist MODE is chosen PER SHARD by
+      # whether its modules share an expensive fixture:
       #   * loadscope groups a whole module onto ONE worker, so module-scoped
       #     equilibrium fixtures (omnigenity qi_eq/tok_eq, bootstrap eq,
       #     stability vacuum/highbeta/shaped) are solved ONCE, not once-per-
@@ -251,12 +251,14 @@ jobs:
   gradient:
     name: Implicit-gradient suite ${{ matrix.shard }} (JIT on, coverage)
     runs-on: ubuntu-latest
-    # Sharded so no single job exceeds the timeout even with a COLD finite-
-    # difference cache (first run after the test file changes recomputes every
-    # FD reference). The two dominant FD tests (lasym-adjoint, lasym-3d) each get
-    # their own shard; shard "c" is the 17 remaining, lighter tests. Each shard
-    # keeps its own FD reference cache. Warm-cache runs finish in ~4 min.
-    timeout-minutes: 15
+    # Sharded so a COLD finite-difference cache remains bounded (first run
+    # after the test file changes recomputes every FD reference).  The two
+    # dominant FD tests (lasym-adjoint, lasym-3d) each get their own shard;
+    # shard "c" owns the remaining tests.  A slow hosted runner measured
+    # 14m19s for those tests alone, so include installation, coverage upload,
+    # and runner variance rather than canceling a fully passing test process
+    # during post-processing.  Warm-cache runs remain much faster.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
