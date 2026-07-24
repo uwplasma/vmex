@@ -465,7 +465,8 @@ jobs:
     # 150-minute limit, and the core job later lost hosted runners three times
     # after 37/79/81 minutes. Keep exact aggregate RUN_FULL coverage, split
     # core alphabetically, isolate each stateful optimization campaign, and
-    # isolate examples and long LASYM/mirror campaigns on fresh workers.
+    # isolate free-boundary, examples, and long LASYM/mirror campaigns on
+    # fresh workers.
     # The ordinary gradient jobs own non-full implicit tests; the dedicated
     # shard below adds its full-marked cases without rerunning that large JAX
     # suite in one process.
@@ -473,7 +474,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [core-a-f, core-g-h, core-i-m, implicit-stability, core-n-s,
+        shard: [core-a-f, core-freeboundary, core-g-h, core-i-m, implicit-stability, core-n-s,
                 core-t-z, lasym-free, opt-qa, opt-qh, opt-qp, examples, mirror-field,
                 mirror-beta-observables, mirror-equilibrium, mirror-spline]
     steps:
@@ -512,7 +513,17 @@ jobs:
           case "${{ matrix.shard }}" in
             core-a-f)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
+                     --ignore=tests/test_cli_freeboundary.py \
+                     --ignore=tests/test_freeboundary.py \
+                     --ignore=tests/test_freeboundary_diff.py \
+                     --ignore=tests/test_freeboundary_multigrid.py \
                      --ignore-glob=tests/test_[g-z]*.py"
+              ;;
+            core-freeboundary)
+              FILES="tests/test_cli_freeboundary.py \
+                     tests/test_freeboundary.py \
+                     tests/test_freeboundary_diff.py \
+                     tests/test_freeboundary_multigrid.py"
               ;;
             core-g-h)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
