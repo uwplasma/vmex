@@ -219,7 +219,6 @@ jobs:
                    tests/test_freeboundary_multigrid.py \
                    tests/test_freeboundary_diff.py \
                    tests/test_cli_freeboundary.py \
-                   tests/test_stability.py \
                    tests/test_solver_end_to_end.py"
           B_FILES="tests/test_golden_digests.py \
                    tests/test_bootstrap.py \
@@ -233,6 +232,7 @@ jobs:
                    tests/test_optimize_penalty.py \
                    tests/test_lgradb.py \
                    tests/test_package_api.py \
+                   tests/test_stability.py \
                    tests/test_multigrid_interp.py"
           D_FILES="tests/test_optimize.py"
           if [ "${{ matrix.shard }}" = "a" ]; then
