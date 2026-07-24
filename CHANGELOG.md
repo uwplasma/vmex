@@ -14,11 +14,31 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once past 1.0.
 - **Differentiable Mercier stability.** `d_merc_state` provides a traceable JAX
   Mercier profile, and `mercier_stability_residual` exposes its validated
   interior surfaces to implicit differentiation and optimization.
+- **Differentiable parallel current and resistive interchange.**
+  `jdotb_state` directly ports VMEC's `<J.B>` profile and `jdotb_residual`
+  selects its optimization-safe interior, while
+  `mercier_shear_state`, `glasser_d_r_state`, and
+  `glasser_stability_residual` expose the published Glasser--Greene--Johnson
+  `D_R <= 0` condition to JIT, AD and optimization, with the documented
+  `DMerc > 0` and nonzero-shear prerequisites.
+- **LASYM NESTOR WOUT fields.** Free-boundary asymmetric runs now write
+  `potcos` and all cosine/sine surface-field tables instead of netCDF fill.
+- **Live VMEC2000 integration gate.** `pytest --run-vmec2000` runs both public
+  solvers on isolated fixed- and free-boundary cases and compares the WOUTs
+  generated in that run.
 - **GPU CI without environment routing.** A manual self-hosted CUDA 13 lane
   fails on CPU fallback and checks explicit CPU/GPU forward-solve and
   implicit-gradient parity without JAX platform environment variables.
 
 ### Changed
+- **Mirror-specific device policy.** Fixed/free-boundary mirror solves and
+  beta scans now accept the common `device=` contract and default to CPU for
+  their measured host-SciPy/JAX callback workload.
+- **High-mode automatic placement.** Core stages with more than 512 active
+  Fourier modes now use a conservative CPU default after an 858-mode
+  same-host CPU win; existing measured GPU winners have at most 162 modes and
+  the intermediate range remains explicitly uncalibrated. Explicit GPU
+  requests and active JAX device contexts still win.
 - **Explicit device semantics.** Omitted or ``device="auto"`` placement keeps
   VMEX's measured policy; explicit ``device=None`` now follows ordinary JAX
   placement. Explicit platform names and ``jax.Device`` objects always win.

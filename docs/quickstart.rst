@@ -168,7 +168,9 @@ Reading wout files
 
 The written files declare the VMEC2000 variable set (:doc:`wout_reference`)
 and load unchanged in simsopt, booz_xform, and other VMEC-ecosystem tools.
-NESTOR potential and surface arrays are currently emitted as fill values.
+When ``wout_from_state`` receives ``vacuum_output=result.vacuum``,
+free-boundary files include the NESTOR potential and surface arrays, including
+the asymmetric partners for ``LASYM = T``. The CLI passes this automatically.
 
 Where to go next
 ----------------

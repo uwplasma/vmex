@@ -19,6 +19,11 @@ import numpy as np
 import pytest
 
 from vmex.core.fourier import Resolution, mode_table, trig_tables
+from vmex.core.nyquist import (
+    symoutput_split,
+    wrout_cos_coeffs,
+    wrout_sin_coeffs,
+)
 from vmex.core.transforms import (
     fourier_to_real,
     real_to_fourier,
@@ -92,6 +97,50 @@ def test_synthesis_analysis_roundtrip(case):
         back_cos, back_sin = real_to_fourier(field_sin, modes=modes, trig=trig, parity="sin")
         np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
         assert not np.any(np.asarray(back_cos))
+
+
+def test_lasym_nestor_surface_analysis_preserves_mode_signs():
+    """The shared LASYM ``*_sur`` WOUT transform preserves cos/sin signs."""
+    resolution = Resolution(
+        mpol=3,
+        ntor=2,
+        ntheta=12,
+        nzeta=10,
+        nfp=2,
+        lasym=True,
+        ns=1,
+    )
+    trig = trig_tables(resolution)
+    modes = mode_table(resolution.mpol, resolution.ntor)
+    cos_coefficients = np.zeros((1, modes.mnmax))
+    sin_coefficients = np.zeros_like(cos_coefficients)
+    mode_index = np.flatnonzero((modes.m == 1) & (modes.n == 1))[0]
+    cos_coefficients[0, mode_index] = 1.25
+    sin_coefficients[0, mode_index] = -0.75
+    (surface,) = fourier_to_real(
+        cos_coefficients,
+        sin_coefficients,
+        modes=modes,
+        trig=trig,
+        derivatives=("value",),
+    )
+
+    symmetric, asymmetric = symoutput_split(
+        f=np.asarray(surface), trig=trig
+    )
+    actual_cos = wrout_cos_coeffs(
+        f=symmetric, modes=modes, trig=trig
+    )
+    actual_sin = wrout_sin_coeffs(
+        f=asymmetric, modes=modes, trig=trig
+    )
+    roundtrip_atol = 8.0 * np.finfo(np.float64).eps
+    np.testing.assert_allclose(
+        actual_cos, cos_coefficients, rtol=0.0, atol=roundtrip_atol
+    )
+    np.testing.assert_allclose(
+        actual_sin, sin_coefficients, rtol=0.0, atol=roundtrip_atol
+    )
 
 
 # ---------------------------------------------------------------------------

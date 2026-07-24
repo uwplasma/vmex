@@ -53,6 +53,7 @@ Gauss-Newton geometry (internal-grid sampling instead of the wout grid).
 Wout-engine terms (:func:`d_merc`, :func:`l_grad_b`, the Boozer-based QI
 residual) run on host NumPy and are finite-difference-only.  Use
 :func:`d_merc_state` or :func:`mercier_stability_residual` for Mercier and
+:func:`jdotb_residual` for an interior parallel-current target, and
 :func:`l_grad_b_state` for ``L_grad_B`` with ``jac="implicit"``.  The
 implicit parameter map supports lasym via the four RBC/ZBS/RBS/ZBC boundary
 families and a traceable ``readin.f`` delta rotation (FD-validated), so
@@ -97,7 +98,15 @@ from .solver import (
     resolution_from_input,
 )
 from .fields import surface_currents
-from .stability import d_merc_state, mercier_stability_residual
+from .stability import (
+    d_merc_state,
+    glasser_d_r_state,
+    glasser_stability_residual,
+    jdotb_residual,
+    jdotb_state,
+    mercier_shear_state,
+    mercier_stability_residual,
+)
 
 # Shared state-physics primitives (statephysics.py, R26a).  Re-exported here
 # for backward compatibility: external user code and tests reach them as
@@ -134,6 +143,11 @@ __all__ = [
     "d_merc",
     "d_merc_state",
     "mercier_stability_residual",
+    "jdotb_state",
+    "jdotb_residual",
+    "mercier_shear_state",
+    "glasser_d_r_state",
+    "glasser_stability_residual",
     "l_grad_b",
     "l_grad_b_state",
     "quasi_isodynamic_residual",

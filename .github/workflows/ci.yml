@@ -127,7 +127,7 @@ jobs:
           if [ "${{ matrix.shard }}" = "field" ]; then
             FILES="tests/mirror/test_exterior.py \
                    tests/mirror/test_free_boundary.py \
-                   tests/mirror/test_geometry_fields.py"
+                   tests/mirror/test_mirror_geometry_fields.py"
           elif [ "${{ matrix.shard }}" = "equilibrium" ]; then
             FILES="tests/mirror/test_implicit.py \
                    tests/mirror/test_isotropic_forces.py \
@@ -465,17 +465,18 @@ jobs:
     # 150-minute limit, and the core job later lost hosted runners three times
     # after 37/79/81 minutes. Keep exact aggregate RUN_FULL coverage, split
     # core alphabetically, isolate each stateful optimization campaign, and
-    # isolate free-boundary, examples, and mirror campaigns on fresh workers.
+    # isolate free-boundary, examples, and long LASYM/mirror campaigns on
+    # fresh workers.
     # The ordinary gradient jobs own non-full implicit tests; the dedicated
-    # shard below adds its full-marked case without rerunning that large JAX
+    # shard below adds its full-marked cases without rerunning that large JAX
     # suite in one process.
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
-        shard: [core-a-f, core-freeboundary, core-g-h, core-i-m, implicit-dmerc, core-n-s,
-                core-t-z, opt-qa, opt-qh, opt-qp, examples, mirror-field,
-                mirror-equilibrium, mirror-spline]
+        shard: [core-a-f, core-freeboundary, core-g-h, core-i-m, implicit-stability, core-n-s,
+                core-t-z, lasym-free, opt-qa, opt-qh, opt-qp, examples, mirror-field,
+                mirror-beta-observables, mirror-equilibrium, mirror-spline]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -532,12 +533,14 @@ jobs:
             core-i-m)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
                      --ignore=tests/test_implicit_grad.py \
+                     --ignore=tests/test_lasym_free_convergence.py \
                      --ignore-glob=tests/test_[a-h]*.py \
                      --ignore-glob=tests/test_[n-z]*.py"
               ;;
-            implicit-dmerc)
+            implicit-stability)
               # Ordinary gradient a/b/c already own every non-full test in
-              # this module; this is its single nightly-only DMerc AD case.
+              # this module; this shard adds its full-marked DMerc, jdotb,
+              # and Glasser D_R implicit-AD cases.
               FILES="tests/test_implicit_grad.py -m full"
               ;;
             core-n-s)
@@ -549,6 +552,9 @@ jobs:
             core-t-z)
               FILES="tests --ignore=tests/mirror --ignore=tests/test_examples.py \
                      --ignore-glob=tests/test_[a-s]*.py"
+              ;;
+            lasym-free)
+              FILES="tests/test_lasym_free_convergence.py"
               ;;
             opt-qa)
               FILES="tests/test_optimization_convergence.py::test_qa_reaches_precise"
@@ -565,7 +571,11 @@ jobs:
             mirror-field)
               FILES="tests/mirror/test_exterior.py \
                      tests/mirror/test_free_boundary.py \
-                     tests/mirror/test_geometry_fields.py"
+                     tests/mirror/test_mirror_geometry_fields.py \
+                     --deselect=tests/mirror/test_free_boundary.py::test_unbounded_exterior_beta_observables_converge_with_resolution"
+              ;;
+            mirror-beta-observables)
+              FILES="tests/mirror/test_free_boundary.py::test_unbounded_exterior_beta_observables_converge_with_resolution"
               ;;
             mirror-equilibrium)
               FILES="tests/mirror/test_implicit.py \

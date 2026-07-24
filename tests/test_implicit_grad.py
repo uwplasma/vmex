@@ -34,8 +34,9 @@ against central finite differences through the full host solver):
 9. the multigrid lane directly (plan Item I.4): ``im.run(multigrid=True)``
    through a genuine ns 5 -> 11 ladder, ``d(wb)/d(RBC(0,1))`` vs the
    frozen-path FD;
-10. implicit DMerc gradients in several boundary directions and with respect
-    to pressure/current inputs against frozen-path central differences.
+10. implicit DMerc, ``jdotb``, and regularized Glasser ``D_R`` gradients in
+    boundary and pressure/current directions against frozen-path central
+    differences.
 
 FD steps (documented choices): central differences with the *same* ftol and
 iteration policy on both sides, converged outputs cached on disk (``/tmp``)
@@ -528,7 +529,13 @@ def test_multigrid_gradient_vs_frozen_path_fd():
     assert rel <= 1e-6
 
 
-def _assert_dmerc_gradients(case, *, include_profiles):
+def _assert_stability_gradients(
+    case,
+    *,
+    include_profiles,
+    metric_names=("DMerc",),
+    direction_labels=None,
+):
     name, inp, cfg, p0, _, _, _ = case
     ntor = int(inp.ntor)
     zero = jax.tree.map(jnp.zeros_like, p0)
@@ -549,47 +556,87 @@ def _assert_dmerc_gradients(case, *, include_profiles):
         directions.append(("curtor/|curtor|", dataclasses.replace(
             zero, curtor=jnp.asarray(abs(float(inp.curtor))))))
 
-    def metric(state, runtime):
-        return jnp.sum(stab.d_merc_state(state, runtime)[2:-1])
+    if direction_labels is not None:
+        directions = [
+            item for item in directions if item[0] in direction_labels
+        ]
+    metric_functions = {
+        "DMerc": lambda state, runtime: jnp.sum(
+            stab.d_merc_state(state, runtime)[2:-1]
+        ),
+        "jdotb": lambda state, runtime: jnp.sum(
+            stab.jdotb_state(state, runtime)[2:-1]
+        ),
+        "D_R": lambda state, runtime: jnp.sum(
+            stab.glasser_d_r_state(
+                state, runtime, shear_epsilon=1.0e-8
+            )[2:-1]
+        ),
+    }
+    for metric_name in metric_names:
+        metric = metric_functions[metric_name]
 
-    def objective(params):
-        solution = im.run(
-            inp,
-            params,
-            ftol=cfg.ftol,
-            max_iterations=cfg.max_iterations,
-        )
-        return metric(solution.state, solution.runtime)
+        def objective(params):
+            solution = im.run(
+                inp,
+                params,
+                ftol=cfg.ftol,
+                max_iterations=cfg.max_iterations,
+            )
+            return metric(solution.state, solution.runtime)
 
-    grad = jax.grad(objective)(p0)
-    for label, tangent in directions:
-        ad = _tree_dot(grad, tangent)
-        fd, info = im.frozen_path_directional_fd(
-            p0, cfg, metric, tangent, h=1.0e-4
-        )
-        residual = max(info["newton_res"])
-        scale = max(abs(ad), abs(fd), 1.0e-12)
-        relative_error = abs(ad - fd) / scale
-        print(
-            f"\n[{name}] d(sum DMerc[2:-1])/d({label}): "
-            f"AD={ad:+.10e} frozen-FD={fd:+.10e} "
-            f"rel={relative_error:.2e} (Newton res {residual:.0e})"
-        )
-        assert residual < 1.0e-8
-        assert relative_error <= 2.0e-3
+        grad = jax.grad(objective)(p0)
+        for label, tangent in directions:
+            ad = _tree_dot(grad, tangent)
+            fd, info = im.frozen_path_directional_fd(
+                p0, cfg, metric, tangent, h=1.0e-4
+            )
+            residual = max(info["newton_res"])
+            scale = max(abs(ad), abs(fd), 1.0e-12)
+            relative_error = abs(ad - fd) / scale
+            print(
+                f"\n[{name}] d(sum {metric_name}[2:-1])/d({label}): "
+                f"AD={ad:+.10e} frozen-FD={fd:+.10e} "
+                f"rel={relative_error:.2e} (Newton res {residual:.0e})"
+            )
+            assert residual < 1.0e-8
+            assert relative_error <= 2.0e-3
 
 
 @pytest.mark.parametrize("case", ["solovev"], indirect=True)
 def test_dmerc_gradient_vs_frozen_path_fd(case):
     """Implicit DMerc shape/pressure derivatives on the axisymmetric case."""
-    _assert_dmerc_gradients(case, include_profiles="pressure")
+    _assert_stability_gradients(case, include_profiles="pressure")
+
+
+@pytest.mark.parametrize("case", ["solovev"], indirect=True)
+def test_jdotb_and_glasser_gradients_vs_frozen_path_fd(case):
+    """Implicit current and resistive-interchange shape/profile gradients."""
+    _assert_stability_gradients(
+        case,
+        include_profiles="pressure",
+        metric_names=("jdotb", "D_R"),
+        direction_labels={"RBC(0,1)", "pres_scale"},
+    )
 
 
 @pytest.mark.full
 @pytest.mark.parametrize("case", ["li383_low_res"], indirect=True)
 def test_dmerc_3d_current_gradient_vs_frozen_path_fd(case):
     """Nightly: implicit 3-D DMerc shape/current derivatives."""
-    _assert_dmerc_gradients(case, include_profiles="current")
+    _assert_stability_gradients(case, include_profiles="current")
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("case", ["li383_low_res"], indirect=True)
+def test_jdotb_and_glasser_3d_current_gradients_vs_frozen_path_fd(case):
+    """Nightly: implicit 3-D current-diagnostic shape/current derivatives."""
+    _assert_stability_gradients(
+        case,
+        include_profiles="current",
+        metric_names=("jdotb", "D_R"),
+        direction_labels={"RBC(0,1)", "curtor/|curtor|"},
+    )
 
 
 # ===========================================================================

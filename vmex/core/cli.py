@@ -32,10 +32,10 @@ Free-boundary routing (``LFREEB = T``):
   :class:`vmex.core.mgrid.MgridField`
   (``solve_free_boundary(inp, external_field=mgrid_field)``); requires ESSOS.
 
-Documented divergence of the free-boundary lane:
+Free-boundary output behavior:
 
-- Symmetric NESTOR potential and surface-field arrays are exported to wout;
-  LASYM vacuum arrays remain netCDF fill.
+- Symmetric and LASYM NESTOR potential and surface-field arrays are exported
+  to wout.
 - ``LFULL3D1OUT = T`` requests a WOUT after NITER exhaustion for either
   boundary mode.  With the default ``F``, VMEC2000 and VMEX return
   ``ier_flag = 2`` without a WOUT.  Fatal numerical/Jacobian errors never

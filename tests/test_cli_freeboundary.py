@@ -127,10 +127,21 @@ def test_wout_written_with_free_boundary_fields(freeb_cli):
         label_count_dim = f"dim_{nextcur:05d}"
         assert ds["curlabel"].dimensions == (label_count_dim, "current_label")
         assert ds["curlabel"].shape == (nextcur, 30)
-        # LASYM vacuum WOUT export remains explicitly unsupported: schema
-        # variables exist but stay at netCDF fill.
-        assert "potsin" in ds.variables
-        assert np.ma.getmaskarray(ds["potsin"][:]).all()
+        for name in (
+            "potsin",
+            "potcos",
+            "bsubumnc_sur",
+            "bsubvmnc_sur",
+            "bsupumnc_sur",
+            "bsupvmnc_sur",
+            "bsubumns_sur",
+            "bsubvmns_sur",
+            "bsupumns_sur",
+            "bsupvmns_sur",
+        ):
+            values = ds[name][:]
+            assert not np.ma.getmaskarray(values).any(), name
+            assert np.isfinite(np.asarray(values)).all(), name
 
 
 # ---------------------------------------------------------------------------

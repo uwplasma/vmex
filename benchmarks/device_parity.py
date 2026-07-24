@@ -43,6 +43,8 @@ METRIC_NAMES = (
     "mhd_energy",
     "magnetic_well",
     "dmerc_interior_mean",
+    "jdotb_interior_mean",
+    "glasser_d_r_interior_mean",
     "quasisymmetry",
     "quasi_isodynamic",
 )
@@ -97,6 +99,8 @@ def _input(quick: bool) -> VmecInput:
         inp,
         rbc=rbc,
         zbs=zbs,
+        ncurr=0,
+        ai=np.asarray([0.4, 0.1]),
         ns_array=np.asarray([7 if quick else 11]),
         ftol_array=np.asarray([1.0e-9 if quick else 1.0e-11]),
         niter_array=np.asarray([1200 if quick else 2000]),
@@ -119,6 +123,12 @@ def _metrics(quick: bool) -> dict[str, Callable[[Any], Any]]:
         "magnetic_well": lambda sol: opt.magnetic_well(sol.state, sol.runtime),
         "dmerc_interior_mean": lambda sol: opt.d_merc_state(
             sol.state, sol.runtime
+        )[2:-1].mean(),
+        "jdotb_interior_mean": lambda sol: opt.jdotb_state(
+            sol.state, sol.runtime
+        )[2:-1].mean(),
+        "glasser_d_r_interior_mean": lambda sol: opt.glasser_d_r_state(
+            sol.state, sol.runtime, shear_epsilon=1.0e-8
         )[2:-1].mean(),
         "quasisymmetry": lambda sol: qs.total_state(sol.state, sol.runtime),
         "quasi_isodynamic": lambda sol: qi.total_state(sol.state, sol.runtime),
@@ -303,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
             "ns": int(inp.ns_array[-1]),
             "ftol": float(inp.ftol_array[-1]),
             "max_iterations": int(inp.niter_array[-1]),
+            "iota_profile": np.asarray(inp.ai).tolist(),
             "boundary_parameter": {
                 "field": "rbc",
                 "index": [int(inp.ntor) + 1, 1],

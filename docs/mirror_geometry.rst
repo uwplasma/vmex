@@ -873,10 +873,22 @@ deliberately unavailable because
 local Fourier-mode refinement failed; it will not be presented as a supported
 gradient.
 
-This mirror derivative path does not expose the core solver's ``device=``
-contract. On the office host, the corrected ``15x15`` case took 35.2 seconds
-on CPU and 44.2 seconds on one RTX A4000; energy and force diagnostics agreed
-to numerical precision.
+Mirror fixed/free-boundary solves and beta scans expose the same ``device=``
+contract as the toroidal core. On the office host, the corrected ``15x15``
+case took 35.2 seconds on CPU and 44.2 seconds on one RTX A4000, so the
+mirror-specific ``device="auto"`` policy selects CPU for its SciPy-controlled
+JAX callbacks. Explicit ``device="cpu"``/``"gpu"`` always wins and
+``device=None`` follows ordinary JAX placement; no environment variable is
+required. Energy and force diagnostics agreed to numerical precision.
+Field callables that capture committed arrays should use
+``jax.tree_util.Partial`` (or another registered pytree), which lets VMEX
+relocate the captured leaves. An ordinary Python closure is opaque, so its
+captured arrays retain their original placement.
+
+The one-shot mirror adjoint still uses SciPy GMRES around exact JAX JVP/VJP
+actions. It inherits the placement of its primal arrays rather than exposing
+an independent accelerator solver policy, because that solve cannot amortize
+a separate compiled SOLVAX path.
 
 Fixed- and free-boundary derivatives solve the linearized converged coefficient
 residual and never retain or differentiate the nonlinear iteration history. The

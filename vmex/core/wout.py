@@ -2,9 +2,9 @@
 
 This module implements the full variable set written by VMEC2000's
 ``wrout.f`` (Appendix A).  Core fixed-boundary fields use the reference
-netCDF names, dimensions, dtypes and unit conventions.  Symmetric
-free-boundary results also populate the NESTOR potential and surface fields
-when their public ``VacuumOutput`` is supplied:
+netCDF names, dimensions, dtypes and unit conventions.  Free-boundary results
+also populate the symmetric or LASYM NESTOR potential and surface fields when
+their public ``VacuumOutput`` is supplied:
 
 - ``presf``/``pres``/``mass`` are stored in Pa (``wrout.f`` divides the
   internal ``mu0*Pa`` values by ``mu0`` on write);
@@ -578,9 +578,8 @@ def wout_from_state(
     ``curlabel`` are caller-supplied (the CLI reads them from the mgrid file;
     ``extcur`` is the input EXTCUR array in Amperes, as ``wrout.f`` writes
     it).  Pass the public ``result.vacuum`` as ``vacuum_output`` to populate
-    symmetric NESTOR ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` tables.
-    LASYM vacuum export remains unsupported and those variables stay
-    ``None`` (netCDF fill).
+    NESTOR ``potsin``/``xmpot``/``xnpot`` and ``*_sur`` tables.  LASYM runs
+    additionally populate ``potcos`` and the four sine ``*_sur`` partners.
     """
     import jax
 
@@ -730,19 +729,38 @@ def wout_from_state(
              for name in ("gmns", "bmns", "bsubumns", "bsubvmns",
                           "bsubsmnc", "bsupumns", "bsupvmns")}
     vacuum_sur: dict[str, np.ndarray] = {}
-    export_vacuum = (
-        vacuum_output is not None and bool(inp.lfreeb) and not lasym)
+    export_vacuum = vacuum_output is not None and bool(inp.lfreeb)
     if export_vacuum:
+        potential_arrays = {
+            name: np.asarray(getattr(vacuum_output, name), dtype=float)
+            for name in ("potsin", "xmpot", "xnpot")
+        }
+        if lasym:
+            if vacuum_output.potcos is None:
+                raise ValueError("LASYM vacuum_output requires potcos")
+            potential_arrays["potcos"] = np.asarray(
+                vacuum_output.potcos, dtype=float
+            )
+        potential_sizes = {values.size for values in potential_arrays.values()}
+        if len(potential_sizes) != 1 or any(
+            values.ndim != 1 for values in potential_arrays.values()
+        ):
+            shapes = {
+                name: values.shape for name, values in potential_arrays.items()
+            }
+            raise ValueError(
+                f"vacuum potential arrays must be equal-length 1-D arrays: {shapes}"
+            )
         expected = (int(trig.ntheta3), int(res.nzeta))
         nyq_modes = mode_table(
             int(np.max(xm_nyq)) + 1,
             int(np.max(np.abs(xn_nyq))) // nfp if xn_nyq.size else 0,
         )
-        for output_name, source_name in (
-            ("bsubumnc_sur", "bsubu"),
-            ("bsubvmnc_sur", "bsubv"),
-            ("bsupumnc_sur", "bsupu"),
-            ("bsupvmnc_sur", "bsupv"),
+        for cos_name, sin_name, source_name in (
+            ("bsubumnc_sur", "bsubumns_sur", "bsubu"),
+            ("bsubvmnc_sur", "bsubvmns_sur", "bsubv"),
+            ("bsupumnc_sur", "bsupumns_sur", "bsupu"),
+            ("bsupvmnc_sur", "bsupvmns_sur", "bsupv"),
         ):
             surface = np.asarray(getattr(vacuum_output, source_name), dtype=float)
             if surface.shape != expected:
@@ -750,8 +768,19 @@ def wout_from_state(
                     f"vacuum_output.{source_name} has shape {surface.shape}, "
                     f"expected {expected}"
                 )
-            vacuum_sur[output_name] = _nyq.wrout_cos_coeffs(
-                f=surface[None, ...], modes=nyq_modes, trig=trig)[0]
+            surface = surface[None, ...]
+            if lasym:
+                symmetric, asymmetric = _nyq.symoutput_split(
+                    f=surface, trig=trig
+                )
+                vacuum_sur[sin_name] = _nyq.wrout_sin_coeffs(
+                    f=asymmetric, modes=nyq_modes, trig=trig
+                )[0]
+            else:
+                symmetric = surface
+            vacuum_sur[cos_name] = _nyq.wrout_cos_coeffs(
+                f=symmetric, modes=nyq_modes, trig=trig
+            )[0]
     nzeta_vmec = int(inp.nzeta) or (1 if ntor == 0 else nzeta)
     nnyq_target = int(nzeta_vmec) // 2
     nnyq_have = int(np.max(xn_nyq)) // nfp if xn_nyq.size else 0
@@ -895,16 +924,18 @@ def wout_from_state(
         bsupumns=nyq_a["bsupumns"], bsupvmns=nyq_a["bsupvmns"],
         mnmaxpot=(int(np.asarray(vacuum_output.xmpot).size)
                   if export_vacuum else None),
-        potsin=(np.asarray(vacuum_output.potsin, dtype=float)
-                if export_vacuum else None),
-        xmpot=(np.asarray(vacuum_output.xmpot, dtype=float)
-               if export_vacuum else None),
-        xnpot=(np.asarray(vacuum_output.xnpot, dtype=float)
-               if export_vacuum else None),
+        potsin=(potential_arrays["potsin"] if export_vacuum else None),
+        potcos=(potential_arrays.get("potcos") if export_vacuum else None),
+        xmpot=(potential_arrays["xmpot"] if export_vacuum else None),
+        xnpot=(potential_arrays["xnpot"] if export_vacuum else None),
         bsubumnc_sur=vacuum_sur.get("bsubumnc_sur"),
         bsubvmnc_sur=vacuum_sur.get("bsubvmnc_sur"),
         bsupumnc_sur=vacuum_sur.get("bsupumnc_sur"),
         bsupvmnc_sur=vacuum_sur.get("bsupvmnc_sur"),
+        bsubumns_sur=vacuum_sur.get("bsubumns_sur"),
+        bsubvmns_sur=vacuum_sur.get("bsubvmns_sur"),
+        bsupumns_sur=vacuum_sur.get("bsupumns_sur"),
+        bsupvmns_sur=vacuum_sur.get("bsupvmns_sur"),
     )
 
 

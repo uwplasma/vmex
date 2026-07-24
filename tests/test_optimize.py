@@ -37,7 +37,7 @@ from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
 
-from conftest import resolve_golden_dir  # noqa: E402
+from tests.conftest import resolve_golden_dir  # noqa: E402
 
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark = [

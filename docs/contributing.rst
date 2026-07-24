@@ -39,6 +39,16 @@ Documentation builds must pass strict mode::
 
   python -m sphinx -W -j auto -b html docs docs/_build/html
 
+An installed VMEC2000 can be exercised live, outside ordinary offline CI::
+
+  pytest -q tests/test_vmec2000_live.py --run-vmec2000 \
+    --vmec2000-executable /path/to/xvmec2000
+
+The test uses isolated output directories and compares WOUTs produced during
+that invocation. It covers finite-beta current/Mercier profiles and a
+converged, asymmetrically forced LASYM free-boundary case including NESTOR
+potential and surface-field tables. Omitting ``--run-vmec2000`` skips it.
+
 GPU CI
 ------
 
@@ -49,10 +59,11 @@ hardware.  Its runner must carry the labels ``self-hosted``, ``linux``,
 must not define ``JAX_PLATFORMS`` or ``JAX_PLATFORM_NAME``.  The workflow
 installs the official ``jax[cuda13]`` distribution, verifies that JAX selects
 the GPU by ordinary hardware discovery, then runs focused placement checks and
-the quick CPU/GPU parity audit for MHD energy, magnetic well, DMerc,
-quasisymmetry, and quasi-isodynamic gradients.  Timing is recorded in the
-uploaded ``device-parity`` artifact but is not a pass/fail gate.  A missing or
-misconfigured accelerator is a failure, not a skipped green GPU job.
+the quick nonzero-shear CPU/GPU parity audit for MHD energy, magnetic well,
+DMerc, ``jdotb``, Glasser ``D_R``, quasisymmetry, and quasi-isodynamic gradients. Timing is
+recorded in the uploaded ``device-parity`` artifact but is not a pass/fail
+gate. A missing or misconfigured accelerator is a failure, not a skipped
+green GPU job.
 
 Releasing
 ---------

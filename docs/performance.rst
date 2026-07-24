@@ -323,16 +323,49 @@ to ~1e-10, so it changes the path, not the fixed point. Reach for it when the
 Memory
 ------
 
-Peak resident memory (0.6–1.5 GB, up to ~3.3 GB on the largest multigrid deck)
-is dominated by the transient JAX/XLA *compile* working set, not the
-equilibrium data — the spectral state, transform tensors, and solver carry
-together are a few MB, and a warm solve's runtime footprint is tens of MB. It
-is a per-process, per-resolution compile cost that amortizes across repeated
-solves. Two knobs bound the optimization-time footprint:
+Peak resident memory is 0.6–1.5 GB on most bundled rows and about 3.3 GB on
+the largest bundled multigrid deck, but those figures are not a
+high-resolution upper bound. The spectral state is small; compiled transform
+graphs and implicit block factors are not. On the supplied HSX
+``ns=101, mpol=18, ntor=24`` deck, a fresh Apple-M4 CPU VMEX process took
+676.46 s and 3.896 GiB maximum RSS. VMEC++ with ten threads took 92.03 s and
+380.0 MiB on the same host; one-radial-process VMEC2000 took 1154.82 s and
+265.0 MiB. A one-thread VMEC++ control took 449.79 s and 445.1 MiB, so its
+advantage is not only thread parallelism: it remained 1.50x faster than VMEX
+and used 8.96x less RSS. VMEX was 1.71x faster than this VMEC2000 run but used
+15.05x its RSS. The VMEX state nevertheless matches VMEC2000 to near
+floating-point accuracy, so this is a performance/storage gap rather than a
+convergence or equilibrium-accuracy failure.
+
+Explicit CPU and GPU runs of the same deck on the office host converged in
+the same 2737 final-stage iterations.  With the GPU persistent cache already
+populated, CPU took 426.94 s and 6.52 GiB host RSS; the RTX A4000 took
+1468.07 s and 5.40 GiB.  CPU was therefore 3.44x faster, while cached GPU
+placement used 17.1% less host RSS.  The CPU/GPU WOUT relative L2 differences
+were ``5.20e-11`` for ``rmnc``, ``3.27e-10`` for ``zmns``, ``9.76e-11`` for
+``bmnc``, and ``6.54e-11`` for core iota.  An empty-cache GPU process took
+1596.01 s and 6.98 GiB.  These measurements show both that explicit GPU
+placement is correct and that it is not automatically faster for a
+high-mode CLI run.
+
+Column chunking bounds simultaneous design-variable probes, not the dominant
+dense ``O(ns * m_block**2)`` block bands and factors. On an exact
+``ns=201``, ``max_mode=5``, one-Jacobian HSX workload:
+
+- the PR74 automatic block path took 355.40 s and 4.106 GiB RSS;
+- an 11-column chunk took 304.24 s and 4.256 GiB;
+- a proposed automatic chunk took 283.05 s but 5.612 GiB.
+
+All three Jacobians were bit-identical. The candidate was rejected because
+RSS increased 36.68%. Matrix-free GMRES sampled 3.122 GiB (about 24% below
+the baseline) but did not finish one Jacobian in 30m08s, over five times the
+block wall. A lower-storage factorization or a measured resolution-aware
+solver policy is still needed.
+
+The existing optimization controls remain useful within that limitation:
 
 - The optimization Jacobian is column-chunked (``jac_chunk_size="auto"``, the
-  same knob DESC exposes), so peak memory does not scale with the number of
-  boundary degrees of freedom.
+  same knob DESC exposes), limiting the simultaneous probe batch.
 - Factoring the residual and field pipelines into reusable compiled
   sub-computations cut the implicit-gradient compile ~20% in memory and ~21% in
   wall time, bit-identically (R16).
@@ -343,11 +376,13 @@ solves. Two knobs bound the optimization-time footprint:
 GPU guidance
 ------------
 
-Measured behavior (``benchmarks/gpu_baseline.json``):
+Measured behavior (``benchmarks/gpu_baseline.json`` plus the supplied
+high-mode HSX case):
 
-- **Per-iteration throughput favours the GPU at every tested size** (0.83 ms
-  vs 1.90 ms per iteration at ``ns=35, mpol=2, ntor=2``; up to ~3x on
-  NuhrenbergZille-class decks: 90 s vs 277 s wall).
+- **Per-iteration throughput favours the GPU across the tested low- and
+  moderate-mode cases** (0.83 ms vs 1.90 ms per iteration at
+  ``ns=35, mpol=2, ntor=2``; up to ~3x on NuhrenbergZille-class decks:
+  90 s vs 277 s wall).
 - **The GPU pays fixed per-solve overheads** (~0.2-0.4 s dispatch/transfer
   floor plus compile or cache-load in cold processes), so small decks that
   finish in well under a second of CPU work stay faster on the CPU
@@ -357,15 +392,23 @@ Measured behavior (``benchmarks/gpu_baseline.json``):
   Apple-Silicon CPU, the CPU wins every production workflow even at
   ``ns = 201`` (the table above) — on a modern desktop, treat the GPU as
   an option for very large or heavily batched solves, not a default.
+- **High Fourier mode count is a separate limit**: on the same office host,
+  the 858-mode HSX deck was 3.44x faster on CPU than on a cache-warm A4000,
+  despite its large aggregate work proxy.
 
 Device policy
 ~~~~~~~~~~~~~
 
 :mod:`vmex.core.device` encodes this as a default placement rule using
 the per-iteration work proxy ``ns * mnmax * nznt`` (the cost driver of the
-batched-matmul transforms): below ``GPU_MIN_ITERATION_WORK = 100_000`` the
-solve stays on the CPU, above it the GPU is used. The policy is a *default*
-only:
+batched-matmul transforms).  The solve stays on CPU below
+``GPU_MIN_ITERATION_WORK = 100_000`` and above
+``GPU_MAX_SPECTRAL_MODES = 512``; the middle region uses GPU.  The measured
+GPU winners have at most 162 modes and the measured CPU winner has 858; the
+intermediate range is not calibrated.  The round cutoff preserves prior AUTO
+behavior for common stages through 288 modes while catching the HSX
+regression, not a claimed universal hardware crossover.  The policy is a
+*default* only:
 
 - an explicit ``device=`` argument to ``solve``/``solve_multigrid`` always
   wins;
@@ -379,6 +422,12 @@ only:
    solve(inp, device="gpu")
    with jax.default_device(jax.devices("gpu")[0]):
        solve(inp)  # AUTO respects this context
+
+The mirror solver uses its own measured default because host SciPy repeatedly
+drives JAX callbacks. ``vmex.mirror.solve_fixed_boundary``,
+``solve_free_boundary``, and ``solve_beta_scan`` choose CPU under ``"auto"``
+(35.2 s CPU versus 44.2 s RTX A4000 on the office ``15x15`` case), but expose
+the same explicit/``None``/active-context precedence.
 
 Persistent compilation cache
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -417,10 +466,11 @@ Reproducing the numbers
    pytest tests/test_parity_breadth.py     # end-to-end parity suite
 
 For a compact hardware-parity audit, ``device_parity.py`` runs the same small
-equilibrium on explicitly selected CPU/GPU devices and records the forward
-state plus boundary derivatives of MHD energy, magnetic well, quasisymmetry,
-quasi-isodynamicity, and the mean traceable ``DMerc[2:-1]`` profile in JSON.
-It does not set or require JAX platform environment variables::
+nonzero-shear equilibrium on explicitly selected CPU/GPU devices and records
+the forward state plus boundary derivatives of MHD energy, magnetic well, quasisymmetry,
+quasi-isodynamicity, and the mean traceable ``DMerc``, ``jdotb``, and
+Glasser ``D_R`` interior profiles in JSON. It does not set or require JAX
+platform environment variables::
 
    python benchmarks/device_parity.py --quick --metrics mhd_energy --output /tmp/vmex-smoke.json
    python benchmarks/device_parity.py --devices cpu,gpu --output /tmp/vmex-parity.json
@@ -428,7 +478,7 @@ It does not set or require JAX platform environment variables::
 On a CPU-only host the default runs the CPU lane and marks the cross-device
 comparison as skipped; ``--devices cpu`` requests that lane explicitly.
 The first command is the short smoke lane; omit ``--metrics`` to audit all
-five objectives.
+seven objectives.
 
 The parity suite needs the golden VMEC2000 fixtures (fetched release assets);
 it is skipped automatically when they are unavailable.

@@ -69,9 +69,9 @@ vmex --doctor
 ```
 
 VMEX does not require platform-selection environment variables for hardware
-detection. Its automatic policy keeps small solves and implicit gradients on
-CPU when that is faster; the public solve and implicit APIs also accept an
-explicit ``device=`` argument.
+detection. Its automatic policy keeps small solves, very high-mode stages,
+and implicit gradients on CPU when that is faster; the public solve and
+implicit APIs also accept an explicit ``device=`` argument.
 
 Development install from source:
 
@@ -164,11 +164,19 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
   the workflow number.
 - **GPU** — at these sizes a fixed per-solve dispatch cost dominates and the CPU
   wins outright; per-iteration throughput favours the GPU ~3× on the largest
-  decks. The device policy picks CPU or GPU per stage.
-- **Memory** — peak (0.6–3.3 GB) is the transient XLA *compile* working set, not
-  the data: the equilibrium state is a few MB. The optimization Jacobian is
-  bounded by column chunking (`jac_chunk_size="auto"`), so it does not grow with
-  the number of design variables.
+  moderate-mode decks. A same-host, cache-warm A4000 run of the supplied
+  858-mode HSX case was instead 3.44× slower than CPU. The measured device
+  policy therefore keeps both small-work and very-high-mode stages on CPU,
+  while explicit placement always wins.
+- **Memory** — the bundled warm cases peak at 0.6–3.3 GB, but that is not a
+  high-resolution upper bound. The supplied `ns=101`, `mpol=18`, `ntor=24`
+  HSX deck used 3.90 GiB in a fresh CPU VMEX process versus 380 MiB in VMEC++
+  and 265 MiB in one-radial-process VMEC2000.
+  Column chunking bounds simultaneous design probes, while the implicit
+  block factors still scale as `O(ns * m_block²)`; an `ns=201` one-Jacobian
+  measurement used 4.11 GiB. A candidate chunk schedule that raised RSS by
+  36.7% was rejected, and the lower-memory GMRES path was over 5× slower
+  without finishing. Reducing the block-factor storage remains open work.
 
 ## Features
 
@@ -324,8 +332,9 @@ low-level single-grid building block.
 
 Optimization building blocks live in `vmex.core.optimize`
 (quasisymmetry and omnigenity residuals; aspect ratio, iota, mirror ratio,
-magnetic well, ballooning-stability targets; a least-squares driver over
-boundary Fourier coefficients) with implicit-differentiation gradients from
+magnetic well, `DMerc`, Glasser `D_R`, `<J·B>`, and ballooning-stability
+targets; a least-squares driver over boundary Fourier coefficients) with
+implicit-differentiation gradients from
 `vmex.core.implicit` (`jac="implicit"`). The recommended pattern is **one
 `least_squares` call** — no `max_mode` continuation loop — with **Exponential
 Spectral Scaling** ordering the harmonics through the trust region:
@@ -391,10 +400,11 @@ for QP. Three measured optimizations keep each campaign in the minutes range:
   converged.
 
 The implicit path runs on CPU by default, where it is fastest at production
-sizes; high-resolution forward solves can use the GPU. The device policy
-chooses per stage, and `device="cpu"` / `device="gpu"` explicitly overrides
-it without environment variables. Passing `device=None` leaves placement to
-JAX; omitting it retains VMEX's measured automatic policy.
+sizes; suitably sized forward solves can use the GPU. The device policy
+chooses per stage using both work and Fourier-mode thresholds, and
+`device="cpu"` / `device="gpu"` explicitly overrides it without environment
+variables. Passing `device=None` leaves placement to JAX; omitting it retains
+VMEX's measured automatic policy.
 
 ### Beyond quasisymmetry: any objective, same gradients
 
@@ -509,7 +519,7 @@ uses CPU or GPU according to the measured per-stage policy. Use `--device
 cpu` or `--device gpu` to override it explicitly. Implicit-gradient work
 defaults to CPU because it is launch-bound on the tested GPUs; passing
 `device=None` to the Python API follows JAX placement. `vmex --doctor`
-reports the devices and both VMEX placement policies.
+reports the devices and all three VMEX placement policies.
 
 ## Documentation
 
@@ -533,6 +543,14 @@ scalar-pressure energy are
 √g B^θ = I'(s) − ∂_ξ λ,    √g B^ξ = Ψ'(s) + ∂_θ λ,    B^s = 0
 W = ∫ [ B²/(2μ₀) + p/(γ − 1) ] dV
 ```
+
+Mirror fixed/free-boundary solves and beta scans use a measured CPU default
+for their SciPy-controlled JAX callbacks (35.2 s CPU versus 44.2 s RTX A4000
+on the office `15x15` case). Pass `device="gpu"` or `device="cpu"` to
+override it, or `device=None` to follow JAX placement; no platform environment
+variable is needed. If a field callable captures device arrays, wrap it with
+`jax.tree_util.Partial` so VMEX can relocate those captured leaves; an opaque
+Python closure cannot be inspected or moved.
 
 ### Fixed-boundary open mirrors
 

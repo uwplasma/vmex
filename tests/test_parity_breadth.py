@@ -79,7 +79,7 @@ from vmex.core.input import VmecInput
 from vmex.core import solver
 from vmex.core.multigrid import solve_multigrid
 
-from conftest import resolve_golden_dir
+from tests.conftest import resolve_golden_dir
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 GOLDEN_DIR = resolve_golden_dir()

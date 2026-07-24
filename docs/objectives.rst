@@ -106,14 +106,23 @@ and composable with both gradient modes:
 - :func:`~vmex.core.optimize.mirror_ratio` — ``(Bmax - Bmin)/(Bmax +
   Bmin)`` on a flux surface, the practical QI knob;
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
-  measure (negative = well, stabilizing).
+  measure (positive = well, stabilizing).
 
 Two reporting diagnostics run on the host-side wout engine:
 :func:`~vmex.core.optimize.d_merc` (Mercier interchange criterion) and
 :func:`~vmex.core.optimize.l_grad_b` (the ``L_grad_B`` coil-complexity proxy).
 Their live-state counterparts :func:`~vmex.core.stability.d_merc_state`
-(``lasym = False``) and :func:`~vmex.core.optimize.l_grad_b_state` are pure
-JAX and can be composed with implicit differentiation.  The convenience
+(``lasym = False``), :func:`~vmex.core.stability.jdotb_state`,
+:func:`~vmex.core.stability.jdotb_residual`,
+:func:`~vmex.core.stability.glasser_d_r_state`, and
+:func:`~vmex.core.optimize.l_grad_b_state` are pure JAX and can be composed
+with implicit differentiation.  ``jdotb_state`` reproduces the VMEC
+``jdotb = <J.B>`` WOUT profile; ``jdotb_residual`` selects ``[2:-1]`` for a
+least-squares current target.  ``glasser_d_r_state`` evaluates the
+Glasser--Greene--Johnson resistive-interchange parameter, for which
+``D_R <= 0`` is the necessary stability condition on nonzero-shear surfaces
+provided the ideal prerequisite ``DMerc > 0`` also holds.
+The convenience
 :func:`~vmex.core.optimize.mercier_stability_residual` selects
 ``DMerc[2:-1]`` and returns
 ``smoothing * softplus((margin - DMerc) / smoothing)``.  Positive ``DMerc``
@@ -127,6 +136,18 @@ exponentially as ``DMerc - margin`` grows.
 
    terms = [(opt.mercier_stability_residual, 0.0, 100.0)]
    result = opt.least_squares(terms, inp, max_mode=3, jac="implicit")
+
+The analogous :func:`~vmex.core.optimize.glasser_stability_residual`
+penalizes positive ``D_R[2:-1]``.  Exact zero-shear surfaces are physically
+outside the GGJ criterion; the residual uses ``shear_epsilon=1e-8`` by
+default so zero-shear seeds have finite optimization rows.  The reporting
+profile keeps the strict zero default. Always include
+:func:`~vmex.core.optimize.mercier_stability_residual` in the same objective
+so ``DMerc > 0`` is enforced rather than treating ``D_R`` as a standalone
+criterion. Then post-check
+:func:`~vmex.core.optimize.mercier_shear_state` and require
+``abs(S) >> shear_epsilon`` on every target surface; a regularized zero-shear
+result is numerically defined but not a valid GGJ stability claim.
 
 ``L_grad_B`` additionally has a fully traceable ``(state, runtime)`` lane,
 :func:`~vmex.core.optimize.l_grad_b_state` — same convention
@@ -341,6 +362,15 @@ Which objectives differentiate how
      - yes
      - traceable Mercier profile / smooth interior instability hinge
        (stellarator-symmetric states only)
+   * - :func:`~vmex.core.optimize.jdotb_state`,
+       :func:`~vmex.core.optimize.jdotb_residual`,
+       :func:`~vmex.core.optimize.mercier_shear_state`,
+       :func:`~vmex.core.optimize.glasser_d_r_state`,
+       :func:`~vmex.core.optimize.glasser_stability_residual`
+     - yes
+     - yes
+     - traceable VMEC ``<J.B>`` and GGJ resistive-interchange profile /
+       smooth upper-bound residual (stellarator-symmetric states only)
    * - :func:`~vmex.core.optimize.d_merc`,
        :func:`~vmex.core.optimize.l_grad_b`
      - yes

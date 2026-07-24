@@ -65,6 +65,11 @@ from .transforms import physical_to_internal_scale
 __all__ = [
     "d_merc_state",
     "mercier_stability_residual",
+    "jdotb_state",
+    "jdotb_residual",
+    "mercier_shear_state",
+    "glasser_d_r_state",
+    "glasser_stability_residual",
     "ballooning_lambda",
     "ballooning_growth_rate",
 ]
@@ -72,6 +77,7 @@ __all__ = [
 Array = Any
 
 _NEWTON_ITERATIONS = 12  # θ_vmec(θ*) root solve; λ is small, converges fast
+_MU0 = 4.0e-7 * np.pi
 
 
 # ---------------------------------------------------------------------------
@@ -150,23 +156,26 @@ def _mercier_current_tables(bsubu: Array, bsubv: Array, bsubs: Array, rt: Solver
     return bsubu, bsubv, (bsubsu, bsubsv)
 
 
-def d_merc_state(state: SpectralState, rt: SolverRuntime) -> Array:
-    """Traceable VMEC ``DMerc`` profile on the full radial mesh.
+def _mercier_profiles_state(
+    state: SpectralState,
+    rt: SolverRuntime,
+) -> tuple[Array, Array, Array, Array, Array]:
+    """Traceable ``(DMerc, <J.B>, <B.B>, shear, H)`` radial profiles.
 
-    Positive interior values indicate Mercier stability.  This is a pure-JAX
-    port of the symmetric ``jxbforce.f``/``mercier.f`` path used by
-    :func:`vmex.core.nyquist.mercier_and_jxb`; it accepts a live converged
-    ``(state, runtime)`` pair and supports ``jit``, JVP and reverse-mode AD.
-    The axis, first near-axis surface and edge retain VMEC's zero/noisy output
-    convention and should be excluded from objectives (normally ``[2:-1]``).
+    The shared pure-JAX reconstruction follows VMEC2000 ``jxbforce.f`` and
+    ``mercier.f``.  The returned Glasser ``H`` uses the normalization of
+    Landreman & Jorge (2020), Eqs. (51) and (53).
     """
     setup = rt.setup
     if bool(setup.lasym):
-        raise NotImplementedError("traceable DMerc supports lasym = False only")
+        raise NotImplementedError(
+            "traceable Mercier/Glasser profiles support lasym = False only"
+        )
     s = jnp.asarray(setup.s_full)
     ns = int(s.shape[0])
     if ns < 3:
-        return jnp.zeros_like(s)
+        zero = jnp.zeros_like(s)
+        return zero, zero, zero, zero, zero
     geometry, jacobian, _, fields, energies = _field_chain(state, rt)
     bsubs = _mercier_bsubs(geometry, jacobian, fields, s)
     bsubu, bsubv, (bsubsu, bsubsv) = _mercier_current_tables(fields.bsubu, fields.bsubv, bsubs, rt)
@@ -221,7 +230,103 @@ def d_merc_state(state: SpectralState, rt: SolverRuntime) -> Array:
     tjb = jnp.einsum("sij,ij->s", jdotb, wint) * factor
     tjj = jnp.einsum("sij,ij->s", jdotb * bdotj_norm / b2i, wint) * factor
     dmerc = 0.25 * shear**2 - shear * (tjb - ip * tbb) + presp * (vpp - presp * tpp) * tbb + tjb**2 - tbb * tjj
-    return jnp.zeros_like(s).at[1:-1].set(dmerc)
+    dmerc_full = jnp.zeros_like(s).at[1:-1].set(dmerc)
+
+    # jxbforce.f flux-surface <J.B>/<B.B> averages.  ``bdotk`` omits the
+    # 1/mu0 conversion above, so ``jdotb_mu0`` is mu0 times the WOUT profile.
+    vp_sum = jnp.asarray(energies.vp)[2:] + jnp.asarray(energies.vp)[1:-1]
+    average_norm = jnp.where(vp_sum != 0.0, 2.0 * sign_jac / vp_sum, 0.0)
+    jdotb_mu0 = average_norm * jnp.einsum("sij,ij->s", bdotk[1:-1], wint)
+    sqgb2 = (
+        jacobian.sqrt_g[2:] * (jnp.asarray(fields.total_pressure)[2:] - pres[2:, None, None])
+        + jacobian.sqrt_g[1:-1]
+        * (jnp.asarray(fields.total_pressure)[1:-1] - pres[1:-1, None, None])
+    )
+    bdotb = average_norm * jnp.einsum("sij,ij->s", sqgb2, wint)
+    jdotb_full = jnp.zeros_like(s).at[1:-1].set(jdotb_mu0 / _MU0)
+    jdotb_full = jdotb_full.at[0].set(2.0 * jdotb_full[1] - jdotb_full[2])
+    jdotb_full = jdotb_full.at[-1].set(
+        2.0 * jdotb_full[-2] - jdotb_full[-3]
+    )
+    bdotb_full = jnp.zeros_like(s).at[1:-1].set(bdotb)
+    bdotb_full = bdotb_full.at[0].set(
+        2.0 * bdotb_full[2] - bdotb_full[1]
+    )
+    bdotb_full = bdotb_full.at[-1].set(
+        2.0 * bdotb_full[-2] - bdotb_full[-3]
+    )
+
+    # In the VMEC Mercier normalization H is shear times the difference
+    # between the |grad psi|^-3 J.B integral and the same B^2 integral times
+    # <mu0 J.B>/<B^2>.
+    surface_ratio = jnp.where(bdotb != 0.0, jdotb_mu0 / bdotb, 0.0)
+    h_glasser = shear * (tjb - tbb * surface_ratio)
+    shear_full = jnp.zeros_like(s).at[1:-1].set(shear)
+    h_full = jnp.zeros_like(s).at[1:-1].set(h_glasser)
+    return dmerc_full, jdotb_full, bdotb_full, shear_full, h_full
+
+
+def d_merc_state(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Traceable VMEC ``DMerc`` profile on the full radial mesh.
+
+    Positive interior values indicate Mercier stability.  This is a pure-JAX
+    port of the symmetric ``jxbforce.f``/``mercier.f`` path used by
+    :func:`vmex.core.nyquist.mercier_and_jxb`; it accepts a live converged
+    ``(state, runtime)`` pair and supports ``jit``, JVP and reverse-mode AD.
+    The axis, first near-axis surface and edge retain VMEC's zero/noisy output
+    convention and should be excluded from objectives (normally ``[2:-1]``).
+    """
+    return _mercier_profiles_state(state, rt)[0]
+
+
+def jdotb_state(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Traceable VMEC ``jdotb = <J.B>`` profile in WOUT units."""
+    return _mercier_profiles_state(state, rt)[1]
+
+
+def jdotb_residual(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Interior ``<J.B>`` profile for least-squares current objectives."""
+    return jdotb_state(state, rt)[2:-1]
+
+
+def mercier_shear_state(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Return ``S = d(iota)/d(Phi)`` in the VMEC Mercier normalization."""
+    return _mercier_profiles_state(state, rt)[3]
+
+
+def glasser_d_r_state(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    shear_epsilon: float = 0.0,
+) -> Array:
+    """Traceable Glasser--Greene--Johnson ``D_R`` profile.
+
+    Non-positive values satisfy the necessary local resistive-interchange
+    stability condition on nonzero-shear surfaces.  With the strict default,
+    exact zero-shear entries are set to zero because the criterion is
+    undefined there.  A positive ``shear_epsilon`` replaces the denominator
+    ``shear**2`` by ``shear**2 + shear_epsilon**2`` for smooth optimization;
+    this regularization does not make zero-shear surfaces physically valid.
+    Post-check :func:`mercier_shear_state` and require every target surface to
+    satisfy ``abs(S) >> shear_epsilon`` before interpreting the result.
+    As for ``DMerc``, use only validated interior surfaces (normally
+    ``[2:-1]``) as optimization targets.
+    """
+    if shear_epsilon < 0.0:
+        raise ValueError(
+            f"shear_epsilon must be non-negative, got {shear_epsilon}"
+        )
+    dmerc, _, _, shear, h_glasser = _mercier_profiles_state(state, rt)
+    epsilon = jnp.asarray(shear_epsilon, dtype=shear.dtype)
+    denominator = shear**2 + epsilon**2
+    correction = (h_glasser - 0.5 * shear**2) ** 2 / jnp.where(
+        denominator != 0.0, denominator, 1.0
+    )
+    d_r = -dmerc + correction
+    if shear_epsilon == 0.0:
+        d_r = jnp.where(shear != 0.0, d_r, 0.0)
+    return d_r
 
 
 def mercier_stability_residual(
@@ -245,6 +350,33 @@ def mercier_stability_residual(
     if smoothing <= 0.0:
         raise ValueError(f"smoothing must be positive, got {smoothing}")
     violation = jnp.asarray(margin) - d_merc_state(state, rt)[2:-1]
+    scale = jnp.asarray(smoothing, dtype=violation.dtype)
+    return scale * jax.nn.softplus(violation / scale)
+
+
+def glasser_stability_residual(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    margin: float = 0.0,
+    smoothing: float = 1.0e-6,
+    shear_epsilon: float = 1.0e-8,
+) -> Array:
+    """Smooth resistive-interchange residual on ``D_R[2:-1]``.
+
+    Subject to the prerequisite ``DMerc > 0``, stable surfaces require
+    ``D_R <= 0``.  Combine this residual with
+    :func:`mercier_stability_residual`; targeting it to zero penalizes
+    ``D_R > -margin`` while retaining a smooth derivative.  The
+    nonzero default shear regularization makes this optimization helper finite
+    on zero-shear seeds; use :func:`glasser_d_r_state` with its strict default
+    for reporting.
+    """
+    if smoothing <= 0.0:
+        raise ValueError(f"smoothing must be positive, got {smoothing}")
+    violation = glasser_d_r_state(
+        state, rt, shear_epsilon=shear_epsilon
+    )[2:-1] + jnp.asarray(margin)
     scale = jnp.asarray(smoothing, dtype=violation.dtype)
     return scale * jax.nn.softplus(violation / scale)
 

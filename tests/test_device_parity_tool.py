@@ -22,9 +22,17 @@ def test_requested_devices_skips_an_unavailable_gpu():
     assert skipped == {"gpu": "no GPU JAX device is available"}
 
 
-def test_metric_selection_includes_traceable_dmerc():
-    assert "dmerc_interior_mean" in device_parity.METRIC_NAMES
-    assert "dmerc_interior_mean" in device_parity._metrics(quick=True)
+@pytest.mark.parametrize(
+    "name",
+    [
+        "dmerc_interior_mean",
+        "jdotb_interior_mean",
+        "glasser_d_r_interior_mean",
+    ],
+)
+def test_metric_selection_includes_traceable_stability_profiles(name):
+    assert name in device_parity.METRIC_NAMES
+    assert name in device_parity._metrics(quick=True)
 
 
 def test_compare_lanes_reports_forward_and_gradient_parity():

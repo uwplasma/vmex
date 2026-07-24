@@ -196,8 +196,9 @@ def format_report(report: DoctorReport) -> str:
         lines.append("  - none detected")
     lines.extend(
         [
-            "VMEX forward default:  automatic size-based CPU/GPU policy",
+            "VMEX forward default:  automatic work/mode-based CPU/GPU policy",
             "VMEX implicit default: CPU on accelerator hosts (explicit device= overrides)",
+            "VMEX mirror default:   CPU for host-SciPy/JAX callback solves",
         ]
     )
     lines.append("")

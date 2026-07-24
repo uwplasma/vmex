@@ -31,7 +31,7 @@ from vmex.core.input import VmecInput
 from vmex.core import solver
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-from conftest import resolve_golden_dir
+from tests.conftest import resolve_golden_dir
 
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark_golden = pytest.mark.skipif(

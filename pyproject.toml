@@ -69,7 +69,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "ruff",
+  "ruff<0.16",
   "sphinx",
   "types-setuptools",
 ]
@@ -86,6 +86,7 @@ vmex = ["resources/input.nfp4_QH_warm_start"]
 markers = [
   "full: slower/full-physics tests; set RUN_FULL=1 to run",
   "gpu: tests that require a real GPU; skipped when no GPU is available",
+  "vmec2000_live: opt-in integration tests requiring a local VMEC2000 executable",
 ]
 
 [tool.coverage.run]

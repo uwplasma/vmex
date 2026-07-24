@@ -45,7 +45,7 @@ from vmex.core.wout import (  # noqa: E402
     write_wout,
 )
 
-from conftest import resolve_golden_dir
+from tests.conftest import resolve_golden_dir
 
 GOLDEN_DIR = resolve_golden_dir()
 pytestmark_golden = pytest.mark.skipif(

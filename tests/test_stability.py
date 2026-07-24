@@ -131,6 +131,55 @@ def test_traceable_dmerc_matches_wout_and_has_state_jvp(shaped_eq):
     np.testing.assert_allclose(pressure_grad, pressure_fd, rtol=1e-7)
 
 
+def test_traceable_jdotb_and_glasser_profiles(shaped_eq):
+    """J.B matches WOUT and D_R follows the published GGJ relation."""
+    state, rt = shaped_eq.state, shaped_eq.runtime
+    dmerc, jdotb, bdotb, shear, h_glasser = jax.jit(
+        stab._mercier_profiles_state
+    )(state, rt)
+    np.testing.assert_allclose(
+        np.asarray(jdotb),
+        np.asarray(shaped_eq.wout.jdotb),
+        rtol=1e-8,
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        stab.jdotb_residual(state, rt),
+        np.asarray(jdotb)[2:-1],
+        rtol=1.0e-13,
+    )
+    np.testing.assert_allclose(
+        np.asarray(bdotb),
+        np.asarray(shaped_eq.wout.bdotb),
+        rtol=1e-8,
+        atol=1e-12,
+    )
+
+    actual = stab.glasser_d_r_state(state, rt)
+    denominator = jnp.where(shear != 0.0, shear**2, 1.0)
+    expected = -dmerc + (h_glasser - 0.5 * shear**2) ** 2 / denominator
+    expected = jnp.where(shear != 0.0, expected, 0.0)
+    np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-15)
+    assert np.all(np.isfinite(np.asarray(actual)))
+
+    tangent = jax.tree.map(jnp.zeros_like, state)
+    tangent = dataclasses.replace(
+        tangent, R_cos=jnp.ones_like(state.R_cos)
+    )
+    _, (jdotb_tangent, d_r_tangent) = jax.jvp(
+        lambda st: (
+            stab.jdotb_state(st, rt),
+            stab.glasser_d_r_state(st, rt, shear_epsilon=1.0e-8),
+        ),
+        (state,),
+        (tangent,),
+    )
+    for profile in (jdotb_tangent, d_r_tangent):
+        interior = np.asarray(profile)[2:-1]
+        assert np.all(np.isfinite(interior))
+        assert np.any(interior != 0.0)
+
+
 def test_mercier_stability_residual_is_smooth_interior_hinge(shaped_eq):
     """The optimizer residual excludes noisy surfaces and follows its formula."""
     state, rt = shaped_eq.state, shaped_eq.runtime
@@ -151,11 +200,45 @@ def test_mercier_stability_residual_is_smooth_interior_hinge(shaped_eq):
         stab.mercier_stability_residual(state, rt, smoothing=0.0)
 
 
-def test_least_squares_accepts_implicit_mercier_term():
-    """One optimizer evaluation builds DMerc residual rows and their Jacobian."""
+def test_glasser_stability_residual_is_smooth_upper_bound(shaped_eq):
+    """The D_R objective penalizes positive values on validated surfaces."""
+    state, rt = shaped_eq.state, shaped_eq.runtime
+    margin, smoothing, shear_epsilon = 2.0e-6, 3.0e-6, 1.0e-8
+    profile = stab.glasser_d_r_state(
+        state, rt, shear_epsilon=shear_epsilon
+    )
+    actual = jax.jit(
+        lambda st: stab.glasser_stability_residual(
+            st,
+            rt,
+            margin=margin,
+            smoothing=smoothing,
+            shear_epsilon=shear_epsilon,
+        )
+    )(state)
+    expected = smoothing * jax.nn.softplus(
+        (profile[2:-1] + margin) / smoothing
+    )
+    np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-16)
+    np.testing.assert_array_equal(
+        stab.glasser_stability_residual(state, rt),
+        stab.glasser_stability_residual(
+            state, rt, shear_epsilon=1.0e-8
+        ),
+    )
+    with pytest.raises(ValueError, match="smoothing must be positive"):
+        stab.glasser_stability_residual(state, rt, smoothing=0.0)
+    with pytest.raises(ValueError, match="shear_epsilon must be non-negative"):
+        stab.glasser_d_r_state(state, rt, shear_epsilon=-1.0)
+
+
+def test_least_squares_accepts_implicit_stability_terms():
+    """One optimizer evaluation builds DMerc/D_R/<J.B> rows and Jacobian."""
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     result = opt.least_squares(
-        [(opt.mercier_stability_residual, 0.0, 1.0)],
+        [(opt.mercier_stability_residual, 0.0, 1.0),
+         (opt.glasser_stability_residual, 0.0, 1.0),
+         (opt.jdotb_residual, 0.0, 1.0e-6)],
         inp,
         max_mode=1,
         jac="implicit",
@@ -167,41 +250,62 @@ def test_least_squares_accepts_implicit_mercier_term():
 
 
 @pytest.mark.full
-def test_implicit_mercier_optimization_improves_margin_with_constraints():
-    """A short implicit campaign improves DMerc while holding aspect and QA."""
+def test_implicit_glasser_optimization_improves_margin_with_constraints():
+    """A sheared campaign reduces D_R while enforcing ideal prerequisites."""
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = dataclasses.replace(inp, ai=np.asarray([1.0, 0.1]))
     seed = opt.solve_equilibrium(inp)
     aspect0 = float(opt.aspect_ratio(seed.state, seed.runtime))
     qa = opt.QuasisymmetryRatioResidual([0.25, 0.5, 0.75], 1, 0)
 
-    def mercier(state, runtime):
-        return stab.mercier_stability_residual(
-            state, runtime, smoothing=1.0e-6
+    def glasser(state, runtime):
+        return stab.glasser_stability_residual(
+            state,
+            runtime,
+            smoothing=1.0e-6,
+            shear_epsilon=1.0e-8,
         )
 
     def metrics(eq):
-        profile = np.asarray(stab.d_merc_state(eq.state, eq.runtime))[2:-1]
-        violation = np.asarray(mercier(eq.state, eq.runtime))
+        dmerc = np.asarray(
+            stab.d_merc_state(eq.state, eq.runtime)
+        )[2:-1]
+        shear = np.asarray(
+            stab.mercier_shear_state(eq.state, eq.runtime)
+        )[2:-1]
+        profile = np.asarray(stab.glasser_d_r_state(
+            eq.state, eq.runtime, shear_epsilon=1.0e-8
+        ))[2:-1]
+        glasser_violation = np.asarray(glasser(eq.state, eq.runtime))
         qa_norm = np.linalg.norm(np.asarray(
             qa.residuals_state(eq.state, eq.runtime)))
-        return float(np.min(profile)), float(np.linalg.norm(violation)), qa_norm
+        return (
+            float(np.min(dmerc)),
+            float(np.min(np.abs(shear))),
+            float(np.max(profile)),
+            float(np.linalg.norm(glasser_violation)),
+            qa_norm,
+        )
 
-    margin0, violation0, qa0 = metrics(seed)
+    dmerc0, shear0, d_r0, glasser0, qa0 = metrics(seed)
     result = opt.least_squares(
         [(opt.aspect_ratio, aspect0, 100.0),
          (qa, 0.0, 1.0e5),
-         (mercier, 0.0, 1.0e5)],
+         (opt.mercier_stability_residual, 0.0, 1.0e5),
+         (glasser, 0.0, 1.0e5)],
         inp,
         max_mode=2,
         jac="implicit",
         max_nfev=6,
     )
     best = opt.solve_equilibrium(result.input)
-    margin1, violation1, qa1 = metrics(best)
+    dmerc1, shear1, d_r1, glasser1, qa1 = metrics(best)
     aspect1 = float(opt.aspect_ratio(best.state, best.runtime))
 
-    assert margin1 > margin0
-    assert violation1 < 0.5 * violation0
+    assert dmerc0 > 0.0 and dmerc1 > 0.0
+    assert min(shear0, shear1) > 100.0e-8
+    assert d_r1 < d_r0
+    assert glasser1 < 0.5 * glasser0
     assert abs(aspect1 - aspect0) < 5.0e-3
     assert qa1 <= 1.05 * qa0
 
@@ -214,6 +318,21 @@ def test_traceable_dmerc_matches_wout_in_3d(finite_beta_3d_eq):
     scale = np.max(np.abs(expected[2:-1]))
     np.testing.assert_allclose(actual[2:-1], expected[2:-1], rtol=1e-10,
                                atol=1e-13 * scale)
+    np.testing.assert_allclose(
+        stab.jdotb_state(eq.state, eq.runtime),
+        eq.wout.jdotb,
+        rtol=1e-10,
+        atol=1e-6,
+    )
+    _, _, bdotb, _, _ = stab._mercier_profiles_state(
+        eq.state, eq.runtime
+    )
+    np.testing.assert_allclose(
+        bdotb,
+        eq.wout.bdotb,
+        rtol=1e-10,
+        atol=1e-12,
+    )
 
 
 def test_reductions_hard_and_smooth_max(highbeta_eq):

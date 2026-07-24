@@ -28,10 +28,13 @@ def _res(ns: int, mpol: int, ntor: int, nfp: int = 1) -> Resolution:
 def test_iteration_work_and_recommendation_threshold():
     small = _res(ns=11, mpol=6, ntor=0)          # tiny tokamak-like
     big = _res(ns=101, mpol=12, ntor=12, nfp=4)  # reactor-scale 3D
+    high_mode = _res(ns=101, mpol=18, ntor=24, nfp=4)
     assert dev.iteration_work(small) < dev.GPU_MIN_ITERATION_WORK
     assert dev.iteration_work(big) >= dev.GPU_MIN_ITERATION_WORK
+    assert high_mode.mnmax > dev.GPU_MAX_SPECTRAL_MODES
     assert dev.recommended_device(small) == "cpu"
     assert dev.recommended_device(big) == "gpu"
+    assert dev.recommended_device(high_mode) == "cpu"
 
 
 @pytest.mark.parametrize("key", ["jax_platforms", "jax_platform_name"])
@@ -51,6 +54,7 @@ def test_none_leaves_placement_to_jax(monkeypatch):
     monkeypatch.setattr(dev, "recommended_device", lambda _: pytest.fail("auto policy ran"))
     assert dev.resolve_device(None, _res(ns=11, mpol=6, ntor=0)) is None
     assert dev.resolve_implicit_device(None, None) is None
+    assert dev.resolve_mirror_device(None) is None
 
 
 def test_omitted_device_uses_auto_policy(monkeypatch):
@@ -76,6 +80,7 @@ def test_default_device_context_is_never_overridden(monkeypatch):
     with jax.default_device(jax.devices("cpu")[0]):
         assert dev.resolve_device(dev.AUTO, _res(ns=11, mpol=6, ntor=0)) is None
         assert dev.resolve_implicit_device(dev.AUTO, None) is None
+        assert dev.resolve_mirror_device(dev.AUTO) is None
 
 
 def test_auto_cpu_recommendation_is_a_noop_on_cpu(monkeypatch):
@@ -143,6 +148,16 @@ def test_resolve_implicit_device_honors_explicit_and_pin():
         jax.config.update("jax_platforms", previous)
 
 
+def test_resolve_mirror_device_defaults_to_cpu_and_honors_explicit():
+    resolved = dev.resolve_mirror_device(dev.AUTO)
+    if jax.default_backend() == "cpu":
+        assert resolved is None
+    else:
+        assert resolved is not None and resolved.platform == "cpu"
+    explicit = dev.resolve_mirror_device("cpu")
+    assert explicit is not None and explicit.platform == "cpu"
+
+
 def test_device_context_is_a_nullcontext_when_placement_untouched(monkeypatch):
     monkeypatch.setattr(dev, "_user_selected_placement", lambda: True)
     res = _res(ns=11, mpol=6, ntor=0)
@@ -170,6 +185,17 @@ def test_put_numeric_leaves_preserves_metadata_and_none_contract():
     )
     assert moved["array"].device.platform == "cpu"
     assert moved["metadata"] == "kept"
+
+
+def test_put_numeric_leaves_moves_registered_partial_captures():
+    target = jax.devices("cpu")[0]
+    field = jax.tree_util.Partial(
+        lambda scale, points: scale * points,
+        jax.numpy.asarray(2.0),
+    )
+    moved = dev._put_numeric_leaves(field, target)
+    assert jax.tree.leaves(moved)[0].device.platform == "cpu"
+    np.testing.assert_allclose(moved(jax.numpy.asarray([3.0])), 6.0)
 
 
 def test_free_boundary_uses_shared_device_context(monkeypatch):

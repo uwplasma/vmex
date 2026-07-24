@@ -110,8 +110,8 @@ Module map
      - derived wout quantities (beta, currents, ``specw``, ``equif``, ...)
      - ``eqfor.f``, ``bcovar.f`` outputs
    * - :mod:`~vmex.core.wout`
-     - VMEC-compatible ``wout_*.nc`` schema, writer and reader; unsupported
-       NESTOR-only arrays remain declared as fill values
+     - VMEC-compatible ``wout_*.nc`` schema, writer and reader, including
+       symmetric and LASYM NESTOR potential/surface tables
      - ``wrout.f``
    * - :mod:`~vmex.core.printing`
      - VMEC2000-format iteration lines, stage banners, termination summary
@@ -171,12 +171,19 @@ work, proxied by
    w = \mathrm{ns} \times \mathrm{mnmax} \times \mathrm{nznt}
 
 (:func:`~vmex.core.device.iteration_work`). Per-iteration throughput
-favours the GPU at every tested size, but the GPU pays fixed per-solve
-overheads (dispatch/transfer floor plus compile or cache load), so small
-decks finish faster on the CPU. The measured crossover is
-:data:`~vmex.core.device.GPU_MIN_ITERATION_WORK` (``100_000``):
-:func:`~vmex.core.device.recommended_device` returns ``"cpu"`` below it
-and ``"gpu"`` at or above it, per multigrid stage.
+favours the GPU across the tested low- and moderate-mode cases, but the GPU
+pays fixed per-solve overheads (dispatch/transfer floor plus compile or cache
+load), so small decks finish faster on the CPU.  High-mode transforms are a
+second measured exception: an 858-mode HSX deck was 3.44x faster on CPU than
+on a cache-warm RTX A4000 on the same host.  Therefore
+:func:`~vmex.core.device.recommended_device` returns ``"cpu"`` below
+:data:`~vmex.core.device.GPU_MIN_ITERATION_WORK` (``100_000``), ``"cpu"``
+above :data:`~vmex.core.device.GPU_MAX_SPECTRAL_MODES` (``512``), and
+``"gpu"`` in the middle region, per multigrid stage.  The measured GPU
+winners have at most 162 modes and the measured CPU winner has 858; the
+intermediate range is not calibrated.  The round 512 cutoff preserves prior
+AUTO behavior for common stages through 288 modes while catching that
+high-mode regression; it is not a universal crossover.
 
 :func:`~vmex.core.device.resolve_device` turns this into a concrete
 placement with strict precedence rules: an explicit device always wins;
@@ -198,6 +205,13 @@ optimization size tested. The forward equilibrium callback uses the solver's
 independent automatic per-stage placement policy; the implicit-device choice
 controls the residual and Jacobian graphs. Explicit ``device=`` arguments and
 JAX placement contexts are still honored for those graphs.
+
+Mirror equilibria have a third measured policy:
+:func:`~vmex.core.device.resolve_mirror_device` selects CPU by default for
+their SciPy-controlled JAX callback loop (35.2 s CPU versus 44.2 s RTX A4000
+on the office ``15x15`` case). Fixed/free-boundary mirror solves and beta
+scans still honor explicit devices, ``device=None``, and active JAX placement
+without environment variables.
 
 Naming conventions
 ------------------

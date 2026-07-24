@@ -313,6 +313,54 @@ surfaces but decays exponentially with the stability margin.  Both profile
 lanes retain VMEC's near-axis and edge limitations; the traceable lane does
 not yet support ``lasym = True``.
 
+Parallel current and resistive interchange
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`~vmex.core.stability.jdotb_state` exposes the same full-mesh
+``jdotb = <J.B>`` profile that VMEC2000 computes in ``jxbforce.f``, but as a
+pure-JAX function of the converged state.  Its WOUT normalization and
+extrapolated axis/edge entries are unchanged, so it can be used directly as
+an implicit-differentiation current objective. This is a direct port of the
+``jxbforce.f`` current reconstruction, distinct from the cheaper
+``bootstrap.vmec_j_dot_B`` force-balance identity used by the Redl mismatch.
+For optimization, :func:`~vmex.core.stability.jdotb_residual` selects
+``jdotb[2:-1]`` to exclude the usual axis/edge entries.
+The live low-resolution current-driven VMEC2000 case measured a maximum
+``4.72e-4`` difference; its regression gate is ``1e-3``.  The remaining
+sensitivity is from the radial derivative of VMEC's filtered ``bsubv``
+coefficients.
+
+Assuming the ideal prerequisite :math:`D_{\rm Merc}>0`, the
+Glasser--Greene--Johnson necessary condition for local resistive interchange
+stability is :math:`D_R \leq 0`.  In the VMEC Mercier normalization, with
+:math:`S=d\iota/d\Phi` and
+:math:`D_{\rm shear}=S^2/4`, Landreman--Jorge's relation is
+
+.. math::
+
+   D_R = -D_{\rm Merc}
+       + \frac{(H-S^2/2)^2}{S^2},\qquad
+   H=S\left(t_{JB}-\frac{\langle\mu_0J\cdot B\rangle}
+                              {\langle B^2\rangle}t_{BB}\right).
+
+:func:`~vmex.core.stability.glasser_d_r_state` reuses the traceable Mercier
+surface integrals and the VMEC-consistent ``jdotb/bdotb`` averages to evaluate
+this expression.  Exact zero-shear entries are set to zero because the
+criterion is undefined there; a positive ``shear_epsilon`` provides a smooth,
+explicit regularization for optimization.  The
+:func:`~vmex.core.stability.glasser_stability_residual` helper selects
+``D_R[2:-1]`` and smoothly penalizes values above ``-margin``; it defaults to
+``shear_epsilon=1e-8`` so zero-shear optimization seeds remain finite.
+It must be combined with ``mercier_stability_residual`` so an
+ideal-Mercier-unstable surface is never accepted based on :math:`D_R` alone.
+After optimization, use ``mercier_shear_state`` to verify
+``abs(S) >> shear_epsilon`` on every target surface; regularization makes the
+numerics finite but cannot establish GGJ stability at zero shear.
+VMEC2000 does not write ``D_R`` itself, so validation is by the published
+identity and live VMEC2000 parity of the traceable ``DMerc``, ``jdotb`` and
+``bdotb`` constituents. Independent evaluation of :math:`H` and
+:math:`D_R` with JMC/DCON remains a separate external validation gate.
+
 Magnetic well
 ~~~~~~~~~~~~~~
 
