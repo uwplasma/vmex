@@ -166,8 +166,9 @@ Reading wout files
    print("edge iota:   ", float(wout.iotaf[-1]))
    print("beta total:  ", float(wout.betatotal))
 
-The written files carry the full VMEC2000 variable set (:doc:`wout_reference`)
+The written files declare the VMEC2000 variable set (:doc:`wout_reference`)
 and load unchanged in simsopt, booz_xform, and other VMEC-ecosystem tools.
+NESTOR potential and surface arrays are currently emitted as fill values.
 
 Where to go next
 ----------------

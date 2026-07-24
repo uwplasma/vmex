@@ -203,7 +203,7 @@ Biot-Savart callable directly on a specified boundary, retaining coil
 derivatives for that residual; it is not an adjoint of the reconverged NESTOR
 solve. All coil geometry lives in ESSOS; vmex has no coil code of its own.
 
-![Free-boundary Landreman-Paul QA pressure scan directly from ESSOS coils](docs/_static/figures/readme_essos_beta_scan.png)
+![Free-boundary Landreman-Paul QA pressure scan from an in-memory ESSOS coil field](docs/_static/figures/readme_essos_beta_scan.png)
 
 *Free-boundary equilibria of the Landreman–Paul precise-QA configuration held
 by its 16 modular coils as optimized in
@@ -497,8 +497,8 @@ options:
                          cuda, rocm, or tpu; applies to all solve paths
   --ftol F               override the final-stage FTOL_ARRAY tolerance
   --max-iter N           override the final-stage NITER_ARRAY cap
-  --coils PATH           ESSOS-style coils file: drive an LFREEB = T deck
-                         by direct Biot-Savart instead of an mgrid file
+  --coils PATH           ESSOS-style coils file: tabulate its Biot-Savart
+                         field in memory instead of reading an mgrid file
   --mbooz/--nbooz N      Boozer spectral resolution (default 32/32)
   --booz-surfaces S      Boozer surfaces ('all' or a list of s values)
   --quiet                silence the VMEC-style stdout
