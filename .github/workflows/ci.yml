@@ -141,14 +141,14 @@ jobs:
   parity:
     name: Parity suite ${{ matrix.shard }} (goldens, coverage)
     runs-on: ubuntu-latest
-    # Headroom for slow shared runners: the golden solves run ~15-20 min on a
-    # healthy runner but tip over a tighter limit on a slow one (the suite
-    # content is unchanged). 35 absorbs that variance without masking a hang.
+    # The former 431-test catch-all passed in 15-20 min on healthy runners but
+    # repeatedly lost slow shared runners. Shards c/e preserve its exact test
+    # set with enough headroom to distinguish runner variance from a hang.
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        shard: [a, b, c, d]
+        shard: [a, b, c, d, e]
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -181,7 +181,7 @@ jobs:
           print("golden dir:", mod.resolve_golden_dir())
           EOF
 
-      # Four shards, each well under the 10-min budget.  The xdist dist MODE is
+      # Five bounded shards.  The xdist dist MODE is
       # chosen PER SHARD by whether its modules share an expensive fixture:
       #   * loadscope groups a whole module onto ONE worker, so module-scoped
       #     equilibrium fixtures (omnigenity qi_eq/tok_eq, bootstrap eq,
@@ -201,11 +201,12 @@ jobs:
       #   a = heaviest solver-golden modules, including all free-boundary
       #       modules so their JAX caches leave with this bounded shard instead
       #       of accumulating in the catch-all worker processes;
-      #   c = everything else, incl. omnigenity/turbulence/bootstrap/stability.
+      #   c = the slow fixture-sharing modules from the former catch-all;
+      #   e = the remaining catch-all modules.
       # Together they cover the whole non-gradient, non-example core suite once;
       # the separate mirror matrix owns tests/mirror. Therefore
       # every test file appears in exactly one shard (coverage gate combines
-      # a+b+c+d), so coverage is invariant under this reshuffle.
+      # a+b+c+d+e), so coverage is invariant under this reshuffle.
       - name: Run parity shard ${{ matrix.shard }} with coverage
         env:
           JAX_ENABLE_X64: "1"
@@ -221,6 +222,17 @@ jobs:
           B_FILES="tests/test_golden_digests.py \
                    tests/test_bootstrap.py \
                    tests/test_wout_golden.py"
+          C_FILES="tests/test_input_profiles.py \
+                   tests/test_setup.py \
+                   tests/test_profiles.py \
+                   tests/test_omnigenity.py \
+                   tests/test_implicit_multi_rhs.py \
+                   tests/test_parallel.py \
+                   tests/test_optimize_penalty.py \
+                   tests/test_lgradb.py \
+                   tests/test_package_api.py \
+                   tests/test_stability.py \
+                   tests/test_multigrid_interp.py"
           D_FILES="tests/test_optimize.py"
           if [ "${{ matrix.shard }}" = "a" ]; then
             pytest -q -n 4 --dist loadscope $A_FILES --durations=15 --cov=vmex --cov-report=term
@@ -228,8 +240,10 @@ jobs:
             pytest -q -n 4 --dist load $B_FILES --durations=15 --cov=vmex --cov-report=term
           elif [ "${{ matrix.shard }}" = "d" ]; then
             pytest -q -n 4 --dist load $D_FILES --durations=15 --cov=vmex --cov-report=term
+          elif [ "${{ matrix.shard }}" = "c" ]; then
+            pytest -q -n 4 --dist loadscope $C_FILES --durations=15 --cov=vmex --cov-report=term
           else
-            IGNORES=$(for f in $A_FILES $B_FILES $D_FILES; do echo "--ignore=$f"; done)
+            IGNORES=$(for f in $A_FILES $B_FILES $C_FILES $D_FILES; do echo "--ignore=$f"; done)
             pytest -q -n 4 --dist loadscope tests \
               --ignore=tests/mirror \
               --ignore=tests/test_implicit_grad.py \
