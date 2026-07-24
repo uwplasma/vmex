@@ -127,16 +127,20 @@ from jax import lax
 
 from .device import AUTO, device_context
 from .errors import (
-    BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
+    AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG, JAC75_FLAG, MISC_ERROR_FLAG, MORE_ITER_FLAG,
     NONFINITE_FLAG, NORM_TERM_FLAG, SUCCESSFUL_TERM_FLAG,
     VmecConvergenceError, VmecJacobianError, VmecNumericalError,
     WERROR_MESSAGES,
 )
 from .fields import (
-    constraint_scaling, energies_and_force_norms, magnetic_fields,
-    metric_elements, preconditioned_force_norm,
+    constraint_scaling, energies_and_force_norms,
+    force_balance_preconditioner_factor, magnetic_fields, metric_elements,
+    preconditioned_force_norm, radial_force_balance_error,
 )
-from .forces import constraint_force, mhd_forces, spectral_mhd_forces
+from .forces import (
+    apply_m1_force_balance, constraint_force, mhd_forces,
+    spectral_mhd_forces,
+)
 from .fourier import ModeTable, Resolution, TrigTables, mode_table, trig_tables
 from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_geometry
 from .input import VmecInput
@@ -219,7 +223,8 @@ class PreconditionerCache:
 
     ``tcon`` (constraint scaling), the residual norms ``fnorm/fnormL/fnorm1``,
     the :func:`precondn` coefficients and assembled :func:`scalfor_matrices`
-    for the R and Z force families, and the ``lamcal`` diagonal ``faclam``.
+    for the R and Z force families, the ``LFORBAL`` ``rzu_fac/rru_fac``
+    factors, and the ``lamcal`` diagonal ``faclam``.
     """
 
     tcon: Array
@@ -228,6 +233,8 @@ class PreconditionerCache:
     fnorm1: Array
     coefficients_R: RadialPreconditionerCoefficients
     coefficients_Z: RadialPreconditionerCoefficients
+    force_balance_R: Array
+    force_balance_Z: Array
     matrices_R: TridiagonalMatrices
     matrices_Z: TridiagonalMatrices
     faclam: Array
@@ -393,6 +400,8 @@ class SolverRuntime:
     gamma: float; tcon0: float; ftol: float
     max_iterations: int; time_step0: float; nstep: int
     jmax: int                           # evolved radial rows (fixed: ns-1)
+    lforbal: bool = False               # tomnsp_mod.f m=1,n=0 force replacement
+    lmove_axis: bool = True             # funct3d.f first-force irst=4 path
 
     # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
     # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
@@ -448,7 +457,7 @@ class SolverRuntime:
 
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0", "ftol", "max_iterations", "time_step0",
-    "nstep", "jmax", "lfreeb", "prec2d",
+    "nstep", "jmax", "lforbal", "lmove_axis", "lfreeb", "prec2d",
 ))
 
 
@@ -576,9 +585,11 @@ def _resolve_prec2d(
     """Resolve the 2D-preconditioner config (``precon2d.f`` / ``evolve.f``).
 
     An explicit ``prec2d`` config wins (used verbatim); otherwise it is built
-    from ``precon_type``/``prec2d_threshold`` (input defaults, overridable) when
-    ``precon_type != "NONE"``.  Returns ``None`` (the default 1D-only path)
-    when the 2D preconditioner is off.
+    from ``precon_type``/``prec2d_threshold`` (input defaults, overridable).
+    ``NONE`` and VMEC2000's ``DEFAULT`` select the parity 1-D path.  ``GMRES``
+    selects VMEX's documented matrix-free JAX/SOLVAX Newton--GMRES path.
+    VMEC2000's distinct ``CG``, ``GMRESR`` and ``TFQMR`` algorithms are
+    rejected rather than silently aliased to GMRES.
     """
     if prec2d is not None:
         return prec2d
@@ -588,8 +599,14 @@ def _resolve_prec2d(
     else:
         pt = "NONE" if precon_type is None else precon_type
         thr = 1e-30 if prec2d_threshold is None else prec2d_threshold
-    if str(pt).strip().upper() == "NONE":
+    pt_normalized = str(pt).strip().upper()
+    if pt_normalized in {"", "NONE", "DEFAULT"}:
         return None
+    if pt_normalized != "GMRES":
+        raise NotImplementedError(
+            "PRECON_TYPE must be NONE/DEFAULT or GMRES; VMEC2000's distinct "
+            "CG, GMRESR, and TFQMR evolution algorithms are not implemented"
+        )
     return Prec2DConfig(threshold=float(thr), finest=bool(finest))
 
 
@@ -600,7 +617,8 @@ def prepare_runtime(
     ftol: float | None = None, max_iterations: int | None = None,
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
-    lconm1: bool = True, setup: RunSetup | None = None,
+    lconm1: bool = True, lforbal: bool | None = None,
+    setup: RunSetup | None = None,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
 ) -> SolverRuntime:
@@ -613,7 +631,9 @@ def prepare_runtime(
     spectral row never evolves in fixed-boundary mode, so they are constants
     of the run.
 
-    ``precon_type``/``prec2d_threshold`` (or an explicit ``prec2d``
+    ``lforbal`` overrides the input's non-variational ``(m=1,n=0)`` force
+    replacement when supplied (a prebuilt :class:`RunSetup` defaults it to
+    false).  ``precon_type``/``prec2d_threshold`` (or an explicit ``prec2d``
     :class:`~vmex.core.preconditioner_2d.Prec2DConfig`) switch on the
     optional 2D block preconditioner (``precon2d.f``); ``None``/``"NONE"``
     (the default) leaves the 1D-only path byte-identical.
@@ -623,16 +643,28 @@ def prepare_runtime(
             raise ValueError("prepare_runtime(RunSetup) requires a Resolution")
         setup = source
         defaults = dict(ftol=1e-10, niter=100, delt=1.0, tcon0=1.0, gamma=0.0,
-                        nstep=200)
+                        nstep=200, lforbal=False, lmove_axis=True)
     else:
         inp = source
         if resolution is None:
             resolution = resolution_from_input(inp)
         if setup is None:
-            setup = run_setup(inp, resolution, lconm1=lconm1)
+            # VMEC2000 profil3d.f starts from the axis coefficients exactly as
+            # supplied, including an all-zero/missing axis.  Its eqsolve.f
+            # driver calls guess_axis once only after the first bad-Jacobian
+            # or high-force (irst=4) pass.  The setup helper retains its
+            # explicit legacy inference option for geometry-only callers, but
+            # a production solve must not pre-guess here and then guess a
+            # second time in _solve_stage.
+            setup = run_setup(
+                inp, resolution, lconm1=lconm1,
+                infer_axis_if_missing=False,
+            )
         defaults = dict(ftol=float(inp.ftol_array[0]), niter=int(inp.niter_array[0]),
                         delt=float(inp.delt), tcon0=float(inp.tcon0),
-                        gamma=float(inp.gamma), nstep=int(inp.nstep))
+                        gamma=float(inp.gamma), nstep=int(inp.nstep),
+                        lforbal=bool(inp.lforbal),
+                        lmove_axis=bool(inp.lmove_axis))
 
     rt = SolverRuntime(
         resolution=resolution, setup=setup,
@@ -643,6 +675,8 @@ def prepare_runtime(
         time_step0=float(defaults["delt"] if time_step is None else time_step),
         nstep=int(defaults["nstep"] if nstep is None else nstep),
         jmax=int(resolution.ns) - 1,
+        lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
+        lmove_axis=bool(defaults["lmove_axis"]),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
     )
@@ -732,6 +766,7 @@ def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
     return PreconditionerCache(
         tcon=z((ns,)), fnorm=z(()), fnormL=z(()), fnorm1=z(()),
         coefficients_R=coeffs, coefficients_Z=coeffs,
+        force_balance_R=z((ns,)), force_balance_Z=z((ns,)),
         matrices_R=mats, matrices_Z=mats, faclam=z((ns, mpol, nr)),
     )
 
@@ -819,6 +854,20 @@ def _force_pipeline(
     spectral = spectral_mhd_forces(
         forces, mpol=res.mpol, ntor=res.ntor, trig=rt.trig, include_edge=bool(rt.lfreeb)
     )
+    if rt.lforbal:
+        equif = radial_force_balance_error(
+            fields=fields,
+            phipf=setup.phipf,
+            trig=rt.trig,
+            s=s,
+            signgs=setup.signgs,
+        )
+        spectral = apply_m1_force_balance(
+            spectral,
+            equif=equif,
+            factor_R=cache.force_balance_R,
+            factor_Z=cache.force_balance_Z,
+        )
 
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
@@ -1004,6 +1053,30 @@ def _evaluate(
         dxdu_even_full=geometry.dR_dtheta_even, dxdu_odd_full=geometry.dR_dtheta_odd,
         x_odd_full=geometry.R_odd, **common,
     )
+    if rt.lforbal and res.mpol >= 2:
+        force_balance_R = force_balance_preconditioner_factor(
+            axd_odd=coefficients_R.axd[:, 1],
+            dxdu_half=jacobian.zu12,
+            trig_multiplier=np.asarray(rt.trig.cosmu)[:, 1],
+            jacobian=jacobian,
+            fields=fields,
+            trig=rt.trig,
+            s=s,
+            signgs=setup.signgs,
+        )
+        force_balance_Z = force_balance_preconditioner_factor(
+            axd_odd=coefficients_Z.axd[:, 1],
+            dxdu_half=jacobian.ru12,
+            trig_multiplier=-np.asarray(rt.trig.sinmu)[:, 1],
+            jacobian=jacobian,
+            fields=fields,
+            trig=rt.trig,
+            s=s,
+            signgs=setup.signgs,
+        )
+    else:
+        force_balance_R = jnp.zeros((ns,), dtype=s.dtype)
+        force_balance_Z = jnp.zeros((ns,), dtype=s.dtype)
     # jmax follows scalfor.f: ns-1 fixed boundary (rt.jmax default), ns once
     # the vacuum field is on (free-boundary lane) — activates the
     # EDGE_PEDESTAL / ZC(0,0) edge stiffening inside scalfor_matrices.
@@ -1025,7 +1098,9 @@ def _evaluate(
     fresh = PreconditionerCache(
         tcon=tcon_new, fnorm=energies.fnorm, fnormL=energies.fnormL,
         fnorm1=fnorm1_new, coefficients_R=coefficients_R,
-        coefficients_Z=coefficients_Z, matrices_R=matrices_R,
+        coefficients_Z=coefficients_Z,
+        force_balance_R=force_balance_R,
+        force_balance_Z=force_balance_Z, matrices_R=matrices_R,
         matrices_Z=matrices_Z, faclam=faclam_new,
     )
     refresh = (((iteration - iter_last_reset) % NS4) == 0) & (~jac_changed)
@@ -1162,11 +1237,13 @@ def _evaluation_is_finite(result: _EvalResult) -> Array:
 def reguess_initial_axis(
     rt: SolverRuntime, state: SpectralState
 ) -> tuple[SolverRuntime, SpectralState, tuple[Array, Array, Array, Array]]:
-    """Apply the VMEC2000 first-bad-Jacobian magnetic-axis retry.
+    """Apply VMEC2000's first-pass magnetic-axis retry.
 
-    Shared by fixed- and free-boundary drivers.  Besides rebuilding the
-    ``profil3d`` state, this updates the setup's axis arrays and rebinds the
-    constraint baselines to that state (``funct3d.f: iter2 == iter1``).
+    Shared by fixed- and free-boundary drivers for a first bad Jacobian and
+    for ``LMOVE_AXIS=T`` with a first raw-force sum above ``1e2``.  Besides
+    rebuilding the ``profil3d`` state, this updates the setup's axis arrays
+    and rebinds the constraint baselines to that state
+    (``funct3d.f: iter2 == iter1``).
     """
     setup = rt.setup
     _, geometry = _geometry(state, rt)
@@ -1234,6 +1311,22 @@ def _make_body(
 
         converged = (~jac1) & (fsqr_c <= ftol) & (fsqz_c <= ftol) & (fsql_c <= ftol)
         bad_init = jac1 & (it == 1)
+        # funct3d.f/eqsolve.f: LMOVE_AXIS=T and a finite first raw-force sum
+        # above 1e2 set irst=4 and return to guess_axis before evolving xc.
+        # ijacob=0 makes this a single retry, exactly like the Fortran guard.
+        axis_reguess = (
+            bool(rt.lmove_axis)
+            & (~jac1)
+            & (~nonfinite1)
+            & (it == 1)
+            & (carry.ijacob == 0)
+            & (rt.resolution.ns >= 3)
+            & (fsq0 > 1.0e2)
+        )
+        # Unlike a bad Jacobian, irst=4 does not return from evolve.f: the
+        # triggering pass still performs its damping/momentum update, and
+        # eqsolve carries that xcdot into the rebuilt-axis retry.  ``done``
+        # below transfers control after that update; only its xc is discarded.
         stepping = running & (~converged) & (~bad_init) & (~nonfinite1)
 
         # ---- TimeStepControl (evolve.f) ------------------------------------
@@ -1333,19 +1426,26 @@ def _make_body(
         jac75 = stepping & (ijacob_n >= 75)
         maxed = stepping & (~eq_reset) & (~jac75) & (it >= max_iter)
 
-        stop_now = running & (converged | bad_init | numerical_bad) | jac75 | maxed | reeval_bad
+        stop_now = (
+            running & (converged | bad_init | axis_reguess | numerical_bad)
+            | jac75 | maxed | reeval_bad
+        )
         done_n = carry.done | stop_now
         ier_n = jnp.where(
             carry.done, carry.ier,
             jnp.where(running & converged, SUCCESSFUL_TERM_FLAG,
             jnp.where(running & bad_init, BAD_JACOBIAN_FLAG,
+            jnp.where(running & axis_reguess, AXIS_REGUESS_FLAG,
             jnp.where(running & numerical_bad, NONFINITE_FLAG,
             jnp.where(jac75, JAC75_FLAG,
             jnp.where(reeval_bad, MISC_ERROR_FLAG,
-            jnp.where(maxed, MORE_ITER_FLAG, carry.ier)))))),
+            jnp.where(maxed, MORE_ITER_FLAG, carry.ier))))))),
         ).astype(carry.ier.dtype)
 
-        advance = stepping & (~eq_reset) & (~jac75) & (~maxed) & (~reeval_bad) & (~numerical_bad)
+        advance = (
+            stepping & (~axis_reguess) & (~eq_reset) & (~jac75) & (~maxed)
+            & (~reeval_bad) & (~numerical_bad)
+        )
         iteration_n = jnp.where(advance, it + 1, it)
 
         # ---- trajectory row (printout.f values) ----------------------------
@@ -1385,11 +1485,20 @@ def _make_body(
     return body
 
 
-def _initial_carry(state: SpectralState, rt: SolverRuntime, *, ijacob: int) -> _LoopCarry:
+def _initial_carry(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    ijacob: int,
+    xcdot: SpectralState | None = None,
+) -> _LoopCarry:
     """Initial loop carry (reset_params.f / initialize_radial.f values)."""
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
-    zeros = jax.tree.map(jnp.zeros_like, state)
+    zeros = (
+        jax.tree.map(jnp.zeros_like, state)
+        if xcdot is None else xcdot
+    )
     delt0 = jnp.asarray(rt.time_step0, dtype=dtype)
     zero, inf = jnp.zeros((), dtype=dtype), jnp.asarray(jnp.inf, dtype=dtype)
     # NOTE: scalar counters/flags carry explicit (non-weak) dtypes so that the
@@ -1544,9 +1653,12 @@ def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
 
 
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
-              ijacob: int, verbose: bool, emit) -> _LoopCarry:
+              ijacob: int, verbose: bool, emit,
+              emit_banner: bool = True,
+              initial_xcdot: SpectralState | None = None) -> _LoopCarry:
     """Run the iteration loop in the requested lane; return the final carry."""
-    carry = _initial_carry(state0, rt, ijacob=ijacob)
+    carry = _initial_carry(
+        state0, rt, ijacob=ijacob, xcdot=initial_xcdot)
 
     if mode == "jit":
         return _while_lane(carry, rt)
@@ -1559,7 +1671,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     # (values bit-for-bit unchanged) makes the per-block donation valid and is
     # amortized over the whole solve.
     carry = jax.tree.map(jnp.array, carry)
-    if verbose:
+    if verbose and emit_banner:
         # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
         emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, rt.ftol, rt.max_iterations), end="")
         emit(FORCE_ITERATIONS_BANNER, end="")
@@ -1571,7 +1683,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         carry = _block_lane(carry, rt)
         done = bool(carry.done)
         upto = int(carry.iteration) if done else int(carry.iteration) - 1
-        if verbose:
+        # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
+        # eqsolve before printout.f, so the discarded first pass has no row.
+        retry_transfer = done and int(carry.ier) in (
+            AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG,
+        )
+        if verbose and not retry_transfer:
             trajectory = np.asarray(carry.trajectory[:max(upto, 0)])
             _emit_lines(rt, trajectory, upto, printed, done, emit)
         if done:
@@ -1581,30 +1698,90 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
 
 def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
                  mode: str, verbose: bool, emit,
-                 try_axis_reguess: bool = True) -> _LoopCarry:
+                 try_axis_reguess: bool = True,
+                 jacobian_retries: int = 2) -> _LoopCarry:
     """Run one solve at a fixed runtime, with the eqsolve.f axis-retry.
 
     ``state0=None`` starts from the runtime's ``profil3d.f`` interior guess.
     On a first-iteration Jacobian sign change with ``ijacob == 0``
     (``eqsolve.f``), the axis is re-guessed from the failing geometry and the
-    loop restarted once (``try_axis_reguess``).  Returns the final carry;
-    the caller maps ``carry.ier`` to results/exceptions (:func:`_finalize`).
-    """
-    setup = rt.setup
-    if state0 is None:
-        state0 = _initial_state(setup)
-    carry = _run_loop(state0, rt, mode=mode, ijacob=0, verbose=verbose, emit=emit)
+    loop restarted once (``try_axis_reguess``).
 
-    # eqsolve.f: on a first-iteration Jacobian sign change with ijacob == 0,
-    # re-guess the axis from the current geometry and restart once.
-    if try_axis_reguess and int(carry.ier) == BAD_JACOBIAN_FLAG \
-            and int(carry.ijacob) == 0 and rt.resolution.ns >= 3:
+    VMEC2000 stops after 75 Jacobian resets and tells the user to change
+    ``DELT``.  VMEX makes that manual recovery deterministic: up to
+    ``jacobian_retries`` attempts restart the best finite checkpoint with
+    zero velocity and half the preceding initial step, capped at 0.5.  The
+    equilibrium equations and convergence test are unchanged; setting
+    ``jacobian_retries=0`` preserves the exact VMEC2000 fatal-stop policy.
+    Returns the final carry; the caller maps ``carry.ier`` to
+    results/exceptions (:func:`_finalize`).
+    """
+    if int(jacobian_retries) < 0:
+        raise ValueError("jacobian_retries must be non-negative")
+
+    def run_attempt(
+        attempt_rt: SolverRuntime,
+        attempt_state: SpectralState,
+        *,
+        emit_banner: bool,
+    ) -> tuple[_LoopCarry, SolverRuntime]:
+        carry = _run_loop(
+            attempt_state, attempt_rt, mode=mode, ijacob=0,
+            verbose=verbose, emit=emit, emit_banner=emit_banner,
+        )
+
+        # eqsolve.f: on a first-iteration Jacobian sign change with
+        # ijacob == 0, re-guess the axis from the current geometry and restart
+        # once.  A high finite first force uses the same transfer while
+        # preserving the triggering pass's momentum.
+        retry_reason = int(carry.ier)
+        if (
+            try_axis_reguess
+            and retry_reason in (BAD_JACOBIAN_FLAG, AXIS_REGUESS_FLAG)
+            and int(carry.ijacob) == 0
+            and attempt_rt.resolution.ns >= 3
+        ):
+            if verbose:
+                if retry_reason == BAD_JACOBIAN_FLAG:
+                    emit(" INITIAL JACOBIAN CHANGED SIGN!")
+                emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
+            attempt_rt, attempt_state, _axis = reguess_initial_axis(
+                attempt_rt, attempt_state
+            )
+            carry = _run_loop(
+                attempt_state, attempt_rt, mode=mode, ijacob=1,
+                verbose=verbose, emit=emit, emit_banner=False,
+                initial_xcdot=(
+                    carry.xcdot
+                    if retry_reason == AXIS_REGUESS_FLAG else None
+                ),
+            )
+        return carry, attempt_rt
+
+    attempt_state = _initial_state(rt.setup) if state0 is None else state0
+    attempt_rt = rt
+    carry, attempt_rt = run_attempt(
+        attempt_rt, attempt_state, emit_banner=True,
+    )
+    for attempt in range(1, int(jacobian_retries) + 1):
+        if int(carry.ier) != JAC75_FLAG:
+            break
+        retry_step = min(0.5, 0.5 * float(attempt_rt.time_step0))
+        attempt_state = carry.xstore
+        attempt_rt = runtime_with_baselines(
+            replace(attempt_rt, time_step0=retry_step),
+            attempt_state,
+        )
         if verbose:
-            emit(" INITIAL JACOBIAN CHANGED SIGN!")
-            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
-        rt, state0, _axis = reguess_initial_axis(rt, state0)
-        carry = _run_loop(state0, rt, mode=mode, ijacob=1, verbose=verbose,
-                          emit=emit)
+            emit(
+                " JACOBIAN RECOVERY RETRY "
+                f"{attempt}/{int(jacobian_retries)}: "
+                "RESTARTING BEST FINITE STATE WITH "
+                f"DELT = {retry_step:.6g}"
+            )
+        carry, attempt_rt = run_attempt(
+            attempt_rt, attempt_state, emit_banner=False,
+        )
     return carry
 
 
@@ -1652,6 +1829,7 @@ def solve(
     device: Any = AUTO,
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
@@ -1666,7 +1844,10 @@ def solve(
     printing (``verbose=True``); ``mode="jit"`` runs one ``lax.while_loop``
     over the same traced body.
 
-    Returns a :class:`SolveResult` on convergence.  Raises
+    Returns a :class:`SolveResult` on convergence.  ``jacobian_retries``
+    (default 2) restarts the best finite checkpoint with a reduced ``DELT``
+    after VMEC2000's 75-reset condition; set it to zero for the exact
+    VMEC2000 fatal-stop policy.  Raises
     :class:`VmecJacobianError` when the initial Jacobian changes sign twice
     (after one ``guess_axis`` retry — the ``eqsolve.f`` ``ijacob == 0`` path)
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
@@ -1715,5 +1896,8 @@ def solve(
         initial_state = hot_restart_state(rt, initial_state)
         rt = runtime_with_baselines(rt, initial_state)  # funct3d.f iter2==iter1
     with device_context(device, rt.resolution):
-        carry = _solve_stage(rt, initial_state, mode=mode, verbose=verbose, emit=emit)
+        carry = _solve_stage(
+            rt, initial_state, mode=mode, verbose=verbose, emit=emit,
+            jacobian_retries=jacobian_retries,
+        )
     return _finalize(carry, rt)

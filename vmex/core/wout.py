@@ -801,7 +801,7 @@ def wout_from_state(
         niter=int(niter), itfsq=int(itfsq),
         lasym=lasym, lrecon=False,
         lfreeb=bool(inp.lfreeb),
-        lmove_axis=True,
+        lmove_axis=bool(inp.lmove_axis),
         lrfp=False,
         ier_flag=0 if bool(converged) else 2,
         aspect=aspect, betatotal=betatotal,

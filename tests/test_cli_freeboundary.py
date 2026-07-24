@@ -8,8 +8,8 @@ Covered:
    ``In VACUUM`` block and ``VACUUM PRESSURE TURNED ON`` banner appear, the
    wout is written and readable with ``lfreeb = True`` and the mgrid's
    ``nextcur``/``extcur``, and the exit code is 2 (MORE ITERATIONS
-   REQUIRED — the capped run cannot converge but VMEC2000 still writes the
-   wout);
+   REQUIRED — the fixture explicitly sets ``LFULL3D1OUT=T`` so VMEC2000 and
+   VMEX write the capped state);
 2. missing mgrid file: warning + fixed-boundary fallback (VMEC2000 policy);
 3. direct-coil conventions: ``MGRID_FILE = 'DIRECT_COILS'`` without
    ``--coils`` and ``--coils`` on a fixed-boundary deck are typed input
@@ -69,6 +69,11 @@ def freeb_cli(tmp_path_factory) -> tuple[int, str, Path]:
     workdir = tmp_path_factory.mktemp("cli_freeb")
     deck = workdir / DECK.name
     shutil.copyfile(DECK, deck)
+    text, count = re.subn(
+        r"(?m)^\s*/\s*$", "  LFULL3D1OUT = T,\n/", deck.read_text(), count=1
+    )
+    assert count == 1
+    deck.write_text(text)
     shutil.copyfile(MGRID, workdir / MGRID.name)
     outdir = workdir / "out"
     rc, stdout = _run_cli([str(deck), "--max-iter", "80", "--outdir", str(outdir)])
@@ -100,7 +105,7 @@ def test_exit_code_reflects_more_iter(freeb_cli):
 
 def test_wout_written_with_free_boundary_fields(freeb_cli):
     _, _, wout_path = freeb_cli
-    assert wout_path.exists(), "capped free-boundary run must still write the wout"
+    assert wout_path.exists(), "LFULL3D1OUT must retain the capped free-boundary state"
     # wrout.f dimensions extcur by the mgrid's nextcur (the bundled synthetic
     # mgrid holds a single summed coil group), truncating the deck's EXTCUR.
     mgrid = read_mgrid(MGRID)
@@ -139,6 +144,26 @@ def test_missing_mgrid_falls_back_to_fixed_boundary(tmp_path):
     assert "In VACUUM" not in stdout
     # the capped fixed-boundary fallback exhausts NITER -> exit code 2.
     assert rc == MORE_ITER_FLAG
+    assert not (tmp_path / f"wout_{CASE}.nc").exists()
+
+
+def test_missing_mgrid_forced_wout_has_effective_fixed_metadata(tmp_path):
+    """LFULL3D1OUT retains the fallback state but must not label it free."""
+    deck = tmp_path / DECK.name
+    text, count = re.subn(
+        r"(?m)^\s*/\s*$", "  LFULL3D1OUT = T,\n/", DECK.read_text(), count=1
+    )
+    assert count == 1
+    deck.write_text(text)  # mgrid deliberately absent
+    rc, stdout = _run_cli(
+        [str(deck), "--max-iter", "5", "--outdir", str(tmp_path)]
+    )
+    assert rc == MORE_ITER_FLAG
+    assert "FIXED-BOUNDARY" in stdout
+    wout = read_wout(tmp_path / f"wout_{CASE}.nc")
+    assert bool(wout.lfreeb) is False
+    with netCDF4.Dataset(str(tmp_path / f"wout_{CASE}.nc")) as ds:
+        assert int(ds["lfreeb__logical__"][()]) == 0
 
 
 # ---------------------------------------------------------------------------

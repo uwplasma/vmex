@@ -14,8 +14,10 @@
 **VMEX** is a clean-room, JAX-native reimplementation of the
 [VMEC2000](https://princetonuniversity.github.io/STELLOPT/VMEC) ideal-MHD
 equilibrium code for stellarators and tokamaks. It reproduces VMEC2000
-iteration-for-iteration on benchmark decks — and, unlike the Fortran
-original, it is differentiable and runs on GPUs.
+iteration-for-iteration on representative benchmark decks — and, unlike the
+Fortran original, provides differentiable research paths and runs on GPUs.
+The exact support and validation matrix is documented in
+[VMEC2000 compatibility and research scope](https://vmex.readthedocs.io/en/latest/vmec2000_compatibility.html).
 
 - **VMEC2000 parity.** The solver ports VMEC2000's algorithms
   constant-for-constant (steepest-descent moment method, radial
@@ -28,15 +30,17 @@ original, it is differentiable and runs on GPUs.
   respect to boundary shape and profile parameters by implicit
   differentiation of the converged fixed point — no finite differences, no
   unrolling — validated against central finite differences to ~1e-6 relative
-  (see the gradient table in the docs), with an O(1)-memory adjoint. **Free
-  boundary** is differentiable end-to-end through the virtual-casing vacuum
-  field (coil / `extcur` derivatives), finite-difference-validated.
+  (see the gradient table in the docs), with an O(1)-memory adjoint. The
+  **free-boundary virtual-casing residual** is differentiable in coil /
+  `extcur` parameters on a specified plasma boundary and is
+  finite-difference-validated. The host-driven NESTOR equilibrium solve itself
+  is not differentiated.
 - **Drop-in.** Reads VMEC2000 `input.*` namelists and VMEC++-style JSON,
   prints VMEC2000-format iteration output, and writes `wout_*.nc` files
   that load unchanged in simsopt and booz_xform.
 - **Batteries included.** Plotting (`vmex --plot`), Boozer transform
   (`vmex --booz`), spline profiles, multigrid, hot restart, free boundary
-  from mgrid files *or* coil fields tabulated in memory,
+  from mgrid files or fields tabulated from coils,
   typed zero-crash errors — with the shared linear/adjoint solver layer
   factored out into [SOLVAX](https://pypi.org/project/solvax/).
 
@@ -173,7 +177,7 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Fixed-boundary equilibria | ✅ | ✅ | ✅ |
 | Free boundary from an mgrid file | ✅ | ✅ | ✅ |
 | Free-boundary radial multigrid + hot restart | ✅ | ✅ | ❌ |
-| Free boundary from coils (no mgrid file) | ✅ | ❌ | ❌ |
+| Free boundary from an in-memory coil-field table | ✅ | ❌ | ❌ |
 | Free-boundary tokamaks (`ntor = 0`) | ✅ | ✅ | ❌ |
 | Non-stellarator-symmetric (`LASYM = T`) | ✅ | ✅ | ✅ |
 | Fixed-boundary fallback on missing mgrid | ✅ | ✅ | ❌ |
@@ -185,19 +189,19 @@ CPU, single thread; `benchmarks/baseline.json`; reproduce with
 | Plotting built in (`--plot`) | ✅ | ❌ | ❌ |
 | GPU execution | ✅ | ❌ | ❌ |
 | Differentiable fixed boundary (implicit diff, O(1) memory) | ✅ | ❌ | ❌ |
-| Differentiable free boundary (virtual casing) | ✅ | ❌ | ❌ |
+| Differentiable virtual-casing residual on a specified boundary | ✅ | ❌ | ❌ |
 | 2D block preconditioner (stiff-case speedup) | ✅ | ❌ | ❌ |
 
-### Free boundary from an in-memory coil field
+### Free boundary from coil-field tabulation
 
-Free-boundary solves do not require a pre-generated mgrid file: tabulate an
+Free-boundary solves can use a coil set by tabulating an
 [ESSOS](https://github.com/uwplasma/ESSOS) coil set onto the solver grid in
 memory (`essos.coils.Coils.to_mgrid`) and pass it as `external_field=`,
-with no MAKEGRID file involved. For gradients, the differentiable free
-boundary evaluates a JAX Biot-Savart (a plain `xyz→B` callable) at the
-boundary points of each iteration, keeping the coil degrees of freedom
-differentiable end-to-end. All coil geometry lives in ESSOS; vmex has no
-coil code of its own.
+without a persistent MAKEGRID file. This forward route still uses mgrid
+interpolation. Separately, the virtual-casing residual can evaluate a JAX
+Biot-Savart callable directly on a specified boundary, retaining coil
+derivatives for that residual; it is not an adjoint of the reconverged NESTOR
+solve. All coil geometry lives in ESSOS; vmex has no coil code of its own.
 
 ![Free-boundary Landreman-Paul QA pressure scan from an in-memory ESSOS coil field](docs/_static/figures/readme_essos_beta_scan.png)
 

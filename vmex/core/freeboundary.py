@@ -50,7 +50,12 @@ from jax import lax
 
 from . import profiles as _profiles
 from .device import AUTO, _placement_device, _put_numeric_leaves, device_context
-from .errors import MORE_ITER_FLAG, SUCCESSFUL_TERM_FLAG
+from .errors import (
+    AXIS_REGUESS_FLAG,
+    JAC75_FLAG,
+    MORE_ITER_FLAG,
+    SUCCESSFUL_TERM_FLAG,
+)
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
 from .geometry import half_mesh_jacobian
@@ -1041,6 +1046,7 @@ def _solve_free_boundary_stage(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
     constraint_continuation: tuple[Array, Array] | None = None,
     reuse_vacuum_cache: bool = False,
 ) -> _FreeBoundaryStageResult:
@@ -1055,7 +1061,13 @@ def _solve_free_boundary_stage(
 
     ``error_on_no_convergence=False`` returns the final state instead of
     raising when NITER is exhausted (useful against unconverged goldens).
+    After VMEC2000's fatal 75-Jacobian-reset condition,
+    ``jacobian_retries`` restarts the best finite plasma checkpoint with
+    zero velocity and a halved/capped ``DELT``.  Vacuum/NESTOR structures are
+    rebuilt for that checkpoint.  Set zero for the exact VMEC2000 stop.
     """
+    if int(jacobian_retries) < 0:
+        raise ValueError("jacobian_retries must be non-negative")
     if not bool(inp.lfreeb):
         raise ValueError("solve_free_boundary requires an LFREEB=T input")
     if external_field is None:
@@ -1230,6 +1242,69 @@ def _solve_free_boundary_stage(
             ), end="")
             printed.add(it_p)
 
+    # VMEC2000's LMOVE_AXIS path is triggered by the *first force pass*, not
+    # only by a bad Jacobian.  Run that pass explicitly before entering the
+    # batched pre-/post-vacuum lanes.  If the shared solver body returns the
+    # internal irst=4 transfer, rebuild both the plasma profiles and the
+    # axis-dependent NESTOR filament/executables, then repeat iteration 1
+    # once with ijacob=1.  The discarded triggering pass is not printed.
+    carry = _iter_lane(carry, rt_initial)
+    if (int(carry.ier) == AXIS_REGUESS_FLAG
+            and int(carry.ijacob) == 0 and ns >= 3):
+        if verbose:
+            emit(" TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS")
+        rt, _init_state, _axis = reguess_initial_axis(rt, _init_state)
+        _initial_ijacob = 1
+
+        _axis_r0, _axis_z0 = _vacuum_scalars(_init_state, rt)[2:4]
+        basis, fused_vac, vacuum_lane = _vacuum_executables(
+            resolution, mf=int(inp.mpol) + 1, nf=int(inp.ntor),
+            signgs=int(rt.setup.signgs),
+            wint=np.asarray(rt.trig.wint, dtype=float),
+            modes=rt.modes, axis_r0=_axis_r0, axis_z0=_axis_z0,
+        )
+        zeros_edge = jnp.zeros(
+            (basis.ntheta3, basis.nzeta), dtype=dtype)
+        carried_edge = zeros_edge
+        if (vacuum_continuation is not None
+                and vacuum_continuation.turned_on):
+            if vacuum_continuation.rbsq is not None:
+                _, carried_geometry = _geometry(_init_state, rt)
+                r_edge = (
+                    carried_geometry.R_even[-1] + carried_geometry.R_odd[-1]
+                )
+                pres_ns = _vacuum_scalars(_init_state, rt)[5]
+                rbsq = jnp.asarray(vacuum_continuation.rbsq, dtype=dtype)
+                carried_edge = jnp.where(
+                    r_edge != 0.0,
+                    rbsq * jnp.asarray(rt.setup.hs) / r_edge,
+                    jnp.zeros_like(r_edge),
+                ) - pres_ns * jnp.asarray(
+                    _presf_ns_scale(inp, ns), dtype=dtype)
+            elif vacuum_continuation.bsqvac is not None:
+                carried_edge = jnp.asarray(
+                    vacuum_continuation.bsqvac, dtype=dtype)
+        rt_fixed = replace(
+            rt, lfreeb=False, bsqvac_edge=zeros_edge,
+            presf_ns_scale=jnp.asarray(0.0, dtype=dtype),
+        )
+        rt_freeb = replace(
+            rt, lfreeb=True, jmax=ns, bsqvac_edge=carried_edge,
+            presf_ns_scale=jnp.asarray(
+                _presf_ns_scale(inp, ns), dtype=dtype),
+        )
+        # The NESTOR matrix/vector were built for the discarded axis.
+        fb.mode_matrix = None
+        fb.bvec_nonsing = None
+        fb.potvac = None
+        rt_initial = rt_freeb if vacuum_active else rt_fixed
+        retry_xcdot = carry.xcdot
+        carry = _initial_carry(
+            _init_state, rt_initial, ijacob=_initial_ijacob,
+            xcdot=retry_xcdot)
+        carry = _iter_lane(carry, rt_initial)
+    _emit_due(final=False)
+
     int_dtype = carry.iteration.dtype
     max_passes = rt.max_iterations + 400
     for _ in range(max_passes):
@@ -1358,6 +1433,43 @@ def _solve_free_boundary_stage(
 
     _emit_due(final=True)
     ier = int(carry.ier)
+    if ier == JAC75_FLAG and int(jacobian_retries) > 0:
+        retry_step = min(0.5, 0.5 * float(rt.time_step0))
+        if verbose:
+            emit(
+                " JACOBIAN RECOVERY RETRY: RESTARTING BEST FINITE "
+                f"STATE WITH DELT = {retry_step:.6g}"
+            )
+        current_rt = rt_freeb if fb.turned_on else rt_fixed
+        return _solve_free_boundary_stage(
+            inp,
+            mgrid_path=mgrid_path,
+            external_field=external_field,
+            resolution=resolution,
+            ftol=ftol,
+            max_iterations=max_iterations,
+            verbose=verbose,
+            emit=emit,
+            error_on_no_convergence=error_on_no_convergence,
+            initial_state=carry.xstore,
+            vacuum_continuation=fb,
+            time_step=retry_step,
+            tcon0=tcon0,
+            gamma=gamma,
+            nstep=nstep,
+            lconm1=lconm1,
+            precon_type=precon_type,
+            prec2d_threshold=prec2d_threshold,
+            prec2d=prec2d,
+            jacobian_retries=int(jacobian_retries) - 1,
+            constraint_continuation=(
+                current_rt.rcon0, current_rt.zcon0
+            ) if fb.turned_on else None,
+            # NESTOR's matrix and axis-current filament depend on the
+            # checkpoint geometry; never reuse the failed attempt's compiled
+            # dynamic cache even at an equal radial resolution.
+            reuse_vacuum_cache=False,
+        )
     if ier == MORE_ITER_FLAG and not error_on_no_convergence:
         result = _result_from_carry(carry, rt_freeb if fb.turned_on else rt_fixed)
         return _FreeBoundaryStageResult(
@@ -1396,6 +1508,7 @@ def solve_free_boundary(
     precon_type: str | None = None,
     prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
+    jacobian_retries: int = 2,
 ) -> SolveResult:
     """Single-grid free-boundary solve (``eqsolve.f`` + ``funct3d.f`` IVAC0).
 
@@ -1408,8 +1521,8 @@ def solve_free_boundary(
     :func:`vmex.core.solver.solve`.  Use
     :func:`vmex.core.multigrid.solve_free_boundary_multigrid` for the complete
     ``NS_ARRAY`` ladder.  Time-step, constraint, print-cadence, m=1-constraint,
-    and optional 2D-preconditioner overrides mirror
-    :func:`vmex.core.solver.solve`.
+    optional 2D-preconditioner overrides and bounded ``jacobian_retries``
+    recovery mirror :func:`vmex.core.solver.solve`.
     """
     if resolution is None:
         resolution = resolution_from_input(inp)
@@ -1427,6 +1540,7 @@ def solve_free_boundary(
             lconm1=lconm1,
             precon_type=precon_type, prec2d_threshold=prec2d_threshold,
             prec2d=prec2d,
+            jacobian_retries=jacobian_retries,
             constraint_continuation=None, reuse_vacuum_cache=False,
         )
     return stage.result

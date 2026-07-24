@@ -53,6 +53,8 @@ __all__ = [
     "energies_and_force_norms",
     "preconditioned_force_norm",
     "surface_currents",
+    "radial_force_balance_error",
+    "force_balance_preconditioner_factor",
     "constraint_scaling",
 ]
 
@@ -610,6 +612,130 @@ def surface_currents(
     rbtor = 1.5 * bvco[-1] - 0.5 * bvco[-2]
     rbtor0 = 1.5 * bvco[1] - 0.5 * bvco[2] if ns >= 3 else bvco[-1]
     return CurrentDiagnostics(buco=buco, bvco=bvco, ctor=ctor, rbtor=rbtor, rbtor0=rbtor0)
+
+
+# ---------------------------------------------------------------------------
+# Non-variational m=1 force-balance replacement (fbal.f / precondn.f)
+# ---------------------------------------------------------------------------
+
+
+def radial_force_balance_error(
+    *,
+    fields: MagneticFields,
+    phipf: Array,
+    trig: TrigTables,
+    s: Array,
+    signgs: int,
+) -> Array:
+    """Flux-surface-averaged radial force error ``equif`` (VMEC ``fbal.f``).
+
+    This is the non-normalized quantity consumed by ``tomnsp_mod.f`` when
+    ``LFORBAL = T``.  On the interior full mesh,
+
+    ``equif = (-phipf*jcuru + chipf*jcurv)/vpphi + dp/ds``,
+
+    where the contravariant current averages follow from radial differences
+    of ``<B_u>`` and ``<B_v>``.  The axis and edge rows are zero, exactly as
+    in ``calc_fbal``.  ``fields.chips`` is the effective ``chipf`` after the
+    ``NCURR=1`` current constraint, when active.
+    """
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    dtype = fields.bsubu.dtype
+    if ns < 3:
+        return jnp.zeros((ns,), dtype=dtype)
+
+    currents = surface_currents(
+        bsubu=fields.bsubu,
+        bsubv=fields.bsubv,
+        trig=trig,
+        s=s,
+        signgs=signgs,
+    )
+    hs = jnp.asarray(s[1] - s[0], dtype=dtype)
+    ohs = 1.0 / hs
+    signgs_f = jnp.asarray(float(int(signgs)), dtype=dtype)
+
+    jcurv = signgs_f * ohs * (currents.buco[2:] - currents.buco[1:-1])
+    jcuru = -signgs_f * ohs * (currents.bvco[2:] - currents.bvco[1:-1])
+    vpphi = 0.5 * (fields.vp[2:] + fields.vp[1:-1])
+    presgrad = ohs * (fields.pressure[2:] - fields.pressure[1:-1])
+    core = (
+        -jnp.asarray(phipf, dtype=dtype)[1:-1] * jcuru
+        + fields.chips[1:-1] * jcurv
+    ) / vpphi + presgrad
+    return jnp.concatenate(
+        [jnp.zeros((1,), dtype=dtype), core, jnp.zeros((1,), dtype=dtype)]
+    )
+
+
+def force_balance_preconditioner_factor(
+    *,
+    axd_odd: Array,
+    dxdu_half: Array,
+    trig_multiplier: Array,
+    jacobian: HalfMeshJacobian,
+    fields: MagneticFields,
+    trig: TrigTables,
+    s: Array,
+    signgs: int,
+) -> Array:
+    """Return the pre-halving ``rzu_fac``/``rru_fac`` of VMEC ``bcovar.f``.
+
+    ``precondn.f`` returns
+
+    ``eqfactor = axd(m-odd)*hs**2 / [signgs*(temp(js)+temp(js+1))]``
+
+    with ``temp = <(-4*r0scale**2)*R*bsq*trigmult*X_u*wint>/vp``.
+    ``bcovar.f`` multiplies this by ``sqrt(s)`` before constructing the
+    reciprocal ``frcc_fac``/``fzsc_fac`` and then halves it for the final
+    ``tomnsp_mod.f`` replacement.  This function deliberately returns the
+    value *before* that final division by two.
+
+    For the R-force factor, pass ``X_u=Z_u`` and ``trigmult=cos(theta)``;
+    for the Z-force factor, pass ``X_u=R_u`` and
+    ``trigmult=-sin(theta)``.
+    """
+    s = jnp.asarray(s)
+    ns = int(s.shape[0])
+    dtype = fields.total_pressure.dtype
+    if ns < 3:
+        return jnp.zeros((ns,), dtype=dtype)
+
+    hs = jnp.asarray(s[1] - s[0], dtype=dtype)
+    r0scale = jnp.asarray(_r0scale(trig), dtype=dtype)
+    pfactor = -4.0 * r0scale * r0scale
+    wint = _angle_weights(trig, dtype)[None, :, :]
+    multiplier = jnp.asarray(trig_multiplier, dtype=dtype)[None, :, None]
+    temp_half = jnp.sum(
+        pfactor
+        * jacobian.r12
+        * fields.total_pressure
+        * wint
+        * multiplier
+        * jnp.asarray(dxdu_half, dtype=dtype),
+        axis=(1, 2),
+    )
+    vp_safe = jnp.where(fields.vp != 0.0, fields.vp, jnp.ones_like(fields.vp))
+    temp_half = jnp.where(fields.vp != 0.0, temp_half / vp_safe, 0.0)
+    temp_full = jnp.asarray(float(int(signgs)), dtype=dtype) * (
+        temp_half
+        + jnp.concatenate([temp_half[1:], jnp.zeros((1,), dtype=dtype)])
+    )
+    eqfactor_core = (
+        jnp.asarray(axd_odd, dtype=dtype)[1:-1]
+        * hs
+        * hs
+        / temp_full[1:-1]
+    )
+    factor_core = jnp.sqrt(jnp.maximum(s[1:-1], 0.0)) * eqfactor_core
+    return jnp.concatenate(
+        [
+            jnp.zeros((1,), dtype=dtype),
+            factor_core,
+            jnp.zeros((1,), dtype=dtype),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
