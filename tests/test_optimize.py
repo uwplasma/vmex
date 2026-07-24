@@ -242,6 +242,12 @@ def test_l_grad_b(solovev_eq):
     np.testing.assert_allclose(fine, val, rtol=5e-2)
 
 
+def test_l_grad_b_rejects_asymmetric_wout() -> None:
+    """The symmetric diagnostic must not silently omit LASYM partners."""
+    with pytest.raises(NotImplementedError, match="lasym = False"):
+        opt.l_grad_b(SimpleNamespace(lasym=True))
+
+
 # ---------------------------------------------------------------------------
 # QI residual
 # ---------------------------------------------------------------------------
@@ -402,8 +408,8 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
     """The R17.1 chunked implicit Jacobian matches the unchunked one.
 
     ``jac_chunk_size`` only changes how the per-dof Jacobian columns are
-    batched (:func:`solvax.chunk_map`: one wide ``vmap`` when ``None`` vs
-    ``jax.lax.map`` in fixed-size chunks otherwise), so the Jacobian scipy
+    batched (:func:`solvax.chunk_map`: one full-width ``lax.map`` batch when
+    ``None`` vs smaller fixed-size batches otherwise), so the Jacobian scipy
     evaluates at the initial boundary must be identical.  Compared at a single
     evaluation (``max_nfev=1``, same default x0) to keep the test cheap; the
     solovev deck has 2 boundary dofs so ``jac_chunk_size=1`` is a real
@@ -412,7 +418,7 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
     jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
-    # Pin the reference to the unchunked (one wide vmap) path explicitly — the
+    # Pin the reference to the unchunked (one full-width batch) path explicitly — the
     # default is now jac_chunk_size="auto" (R17.1 memory-bounded default), so
     # None is what makes this an unchunked-vs-chunked comparison.
     ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",

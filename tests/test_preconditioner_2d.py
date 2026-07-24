@@ -35,7 +35,7 @@ from vmex.core.preconditioner_2d import (
     Prec2DConfig, flat_operator, newton_direction,
 )
 from vmex.core.solver import (
-    SpectralState, _initial_state, _preconditioned_force_signed,
+    SpectralState, _initial_state, _preconditioned_force_signed, _resolve_prec2d,
     evaluate_forces, prepare_runtime, resolution_from_input, solve,
 )
 
@@ -132,6 +132,19 @@ def test_prec2d_config_is_hashable():
     cfg = Prec2DConfig(threshold=1e-6)
     assert hash(cfg) == hash(Prec2DConfig(threshold=1e-6))
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-7))
+
+
+def test_precon_type_has_explicit_non_aliasing_semantics() -> None:
+    """DEFAULT is 1-D; VMEC2000's other Krylov names are not GMRES aliases."""
+    assert _resolve_prec2d(
+        VmecInput(precon_type="DEFAULT"), None, None, None
+    ) is None
+    assert isinstance(
+        _resolve_prec2d(VmecInput(precon_type="GMRES"), None, None, None),
+        Prec2DConfig,
+    )
+    with pytest.raises(NotImplementedError, match="CG, GMRESR, and TFQMR"):
+        _resolve_prec2d(VmecInput(precon_type="TFQMR"), None, None, None)
 
 
 @pytest.mark.full

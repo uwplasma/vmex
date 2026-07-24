@@ -43,7 +43,7 @@ def test_free_boundary_cli_forwards_device(monkeypatch, tmp_path):
     args = cli.build_parser().parse_args(
         ["input.case", "--quiet", "--device", "gpu"]
     )
-    inp = SimpleNamespace(ns_array=[11])
+    inp = SimpleNamespace(ns_array=[11], lfull3d1out=False)
     plan = SimpleNamespace(solver_kwargs={})
     seen = {}
     ftol_array, niter_array = [1e-8], [3]
@@ -64,4 +64,4 @@ def test_free_boundary_cli_forwards_device(monkeypatch, tmp_path):
     assert seen["device"] == "gpu"
     assert seen["ftol_array"] is ftol_array
     assert seen["niter_array"] is niter_array
-    assert seen["raise_on_max_iterations"] is False
+    assert seen["raise_on_max_iterations"] is True

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from vmex.core.errors import VmecNumericalError
@@ -38,6 +39,24 @@ def test_shareable_diagnostic_redacts_input_details(capsys) -> None:
     assert "R(0)=" not in output
     assert "FSQR=" not in output
     assert "OK_FIRST_FORCE_PASS_FINITE" in output
+
+
+def test_shareable_diagnostic_warns_on_undersampled_angular_grid(
+    tmp_path: Path, capsys
+) -> None:
+    """The aliasing warning discloses no resolution or coefficient values."""
+    inp = VmecInput.from_file(DATA / "input.nfp2_QI")
+    path = dataclasses.replace(inp, ntheta=16, nzeta=14).to_indata(
+        tmp_path / "input.private_undersampled"
+    )
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "angular grid meets VMEC automatic-resolution floor: FAIL" in output
+    assert "assessment: W01_ANGULAR_GRID_BELOW_VMEC_DEFAULT" in output
+    assert "private_undersampled" not in output
+    assert "ntheta=" not in output.lower()
+    assert "nzeta=" not in output.lower()
 
 
 def test_shareable_diagnostic_localizes_zero_energy_scale(
@@ -81,6 +100,85 @@ def test_shareable_diagnostic_flags_unsupported_reconstruction(
     assert "D00A_RECONSTRUCTION_MODE_UNSUPPORTED" in output
     assert "private_reconstruction" not in output
     assert "RBC" not in output
+
+
+def test_shareable_diagnostic_uses_production_mode_classification(
+    tmp_path: Path, capsys,
+) -> None:
+    """A production-rejected model gets a stable value-free diagnostic code."""
+    path = tmp_path / "input.private_trip3d"
+    path.write_text("&INDATA\nTRIP3D_FILE='private_field_name.nc'\n/\n")
+    assert diagnose(path) == 1
+    output = capsys.readouterr().out
+    assert "input parsing: PASS" in output
+    assert "D00E_TRIP3D_MODE_UNSUPPORTED" in output
+    assert "private_trip3d" not in output
+    assert "private_field_name" not in output
+
+
+def test_shareable_diagnostic_supports_lforbal(
+    tmp_path: Path, capsys
+) -> None:
+    """The active non-variational force mode reaches the finite force audit."""
+    path = tmp_path / "input.private_lforbal"
+    path.write_text(
+        """&INDATA
+        LFORBAL = T
+        MPOL = 3
+        NTOR = 0
+        RBC(0,0) = 1.0
+        RBC(0,1) = 0.1
+        ZBS(0,1) = 0.1
+        /
+        """
+    )
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "input physics mode supported: PASS" in output
+    assert "assessment: OK_FIRST_FORCE_PASS_FINITE" in output
+    assert "D00D_LFORBAL_MODE_UNSUPPORTED" not in output
+    assert "private_lforbal" not in output
+    assert "RBC" not in output
+
+
+def test_shareable_diagnostic_reports_high_force_axis_recovery(
+    tmp_path: Path, capsys
+) -> None:
+    """A finite irst=4 trigger is reported without printing force values."""
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    path = dataclasses.replace(
+        inp, raxis_c=np.asarray([4.4]), lmove_axis=True,
+    ).to_indata(tmp_path / "input.private_axis_recovery")
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "automatic first-pass axis recovery: REQUIRED" in output
+    assert "OK_FIRST_FORCE_PASS_FINITE" in output
+    assert "private_axis_recovery" not in output
+    assert "4.4" not in output
+
+
+def test_shareable_diagnostic_redacts_input_parse_error(
+    tmp_path: Path, capsys
+) -> None:
+    """A parser failure gets a useful code without echoing private syntax."""
+    path = tmp_path / "input.private_parse_error"
+    path.write_text(
+        """&INDATA
+        MPOL = 3
+        NTOR = 1
+        RBC(:,0) = 1.0
+        /
+        """
+    )
+
+    assert diagnose(path) == 1
+    output = capsys.readouterr().out
+    assert "D00C_INPUT_PARSE_ERROR" in output
+    assert "private_parse_error" not in output
+    assert "RBC" not in output
+    assert "ValueError" not in output
 
 
 def test_inert_reconstruction_flag_matches_vmec2000_disable(
@@ -133,4 +231,48 @@ def test_indexed_aphi_multivalue_prevents_false_zero_flux_diagnosis(
     output = capsys.readouterr().out
     assert "R/Z force normalization valid: PASS" in output
     assert "lambda force normalization valid: PASS" in output
+    assert "OK_FIRST_FORCE_PASS_FINITE" in output
+
+
+def test_shareable_diagnostic_accepts_compact_boundary_section(
+    tmp_path: Path, capsys
+) -> None:
+    """A legal ``RBC(nlo:nhi,m)`` section reaches the first force pass."""
+    inp = VmecInput.from_file(DATA / "input.nfp2_QI")
+    path = inp.to_indata(tmp_path / "input.private_boundary_section")
+    text = path.read_text().replace(
+        "&INDATA",
+        "&INDATA\n  RBC(-6:6,0) = 13*0.0",
+    )
+    path.write_text(text)
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "private_boundary_section" not in output
+    assert "RBC" not in output
+    assert "OK_FIRST_FORCE_PASS_FINITE" in output
+
+
+def test_first_force_uses_values_from_compact_boundary_sections(
+    tmp_path: Path, capsys
+) -> None:
+    """Section-only boundary coefficients produce a finite equilibrium state."""
+    path = tmp_path / "input.private_section_only"
+    path.write_text(
+        """&INDATA
+        NFP = 1
+        MPOL = 3
+        NTOR = 1
+        NS_ARRAY = 7
+        RBC(-1:1,0) = 0.0, 1.0, 0.0
+        RBC(-1:1,1) = 0.0, 0.1, 0.0
+        ZBS(-1:1,1) = 0.0, 0.1, 0.0
+        /
+        """
+    )
+
+    assert diagnose(path) == 0
+    output = capsys.readouterr().out
+    assert "private_section_only" not in output
+    assert "RBC" not in output
     assert "OK_FIRST_FORCE_PASS_FINITE" in output

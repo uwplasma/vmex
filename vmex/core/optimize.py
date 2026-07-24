@@ -602,12 +602,18 @@ def l_grad_b(eq, *, s_index: int = -1, ntheta: int = 24, nphi: int = 24) -> Arra
     Returns the (hard) minimum over a uniform ``(theta, phi)`` grid on the
     selected surface (``s_index`` indexes the ``ns``-long half-mesh arrays;
     default edge).  Larger is better; a practical least-squares term is
-    ``max(1/L - 1/threshold, 0)``.  Symmetric configurations only (lasym
-    sine partners are ignored).  Accepts an :class:`Equilibrium` or wout-like.
+    ``max(1/L - 1/threshold, 0)``.  Symmetric configurations only; asymmetric
+    inputs raise instead of silently dropping their sine/cosine partners.
+    Accepts an :class:`Equilibrium` or wout-like.
     This lane consumes host-NumPy wout tables (finite-difference-only); use
     :func:`l_grad_b_state` for ``jac="implicit"``.
     """
     wout = eq.wout if isinstance(eq, Equilibrium) else eq
+    if bool(wout.lasym):
+        raise NotImplementedError(
+            "l_grad_b supports stellarator-symmetric equilibria only "
+            "(lasym = False); asymmetric Fourier partners are not ignored"
+        )
     grid = _lgradb_grid(
         xm=jnp.asarray(np.asarray(wout.xm, dtype=float)),
         xn=jnp.asarray(np.asarray(wout.xn, dtype=float)),
@@ -1676,8 +1682,12 @@ def _least_squares_implicit(
         tangent_stack = (jnp.asarray(t_rbc), jnp.asarray(t_zbs),
                          jnp.asarray(t_ac), jnp.asarray(t_curtor))
 
-    # R17.1 memory knob: chunk_size None == one wide vmap (current behavior),
-    # an int / "auto" caps peak Jacobian memory at that many dofs at a time.
+    # R17.1 memory knob: chunk_size None == one full-width batch, while an int
+    # / "auto" caps peak Jacobian memory at that many dofs at a time.  Route
+    # the full-width case through lax.map(batch_size=ndof), not a bare vmap:
+    # JAX 0.6.2 mis-transforms the nested iterative implicit solve under the
+    # latter (a wrong aspect-ratio column), whereas the full-width lax.map
+    # batch agrees with the chunked paths and independent central FD.
     if jac_chunk_size == "auto":
         chunk = _auto_jac_chunk(ndof)
     elif jac_chunk_size is None or isinstance(jac_chunk_size, int):
@@ -1750,7 +1760,10 @@ def _least_squares_implicit(
             dz, _ = imp._adjoint_solve(Fz, rhs_of(tp), cfg)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(column, tangent_stack, chunk_size=chunk)
+        tangent_chunk = ndof if chunk is None else chunk
+        cols, dz_cols = chunk_map(
+            column, tangent_stack, chunk_size=tangent_chunk
+        )
         return jnp.transpose(cols), dz_cols
 
     # R25.2 amortized block-tridiagonal variant.  The *raw* residual
@@ -1781,7 +1794,12 @@ def _least_squares_implicit(
     probe_color = jnp.asarray(np.repeat(np.arange(3), m_block))
     probe_field = jnp.asarray(np.tile(np.repeat(np.arange(n_act), mn_state), 3))
     probe_col = jnp.asarray(np.tile(np.tile(np.arange(mn_state), n_act), 3))
-    probe_chunk = chunk
+    if jac_chunk_size == "auto":
+        probe_chunk = _auto_jac_chunk(3 * m_block)
+    elif jac_chunk_size is None:
+        probe_chunk = 3 * m_block
+    else:
+        probe_chunk = chunk
 
     def _pack(t) -> jnp.ndarray:
         """SpectralState -> (ns, m_block): active fields side by side."""
@@ -1852,7 +1870,8 @@ def _least_squares_implicit(
             b = jax.jvp(lambda prm: F_raw(z_star, prm), (params,), (tp,))[1]
             return _pack(jax.tree.map(jnp.negative, b))
 
-        rhs = chunk_map(raw_rhs, tangent_stack, chunk_size=chunk)
+        tangent_chunk = ndof if chunk is None else chunk
+        rhs = chunk_map(raw_rhs, tangent_stack, chunk_size=tangent_chunk)
         dz0 = block_thomas_solve(factors, jnp.moveaxis(rhs, 0, -1))
 
         def column(args):
@@ -1865,7 +1884,7 @@ def _least_squares_implicit(
 
         cols, dz_cols = chunk_map(
             column, (*tangent_stack, jnp.moveaxis(dz0, -1, 0)),
-            chunk_size=chunk)
+            chunk_size=tangent_chunk)
         return jnp.transpose(cols), dz_cols
 
     # R25.3 recycled variant: all ndof solves share the operator Fz (and Fz

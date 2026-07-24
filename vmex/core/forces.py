@@ -77,6 +77,7 @@ __all__ = [
     "mhd_forces",
     "symmetrize_forces",
     "spectral_mhd_forces",
+    "apply_m1_force_balance",
 ]
 
 Array = Any
@@ -916,3 +917,49 @@ def spectral_mhd_forces(
         force_lambda_cc=out_asym.force_lambda_cc,
         force_lambda_ss=out_asym.force_lambda_ss,
     )
+
+
+def apply_m1_force_balance(
+    force: SpectralForce,
+    *,
+    equif: Array,
+    factor_R: Array,
+    factor_Z: Array,
+) -> SpectralForce:
+    """Apply VMEC2000's ``LFORBAL`` ``(m=1,n=0)`` force replacement.
+
+    ``tomnsp_mod.f`` replaces only the stellarator-symmetric ``frcc`` and
+    ``fzsc`` blocks, including in ``LASYM`` runs.  With ``factor_R/Z`` equal
+    to the pre-halving ``rzu_fac/rru_fac`` values from ``bcovar.f``, the
+    interior full-mesh rows are
+
+    ``work = frcc/factor_R - fzsc/factor_Z``
+
+    ``frcc = (factor_R/2)*(equif + work)``
+
+    ``fzsc = (factor_Z/2)*(equif - work)``.
+
+    Axis and edge rows, all other modes, and all asymmetric blocks are
+    unchanged.
+    """
+    frcc = force.force_R_cc
+    fzsc = force.force_Z_sc
+    if frcc is None or fzsc is None:
+        return force
+    frcc = jnp.asarray(frcc)
+    fzsc = jnp.asarray(fzsc)
+    ns, mpol, _ = frcc.shape
+    if int(ns) < 3 or int(mpol) < 2:
+        return force
+
+    factor_R = jnp.asarray(factor_R, dtype=frcc.dtype)
+    factor_Z = jnp.asarray(factor_Z, dtype=fzsc.dtype)
+    equif = jnp.asarray(equif, dtype=frcc.dtype)
+    old_R = frcc[1:-1, 1, 0]
+    old_Z = fzsc[1:-1, 1, 0]
+    work = old_R / factor_R[1:-1] - old_Z / factor_Z[1:-1]
+    new_R = 0.5 * factor_R[1:-1] * (equif[1:-1] + work)
+    new_Z = 0.5 * factor_Z[1:-1] * (equif[1:-1] - work)
+    frcc = frcc.at[1:-1, 1, 0].set(new_R)
+    fzsc = fzsc.at[1:-1, 1, 0].set(new_Z)
+    return replace(force, force_R_cc=frcc, force_Z_sc=fzsc)

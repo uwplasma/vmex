@@ -78,9 +78,27 @@ def register_pytree_dataclass(cls, *, meta: tuple[str, ...] = (),
     """
     names = [f.name for f in dataclass_fields(cls)
              if f.name not in meta and f.name not in drop]
-    return jax.tree_util.register_dataclass(
-        cls, data_fields=names, meta_fields=list(meta), drop_fields=list(drop)
-    )
+    try:
+        return jax.tree_util.register_dataclass(
+            cls, data_fields=names, meta_fields=list(meta), drop_fields=list(drop)
+        )
+    except ValueError as exc:
+        # JAX 0.6.2 validates ``drop_fields`` with
+        # ``init_fields.difference_update(*drop_fields)``.  A normal
+        # ``["runtime"]`` is consequently expanded into characters and the
+        # field is reported missing.  Newer JAX releases accept the public
+        # sequence-of-names contract above.  Retry only that diagnosed old-JAX
+        # failure with singleton iterables, which gives 0.6.2 the intended set
+        # subtraction without changing flatten/unflatten semantics.
+        if not drop or "Missing fields" not in str(exc):
+            raise
+        legacy_drop_fields: Any = tuple((name,) for name in drop)
+        return jax.tree_util.register_dataclass(
+            cls,
+            data_fields=names,
+            meta_fields=list(meta),
+            drop_fields=legacy_drop_fields,
+        )
 
 
 def _einsum(expr: str, *operands: Array) -> Array:

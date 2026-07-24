@@ -33,6 +33,13 @@ SUCCESSFUL_TERM_FLAG = 11
 # ``solver._finalize`` distinguish NaN/Inf from a Jacobian-retry failure.
 NONFINITE_FLAG = 90
 
+# Internal-only eqsolve control transfer.  VMEC2000 communicates this as
+# ``irst = 4`` (not an ier_flag): with ``LMOVE_AXIS=T``, a finite first force
+# sum above 1e2 returns to eqsolve so ``guess_axis`` can rebuild the initial
+# profiles before any momentum step is taken.  A distinct carry status lets
+# the jitted VMEX loop make the same host-side control transfer.
+AXIS_REGUESS_FLAG = 91
+
 #: VMEC2000 termination messages, keyed by ier_flag
 #: (Sources/Input_Output/fileout.f, ``werror`` table).
 WERROR_MESSAGES: dict[int, str] = {

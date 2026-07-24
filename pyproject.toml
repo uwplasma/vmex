@@ -46,7 +46,8 @@ Issues = "https://github.com/uwplasma/vmex/issues"
 Changelog = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
-# Differentiable free boundary via virtual casing (plan.md R15.3 + R19).
+# Differentiable virtual-casing residual on a specified boundary
+# (plan.md R15.3 + R19); this is not a NESTOR equilibrium adjoint.
 # ``virtual_casing_jax`` is a uwplasma package (https://github.com/uwplasma/
 # virtual_casing_jax); it is NOT yet on PyPI, so ``pip install vmex[freeb]``
 # will not resolve it from an index — install it editable alongside vmex:
@@ -104,6 +105,10 @@ omit = ["*/freeboundary_diff.py", "*/turbulence.py"]
 line-length = 120
 
 [tool.ruff.lint]
+# Ruff 0.16 changed its implicit default from the classic Pyflakes/pycodestyle
+# baseline to every stable rule.  Keep VMEX's existing lint contract explicit
+# so an unpinned developer-tool upgrade cannot reclassify the whole repository.
+select = ["E4", "E7", "E9", "F"]
 # E402: module-level import not at top-of-file.  Deferred imports (after env
 #        setup / jax.config calls) are deliberate to control JAX initialisation.
 # E501: line too long.  Handled by the line-length setting above; long lines in

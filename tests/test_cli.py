@@ -19,6 +19,7 @@ Covered here (plan.md Phase 2 STATUS item 4 — first vertical slice):
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import re
 from pathlib import Path
@@ -236,3 +237,30 @@ def test_iteration_exhaustion_exits_with_more_iter(tmp_path):
     )
     assert rc == MORE_ITER_FLAG
     assert WERROR_MESSAGES[MORE_ITER_FLAG] in stdout
+
+
+def test_lforbal_iteration_exhaustion_writes_wout(tmp_path):
+    """LFORBAL=T is solved, not ignored, and keeps VMEC's NITER WOUT policy."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(SOLOVEV_DECK),
+        lforbal=True,
+        lfull3d1out=True,
+        lmove_axis=False,
+        nstep=1,
+        niter_array=np.asarray([3]),
+        ftol_array=np.asarray([1.0e-30]),
+    )
+    deck = inp.to_indata(tmp_path / "input.lforbal")
+    rc, stdout = _run_cli([str(deck), "--outdir", str(tmp_path)])
+    assert rc == MORE_ITER_FLAG
+    rows = _iteration_rows(stdout)
+    assert [row[1][:3] for row in rows] == [
+        [8.33e-2, 4.94e-4, 3.21e-2],
+        [6.82e-3, 1.41e-3, 4.37e-3],
+        [1.52e-2, 9.15e-4, 6.98e-3],
+    ]
+    wout_path = tmp_path / "wout_lforbal.nc"
+    assert wout_path.exists()
+    wout = read_wout(wout_path)
+    assert int(wout.ier_flag) == MORE_ITER_FLAG
+    assert bool(wout.lmove_axis) is False
