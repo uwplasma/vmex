@@ -23,6 +23,9 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
 - :func:`least_squares` — a thin :func:`scipy.optimize.least_squares` driver
   over boundary Fourier dofs (:func:`pack_boundary`/:func:`unpack_boundary`),
   taking simsopt-style ``(callable, target, weight)`` terms.
+- :func:`minimize` — the same residual definition scalarized as
+  ``0.5 * sum(residual**2)`` and minimized with L-BFGS-B, so one reverse
+  implicit adjoint supplies the gradient without a dense residual Jacobian.
 
 Helicity conventions (match legacy/simsopt exactly)
 ---------------------------------------------------
@@ -157,6 +160,7 @@ __all__ = [
     "pack_boundary",
     "unpack_boundary",
     "least_squares",
+    "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
@@ -201,6 +205,11 @@ class Equilibrium:
             fsqr=float(r.fsqr), fsqz=float(r.fsqz), fsql=float(r.fsql),
             niter=int(r.iterations), converged=bool(r.converged),
         )
+
+
+def _auto_jac_chunk(dim: int) -> int:
+    """Bound device-aware batching by the conservative square-root policy."""
+    return min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
 
 
 def solve_equilibrium(
@@ -1157,7 +1166,7 @@ def least_squares(
     current_dofs: int | None = None,
     jac: str | None = None,
     jac_chunk_size: int | str | None = "auto",
-    jac_solver: str = "block",
+    jac_solver: str = "auto",
     recycle: bool = False,
     hot_restart: bool = True,
     warm_start: str | None = "perturbation",
@@ -1234,19 +1243,18 @@ def least_squares(
     ``readin.f`` delta rotation.
     ``jac_chunk_size`` (R17.1 memory knob, ``jac="implicit"`` only) chunks the
     per-dof Jacobian columns via :func:`solvax.chunk_map`: ``"auto"`` (default)
-    lets :func:`solvax.auto_chunk_size` pick a memory-bounded width (the
-    largest block that fits the device budget on GPU, a sqrt-balanced width on
-    CPU) so peak Jacobian memory is ``m0 + m1*chunk`` instead of scaling with
-    the full dof count; an ``int`` fixes that many boundary dofs at a time; and
-    ``None`` forces one wide ``vmap`` over all dofs (the pre-R17.1 behavior,
-    fastest but peak memory O(dofs)).  The column blocks are mathematically
-    independent, so the assembled Jacobian is identical to float64 round-off
-    (~1e-15) across chunk sizes.  It is inert for ``jac=None`` (scipy computes
-    the finite-difference Jacobian itself).
+    uses SOLVAX's device-aware width capped by a conservative square-root
+    width, so an accelerator memory report cannot expand the full probe batch;
+    an ``int`` fixes that many boundary dofs at a time; and ``None`` forces one
+    wide ``vmap`` over all dofs. The column blocks are mathematically
+    independent, so the assembled Jacobian is identical to float64 round-off.
+    It is inert for ``jac=None``.
 
-    ``jac_solver`` (plan R25.2, ``jac="implicit"`` only) selects the linear
-    solver behind the per-dof implicit-Jacobian columns.  ``"block"``
-    (default) amortizes one block-tridiagonal factorization of the *raw*
+    ``jac_solver`` (``jac="implicit"`` only) selects the implicit-Jacobian
+    direction. ``"auto"`` (default) uses one matrix-free reverse solve for a
+    scalar residual and the ``"block"`` path below otherwise. ``"reverse"``
+    requests one reverse solve per residual row. ``"block"``
+    amortizes one block-tridiagonal factorization of the *raw*
     force Jacobian — whose radial coupling is exactly nearest-neighbor, so
     ns dense ``(3*mn, 3*mn)`` blocks assembled by 3-colored ``jax.jvp``
     probes capture it completely at a cost independent of the dof count —
@@ -1408,6 +1416,64 @@ def least_squares(
     return result
 
 
+def minimize(
+    objective_terms: Sequence[tuple[Callable, float, float]],
+    inp: VmecInput,
+    *,
+    max_mode: int | Sequence[int] = 1,
+    x0: np.ndarray | None = None,
+    current_dofs: int | None = None,
+    hot_restart: bool = True,
+    device: Any = AUTO,
+    solve_kwargs: dict | None = None,
+    verbose: int = 0,
+    method: str = "L-BFGS-B",
+    **scipy_kwargs,
+):
+    """Minimize the scalarized residual norm with one adjoint per gradient.
+
+    The objective is exactly ``0.5 * sum(rows**2)``, with ``rows`` defined by
+    :func:`least_squares`.  Unlike Gauss--Newton least squares, a reverse
+    gradient of this scalar needs one matrix-free implicit adjoint and never
+    forms the vector residual Jacobian or its dense radial block factors.
+    This is the bounded-storage path for profile objectives such as ``DMerc``,
+    ``jdotb``, and Glasser ``D_R``.  It changes the optimization algorithm,
+    not the objective or its unconstrained minimizers, and is therefore
+    opt-in; :func:`least_squares` retains all existing defaults.
+
+    ``method`` and remaining keywords are passed to
+    :func:`scipy.optimize.minimize` (default ``"L-BFGS-B"``; use ``bounds=``
+    and ``options={"maxiter": ...}`` in the usual scipy form).  All objective
+    terms must support ``jac="implicit"`` as documented by
+    :func:`least_squares`.  Plain state hot restarts are used because the
+    first-order perturbation warm start requires the forward state-response
+    columns that this lower-storage path deliberately avoids.
+    """
+    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
+                      else [int(m) for m in max_mode])
+    if len(modes_schedule) > 1:
+        if x0 is not None:
+            raise ValueError("x0 cannot be combined with a max_mode schedule")
+        stage_results = []
+        current = inp
+        for mm in modes_schedule:
+            result = minimize(
+                objective_terms, current, max_mode=mm,
+                current_dofs=current_dofs, hot_restart=hot_restart,
+                device=device, solve_kwargs=solve_kwargs, verbose=verbose,
+                method=method, **scipy_kwargs)
+            stage_results.append(result)
+            current = result.input
+        result.stage_results = stage_results
+        return result
+    return _least_squares_implicit(
+        objective_terms, inp, max_mode=modes_schedule[0], x0=x0,
+        current_dofs=current_dofs, jac_solver="reverse", recycle=False,
+        warm_start=("state" if hot_restart else None),
+        solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
+        minimize_method=method, **scipy_kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Implicit-gradient mode (vmex.core.implicit wiring)
 # ---------------------------------------------------------------------------
@@ -1453,12 +1519,13 @@ def _least_squares_implicit(
     x0: np.ndarray | None,
     current_dofs: int | None = None,
     jac_chunk_size: int | str | None = "auto",
-    jac_solver: str = "block",
+    jac_solver: str = "auto",
     recycle: bool = False,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
     verbose: int = 0,
+    minimize_method: str | None = None,
     **scipy_kwargs,
 ):
     """Single-stage boundary least squares with implicit-gradient Jacobians.
@@ -1470,13 +1537,11 @@ def _least_squares_implicit(
     :func:`~vmex.core.implicit.runtime_from_params` -> the stacked
     objective rows: one warm host solve per trial ``x``.  ``jac`` computes
     the exact residual Jacobian by *forward* implicit differentiation:
-    by default (``jac_solver="block"``, see ``jacobian_rows_block``) one
-    amortized block-tridiagonal factorization backsolves every boundary-dof
-    column at once; ``jac_solver="gmres"`` (see ``jacobian_rows``) runs one
-    preconditioned GMRES per boundary dof, batched.  Either way this is far
-    below one full equilibrium solve per dof (finite differences) while
-    keeping the full pointwise Gauss-Newton residual geometry.  Both are
-    jit-compiled once per stage.
+    with one reverse adjoint for a scalar residual (``jac_solver="auto"``);
+    vector residuals use one amortized block-tridiagonal factorization
+    (``jacobian_rows_block``), while ``jac_solver="gmres"`` keeps the
+    per-boundary-dof fallback. All paths retain the full pointwise
+    Gauss-Newton residual geometry and are jit-compiled once per stage.
 
     The residual and Jacobian graphs run on the device chosen by
     :func:`vmex.core.device.resolve_implicit_device` — the CPU by default,
@@ -1570,6 +1635,12 @@ def _least_squares_implicit(
 
     rows_jit = jax.jit(residual_rows)
 
+    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+        rows = residual_rows(x)
+        return 0.5 * jnp.vdot(rows, rows)
+
+    value_grad_jit = jax.jit(jax.value_and_grad(scalar_loss))
+
     # The evolved-dof mask is a *structural* per-config constant; fetch it
     # once (first host solve, cached in implicit._MASK_CACHE) so the Jacobian
     # graph below can close over it.
@@ -1618,7 +1689,7 @@ def _least_squares_implicit(
     # latter (a wrong aspect-ratio column), whereas the full-width lax.map
     # batch agrees with the chunked paths and independent central FD.
     if jac_chunk_size == "auto":
-        chunk = int(auto_chunk_size(ndof))
+        chunk = _auto_jac_chunk(ndof)
     elif jac_chunk_size is None or isinstance(jac_chunk_size, int):
         chunk = jac_chunk_size
     else:
@@ -1724,7 +1795,7 @@ def _least_squares_implicit(
     probe_field = jnp.asarray(np.tile(np.repeat(np.arange(n_act), mn_state), 3))
     probe_col = jnp.asarray(np.tile(np.tile(np.arange(mn_state), n_act), 3))
     if jac_chunk_size == "auto":
-        probe_chunk = int(auto_chunk_size(3 * m_block))
+        probe_chunk = _auto_jac_chunk(3 * m_block)
     elif jac_chunk_size is None:
         probe_chunk = 3 * m_block
     else:
@@ -1870,16 +1941,18 @@ def _least_squares_implicit(
         cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:ndof]
         return jnp.transpose(cols), C, U
 
-    if jac_solver not in ("block", "gmres"):
+    if jac_solver not in ("auto", "block", "gmres", "reverse"):
         raise ValueError(
-            f"jac_solver must be 'block' or 'gmres', got {jac_solver!r}")
+            "jac_solver must be 'auto', 'block', 'gmres', or 'reverse', "
+            f"got {jac_solver!r}")
     if recycle:
         jac_impl = jacobian_rows_recycled  # opt-in R25.3 experiment wins
-    elif jac_solver == "block":
+    elif jac_solver in ("auto", "block"):
         jac_impl = jacobian_rows_block
     else:
         jac_impl = jacobian_rows
     jac_jit = jax.jit(jac_impl)
+    reverse_jit = jax.jit(jax.jacrev(residual_rows))
 
     holder: dict[str, Any] = {"nres": None, "lin": None}
     if recycle:
@@ -1953,7 +2026,19 @@ def _least_squares_implicit(
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
         try:
-            if recycle:
+            reverse = (
+                not recycle
+                and (
+                    jac_solver == "reverse"
+                    or (jac_solver == "auto" and holder["nres"] == 1)
+                )
+            )
+            if reverse:
+                jac = np.asarray(
+                    jax.device_get(reverse_jit(_place(x))), dtype=float
+                )
+                holder["lin"] = None
+            elif recycle:
                 rows, C, U = jac_jit(_place(x), *holder["recycle"])
                 holder["recycle"] = (C, U)  # deflate the next jac evaluation
                 jac = np.asarray(jax.device_get(rows), dtype=float)
@@ -1984,8 +2069,37 @@ def _least_squares_implicit(
         except Exception:  # the seed itself does not converge -> fun raises clearly
             pass
 
-    result = scipy.optimize.least_squares(fun, np.asarray(x0, dtype=float),
-                                          jac=jac_fn, **scipy_kwargs)
+    if minimize_method is None:
+        result = scipy.optimize.least_squares(
+            fun, np.asarray(x0, dtype=float), jac=jac_fn, **scipy_kwargs)
+    else:
+        def value_and_grad(x: np.ndarray):
+            try:
+                value, grad = value_grad_jit(_place(x))
+                value = float(jax.device_get(value))
+                grad = np.asarray(jax.device_get(grad), dtype=float)
+            except Exception as exc:
+                if holder.get("last_grad") is None:
+                    raise
+                if verbose:
+                    print(f"[minimize] trial solve/gradient failed: {exc}")
+                return 1.0e12, holder["last_grad"]
+            if np.isfinite(value) and np.all(np.isfinite(grad)):
+                holder["last_grad"] = grad
+                if verbose:
+                    print(f"[minimize] cost = {value:.6e}")
+                return value, grad
+            if holder.get("last_grad") is None:
+                raise FloatingPointError("non-finite initial objective or gradient")
+            return 1.0e12, holder["last_grad"]
+
+        result = scipy.optimize.minimize(
+            value_and_grad, np.asarray(x0, dtype=float), jac=True,
+            method=minimize_method, **scipy_kwargs)
+        if "jac" not in result:  # scipy may skip evaluation if every dof is fixed
+            result.fun, result.jac = value_and_grad(result.x)
+        result.cost = float(result.fun)
+        result.optimality = float(np.linalg.norm(result.jac, ord=np.inf))
     result.input = unpack_boundary(inp, result.x[:nboundary], max_mode)
     if k_cur:
         result.input = _apply_current(result.input, result.x[nboundary:],

@@ -386,6 +386,24 @@ def test_least_squares_implicit_smoke(solovev_eq):
     assert abs(aspect1 - 4.0) < abs(aspect0 - 4.0)
 
 
+def test_minimize_scalarized_implicit_smoke(solovev_eq):
+    """L-BFGS-B lowers the same cost with a finite reverse gradient."""
+    jax.config.update("jax_disable_jit", False)
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    x0 = opt.pack_boundary(inp, 1)
+    cost0 = 0.5 * (float(opt.aspect_ratio(
+        solovev_eq.state, solovev_eq.runtime)) - 4.0) ** 2
+    bounds = list(zip(x0 - 0.5, x0 + 0.5))
+    res = opt.minimize(
+        [(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=1,
+        bounds=bounds, options={"maxiter": 1})
+    assert res.cost < cost0
+    assert np.isfinite(res.optimality)
+    assert np.all(np.isfinite(res.jac))
+    assert np.all(res.x >= x0 - 0.5) and np.all(res.x <= x0 + 0.5)
+    assert isinstance(res.input, VmecInput)
+
+
 def test_least_squares_implicit_jac_chunking(solovev_eq):
     """The R17.1 chunked implicit Jacobian matches the unchunked one.
 
@@ -414,10 +432,16 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
                                    err_msg=f"chunk={chunk!r}")
 
 
+def test_auto_jac_chunk_stays_bounded_with_large_device(monkeypatch):
+    """A reported accelerator budget must not turn ``auto`` into one vmap."""
+    monkeypatch.setattr(opt, "auto_chunk_size", lambda dim: dim)
+    assert opt._auto_jac_chunk(120) == 11
+
+
 def test_least_squares_implicit_jac_solver_block(solovev_eq):
     """The R25.2 block-tridiagonal Jacobian matches the per-dof GMRES one.
 
-    ``jac_solver="block"`` (default) assembles the raw force Jacobian's
+    ``jac_solver="block"`` assembles the raw force Jacobian's
     radial blocks by colored jvp probes, factors once
     (:func:`solvax.block_thomas_factor`) and backsolves every dof column,
     then certifies each column with a short warm-started GMRES pass against
@@ -431,8 +455,11 @@ def test_least_squares_implicit_jac_solver_block(solovev_eq):
                             jac_solver="gmres", max_nfev=1)
     got = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
                             jac_solver="block", max_nfev=1)
+    reverse = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
+                                jac_solver="reverse", max_nfev=1)
     assert got.jac.shape == ref.jac.shape
     np.testing.assert_allclose(got.jac, ref.jac, rtol=1e-6, atol=1e-8)
+    np.testing.assert_allclose(reverse.jac, ref.jac, rtol=1e-6, atol=1e-8)
     with pytest.raises(ValueError, match="jac_solver"):
         opt.least_squares(obj, inp, max_mode=1, jac="implicit",
                           jac_solver="svd", max_nfev=1)
