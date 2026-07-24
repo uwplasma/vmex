@@ -40,7 +40,7 @@ import jax.numpy as jnp  # noqa: E402
 
 from vmex.core import freeboundary as FB  # noqa: E402
 from vmex.core import vacuum as V  # noqa: E402
-from vmex.core.errors import MgridNotFoundError  # noqa: E402
+from vmex.core.errors import MgridNotFoundError, VmecJacobianError  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmex.core.solver import (  # noqa: E402
@@ -398,6 +398,39 @@ def test_missing_mgrid_raises(tmp_path):
         FB.solve_free_boundary(inp, mgrid_path=tmp_path / "mgrid_missing.nc")
 
 
+def test_jac75_retry_rebuilds_vacuum_and_converges(capsys):
+    """A recovered free-boundary stage rebuilds NESTOR at its checkpoint."""
+    if not CONV_MGRID.exists():
+        pytest.skip(
+            "converged public CTH mgrid asset unavailable; run "
+            "examples/data/fetch_assets.py"
+        )
+    inp = dataclasses.replace(
+        VmecInput.from_file(CONV_DECK), delt=1.0e4,
+    )
+    with pytest.raises(VmecJacobianError) as exc:
+        FB.solve_free_boundary(
+            inp,
+            mgrid_path=CONV_MGRID,
+            max_iterations=2500,
+            jacobian_retries=0,
+        )
+    assert exc.value.jacobian_resets == 75
+
+    result = FB.solve_free_boundary(
+        inp,
+        mgrid_path=CONV_MGRID,
+        max_iterations=2500,
+        jacobian_retries=2,
+        verbose=True,
+    )
+    output = capsys.readouterr().out
+    assert "JACOBIAN RECOVERY RETRY" in output
+    assert "VACUUM PRESSURE TURNED ON" in output
+    assert result.converged
+    assert max(result.fsqr, result.fsqz, result.fsql) <= 1.0e-10
+
+
 def test_bad_supplied_axis_is_reguessed_before_fused_filament(capsys):
     """Free boundary must share fixed boundary's first-bad-axis recovery."""
     inp = VmecInput.from_file(DECK)
@@ -413,6 +446,23 @@ def test_bad_supplied_axis_is_reguessed_before_fused_filament(capsys):
     assert not result.converged
     assert np.isfinite(result.fsqr)
     assert result.r00 < 1.0
+
+
+def test_high_first_force_reguesses_valid_axis_before_vacuum(capsys):
+    """LMOVE_AXIS also retries a valid-Jacobian axis when FSQ(1) > 1e2."""
+    inp = VmecInput.from_file(DECK)
+    raxis_c = inp.raxis_c.copy()
+    raxis_c[0] = 0.81  # valid Jacobian, but raw first-force sum is ~2.8e2
+    inp = dataclasses.replace(inp, raxis_c=raxis_c, niter_array=[2], nstep=1)
+    result = FB.solve_free_boundary(
+        inp, mgrid_path=MGRID, max_iterations=2, verbose=True,
+        error_on_no_convergence=False,
+    )
+    output = capsys.readouterr().out
+    assert "INITIAL JACOBIAN CHANGED SIGN" not in output
+    assert "TRYING TO IMPROVE INITIAL MAGNETIC AXIS GUESS" in output
+    assert result.fsq_history[0, :3].sum() < 1.0e2
+    assert np.isfinite(result.fsqr)
 
 
 def test_cached_vacuum_executable_rechecks_dynamic_axis(monkeypatch):
