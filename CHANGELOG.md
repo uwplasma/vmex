@@ -7,6 +7,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once past 1.0.
 ## [Unreleased]
 
 ### Added
+- **Bounded-storage profile optimization.** `optimize.minimize` scalarizes the
+  existing least-squares rows and uses L-BFGS-B with one matrix-free reverse
+  adjoint per gradient, avoiding dense residual Jacobians for high-resolution
+  `DMerc`, `jdotb`, and Glasser `D_R` campaigns without changing defaults.
 - **High-resolution resource profiler.**
   `benchmarks/profile_high_resolution.py` records fresh-process implicit
   Jacobian checksums and per-resolution mirror wall/RSS scaling without

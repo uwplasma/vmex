@@ -433,6 +433,23 @@ objective at a stiff weight:
 - lower the aspect ratio to 4.8 at fixed iota;
 - push the Mercier criterion `DMerc` toward stability at ⟨β⟩ ≈ 1.25%.
 
+High-resolution vector profiles can use `opt.minimize(...)` with the same
+`(objective, target, weight)` terms. It minimizes the identical squared
+residual cost with L-BFGS-B and one matrix-free reverse adjoint per gradient,
+avoiding the dense residual Jacobian used by Gauss–Newton:
+
+```python
+result = opt.minimize(
+    [(opt.mercier_stability_residual, 0.0, 1.0),
+     (opt.glasser_stability_residual, 0.0, 1.0),
+     (opt.jdotb_residual, 0.0, 1e-6)],
+    inp, max_mode=5, bounds=bounds, options={"maxiter": 100},
+)
+```
+
+This bounded-storage optimizer is opt-in because its quasi-Newton steps differ
+from `least_squares`; existing defaults and objective minima are unchanged.
+
 The first four use the implicit adjoint (`jac="implicit"`). The published
 `DMerc` showcase deliberately preserves its legacy host-side reporting lane
 and finite-difference baseline at `max_mode` 2. New campaigns can instead use
