@@ -58,6 +58,38 @@ additionally frees the first ``k`` current-profile (``AC``) coefficients
 plus ``CURTOR`` in either mode — the dof set of the self-consistent
 bootstrap objective.
 
+Embedding VMEX in an external optimizer
+----------------------------------------
+
+:class:`~vmex.core.optimize.ImplicitResidualContext` exposes the same
+fixed-boundary residual and implicit-Jacobian machinery without invoking
+scipy.  It retains compiled graphs, warm starts, and the latest converged
+equilibrium across calls.  This is the supported integration point for
+Simsopt and other optimizers that own their optimization vector and step
+logic:
+
+.. code-block:: python
+
+   context = opt.ImplicitResidualContext(
+       inp,
+       [(opt.aspect_ratio, 6.0, 1.0),
+        (opt.mean_iota, 0.42, 1.0)],
+       max_mode=3,
+       parameter_indices=active_indices,
+       jac_solver="block",
+   )
+   residual, jacobian, equilibrium = context.residual_jacobian(context.x0)
+
+``parameter_indices`` explicitly selects and orders entries of VMEX's
+canonical boundary vector.  Omitted entries remain fixed at their seed
+values; vector-length coincidences are never used to infer a mapping.
+Call :meth:`~vmex.core.optimize.ImplicitResidualContext.objective_and_gradient`
+for ``0.5 * ||r||^2`` and its gradient, or
+:meth:`~vmex.core.optimize.ImplicitResidualContext.solution` to obtain the
+cached equilibrium corresponding to a parameter vector.  The context is
+fixed-boundary only.  Free-boundary coil differentiation uses a separate
+solver path and is not implied by this API.
+
 Bounded-storage profile optimization
 ------------------------------------
 

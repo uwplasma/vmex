@@ -116,6 +116,18 @@ def test_surface_data_reproduces_equilibrium_bnormal():
     assert rms < 1e-10, f"B_total . n / |B| = {rms:.2e} (expected ~machine epsilon)"
 
 
+def test_surface_data_accepts_explicit_cell_centered_grid():
+    if not WOUT.exists():
+        pytest.skip(f"wout fixture unavailable: {WOUT}")
+    wout = read_wout(WOUT)
+    theta = (np.arange(9) + 0.5) * 2.0 * np.pi / 9
+    phi = (np.arange(7) + 0.5) * 2.0 * np.pi / (7 * int(wout.nfp))
+    sd = FBD.surface_field_data_from_wout(wout, theta=theta, phi=phi)
+    assert sd.gamma.shape == (3, 7, 9)
+    np.testing.assert_allclose(sd.theta, theta)
+    np.testing.assert_allclose(sd.phi, phi)
+
+
 def test_synthetic_surface_gradient_fd_validates():
     """Asset-free: grad of the free-boundary residual w.r.t. coil dofs vs central FD."""
     sd = _synthetic_surface()

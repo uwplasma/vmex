@@ -188,6 +188,8 @@ def surface_field_data_from_wout(
     *,
     nphi: int = 32,
     ntheta: int = 32,
+    phi=None,
+    theta=None,
     s_index: int = -1,
     use_stellsym: bool = True,
 ) -> "VmecSurfaceFieldData":
@@ -236,14 +238,15 @@ def surface_field_data_from_wout(
         bsupu=bsupu, bsupv=bsupv, bsupu_s=bsupu_s, bsupv_s=bsupv_s,
         lasym=lasym, use_stellsym=use_stellsym,
         signgs=int(getattr(wout, "signgs", -1)),
-        nphi=nphi, ntheta=ntheta, source_convention="vmex_wout",
+        nphi=nphi, ntheta=ntheta, phi=phi, theta=theta,
+        source_convention="vmex_wout",
     )
 
 
 def _assemble_surface_field_data(
     *, nfp, ns, j, xm, xn, xmn, xnn, rmnc, zmns, rmns, zmnc,
     bsupu, bsupv, bsupu_s, bsupv_s, lasym, use_stellsym, signgs,
-    nphi, ntheta, source_convention,
+    nphi, ntheta, source_convention, phi=None, theta=None,
 ) -> "VmecSurfaceFieldData":
     """Assemble a :class:`VmecSurfaceFieldData` from boundary Fourier spectra.
 
@@ -252,8 +255,18 @@ def _assemble_surface_field_data(
     spectra straight off a live equilibrium state).  All array inputs may be
     jax tracers, so the whole construction differentiates in the boundary.
     """
-    theta = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
-    phi = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, int(nphi), endpoint=False)
+    theta = (
+        jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
+        if theta is None else jnp.asarray(theta)
+    )
+    phi = (
+        jnp.linspace(0.0, 2.0 * jnp.pi / nfp, int(nphi), endpoint=False)
+        if phi is None else jnp.asarray(phi)
+    )
+    if theta.ndim != 1 or phi.ndim != 1:
+        raise ValueError("theta and phi must be one-dimensional")
+    ntheta = int(theta.shape[0])
+    nphi = int(phi.shape[0])
 
     # -- boundary geometry (full mesh) + theta/phi tangents --
     R, Ru, Rv = _mode_series(rmnc[j], None if rmns is None else rmns[j], xm, xn, theta, phi)
@@ -347,6 +360,8 @@ def surface_field_data_from_state(
     *,
     nphi: int = 32,
     ntheta: int = 32,
+    phi=None,
+    theta=None,
     s_index: int = -1,
     use_stellsym: bool = True,
 ) -> "VmecSurfaceFieldData":
@@ -443,7 +458,8 @@ def surface_field_data_from_state(
         xmn=xm_nyq, xnn=xn_nyq, rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc,
         bsupu=bsupumnc, bsupv=bsupvmnc, bsupu_s=None, bsupv_s=None,
         lasym=lasym, use_stellsym=use_stellsym, signgs=signgs,
-        nphi=nphi, ntheta=ntheta, source_convention="vmex_state")
+        nphi=nphi, ntheta=ntheta, phi=phi, theta=theta,
+        source_convention="vmex_state")
 
 
 # ---------------------------------------------------------------------------

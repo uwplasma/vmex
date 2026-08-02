@@ -121,11 +121,13 @@ __all__ = [
     "Equilibrium",
     "solve_equilibrium",
     "QuasisymmetryRatioResidual",
+    "LegacyQIResidual",
     "aspect_ratio",
     "mean_iota",
     "edge_iota",
     "iota_edge",
     "mirror_ratio",
+    "maximum_elongation",
     "volume",
     "magnetic_well",
     "d_merc",
@@ -144,12 +146,246 @@ __all__ = [
     "boundary_dof_names",
     "pack_boundary",
     "unpack_boundary",
+    "ImplicitResidualContext",
     "least_squares",
     "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
+
+
+@dataclass
+class _ImplicitResidualHooks:
+    """Compiled callables and state owned by :class:`ImplicitResidualContext`."""
+
+    x0: np.ndarray
+    fun: Callable
+    jac: Callable
+    params_of: Callable
+    cfg: Any
+    inp: VmecInput
+    max_mode: int
+    nboundary: int
+    term_slices: tuple[slice, ...]
+    holder: dict
+
+
+class ImplicitResidualContext:
+    """Reusable VMEX residual/Jacobian context for external optimizers.
+
+    This public interface exposes the same block-factorized forward implicit
+    Jacobian used by :func:`least_squares`, without invoking scipy. Compiled
+    graphs, equilibrium warm starts, and the last valid Jacobian are retained
+    across calls.
+
+    By default the context uses VMEX's canonical ``max_mode`` boundary
+    parameterization. ``parameter_indices`` may select and reorder an explicit
+    subset of that vector; omitted canonical entries remain fixed at their
+    seed values. No correspondence is inferred from vector lengths.
+    """
+
+    def __init__(
+        self,
+        inp: VmecInput,
+        objective_terms: Sequence[tuple[Callable, float, float]],
+        *,
+        max_mode: int,
+        x0: np.ndarray | None = None,
+        parameter_indices: Sequence[int] | None = None,
+        current_dofs: int | None = None,
+        jac_chunk_size: int | str | None = "auto",
+        jac_solver: str = "block",
+        recycle: bool = False,
+        warm_start: str | None = "perturbation",
+        solve_kwargs: dict | None = None,
+        device: Any = AUTO,
+        verbose: int = 0,
+    ):
+        self._hooks = _least_squares_implicit(
+            objective_terms,
+            inp,
+            max_mode=int(max_mode),
+            x0=x0,
+            current_dofs=current_dofs,
+            jac_chunk_size=jac_chunk_size,
+            jac_solver=jac_solver,
+            recycle=recycle,
+            warm_start=warm_start,
+            solve_kwargs=dict(solve_kwargs or {}),
+            device=device,
+            verbose=verbose,
+            _return_context=True,
+        )
+        full_size = int(self._hooks.x0.size)
+        if parameter_indices is None:
+            indices = np.arange(full_size, dtype=int)
+        else:
+            indices = np.asarray(parameter_indices, dtype=int).reshape(-1)
+            if np.any(indices < 0) or np.any(indices >= full_size):
+                raise ValueError("parameter_indices contains an out-of-range index")
+            if np.unique(indices).size != indices.size:
+                raise ValueError("parameter_indices must not contain duplicates")
+        self._parameter_indices = indices
+        self._full_x0 = np.asarray(self._hooks.x0, dtype=float).copy()
+
+    def _expand_x(self, x):
+        x = np.asarray(x, dtype=float).reshape(-1)
+        if x.size != self._parameter_indices.size:
+            raise ValueError(
+                f"expected {self._parameter_indices.size} parameters, got {x.size}"
+            )
+        full = self._full_x0.copy()
+        full[self._parameter_indices] = x
+        return full
+
+    @property
+    def x0(self):
+        return self._full_x0[self._parameter_indices].copy()
+
+    @property
+    def parameter_indices(self):
+        return self._parameter_indices.copy()
+
+    @property
+    def term_slices(self):
+        return self._hooks.term_slices
+
+    @property
+    def solve_stats(self):
+        from . import implicit as imp
+
+        stats = imp._SOLVE_STATS.get(self._hooks.cfg)
+        return None if stats is None else dict(stats)
+
+    def residuals(self, x):
+        return np.asarray(self._hooks.fun(self._expand_x(x)), dtype=float)
+
+    def jacobian(self, x):
+        full = np.asarray(self._hooks.jac(self._expand_x(x)), dtype=float)
+        return full[:, self._parameter_indices]
+
+    def residual_jacobian(self, x):
+        x = np.asarray(x, dtype=float)
+        residual = self.residuals(x)
+        jacobian = self.jacobian(x)
+        return residual, jacobian, self.solution(x)
+
+    def objective_and_gradient(self, x):
+        residual, jacobian, solution = self.residual_jacobian(x)
+        return 0.5 * float(residual @ residual), jacobian.T @ residual, solution
+
+    def solution(self, x):
+        """Return the cached converged equilibrium for ``x``, solving if needed."""
+        from . import implicit as imp
+
+        active_x = np.asarray(x, dtype=float).reshape(-1)
+        full_x = self._expand_x(active_x)
+        params = self._hooks.params_of(jnp.asarray(full_x, dtype=jnp.float64))
+        key = imp._params_key(jax.tree.map(np.asarray, params))
+        hit = imp._LAST_SOLVE.get(self._hooks.cfg)
+        if hit is None or hit[0] != key:
+            self.residuals(active_x)
+            hit = imp._LAST_SOLVE.get(self._hooks.cfg)
+        if hit is None or hit[0] != key:
+            raise RuntimeError("VMEX residual evaluation did not cache a solution")
+        result = hit[1]
+        runtime = imp.runtime_from_params(params, self._hooks.cfg)
+        inp = imp.input_with_params(self._hooks.inp, params)
+        return Equilibrium(inp=inp, state=result.state, runtime=runtime, result=result)
+
+
+class LegacyQIResidual:
+    """Traceable legacy four-block quasi-isodynamic residual.
+
+    This wrapper composes :func:`vmex.core.omnigenity.boozer_bmnc_state`
+    with :func:`quasi_isodynamic_residual`. It is intentionally distinct
+    from :class:`vmex.core.omnigenity.QIResidual`, which implements the newer
+    three-term omnigenity objective; values from the two definitions are not
+    directly comparable.
+    """
+
+    name = "qi_legacy_four_block"
+
+    def __init__(
+        self,
+        surfaces,
+        *,
+        weights=None,
+        mboz=16,
+        nboz=16,
+        oversample=2,
+        nphi=151,
+        nalpha=31,
+        n_bounce=51,
+        include_bounce_endpoints=False,
+        softness=2.0e-2,
+        width_weight=1.0,
+        branch_width_weight=0.5,
+        branch_width_softness=1.0e-2,
+        profile_weight=0.1,
+        shuffle_profile_weight=1.0,
+        shuffle_profile_softness=2.0e-2,
+        phimin=0.0,
+    ):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        self.weights = None if weights is None else np.asarray(weights, dtype=float)
+        if self.weights is not None and self.weights.shape != self.surfaces.shape:
+            raise ValueError("weights must have the same shape as surfaces")
+        self.mboz = int(mboz)
+        self.nboz = int(nboz)
+        self.oversample = int(oversample)
+        self.options = dict(
+            nphi=int(nphi), nalpha=int(nalpha), n_bounce=int(n_bounce),
+            include_bounce_endpoints=bool(include_bounce_endpoints),
+            softness=float(softness), width_weight=float(width_weight),
+            branch_width_weight=float(branch_width_weight),
+            branch_width_softness=float(branch_width_softness),
+            profile_weight=float(profile_weight),
+            shuffle_profile_weight=float(shuffle_profile_weight),
+            shuffle_profile_softness=float(shuffle_profile_softness),
+            phimin=float(phimin),
+        )
+
+    def compute_state(self, state, runtime):
+        from .omnigenity import boozer_bmnc_state
+
+        booz = boozer_bmnc_state(
+            state,
+            runtime,
+            surfaces=self.surfaces,
+            mboz=self.mboz,
+            nboz=self.nboz,
+            oversample=self.oversample,
+        )
+        result = quasi_isodynamic_residual(
+            bmnc_b=booz["bmnc_b"],
+            xm_b=booz["xm_b"],
+            xn_b=booz["xn_b"],
+            iota_b=booz["iota_b"],
+            nfp=booz["nfp"],
+            weights=self.weights,
+            **self.options,
+        )
+        result.update(booz)
+        return result
+
+    def residuals_state(self, state, runtime):
+        return self.compute_state(state, runtime)["residuals1d"]
+
+    def total_state(self, state, runtime):
+        return self.compute_state(state, runtime)["total"]
+
+    def J(self, equilibrium):
+        return self.residuals_state(equilibrium.state, equilibrium.runtime)
+
+    __call__ = J
+
+    def residuals(self, equilibrium):
+        return self.J(equilibrium)
+
+    def total(self, equilibrium):
+        return self.total_state(equilibrium.state, equilibrium.runtime)
 
 
 def __getattr__(name: str):  # PEP 562 lazy re-export
@@ -530,6 +766,61 @@ def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) 
                                 jnp.asarray(jnp.finfo(bsq.dtype).tiny, dtype=bsq.dtype)))
     bmax, bmin = jnp.max(bmag), jnp.min(bmag)
     return (bmax - bmin) / (bmax + bmin)
+
+
+def maximum_elongation(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    ntheta: int = 48,
+    nphi: int = 16,
+) -> Array:
+    """Differentiable LCFS cross-section elongation proxy.
+
+    Each fixed-toroidal-angle cross section is sampled from the physical
+    boundary Fourier coefficients. Its elongation is
+    ``sqrt(lambda_max/lambda_min)`` for the covariance of ``(R, Z)`` over
+    poloidal angle; the maximum over toroidal angle is returned. This is the
+    same covariance proxy used by the legacy VMEC-JAX QI workflow.
+    """
+    from .solver import _physical_coefficients
+    from .transforms import physical_to_internal_scale
+
+    if int(ntheta) < 4 or int(nphi) < 3:
+        raise ValueError("maximum_elongation requires ntheta >= 4 and nphi >= 3")
+    setup = rt.setup
+    rc, rs, zc, zs = _physical_coefficients(
+        state,
+        modes=rt.modes,
+        lthreed=setup.lthreed,
+        lasym=setup.lasym,
+        lconm1=setup.lconm1,
+    )
+    scale = 1.0 / physical_to_internal_scale(rt.modes, rt.trig)
+    rc = rc[-1] * scale
+    rs = rs[-1] * scale
+    zc = zc[-1] * scale
+    zs = zs[-1] * scale
+    theta = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
+    zeta = jnp.linspace(0.0, 2.0 * jnp.pi, int(nphi), endpoint=False)
+    angle = (
+        theta[:, None, None] * jnp.asarray(rt.modes.m)[None, None, :]
+        - zeta[None, :, None] * jnp.asarray(rt.modes.n)[None, None, :]
+    )
+    cosine, sine = jnp.cos(angle), jnp.sin(angle)
+    R = jnp.sum(rc[None, None, :] * cosine + rs[None, None, :] * sine, axis=-1)
+    Z = jnp.sum(zc[None, None, :] * cosine + zs[None, None, :] * sine, axis=-1)
+    points = jnp.stack([R, Z], axis=-1)
+    points = jnp.swapaxes(points, 0, 1)
+    centered = points - jnp.mean(points, axis=1, keepdims=True)
+    covariance = jnp.einsum("pti,ptj->pij", centered, centered) / float(ntheta)
+    eigenvalues = jnp.linalg.eigvalsh(covariance)
+    tiny = jnp.asarray(jnp.finfo(eigenvalues.dtype).tiny)
+    elongation = jnp.sqrt(
+        jnp.maximum(eigenvalues[:, -1], tiny)
+        / jnp.maximum(eigenvalues[:, -2], tiny)
+    )
+    return jnp.max(elongation)
 
 
 def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
@@ -1472,6 +1763,7 @@ def _least_squares_implicit(
     device: Any = AUTO,
     verbose: int = 0,
     minimize_method: str | None = None,
+    _return_context: bool = False,
     **scipy_kwargs,
 ):
     """Single-stage boundary least squares with implicit-gradient Jacobians.
@@ -2025,6 +2317,33 @@ def _least_squares_implicit(
             holder["nres"] = int(np.asarray(jax.device_get(rows_jit(_place(x0)))).size)
         except Exception:  # the seed itself does not converge -> fun raises clearly
             pass
+
+    if _return_context:
+        # Shapes are static for a context. Evaluate each term against the
+        # already memoized seed equilibrium to expose stable row attribution.
+        params_seed = params_of(jnp.asarray(x0, dtype=jnp.float64))
+        state_seed = imp.solve_implicit(params_seed, cfg)
+        runtime_seed = imp.runtime_from_params(params_seed, cfg)
+        sizes = [
+            int(np.asarray(jax.device_get(jnp.atleast_1d(f(state_seed, runtime_seed)))).size)
+            for f, _, _ in terms
+        ]
+        offsets = np.cumsum([0, *sizes])
+        return _ImplicitResidualHooks(
+            x0=np.asarray(x0, dtype=float),
+            fun=fun,
+            jac=jac_fn,
+            params_of=params_of,
+            cfg=cfg,
+            inp=inp,
+            max_mode=max_mode,
+            nboundary=nboundary,
+            term_slices=tuple(
+                slice(int(offsets[i]), int(offsets[i + 1]))
+                for i in range(len(sizes))
+            ),
+            holder=holder,
+        )
 
     if minimize_method is None:
         result = scipy.optimize.least_squares(
