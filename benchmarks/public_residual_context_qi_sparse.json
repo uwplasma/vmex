@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "benchmark": "public_implicit_residual_context_qi",
+  "preset": "production",
+  "configuration": {
+    "input": "examples/data/input.nfp1_QI",
+    "input_sha256": "60d7b1e3b37f4fa0d7858a80319ae54478f18d2a8f52f3d840a31bcf8a5f8f60",
+    "max_mode": 4,
+    "canonical_dofs": 80,
+    "parameter_stride": 10,
+    "parameter_indices": [
+      0,
+      10,
+      20,
+      30,
+      40,
+      50,
+      60,
+      70
+    ],
+    "surfaces": [
+      0.0625,
+      0.3125,
+      0.5625,
+      0.8125
+    ],
+    "mboz": 18,
+    "nboz": 18,
+    "oversample": 2,
+    "nphi": 141,
+    "nalpha": 27,
+    "n_bounce": 51,
+    "include_bounce_endpoints": true,
+    "softness": 0.02,
+    "width_weight": 1.0,
+    "branch_width_weight": 0.5,
+    "branch_width_softness": 0.02,
+    "profile_weight": 0.1,
+    "shuffle_profile_weight": 1.0,
+    "shuffle_profile_softness": 0.02,
+    "jac_solver": "block",
+    "jac_chunk_size": "auto",
+    "warm_start": "perturbation",
+    "repeats": 3
+  },
+  "dimensions": {
+    "residual_rows": 41472,
+    "active_dofs": 8,
+    "jacobian_shape": [
+      41472,
+      8
+    ],
+    "jacobian_bytes": 2654208
+  },
+  "numerics": {
+    "residual_norm": 0.07248947751200799,
+    "jacobian_norm": 23.587375914350098,
+    "residual_sha256": "a3d21c38259e21f8fcfab31453b6a946ee32e9dcabd42360e4150a3ced825e77",
+    "jacobian_sha256": "671942f14fb68f0988775f7b443550d6a9415927d220a8d91e771ef4649c9356",
+    "solve_stats": {
+      "solves": 1,
+      "iterations": 6041
+    }
+  },
+  "phases": {
+    "context_construction": {
+      "wall_s": 46.36469762516208,
+      "peak_rss_bytes_before": 170655744,
+      "peak_rss_bytes_after": 2963537920,
+      "peak_rss_increment_bytes": 2792882176,
+      "compilation": {
+        "counts": {
+          "/jax/core/compile/jaxpr_trace_duration": 982,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 1912,
+          "/jax/core/compile/backend_compile_duration": 1912,
+          "/jax/compilation_cache/compile_time_saved_sec": 244,
+          "/jax/compilation_cache/cache_retrieval_time_sec": 244
+        },
+        "duration_s": {
+          "/jax/core/compile/jaxpr_trace_duration": 0.48677659034729004,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 6.608403921127319,
+          "/jax/core/compile/backend_compile_duration": 29.639179229736328,
+          "/jax/compilation_cache/compile_time_saved_sec": -0.24239920312538743,
+          "/jax/compilation_cache/cache_retrieval_time_sec": 0.24239920312538743
+        },
+        "backend_compile_count": 1912
+      }
+    },
+    "cold_residual": {
+      "wall_s": 0.02253025001846254,
+      "peak_rss_bytes_before": 2963537920,
+      "peak_rss_bytes_after": 2963537920,
+      "peak_rss_increment_bytes": 0,
+      "compilation": {
+        "counts": {},
+        "duration_s": {},
+        "backend_compile_count": 0
+      }
+    },
+    "cold_jacobian": {
+      "wall_s": 33.834562292089686,
+      "peak_rss_bytes_before": 2963537920,
+      "peak_rss_bytes_after": 3106013184,
+      "peak_rss_increment_bytes": 142475264,
+      "compilation": {
+        "counts": {
+          "/jax/core/compile/jaxpr_trace_duration": 1,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 1,
+          "/jax/core/compile/backend_compile_duration": 1
+        },
+        "duration_s": {
+          "/jax/core/compile/jaxpr_trace_duration": 3.78462815284729,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 0.8104040622711182,
+          "/jax/core/compile/backend_compile_duration": 27.94977307319641
+        },
+        "backend_compile_count": 1
+      }
+    },
+    "stabilization_residual": {
+      "wall_s": 0.1731102908961475,
+      "peak_rss_bytes_before": 3106013184,
+      "peak_rss_bytes_after": 3106013184,
+      "peak_rss_increment_bytes": 0,
+      "compilation": {
+        "counts": {
+          "/jax/core/compile/jaxpr_trace_duration": 1,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 1,
+          "/jax/core/compile/backend_compile_duration": 1
+        },
+        "duration_s": {
+          "/jax/core/compile/jaxpr_trace_duration": 0.02805471420288086,
+          "/jax/core/compile/jaxpr_to_mlir_module_duration": 0.01211690902709961,
+          "/jax/core/compile/backend_compile_duration": 0.11089515686035156
+        },
+        "backend_compile_count": 1
+      }
+    },
+    "stabilization_jacobian": {
+      "wall_s": 0.7180527499876916,
+      "peak_rss_bytes_before": 3106013184,
+      "peak_rss_bytes_after": 3166142464,
+      "peak_rss_increment_bytes": 60129280,
+      "compilation": {
+        "counts": {},
+        "duration_s": {},
+        "backend_compile_count": 0
+      }
+    },
+    "steady_state_repeats": [
+      {
+        "residual": {
+          "wall_s": 0.01778250001370907,
+          "peak_rss_bytes_before": 3166142464,
+          "peak_rss_bytes_after": 3166142464,
+          "peak_rss_increment_bytes": 0,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        },
+        "jacobian": {
+          "wall_s": 0.6930967499502003,
+          "peak_rss_bytes_before": 3166142464,
+          "peak_rss_bytes_after": 3187949568,
+          "peak_rss_increment_bytes": 21807104,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        }
+      },
+      {
+        "residual": {
+          "wall_s": 0.017071334179490805,
+          "peak_rss_bytes_before": 3187949568,
+          "peak_rss_bytes_after": 3187949568,
+          "peak_rss_increment_bytes": 0,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        },
+        "jacobian": {
+          "wall_s": 0.7093153751920909,
+          "peak_rss_bytes_before": 3187949568,
+          "peak_rss_bytes_after": 3196256256,
+          "peak_rss_increment_bytes": 8306688,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        }
+      },
+      {
+        "residual": {
+          "wall_s": 0.01769383391365409,
+          "peak_rss_bytes_before": 3196256256,
+          "peak_rss_bytes_after": 3196256256,
+          "peak_rss_increment_bytes": 0,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        },
+        "jacobian": {
+          "wall_s": 0.7073070839978755,
+          "peak_rss_bytes_before": 3196256256,
+          "peak_rss_bytes_after": 3208019968,
+          "peak_rss_increment_bytes": 11763712,
+          "compilation": {
+            "counts": {},
+            "duration_s": {},
+            "backend_compile_count": 0
+          }
+        }
+      }
+    ]
+  },
+  "steady_state": {
+    "unexpected_backend_compilations": 0,
+    "recompilation_gate_passed": true,
+    "residual_wall_s": [
+      0.01778250001370907,
+      0.017071334179490805,
+      0.01769383391365409
+    ],
+    "jacobian_wall_s": [
+      0.6930967499502003,
+      0.7093153751920909,
+      0.7073070839978755
+    ]
+  },
+  "environment": {
+    "python": "3.11.15",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "jax": "0.10.2",
+    "jax_backend": "cpu",
+    "jax_enable_x64": true,
+    "jax_devices": [
+      "cpu:0"
+    ],
+    "vmex_module": "vmex/__init__.py",
+    "final_peak_rss_bytes": 3208019968
+  },
+  "provenance": {
+    "measurement_commit": "e3763b9a79ee854a8b43631b6520d3579a01a90d",
+    "measurement_dirty": false,
+    "input_data_embedded": false
+  }
+}
