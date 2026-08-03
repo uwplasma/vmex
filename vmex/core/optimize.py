@@ -302,7 +302,13 @@ class LegacyQIResidual:
     with :func:`quasi_isodynamic_residual`. It is intentionally distinct
     from :class:`vmex.core.omnigenity.QIResidual`, which implements the newer
     three-term omnigenity objective; values from the two definitions are not
-    directly comparable.
+    directly comparable. Like the three-term traceable residual, this class
+    currently supports stellarator-symmetric states only; ``lasym=True`` is
+    rejected by the shared state-to-Boozer transformation.
+
+    Removed original VMEC-JAX controls such as ``aligned_profile``,
+    ``weighted_shuffle``, and ``shuffle_profile_nphi_out`` are deliberately
+    not accepted rather than being silently ignored.
     """
 
     name = "qi_legacy_four_block"

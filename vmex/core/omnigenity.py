@@ -513,6 +513,9 @@ class QIResidual:
 
         qi = QIResidual(np.linspace(0.25, 0.9, 4))
         result = least_squares([(qi, 0.0, 10.0), ...], inp, jac="implicit")
+
+    The traceable state-to-Boozer transformation currently supports
+    stellarator-symmetric states only and rejects ``lasym=True``.
     """
 
     name = "qi"

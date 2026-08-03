@@ -1,13 +1,40 @@
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
+import jax
 import numpy as np
+import pytest
 
 from vmex.core.input import VmecInput
 from vmex.core import optimize
+from vmex.core.omnigenity import QIResidual
 
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+
+
+@pytest.fixture(scope="module")
+def legacy_qi_equilibrium():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [(optimize.aspect_ratio, 1.0, 1.0)],
+        max_mode=1,
+        jac_solver="reverse",
+        warm_start="state",
+    )
+    equilibrium = context.solution(context.x0)
+    residual = optimize.LegacyQIResidual(
+        [0.5],
+        mboz=4,
+        nboz=3,
+        oversample=1,
+        nphi=17,
+        nalpha=5,
+        n_bounce=7,
+    )
+    return inp, equilibrium, residual
 
 
 def test_public_scalar_residual_context():
@@ -83,6 +110,92 @@ def test_legacy_qi_options_are_python_scalars():
     )
     assert residual.options["nphi"] == 31
     assert isinstance(residual.options["nphi"], int)
+
+
+def test_legacy_qi_traceable_and_wout_routes_agree(legacy_qi_equilibrium):
+    _, equilibrium, residual = legacy_qi_equilibrium
+    traceable = residual.compute_state(equilibrium.state, equilibrium.runtime)
+    from_wout = optimize.quasi_isodynamic_residual_from_wout(
+        equilibrium.wout,
+        surfaces=residual.surfaces,
+        mboz=residual.mboz,
+        nboz=residual.nboz,
+        weights=residual.weights,
+        **residual.options,
+    )
+    traceable_rows = np.asarray(traceable["residuals1d"])
+    wout_rows = np.asarray(from_wout["residuals1d"])
+    assert traceable_rows.shape == wout_rows.shape
+
+    # The state route uses the solver's half-mesh field tables whereas the
+    # WOUT route transforms reconstructed output tables. Their discretizations
+    # are not bitwise identical; this fixture measures ~2.3% relative row-norm
+    # disagreement and ~0.6% total disagreement at the selected low resolution.
+    relative_row_error = (
+        np.linalg.norm(traceable_rows - wout_rows) / np.linalg.norm(wout_rows)
+    )
+    assert relative_row_error < 3.0e-2
+    np.testing.assert_allclose(
+        float(traceable["total"]), float(from_wout["total"]), rtol=1.0e-2
+    )
+
+
+def test_legacy_qi_eager_jit_parity_and_state_gradient(legacy_qi_equilibrium):
+    _, equilibrium, residual = legacy_qi_equilibrium
+
+    def rows(state):
+        return residual.residuals_state(state, equilibrium.runtime)
+
+    eager = rows(equilibrium.state)
+    compiled = jax.jit(rows)(equilibrium.state)
+    np.testing.assert_allclose(np.asarray(compiled), np.asarray(eager), rtol=1.0e-12)
+
+    gradient = jax.grad(
+        lambda state: residual.total_state(state, equilibrium.runtime)
+    )(equilibrium.state)
+    leaves = [np.asarray(leaf) for leaf in jax.tree.leaves(gradient)]
+    assert all(np.all(np.isfinite(leaf)) for leaf in leaves)
+    assert np.sqrt(sum(float(np.sum(leaf * leaf)) for leaf in leaves)) > 1.0e-10
+
+
+def test_legacy_qi_composes_with_implicit_least_squares(legacy_qi_equilibrium):
+    inp, _, residual = legacy_qi_equilibrium
+    result = optimize.least_squares(
+        [(residual, 0.0, 1.0)],
+        inp,
+        max_mode=1,
+        jac="implicit",
+        jac_solver="block",
+        warm_start="state",
+        max_nfev=1,
+    )
+    assert result.nfev == 1
+    assert result.fun.shape == (240,)
+    assert result.jac.shape == (240, 2)
+    assert np.all(np.isfinite(result.jac))
+    assert np.linalg.norm(result.jac) > 1.0e-10
+
+
+@pytest.mark.parametrize(
+    "residual",
+    [
+        QIResidual([0.5], mboz=4, nboz=3, oversample=1),
+        optimize.LegacyQIResidual([0.5], mboz=4, nboz=3, oversample=1),
+    ],
+)
+def test_traceable_qi_definitions_share_clear_lasym_rejection(residual):
+    runtime = SimpleNamespace(setup=SimpleNamespace(lasym=True))
+    with pytest.raises(NotImplementedError, match="stellarator-symmetric.*lasym = False"):
+        residual.compute_state(None, runtime)
+
+
+@pytest.mark.parametrize(
+    "control",
+    ["aligned_profile", "weighted_shuffle", "shuffle_profile_nphi_out"],
+)
+def test_legacy_qi_rejects_removed_controls(control):
+    with pytest.raises(TypeError, match=control):
+        optimize.LegacyQIResidual([0.5], **{control: True})
 
 
 def test_maximum_elongation_directional_derivative():
