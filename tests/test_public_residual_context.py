@@ -143,15 +143,23 @@ def test_public_context_explicit_parameter_subset_and_order():
     full = optimize.ImplicitResidualContext(
         inp,
         [(optimize.aspect_ratio, 1.0, 1.0)],
-        max_mode=1,
-        jac_solver="reverse",
+        max_mode=2,
+        jac_solver="block",
         warm_start="state",
     )
-    indices = np.asarray([1, 0])
+    indices = np.asarray([3, 0])
     reduced = optimize.ImplicitResidualContext(
         inp,
         [(optimize.aspect_ratio, 1.0, 1.0)],
-        max_mode=1,
+        max_mode=2,
+        parameter_indices=indices,
+        jac_solver="block",
+        warm_start="state",
+    )
+    reduced_reverse = optimize.ImplicitResidualContext(
+        inp,
+        [(optimize.aspect_ratio, 1.0, 1.0)],
+        max_mode=2,
         parameter_indices=indices,
         jac_solver="reverse",
         warm_start="state",
@@ -160,6 +168,10 @@ def test_public_context_explicit_parameter_subset_and_order():
     np.testing.assert_allclose(reduced.residuals(reduced.x0), full.residuals(full.x0))
     np.testing.assert_allclose(
         reduced.jacobian(reduced.x0), full.jacobian(full.x0)[:, indices]
+    )
+    np.testing.assert_allclose(
+        reduced_reverse.jacobian(reduced_reverse.x0),
+        full.jacobian(full.x0)[:, indices],
     )
     assert reduced.solution(reduced.x0).result.converged
 

@@ -167,6 +167,7 @@ class _ImplicitResidualHooks:
     inp: VmecInput
     max_mode: int
     nboundary: int
+    jacobian_indices: np.ndarray
     term_slices: tuple[slice, ...]
     holder: dict
 
@@ -182,7 +183,8 @@ class ImplicitResidualContext:
     By default the context uses VMEX's canonical ``max_mode`` boundary
     parameterization. ``parameter_indices`` may select and reorder an explicit
     subset of that vector; omitted canonical entries remain fixed at their
-    seed values. No correspondence is inferred from vector lengths.
+    seed values and their implicit Jacobian columns are not computed. No
+    correspondence is inferred from vector lengths.
     """
 
     def __init__(
@@ -215,19 +217,16 @@ class ImplicitResidualContext:
             solve_kwargs=dict(solve_kwargs or {}),
             device=device,
             verbose=verbose,
+            _jacobian_indices=parameter_indices,
             _return_context=True,
         )
         full_size = int(self._hooks.x0.size)
-        if parameter_indices is None:
-            indices = np.arange(full_size, dtype=int)
-        else:
-            indices = np.asarray(parameter_indices, dtype=int).reshape(-1)
-            if np.any(indices < 0) or np.any(indices >= full_size):
-                raise ValueError("parameter_indices contains an out-of-range index")
-            if np.unique(indices).size != indices.size:
-                raise ValueError("parameter_indices must not contain duplicates")
-        self._parameter_indices = indices
+        self._parameter_indices = np.asarray(
+            self._hooks.jacobian_indices, dtype=int
+        ).copy()
         self._full_x0 = np.asarray(self._hooks.x0, dtype=float).copy()
+        if np.any(self._parameter_indices >= full_size):  # internal invariant
+            raise RuntimeError("implicit context returned invalid parameter indices")
 
     def _expand_x(self, x):
         x = np.asarray(x, dtype=float).reshape(-1)
@@ -262,8 +261,7 @@ class ImplicitResidualContext:
         return np.asarray(self._hooks.fun(self._expand_x(x)), dtype=float)
 
     def jacobian(self, x):
-        full = np.asarray(self._hooks.jac(self._expand_x(x)), dtype=float)
-        return full[:, self._parameter_indices]
+        return np.asarray(self._hooks.jac(self._expand_x(x)), dtype=float)
 
     def residual_jacobian(self, x):
         x = np.asarray(x, dtype=float)
@@ -1769,6 +1767,7 @@ def _least_squares_implicit(
     device: Any = AUTO,
     verbose: int = 0,
     minimize_method: str | None = None,
+    _jacobian_indices: Sequence[int] | None = None,
     _return_context: bool = False,
     **scipy_kwargs,
 ):
@@ -1816,6 +1815,17 @@ def _least_squares_implicit(
     k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
     nboundary = nfam * nm
     ndof = nboundary + (k_cur + 1 if k_cur else 0)
+    if _jacobian_indices is None:
+        jacobian_indices = np.arange(ndof, dtype=int)
+    else:
+        jacobian_indices = np.asarray(_jacobian_indices, dtype=int).reshape(-1)
+        if np.any(jacobian_indices < 0) or np.any(jacobian_indices >= ndof):
+            raise ValueError("parameter_indices contains an out-of-range index")
+        if np.unique(jacobian_indices).size != jacobian_indices.size:
+            raise ValueError("parameter_indices must not contain duplicates")
+    njac = int(jacobian_indices.size)
+    if njac == 0:
+        raise ValueError("parameter_indices must select at least one parameter")
     # multigrid=True routes the host solve through solve_multigrid so
     # NITER-exhausted trials are penalized instead of raising (same trial
     # policy as the finite-difference path).  Loose adjoint budget: the
@@ -1920,15 +1930,19 @@ def _least_squares_implicit(
     else:
         tangent_stack = (jnp.asarray(t_rbc), jnp.asarray(t_zbs),
                          jnp.asarray(t_ac), jnp.asarray(t_curtor))
+    # Restrict the tangent batch before any implicit backsolves. The
+    # equilibrium state and block factorization stay canonical, while sparse
+    # or reordered external masks pay only for their requested columns.
+    tangent_stack = tuple(t[jacobian_indices] for t in tangent_stack)
 
     # R17.1 memory knob: chunk_size None == one full-width batch, while an int
     # / "auto" caps peak Jacobian memory at that many dofs at a time.  Route
-    # the full-width case through lax.map(batch_size=ndof), not a bare vmap:
+    # the full-width case through lax.map(batch_size=njac), not a bare vmap:
     # JAX 0.6.2 mis-transforms the nested iterative implicit solve under the
     # latter (a wrong aspect-ratio column), whereas the full-width lax.map
     # batch agrees with the chunked paths and independent central FD.
     if jac_chunk_size == "auto":
-        chunk = _auto_jac_chunk(ndof)
+        chunk = _auto_jac_chunk(njac)
     elif jac_chunk_size is None or isinstance(jac_chunk_size, int):
         chunk = jac_chunk_size
     else:
@@ -1988,8 +2002,8 @@ def _least_squares_implicit(
         differences) — while exposing the *full* pointwise Gauss-Newton
         geometry to scipy.  Columns are mathematically independent, so the
         result is identical across chunk sizes to float64 round-off.
-        Also returns the per-dof state responses ``dz_j`` (leading axis
-        ``ndof``): they are the R25.4 perturbation warm-start linearization,
+        Also returns the selected-dof state responses ``dz_j`` (leading axis
+        ``njac``): they are the R25.4 perturbation warm-start linearization,
         already paid for by the column solves.
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x)
@@ -1999,7 +2013,7 @@ def _least_squares_implicit(
             dz, _ = imp._adjoint_solve(Fz, rhs_of(tp), cfg)
             return column_of(dz, tp), dz
 
-        tangent_chunk = ndof if chunk is None else chunk
+        tangent_chunk = njac if chunk is None else chunk
         cols, dz_cols = chunk_map(
             column, tangent_stack, chunk_size=tangent_chunk
         )
@@ -2105,7 +2119,7 @@ def _least_squares_implicit(
             b = jax.jvp(lambda prm: F_raw(z_star, prm), (params,), (tp,))[1]
             return _pack(jax.tree.map(jnp.negative, b))
 
-        tangent_chunk = ndof if chunk is None else chunk
+        tangent_chunk = njac if chunk is None else chunk
         rhs = chunk_map(raw_rhs, tangent_stack, chunk_size=tangent_chunk)
         dz0 = block_thomas_solve(factors, jnp.moveaxis(rhs, 0, -1))
 
@@ -2122,7 +2136,7 @@ def _least_squares_implicit(
             chunk_size=tangent_chunk)
         return jnp.transpose(cols), dz_cols
 
-    # Recycled variant: all ndof solves share the operator Fz (which drifts
+    # Recycled variant: all selected-dof solves share the operator Fz (which drifts
     # slowly between accepted trust-region iterates), so a GCROT deflation
     # pair (C, U) is threaded through a lax.scan over fixed-size dof chunks
     # (vmapped within a chunk, pair advanced from lane 0) and stashed
@@ -2135,9 +2149,9 @@ def _least_squares_implicit(
     # rotation); measured drift per accepted trust-region step is ~1e-3 on
     # slowly-varying operators, so 0.5 only trips on genuinely large steps.
     _RECYCLE_DRIFT_LIMIT = 0.5
-    csize = int(chunk) if chunk else ndof
-    nchunks = -(-ndof // csize)
-    pad = nchunks * csize - ndof
+    csize = int(chunk) if chunk else njac
+    nchunks = -(-njac // csize)
+    pad = nchunks * csize - njac
 
     def jacobian_rows_recycled(x: jnp.ndarray, C: jnp.ndarray,
                                U: jnp.ndarray):
@@ -2190,7 +2204,7 @@ def _least_squares_implicit(
         (C, U), (cols, drifts) = jax.lax.scan(
             scan_body, (C, U),
             tuple(pad_stack(t) for t in tangent_stack))
-        cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:ndof]
+        cols = cols.reshape((nchunks * csize,) + cols.shape[2:])[:njac]
         return jnp.transpose(cols), C, U, jnp.max(drifts)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):
@@ -2204,7 +2218,14 @@ def _least_squares_implicit(
     else:
         jac_impl = jacobian_rows
     jac_jit = jax.jit(jac_impl)
-    reverse_jit = jax.jit(jax.jacrev(residual_rows))
+
+    def reverse_rows_selected(x: jnp.ndarray):
+        def selected_rows(x_selected):
+            return residual_rows(x.at[jacobian_indices].set(x_selected))
+
+        return jax.jacrev(selected_rows)(x[jacobian_indices])
+
+    reverse_jit = jax.jit(reverse_rows_selected)
 
     holder: dict[str, Any] = {"nres": None, "lin": None}
     if recycle:
@@ -2234,8 +2255,9 @@ def _least_squares_implicit(
         boundary shift becomes a no-op) and frozen directions stay frozen.
         """
         rt_p = imp.runtime_from_params(params_of(x_trial), cfg)
+        delta = (x_trial - x_ref)[jacobian_indices]
         dz = jax.tree.map(
-            lambda d: jnp.tensordot(x_trial - x_ref, d, axes=1), dz_cols)
+            lambda d: jnp.tensordot(delta, d, axes=1), dz_cols)
         z = jax.tree.map(jnp.add, P_seed(frozen), dz)
         return imp._assemble(z, rt_p, frozen, P_seed, edge_seed)
 
@@ -2344,6 +2366,7 @@ def _least_squares_implicit(
             inp=inp,
             max_mode=max_mode,
             nboundary=nboundary,
+            jacobian_indices=jacobian_indices,
             term_slices=tuple(
                 slice(int(offsets[i]), int(offsets[i + 1]))
                 for i in range(len(sizes))

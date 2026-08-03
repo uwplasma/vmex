@@ -170,6 +170,8 @@ def run(args: argparse.Namespace) -> dict[str, object]:
     input_path = Path(config.pop("input"))
     inp = VmecInput.from_file(input_path)
     max_mode = int(config.pop("max_mode"))
+    canonical_dofs = int(optimize.pack_boundary(inp, max_mode).size)
+    parameter_indices = np.arange(0, canonical_dofs, args.parameter_stride)
     residual = optimize.LegacyQIResidual(**config)
     terms = [(residual.residuals_state, 0.0, 1.0)]
 
@@ -183,6 +185,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             inp,
             terms,
             max_mode=max_mode,
+            parameter_indices=parameter_indices,
             jac_chunk_size=args.jac_chunk_size,
             jac_solver=args.jac_solver,
             recycle=False,
@@ -260,6 +263,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "input": input_relative,
             "input_sha256": file_sha256(input_path),
             "max_mode": max_mode,
+            "canonical_dofs": canonical_dofs,
+            "parameter_stride": args.parameter_stride,
+            "parameter_indices": parameter_indices.tolist(),
             **config,
             "jac_solver": args.jac_solver,
             "jac_chunk_size": args.jac_chunk_size,
@@ -312,6 +318,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--preset", choices=("quick", "production"), default="quick")
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--parameter-stride", type=int, default=1)
     parser.add_argument("--jac-solver", choices=("block", "gmres", "reverse"), default="block")
     parser.add_argument("--jac-chunk-size", default="auto")
     parser.add_argument("--warm-start", choices=("perturbation", "state"), default="perturbation")
@@ -320,6 +327,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.repeats < 1:
         parser.error("--repeats must be at least 1")
+    if args.parameter_stride < 1:
+        parser.error("--parameter-stride must be at least 1")
     if args.jac_chunk_size != "auto":
         args.jac_chunk_size = int(args.jac_chunk_size)
     if args.device == "none":
