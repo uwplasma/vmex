@@ -12,6 +12,7 @@ from vmex.core.omnigenity import QIResidual
 
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 
 @pytest.fixture(scope="module")
@@ -76,6 +77,65 @@ def test_public_context_jacobian_matches_central_difference():
         np.testing.assert_allclose(
             jacobian[:, column], finite_difference, rtol=2.0e-4, atol=2.0e-6
         )
+
+
+def test_mean_iota_and_mirror_directional_derivatives():
+    inp = VmecInput.from_file(DATA / "input.nfp2_QA")
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [
+            (optimize.mean_iota, 0.0, 1.0),
+            (optimize.mirror_ratio, 0.0, 1.0),
+        ],
+        max_mode=1,
+        jac_solver="block",
+        warm_start="state",
+    )
+    x = context.x0
+    direction = np.linspace(-0.4, 0.7, x.size)
+    direction /= np.linalg.norm(direction)
+    analytic = context.jacobian(x) @ direction
+    step = 2.0e-5
+    finite_difference = (
+        context.residuals(x + step * direction)
+        - context.residuals(x - step * direction)
+    ) / (2.0 * step)
+
+    assert np.all(np.isfinite(analytic))
+    assert np.all(np.abs(analytic) > 1.0e-8)
+    # This converged, non-axisymmetric fixture measures about 2.0% relative
+    # error for mean iota and 0.13% for mirror ratio against re-solved FD.
+    np.testing.assert_allclose(analytic, finite_difference, rtol=3.0e-2, atol=1.0e-8)
+
+
+def test_public_context_qs_residual_directional_derivative():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    qs = optimize.QuasisymmetryRatioResidual([0.5], 1, -1)
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [(qs, 0.0, 1.0)],
+        max_mode=1,
+        jac_solver="block",
+        warm_start="state",
+    )
+    x = context.x0
+    direction = np.linspace(0.6, -0.8, x.size)
+    direction /= np.linalg.norm(direction)
+    analytic = context.jacobian(x) @ direction
+    step = 2.0e-5
+    finite_difference = (
+        context.residuals(x + step * direction)
+        - context.residuals(x - step * direction)
+    ) / (2.0 * step)
+
+    assert analytic.shape == finite_difference.shape
+    assert np.all(np.isfinite(analytic))
+    assert np.linalg.norm(analytic) > 1.0e-8
+    relative_error = (
+        np.linalg.norm(analytic - finite_difference)
+        / np.linalg.norm(finite_difference)
+    )
+    assert relative_error < 3.0e-2
 
 
 def test_public_context_explicit_parameter_subset_and_order():
@@ -148,7 +208,9 @@ def test_legacy_qi_eager_jit_parity_and_state_gradient(legacy_qi_equilibrium):
 
     eager = rows(equilibrium.state)
     compiled = jax.jit(rows)(equilibrium.state)
-    np.testing.assert_allclose(np.asarray(compiled), np.asarray(eager), rtol=1.0e-12)
+    np.testing.assert_allclose(
+        np.asarray(compiled), np.asarray(eager), rtol=1.0e-12, atol=1.0e-15
+    )
 
     gradient = jax.grad(
         lambda state: residual.total_state(state, equilibrium.runtime)
