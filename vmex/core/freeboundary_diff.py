@@ -358,6 +358,7 @@ def surface_field_data_from_state(
     inp,
     state,
     *,
+    runtime=None,
     nphi: int = 32,
     ntheta: int = 32,
     phi=None,
@@ -377,10 +378,15 @@ def surface_field_data_from_state(
     *simultaneous* plasma-boundary + coil single-stage objective possible:
     ``jax.grad`` threads through both this surface field and the coil field.
 
-    ``inp`` supplies the static resolution / profile metadata; ``state`` the
-    (possibly traced) spectral geometry.  Stellarator-symmetric only for now;
-    ``lasym=True`` is rejected because this path has not been validated with
-    the asymmetric surface-field channels.
+    ``inp`` supplies static resolution/profile metadata and ``state`` the
+    (possibly traced) spectral geometry. If a traceable ``runtime`` from
+    :func:`vmex.core.implicit.runtime_from_params` is supplied, its dynamic
+    flux, pressure, current, and boundary-orientation data are used instead
+    of rebuilding profiles from the host input. This is the path for
+    quantities differentiated through an implicit solve.
+    Stellarator-symmetric only for now; ``lasym=True`` is rejected because
+    this path has not been validated with the asymmetric surface-field
+    channels.
 
     Pure vmex numerics — usable without ``virtual_casing_jax`` (the optional
     dependency is required only by the virtual-casing solver paths).
@@ -415,9 +421,30 @@ def surface_field_data_from_state(
     grids = radial_grids(ns)
     ncurr = int(inp.ncurr)
 
-    boundary = boundary_from_input(inp, modes=modes, trig=trig, lconm1=True)
-    signgs = int(boundary.signgs)
-    prof = flux_profiles(inp, grids, r00=boundary.r00, signgs=signgs, lflip=boundary.lflip)
+    if runtime is None:
+        boundary = boundary_from_input(inp, modes=modes, trig=trig, lconm1=True)
+        signgs = int(boundary.signgs)
+        prof = flux_profiles(
+            inp,
+            grids,
+            r00=boundary.r00,
+            signgs=signgs,
+            lflip=boundary.lflip,
+        )
+    else:
+        setup = runtime.setup
+        signgs = int(setup.signgs)
+        prof = {
+            "phips": setup.phips,
+            "chips": setup.chips,
+            "iotas": setup.iotas,
+            "icurv": setup.icurv,
+            "mass": setup.mass,
+            "phipf": setup.phipf,
+            "chipf": setup.chipf,
+            "iotaf": setup.iotaf,
+            "lamscale": setup.lamscale,
+        }
 
     R_cos_p, Z_sin_p, R_sin_p, Z_cos_p = m1_constrained_to_physical(
         state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,

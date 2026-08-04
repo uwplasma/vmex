@@ -8,6 +8,7 @@ import pytest
 
 from vmex.core.input import VmecInput
 from vmex.core import optimize
+from vmex.core.freeboundary_diff import surface_field_data_from_state
 from vmex.core.omnigenity import QIResidual
 
 
@@ -174,6 +175,137 @@ def test_public_context_explicit_parameter_subset_and_order():
         full.jacobian(full.x0)[:, indices],
     )
     assert reduced.solution(reduced.x0).result.converged
+
+
+def test_public_context_quantity_vjp_matches_residual_jacobian():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [
+            (optimize.aspect_ratio, 0.0, 1.0),
+            (optimize.mean_iota, 0.0, 1.0),
+        ],
+        max_mode=1,
+        jac_solver="block",
+        warm_start="state",
+    )
+
+    def quantity(state, runtime, params):
+        del params
+        return jax.numpy.stack([
+            optimize.aspect_ratio(state, runtime),
+            optimize.mean_iota(state, runtime),
+        ])
+
+    cotangent = np.asarray([0.7, -0.2])
+    value, gradient, equilibrium = context.quantity_value_and_vjp(
+        context.x0, quantity, cotangent
+    )
+    expected_value = context.residuals(context.x0)
+    expected_gradient = cotangent @ context.jacobian(context.x0)
+
+    np.testing.assert_allclose(value, expected_value)
+    np.testing.assert_allclose(gradient, expected_gradient, rtol=2.0e-8, atol=2.0e-10)
+    assert equilibrium.result.converged
+
+    solves_after_first_vjp = context.solve_stats["solves"]
+    second_cotangent = np.asarray([-0.1, 0.5])
+    _, second_gradient, _ = context.quantity_value_and_vjp(
+        context.x0, quantity, second_cotangent
+    )
+    np.testing.assert_allclose(
+        second_gradient,
+        second_cotangent @ context.jacobian(context.x0),
+        rtol=2.0e-8,
+        atol=2.0e-10,
+    )
+    assert context.solve_stats["solves"] == solves_after_first_vjp
+
+
+def test_surface_field_runtime_path_matches_concrete_input_path():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [(optimize.aspect_ratio, 0.0, 1.0)],
+        max_mode=1,
+        jac_solver="block",
+        warm_start="state",
+    )
+    equilibrium = context.solution(context.x0)
+    angles = dict(
+        phi=np.asarray([0.1, 0.3]),
+        theta=np.linspace(0.0, 2.0 * np.pi, 4, endpoint=False),
+    )
+    concrete = surface_field_data_from_state(
+        equilibrium.inp, equilibrium.state, **angles
+    )
+    traceable = surface_field_data_from_state(
+        inp,
+        equilibrium.state,
+        runtime=equilibrium.runtime,
+        **angles,
+    )
+    for name in ("gamma", "B_total"):
+        np.testing.assert_allclose(
+            np.asarray(getattr(traceable, name)),
+            np.asarray(getattr(concrete, name)),
+            rtol=2.0e-12,
+            atol=2.0e-13,
+        )
+
+
+def test_public_context_quantity_vjp_selected_order_and_direct_parameter_path():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    indices = np.asarray([3, 0])
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [(optimize.aspect_ratio, 0.0, 1.0)],
+        max_mode=2,
+        parameter_indices=indices,
+        jac_solver="block",
+        warm_start="state",
+    )
+
+    def quantity(state, runtime, params):
+        return jax.numpy.stack([
+            optimize.aspect_ratio(state, runtime),
+            jax.numpy.sum(params.rbc * params.rbc)
+            + 0.5 * jax.numpy.sum(params.zbs * params.zbs),
+        ])
+
+    x = context.x0
+    cotangent = np.asarray([0.4, -0.3])
+    value, gradient, _ = context.quantity_value_and_vjp(x, quantity, cotangent)
+    np.testing.assert_allclose(context.quantity(x, quantity), value)
+
+    step = 2.0e-5
+    finite_difference = np.empty_like(x)
+    for column in range(x.size):
+        direction = np.zeros_like(x)
+        direction[column] = step
+        plus = context.quantity(x + direction, quantity)
+        minus = context.quantity(x - direction, quantity)
+        finite_difference[column] = cotangent @ ((plus - minus) / (2.0 * step))
+
+    np.testing.assert_allclose(gradient, finite_difference, rtol=3.0e-3, atol=2.0e-6)
+
+
+def test_public_context_quantity_vjp_rejects_wrong_cotangent_shape():
+    inp = VmecInput.from_file(DATA / "input.solovev")
+    context = optimize.ImplicitResidualContext(
+        inp,
+        [(optimize.aspect_ratio, 0.0, 1.0)],
+        max_mode=1,
+        jac_solver="reverse",
+        warm_start="state",
+    )
+
+    def quantity(state, runtime, params):
+        del params
+        return jax.numpy.atleast_1d(optimize.aspect_ratio(state, runtime))
+
+    with pytest.raises(ValueError, match="cotangent shape"):
+        context.quantity_value_and_vjp(context.x0, quantity, np.ones(2))
 
 
 def test_legacy_qi_options_are_python_scalars():

@@ -185,6 +185,11 @@ class ImplicitResidualContext:
     subset of that vector; omitted canonical entries remain fixed at their
     seed values and their implicit Jacobian columns are not computed. No
     correspondence is inferred from vector lengths.
+
+    :meth:`quantity_value_and_vjp` additionally contracts an arbitrary
+    traceable array quantity with a supplied cotangent. This reverse path
+    applies one implicit adjoint and returns the selected parameter ordering;
+    it does not materialize the quantity's dense Jacobian.
     """
 
     def __init__(
@@ -227,6 +232,8 @@ class ImplicitResidualContext:
         self._full_x0 = np.asarray(self._hooks.x0, dtype=float).copy()
         if np.any(self._parameter_indices >= full_size):  # internal invariant
             raise RuntimeError("implicit context returned invalid parameter indices")
+        self._quantity_fun_cache: dict[int, tuple[Callable, Callable]] = {}
+        self._quantity_vjp_cache: dict[int, tuple[Callable, Callable]] = {}
 
     def _expand_x(self, x):
         x = np.asarray(x, dtype=float).reshape(-1)
@@ -272,6 +279,97 @@ class ImplicitResidualContext:
     def objective_and_gradient(self, x):
         residual, jacobian, solution = self.residual_jacobian(x)
         return 0.5 * float(residual @ residual), jacobian.T @ residual, solution
+
+    def _quantity_function(self, quantity: Callable):
+        """Return the traceable selected-parameter map for ``quantity``."""
+        from . import implicit as imp
+
+        if not callable(quantity):
+            raise TypeError("quantity must be callable")
+        key = id(quantity)
+        cached = self._quantity_fun_cache.get(key)
+        if cached is not None and cached[0] is quantity:
+            return cached[1]
+
+        full_x0 = jnp.asarray(self._full_x0, dtype=jnp.float64)
+        parameter_indices = jnp.asarray(self._parameter_indices, dtype=jnp.int32)
+
+        def evaluate(active_x):
+            full_x = full_x0.at[parameter_indices].set(active_x)
+            params = self._hooks.params_of(full_x)
+            state = imp.solve_implicit(params, self._hooks.cfg)
+            runtime = imp.runtime_from_params(params, self._hooks.cfg)
+            return jnp.asarray(quantity(state, runtime, params))
+
+        compiled = jax.jit(evaluate)
+        self._quantity_fun_cache[key] = (quantity, compiled)
+        return compiled
+
+    def _quantity_vjp_function(self, quantity: Callable):
+        """Return a compiled value-and-VJP contraction for ``quantity``."""
+        key = id(quantity)
+        cached = self._quantity_vjp_cache.get(key)
+        if cached is not None and cached[0] is quantity:
+            return cached[1]
+
+        evaluate = self._quantity_function(quantity)
+
+        def value_and_vjp(active_x, cotangent):
+            value, pullback = jax.vjp(evaluate, active_x)
+            gradient, = pullback(cotangent)
+            return value, gradient
+
+        compiled = jax.jit(value_and_vjp)
+        self._quantity_vjp_cache[key] = (quantity, compiled)
+        return compiled
+
+    def _place(self, value):
+        """Place a quantity-VJP input on the context's selected device."""
+        array = jnp.asarray(value, dtype=jnp.float64)
+        device = self._hooks.cfg.device
+        return array if device is None else jax.device_put(array, device)
+
+    def quantity(self, x, quantity: Callable):
+        """Evaluate an array-valued quantity at the converged equilibrium.
+
+        ``quantity`` must be a JAX-traceable callable with signature
+        ``quantity(state, runtime, params)``. The raw implicit parameters are
+        included so direct parameter dependence, in addition to dependence
+        through the converged equilibrium, is retained.
+        """
+        active_x = np.asarray(x, dtype=float).reshape(-1)
+        self._expand_x(active_x)  # Validate selected-vector shape.
+        value = self._quantity_function(quantity)(self._place(active_x))
+        return np.asarray(jax.device_get(value), dtype=float)
+
+    def quantity_value_and_vjp(self, x, quantity: Callable, cotangent):
+        """Evaluate ``quantity`` and contract its selected-parameter VJP.
+
+        The returned gradient is ordered exactly like :attr:`x0` and
+        :attr:`parameter_indices`. One reverse implicit adjoint is applied for
+        the supplied cotangent; no dense quantity Jacobian is formed.
+        Changing cotangent values with the same static shape reuses the
+        compiled contraction.
+        """
+        active_x = np.asarray(x, dtype=float).reshape(-1)
+        self._expand_x(active_x)  # Validate selected-vector shape.
+        value_fun = self._quantity_function(quantity)
+        placed_x = self._place(active_x)
+        value_shape = jax.eval_shape(value_fun, placed_x)
+        cotangent_array = np.asarray(cotangent, dtype=float)
+        if cotangent_array.shape != value_shape.shape:
+            raise ValueError(
+                "cotangent shape does not match quantity shape: "
+                f"{cotangent_array.shape} != {value_shape.shape}"
+            )
+        value, gradient = self._quantity_vjp_function(quantity)(
+            placed_x, self._place(cotangent_array)
+        )
+        return (
+            np.asarray(jax.device_get(value), dtype=float),
+            np.asarray(jax.device_get(gradient), dtype=float),
+            self.solution(active_x),
+        )
 
     def solution(self, x):
         """Return the cached converged equilibrium for ``x``, solving if needed."""
