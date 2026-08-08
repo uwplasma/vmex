@@ -403,6 +403,7 @@ The recommended pattern releases all harmonics in one problem and uses
 
 ```python
 from scipy.optimize import least_squares
+from vmex import OptimizationMonitor
 from vmex import optimize as opt
 
 qs = opt.QuasisymmetryRatioResidual(surfaces, helicity_m=1, helicity_n=0)
@@ -414,6 +415,7 @@ problem = opt.VmecProblem.from_tuples(
 result = least_squares(
     problem.residual, problem.x0, jac=problem.residual_jac,
     x_scale=problem.scales,
+    callback=OptimizationMonitor(problem),
 )
 optimized_input = problem.input_from_x(result.x)
 ```
@@ -422,7 +424,10 @@ For scalar methods, pass `problem.value_and_grad` to
 `scipy.optimize.minimize(..., jac=True)`. `problem.jax_value_and_grad` and
 `problem.jax_residual` provide the same physics to JAXopt and Optax. The
 existing `opt.least_squares()` and `opt.minimize()` functions remain concise
-compatibility adapters.
+compatibility adapters. Monitoring is callback-based, so it reports accepted
+iterations rather than every trial evaluation. VMEX suppresses JAX's repeated
+PjRt persistent-cache version warning by default; set
+`VMEX_JAX_LOGGING_LEVEL=WARNING` before import to restore JAX diagnostics.
 
 The architecture, derivative validation, performance criteria, documentation
 work, and staged pull-request plan are recorded in
