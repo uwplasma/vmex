@@ -97,6 +97,62 @@ leaving VMEX failures and warnings visible.  Set
 import for more JAX diagnostics; ``VMEX_JAX_LOGGING_LEVEL=inherit`` leaves
 the process setting untouched.
 
+External optimizers and supplied derivatives
+--------------------------------------------
+
+The files ``QI_optimization_scipy.py``, ``QI_optimization_jaxopt.py``, and
+``QI_optimization_optax.py`` in ``examples/optimization`` construct the same
+QI :class:`~vmex.core.problem.VmecProblem`.  They demonstrate SciPy nonlinear
+least squares, BFGS and L-BFGS-B; JAXopt LBFGS and Levenberg--Marquardt; and an
+arbitrary Optax transformation chain.  VMEX contains no method registry or
+hand-written clone of those algorithms.
+
+Opaque host objectives use the same public object with a different derivative
+provider:
+
+.. code-block:: python
+
+   problem = opt.VmecProblem.from_tuples(
+       inp,
+       [(host_objective, target, weight)],
+       derivatives="finite_difference",
+       fd_method="3-point",
+       workers=None,                 # automatic workstation default
+   )
+
+Central probes are independent and run through
+:func:`vmex.core.parallel.map_ensemble`; ``workers=1`` selects a serial
+reference.  Traceable objectives should keep ``derivatives="implicit"``: a
+scalar exact gradient uses one adjoint instead of two equilibrium solves per
+degree of freedom.  Users with complete x-level derivatives construct
+:class:`~vmex.core.problem.FunctionProblem` directly with ``value_and_grad``
+or ``residual_and_jac``.  Thus exact, finite-difference, and supplied
+derivatives all present identical optimizer-facing names.
+
+``benchmarks/optimization_derivatives.py`` records exact/parallel-FD timing,
+work count, and numerical agreement under one input and objective.
+``benchmarks/alex_qi_acceptance.py`` reproduces the local ``alex_qi`` tuple,
+checks finite derivatives at ``max_mode=1`` or 5, and can run every documented
+backend with a fixed iteration budget.  Reports include package versions and
+failure/fallback counters.  SIMSOPT and DESC versions are recorded for
+provenance, but VMEX does not claim a cross-code speed ratio unless equation,
+resolution, variables, objective, tolerances, and warm-cache state match; a
+shorter run of different physics is not a defensible benchmark.
+
+The committed 2026-08-08 Apple-arm64 measurements are in
+``benchmarks/optimization_derivatives_macos.json`` and
+``benchmarks/alex_qi_max_mode5_macos.json``.  On the two-variable Solovev
+gate, after both lanes were warmed, the exact Jacobian took 1.52 ms versus
+277.83 ms for four parallel central probes (183x), agreeing to 1.23e-10
+relative error.  More importantly for scaling, the exact scalar-gradient work
+does not grow to 196 equilibrium probes at the 98-variable ``alex_qi``
+``max_mode=5`` point: its gradient was finite in 47.8 s, and one accepted
+least-squares step reduced cost from 1.225319 to 0.928739 in another 40.8 s
+with no failed trial or derivative fallback.  The recorded local SIMSOPT
+1.10.7 development build and DESC 0.17.1 development build solve different
+discretizations/objectives, so no fabricated wall-time ratio is attached to
+their names.
+
 The compatibility drivers
 -------------------------
 
