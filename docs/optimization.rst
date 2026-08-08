@@ -59,6 +59,44 @@ contributes ``sqrt(w) * (f - target)`` residual rows, so its squared cost is
 proportional to ``w`` rather than ``w**2``.  Existing high-level wrappers
 retain their historical residual-scale convention for reproducibility.
 
+Accepted-iteration monitoring
+-----------------------------
+
+Objective evaluation is silent by default.  Printing from an objective is
+misleading because trust-region and line-search methods deliberately evaluate
+rejected points, so their raw costs need not decrease monotonically.  Attach
+an :class:`~vmex.core.monitoring.OptimizationMonitor` to report optimizer
+callbacks instead:
+
+.. code-block:: python
+
+   from vmex import OptimizationMonitor
+
+   monitor = OptimizationMonitor(problem)
+   result = scipy.optimize.least_squares(
+       problem.residual,
+       problem.x0,
+       jac=problem.residual_jac,
+       x_scale=problem.scales,
+       callback=monitor,
+   )
+
+The stable columns are iteration, cost, accepted reduction, optimality when
+the backend supplies it, equilibrium solves, and failed/rejected trials.
+``monitor.records`` contains immutable records for plotting or tests.
+JAXopt, Optax, and custom loops call ``monitor.record(...)`` with the value
+and optimality they already computed, so monitoring never dictates the
+optimizer.  The compatibility least-squares driver uses SciPy's concise
+accepted-iteration table for ``verbose=1``; scalar ``minimize`` uses this
+same monitor.
+
+VMEX also sets JAX's Python logging level to ``ERROR`` at import time.  This
+removes the repeated PjRt persistent-cache version-compatibility lines while
+leaving VMEX failures and warnings visible.  Set
+``VMEX_JAX_LOGGING_LEVEL=WARNING`` (or another JAX logging level) before
+import for more JAX diagnostics; ``VMEX_JAX_LOGGING_LEVEL=inherit`` leaves
+the process setting untouched.
+
 The compatibility drivers
 -------------------------
 
@@ -279,6 +317,13 @@ No Python exception crosses ``jax.pure_callback``, so rejected high-mode
 trials do not produce an opaque JAX traceback.  Use
 ``problem.evaluate(x).status`` and its ``diagnostics`` mapping when a driver
 needs the typed failure rather than only the numerical penalty.
+
+The vector-Jacobian path normally uses the amortized block factorization.  If
+its warm corrector is non-finite at a difficult accepted point, VMEX retries
+the independent certified per-column GMRES lane before the optimizer sees the
+Jacobian.  ``derivative_fallbacks`` and ``failed_trials`` are exposed on the
+compatibility ``OptimizeResult`` and in ``problem.evaluate(x).diagnostics``;
+the fast path and its defaults are unchanged.
 
 The gradient stack: what makes a Jacobian cheap
 -----------------------------------------------
