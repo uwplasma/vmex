@@ -428,6 +428,10 @@ compatibility adapters. Monitoring is callback-based, so it reports accepted
 iterations rather than every trial evaluation. VMEX suppresses JAX's repeated
 PjRt persistent-cache version warning by default; set
 `VMEX_JAX_LOGGING_LEVEL=WARNING` before import to restore JAX diagnostics.
+Runnable QI examples cover SciPy least squares/BFGS/L-BFGS-B, JAXopt
+LBFGS/Levenberg–Marquardt, and Optax Adam. Opaque host objectives select
+`derivatives="finite_difference"`; central probes use automatic workers, while
+traceable objectives retain the faster implicit adjoint.
 
 The architecture, derivative validation, performance criteria, documentation
 work, and staged pull-request plan are recorded in

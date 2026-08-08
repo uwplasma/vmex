@@ -61,6 +61,7 @@ import dataclasses
 import inspect
 from dataclasses import dataclass
 from functools import cached_property
+from threading import RLock
 from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
@@ -1139,6 +1140,166 @@ def _ess_scale(inp: VmecInput, max_mode: int, alpha: float) -> np.ndarray:
     return np.exp(-alpha * levels) / np.exp(-alpha)
 
 
+def _make_finite_difference_problem(
+    inp: VmecInput,
+    *,
+    objective_terms: Sequence[tuple[Callable, float, float]],
+    loss: Callable | None,
+    max_mode: int,
+    x0: np.ndarray | None,
+    current_dofs: int | None,
+    weight_mode: str,
+    fd_method: str,
+    fd_rel_step: float | None,
+    workers: int | None,
+    bounds: Any,
+    use_ess: bool,
+    ess_alpha: float,
+    solve_kwargs: dict[str, Any],
+    device: Any,
+    problem_class: type[VmecProblem],
+) -> VmecProblem:
+    """Build the opaque-host derivative lane used by :func:`make_problem`."""
+    from .parallel import finite_difference_gradient, finite_difference_jacobian
+
+    if weight_mode not in ("legacy", "simsopt"):
+        raise ValueError("weight_mode must be 'legacy' or 'simsopt'")
+    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
+    nboundary = _n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
+    if x0 is None:
+        x0 = pack_boundary(inp, max_mode)
+        if k_cur:
+            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
+    x0 = np.asarray(x0, dtype=float)
+    solve_kwargs.setdefault("device", device)
+
+    def input_from_x(x: np.ndarray) -> VmecInput:
+        result = unpack_boundary(inp, np.asarray(x)[:nboundary], max_mode)
+        if k_cur:
+            result = _apply_current(
+                result, np.asarray(x)[nboundary:], k_cur, ac_scale
+            )
+        return result
+
+    holder: dict[str, Any] = {
+        "cache": None,
+        "failed_trials": 0,
+        "derivative_fallbacks": 0,
+    }
+    lock = RLock()
+
+    def equilibrium(x: np.ndarray) -> Equilibrium:
+        key = FunctionProblem._key(np.asarray(x, dtype=float))
+        with lock:
+            cached = holder["cache"]
+            if cached is not None and cached[0] == key:
+                return cached[1]
+        solved = solve_equilibrium(input_from_x(x), **solve_kwargs)
+        with lock:
+            holder["cache"] = (key, solved)
+        return solved
+
+    weights = []
+    for function, target, weight in objective_terms:
+        scale = float(weight)
+        if weight_mode == "simsopt":
+            if scale < 0.0:
+                raise ValueError("least-squares weights must be non-negative")
+            scale = float(np.sqrt(scale))
+        weights.append((function, float(target), scale))
+
+    def raw_residual(x: np.ndarray) -> np.ndarray:
+        eq = equilibrium(x)
+        return np.concatenate([
+            scale * (_call_term(function, eq) - target)
+            for function, target, scale in weights
+        ])
+
+    def raw_scalar(x: np.ndarray) -> float:
+        eq = equilibrium(x)
+        if loss is not None:
+            return float(np.asarray(_call_term(loss, eq)).squeeze())
+        rows = raw_residual(x)
+        return 0.5 * float(rows @ rows)
+
+    # The seed is strict and establishes output shape.  Subsequent failed
+    # probes receive a deterministic finite penalty so parallel FD completes.
+    initial_rows = None if loss is not None else raw_residual(x0)
+    initial_value = raw_scalar(x0)
+    if not np.isfinite(initial_value):
+        raise FloatingPointError("non-finite objective at the initial point")
+    if initial_rows is not None and (
+        initial_rows.size == 0 or not np.all(np.isfinite(initial_rows))
+    ):
+        raise FloatingPointError("non-finite or empty residual at the initial point")
+    penalty_scale = np.maximum(np.abs(x0), 1.0e-2)
+
+    def failure_magnitude(x: np.ndarray) -> float:
+        return 1.0e6 * (1.0 + np.linalg.norm((np.asarray(x) - x0) / penalty_scale))
+
+    def residual(x: np.ndarray) -> np.ndarray:
+        try:
+            rows = raw_residual(x)
+        except Exception:
+            with lock:
+                holder["failed_trials"] += 1
+            return np.full(
+                initial_rows.shape,
+                failure_magnitude(x) / np.sqrt(initial_rows.size),
+            )
+        return np.where(np.isfinite(rows), rows, failure_magnitude(x))
+
+    def scalar(x: np.ndarray) -> float:
+        try:
+            value = raw_scalar(x)
+        except Exception:
+            with lock:
+                holder["failed_trials"] += 1
+            return 0.5 * failure_magnitude(x) ** 2
+        return value if np.isfinite(value) else 0.5 * failure_magnitude(x) ** 2
+
+    fd_kwargs = {
+        "method": fd_method,
+        "rel_step": fd_rel_step,
+        "workers": workers,
+    }
+    names = list(boundary_dof_names(inp, max_mode))
+    if k_cur:
+        names.extend([f"AC({j})/{ac_scale:.6g}" for j in range(k_cur)])
+        names.append("CURTOR/1e6")
+    scales = _ess_scale(inp, max_mode, float(ess_alpha)) if use_ess else None
+    if scales is not None and k_cur:
+        scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    common = dict(
+        names=names,
+        bounds=bounds,
+        scales=scales,
+        input_from_x=input_from_x,
+        metadata={
+            "derivatives": "finite_difference",
+            "fd_method": fd_method,
+            "workers": workers,
+            "weight_mode": weight_mode,
+            "max_mode": max_mode,
+            "holder": holder,
+        },
+    )
+    if loss is not None:
+        return problem_class(
+            x0,
+            fun=scalar,
+            grad=lambda x: finite_difference_gradient(scalar, x, **fd_kwargs),
+            **common,
+        )
+    return problem_class(
+        x0,
+        fun=scalar,
+        residual=residual,
+        residual_jac=lambda x: finite_difference_jacobian(residual, x, **fd_kwargs),
+        **common,
+    )
+
+
 def make_problem(
     inp: VmecInput,
     *,
@@ -1148,6 +1309,9 @@ def make_problem(
     x0: np.ndarray | None = None,
     current_dofs: int | None = None,
     derivatives: str = "implicit",
+    fd_method: str = "3-point",
+    fd_rel_step: float | None = None,
+    workers: int | None = None,
     weight_mode: str = "simsopt",
     jac_chunk_size: int | str | None = "auto",
     jac_solver: str = "auto",
@@ -1166,8 +1330,11 @@ def make_problem(
 
     Exactly one of ``objective_terms`` and ``loss`` is required.  Tuple terms
     use SIMSOPT cost-weight semantics by default; pass ``weight_mode="legacy"``
-    only when reproducing an existing VMEX wrapper calculation.  ``loss`` must
-    be a traceable ``(state, runtime) -> scalar`` callable.
+    only when reproducing an existing VMEX wrapper calculation.  With
+    ``derivatives="implicit"``, ``loss`` must be a traceable
+    ``(state, runtime) -> scalar`` callable.  ``"finite_difference"`` also
+    accepts opaque host objectives and uses independent central probes;
+    ``workers=None`` selects the automatic host-worker count.
 
     The returned object contains no optimization algorithm.  Pass
     :meth:`VmecProblem.residual` / :meth:`VmecProblem.residual_jac` to a
@@ -1181,9 +1348,28 @@ def make_problem(
     """
     if (objective_terms is None) == (loss is None):
         raise ValueError("provide exactly one of objective_terms or loss")
+    if derivatives == "finite_difference":
+        return _make_finite_difference_problem(
+            inp,
+            objective_terms=list(objective_terms or ()),
+            loss=loss,
+            max_mode=int(max_mode),
+            x0=x0,
+            current_dofs=current_dofs,
+            weight_mode=weight_mode,
+            fd_method=fd_method,
+            fd_rel_step=fd_rel_step,
+            workers=workers,
+            bounds=bounds,
+            use_ess=use_ess,
+            ess_alpha=ess_alpha,
+            solve_kwargs=dict(solve_kwargs or {}),
+            device=device,
+            problem_class=problem_class,
+        )
     if derivatives != "implicit":
         raise ValueError(
-            "make_problem currently supports derivatives='implicit'; "
+            "derivatives must be 'implicit' or 'finite_difference'; "
             "use FunctionProblem.from_functions for supplied x-level derivatives"
         )
     max_mode = int(max_mode)
