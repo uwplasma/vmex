@@ -425,6 +425,9 @@ def test_least_squares_implicit_jac_solver_block(solovev_eq, monkeypatch):
                                weighted_jac.T @ residual, rtol=1e-6)
     assert np.all(np.isfinite(np.asarray(problem.jax_residual_jac(problem.x0))))
     assert problem.input_from_x(problem.x0) == inp
+    evaluation = problem.evaluate(problem.x0)
+    assert evaluation.success
+    assert evaluation.diagnostics["solve_stats"]["solves"] >= 1
     scalar = opt.VmecProblem.from_loss(
         inp,
         lambda state, runtime: 0.5 * (opt.aspect_ratio(state, runtime) - 4.0) ** 2,
@@ -472,6 +475,21 @@ def test_least_squares_implicit_jac_solver_block(solovev_eq, monkeypatch):
 
     with pytest.raises(AttributeError, match="residuals"):
         scalar.residual(scalar.x0)
+    from vmex.core import implicit as implicit_module
+    from vmex.core.problem import Evaluation, FunctionProblem
+
+    config = problem.metadata["config"]
+    implicit_module._LAST_STATUS_ERROR[config] = ValueError("rejected boundary")
+    monkeypatch.setattr(
+        FunctionProblem,
+        "evaluate",
+        lambda self, x, derivatives=True: Evaluation(x=np.asarray(x)),
+    )
+    failed = problem.evaluate(problem.x0)
+    assert failed.status == "failed_solve"
+    assert failed.message == "rejected boundary"
+    assert failed.diagnostics["exception_type"] == "ValueError"
+    implicit_module._LAST_STATUS_ERROR.pop(config, None)
     with pytest.raises(ValueError, match="jac_solver"):
         opt.least_squares(obj, inp, max_mode=1, jac="implicit",
                           jac_solver="svd", max_nfev=1)

@@ -9,7 +9,7 @@ lightweight tests and does not introduce an import cycle with
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from threading import RLock
 from typing import Any, Callable, Mapping, Sequence
 
@@ -282,6 +282,29 @@ class VmecProblem(FunctionProblem):
     def input_from_x(self, x: Array) -> Any:
         """Return a new :class:`VmecInput` containing decision vector ``x``."""
         return self._input_from_x(self._x(x))
+
+    def evaluate(self, x: Array, *, derivatives: bool = True) -> Evaluation:
+        """Evaluate and attach VMEC solve/adjoint status diagnostics."""
+        evaluation = super().evaluate(x, derivatives=derivatives)
+        cfg = self.metadata.get("config")
+        if cfg is None:
+            return evaluation
+        from . import implicit as imp
+
+        diagnostics = dict(evaluation.diagnostics)
+        stats = imp._SOLVE_STATS.get(cfg)
+        if stats is not None:
+            diagnostics["solve_stats"] = dict(stats)
+        error = imp._LAST_STATUS_ERROR.get(cfg)
+        if error is None:
+            return replace(evaluation, diagnostics=diagnostics)
+        diagnostics["exception_type"] = type(error).__name__
+        return replace(
+            evaluation,
+            status="failed_solve",
+            message=str(error),
+            diagnostics=diagnostics,
+        )
 
 
 __all__ = ["Evaluation", "FunctionProblem", "VmecProblem"]

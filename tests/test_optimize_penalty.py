@@ -84,8 +84,9 @@ def test_implicit_lane_fun_penalty_path(monkeypatch, capsys):
                             max_nfev=4, verbose=1)
     out = capsys.readouterr().out
     assert calls["poisoned"] >= 1
-    assert "trial solve failed" in out  # the penalty branch executed
-    assert "VmecJacobianError" in out   # Item I.1 relay: short sentinel, typed name
+    assert "cost" in out                 # finite penalty evaluations were reported
+    assert "VmecJacobianError" not in out
+    assert "Traceback" not in out        # no exception crossed pure_callback
     assert np.isfinite(res.cost)
     np.testing.assert_allclose(res.x, opt.pack_boundary(inp, 1))  # stayed at x0
 
@@ -111,18 +112,19 @@ def test_minimize_penalty_path(monkeypatch, capsys):
         options={"maxiter": 2, "maxls": 3})
     out = capsys.readouterr().out
     assert calls["poisoned"] >= 1
-    assert "trial solve/gradient failed" in out
+    assert "cost" in out
+    assert "VmecJacobianError" not in out
+    assert "Traceback" not in out
     assert np.isfinite(res.cost)
 
 
-def test_implicit_lane_jac_fallback_and_diagnostic_resolve(monkeypatch, capsys):
-    """jac='implicit': failed Jacobian reuses the last valid one; final
-    diagnostic re-solve falls back to a cold solve when the hot seed fails.
+def test_implicit_lane_status_penalty_and_diagnostic_resolve(monkeypatch, capsys):
+    """Failed differentiated trials use a penalty; diagnostics re-solve cold.
 
     The scipy driver evaluates ``jac`` at exactly the accepted iterate
     ``fun`` just solved (a memo-hit host solve), so poisoning memo-hit
-    solves after the first ``jac(x0)`` fails every later Jacobian while all
-    trial solves stay healthy.  ``solve_equilibrium`` additionally fails
+    solves after the first ``jac(x0)`` fails later differentiated trials,
+    which follow the status-safe penalty branch. ``solve_equilibrium`` fails
     whenever hot-seeded, forcing the final diagnostic's cold-solve fallback.
     """
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
@@ -155,7 +157,8 @@ def test_implicit_lane_jac_fallback_and_diagnostic_resolve(monkeypatch, capsys):
                             max_nfev=4, verbose=1)
     out = capsys.readouterr().out
     assert calls["poisoned"] >= 1
-    assert "trial jacobian failed" in out  # last-valid-Jacobian fallback ran
+    assert "VmecJacobianError" not in out
+    assert "Traceback" not in out
     assert seeded["n"] == 1
     assert np.isfinite(res.cost)
     assert res.equilibrium is not None  # cold-solve fallback delivered it
