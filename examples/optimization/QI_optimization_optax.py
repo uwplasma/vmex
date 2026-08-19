@@ -32,16 +32,18 @@ qi = ConstructedQIResidual(SURFACES, mboz=8 if ci_smoke else 12,
     nboz=8 if ci_smoke else 12, nphi=31 if ci_smoke else 61,
     nalpha=7 if ci_smoke else 18, n_bounce=7 if ci_smoke else 21)
 
-def iota_floor(state, runtime):
-    return jnp.maximum(0.3 - jnp.abs(opt.mean_iota(state, runtime)), 0.0)
+def iota_floor(equilibrium_state, solver_context):
+    return jnp.maximum(
+        0.3 - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
 
-def elongation_excess(state, runtime):
-    return jnp.maximum(opt.max_elongation(state, runtime) - 8.0, 0.0)
+def elongation_excess(equilibrium_state, solver_context):
+    return jnp.maximum(
+        opt.max_elongation(equilibrium_state, solver_context) - 8.0, 0.0)
 
 terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, 10.0, 0.005),
          (iota_floor, 0.0, 10.0), (elongation_excess, 0.0, 1.0)]
 problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=MAX_MODE,
-    vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True)
+    vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True, evaluation_progress=True)
 print(f"dof_names = {problem.dof_names}")
 problem.compile_value_and_gradient()
 transform = optax.chain(
@@ -70,12 +72,14 @@ x = x0 + scales * y
 equilibrium = problem.equilibrium_from_x(x)
 final_input = replace(problem.input_from_x(x), ns_array=np.array([31 if ci_smoke else 101]),
                       ftol_array=np.array([1e-10 if ci_smoke else 1e-14]), niter_array=np.array([8000]))
-final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.state,
+final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium.solution,
                                           verbose=not ci_smoke, raise_on_max_iterations=True)
 input_path = final_input.to_indata("input.QI_optax_adam")
 wout_path = vj.write_wout("wout_QI_optax_adam.nc", final_equilibrium.wout)
 print(f"Optax Adam: final cost = {float(problem.jax_fun(x)):.12e}, "
       f"QI total = {float(qi.total(final_equilibrium)):.6e}")
 print(f"wrote {input_path}\nwrote {wout_path}")
+monitor.save("QI_optax_adam_objectives.csv")
+monitor.plot("QI_optax_adam_objectives.png")
 for path in vj.plot_wout(wout_path, ".").values():
     print(f"wrote {path}")

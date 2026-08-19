@@ -21,6 +21,7 @@ ASPECT_TARGET = 5.0
 IOTA_FLOOR = 0.51
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
+ESS_ALPHA = 1.2  # lower only after a low-mode QI basin has converged
 MINIMUM_MPOL = 5
 VARY_MAJOR_RADIUS = False  # set True to optimize RBC(0,0) instead of fixing it
 SEED_PERTURBATION = 0.05
@@ -42,14 +43,21 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 # Objective function terms
 qi = ConstructedQIResidual(SURFACES, **qi_options)
 
-def iota_floor(state, runtime):
-    return jnp.maximum(IOTA_FLOOR - jnp.abs(opt.mean_iota(state, runtime)), 0.0)
+# Floor the profile minimum, not its average: a mean target is satisfiable while
+# an interior surface sits near zero transform, which is what a current-carried
+# finite-beta profile does. opt.mean_iota targets the average instead, and
+# opt.soft_min_abs_iota is the smooth-minimum variant.
+def iota_floor(equilibrium_state, solver_context):
+    return jnp.maximum(
+        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
-def mirror_excess(state, runtime):
-    return jnp.maximum(opt.mirror_ratio(state, runtime) - MIRROR_LIMIT, 0.0)
+def mirror_excess(equilibrium_state, solver_context):
+    return jnp.maximum(
+        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
 
-def elongation_excess(state, runtime):
-    return jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0.0)
+def elongation_excess(equilibrium_state, solver_context):
+    return jnp.maximum(
+        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
 
 objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 0.005),
@@ -63,8 +71,15 @@ report = opt.EquilibriumReporter(
     ("constructed QI", qi.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("mirror", opt.mirror_ratio, ".4f"),
     ("elongation", opt.max_elongation, ".4f"))
+monitor = opt.OptimizationMonitor(stream=None)
 
 # Optimize for QI in stages, increasing the maximum mode number each time.
+# If a RuntimeWarning reports uncertified Jacobian columns, it is expected
+# once the optimizer leaves the seed and needs no action: the shipped
+# jacobian_adjoint_tol=1e-4 and jacobian_adjoint_maxiter=10 are the measured
+# optimum, since ten times that budget moved the Jacobian by 2e-8 and
+# certified no extra column. Both are from_tuples arguments; pass
+# evaluation_progress=False to drop the per-evaluation timing lines.
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QI stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
@@ -76,15 +91,17 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     # Restart SciPy's trust-region model; equal-shape JAX executables are reused.
     problem = opt.VmecProblem.from_tuples(
         inp, qi_terms, max_mode=max_mode, use_ess=True, progress=not ci_smoke,
-        vary_major_radius=VARY_MAJOR_RADIUS,
+        evaluation_progress=not ci_smoke,
+        ess_alpha=ESS_ALPHA, vary_major_radius=VARY_MAJOR_RADIUS,
     )
     print(f"dof_names = {problem.dof_names}")
+    monitor.problem = problem
     if not ci_smoke:
         problem.compile_residual_and_jacobian()
     result = least_squares(
         problem.residual, problem.x0, jac=problem.residual_jac,
         x_scale=problem.scales, max_nfev=max_nfev,
-        ftol=1.0e-6, xtol=1.0e-10, verbose=2
+        ftol=1.0e-6, xtol=1.0e-10, verbose=2, callback=monitor
     )
     inp = problem.input_from_x(result.x)
     equilibrium = problem.equilibrium_from_x(result.x)
@@ -96,7 +113,7 @@ final_input = replace(inp,
     ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-14]),
     niter_array=np.array([8000]))
 final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.state,
+    final_input, initial_state=equilibrium.solution,
     verbose=not ci_smoke, raise_on_max_iterations=True)
 qi_final = report("final", final_equilibrium)["constructed QI"]
 qi_validation = ConstructedQIResidual(SURFACES, **validation_options)
@@ -110,5 +127,7 @@ print(f"wrote {input_path}")
 print(f"wrote {wout_path}")
 
 # Plot results
+monitor.save("QI_optimization_objectives.csv")
+monitor.plot("QI_optimization_objectives.png")
 for path in vj.plot_wout(wout_path, ".").values():
     print(f"wrote {path}")

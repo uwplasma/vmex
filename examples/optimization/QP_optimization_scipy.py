@@ -18,6 +18,7 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 MAX_MODES = [1, 2, 3, 4]
 MAXITER = 50
 METHOD = "BFGS"  # or "L-BFGS-B"
+PARAMETER_BOUND = 1.0
 BOUNDARY_STEP = 0.05  # typical change represented by one scaled variable
 ASPECT_TARGET = 7.0
 IOTA_FLOOR = 0.51
@@ -43,14 +44,17 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5,
 # Objective function terms
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 
-def iota_floor(state, runtime):
-    return jnp.maximum(0.3 - jnp.abs(opt.mean_iota(state, runtime)), 0.0)
+def iota_floor(equilibrium_state, solver_context):
+    return jnp.maximum(
+        0.3 - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
 
-def elongation_excess(state, runtime):
-    return jnp.maximum(opt.max_elongation(state, runtime) - 8.0, 0.0)
+def elongation_excess(equilibrium_state, solver_context):
+    return jnp.maximum(
+        opt.max_elongation(equilibrium_state, solver_context) - 8.0, 0.0)
 
-def mirror_excess(state, runtime):
-    return jnp.maximum(opt.mirror_ratio(state, runtime) - 0.25, 0.0)
+def mirror_excess(equilibrium_state, solver_context):
+    return jnp.maximum(
+        opt.mirror_ratio(equilibrium_state, solver_context) - 0.25, 0.0)
 
 objective_function_terms = [
     (qs, 0.0, 1.0),
@@ -78,6 +82,12 @@ options = {"maxiter": MAXITER, "gtol": 1.0e-6}
 if METHOD == "L-BFGS-B":
     options.update(maxls=20, ftol=1.0e-12, maxcor=20)
 
+# If a RuntimeWarning reports uncertified Jacobian columns, it is expected
+# once the optimizer leaves the seed and needs no action: the shipped
+# jacobian_adjoint_tol=1e-4 and jacobian_adjoint_maxiter=10 are the measured
+# optimum, since ten times that budget moved the Jacobian by 2e-8 and
+# certified no extra column. Both are from_tuples arguments; pass
+# evaluation_progress=False to drop the per-evaluation timing lines.
 for max_mode in MAX_MODES:
     print(f"\n===== QP stage, max_mode = {max_mode} =====")
     mpol = max(max_mode + 2, MINIMUM_MPOL)
@@ -96,7 +106,7 @@ for max_mode in MAX_MODES:
                  "jac": gradient(intermediate_result.x)})
 
     result = minimize(cost, np.zeros_like(x0), jac=gradient, method=METHOD,
-                      bounds=[(-1.0, 1.0)] * x0.size if METHOD == "L-BFGS-B" else None,
+                      bounds=[(-PARAMETER_BOUND, PARAMETER_BOUND)] * x0.size if METHOD == "L-BFGS-B" else None,
                       callback=monitor_y,
                       options=options)
     result.x = x_from_y(result.x)
@@ -109,7 +119,7 @@ final_input = replace(inp,
     ftol_array=np.array([1.0e-10 if ci_smoke else 1.0e-14]),
     niter_array=np.array([20000]))
 final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.state,
+    final_input, initial_state=equilibrium.solution,
     verbose=not ci_smoke, raise_on_max_iterations=True)
 final_total = report("final", final_equilibrium)["constructed QP"]
 print(f"\n{METHOD}: final cost = {float(result.fun):.12e}, QP total = {final_total:.3e}")
@@ -121,5 +131,7 @@ print(f"wrote {input_path}")
 print(f"wrote {wout_path}")
 
 # Plot results
+monitor.save(f"QP_scipy_{METHOD}_objectives.csv")
+monitor.plot(f"QP_scipy_{METHOD}_objectives.png")
 for path in vj.plot_wout(wout_path, ".").values():
     print(f"wrote {path}")
