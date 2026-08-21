@@ -180,7 +180,7 @@ optimized_input = problem.input_from_x(result.x)
 optimized_equilibrium = problem.equilibrium_from_x(result.x)
 ```
 
-The defaults are exact implicit derivatives, automatic Jacobian direction, one-column Jacobian batches, hot restarts, and cost weights. Advanced controls include:
+The defaults are certified implicit derivatives, automatic Jacobian direction, one-column Jacobian batches, hot restarts, and cost weights. The automatic lane never returns an uncertified Jacobian: if its amortized block response misses tolerance, it recomputes that point with the independently certified reverse adjoint. Advanced controls include:
 
 - `derivative_method="finite_difference"` for opaque host objectives;
 - `implicit_jacobian_method` and `jacobian_batch_size` for response assembly and memory/compile tradeoffs;

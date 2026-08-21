@@ -97,6 +97,15 @@ and the block-tridiagonal forward response for a residual vector. Advanced
 choices are ``"block_tridiagonal"``, ``"forward_gmres"``, and
 ``"reverse_adjoint"``.
 
+Every returned Jacobian is certified against the true linearized residual.
+If a block or forward response misses its requested tolerance, ``"auto"``
+recomputes that point with the independently certified reverse adjoint. A
+forced advanced method called through the host ``residual_jac`` API raises
+:class:`vmex.core.errors.AdjointSolveError` instead of returning an approximate
+derivative. The transformable ``jax_residual_jac`` API falls back to reverse
+inside the compiled graph because a Python exception cannot be part of a JAX
+transformation.
+
 ``jacobian_batch_size=1`` minimizes cold compilation complexity and peak
 memory for the usual QI/QS problems through ``max_mode=5``.
 ``jacobian_batch_size="auto"`` may improve warm throughput in long campaigns
