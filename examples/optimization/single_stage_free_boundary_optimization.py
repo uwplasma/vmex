@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""True free-boundary QA optimization with ESSOS coils as the only dofs."""
+"""True free-boundary QA optimization with ESSOS coils as the only dofs.
+
+Development preview: this script requires the independently reviewed ESSOS
+0.17 functional coil APIs; VMEX 0.6 itself supports ESSOS 0.16.
+"""
 
 from dataclasses import replace
 import os
@@ -14,10 +18,15 @@ import vmex as vj
 from vmex import optimize as opt
 from vmex.core import implicit as im
 
-from essos.coils import Coils
-from essos.fields import BiotSavart
-from essos.objective_functions import loss_coil_separation
-from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
+try:
+    from essos.coils import Coils
+    from essos.fields import BiotSavart
+    from essos.objective_functions import loss_coil_separation
+    from essos.surfaces import SurfaceRZFourier, surfacerzfourier_from_boundary
+except ImportError as error:
+    raise ImportError(
+        "This development example requires ESSOS 0.17 APIs pending independent review."
+    ) from error
 
 SURFACES = np.linspace(0.1, 1.0, 6)
 NS, MPOL, NTOR, NITER, FTOL = 25, 5, 5, 4000, 1.0e-10

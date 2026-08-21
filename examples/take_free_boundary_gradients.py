@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""Differentiate a true NESTOR free-boundary solve through its coupled root."""
+"""Differentiate a true NESTOR free-boundary solve through its coupled root.
+
+Development preview: this script requires the independently reviewed ESSOS
+0.17 functional coil APIs; VMEX 0.6 itself supports ESSOS 0.16.
+"""
 
 from dataclasses import replace
 import os
@@ -18,6 +22,11 @@ from vmex.core.freeboundary_implicit import (
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
+
+if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
+    raise ImportError(
+        "This development example requires ESSOS 0.17 APIs pending independent review."
+    )
 
 DATA = Path(__file__).resolve().parent / "data"
 NS, MPOL, NTOR, NITER, FTOL = 25, 5, 5, 12000, 1.0e-10

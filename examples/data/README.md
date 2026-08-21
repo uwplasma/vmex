@@ -5,7 +5,9 @@ examples, tests, and documentation.
 
 - `input.*`: VMEC input decks.
 - `ESSOS_biot_savart_LandremanPaulQA.json`: vacuum coils for the low-resolution
-  Landreman--Paul QA boundary.
+  Landreman--Paul QA boundary. The three compact coil files retain ESSOS's
+  public `dofs_curves` / `dofs_currents` schema, which is read identically by
+  released ESSOS 0.16 and the 0.17 development loader.
 - `input.LandremanPaul2021_QA_beta2p5_bootstrap` and the matching
   `ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json`: a 2.5%-beta QA
   equilibrium with self-consistent bootstrap current for the coupled

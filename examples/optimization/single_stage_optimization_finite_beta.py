@@ -5,6 +5,8 @@ The boundary is varied but each VMEX evaluation is a fixed-boundary solve.
 Virtual casing only separates the converged total field into its plasma and
 required external-coil parts; no free-boundary equilibrium is solved here.
 Use the commented ``Coils.from_simsopt`` line to load a SIMSOPT coil JSON.
+Development preview: this script requires the independently reviewed ESSOS
+0.17 functional coil APIs; VMEX 0.6 itself supports ESSOS 0.16.
 """
 
 from dataclasses import replace
@@ -25,10 +27,15 @@ from vmex.core.bootstrap import (ELEMENTARY_CHARGE, KineticProfiles, RedlBootstr
 import jax
 import jax.numpy as jnp
 
-from essos.coils import Coils, CreateEquallySpacedCurves
-from essos.fields import BiotSavart
-from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
-from essos.surfaces import surfacerzfourier_from_boundary
+try:
+    from essos.coils import Coils, CreateEquallySpacedCurves
+    from essos.fields import BiotSavart
+    from essos.objective_functions import loss_coil_separation, loss_coil_surface_distance
+    from essos.surfaces import surfacerzfourier_from_boundary
+except ImportError as error:
+    raise ImportError(
+        "This development example requires ESSOS 0.17 APIs pending independent review."
+    ) from error
 
 nfp = 2  # number of field periods
 MAKE_MOVIE = True  # set True for a compact GIF of accepted iterates
