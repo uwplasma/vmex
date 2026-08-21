@@ -15,6 +15,9 @@ that region as vacuum. Boundary-normal matching on one interface also does
 not uniquely reconstruct those removed volume currents. The comparison makes
 that physical limitation measurable instead of treating the two problems as
 mathematically identical.
+
+Development preview: this script requires the independently reviewed ESSOS
+0.17 functional coil APIs; VMEX 0.6 itself supports ESSOS 0.16.
 """
 
 from dataclasses import replace
@@ -39,6 +42,11 @@ from vmex.core.solver import prepare_runtime, resolution_from_input
 
 from essos.coils import Coils
 from essos.fields import BiotSavart
+
+if not all(hasattr(Coils, name) for name in ("from_json", "with_dofs")):
+    raise ImportError(
+        "This development example requires ESSOS 0.17 APIs pending independent review."
+    )
 
 DATA = Path(__file__).resolve().parent / "data"
 # The bundled coils were optimized at 2.5% beta. A short continuation reaches

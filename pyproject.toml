@@ -77,8 +77,8 @@ freeb = [
 turbulence = [
   "gkx>=1.7.1",
 ]
-# ESSOS 0.17 adds the named/functional coil interfaces used by the new
-# single-stage examples; 0.16 remains compatible with VMEX's existing CLI.
+# ESSOS 0.16 is VMEX's stable coil/CLI interface. Examples using the pending
+# named, functional, distance, surface, or tracing helpers are guarded previews.
 coils = [
   "essos>=0.16",
 ]

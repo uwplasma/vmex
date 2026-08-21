@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,68 @@ EXAMPLES = REPO / "examples"
 DATA_DIR = EXAMPLES / "data"
 
 _COST_RE = re.compile(r"^\s*\d+\s+\d+\s+([0-9.eE+-]+)", re.MULTILINE)
+
+ESSOS_017_PREVIEWS = (
+    EXAMPLES / "take_free_boundary_gradients.py",
+    EXAMPLES / "vmex_fixed_free_boundary_comparison.py",
+    EXAMPLES / "vmex_get_B_outside_plasma.py",
+    EXAMPLES / "vmex_fieldline_tracing_vacuum.py",
+    EXAMPLES / "vmex_fieldline_tracing_finite_beta.py",
+    EXAMPLES / "optimization" / "single_stage_optimization.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
+    EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
+    EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
+)
+
+
+def test_released_essos_reads_bundled_coil_fixtures() -> None:
+    """The compact coil files retain the schema supported by ESSOS 0.16."""
+    pytest.importorskip("essos")
+    from essos.coils import Coils
+
+    if hasattr(Coils, "from_json"):
+        load = Coils.from_json
+    else:
+        from essos.coils import Coils_from_json
+
+        load = Coils_from_json
+    for path in sorted(DATA_DIR.glob("ESSOS_biot_savart_*.json")):
+        coils = load(str(path))
+        assert np.all(np.isfinite(np.asarray(coils.gamma)))
+        assert np.all(np.isfinite(np.asarray(coils.currents)))
+
+
+def test_unreleased_essos_examples_fail_with_a_release_boundary() -> None:
+    """Released ESSOS gets a clear preview error, not a missing-symbol crash."""
+    pytest.importorskip("essos")
+    from essos.coils import Coils
+
+    try:
+        from essos.dynamics import LevelsetStoppingCriterion, trace_field_lines
+        from essos.objective_functions import (
+            loss_coil_separation,
+            loss_coil_surface_distance,
+        )
+        from essos.surfaces import surfacerzfourier_from_boundary
+    except ImportError:
+        has_preview_api = False
+    else:
+        del (LevelsetStoppingCriterion, trace_field_lines,
+             loss_coil_separation, loss_coil_surface_distance,
+             surfacerzfourier_from_boundary)
+        has_preview_api = all(
+            hasattr(Coils, name)
+            for name in ("from_json", "with_dofs", "dof_names")
+        )
+    if has_preview_api:
+        pytest.skip("development ESSOS API is installed")
+
+    for script in ESSOS_017_PREVIEWS:
+        with pytest.raises(
+            ImportError,
+            match="requires ESSOS 0.17 APIs pending independent review",
+        ):
+            runpy.run_path(str(script))
 
 
 def _run_example(script: Path, cwd: Path, timeout: int = 2400,

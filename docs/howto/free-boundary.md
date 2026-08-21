@@ -76,13 +76,15 @@ factor runs on CPU by design ({doc}`run-on-gpu`).
 
 ## Differentiability scope
 
-Coil/`extcur` gradients on a specified boundary use the virtual-casing
-residual (`examples/optimization/single_stage_optimization_finite_beta.py`);
-that lane is the mature one. The coupled NESTOR fixed point is also
+Coil/`extcur` gradients on a specified boundary use the mature virtual-casing
+residual. Its joint coil example is the ESSOS 0.17 development preview
+`examples/optimization/single_stage_optimization_finite_beta.py`. The coupled
+NESTOR fixed point is also
 differentiated, by
 {func}`vmex.core.freeboundary_implicit.solve_free_boundary_implicit`, which
 reverse-differentiates the reconverged plasma--vacuum root against plasma
-profiles and direct coil dofs (`examples/take_free_boundary_gradients.py`,
+profiles and direct coil dofs (the ESSOS 0.17 development previews
+`examples/take_free_boundary_gradients.py` and
 `examples/optimization/single_stage_free_boundary_optimization.py`). It is
 experimental and CPU-only. Scope is stated in
 {doc}`/reference/capabilities` and the mechanism in

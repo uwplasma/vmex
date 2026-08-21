@@ -99,7 +99,8 @@ reverse-mode derivative of the coupled fixed point with respect to plasma
 profiles and direct coil shape/current dofs, with a whole-state transpose by
 default (`adjoint_solver="coupled_gcrot"`) and an opt-in boundary-Schur
 transpose (`examples/take_free_boundary_gradients.py`,
-`examples/optimization/single_stage_free_boundary_optimization.py`). That path
+`examples/optimization/single_stage_free_boundary_optimization.py`, an ESSOS
+0.17 development preview). That path
 is experimental and CPU-only; cold compile time, GPU memory, and failed-trial
 recovery keep it at `vjp = limited`. The per-configuration contract, including
 what each grade means and what the free-boundary rows still need, is
