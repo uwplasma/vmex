@@ -99,7 +99,7 @@ jobs:
             parallel: "-n 2"
           - lane: implicit-response
             selector: pr-implicit-response
-            parallel: "-n 2"
+            parallel: ""
           - lane: field-api
             selector: pr-physics-field
             parallel: "-n 2"
