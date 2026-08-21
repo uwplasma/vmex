@@ -97,8 +97,14 @@ jobs:
           - lane: core
             selector: pr-physics-core
             parallel: "-n 2"
-          - lane: implicit-response
-            selector: pr-implicit-response
+          - lane: implicit-response-a
+            selector: pr-implicit-response-a
+            parallel: ""
+          - lane: implicit-response-b
+            selector: pr-implicit-response-b
+            parallel: ""
+          - lane: free-boundary-adjoint
+            selector: pr-free-boundary-adjoint
             parallel: ""
           - lane: field-api
             selector: pr-physics-field
