@@ -102,8 +102,12 @@ No solve is trusted silently. Each adjoint/tangent solve returns a
 {class}`~vmex.core.implicit.LinearResponseReport` with the achieved residual
 norm, the requested tolerance, the iteration count, and a converged flag; the
 block-Thomas Jacobian path certifies every column with one warm-started GMRES
-pass against the preconditioned system to the same `adjoint_tol` as the
-per-column path. SOLVAX's own GCROT result additionally carries a
+pass against the exact raw operator. The automatic optimizer lane recomputes
+an uncertified block response with the independent reverse adjoint; a forced
+block or forward lane raises through the host API rather than returning an
+approximate Jacobian. The transformable JAX API uses the reverse fallback
+inside the compiled graph, where a Python exception is not available.
+SOLVAX's own GCROT result additionally carries a
 `recycle_drift` monitor — how far the operator has drifted since the recycle
 pair was built — but VMEX neither reads nor surfaces it, so those four fields
 are the whole certificate.

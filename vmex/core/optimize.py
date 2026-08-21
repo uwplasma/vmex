@@ -77,6 +77,7 @@ from solvax import (
 )
 
 from .device import AUTO
+from .errors import AdjointSolveError
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .solver import (
@@ -322,10 +323,10 @@ def _auto_jac_chunk(dim: int) -> int:
 
 
 def _certifier_summary(report: Any) -> jnp.ndarray:
-    """``[max iterations, columns not certified]`` for one Jacobian call.
+    """Compact convergence evidence for one implicit-Jacobian call.
 
     Both implicit-Jacobian lanes certify every column against
-    ``cfg.adjoint_tol``, and how hard that is depends on the iterate: the
+    ``cfg.jacobian_adjoint_tol``, and how hard that is depends on the iterate: the
     block factorization is an excellent preconditioner at the point it was
     built for and a progressively worse one as the optimizer moves.  When it
     degrades the certifier silently absorbs the whole cost of a Jacobian, so
@@ -333,18 +334,24 @@ def _certifier_summary(report: Any) -> jnp.ndarray:
     """
     iterations = jnp.asarray(getattr(report, "iterations", 0)).ravel()
     converged = jnp.asarray(getattr(report, "converged", True)).ravel()
+    residual = jnp.asarray(getattr(report, "residual_norm", 0.0)).ravel()
+    tolerance = jnp.asarray(getattr(report, "tolerance", jnp.inf)).ravel()
+    relative = residual / jnp.maximum(tolerance, jnp.finfo(residual.dtype).tiny)
+    worst = jnp.argmax(relative)
     return jnp.stack((
         jnp.max(iterations).astype(jnp.float64),
         jnp.sum(jnp.logical_not(converged)).astype(jnp.float64),
+        residual[worst].astype(jnp.float64),
+        tolerance[worst].astype(jnp.float64),
     ))
 
 
 def _record_certifier(holder: dict, summary: Any, cfg: Any = None) -> None:
     """Record the worst certifier cost, and say so when columns miss.
 
-    An uncertified column is returned as NaN and the Jacobian then falls back
-    to the previous one, so a stage can spend an hour per Jacobian and make no
-    real progress with nothing on screen to say why.  Warn once per problem.
+    Automatic differentiation falls back to the independently certified
+    reverse lane when a column misses. Forced solver lanes raise rather than
+    returning an approximate Jacobian. Warn once per problem.
     """
     values = np.asarray(jax.device_get(summary), dtype=float).ravel()
     if values.size < 2 or not np.all(np.isfinite(values)):
@@ -361,18 +368,61 @@ def _record_certifier(holder: dict, summary: Any, cfg: Any = None) -> None:
         warnings.warn(
             f"{unconverged} of the implicit-Jacobian columns did not reach "
             f"jacobian_adjoint_tol={tol} within jacobian_adjoint_maxiter="
-            f"{budget} restarts ({iterations} Krylov iterations). Those "
-            "columns carry the direct block-tridiagonal solve corrected as "
-            "far as the budget allowed, which is the usual outcome on an "
-            "asymmetric boundary once the optimizer leaves the seed and is "
-            "normally accurate enough to optimize with. The shipped settings "
-            "are already the measured optimum: raising the budget by ten "
-            "times moved the Jacobian by 2e-8 and certified no extra column, "
-            "so no action is needed unless the optimizer stops making "
-            "progress. If it does, pass jacobian_adjoint_tol=1e-3 to accept "
-            "sooner, or implicit_jacobian_method='reverse_adjoint' for a "
-            "slower but independently certified Jacobian.",
+            f"{budget} restarts ({iterations} Krylov iterations). The "
+            "automatic method will use the independently certified reverse "
+            "Jacobian for this point; an explicitly forced block or forward "
+            "solver raises instead of returning an uncertified derivative.",
             RuntimeWarning, stacklevel=2)
+
+
+def _certified_host_jacobian(
+    candidate: np.ndarray,
+    summary: Any,
+    *,
+    jac_solver: str,
+    reverse_candidate: Callable[[], np.ndarray],
+) -> tuple[np.ndarray, bool]:
+    """Return a certified current-point Jacobian or raise a typed error."""
+    evidence = np.asarray(jax.device_get(summary), dtype=float).ravel()
+    if evidence.size < 4 or not np.all(np.isfinite(evidence)):
+        raise FloatingPointError("invalid implicit-Jacobian certificate")
+    if not int(evidence[1]):
+        return candidate, False
+    if jac_solver != "auto":
+        raise AdjointSolveError(
+            message=(
+                f"implicit Jacobian {jac_solver!r} lane left "
+                f"{int(evidence[1])} columns uncertified"
+            ),
+            hint=(
+                "use implicit_jacobian_method='auto' for an independently "
+                "certified reverse fallback, or increase the Jacobian "
+                "Krylov budget"
+            ),
+            iterations=int(evidence[0]),
+            residual_norm=float(evidence[2]),
+            tolerance=float(evidence[3]),
+        )
+    return reverse_candidate(), True
+
+
+def _certified_jax_jacobian(
+    candidate: jnp.ndarray,
+    summary: jnp.ndarray,
+    reverse_candidate: Callable[[], jnp.ndarray],
+) -> jnp.ndarray:
+    """Keep transformed JAX derivatives exact without host exceptions."""
+    certified = (
+        jnp.all(jnp.isfinite(summary))
+        & (summary[1] == 0)
+        & jnp.all(jnp.isfinite(candidate))
+    )
+    return jax.lax.cond(
+        certified,
+        lambda _: candidate,
+        lambda _: reverse_candidate(),
+        operand=None,
+    )
 
 
 def solve_equilibrium(
@@ -1765,7 +1815,10 @@ def make_problem(
     block-tridiagonal factorization for vector residuals.  Advanced choices
     are ``"block_tridiagonal"``, ``"forward_gmres"``, and
     ``"reverse_adjoint"``; the names describe how the exact implicit
-    Jacobian is assembled.
+    Jacobian is assembled.  An uncertified automatic response is recomputed
+    by reverse adjoint.  Forced host methods raise
+    :class:`AdjointSolveError`; transformable JAX methods use the same reverse
+    fallback because Python exceptions cannot be raised reliably under jit.
 
     ``jacobian_batch_size=1`` is the default for QI/QS problems through
     ``max_mode=5``: it minimizes cold compilation complexity and peak memory.
@@ -2019,7 +2072,10 @@ def least_squares(
     budget; columns already at tolerance cost one matvec).  ``"gmres"`` is
     the per-dof-column fallback
     if the block path misbehaves on an exotic configuration; both produce
-    the same Jacobian to solver tolerance.
+    the same Jacobian to solver tolerance.  An uncertified automatic response
+    is recomputed by reverse adjoint.  Forced host methods raise
+    :class:`AdjointSolveError`; transformable JAX methods fall back to reverse
+    so no compiled public path returns an uncertified matrix.
 
     ``adjoint_tol`` and ``adjoint_maxiter`` control the certified linear
     response solves.  All public optimization paths allow 300 restarts by
@@ -2739,10 +2795,13 @@ def _least_squares_implicit(
 
         def column(tp_stack):
             tp = tangent_of(tp_stack)
+            rhs = rhs_of(tp)
             dz, krylov = imp._adjoint_solve(
-                Fz, rhs_of(tp), cfg, rtol=certify_rtol,
+                Fz, rhs, cfg, rtol=certify_rtol,
                 max_restarts=certify_maxiter)
-            return column_of(dz, tp), dz, krylov
+            report = imp._linear_response_report(
+                krylov, rhs, cfg, rtol=certify_rtol)
+            return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
         cols, dz_cols, krylov = chunk_map(
@@ -2911,10 +2970,20 @@ def _least_squares_implicit(
             jax.device_get(rows_jit(_place(x)))
         if imp._LAST_STATUS_ERROR.get(cfg) is not None:
             holder["lin"] = None
-            jac = failure_jacobian(x)
-            holder["last_jac"] = jac
-            holder["last_jac_key"] = x_key
-            return jac
+            return failure_jacobian(x)
+
+        def reverse_candidate() -> np.ndarray:
+            candidate = np.asarray(
+                jax.device_get(reverse_jit(_place(x))), dtype=float
+            )
+            if not np.all(np.isfinite(candidate)):
+                raise AdjointSolveError(
+                    message="certified reverse Jacobian fallback failed",
+                    hint="increase the reverse-adjoint Krylov budget",
+                )
+            holder["lin"] = None
+            return candidate
+
         primary_error = None
         try:
             reverse = (
@@ -2922,17 +2991,22 @@ def _least_squares_implicit(
                 or (jac_solver == "auto" and holder["nres"] == 1)
             )
             if reverse:
-                jac = np.asarray(
-                    jax.device_get(reverse_jit(_place(x))), dtype=float
-                )
-                holder["lin"] = None
+                jac = reverse_candidate()
             else:
                 rows, dz_cols, summary = jac_jit(_place(x))
-                if warm_start == "perturbation":
-                    _stash_linearization(np.asarray(x, dtype=float), dz_cols)
                 jac = np.asarray(jax.device_get(rows), dtype=float)
                 _record_certifier(holder, summary, cfg)
+                jac, used_reverse = _certified_host_jacobian(
+                    jac, summary, jac_solver=jac_solver,
+                    reverse_candidate=reverse_candidate,
+                )
+                if used_reverse:
+                    holder["derivative_fallbacks"] += 1
+                elif warm_start == "perturbation":
+                    _stash_linearization(np.asarray(x, dtype=float), dz_cols)
         except Exception as exc:
+            if isinstance(exc, AdjointSolveError) and jac_solver != "auto":
+                raise
             primary_error = exc
             jac = None
 
@@ -2946,20 +3020,28 @@ def _least_squares_implicit(
                     rows, dz_cols, summary = gmres_jit(_place(x))
                     candidate = np.asarray(jax.device_get(rows), dtype=float)
                     _record_certifier(holder, summary, cfg)
+                    candidate, used_reverse = _certified_host_jacobian(
+                        candidate, summary, jac_solver=jac_solver,
+                        reverse_candidate=reverse_candidate,
+                    )
                     if np.all(np.isfinite(candidate)):
                         holder["derivative_fallbacks"] += 1
-                        if warm_start == "perturbation":
+                        if warm_start == "perturbation" and not used_reverse:
                             _stash_linearization(np.asarray(x, dtype=float), dz_cols)
                         holder["last_jac"] = candidate
                         holder["last_jac_key"] = x_key
                         return candidate
                 except Exception as exc:
                     primary_error = exc
-            # A failed trial already has a finite penalty residual.  Returning
-            # the last certified Jacobian makes SciPy shorten its step; the
-            # counter exposes this compatibility fallback in result diagnostics.
+            # Memoization is valid only at the identical parameter point. A
+            # Jacobian certified at a different x is not a derivative here.
             holder["failed_trials"] += 1
-            if holder.get("last_jac") is not None:
+            if isinstance(primary_error, AdjointSolveError):
+                raise primary_error
+            if (
+                holder.get("last_jac") is not None
+                and holder.get("last_jac_key") == x_key
+            ):
                 return holder["last_jac"]
             if primary_error is not None:
                 raise primary_error
@@ -3152,7 +3234,13 @@ def _least_squares_implicit(
         )
         if reverse:
             return reverse_jit(x)
-        return jac_jit(x)[0]
+        rows, _dz_cols, summary = jac_jit(x)
+        # A transformed JAX function cannot raise the host-side typed error
+        # used by an explicitly forced solver. Preserve exactness by falling
+        # back to the certified reverse graph inside the compiled program.
+        return _certified_jax_jacobian(
+            rows, summary, lambda: reverse_jit(x)
+        )
 
     def residual_value_and_gradient(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         """JAX scalar pair from the same certified residual/Jacobian lane."""
