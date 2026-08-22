@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.6.0)
+## 0.6.0
 
 VMEX 0.6 extends the differentiable equilibrium contract beyond fixed-boundary
 shape objectives:
