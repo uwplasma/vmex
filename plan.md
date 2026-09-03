@@ -2947,6 +2947,20 @@ regimes after #246 merges.
   (`tests/test_strong_force.py:76-96`); `input.solovev` is a VMEC solve, not
   the analytic Solov'ev. Add an analytic Solov'ev equilibrium with known
   J x B = grad p and a spline/Fourier refinement convergence plot.
+  DONE - `tests/test_strong_force_solovev.py` builds the closed-form
+  `psi = b (R^2-R0^2)^2 + g Z^2` Solov'ev (aspect 8, elongation 2.1,
+  p(0) = 5.03e4 Pa, |JxB| = |grad p| ~ 1e5 N/m^3, constant Jacobian so lambda
+  and phipf are elementary) directly in the native basis, with no solve and no
+  committed reference data. The oracle converges cleanly: degree 3 at 2/4/8/16
+  spans gives normalized_l2 1.082e-5 -> 2.302e-6 -> 5.382e-7 -> 1.303e-7,
+  orders 2.234/2.096/2.047 = O(h^(p-1)) as the two derivatives of the map
+  predict; degree 5 at 4 spans is 3095x lower; poloidal truncation decays
+  geometrically at ratios 3355 and 3300 per four modes (tau^4). New finding:
+  the certificate has a round-off floor at normalized_l2 ~ 1e-10
+  (absolute_l2 ~ 1.6e-5 N/m^3, ~1e-10 relative to |JxB|), independent of mpol
+  and slightly worse with more spline coefficients - the nested jacfwd behind
+  curl B. That is 6-7 orders below the ~1e-3 polish numbers, so the oracle is
+  not what limits them.
 - 31.2-R6 Selection bias: README "the figure shows only cases where polishing
   demonstrably wins" and the section 21.2 policy. Section 21.3 already
   forbids paper claims outside the mandatory set; reword the README now and
