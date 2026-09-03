@@ -485,3 +485,26 @@ def test_chart_metadata_excludes_the_build_timestamp():
     assert structure == jax.tree_util.tree_structure(rebuilt)
     leaves, treedef = jax.tree_util.tree_flatten(chart)
     assert treedef.unflatten(leaves).build_seconds == 0.0
+
+
+def test_high_order_surface_reports_asymmetry_it_carries():
+    """A state with asymmetric harmonics is not handed over as symmetric.
+
+    ``surface_field_data_from_wout`` sets ``stellsym=(not lasym) and
+    use_stellsym``; the high-order route took the caller's request verbatim,
+    so an asymmetric polished state reached the exterior solver labelled
+    symmetric, which folds the boundary onto a half period that does not
+    describe it.
+    """
+    from vmex.core.virtual_casing import surface_field_data_from_high_order
+
+    symmetric = _constant_toroidal_field_state()
+    asymmetric = replace(
+        symmetric, R_sin=jnp.asarray(symmetric.R_sin).at[0, 0].set(1.0e-3))
+
+    kwargs = dict(nphi=8, ntheta=10)
+    assert surface_field_data_from_high_order(symmetric, **kwargs).stellsym is True
+    assert surface_field_data_from_high_order(asymmetric, **kwargs).stellsym is False
+    # an explicit request for no symmetry is still honoured
+    assert surface_field_data_from_high_order(
+        symmetric, use_stellsym=False, **kwargs).stellsym is False
