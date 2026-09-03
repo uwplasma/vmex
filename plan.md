@@ -2958,6 +2958,17 @@ regimes after #246 merges.
   `solver.py:1198-1201`). Run `up_down_asymmetric_tokamak` with and without
   the halving against the VMEC2000 threed1 trajectory; fix or document in
   `docs/reference/vmec2000-compatibility.rst`.
+  RESOLVED - no defect. The halving is one of a matched pair with the LASYM
+  `dnorm = 1/(nzeta*ntheta3)` of the 2024 `fixaray.f`; upstream retired both
+  together (STELLOPT v6.5.0-42-g9177f58c and PARVMEC master comment out the
+  `tcon` line and drop the `dnorm` branch), and VMEC++ 0.5.3 agrees. The
+  cited lines are a 2024 snapshot. Measured on `up_down_asymmetric_tokamak`
+  (ns=17, 2000 iterations): VMEX as shipped tracks the upstream binary to
+  4.9e-3 max relative (the screen print precision) and VMEX with both factors
+  tracks the 2024 binary to 5.0e-3; `tcon` halved alone matches neither
+  (2.8e+1 / 5.7e+1). Documented under "LASYM constraint scaling" in
+  `vmec2000-compatibility.rst` and pinned by the symmetric-limit tests in
+  `tests/test_forces_residuals.py`.
 - 31.2-R8 Convention-page errors: `spectral-representation.rst:329-337` puts
   2pi/signgs on the wrong term in B^u/B^v (code: `fields.py:360-372`,
   `bcovar.f:168-169`); `:339-342` claims a 1/NFP zeta conversion that does
