@@ -393,7 +393,7 @@ exported equilibrium of each code - VMEX, VMEC2000, VMEC++, and DESC - on the
 bundled finite-pressure shaped tokamak; VMEX is the certified polished
 result. Stellarator rows join as certified 3-D polishing becomes tractable
 (the compile-side work is in progress); the figure shows only cases where
-polishing demonstrably wins.
+polishing wins on the independent force certificate.
 
 ![Finite-pressure tokamak and finite-beta stellarator force-balance comparisons](docs/_static/figures/readme_strong_force_comparison.webp)
 
@@ -468,7 +468,7 @@ The detailed, phased plan lives in [plan.md](plan.md). In flight now:
   Nemov proxy and is checked against drift-kinetic identities and its own
   `wout` tables, but no test yet asserts its value against a number
   computed by DESC's `GammaC` on a shared equilibrium.
-- Up-down asymmetric (LASYM) equilibria as a first-class certified lane.
+- Up-down asymmetric (LASYM) equilibria as a fully certified lane.
 - Promote the boundary-Schur free-boundary adjoint and coil-only
   free-boundary single-stage optimization after their compile and GPU
   memory costs come down.
