@@ -2947,6 +2947,20 @@ regimes after #246 merges.
   (`tests/test_strong_force.py:76-96`); `input.solovev` is a VMEC solve, not
   the analytic Solov'ev. Add an analytic Solov'ev equilibrium with known
   J x B = grad p and a spline/Fourier refinement convergence plot.
+  DONE - `tests/test_strong_force_solovev.py` builds the closed-form
+  `psi = b (R^2-R0^2)^2 + g Z^2` Solov'ev (aspect 8, elongation 2.1,
+  p(0) = 5.03e4 Pa, |JxB| = |grad p| ~ 1e5 N/m^3, constant Jacobian so lambda
+  and phipf are elementary) directly in the native basis, with no solve and no
+  committed reference data. The oracle converges cleanly: degree 3 at 2/4/8/16
+  spans gives normalized_l2 1.082e-5 -> 2.302e-6 -> 5.382e-7 -> 1.303e-7,
+  orders 2.234/2.096/2.047 = O(h^(p-1)) as the two derivatives of the map
+  predict; degree 5 at 4 spans is 3095x lower; poloidal truncation decays
+  geometrically at ratios 3355 and 3300 per four modes (tau^4). New finding:
+  the certificate has a round-off floor at normalized_l2 ~ 1e-10
+  (absolute_l2 ~ 1.6e-5 N/m^3, ~1e-10 relative to |JxB|), independent of mpol
+  and slightly worse with more spline coefficients - the nested jacfwd behind
+  curl B. That is 6-7 orders below the ~1e-3 polish numbers, so the oracle is
+  not what limits them.
 - 31.2-R6 Selection bias: README "the figure shows only cases where polishing
   demonstrably wins" and the section 21.2 policy. Section 21.3 already
   forbids paper claims outside the mandatory set; reword the README now and
@@ -2958,6 +2972,17 @@ regimes after #246 merges.
   `solver.py:1198-1201`). Run `up_down_asymmetric_tokamak` with and without
   the halving against the VMEC2000 threed1 trajectory; fix or document in
   `docs/reference/vmec2000-compatibility.rst`.
+  RESOLVED - no defect. The halving is one of a matched pair with the LASYM
+  `dnorm = 1/(nzeta*ntheta3)` of the 2024 `fixaray.f`; upstream retired both
+  together (STELLOPT v6.5.0-42-g9177f58c and PARVMEC master comment out the
+  `tcon` line and drop the `dnorm` branch), and VMEC++ 0.5.3 agrees. The
+  cited lines are a 2024 snapshot. Measured on `up_down_asymmetric_tokamak`
+  (ns=17, 2000 iterations): VMEX as shipped tracks the upstream binary to
+  4.9e-3 max relative (the screen print precision) and VMEX with both factors
+  tracks the 2024 binary to 5.0e-3; `tcon` halved alone matches neither
+  (2.8e+1 / 5.7e+1). Documented under "LASYM constraint scaling" in
+  `vmec2000-compatibility.rst` and pinned by the symmetric-limit tests in
+  `tests/test_forces_residuals.py`.
 - 31.2-R8 Convention-page errors: `spectral-representation.rst:329-337` puts
   2pi/signgs on the wrong term in B^u/B^v (code: `fields.py:360-372`,
   `bcovar.f:168-169`); `:339-342` claims a 1/NFP zeta conversion that does
