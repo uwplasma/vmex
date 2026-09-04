@@ -66,7 +66,7 @@ objective_function_terms = [
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))
-monitor = opt.OptimizationMonitor(stream=None)
+monitor = opt.OptimizationMonitor()
 
 # Scalarize the exact least-squares rows before differentiating. Reverse-mode
 # implicit differentiation then needs one adjoint regardless of boundary dof
@@ -97,13 +97,12 @@ def x_from_y(y):
 def value_and_gradient(y):
     value, gradient = problem.value_and_grad(x_from_y(y))
     evaluation_costs.append(float(value))
-    return value, step * gradient
+    return monitor.cache_evaluation(x_from_y(y), value, step * gradient)
 
 
 def monitor_y(intermediate_result):
     x = x_from_y(intermediate_result.x)
-    monitor({"x": x, "fun": intermediate_result.fun,
-             "jac": value_and_gradient(intermediate_result.x)[1]})
+    monitor({"x": x, "fun": intermediate_result.fun})
 
 
 evaluation_costs = []
