@@ -165,5 +165,31 @@
     "published_at": "2025-08-23T12:44:31Z",
     "tag_name": "v0.16",
     "target_commitish": "main"
+  },
+  "second_review_20260905": {
+    "scope": "Read-only literature review of the plan of record (three reports) plus code checks; no production code changed by this revision.",
+    "reports": [
+      "polishing method: DESC/GVEC/SIESTA/SPEC/Thun formulations and solvers, CG-on-normal-equations conditioning, LSMR, same-basis block preconditioning, resolution floor at MPOL=NTOR=10",
+      "differentiable optimization: derivative-evidence standard (Antonsen 2019, Paul 2020, Nies 2022, Jorge 2023, simsopt Taylor tests), free-boundary adjoint structure (Henneberg 2021 Eq. 5.15, DESC proximal SVD), single-stage seeding, objective oracles",
+      "validation standards: evidence categories present in DESC Parts 1-3, Hudson 2025, Thun 2026, AGNI, SPECTRE, VMEC++ validation repo; VMEX gap list ranked by reviewer severity"
+    ],
+    "plan_changes": [
+      "C0 decision gate",
+      "E off the critical path",
+      "F0 derivative table",
+      "F2 oracles and seeding",
+      "C3 LSMR then same-basis preconditioner",
+      "J2 evidence bar",
+      "section 6 PR merge order",
+      "section 7 next ten PRs",
+      "section 8 runbook"
+    ],
+    "corrections": {
+      "tokamak_polish_record": "80 nonlinear iterations, 47308 linear iterations, 463.35 s, least_squares_success false, accepted by certificate (benchmarks/strong_force_cases_m4.json)",
+      "gamma_c_prompt_loss": "Velasco 2021 section 5.4: loss fraction follows the |gamma_c*| variant (eq. 21); Gamma_c does not predict it; Gamma_alpha is the validated predictor (PR #272)",
+      "lasym_tcon": "31.2-R7 closed as already correct by #264",
+      "force_error_normalizations_branch": "four pushed commits recovered; unverified; PR pending"
+    },
+    "no_taylor_test_in_tree": true
   }
 }
