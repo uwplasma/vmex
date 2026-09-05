@@ -183,8 +183,9 @@ class StrongForceContinuationError(VmecNumericalError):
 class StrongForceCertificationError(VmecNumericalError):
     """Collocation stationarity or its independent force certificate failed.
 
-    ``solver_converged`` distinguishes failure of ``J.T r = 0`` from failure
-    of either overintegrated certificate threshold.
+    Driver failures carry the solver flag and force/quadrature thresholds.
+    Derivative eligibility failures carry the recomputed scaled
+    ``stationarity_norm`` and its ``stationarity_tolerance``.
     """
 
     solver_converged: bool = False
@@ -192,6 +193,8 @@ class StrongForceCertificationError(VmecNumericalError):
     tolerance: float = 0.0
     radial_refinement: float = float("inf")
     radial_refinement_tolerance: float = 0.0
+    stationarity_norm: float = float("inf")
+    stationarity_tolerance: float = 0.0
 
 
 @dataclass
