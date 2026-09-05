@@ -12,6 +12,7 @@ elevated end-collar force is the expected boundary layer at the frozen cuts.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -57,6 +58,11 @@ RUN_GRADIENT_CHECK = True
 FINITE_DIFFERENCE_STEP = 2.0e-4
 STRONG_FORCE_GATE = 5.0e-2
 OUTPUT_DIR = Path("results/mirror_fixed_boundary_nonaxisymmetric")
+# The paired 3-D figure the README and docs embed is written straight into the
+# documentation tree as lossless WebP, so re-running this script reproduces the
+# committed bytes; VMEX_EXAMPLES_CI=1 redirects it to OUTPUT_DIR instead.
+CI = os.environ.get("VMEX_EXAMPLES_CI") == "1"
+FIGURE_DIR = OUTPUT_DIR if CI else REPO_ROOT / "docs" / "_static" / "figures"
 
 RADIUS = {"rotating_ellipse": 0.12, "straight_field_line": 0.10}
 AXIAL_FLUX_DERIVATIVE = {"rotating_ellipse": 0.0072, "straight_field_line": 0.005}
@@ -311,12 +317,13 @@ assert float(axisymmetric_evaluated.normalized_divergence_rms) < 1.0e-12
 pair_figure = plot_mirror_3d_pair(
     axisymmetric_mout,
     OUTPUT_DIR / "mout_rotating_ellipse.nc",
-    OUTPUT_DIR,
+    FIGURE_DIR,
     titles=(
         "Axisymmetric mirror (circular sections)",
         "Rotating-ellipse mirror (90-degree twist)",
     ),
     name="mirror_fixed_boundary_3d",
+    image_format="webp",
 )
 print(f"Wrote paired fixed-boundary 3-D figure: {pair_figure}")
 
