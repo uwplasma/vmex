@@ -30,7 +30,7 @@ from scipy.linalg import lstsq
 import vmex
 from benchmarks._provenance import assert_repo_vmex, git_state
 from benchmarks.e1_functional_consistency import shaped_state
-from vmex.core.polish import _physical_equation_basis, apply_high_order_correction
+from vmex.core.polish import _flatten_high, _physical_equation_basis, apply_high_order_correction
 from vmex.core.profiles import MU0
 from vmex.core.radial_basis import _span_quadrature
 from vmex.core.strong_force import _basic_fields, _point_force, certify_strong_force
@@ -56,6 +56,7 @@ def experiment(native, layout, steps, order, angles, damping):
                           for theta in np.arange(angles) * 2 * np.pi / angles])
     weights = jnp.asarray(np.repeat(weights, angles) * (2 * np.pi)**2 / angles)
     zero = jnp.zeros(layout.size)
+    coefficient_map = np.asarray(jax.jacfwd(lambda vector: _flatten_high(layout.unpack(vector)))(zero))
 
     def state(vector):
         return apply_high_order_correction(native, layout.unpack(vector))
@@ -66,8 +67,9 @@ def experiment(native, layout, steps, order, angles, damping):
         return jacobian, force
 
     jacobian, _ = fields(zero)
-    # Freeze the reference volume measure. Scaling is explicit column-L2
-    # equilibration below, not a claim to reproduce production Ruiz scaling.
+    # Freeze the reference volume measure. Equilibration is not production
+    # Ruiz scaling. Damping acts in physical spline coefficients: the local
+    # SVD layout basis can rotate between BLAS versions without changing it.
     volume_weights = weights * jnp.abs(jacobian)
     measure = jnp.sqrt(volume_weights / jnp.sum(volume_weights))
     residual = jax.jit(lambda vector: (measure[:, None] * fields(vector)[1]).reshape(-1))
@@ -102,12 +104,15 @@ def experiment(native, layout, steps, order, angles, damping):
         history = []
         for iteration in range(steps):
             r = np.asarray(residual(jnp.asarray(vector)))
-            J = (J0 if iteration == 0 else np.asarray(jac(jnp.asarray(vector)))) @ basis
+            full_J = J0 if iteration == 0 else np.asarray(jac(jnp.asarray(vector)))
+            J = full_J @ basis
             column_norm = np.linalg.norm(J, axis=0)
             scale = 1 / np.maximum(column_norm, max(float(column_norm.max()) * 1e-12, 1e-30))
             scaled = J * scale
-            augmented = np.vstack((scaled, np.sqrt(damping) * np.eye(basis.shape[1])))
-            rhs = np.concatenate((-r, np.zeros(basis.shape[1])))
+            physical_norm = np.linalg.norm(full_J @ coefficient_map.T, axis=0)
+            penalty = physical_norm[:, None] * (coefficient_map @ basis)
+            augmented = np.vstack((scaled, np.sqrt(damping) * penalty * scale))
+            rhs = np.concatenate((-r, np.zeros(coefficient_map.shape[0])))
             started = time.perf_counter()
             y, _, rank, _ = lstsq(augmented, rhs, lapack_driver="gelsd")
             qr, _, _, _ = lstsq(augmented, rhs, lapack_driver="gelsy")
@@ -145,7 +150,8 @@ def experiment(native, layout, steps, order, angles, damping):
         results["charts"][name] = {"coordinates": basis.shape[1], "history": history,
                                   "final_certificate": final,
                                   "absolute_l2_improvement": initial["absolute_l2"] / final["absolute_l2"],
-                                  "final_coordinates": vector.tolist()}
+                                  "final_coordinates": vector.tolist(),
+                                  "final_physical_correction": (coefficient_map @ vector).tolist()}
     results["verification_passed"] = (
         results["jacobian_fd_relative"] < 1e-6
         and results["full_energy_hessian"]["symmetry_relative"] < 1e-10
