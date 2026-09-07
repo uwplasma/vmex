@@ -190,7 +190,9 @@ attempts are saved as such.
   Jacobian memory. Measure assembly/factorization costs rather than extrapolating. Pass: the independent
   certificate improves by an order of magnitude on the QA target. Fail: the
   obstruction is representation, reachability or closure; no Krylov work
-  follows.
+  follows. **Result 2026-09-07: the shaped tokamak passes, QA does not.**
+  Converge the toroidal sampling before reading any QA number: six planes
+  under-resolves this nfp=2 deck and inverts the chart comparison.
 - **E3, variational Newton (one to two weeks, only if E1 passes).** Newton on
   `∂W/∂c = 0` with matrix-free Hessian products, MINRES or CG inner solves at
   Eisenstat–Walker forcing, the banded per-(m, n) preconditioner assembled
@@ -205,7 +207,9 @@ attempts are saved as such.
 
 **Decision tree.** If even the trusted dense step cannot improve the
 independent force, investigate representation, closure or admissibility and
-stop tuning Krylov iterations. If the dense step works but no iterative solve
+stop tuning Krylov iterations. **This branch is now taken for 3-D**: E2's QA
+run reaches 2.31x against a 10x gate, so representation, closure and
+admissibility come before any 3-D solver or chart replacement work. If the dense step works but no iterative solve
 does, the 3-D solver is dense LM with an explicit memory-bounded resolution
 cap. If E3 passes, it is the scalable mode and E2 the reference. If both work
 but cost is excessive, profile the demonstrated bottleneck. If the bounded QA
@@ -649,3 +653,33 @@ trajectories. Raw results and both attempts: sibling `vmex-e2-evidence`. The off
 versus maximum 3.7e8) does not alone reject Newton. SciPy supplies the independent diagnostic; SOLVAX's production GN remains
 unchanged. Next: affordable finite-beta QA reference and bounded convergence, then chart/solver integration. E2 is not passed
 for QA; E3, a1 routing, P0.4, fixed-current closure and release remain gated. Integration CI is pending.
+
+**2026-09-07, E2 on finite-beta 3-D QA.** Branch `research/e2-qa-reference`,
+base #288; clean measurement commit `e9412c93` (`measurement_dirty` false).
+`benchmarks/e2_dense_reference.py` gains a `qa_state` seed from
+`input.nfp2_QA_smooth_beta` and field-period sampling; one plane reproduces the
+axisymmetric grid and weights exactly, and the shaped case re-ran bit-identical
+(`188.549`/`335.256`, FD `1.575e-9`), so #288's numbers stand. Seed resolution
+is a flag because the representation is what E2 varies. CPU/JAX 0.9.2/float64,
+`--seed-ns 13 --order 8 --angles 32 --steps 5`; every run passed the script's
+own FD, Hessian-symmetry, QR/SVD and geometry gates.
+Toroidal convergence at 2 spans, full R/Z certificate gain: 1.373x (6 planes),
+2.291x (8), 2.302x (10), 2.306x (12), 2.306x (16). **Six planes under-resolves
+this nfp=2 deck**; readings below use 12. Radial refinement at 12 planes:
+2 spans (152 coordinates, initial 167752 N/m^3) 2.306x full versus 1.918x
+structured; 3 spans (187, 135583) 1.820x versus 1.588x; 4 spans (222, 128655)
+1.694x versus 1.515x. Structured columns are 112/137/162, so the chart drops
+26-28% of the constrained space, matching E1's rank finding in 3-D.
+Readings: retaining independent R/Z helps at every refinement, by 12-20%, so
+E1's reachability result holds in 3-D; refining radially lowers the initial
+force error but also lowers what a bounded step recovers; the minimum signed
+Jacobian stays 0.0094 at every seed, against 5.84 on the tokamak. **E2 is not
+passed on QA**: the best gain anywhere is 2.306x against the order-of-magnitude
+gate, so no chart replacement, E3 promotion or Krylov work is justified by this
+evidence. Next: representation, closure and admissibility, starting with the
+0.0094 seed geometry, not a solver. An earlier 6-plane sweep suggested the
+chart advantage vanished under radial refinement; that was an under-resolved
+artifact and is superseded by the 12-plane numbers above. Process RSS reached
+13.0 GiB at 4 spans / 8 planes while reference matrices stayed under 18 MiB, so
+the 2 GiB matrix budget does not bound the job. Raw JSON and logs: sibling
+`vmex-e2qa-evidence`.
