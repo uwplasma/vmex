@@ -185,9 +185,9 @@ attempts are saved as such.
   reference `H`, retaining independent R/Z, on the frozen tokamak and one affordable finite-beta QA
   linearization; compare spectrum and rank, augmented QR/SVD reference steps
   with the actual scaling, and the physical step, cost reduction and linear
-  residual, not only coefficient norms. This is DESC's solver, not only a
-  diagnostic: at ≤ 3,000 unknowns the Jacobian is under 1 GiB and the
-  factorization takes seconds on the office box. Pass: the independent
+  residual, not only coefficient norms. Budget residual rows × coordinates ×
+  dtype size plus factorization workspace; 3,000 unknowns alone do not bound
+  Jacobian memory. Measure assembly/factorization costs rather than extrapolating. Pass: the independent
   certificate improves by an order of magnitude on the QA target. Fail: the
   obstruction is representation, reachability or closure; no Krylov work
   follows.
@@ -198,8 +198,10 @@ attempts are saved as such.
   acceptance with geometry rejection, and the strong certificate as judge.
   Pass: the certified tokamak value at fewer than 50 Hessian products per
   step and fewer than 20 steps, and h/p convergence on Solov'ev at the
-  degree's order. Kill: an indefinite Hessian on a case VMEC converges, or
-  no 5× reduction in operator applications against E2's dense step.
+  degree's order. Diagnose negative curvature at a certified stable equilibrium;
+  an indefinite off-root Hessian alone is not a kill rule (see the
+  [trust-region reference](https://docs.scipy.org/doc/scipy/tutorial/optimize.html)).
+  Kill on failed force/geometry convergence or no 5× operator reduction against E2.
 
 **Decision tree.** If even the trusted dense step cannot improve the
 independent force, investigate representation, closure or admissibility and
@@ -614,33 +616,36 @@ reference 138.346, residual scale 6.83505). CI's failure remains unreproduced. T
 (JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
 `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
 
-**2026-09-06, #286 / P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`, initial base #277; integration
-`2ae2a716`, implementation `0bfab61d`. GN/linear/homotopy split shares fixtures; real nonlinear/adjoint cases run explicitly in
-Nightly; option routing uses mocks plus one real PR solve/export. All 1,962 original cases and 64 polish bodies retained; 1,974
-collected with 12 new cases. Twelve manifest guards passed/10.81 s; final preflight 77/17.94 s plus Sphinx/Ruff/mypy. Local PR
-selection 253/375.30 s (22 deselected); full homotopy 12/385.24 s; full options 41/102.23 s; full adjoints 15/932.33 s, no
-skips. NCSX requires ncsx-mgrid, not reference-nc: initial file assertion stopped correctly, corrected fetch then passed, with
-manifest-linked guard. Office full linear: 96 passes on Python 3.12/JAX 0.11.1 (406.44 s) and 0.9.2 (577.27 s). Shape-rejection
-test then returned to GN for fixture reuse: final PR linear 93 passes (2 full deselections), local 7.21 s, office 16.24/18.98 s.
-Interpreted GN stopped incomplete after 115 passes/1413.93 s; scoped-JIT GN passed 124/579.02 s on office `~/vmex-ci-final` at
-`32f01c0c`, local 124/349.79 s. Initial options run also interrupted for JIT repair. Mirror consolidated: 57/331.74 s; revised
-misc 74/273.04 s, 11 opt-in live-VMEC2000 skips. CI run 34080867732 passed on `d58223b4`: polish 5.37 min versus parent 43.4,
-misc 24.58 versus 27.7, c2 22.60; all jobs <25 min. Both JAX gates passed; coverage skipped for test/docs-only delta. No RSS or
-solver-performance ranking claimed. Raw logs: `vmex-phase1-ci-evidence`. #286 retargeted to main, integrated #277 at `98049a1a`,
-resolving only logbook conflicts. Integration CI and Nightly 34132378608 pending; campaign-class a1 routing remains open.
+**2026-09-06, #286 / CI tiering.** `fix/phase1-ci-tiers` in `vmex-ci-tiers`, initially base #277; integration `2ae2a716`, split
+`0bfab61d`, scoped-JIT GN `32f01c0c`. All 1,962 original cases/64 polish bodies retained; 1,974 collected. GN/linear/homotopy
+share fixtures, nonlinear cases explicitly scheduled; option routing mocked with one real PR solve/export. Final static/docs: 77
+guards/17.94 s. Local full homotopy 12/385.24 s, options 41/102.23 s, adjoints 15/932.33 s without skips. NCSX asset assertion
+found the wrong bundle; corrected to ncsx-mgrid with a manifest-linked guard. Office linear/MHD: 96 passes on both JAX versions
+(406.44/577.27 s); one test returned to GN for fixture reuse. Final PR linear: 93 passes/7.21 s locally, 16.24/18.98 s office.
+Interpreted GN stopped at 115/1413.93 s; compiled GN 124/579.02 s office, 349.79 s local. Raw results/stopped attempts:
+`vmex-phase1-ci-evidence`. CI 34080867732 on `d58223b4` passed: polish 5.37 min versus 43.4, misc 24.58 versus 27.7, c2 22.60;
+every PR job <25 min, both JAX gates green. No solver speedup claimed. Retargeted to main and merged #277 `98049a1a`, resolving
+only logbook conflicts; integration CI/Nightly 34132378608 remain pending.
 
-**2026-09-07, E1 and cleanup.** `research/e1-functional-consistency`, base #286 `6a4d560f`;
-`benchmarks/e1_functional_consistency.py` at `b17352c1`: independent complete virtual work, fixed boundary/profiles and GAMMA=0,
-deliberately off-root. Clean CPU/JAX 0.9.2: order 4/8/12 work errors 4.006e-3 → 7.931e-14 (Solovev, 30 coordinates/32 angles);
-8.875e-3 → 8.210e-13 (shaped, 56/64). Omitting lambda leaves 3.085%/13.295%; AD duality <7e-15. Current-driven shaped seed uses
-frozen iota for this audit, NOT fixed-current variations. Office JAX 0.11.1, 128 angles: 8.354e-13. Actual layout/structured
-chart normal ranks: 36/20; extrema response ratios <9e-15 on both versions. E1 energy identity supported; structured
-reachability fails. Clean shaped chart run: 43.14 s/1117.7 MiB local; 43.55 s/1043.7 MiB office. Repeated local numerical output
-is byte-identical excluding wall time/RSS. Source, JSON and logs are in sibling `vmex-e1-evidence`; reproduction:
-CPU/float64/cache disabled, script `--case shaped-frozen-iota --orders 4 8 12 --angles 64 --output /tmp/e1.json`. Solovev uses
-`--case solovev --angles 32`. Deleted 32 remote and 73 local branches after ancestry or exact merged-PR-head checks; remote SHA
-leases protected concurrent changes. Open dependencies/worktrees retained; 16 remote and 33 local branches remain before
-publishing E1. Deletion SHAs are saved with the raw evidence. Nightly 34132378608 exposed #280's stale example regex after a
-successful certified polish; repair reads all three current metrics and requires finite decreases; real example passed locally
-in 149.72 s. Next: E2 full R/Z reference, then a reachability-preserving chart; no E3 promotion. Finish integration checks and
-a1 routing; P0.4 and fixed-current closure remain open. No release.
+**2026-09-07, #287 / E1 and cleanup.** Branch `research/e1-functional-consistency`, base #286 `6a4d560f`; measured script
+`b17352c1`. Complete prescribed-profile/GAMMA=0 energy work passes off-root on Solovev (30 coordinates, 7.931e-14 discrepancy)
+and shaped tokamak (56, 8.210e-13); omitting lambda leaves 3.085%/13.295%. Office JAX 0.11.1 with 128 angles gives 8.354e-13.
+Structured/layout normal ranks 20/36; Z-extremum response ratios <9e-15. Raw results, commands and deletion SHAs: sibling
+`vmex-e1-evidence`. Clean shaped chart: local 43.14 s/1117.7 MiB, office 43.55 s/1043.7 MiB; repeated numerical output identical
+excluding time/RSS. Deleted 32 remote/73 local merged branches using ancestry or exact merged-PR heads; open
+dependencies/worktrees preserved. Nightly 34132378608 exposed #280's stale example regex after a successful polish; #287 repairs
+all three metric checks (real example passed/149.72 s). Its strict preflight passed 77 guards/19.00 s. E1 identifies a physical
+reachability restriction; it does not promote E3.
+
+**2026-09-07, E2 shaped reference.** `research/e2-full-rz-reference`, base #287 `4ba23d30`; clean measurement `c725c407`.
+CPU/float64/cache off: `python benchmarks/e2_dense_reference.py --order 10 --angles 48 --output /tmp/e2.json` (3 steps). Full
+R/Z/lambda versus structured coordinates, same ns=9, degree=3/two-span seed, frozen iota/pressure; not the fixed-current or
+production-resolution solve. QR/GELSY and SVD/GELSD agree; full J rank 56, FD/JVP error <2e-9, Hessian asymmetry <4e-16.
+Independent force RMS: 2194.742 → 188.549/335.259 N/m³ (full/structured), peak 863.77/905.48; positive sampled Jacobians and
+certificate radial discrepancy <6e-13. Order 6/24-angle RMS: 188.558/336.526. Local JAX 0.9.2: 52.27 s/1105.1 MiB; office
+0.11.1: 115.58 s/2127.8 MiB. Physical corrections agree to 2.3e-11 relative. Reference J/H: 1.25 MiB, separate from process RSS.
+The earlier `7048b71b` metric depended on arbitrary SVD coordinates; physical-coefficient damping removed its platform-dependent
+trajectories. Raw results and both attempts: sibling `vmex-e2-evidence`. The off-root Hessian's small negative curvature (~-276
+versus maximum 3.7e8) does not alone reject Newton. SciPy supplies the independent diagnostic; SOLVAX's production GN remains
+unchanged. Next: affordable finite-beta QA reference and bounded convergence, then chart/solver integration. E2 is not passed
+for QA; E3, a1 routing, P0.4, fixed-current closure and release remain gated. Integration CI is pending.
