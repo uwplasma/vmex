@@ -144,7 +144,8 @@ dropped from 44.7 s and 2,965 MiB peak RSS for the residual Jacobian to 32.2 s
 and 2,574 MiB for the scalar adjoint. Warm value/gradient medians were 16.6 s
 and 17.4 s, respectively, so the scalar path did not improve warm throughput
 in that measurement. The raw records are
-``benchmarks/qa_optimization_startup_{least_squares,scalar}_m4.json``; neither
+``benchmarks/qa_optimization_startup_least_squares_m4.json`` and
+``benchmarks/qa_optimization_startup_scalar_m4.json``; neither
 record is a GPU or persistent-cache claim.
 
 The canonical ``QA_optimization.py`` remains the residual/Jacobian tutorial.
