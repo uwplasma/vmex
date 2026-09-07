@@ -1377,4 +1377,3 @@ def test_declined_auto_does_not_warn_under_the_warn_fail_policy(tmp_path):
         warnings.simplefilter("error", RuntimeWarning)
         result = solve_file(path, write_wout=False)
     assert result.polish_report.termination_reason == "auto-declined-cost"
-

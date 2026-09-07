@@ -173,14 +173,14 @@ does not interrupt. Fixed boundary, stellarator symmetry, prescribed iota,
 GAMMA = 0 until the closure audit in P1 admits more. Failed and capped
 attempts are saved as such.
 
-- **E1, functional consistency (one day).** For random chart directions v,
-  compare `⟨∂W/∂c, v⟩` from reverse-mode AD with `−∫ F_cart · (∂x/∂c v) √g`
-  from the certificate's own Cartesian force at the same quadrature; check
-  the strong residual's Jacobian against the same object by JVP/VJP duality;
-  run the chart rank and gauge-quotient audit on the same tiny reference.
-  Pass: 1e-10 relative agreement on Solov'ev and the shaped tokamak. Fail:
-  the energy route stops and the reason (closure term, boundary term, gauge)
-  is recorded.
+- **E1, functional consistency (one day).** Compare AD `dW[c]v` with complete
+  virtual work, including lambda (or displacement at fixed field-line labels),
+  closure and boundary terms. Fixed-angle `∂x/∂c v` alone misses lambda work;
+  see the [VMEC variation](https://princetonuniversity.github.io/STELLOPT/VMEC.html#theory).
+  On Solov'ev and the shaped tokamak, separate quadrature-refinement error
+  from the 1e-10 AD/JVP/VJP consistency bar; audit rank and the gauge quotient.
+  An unexplained, quadrature-converged work mismatch stops the energy route;
+  diagnose missing terms or quadrature first, before interpreting solver failure.
 - **E2, dense reference step (one week).** Assemble `J` and the constrained
   reference `H` on the frozen tokamak and one affordable finite-beta QA
   linearization; compare spectrum and rank, augmented QR/SVD reference steps
@@ -263,7 +263,7 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    numbers in `CHANGELOG.md`, and add a cited-path existence test for
    `benchmarks/` references. Add README ≤ 300 and CHANGELOG ≤ 200 line caps to
    the same gate.
-2. **JAX policy and #277 — assertion repair tested on both versions; CI/matrix pending.** Test the floor (0.9.2, the machines we own) and
+2. **JAX policy and #277 — assertion repair tested; version matrix under validation.** Test the floor (0.9.2, the machines we own) and
    the head (0.11.x, CI); tolerances backed by observed accuracy; no
    cross-version bit claims. Bisect #277's assertion on the office box under
    `~/vmex_sweep/env-0.8.0` (JAX 0.11.1) with `--xla_cpu_use_xnnpack=false`
@@ -272,7 +272,7 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    stationarity at the derivative gate's 1e-8 bar and lets the derivative call
    be the check; SOLVAX's 1e-10 flag is a solver metric. Keep the tight
    real-MHD fixture.
-3. **CI tiering to a 25-minute PR ceiling — JIT isolation implemented; tiering pending.** Every test that runs a polish or
+3. **CI tiering — implementation under validation; hosted ceiling unproved.** Every test that runs a polish or
    a free-boundary implicit adjoint moves to `full`; `test_polish_preconditioner.py`
    splits into Gauss-Newton (PR), homotopy (nightly) and linear (PR);
    `test_run_options.py` exercises directive parsing against a mocked driver
@@ -611,10 +611,13 @@ figure manifest and merged; #283's plan rebased onto it and rewritten as this
 document; #274 closed. Local lane runs on clean main (fast plus seven physics
 lanes, all green) recorded in §2; the parity-lane log was lost with the
 session's task directory and those lanes are rerun in Phase 1's tiering PR.
-The office workstation was unreachable at the end of the day, so the JAX
-0.11.1 reproduction of #277's assertion (`~/vmex277/run277b.log`) is the
-first thing Phase 1 reads. No production code was changed.
+Office was unreachable; the recovered #277 evidence is recorded below.
 
+**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements
+the documentation gates: 73 guards and strict Sphinx passed. #285 (`40c1792b`,
+base #284) restores JIT state in four modules: 73 tests passed in 396.88 s;
+the regression fails on the parent. #284 CI passed; reviews/#285 CI await; retarget #285
+before deleting #284's branch. The tiering entry below continues this work.
 
 **2026-09-06, Phase 1 / P0.1–P0.3.** All-state PR inventory identifies #283
 as this plan's authority. #284 (`417fb4fc`, base main `2a0d4356`) implements
@@ -625,25 +628,31 @@ new subprocess regression fails on the unchanged parent. Both passed CI and merg
 merge; branch bases were retained. Tiering, module
 splitting, parsing mocks and the 25-minute lane gate remain unfinished.
 
-**2026-09-06, #277 / P0.2.** Merged main's authoritative plan into the
-stationarity branch (`068b2cbc`, numerical polish source unchanged). The old
-office log contains only missing pytest, not a failed solve. An isolated
-Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20 environment on office reproduced
-neither the original assertion failure nor a tolerance problem at `db6092b7`:
-the tight MHD test passed unmodified in 333.88 s; with both XLA flags above
-disabled it passed in 313.34 s, reporting 17 iterations, scaled stationarity
-2.598e-9, initial reference 138.346 and residual scale 6.83505. Both physical
-acceptance and internal solver success were true. This is not a flag bisect
-or a diagnosis of CI run 34005068178. The repaired test checks the public
-finite stationarity norm against its reported tolerance and retains tangent,
-adjoint, custom-VJP, Boozer and Taylor checks; solver/derivative tolerances
-and the tight fixture are unchanged. Local JAX 0.9.2: 27 selected tests passed
-in 228.87 s. Command: cache disabled, CPU, pytest on the polish module with
-`-k 'collocation_polish_primal_and_derivatives or polish_stationarity or physics_accepted_polish_can_fail_derivative_stationarity'`.
-Office JAX 0.11.1: the same 27 tests passed in 365.96 s on `db6092b7`
-plus the identical test patch. Static preflight, strict Sphinx and 59 guards
-passed (guards: 12.12 s); final-head CI and required review remain pending.
-Raw logs: `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`
-outside git. RSS was not measured; these test times are not benchmark claims.
-Next: merge #277 after CI/review, then finish CI tiering/JAX matrix;
-P1 and E1 have not started, and the release hold remains.
+**2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`;
+assertion repair pushed at `6371a36b`, without changing tolerances. The old
+office log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX
+0.11.1 / SOLVAX 0.20, the original tight MHD test passed in 333.88 s; with
+both XLA flags disabled it passed in 313.34 s (17 iterations, stationarity
+2.598e-9, reference 138.346, residual scale 6.83505). CI's failure remains
+unreproduced. The repaired selection passed 27 cases locally (JAX 0.9.2,
+228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
+`vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
+
+**2026-09-06, P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch
+`fix/phase1-ci-tiers`, integrates #277/#284/#285 at `2ae2a716`; split and CI
+implementation at `0bfab61d`. GN retains its module; linear and homotopy
+checks move to two modules, sharing the existing fixtures. Real polish and
+free-boundary adjoint integrations are full-marked and scheduled explicitly;
+option parsing/precedence and failure routing use mocks with one real PR
+solve/export. Assertions and physics tolerances are retained. All 1,962
+original cases survive the move; collection is 1,973 with 11 new cases.
+Eleven manifest guards passed in 9.89 s; PR/nightly matrices pin Python 3.12
+and JAX 0.9.2/0.11.1;
+PR physics/parity timeouts are 25 minutes. A timeout edit is not runtime
+proof. Campaign-class a1 routing and measured hosted limits remain open.
+Local PR selection: 253 passed, 22 full cases deselected, 375.30 s;
+76 guards passed in 18.00 s plus strict Sphinx/Ruff/mypy; all 64 original
+polish bodies are unchanged. Full homotopy: 12 passed in 385.24 s locally;
+office linear/MHD: 96 passed in 406.44 s on JAX 0.11.1. Logs are in
+`vmex-phase1-ci-evidence`; office 0.9.2 and local full options runs continue. An initial local options run was interrupted to enable its real solve
+with the restoring JIT fixture; it is not a passing observation. No peak RSS or performance ranking is claimed. Next: publish after remaining checks, then hosted CI/review and parent merges. P1/E1 and the release remain on hold.

@@ -393,7 +393,7 @@ def test_solve_file_directives_reach_driver_once(tmp_path, monkeypatch, mode, ov
     ("WARN", "auto-declined-cost", False),
     ("FALLBACK", "nonlinear-failed", False),
 ])
-def test_solve_file_failed_polish_never_resolves(tmp_path, monkeypatch, policy, reason, warns):
+def test_solve_file_failed_polish_does_not_repeat_the_solve(tmp_path, monkeypatch, policy, reason, warns):
     import warnings
     from types import SimpleNamespace
     from unittest.mock import Mock
