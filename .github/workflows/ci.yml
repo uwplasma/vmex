@@ -150,10 +150,7 @@ jobs:
             selector: pr-mirror-field
             parallel: ""
           - lane: mirror-spline
-            selector: pr-physics-mirror-spline
-            parallel: ""
-          - lane: mirror-output
-            selector: pr-physics-mirror-output
+            selector: pr-mirror-spline
             parallel: ""
     steps:
       - uses: actions/checkout@v7.0.1
@@ -228,7 +225,7 @@ jobs:
             selector: pr-parity-c2
             parallel: "-n 4"
           - lane: misc
-            selector: pr-examples pr-external pr-full-only pr-gradient pr-mirror-spline
+            selector: pr-examples pr-external pr-full-only pr-gradient
             parallel: "-n 4"
     steps:
       - uses: actions/checkout@v7.0.1

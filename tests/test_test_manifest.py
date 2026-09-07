@@ -222,3 +222,13 @@ def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> 
         assert node in nodes
     assert not any("::test_polish_linear_true_certificate" in node for node in nodes)
     assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
+
+
+def test_mirror_primary_suite_runs_once_in_physics() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    physics, parity = ci.split("  physics:", 1)[1].split("  parity:", 1)
+    assert "selector: pr-mirror-spline" in physics
+    assert "pr-mirror-spline" not in parity
+    # The complete primary selector includes the former separate output job.
+    assert set(test_manifest.select("pr-physics-mirror-output")) <= set(
+        test_manifest.select("pr-mirror-spline"))

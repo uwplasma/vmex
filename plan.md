@@ -583,41 +583,35 @@ python tools/preflight.py --static
 
 ## 12. Execution logbook
 
-Format for each entry: date, PR (base and head), owning gate, command and
-environment, result with units, time and memory, limitation or failure, next
-action. Abandoned experiments stay as evidence with their stop reason.
-Update the gate's status in place; do not append work packages.
+Format for each entry: date, PR (base and head), owning gate, command and environment, result with
+units, time and memory, limitation or failure, next action. Abandoned experiments stay as evidence
+with their stop reason. Update the gate's status in place; do not append work packages.
 
-**2026-09-05.** Twenty-one PRs merged in plan order (#267–#270, #264, #263,
-#262, #260, #258, #259, #254, #253, #256, #257, #261, #197, #280, #272, #278,
-#273, #281, #265); #271 was auto-closed by its base-branch deletion and
-reopened as #281. Facts learned: the compilation-cache entry scaling
-(`LRUCache.put` rescans the directory: 0.028 ms per entry) is bounded by #254;
-the W7-X flat certificate (34.23 GiB) is replaced by the batched one (3.24
-GiB certificate, 16.6 GiB chart); the LASYM `tcon` audit closed in VMEX's
-favour; the certificate diagnostics `angular_spectral_tail` and
-`nestedness_margin` were redefined by #258; the baseline guard is pinned by
-norms with a 1e-10 relative and 1e-12 absolute floor (#280).
+**2026-09-05.** Twenty-one PRs merged in plan order (#267–#270, #264, #263, #262, #260, #258, #259,
+#254, #253, #256, #257, #261, #197, #280, #272, #278, #273, #281, #265); #271 was auto-closed by its
+base-branch deletion and reopened as #281. Facts learned: the compilation-cache entry scaling
+(`LRUCache.put` rescans the directory: 0.028 ms per entry) is bounded by #254; the W7-X flat
+certificate (34.23 GiB) is replaced by the batched one (3.24 GiB certificate, 16.6 GiB chart); the
+LASYM `tcon` audit closed in VMEX's favour; the certificate diagnostics `angular_spectral_tail` and
+`nestedness_margin` were redefined by #258; the baseline guard is pinned by norms with a 1e-10
+relative and 1e-12 absolute floor (#280).
 
-**2026-09-06, #282 probes** (Apple M3 Max, JAX 0.9.2, cache disabled): the
-same-deck VMEC++ 0.7.3 parity, native DESC solve, frozen 156×17 operator and
-capped GVEC run of §2; raw logs in `vmex-review-evidence-20260906` outside
-git, compact results in `focused_review_20260906`. The README went from 573
-to 220 lines and the validation page separated native force accuracy from
-WOUT reconstruction. #277's CI failure (run 34005068178) preserved.
+**2026-09-06, #282 probes** (Apple M3 Max, JAX 0.9.2, cache disabled): the same-deck VMEC++ 0.7.3
+parity, native DESC solve, frozen 156×17 operator and capped GVEC run of §2; raw logs in
+`vmex-review-evidence-20260906` outside git, compact results in `focused_review_20260906`. The
+README went from 573 to 220 lines and the validation page separated native force accuracy from WOUT
+reconstruction. #277's CI failure (run 34005068178) preserved.
 
-**2026-09-06, consolidation.** #266 and #276 merged; #282 rebased over #276's
-figure manifest and merged; #283's plan rebased onto it and rewritten as this
-document; #274 closed. Local lane runs on clean main (fast plus seven physics
-lanes, all green) recorded in §2; the parity-lane log was lost with the
-session's task directory and those lanes are rerun in Phase 1's tiering PR.
-Office was unreachable; the recovered #277 evidence is recorded below.
+**2026-09-06, consolidation.** #266 and #276 merged; #282 rebased over #276's figure manifest and
+merged; #283's plan rebased onto it and rewritten as this document; #274 closed. Local lane runs on
+clean main (fast plus seven physics lanes, all green) recorded in §2; the parity-lane log was lost
+with the session's task directory and those lanes are rerun in Phase 1's tiering PR. Office was
+unreachable; the recovered #277 evidence is recorded below.
 
-**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements
-the documentation gates: 73 guards and strict Sphinx passed. #285 (`40c1792b`,
-base #284) restores JIT state in four modules: 73 tests passed in 396.88 s;
-the regression fails on the parent. #284 CI passed; reviews/#285 CI await; retarget #285
-before deleting #284's branch. The tiering entry below continues this work.
+**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73
+guards and strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four modules: 73
+tests passed in 396.88 s; the regression fails on the parent. #284 CI passed; reviews/#285 CI await;
+retarget #285 before deleting #284's branch. The tiering entry below continues this work.
 
 **2026-09-06, Phase 1 / P0.1–P0.3.** All-state PR inventory identifies #283
 as this plan's authority. #284 (`417fb4fc`, base main `2a0d4356`) implements
@@ -636,23 +630,32 @@ both XLA flags disabled it passed in 313.34 s (17 iterations, stationarity
 2.598e-9, reference 138.346, residual scale 6.83505). CI's failure remains
 unreproduced. The repaired selection passed 27 cases locally (JAX 0.9.2,
 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
+
+**2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at
+`6371a36b`, without changing tolerances. The old office log only lacked pytest. On clean `db6092b7`,
+Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original tight MHD test passed in 333.88 s; with both
+XLA flags disabled it passed in 313.34 s (17 iterations, stationarity 2.598e-9, reference 138.346,
+residual scale 6.83505). CI's failure remains unreproduced. The repaired selection passed 27 cases
+locally (JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
 `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
 
-**2026-09-06, P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch
-`fix/phase1-ci-tiers`, integrates #277/#284/#285 at `2ae2a716`; split and CI
-implementation at `0bfab61d`. GN retains its module; linear and homotopy
-checks move to two modules, sharing the existing fixtures. Real polish and
-free-boundary adjoint integrations are full-marked and scheduled explicitly;
-option parsing/precedence and failure routing use mocks with one real PR
-solve/export. Assertions and physics tolerances are retained. All 1,962
-original cases survive the move; collection is 1,973 with 11 new cases.
-Eleven manifest guards passed in 9.89 s; PR/nightly matrices pin Python 3.12
-and JAX 0.9.2/0.11.1;
-PR physics/parity timeouts are 25 minutes. A timeout edit is not runtime
-proof. Campaign-class a1 routing and measured hosted limits remain open.
-Local PR selection: 253 passed, 22 full cases deselected, 375.30 s;
-76 guards passed in 18.00 s plus strict Sphinx/Ruff/mypy; all 64 original
-polish bodies are unchanged. Full homotopy: 12 passed in 385.24 s locally;
-office linear/MHD: 96 passed in 406.44 s on JAX 0.11.1. Logs are in
-`vmex-phase1-ci-evidence`; office 0.9.2 and local full options runs continue. An initial local options run was interrupted to enable its real solve
-with the restoring JIT fixture; it is not a passing observation. No peak RSS or performance ranking is claimed. Next: publish after remaining checks, then hosted CI/review and parent merges. P1/E1 and the release remain on hold.
+**2026-09-06, P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`,
+integrates #277/#284/#285 at `2ae2a716`; split and CI implementation at `0bfab61d`. GN retains its
+module; linear and homotopy checks move to two modules, sharing the existing fixtures. Real polish
+and free-boundary adjoint integrations are full-marked and scheduled explicitly; option
+parsing/precedence and failure routing use mocks with one real PR solve/export. Assertions and
+physics tolerances are retained. All 1,962 original cases survive; collection is 1,974 with 12 new
+cases. Twelve manifest guards passed in 10.81 s; PR/nightly matrices pin Python 3.12/JAX
+0.9.2/0.11.1; PR physics/parity timeouts are 25 minutes. A timeout edit is not runtime proof.
+Campaign-class a1 routing and measured hosted limits remain open. Local PR selection: 253 passed, 22
+full cases deselected, 375.30 s; 76 guards passed in 18.00 s plus strict Sphinx/Ruff/mypy; all 64
+original polish bodies are unchanged. Full homotopy: 12 passed/385.24 s; full options: 41
+passed/102.23 s. Office linear/MHD: 96 passed on each version (0.11.1: 406.44 s; 0.9.2: 577.27 s),
+same Python 3.12. Consolidated mirror: 57 passed in 331.74 s. Parent #284 misc took 27.7 min: remove
+its duplicate mirror suite and fold the output job into physics (one fewer job). Revised misc: 74
+passed/273.04 s; its 11 skips are explicitly disabled live VMEC2000 tests. Full GN on office and
+full adjoints locally run with 30-minute caps; the verified reference-nc bundle supplies NCSX,
+preventing a missing-asset skip. Logs: `vmex-phase1-ci-evidence`. The initial options run was
+interrupted for the scoped JIT fix; no peak RSS or performance ranking is claimed. Next: publish
+after remaining checks, then hosted CI/review and parent merges. P1/E1 and the release remain on
+hold.
