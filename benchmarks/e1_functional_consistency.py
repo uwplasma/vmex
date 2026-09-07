@@ -152,6 +152,35 @@ def shaped_state():
     return native, layout
 
 
+def qa_state(mpol=3, ntor=2, ns=9, spans=2):
+    """Seed the finite-beta 3-D QA deck, then freeze both flux derivatives.
+
+    The same prescribed-iota audit as :func:`shaped_state` on a genuinely
+    toroidally varying equilibrium. Resolution is a deliberate reduction of
+    the deck's MPOL=NTOR=5: the dense reference is bounded, not production.
+    """
+    from vmex.core import implicit
+    from vmex.core.input import VmecInput
+    from vmex.core.polish import make_high_low_transfer, make_strong_root_layout
+
+    inp = VmecInput.from_file(ROOT / "examples/data/input.nfp2_QA_smooth_beta")
+    inp = replace(
+        inp.change_resolution(mpol=mpol, ntor=ntor, ntheta=2 * mpol + 6,
+                              nzeta=max(4, 2 * ntor + 2)),
+        ns_array=np.asarray([ns]), ftol_array=np.asarray([1e-10]),
+        niter_array=np.asarray([4000]),
+    )
+    config = implicit.make_config(inp, ftol=1e-10, max_iterations=4000)
+    params = implicit.params_from_input(inp)
+    state, mask = implicit.solve_implicit_with_aux(params, config)
+    runtime = implicit.runtime_from_params(params, config)
+    basis = BSplineBasis.clamped(np.linspace(0, 1, spans + 1), degree=3)
+    native = lift_high_order_state(state, runtime, radial_basis=basis)
+    transfer = make_high_low_transfer(native, runtime, project_config=config, project_mask=mask)
+    layout = make_strong_root_layout(mask, native, transfer=transfer)
+    return native, layout
+
+
 def chart_audit(native, layout):
     """Audit the production structured subspace before invertible Ruiz scaling.
 

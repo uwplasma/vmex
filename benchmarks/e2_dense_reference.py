@@ -1,8 +1,9 @@
 """E2 fixed-profile dense reference: full R/Z versus the structured subspace.
 
-Uses the actual constrained layout from E1. Both runs start from the same
-shaped-tokamak seed with frozen flux and pressure profiles (GAMMA=0). This
-is a bounded diagnostic, not a production solver or a fixed-current solve.
+Uses the actual constrained layout from E1. Runs start from the shaped-tokamak
+seed or, with ``--case qa --planes N``, the finite-beta 3-D QA deck sampled on
+N field-period planes; both freeze the flux and pressure profiles (GAMMA=0).
+This is a bounded diagnostic, not a production solver or a fixed-current solve.
 Augmented least squares uses SciPy's independent GELSD/GELSY implementations:
 https://docs.scipy.org/doc/scipy/reference/generated/scipy.linalg.lstsq.html
 """
@@ -29,7 +30,7 @@ from scipy.linalg import lstsq
 
 import vmex
 from benchmarks._provenance import assert_repo_vmex, git_state
-from benchmarks.e1_functional_consistency import shaped_state
+from benchmarks.e1_functional_consistency import qa_state, shaped_state
 from vmex.core.polish import _flatten_high, _physical_equation_basis, apply_high_order_correction
 from vmex.core.profiles import MU0
 from vmex.core.radial_basis import _span_quadrature
@@ -50,11 +51,16 @@ def spectrum(matrix):
             "singular_values": singular.tolist()}
 
 
-def experiment(native, layout, steps, order, angles, damping):
+def experiment(native, layout, steps, order, angles, damping, planes=1):
     rho, weights = _span_quadrature(np.sqrt(native.radial_basis.breakpoints), order)
-    points = jnp.asarray([(r, theta, 0.0) for r in rho
-                          for theta in np.arange(angles) * 2 * np.pi / angles])
-    weights = jnp.asarray(np.repeat(weights, angles) * (2 * np.pi)**2 / angles)
+    # `planes` samples the field-period toroidal angle. One plane reproduces
+    # the axisymmetric grid exactly, including its quadrature weights.
+    zetas = np.arange(planes) * 2 * np.pi / planes
+    points = jnp.asarray([(r, theta, zeta) for r in rho
+                          for theta in np.arange(angles) * 2 * np.pi / angles
+                          for zeta in zetas])
+    weights = jnp.asarray(np.repeat(weights, angles * planes)
+                          * (2 * np.pi)**2 / (angles * planes))
     zero = jnp.zeros(layout.size)
     coefficient_map = np.asarray(jax.jacfwd(lambda vector: _flatten_high(layout.unpack(vector)))(zero))
 
@@ -171,26 +177,57 @@ def main():
     parser.add_argument("--order", type=int, default=6)
     parser.add_argument("--angles", type=int, default=24)
     parser.add_argument("--damping", type=float, default=1e-3)
+    parser.add_argument("--case", choices=("shaped", "qa"), default="shaped")
+    parser.add_argument("--planes", type=int, default=1)
+    # Seed resolution is the representation under test: E2 requires at least
+    # three radial refinements and two angular resolutions before a verdict.
+    parser.add_argument("--seed-ns", type=int, default=9)
+    parser.add_argument("--seed-spans", type=int, default=2)
+    parser.add_argument("--seed-mpol", type=int, default=3)
+    parser.add_argument("--seed-ntor", type=int, default=2)
+    parser.add_argument("--budget-seconds", type=int, default=600)
     args = parser.parse_args()
     if not jax.config.x64_enabled or not 1 <= args.steps <= 5 or not 4 <= args.order <= 12 or not 16 <= args.angles <= 64:
         parser.error("require float64, steps 1..5, order 4..12, angles 16..64")
+    if not 1 <= args.planes <= 16:
+        parser.error("planes must be 1..16")
+    if args.case == "shaped" and args.planes != 1:
+        parser.error("the shaped tokamak is axisymmetric: use --planes 1")
+    if args.case == "qa" and args.planes == 1:
+        parser.error("the QA case is 3-D: use --planes > 1")
+    if not 60 <= args.budget_seconds <= 3600:
+        parser.error("budget-seconds must be 60..3600")
+    if not 5 <= args.seed_ns <= 51 or not 1 <= args.seed_spans <= 8:
+        parser.error("seed-ns must be 5..51 and seed-spans 1..8")
+    if not 2 <= args.seed_mpol <= 8 or not 0 <= args.seed_ntor <= 8:
+        parser.error("seed-mpol must be 2..8 and seed-ntor 0..8")
+    if args.case == "shaped" and (args.seed_ns, args.seed_spans, args.seed_mpol, args.seed_ntor) != (9, 2, 3, 2):
+        parser.error("seed resolution flags apply to --case qa; the shaped seed is fixed")
     if not np.isfinite(args.damping) or args.damping <= 0:
         parser.error("damping must be finite and positive")
     def expired(*_):
-        raise TimeoutError("E2 600 s diagnostic budget")
+        raise TimeoutError(f"E2 {args.budget_seconds} s diagnostic budget")
     signal.signal(signal.SIGALRM, expired)
-    signal.alarm(600)
+    signal.alarm(args.budget_seconds)
     provenance = git_state(ROOT)
     provenance.update(vmex_module=assert_repo_vmex(vmex.__file__, ROOT),
                       python=platform.python_version(), platform=platform.system(),
                       versions={name: version(name) for name in ("jax", "jaxlib", "scipy", "numpy", "solvax")},
                       device=str(jax.devices()[0]), precision="float64")
     started = time.perf_counter()
-    output = {"_provenance": provenance, "case": "shaped tokamak, frozen iota/pressure, GAMMA=0",
+    seed = {"shaped": ("shaped tokamak, frozen iota/pressure, GAMMA=0",
+                       shaped_state),
+            "qa": (f"nfp2 QA smooth beta at mpol={args.seed_mpol} ntor={args.seed_ntor} "
+                   f"ns={args.seed_ns} spans={args.seed_spans}, frozen iota/pressure, GAMMA=0",
+                   lambda: qa_state(mpol=args.seed_mpol, ntor=args.seed_ntor,
+                                    ns=args.seed_ns, spans=args.seed_spans))}[args.case]
+    output = {"_provenance": provenance, "case": seed[0],
               "settings": {k: v for k, v in vars(args).items() if k != "output"}}
     try:
-        output["result"] = experiment(*shaped_state(), args.steps, args.order, args.angles, args.damping)
-        output["status"] = "completed diagnostic; QA and nonlinear convergence not established"
+        output["result"] = experiment(*seed[1](), args.steps, args.order, args.angles,
+                                      args.damping, args.planes)
+        output["status"] = ("completed bounded diagnostic at this resolution; "
+                            "nonlinear convergence and production promotion not established")
         if not output["result"]["verification_passed"]:
             raise RuntimeError("E2 reference consistency or geometry check failed")
     except Exception as error:
