@@ -170,6 +170,7 @@ def test_free_boundary_host_adjoint_rejects_a_false_solver_success(monkeypatch):
                           jnp.ones(2), cfg)
 
 
+@pytest.mark.full
 def test_free_boundary_current_gradient_matches_resolve_finite_difference():
     """The implicit coil-current response agrees with two independent solves."""
     inp = lasym_free_input(DATA)
@@ -307,6 +308,7 @@ def test_free_boundary_pressure_gradient_matches_resolve_finite_difference():
         derivative, finite_difference, rtol=1.0e-1, atol=1.0e-7)
 
 
+@pytest.mark.full
 def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
     """Both adjoint solvers invert the same converged plasma-vacuum Jacobian.
 
@@ -454,6 +456,7 @@ def _flat(tree):
     return jnp.concatenate([jnp.ravel(leaf) for leaf in jax.tree.leaves(tree)])
 
 
+@pytest.mark.full
 def test_free_boundary_gradient_is_certified_factor_by_factor():
     """A certificate whose tolerances come from arithmetic, not solver noise.
 
@@ -584,6 +587,7 @@ def test_free_boundary_gradient_is_certified_factor_by_factor():
     assert abs(forward_side - adjoint_side) / abs(adjoint_side) < 1.0e-6
 
 
+@pytest.mark.full
 def test_free_boundary_root_reproducibility_bounds_the_gradient():
     """Two entry points, two roots, and the gradient amplifies the gap.
 

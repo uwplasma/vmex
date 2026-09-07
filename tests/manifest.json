@@ -40,7 +40,7 @@
     ["tests/test_forces_residuals.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-d-f0"]],
     ["tests/test_fourier_transforms.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "pr-fast", "full-core-d-f0"]],
     ["tests/test_freeboundary.py", "free-boundary", "integration", "slow", "cpu-gpu", "golden", "vmec2000", ["pr-parity-a1", "full-core-fb-a"]],
-    ["tests/test_freeboundary_implicit.py", "free-boundary", "ad", "slow", "cpu-gpu", "none", "fd", ["pr-parity-a1", "full-core-fb-a"]],
+    ["tests/test_freeboundary_implicit.py", "free-boundary", "ad", "slow", "cpu-gpu", "none", "fd", ["pr-parity-a1", "full-free-boundary-adjoint"]],
     ["tests/test_virtual_casing_api.py", "virtual-casing", "unit", "fast", "cpu", "none", "none", ["pr-parity-a1", "full-core-fb-a"]],
     ["tests/test_virtual_casing_physics.py", "virtual-casing", "ad", "medium", "cpu-gpu", "reference-nc", "fd", ["pr-parity-a1", "optional", "full-core-fb-a"]],
     ["tests/test_freeboundary_linear.py", "free-boundary", "ad", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-a1", "full-core-fb-a"]],
@@ -82,8 +82,10 @@
     ["tests/test_performance_docs.py", "infrastructure", "unit", "fast", "cpu", "none", "golden", ["pr-parity-c2", "full-core-n-s"]],
     ["tests/test_plot_summary.py", "diagnostics", "integration", "medium", "cpu", "none", "analytic", ["pr-parity-c2", "pr-fast", "full-core-n-s"]],
     ["tests/test_plotting_boozer.py", "diagnostics", "integration", "medium", "cpu", "golden", "external", ["pr-parity-c2", "full-core-n-s"]],
-    ["tests/test_polish_preconditioner.py", "equilibrium", "ad", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-e", "full-core-n-s"]],
-    ["tests/test_run_options.py", "equilibrium", "unit", "medium", "cpu", "none", "analytic", ["pr-parity-f", "full-core-n-s"]],
+    ["tests/test_polish_preconditioner.py", "equilibrium", "ad", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-e", "full-polish-gn"]],
+    ["tests/test_polish_linear.py", "equilibrium", "ad", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-e", "full-polish-linear"]],
+    ["tests/test_polish_homotopy.py", "equilibrium", "ad", "slow", "cpu-gpu", "none", "analytic", ["pr-full-only", "full-polish-homotopy"]],
+    ["tests/test_run_options.py", "equilibrium", "unit", "medium", "cpu", "none", "analytic", ["pr-parity-f", "full-run-options"]],
     ["tests/test_profile_workflows.py", "performance", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-n-s"]],
     ["tests/test_postprocess_currents.py", "diagnostics", "oracle", "medium", "cpu-gpu", "golden", "vmec2000", ["pr-parity-c2", "full-core-n-s"]],
     ["tests/test_preconditioner.py", "equilibrium", "unit", "medium", "cpu-gpu", "none", "analytic", ["pr-parity-c2", "pr-fast", "full-core-n-s"]],
@@ -175,7 +177,9 @@
       "tests/test_plotting_boozer.py"
     ],
     "pr-free-boundary-adjoint": [
-      "tests/test_freeboundary_implicit.py::test_free_boundary_current_gradient_matches_resolve_finite_difference"
+      "tests/test_freeboundary_linear.py",
+      "tests/test_freeboundary_implicit.py::test_host_adjoint_best_effort_warns_instead_of_raising",
+      "tests/test_freeboundary_implicit.py::test_free_boundary_host_adjoint_rejects_a_false_solver_success"
     ],
     "pr-implicit-response-a": [
       "tests/test_input_profiles.py::test_change_resolution_preserves_representable_coefficients",
