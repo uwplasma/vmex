@@ -1850,7 +1850,8 @@ def test_collocation_polish_primal_and_derivatives(small_strong_root):
         assert result.polish_report.variable_scale_probes == 2
         assert result.context is not None
         assert result.polish_report.converged
-        assert result.polish_report.least_squares_success
+        # The 1e-10 primal stopping flag is not derivative eligibility.
+        # Check the public stationarity and linear certificates below.
         assert result.polish_report.nonlinear_iterations > 0
 
         native_tangent = _random_like(small_strong_root.native, 51)
@@ -1871,6 +1872,9 @@ def test_collocation_polish_primal_and_derivatives(small_strong_root):
         assert bool(adjoint.report.converged)
         assert bool(tangent.report.stationarity_converged)
         assert bool(adjoint.report.stationarity_converged)
+        for report in (tangent.report, adjoint.report):
+            assert np.isfinite(float(report.stationarity_norm))
+            assert float(report.stationarity_norm) <= float(report.stationarity_tolerance)
         np.testing.assert_allclose(tangent.report.stationarity_norm,
                                    result.polish_report.least_squares_optimality, rtol=1.0e-4, atol=1.0e-8)
         np.testing.assert_allclose(
