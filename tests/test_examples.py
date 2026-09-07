@@ -219,11 +219,15 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
 def test_force_balance_polishing_example(tmp_path):
     out = _run_example(EXAMPLES / "force_balance_polishing.py", tmp_path, timeout=1200)
     assert "POLISH CERTIFIED" in out
-    certificate = re.search(
-        r"independent strong-force certificate: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-    assert certificate is not None, out
-    initial, final = (float(g) for g in certificate.groups())
-    assert final < initial, f"the polish must lower the strong-force residual: {out}"
+    assert "independent strong-force certificate over s in [0.10, 0.99]:" in out
+    for label in ("eps_F volume L2 (<= 2 by construction)", "<|F|> [N m^-3]",
+                  "<|F|>/<|grad(B^2/2mu0)|>"):
+        certificate = re.search(
+            re.escape(label) + r"\s+([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+        assert certificate is not None, out
+        initial, final = (float(g) for g in certificate.groups())
+        assert np.isfinite([initial, final]).all() and 0 <= final < initial, (
+            f"the polish must lower the reported {label}: {out}")
     outdir = tmp_path / "output_force_balance_polishing"
     for name in ("wout_shaped_tokamak_before_polish.nc",
                  "wout_shaped_tokamak_pressure_polished.nc"):

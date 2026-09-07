@@ -182,7 +182,7 @@ attempts are saved as such.
   An unexplained, quadrature-converged work mismatch stops the energy route;
   diagnose missing terms or quadrature first, before interpreting solver failure.
 - **E2, dense reference step (one week).** Assemble `J` and the constrained
-  reference `H` on the frozen tokamak and one affordable finite-beta QA
+  reference `H`, retaining independent R/Z, on the frozen tokamak and one affordable finite-beta QA
   linearization; compare spectrum and rank, augmented QR/SVD reference steps
   with the actual scaling, and the physical step, cost reduction and linear
   residual, not only coefficient norms. This is DESC's solver, not only a
@@ -212,6 +212,14 @@ the obstruction. No W7-X run and no global coordinate change without that
 diagnosis.
 
 ### 3.2 Coordinates and the axis
+
+**E1 finding (2026-09-07): fix reachability before Newton tuning.** On the
+shaped tokamak, the actual structured chart reduces sampled normal-motion
+rank from 36 to 20 and cannot move the vertical extrema normally, although
+those motions exist in the full constrained layout. This is a restriction of
+physical directions, not solely a coordinate gauge. E2 must retain independent
+R and Z in its reference; compare any replacement chart against that space.
+The prescribed-profile energy identity passes; this does not promote E3.
 
 Keep `ρ^|m| q(s)` with B-splines in s and quadrature in ρ, with the analytic
 first and second axis limits already in `radial_basis.evaluate_regularized_mode`.
@@ -256,23 +264,22 @@ research with the figure as its honest status.
 Owner: VMEX (`implicit.py`, `polish_driver.py`, `polish_implicit.py`, the
 public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
 
-1. **Stale claims, one PR — implemented in [#284](https://github.com/uwplasma/vmex/pull/284); CI/review pending.** Remove the withdrawn 26-fold number from
+1. **Stale claims — merged in #284.** Remove the withdrawn 26-fold number from
    `CHANGELOG.md`; remove or generate the three artifacts `performance.rst`
    cites; point the two benchmark records and three test docstrings at the
    P letters; extend `tools/check_docs_prose.py` to scan `.rst` pages and
    numbers in `CHANGELOG.md`, and add a cited-path existence test for
    `benchmarks/` references. Add README ≤ 300 and CHANGELOG ≤ 200 line caps to
    the same gate.
-2. **JAX policy and #277 — assertion repair tested; version matrix under validation.** Test the floor (0.9.2, the machines we own) and
-   the head (0.11.x, CI); tolerances backed by observed accuracy; no
-   cross-version bit claims. Bisect #277's assertion on the office box under
-   `~/vmex_sweep/env-0.8.0` (JAX 0.11.1) with `--xla_cpu_use_xnnpack=false`
-   and `--xla_allow_excess_precision=false`; record versions, initial residual
-   scaling, stopping reason and attained stationarity. The test asserts
-   stationarity at the derivative gate's 1e-8 bar and lets the derivative call
-   be the check; SOLVAX's 1e-10 flag is a solver metric. Keep the tight
-   real-MHD fixture.
-3. **CI tiering — implementation under validation; hosted ceiling unproved.** Every test that runs a polish or
+2. **JAX policy and #277 — repaired assertion and version matrix tested; integration CI pending.**
+   Keep floor 0.9.2 and head 0.11.1 on Python 3.12; compare accuracy, not bits.
+   The isolated office reproduction did not reproduce the old CI assertion;
+   the two XLA flags are not a diagnosed cause. The test now checks the public
+   derivative stationarity bar, retaining the tight MHD fixture and both
+   physical acceptance and derivative duality/Taylor checks. See §12 for
+   measured versions, scaling and attained stationarity. Do not repeat the
+   invalid `env-0.8.0` setup or claim that a missing-pytest log is numerical evidence.
+3. **CI tiering — hosted 25-minute ceiling passed; integration/nightly validation pending.** Every test that runs a polish or
    a free-boundary implicit adjoint moves to `full`; `test_polish_preconditioner.py`
    splits into Gauss-Newton (PR), homotopy (nightly) and linear (PR);
    `test_run_options.py` exercises directive parsing against a mocked driver
@@ -583,63 +590,57 @@ python tools/preflight.py --static
 
 ## 12. Execution logbook
 
-Format for each entry: date, PR (base and head), owning gate, command and environment, result with
-units, time and memory, limitation or failure, next action. Abandoned experiments stay as evidence
-with their stop reason. Update the gate's status in place; do not append work packages.
+Format for each entry: date, PR (base and head), owning gate, command and environment, result with units, time and memory,
+limitation or failure, next action. Abandoned experiments stay as evidence with their stop reason. Update the gate's status in
+place; do not append work packages.
 
-**2026-09-05.** Twenty-one PRs merged in plan order (#267–#270, #264, #263, #262, #260, #258, #259,
-#254, #253, #256, #257, #261, #197, #280, #272, #278, #273, #281, #265); #271 was auto-closed by its
-base-branch deletion and reopened as #281. Facts learned: the compilation-cache entry scaling
-(`LRUCache.put` rescans the directory: 0.028 ms per entry) is bounded by #254; the W7-X flat
-certificate (34.23 GiB) is replaced by the batched one (3.24 GiB certificate, 16.6 GiB chart); the
-LASYM `tcon` audit closed in VMEX's favour; the certificate diagnostics `angular_spectral_tail` and
-`nestedness_margin` were redefined by #258; the baseline guard is pinned by norms with a 1e-10
-relative and 1e-12 absolute floor (#280).
+**2026-09-05–06, integrated history.** Earlier plan-ordered PRs are merged; #271 was reopened as #281 after base deletion. #254
+bounded cache rescans (0.028 ms/entry); W7-X certificate memory fell from 34.23 to 3.24 GiB (16.6 GiB chart). LASYM tcon audit
+passed; #258 redefined spectral-tail/nestedness diagnostics; #280 pins baseline norms at 1e-10 relative/1e-12 absolute floors.
+#266/#276 and review #282 merged; #283 became this plan's authority; #274 closed. #282's M3/JAX 0.9.2 probes cover VMEC++ 0.7.3,
+DESC, frozen 156×17 operator and capped GVEC (§2); README 573→220 lines. Raw evidence: `vmex-review-evidence-20260906`, compact
+records: `focused_review_20260906`. Clean-main fast/seven physics lanes passed. Lost parity logs were rerun in #286; office
+recovery and the unreproduced #277 failure are recorded below.
 
-**2026-09-06, #282 probes** (Apple M3 Max, JAX 0.9.2, cache disabled): the same-deck VMEC++ 0.7.3
-parity, native DESC solve, frozen 156×17 operator and capped GVEC run of §2; raw logs in
-`vmex-review-evidence-20260906` outside git, compact results in `focused_review_20260906`. The
-README went from 573 to 220 lines and the validation page separated native force accuracy from WOUT
-reconstruction. #277's CI failure (run 34005068178) preserved.
+**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73 guards and
+strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four modules: 73 tests passed in 396.88
+s; the regression fails on the parent. Both passed CI and merged on 2026-09-07 with user-authorized admin merge;
+their branches are retained.
 
-**2026-09-06, consolidation.** #266 and #276 merged; #282 rebased over #276's figure manifest and
-merged; #283's plan rebased onto it and rewritten as this document; #274 closed. Local lane runs on
-clean main (fast plus seven physics lanes, all green) recorded in §2; the parity-lane log was lost
-with the session's task directory and those lanes are rerun in Phase 1's tiering PR. Office was
-unreachable; the recovered #277 evidence is recorded below.
-
-**2026-09-06, Phase 1 / P0.1 and P0.3 isolation.** #284 (`417fb4fc`, base `2a0d4356`) implements P0.1: the withdrawn-claim removal, RST prose scanning, root line caps and cited-path guards; 73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four test modules: 73 tests passed in 396.88 s and the new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 under the plan's admin-merge rule; their branch bases were retained for the stack. Tiering, module splitting, parsing mocks and the 25-minute lane gate continue in #286.
-
-**2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at
-`6371a36b`, without changing tolerances. The old office log only lacked pytest. On clean `db6092b7`,
-Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original tight MHD test passed in 333.88 s; with both
-XLA flags disabled it passed in 313.34 s (17 iterations, stationarity 2.598e-9, reference 138.346,
-residual scale 6.83505). CI's failure remains unreproduced. The repaired selection passed 27 cases
-locally (JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
+**2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at `6371a36b`, without changing
+tolerances. The old office log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original
+tight MHD test passed in 333.88 s; with both XLA flags disabled it passed in 313.34 s (17 iterations, stationarity 2.598e-9,
+reference 138.346, residual scale 6.83505). CI's failure remains unreproduced. The repaired selection passed 27 cases locally
+(JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
 `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
 
-**2026-09-06, #286 / P0.3/P0.2 tiering (base #277).** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`,
-integrates #277/#284/#285 at `2ae2a716`; split and CI implementation at `0bfab61d`. GN retains its
-module; linear and homotopy checks move to two modules, sharing the existing fixtures. Real polish
-and free-boundary adjoint integrations are full-marked and scheduled explicitly; option
-parsing/precedence and failure routing use mocks with one real PR solve/export. Assertions and
-physics tolerances are retained. All 1,962 original cases survive; collection is 1,974 with 12 new
-cases. Twelve manifest guards passed in 10.81 s; PR/nightly matrices pin Python 3.12/JAX
-0.9.2/0.11.1; PR physics/parity timeouts are 25 minutes. A timeout edit is not runtime proof.
-Campaign-class a1 routing and measured hosted limits remain open. Local PR selection: 253 passed, 22
-full cases deselected, 375.30 s; 77 final guards passed in 17.94 s plus strict Sphinx/Ruff/mypy; all
-64 original polish bodies are unchanged. Full homotopy: 12 passed/385.24 s; full options: 41
-passed/102.23 s. Office linear/MHD: 96 passed on each version (0.11.1: 406.44 s; 0.9.2: 577.27 s),
-same Python 3.12. The shape-rejection test then moved back to GN to reuse its fixture: final PR
-linear selection is 93 passed/7.21 s locally, 16.24/18.98 s on office head/floor (2 MHD cases full),
-with all test bodies retained. Consolidated mirror: 57 passed in 331.74 s. Parent #284 misc took
-27.7 min: remove its duplicate mirror suite and fold the output job into physics (one fewer job).
-Revised misc: 74 passed/273.04 s; its 11 skips are explicitly disabled live VMEC2000 tests. The
-interpreted GN run was stopped after 115 passes/1413.93 s to try scoped JIT; it is incomplete.
-Compiled GN passed 124/579.02 s on office `~/vmex-ci-final` (`32f01c0c`); the local JAX 0.9.2 run
-passed 124/349.79 s. Full adjoints passed 15/932.33 s with no skips; the first asset assertion
-stopped before tests because reference-nc lacks NCSX. Corrected Nightly to ncsx-mgrid with a file
-assertion and manifest-linked guard; the rerun passed. Logs: `vmex-phase1-ci-evidence`. The initial
-options run was interrupted for the scoped JIT fix; no peak RSS or performance ranking is claimed.
-Next: hosted CI/runtime and coverage gates, required review, then parent merges; retarget this
-branch before deleting #277’s branch. P1/E1 and the release remain on hold.
+**2026-09-06, #286 / P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`, initial base #277; integration
+`2ae2a716`, implementation `0bfab61d`. GN/linear/homotopy split shares fixtures; real nonlinear/adjoint cases run explicitly in
+Nightly; option routing uses mocks plus one real PR solve/export. All 1,962 original cases and 64 polish bodies retained; 1,974
+collected with 12 new cases. Twelve manifest guards passed/10.81 s; final preflight 77/17.94 s plus Sphinx/Ruff/mypy. Local PR
+selection 253/375.30 s (22 deselected); full homotopy 12/385.24 s; full options 41/102.23 s; full adjoints 15/932.33 s, no
+skips. NCSX requires ncsx-mgrid, not reference-nc: initial file assertion stopped correctly, corrected fetch then passed, with
+manifest-linked guard. Office full linear: 96 passes on Python 3.12/JAX 0.11.1 (406.44 s) and 0.9.2 (577.27 s). Shape-rejection
+test then returned to GN for fixture reuse: final PR linear 93 passes (2 full deselections), local 7.21 s, office 16.24/18.98 s.
+Interpreted GN stopped incomplete after 115 passes/1413.93 s; scoped-JIT GN passed 124/579.02 s on office `~/vmex-ci-final` at
+`32f01c0c`, local 124/349.79 s. Initial options run also interrupted for JIT repair. Mirror consolidated: 57/331.74 s; revised
+misc 74/273.04 s, 11 opt-in live-VMEC2000 skips. CI run 34080867732 passed on `d58223b4`: polish 5.37 min versus parent 43.4,
+misc 24.58 versus 27.7, c2 22.60; all jobs <25 min. Both JAX gates passed; coverage skipped for test/docs-only delta. No RSS or
+solver-performance ranking claimed. Raw logs: `vmex-phase1-ci-evidence`. #286 retargeted to main, integrated #277 at `98049a1a`,
+resolving only logbook conflicts. Integration CI and Nightly 34132378608 pending; campaign-class a1 routing remains open.
+
+**2026-09-07, E1 and cleanup.** `research/e1-functional-consistency`, base #286 `6a4d560f`;
+`benchmarks/e1_functional_consistency.py` at `b17352c1`: independent complete virtual work, fixed boundary/profiles and GAMMA=0,
+deliberately off-root. Clean CPU/JAX 0.9.2: order 4/8/12 work errors 4.006e-3 → 7.931e-14 (Solovev, 30 coordinates/32 angles);
+8.875e-3 → 8.210e-13 (shaped, 56/64). Omitting lambda leaves 3.085%/13.295%; AD duality <7e-15. Current-driven shaped seed uses
+frozen iota for this audit, NOT fixed-current variations. Office JAX 0.11.1, 128 angles: 8.354e-13. Actual layout/structured
+chart normal ranks: 36/20; extrema response ratios <9e-15 on both versions. E1 energy identity supported; structured
+reachability fails. Clean shaped chart run: 43.14 s/1117.7 MiB local; 43.55 s/1043.7 MiB office. Repeated local numerical output
+is byte-identical excluding wall time/RSS. Source, JSON and logs are in sibling `vmex-e1-evidence`; reproduction:
+CPU/float64/cache disabled, script `--case shaped-frozen-iota --orders 4 8 12 --angles 64 --output /tmp/e1.json`. Solovev uses
+`--case solovev --angles 32`. Deleted 32 remote and 73 local branches after ancestry or exact merged-PR-head checks; remote SHA
+leases protected concurrent changes. Open dependencies/worktrees retained; 16 remote and 33 local branches remain before
+publishing E1. Deletion SHAs are saved with the raw evidence. Nightly 34132378608 exposed #280's stale example regex after a
+successful certified polish; repair reads all three current metrics and requires finite decreases; real example passed locally
+in 149.72 s. Next: E2 full R/Z reference, then a reachability-preserving chart; no E3 promotion. Finish integration checks and
+a1 routing; P0.4 and fixed-current closure remain open. No release.
