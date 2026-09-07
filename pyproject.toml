@@ -175,6 +175,11 @@ ignore = ["E402", "E501", "E702"]
 [tool.ruff.lint.per-file-ignores]
 # The docstring contract is on the package's public surface only.
 "tests/**" = ["D"]
+# The split polish modules import shared fixtures with the `as` re-export
+# idiom and take them as test parameters; F811 for that pattern is a
+# false positive that only some ruff versions report.
+"tests/test_polish_homotopy.py" = ["D", "F811"]
+"tests/test_polish_linear.py" = ["D", "F811"]
 "examples/**" = ["D"]
 "benchmarks/**" = ["D"]
 "tools/**" = ["D"]

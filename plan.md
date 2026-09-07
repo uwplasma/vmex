@@ -608,28 +608,7 @@ clean main (fast plus seven physics lanes, all green) recorded in §2; the parit
 with the session's task directory and those lanes are rerun in Phase 1's tiering PR. Office was
 unreachable; the recovered #277 evidence is recorded below.
 
-**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73
-guards and strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four modules: 73
-tests passed in 396.88 s; the regression fails on the parent. #284 CI passed; reviews/#285 CI await;
-retarget #285 before deleting #284's branch. The tiering entry below continues this work.
-
-**2026-09-06, Phase 1 / P0.1–P0.3.** All-state PR inventory identifies #283
-as this plan's authority. #284 (`417fb4fc`, base main `2a0d4356`) implements
-P0.1: withdrawn-claim, RST prose, root line-cap and cited-path guards;
-73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284)
-restores JIT state in four test modules: 73 tests passed in 396.88 s and the
-new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 with user-authorized admin
-merge; branch bases were retained. Tiering, module
-splitting, parsing mocks and the 25-minute lane gate remain unfinished.
-
-**2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`;
-assertion repair pushed at `6371a36b`, without changing tolerances. The old
-office log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX
-0.11.1 / SOLVAX 0.20, the original tight MHD test passed in 333.88 s; with
-both XLA flags disabled it passed in 313.34 s (17 iterations, stationarity
-2.598e-9, reference 138.346, residual scale 6.83505). CI's failure remains
-unreproduced. The repaired selection passed 27 cases locally (JAX 0.9.2,
-228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
+**2026-09-06, Phase 1 / P0.1 and P0.3 isolation.** #284 (`417fb4fc`, base `2a0d4356`) implements P0.1: the withdrawn-claim removal, RST prose scanning, root line caps and cited-path guards; 73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four test modules: 73 tests passed in 396.88 s and the new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 under the plan's admin-merge rule; their branch bases were retained for the stack. Tiering, module splitting, parsing mocks and the 25-minute lane gate continue in #286.
 
 **2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at
 `6371a36b`, without changing tolerances. The old office log only lacked pytest. On clean `db6092b7`,
