@@ -681,5 +681,11 @@ evidence. Next: representation, closure and admissibility, starting with the
 chart advantage vanished under radial refinement; that was an under-resolved
 artifact and is superseded by the 12-plane numbers above. Process RSS reached
 13.0 GiB at 4 spans / 8 planes while reference matrices stayed under 18 MiB, so
-the 2 GiB matrix budget does not bound the job. Raw JSON and logs: sibling
-`vmex-e2qa-evidence`.
+the 2 GiB matrix budget does not bound the job. The verdict is version
+independent: Python 3.12 with JAX/jaxlib 0.11.1, numpy 2.5.3 and scipy 1.18.1
+reproduces both 12-plane readings exactly (2.306x/1.918x and 1.694x/1.515x),
+and E1's Solov'ev work discrepancy comes back 8.014e-14 against the floor's
+7.931e-14, which is round-off at that magnitude. JAX 0.11 requires Python 3.12
+or newer, so the floor environment cannot install it; the persistent head
+environment is `~/local/venvs/vmex-head`. Raw JSON and logs, both versions:
+sibling `vmex-e2qa-evidence` (`floor/` and `head/`).
