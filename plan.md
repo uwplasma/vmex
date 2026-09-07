@@ -256,7 +256,7 @@ research with the figure as its honest status.
 Owner: VMEX (`implicit.py`, `polish_driver.py`, `polish_implicit.py`, the
 public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
 
-1. **Stale claims, one PR — implemented locally; review pending.** Remove the withdrawn 26-fold number from
+1. **Stale claims, one PR — implemented in [#284](https://github.com/uwplasma/vmex/pull/284); CI/review pending.** Remove the withdrawn 26-fold number from
    `CHANGELOG.md`; remove or generate the three artifacts `performance.rst`
    cites; point the two benchmark records and three test docstrings at the
    P letters; extend `tools/check_docs_prose.py` to scan `.rst` pages and
@@ -272,7 +272,7 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    stationarity at the derivative gate's 1e-8 bar and lets the derivative call
    be the check; SOLVAX's 1e-10 flag is a solver metric. Keep the tight
    real-MHD fixture.
-3. **CI tiering to a 25-minute PR ceiling.** Every test that runs a polish or
+3. **CI tiering to a 25-minute PR ceiling — JIT isolation implemented; tiering pending.** Every test that runs a polish or
    a free-boundary implicit adjoint moves to `full`; `test_polish_preconditioner.py`
    splits into Gauss-Newton (PR), homotopy (nightly) and linear (PR);
    `test_run_options.py` exercises directive parsing against a mocked driver
@@ -634,3 +634,16 @@ named pytest”; its Python also lacks pip and the copied directory has no git
 metadata. This is not a JAX numerical reproduction. Next: review/merge P0.1,
 then P0.3 test isolation/tiering; prepare an isolated pinned office environment
 for P0.2 rather than treating the incomplete saved run as evidence.
+
+**2026-09-07, Phase 1 / P0.3 isolation.** Based on P0.1 commit `417fb4fc`
+(PR #284), branch `fix/phase1-test-isolation`, worktree
+`/Users/rogeriojorge/local/vmex-test-isolation`. Four modules now use the
+existing restoring JIT fixture; removed their unscoped configuration writes.
+A subprocess regression checks restoration between real test modules. The
+unmodified parent fails the session-end restoration probe; the fix passes.
+CPU/JAX 0.9.2, cache disabled: the four complete PR module selections passed
+73 tests, 2 full tests deselected, in 396.88 s; manifest guards 9 passed in
+13.38 s; static preflight: 71 passed/3 unbuilt-HTML skips; RSS unmeasured. Logs: `vmex-review-evidence-20260906/jit-*.log`.
+No test moved to nightly and no tolerance changed; the 25-minute lane target
+remains unproved. Isolate this correction before measuring the tiering change.
+Next: finish P0.3 selector/tiering work and the office P0.2 reproduction.
