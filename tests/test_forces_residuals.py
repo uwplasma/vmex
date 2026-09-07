@@ -301,7 +301,7 @@ def test_alias_lasym_gcon_matches_index_map_reference(shape):
 
 
 # ---------------------------------------------------------------------------
-# LASYM constraint scaling: the symmetric limit is continuous (plan 31.2-R7)
+# LASYM constraint scaling: the symmetric limit is continuous (plan P1)
 # ---------------------------------------------------------------------------
 #
 # A 2024 STELLOPT snapshot paired two LASYM-only factors of one half: the

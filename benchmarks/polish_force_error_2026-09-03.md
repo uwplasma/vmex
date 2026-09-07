@@ -13,7 +13,7 @@ state before and after the correction — one spline basis, one set of
 certificate nodes — so the pair is like for like and carries no export-mesh
 or reconstruction difference.
 
-## Why the records exist (plan 31.2-R1, 31.2-R3)
+## Why the records exist (plan P0/P1)
 
 The shipped acceptance metric
 

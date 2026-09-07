@@ -415,7 +415,7 @@ def _prose_number(value: float, digits: int = 3) -> str:
 def test_polish_force_error_records_are_provenanced(name: str) -> None:
     """Each polish force-error record must stand on its own provenance.
 
-    31.2-R3: the README's previous "26-fold" polish figure had no artifact
+    P0/P1: the README's previous "26-fold" polish figure had no artifact
     behind it and its two ends came from different export meshes.  The
     replacement is measured from a clean checkout with the deck hashed, the
     commit recorded, and the invocation kept, so a reader can re-run it.
@@ -464,7 +464,7 @@ def test_polish_force_error_records_are_provenanced(name: str) -> None:
 
 
 def test_solovev_record_shows_the_certificate_at_its_ceiling() -> None:
-    """31.2-R1's evidence: a shipped deck where eps_F carries no information.
+    """P1 evidence: a shipped deck where eps_F carries no information.
 
     ``input.solovev`` peaks at 0.125 Pa, so the pressure gradient is five
     orders of magnitude below the magnetic pressure gradient and the
@@ -540,7 +540,7 @@ def test_validation_polish_gain_matches_the_committed_record() -> None:
 
 
 def test_readme_states_the_certificate_ceiling_and_its_selection() -> None:
-    """31.2-R1 and 31.2-R6: the two claims the README must not make silently.
+    """P0/P1: the two claims the README must not make silently.
 
     eps_F may not appear without its bound, and a figure built from
     hand-picked cases may not be presented as general evidence.

@@ -256,7 +256,7 @@ research with the figure as its honest status.
 Owner: VMEX (`implicit.py`, `polish_driver.py`, `polish_implicit.py`, the
 public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
 
-1. **Stale claims, one PR.** Remove the withdrawn 26-fold number from
+1. **Stale claims, one PR — implemented locally; review pending.** Remove the withdrawn 26-fold number from
    `CHANGELOG.md`; remove or generate the three artifacts `performance.rst`
    cites; point the two benchmark records and three test docstrings at the
    P letters; extend `tools/check_docs_prose.py` to scan `.rst` pages and
@@ -614,3 +614,23 @@ session's task directory and those lanes are rerun in Phase 1's tiering PR.
 The office workstation was unreachable at the end of the day, so the JAX
 0.11.1 reproduction of #277's assertion (`~/vmex277/run277b.log`) is the
 first thing Phase 1 reads. No production code was changed.
+
+**2026-09-07, Phase 1 / P0.1.** Base `2a0d4356`, branch
+`fix/phase1-prose-gates`, worktree `/Users/rogeriojorge/local/vmex-phase1`.
+Removed the withdrawn changelog gain, replaced retired P0/P1 references,
+extended the prose gate to RST and root line caps, and added benchmark-path
+checks to the gate, fast manifest lane and local preflight. The office JSON
+and trace paths in `performance.rst` were generated-output examples, not
+missing measured evidence; they now use explicit temporary destinations.
+Published reference titles remain intact; code/math blocks are excluded from
+prose scanning while nonexistent prose citations fail. No numerical source or
+benchmark measurements changed. Local Python 3.11 / JAX 0.9.2: `python
+tools/preflight.py --static --docs` passed Ruff, mypy, prose/media, strict
+Sphinx and 73 guards (15.82 s); focused citation/performance tests passed
+33/33 (9.54 s); `python tools/test_manifest.py check` passed. No runtime or
+memory improvement is claimed. Raw log: `vmex-review-evidence-20260906/phase1-preflight.log`.
+Office recovery check found `~/vmex277/run277b.log` contains only “No module
+named pytest”; its Python also lacks pip and the copied directory has no git
+metadata. This is not a JAX numerical reproduction. Next: review/merge P0.1,
+then P0.3 test isolation/tiering; prepare an isolated pinned office environment
+for P0.2 rather than treating the incomplete saved run as evidence.
