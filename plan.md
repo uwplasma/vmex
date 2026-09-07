@@ -263,7 +263,7 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    numbers in `CHANGELOG.md`, and add a cited-path existence test for
    `benchmarks/` references. Add README ≤ 300 and CHANGELOG ≤ 200 line caps to
    the same gate.
-2. **JAX policy and #277.** Test the floor (0.9.2, the machines we own) and
+2. **JAX policy and #277 — assertion repair tested on both versions; CI/matrix pending.** Test the floor (0.9.2, the machines we own) and
    the head (0.11.x, CI); tolerances backed by observed accuracy; no
    cross-version bit claims. Bisect #277's assertion on the office box under
    `~/vmex_sweep/env-0.8.0` (JAX 0.11.1) with `--xla_cpu_use_xnnpack=false`
@@ -615,35 +615,35 @@ The office workstation was unreachable at the end of the day, so the JAX
 0.11.1 reproduction of #277's assertion (`~/vmex277/run277b.log`) is the
 first thing Phase 1 reads. No production code was changed.
 
-**2026-09-07, Phase 1 / P0.1.** Base `2a0d4356`, branch
-`fix/phase1-prose-gates`, worktree `/Users/rogeriojorge/local/vmex-phase1`.
-Removed the withdrawn changelog gain, replaced retired P0/P1 references,
-extended the prose gate to RST and root line caps, and added benchmark-path
-checks to the gate, fast manifest lane and local preflight. The office JSON
-and trace paths in `performance.rst` were generated-output examples, not
-missing measured evidence; they now use explicit temporary destinations.
-Published reference titles remain intact; code/math blocks are excluded from
-prose scanning while nonexistent prose citations fail. No numerical source or
-benchmark measurements changed. Local Python 3.11 / JAX 0.9.2: `python
-tools/preflight.py --static --docs` passed Ruff, mypy, prose/media, strict
-Sphinx and 73 guards (15.82 s); focused citation/performance tests passed
-33/33 (9.54 s); `python tools/test_manifest.py check` passed. No runtime or
-memory improvement is claimed. Raw log: `vmex-review-evidence-20260906/phase1-preflight.log`.
-Office recovery check found `~/vmex277/run277b.log` contains only “No module
-named pytest”; its Python also lacks pip and the copied directory has no git
-metadata. This is not a JAX numerical reproduction. Next: review/merge P0.1,
-then P0.3 test isolation/tiering; prepare an isolated pinned office environment
-for P0.2 rather than treating the incomplete saved run as evidence.
 
-**2026-09-07, Phase 1 / P0.3 isolation.** Based on P0.1 commit `417fb4fc`
-(PR #284), branch `fix/phase1-test-isolation`, worktree
-`/Users/rogeriojorge/local/vmex-test-isolation`. Four modules now use the
-existing restoring JIT fixture; removed their unscoped configuration writes.
-A subprocess regression checks restoration between real test modules. The
-unmodified parent fails the session-end restoration probe; the fix passes.
-CPU/JAX 0.9.2, cache disabled: the four complete PR module selections passed
-73 tests, 2 full tests deselected, in 396.88 s; manifest guards 9 passed in
-13.38 s; static preflight: 71 passed/3 unbuilt-HTML skips; RSS unmeasured. Logs: `vmex-review-evidence-20260906/jit-*.log`.
-No test moved to nightly and no tolerance changed; the 25-minute lane target
-remains unproved. Isolate this correction before measuring the tiering change.
-Next: finish P0.3 selector/tiering work and the office P0.2 reproduction.
+**2026-09-06, Phase 1 / P0.1–P0.3.** All-state PR inventory identifies #283
+as this plan's authority. #284 (`417fb4fc`, base main `2a0d4356`) implements
+P0.1: withdrawn-claim, RST prose, root line-cap and cited-path guards;
+73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284)
+restores JIT state in four test modules: 73 tests passed in 396.88 s and the
+new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 with user-authorized admin
+merge; branch bases were retained. Tiering, module
+splitting, parsing mocks and the 25-minute lane gate remain unfinished.
+
+**2026-09-06, #277 / P0.2.** Merged main's authoritative plan into the
+stationarity branch (`068b2cbc`, numerical polish source unchanged). The old
+office log contains only missing pytest, not a failed solve. An isolated
+Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20 environment on office reproduced
+neither the original assertion failure nor a tolerance problem at `db6092b7`:
+the tight MHD test passed unmodified in 333.88 s; with both XLA flags above
+disabled it passed in 313.34 s, reporting 17 iterations, scaled stationarity
+2.598e-9, initial reference 138.346 and residual scale 6.83505. Both physical
+acceptance and internal solver success were true. This is not a flag bisect
+or a diagnosis of CI run 34005068178. The repaired test checks the public
+finite stationarity norm against its reported tolerance and retains tangent,
+adjoint, custom-VJP, Boozer and Taylor checks; solver/derivative tolerances
+and the tight fixture are unchanged. Local JAX 0.9.2: 27 selected tests passed
+in 228.87 s. Command: cache disabled, CPU, pytest on the polish module with
+`-k 'collocation_polish_primal_and_derivatives or polish_stationarity or physics_accepted_polish_can_fail_derivative_stationarity'`.
+Office JAX 0.11.1: the same 27 tests passed in 365.96 s on `db6092b7`
+plus the identical test patch. Static preflight, strict Sphinx and 59 guards
+passed (guards: 12.12 s); final-head CI and required review remain pending.
+Raw logs: `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`
+outside git. RSS was not measured; these test times are not benchmark claims.
+Next: merge #277 after CI/review, then finish CI tiering/JAX matrix;
+P1 and E1 have not started, and the release hold remains.
