@@ -62,6 +62,7 @@ from vmex.core.strong_force import (
 )
 
 jax.config.update("jax_enable_x64", True)
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
