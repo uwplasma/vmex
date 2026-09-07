@@ -639,7 +639,7 @@ residual scale 6.83505). CI's failure remains unreproduced. The repaired selecti
 locally (JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
 `vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
 
-**2026-09-06, P0.3/P0.2 tiering.** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`,
+**2026-09-06, #286 / P0.3/P0.2 tiering (base #277).** Worktree `vmex-ci-tiers`, branch `fix/phase1-ci-tiers`,
 integrates #277/#284/#285 at `2ae2a716`; split and CI implementation at `0bfab61d`. GN retains its
 module; linear and homotopy checks move to two modules, sharing the existing fixtures. Real polish
 and free-boundary adjoint integrations are full-marked and scheduled explicitly; option
