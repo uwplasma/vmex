@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
-import jax
 import numpy as np
 import pytest
 
@@ -26,6 +25,8 @@ from vmex.core.scaling import (
     scale_wout,
 )
 from vmex.core.wout import _preset_array, read_wout, wout_from_state, write_wout
+
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
@@ -128,7 +129,6 @@ def test_mgrid_scaling_distinguishes_per_ampere_and_raw_tables():
 
 @pytest.fixture(scope="module")
 def finite_beta_similarity():
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA / "input.nfp2_QA_finite_beta")
     inp = dataclasses.replace(
         inp,
