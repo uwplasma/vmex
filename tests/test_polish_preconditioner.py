@@ -1,4 +1,4 @@
-"""High/low transfer and stored raw-block preconditioner tests."""
+"""Gauss-Newton, physical-chart and export contracts."""
 
 from __future__ import annotations
 

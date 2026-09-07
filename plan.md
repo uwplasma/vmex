@@ -648,16 +648,19 @@ physics tolerances are retained. All 1,962 original cases survive; collection is
 cases. Twelve manifest guards passed in 10.81 s; PR/nightly matrices pin Python 3.12/JAX
 0.9.2/0.11.1; PR physics/parity timeouts are 25 minutes. A timeout edit is not runtime proof.
 Campaign-class a1 routing and measured hosted limits remain open. Local PR selection: 253 passed, 22
-full cases deselected, 375.30 s; 76 guards passed in 18.00 s plus strict Sphinx/Ruff/mypy; all 64
-original polish bodies are unchanged. Full homotopy: 12 passed/385.24 s; full options: 41
+full cases deselected, 375.30 s; 77 final guards passed in 17.94 s plus strict Sphinx/Ruff/mypy; all
+64 original polish bodies are unchanged. Full homotopy: 12 passed/385.24 s; full options: 41
 passed/102.23 s. Office linear/MHD: 96 passed on each version (0.11.1: 406.44 s; 0.9.2: 577.27 s),
 same Python 3.12. The shape-rejection test then moved back to GN to reuse its fixture: final PR
-linear selection is 93 passed/7.21 s (2 MHD cases full), with all test bodies retained. Consolidated
-mirror: 57 passed in 331.74 s. Parent #284 misc took 27.7 min: remove its duplicate mirror suite and
-fold the output job into physics (one fewer job). Revised misc: 74 passed/273.04 s; its 11 skips are
-explicitly disabled live VMEC2000 tests. Full GN on office and full adjoints locally run with
-30-minute caps; the first asset assertion stopped before tests because reference-nc lacks NCSX.
-Corrected Nightly to ncsx-mgrid with a file assertion and manifest-linked guard; the full adjoint
-run then started. Logs: `vmex-phase1-ci-evidence`. The initial options run was interrupted for the
-scoped JIT fix; no peak RSS or performance ranking is claimed. Next: publish after remaining checks,
-then hosted CI/review and parent merges. P1/E1 and the release remain on hold.
+linear selection is 93 passed/7.21 s locally, 16.24/18.98 s on office head/floor (2 MHD cases full),
+with all test bodies retained. Consolidated mirror: 57 passed in 331.74 s. Parent #284 misc took
+27.7 min: remove its duplicate mirror suite and fold the output job into physics (one fewer job).
+Revised misc: 74 passed/273.04 s; its 11 skips are explicitly disabled live VMEC2000 tests. The
+interpreted GN run was stopped after 115 passes/1413.93 s to try scoped JIT; it is incomplete.
+Compiled GN passed 124/579.02 s on office `~/vmex-ci-final` (`32f01c0c`); the local JAX 0.9.2 run
+passed 124/349.79 s. Full adjoints passed 15/932.33 s with no skips; the first asset assertion
+stopped before tests because reference-nc lacks NCSX. Corrected Nightly to ncsx-mgrid with a file
+assertion and manifest-linked guard; the rerun passed. Logs: `vmex-phase1-ci-evidence`. The initial
+options run was interrupted for the scoped JIT fix; no peak RSS or performance ranking is claimed.
+Next: hosted CI/runtime and coverage gates, required review, then parent merges; retarget this
+branch before deleting #277’s branch. P1/E1 and the release remain on hold.

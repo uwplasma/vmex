@@ -130,6 +130,12 @@ jobs:
           cache: pip
       - name: Install tested numerical versions
         run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Add XLA compile headroom
+        run: |
+          sudo fallocate -l 12G /mnt/vmex-swap
+          sudo chmod 600 /mnt/vmex-swap
+          sudo mkswap /mnt/vmex-swap
+          sudo swapon /mnt/vmex-swap
       - name: Fetch the free-boundary reference fixture
         if: matrix.selector == 'full-free-boundary-adjoint'
         run: |
