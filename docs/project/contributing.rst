@@ -46,8 +46,8 @@ JAX compatibility and test tiers
 
 The stationarity contract is checked on Python 3.12 with JAX/JAXlib 0.9.2
 and 0.11.1, using identical float64 tolerances. These are tested numerical
-versions; the broader package dependency bounds do not certify every
-intermediate release. The PR matrix exercises eager and compiled linear
+versions for the core install; optional integrations can require newer JAX.
+The broader package dependency bounds do not certify every intermediate release. The PR matrix exercises eager and compiled linear
 certificates; Nightly runs the tight real-MHD derivative and rejected-root
 cases on both versions. Update the pair deliberately after reproducing failures,
 with environment and attained residuals recorded in ``plan.md``.

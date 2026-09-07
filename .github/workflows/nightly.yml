@@ -132,7 +132,9 @@ jobs:
         run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
       - name: Fetch the free-boundary reference fixture
         if: matrix.selector == 'full-free-boundary-adjoint'
-        run: python tools/fetch_assets.py --bundle reference-nc
+        run: |
+          python tools/fetch_assets.py --bundle ncsx-mgrid
+          test -f examples/data/mgrid_ncsx_c09r00_small.nc
       - name: Run retained nonlinear contracts
         env:
           RUN_FULL: "1"

@@ -195,6 +195,11 @@ def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
         assert lane in _invoked_lanes()
         assert f"selector: {lane}" in nightly
     assert 'RUN_FULL: "1"' in nightly
+    bundles = json.loads((ROOT / "assets/manifest.json").read_text())["bundles"]
+    ncsx = next(bundle["name"] for bundle in bundles
+                if "examples/data/mgrid_ncsx_c09r00_small.nc" in bundle["common_paths"])
+    assert f"tools/fetch_assets.py --bundle {ncsx}" in nightly
+    assert "test -f examples/data/mgrid_ncsx_c09r00_small.nc" in nightly
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     assert 'jax: ["0.9.2", "0.11.1"]' in ci
     assert "device, jax-compatibility, changed-coverage]" in ci

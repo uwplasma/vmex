@@ -366,25 +366,6 @@ def test_collocation_certification_error_retains_both_failure_gates():
     assert error.radial_refinement > error.radial_refinement_tolerance
 
 
-def test_implicit_polish_rejects_mismatched_inputs(small_strong_root):
-    chart = make_strong_structured_chart(small_strong_root)
-    good = PolishContext(
-        small_strong_root,
-        chart,
-        jnp.zeros((chart.size,)),
-        jnp.ones((chart.size,)),
-    )
-    bad = good._replace(correction=jnp.zeros((chart.size + 1,)))
-    with pytest.raises(ValueError, match="correction has shape"):
-        collocation_polish_tangent(bad, small_strong_root.native)
-    with pytest.raises(ValueError, match="correction has shape"):
-        collocation_polish_adjoint(bad, small_strong_root.native)
-    with pytest.raises(ValueError, match="native_tangent"):
-        collocation_polish_tangent(good, jnp.asarray(0.0))
-    with pytest.raises(ValueError, match="polished_cotangent"):
-        collocation_polish_adjoint(good, jnp.asarray(0.0))
-    with pytest.raises(ValueError, match="native must have"):
-        implicit_collocation_polished_state(jnp.asarray(0.0), good)
 
 
 @pytest.mark.full

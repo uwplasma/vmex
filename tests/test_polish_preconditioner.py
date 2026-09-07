@@ -45,11 +45,16 @@ from vmex.core.polish import (
 )
 from vmex.core.polish_driver import (
     PolishConfig,
+    PolishContext,
     _build_mode_block_preconditioner,
     _solve_low_inverse,
     polish_collocation_least_squares,
     polish_strong_root,
     polished_wout_ns,
+)
+from vmex.core.polish_implicit import (
+    collocation_polish_tangent, collocation_polish_adjoint,
+    implicit_collocation_polished_state,
 )
 from vmex.core.strong_force import (
     FORCE_ERROR_MEASURE_LABELS,
@@ -718,6 +723,28 @@ def test_physical_chart_adapters_and_validation(small_strong_root, monkeypatch):
     )
     with pytest.raises(ValueError, match="stellarator symmetry"):
         make_strong_structured_chart(asymmetric)
+
+
+def test_implicit_polish_rejects_mismatched_inputs(small_strong_root):
+    chart = make_strong_structured_chart(small_strong_root)
+    good = PolishContext(
+        small_strong_root,
+        chart,
+        jnp.zeros((chart.size,)),
+        jnp.ones((chart.size,)),
+    )
+    bad = good._replace(correction=jnp.zeros((chart.size + 1,)))
+    with pytest.raises(ValueError, match="correction has shape"):
+        collocation_polish_tangent(bad, small_strong_root.native)
+    with pytest.raises(ValueError, match="correction has shape"):
+        collocation_polish_adjoint(bad, small_strong_root.native)
+    with pytest.raises(ValueError, match="native_tangent"):
+        collocation_polish_tangent(good, jnp.asarray(0.0))
+    with pytest.raises(ValueError, match="polished_cotangent"):
+        collocation_polish_adjoint(good, jnp.asarray(0.0))
+    with pytest.raises(ValueError, match="native must have"):
+        implicit_collocation_polished_state(jnp.asarray(0.0), good)
+
 
 
 @pytest.mark.parametrize("route", ["legacy", "continuation", "continuation-final", "collocation"])
