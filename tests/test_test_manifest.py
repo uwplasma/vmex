@@ -16,6 +16,42 @@ import test_manifest  # noqa: E402
 import ci_scope  # noqa: E402
 
 
+def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
+    """Lane narrowing is an optimisation, so every doubt returns the full matrix."""
+    entries = [
+        {"lane": "a-free", "selector": "pr-parity-a1"},
+        {"lane": "c2", "selector": "pr-parity-c2"},
+        {"lane": "core", "selector": "pr-physics-core"},
+    ]
+    everything = ci_scope.select_lanes(["vmex/core/solver.py"], entries)
+    assert everything == entries, "package code must keep every lane"
+    for path in (".github/workflows/ci.yml", "tools/ci_scope.py", "pyproject.toml"):
+        assert ci_scope.select_lanes([path], entries) == entries, path
+    assert ci_scope.select_lanes(
+        ["vmex/core/solver.py", "tests/test_gammac.py"], entries
+    ) == entries, "a mixed change keeps every lane"
+
+    # A test module runs the lanes that own it, and nothing else.
+    lanes = ci_scope.needed_lanes(["tests/test_gammac.py"])
+    assert lanes and lanes < {entry["selector"] for entry in entries} | lanes
+    assert "pr-parity-c2" in lanes
+    assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
+
+    # Benchmarks and examples are attributed through the tests that name them.
+    assert ci_scope.needed_lanes(["benchmarks/e2_dense_reference.py"])
+    assert ci_scope.needed_lanes(["examples/optimization/QA_optimization.py"])
+
+    # A new benchmark nothing names still inherits the lanes of every test that
+    # imports the package, which is the safe direction to err in.
+    assert ci_scope.needed_lanes(["benchmarks/_brand_new_probe.py"]) == ci_scope.needed_lanes(
+        ["benchmarks/e2_dense_reference.py"]
+    )
+    # A module the manifest does not own gives no ownership to narrow by.
+    assert ci_scope.needed_lanes(["tests/test_not_in_the_manifest.py"]) is None
+    # Data files under a narrowable prefix need no numerical lane.
+    assert ci_scope.needed_lanes(["docs/_static/figures/figures.json"]) == set()
+
+
 def test_ci_scope_skips_only_documentation_and_rendered_media() -> None:
     assert ci_scope.classify(
         ["docs/howto/gpu.rst", "README.md", "docs/figure.webp"]
@@ -115,6 +151,12 @@ def _invoked_lanes() -> set[str]:
     for value in re.findall(r"^\s*(?:-\s*)?selector:\s*(.+?)\s*$", text, re.M):
         invoked.update(value.split())          # a matrix value may list several
     invoked |= set(re.findall(r"test_manifest\.py select ([a-z][A-Za-z0-9-]*)", text))
+    # The physics and parity matrices are computed per change, so their lanes
+    # are declared once as the JSON that selection filters. That declaration is
+    # the authority the narrowing reads, so it is the authority checked here.
+    for declaration in re.findall(r"^\s*ALL:\s*'(\[.*\])'\s*$", text, re.M):
+        for entry in json.loads(declaration):
+            invoked.update(str(entry.get("selector", "")).split())
     return invoked
 
 
@@ -229,11 +271,22 @@ def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> 
     assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
 
 
-def test_mirror_primary_suite_runs_once_in_physics() -> None:
+def _declared_lanes(job: str) -> set[str]:
+    """Selectors the ``changes`` job declares for one computed matrix."""
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
-    physics, parity = ci.split("  physics:", 1)[1].split("  parity:", 1)
-    assert "selector: pr-mirror-spline" in physics
+    block = ci.split(f"- id: {job}", 1)[1]
+    declaration = re.search(r"^\s*ALL:\s*'(\[.*\])'\s*$", block, re.M)
+    assert declaration, f"the {job} matrix declaration is missing"
+    return {selector
+            for entry in json.loads(declaration.group(1))
+            for selector in str(entry.get("selector", "")).split()}
+
+
+def test_mirror_primary_suite_runs_once_in_physics() -> None:
+    physics, parity = _declared_lanes("physics"), _declared_lanes("parity")
+    assert "pr-mirror-spline" in physics
     assert "pr-mirror-spline" not in parity
+    assert not physics & parity, "a lane declared in both matrices runs twice"
     # The complete primary selector includes the former separate output job.
     assert set(test_manifest.select("pr-physics-mirror-output")) <= set(
         test_manifest.select("pr-mirror-spline"))
