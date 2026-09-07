@@ -26,6 +26,8 @@ from vmex.core.run_options import (
     strip_vmex_json,
 )
 
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
@@ -246,6 +248,7 @@ def test_public_python_polish_defaults_are_explicitly_off():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.full
 def test_solve_file_runs_and_writes_wout(tmp_path):
     import vmex as vj
 
@@ -296,7 +299,7 @@ def test_unpolished_wout_stays_bit_identical_to_the_plain_state_write(tmp_path):
     assert written.read_bytes() == reference.read_bytes()
 
 
-def test_solve_file_rejects_polish_on_a_free_boundary_deck(tmp_path):
+def test_solve_file_rejects_polish_on_a_free_boundary_deck(tmp_path, monkeypatch):
     source = tmp_path / "input.freeb"
     # MGRID_FILE must name something: readin.f (and VmecInput) force
     # LFREEB = F when it is 'NONE', which would silently reroute this deck to
@@ -310,16 +313,20 @@ def test_solve_file_rejects_polish_on_a_free_boundary_deck(tmp_path):
 
     with pytest.raises(ValueError, match="fixed-boundary.*file"):
         vj.solve_file(source, write_wout=False)
-    # --no-polish equivalent: the Python keyword overrides the directive, so
-    # the gate no longer fires.  The deck then proceeds into the free-boundary
-    # ladder and fails there for its own reason (no usable mgrid), which is
-    # the point: the rejection above is the polish gate, not deck validation.
-    with pytest.raises(Exception) as info:
-        vj.solve_file(source, polish=False, write_wout=False,
-                      niter_array=np.array([3]))
-    assert "polishing requires" not in str(info.value)
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from vmex.core import multigrid
+
+    result = SimpleNamespace(polish_report=None)
+    driver = Mock(return_value=result)
+    monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", driver)
+    assert vj.solve_file(source, polish=False, write_wout=False) is result
+    driver.assert_called_once()
+    assert driver.call_args.args[0].lfreeb
 
 
+
+@pytest.mark.full
 def test_solve_file_polish_directive_activates_polishing(tmp_path):
     """One documented input runs the whole flow: directive -> polished wout.
 
@@ -357,3 +364,53 @@ def test_solve_file_polish_directive_activates_polishing(tmp_path):
     # really came from the file.
     plain = vj.solve_file(physics, outdir=tmp_path, polish_config=config)
     assert plain.polish_report is None
+
+
+@pytest.mark.parametrize("mode", ["AUTO", ".TRUE.", ".FALSE."])
+@pytest.mark.parametrize("override", [None, False])
+def test_solve_file_directives_reach_driver_once(tmp_path, monkeypatch, mode, override):
+    """Parsing and Python precedence need no nonlinear solve."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from vmex.core import multigrid
+
+    path = tmp_path / "input.directives"
+    path.write_text(f"!@VMEX POLISH = {mode}\n!@VMEX POLISH_TOL = 2e-5\n"
+                    + (DATA / "input.solovev").read_text())
+    result = SimpleNamespace(polish_report=None)
+    driver = Mock(return_value=result)
+    monkeypatch.setattr(multigrid, "solve_multigrid", driver)
+    assert multigrid.solve_file(path, polish=override, write_wout=False) is result
+    driver.assert_called_once()
+    expected = {"AUTO": "auto", ".TRUE.": True, ".FALSE.": False}[mode]
+    assert driver.call_args.kwargs["polish_force_balance"] == (
+        expected if override is None else override)
+    assert driver.call_args.kwargs["polish_config"].tolerance == 2e-5
+
+
+@pytest.mark.parametrize("policy,reason,warns", [
+    ("WARN", "nonlinear-failed", True),
+    ("WARN", "auto-declined-cost", False),
+    ("FALLBACK", "nonlinear-failed", False),
+])
+def test_solve_file_failed_polish_does_not_repeat_the_solve(tmp_path, monkeypatch, policy, reason, warns):
+    import warnings
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from vmex.core import multigrid
+
+    path = tmp_path / "input.failure"
+    path.write_text(f"!@VMEX POLISH = AUTO\n!@VMEX POLISH_FAIL = {policy}\n"
+                    + (DATA / "input.solovev").read_text())
+    result = SimpleNamespace(polish_report=SimpleNamespace(
+        converged=False, termination_reason=reason))
+    driver = Mock(return_value=result)
+    monkeypatch.setattr(multigrid, "solve_multigrid", driver)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert multigrid.solve_file(path, write_wout=False) is result
+    assert len(caught) == int(warns)
+    if warns:
+        assert "polishing failed" in str(caught[0].message)
+    driver.assert_called_once()
+    assert driver.call_args.kwargs["polish_config"].fail_policy == "return_unpolished"

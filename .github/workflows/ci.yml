@@ -123,7 +123,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -150,10 +150,7 @@ jobs:
             selector: pr-mirror-field
             parallel: ""
           - lane: mirror-spline
-            selector: pr-physics-mirror-spline
-            parallel: ""
-          - lane: mirror-output
-            selector: pr-physics-mirror-output
+            selector: pr-mirror-spline
             parallel: ""
     steps:
       - uses: actions/checkout@v7.0.1
@@ -199,41 +196,15 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    # The primary-lane partition is the whole pull-request suite; these
-    # jobs are the part no other job was running, and they define the CI
-    # attempt's wall clock, so the partition is rebalanced when a lane
-    # outgrows the others.  Lane c1 (then pr-parity-c1 + c3 + d) had grown
-    # to 44m36s -- double the next-longest job -- with almost all of the
-    # weight in the c3/d implicit-campaign modules (test_optimize.py alone
-    # carries ~31 minutes of call time), so those now run as their own
-    # job.  Lane a's 32m24s at -n 2 was the next ceiling; only the
-    # pr-parity-a1 selector carries the free-boundary modules whose
-    # concurrent solves exhaust the runner at -n 4 (killed mid-run at
-    # 32m10s, twice, on two different pull requests), so a1 keeps -n 2 by
-    # itself and a2+b run at -n 4.  The c3d lane then became the ceiling at
-    # 34 minutes green (43-44 under runner load, which kept tipping a
-    # 45-minute budget into a timeout-cancel), with two thirds of its call
-    # time in two modules: test_polish_preconditioner.py (~44 minutes of
-    # call time; every polish test builds a chart and certifies) and
-    # test_run_options.py (~16 minutes, mostly the polish directive).
-    # Those two ran as lane e, which dropped the longest parity lane to
-    # roughly 20 minutes.  The polish tests then grew again (#269's real
-    # Solov'ev correction at 705 s, #261's AUTO pricing and heartbeat tests
-    # run real polishes) and lane e reached 25 minutes on main and timed
-    # out at 55 on #261, so test_run_options.py (~20 minutes of call time,
-    # three polish-directive solves) is lane f on its own.  The budget stays at 55: it is a cap, not a reservation, and
-    # the 2026-08-31 timeout plague is not worth re-running to save a
-    # number nobody reads.
-    timeout-minutes: 55
+    # Real polish and free-boundary adjoint solves run in Nightly. Keep the
+    # PR partition bounded; a timeout is a failure, never a passing benchmark.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
           - lane: a-free
             selector: pr-parity-a1
-            # -n 2, not 4: this selector carries the free-boundary modules
-            # (test_freeboundary_implicit alone has two ~8-minute tests),
-            # and four concurrent free-boundary solves exhaust the runner.
             parallel: "-n 2"
           - lane: a-core
             selector: pr-parity-a2 pr-parity-b
@@ -254,7 +225,7 @@ jobs:
             selector: pr-parity-c2
             parallel: "-n 4"
           - lane: misc
-            selector: pr-examples pr-external pr-full-only pr-gradient pr-mirror-spline
+            selector: pr-examples pr-external pr-full-only pr-gradient
             parallel: "-n 4"
     steps:
       - uses: actions/checkout@v7.0.1
@@ -329,6 +300,32 @@ jobs:
           path: coverage.device
           retention-days: 3
 
+  jax-compatibility:
+    name: Stationarity contract (JAX ${{ matrix.jax }})
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        jax: ["0.9.2", "0.11.1"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tested numerical versions
+        run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Record environment and exercise eager and compiled certificates
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          python -m pip freeze
+          pytest -q -m "not full and not weekly" tests/test_polish_linear.py --durations=10
+
   changed-coverage:
     name: Changed executable lines (>= 95%)
     runs-on: ubuntu-latest
@@ -385,7 +382,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
-    needs: [changes, quality, fast, physics, parity, device, changed-coverage]
+    needs: [changes, quality, fast, physics, parity, device, jax-compatibility, changed-coverage]
     steps:
       - name: Require every review gate
         env:

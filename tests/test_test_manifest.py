@@ -112,7 +112,7 @@ def _invoked_lanes() -> set[str]:
     text = "\n".join(
         path.read_text() for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")))
     invoked: set[str] = set()
-    for value in re.findall(r"^\s*selector:\s*(.+?)\s*$", text, re.M):
+    for value in re.findall(r"^\s*(?:-\s*)?selector:\s*(.+?)\s*$", text, re.M):
         invoked.update(value.split())          # a matrix value may list several
     invoked |= set(re.findall(r"test_manifest\.py select ([a-z][A-Za-z0-9-]*)", text))
     return invoked
@@ -185,3 +185,55 @@ def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "3 passed" in result.stdout
+
+
+def test_deferred_nonlinear_contracts_have_scheduled_jobs() -> None:
+    nightly = (ROOT / ".github/workflows/nightly.yml").read_text()
+    for lane in ("full-polish-gn", "full-polish-linear", "full-polish-homotopy",
+                 "full-run-options", "full-free-boundary-adjoint"):
+        assert test_manifest.select(lane)
+        assert lane in _invoked_lanes()
+        assert f"selector: {lane}" in nightly
+    assert 'RUN_FULL: "1"' in nightly
+    bundles = json.loads((ROOT / "assets/manifest.json").read_text())["bundles"]
+    ncsx = next(bundle["name"] for bundle in bundles
+                if "examples/data/mgrid_ncsx_c09r00_small.nc" in bundle["common_paths"])
+    assert f"tools/fetch_assets.py --bundle {ncsx}" in nightly
+    assert "test -f examples/data/mgrid_ncsx_c09r00_small.nc" in nightly
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert 'jax: ["0.9.2", "0.11.1"]' in ci
+    assert "device, jax-compatibility, changed-coverage]" in ci
+
+
+def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> None:
+    env = os.environ.copy()
+    env.pop("RUN_FULL", None)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", "full",
+         "tests/test_polish_preconditioner.py", "tests/test_polish_linear.py",
+         "tests/test_polish_homotopy.py", "tests/test_run_options.py",
+         "tests/test_freeboundary_implicit.py"],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    nodes = {line for line in result.stdout.splitlines() if "::" in line}
+    for node in (
+        "tests/test_polish_linear.py::test_collocation_polish_primal_and_derivatives",
+        "tests/test_polish_linear.py::test_physics_accepted_polish_can_fail_derivative_stationarity",
+        "tests/test_polish_preconditioner.py::test_auto_declines_a_solve_it_priced_above_its_budget",
+        "tests/test_polish_preconditioner.py::test_public_solver_auto_corrects_a_lift_that_fails_quadrature",
+        "tests/test_run_options.py::test_solve_file_polish_directive_activates_polishing",
+        "tests/test_freeboundary_implicit.py::test_free_boundary_current_gradient_matches_resolve_finite_difference",
+    ):
+        assert node in nodes
+    assert not any("::test_polish_linear_true_certificate" in node for node in nodes)
+    assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
+
+
+def test_mirror_primary_suite_runs_once_in_physics() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    physics, parity = ci.split("  physics:", 1)[1].split("  parity:", 1)
+    assert "selector: pr-mirror-spline" in physics
+    assert "pr-mirror-spline" not in parity
+    # The complete primary selector includes the former separate output job.
+    assert set(test_manifest.select("pr-physics-mirror-output")) <= set(
+        test_manifest.select("pr-mirror-spline"))

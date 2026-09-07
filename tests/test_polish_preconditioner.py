@@ -1,4 +1,4 @@
-"""High/low transfer and stored raw-block preconditioner tests."""
+"""Gauss-Newton, physical-chart and export contracts."""
 
 from __future__ import annotations
 
@@ -15,16 +15,12 @@ from vmex.core import implicit
 from vmex.core import solver
 from vmex.core.errors import (
     StrongForceCertificationError,
-    StrongForceContinuationError,
-    StrongForceLinearSolveError,
 )
 from vmex.core.input import VmecInput
-from vmex.core.omnigenity import boozer_spectrum_high_order
 from vmex.core.polish import (
     HighOrderCorrection,
     PreconditionerRefreshPolicy,
     PreconditionerSnapshot,
-    apply_high_order_correction,
     build_low_order_preconditioner,
     build_strong_physical_block_preconditioner,
     build_strong_mode_block_preconditioner,
@@ -50,32 +46,14 @@ from vmex.core.polish import (
 from vmex.core.polish_driver import (
     PolishConfig,
     PolishContext,
-    _IdentityPreconditioner,
-    _arclength_to_target,
-    _bordered_preconditioner,
-    _branch_tangent,
     _build_mode_block_preconditioner,
-    _continuation_precondition,
-    _low_inverse,
-    _normalized_low_residual_norm,
     _solve_low_inverse,
-    _ptc_config,
-    _residual_evaluations,
-    _supports_keyword,
     polish_collocation_least_squares,
     polish_strong_root,
     polished_wout_ns,
 )
 from vmex.core.polish_implicit import (
-    PolishLinearConfig,
-    PolishLinearReport,
-    _checked_solution,
-    _linear_report,
-    _solve_linear,
-    _collocation_stationarity,
-    _tree_norm as _implicit_tree_norm,
-    collocation_polish_adjoint,
-    collocation_polish_tangent,
+    collocation_polish_tangent, collocation_polish_adjoint,
     implicit_collocation_polished_state,
 )
 from vmex.core.strong_force import (
@@ -84,513 +62,9 @@ from vmex.core.strong_force import (
 )
 
 jax.config.update("jax_enable_x64", True)
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
-
-
-@pytest.mark.parametrize(
-    ("updates", "message"),
-    [
-        ({"rtol": 0.0}, "rtol"),
-        ({"atol": -1.0}, "atol"),
-        ({"restart": 0}, "restart"),
-        ({"max_restarts": 0}, "max_restarts"),
-        ({"fail_policy": "ignore"}, "fail_policy"),
-        ({"stationarity_rtol": 0.0}, "stationarity_rtol"),
-        ({"stationarity_rtol": np.inf}, "stationarity_rtol"),
-        ({"stationarity_atol": -1.0}, "stationarity_atol"),
-        ({"stationarity_atol": np.nan}, "stationarity_atol"),
-    ],
-)
-def test_polish_linear_config_validation(updates, message):
-    with pytest.raises(ValueError, match=message):
-        PolishLinearConfig(**updates)
-
-
-def test_polish_linear_failure_policy_is_explicit():
-    value = jnp.ones((2,))
-    report = PolishLinearReport(
-        residual_norm=jnp.asarray(2.0),
-        tolerance=jnp.asarray(1.0),
-        iterations=jnp.asarray(3),
-        converged=jnp.asarray(False),
-    )
-    with pytest.raises(StrongForceLinearSolveError, match="did not converge"):
-        _checked_solution(value, report, PolishLinearConfig(), "test")
-    result = _checked_solution(
-        value,
-        report,
-        PolishLinearConfig(fail_policy="nan"),
-        "test",
-    )
-    assert np.isnan(result).all()
-    assert _implicit_tree_norm((jnp.asarray([3.0, 4.0]),)) == pytest.approx(5.0)
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-@pytest.mark.parametrize(
-    ("rhs", "value", "applied", "flag", "accepted"),
-    [
-        (1.0, 0.0, 0.0, True, False),
-        (1.0, 0.0, 0.0, False, False),
-        (1.0, 1.0, 1.0, False, True),
-        (1.0, np.nan, 1.0, True, False),
-        (1.0, np.inf, 1.0, True, False),
-        (np.nan, 1.0, 1.0, True, False),
-        (np.inf, 1.0, 1.0, True, False),
-        (1.0, 1.0, np.nan, True, False),
-        (1.0, 1.0, np.inf, True, False),
-        (1.0e200, 1.0e200, 1.0e200, True, False),
-        (1.0, 1.0e200, 1.0e200, True, False),
-        (0.0, 0.0, 0.0, False, True),
-        (0.0, 1.0e-12, 1.0e-12, False, True),
-        (0.0, 1.0e-9, 1.0e-9, True, False),
-    ],
-)
-def test_polish_linear_true_certificate(compiled, rhs, value, applied, flag, accepted):
-    def report_for(rhs, value, applied):
-        return _linear_report(
-            lambda _: applied,
-            rhs,
-            SimpleNamespace(x=value, converged=flag, iterations=jnp.asarray(30)),
-            PolishLinearConfig(),
-        )
-
-    with jax.disable_jit(False):
-        report = (jax.jit(report_for) if compiled else report_for)(
-            *[jnp.asarray([item, item]) for item in (rhs, value, applied)]
-        )
-    assert bool(report.converged) == accepted
-    assert int(report.iterations) == 30
-
-
-@pytest.mark.parametrize("policy", ["raise", "nan"])
-def test_polish_linear_compiled_failure_returns_nan_and_status(policy):
-    config = PolishLinearConfig(fail_policy=policy)
-
-    def checked(value):
-        report = _linear_report(
-            lambda x: x, jnp.ones(1),
-            SimpleNamespace(x=value, converged=True, iterations=jnp.asarray(1)),
-            config,
-        )
-        return _checked_solution(value, report, config, "tangent"), report
-
-    with jax.disable_jit(False):
-        value, report = jax.jit(checked)(jnp.zeros(1))
-    assert not bool(report.converged)
-    assert bool(jnp.all(jnp.isnan(value)))
-
-
-@pytest.mark.parametrize("transpose", [False, True])
-@pytest.mark.parametrize("compiled", [False, True])
-def test_polish_linear_krylov_true_residual(transpose, compiled):
-    matrix = jnp.asarray([[4.0, 1.0], [-2.0, 3.0]])
-    if transpose:
-        matrix = matrix.T
-    rhs = jnp.asarray([2.0, -1.0])
-
-    def solve(rhs):
-        return _solve_linear(
-            lambda x: matrix @ x, rhs, lambda x: x / 4.0,
-            PolishLinearConfig(), "adjoint" if transpose else "tangent",
-        )
-
-    with jax.disable_jit(False):
-        value, report = (jax.jit(solve) if compiled else solve)(rhs)
-    assert bool(report.converged)
-    np.testing.assert_allclose(value, np.linalg.solve(matrix, rhs), atol=1.0e-11)
-    assert float(jnp.linalg.norm(rhs - matrix @ value)) <= float(report.tolerance)
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-def test_polish_linear_iteration_exhaustion(compiled):
-    matrix = jnp.asarray([[4.0, 1.0], [-2.0, 3.0]])
-    rhs = jnp.asarray([2.0, -1.0])
-
-    def solve(rhs):
-        return _solve_linear(
-            lambda x: matrix @ x, rhs, lambda x: x,
-            PolishLinearConfig(restart=1, max_restarts=1, fail_policy="nan"),
-            "tangent",
-        )
-
-    with jax.disable_jit(False):
-        value, report = (jax.jit(solve) if compiled else solve)(rhs)
-    assert not bool(report.converged)
-    assert float(report.residual_norm) > float(report.tolerance)
-    assert bool(jnp.all(jnp.isnan(value)))
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-def test_polish_vjp_uses_primal_native_input(monkeypatch, compiled):
-    """An analytic stationary root detects reuse of a stale native parameter."""
-    from vmex.core import polish_implicit as pi
-
-    @dataclasses.dataclass(frozen=True, eq=False)
-    class Runtime:
-        native: jax.Array
-
-    # g(c,q)=c-q^2=0, output=q+c, hence d(output)/dq=1+2q.
-    # Keep the actual adjoint/Krylov/custom-VJP chain; replace only the physics.
-    runtime = Runtime(jnp.asarray([1.0]))
-    context = PolishContext(runtime, SimpleNamespace(size=1), jnp.ones(1), jnp.ones(1))
-    monkeypatch.setattr(pi, "_collocation_stationarity", lambda c, q, runtime, chart: c - q*q)
-    monkeypatch.setattr(pi, "_collocation_corrected_state", lambda q, c, runtime, chart: q + c)
-
-    def objective(q):
-        stationary = context._replace(correction=jax.lax.stop_gradient(q*q))
-        return jnp.sum(implicit_collocation_polished_state(q, stationary))
-
-    with jax.disable_jit(False):
-        derivative = jax.grad(objective)
-        if compiled:
-            derivative = jax.jit(derivative)
-        # One compiled function must handle changed native data correctly.
-        for q in (1.0, 2.0, -0.5):
-            np.testing.assert_allclose(
-                derivative(jnp.asarray([q])), [1.0 + 2.0*q], atol=1.0e-11)
-
-
-@pytest.fixture
-def analytic_stationarity_context(monkeypatch):
-    from vmex.core import polish_implicit as pi
-
-    @dataclasses.dataclass(frozen=True, eq=False)
-    class Runtime:
-        native: jax.Array
-
-    # r=[c^2-q,c] has a nonzero-residual stationary root c=sqrt(q-1/2).
-    # Its exact Hessian is 4q-2, whereas the GN approximation is 4q-1.
-    monkeypatch.setattr(pi, "strong_collocation_residual_at_native",
-                        lambda c, q, runtime, chart: jnp.concatenate((c*c-q, c)))
-    monkeypatch.setattr(pi, "_collocation_corrected_state", lambda q, c, runtime, chart: q+c)
-    return PolishContext(Runtime(jnp.asarray([1.5])), SimpleNamespace(size=1),
-                         jnp.ones(1), jnp.asarray([3.0]), 2.0, 1.0)
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-def test_polish_stationary_nonzero_residual_derivatives(analytic_stationarity_context, compiled):
-    context = analytic_stationarity_context
-
-    def responses(q):
-        root = jnp.sqrt(q-0.5)
-        current = context._replace(
-            runtime=dataclasses.replace(context.runtime, native=q), correction=root)
-        tangent = collocation_polish_tangent(current, jnp.ones_like(q))
-        adjoint = collocation_polish_adjoint(current, jnp.ones_like(q))
-        custom = jax.grad(lambda native: jnp.sum(implicit_collocation_polished_state(
-            native, context._replace(correction=root))))(q)
-        return tangent, adjoint, custom
-
-    with jax.disable_jit(False):
-        evaluate = jax.jit(responses) if compiled else responses
-        for q in (1.5, 4.5):
-            tangent, adjoint, custom = evaluate(jnp.asarray([q]))
-            expected = 1.0 + 0.5/np.sqrt(q-0.5)
-            for result in (tangent, adjoint):
-                assert bool(result.report.converged)
-                assert bool(result.report.stationarity_converged)
-                assert bool(result.report.linear_converged)
-                assert float(result.report.stationarity_norm) <= float(result.report.stationarity_tolerance)
-            for actual in (tangent.native_tangent, adjoint.native_cotangent, custom):
-                np.testing.assert_allclose(actual, expected, atol=1.0e-10)
-
-
-@pytest.mark.parametrize("mode", ["tangent", "adjoint", "vjp"])
-@pytest.mark.parametrize("compiled", [False, True])
-@pytest.mark.parametrize("policy", ["raise", "nan"])
-def test_polish_nonstationary_derivative_failure(analytic_stationarity_context, mode, compiled, policy):
-    context = analytic_stationarity_context
-    config = PolishLinearConfig(fail_policy=policy)
-
-    def response(correction):
-        current = context._replace(correction=correction)
-        if mode == "vjp":
-            return jax.grad(lambda native: jnp.sum(implicit_collocation_polished_state(
-                native, current, config)))(current.runtime.native)
-        function = collocation_polish_tangent if mode == "tangent" else collocation_polish_adjoint
-        result = function(current, jnp.ones(1), config=config)
-        return result[0], result.report
-
-    with jax.disable_jit(False):
-        evaluate = jax.jit(response) if compiled else response
-        if not compiled and policy == "raise":
-            with pytest.raises(StrongForceCertificationError) as failure:
-                evaluate(jnp.asarray([1.1]))
-            assert failure.value.stationarity_norm == pytest.approx(0.3465)
-            assert failure.value.stationarity_norm > failure.value.stationarity_tolerance
-        else:
-            result = evaluate(jnp.asarray([1.1]))
-            value = result if mode == "vjp" else result[0]
-            assert bool(jnp.all(jnp.isnan(value)))
-            if mode != "vjp":
-                report = result[1]
-                assert not bool(report.converged)
-                assert not bool(report.stationarity_converged)
-                assert not bool(report.linear_converged)
-                assert int(report.iterations) == 0
-                assert float(report.stationarity_norm) == pytest.approx(0.3465)
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [("residual_scale", v) for v in (0.0, -1.0, np.nan, np.inf)]
-    + [("stationarity_reference", v) for v in (-1.0, np.nan, np.inf)]
-    + [("variable_scale", jnp.asarray([v])) for v in (0.0, -1.0, np.nan, np.inf)]
-    + [("correction", jnp.asarray([np.nan]))],
-)
-def test_polish_stationarity_rejects_invalid_scaling(analytic_stationarity_context, compiled, field, value):
-    from vmex.core.polish_implicit import _stationarity_certificate
-
-    context = analytic_stationarity_context._replace(**{field: value})
-    certificate = lambda g: _stationarity_certificate(g, context, PolishLinearConfig())  # noqa: E731
-    with jax.disable_jit(False):
-        result = (jax.jit(certificate) if compiled else certificate)(jnp.zeros(1))
-    assert not bool(result[2])
-
-
-def test_polish_stationarity_scaling_and_shapes(analytic_stationarity_context):
-    from vmex.core.polish_implicit import _stationarity_certificate
-
-    context = analytic_stationarity_context._replace(variable_scale=jnp.asarray([2.0]), residual_scale=4.0)
-    config = PolishLinearConfig(stationarity_atol=1.0)
-    norm, tolerance, valid = _stationarity_certificate(jnp.asarray([8.0]), context, config)
-    assert float(norm) == 1.0
-    assert float(tolerance) == 1.0
-    assert bool(valid)
-    assert not bool(_stationarity_certificate(jnp.asarray([8.001]), context, config)[2])
-    for gradient in (jnp.asarray([np.nan]), jnp.asarray([np.inf])):
-        assert not bool(_stationarity_certificate(gradient, context, config)[2])
-    with pytest.raises(ValueError, match="scalars"):
-        _stationarity_certificate(jnp.ones(1), context._replace(residual_scale=jnp.ones(1)), config)
-    with pytest.raises(ValueError, match="shape"):
-        _stationarity_certificate(jnp.ones(1), context._replace(variable_scale=jnp.ones(2)), config)
-
-
-@pytest.mark.parametrize("compiled", [False, True])
-@pytest.mark.parametrize("policy", ["raise", "nan"])
-def test_stationary_polish_reports_a_failed_linear_solve(compiled, policy):
-    from vmex.core.polish_implicit import _solve_stationary_linear
-
-    matrix = jnp.asarray([[4.0, 1.0], [-2.0, 3.0]])
-    config = PolishLinearConfig(restart=1, max_restarts=1, fail_policy=policy)
-
-    def solve(rhs):
-        return _solve_stationary_linear(
-            lambda x: matrix @ x, rhs, lambda x: x, config, "tangent",
-            (jnp.asarray(0.0), jnp.asarray(1.0e-8), jnp.asarray(True)))
-
-    with jax.disable_jit(False):
-        evaluate = jax.jit(solve) if compiled else solve
-        if not compiled and policy == "raise":
-            with pytest.raises(StrongForceLinearSolveError):
-                evaluate(jnp.asarray([2.0, -1.0]))
-        else:
-            value, report = evaluate(jnp.asarray([2.0, -1.0]))
-            assert bool(report.stationarity_converged)
-            assert not bool(report.linear_converged)
-            assert not bool(report.converged)
-            assert int(report.iterations) > 0
-            assert bool(jnp.all(jnp.isnan(value)))
-
-
-def test_collocation_certification_error_retains_both_failure_gates():
-    error = StrongForceCertificationError(
-        "not certified",
-        solver_converged=True,
-        normalized_l2=0.2,
-        tolerance=0.1,
-        radial_refinement=0.03,
-        radial_refinement_tolerance=0.01,
-    )
-
-    assert error.solver_converged
-    assert error.normalized_l2 > error.tolerance
-    assert error.radial_refinement > error.radial_refinement_tolerance
-
-
-def test_solvax_continuation_api_compatibility_helpers():
-    def legacy_preconditioner(state, rhs, dtau):
-        del state, dtau
-        return rhs
-
-    def parameterized_preconditioner(state, rhs, dtau, parameter):
-        del state, dtau, parameter
-        return rhs
-
-    assert not _supports_keyword(legacy_preconditioner, "parameter")
-    assert _supports_keyword(parameterized_preconditioner, "parameter")
-    np.testing.assert_array_equal(
-        legacy_preconditioner(None, jnp.ones((2,)), None), jnp.ones((2,))
-    )
-    np.testing.assert_array_equal(
-        parameterized_preconditioner(None, jnp.ones((2,)), None, None),
-        jnp.ones((2,)),
-    )
-    assert _residual_evaluations(
-        SimpleNamespace(nonlinear_steps=3, residual_evaluations=9)
-    ) == 9
-    assert _residual_evaluations(SimpleNamespace(nonlinear_steps=3)) == 4
-    assert _residual_evaluations(SimpleNamespace(steps=2)) == 3
-    assert not _supports_keyword(1, "parameter")
-
-
-def test_parameterized_continuation_preconditioner_switches_at_half(monkeypatch):
-    rhs = jnp.asarray([1.0, -2.0])
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._low_inverse", lambda value, runtime: 2.0 * value
-    )
-    block = SimpleNamespace(apply=lambda value, alpha, dtau: 3.0 * value)
-    np.testing.assert_array_equal(
-        _continuation_precondition(rhs, 0.25, 1.0, SimpleNamespace(), block),
-        2.0 * rhs,
-    )
-    np.testing.assert_array_equal(
-        _continuation_precondition(rhs, 0.75, 1.0, SimpleNamespace(), block),
-        3.0 * rhs,
-    )
-    np.testing.assert_array_equal(
-        _continuation_precondition(
-            rhs, 0.25, 1.0, SimpleNamespace(), block, SimpleNamespace()
-        ),
-        3.0 * rhs,
-    )
-    identity = _IdentityPreconditioner()
-    np.testing.assert_array_equal(identity.apply(rhs), rhs)
-    np.testing.assert_array_equal(
-        _continuation_precondition(
-            rhs,
-            0.25,
-            1.0,
-            SimpleNamespace(),
-            identity,
-        ),
-        rhs,
-    )
-
-
-def test_arclength_crossing_runs_target_correction_and_counts_work(monkeypatch):
-    zero = jnp.zeros((2,))
-    target_vector = jnp.asarray([0.25, -0.5])
-
-    def corrector(
-        residual,
-        initial,
-        *,
-        tangent,
-        predictor,
-        config,
-        admissible,
-        parameterized_precond,
-    ):
-        del residual, initial, config
-        assert bool(admissible(*predictor))
-        np.testing.assert_array_equal(
-            parameterized_precond(predictor, predictor, 1.0, tangent, predictor)[0],
-            predictor[0],
-        )
-        return SimpleNamespace(
-            x=predictor,
-            steps=2,
-            linear_iterations=3,
-            residual_evaluations=4,
-            converged=True,
-            linear_converged=True,
-        )
-
-    def target(residual, initial, *, precond, admissible, config):
-        del residual, initial, config
-        assert bool(admissible(target_vector))
-        np.testing.assert_array_equal(precond(target_vector, target_vector, 1.0), target_vector)
-        return SimpleNamespace(
-            x=target_vector,
-            steps=5,
-            linear_iterations=6,
-            residual_evaluations=7,
-            converged=True,
-            linear_converged=True,
-        )
-
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._solvax_continuation_api",
-        lambda: (None, None, None, corrector, target),
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._ptc_config", lambda config, **kwargs: object()
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._branch_tangent",
-        lambda *args, **kwargs: (jnp.zeros_like(zero), jnp.asarray(1.0)),
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._apply_bordered_preconditioner",
-        lambda state, rhs, dtau, tangent, runtime, block, chart=None: rhs,
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._low_inverse", lambda rhs, runtime: rhs
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver.strong_root_residual",
-        lambda vector, runtime, alpha: vector + alpha,
-    )
-    result = _arclength_to_target(
-        zero,
-        0.95,
-        SimpleNamespace(layout=SimpleNamespace(size=2), operator_balance=1.0),
-        PolishConfig(max_arclength_steps=1, arclength_step=0.1),
-        lambda vector, alpha: jnp.all(jnp.isfinite(vector)) & jnp.isfinite(alpha),
-        None,
-        None,
-    )
-    np.testing.assert_array_equal(result[0], target_vector)
-    assert result[1:] == (1.0, 1, 7, 9, 11)
-
-
-def test_bordered_tangent_uses_previous_orientation(monkeypatch):
-    zero = jnp.zeros((2,))
-    previous = (jnp.asarray([-1.0, -1.0]), jnp.asarray(-1.0))
-
-    def fake_gmres(operator, rhs, *, precond, **kwargs):
-        del kwargs
-        physical, normalization = operator(rhs)
-        assert physical.shape == zero.shape
-        assert np.isfinite(float(normalization))
-        for actual, expected in zip(
-            jax.tree.leaves(precond(rhs)), jax.tree.leaves(rhs), strict=True
-        ):
-            np.testing.assert_array_equal(actual, expected)
-        return SimpleNamespace(
-            x=(jnp.asarray([0.5, 0.25]), jnp.asarray(0.5)),
-            converged=True,
-            residual_norm=jnp.asarray(0.0),
-            iterations=1,
-        )
-
-    monkeypatch.setattr("vmex.core.polish_driver.gmres", fake_gmres)
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._bordered_preconditioner",
-        lambda *args, **kwargs: lambda state, rhs, dtau: rhs,
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver.strong_root_residual",
-        lambda vector, runtime, alpha: vector + alpha * jnp.ones_like(vector),
-    )
-    tangent = _branch_tangent(
-        zero,
-        0.5,
-        SimpleNamespace(),
-        PolishConfig(),
-        previous,
-        None,
-    )
-    np.testing.assert_allclose(
-        jnp.vdot(tangent[0], tangent[0]).real + tangent[1] ** 2,
-        1.0,
-        rtol=2.0e-13,
-    )
-    assert float(jnp.vdot(tangent[0], previous[0]) + tangent[1] * previous[1]) > 0.0
 
 
 def _tree_dot(left, right):
@@ -876,87 +350,6 @@ def test_factor_refresh_policy_reports_every_trigger():
 def test_factor_refresh_policy_rejects_invalid_thresholds(field, value, message):
     with pytest.raises(ValueError, match=message):
         PreconditionerRefreshPolicy(**{field: value})
-
-
-def test_square_strong_root_endpoint_jvp_boundary_and_rank(small_strong_root):
-    runtime = small_strong_root
-    zero = jnp.zeros((runtime.layout.size,), dtype=jnp.float64)
-    radial_matrix = runtime.native.radial_basis.basis_matrix(runtime.radial_nodes**2)
-    assert runtime.radial_nodes.size > runtime.native.radial_basis.size
-    assert runtime.theta.size >= 4 * int(np.max(np.abs(runtime.native.m))) + 5
-    assert runtime.zeta.size == 1
-    for mode, mode_m in enumerate(np.asarray(runtime.native.m)):
-        regularized_matrix = (
-            runtime.radial_nodes[:, None] ** abs(int(mode_m)) * radial_matrix
-        )
-        np.testing.assert_allclose(
-            runtime.radial_fit[mode] @ regularized_matrix,
-            np.eye(runtime.native.radial_basis.size),
-            rtol=5.0e-10,
-            atol=5.0e-10,
-        )
-    low_endpoint = strong_root_residual(zero, runtime, 0.0)
-    strong_endpoint = strong_root_residual(zero, runtime, 1.0)
-    # The alpha = 0 endpoint is legacy_residual(x0) - legacy_defect: two
-    # evaluations of one nonlinear function in two separately compiled
-    # programs.  XLA does not promise bit-identical fusion across programs or
-    # platforms, so the cancellation bottoms out at round-off (measured
-    # 2.8e-14 on the Linux CI runner, exact zero on arm64).  The bound is the
-    # cancellation floor of the row-scaled O(1) residual, not a physics
-    # tolerance.
-    np.testing.assert_allclose(low_endpoint, 0.0, atol=1.0e-12)
-    assert strong_endpoint.shape == zero.shape
-    assert np.all(np.isfinite(np.asarray(strong_endpoint)))
-    # The initial force RMS is divided by the measured low-inverse stiffness.
-    np.testing.assert_allclose(
-        jnp.linalg.norm(strong_endpoint),
-        np.sqrt(runtime.layout.size) / runtime.operator_balance,
-        rtol=3.0e-13,
-    )
-    assert float(runtime.operator_balance) >= 1.0
-    assert runtime.coordinate_scale.shape == zero.shape
-    assert runtime.equation_scale.shape == zero.shape
-    assert np.all(np.asarray(runtime.coordinate_scale) > 0.0)
-    assert np.all(np.asarray(runtime.equation_scale) > 0.0)
-    assert runtime.strong_block_sign.shape == (3,)
-    np.testing.assert_array_equal(jnp.abs(runtime.strong_block_sign), 1.0)
-
-    probe = jnp.linspace(-0.01, 0.015, runtime.layout.size)
-    low_probe = strong_root_residual(probe, runtime, 0.0)
-    strong_probe = strong_root_residual(probe, runtime, 1.0)
-    alpha = 0.37
-    np.testing.assert_allclose(
-        strong_root_residual(probe, runtime, alpha),
-        low_probe + alpha * (strong_probe - low_probe),
-        rtol=2.0e-13,
-        atol=2.0e-13,
-    )
-
-    direction = jnp.linspace(-0.2, 0.3, runtime.layout.size)
-    _, tangent = jax.jvp(
-        lambda value: strong_root_residual(value, runtime, 1.0),
-        (zero,),
-        (direction,),
-    )
-    step = 2.0e-5
-    finite_difference = (
-        strong_root_residual(step * direction, runtime, 1.0)
-        - strong_root_residual(-step * direction, runtime, 1.0)
-    ) / (2.0 * step)
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2.0e-6, atol=2.0e-7)
-
-    correction = runtime.layout.unpack(0.01 * direction)
-    corrected = apply_high_order_correction(runtime.native, correction)
-    for name in ("R_cos", "R_sin", "Z_cos", "Z_sin"):
-        np.testing.assert_array_equal(
-            np.asarray(getattr(corrected, name)[:, -1]),
-            np.asarray(getattr(runtime.native, name)[:, -1]),
-        )
-    assert corrected.source.endswith("strong-root correction")
-
-    rank, singular_values = strong_root_rank(runtime, relative_tolerance=1.0e-8)
-    assert rank == runtime.layout.size
-    assert float(singular_values[-1]) > 0.0
 
 
 def test_physical_chart_eliminates_only_the_linear_coordinate_gauge(
@@ -1354,178 +747,6 @@ def test_implicit_polish_rejects_mismatched_inputs(small_strong_root):
         implicit_collocation_polished_state(jnp.asarray(0.0), good)
 
 
-def test_low_vector_preconditioner_is_finite_on_native_coordinates(
-    small_strong_root,
-):
-    runtime = small_strong_root
-    zero = jnp.zeros((runtime.layout.size,), dtype=jnp.float64)
-    direction = jnp.linspace(-0.1, 0.2, runtime.layout.size)
-    _, response = jax.jvp(
-        lambda value: strong_root_residual(value, runtime, 0.0),
-        (zero,),
-        (direction,),
-    )
-    recovered = _low_inverse(response, runtime)
-    assert np.all(np.isfinite(np.asarray(recovered)))
-    assert float(jnp.linalg.norm(recovered)) > 0.0
-    assert float(jnp.linalg.norm(recovered)) < 10.0 * float(
-        jnp.linalg.norm(direction)
-    )
-
-
-def test_scaled_low_inverse_and_transpose_are_exact_duals(small_strong_root):
-    runtime = small_strong_root
-    left = runtime.transfer.restrict(
-        runtime.layout.unpack(jnp.linspace(-0.2, 0.1, runtime.layout.size))
-    )
-    right = runtime.transfer.restrict(
-        runtime.layout.unpack(jnp.linspace(0.3, -0.15, runtime.layout.size))
-    )
-    forward = runtime.low_preconditioner.solve_scaled(left)
-    transpose = runtime.low_preconditioner.solve_scaled_transpose(right)
-    np.testing.assert_allclose(
-        _tree_dot(forward, right),
-        _tree_dot(left, transpose),
-        rtol=3.0e-12,
-        atol=3.0e-12,
-    )
-
-
-def test_arclength_tangent_and_bordered_preconditioner_are_finite(
-    small_strong_root,
-):
-    runtime = small_strong_root
-    zero = jnp.zeros((runtime.layout.size,), dtype=jnp.float64)
-    block_preconditioner = _build_mode_block_preconditioner(runtime)
-    direction = jnp.linspace(-0.15, 0.25, runtime.layout.size)
-    _, response = jax.jvp(
-        lambda value: strong_root_residual(value, runtime, 1.0),
-        (zero,),
-        (direction,),
-    )
-    recovered = block_preconditioner.apply(response, 1.0)
-    np.testing.assert_allclose(recovered, direction, rtol=3.0e-8, atol=3.0e-8)
-    _, pullback = jax.vjp(
-        lambda value: strong_root_residual(value, runtime, 1.0), zero
-    )
-    transpose_response = pullback(direction)[0]
-    transpose_recovered = block_preconditioner.apply_transpose(
-        transpose_response, 1.0
-    )
-    np.testing.assert_allclose(
-        transpose_recovered, direction, rtol=3.0e-8, atol=3.0e-8
-    )
-    tangent = _branch_tangent(
-        zero,
-        0.0,
-        runtime,
-        PolishConfig(),
-        None,
-        block_preconditioner,
-    )
-    np.testing.assert_allclose(
-        jnp.vdot(tangent[0], tangent[0]).real + tangent[1] ** 2,
-        1.0,
-        rtol=2.0e-13,
-    )
-    assert float(tangent[1]) > 0.0
-    rhs = (jnp.linspace(-0.2, 0.3, runtime.layout.size), jnp.asarray(0.4))
-    corrected = _bordered_preconditioner(
-        runtime, tangent, block_preconditioner
-    )((zero, 0.0), rhs, 1.0e6)
-    assert corrected[0].shape == zero.shape
-    assert np.all(np.isfinite(np.asarray(corrected[0])))
-    assert np.isfinite(float(corrected[1]))
-
-
-def test_polish_driver_records_bounded_unpolished_return(
-    small_strong_root, monkeypatch
-):
-    class InitialCertificate:
-        normalized_l2 = jnp.asarray(2.0)
-        radial_refinement_difference = jnp.asarray(0.0)
-        minimum_signed_jacobian = jnp.asarray(0.5)
-        # the driver now reports the non-saturating window normalizations
-        # beside eps_F, so a stand-in certificate has to carry them
-        window_normalizations = SimpleNamespace(
-            volume_average_force=jnp.asarray(1.0),
-            relative_force_error=jnp.asarray(1.0),
-            magnetic_relative_force_error=jnp.asarray(1.0),
-            s_min=0.1, s_max=0.99,
-        )
-
-    config = PolishConfig(
-        max_continuation_stages=1,
-        alpha_initial_step=1.0e-3,
-        alpha_min_step=1.0e-3,
-        alpha_max_step=1.0e-3,
-        max_nonlinear_iterations=12,
-        preconditioner="legacy",
-        use_pseudo_arclength=True,
-        fail_policy="return_unpolished",
-    )
-
-    def fail_tangent(*args, **kwargs):
-        del args, kwargs
-        raise StrongForceContinuationError("test tangent failure")
-
-    def endpoint(residual, initial, **kwargs):
-        del residual, kwargs
-        return SimpleNamespace(
-            x=initial,
-            steps=2,
-            linear_iterations=3,
-            residual_evaluations=4,
-            converged=True,
-            linear_converged=True,
-        )
-
-    def continuation(residual, initial, *, accept_stage, **kwargs):
-        del residual, kwargs
-        alpha = 1.0e-3
-        accept_stage(initial, alpha, None)
-        stage = SimpleNamespace(
-            nonlinear_steps=5,
-            linear_iterations=6,
-            residual_evaluations=7,
-            accepted=True,
-        )
-        return SimpleNamespace(
-            x=initial,
-            alpha=alpha,
-            steps=(stage,),
-            converged=False,
-        )
-
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._solvax_continuation_api",
-        lambda: (lambda **kwargs: object(), None, continuation, None, endpoint),
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._ptc_config", lambda config, **kwargs: object()
-    )
-    monkeypatch.setattr(
-        "vmex.core.polish_driver._arclength_to_target", fail_tangent
-    )
-    chart = make_strong_structured_chart(small_strong_root)
-    result = polish_strong_root(
-        small_strong_root,
-        config=config,
-        initial_certificate=InitialCertificate(),
-        chart=chart,
-    )
-    report = result.polish_report
-    assert not report.converged
-    assert report.termination_reason == "pseudo-arclength-tangent-failed"
-    assert report.final_alpha == pytest.approx(1.0e-3)
-    assert report.continuation_accepted == 1
-    assert report.continuation_rejected == 0
-    assert report.nonlinear_iterations > 0
-    assert report.linear_iterations > 0
-    assert report.minimum_signed_jacobian > 0.0
-    np.testing.assert_array_equal(result.correction, 0.0)
-    assert result.native_equilibrium is small_strong_root.native
-
 
 @pytest.mark.parametrize("route", ["legacy", "continuation", "continuation-final", "collocation"])
 @pytest.mark.parametrize(
@@ -1654,6 +875,7 @@ def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
         assert result.polish_report.radial_refinement_tolerance == 0.001
 
 
+@pytest.mark.full
 def test_polish_driver_skips_an_already_certified_state(small_strong_root):
     class InitialCertificate:
         normalized_l2 = jnp.asarray(1.0e-9)
@@ -1682,55 +904,7 @@ def test_polish_driver_skips_an_already_certified_state(small_strong_root):
     np.testing.assert_array_equal(result.correction, 0.0)
 
 
-def test_legacy_polish_announces_refinement_and_certificate_phases():
-    """The legacy driver's setup phases each emit a notice before starting.
-
-    Small solovev case; the raw lift never certifies at the default bar, so
-    the run passes through every phase (refinement, initial certificate,
-    preconditioner/root-runtime build) into one bounded Gauss-Newton step.
-    """
-    from vmex import VmecInput
-    from vmex.core.polish_driver import polish_legacy_solution
-    from vmex.core.solver import resolution_from_input, solve
-
-    inp = VmecInput.from_file(
-        str(DATA / "input.solovev")
-    ).change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
-    inp = dataclasses.replace(
-        inp, ns_array=np.asarray([5]), ftol_array=np.asarray([1.0e-9]),
-        niter_array=np.asarray([2000]),
-    )
-    result = solve(inp)
-    lines: list[str] = []
-
-    def capture(text="", **kwargs):
-        lines.append(str(text))
-
-    polish_legacy_solution(
-        inp,
-        resolution_from_input(inp, ns=5),
-        result.state,
-        config=PolishConfig(
-            max_nonlinear_iterations=1,
-            collocation_scale_probes=2,
-            fail_policy="return_unpolished",
-        ),
-        verbose=True,
-        emit=capture,
-    )
-    text = "\n".join(lines)
-    assert "refining the converged state" in text
-    assert "evaluating the initial force certificate" in text
-    assert "building the polish preconditioner and root runtime" in text
-    # eps_F alone is unreadable on a low-beta case: the console must name
-    # its ceiling and print the measures that can actually move.
-    assert "EPS-F is bounded by 2 by construction" in text
-    assert "<|F|>  [N m^-3]" in text
-    assert "<|F|>/<|grad B^2/2mu0|>" in text
-    assert "|F| L2 near axis [N m^-3]" in text
-    assert "(volume averages over s in [0.10, 0.99])" in text
-
-
+@pytest.mark.full
 def test_collocation_polish_announces_each_phase(small_strong_root):
     """Every silent setup phase emits a notice before it starts.
 
@@ -1769,6 +943,7 @@ def test_collocation_polish_announces_each_phase(small_strong_root):
     assert summary.count(" -> ") >= len(FORCE_ERROR_MEASURE_LABELS)
 
 
+@pytest.mark.full
 def test_normalization_fields_report_both_ends_of_the_window_averages():
     """``PolishReport`` must carry a pair that can move, not only eps_F.
 
@@ -1811,165 +986,6 @@ def test_normalization_fields_report_both_ends_of_the_window_averages():
     )
 
 
-def test_physics_accepted_polish_can_fail_derivative_stationarity(small_strong_root):
-    chart = make_strong_structured_chart(small_strong_root, balance_iterations=1, balance_probes=2)
-    with jax.disable_jit(False):
-        result = polish_collocation_least_squares(
-            small_strong_root, chart=chart,
-            config=PolishConfig(tolerance=2.0, validation_tolerance=10.0,
-                                radial_refinement_tolerance=10.0, collocation_scale_probes=2,
-                                max_nonlinear_iterations=1))
-        assert result.polish_report.converged
-        # This loose solver bar accepts the initial point, whose exact gradient
-        # is not within the default derivative stationarity threshold.
-        assert result.polish_report.nonlinear_iterations == 0
-        with pytest.raises(StrongForceCertificationError, match="stationary"):
-            collocation_polish_tangent(result.context, _random_like(small_strong_root.native, 51))
-
-
-def test_collocation_polish_primal_and_derivatives(small_strong_root):
-    # Compile this numerical integration explicitly; the suite disables JIT.
-    with jax.disable_jit(False):
-        chart = make_strong_structured_chart(
-            small_strong_root, balance_iterations=1, balance_probes=2
-        )
-        result = polish_collocation_least_squares(
-            small_strong_root,
-            chart=chart,
-            config=PolishConfig(
-                tolerance=1.0e-10,
-                validation_tolerance=10.0,
-                radial_refinement_tolerance=10.0,
-                collocation_scale_probes=2,
-                max_nonlinear_iterations=40,
-                fail_policy="return_unpolished",
-            ),
-        )
-        assert result.correction.shape == (small_strong_root.layout.size,)
-        assert result.polish_report.least_squares_success is not None
-        assert result.polish_report.variable_scale_probes == 2
-        assert result.context is not None
-        assert result.polish_report.converged
-        # The 1e-10 primal stopping flag is not derivative eligibility.
-        # Check the public stationarity and linear certificates below.
-        assert result.polish_report.nonlinear_iterations > 0
-
-        native_tangent = _random_like(small_strong_root.native, 51)
-        output_cotangent = _random_like(small_strong_root.native, 52)
-        linear_config = PolishLinearConfig(
-            rtol=2.0e-10,
-            atol=2.0e-11,
-            restart=chart.size,
-            max_restarts=5,
-        )
-        tangent = collocation_polish_tangent(
-            result.context, native_tangent, config=linear_config
-        )
-        adjoint = collocation_polish_adjoint(
-            result.context, output_cotangent, config=linear_config
-        )
-        assert bool(tangent.report.converged)
-        assert bool(adjoint.report.converged)
-        assert bool(tangent.report.stationarity_converged)
-        assert bool(adjoint.report.stationarity_converged)
-        for report in (tangent.report, adjoint.report):
-            assert np.isfinite(float(report.stationarity_norm))
-            assert float(report.stationarity_norm) <= float(report.stationarity_tolerance)
-        np.testing.assert_allclose(tangent.report.stationarity_norm,
-                                   result.polish_report.least_squares_optimality, rtol=1.0e-4, atol=1.0e-8)
-        np.testing.assert_allclose(
-            _tree_dot(output_cotangent, tangent.native_tangent),
-            _tree_dot(adjoint.native_cotangent, native_tangent),
-            rtol=2.0e-5,
-            atol=2.0e-6,
-        )
-
-        def objective(native):
-            polished = implicit_collocation_polished_state(
-                native, result.context, linear_config
-            )
-            return _tree_dot(polished, output_cotangent)
-
-        custom_gradient = jax.grad(objective)(small_strong_root.native)
-        difference = jax.tree.map(
-            jnp.subtract, custom_gradient, adjoint.native_cotangent
-        )
-        assert _tree_norm(difference) <= 2.0e-5 * max(
-            _tree_norm(adjoint.native_cotangent), 1.0
-        )
-
-        polished = implicit_collocation_polished_state(
-            small_strong_root.native,
-            result.context,
-            linear_config,
-        )
-
-        def boozer_objective(native):
-            spectrum = boozer_spectrum_high_order(
-                native,
-                surfaces=[0.49],
-                mboz=4,
-                nboz=2,
-                ntheta=12,
-                nzeta=8,
-            )
-            return jnp.sum(spectrum["bmnc_b"][:, 1:] ** 2)
-
-        boozer_cotangent = jax.grad(boozer_objective)(polished)
-        boozer_adjoint = collocation_polish_adjoint(
-            result.context,
-            boozer_cotangent,
-            config=linear_config,
-        )
-        boozer_gradient = jax.grad(
-            lambda native: boozer_objective(
-                implicit_collocation_polished_state(
-                    native,
-                    result.context,
-                    linear_config,
-                )
-            )
-        )(small_strong_root.native)
-        boozer_difference = jax.tree.map(
-            jnp.subtract,
-            boozer_gradient,
-            boozer_adjoint.native_cotangent,
-        )
-        assert _tree_norm(boozer_difference) <= 2.0e-5 * max(
-            _tree_norm(boozer_adjoint.native_cotangent),
-            1.0,
-        )
-
-        base_stationarity = _collocation_stationarity(
-            result.context.correction,
-            small_strong_root.native,
-            result.context.runtime,
-            result.context.chart,
-        )
-
-        def stationarity_remainder(step):
-            perturbed_native = jax.tree.map(
-                lambda value, direction: value + step * direction,
-                small_strong_root.native,
-                native_tangent,
-            )
-            perturbed_correction = (
-                result.context.correction + step * tangent.correction_tangent
-            )
-            return jnp.linalg.norm(
-                _collocation_stationarity(
-                    perturbed_correction,
-                    perturbed_native,
-                    result.context.runtime,
-                    result.context.chart,
-                )
-                - base_stationarity
-            )
-
-        coarse = stationarity_remainder(2.0e-5)
-        fine = stationarity_remainder(1.0e-5)
-        assert fine < 0.35 * coarse
-
 @pytest.mark.parametrize(
     ("updates", "message"),
     [
@@ -1998,40 +1014,6 @@ def test_polish_config_validation(updates, message):
         PolishConfig(**updates)
 
 
-def test_polish_ptc_stopping_is_invariant_to_positive_residual_scaling():
-    tolerance = 2.0e-7
-    config = _ptc_config(PolishConfig(tolerance=tolerance), residual_scale=3.0e-4)
-    rescaled = _ptc_config(
-        PolishConfig(tolerance=tolerance), residual_scale=7.0 * 3.0e-4
-    )
-    assert config.rtol == tolerance
-    assert config.atol == pytest.approx(tolerance * 3.0e-4)
-    assert rescaled.atol == pytest.approx(7.0 * config.atol)
-
-
-def test_low_endpoint_check_ignores_numerical_row_equilibration():
-    residual = jnp.asarray([2.0e-9, -6.0e-9])
-    runtime = SimpleNamespace(
-        equation_scale=jnp.asarray([2.0, 3.0]),
-        layout=SimpleNamespace(size=2),
-    )
-    rescaled_runtime = SimpleNamespace(
-        equation_scale=7.0 * runtime.equation_scale,
-        layout=runtime.layout,
-    )
-    expected = jnp.linalg.norm(residual / runtime.equation_scale) / jnp.sqrt(2.0)
-    np.testing.assert_allclose(
-        _normalized_low_residual_norm(residual, runtime),
-        expected,
-        rtol=2.0e-13,
-    )
-    np.testing.assert_allclose(
-        _normalized_low_residual_norm(7.0 * residual, rescaled_runtime),
-        expected,
-        rtol=2.0e-13,
-    )
-
-
 def test_public_solver_rejects_unknown_polish_mode_before_solving():
     inp = VmecInput.from_file(DATA / "input.solovev")
     with pytest.raises(ValueError, match="False, True, or 'auto'"):
@@ -2049,6 +1031,7 @@ def test_public_solver_resolves_polish_keywords_only():
         solver._resolve_force_balance_polish(inp, False, True)
 
 
+@pytest.mark.full
 def test_public_solver_auto_corrects_a_lift_that_fails_quadrature(monkeypatch):
     from vmex.core import strong_force
 
@@ -2166,6 +1149,7 @@ def test_polished_wout_ns_covers_reconstruction_and_the_native_basis():
     assert polished_wout_ns(wide, solve_ns=31) == 181
 
 
+@pytest.mark.full
 def test_polished_wout_export_certifies_near_the_native_state(tmp_path):
     pytest.importorskip("netCDF4")
     import vmex as vj
@@ -2229,6 +1213,7 @@ _BOUNDED_POLISH = dict(
 )
 
 
+@pytest.mark.full
 def test_auto_declines_a_solve_it_priced_above_its_budget():
     """AUTO must measure the cost and refuse to spend past its ceiling.
 
@@ -2399,6 +1384,7 @@ def test_progress_callbacks_are_inert_without_an_active_reporter():
     assert quiet.lines == 1
 
 
+@pytest.mark.full
 def test_declined_auto_does_not_warn_under_the_warn_fail_policy(tmp_path):
     """``POLISH_FAIL = WARN`` reports failures, and a decline is not one."""
 
@@ -2419,42 +1405,3 @@ def test_declined_auto_does_not_warn_under_the_warn_fail_policy(tmp_path):
         warnings.simplefilter("error", RuntimeWarning)
         result = solve_file(path, write_wout=False)
     assert result.polish_report.termination_reason == "auto-declined-cost"
-def test_polish_derivative_failure_is_nan_under_tracing_and_raises_outside():
-    """``fail_policy="raise"`` cannot raise on a traced convergence flag.
-
-    Outside jit the policy raises; under jit the flag is a tracer, so both
-    policies return NaN. The docstring says so, and this pins it: a jitted
-    gradient that fails comes back as NaN, never as an exception.
-    """
-    import jax
-    import jax.numpy as jnp
-
-    from vmex.core.polish_implicit import (
-        PolishLinearConfig, PolishLinearReport, StrongForceLinearSolveError,
-        _checked_solution,
-    )
-
-    def report(converged):
-        return PolishLinearReport(
-            residual_norm=jnp.asarray(1.0), tolerance=jnp.asarray(1.0e-8),
-            iterations=jnp.asarray(30), converged=converged)
-
-    value = jnp.ones(3)
-    raising = PolishLinearConfig(fail_policy="raise")
-
-    # eager, failed: the documented exception
-    with pytest.raises(StrongForceLinearSolveError):
-        _checked_solution(value, report(jnp.asarray(False)), raising, "tangent")
-    # eager, converged: the value passes through
-    ok = _checked_solution(value, report(jnp.asarray(True)), raising, "tangent")
-    assert bool(jnp.all(ok == value))
-
-    # traced, failed: NaN, no exception, whatever the policy says.  The
-    # conftest disables jit suite-wide, so ask for it explicitly here --
-    # which is also why the interpreted suite never exercised this path.
-    def traced(flag):
-        return _checked_solution(value, report(flag), raising, "tangent")
-
-    with jax.disable_jit(False):
-        assert bool(jnp.all(jnp.isnan(jax.jit(traced)(jnp.asarray(False)))))
-        assert bool(jnp.all(jax.jit(traced)(jnp.asarray(True)) == value))

@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  VMEX_COMPILATION_CACHE: disabled
   JAX_ENABLE_X64: "1"
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
@@ -97,5 +98,61 @@ jobs:
         with:
           name: test-report-optional
           path: test-report-*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  nonlinear-contracts:
+    name: ${{ matrix.selector }} (JAX ${{ matrix.jax }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - selector: full-polish-gn
+            jax: "0.11.1"
+          - selector: full-polish-homotopy
+            jax: "0.11.1"
+          - selector: full-polish-linear
+            jax: "0.9.2"
+          - selector: full-polish-linear
+            jax: "0.11.1"
+          - selector: full-run-options
+            jax: "0.11.1"
+          - selector: full-free-boundary-adjoint
+            jax: "0.11.1"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tested numerical versions
+        run: python -m pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Add XLA compile headroom
+        run: |
+          sudo fallocate -l 12G /mnt/vmex-swap
+          sudo chmod 600 /mnt/vmex-swap
+          sudo mkswap /mnt/vmex-swap
+          sudo swapon /mnt/vmex-swap
+      - name: Fetch the free-boundary reference fixture
+        if: matrix.selector == 'full-free-boundary-adjoint'
+        run: |
+          python tools/fetch_assets.py --bundle ncsx-mgrid
+          test -f examples/data/mgrid_ncsx_c09r00_small.nc
+      - name: Run retained nonlinear contracts
+        env:
+          RUN_FULL: "1"
+          JAX_PLATFORMS: cpu
+        run: |
+          python -m pip freeze
+          FILES="$(python tools/test_manifest.py select ${{ matrix.selector }})"
+          pytest -q $FILES --durations=20 --vmex-report=nonlinear-report.json
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: nonlinear-${{ matrix.selector }}-${{ matrix.jax }}
+          path: nonlinear-report.json
           if-no-files-found: warn
           retention-days: 7

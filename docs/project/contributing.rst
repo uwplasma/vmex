@@ -31,15 +31,38 @@ The workflows obtain their selectors from the manifest:
 - ``CI`` is the stable pull-request gate. It runs fast API checks and
   representative fixed-boundary, free-boundary/NESTOR, mirror, device, and AD
   paths. Changed executable lines must be at least 95% covered.
-- ``Nightly`` owns the complete integration/oracle matrix and aggregate
-  package coverage. Its matrices leave hosted capacity for pull-request
-  checks.
-- ``Weekly high resolution`` owns campaigns that exceed the 150-minute cold
-  nightly budget.
+- ``Nightly`` runs optimization and optional integrations, plus the retained
+  nonlinear polish, homotopy, file-directive and free-boundary adjoint checks.
+  A full-suite ownership entry alone does not schedule a test: its selector
+  must also appear in a workflow.
+- ``Weekly high resolution`` runs the selected high-resolution campaigns.
 - ``Trusted GPU physics`` is an explicit self-hosted dispatch.
 
 Use ``pytest --vmex-report=report.json`` to record the 50 slowest tests and all
 skip reasons with the same metadata.
+
+JAX compatibility and test tiers
+--------------------------------
+
+The stationarity contract is checked on Python 3.12 with JAX/JAXlib 0.9.2
+and 0.11.1, using identical float64 tolerances. These are tested numerical
+versions for the core install; optional integrations can require newer JAX.
+The broader package dependency bounds do not certify every intermediate release. The PR matrix exercises eager and compiled linear
+certificates; Nightly runs the tight real-MHD derivative and rejected-root
+cases on both versions. Update the pair deliberately after reproducing failures,
+with environment and attained residuals recorded in ``plan.md``.
+
+PR physics and parity jobs have a 25-minute timeout. Actual successful job
+times establish the runtime gate. ``full`` marks retain expensive checks for
+scheduled runs; they do not weaken assertions. Run either tier locally::
+
+  VMEX_COMPILATION_CACHE=disabled pytest -q -m "not full and not weekly" tests/test_polish_linear.py
+  RUN_FULL=1 VMEX_COMPILATION_CACHE=disabled pytest -q tests/test_polish_linear.py
+
+Use the restoring ``_module_jit_enabled`` fixture when a module needs compiled
+solves; an unscoped ``jax.config.update`` can change later tests. Directive
+parsing and precedence use a mocked driver; one real unpolished solve/export
+check remains in PR CI and the polished file workflow runs in Nightly.
 
 Reference assets
 ----------------
