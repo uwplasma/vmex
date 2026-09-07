@@ -602,16 +602,10 @@ DESC, frozen 156×17 operator and capped GVEC (§2); README 573→220 lines. Raw
 records: `focused_review_20260906`. Clean-main fast/seven physics lanes passed. Lost parity logs were rerun in #286; office
 recovery and the unreproduced #277 failure are recorded below.
 
-**2026-09-06, Phase 1 / P0.1 and P0.3 isolation.** #284 (`417fb4fc`, base `2a0d4356`) implements P0.1: the withdrawn-claim removal, RST prose scanning, root line caps and cited-path guards; 73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four test modules: 73 tests passed in 396.88 s and the new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 under the plan's admin-merge rule; their branch bases were retained for the stack. Tiering, module splitting, parsing mocks and the 25-minute lane gate continue in #286.
-
 **2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73 guards and
 strict Sphinx passed. #285 (`40c1792b`, base #284) restores JIT state in four modules: 73 tests passed in 396.88
 s; the regression fails on the parent. Both passed CI and merged on 2026-09-07 with user-authorized admin merge;
 their branches are retained.
-
-**2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73 guards and strict Sphinx
-passed. #285 (`40c1792b`, base #284) restores JIT state in four modules: 73 tests passed in 396.88 s; the regression fails on
-the parent. Both passed CI and merged on 2026-09-07 with user-authorized admin merge; their branches are retained.
 
 **2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at `6371a36b`, without changing
 tolerances. The old office log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original
