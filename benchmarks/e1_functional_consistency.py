@@ -135,6 +135,7 @@ def shaped_state():
     """
     from vmex.core import implicit
     from vmex.core.input import VmecInput
+    from vmex.core.polish import make_high_low_transfer, make_strong_root_layout
 
     inp = VmecInput.from_file(ROOT / "examples/data/input.shaped_tokamak_pressure_polished")
     inp = replace(inp.change_resolution(mpol=5, ntor=0, ntheta=16, nzeta=4),
@@ -142,10 +143,67 @@ def shaped_state():
                   niter_array=np.asarray([1000]))
     config = implicit.make_config(inp, ftol=1e-10, max_iterations=1000)
     params = implicit.params_from_input(inp)
-    state, _ = implicit.solve_implicit_with_aux(params, config)
+    state, mask = implicit.solve_implicit_with_aux(params, config)
     runtime = implicit.runtime_from_params(params, config)
     basis = BSplineBasis.clamped(np.linspace(0, 1, 3), degree=3)
-    return lift_high_order_state(state, runtime, radial_basis=basis)
+    native = lift_high_order_state(state, runtime, radial_basis=basis)
+    transfer = make_high_low_transfer(native, runtime, project_config=config, project_mask=mask)
+    layout = make_strong_root_layout(mask, native, transfer=transfer)
+    return native, layout
+
+
+def chart_audit(native, layout):
+    """Audit the production structured subspace before invertible Ruiz scaling.
+
+    Use the actual layout's constraint elimination, including m=1 coupling.
+    A Z-extremum probe tests whether cylindrical-radial coordinates can move
+    the surface normally there; lambda cannot supply normal displacement.
+    """
+    from scipy.optimize import brentq
+    from vmex.core.polish import _physical_equation_basis
+
+    state, indices = coordinates(native)
+    zero = jnp.zeros(len(indices))
+
+    def active(vector):
+        correction = layout.unpack(vector)
+        return jnp.asarray([getattr(correction, name)[mode, radial]
+                            for name, mode, radial in indices])
+
+    full = np.asarray(jax.jacfwd(active)(jnp.zeros(layout.size)))
+    structured = full @ _physical_equation_basis(layout)
+
+    @jax.jit
+    def normal_row(point):
+        basis, *_ = _basic_fields(native, point)
+        normal = jnp.cross(basis[:, 1], basis[:, 2])
+        normal /= jnp.linalg.norm(normal)
+        return normal @ jax.jacfwd(lambda vector: _position(state(vector), point))(zero)
+
+    samples = []
+    dZ = jax.jit(jax.grad(lambda point: _RZL(native, point)[1]))
+    for rho in (0.25, 0.5, 0.75):
+        theta = brentq(lambda angle: float(dZ(jnp.asarray([rho, angle, 0.0]))[1]),
+                       0.1, 3.0, xtol=1e-14)
+        point = jnp.asarray([rho, theta, 0.0])
+        row = np.asarray(normal_row(point))
+        full_norm = np.linalg.norm(row @ full)
+        structured_norm = np.linalg.norm(row @ structured)
+        samples.append({"rho": rho, "theta_Z_max": float(theta),
+                        "layout_normal_row_norm": float(full_norm),
+                        "structured_normal_row_norm": float(structured_norm),
+                        "structured_to_layout_row_ratio": float(structured_norm / full_norm)})
+    points = jnp.asarray([(rho, theta, 0.0) for rho in np.linspace(0.1, 0.9, 7)
+                          for theta in np.arange(128) * 2 * np.pi / 128])
+    rows = np.asarray(jax.vmap(normal_row)(points))
+    spectra = {}
+    for name, matrix in (("layout", full), ("structured", structured)):
+        singular = np.linalg.svd(rows @ matrix, compute_uv=False)
+        spectra[name] = {"coordinates": matrix.shape[1],
+                         "normal_rank_rtol_1e-10": int(np.sum(singular > singular[0] * 1e-10)),
+                         "normal_singular_values": singular.tolist()}
+    return {"spectra": spectra, "Z_extrema": samples,
+            "scope": "actual constrained layout and structured chart subspaces, before coordinate scaling"}
 
 
 def main():
@@ -170,8 +228,8 @@ def main():
                       numpy=np.__version__, platform=platform.system(),
                       device=str(jax.devices()[0]), precision="float64",
                       vmex_module=assert_repo_vmex(vmex.__file__, ROOT))
-    native = (_analytic_state(_Solovev(mmax=2), degree=3, spans=2)
-              if args.case == "solovev" else shaped_state())
+    native, layout = ((_analytic_state(_Solovev(mmax=2), degree=3, spans=2), None)
+                      if args.case == "solovev" else shaped_state())
     records = []
     for order in args.orders:
         record = probe(native, order, args.angles)
@@ -179,7 +237,8 @@ def main():
         print(json.dumps({k: v for k, v in record.items() if k not in
                           ("gradient", "virtual_work", "sampled_displacement_singular_values")}), flush=True)
         jax.clear_caches()
-    output = {"_provenance": provenance, "case": args.case,
+    chart = chart_audit(native, layout) if layout is not None else None
+    output = {"_provenance": provenance, "case": args.case, "chart_audit": chart,
               "scope": "fixed-boundary prescribed profiles, GAMMA=0; not the production gauge quotient",
               "records": records, "seconds": time.perf_counter() - started,
               "peak_rss_MiB": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss /
