@@ -256,7 +256,7 @@ research with the figure as its honest status.
 Owner: VMEX (`implicit.py`, `polish_driver.py`, `polish_implicit.py`, the
 public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
 
-1. **Stale claims, one PR.** Remove the withdrawn 26-fold number from
+1. **Stale claims, one PR — implemented in [#284](https://github.com/uwplasma/vmex/pull/284); CI/review pending.** Remove the withdrawn 26-fold number from
    `CHANGELOG.md`; remove or generate the three artifacts `performance.rst`
    cites; point the two benchmark records and three test docstrings at the
    P letters; extend `tools/check_docs_prose.py` to scan `.rst` pages and
@@ -272,7 +272,7 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    stationarity at the derivative gate's 1e-8 bar and lets the derivative call
    be the check; SOLVAX's 1e-10 flag is a solver metric. Keep the tight
    real-MHD fixture.
-3. **CI tiering to a 25-minute PR ceiling.** Every test that runs a polish or
+3. **CI tiering to a 25-minute PR ceiling — JIT isolation implemented; tiering pending.** Every test that runs a polish or
    a free-boundary implicit adjoint moves to `full`; `test_polish_preconditioner.py`
    splits into Gauss-Newton (PR), homotopy (nightly) and linear (PR);
    `test_run_options.py` exercises directive parsing against a mocked driver
@@ -621,8 +621,8 @@ as this plan's authority. #284 (`417fb4fc`, base main `2a0d4356`) implements
 P0.1: withdrawn-claim, RST prose, root line-cap and cited-path guards;
 73 preflight guards and strict Sphinx passed. #285 (`40c1792b`, base #284)
 restores JIT state in four test modules: 73 tests passed in 396.88 s and the
-new subprocess regression fails on the unchanged parent. Both await CI and
-review; retarget #285 before deleting #284's base branch. Tiering, module
+new subprocess regression fails on the unchanged parent. Both passed CI and merged on 2026-09-07 with user-authorized admin
+merge; branch bases were retained. Tiering, module
 splitting, parsing mocks and the 25-minute lane gate remain unfinished.
 
 **2026-09-06, #277 / P0.2.** Merged main's authoritative plan into the

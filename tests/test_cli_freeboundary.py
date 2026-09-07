@@ -34,6 +34,8 @@ from vmex.core.errors import (
 from vmex.core.mgrid import read_mgrid
 from vmex.core.wout import read_wout
 
+pytestmark = pytest.mark.usefixtures("_module_jit_enabled")
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = DATA_DIR / "input.cth_like_free_bdy_lasym_small"
 MGRID = DATA_DIR / "mgrid_cth_like_lasym_small.nc"
@@ -42,13 +44,6 @@ SOLOVEV_DECK = DATA_DIR / "input.solovev"
 
 #: EXTCUR of the golden deck (HF, TVF).
 DECK_EXTCUR = (-12.0, -2.55)
-
-
-@pytest.fixture(autouse=True)
-def _enable_jit():
-    """Full solves need JIT (the repo conftest disables it for unit tests)."""
-    jax.config.update("jax_disable_jit", False)
-    yield
 
 
 def _run_cli(argv: list[str]) -> tuple[int, str]:
@@ -62,7 +57,6 @@ def _run_cli(argv: list[str]) -> tuple[int, str]:
 @pytest.fixture(scope="module")
 def freeb_cli(tmp_path_factory) -> tuple[int, str, Path]:
     """One capped ``LFULL3D1OUT=T`` free-boundary run (shared)."""
-    jax.config.update("jax_disable_jit", False)
     workdir = tmp_path_factory.mktemp("cli_freeb")
     deck = workdir / DECK.name
     text, count = re.subn(

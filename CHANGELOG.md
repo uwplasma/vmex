@@ -60,10 +60,9 @@ in the pull-request and release bodies and are being backfilled as
   62 -> 6.5 s cold on the QA example, per-trial-point evaluation 12.5 -> 8.0 s
   (#240). The staging idioms are applied to the free-boundary implicit and
   mirror Newton-Krylov paths, and CI pins the optimization cold start (#241).
-- README: the polish summary plots the independent oracle's force-error
-  profile (unpolished vs certified polished export, 26-fold) with both
-  flux-surface sets overlaid; the extender section shows the exterior
-  island chain resolved by the total field (#237, #239).
+- Validation: distinguish native force accuracy from WOUT reconstruction.
+  The corrected before/after measurements and normalization limits are in
+  `benchmarks/polish_force_error_2026-09-03.json` (#280, #282).
 - CI: the Codecov upload is best-effort so the changed-line coverage gate
   always runs; parity lanes get budget headroom (#236, #242).
 

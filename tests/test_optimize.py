@@ -60,7 +60,6 @@ def solovev_eq() -> opt.Equilibrium:
 
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     cache = CACHE_DIR / "solovev_state.npz"
-    jax.config.update("jax_disable_jit", False)  # tests/conftest disables jit globally
     if cache.exists():
         data = np.load(cache)
         state = SpectralState(**{k: jax.numpy.asarray(data[k]) for k in _STATE_FIELDS})
@@ -326,7 +325,6 @@ def test_l_grad_b(solovev_eq):
     """LgradB objective: finiteness, jit parity, grid convergence, pins
     (recorded 2026-07-09, x64 CPU: golden nfp4_QH 0.3238956855163282 m,
     cached solovev 2.2782393147008424 m ~ minor-radius scale)."""
-    jax.config.update("jax_disable_jit", False)
     gqh = _golden_wout("nfp4_QH_warm_start")
     val = float(opt.l_grad_b(gqh))
     assert np.isfinite(val) and 0.0 < val < 100.0
@@ -379,7 +377,6 @@ def test_qi_regression_pin_and_jit(solovev_eq):
     residual amplifies convergence-path drift (~1e-4 between BLAS/jit
     configurations)."""
     pytest.importorskip("booz_xform_jax")
-    jax.config.update("jax_disable_jit", False)
     booz = opt.boozer_modes_from_wout(solovev_eq.wout, surfaces=[0.5, 1.0],
                                       mboz=8, nboz=8)
     out = opt.quasi_isodynamic_residual(
@@ -464,7 +461,6 @@ def test_least_squares_smoke(solovev_eq):
     the initial aspect is ~3.118, the target 4.0, and a handful of
     finite-difference trust-region steps must strictly reduce the cost.
     """
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     aspect0 = float(opt.aspect_ratio(solovev_eq.state, solovev_eq.runtime))
     cost0 = 0.5 * (aspect0 - 4.0) ** 2
@@ -489,7 +485,6 @@ def test_least_squares_implicit_smoke(solovev_eq):
     boundary plus one linearized-KKT solve for all dofs — gradient cost
     ~O(1 equilibrium solve) independent of the dof count.
     """
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     aspect0 = float(opt.aspect_ratio(solovev_eq.state, solovev_eq.runtime))
     cost0 = 0.5 * (aspect0 - 4.0) ** 2
@@ -503,7 +498,6 @@ def test_least_squares_implicit_smoke(solovev_eq):
 
 def test_minimize_scalarized_implicit_smoke(solovev_eq):
     """L-BFGS-B lowers the same cost with a finite reverse gradient."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     x0 = opt.pack_boundary(inp, 1)
     cost0 = 0.5 * (float(opt.aspect_ratio(
@@ -531,7 +525,6 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     this 2-dof problem: BFGS 3.89e-01 -> 1.55e-06 in 3 iterations (6
     evaluations), L-BFGS-B -> 3.64e-05 in 2; bounds carry ample margin.
     """
-    jax.config.update("jax_disable_jit", False)
     import scipy.optimize
 
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
@@ -587,7 +580,6 @@ def test_from_loss_honors_bound_scalar_method_literally():
     literally, and vector or non-traceable losses must be rejected with
     actionable errors before any optimizer sees them.
     """
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     qs = opt.QuasisymmetryRatioResidual(SURFACES, 1, -1)
 
@@ -624,7 +616,6 @@ def test_certified_trial_guards_reject_stale_or_missing_memo(monkeypatch):
 
     from vmex.core import implicit as implicit_module
 
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
     inp = dataclasses.replace(
@@ -701,7 +692,6 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
     (:func:`solvax.chunk_map`), so the Jacobian at the initial boundary must
     be identical.  ``max_nfev=1`` keeps it cheap; solovev has 2 dofs so
     ``jac_chunk_size=1`` is a real 2-chunk pass."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
     # explicit None pins the unchunked reference (default is "auto")
@@ -819,7 +809,6 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     jvp probes, one :func:`solvax.block_thomas_factor`, GMRES-certified
     columns) must agree with the per-dof GMRES path to the solver tolerance
     (``adjoint_tol = 1e-6``)."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     inp = inp.change_resolution(
         mpol=3, ntor=0, ntheta=12, nzeta=4,
@@ -1227,7 +1216,6 @@ def test_least_squares_implicit_warm_start_modes(solovev_eq):
     restart: ``warm_start`` only changes each trial's initial guess, never
     the fixed point, so the optimizer walks the same trust-region path;
     ``solve_stats`` exposes the effort totals the R25.4 benchmark compares."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     obj = [(opt.aspect_ratio, 4.0, 1.0)]
     ref = opt.least_squares(obj, inp, max_mode=1, jac="implicit",
@@ -1249,7 +1237,6 @@ def test_least_squares_max_mode_schedule():
     """Staged max_mode continuation: two ultra-short stages chain through
     result.input; the second starts from — and does not regress — the
     first stage's boundary."""
-    jax.config.update("jax_disable_jit", False)
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     res = opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp,
                             max_mode=(1, 1), max_nfev=2, diff_step=1e-4,

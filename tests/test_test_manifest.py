@@ -160,3 +160,28 @@ def test_workflow_selects_manifest_lanes() -> None:
     assert "timeout-minutes: 45" in nightly
     for stale in ("A1_FILES=", "C2_FILES=", "core-a-c)"):
         assert stale not in "".join(workflows.values())
+
+
+def test_solver_modules_restore_jit_between_modules(tmp_path: Path) -> None:
+    """Exercise real module setup/teardown in one worker, where leaks matter."""
+    plugin = tmp_path / "jit_restoration_probe.py"
+    plugin.write_text(
+        "import jax, pytest\n"
+        "@pytest.hookimpl(wrapper=True)\n"
+        "def pytest_runtest_teardown(item, nextitem):\n"
+        "    result = yield\n"
+        "    if nextitem is None or nextitem.module is not item.module:\n"
+        "        assert jax.config.jax_disable_jit, item.nodeid\n"
+        "    return result\n"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), env.get("PYTHONPATH", "")])
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "jit_restoration_probe",
+         "tests/test_scaling.py::test_input_scaling_changes_only_dimensional_quantities",
+         "tests/test_cli_freeboundary.py::test_free_boundary_default_raises_before_wout",
+         "tests/test_optimize.py::test_public_problem_factory_validation"],
+        cwd=ROOT, env=env, text=True, capture_output=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "3 passed" in result.stdout

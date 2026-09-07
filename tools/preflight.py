@@ -41,6 +41,7 @@ GUARD_TESTS = (
     "tests/test_test_manifest.py",
     "tests/test_performance_docs.py",
     "tests/test_docs_nav.py",
+    "tests/test_cited_paths.py",
     "tests/test_capability_docs.py",
     "tests/test_api_reference_completeness.py",
     "tests/test_packaging_metadata.py",

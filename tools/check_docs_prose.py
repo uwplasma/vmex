@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Docs prose and media gates (plan_docs_vmex.md sections 2 and 9).
+"""Docs prose, citation and media gates (plan P0/P4).
 
 Mechanical checks on the Diátaxis docs tree:
 
-1.  Banned words/phrases in Markdown prose (fenced code and inline code are
+1.  Banned words/phrases in Markdown and reStructuredText prose (fenced code and inline code are
     exempt), including exclamation marks and emoji in headings. The scan
     covers the docs tree plus the root ``README.md`` and ``CHANGELOG.md``.
 2.  Every how-to title starts with an imperative verb.
@@ -58,6 +58,9 @@ HOWTO_VERBS = {
 
 TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b")
 LINE_CAP = 250
+ROOT_LINE_CAPS = {"README.md": 300, "CHANGELOG.md": 200}
+RETRACTED_GAIN = re.compile(r"\b(?:26[- ]fold|26\s*[×x])(?!\w)", re.IGNORECASE)
+BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)")
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
@@ -96,16 +99,27 @@ def _is_grandfathered(rel: str) -> bool:
     return rel in GRANDFATHERED_FILES or rel.startswith(GRANDFATHERED_PREFIXES)
 
 
-def _prose_lines(text: str):
-    """Yield ``(lineno, line)`` for Markdown prose.
+def _prose_lines(text: str, *, rst: bool = False):
+    """Yield ``(lineno, line)`` outside Markdown or RST code/math blocks.
 
     Skips fenced code blocks and ``$$`` display-math blocks: code and LaTeX
     are not prose (``\\!`` spacing would otherwise read as an exclamation).
     """
     fence = None
     math = False
+    literal_indent = None
     for lineno, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
+        if rst and literal_indent is not None:
+            indent = len(line) - len(line.lstrip())
+            if not stripped or indent > literal_indent:
+                continue
+            literal_indent = None
+        if rst and (re.match(r"\s*\.\. (?:code(?:-block)?|sourcecode|math|raw)::", line)
+                    or (not stripped.startswith(".. ") and line.rstrip().endswith("::"))):
+            literal_indent = len(line) - len(line.lstrip())
+            if stripped.startswith(".. "):
+                continue
         opener = re.match(r"^(`{3,}|~{3,})", stripped)
         if fence is None and opener:
             fence = opener.group(1)[0] * 3
@@ -123,7 +137,7 @@ def _prose_lines(text: str):
 
 
 def _strip_inline_code(line: str) -> str:
-    line = re.sub(r"`[^`]*`", "", line)
+    line = re.sub(r"``[^`]*``|`[^`]*`", "", line)
     return re.sub(r"\$[^$]*\$", "", line)
 
 
@@ -134,10 +148,13 @@ def _has_emoji(text: str) -> bool:
     )
 
 
-def check_markdown(path: Path, errors: list[str]) -> None:
+def check_prose(path: Path, errors: list[str]) -> None:
     rel = path.relative_to(ROOT)
     text = path.read_text(encoding="utf-8")
-    for lineno, line in _prose_lines(text):
+    # Published titles are quotations, not our editorial vocabulary.
+    if path == DOCS / "project" / "references.rst":
+        text = re.sub(r"“[^”]*”", lambda m: "\n" * m.group().count("\n"), text)
+    for lineno, line in _prose_lines(text, rst=path.suffix == ".rst"):
         prose = _strip_inline_code(line)
         for pattern in BANNED_RE:
             if pattern.search(prose):
@@ -147,6 +164,26 @@ def check_markdown(path: Path, errors: list[str]) -> None:
             errors.append(f"{rel}:{lineno}: exclamation mark in prose")
         if line.startswith("#") and _has_emoji(line):
             errors.append(f"{rel}:{lineno}: emoji in heading")
+
+
+def check_root_limits(path: Path, errors: list[str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    count = len(text.splitlines())
+    if count > ROOT_LINE_CAPS[path.name]:
+        errors.append(f"{path.name}: {count} lines exceeds the {ROOT_LINE_CAPS[path.name]}-line cap")
+    if path.name == "CHANGELOG.md":
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if RETRACTED_GAIN.search(line):
+                errors.append(f"{path.name}:{lineno}: withdrawn polish gain; cite the corrected record")
+
+
+def check_cited_paths(path: Path, errors: list[str]) -> None:
+    """Check repository benchmark citations in prose, excluding output commands."""
+    for lineno, line in _prose_lines(path.read_text(encoding="utf-8"), rst=path.suffix == ".rst"):
+        for match in BENCHMARK_PATH.finditer(line):
+            target = match.group(1).rstrip(".,")
+            if not any(ROOT.glob(target)):
+                errors.append(f"{path.relative_to(ROOT)}:{lineno}: missing cited path {target}")
 
 
 def check_howto_title(path: Path, errors: list[str]) -> None:
@@ -191,15 +228,20 @@ def main() -> int:
 
     markdown_pages = sorted(DOCS.rglob("*.md"))
     markdown_pages = [p for p in markdown_pages if "_build" not in p.parts]
-    for page in markdown_pages:
-        check_markdown(page, errors)
+    rst_pages = sorted(p for p in DOCS.rglob("*.rst") if "_build" not in p.parts)
+    for page in [*markdown_pages, *rst_pages]:
+        check_prose(page, errors)
 
     # Root prose ships too: README.md is the PyPI long description and
     # CHANGELOG.md (when present) the release record.
     for name in ("README.md", "CHANGELOG.md"):
         page = ROOT / name
         if page.exists():
-            check_markdown(page, errors)
+            check_prose(page, errors)
+            check_root_limits(page, errors)
+
+    for page in [*markdown_pages, *rst_pages, ROOT / "README.md", ROOT / "CHANGELOG.md"]:
+        check_cited_paths(page, errors)
 
     for page in markdown_pages:
         if page.parent == DOCS / "howto" and page.name != "index.md":
