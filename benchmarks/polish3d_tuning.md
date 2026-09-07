@@ -8,7 +8,7 @@ steps, certificate correctly declines. VMEC2000's unpolished export for the
 same deck certifies at ~0.394. Axisymmetric reference
 (`input.shaped_tokamak_pressure_polished`): certified at the 1e-2
 validation tolerance. Its headline gain factor is under separate revision
-(plan 31.2-R3: the quoted figure mixes the polish gain with an export-mesh
+(plan P0/P1: the quoted figure mixes the polish gain with an export-mesh
 reconstruction difference), so it is deliberately not restated here.
 
 All runs: office box, 36-core CPU, `JAX_PLATFORMS=cpu JAX_ENABLE_X64=1`,
