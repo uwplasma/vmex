@@ -743,3 +743,40 @@ is the same limiter E2 reached from the other side, and it sharpens §3.2: the
 experiment to run, before any solver work. A total-only plot would have shown a
 spurious minimum at 10 spans, which is why the region split is always reported.
 Evidence: `~/local/vmex-residual-evidence`.
+
+**2026-09-07, knot grading refuted, and the axis lever named.** The previous
+entry proposed grading knots in `rho` as the first representation experiment.
+`benchmarks/knot_grading.py` (PR #296) ran it and the hypothesis is refuted in
+the opposite direction: at matched coefficient count a `rho`-graded basis
+raises the near-axis residual on both `input.DSHAPE` and
+`input.shaped_tokamak_pressure_polished`, at every span count and grading
+strength tested, and near-axis residual is monotone in grading strength.
+
+The mechanism is arithmetic, and it is a lift precondition rather than physics.
+A `k`-span basis graded as `linspace(0, 1, k+1)**2` has first span `[0, 1/k^2]`
+in `s`, so it needs `ns - 1 > k^2` source samples where a uniform basis needs
+`ns - 1 > k`: grading costs a quadratic increase in radial mesh. At `ns` 17 the
+innermost span holds one sample at 4 spans and none from 6 spans on, so
+`lift_high_order_state`'s unregularized least squares fills them min-norm, the
+signed Jacobian turns negative (-67.5, -86.0) and the lift is not even nested.
+Those 1e+11 to 1e+18 magnitudes are an unsupported fit, not a physical result.
+
+The penalty survives a supported fit, which is the part that matters. At
+grading exponent 1.5 with no empty span and both arms nested and
+quadrature-converged, grading cuts the total residual 765-fold and the edge
+749-fold, and still raises the axis 1.95-fold at 4 spans and 644-fold at 6; at
+`ns` 65, with 15 and 3 samples in the inner spans, the axis is 2.6 and 5.0
+times worse. So the knot vector is not the axis lever. Grading helps the edge
+enormously and the axis not at all, which points at the source data and the fit
+near the axis, the half mesh with its axis row copied from the first surface,
+exactly where E2's QA seed held its 0.0094 minimum Jacobian whatever the
+refinement.
+
+Two follow-ups, neither done here. `lift_high_order_state` silently accepts a
+caller basis with unfed spans and returns a min-norm answer; a samples-per-span
+precondition would turn a silent 1e+18 into an error, and is worth doing before
+any further representation work. And #293's 4-span total and edge figures are
+themselves grid-limited (refinement difference 0.245), so they bound nothing;
+the >= 6-span rows, refinement difference 4e-11 to 2e-9, are the usable ones.
+Peak RSS reached 7.1 GiB at 10 spans, twice the expected figure, so these runs
+are serialized. Evidence: `~/local/wt-knots-evidence`.
