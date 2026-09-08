@@ -689,3 +689,24 @@ and E1's Solov'ev work discrepancy comes back 8.014e-14 against the floor's
 or newer, so the floor environment cannot install it; the persistent head
 environment is `~/local/venvs/vmex-head`. Raw JSON and logs, both versions:
 sibling `vmex-e2qa-evidence` (`floor/` and `head/`).
+
+**2026-09-07, single-stage example does not meet its own targets.** Running
+`examples/optimization/single_stage_optimization.py` as shipped (CPU, JAX
+0.9.2, ESSOS at `1b3210c`, 92 L-BFGS-B iterations, 30 min) drives the weighted
+objective from 4.495e+02 to 1.177e+01 and prints a QA residual of 3.44e-02,
+yet the converged equilibrium has minimum `|iota|` 0.0181 against the example's
+own `IOTA_FLOOR` of 0.42, and aspect 5.29 against a target of 4.0. The
+objective history shows why: the coil normal-field term falls from 4.238e+02 to
+4.452e-01 and the aspect term from 1.926e+01 to 8.27e-01, while the iota-floor
+term rises from 5.897 to 8.038 and the QA term rises from 1.220e-03 to
+1.704e-02. A boundary with almost no rotational transform makes the
+quasisymmetry residual trivially small, which is the same degeneracy #266
+recorded for the free-boundary variant; here it appears in the fixed-boundary
+one. The example printed every coil metric beside its limit but printed
+`mean iota` with no target, so the run read as a success. It now reports
+minimum `|iota|` and aspect against their targets and says plainly when a
+target is unmet. The optimizer, objective weights and seed are unchanged: this
+records the behaviour rather than tuning it away. Whether the fix is a higher
+`IOTA_WEIGHT`, a transform-carrying seed or a constrained formulation is open,
+and it belongs with P3's application work, not with P2. Evidence:
+`~/local/vmex-single-stage-evidence`.
