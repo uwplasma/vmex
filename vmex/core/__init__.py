@@ -29,7 +29,6 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``freeboundary_implicit`` coupled NESTOR/VMEC implicit differentiation
 - ``stability``       differentiable ideal-MHD stability (Mercier and infinite-n ballooning)
 - ``virtual_casing`` plasma-current fields and residuals on a prescribed interface
-- ``freeboundary_diff`` compatibility name for the original virtual-casing API
 - ``device``          CPU/GPU placement policy (measured: benchmarks/gpu_baseline.json)
 
 Every module is validated by A/B equivalence tests against the legacy

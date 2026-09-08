@@ -83,7 +83,7 @@ def build(outdir: Path, *, offset_factor: float = 1.2, mmax: int = 18,
           kp: int = 36) -> dict:
     jax.config.update("jax_enable_x64", True)
     from vmex.core.input import VmecInput
-    from vmex.core.freeboundary_diff import surface_field_data_from_state
+    from vmex.core.virtual_casing import surface_field_data_from_state
     from vmex.core.mgrid import MgridData, write_mgrid
     from vmex.core.multigrid import solve_multigrid
 

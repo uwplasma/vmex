@@ -208,17 +208,8 @@ Free boundary
 .. automodule:: vmex.core.freeboundary_implicit
    :members:
 
-.. automodule:: vmex.core.freeboundary_linear
-   :members:
-
 .. automodule:: vmex.core.virtual_casing
    :members:
-
-.. automodule:: vmex.core.freeboundary_diff
-   :no-members:
-
-It re-exports the names above unchanged; it does not differentiate through a
-moving-boundary NESTOR equilibrium solve.
 
 .. automodule:: vmex.core.mgrid
    :members:

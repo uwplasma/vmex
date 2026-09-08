@@ -40,7 +40,6 @@ Python 3.10–3.12 is tested. CPU JAX is included; for GPUs follow the
 Optional extras include `vmex[coils]` (ESSOS), `vmex[freeb]` (virtual casing),
 `vmex[neoclassical]` (effective ripple), and `vmex[optimizers]` (JAXopt/Optax).
 See [installation](https://vmex.readthedocs.io/en/latest/installation.html) for dependencies.
-The former package name, `vmec_jax`, remains a deprecated import shim.
 
 ## Solve, plot and restart
 

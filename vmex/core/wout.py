@@ -37,7 +37,7 @@ remaining VMEC2000 output quantities (``eqfor.f``/``spectrum.f``/
 from __future__ import annotations
 
 import functools
-from dataclasses import dataclass, fields as _dc_fields
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1018,7 +1018,3 @@ def wout_from_state(
         vmex_trapped_fraction=np.asarray(trapped_fraction, dtype=float),
     )
 
-
-def wout_field_names() -> tuple[str, ...]:
-    """All :class:`WoutData` field names (for completeness checks)."""
-    return tuple(f.name for f in _dc_fields(WoutData))

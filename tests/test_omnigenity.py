@@ -101,27 +101,6 @@ def test_half_mesh_midpoint_tie_selects_lower_surface(monkeypatch):
         omn.boozer_spectrum_state(object(), runtime, surfaces=[0.1])
 
 
-def test_deprecated_transform_aliases_warn_and_dispatch(monkeypatch):
-    """The pre-handover names still work: one warning, then the canonical call."""
-    calls = []
-    monkeypatch.setattr(
-        omn, "boozer_spectrum_state",
-        lambda *a, **k: calls.append(("state", a, k)) or {"tag": "state"})
-    monkeypatch.setattr(
-        omn, "boozer_spectrum_high_order",
-        lambda *a, **k: calls.append(("high", a, k)) or {"tag": "high"})
-    with pytest.warns(DeprecationWarning, match="boozer_spectrum_state"):
-        out = omn.boozer_bmnc_state("st", "rt", surfaces=[0.5], mboz=4)
-    assert out == {"tag": "state"}
-    with pytest.warns(DeprecationWarning, match="boozer_spectrum_high_order"):
-        out = omn.boozer_bmnc_high_order("st", surfaces=[0.5], nboz=3)
-    assert out == {"tag": "high"}
-    assert calls == [
-        ("state", ("st", "rt"), {"surfaces": [0.5], "mboz": 4}),
-        ("high", ("st",), {"surfaces": [0.5], "nboz": 3}),
-    ]
-
-
 @pytest.mark.full
 def test_boozer_spectrum_matches_booz_xform(qi_eq):
     pytest.importorskip("booz_xform_jax")

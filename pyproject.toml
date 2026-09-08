@@ -124,7 +124,7 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vmex*", "vmec_jax"]
+include = ["vmex*"]
 exclude = ["tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"]
 
 [tool.setuptools.package-data]
