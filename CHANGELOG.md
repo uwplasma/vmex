@@ -1,70 +1,34 @@
 # Changelog
 
-Release notes are mirrored from the GitHub releases.  Where a number has a
-committed artifact it is named; the 0.8.x cold-start timings were measured
-in the pull-request and release bodies and are being backfilled as
-`benchmarks/` artifacts (see the *Performance and validation* page).
+Release notes are mirrored from the GitHub releases, which carry each release
+in full. A number appears here only where a committed artifact backs it, and
+`benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
+revision it was measured at, and the pages that cite it.
 
 ## Unreleased
 
-- Polish memory at production stellarator resolution: the independent
-  force sweep now sizes its point batches from the problem's own mode
-  table and radial basis instead of a constant tuned on one deck, and
-  checkpoints the per-point kernel so reverse-mode passes stay per-batch.
-  On the W7-X standard configuration (`MPOL = NTOR = 10`, `ns = 51`) the
-  initial certificate falls from a single 34 GB allocation to 3.0 GiB
-  peak RSS, and the full polish setup completes where it was previously
-  killed by the OS. Measured in `benchmarks/polish_memory.py` with the
-  pre-fix sweep as one of its arms.
-- Polish observability, part two: the Gauss-Newton phase now prints while
-  it runs. The per-iteration rows added in #243 are read out of the solver
-  history after the jitted loop returns, which at production resolution
-  meant ten hours of silence; a device callback on the inner linear
-  products now emits a throttled progress line, verified bit-identical to
-  the unreported solve.
-- `POLISH = AUTO` prices the solve before committing to it: it times one
-  Gauss-Newton linear product on the problem at hand, and if the iteration
-  limits allow more than `POLISH_BUDGET` (new directive, `--polish-budget`,
-  default 3600 s) it reports what it measured, returns the equilibrium
-  unpolished, and names the knobs that override the decision. `POLISH = ON`
-  never measures and never declines.
-- README states where polishing is effective: every certified case is
-  axisymmetric, and the two 3-D measurements (a QA deck at `MPOL = NTOR = 5`
-  and the W7-X standard configuration) are quoted with their budgets and
-  their certificate outcomes in `benchmarks/polish3d_tuning.md`.
-- Gyrokinetic flux-tube contract: the `epsilon` scalar is the field-line
-  `|B|` modulation depth `(Bmax - Bmin)/(Bmax + Bmin)` in both the core and
-  mirror lanes (`vmex.core.turbulence.b_modulation_depth`; exactly GKX's
-  inverse-aspect-ratio `epsilon` for its `1/(1 + eps cos theta)` model)
-  instead of `std|B|/mean|B|`, and `R0` is the effective major radius (the
-  wout `Rmajor_p`; `L_axis/(2 pi)` on the mirror) instead of `L_ref`, so the
-  `aminor = epsilon * R0` GKX derives when it writes run artifacts is a
-  physical minor radius. Neither scalar enters GKX's solver (#271).
-- Figure provenance: the mirror, ESSOS free-boundary, and extender examples
-  write the figures the README and docs embed straight into
-  `docs/_static/figures/` as lossless WebP, so every figure in
-  `docs/_static/figures/figures.json` that a script produces is now
-  reproduced byte for byte by its recorded command; the mirror composite
-  plotters take an opt-in `image_format="webp"`, and the extender example
-  crops its phi=0 Poincare pair itself instead of by hand.
-- Polish observability: the CLI announces every polish phase (state
-  refinement, initial certificate, preconditioner and chart build, compile
-  notice), prints one row per Gauss-Newton iteration, and closes with a
-  certificate verdict naming any failed check (#243, #244).
-- Input-file polish control: `!@VMEX POLISH_TOL`, `POLISH_DEGREE`,
-  `POLISH_SPANS`, `POLISH_MAX_ITER`, `POLISH_FAIL`, with mirrored CLI flags
-  and `solve_file` keywords; precedence CLI flag > Python keyword > file
-  directive > default (#243).
-- Optimization startup: the seed refinement is staged as one per-config
-  executable and deferred out of problem construction; time to first output
-  62 -> 6.5 s cold on the QA example, per-trial-point evaluation 12.5 -> 8.0 s
-  (#240). The staging idioms are applied to the free-boundary implicit and
-  mirror Newton-Krylov paths, and CI pins the optimization cold start (#241).
-- Validation: distinguish native force accuracy from WOUT reconstruction.
-  The corrected before/after measurements and normalization limits are in
-  `benchmarks/polish_force_error_2026-09-03.json` (#280, #282).
-- CI: the Codecov upload is best-effort so the changed-line coverage gate
-  always runs; parity lanes get budget headroom (#236, #242).
+### Added
+
+- Polish reports live progress: phase announcements, one row per Gauss-Newton
+  iteration from inside the jitted solve, and a certificate verdict (#243, #244).
+- `POLISH = AUTO` prices the solve and returns the equilibrium unpolished past
+  `POLISH_BUDGET` (`--polish-budget`, default 3600 s); `POLISH = ON` never declines.
+- Polish directives `POLISH_TOL`, `POLISH_DEGREE`, `POLISH_SPANS`,
+  `POLISH_MAX_ITER` and `POLISH_FAIL`, with CLI flags and `solve_file` keywords (#243).
+
+### Changed
+
+- The gyrokinetic flux-tube `epsilon` is the field-line `|B|` modulation depth
+  and `R0` the effective major radius, so GKX's minor radius is physical (#271).
+- Optimization seed refinement is a deferred per-configuration executable, on the
+  scalar, free-boundary implicit and mirror Newton-Krylov paths (#240, #241).
+
+### Fixed
+
+- Polish sizes its force sweep from the deck's own mode table and checkpoints the
+  per-point kernel: W7-X standard certifies at 3.0 GiB, not 34 (`benchmarks/polish_memory_w7x.json`).
+- Force-error reporting separates native accuracy from WOUT reconstruction; the
+  corrected pair is `benchmarks/polish_force_error_2026-09-03.json` (#280, #282).
 
 ## 0.8.1 - 2026-09-02
 
