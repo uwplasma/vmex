@@ -710,3 +710,36 @@ records the behaviour rather than tuning it away. Whether the fix is a higher
 `IOTA_WEIGHT`, a transform-carrying seed or a constrained formulation is open,
 and it belongs with P3's application work, not with P2. Evidence:
 `~/local/vmex-single-stage-evidence`.
+
+**2026-09-07, P1 residual scan: the radial basis, not the solve, sets the
+number.** `benchmarks/residual_vs_resolution.py` reports the continuum
+certificate in both published normalizations against two axes: the VMEC lane's
+`ns`, and the continuous representation's spline count. Building it produced
+two results before any figure.
+
+First, a lift held fixed while `ns` rises measures the basis, not the solve. On
+`input.DSHAPE` with a two-span lift the residual appeared to worsen 30-fold
+from `ns` 9 to 13; a finer solution carries radial structure a coarse basis
+cannot represent, so the certificate reported projection error. Every mesh
+point is now certified at two lift resolutions and flagged `lift_limited` when
+they disagree by more than 10 percent. At `ns` 17 with 12 spans every point is
+still lift-limited, so no VMEC-lane radial trend is quoted here.
+
+Second, and quadrature-converged: refining the radial spline basis degrades the
+near-axis residual. On `input.DSHAPE` at `ns` 17, degree 3, dimensional volume
+L2 in N m^-3 by region, spans 4/6/8/10/12: near-axis 1003, 1300, 1916, 3904,
+1.292e+04; edge 1.347e+07, 1.832e+04, 2514, 510, 463; total 7.87e+06, 1.051e+04,
+1551, 1084, 3086. The edge converges monotonically while the axis rises about
+threefold per refinement, so the total turns around at 10 spans. Coarse
+(angular 2, radial increment 2) and fine (4, 8) quadrature agree to three or
+four significant figures for 6 spans and above; only the badly under-resolved
+4-span point moves, so this is the representation and not the measurement.
+
+Reading: uniform-in-`s` knots put spline freedom where `rho^|m|` is smallest and
+the VMEC source is weakest, and the fit then reproduces axis-region noise. This
+is the same limiter E2 reached from the other side, and it sharpens §3.2: the
+`rho^|m|` basis is right, and its knot distribution is not. Grading knots in
+`rho`, or treating the axis region explicitly, is the first representation
+experiment to run, before any solver work. A total-only plot would have shown a
+spurious minimum at 10 spans, which is why the region split is always reported.
+Evidence: `~/local/vmex-residual-evidence`.
