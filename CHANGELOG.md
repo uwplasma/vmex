@@ -66,6 +66,25 @@ in the pull-request and release bodies and are being backfilled as
 - CI: the Codecov upload is best-effort so the changed-line coverage gate
   always runs; parity lanes get budget headroom (#236, #242).
 
+### Removed
+
+- The `vmec_jax` compatibility package is gone; the project has been importable
+  as `vmex` since 0.7.0 and the rename shim is no longer installed.
+- `vmex.core.freeboundary_diff` is gone; import the prescribed-interface
+  virtual-casing API from `vmex.core.virtual_casing` (or the `vmex` top level),
+  which has re-exported every one of its names unchanged.
+- The deprecated Boozer-transform aliases `boozer_bmnc_state` and
+  `boozer_bmnc_high_order` are gone, together with `vmex.boozer_bmnc_high_order`;
+  call `boozer_spectrum_state` / `boozer_spectrum_high_order`, whose signatures
+  and return contracts are identical.
+- `vmex.core.freeboundary_linear` is gone; the coupled free-boundary adjoint
+  ships in `vmex.core.freeboundary_implicit`, whose edge Schur complement
+  superseded this never-wired bordered-operator prototype.
+- The unused helpers `vmex.core.wout.wout_field_names` and
+  `vmex.core.virtual_casing.value_and_grad_bnormal` are gone; use
+  `dataclasses.fields(WoutData)` and `jax.value_and_grad` on
+  `PlasmaVacuumInterface.bnormal_objective` respectively.
+
 ## 0.8.1 - 2026-09-02
 
 The cold-start performance release. Cold CLI, python, and optimization runs

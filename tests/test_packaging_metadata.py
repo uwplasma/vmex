@@ -20,8 +20,7 @@ def test_setuptools_discovery_only_packages_vmex_namespace() -> None:
     package_find = data["tool"]["setuptools"]["packages"]["find"]
 
     assert package_find["where"] == ["."]
-    # "vmex*" is the package; "vmec_jax" is the one-release deprecation shim.
-    assert package_find["include"] == ["vmex*", "vmec_jax"]
+    assert package_find["include"] == ["vmex*"]
     for pattern in ("tests*", "docs*", "examples*", "tools*", "validation*", "results*", "build*", "dist*"):
         assert pattern in package_find["exclude"]
 

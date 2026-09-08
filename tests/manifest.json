@@ -43,7 +43,6 @@
     ["tests/test_freeboundary_implicit.py", "free-boundary", "ad", "slow", "cpu-gpu", "none", "fd", ["pr-parity-a1", "full-free-boundary-adjoint"]],
     ["tests/test_virtual_casing_api.py", "virtual-casing", "unit", "fast", "cpu", "none", "none", ["pr-parity-a1", "full-core-fb-a"]],
     ["tests/test_virtual_casing_physics.py", "virtual-casing", "ad", "medium", "cpu-gpu", "reference-nc", "fd", ["pr-parity-a1", "optional", "full-core-fb-a"]],
-    ["tests/test_freeboundary_linear.py", "free-boundary", "ad", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-a1", "full-core-fb-a"]],
     ["tests/test_freeboundary_multigrid.py", "free-boundary", "integration", "slow", "cpu-gpu", "golden", "vmec2000", ["pr-parity-a1", "full-core-fb-b"]],
     ["tests/test_freeboundary_stress.py", "free-boundary", "integration", "medium", "cpu-gpu", "generated", "analytic", ["pr-parity-a1"]],
     ["tests/test_geometry_fields.py", "equilibrium", "unit", "fast", "cpu-gpu", "none", "analytic", ["pr-parity-c1", "full-core-g-h"]],
@@ -158,7 +157,6 @@
       "tests/test_freeboundary_multigrid.py::test_stage_transfer_carries_vacuum_and_interpolates_final_xc",
       "tests/test_freeboundary_multigrid.py::test_initial_bad_jacobian_restarts_free_ladder_through_ns3",
       "tests/test_freeboundary_multigrid.py::test_single_grid_hot_restart_preserves_free_edge",
-      "tests/test_freeboundary_linear.py",
       "tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates",
       "tests/test_printing.py::test_compile_notice_variants",
       "tests/test_printing.py::test_emit_flushed_writes_and_flushes",
@@ -177,7 +175,6 @@
       "tests/test_plotting_boozer.py"
     ],
     "pr-free-boundary-adjoint": [
-      "tests/test_freeboundary_linear.py",
       "tests/test_freeboundary_implicit.py::test_host_adjoint_best_effort_warns_instead_of_raising",
       "tests/test_freeboundary_implicit.py::test_free_boundary_host_adjoint_rejects_a_false_solver_success"
     ],

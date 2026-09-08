@@ -243,7 +243,7 @@ def test_wout_geometry_rejects_invalid_normalization(shaped_eq):
 
 
 # ---------------------------------------------------------------------------
-# GKX contract + proxies (importorskip-gated, like freeboundary_diff)
+# GKX contract + proxies (importorskip-gated, like virtual_casing)
 # ---------------------------------------------------------------------------
 
 

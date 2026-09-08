@@ -46,7 +46,6 @@ section of ``docs/explanation/nestor-vacuum.rst``.
 
 ``virtual_casing_jax`` is an optional dependency. Surface-data construction
 remains available without it; virtual-casing solver paths raise a clear error.
-The old :mod:`vmex.core.freeboundary_diff` name is a compatibility shim.
 """
 
 from __future__ import annotations
@@ -859,19 +858,3 @@ class PlasmaVacuumInterface:
 # Published before the prescribed-interface/free-boundary distinction was made
 # explicit. Keep the old class name as an exact alias through the 0.x series.
 FreeBoundaryDiffProblem = PlasmaVacuumInterface
-
-
-def value_and_grad_bnormal(
-    problem: "PlasmaVacuumInterface",
-    external_field: Any,
-) -> tuple[jax.Array, Any]:
-    """``(J, dJ/d external_field)`` of the normal-field objective via ``jax.value_and_grad``.
-
-    ``external_field`` is a pytree (an ``MgridField``, or a callable closing over
-    coil dofs); the gradient has the same structure (``extcur``, or the coil dofs).
-    """
-
-    def fun(ef: Any) -> jax.Array:
-        return problem.bnormal_objective(ef)
-
-    return jax.value_and_grad(fun)(external_field)

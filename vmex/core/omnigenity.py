@@ -18,8 +18,7 @@ Two pieces:
    jittable kernel (``booz_xform_jax.jax_api.booz_xform_jax_impl``) for
    symmetric and ``lasym`` states alike, so vmex carries no second
    implementation of the transform and the whole chain stays end-to-end
-   differentiable.  (:func:`boozer_bmnc_state` remains as a deprecated
-   alias of the previous name.)
+   differentiable.
 
 2. :func:`omnigenity_residual` / :class:`QIResidual` — a smooth, lightweight
    surrogate for poloidally-closed-contour (``M = 0, N = 1``) omnigenity.
@@ -68,7 +67,6 @@ Scope notes
 from __future__ import annotations
 
 import dataclasses
-import warnings
 from typing import Any, Iterable
 
 import numpy as np
@@ -81,8 +79,6 @@ from .solver import SolverRuntime, SpectralState
 from .statephysics import _as_1d
 
 __all__ = [
-    "boozer_bmnc_high_order",
-    "boozer_bmnc_state",
     "boozer_spectrum_high_order",
     "boozer_spectrum_state",
     "omnigenity_residual",
@@ -417,41 +413,6 @@ def boozer_spectrum_state(
     return _boozer_kernel_state(
         state, rt, rows=rows, s_half=s_half_np, mboz=mboz, nboz=nboz,
         oversample=oversample)
-
-
-def boozer_bmnc_state(*args, **kwargs) -> dict[str, Array]:
-    """Deprecated alias of :func:`boozer_spectrum_state`.
-
-    Emits a :exc:`DeprecationWarning`, then forwards ``*args``/``**kwargs``
-    unchanged.  Same signature and return contract (including the ``bmns_b``
-    block).  The name changed when the in-repo symmetric FFT transform was
-    retired in favor of booz_xform_jax's kernel for both parities.
-    """
-    warnings.warn(
-        "vmex.core.omnigenity.boozer_bmnc_state is deprecated; call "
-        "boozer_spectrum_state (identical signature and return contract)",
-        DeprecationWarning, stacklevel=2)
-    return boozer_spectrum_state(*args, **kwargs)
-
-
-def boozer_bmnc_high_order(*args, **kwargs) -> dict[str, Array]:
-    """Deprecated alias of :func:`boozer_spectrum_high_order`.
-
-    Emits a :exc:`DeprecationWarning` on every call, then forwards ``*args``
-    and ``**kwargs`` unchanged and returns that function's result verbatim —
-    the same dict of ``bmnc_b``/``bmns_b``, ``xm_b``/``xn_b``, ``iota_b``,
-    ``G_b``/``I_b``, ``nfp`` and ``s_b``.  Signature and return contract are
-    identical, so migrating is a rename: call
-    :func:`boozer_spectrum_high_order`.  The old name understates what comes
-    back, which is the whole spectrum including the ``bmns_b`` block, not a
-    ``bmnc`` table.
-    """
-    warnings.warn(
-        "vmex.core.omnigenity.boozer_bmnc_high_order is deprecated; call "
-        "boozer_spectrum_high_order (identical signature and return "
-        "contract)",
-        DeprecationWarning, stacklevel=2)
-    return boozer_spectrum_high_order(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------

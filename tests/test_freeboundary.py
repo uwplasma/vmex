@@ -30,7 +30,6 @@ import jax.numpy as jnp  # noqa: E402
 from vmex.core import freeboundary as FB  # noqa: E402
 from vmex.core import vacuum as V  # noqa: E402
 from vmex.core.errors import MgridNotFoundError, VmecJacobianError  # noqa: E402
-from vmex.core.freeboundary_linear import linearize_nestor_coupling  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.mgrid import MgridField, read_mgrid  # noqa: E402
 from vmex.core.solver import (  # noqa: E402
@@ -125,8 +124,8 @@ def test_nestor_skip_branch_matches_full_solve(ab_inputs):
 
 
 @pytest.mark.full
-def test_live_nestor_blocks_match_coupled_residual_jvp_and_vjp():
-    """The bordered blocks come from a live, small LASYM NESTOR equation."""
+def test_live_nestor_residual_differentiates_a_tabulated_coil_control():
+    """A live, small LASYM NESTOR equation differentiated w.r.t. a coil control."""
     basis = V.vacuum_basis(
         mf=1, nf=0, ntheta3=6, nzeta=1, nfp=1, lasym=True,
         wint=np.full((6,), 1.0 / 6.0),
@@ -147,59 +146,7 @@ def test_live_nestor_blocks_match_coupled_residual_jvp_and_vjp():
     solver = V.make_vacuum_solver(basis, signgs=-1)
     bexni = jnp.full((6, 1), 0.05)
 
-    def boundary(x):
-        scale, twist = 1.0 + 1e-4 * x[0], 1e-4 * x[1]
-        fields = {}
-        for r_name, z_name in (
-            ("R", "Z"), ("Ru", "Zu"), ("Rv", "Zv"),
-            ("ruu", "zuu"), ("ruv", "zuv"), ("rvv", "zvv"),
-        ):
-            r, z = getattr(boundary0, r_name), getattr(boundary0, z_name)
-            fields[r_name] = scale * r + twist * z
-            fields[z_name] = scale * z - twist * r
-        return dataclasses.replace(boundary0, **fields)
-
-    def vacuum_system(x):
-        matrix, rhs, *_ = solver.assemble(boundary(x), bexni)
-        return matrix, rhs
-
-    def plasma_residual(x, q):
-        b = boundary(x)
-        guu = b.Ru * b.Ru + b.Zu * b.Zu
-        guv = b.Ru * b.Rv + b.Zu * b.Zv
-        gvv = b.Rv * b.Rv + b.Zv * b.Zv + b.R * b.R
-        bsq, *_ = V.vacuum_channels(
-            basis=basis, potvac=q, bexu=jnp.full_like(b.R, 0.02),
-            bexv=0.1 * b.R, guu=guu, guv=guv, gvv=gvv,
-        )
-        return jnp.asarray([jnp.mean(bsq), jnp.mean(bsq * b.R)])
-
-    x0 = jnp.zeros((2,), dtype=jnp.float64)
     q0, *_ = solver.full(boundary0, bexni)
-    op = linearize_nestor_coupling(plasma_residual, vacuum_system, x0, q0)
-
-    def coupled(value):
-        x, q = value[:2], value[2:]
-        matrix, rhs = vacuum_system(x)
-        return jnp.concatenate((plasma_residual(x, q), matrix @ q - rhs))
-
-    base = jnp.concatenate((x0, q0))
-    tangent = jnp.linspace(-0.2, 0.3, base.size)
-    cotangent = jnp.linspace(0.1, -0.1, base.size)
-    expected = jax.jvp(coupled, (base,), (tangent,))[1]
-    np.testing.assert_allclose(op(tangent), expected, rtol=2e-12, atol=2e-12)
-    _, pullback = jax.vjp(coupled, base)
-    np.testing.assert_allclose(
-        op.transpose(cotangent), pullback(cotangent)[0],
-        rtol=2e-12, atol=2e-12,
-    )
-    for value in (
-        op.plasma(jnp.ones_like(x0)),
-        op.vacuum_to_plasma(jnp.ones_like(q0)),
-        op.plasma_to_vacuum(jnp.ones_like(x0)),
-        op.vacuum(jnp.ones_like(q0)),
-    ):
-        assert float(jnp.linalg.norm(value)) > 0.0
 
     # Coil-control lane: differentiable JAX tabulation must carry a physical
     # uniform vertical field all the way into NESTOR's unsolved residual.

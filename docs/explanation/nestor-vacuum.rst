@@ -142,8 +142,8 @@ assembled by
 smooth JAX function of the external-field dofs alone (coil Fourier
 coefficients/currents of a callable ESSOS coil field via
 :func:`~vmex.core.virtual_casing.external_B_cartesian`, or
-``extcur``), and its ``value_and_grad_bnormal`` helper returns gradients
-validated against finite differences — no NESTOR adjoint is required.
+``extcur``), so ``jax.value_and_grad`` returns gradients validated against
+finite differences — no NESTOR adjoint is required.
 
 The finite-beta single-stage example uses a pressure profile that vanishes at
 the LCFS. It therefore needs no prescribed physical sheet current in the jump
