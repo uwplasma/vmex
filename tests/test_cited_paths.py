@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -90,3 +91,92 @@ def test_rst_prose_scan_preserves_code_math_and_reference_titles(tmp_path, monke
     errors.clear()
     gate.check_prose(reference, errors)
     assert len(errors) == 1 and ":3:" in errors[0]
+
+
+# --- benchmarks/INDEX.md: every artifact accounted for, every path real ------
+
+INDEX_SPEC = importlib.util.spec_from_file_location(
+    "benchmark_index", ROOT / "tools/render_benchmark_index.py"
+)
+assert INDEX_SPEC is not None and INDEX_SPEC.loader is not None
+index_tool = importlib.util.module_from_spec(INDEX_SPEC)
+INDEX_SPEC.loader.exec_module(index_tool)
+
+#: A code span in INDEX.md that names a repository path (commits and column
+#: headings are backticked too, but only paths carry a separator).
+INDEX_PATH = re.compile(r"`((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]*)`")
+
+
+def _index_text() -> str:
+    return (ROOT / "benchmarks/INDEX.md").read_text(encoding="utf-8")
+
+
+def test_every_benchmark_artifact_appears_in_the_index() -> None:
+    """No committed record may be missing from the index.
+
+    An artifact is named outright or covered by a grouped directory whose
+    file count the index states, so neither a new record nor a new file in
+    a grouped directory can arrive unlisted.
+    """
+    text = _index_text()
+    counts = {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"\| `(benchmarks/\S+?)/` \| (\d+) \|", text)
+    }
+    missing: list[str] = []
+    for rel in index_tool.artifacts():
+        group = index_tool.group_of(rel)
+        if group is None:
+            if f"`{rel}`" not in text:
+                missing.append(rel)
+        elif group not in counts:
+            missing.append(rel)
+    assert not missing, (
+        "absent from benchmarks/INDEX.md; run python tools/render_benchmark_index.py:\n"
+        + "\n".join(missing)
+    )
+    for group, stated in counts.items():
+        actual = sum(index_tool.group_of(rel) == group for rel in index_tool.artifacts())
+        assert stated == actual, (
+            f"{group}/ holds {actual} files but INDEX.md states {stated}; "
+            "run python tools/render_benchmark_index.py"
+        )
+
+
+def test_index_names_no_path_that_is_missing() -> None:
+    """Every path the index cites must exist in this checkout."""
+    missing = sorted(
+        {
+            target
+            for target in INDEX_PATH.findall(_index_text())
+            if not (ROOT / target.rstrip("/")).exists()
+        }
+    )
+    assert not missing, "benchmarks/INDEX.md cites paths that do not exist:\n" + "\n".join(missing)
+
+
+def test_index_is_regenerated_from_the_tree() -> None:
+    """The committed index must be exactly what the generator renders."""
+    assert index_tool.render() == _index_text(), (
+        "benchmarks/INDEX.md is stale; run python tools/render_benchmark_index.py"
+    )
+
+
+def test_every_artifact_has_an_attributed_generator() -> None:
+    """A new artifact must say which script writes it, or admit that none does."""
+    for rel in index_tool.artifacts():
+        script = index_tool.generator_of(rel)  # raises when unattributed
+        assert not script or (ROOT / script).is_file(), f"{rel}: generator {script} is missing"
+
+
+def test_index_detects_an_artifact_the_index_forgot(tmp_path, monkeypatch) -> None:
+    """The membership check has to actually fail on an unlisted record."""
+    monkeypatch.setattr(index_tool, "REPO", tmp_path)
+    monkeypatch.setattr(index_tool, "BENCHMARKS", tmp_path / "benchmarks")
+    monkeypatch.setattr(index_tool, "INDEX", tmp_path / "benchmarks/INDEX.md")
+    (tmp_path / "benchmarks").mkdir()
+    (tmp_path / "benchmarks/baseline.json").write_text("{}")
+    (tmp_path / "benchmarks/INDEX.md").write_text("no records here\n")
+    assert index_tool.artifacts() == ["benchmarks/baseline.json"]
+    assert "`benchmarks/baseline.json`" not in (tmp_path / "benchmarks/INDEX.md").read_text()
+    assert "`benchmarks/baseline.json`" in index_tool.render()
