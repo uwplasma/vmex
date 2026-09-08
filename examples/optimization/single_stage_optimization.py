@@ -291,6 +291,25 @@ print(f"Minimum coil-surface distance = {coil_surface_distance:.4f} m "
 print(f"Minimum coil-coil distance = {coil_distance:.4f} m (target >= {COIL_DISTANCE_LIMIT:.4f} m)")
 print(f"Maximum curvature = {maximum_curvature:.4f} 1/m (target <= {CURVATURE_LIMIT:.4f} 1/m)")
 
+# The coil metrics above are each printed against their limit; the plasma
+# targets were not, so a run that drove the coil terms down while leaving the
+# rotational transform near zero read as a success. A boundary with no
+# transform also makes the quasisymmetry residual trivially small, so report
+# both plasma targets explicitly and say plainly whether they were met.
+minimum_iota = float(opt.min_abs_iota(final_equilibrium.state, final_equilibrium.runtime))
+final_aspect = float(opt.aspect_ratio(final_equilibrium.state, final_equilibrium.runtime))
+print(f"Minimum |iota| = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f})")
+print(f"Aspect ratio = {final_aspect:.4f} (target {ASPECT_TARGET:.4f})")
+unmet = []
+if minimum_iota < IOTA_FLOOR:
+    unmet.append(f"minimum |iota| {minimum_iota:.4f} below the {IOTA_FLOOR:.4f} floor")
+if normal_field_rms > NORMAL_FIELD_LIMIT:
+    unmet.append(f"B.n/B RMS {100 * normal_field_rms:.3f}% above {100 * NORMAL_FIELD_LIMIT:.1f}%")
+if unmet:
+    print("\nThis run did NOT meet its stated targets: " + "; ".join(unmet) + ".")
+    print("A lower weighted objective with an unmet target is not a design. "
+          "Raise the weight, reseed, or extend the budget before using it.")
+
 # Save results
 input_path = final_input.to_indata("input.single_stage_optimized")
 wout_path = vj.write_wout("wout_single_stage_optimized.nc", final_equilibrium.wout)
