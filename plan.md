@@ -743,3 +743,73 @@ is the same limiter E2 reached from the other side, and it sharpens §3.2: the
 experiment to run, before any solver work. A total-only plot would have shown a
 spurious minimum at 10 spans, which is why the region split is always reported.
 Evidence: `~/local/vmex-residual-evidence`.
+
+**2026-09-07, knot grading refuted, and the axis lever named.** The previous
+entry proposed grading knots in `rho` as the first representation experiment.
+`benchmarks/knot_grading.py` (PR #296) ran it and the hypothesis is refuted in
+the opposite direction: at matched coefficient count a `rho`-graded basis
+raises the near-axis residual on both `input.DSHAPE` and
+`input.shaped_tokamak_pressure_polished`, at every span count and grading
+strength tested, and near-axis residual is monotone in grading strength.
+
+The mechanism is arithmetic, and it is a lift precondition rather than physics.
+A `k`-span basis graded as `linspace(0, 1, k+1)**2` has first span `[0, 1/k^2]`
+in `s`, so it needs `ns - 1 > k^2` source samples where a uniform basis needs
+`ns - 1 > k`: grading costs a quadratic increase in radial mesh. At `ns` 17 the
+innermost span holds one sample at 4 spans and none from 6 spans on, so
+`lift_high_order_state`'s unregularized least squares fills them min-norm, the
+signed Jacobian turns negative (-67.5, -86.0) and the lift is not even nested.
+Those 1e+11 to 1e+18 magnitudes are an unsupported fit, not a physical result.
+
+The penalty survives a supported fit, which is the part that matters. At
+grading exponent 1.5 with no empty span and both arms nested and
+quadrature-converged, grading cuts the total residual 765-fold and the edge
+749-fold, and still raises the axis 1.95-fold at 4 spans and 644-fold at 6; at
+`ns` 65, with 15 and 3 samples in the inner spans, the axis is 2.6 and 5.0
+times worse. So the knot vector is not the axis lever. Grading helps the edge
+enormously and the axis not at all, which points at the source data and the fit
+near the axis, the half mesh with its axis row copied from the first surface,
+exactly where E2's QA seed held its 0.0094 minimum Jacobian whatever the
+refinement.
+
+Two follow-ups, neither done here. `lift_high_order_state` silently accepts a
+caller basis with unfed spans and returns a min-norm answer; a samples-per-span
+precondition would turn a silent 1e+18 into an error, and is worth doing before
+any further representation work. And #293's 4-span total and edge figures are
+themselves grid-limited (refinement difference 0.245), so they bound nothing;
+the >= 6-span rows, refinement difference 4e-11 to 2e-9, are the usable ones.
+Peak RSS reached 7.1 GiB at 10 spans, twice the expected figure, so these runs
+are serialized. Evidence: `~/local/wt-knots-evidence`.
+
+**2026-09-07, Phase 2 in one parallel round.** Four workstreams ran at once on
+disjoint files, with none of them touching this logbook so their branches could
+not collide; the entries here are written at merge time instead. Merged:
+#293 the P1 residual generator, #294 dead code and shims (-406 lines: the
+`vmec_jax` rename shim, `freeboundary_diff`, the `boozer_bmnc_*` aliases,
+`wout_field_names`, `value_and_grad_bnormal`, and the never-wired
+`freeboundary_linear` prototype, with `vmex.__all__` 93 to 92), #295 the
+CHANGELOG at release-note grade (unreleased 61 to 24 lines, whole file 115 to
+79) plus a generated `benchmarks/INDEX.md` covering all 87 artifacts with a
+staleness test, and #296 the knot-grading refutation. #297, the homotopy
+extraction, is the one still open.
+
+Two corrections came out of the round and both are kept. #295 found that only
+`qa_optimization_startup_main_m4.json` is orphaned, not all three startup
+records as an earlier reading had it, and it removed cold-start numbers from
+the CHANGELOG that no committed artifact backs rather than rewording them.
+#294 found a consumer the brief missed, `linearize_nestor_coupling` in the
+free-boundary tests, and kept its differentiable coil-control half rather than
+deleting the test with the prototype.
+
+The CI narrowing merged in #290 and #292 is doing its work: #293 and #296 ran
+4 of 16 lanes, #294 and #295 correctly ran all 16 because they touch package
+code. #297 exposed the one real gap. Moving 473 lines into a new module made
+them "changed" for diff-cover while their tests sat in a nightly-only lane, so
+coverage read 42.8 percent. The fix was tiering that had been wrong anyway: the
+module carried a blanket `full` mark although only two of its cases run real
+polishes, so the mark came off, the module joined the `pr-parity-e`
+pull-request lane beside its siblings, and coverage rose to 94.0 percent. The
+remaining 28 lines are guard clauses and deep continuation branches; the guards
+are being given fast unit tests rather than bought with slow ones. Moving code
+should not lose it coverage, and a pure move exposing a pre-existing gap is
+worth closing rather than exempting.

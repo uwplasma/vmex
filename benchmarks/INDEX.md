@@ -7,8 +7,8 @@ missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
 87 committed artifacts: 33 standalone records and 1 grouped directory holding
-54 files. 30 of the 34 entries below are cited by a page, a test or another
-script; 4 are cited by nothing.
+54 files. 31 of the 34 entries below are cited by a page, a test or another
+script; 3 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -45,7 +45,7 @@ hand rather than by a script in this tree.
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/profile.json` | `benchmarks/profile_production.py` |  |  | *nothing* |
 | `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
-| `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | *nothing* |
+| `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | `plan.md` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | `plan.md` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `plan.md`, `tests/test_performance_docs.py` |
@@ -69,4 +69,3 @@ reads. They are kept, not deleted; the list exists so that stays visible.
 - `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
 - `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/profile.json`
-- `benchmarks/qa_optimization_startup_main_m4.json`
