@@ -51,6 +51,21 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     # Data files under a narrowable prefix need no numerical lane.
     assert ci_scope.needed_lanes(["docs/_static/figures/figures.json"]) == set()
 
+    # Root prose is narrowable wherever it lives, because the logbook rides
+    # along with almost every change and cannot alter what the package
+    # computes. It still runs the lanes owning the guards that read it.
+    plan_lanes = ci_scope.needed_lanes(["plan.md"])
+    assert plan_lanes is not None and "pr-parity-c2" in plan_lanes
+    assert ci_scope.needed_lanes(["README.md"]) is not None
+    mixed = ci_scope.needed_lanes(
+        ["examples/optimization/single_stage_optimization.py", "plan.md"]
+    )
+    assert mixed is not None and mixed >= plan_lanes, (
+        "a change carrying the logbook must still run the logbook's guards"
+    )
+    # Prose alongside package code keeps the full matrix.
+    assert ci_scope.needed_lanes(["vmex/core/solver.py", "plan.md"]) is None
+
 
 def test_ci_scope_skips_only_documentation_and_rendered_media() -> None:
     assert ci_scope.classify(

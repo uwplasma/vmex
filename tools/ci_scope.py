@@ -64,6 +64,19 @@ NARROWABLE_PREFIXES = ("tests/", "benchmarks/", "examples/", "docs/")
 _IMPORTS = re.compile(r"^\s*(?:from|import)\s+(benchmarks|examples)\b", re.MULTILINE)
 
 
+def _is_narrowable(path: str) -> bool:
+    """Whether ``path`` can be attributed to particular lanes.
+
+    Documentation is narrowable wherever it sits, including the root files the
+    logbook and README live in: prose cannot change what the package computes,
+    only what the documentation guards read. Everything else must sit under a
+    tree the package does not import.
+    """
+    return path.startswith(NARROWABLE_PREFIXES) or any(
+        path.lower().endswith(suffix) for suffix in DOCUMENTATION_SUFFIXES
+    )
+
+
 def _owning_lanes(modules: Iterable[str], manifest: dict) -> set[str]:
     """PR lanes that own any of ``modules``, by the manifest's own ownership."""
     wanted = set(modules)
@@ -82,11 +95,12 @@ def _tests_referencing(paths: Iterable[str], root: Path) -> set[str]:
     for helpers, and a literal path for scripts they execute. Missing either
     would silently drop a lane, so both are matched.
     """
-    targets = [path for path in paths if path.endswith(".py")]
+    targets = list(paths)
     if not targets:
         return set()
-    packages = {path.split("/", 1)[0] for path in targets}
-    stems = {Path(path).stem for path in targets}
+    packages = {path.split("/", 1)[0] for path in targets if path.endswith(".py")}
+    stems = {Path(path).name for path in targets}
+    stems |= {Path(path).stem for path in targets if path.endswith(".py")}
     found = set()
     for path in sorted((root / "tests").rglob("test_*.py")):
         text = path.read_text(encoding="utf-8", errors="ignore")
@@ -105,7 +119,7 @@ def needed_lanes(paths: Iterable[str], *, manifest=None, root=None) -> set[str] 
     """
     root = Path(root) if root is not None else ROOT
     changed = tuple(path.strip("/") for path in paths if path.strip("/"))
-    if not changed or not all(path.startswith(NARROWABLE_PREFIXES) for path in changed):
+    if not changed or not all(_is_narrowable(path) for path in changed):
         return None
     if manifest is None:
         manifest = json.loads((root / "tests" / "manifest.json").read_text(encoding="utf-8"))
@@ -113,7 +127,9 @@ def needed_lanes(paths: Iterable[str], *, manifest=None, root=None) -> set[str] 
     modules = {path for path in changed if path.startswith("tests/") and path.endswith(".py")}
     scripts = [path for path in changed
                if path.startswith(("benchmarks/", "examples/")) and path.endswith(".py")]
-    modules |= _tests_referencing(scripts, root)
+    documents = [path for path in changed
+                 if any(path.lower().endswith(suffix) for suffix in DOCUMENTATION_SUFFIXES)]
+    modules |= _tests_referencing(scripts + documents, root)
     unattributed = [path for path in changed
                     if path.endswith(".py") and path not in modules
                     and path not in scripts]
