@@ -31,6 +31,8 @@ jobs:
     outputs:
       run_tests: ${{ steps.scope.outputs.run_tests }}
       run_coverage: ${{ steps.scope.outputs.run_coverage }}
+      physics: ${{ steps.physics.outputs.matrix }}
+      parity: ${{ steps.parity.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -44,6 +46,36 @@ jobs:
               python tools/ci_scope.py --null >> "$GITHUB_OUTPUT"
           else
             python tools/ci_scope.py --all </dev/null >> "$GITHUB_OUTPUT"
+          fi
+      - id: physics
+        # Narrowing reuses the manifest ownership the lanes are built from.
+        # Anything it cannot attribute returns every lane, so a miss costs
+        # runner time and never coverage.
+        name: Select the physics lanes this change needs
+        shell: bash
+        env:
+          ALL: '[{"lane":"core","selector":"pr-physics-core","parallel":"-n 2"},{"lane":"implicit-response-a","selector":"pr-implicit-response-a","parallel":""},{"lane":"implicit-response-b","selector":"pr-implicit-response-b","parallel":""},{"lane":"free-boundary-adjoint","selector":"pr-free-boundary-adjoint","parallel":""},{"lane":"field-api","selector":"pr-physics-field","parallel":"-n 2"},{"lane":"mirror-equilibrium","selector":"pr-mirror-equilibrium","parallel":""},{"lane":"mirror-field","selector":"pr-mirror-field","parallel":""},{"lane":"mirror-spline","selector":"pr-mirror-spline","parallel":""}]'
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          else
+            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          fi
+      - id: parity
+        # Narrowing reuses the manifest ownership the lanes are built from.
+        # Anything it cannot attribute returns every lane, so a miss costs
+        # runner time and never coverage.
+        name: Select the parity lanes this change needs
+        shell: bash
+        env:
+          ALL: '[{"lane":"a-free","selector":"pr-parity-a1","parallel":"-n 2"},{"lane":"a-core","selector":"pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c1","selector":"pr-parity-c1","parallel":"-n 4"},{"lane":"c3d","selector":"pr-parity-c3 pr-parity-d","parallel":"-n 4"},{"lane":"e-polish","selector":"pr-parity-e","parallel":"-n 4"},{"lane":"f-options","selector":"pr-parity-f","parallel":"-n 4"},{"lane":"c2","selector":"pr-parity-c2","parallel":"-n 4"},{"lane":"misc","selector":"pr-examples pr-external pr-full-only pr-gradient","parallel":"-n 4"}]'
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+          else
+            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
           fi
 
   quality:
@@ -121,37 +153,15 @@ jobs:
   physics:
     name: Representative ${{ matrix.lane }} physics
     needs: changes
-    if: needs.changes.outputs.run_tests == 'true'
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      needs.changes.outputs.physics != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - lane: core
-            selector: pr-physics-core
-            parallel: "-n 2"
-          - lane: implicit-response-a
-            selector: pr-implicit-response-a
-            parallel: ""
-          - lane: implicit-response-b
-            selector: pr-implicit-response-b
-            parallel: ""
-          - lane: free-boundary-adjoint
-            selector: pr-free-boundary-adjoint
-            parallel: ""
-          - lane: field-api
-            selector: pr-physics-field
-            parallel: "-n 2"
-          - lane: mirror-equilibrium
-            selector: pr-mirror-equilibrium
-            parallel: ""
-          - lane: mirror-field
-            selector: pr-mirror-field
-            parallel: ""
-          - lane: mirror-spline
-            selector: pr-mirror-spline
-            parallel: ""
+        include: ${{ fromJSON(needs.changes.outputs.physics) }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -194,7 +204,9 @@ jobs:
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
-    if: needs.changes.outputs.run_tests == 'true'
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      needs.changes.outputs.parity != '[]'
     runs-on: ubuntu-latest
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
@@ -202,31 +214,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - lane: a-free
-            selector: pr-parity-a1
-            parallel: "-n 2"
-          - lane: a-core
-            selector: pr-parity-a2 pr-parity-b
-            parallel: "-n 4"
-          - lane: c1
-            selector: pr-parity-c1
-            parallel: "-n 4"
-          - lane: c3d
-            selector: pr-parity-c3 pr-parity-d
-            parallel: "-n 4"
-          - lane: e-polish
-            selector: pr-parity-e
-            parallel: "-n 4"
-          - lane: f-options
-            selector: pr-parity-f
-            parallel: "-n 4"
-          - lane: c2
-            selector: pr-parity-c2
-            parallel: "-n 4"
-          - lane: misc
-            selector: pr-examples pr-external pr-full-only pr-gradient
-            parallel: "-n 4"
+        include: ${{ fromJSON(needs.changes.outputs.parity) }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
