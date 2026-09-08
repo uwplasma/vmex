@@ -28,13 +28,15 @@ from vmex.core.input import VmecInput
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.polish import (
     build_low_order_preconditioner,
-    build_strong_physical_block_preconditioner,
-    make_strong_physical_chart,
     make_strong_root_runtime,
     make_strong_structured_chart,
+    strong_root_residual,
+)
+from vmex.core.polish_homotopy import (
+    build_strong_physical_block_preconditioner,
+    make_strong_physical_chart,
     strong_physical_residual,
     strong_root_rank,
-    strong_root_residual,
 )
 from vmex.core.strong_force import lift_high_order_state
 

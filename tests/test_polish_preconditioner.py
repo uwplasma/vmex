@@ -18,39 +18,27 @@ from vmex.core.errors import (
 )
 from vmex.core.input import VmecInput
 from vmex.core.polish import (
-    HighOrderCorrection,
-    PreconditionerRefreshPolicy,
-    PreconditionerSnapshot,
     build_low_order_preconditioner,
-    build_strong_physical_block_preconditioner,
-    build_strong_mode_block_preconditioner,
     make_high_low_transfer,
-    make_strong_physical_chart,
     make_strong_structured_chart,
     make_strong_root_layout,
     make_strong_root_runtime,
-    preconditioner_quality,
-    preconditioner_refresh_decision,
     sample_high_order_state,
-    _strong_residual_unscaled,
     _streaming_ruiz_scales,
     _physical_coordinate_blocks,
     _physical_equation_chart,
     strong_collocation_residual,
-    strong_projection_diagnostics,
-    strong_physical_residual,
-    strong_root_rank,
-    strong_root_residual,
     strong_root_residual_at_native,
 )
 from vmex.core.polish_driver import (
     PolishConfig,
     PolishContext,
-    _build_mode_block_preconditioner,
-    _solve_low_inverse,
     polish_collocation_least_squares,
-    polish_strong_root,
     polished_wout_ns,
+)
+from vmex.core.polish_homotopy import (
+    strong_projection_diagnostics,
+    strong_physical_residual,
 )
 from vmex.core.polish_implicit import (
     collocation_polish_tangent, collocation_polish_adjoint,
@@ -277,7 +265,7 @@ def test_stored_block_preconditioner_reuses_factors_and_transposes(small_adapter
     np.testing.assert_allclose(lhs, rhs, rtol=2.0e-10, atol=2.0e-10)
 
 
-def test_transfer_validation_and_quality_metric(small_adapter):
+def test_transfer_validation_rejects_bad_tables_and_shapes(small_adapter):
     native, runtime, *_ = small_adapter
     invalid = dataclasses.replace(native, m=np.asarray(native.m) + 1)
     with pytest.raises(ValueError, match="mode tables"):
@@ -290,145 +278,6 @@ def test_transfer_validation_and_quality_metric(small_adapter):
     )
     with pytest.raises(ValueError, match="R_cos has shape"):
         transfer.project_high(malformed)
-
-    one = transfer.zeros_high(jnp.float64)
-    one = HighOrderCorrection(
-        *(jnp.ones_like(leaf) for leaf in jax.tree.leaves(one))
-    )
-    probes = jax.tree.map(lambda value: jnp.stack((value, 2.0 * value)), one)
-    quality = preconditioner_quality(lambda value: value, lambda value: value, probes)
-    np.testing.assert_array_equal(quality.relative_residual, 0.0)
-    assert float(quality.maximum) == 0.0
-    assert float(quality.rms) == 0.0
-
-
-def test_factor_refresh_policy_reports_every_trigger():
-    previous = PreconditionerSnapshot(
-        alpha=0.1,
-        radial_degree=3,
-        radial_size=5,
-        krylov_iterations=10,
-        relative_residual=0.1,
-        jacobian_margin=2.0,
-    )
-    stable = dataclasses.replace(previous, alpha=0.2)
-    assert preconditioner_refresh_decision(previous, stable) == (False, ())
-
-    degraded = PreconditionerSnapshot(
-        alpha=0.5,
-        radial_degree=5,
-        radial_size=9,
-        krylov_iterations=81,
-        relative_residual=0.6,
-        jacobian_margin=1.0,
-        parameter_distance=0.2,
-        transpose_converged=False,
-    )
-    decision = preconditioner_refresh_decision(previous, degraded)
-    assert decision.refresh
-    assert decision.reasons == (
-        "continuation-step",
-        "radial-grid",
-        "krylov-work",
-        "linear-quality",
-        "jacobian-margin",
-        "parameter-distance",
-        "transpose-certificate",
-    )
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("max_alpha_change", 0.0, "max_alpha_change"),
-        ("max_krylov_iterations", 0, "max_krylov_iterations"),
-        ("max_relative_residual", 0.0, "max_relative_residual"),
-        ("min_jacobian_margin_ratio", 0.0, "min_jacobian_margin_ratio"),
-        ("max_parameter_distance", 0.0, "max_parameter_distance"),
-    ],
-)
-def test_factor_refresh_policy_rejects_invalid_thresholds(field, value, message):
-    with pytest.raises(ValueError, match=message):
-        PreconditionerRefreshPolicy(**{field: value})
-
-
-def test_physical_chart_eliminates_only_the_linear_coordinate_gauge(
-    small_strong_root,
-):
-    runtime = small_strong_root
-    chart = make_strong_physical_chart(runtime)
-    assert chart.full_size == runtime.layout.size
-    assert chart.size + chart.gauge_rank == chart.full_size
-    assert chart.gauge_rank > 0
-    assert chart.build_seconds > 0.0
-    np.testing.assert_allclose(
-        np.asarray(chart.coordinate_basis.T @ chart.coordinate_basis),
-        np.eye(chart.size),
-        rtol=2.0e-12,
-        atol=2.0e-12,
-    )
-    np.testing.assert_allclose(
-        np.asarray(chart.equation_basis.T @ chart.equation_basis),
-        np.eye(chart.size),
-        rtol=2.0e-12,
-        atol=2.0e-12,
-    )
-
-    zero = jnp.zeros((chart.size,), dtype=jnp.float64)
-    # Same two-program cancellation floor as the endpoint test above.
-    np.testing.assert_allclose(
-        strong_physical_residual(zero, runtime, chart, 0.0), 0.0, atol=1.0e-12
-    )
-    probe = jnp.linspace(-0.01, 0.015, chart.size)
-    full_probe = chart.lift(probe)
-    low_probe = chart.project(strong_root_residual(full_probe, runtime, 0.0))
-    strong_probe = chart.project(
-        _strong_residual_unscaled(
-            full_probe,
-            runtime,
-            include_coordinate_gauge=False,
-        )
-        / runtime.strong_scale
-    )
-    alpha = 0.37
-    np.testing.assert_allclose(
-        strong_physical_residual(probe, runtime, chart, alpha),
-        low_probe + alpha * (strong_probe - low_probe),
-        rtol=2.0e-13,
-        atol=2.0e-13,
-    )
-    direction = jnp.linspace(-0.2, 0.3, chart.size)
-    _, tangent = jax.jvp(
-        lambda value: strong_physical_residual(value, runtime, chart, 1.0),
-        (zero,),
-        (direction,),
-    )
-    step = 2.0e-5
-    finite_difference = (
-        strong_physical_residual(step * direction, runtime, chart, 1.0)
-        - strong_physical_residual(-step * direction, runtime, chart, 1.0)
-    ) / (2.0 * step)
-    np.testing.assert_allclose(tangent, finite_difference, rtol=2.0e-6, atol=2.0e-7)
-    jacobian = jax.jacfwd(
-        lambda value: strong_physical_residual(value, runtime, chart, 1.0)
-    )(zero)
-    singular_values = jnp.linalg.svd(jacobian, compute_uv=False)
-    rank = int(jnp.sum(singular_values > 1.0e-8 * singular_values[0]))
-    assert rank == chart.size
-
-    with pytest.raises(ValueError, match="relative_tolerance"):
-        make_strong_physical_chart(runtime, relative_tolerance=0.0)
-    with pytest.raises(ValueError, match="radial_quadrature_order"):
-        make_strong_root_runtime(
-            runtime.native,
-            runtime.low_preconditioner,
-            runtime.transfer.zeros_low(),
-            radial_quadrature_order=1,
-        )
-    with pytest.raises(ValueError, match="physical vector"):
-        chart.lift(jnp.zeros((chart.size + 1,)))
-    with pytest.raises(ValueError, match="full residual"):
-        chart.project(jnp.zeros((chart.full_size + 1,)))
 
 
 def test_structured_chart_uses_only_physical_layout_channels(small_strong_root):
@@ -481,129 +330,6 @@ def test_structured_chart_uses_only_physical_layout_channels(small_strong_root):
     )
 
 
-def _solved_solovev_strong_runtime(ntor: int):
-    """Build a strong-root runtime from a converged tiny solovev solve."""
-
-    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
-        mpol=3,
-        ntor=ntor,
-        ntheta=12,
-        nzeta=1 if ntor == 0 else 4,
-    )
-    inp = dataclasses.replace(
-        inp,
-        ns_array=np.asarray([5]),
-        ftol_array=np.asarray([1.0e-10]),
-        niter_array=np.asarray([1000]),
-    )
-    config = implicit.make_config(inp, ftol=1.0e-10, max_iterations=1000)
-    params = implicit.params_from_input(inp)
-    state, mask = implicit.solve_implicit_with_aux(params, config)
-    runtime = implicit.runtime_from_params(params, config)
-    native = lift_high_order_state(state, runtime, degree=3)
-    adapter = build_low_order_preconditioner(
-        native,
-        params,
-        config,
-        state,
-        mask,
-        probe_chunk_size=4,
-    )
-    return make_strong_root_runtime(native, adapter, mask)
-
-
-@pytest.mark.full  # 150-310 s each on an M4: real polishes; the PR lane keeps the decline path
-def test_projection_diagnostics_match_axisymmetric_case_at_ntor_one():
-    """The 3-D angular reconstruction must reduce to the ntor=0 one.
-
-    ``strong_projection_diagnostics`` used to broadcast the raw theta and
-    zeta grids against each other when rebuilding the retained-mode phase;
-    that only typechecks when ``nzeta == 1``, so every ``nzeta > 1``
-    diagnostic crashed and the axisymmetric benchmarks never noticed.  An
-    axisymmetric state embedded at ``ntor = 1`` must report the same
-    angular/radial fit content as its genuine ``ntor = 0`` build — the
-    added zeta points and n != 0 fit directions see a zeta-constant signal.
-    """
-
-    results = []
-    for ntor in (0, 1):
-        runtime = _solved_solovev_strong_runtime(ntor)
-        chart = make_strong_structured_chart(runtime)
-        zero = np.zeros((int(chart.size),))
-        diagnostics = strong_projection_diagnostics(zero, runtime, chart)
-        assert np.all(np.isfinite(np.asarray(tuple(diagnostics))))
-        collocation = strong_collocation_residual(
-            jnp.asarray(zero), runtime, chart
-        )
-        point_count = (
-            runtime.radial_nodes.size * runtime.theta.size * runtime.zeta.size
-        )
-        np.testing.assert_allclose(
-            jnp.linalg.norm(collocation) / np.sqrt(float(point_count)),
-            diagnostics.sampled_rms,
-            rtol=2.0e-13,
-            atol=2.0e-13,
-        )
-        results.append(diagnostics)
-    axisymmetric, embedded = results
-    for name in (
-        "sampled_rms",
-        "reconstructed_rms",
-        "unresolved_rms",
-        "unresolved_fraction",
-        "angular_unresolved_fraction",
-        "radial_fit_unresolved_fraction",
-        "radial_unresolved_fraction",
-        "helical_unresolved_fraction",
-    ):
-        # The two builds run independent legacy solves, so the states agree
-        # only to the ftol floor; 1e-6 still separates correct angular
-        # bookkeeping (equal content) from a wrong flattening (O(1) off).
-        np.testing.assert_allclose(
-            np.asarray(getattr(embedded, name)),
-            np.asarray(getattr(axisymmetric, name)),
-            rtol=1.0e-6,
-            atol=1.0e-9,
-            err_msg=name,
-        )
-
-
-def test_structured_chart_mode_blocks_recover_local_jacobian(small_strong_root):
-    runtime = small_strong_root
-    chart = make_strong_structured_chart(runtime)
-    preconditioner = build_strong_physical_block_preconditioner(
-        runtime,
-        chart,
-        poloidal_bandwidth=64,
-    )
-    zero = jnp.zeros((chart.size,), dtype=jnp.float64)
-    direction = jnp.linspace(-0.15, 0.25, chart.size)
-    _, response = jax.jvp(
-        lambda value: strong_physical_residual(value, runtime, chart, 1.0),
-        (zero,),
-        (direction,),
-    )
-    np.testing.assert_allclose(
-        preconditioner.apply(response, 1.0),
-        direction,
-        rtol=5.0e-8,
-        atol=5.0e-8,
-    )
-    with pytest.raises(ValueError, match="poloidal_bandwidth"):
-        build_strong_physical_block_preconditioner(
-            runtime, chart, poloidal_bandwidth=0
-        )
-    with pytest.raises(ValueError, match="physical block linearization"):
-        build_strong_physical_block_preconditioner(
-            runtime,
-            chart,
-            jnp.zeros((chart.size + 1,)),
-        )
-    dense_chart = make_strong_physical_chart(runtime)
-    with pytest.raises(ValueError, match="local structured chart"):
-        build_strong_physical_block_preconditioner(runtime, dense_chart)
-
-
 def test_strong_root_validation_branches(small_adapter, small_strong_root):
     native, _, _, mask, adapter = small_adapter
     layout = small_strong_root.layout
@@ -616,29 +342,11 @@ def test_strong_root_validation_branches(small_adapter, small_strong_root):
     zero_mask = jax.tree.map(jnp.zeros_like, mask)
     with pytest.raises(ValueError, match="no free physical displacement"):
         make_strong_root_runtime(native, adapter, zero_mask)
-    with pytest.raises(ValueError, match="poloidal_bandwidth"):
-        build_strong_mode_block_preconditioner(
-            small_strong_root, poloidal_bandwidth=0
-        )
-    with pytest.raises(ValueError, match="block linearization"):
-        build_strong_mode_block_preconditioner(
-            small_strong_root,
-            jnp.zeros((small_strong_root.layout.size + 1,)),
-        )
     mismatched = dataclasses.replace(mask, Z_sin=mask.Z_sin[:, :-1])
     with pytest.raises(ValueError, match="layout must match"):
         make_strong_root_layout(mismatched, native)
     with pytest.raises(ValueError, match="high/low transfer"):
         make_strong_root_layout(mask, native)
-    with pytest.raises(ValueError, match="relative_tolerance"):
-        strong_root_rank(small_strong_root, relative_tolerance=0.0)
-    rank, values = strong_root_rank(
-        small_strong_root,
-        jnp.zeros((layout.size,)),
-        relative_tolerance=1.0e-8,
-    )
-    assert rank == layout.size
-    assert values.shape == (layout.size,)
 
     unbalanced = make_strong_root_runtime(
         native, adapter, mask, balance_full_root=False
@@ -684,23 +392,14 @@ def test_strong_runtime_and_chart_pytree_roundtrip(small_strong_root):
     ).gauge_rank == chart.gauge_rank
 
 
-def test_physical_chart_adapters_and_validation(small_strong_root, monkeypatch):
+def test_physical_chart_adapters_and_validation(small_strong_root):
     chart = make_strong_structured_chart(small_strong_root)
-    rhs = jnp.linspace(-0.2, 0.3, chart.size)
-    solved = _solve_low_inverse(rhs, small_strong_root, chart)
-    assert solved.shape == rhs.shape
     residual = strong_root_residual_at_native(
         jnp.zeros((small_strong_root.layout.size,)),
         small_strong_root.native,
         small_strong_root,
     )
     assert residual.shape == (small_strong_root.layout.size,)
-    sentinel = object()
-    monkeypatch.setattr(
-        "vmex.core.polish_driver.build_strong_physical_block_preconditioner",
-        lambda runtime, physical_chart: sentinel,
-    )
-    assert _build_mode_block_preconditioner(small_strong_root, chart) is sentinel
     with pytest.raises(ValueError, match="poloidal_bandwidth"):
         _physical_coordinate_blocks(small_strong_root, chart, 0)
     with pytest.raises(ValueError, match="no physical force-output"):
@@ -767,6 +466,7 @@ def test_implicit_polish_rejects_mismatched_inputs(small_strong_root):
 def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
     """Exercise the driver decisions while substituting costly physics kernels."""
     from vmex.core import polish_driver as driver
+    from vmex.core import polish_homotopy as homotopy
     from vmex.core import strong_force
 
     certificate = SimpleNamespace(
@@ -800,8 +500,8 @@ def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
         raise NeedsCorrection
 
     if route == "continuation":
-        monkeypatch.setattr(driver, "_solvax_continuation_api", correction_required)
-        run = lambda: driver.polish_strong_root(  # noqa: E731
+        monkeypatch.setattr(homotopy, "_solvax_continuation_api", correction_required)
+        run = lambda: homotopy.polish_strong_root(  # noqa: E731
             runtime, config=config, initial_certificate=certificate)
     elif route == "legacy":
         for name in ("make_config", "params_from_input", "runtime_from_params",
@@ -821,21 +521,21 @@ def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
                 magnetic_relative_force_error=jnp.asarray(1.0), s_min=0.1, s_max=0.99))
         continuation = lambda *a, **k: SimpleNamespace(  # noqa: E731
             x=jnp.zeros(1), alpha=1.0, converged=True, steps=())
-        monkeypatch.setattr(driver, "_solvax_continuation_api",
+        monkeypatch.setattr(homotopy, "_solvax_continuation_api",
                             lambda: (None, None, continuation, None, None))
-        monkeypatch.setattr(driver, "_ptc_config", lambda *a, **k: None)
-        monkeypatch.setattr(driver, "_continuation_config", lambda *a: None)
-        monkeypatch.setattr(driver, "_minimum_signed_jacobian", lambda *a: 0.5)
-        monkeypatch.setattr(driver, "_solve_residual", lambda *a: jnp.zeros(1))
-        monkeypatch.setattr(driver, "_normalized_low_residual_norm", lambda *a: 0.0)
-        monkeypatch.setattr(driver, "_corrected_state", lambda *a: native)
-        monkeypatch.setattr(driver, "certify_strong_force", lambda *a, **k: certificate)
-        result = driver.polish_strong_root(runtime, config=config, initial_certificate=initial)
+        monkeypatch.setattr(homotopy, "_ptc_config", lambda *a, **k: None)
+        monkeypatch.setattr(homotopy, "_continuation_config", lambda *a: None)
+        monkeypatch.setattr(homotopy, "_minimum_signed_jacobian", lambda *a: 0.5)
+        monkeypatch.setattr(homotopy, "_solve_residual", lambda *a: jnp.zeros(1))
+        monkeypatch.setattr(homotopy, "_normalized_low_residual_norm", lambda *a: 0.0)
+        monkeypatch.setattr(homotopy, "_corrected_state", lambda *a: native)
+        monkeypatch.setattr(homotopy, "certify_strong_force", lambda *a, **k: certificate)
+        result = homotopy.polish_strong_root(runtime, config=config, initial_certificate=initial)
         assert result.polish_report.converged == accepted
         assert result.polish_report.radial_refinement_tolerance == 0.001
         if not accepted:
             with pytest.raises(StrongForceCertificationError) as failure:
-                driver.polish_strong_root(
+                homotopy.polish_strong_root(
                     runtime, config=dataclasses.replace(config, fail_policy="raise"),
                     initial_certificate=initial)
             assert failure.value.solver_converged
@@ -873,35 +573,6 @@ def test_polish_certificate_routes(monkeypatch, route, field, value, accepted):
         assert result.polish_report.converged
         assert result.polish_report.termination_reason == "already-certified"
         assert result.polish_report.radial_refinement_tolerance == 0.001
-
-
-@pytest.mark.full
-def test_polish_driver_skips_an_already_certified_state(small_strong_root):
-    class InitialCertificate:
-        normalized_l2 = jnp.asarray(1.0e-9)
-        radial_refinement_difference = jnp.asarray(0.0)
-        minimum_signed_jacobian = jnp.asarray(0.5)
-        # the driver now reports the non-saturating window normalizations
-        # beside eps_F, so a stand-in certificate has to carry them
-        window_normalizations = SimpleNamespace(
-            volume_average_force=jnp.asarray(1.0),
-            relative_force_error=jnp.asarray(1.0),
-            magnetic_relative_force_error=jnp.asarray(1.0),
-            s_min=0.1, s_max=0.99,
-        )
-
-    result = polish_strong_root(
-        small_strong_root,
-        config=PolishConfig(validation_tolerance=1.0e-8),
-        initial_certificate=InitialCertificate(),
-    )
-    report = result.polish_report
-    assert report.converged
-    assert report.termination_reason == "already-certified"
-    assert report.nonlinear_iterations == 0
-    assert report.linear_iterations == 0
-    assert report.residual_evaluations == 0
-    np.testing.assert_array_equal(result.correction, 0.0)
 
 
 @pytest.mark.full

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -13,14 +14,23 @@ import pytest
 from vmex.core.errors import (
     StrongForceContinuationError,
 )
+from vmex.core import implicit
+from vmex.core.input import VmecInput
 from vmex.core.polish import (
+    HighOrderCorrection,
     apply_high_order_correction,
+    build_low_order_preconditioner,
+    make_strong_root_runtime,
     make_strong_structured_chart,
-    strong_root_rank,
+    strong_collocation_residual,
     strong_root_residual,
+    _strong_residual_unscaled,
 )
-from vmex.core.polish_driver import (
-    PolishConfig,
+from vmex.core.polish_driver import PolishConfig
+from vmex.core.strong_force import lift_high_order_state
+from vmex.core.polish_homotopy import (
+    PreconditionerRefreshPolicy,
+    PreconditionerSnapshot,
     _IdentityPreconditioner,
     _arclength_to_target,
     _bordered_preconditioner,
@@ -31,8 +41,18 @@ from vmex.core.polish_driver import (
     _normalized_low_residual_norm,
     _ptc_config,
     _residual_evaluations,
+    _solvax_continuation_api,
+    _solve_low_inverse,
     _supports_keyword,
+    build_strong_mode_block_preconditioner,
+    build_strong_physical_block_preconditioner,
+    make_strong_physical_chart,
     polish_strong_root,
+    preconditioner_quality,
+    preconditioner_refresh_decision,
+    strong_physical_residual,
+    strong_projection_diagnostics,
+    strong_root_rank,
 )
 
 jax.config.update("jax_enable_x64", True)
@@ -42,7 +62,9 @@ from tests.test_polish_preconditioner import (
     _tree_dot, small_adapter as small_adapter, small_strong_root as small_strong_root,
 )
 
-pytestmark = pytest.mark.full
+# No module-level tier: the two real-polish cases below carry their own
+# ``full`` marks, and the contract tests run in pull-request CI so the
+# homotopy module keeps changed-line coverage where it is extracted.
 
 
 def test_solvax_continuation_api_compatibility_helpers():
@@ -74,7 +96,7 @@ def test_solvax_continuation_api_compatibility_helpers():
 def test_parameterized_continuation_preconditioner_switches_at_half(monkeypatch):
     rhs = jnp.asarray([1.0, -2.0])
     monkeypatch.setattr(
-        "vmex.core.polish_driver._low_inverse", lambda value, runtime: 2.0 * value
+        "vmex.core.polish_homotopy._low_inverse", lambda value, runtime: 2.0 * value
     )
     block = SimpleNamespace(apply=lambda value, alpha, dtau: 3.0 * value)
     np.testing.assert_array_equal(
@@ -148,25 +170,25 @@ def test_arclength_crossing_runs_target_correction_and_counts_work(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "vmex.core.polish_driver._solvax_continuation_api",
+        "vmex.core.polish_homotopy._solvax_continuation_api",
         lambda: (None, None, None, corrector, target),
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._ptc_config", lambda config, **kwargs: object()
+        "vmex.core.polish_homotopy._ptc_config", lambda config, **kwargs: object()
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._branch_tangent",
+        "vmex.core.polish_homotopy._branch_tangent",
         lambda *args, **kwargs: (jnp.zeros_like(zero), jnp.asarray(1.0)),
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._apply_bordered_preconditioner",
+        "vmex.core.polish_homotopy._apply_bordered_preconditioner",
         lambda state, rhs, dtau, tangent, runtime, block, chart=None: rhs,
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._low_inverse", lambda rhs, runtime: rhs
+        "vmex.core.polish_homotopy._low_inverse", lambda rhs, runtime: rhs
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver.strong_root_residual",
+        "vmex.core.polish_homotopy.strong_root_residual",
         lambda vector, runtime, alpha: vector + alpha,
     )
     result = _arclength_to_target(
@@ -202,13 +224,13 @@ def test_bordered_tangent_uses_previous_orientation(monkeypatch):
             iterations=1,
         )
 
-    monkeypatch.setattr("vmex.core.polish_driver.gmres", fake_gmres)
+    monkeypatch.setattr("vmex.core.polish_homotopy.gmres", fake_gmres)
     monkeypatch.setattr(
-        "vmex.core.polish_driver._bordered_preconditioner",
+        "vmex.core.polish_homotopy._bordered_preconditioner",
         lambda *args, **kwargs: lambda state, rhs, dtau: rhs,
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver.strong_root_residual",
+        "vmex.core.polish_homotopy.strong_root_residual",
         lambda vector, runtime, alpha: vector + alpha * jnp.ones_like(vector),
     )
     tangent = _branch_tangent(
@@ -452,14 +474,14 @@ def test_polish_driver_records_bounded_unpolished_return(
         )
 
     monkeypatch.setattr(
-        "vmex.core.polish_driver._solvax_continuation_api",
+        "vmex.core.polish_homotopy._solvax_continuation_api",
         lambda: (lambda **kwargs: object(), None, continuation, None, endpoint),
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._ptc_config", lambda config, **kwargs: object()
+        "vmex.core.polish_homotopy._ptc_config", lambda config, **kwargs: object()
     )
     monkeypatch.setattr(
-        "vmex.core.polish_driver._arclength_to_target", fail_tangent
+        "vmex.core.polish_homotopy._arclength_to_target", fail_tangent
     )
     chart = make_strong_structured_chart(small_strong_root)
     result = polish_strong_root(
@@ -563,3 +585,408 @@ def test_low_endpoint_check_ignores_numerical_row_equilibration():
         rtol=2.0e-13,
     )
 
+
+def test_factor_refresh_policy_reports_every_trigger():
+    previous = PreconditionerSnapshot(
+        alpha=0.1,
+        radial_degree=3,
+        radial_size=5,
+        krylov_iterations=10,
+        relative_residual=0.1,
+        jacobian_margin=2.0,
+    )
+    stable = dataclasses.replace(previous, alpha=0.2)
+    assert preconditioner_refresh_decision(previous, stable) == (False, ())
+
+    degraded = PreconditionerSnapshot(
+        alpha=0.5,
+        radial_degree=5,
+        radial_size=9,
+        krylov_iterations=81,
+        relative_residual=0.6,
+        jacobian_margin=1.0,
+        parameter_distance=0.2,
+        transpose_converged=False,
+    )
+    decision = preconditioner_refresh_decision(previous, degraded)
+    assert decision.refresh
+    assert decision.reasons == (
+        "continuation-step",
+        "radial-grid",
+        "krylov-work",
+        "linear-quality",
+        "jacobian-margin",
+        "parameter-distance",
+        "transpose-certificate",
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("max_alpha_change", 0.0, "max_alpha_change"),
+        ("max_krylov_iterations", 0, "max_krylov_iterations"),
+        ("max_relative_residual", 0.0, "max_relative_residual"),
+        ("min_jacobian_margin_ratio", 0.0, "min_jacobian_margin_ratio"),
+        ("max_parameter_distance", 0.0, "max_parameter_distance"),
+    ],
+)
+def test_factor_refresh_policy_rejects_invalid_thresholds(field, value, message):
+    with pytest.raises(ValueError, match=message):
+        PreconditionerRefreshPolicy(**{field: value})
+
+
+def test_physical_chart_eliminates_only_the_linear_coordinate_gauge(
+    small_strong_root,
+):
+    runtime = small_strong_root
+    chart = make_strong_physical_chart(runtime)
+    assert chart.full_size == runtime.layout.size
+    assert chart.size + chart.gauge_rank == chart.full_size
+    assert chart.gauge_rank > 0
+    assert chart.build_seconds > 0.0
+    np.testing.assert_allclose(
+        np.asarray(chart.coordinate_basis.T @ chart.coordinate_basis),
+        np.eye(chart.size),
+        rtol=2.0e-12,
+        atol=2.0e-12,
+    )
+    np.testing.assert_allclose(
+        np.asarray(chart.equation_basis.T @ chart.equation_basis),
+        np.eye(chart.size),
+        rtol=2.0e-12,
+        atol=2.0e-12,
+    )
+
+    zero = jnp.zeros((chart.size,), dtype=jnp.float64)
+    # Same two-program cancellation floor as the endpoint test above.
+    np.testing.assert_allclose(
+        strong_physical_residual(zero, runtime, chart, 0.0), 0.0, atol=1.0e-12
+    )
+    probe = jnp.linspace(-0.01, 0.015, chart.size)
+    full_probe = chart.lift(probe)
+    low_probe = chart.project(strong_root_residual(full_probe, runtime, 0.0))
+    strong_probe = chart.project(
+        _strong_residual_unscaled(
+            full_probe,
+            runtime,
+            include_coordinate_gauge=False,
+        )
+        / runtime.strong_scale
+    )
+    alpha = 0.37
+    np.testing.assert_allclose(
+        strong_physical_residual(probe, runtime, chart, alpha),
+        low_probe + alpha * (strong_probe - low_probe),
+        rtol=2.0e-13,
+        atol=2.0e-13,
+    )
+    direction = jnp.linspace(-0.2, 0.3, chart.size)
+    _, tangent = jax.jvp(
+        lambda value: strong_physical_residual(value, runtime, chart, 1.0),
+        (zero,),
+        (direction,),
+    )
+    step = 2.0e-5
+    finite_difference = (
+        strong_physical_residual(step * direction, runtime, chart, 1.0)
+        - strong_physical_residual(-step * direction, runtime, chart, 1.0)
+    ) / (2.0 * step)
+    np.testing.assert_allclose(tangent, finite_difference, rtol=2.0e-6, atol=2.0e-7)
+    jacobian = jax.jacfwd(
+        lambda value: strong_physical_residual(value, runtime, chart, 1.0)
+    )(zero)
+    singular_values = jnp.linalg.svd(jacobian, compute_uv=False)
+    rank = int(jnp.sum(singular_values > 1.0e-8 * singular_values[0]))
+    assert rank == chart.size
+
+    with pytest.raises(ValueError, match="relative_tolerance"):
+        make_strong_physical_chart(runtime, relative_tolerance=0.0)
+    with pytest.raises(ValueError, match="radial_quadrature_order"):
+        make_strong_root_runtime(
+            runtime.native,
+            runtime.low_preconditioner,
+            runtime.transfer.zeros_low(),
+            radial_quadrature_order=1,
+        )
+    with pytest.raises(ValueError, match="physical vector"):
+        chart.lift(jnp.zeros((chart.size + 1,)))
+    with pytest.raises(ValueError, match="full residual"):
+        chart.project(jnp.zeros((chart.full_size + 1,)))
+
+
+def _solved_solovev_strong_runtime(ntor: int):
+    """Build a strong-root runtime from a converged tiny solovev solve."""
+
+    inp = VmecInput.from_file(DATA / "input.solovev").change_resolution(
+        mpol=3,
+        ntor=ntor,
+        ntheta=12,
+        nzeta=1 if ntor == 0 else 4,
+    )
+    inp = dataclasses.replace(
+        inp,
+        ns_array=np.asarray([5]),
+        ftol_array=np.asarray([1.0e-10]),
+        niter_array=np.asarray([1000]),
+    )
+    config = implicit.make_config(inp, ftol=1.0e-10, max_iterations=1000)
+    params = implicit.params_from_input(inp)
+    state, mask = implicit.solve_implicit_with_aux(params, config)
+    runtime = implicit.runtime_from_params(params, config)
+    native = lift_high_order_state(state, runtime, degree=3)
+    adapter = build_low_order_preconditioner(
+        native,
+        params,
+        config,
+        state,
+        mask,
+        probe_chunk_size=4,
+    )
+    return make_strong_root_runtime(native, adapter, mask)
+
+
+@pytest.mark.full  # 150-310 s each on an M4: real polishes; the PR lane keeps the decline path
+def test_projection_diagnostics_match_axisymmetric_case_at_ntor_one():
+    """The 3-D angular reconstruction must reduce to the ntor=0 one.
+
+    ``strong_projection_diagnostics`` used to broadcast the raw theta and
+    zeta grids against each other when rebuilding the retained-mode phase;
+    that only typechecks when ``nzeta == 1``, so every ``nzeta > 1``
+    diagnostic crashed and the axisymmetric benchmarks never noticed.  An
+    axisymmetric state embedded at ``ntor = 1`` must report the same
+    angular/radial fit content as its genuine ``ntor = 0`` build — the
+    added zeta points and n != 0 fit directions see a zeta-constant signal.
+    """
+
+    results = []
+    for ntor in (0, 1):
+        runtime = _solved_solovev_strong_runtime(ntor)
+        chart = make_strong_structured_chart(runtime)
+        zero = np.zeros((int(chart.size),))
+        diagnostics = strong_projection_diagnostics(zero, runtime, chart)
+        assert np.all(np.isfinite(np.asarray(tuple(diagnostics))))
+        collocation = strong_collocation_residual(
+            jnp.asarray(zero), runtime, chart
+        )
+        point_count = (
+            runtime.radial_nodes.size * runtime.theta.size * runtime.zeta.size
+        )
+        np.testing.assert_allclose(
+            jnp.linalg.norm(collocation) / np.sqrt(float(point_count)),
+            diagnostics.sampled_rms,
+            rtol=2.0e-13,
+            atol=2.0e-13,
+        )
+        results.append(diagnostics)
+    axisymmetric, embedded = results
+    for name in (
+        "sampled_rms",
+        "reconstructed_rms",
+        "unresolved_rms",
+        "unresolved_fraction",
+        "angular_unresolved_fraction",
+        "radial_fit_unresolved_fraction",
+        "radial_unresolved_fraction",
+        "helical_unresolved_fraction",
+    ):
+        # The two builds run independent legacy solves, so the states agree
+        # only to the ftol floor; 1e-6 still separates correct angular
+        # bookkeeping (equal content) from a wrong flattening (O(1) off).
+        np.testing.assert_allclose(
+            np.asarray(getattr(embedded, name)),
+            np.asarray(getattr(axisymmetric, name)),
+            rtol=1.0e-6,
+            atol=1.0e-9,
+            err_msg=name,
+        )
+
+
+def test_structured_chart_mode_blocks_recover_local_jacobian(small_strong_root):
+    runtime = small_strong_root
+    chart = make_strong_structured_chart(runtime)
+    preconditioner = build_strong_physical_block_preconditioner(
+        runtime,
+        chart,
+        poloidal_bandwidth=64,
+    )
+    zero = jnp.zeros((chart.size,), dtype=jnp.float64)
+    direction = jnp.linspace(-0.15, 0.25, chart.size)
+    _, response = jax.jvp(
+        lambda value: strong_physical_residual(value, runtime, chart, 1.0),
+        (zero,),
+        (direction,),
+    )
+    np.testing.assert_allclose(
+        preconditioner.apply(response, 1.0),
+        direction,
+        rtol=5.0e-8,
+        atol=5.0e-8,
+    )
+    with pytest.raises(ValueError, match="poloidal_bandwidth"):
+        build_strong_physical_block_preconditioner(
+            runtime, chart, poloidal_bandwidth=0
+        )
+    with pytest.raises(ValueError, match="physical block linearization"):
+        build_strong_physical_block_preconditioner(
+            runtime,
+            chart,
+            jnp.zeros((chart.size + 1,)),
+        )
+    dense_chart = make_strong_physical_chart(runtime)
+    with pytest.raises(ValueError, match="local structured chart"):
+        build_strong_physical_block_preconditioner(runtime, dense_chart)
+
+
+@pytest.mark.full
+def test_polish_driver_skips_an_already_certified_state(small_strong_root):
+    class InitialCertificate:
+        normalized_l2 = jnp.asarray(1.0e-9)
+        radial_refinement_difference = jnp.asarray(0.0)
+        minimum_signed_jacobian = jnp.asarray(0.5)
+        # the driver now reports the non-saturating window normalizations
+        # beside eps_F, so a stand-in certificate has to carry them
+        window_normalizations = SimpleNamespace(
+            volume_average_force=jnp.asarray(1.0),
+            relative_force_error=jnp.asarray(1.0),
+            magnetic_relative_force_error=jnp.asarray(1.0),
+            s_min=0.1, s_max=0.99,
+        )
+
+    result = polish_strong_root(
+        small_strong_root,
+        config=PolishConfig(validation_tolerance=1.0e-8),
+        initial_certificate=InitialCertificate(),
+    )
+    report = result.polish_report
+    assert report.converged
+    assert report.termination_reason == "already-certified"
+    assert report.nonlinear_iterations == 0
+    assert report.linear_iterations == 0
+    assert report.residual_evaluations == 0
+    np.testing.assert_array_equal(result.correction, 0.0)
+
+
+def test_preconditioner_quality_is_exact_for_an_identity_pair(small_adapter):
+    transfer = small_adapter[-1].transfer
+    one = transfer.zeros_high(jnp.float64)
+    one = HighOrderCorrection(
+        *(jnp.ones_like(leaf) for leaf in jax.tree.leaves(one))
+    )
+    probes = jax.tree.map(lambda value: jnp.stack((value, 2.0 * value)), one)
+    quality = preconditioner_quality(lambda value: value, lambda value: value, probes)
+    np.testing.assert_array_equal(quality.relative_residual, 0.0)
+    assert float(quality.maximum) == 0.0
+    assert float(quality.rms) == 0.0
+
+
+def test_strong_root_homotopy_validation_branches(small_strong_root):
+    layout = small_strong_root.layout
+    with pytest.raises(ValueError, match="poloidal_bandwidth"):
+        build_strong_mode_block_preconditioner(
+            small_strong_root, poloidal_bandwidth=0
+        )
+    with pytest.raises(ValueError, match="block linearization"):
+        build_strong_mode_block_preconditioner(
+            small_strong_root,
+            jnp.zeros((layout.size + 1,)),
+        )
+    with pytest.raises(ValueError, match="relative_tolerance"):
+        strong_root_rank(small_strong_root, relative_tolerance=0.0)
+    rank, values = strong_root_rank(
+        small_strong_root,
+        jnp.zeros((layout.size,)),
+        relative_tolerance=1.0e-8,
+    )
+    assert rank == layout.size
+    assert values.shape == (layout.size,)
+
+
+def test_homotopy_chart_adapters_use_the_low_endpoint_inverse(
+    small_strong_root, monkeypatch
+):
+    chart = make_strong_structured_chart(small_strong_root)
+    rhs = jnp.linspace(-0.2, 0.3, chart.size)
+    solved = _solve_low_inverse(rhs, small_strong_root, chart)
+    assert solved.shape == rhs.shape
+    sentinel = object()
+    monkeypatch.setattr(
+        "vmex.core.polish_homotopy.build_strong_physical_block_preconditioner",
+        lambda runtime, physical_chart: sentinel,
+    )
+    assert _build_mode_block_preconditioner(small_strong_root, chart) is sentinel
+
+
+def test_continuation_api_names_the_required_solvax_release(monkeypatch):
+    monkeypatch.setitem(sys.modules, "solvax", ModuleType("solvax"))
+    with pytest.raises(RuntimeError) as raised:
+        _solvax_continuation_api()
+    message = str(raised.value)
+    assert "strong-force polishing requires a SOLVAX release" in message
+    assert "adaptive continuation" in message
+    assert "pseudo-transient continuation" in message
+    assert "pseudo-arclength correction" in message
+    assert "uwplasma/SOLVAX#87" in message
+    assert isinstance(raised.value.__cause__, ImportError)
+
+
+def test_physical_chart_rejects_a_gauge_without_independent_equations(
+    small_strong_root, monkeypatch
+):
+    for gauge_residual in (
+        lambda vector, runtime: jnp.zeros_like(vector),
+        lambda vector, runtime: jnp.zeros((0,), dtype=vector.dtype),
+    ):
+        monkeypatch.setattr(
+            "vmex.core.polish_homotopy._coordinate_gauge_residual_unscaled",
+            gauge_residual,
+        )
+        with pytest.raises(
+            ValueError,
+            match="coordinate-gauge operator has no independent equations",
+        ):
+            make_strong_physical_chart(small_strong_root)
+
+
+def test_physical_chart_rejects_a_gauge_rank_outside_the_root(
+    small_strong_root, monkeypatch
+):
+    # A unit relative tolerance keeps every singular value at or below the
+    # threshold, so the numerical gauge rank collapses to zero.
+    with pytest.raises(
+        ValueError,
+        match="coordinate-gauge rank must be positive and smaller than the root",
+    ):
+        make_strong_physical_chart(small_strong_root, relative_tolerance=1.0)
+    # The opposite failure: a full-rank gauge would leave no physical
+    # coordinate behind.
+    monkeypatch.setattr(
+        "vmex.core.polish_homotopy._coordinate_gauge_residual_unscaled",
+        lambda vector, runtime: vector,
+    )
+    with pytest.raises(
+        ValueError,
+        match="coordinate-gauge rank must be positive and smaller than the root",
+    ):
+        make_strong_physical_chart(small_strong_root)
+
+
+def test_physical_chart_rejects_a_mismatched_equation_basis(
+    small_strong_root, monkeypatch
+):
+    size = small_strong_root.layout.size
+    physical_size = size - make_strong_physical_chart(small_strong_root).gauge_rank
+    # A square basis can never match the gauge-free coordinate count, because
+    # a positive gauge rank is checked first.
+    monkeypatch.setattr(
+        "vmex.core.polish_homotopy._physical_equation_basis",
+        lambda layout: np.zeros((size, size)),
+    )
+    with pytest.raises(ValueError) as raised:
+        make_strong_physical_chart(small_strong_root)
+    message = str(raised.value)
+    assert (
+        "physical force-output equation count does not match gauge-free "
+        "coordinates" in message
+    )
+    assert message.endswith(f"{size} != {physical_size}")

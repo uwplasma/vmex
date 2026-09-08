@@ -46,6 +46,8 @@ from vmex.core.polish import (  # noqa: E402
     make_strong_root_runtime,
     make_strong_structured_chart,
     strong_collocation_residual,
+)
+from vmex.core.polish_homotopy import (  # noqa: E402
     strong_projection_diagnostics,
 )
 from vmex.core.polish_driver import (  # noqa: E402
