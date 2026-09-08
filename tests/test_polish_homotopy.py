@@ -60,7 +60,9 @@ from tests.test_polish_preconditioner import (
     _tree_dot, small_adapter as small_adapter, small_strong_root as small_strong_root,
 )
 
-pytestmark = pytest.mark.full
+# No module-level tier: the two real-polish cases below carry their own
+# ``full`` marks, and the contract tests run in pull-request CI so the
+# homotopy module keeps changed-line coverage where it is extracted.
 
 
 def test_solvax_continuation_api_compatibility_helpers():
