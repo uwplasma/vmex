@@ -780,3 +780,36 @@ themselves grid-limited (refinement difference 0.245), so they bound nothing;
 the >= 6-span rows, refinement difference 4e-11 to 2e-9, are the usable ones.
 Peak RSS reached 7.1 GiB at 10 spans, twice the expected figure, so these runs
 are serialized. Evidence: `~/local/wt-knots-evidence`.
+
+**2026-09-07, Phase 2 in one parallel round.** Four workstreams ran at once on
+disjoint files, with none of them touching this logbook so their branches could
+not collide; the entries here are written at merge time instead. Merged:
+#293 the P1 residual generator, #294 dead code and shims (-406 lines: the
+`vmec_jax` rename shim, `freeboundary_diff`, the `boozer_bmnc_*` aliases,
+`wout_field_names`, `value_and_grad_bnormal`, and the never-wired
+`freeboundary_linear` prototype, with `vmex.__all__` 93 to 92), #295 the
+CHANGELOG at release-note grade (unreleased 61 to 24 lines, whole file 115 to
+79) plus a generated `benchmarks/INDEX.md` covering all 87 artifacts with a
+staleness test, and #296 the knot-grading refutation. #297, the homotopy
+extraction, is the one still open.
+
+Two corrections came out of the round and both are kept. #295 found that only
+`qa_optimization_startup_main_m4.json` is orphaned, not all three startup
+records as an earlier reading had it, and it removed cold-start numbers from
+the CHANGELOG that no committed artifact backs rather than rewording them.
+#294 found a consumer the brief missed, `linearize_nestor_coupling` in the
+free-boundary tests, and kept its differentiable coil-control half rather than
+deleting the test with the prototype.
+
+The CI narrowing merged in #290 and #292 is doing its work: #293 and #296 ran
+4 of 16 lanes, #294 and #295 correctly ran all 16 because they touch package
+code. #297 exposed the one real gap. Moving 473 lines into a new module made
+them "changed" for diff-cover while their tests sat in a nightly-only lane, so
+coverage read 42.8 percent. The fix was tiering that had been wrong anyway: the
+module carried a blanket `full` mark although only two of its cases run real
+polishes, so the mark came off, the module joined the `pr-parity-e`
+pull-request lane beside its siblings, and coverage rose to 94.0 percent. The
+remaining 28 lines are guard clauses and deep continuation branches; the guards
+are being given fast unit tests rather than bought with slow ones. Moving code
+should not lose it coverage, and a pure move exposing a pre-existing gap is
+worth closing rather than exempting.
