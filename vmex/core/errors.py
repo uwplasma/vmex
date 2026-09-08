@@ -251,7 +251,7 @@ class StrongForceContinuationError(VmecNumericalError):
     unpolished VMEX state) to 1 (the exact strong-force root), so that the
     correction stays on the same equilibrium branch instead of jumping to a
     different one.  This is raised by
-    :func:`vmex.core.polish_driver.polish_strong_root` when
+    :func:`vmex.core.polish_homotopy.polish_strong_root` when
     :class:`~vmex.core.polish_driver.PolishConfig` has
     ``fail_policy="raise"`` and the walk stalls, and separately by the
     pseudo-arclength stage when its bordered tangent solve fails.  With
@@ -317,7 +317,7 @@ class StrongForceCertificationError(VmecNumericalError):
     all three of ``normalized_l2 <= certificate_tolerance``,
     ``radial_refinement_difference <= radial_refinement_tolerance`` and a
     strictly positive ``minimum_signed_jacobian``, and populates every
-    attribute below.  :func:`vmex.core.polish_driver.polish_strong_root` --
+    attribute below.  :func:`vmex.core.polish_homotopy.polish_strong_root` --
     which walks the homotopy to ``alpha = 1`` first and only then certifies
     -- tests ``normalized_l2`` alone and fills only ``normalized_l2`` and
     ``tolerance``, so on that path ``solver_converged`` stays ``False`` and

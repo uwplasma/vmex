@@ -38,6 +38,9 @@ High-order correction transfer and preconditioner
 .. automodule:: vmex.core.polish_driver
    :members:
 
+.. automodule:: vmex.core.polish_homotopy
+   :members:
+
 .. automodule:: vmex.core.polish_implicit
    :members:
 

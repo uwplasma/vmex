@@ -325,7 +325,7 @@ Its R/Z fit has a structurally zero terminal coefficient, so a correction
 cannot move the fixed boundary; symmetry zeros and the lambda gauge are
 eliminated rather than penalized.  Tests certify both transfer dualities and
 the complete preconditioner duality.
-:func:`~vmex.core.polish.preconditioner_quality` measures the true relative
+:func:`~vmex.core.polish_homotopy.preconditioner_quality` measures the true relative
 residual ``||A P r-r||/||r||`` on fixed probes; it is a library diagnostic and
 the shipped lane does not call it.
 
@@ -426,9 +426,9 @@ equations, and closed the system with ``N_Z`` coordinate equations that set the
 projection of the displacement onto the lifted poloidal tangent to zero.  That
 tangential-displacement gauge produced a square Jacobian
 (:func:`~vmex.core.polish.strong_root_residual`,
-:func:`~vmex.core.polish.strong_physical_residual`).
+:func:`~vmex.core.polish_homotopy.strong_physical_residual`).
 
-:func:`~vmex.core.polish_driver.polish_strong_root` drove it with a homotopy
+:func:`~vmex.core.polish_homotopy.polish_strong_root` drove it with a homotopy
 ``H(c, alpha) = R_low(c) + alpha [R_strong(c) - R_low(c)]`` anchored on the
 legacy raw-force defect, advanced by SOLVAX adaptive continuation with
 pseudo-transient continuation and Eisenstat--Walker forcing, with a bordered

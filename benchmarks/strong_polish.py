@@ -27,17 +27,19 @@ from vmex.core.polish import (
     make_strong_root_runtime,
     make_strong_structured_chart,
     strong_collocation_residual,
-    strong_projection_diagnostics,
-    strong_physical_residual,
 )
 from vmex.core.polish_driver import (
     PolishConfig,
     _collocation_variable_scale,
     _corrected_state,
+    polish_collocation_least_squares,
+)
+from vmex.core.polish_homotopy import (
     _minimum_signed_jacobian,
     _ptc_config,
-    polish_collocation_least_squares,
     polish_strong_root,
+    strong_physical_residual,
+    strong_projection_diagnostics,
 )
 from vmex.core.radial_basis import BSplineBasis
 from vmex.core.strong_force import (

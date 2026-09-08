@@ -39,8 +39,8 @@ from vmex.core.polish import (
     make_strong_root_runtime,
     make_strong_structured_chart,
     strong_collocation_residual,
-    strong_projection_diagnostics,
 )
+from vmex.core.polish_homotopy import strong_projection_diagnostics
 from vmex.core.polish_driver import (
     PolishConfig,
     _collocation_variable_scale,

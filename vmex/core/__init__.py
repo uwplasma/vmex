@@ -9,7 +9,8 @@ Module map (each header docstring names its VMEC2000 counterpart):
 - ``radial_basis``    local high-order splines + rho^|m| axis regularity
 - ``strong_force``    continuous reconstruction + independent JxB-grad(p) oracle
 - ``polish``          high/low transfer + stored raw-block polish preconditioner
-- ``polish_driver``   PTC/continuation strong-root correction and reports
+- ``polish_driver``   Gauss--Newton strong-root correction and reports
+- ``polish_homotopy`` square PTC/continuation route, kept for diagnostics
 - ``polish_implicit`` matrix-free IFT tangents/adjoints of a polished root
 - ``fourier``         Resolution, ModeTable, trig tables (fixaray.f)
 - ``transforms``      totzsps/totzspa/tomnsps/tomnspa as batched matmuls
