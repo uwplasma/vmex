@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -40,6 +41,7 @@ from vmex.core.polish_homotopy import (
     _normalized_low_residual_norm,
     _ptc_config,
     _residual_evaluations,
+    _solvax_continuation_api,
     _solve_low_inverse,
     _supports_keyword,
     build_strong_mode_block_preconditioner,
@@ -913,3 +915,78 @@ def test_homotopy_chart_adapters_use_the_low_endpoint_inverse(
         lambda runtime, physical_chart: sentinel,
     )
     assert _build_mode_block_preconditioner(small_strong_root, chart) is sentinel
+
+
+def test_continuation_api_names_the_required_solvax_release(monkeypatch):
+    monkeypatch.setitem(sys.modules, "solvax", ModuleType("solvax"))
+    with pytest.raises(RuntimeError) as raised:
+        _solvax_continuation_api()
+    message = str(raised.value)
+    assert "strong-force polishing requires a SOLVAX release" in message
+    assert "adaptive continuation" in message
+    assert "pseudo-transient continuation" in message
+    assert "pseudo-arclength correction" in message
+    assert "uwplasma/SOLVAX#87" in message
+    assert isinstance(raised.value.__cause__, ImportError)
+
+
+def test_physical_chart_rejects_a_gauge_without_independent_equations(
+    small_strong_root, monkeypatch
+):
+    for gauge_residual in (
+        lambda vector, runtime: jnp.zeros_like(vector),
+        lambda vector, runtime: jnp.zeros((0,), dtype=vector.dtype),
+    ):
+        monkeypatch.setattr(
+            "vmex.core.polish_homotopy._coordinate_gauge_residual_unscaled",
+            gauge_residual,
+        )
+        with pytest.raises(
+            ValueError,
+            match="coordinate-gauge operator has no independent equations",
+        ):
+            make_strong_physical_chart(small_strong_root)
+
+
+def test_physical_chart_rejects_a_gauge_rank_outside_the_root(
+    small_strong_root, monkeypatch
+):
+    # A unit relative tolerance keeps every singular value at or below the
+    # threshold, so the numerical gauge rank collapses to zero.
+    with pytest.raises(
+        ValueError,
+        match="coordinate-gauge rank must be positive and smaller than the root",
+    ):
+        make_strong_physical_chart(small_strong_root, relative_tolerance=1.0)
+    # The opposite failure: a full-rank gauge would leave no physical
+    # coordinate behind.
+    monkeypatch.setattr(
+        "vmex.core.polish_homotopy._coordinate_gauge_residual_unscaled",
+        lambda vector, runtime: vector,
+    )
+    with pytest.raises(
+        ValueError,
+        match="coordinate-gauge rank must be positive and smaller than the root",
+    ):
+        make_strong_physical_chart(small_strong_root)
+
+
+def test_physical_chart_rejects_a_mismatched_equation_basis(
+    small_strong_root, monkeypatch
+):
+    size = small_strong_root.layout.size
+    physical_size = size - make_strong_physical_chart(small_strong_root).gauge_rank
+    # A square basis can never match the gauge-free coordinate count, because
+    # a positive gauge rank is checked first.
+    monkeypatch.setattr(
+        "vmex.core.polish_homotopy._physical_equation_basis",
+        lambda layout: np.zeros((size, size)),
+    )
+    with pytest.raises(ValueError) as raised:
+        make_strong_physical_chart(small_strong_root)
+    message = str(raised.value)
+    assert (
+        "physical force-output equation count does not match gauge-free "
+        "coordinates" in message
+    )
+    assert message.endswith(f"{size} != {physical_size}")
