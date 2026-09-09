@@ -1,8 +1,13 @@
 #!/usr/bin/env python
 """Quasi-axisymmetric boundary optimization with a magnetic well."""
 
-from dataclasses import replace
 import os
+os.environ["XLA_FLAGS"] = "--xla_cpu_parallel_codegen_split_count=2"  # default is 32; cap
+                                                                        # concurrent LLVM codegen
+                                                                        # workers to bound peak
+                                                                        # compile-time memory
+
+from dataclasses import replace
 from pathlib import Path
 
 import jax.numpy as jnp
