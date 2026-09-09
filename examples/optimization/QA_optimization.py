@@ -53,7 +53,7 @@ jax.config.update("jax_enable_compilation_cache", False)
 from simsopt.geo import SurfaceRZFourier
 from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
-from jaxopt import ScipyMinimize as minimize
+from jaxopt import LBFGS as minimize
 MINIMUM_DISTANCE = 0.05
 DISTANCE_WALL_SCALE = 0.01
 DISTANCE_WALL_WEIGHT = 10.0
@@ -548,7 +548,8 @@ def winding_surface_objective(equilibrium_state, solver_context):
                 + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
                 + DISTANCE_WALL_WEIGHT * wall + invalid)
 
-    optimizer = minimize(method="L-BFGS-B", fun=objective, maxiter=100)
+    optimizer = minimize(fun=objective, maxiter=100, implicit_diff=False,
+                        linesearch="backtracking", tol=1e-6)
     result = optimizer.run(winding_dofs)
 
     _, _, _, opt_distance, _ = calc_objectives(result.params, plasma_points, plasma_normals, local_weights, winding_R_cos)
