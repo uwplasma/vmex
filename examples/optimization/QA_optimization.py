@@ -54,6 +54,7 @@ from simsopt.geo import SurfaceRZFourier
 from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
 from jaxopt import LBFGS as minimize
+from jaxopt.implicit_diff import root_jvp
 MINIMUM_DISTANCE = 0.05
 DISTANCE_WALL_SCALE = 0.01
 DISTANCE_WALL_WEIGHT = 10.0
@@ -515,6 +516,51 @@ weights = mode_weights(surface)
 
 
 
+def _winding_objective_value(dofs, plasma_points, plasma_normals, local_weights,
+                             winding_R_cos, scales):
+    pca, volume, spectral, distance, minimum_normal_length = calc_objectives(
+        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
+    invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
+    return (PCA_WEIGHT * pca / scales[0] # pca based objective
+            - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
+            + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
+            + DISTANCE_WALL_WEIGHT * wall + invalid)
+
+
+def _winding_optimality(dofs, plasma_points, plasma_normals, local_weights,
+                        winding_R_cos, scales):
+    return jax.grad(_winding_objective_value)(
+        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos, scales)
+
+
+@jax.custom_jvp
+def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weights,
+                          winding_R_cos, scales):
+    # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
+    # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
+    # (compiled size independent of maxiter) instead of unrolling 100 steps into
+    # every traced residual/Jacobian evaluation. The custom_jvp below supplies
+    # the (forward-mode-compatible) sensitivity in place of jaxopt's own
+    # reverse-mode-only custom_vjp rule, which VMEX's default forward-mode
+    # (jax.jvp) Jacobian construction cannot differentiate through. This gives
+    # a forward-mode derivative only: switching this problem's jac_solver to
+    # "reverse" would need a matching defvjp too.
+    optimizer = minimize(
+        fun=lambda d: _winding_objective_value(
+            d, plasma_points, plasma_normals, local_weights, winding_R_cos, scales),
+        maxiter=100, linesearch="backtracking", tol=1e-6)
+    return optimizer.run(init_dofs).params
+
+
+@_solve_winding_surface.defjvp
+def _solve_winding_surface_jvp(primals, tangents):
+    sol = _solve_winding_surface(*primals)
+    sol_tangent = root_jvp(optimality_fun=_winding_optimality, sol=sol,
+                           args=primals[1:], tangents=tangents[1:])
+    return sol, sol_tangent
+
+
 def winding_surface_objective(equilibrium_state, solver_context):
     # Initial from vmex
     aminor = _aspect_scalars(equilibrium_state, solver_context)[0]
@@ -538,21 +584,11 @@ def winding_surface_objective(equilibrium_state, solver_context):
 
     scales = calc_objectives(winding_dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
 
-    def objective(dofs):
-        pca, volume, spectral, distance, minimum_normal_length = calc_objectives(
-            dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
-        wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
-        invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
-        return (PCA_WEIGHT * pca / scales[0] # pca based objective
-                - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
-                + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
-                + DISTANCE_WALL_WEIGHT * wall + invalid)
+    winding_solution = _solve_winding_surface(
+        winding_dofs, plasma_points, plasma_normals, local_weights,
+        winding_R_cos, scales)
 
-    optimizer = minimize(fun=objective, maxiter=100, implicit_diff=False,
-                        linesearch="backtracking", tol=1e-6)
-    result = optimizer.run(winding_dofs)
-
-    _, _, _, opt_distance, _ = calc_objectives(result.params, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    _, _, _, opt_distance, _ = calc_objectives(winding_solution, plasma_points, plasma_normals, local_weights, winding_R_cos)
 
     return 1 + jnp.tanh(-opt_distance+1)
 
