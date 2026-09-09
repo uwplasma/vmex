@@ -48,6 +48,8 @@ def iota_floor(equilibrium_state, solver_context):
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 import jax
+jax.config.update("jax_enable_compilation_cache", False)
+
 from simsopt.geo import SurfaceRZFourier
 from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
@@ -414,7 +416,7 @@ def vmex_boundary_to_dense(R_cos, R_sin, Z_cos, Z_sin, solver_context):
     m = jnp.asarray(modes.m, dtype=int)
     n = jnp.asarray(modes.n, dtype=int)
     ntor = int(solver_context.resolution.ntor)
-    mpol = int(jnp.max(m)) + 1
+    mpol = int(solver_context.resolution.mpol)
     shape = (mpol, 2 * ntor + 1)
 
     scale = (jnp.asarray(solver_context.trig.mscale)[m]
