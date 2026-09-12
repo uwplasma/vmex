@@ -1284,12 +1284,16 @@ The warm 48-parameter GPU trace now maps kernel time to source operations.
 A separate diagnostic replay disables CUDA command buffers to expose HLO
 origins; retain the ordinary trace for performance claims. Dense geometry
 Fourier synthesis accounts for 76.74 ms, including 49.34 ms in local
-`row_jacobian` VJP block assembly. A bounded comparison of the existing
-separable synthesis in that local AD shape rejects switching: GPU warm time
+`row_jacobian` VJP block assembly (47.92 ms derivative contractions,
+1.42 ms primal synthesis). The existing VJP already hoists primal geometry.
+A bounded comparison using 32-column chunks rejects switching to existing
+separable synthesis in that representative AD shape: GPU warm time
 rises from 6.71 to 7.04 ms and temporary memory from 7.46 to 10.64 MB;
 CPU time rises from 25.33 to 31.35 ms. Derivative differences are below
 1.8e-13 relative. Retain the dense path and investigate reuse within local
 block assembly before adding transform implementations or global policy.
+The traced workload uses 10-column chunks; its exact-shape comparison remains
+required before applying the representative result to that workload.
 Do not repeat broad constraint/geometry fusion: branch commit c595c257
 records changed rounding and 15–25% slower concatenated contractions.
 Root-history consistency and complete optimization acceptance remain open;
