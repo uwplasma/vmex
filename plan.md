@@ -9,7 +9,8 @@ Base: main after those merges, 0.8.1. It is a planning change: no equilibrium
 algorithm, derivative guarantee or performance claim is promoted here.
 
 **Release hold.** No tag, version bump or publication date is scheduled. One
-release follows the gates in §8 and §9.
+release follows the gates in §8 and §9. **Merge hold:** prepare and test PRs,
+but obtain explicit maintainer approval before any merge; do not enable auto-merge.
 
 ## 0. How to use this plan
 
@@ -488,13 +489,16 @@ tests; `solver.py` reaches only `polish_legacy_solution`, and the two routes
 share one helper. Delete the `vmec_jax` shim, `freeboundary_diff.py`, the
 `boozer_bmnc_*` aliases, `wout_field_names` and `value_and_grad_bnormal`;
 retire or fold `freeboundary_linear.py`; privatise the 120 test-only public
-definitions (none are in `vmex.__all__`); split `optimize.py` into objectives
-and drivers (its 1,132-line `_least_squares_implicit` is where
-`test_optimize.py`'s 31 minutes live) and `plotting.py` by artifact type;
+definitions (none are in `vmex.__all__`); reduce repeated work in optimization
+and plotting before reorganizing modules;
 merge the duplicated `_tree_norm`, lazy-export block and matplotlib guard.
 About 1,600 lines leave `vmex/` with no product path touched; four of these
 need a changelog note. Track added and deleted lines, file count, installed
-size and artifact bytes per implementation PR.
+size and artifact bytes per implementation PR. Profile `vmex --plotting`
+and representative examples separately from solving: imports, field evaluation,
+rendering and saving. Preserve figure content and numerical sampling; require
+measured runtime/memory benefit and image inspection before promotion. Reuse
+existing tests and documentation sections instead of adding parallel frameworks.
 
 **Publication and release.** Paper 1 is the product: VMEC compatibility,
 the certificate, three-way gradient agreement, the residual figure, the
@@ -512,9 +516,10 @@ citation metadata recorded; claims regenerated from records.
 ## 9. Phases and the pull requests
 
 Each phase lists the PRs an agent opens, in order, with the verification it
-runs before pushing. Local verification is the merge bar; admin-merge is
-permitted only when every real lane is green and only the unsigned-commit
-gate or an external status is red. Commits are authored by the maintainer
+runs before pushing. Passing verification establishes readiness, not permission
+to merge. Present the exact head, review, checks and remaining limitations to
+the maintainer for explicit approval before any merge, including admin merges.
+Commits are authored by the maintainer
 with no tool attribution. Work happens in worktrees, never in the shared
 checkout; one heavy local job at a time; the remote box takes one heavy job.
 
@@ -1255,3 +1260,11 @@ below 2.36e-11. Canonical reference freezing adds no numerical benefit on
 these excursions, and cold replays agree. This does not close the larger
 cross-problem root discrepancy. Repeat accepted-state derivative/accuracy
 checks after the interpolation correction before a full optimization rerun.
+
+The corrected-state CPU study at refinement 1e-12 now reproduces the cold
+objective and returns within 5.3e-10 relative after nearby trials. For steps
+1.25e-5 through 1.5625e-6, both Taylor remainders decrease quadratically;
+centered-gradient relative error reaches 1.2e-7. Larger negative steps show
+a jump requiring well-selection versus equilibrium-branch attribution.
+Projected residuals near 1e-13 do not establish strong force balance. P3
+remains open; neither this local test nor the capped runs certify a design.
