@@ -512,8 +512,10 @@ hopping with ``ess_alpha=0.7`` followed by exact least-squares polishing.
 Hot restart and final output
 ----------------------------
 
-Optimization trials hot-restart by default. The exact accepted state is
-available without another cold solve:
+Optimization trials hot-restart by default. Evaluate the returned parameters
+explicitly: the last line-search trial may differ from the accepted point.
+``equilibrium_from_x`` uses an exact parameter cache hit when available and
+otherwise solves again:
 
 .. code-block:: python
 
@@ -539,6 +541,11 @@ available without another cold solve:
 ``verbose=True`` shows whether the final run needs a larger iteration budget.
 The hot seed is especially important for strongly shaped boundaries whose
 cold magnetic-axis guess may be poor.
+Also compare the final objective after nearby trials and an independent cold
+replay. A converged forward solve and a certified linear response do not
+guarantee history-independent QI values. ``benchmarks/optimization.py
+--case collaborator --repeatability`` reproduces the current regression;
+``--residual-only`` separates plain hot starts from derivative predictors.
 
 Pointwise fields and VJPs
 -------------------------

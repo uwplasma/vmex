@@ -412,6 +412,12 @@ figure with its kill criterion evaluated.
    This is partial progress, not passage of P3: next measure compilation,
    accepted/rejected solves and time to a validated design using the existing
    `benchmarks/optimization.py` before changing solver budgets or refinement.
+   **Resumed backend review:** the full supplied candidate workflow now has
+   a complete office CPU profile and accepted/trial vectors, but joint BFGS
+   still reports precision loss. Next validate the traced GPU tridiagonal
+   bottleneck across full equilibria and derivative workloads, then resolve
+   restart consistency before claiming time to a validated design. Keep
+   generic sweep improvements in SOLVAX and VMEC acceptance in VMEX.
 4. **Flagship.** Landreman and Paul precise QA from simsopt's
    `input.LandremanPaul2021_QA` and DESC's `precise_QA.py`: a reduced student
    example with a stated resolution gap, and a research run reproducing the
@@ -1025,3 +1031,36 @@ accepted vectors/cost in NPZ. Never reuse an interrupted output label or treat
 imports as workflow completion. All numerical jobs launched here finished;
 no release/merge, no default solver or SOLVAX change. The PR body carries the
 remaining acceptance gates and environment/version table for handoff.
+
+### 2026-09-12 — completed collaborator profile and GPU backend diagnosis
+
+PR #299 remains draft; all checks at 9b3f8517 passed. Office host memory
+contention cleared. The complete candidate CPU workflow took 1,256 s with
+cProfile and saved every phase's trial and accepted vectors. Joint BFGS ended
+with precision loss (226 evaluations); initial full coil optimization hit
+1,500 iterations. This is completed execution, not an accepted design or a
+speed ratio against the unprofiled Mac baseline.
+
+A bounded GPU trace identifies cuSPARSE tridiagonal kernels as the dominant
+native-iteration cost. At iteration 21 on the supplied ns16 input, ten-step
+warm medians are 81 ms (0.3), 148 ms (0.7), 90 ms (current), 29 ms (existing
+checked Thomas), and 19 ms (Thomas plus experimental SOLVAX scan unroll8).
+Current/Thomas state relative differences are at most 1.1e-13. These preserve
+pivot/residual guards and are not whole-solve speed claims. Full-deck and AD
+validation, including CPU cost and free-boundary consumers, precedes policy
+changes. The first current-version probe selected iteration 11 and is excluded.
+
+Refinement alone leaves 1.42% return-point QI drift. Holding the initial cold
+m=1 reference on warm solves *and* refining gives about 6e-8 drift in the
+small-step probe; larger-step/derivative checks are still in progress. No
+gauge policy is promoted. Documentation now distinguishes frozen-equation
+AD checks from independent re-solve validation. The benchmark saves evaluated
+refined states and achieved force norms separately from raw solver diagnostics.
+Ruff, benchmark mypy, prose checks, strict Sphinx and a seven-point local
+refinement replay passed; the SOLVAX experiment passed 53 CPU tridiagonal tests.
+
+Evidence and exclusions are in `resumed_backend_investigation` of
+[`review_optimization_20260912.json`](benchmarks/review_optimization_20260912.json).
+External `INVESTIGATION.md` records live jobs; inspect before restarting them.
+Continue with full GPU backend validation, the remaining historical optimizer
+matrix, accepted-design replay and the existing P3/free-boundary gates.

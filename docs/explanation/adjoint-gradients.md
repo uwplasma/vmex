@@ -73,7 +73,7 @@ $m = 1$ families: 1.5e-04) that residual is a 1.8e-03 displacement of the
 state — enough to move a solver-sensitive metric by more than the derivative
 being measured.
 
-VMEX therefore Newton-refines the state onto the root inside the host
+VMEX therefore Newton-refines the state toward the root inside the host
 callback, before any lane reads it (`ImplicitConfig.refine_tol`, default
 1e-10; `inf` disables it, and a refinement that fails to improve the residual
 leaves the host state in place). Value, cotangent and linearization then all
@@ -88,8 +88,9 @@ Nearby optimization trials reuse the previous Newton displacement as a guess.
 VMEX evaluates the new frozen residual before accepting that guess; if it does
 not reach `refine_tol`, VMEX discards it and replays the original refinement.
 This changes work, not the accepted numerical path. Public optimization
-factories expose the same `refine_tol`; keep 1e-10 for production gradients
-and use `numpy.inf` only for an explicit legacy comparison.
+factories expose the same `refine_tol`. Refinement is best-effort within a
+bounded budget, so the achieved residual can exceed this tolerance. Disabling
+it with `numpy.inf` requires separate derivative and repeatability validation.
 
 ## The six SOLVAX solve classes
 
@@ -139,34 +140,27 @@ the exact linearized operator.
 
 ## Validating the gradients: the frozen path
 
-The adjoint returns the derivative of the fixed point of the **frozen**
-residual $F$: the preconditioner, the `tcon` constraint strength, the
-converged m=1 Z-force branch, and the dof mask are captured once at the base
-parameters and held fixed. Validation must respect that. Equilibrium outputs
-fall into two classes:
+The adjoint differentiates the root with constrained coordinates and the dof
+projector frozen at the base state. The preconditioner and `tcon` remain
+state-dependent. {func}`~vmex.core.implicit.frozen_path_directional_fd`
+Newton-solves those same equations at perturbed parameters and tests their
+implicit derivative; `tests/test_implicit_grad.py` uses this contract.
 
-- **Smooth bulk integrals** — the magnetic energy `wb`, the aspect ratio,
-  the volume. A naive central finite difference through the full host solver
-  (re-converging independently at $p\pm h$) matches `jax.grad` to
-  rtol <= 1e-6; the solver's internal path averages out of a bulk integral.
-- **Solver-sensitive metrics** — `iota` (built from the current-constrained
-  `chips` at `ncurr = 1`), the mirror ratio, the magnetic well, the
-  Boozer/QI residual: these read the converged state directly and locally.
-  A naive re-solve at $p\pm h$ lets the convergence logic re-form slightly
-  differently on each side — an $O(1)$ perturbation of the discrete *path*,
-  not of the *fixed point* — and it can swamp, even sign-flip, the finite
-  difference. On `li383_low_res`,
-  $d(\iota_{\mathrm{edge}})/d(\mathrm{RBC}(-1,1))$ is $-0.773$ from the
-  adjoint but $+0.045$ from a naive central FD.
+Independent nonlinear re-solves test a second requirement: whether the
+objective supplied to an optimizer follows that differentiable root. They
+can disagree for iota, mirror, magnetic well, and Boozer/QI metrics because
+finite force residuals and restart-dependent constrained coordinates affect
+the returned state. A frozen-path pass does not dismiss that disagreement.
+For example, the recorded `li383_low_res` edge-iota derivative is -0.773
+from the adjoint and +0.045 from an independent central difference.
 
-The naive FD is therefore not a valid reference for solver-sensitive metrics —
-the disagreement is a property of the finite-difference probe, not an error
-in the adjoint. The correct check reuses the *same* frozen residual the
-adjoint differentiates: {func}`~vmex.core.implicit.frozen_path_directional_fd`
-takes a directional step $p\pm h$, Newton-solves the frozen $F$ to its
-perturbed root, and finite-differences that. It reproduces the adjoint to
-solver accuracy for `iota`, mirror, well, and QI alike, and it is the
-reference used in `tests/test_implicit_grad.py`.
+Validate optimization with identical-parameter return and cold-replay checks,
+then re-solve Taylor tests across decreasing steps with achieved nonlinear
+residuals below the measured error. Check final force balance and resolution
+independently. The collaborator replay in `benchmarks/optimization.py` and
+`benchmarks/review_optimization_20260912.json` records the unresolved QI
+history dependence; neither a linear-solve certificate nor requesting
+`refine_tol=1e-10` establishes repeatability.
 
 ## Forward mode for least-squares Jacobians
 

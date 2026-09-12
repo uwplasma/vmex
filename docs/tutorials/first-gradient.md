@@ -53,9 +53,9 @@ memory no matter how many iterations the forward solve took
 - there is no finite-difference truncation/roundoff trade-off, which is
   exactly what the agreement printed above shows.
 
-One caveat worth knowing before you rely on FD checks yourself: for
-solver-sensitive outputs (iota, mirror ratio, magnetic well) a naive
-re-solving finite difference is not a valid reference — the frozen-path
-check in {doc}`/explanation/adjoint-gradients` is.
+For solver-sensitive outputs (iota, mirror ratio, magnetic well), check both
+the frozen-equation derivative and independent re-solves. Restart history
+and finite residuals can spoil the optimization mapping even when its
+frozen-path check passes; see {doc}`/explanation/adjoint-gradients`.
 
 Next: {doc}`first-optimization` puts the gradient to work.

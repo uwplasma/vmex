@@ -178,6 +178,19 @@ def repeatability(problem, args, path):
                        iota_max=float(np.max(result.iotaf)),
                        state_relative_change=float(np.linalg.norm(state - arrays["initial_state"])
                                                    / np.linalg.norm(arrays["initial_state"])))
+            refined = imp._LAST_REFINED.get(cfg)
+            if np.isfinite(args.refine_tol) and refined is not None and refined[0] == hit[0]:
+                # Solver diagnostics above describe the raw forward state;
+                # the objective consumes this separately refined state.
+                evaluated = refined[1]
+                flat = np.concatenate([np.asarray(v).ravel() for v in jax.tree.leaves(evaluated)])
+                arrays[f"{label}_evaluated_state"] = flat
+                mask = imp._fixed_boundary_dof_mask(cfg)
+                project = imp._dof_projector(cfg, mask)
+                force = imp.residual_fn(cfg, evaluated, mask)(project(evaluated), params)
+                row.update(refined_state_relative_correction=float(np.linalg.norm(flat - state)
+                                                                    / np.linalg.norm(state)),
+                           evaluated_force_norm=float(imp._tree_norm(force)))
         else:
             row["converged"] = False
         rows.append(row)

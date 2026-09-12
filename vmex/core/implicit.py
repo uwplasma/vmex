@@ -33,9 +33,9 @@ function theorem — while remaining exactly as well-conditioned as VMEC's own
 preconditioned iteration.  Correctness: ``gc = M(x, p) f(x, p)`` with ``f``
 the raw (``scalxc``-scaled) spectral force and ``M`` the invertible linear
 1D-preconditioner map (``scale_m1`` + ``scalfor`` tridiagonal solves +
-``faclam``).  At the root, ``dF = M df + dM f = M df`` up to ``O(|f|) =
-O(ftol)``, so the implicit gradients of the preconditioned residual equal
-those of the raw force residual to solver accuracy, and GMRES on ``dF/dx``
+``faclam``).  Away from the root, ``dF = M df + dM f`` includes a term
+proportional to the force, not its square. At the root its gradients equal
+those of the raw force residual at the root, and GMRES on ``dF/dx``
 inherits the preconditioning for free.  The raw-force formulation
 (``formulation="raw"``) is kept for the informational with/without-
 preconditioner comparison in the tests.
@@ -76,13 +76,13 @@ independent structural-zero oracle and handles coupled free-boundary maps.
 
 Gradient checking solver-sensitive metrics
 ------------------------------------------
-The adjoint gradient is the derivative of the fixed point of the *frozen*
-residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
-once at the base parameters, not re-derived.  For solver-sensitive metrics
-(``iota`` at ``ncurr=1``, mirror ratio, magnetic well, Boozer/QI residual) a
-naive re-solve FD is *not* a valid reference — it can sign-flip; use
-:func:`frozen_path_directional_fd`, which reproduces the adjoint to solver
-accuracy (full rationale on that function; ``tests/test_implicit_grad.py``).
+The adjoint differentiates the root with frozen constrained coordinates and
+dof projector; the preconditioner and ``tcon`` remain state-dependent.
+:func:`frozen_path_directional_fd` isolates this derivative contract.  It
+does not establish agreement with independent nonlinear re-solves: restart
+history can change solver-sensitive metrics (iota, mirror, well, Boozer/QI)
+at identical parameters.  Optimization validation also needs repeatability,
+re-solve Taylor tests, and independent final-state physics checks.
 
 Strict and optimization-safe callback lanes
 ---------------------------------------------
@@ -1329,8 +1329,8 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
             lconm1=cfg.lconm1, initial_state=init, use_fft=False,
                 device=solver_device)
     # Seed ladder: perturbation prediction -> plain hot restart -> cold.
-    # A bad warm seed must not fail the trial (only the initial guess is at
-    # stake — every rung converges to the same fixed point).
+    # A bad warm seed must not fail the trial. Finite-tolerance states and
+    # frozen coordinate references can nevertheless depend on the seed.
     attempts = [s for s in (perturb, hot) if s is not None] + [None]
     for k, init in enumerate(attempts):
         try:
@@ -3256,33 +3256,19 @@ def frozen_path_directional_fd(
 ) -> tuple[float, dict]:
     """Central FD of ``metric_fn`` along ``tangent`` on the *frozen* solve path.
 
-    The correct finite-difference reference for **solver-sensitive** metrics --
-    ``iota`` (derived from the current-constrained ``chips`` at ``ncurr=1``),
-    the mirror ratio, the magnetic well, the Boozer/QI residual -- whose value
-    reads the converged solver state directly rather than through a smooth bulk
-    integral (``wb``, ``aspect``, for which a naive re-solve FD is already
-    exact and :func:`jax.grad` matches it to ``rtol <= 1e-6``).
+    Isolate the derivative of the frozen-coordinate residual, including for
+    solver-sensitive metrics such as iota, mirror, magnetic well and QI.
+    The helper captures the constrained coordinates and projector at the
+    base state, Newton-solves ``F(z, params +/- h*tangent) = 0``, and takes
+    the central difference. The preconditioner remains state-dependent.
 
-    A naive full re-solve at ``params +/- h*tangent`` lets the solver's internal
-    convergence logic -- the ``bcovar`` preconditioner, the ``tcon`` constraint
-    scaling, the m=1 ``gcz`` zeroing branch (``residue.f90``), the dof mask, the
-    multigrid schedule, and exactly where the ``ftol`` crossing lands -- re-form
-    slightly differently at each perturbed point.  For a solver-sensitive metric
-    that path variation is an O(1) contribution that can inflate or even
-    sign-flip the finite difference (measured on ``li383_low_res``:
-    ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
-
-    The implicit adjoint deliberately does *not* differentiate through that
-    logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
-    preconditioner / mask / branch captured once at ``params``; see the module
-    docstring), which is the stable, physical gradient.  This helper reproduces
-    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
-    ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
-    adjoint uses) from the converged ``z*`` before central-differencing
-    ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
-    contracted with ``tangent`` to solver accuracy -- the gradient check a naive
-    re-solve FD cannot provide for these metrics.
+    Agreement verifies this equation-level derivative, not repeatability of
+    the public nonlinear solve. Independent re-solves may select different
+    constrained coordinates or stop too far from a root. On the recorded
+    ``li383_low_res`` edge-iota example, the adjoint gives -0.773 while a
+    re-solve difference gives +0.045. Such disagreement remains an optimization
+    validation gap; use re-solve Taylor tests and final-state physics checks
+    alongside this helper.
 
     The Newton steps go through the recycling GCROT solve rather than plain
     restarted GMRES: from a warm start already at the root the step's RHS
