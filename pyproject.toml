@@ -63,6 +63,7 @@ Issues = "https://github.com/uwplasma/vmex/issues"
 Changelog = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
+desc = ["desc-opt>=0.17"]
 optimizers = [
   "jaxopt",
   "optax",

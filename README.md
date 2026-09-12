@@ -72,6 +72,20 @@ for a saved WOUT. [Restart](https://vmex.readthedocs.io/en/latest/howto/restart-
 and [CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover
 resolution changes, devices, profiles and output controls.
 
+```console
+pip install 'vmex[desc]'
+vmex equilibrium.h5  # writes input.equilibrium and solves it to write wout_equilibrium.nc
+vmex input.equilibrium  # reproduce the WOUT without DESC
+```
+
+Native DESC text decks use their final continuation stage; HDF5/pickle outputs use the final `Equilibrium` in an `EquilibriaFamily` or a single equilibrium.
+`--outdir DIR` places both files in DIR. Output extensions are stripped from names; native text deck names are preserved.
+DESC's exporter transfers boundary, pressure, current/iota, flux, field periods and asymmetry to a standard fixed-boundary VMEC input.
+Non-polynomial profiles are sampled at 101 radial points, with enclosed current transferred directly. WOUT iota has the opposite sign to DESC's right-handed convention.
+Conversion chooses the smallest rectangular boundary spectrum with a conservative 1% bound on discarded position and angular derivatives relative to their nonconstant RMS Fourier amplitudes.
+This bounds boundary truncation, not magnetic-field error. `--desc-tol 0` retains all nonzero boundary modes.
+Generated inputs use 17/33/65 radial surfaces; edit the input for stricter resolution studies.
+
 ## Differentiate and optimize
 
 Compute a boundary/profile derivative without differentiating through every
