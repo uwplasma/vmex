@@ -1270,3 +1270,12 @@ independent frozen-state reproduction isolates the resulting 3.4e-6 cost jump.
 Document branch-local AD; do not freeze minima or change the objective silently.
 Projected residuals near 1e-13 do not establish strong force balance. P3
 remains open; neither this local test nor the capped runs certify a design.
+
+
+The optional magnetic-only transform in
+[booz_xform_jax #8](https://github.com/uwplasma/booz_xform_jax/pull/8) reduces
+matched collaborator warm Jacobians from 0.66 to 0.43 seconds (48 parameters).
+VMEX requests it when available; older dependencies retain the existing path.
+Native/high-order and symmetric/asymmetric checks pass on CPU and GPU without
+changing sampling or tolerances. The upstream PR remains unmerged; this is
+component evidence, not a completed optimization. Preserve the merge hold.
