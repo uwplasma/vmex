@@ -577,5 +577,118 @@
     "interrupted": "Office suite stopped by user pause while entering full optimization-convergence tests; four QA/QH/QI/QP full tests not completed in this continuation. Earlier PR head had all 27 CI checks green; new checkpoint requires CI.",
     "not_run": ["CPU cold CLI/Python matrix", "cross-version bounded QA/QH/QI/QP optimizer worker", "new optimizer-phase XProf/cProfile diagnostics", "paired full-budget candidate collaborator run"],
     "state": "Paused at user request. No merge or release."
+  },
+  "resumed_correctness_review": {
+    "candidate_ci": {
+      "commit": "f205c9957a5ebb15665a0109afc5f7217fddd53d",
+      "checks_passed": 27
+    },
+    "full_family_tests": {
+      "host": "office CPU",
+      "passed": 4,
+      "cases": [
+        "qa",
+        "qh",
+        "qp",
+        "qi"
+      ],
+      "log": "external results/resume-family-convergence.log"
+    },
+    "scope": "Saved collaborator input.final, exact supplied surface objective; VMEX-only diagnostic, not a replay of the complete accepted optimizer history. Other office workloads were active; no timing comparisons.",
+    "source": "f09288b37bac7d7122e98220192795e76770cd1f",
+    "input_sha256": "77d6137214d5945785935727d1ced22f9e6b09ed44b6109d6bfbe0d5beffeb09",
+    "recipe": "max_mode=3; aspect target7 weight1, supplied three-term QI weight1, mirror excess .21 weight100, elongation excess6 weight100; residual dot residual. x0 then +/-1e-4 and +/-1e-6 times normalized linspace(-.5,.5,48), returning to x0 after each trial. Clear solve/refinement/seed/objective caches for cold replay. Refinement disabled.",
+    "replays": {
+      "replay-surface-main-cpu": {
+        "initial_cost": 0.0058922692115433205,
+        "max_return_relative_drift": 0.015241474908673114,
+        "cold_replay_cost": 0.0058922692115433205,
+        "all_converged": true,
+        "rows": [
+          {
+            "label": "initial",
+            "residual_cost": 0.0058922692115433205,
+            "iterations": 1360,
+            "fsqr": 9.986997689539255e-13,
+            "fsqz": 2.7276820788739316e-14,
+            "fsql": 1.2515334804081514e-13
+          },
+          {
+            "label": "return_plus_0.0001",
+            "residual_cost": 0.005982076084886205,
+            "iterations": 417,
+            "fsqr": 9.989967162425817e-13,
+            "fsqz": 2.6676189984359047e-14,
+            "fsql": 1.3039860392997018e-13
+          },
+          {
+            "label": "return_minus_1e-06",
+            "residual_cost": 0.005949072708897651,
+            "iterations": 67,
+            "fsqr": 9.611668414818052e-13,
+            "fsqz": 1.5924360777027047e-13,
+            "fsql": 1.3900578181100722e-13
+          },
+          {
+            "label": "cold_replay",
+            "residual_cost": 0.0058922692115433205,
+            "iterations": 1360,
+            "fsqr": 9.986997689539255e-13,
+            "fsqz": 2.7276820788739316e-14,
+            "fsql": 1.2515334804081514e-13
+          }
+        ]
+      },
+      "replay-surface-main-tight-cpu": {
+        "initial_cost": 0.00591571281216441,
+        "max_return_relative_drift": 0.015303310932236025,
+        "cold_replay_cost": 0.00591571281216441,
+        "all_converged": true,
+        "rows": [
+          {
+            "label": "initial",
+            "residual_cost": 0.00591571281216441,
+            "iterations": 2286,
+            "fsqr": 9.984620951156208e-15,
+            "fsqz": 2.7699071722369423e-16,
+            "fsql": 1.2350479838911848e-15
+          },
+          {
+            "label": "return_plus_0.0001",
+            "residual_cost": 0.006006242804714774,
+            "iterations": 988,
+            "fsqr": 9.988119927139647e-15,
+            "fsqz": 3.5252857674085636e-16,
+            "fsql": 1.2077148866135534e-15
+          },
+          {
+            "label": "return_minus_1e-06",
+            "residual_cost": 0.005972326805810148,
+            "iterations": 99,
+            "fsqr": 9.203389036863472e-15,
+            "fsqz": 2.8463469354978793e-15,
+            "fsql": 6.939418799608512e-16
+          },
+          {
+            "label": "cold_replay",
+            "residual_cost": 0.00591571281216441,
+            "iterations": 2286,
+            "fsqr": 9.984620951156208e-15,
+            "fsqz": 2.7699071722369423e-16,
+            "fsql": 1.2350479838911848e-15
+          }
+        ]
+      }
+    },
+    "interpretation": "Pre-existing history dependence: raw R/Z edge rows return exactly, but frozen m=1 Z_sin antisymmetric directions and other state coefficients differ. Tightening forward ftol from 1e-12 to 1e-14 does not remove drift. Gauge/restart handling is a hypothesis to test, not a proven repair; complete collaborator cost discrepancy remains open.",
+    "candidate_predictor_gpu": {
+      "commit": "f205c9957a5ebb15665a0109afc5f7217fddd53d",
+      "max_return_relative_drift": 0.00015360188364921257,
+      "max_value_pair_absolute_difference": 0.0,
+      "central_directional_difference_1e_6": 1.4519147254372922,
+      "analytic_directional_derivative": 1.45194915508528,
+      "relative_difference": 2.3712709131262777e-05,
+      "scope": "Derivative calls supply perturbation warm seeds; do not attribute the difference from residual-only hot-restart replay to PR source changes."
+    }
   }
 }

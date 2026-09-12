@@ -911,3 +911,28 @@ Resume in this order:
    CPU and GPU coverage without overlapping timed jobs on one machine.
 4. Finish full family convergence tests and checkpoint CI; review then merge
    the focused PR only when these acceptance gates are satisfied. P3 remains open.
+
+**2026-09-12, resumed PR #299 correctness gate.** Checkpoint f205c995 has all
+27 CI checks green; all four full QA/QH/QP/QI convergence tests now pass on
+office CPU. The full collaborator history localizes its cost discrepancy to
+the surface contribution: the coil cost returns to the accepted value while
+the surface cost changes. A VMEX-only replay of the saved final input confirms
+history dependence on frozen main f09288b3, before this PR: identical boundary
+parameters give a 1.52% cost drift after nearby residual-only trials. Fresh
+cold replay restores the initial state/value exactly. Tightening forward FTOL
+from 1e-12 to 1e-14 leaves a 1.53% drift; refinement is already disabled.
+R/Z edge rows restore exactly, but frozen m=1 coordinate combinations and
+interior/lambda coefficients differ. Restart/coordinate handling is now a
+specific hypothesis to test, not a proven fix or a reason to change defaults.
+
+Candidate GPU value/gradient replay with the perturbation predictor reduces
+the small-step return drift to 0.0154%; paired values agree exactly and a
+1e-6 central directional difference agrees with AD within 2.4e-5 relative.
+This does not certify larger/rejected trials or the complete collaborator
+history. External `vega_tests/replay_surface.py` and `results/replay-surface-*`
+hold the reproducer and raw states; compact evidence is in the existing review
+JSON. Office has concurrent collaborator workloads, so these diagnostics
+provide no performance ratios. Next: larger-trial predictor/retry replay,
+then exact accepted-point logging in the full supplied Simsopt workflow on
+office. Preserve the remaining profiling matrix and merge gates above; do
+not replace the consistency gate with tolerance tuning or a speed claim.
