@@ -366,3 +366,34 @@ def test_solver_dataclass_unchanged():
     """The public surface is untouched: same signature, same closures."""
     fields = {f.name for f in dataclasses.fields(V.VacuumSolver)}
     assert fields == {"basis", "signgs", "full", "skip", "assemble"}
+
+
+@pytest.mark.usefixtures("_module_jit_enabled")
+@pytest.mark.parametrize("include_kernel", [False, True])
+def test_analytic_mode_projection_boundary_derivative(cth_vacuum_inputs, include_kernel):
+    """Signed Fourier projection retains the boundary response in both lanes."""
+    fixture = cth_vacuum_inputs
+    boundary, basis = fixture["boundary"], fixture["basis"]
+    direction = jnp.cos(jnp.reshape(jnp.asarray(basis.theta), boundary.R.shape))
+
+    @jax.jit
+    def evaluate(displacement):
+        return V._analytic_terms(
+            dataclasses.replace(boundary, R=boundary.R + displacement * direction),
+            fixture["bexni"], basis, fixture["signgs"],
+            include_kernel=include_kernel)
+
+    value, derivative = jax.jvp(evaluate, (jnp.asarray(0.),), (jnp.asarray(1.),))
+    step = 1.0e-5
+    plus, minus = evaluate(step), evaluate(-step)
+    for actual, upper, lower in zip(jax.tree.leaves(derivative),
+                                    jax.tree.leaves(plus), jax.tree.leaves(minus)):
+        expected = (upper - lower) / (2 * step)
+        assert float(jnp.linalg.norm(actual - expected)) <= (
+            2.0e-6 * float(jnp.linalg.norm(expected)) + 1.0e-10)
+    # analyt.f leaves the duplicated m=0, n<0 slots empty, in both parity blocks.
+    duplicate = np.asarray((basis.xmpot == 0) & (basis.n_raw < 0))
+    if basis.lasym:
+        duplicate = np.tile(duplicate, 2)
+    for array in jax.tree.leaves(value):
+        np.testing.assert_array_equal(np.asarray(array)[duplicate], 0.)
