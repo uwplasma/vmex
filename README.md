@@ -82,7 +82,7 @@ Native DESC text decks use their final continuation stage; HDF5/pickle outputs u
 `--outdir DIR` places both files in DIR. Output extensions are stripped from names; native text deck names are preserved.
 DESC's exporter transfers boundary, pressure, current/iota, flux, field periods and asymmetry to a standard fixed-boundary VMEC input.
 Non-polynomial profiles are sampled at 101 radial points, with enclosed current transferred directly. WOUT iota has the opposite sign to DESC's right-handed convention.
-Conversion chooses the smallest rectangular boundary spectrum with a conservative 1% bound on discarded position and angular derivatives relative to their nonconstant RMS Fourier amplitudes.
+Conversion chooses the smallest rectangular boundary spectrum with a conservative 1% position/derivative bound relative to nonconstant RMS Fourier amplitudes, plus one solver harmonic for interior accuracy.
 This bounds boundary truncation, not magnetic-field error. `--desc-tol 0` retains all nonzero boundary modes.
 Generated inputs use 17/33/65 radial surfaces; edit the input for stricter resolution studies.
 

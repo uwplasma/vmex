@@ -94,7 +94,7 @@ def test_hdf5_preserves_physical_profiles_and_surface(tmp_path, desc_equilibrium
     (EquilibriaFamily(desc_equilibrium(), eq) if family else eq).save(str(source))
     inp = VmecInput.from_file(write_desc_input(source))
     assert (inp.nfp, inp.lasym, inp.phiedge) == (3, asymmetric, 2.3)
-    assert (inp.mpol, inp.ntor) == (2, 1)
+    assert (inp.mpol, inp.ntor) == (3, 2)
     s = np.linspace(0.01, 1, 41)
     np.testing.assert_allclose(pressure(inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f, s), 1200 - 1000*s)
     if current:
@@ -215,6 +215,6 @@ def test_native_final_continuation_stage(tmp_path, desc_equilibrium):
                       "m: -1 n: 0 R1 = 0 Z1 = -1\nm: 1 n: 1 R1 = 0.1 Z1 = 0\n")
     inp = VmecInput.from_file(write_desc_input(source))
     np.testing.assert_allclose(inp.am[:2], [1200, -1000])
-    assert inp.ntor == 1
+    assert inp.ntor == 2
     assert inp.nfp == 3
-    assert np.max(abs(inp.rbc[[0, 2]])) > 0.01
+    assert np.max(abs(inp.rbc[[1, 3]])) > 0.01

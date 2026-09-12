@@ -82,6 +82,14 @@ def write_desc_input(source: Path, outdir: Path | None = None, *, tolerance: flo
             VMECIO.write_vmec_input(eq, str(path), NS_ARRAY=[17, 33, 65],
                                     NITER_ARRAY=[2000, 4000, 8000], FTOL_ARRAY=[1e-8, 1e-10, 1e-12])
             inp = _compact_boundary(VmecInput.from_file(path), tolerance)
+        # Boundary resolution alone under-resolves the interior after VMEC's
+        # poloidal reparameterization. Keep one extra solver harmonic; these
+        # zero boundary coefficients add no surface-shape detail.
+        extra_n = int(inp.ntor > 0)
+        inp = replace(inp, mpol=inp.mpol + 1, ntor=inp.ntor + extra_n, **{
+            key: np.pad(getattr(inp, key), ((extra_n, extra_n), (0, 1)))
+            for key in ("rbc", "zbs", "rbs", "zbc")
+        })
         # Splines in rho are not splines in s=rho**2. Sample the actual
         # profiles, especially enclosed current: DESC's derivative exporter
         # sets dI/ds=0 on axis, which distorts otherwise regular currents.
