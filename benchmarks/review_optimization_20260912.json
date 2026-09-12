@@ -969,5 +969,50 @@
       "static": "Ruff, mypy benchmark, docs prose gate, strict Sphinx passed"
     },
     "handoff": "Local <local-vega-tests> and office <office-benchmark-root>. See INVESTIGATION.md for running labels. External profile_forward_block.py and profile_tridiagonal_backends.py save bounded traces/HLO outside git. SOLVAX experiment worktree <solvax-experiment-worktree>, branch perf/small-batched-tridiagonal; unrelated SOLVAX PRs100/101 untouched."
+  },
+  "batching_resumption": {
+    "source_change": "cd667198: nearby-divisor Jacobian batching only; accepted-point diagnostic re-solve retained",
+    "status": "Component evidence; full accepted-design gate remains open. No release.",
+    "solvax_merge": "9b37d6998240ac839e9dc5da35f3cbba8a560980",
+    "qa_divisor_only": {
+      "scope": "Reduced nfp2 ns13 mpol3 ntor3, four evaluations; converged final equilibrium diagnostics, not a converged optimization",
+      "cpu_total_seconds": {
+        "control": 103.4156,
+        "candidate": 87.8667
+      },
+      "gpu_total_seconds": {
+        "control": 255.4105,
+        "candidate": 224.9416
+      }
+    },
+    "collaborator_48_dof": {
+      "scope": "Five identical parameter vectors, disabled refinement, selected two-row Thomas control",
+      "gpu_first_derivative_seconds": {
+        "control": 210.1,
+        "candidate": 122.9214
+      },
+      "max_relative_jacobian_difference": 1.803e-12,
+      "max_relative_residual_difference": 1.555e-12,
+      "warm_jacobian_seconds": {
+        "control_approx": 0.49,
+        "candidate_range": [
+          0.55,
+          0.61
+        ]
+      },
+      "provenance_limit": "Latest raw report omits source hashes; rolling checkout metadata is not the runtime revision. Repeat decisive timings from frozen source."
+    },
+    "withheld_materialization": {
+      "reason": "QA returned no final equilibrium diagnostics despite passing small CPU/GPU smoke checks",
+      "excluded_gpu_total_seconds": 166.94698
+    },
+    "ncsx_compile": {
+      "original_forward_seconds": 68.101,
+      "original_resource_stop_seconds": 205.252,
+      "resident_limit_gib": 20,
+      "location": "JIT compilation of host adjoint transpose",
+      "status": "Original and saved-pullback variants have not passed the larger-family gate in this environment."
+    },
+    "artifacts": "External investigation results/benchmark-resumption-audit.md; results/divisor-collaborator-gpu.{json,npz}; results/matrix-*-cpu/report.json"
   }
 }
