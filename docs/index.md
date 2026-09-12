@@ -139,5 +139,6 @@ explanation/index
 :caption: Project
 
 project/contributing
+project/implicit_primal_contract
 project/references
 ```

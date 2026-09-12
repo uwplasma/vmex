@@ -782,3 +782,164 @@ def test_evaluation_progress_reports_slow_calls_and_stays_quiet_otherwise(capsys
                             residual_jac=lambda _x: np.ones((1, 1)))
     quiet.residual(np.array([0.0]))
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("same_state", [True, False])
+def test_vmec_primal_certificate_matches_refined_anchor(monkeypatch, same_state):
+    from pathlib import Path
+    from vmex.core import implicit as imp
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(
+        Path(__file__).resolve().parents[1] / "examples/data/input.solovev")
+    cfg = imp.make_config(inp)
+    params = imp.params_from_input(inp)
+    key = imp._params_key(params)
+    state = np.ones(1)
+    certificate = {"derivative_certified": True, "primal_residual_norm": 1e-12}
+    imp._LAST_PRIMAL_CERTIFICATE[cfg] = (
+        key, imp._primal_state_key(state), certificate)
+    imp._LAST_REFINED[cfg] = (key, state if same_state else state + 1)
+    equilibrium = SimpleNamespace(result=SimpleNamespace(
+        converged=True, fsqr=1e-15, fsqz=0., fsql=0.))
+    problem = VmecProblem(
+        [1.0], fun=np.sum, input_from_x=lambda x: inp,
+        x_from_input=lambda inp: [1.0], equilibrium_from_x=lambda x: equilibrium,
+        metadata={"config": cfg})
+    evaluation = problem.evaluate(problem.x0, derivatives=False)
+    assert evaluation.diagnostics["derivative_certified"] is same_state
+    assert (evaluation.status == "under_converged") is (not same_state)
+
+
+def test_cached_vmec_derivative_keeps_its_own_primal_certificate():
+    from dataclasses import dataclass, replace
+    from pathlib import Path
+    from vmex.core import implicit as imp
+    from vmex.core.input import VmecInput
+
+    @dataclass(frozen=True)
+    class Result:
+        state: object
+        converged: bool = True
+        fsqr: float = 1e-15
+        fsqz: float = 0.0
+        fsql: float = 0.0
+
+    inp = VmecInput.from_file(
+        Path(__file__).resolve().parents[1] / "examples/data/input.solovev")
+    cfg = imp.make_config(inp)
+    key = imp._params_key(imp.params_from_input(inp))
+    state = np.ones(1)
+    certificate = {"derivative_certified": True, "primal_residual_norm": 1e-12}
+    source = Result(np.zeros(1))
+    calls = []
+
+    def value_gradient(x):
+        calls.append(True)
+        imp._LAST_SOLVE[cfg] = (key, source)
+        imp._LAST_REFINED[cfg] = (key, state)
+        imp._LAST_PRIMAL_CERTIFICATE[cfg] = (
+            key, imp._primal_state_key(state), certificate)
+        return 2.0, np.ones(1)
+
+    problem = VmecProblem(
+        [1.0], value_and_grad=value_gradient, input_from_x=lambda x: inp,
+        x_from_input=lambda inp: [1.0],
+        equilibrium_from_x=lambda x: SimpleNamespace(result=source),
+        metadata={"config": cfg, "equilibrium_from_cached_result":
+                  lambda x, result, iterations: SimpleNamespace(state=result.state, result=result)})
+    first = problem.evaluate(problem.x0)
+    assert first.diagnostics["derivative_certified"]
+    # Neither mutation of the original array nor a newer same-parameter solve
+    # may change the coefficients or historical FSQ attached to the cache.
+    state[0] = 5.0
+    imp._LAST_REFINED[cfg] = (key, state + 1)
+    imp._LAST_SOLVE[cfg] = (key, replace(source, state=state + 1, fsqr=0.2))
+    imp._LAST_PRIMAL_CERTIFICATE.pop(cfg)
+    revisited = problem.evaluate(problem.x0)
+    assert revisited.diagnostics["derivative_certified"]
+    assert not revisited.diagnostics["derivative_anchor_matches_current_refinement"]
+    np.testing.assert_array_equal(revisited.gradient, first.gradient)
+    assert len(calls) == 1
+    materialized = problem.equilibrium_from_x(problem.x0)
+    np.testing.assert_array_equal(materialized.state, [1.0])
+    assert materialized.result.fsqr == source.fsqr
+    assert imp._primal_state_key(materialized.state) == problem._vg_cache_primal[1]
+    with pytest.raises(ValueError, match="read-only"):
+        materialized.state[0] = 9.0
+
+    # Conflicting scalar/residual anchors are explicit, never silently chosen.
+    problem._rj_cache = (problem._key(problem.x0), (np.ones(1), np.ones((1, 1))))
+    problem._rj_cache_primal = (key, imp._primal_state_key(state), certificate)
+    problem._rj_cache_anchor = replace(source, state=state)
+    with pytest.raises(RuntimeError, match="conflicting equilibrium anchors"):
+        problem.equilibrium_from_x(problem.x0)
+    rejected = problem.evaluate(problem.x0)
+    assert rejected.status == "under_converged"
+    assert not rejected.diagnostics["derivative_certified"]
+    problem._rj_cache_anchor = None
+    with pytest.raises(RuntimeError, match="materialization provenance"):
+        problem.equilibrium_from_x(problem.x0)
+    problem._rj_cache = None
+    problem.value_and_grad(np.array([2.0]))
+    assert problem._cached_primal_result(problem.x0) is None
+    np.testing.assert_array_equal(problem._vg_cache_anchor.state, [5.0])
+
+
+def test_residual_derivative_cache_without_primal_evidence_is_uncertified():
+    problem = VmecProblem(
+        [1.0], residual_and_jac=lambda x: (x, np.eye(1)),
+        input_from_x=lambda x: x, x_from_input=lambda x: x)
+    first = problem.residual_and_jac(problem.x0)
+    second = problem.residual_and_jac(problem.x0)
+    np.testing.assert_array_equal(first[1], second[1])
+    assert problem._rj_cache_primal is None
+
+
+@pytest.mark.parametrize("phase", ["snapshot", "evaluation"])
+def test_primal_snapshot_is_atomic_with_derivative_cache(monkeypatch, phase):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    snapshot_started, allow_snapshot, second_evaluation = Event(), Event(), Event()
+
+    def value_gradient(x):
+        if x[0] == 2.0:
+            second_evaluation.set()
+        return float(x[0]), np.ones(1)
+
+    class Config:
+        ftol = 1e-10
+        max_fsq_ratio = 10.0
+
+    def materialize(x):
+        if phase == "evaluation":
+            snapshot_started.set()
+            assert allow_snapshot.wait(2.0)
+        return SimpleNamespace(result=SimpleNamespace(
+            converged=True, fsqr=0.0, fsqz=0.0, fsql=0.0))
+
+    problem = VmecProblem([1.0], value_and_grad=value_gradient,
+                          input_from_x=lambda x: x, x_from_input=lambda x: x,
+                          equilibrium_from_x=materialize, metadata={"config": Config()})
+    original = problem._remember_primal_cache
+
+    def paused_snapshot(name, previous):
+        if phase == "snapshot" and not snapshot_started.is_set():
+            snapshot_started.set()
+            assert allow_snapshot.wait(2.0)
+        original(name, previous)
+
+    monkeypatch.setattr(problem, "_remember_primal_cache", paused_snapshot)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        operation = problem.evaluate if phase == "evaluation" else problem.value_and_grad
+        first = pool.submit(operation, np.array([1.0]))
+        assert snapshot_started.wait(2.0)
+        second = pool.submit(problem.value_and_grad, np.array([2.0]))
+        try:
+            assert not second_evaluation.wait(0.05)
+        finally:
+            allow_snapshot.set()
+        result = first.result(timeout=2.0)
+        assert (result.value if phase == "evaluation" else result[0]) == 1.0
+        assert second.result(timeout=2.0)[0] == 2.0

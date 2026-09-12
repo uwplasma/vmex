@@ -534,6 +534,10 @@ def test_solovev_gradients_vs_fd(solovev):
         return jnp.stack([sol.wb, sol.wp, sol.aspect])
 
     jac = jax.jacrev(outs)(p0)  # one forward solve + one adjoint per output
+    state, mask = im.solve_implicit_with_aux(p0, cfg)
+    certificate = im._certify_primal(cfg, p0, state, mask)
+    print(f"\n[{name}] actual primal certificate: {certificate}")
+    assert certificate["derivative_certified"]
     ad = {
         ("wb", "rbc"): float(np.asarray(jac.rbc)[0, ntor, 1]),
         ("aspect", "rbc"): float(np.asarray(jac.rbc)[2, ntor, 1]),
