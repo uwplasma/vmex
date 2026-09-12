@@ -78,10 +78,13 @@ def _surface_series(cosine, sine, nfp, tor_angle, pol_angle, n_min, m_min,
     coefficients = cosine if cosine is not None else sine
     tor_angle, pol_angle = jnp.broadcast_arrays(tor_angle, pol_angle)
     trailing = (1,) * tor_angle.ndim
-    m = (jnp.arange(coefficients.shape[0]) + m_min).reshape((-1, 1) + trailing)
+    angle_dtype = jnp.result_type(tor_angle, pol_angle, 1.0)
+    m = (jnp.arange(coefficients.shape[0], dtype=angle_dtype) + m_min).reshape(
+        (-1, 1) + trailing)
     if n_min is None:
         n_min = -(coefficients.shape[1] - 1) / 2
-    n = ((jnp.arange(coefficients.shape[1]) + n_min) * nfp).reshape((1, -1) + trailing)
+    n = ((jnp.arange(coefficients.shape[1], dtype=angle_dtype) + n_min) * nfp).reshape(
+        (1, -1) + trailing)
     angle = m * pol_angle - n * tor_angle
     c, s = jnp.cos(angle), jnp.sin(angle)
     if derivative is not None:
