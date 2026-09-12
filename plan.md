@@ -951,3 +951,77 @@ dependency completion and driver import checks are separate from workflow
 execution. Full timing/profile runs remain pending under controlled CPU/GPU
 load (office was using 14 GiB swap). No numerical experiment remains running
 from this continuation; no merge or release.
+
+**2026-09-12, reproducible PR #299 handoff.** The existing optimization
+benchmark now includes `--repeatability` and the supplied collaborator's
+surface terms. The existing review JSON embeds the exact final input as
+minimal VMEC JSON; every parsed input field was checked against the supplied
+`input.final`. No external script/data is required for this surface diagnostic.
+It saves trial vectors/residuals/raw states, verifies exact solve memo/status,
+and clears both solve and refinement caches for cold replay. `--residual-only`
+uses plain hot starts; derivative calls enable the perturbation predictor.
+These are different protocols, not a measured source-code speedup.
+
+Local CPU and office GPU each completed seven evaluations at step 1e-4:
+matching iteration counts, objective agreement within 4.3e-10 relative,
+magnetic-energy agreement within 6.1e-18 absolute, iota extrema within 2.9e-11
+absolute. Both reproduce the history dependence. A bounded local diagnostic
+also completed seven QA value/gradient evaluations with exact memo checks,
+certified derivatives and identical value pairs; benchmark Ruff/mypy pass.
+A bounded local coordinate diagnostic
+preserving the initial cold m=1 reference on warm solves retains the initial
+cold solution but still gives 0.192% maximum return drift at FTOL=1e-12 and
+0.0468% at 1e-14. No coordinate-policy fix is promoted. Office host RAM/swap
+contention still prevents trustworthy full-workflow timings despite idle GPUs.
+
+Reproduce from the PR checkout with installed pinned dependencies (float64,
+no persistent cache; this is a diagnostic, not a timed optimizer):
+
+```bash
+JAX_PLATFORMS=cpu JAX_ENABLE_X64=1 VMEX_COMPILATION_CACHE=disabled \
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=. \
+python benchmarks/optimization.py --case collaborator --keep-input-resolution \
+  --max-mode 3 --refine-tol inf --batch-size auto --device cpu \
+  --repeatability --residual-only --repeatability-steps 1e-4 \
+  --output /tmp/vmex-repeatability-cpu.json
+```
+
+For GPU, use `JAX_PLATFORMS=cuda,cpu`, `CUDA_VISIBLE_DEVICES=0`,
+`XLA_PYTHON_CLIENT_PREALLOCATE=false`, `--device gpu` and a distinct output.
+Remove `--residual-only` for certified value/gradient and predictor replay;
+use `--repeatability-steps .001 .01` for the larger/rejected-trial protocol.
+Do not infer convergence from a stale memo after a failed trial. Native cold
+and optimizer timing commands remain in the benchmark CLI; the unresolved
+historical family/full-workflow matrix above is not marked complete.
+
+The coordinate investigation is grounded in
+[VMEC2000 constrain_m1](https://github.com/hiddenSymmetries/VMEC2000/blob/728af8bd6c796b36a0aa85fe298e507791e57c6e/Sources/General/residue.f90),
+which conditionally suppresses the constrained m=1 force, and
+[VMEC++ external Evaluate](https://github.com/proximafusion/vmecpp/blob/07ef6710078e78e29ccabab0443cb3ec0ad7e375/src/vmecpp/cpp/vmecpp/vmec/pybind11/pybind_vmec.cc),
+which fixes that force gauge for external evaluations to avoid dependence on
+the preceding state. This is not evidence that VMEC++ native optimization
+solves our observed drift. [DESC Part 1](https://doi.org/10.1017/S0022377823000272)
+provides the broader coordinate/spectral-condensation comparison. The next
+test must separate a consistent discrete force/root and coordinate reference
+from finite-tolerance error, then check independent physics and directional
+derivatives. A repeat-value cache alone would hide the issue.
+
+Full supplied workflow handoff: local root is
+`/Users/rogeriojorge/local/vega_tests`, office root is
+`~/vega-performance-20260912`. Local `sources/performance` is this PR;
+`sources/latest` is frozen main f09288b3; office `host` contains the matching
+candidate source and `baseline` the frozen main source. Office snapshot git
+metadata is older than copied source: compare recorded source hashes.
+Both roots have `run_workflow.py`, driver/wrapper, `src/`, supplied input,
+and external results. Use office `env-clean/bin/python`; local
+`envs/latest/bin/python` needs the recorded Mac MPI library path. The exact
+Simsopt branch is csvega24's `codex/scalar-surface-gradient-phase0`, commit
+fa05207846283d8ad03c0cdf499318df22a15f0d. The full workflow still needs these
+external collaborator files; only the surface replay is self-contained in git.
+`run_workflow.py --label NEW_LABEL --cap 3 --no-profile` makes a fresh capped
+run; omit `--cap` for full budgets and `--no-profile` for cProfile. Set
+`PYTHONPATH` to the chosen VMEX checkout. Each phase now saves trial and
+accepted vectors/cost in NPZ. Never reuse an interrupted output label or treat
+imports as workflow completion. All numerical jobs launched here finished;
+no release/merge, no default solver or SOLVAX change. The PR body carries the
+remaining acceptance gates and environment/version table for handoff.

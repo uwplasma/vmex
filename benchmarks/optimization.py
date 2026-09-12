@@ -44,6 +44,14 @@ def version(name: str) -> str | None:
 
 
 def terms(case: str):
+    if case == "collaborator":
+        qi = QIResidual(np.array([1, 5, 9, 13]) / 16, mboz=18, nboz=18,
+                        oversample=2, nphi=141, nalpha=27, n_levels=16, softness=.02)
+        return [
+            (opt.aspect_ratio, 7., 1.), (qi, 0., 1.),
+            (lambda s, r: jnp.maximum(opt.mirror_ratio(s, r) - .21, 0.), 0., 100.),
+            (lambda s, r: jnp.maximum(opt.max_elongation(s, r) - 6., 0.), 0., 100.),
+        ]
     surfaces = np.linspace(0.1, 1.0, 6)
 
     def iota_floor(state, runtime):
@@ -119,9 +127,81 @@ def fieldline_kernel_report():
                 **git_state(REPO), **report)
 
 
+def repeatability(problem, args, path):
+    """Diagnostic trajectory, including exact memo checks after failed trials.
+
+    Private cache access is confined to this diagnostic. A cold replay must
+    clear refinement as well as solve caches; clearing only the latter can
+    pair an old objective with a new raw state at identical parameters.
+    """
+    from vmex.core import implicit as imp
+
+    cfg = problem.metadata["config"]
+    x = problem.x0.copy()
+    direction = np.linspace(-.5, .5, x.size)
+    direction /= np.linalg.norm(direction)
+    rows, arrays = [], {"x0": x, "direction": direction}
+    report = dict(case=args.case, device=args.device, residual_only=args.residual_only,
+                  refine_tol=args.refine_tol if np.isfinite(args.refine_tol) else "disabled",
+                  forward_ftol=float(cfg.ftol), input_sha256=file_sha256(path),
+                  steps=args.repeatability_steps, platform=platform.platform(),
+                  python=platform.python_version(),
+                  source_sha256={str(p): file_sha256(REPO / p) for p in (
+                      Path("benchmarks/optimization.py"),
+                      *(Path(f"vmex/core/{name}.py") for name in
+                        ("optimize", "implicit", "bounce", "omnigenity", "maxj")))},
+                  versions={name: version(name) for name in
+                            ("jax", "jaxlib", "numpy", "scipy", "solvax", "booz_xform_jax")},
+                  **git_state(REPO), rows=rows)
+
+    def evaluate(label, point):
+        residual = np.asarray(problem.residual(point))
+        row = dict(label=label, residual_cost=float(residual @ residual))
+        if not args.residual_only:
+            value, gradient = problem.value_and_grad(point)
+            row.update(gradient_cost=2 * value, directional_gradient=float(2 * gradient @ direction),
+                       derivative_certified=bool(problem.metadata["holder"].get("scalar_certified", False)))
+        params = imp.params_from_input(problem.input_from_x(point))
+        hit = imp._LAST_SOLVE.get(cfg)
+        error = imp._LAST_STATUS_ERROR.get(cfg)
+        exact = hit is not None and hit[0] == imp._params_key(params)
+        row.update(exact_solve_memo=exact,
+                   status_error=None if error is None else type(error).__name__)
+        arrays[f"{label}_x"], arrays[f"{label}_residual"] = point.copy(), residual
+        if exact and error is None:
+            result = hit[1]
+            state = np.concatenate([np.asarray(v).ravel() for v in jax.tree.leaves(result.state)])
+            arrays[f"{label}_state"] = state
+            row.update(converged=bool(result.converged), iterations=int(result.iterations),
+                       fsqr=float(result.fsqr), fsqz=float(result.fsqz), fsql=float(result.fsql),
+                       wb=float(result.wb), iota_min=float(np.min(result.iotaf)),
+                       iota_max=float(np.max(result.iotaf)),
+                       state_relative_change=float(np.linalg.norm(state - arrays["initial_state"])
+                                                   / np.linalg.norm(arrays["initial_state"])))
+        else:
+            row["converged"] = False
+        rows.append(row)
+        args.output.write_text(json.dumps(report, indent=2) + "\n")
+        np.savez_compressed(args.output.with_suffix(".npz"), **arrays)
+        print(json.dumps(row), flush=True)
+
+    evaluate("initial", x)
+    evaluate("repeat", x)
+    for step in args.repeatability_steps:
+        for sign, name in ((1, "plus"), (-1, "minus")):
+            evaluate(f"{name}_{step}", x + sign * step * direction)
+            evaluate(f"return_{name}_{step}", x)
+    problem._vg_cache = problem._rj_cache = None
+    problem.metadata["holder"]["lin"] = None
+    for cache in (imp._LAST_SOLVE, imp._HOT_CACHE, imp._PERTURB_SEED,
+                  imp._LAST_REFINED, imp._LAST_REFINEMENT_CORRECTION, imp._LAST_STATUS_ERROR):
+        cache.pop(cfg, None)
+    evaluate("cold_replay", x)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", choices=("qi", "constructed_qi", "qa", "qh", "qp", "scalar"), default="qi")
+    parser.add_argument("--case", choices=("qi", "constructed_qi", "qa", "qh", "qp", "scalar", "collaborator"), default="qi")
     parser.add_argument("--nfp", type=int, choices=range(1, 6), default=2)
     parser.add_argument("--input", type=Path)
     parser.add_argument("--max-mode", type=int, default=1)
@@ -141,8 +221,17 @@ def main() -> None:
     parser.add_argument("--output", type=Path, help="JSON report and companion numerical .npz")
     parser.add_argument("--skip-jax-contract", action="store_true", help="Measure only the host optimizer API")
     parser.add_argument("--fieldline-kernel", action="store_true", help="Compare Fourier synthesis with a dense oracle")
+    parser.add_argument("--repeatability", action="store_true", help="Replay identical parameters between nearby trials")
+    parser.add_argument("--repeatability-steps", nargs="+", type=float, default=[1e-4, 1e-6])
+    parser.add_argument("--residual-only", action="store_true", help="Skip derivatives in the repeatability diagnostic")
     args = parser.parse_args()
     assert_repo_vmex(vmex.__file__, REPO)
+    if args.repeatability:
+        if args.output is None or args.derivatives != "implicit":
+            parser.error("--repeatability requires --output and implicit derivatives")
+        if any(not np.isfinite(step) or step <= 0 for step in args.repeatability_steps):
+            parser.error("repeatability steps must be finite and positive")
+        args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.fieldline_kernel:
         device = jax.devices(None if args.device == "auto" else args.device)[0]
         with jax.default_device(device):
@@ -158,8 +247,12 @@ def main() -> None:
     batch_size = "auto" if args.batch_size == "auto" else int(args.batch_size)
 
     path = args.input or REPO / f"examples/data/input.minimal_seed_nfp{min(args.nfp, 4)}"
-    inp = VmecInput.from_file(path)
-    if args.input is None and inp.nfp != args.nfp:
+    if args.case == "collaborator" and args.input is None:
+        path = REPO / "benchmarks/review_optimization_20260912.json"
+        inp = VmecInput.from_json_text(json.dumps(json.loads(path.read_text())["repeatability_input"]))
+    else:
+        inp = VmecInput.from_file(path)
+    if args.input is None and args.case != "collaborator" and inp.nfp != args.nfp:
         inp = replace(inp, nfp=args.nfp)
     mpol = max(args.max_mode + 2, 5)
     if not args.keep_input_resolution:
@@ -177,6 +270,9 @@ def main() -> None:
         jacobian_batch_size=batch_size,
     )
     build_seconds = time.perf_counter() - started
+    if args.repeatability:
+        repeatability(problem, args, path)
+        return
     print(f"Problem built in {build_seconds:.3f}s; evaluating first derivative", file=sys.stderr, flush=True)
 
     started = time.perf_counter()

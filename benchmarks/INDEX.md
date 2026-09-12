@@ -48,7 +48,7 @@ hand rather than by a script in this tree.
 | `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | `plan.md` |
 | `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | `plan.md` |
-| `benchmarks/review_optimization_20260912.json` |  | `f09288b3` | 2026-09-12 | `plan.md` |
+| `benchmarks/review_optimization_20260912.json` |  | `f09288b3` | 2026-09-12 | `benchmarks/optimization.py`, `plan.md` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `plan.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_m4.json` | `benchmarks/strong_force.py` | `9481f64a` |  | `docs/reference/performance.rst` |

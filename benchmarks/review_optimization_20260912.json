@@ -710,5 +710,101 @@
       "all_exact_and_converged": true,
       "interpretation": "Reduced but nonzero drift; different initial equilibrium. Evidence for a coordinate/restart contribution, not an accuracy-preserving fix."
     }
+  },
+  "repeatability_input": {
+    "ns_array": [16],
+    "ftol_array": [1e-12],
+    "niter_array": [4000],
+    "delt": 0.9,
+    "tcon0": 2.0,
+    "phiedge": 0.04299515045,
+    "nstep": 200,
+    "ncurr": 1,
+    "rbc": [
+      {"m": 1, "n": -3, "value": -0.002258039859912594},
+      {"m": 2, "n": -3, "value": -0.0014072964015952242},
+      {"m": 3, "n": -3, "value": -9.051020221429007e-05},
+      {"m": 1, "n": -2, "value": -0.007042369469216212},
+      {"m": 2, "n": -2, "value": 0.0015025201277428365},
+      {"m": 3, "n": -2, "value": -0.0005073178910473561},
+      {"m": 1, "n": -1, "value": -0.05129612009764143},
+      {"m": 2, "n": -1, "value": 0.005100915776886109},
+      {"m": 3, "n": -1, "value": 0.0008806191863378449},
+      {"m": 0, "n": 0, "value": 1.0},
+      {"m": 1, "n": 0, "value": 0.13237958459772153},
+      {"m": 2, "n": 0, "value": -0.008430664196341019},
+      {"m": 3, "n": 0, "value": 0.0003516925322970672},
+      {"m": 0, "n": 1, "value": 0.11072676287386235},
+      {"m": 1, "n": 1, "value": -0.015697731806771573},
+      {"m": 2, "n": 1, "value": 0.010819220541650833},
+      {"m": 3, "n": 1, "value": -0.0009031662025365472},
+      {"m": 0, "n": 2, "value": -0.18159671487225684},
+      {"m": 1, "n": 2, "value": 0.0770021979292755},
+      {"m": 2, "n": 2, "value": -0.0044542936604470805},
+      {"m": 3, "n": 2, "value": -0.0014746097274417613},
+      {"m": 0, "n": 3, "value": -0.011051518113576707},
+      {"m": 1, "n": 3, "value": 0.0009658679625027923},
+      {"m": 2, "n": 3, "value": -0.002138540530441494},
+      {"m": 3, "n": 3, "value": 0.00019971130972554714}
+    ],
+    "zbs": [
+      {"m": 1, "n": -3, "value": -0.004117090788656811},
+      {"m": 2, "n": -3, "value": -0.0007113728931343971},
+      {"m": 3, "n": -3, "value": -0.00012546003779520914},
+      {"m": 1, "n": -2, "value": -0.003167501924255082},
+      {"m": 2, "n": -2, "value": -0.0007290833220281791},
+      {"m": 3, "n": -2, "value": -0.00048661026644303897},
+      {"m": 1, "n": -1, "value": -0.04825322901015365},
+      {"m": 2, "n": -1, "value": 0.004953641447818782},
+      {"m": 3, "n": -1, "value": 0.0015595558303988667},
+      {"m": 1, "n": 0, "value": 0.17286672231279776},
+      {"m": 2, "n": 0, "value": -0.006931420586735865},
+      {"m": 3, "n": 0, "value": -0.0009511512201245927},
+      {"m": 0, "n": 1, "value": -0.3499469387544589},
+      {"m": 1, "n": 1, "value": 0.05374779995893194},
+      {"m": 2, "n": 1, "value": -0.014353099982215631},
+      {"m": 3, "n": 1, "value": -0.0002666272935732307},
+      {"m": 0, "n": 2, "value": 0.1315511219020954},
+      {"m": 1, "n": 2, "value": -0.06913022379278892},
+      {"m": 2, "n": 2, "value": -0.008389780731229958},
+      {"m": 3, "n": 2, "value": 0.0029960386664800716},
+      {"m": 0, "n": 3, "value": 0.006491000381700828},
+      {"m": 1, "n": 3, "value": 0.002469063564004713},
+      {"m": 2, "n": 3, "value": 0.0016204244613096867},
+      {"m": 3, "n": 3, "value": -0.00041807316159090714}
+    ],
+    "nvacskip": 6,
+    "precon_type": "none",
+    "prec2d_threshold": 1e-19,
+    "mpol": 5,
+    "ntor": 5
+  },
+  "handoff_reproducer_validation": {
+    "source_checkpoint": "a5ea07e2def31a8c7a64aa2b032a0703c99c373f",
+    "production_changes": false,
+    "in_tree_reproducer": "benchmarks/optimization.py --case collaborator --repeatability; exact VmecInput JSON embedded in repeatability_input, round-trip checked for every dataclass field",
+    "local_cpu_office_gpu": {
+      "rows_per_device": 7,
+      "all_exact_and_converged": true,
+      "iteration_counts_match": true,
+      "max_cost_relative_difference": 4.2327963356569853e-10,
+      "max_wb_absolute_difference": 6.071532165918825e-18,
+      "max_iota_extrema_absolute_difference": 2.8551050412772838e-11,
+      "timing_claim": "None: shared host memory contention; local nice15 and one-thread settings."
+    },
+    "qa_recorder_validation": {"points": 7, "all_exact_and_converged": true, "all_derivatives_certified": true, "max_value_pair_difference": 0.0},
+    "canonical_hot_diagnostic": {
+      "replay-canonical-hot-local": {
+        "initial_cost": 0.005892269192352927,
+        "cold_replay_cost": 0.005892269192352927,
+        "max_return_relative_drift": 0.0019174682891567318
+      },
+      "replay-canonical-hot-tight-local": {
+        "initial_cost": 0.005915712805400415,
+        "cold_replay_cost": 0.005915712805400415,
+        "max_return_relative_drift": 0.0004677287303969102
+      },
+      "verdict": "Do not promote: preserving initial cold m1 antisymmetric Z_sin interior reference and suppressing its force on warm trials reduces but does not eliminate drift. Restore the original cold policy for cold replay. Diagnostic harness only; no accuracy-preserving fix demonstrated."
+    }
   }
 }
