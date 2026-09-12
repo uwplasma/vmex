@@ -418,6 +418,16 @@ figure with its kill criterion evaluated.
    bottleneck across full equilibria and derivative workloads, then resolve
    restart consistency before claiming time to a validated design. Keep
    generic sweep improvements in SOLVAX and VMEC acceptance in VMEX.
+   **Additional collaborator checks:** compare the unchanged supplied scripts
+   in isolated historical/current environments, separating QI-definition changes
+   from solver and compilation costs. Review the separate
+   [winding branch](https://github.com/uwplasma/vmex/tree/ds/working_winding)
+   against the physical current-potential goals in
+   [ESSOS #66](https://github.com/uwplasma/ESSOS/pull/66). Any targeted PR must
+   use that branch as its base, preserve the stated objective, measure memory
+   and derivative cost, and meet 95% changed-code coverage plus independent
+   physics/numerics checks. Do not imply that a faster entropy proxy resolves
+   the physical winding-surface design problem.
 4. **Flagship.** Landreman and Paul precise QA from simsopt's
    `input.LandremanPaul2021_QA` and DESC's `precise_QA.py`: a reduced student
    example with a stated resolution gap, and a research run reproducing the
@@ -1178,12 +1188,18 @@ per-adjoint pullbacks, full NCSX current gradients pass independent cold
 re-solves on CPU (104.02 s, 2.24 GiB peak host RSS) and GPU (276.04 s, 3.01 GiB).
 The original source exceeded 20 GiB during compilation. This resolves that
 observed compiler-memory failure; it does not establish GPU superiority.
-High-mode validation found a 3.35e-6 discrepancy at mf=14, nf=9 using an
-eager reference after baseline compilation exceeded its memory cap. An
-order-preserving scan shows the same discrepancy, so attribution to reordered
-contraction is not established. Keep both candidates under review and compare
-matched compilation modes before promotion; standard-family certificates
-do not resolve this high-mode uncertainty.
+High-mode validation initially found a 3.35e-6 eager-versus-compiled
+comparison difference at mf=14, nf=9. An order-preserving scan showed the
+same effect; the mismatch did not establish a contraction regression.
+A resolved 32x24 frozen-operand long-double assembly oracle gives source
+error norms 5.87e-9 (old) versus 2.54e-9 (contraction), and kernel errors
+2.20e-7 versus 2.06e-7. Maximum kernel error decreases from 7.56e-8 to
+4.83e-8. Retain the contraction rather than the scan. This oracle isolates
+assembly rounding; existing independent quadrature tests separately guard
+the recurrence, and no new high-mode physical-accuracy claim follows.
+Repeated CTH independent re-solves, three host guards and two compiled
+projection tests pass on GPU (six tests). Reviewed changes are committed as 931be2d5 (analytic assembly) and
+9950781d (saved adjoint pullback). Latest CI remains required.
 
 The withheld final materialization change is now diagnosed: at the QA accepted
 point the native solve is capped at 800 iterations, FSQ/FTOL=2.593286, while
@@ -1202,3 +1218,14 @@ vector mapping. Replay the accepted design from cold and changed-point warm
 histories, preserving the supplied disabled-refinement setting. Fixing this
 requires an equilibrium/root-consistency decision; memoizing reported costs
 would conceal the discrepancy. P3 remains open.
+
+
+The added isolated version audit narrows the QI discrepancy: with identical
+Boozer coefficients, the three-term surrogate agrees between 0.3 and current
+VMEX to round-off. With identical geometry through each native transform,
+QI costs differ by 1.346%; current warm evaluation is also slower. Attribute
+this observation to the Boozer pipeline pending accuracy analysis, rather
+than claiming the surrogate formula itself changed. Compare transform
+normalization, modes, coordinate inversion and resolution before considering
+an old-path restoration. The supplied Simsopt adapter rejects unmodified 0.3
+and 0.7 capabilities; that rejection is not a historical runtime result.

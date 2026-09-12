@@ -1014,5 +1014,50 @@
       "status": "Original and saved-pullback variants have not passed the larger-family gate in this environment."
     },
     "artifacts": "Raw component and historical-matrix reports are retained privately; measurements and limitations are summarized here."
+  },
+  "coupled_assembly_validation": {
+    "vacuum_commit": "931be2d5",
+    "pullback_commit": "9950781d",
+    "vacuum_sha256": "d6748ac060c2959d9951e7057582ace180f79184d63efc92fb224efbcbfe7863",
+    "ncsx_independent_resolve_certificate": {
+      "cpu_seconds": 104.0155,
+      "cpu_peak_rss_gib": 2.244,
+      "gpu_seconds": 276.043,
+      "gpu_peak_rss_gib": 3.007,
+      "baseline": "Original CPU transpose compilation exceeded20GiB; saved-pullback alone was stopped at38GB.",
+      "gpu_provenance": "NCSX GPU preceded only explicit float64-preserving weight dtype and comment changes; final CTH GPU suite used final source."
+    },
+    "validation": {
+      "gpu_cth_resolve_and_guards_and_projection_passed": 6,
+      "cpu_recurrence_quadrature_passed": 7,
+      "local_compiled_projection_passed": 2,
+      "static": "ruff, mypy and diff checks passed; latest CI required"
+    },
+    "resolved_highmode_assembly_oracle": {
+      "mf": 14,
+      "nf": 9,
+      "angular_grid": [
+        32,
+        24
+      ],
+      "reference": "Long-double accumulation of identical frozen recurrence/geometry operands; isolates assembly, not recurrence accuracy.",
+      "source_error_norm": {
+        "old": 5.872e-09,
+        "contraction": 2.536e-09
+      },
+      "kernel_error_norm": {
+        "old": 2.2e-07,
+        "contraction": 2.059e-07
+      },
+      "kernel_max_error": {
+        "old": 7.56e-08,
+        "contraction": 4.83e-08
+      }
+    },
+    "limitations": [
+      "GPU remains slower thanCPU for this full coupled derivative.",
+      "Matched source/parity and independent recurrence quadrature remain distinct from high-resolution physical force accuracy.",
+      "Eager-versus-jitted high-mode discrepancies must not be attributed solely to contraction."
+    ]
   }
 }
