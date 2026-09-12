@@ -1086,5 +1086,21 @@
       "max_refined_return_projected_residual": 2.3586340285930395e-11,
       "canonical_reference_effect": "No numerical difference on these small excursions; not a global gauge-equivalence proof."
     }
+  },
+  "accepted_surface_qi_branch": {
+    "source_commit": "a6b13367",
+    "device": "cpu",
+    "refine_tol": 1e-12,
+    "cold_cost": 0.0036110877050274924,
+    "directional_gradient": 1.0945857049868257,
+    "max_relative_return_error": 5.281046711047566e-10,
+    "local_steps": [1.25e-5, 6.25e-6, 3.125e-6, 1.5625e-6],
+    "centered_derivative_relative_errors": [3.447830156710907e-6, 8.60461405238766e-7, 2.580072442359693e-7, -1.1744291328330547e-7],
+    "positive_taylor_remainders": [6.961192489934463e-8, 1.7397065659604757e-8, 4.346678764758337e-9, 1.0863657929001977e-9],
+    "negative_taylor_remainders": [6.951757625927864e-8, 1.7385292550180557e-8, 4.344913695751042e-9, 1.0867675158191795e-9],
+    "larger_negative_steps": [1e-4, 5e-5, 2.5e-5],
+    "cost_removed_by_diagnostic_fixed_minima": [3.4043033e-6, 3.4079934e-6, 3.4109075e-6],
+    "attribution": "A sampled minimum changes phi index 53 to 52 on the third QI surface, alpha index 1. An independent NumPy surrogate reproduces JAX within 8.7e-19 and isolates the cost jump by holding minimum indices fixed only for diagnosis.",
+    "limits": "No objective change or production minimum freezing. Three local halvings do not close the family-wide P3 gate. Projected residuals are not strong-force certificates. Global restart-history consistency remains unresolved."
   }
 }

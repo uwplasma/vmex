@@ -244,20 +244,19 @@ The constructed-QI target
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Because :math:`\mathcal J_\parallel` uniformity is awkward to differentiate,
-:class:`~vmex.core.omnigenity.QIResidual` implements a lightweight smooth
+:class:`~vmex.core.omnigenity.QIResidual` implements a lightweight
 surrogate distilled from level-set conditions used by the
 *constructed-QI-target* method of Goodman *et al.* (2023). On each surface,
 :math:`|B|` is sampled along Boozer field lines
 :math:`\theta_B=\alpha+\iota\phi_B` over one field period, and three families of
-residual — each an **exact zero of an exactly QI field** — are stacked:
+residual approximate QI conditions at the chosen sampling:
 
 * **Bounce-distance uniformity** (``well_weight``). For every trapping level
   :math:`B^*`, the distance :math:`\delta(\alpha,B^*)` between the two monotone
   branches of the magnetic well, minus its field-line average. This is the
   Cary–Shasharina condition (constant well width at fixed :math:`B^*` across
   field lines) that Goodman's "shuffle" step enforces; the branch envelopes are
-  built from smooth running-maximum occupancy integrals so the term is
-  differentiable.
+  built from running maxima and sigmoid occupancy integrals.
 
 * **Extremum alignment** (``extremum_weight``). The per-field-line
   :math:`B_{\min}` and :math:`B_{\max}` minus their field-line averages —
@@ -268,11 +267,10 @@ residual — each an **exact zero of an exactly QI field** — are stacked:
   between :math:`|B|` and its monotone branch envelopes — Goodman's "squash"
   distance, which penalizes side wells (more than one magnetic well per period).
 
-Every operation (sigmoid occupancies, running maxima, level-space quadrature) is
-smooth or piecewise-smooth, so the residual is jit/grad/jvp-transparent and QI
-optimization runs with the exact implicit adjoint, exactly like the QS residual.
-These are necessary conditions at finite sampling, not a converse theorem: the
-surrogate can be small while the fuller construction remains large.
+Sigmoid occupancies are smooth and running maxima are piecewise smooth, but
+sampled argmin well switches can make the residual discontinuous. JAX computes
+derivatives within the selected branch; Taylor tests must identify crossings.
+A small sampled surrogate does not certify a small fuller construction.
 
 VMEX keeps the three QI formulations separate:
 

@@ -91,7 +91,7 @@ Module map
        mirror, well, DMerc, ...) + least-squares driver
      - (no VMEC2000 equivalent)
    * - :mod:`~vmex.core.omnigenity`
-     - traceable Boozer ``|B|`` spectrum + lightweight smooth QI surrogate
+     - traceable Boozer ``|B|`` spectrum + lightweight QI surrogate
      - (no VMEC2000 equivalent)
    * - :mod:`~vmex.core.qi`
      - full constructed-QI and direct bounce-action residuals

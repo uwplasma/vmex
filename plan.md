@@ -1264,7 +1264,9 @@ checks after the interpolation correction before a full optimization rerun.
 The corrected-state CPU study at refinement 1e-12 now reproduces the cold
 objective and returns within 5.3e-10 relative after nearby trials. For steps
 1.25e-5 through 1.5625e-6, both Taylor remainders decrease quadratically;
-centered-gradient relative error reaches 1.2e-7. Larger negative steps show
-a jump requiring well-selection versus equilibrium-branch attribution.
+centered-gradient relative error reaches 1.2e-7. Larger negative steps switch
+a sampled QI well minimum (phi index 53 to 52 on the third surface). An
+independent frozen-state reproduction isolates the resulting 3.4e-6 cost jump.
+Document branch-local AD; do not freeze minima or change the objective silently.
 Projected residuals near 1e-13 do not establish strong force balance. P3
 remains open; neither this local test nor the capped runs certify a design.

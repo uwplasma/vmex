@@ -233,12 +233,13 @@ minimum (gradient validated against the frozen-path FD to 1.7e-6):
 Omnigenity and quasi-isodynamicity
 ----------------------------------
 
-:class:`~vmex.core.omnigenity.QIResidual` is a smooth, lightweight QI
+:class:`~vmex.core.omnigenity.QIResidual` is a lightweight QI
 *surrogate*: bounce-distance uniformity, extremum alignment, and single-well
 monotonicity evaluated on a pure-JAX Boozer ``|B|`` spectrum.  It is useful
-for inexpensive scouting and exact-gradient tests, but an aggressive
+for inexpensive scouting and branch-local gradient tests, but an aggressive
 high-mode optimization can reduce it without reducing the full Goodman
-squash-and-shuffle distance.
+squash-and-shuffle distance. Sampled well switches can produce cost jumps;
+automatic differentiation follows the selected branch.
 
 :class:`~vmex.core.qi.ConstructedQIResidual` evaluates that fuller Goodman
 construction on the same traceable spectrum.  It is the production QI target.
@@ -290,7 +291,7 @@ certification grid.
 
 .. note::
 
-   Use ``QIResidual`` only as the explicitly named smooth surrogate.  For a
+   Use ``QIResidual`` only as the explicitly named level-set surrogate.  For a
    production result, optimize ``ConstructedQIResidual`` and cross-check its
    resolved value against the wout/Boozer implementation.  See
    :ref:`confinement-qi-fidelity`.

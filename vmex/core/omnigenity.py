@@ -20,7 +20,7 @@ Two pieces:
    implementation of the transform and the whole chain stays end-to-end
    differentiable.
 
-2. :func:`omnigenity_residual` / :class:`QIResidual` — a smooth, lightweight
+2. :func:`omnigenity_residual` / :class:`QIResidual` — a lightweight
    surrogate for poloidally-closed-contour (``M = 0, N = 1``) omnigenity.
    It distills conditions used in the constructed-QI target of
    **Goodman et al., "Constructing precisely quasi-isodynamic magnetic
@@ -44,13 +44,13 @@ Two pieces:
      between ``|B|`` and its monotone branch envelopes — Goodman's "squash"
      distance, penalizing side extrema (multiple wells per period).
 
-   Each piece is an exact zero of an exactly QI field, every operation is
-   smooth or piecewise-smooth (sigmoid occupancies, running maxima), and the
-   full pipeline is jit/grad/jvp-transparent for the implicit lane.  The
-   converse does not hold at finite sampling: this inexpensive surrogate can
-   be driven low by a field that still has a large full squash-and-shuffle
-   distance.  Use :class:`vmex.core.qi.ConstructedQIResidual` for production
-   QI optimization and resolved reporting.
+   Sigmoid occupancies are smooth; running maxima are piecewise smooth.
+   Discrete argmin well selection can make the sampled residual discontinuous
+   when minima switch. AD differentiates the selected branch; re-solve Taylor
+   checks must identify such crossings. A low value at finite sampling does
+   not certify a small full squash-and-shuffle distance. Use
+   :class:`vmex.core.qi.ConstructedQIResidual` for production QI optimization
+   and resolved reporting.
 
 Scope notes
 -----------
@@ -598,11 +598,11 @@ def omnigenity_residual(
 
 
 class QIResidual:
-    """Traceable smooth quasi-isodynamic surrogate (module docstring).
+    """Traceable quasi-isodynamic surrogate with discrete well selection.
 
     Composition of :func:`boozer_spectrum_state` (traceable Boozer ``|B|``
     spectrum on the requested surfaces) and :func:`omnigenity_residual`
-    (a smooth level-set surrogate for the Goodman construction).  The
+    (a level-set surrogate with branch-local derivatives). The
     interface mirrors
     :class:`~vmex.core.optimize.QuasisymmetryRatioResidual`: the instance
     is a :func:`~vmex.core.optimize.least_squares` objective term for
