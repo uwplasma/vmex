@@ -101,7 +101,7 @@ and release pages). Shared-host timings are diagnostic samples, not rankings.
 | Same-deck VMEC++ 0.7.3 parity | tokamak: R/Z relative L2 below 1.2e-15, lambda below 3e-14, iterations 158/159; finite-beta QA: R 3.73e-6, Z 1.79e-5, lambda 3.87e-4, iota 4.06e-7, iterations 730/775 | `focused_review_20260906.same_deck_comparison` |
 | Native DESC | tokamak WOUT, L=12/M=6/N=0, converged in 28 iterations; `<\|F\|>/<\|∇p\|>` 8.06e-5; the earlier lifted-WOUT number 7.13e-2 is a different norm on a reconstructed object | `focused_review_20260906.native_desc` |
 | Optimization cost | #266's QA profile: 7.63 s per value/gradient call, 0.35 s VMEC loop, 3.86 s Newton refinement, 3.06 s adjoint; a max-mode-2 run 265 s | #266 |
-| Stale claims still on main | withdrawn 26-fold number in `CHANGELOG.md:57`; `docs/reference/performance.rst:899–953` cites `gpu_office.json`, `gpu_office_cmdbuf.json` and `benchmarks/traces/`, none of which exist; two benchmark records and three test docstrings cite the retired "31.2-R" numbering | grep |
+| Stale claims still on main | withdrawn 26-fold number in `CHANGELOG.md:57`; `docs/reference/performance.rst:899–953` cites two unavailable GPU reports and `benchmarks/traces/`, none of which exist; two benchmark records and three test docstrings cite the retired "31.2-R" numbering | grep |
 | Test hygiene | four modules flip `jax_disable_jit` and never restore it: `test_scaling.py:131`, `test_cli_freeboundary.py:50,65`, `test_tracing.py:42`, `test_optimize.py:63,329` | grep |
 | Vocabulary | "sharding" in code and docs means single-device placement; no `Mesh` or `NamedSharding` exists | grep |
 | #277 | its e-polish lane fails only on CI (JAX 0.11.1, Python 3.12: 1 failed, 226 passed in 2,519 s); the same test passes on JAX 0.9.2 on two machines | run 34005068178 |
@@ -279,12 +279,12 @@ public optimization wrappers, CI); SOLVAX owns generic true-residual reporting.
    the same gate.
 2. **JAX policy and #277 — repaired assertion and version matrix tested; integration CI pending.**
    Keep floor 0.9.2 and head 0.11.1 on Python 3.12; compare accuracy, not bits.
-   The isolated office reproduction did not reproduce the old CI assertion;
+   The isolated remote reproduction did not reproduce the old CI assertion;
    the two XLA flags are not a diagnosed cause. The test now checks the public
    derivative stationarity bar, retaining the tight MHD fixture and both
    physical acceptance and derivative duality/Taylor checks. See §12 for
    measured versions, scaling and attained stationarity. Do not repeat the
-   invalid `env-0.8.0` setup or claim that a missing-pytest log is numerical evidence.
+   previously invalid environment setup or claim that a missing-pytest log is numerical evidence.
 3. **CI tiering — hosted 25-minute ceiling passed; integration/nightly validation pending.** Every test that runs a polish or
    a free-boundary implicit adjoint moves to `full`; `test_polish_preconditioner.py`
    splits into Gauss-Newton (PR), homotopy (nightly) and linear (PR);
@@ -368,7 +368,7 @@ comes from a hashed artifact.
 ## 6. P2. Formulation and solver
 
 E1 in week 1; E2 in weeks 2–3; E3 in weeks 3–5 if E1 passes; the ladder of
-§3.3 in weeks 4–6 on the office box. No new knobs, budgets, heartbeats or
+§3.3 in weeks 4–6 on the remote box. No new knobs, budgets, heartbeats or
 routes are added to the polish lane while this runs. SOLVAX's existing
 Krylov and globalization APIs are reused; a missing generic capability is
 added there only for a reproducible VMEX need.
@@ -413,7 +413,7 @@ figure with its kill criterion evaluated.
    accepted/rejected solves and time to a validated design using the existing
    `benchmarks/optimization.py` before changing solver budgets or refinement.
    **Resumed backend review:** the full supplied candidate workflow now has
-   a complete office CPU profile and accepted/trial vectors, but joint BFGS
+   a complete remote CPU profile and accepted/trial vectors, but joint BFGS
    still reports precision loss. Next validate the traced GPU tridiagonal
    bottleneck across full equilibria and derivative workloads, then resolve
    restart consistency before claiming time to a validated design. Keep
@@ -450,7 +450,7 @@ optimized-design runs; at least five warm samples and three complete runs
 where affordable; spread, failures and censored timeouts reported; profiling
 separate from timing; peak host RSS and device memory with definitions; an
 idle host and matched thread budgets for any release comparison. One-device
-CPU and office GPU first, then independent-case throughput with bounded
+CPU and remote GPU first, then independent-case throughput with bounded
 workers; the vocabulary is "placement", and distributed single solves stay
 set aside.
 
@@ -506,7 +506,7 @@ runs before pushing. Local verification is the merge bar; admin-merge is
 permitted only when every real lane is green and only the unsigned-commit
 gate or an external status is red. Commits are authored by the maintainer
 with no tool attribution. Work happens in worktrees, never in the shared
-checkout; one heavy local job at a time; the office box takes one heavy job.
+checkout; one heavy local job at a time; the remote box takes one heavy job.
 
 **Phase 1, week 1: truth and cost.**
 
@@ -514,7 +514,7 @@ checkout; one heavy local job at a time; the office box takes one heavy job.
 |---|---|---|
 | Fix the stale claims and extend the prose gate (P0.1) | `CHANGELOG.md`, `docs/reference/performance.rst`, two benchmark records, three test docstrings, `tools/check_docs_prose.py`, a new `tests/test_cited_paths.py` | prose gate, `tools/preflight.py --static`, strict Sphinx |
 | CI tiering and jit-leak fixes (P0.3) | `tests/manifest.json`, `.github/workflows/ci.yml`, the four leaking test modules, the split of `test_polish_preconditioner.py` | `python tools/test_manifest.py check`; every PR lane run locally with its selector; wall times recorded in §12 |
-| JAX policy and the #277 repair (P0.2) | `.github/workflows/ci.yml` matrix, `docs/reference/performance.rst` tolerance policy, `tests/test_polish_preconditioner.py:1853` | the bisect on the office box; #277 green on 0.9.2 and 0.11.x |
+| JAX policy and the #277 repair (P0.2) | `.github/workflows/ci.yml` matrix, `docs/reference/performance.rst` tolerance policy, `tests/test_polish_preconditioner.py:1853` | the bisect on the remote box; #277 green on 0.9.2 and 0.11.x |
 | E1 functional consistency (P2) | `benchmarks/e1_functional_consistency.py`, `benchmarks/e1_*.json` with provenance | the E1 pass criterion; result in §12 |
 
 **Phase 2, weeks 1–2: smaller repository.**
@@ -548,7 +548,7 @@ checkout; one heavy local job at a time; the office box takes one heavy job.
 
 | PR | Files | Verification |
 |---|---|---|
-| Resolution ladder on the QA deck (P2) | `benchmarks/ladder_qa.py`, artifacts, figure, validation page | kill criterion evaluated; office wall time recorded |
+| Resolution ladder on the QA deck (P2) | `benchmarks/ladder_qa.py`, artifacts, figure, validation page | kill criterion evaluated; remote wall time recorded |
 | Profiled optimization (P3.3; QI response measured, full design pending) | existing `benchmarks/optimization.py`, artifacts, `docs/reference/performance.rst` | stage timings with changed parameters and total time to a validated design |
 
 **Phase 6, weeks 5–7: the flagship.**
@@ -571,15 +571,12 @@ hold.
 
 ## 11. Environment and runbook
 
-- **Machines.** Apple M4 and M3 Max laptops (JAX 0.9.2, SOLVAX 0.20.0); the
-  office workstation (`ssh office`, 36 cores, two RTX A4000). Use
-  `~/venvs/vmex-gpu` (SOLVAX 0.20.0, JAX 0.9.2, ESSOS present) with
-  `JAX_PLATFORMS=cpu` for CPU numerics, and `~/vmex_sweep/env-0.8.0` (JAX
-  0.11.1) to reproduce CI; `~/stellarator_venv` has SOLVAX 0.7.3 and fails on
-  current vmex. The single-stage examples need ESSOS main (which contains
-  #58): clone it to `~/essos58` and prepend it to `PYTHONPATH`; the venv lacks
-  `pyevtk`, so the examples finish the optimization and then fail in the VTK
-  export. Filter the harmless `cpu_aot_loader` lines from office logs.
+- **Machines.** Apple M4 and M3 Max laptops and a 36-core workstation with
+  two RTX A4000 GPUs. Use isolated environments with SOLVAX 0.20.0 and
+  JAX 0.9.2 for the recorded numerical comparisons, and JAX 0.11.1 to
+  reproduce newer CI. SOLVAX 0.7.3 is incompatible with current VMEX.
+  Single-stage examples require ESSOS with #58 and `pyevtk` for VTK export;
+  missing export dependencies must not be confused with optimizer failure.
 - **External references.** VMEC++ 0.7.3 wheel plus source
   `07ef6710078e78e29ccabab0443cb3ec0ad7e375`; DESC `ad105c5e525fbf26824d6cf9dde48775db0f8a2c`
   in an isolated environment (`jax<0.10`); GVEC `c0dc66fe2b9faa147c76a728e5cd053ce693d472`;
@@ -617,8 +614,7 @@ place; do not append work packages.
 bounded cache rescans (0.028 ms/entry); W7-X certificate memory fell from 34.23 to 3.24 GiB (16.6 GiB chart). LASYM tcon audit
 passed; #258 redefined spectral-tail/nestedness diagnostics; #280 pins baseline norms at 1e-10 relative/1e-12 absolute floors.
 #266/#276 and review #282 merged; #283 became this plan's authority; #274 closed. #282's M3/JAX 0.9.2 probes cover VMEC++ 0.7.3,
-DESC, frozen 156×17 operator and capped GVEC (§2); README 573→220 lines. Raw evidence: `vmex-review-evidence-20260906`, compact
-records: `focused_review_20260906`. Clean-main fast/seven physics lanes passed. Lost parity logs were rerun in #286; office
+DESC, frozen 156×17 operator and capped GVEC (§2); README 573→220 lines. Raw evidence and compact records are retained privately. Clean-main fast/seven physics lanes passed. Lost parity logs were rerun in #286; remote
 recovery and the unreproduced #277 failure are recorded below.
 
 **2026-09-06, P0.1/P0.3.** #284 (`417fb4fc`, base `2a0d4356`) implements the documentation gates: 73 guards and
@@ -627,28 +623,28 @@ s; the regression fails on the parent. Both passed CI and merged on 2026-09-07 w
 their branches are retained.
 
 **2026-09-06, #277 / P0.2.** Main and this plan merged at `068b2cbc`; assertion repair pushed at `6371a36b`, without changing
-tolerances. The old office log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original
+tolerances. The old remote log only lacked pytest. On clean `db6092b7`, Python 3.12.13 / JAX 0.11.1 / SOLVAX 0.20, the original
 tight MHD test passed in 333.88 s; with both XLA flags disabled it passed in 313.34 s (17 iterations, stationarity 2.598e-9,
 reference 138.346, residual scale 6.83505). CI's failure remains unreproduced. The repaired selection passed 27 cases locally
-(JAX 0.9.2, 228.87 s) and on office (0.11.1, 365.96 s); static checks passed. Raw logs:
-`vmex-review-evidence-20260906/{277-repair-*,office-277-*}.log`; RSS unmeasured.
+(JAX 0.9.2, 228.87 s) and on remote (0.11.1, 365.96 s); static checks passed. Raw logs:
+private repair logs; RSS unmeasured.
 
-**2026-09-06, #286 / CI tiering.** `fix/phase1-ci-tiers` in `vmex-ci-tiers`, initially base #277; integration `2ae2a716`, split
+**2026-09-06, #286 / CI tiering.** `fix/phase1-ci-tiers` in an isolated worktree, initially base #277; integration `2ae2a716`, split
 `0bfab61d`, scoped-JIT GN `32f01c0c`. All 1,962 original cases/64 polish bodies retained; 1,974 collected. GN/linear/homotopy
 share fixtures, nonlinear cases explicitly scheduled; option routing mocked with one real PR solve/export. Final static/docs: 77
 guards/17.94 s. Local full homotopy 12/385.24 s, options 41/102.23 s, adjoints 15/932.33 s without skips. NCSX asset assertion
-found the wrong bundle; corrected to ncsx-mgrid with a manifest-linked guard. Office linear/MHD: 96 passes on both JAX versions
-(406.44/577.27 s); one test returned to GN for fixture reuse. Final PR linear: 93 passes/7.21 s locally, 16.24/18.98 s office.
-Interpreted GN stopped at 115/1413.93 s; compiled GN 124/579.02 s office, 349.79 s local. Raw results/stopped attempts:
-`vmex-phase1-ci-evidence`. CI 34080867732 on `d58223b4` passed: polish 5.37 min versus 43.4, misc 24.58 versus 27.7, c2 22.60;
+found the wrong bundle; corrected to ncsx-mgrid with a manifest-linked guard. Remote linear/MHD: 96 passes on both JAX versions
+(406.44/577.27 s); one test returned to GN for fixture reuse. Final PR linear: 93 passes/7.21 s locally, 16.24/18.98 s remote.
+Interpreted GN stopped at 115/1413.93 s; compiled GN 124/579.02 s remote, 349.79 s local. Raw results/stopped attempts:
+private CI evidence. CI 34080867732 on `d58223b4` passed: polish 5.37 min versus 43.4, misc 24.58 versus 27.7, c2 22.60;
 every PR job <25 min, both JAX gates green. No solver speedup claimed. Retargeted to main and merged #277 `98049a1a`, resolving
 only logbook conflicts; integration CI/Nightly 34132378608 remain pending.
 
 **2026-09-07, #287 / E1 and cleanup.** Branch `research/e1-functional-consistency`, base #286 `6a4d560f`; measured script
 `b17352c1`. Complete prescribed-profile/GAMMA=0 energy work passes off-root on Solovev (30 coordinates, 7.931e-14 discrepancy)
-and shaped tokamak (56, 8.210e-13); omitting lambda leaves 3.085%/13.295%. Office JAX 0.11.1 with 128 angles gives 8.354e-13.
+and shaped tokamak (56, 8.210e-13); omitting lambda leaves 3.085%/13.295%. Remote JAX 0.11.1 with 128 angles gives 8.354e-13.
 Structured/layout normal ranks 20/36; Z-extremum response ratios <9e-15. Raw results, commands and deletion SHAs: sibling
-`vmex-e1-evidence`. Clean shaped chart: local 43.14 s/1117.7 MiB, office 43.55 s/1043.7 MiB; repeated numerical output identical
+private E1 evidence. Clean shaped chart: local 43.14 s/1117.7 MiB, remote 43.55 s/1043.7 MiB; repeated numerical output identical
 excluding time/RSS. Deleted 32 remote/73 local merged branches using ancestry or exact merged-PR heads; open
 dependencies/worktrees preserved. Nightly 34132378608 exposed #280's stale example regex after a successful polish; #287 repairs
 all three metric checks (real example passed/149.72 s). Its strict preflight passed 77 guards/19.00 s. E1 identifies a physical
@@ -659,10 +655,10 @@ CPU/float64/cache off: `python benchmarks/e2_dense_reference.py --order 10 --ang
 R/Z/lambda versus structured coordinates, same ns=9, degree=3/two-span seed, frozen iota/pressure; not the fixed-current or
 production-resolution solve. QR/GELSY and SVD/GELSD agree; full J rank 56, FD/JVP error <2e-9, Hessian asymmetry <4e-16.
 Independent force RMS: 2194.742 → 188.549/335.259 N/m³ (full/structured), peak 863.77/905.48; positive sampled Jacobians and
-certificate radial discrepancy <6e-13. Order 6/24-angle RMS: 188.558/336.526. Local JAX 0.9.2: 52.27 s/1105.1 MiB; office
+certificate radial discrepancy <6e-13. Order 6/24-angle RMS: 188.558/336.526. Local JAX 0.9.2: 52.27 s/1105.1 MiB; remote
 0.11.1: 115.58 s/2127.8 MiB. Physical corrections agree to 2.3e-11 relative. Reference J/H: 1.25 MiB, separate from process RSS.
 The earlier `7048b71b` metric depended on arbitrary SVD coordinates; physical-coefficient damping removed its platform-dependent
-trajectories. Raw results and both attempts: sibling `vmex-e2-evidence`. The off-root Hessian's small negative curvature (~-276
+trajectories. Raw results and both attempts: private E2 evidence. The off-root Hessian's small negative curvature (~-276
 versus maximum 3.7e8) does not alone reject Newton. SciPy supplies the independent diagnostic; SOLVAX's production GN remains
 unchanged. Next: affordable finite-beta QA reference and bounded convergence, then chart/solver integration. E2 is not passed
 for QA; E3, a1 routing, P0.4, fixed-current closure and release remain gated. Integration CI is pending.
@@ -700,8 +696,8 @@ reproduces both 12-plane readings exactly (2.306x/1.918x and 1.694x/1.515x),
 and E1's Solov'ev work discrepancy comes back 8.014e-14 against the floor's
 7.931e-14, which is round-off at that magnitude. JAX 0.11 requires Python 3.12
 or newer, so the floor environment cannot install it; the persistent head
-environment is `~/local/venvs/vmex-head`. Raw JSON and logs, both versions:
-sibling `vmex-e2qa-evidence` (`floor/` and `head/`).
+environment uses those newer versions. Raw JSON and logs for both versions
+are retained privately.
 
 **2026-09-07, single-stage example does not meet its own targets.** Running
 `examples/optimization/single_stage_optimization.py` as shipped (CPU, JAX
@@ -722,7 +718,7 @@ target is unmet. The optimizer, objective weights and seed are unchanged: this
 records the behaviour rather than tuning it away. Whether the fix is a higher
 `IOTA_WEIGHT`, a transform-carrying seed or a constrained formulation is open,
 and it belongs with P3's application work, not with P2. Evidence:
-`~/local/vmex-single-stage-evidence`.
+private single-stage records.
 
 **2026-09-07, P1 residual scan: the radial basis, not the solve, sets the
 number.** `benchmarks/residual_vs_resolution.py` reports the continuum
@@ -755,7 +751,7 @@ is the same limiter E2 reached from the other side, and it sharpens §3.2: the
 `rho`, or treating the axis region explicitly, is the first representation
 experiment to run, before any solver work. A total-only plot would have shown a
 spurious minimum at 10 spans, which is why the region split is always reported.
-Evidence: `~/local/vmex-residual-evidence`.
+Evidence: private residual records.
 
 **2026-09-07, knot grading refuted, and the axis lever named.** The previous
 entry proposed grading knots in `rho` as the first representation experiment.
@@ -792,7 +788,7 @@ any further representation work. And #293's 4-span total and edge figures are
 themselves grid-limited (refinement difference 0.245), so they bound nothing;
 the >= 6-span rows, refinement difference 4e-11 to 2e-9, are the usable ones.
 Peak RSS reached 7.1 GiB at 10 spans, twice the expected figure, so these runs
-are serialized. Evidence: `~/local/wt-knots-evidence`.
+are serialized. Evidence: private knot-test records.
 
 **2026-09-07, Phase 2 in one parallel round.** Four workstreams ran at once on
 disjoint files, with none of them touching this logbook so their branches could
@@ -835,7 +831,7 @@ refinement. The supplied wrapper disables refinement, so raising its tolerance
 cannot explain or fix this workload's cost. Historical 0.3/current objectives
 differ; their timings alone do not establish a same-accuracy regression.
 
-An office XProf trace assigns about 375 of 908 ms of GPU kernels to short
+An remote XProf trace assigns about 375 of 908 ms of GPU kernels to short
 tridiagonal solves inside preconditioned GMRES JVPs. Reusing the primal
 linearization removes repeated work while retaining the preconditioner's full
 derivative. The other change factors the field-line Fourier phase into two
@@ -897,12 +893,12 @@ the supplied wrapper in these runs; raising its tolerance cannot explain them.
 The GPU constructed-QI optimizer that previously stalled now completes with
 the same seven solves/14,484 iterations and final cost 0.0026945874913 as CPU,
 with certified derivatives. Its 163.36 s optimizer time remains expensive.
-New validation: 24 office CPU tests pass, one skipped, including direct-Jacobian
+New validation: 24 remote CPU tests pass, one skipped, including direct-Jacobian
 and scalar host-thread regressions and missing/stale memo guards; Ruff/mypy pass.
 The extended suite was interrupted during full optimization-convergence tests;
 those four tests remain open. Previous head ef8a25fa had all 27 CI checks green;
 that result does not certify the new checkpoint. No merge, release, or active
-local/office experiment at pause.
+local/remote experiment at pause.
 
 Resume in this order:
 1. Reconcile the full collaborator run's objective recomputation and precision
@@ -920,7 +916,7 @@ Resume in this order:
 
 **2026-09-12, resumed PR #299 correctness gate.** Checkpoint f205c995 has all
 27 CI checks green; all four full QA/QH/QP/QI convergence tests now pass on
-office CPU. The full collaborator history localizes its cost discrepancy to
+remote CPU. The full collaborator history localizes its cost discrepancy to
 the surface contribution: the coil cost returns to the accepted value while
 the surface cost changes. A VMEX-only replay of the saved final input confirms
 history dependence on frozen main f09288b3, before this PR: identical boundary
@@ -935,12 +931,12 @@ Candidate GPU value/gradient replay with the perturbation predictor reduces
 the small-step return drift to 0.0154%; paired values agree exactly and a
 1e-6 central directional difference agrees with AD within 2.4e-5 relative.
 This does not certify larger/rejected trials or the complete collaborator
-history. External `vega_tests/replay_surface.py` and `results/replay-surface-*`
+history. A private replay harness and raw state captures
 hold the reproducer and raw states; compact evidence is in the existing review
-JSON. Office has concurrent collaborator workloads, so these diagnostics
+JSON. Remote has concurrent collaborator workloads, so these diagnostics
 provide no performance ratios. Next: larger-trial predictor/retry replay,
 then exact accepted-point logging in the full supplied Simsopt workflow on
-office. Preserve the remaining profiling matrix and merge gates above; do
+remote. Preserve the remaining profiling matrix and merge gates above; do
 not replace the consistency gate with tolerance tuning or a speed claim.
 
 Follow-up: pre-PR main with derivative/predictor calls returns a 3.01% different
@@ -950,25 +946,25 @@ residual-only drift to 0.106%, but changes the initial equilibrium and does
 not eliminate drift. Do not promote it as a fix. Next isolate a consistent
 coordinate reference across trials and verify forward/derivative agreement
 against independently evaluated physics before modifying solver defaults.
-The supplied Simsopt branch is built on office with pinned numerical packages;
+The supplied Simsopt branch is built on remote with pinned numerical packages;
 the workflow harness now records trial/accepted vectors for exact replay.
 Its first smoke attempt stopped at missing pandas before numerical work;
 dependency completion and driver import checks are separate from workflow
 execution. Full timing/profile runs remain pending under controlled CPU/GPU
-load (office was using 14 GiB swap). No numerical experiment remains running
+load (remote was using 14 GiB swap). No numerical experiment remains running
 from this continuation; no merge or release.
 
 **2026-09-12, reproducible PR #299 handoff.** The existing optimization
 benchmark now includes `--repeatability` and the supplied collaborator's
 surface terms. The existing review JSON embeds the exact final input as
 minimal VMEC JSON; every parsed input field was checked against the supplied
-`input.final`. No external script/data is required for this surface diagnostic.
+the saved collaborator input. No external script/data is required for this surface diagnostic.
 It saves trial vectors/residuals/raw states, verifies exact solve memo/status,
 and clears both solve and refinement caches for cold replay. `--residual-only`
 uses plain hot starts; derivative calls enable the perturbation predictor.
 These are different protocols, not a measured source-code speedup.
 
-Local CPU and office GPU each completed seven evaluations at step 1e-4:
+Local CPU and remote GPU each completed seven evaluations at step 1e-4:
 matching iteration counts, objective agreement within 4.3e-10 relative,
 magnetic-energy agreement within 6.1e-18 absolute, iota extrema within 2.9e-11
 absolute. Both reproduce the history dependence. A bounded local diagnostic
@@ -977,7 +973,7 @@ certified derivatives and identical value pairs; benchmark Ruff/mypy pass.
 A bounded local coordinate diagnostic
 preserving the initial cold m=1 reference on warm solves retains the initial
 cold solution but still gives 0.192% maximum return drift at FTOL=1e-12 and
-0.0468% at 1e-14. No coordinate-policy fix is promoted. Office host RAM/swap
+0.0468% at 1e-14. No coordinate-policy fix is promoted. Remote host RAM/swap
 contention still prevents trustworthy full-workflow timings despite idle GPUs.
 
 Reproduce from the PR checkout with installed pinned dependencies (float64,
@@ -1026,7 +1022,7 @@ records public source revisions and remaining acceptance gates.
 
 ### 2026-09-12 — completed collaborator profile and GPU backend diagnosis
 
-PR #299 remains draft; all checks at 9b3f8517 passed. Office host memory
+PR #299 remains draft; all checks at 9b3f8517 passed. Remote host memory
 contention cleared. The complete candidate CPU workflow took 1,256 s with
 cProfile and saved every phase's trial and accepted vectors. Joint BFGS ended
 with precision loss (226 evaluations); initial full coil optimization hit
@@ -1053,7 +1049,7 @@ refinement replay passed; the SOLVAX experiment passed 53 CPU tridiagonal tests.
 
 Evidence and exclusions are in `resumed_backend_investigation` of
 [`review_optimization_20260912.json`](benchmarks/review_optimization_20260912.json).
-External `INVESTIGATION.md` records live jobs; inspect before restarting them.
+Private recovery notes record live jobs; inspect before restarting them.
 Continue with full GPU backend validation, the remaining historical optimizer
 matrix, accepted-design replay and the existing P3/free-boundary gates.
 
@@ -1132,7 +1128,7 @@ returned no final equilibrium despite passing the small smoke test. Diagnose
 native convergence and accepted-point materialization before removing the
 diagnostic re-solve. Native and finite-refined states remain distinct.
 
-Office 48-DOF collaborator first derivative: 210.10 to 122.92 s against the
+Remote 48-DOF collaborator first derivative: 210.10 to 122.92 s against the
 selected two-row Thomas control (earlier pre-Thomas control: 190.65 s).
 At five identical parameter vectors, maximum relative Jacobian disagreement
 is 1.81e-12 and residual disagreement 1.56e-12. Reduced QA GPU four-evaluation
@@ -1141,9 +1137,9 @@ run: 255.41 to 166.95 s, first Jacobian 180.90 to 114.67 s, same final cost
 claims. The divisor-only run retained converged final diagnostics and took
 224.94 s GPU (control 255.41 s), and 87.87 s CPU (control 103.42 s). These are component/capped results, not converged designs or a
 universal speedup. Repeat final comparisons without competing memory-heavy jobs.
-Raw reports remain external under results/divisor-collaborator-gpu and
-results/candidate-materialized-qa-gpu; use their source hashes because the
-measurement checkout is a rolling file snapshot.
+Raw reports and machine-specific handoff details remain private; use their
+recorded source hashes because a measurement checkout can contain copied
+files that differ from its git metadata.
 
 Free-boundary saved-pullback reuse passes the CTH current derivative against
 independent re-solves plus three guards on GPU (4 tests, 432 s). Keep it under
@@ -1168,3 +1164,41 @@ SOLVAX #102 merged as 9b37d6998240ac839e9dc5da35f3cbba8a560980 after all
 11 CI checks and source-matched CPU/GPU tests passed. Installed 0.20.0 does
 not automatically include this source change; use the pinned merge for
 validation. No release or dependency version bump was made.
+
+
+### Free-boundary compilation and exact accepted-vector audit
+
+The original NCSX transpose compiler blow-up comes from Python-expanded
+recurrence-order/Fourier-mode scatter assembly in the analytic NESTOR terms.
+The candidate contracts recurrence orders directly onto requested modes,
+preserving signed-mode selection, the analyt.f analysesum2 ordering and both
+Fourier parities. Original-source value/JVP comparisons agree within 7.6e-13;
+the analytic NCSX JVP compile-and-run falls from 28.71 to 1.44 s. With saved
+per-adjoint pullbacks, full NCSX current gradients pass independent cold
+re-solves on CPU (104.02 s, 2.24 GiB peak host RSS) and GPU (276.04 s, 3.01 GiB).
+The original source exceeded 20 GiB during compilation. This resolves that
+observed compiler-memory failure; it does not establish GPU superiority.
+High-mode validation found a 3.35e-6 discrepancy at mf=14, nf=9 using an
+eager reference after baseline compilation exceeded its memory cap. An
+order-preserving scan shows the same discrepancy, so attribution to reordered
+contraction is not established. Keep both candidates under review and compare
+matched compilation modes before promotion; standard-family certificates
+do not resolve this high-mode uncertainty.
+
+The withheld final materialization change is now diagnosed: at the QA accepted
+point the native solve is capped at 800 iterations, FSQ/FTOL=2.593286, while
+the old diagnostic re-solve converges in 200 further iterations. The helper
+returned normally; the proposed caller discarded its unconverged result.
+Retain the diagnostic fallback. Any future cache reuse must require an exact,
+converged native result and preserve finite-refinement state semantics.
+
+The full collaborator trace contains stronger repeatability evidence than the
+previous summary: its accepted 847-component vector is bitwise identical to
+trials 206 and 213 (zero based). Surface costs are 0.0028777931180186977 and
+0.0029899648756181374; final summary gives 0.003125520751907784. The coil term
+is unchanged at 0.02811992991742758. The surface discrepancy is therefore
+history dependence at the same design, not a changed coil geometry or missing
+vector mapping. Replay the accepted design from cold and changed-point warm
+histories, preserving the supplied disabled-refinement setting. Fixing this
+requires an equilibrium/root-consistency decision; memoizing reported costs
+would conceal the discrepancy. P3 remains open.

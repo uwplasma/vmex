@@ -2117,10 +2117,10 @@ def least_squares(
     exactly the columns the implicit Jacobian already solves, so the
     linearization is stashed at each ``jac(x_ref)`` call for free.
     ``"state"`` is the plain hot restart; ``None`` disables warm starting.
-    All three converge to the same fixed points — only the inner iteration
-    count changes — and a missing or mismatched seed falls back through the
-    perturbation -> state -> cold ladder. ``hot_restart=False`` forces
-    ``warm_start=None``.
+    At finite tolerances, different seeds can change the returned equilibrium;
+    independently re-solve accepted designs to check accuracy and repeatability.
+    Missing or mismatched seeds fall back through perturbation -> state -> cold.
+    ``hot_restart=False`` forces ``warm_start=None``.
 
     Remaining keywords go to :func:`scipy.optimize.least_squares` (e.g.
     ``max_nfev``, ``ftol``, ``xtol``, ``diff_step``).
