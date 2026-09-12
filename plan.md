@@ -936,3 +936,18 @@ provide no performance ratios. Next: larger-trial predictor/retry replay,
 then exact accepted-point logging in the full supplied Simsopt workflow on
 office. Preserve the remaining profiling matrix and merge gates above; do
 not replace the consistency gate with tolerance tuning or a speed claim.
+
+Follow-up: pre-PR main with derivative/predictor calls returns a 3.01% different
+cost after a valid +0.01 directional excursion; cold replay again restores
+the original value. A harness-only always-frozen m=1 diagnostic reduces
+residual-only drift to 0.106%, but changes the initial equilibrium and does
+not eliminate drift. Do not promote it as a fix. Next isolate a consistent
+coordinate reference across trials and verify forward/derivative agreement
+against independently evaluated physics before modifying solver defaults.
+The supplied Simsopt branch is built on office with pinned numerical packages;
+the workflow harness now records trial/accepted vectors for exact replay.
+Its first smoke attempt stopped at missing pandas before numerical work;
+dependency completion and driver import checks are separate from workflow
+execution. Full timing/profile runs remain pending under controlled CPU/GPU
+load (office was using 14 GiB swap). No numerical experiment remains running
+from this continuation; no merge or release.

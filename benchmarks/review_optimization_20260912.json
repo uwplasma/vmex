@@ -690,5 +690,25 @@
       "relative_difference": 2.3712709131262777e-05,
       "scope": "Derivative calls supply perturbation warm seeds; do not attribute the difference from residual-only hot-restart replay to PR source changes."
     }
+  },
+  "restart_followup": {
+    "larger_predictor_trials_main_cpu": {
+      "steps": [
+        0.001,
+        0.01
+      ],
+      "initial_cost": 0.0058922692115433205,
+      "return_after_positive_0_01_cost": 0.006069357350740659,
+      "relative_drift": 0.030054319115360828,
+      "cold_replay_cost": 0.0058922692115433205,
+      "caveat": "Negative .01 trial failed: exclude its stale cached-state/converged fields in the original raw report. Reproducer now checks exact solve memo and status before recording convergence."
+    },
+    "fixed_m1_diagnostic": {
+      "method": "Harness-only override of solver.m1_zero_condition to true throughout; no source/default change.",
+      "initial_cost": 0.00581040866566489,
+      "max_return_relative_drift": 0.0010648799676824527,
+      "all_exact_and_converged": true,
+      "interpretation": "Reduced but nonzero drift; different initial equilibrium. Evidence for a coordinate/restart contribution, not an accuracy-preserving fix."
+    }
   }
 }
