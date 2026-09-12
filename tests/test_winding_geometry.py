@@ -155,3 +155,80 @@ def test_float32_geometry_keeps_angular_precision(geometry):
     value = geometry["r_surface"](rc, 2, phi, theta)
     assert value.dtype == jnp.float32
     np.testing.assert_allclose(value, 3 + .7 * np.cos(.3), rtol=2e-7)
+
+
+@pytest.fixture(scope="module")
+def response():
+    from jaxopt import LBFGS
+    from jaxopt.implicit_diff import root_jvp
+
+    path = Path(__file__).parents[1] / "examples/optimization/QA_optimization.py"
+    names = {"_winding_linear_solve", "_winding_optimality",
+             "_solve_winding_surface", "_solve_winding_surface_jvp"}
+    tree = ast.parse(path.read_text(), filename=str(path))
+    tree.body = [node for node in tree.body
+                 if (isinstance(node, ast.FunctionDef) and node.name in names)
+                 or (isinstance(node, ast.ImportFrom) and node.module == "solvax")]
+    namespace = {"jax": jax, "jnp": jnp, "minimize": LBFGS, "root_jvp": root_jvp}
+    exec(compile(tree, str(path), "exec"), namespace)
+    previous = jax.config.jax_enable_x64
+    jax.config.update("jax_enable_x64", True)
+    try:
+        with jax.disable_jit(False):
+            yield namespace
+    finally:
+        jax.config.update("jax_enable_x64", previous)
+
+
+@pytest.mark.parametrize("matrix", [
+    [[3., 1.], [1., -2.]], [[3., 2.], [-1., 4.]],
+])
+def test_certified_winding_linear_solve_forward_reverse(response, matrix):
+    matrix = jnp.asarray(matrix)
+    rhs = jnp.array([.7, -.3])
+    def solve(value):
+        return response["_winding_linear_solve"](lambda x: matrix @ x, value)
+    expected = jnp.linalg.solve(matrix, rhs)
+    np.testing.assert_allclose(jax.jit(solve)(rhs), expected, rtol=1e-12)
+    direction = jnp.array([.2, .8])
+    tangent = jax.jvp(solve, (rhs,), (direction,))[1]
+    cotangent = jax.grad(lambda value: jnp.dot(solve(value), direction))(rhs)
+    np.testing.assert_allclose(tangent, jnp.linalg.solve(matrix, direction), rtol=1e-12)
+    np.testing.assert_allclose(cotangent, jnp.linalg.solve(matrix.T, direction), rtol=1e-12)
+
+
+def test_winding_linear_failure_is_not_an_unchecked_gradient(response):
+    zero = response["_winding_linear_solve"](lambda x: 2 * x, jnp.zeros(2))
+    np.testing.assert_array_equal(zero, jnp.zeros(2))
+    value = response["_winding_linear_solve"](
+        lambda x: 2 * x, jnp.ones(2), max_restarts=0)
+    assert np.all(np.isnan(value))
+
+
+def test_winding_root_response_and_curvature(response):
+    matrix = jnp.array([[3., .4], [.4, 2.]])
+    response["_winding_objective_value"] = (
+        lambda d, p, *unused: .5 * d @ (matrix + jnp.diag(p**2)) @ d
+        - jnp.dot(p**2, d))
+    def solve(p):
+        return response["_solve_winding_surface"](jnp.zeros(2), p, 0., 0., 0., 0.)
+    p = jnp.array([.7, -.3])
+    direction = jnp.array([.2, .8])
+    value, tangent = jax.jvp(solve, (p,), (direction,))
+    def exact(q):
+        return jnp.linalg.solve(matrix + jnp.diag(q**2), q**2)
+    np.testing.assert_allclose(value, exact(p), atol=5e-7)
+    np.testing.assert_allclose(tangent, jax.jvp(exact, (p,), (direction,))[1], atol=2e-7)
+    gradient = jax.grad(lambda q: jnp.sum(solve(q)))
+    exact_gradient = jax.grad(lambda q: jnp.sum(exact(q)))
+    np.testing.assert_allclose(gradient(p), exact_gradient(p), atol=2e-7)
+    hvp = jax.jvp(gradient, (p,), (direction,))[1]
+    np.testing.assert_allclose(hvp, jax.jvp(exact_gradient, (p,), (direction,))[1], atol=2e-7)
+
+
+def test_unstationary_winding_inner_solve_rejects_response(response):
+    response["_winding_objective_value"] = lambda d, p, *unused: jnp.dot(d, p)
+    _, tangent = jax.jvp(
+        lambda p: response["_solve_winding_surface"](jnp.zeros(2), p, 0., 0., 0., 0.),
+        (jnp.ones(2),), (jnp.ones(2),))
+    assert np.all(np.isnan(tangent))

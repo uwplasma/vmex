@@ -208,7 +208,7 @@ jobs:
           python -m pip install -U pip
           python -m pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
       - name: Install the winding example optimizer
-        if: matrix.lane == 'misc'
+        if: matrix.lane == 'misc' || matrix.lane == 'c1'
         run: python -m pip install ".[optimizers]"
       - name: Add XLA compile headroom
         run: |

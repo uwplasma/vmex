@@ -59,6 +59,7 @@ from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
 from jaxopt import LBFGS as minimize
 from jaxopt.implicit_diff import root_jvp
+from solvax import gcrot
 MINIMUM_DISTANCE = 0.05
 DISTANCE_WALL_SCALE = 0.01
 DISTANCE_WALL_WEIGHT = 10.0
@@ -501,15 +502,9 @@ def _winding_optimality(dofs, plasma_points, plasma_normals, local_weights,
 @jax.custom_jvp
 def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weights,
                           winding_R_cos, scales):
-    # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
-    # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
-    # (compiled size independent of maxiter) instead of unrolling 100 steps into
-    # every traced residual/Jacobian evaluation. The custom_jvp below supplies
-    # the (forward-mode-compatible) sensitivity in place of jaxopt's own
-    # reverse-mode-only custom_vjp rule, which VMEX's default forward-mode
-    # (jax.jvp) Jacobian construction cannot differentiate through. This gives
-    # a forward-mode derivative only: switching this problem's jac_solver to
-    # "reverse" would need a matching defvjp too.
+    # Retain JAXopt's compact while-loop forward solve. The custom JVP below
+    # supplies forward and reverse sensitivities through the certified linear
+    # solve, without unrolling the inner optimizer's 100 iterations.
     optimizer = minimize(
         fun=lambda d: _winding_objective_value(
             d, plasma_points, plasma_normals, local_weights, winding_R_cos, scales),
@@ -517,12 +512,26 @@ def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weigh
     return optimizer.run(init_dofs).params
 
 
+def _winding_linear_solve(matvec, rhs, *, rtol=1e-8, max_restarts=10):
+    """Solve the original Hessian equation; return NaNs if it is uncertified."""
+    _, operator = jax.linearize(matvec, jnp.zeros_like(rhs))
+
+    def solve(action, value):
+        result = gcrot(action, value, rtol=rtol, max_restarts=max_restarts)
+        return jnp.where(result.converged, result.x, jnp.nan)
+
+    return jax.lax.custom_linear_solve(
+        operator, rhs, solve=solve, transpose_solve=solve)
+
+
 @_solve_winding_surface.defjvp
 def _solve_winding_surface_jvp(primals, tangents):
     sol = _solve_winding_surface(*primals)
     sol_tangent = root_jvp(optimality_fun=_winding_optimality, sol=sol,
-                           args=primals[1:], tangents=tangents[1:])
-    return sol, sol_tangent
+                           args=primals[1:], tangents=tangents[1:],
+                           solve=_winding_linear_solve)
+    stationary = jnp.linalg.norm(_winding_optimality(sol, *primals[1:])) <= 1e-6
+    return sol, jnp.where(stationary, sol_tangent, jnp.nan)
 
 
 def winding_surface_objective(equilibrium_state, solver_context):
