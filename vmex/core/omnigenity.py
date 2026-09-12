@@ -75,6 +75,7 @@ import jax
 import jax.numpy as jnp
 
 from .boozer_tables import boozer_input_tables, high_order_boozer_input_tables
+from .bounce import _boozer_field_strength
 from .solver import SolverRuntime, SpectralState
 from .statephysics import _as_1d
 
@@ -537,10 +538,7 @@ def omnigenity_residual(
     period = 2.0 * np.pi / float(nfp)
     phi = jnp.asarray(period * np.arange(nphi) / nphi, dtype=dtype)
     alpha = jnp.asarray(2.0 * np.pi * np.arange(nalpha) / nalpha, dtype=dtype)
-    theta = alpha[None, :, None] + iota_b[:, None, None] * phi[None, None, :]
-    angle = (theta[..., None] * xm_b - phi[None, None, :, None] * xn_b)
-    b = (jnp.einsum("sapm,sm->sap", jnp.cos(angle), bmnc_b)
-         + jnp.einsum("sapm,sm->sap", jnp.sin(angle), bmns_b))
+    b = _boozer_field_strength(bmnc_b, bmns_b, xm_b, xn_b, iota_b, alpha, phi)
 
     bmin = jnp.min(b, axis=(1, 2), keepdims=True)
     bmax = jnp.max(b, axis=(1, 2), keepdims=True)

@@ -8,7 +8,7 @@ import numpy as np
 
 import jax.numpy as jnp
 
-from .bounce import bounce_action, bounce_action_from_boozer
+from .bounce import _boozer_field_strength, bounce_action, bounce_action_from_boozer
 from .omnigenity import boozer_spectrum_state
 from .optimize import quasi_isodynamic_residual
 from .qi import j_invariant_qi_residual_from_boozer
@@ -176,14 +176,9 @@ def common_trapped_pitches_state(
     phi = jnp.asarray(
         2.0 * np.pi * np.arange(nphi) / (int(booz["nfp"]) * int(points_per_period)),
         dtype=dtype)
-    theta = alpha[None, :, None] + booz["iota_b"][:, None, None] * phi[None, None, :]
-    angle = (theta[..., None] * booz["xm_b"]
-             - phi[None, None, :, None] * booz["xn_b"])
-    bmns = booz.get("bmns_b")
-    if bmns is None:
-        bmns = jnp.zeros_like(booz["bmnc_b"])
-    bmag = (jnp.einsum("sapm,sm->sap", jnp.cos(angle), booz["bmnc_b"])
-            + jnp.einsum("sapm,sm->sap", jnp.sin(angle), bmns))
+    bmag = _boozer_field_strength(
+        booz["bmnc_b"], booz.get("bmns_b"), booz["xm_b"], booz["xn_b"],
+        booz["iota_b"], alpha, phi)
     return common_trapped_pitches(jnp.swapaxes(bmag, 1, 2), trapping_depths)
 
 

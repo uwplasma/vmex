@@ -559,10 +559,15 @@ def scalfor_matrices(
     bxd_rows = bxd[:jmax]
     cx_rows = cx[:jmax]
 
-    axm_m = axm_rows[:, m_parity]
-    bxm_m = bxm_rows[:, m_parity]
-    axd_m = axd_rows[:, m_parity]
-    bxd_m = bxd_rows[:, m_parity]
+    # Broadcast the two parity columns. A gather after radial padding creates
+    # a transposed scatter that CUDA XLA can simplify to incompatible bounds.
+    def parity_columns(rows):
+        return jnp.where(m_parity[None, :] == 0, rows[:, :1], rows[:, 1:2])
+
+    axm_m = parity_columns(axm_rows)
+    bxm_m = parity_columns(bxm_rows)
+    axd_m = parity_columns(axd_rows)
+    bxd_m = parity_columns(bxd_rows)
 
     ax = -(axm_m[:, :, None] + bxm_m[:, :, None] * m2)
     dx = -(axd_m[:, :, None] + bxd_m[:, :, None] * m2 + cx_rows[:, None, None] * n2)
@@ -665,9 +670,12 @@ def scalfor(
         Same ``jmax`` used to assemble ``matrices`` (static).
     tridiagonal_method:
         Forwarded to SOLVAX's checked tridiagonal solve
-        (``"auto"``/``"thomas"``/``"lax"``; static).  The default picks per
-        lowering platform: the bit-parity Thomas scan on CPU, the fused
-        backend on accelerators.
+        (``"auto"``/``"thomas"``/``"lax"``; static). The default selects
+        Thomas for at most 256 radial rows and at least four m>0 coefficient
+        columns; longer or narrower systems retain SOLVAX's
+        platform selection. Short, batched VMEC systems spend most CUDA
+        time launching cuSPARSE kernels; the checked Thomas sweep avoids
+        those launches while retaining the same acceptance checks.
     return_safe:
         Also return a scalar status.  Production calls use SOLVAX's
         unregularized pivot and backward-residual checks.  A rejected column
@@ -682,6 +690,8 @@ def scalfor(
         f = f[..., None]
     jmax = int(jmax)
     mpol = int(f.shape[1])
+    if tridiagonal_method == "auto" and jmax <= 256 and (mpol - 1) * f.shape[2] >= 4:
+        tridiagonal_method = "thomas"
     out = f
     safe = jnp.asarray(True)
 

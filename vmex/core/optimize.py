@@ -127,6 +127,7 @@ from .statephysics import (
     volume,
     volume_average_beta,
 )
+from .bounce import _boozer_field_strength
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
 from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
@@ -328,8 +329,12 @@ class Equilibrium:
 
 
 def _auto_jac_chunk(dim: int) -> int:
-    """Bound device-aware batching by the conservative square-root policy."""
-    return min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    """Avoid a second remainder graph without expanding the memory budget."""
+    bound = min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    # lax.map traces a separate vmap for the tail. Prefer a nearby divisor,
+    # but retain the original width when avoiding a tail would serialize it.
+    widths = range(bound, (bound + 1) // 2 - 1, -1)
+    return next((width for width in widths if dim % width == 0), bound)
 
 
 def _linear_response_summary(report: Any) -> jnp.ndarray:
@@ -930,12 +935,8 @@ def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, bmns_b=None, nfp: int, weights, nphi
     phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
     phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
     alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
-    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
-    angle = (theta[:, :, :, None] * xm_b[None, None, None, :]
-             - phi[None, :, None, None] * xn_b[None, None, None, :])
-    bmag = jnp.sum(
-        bmnc_b[:, None, None, :] * jnp.cos(angle)
-        + bmns_b[:, None, None, :] * jnp.sin(angle), axis=-1)
+    bmag = jnp.swapaxes(_boozer_field_strength(
+        bmnc_b, bmns_b, xm_b, xn_b, iota_b, alpha, phi), 1, 2)
 
     bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
     bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
@@ -2078,7 +2079,8 @@ def least_squares(
     :func:`solvax.chunk_map`: ``"auto"`` (default) caps SOLVAX's
     device-aware width by a conservative square-root policy, so an
     accelerator memory report cannot expand the full probe batch; an ``int``
-    fixes that many dofs at a time; ``None`` forces one wide batch.  Column
+    fixes that many dofs at a time; ``None`` forces one wide batch. Automatic
+    widths prefer a nearby divisor to avoid compiling a separate tail. Column
     blocks are mathematically independent, so the assembled Jacobian is
     identical across chunk sizes to float64 round-off.
 
@@ -2115,10 +2117,10 @@ def least_squares(
     exactly the columns the implicit Jacobian already solves, so the
     linearization is stashed at each ``jac(x_ref)`` call for free.
     ``"state"`` is the plain hot restart; ``None`` disables warm starting.
-    All three converge to the same fixed points — only the inner iteration
-    count changes — and a missing or mismatched seed falls back through the
-    perturbation -> state -> cold ladder. ``hot_restart=False`` forces
-    ``warm_start=None``.
+    At finite tolerances, different seeds can change the returned equilibrium;
+    independently re-solve accepted designs to check accuracy and repeatability.
+    Missing or mismatched seeds fall back through perturbation -> state -> cold.
+    ``hot_restart=False`` forces ``warm_start=None``.
 
     Remaining keywords go to :func:`scipy.optimize.least_squares` (e.g.
     ``max_nfev``, ``ftol``, ``xtol``, ``diff_step``).
@@ -2807,9 +2809,8 @@ def _least_squares_implicit(
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
 
-    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+    def rows_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         return jax.lax.cond(
             status == 0,
@@ -2822,12 +2823,17 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return rows_at_state(x, state, status)
+
+    host_rows_jit = _problem_jit(
+        problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
     rows_jit = _problem_jit(
         problem_jit_key, "rows", lambda: jax.jit(residual_rows))
 
-    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+    def scalar_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         def accepted(_):
             rows = term_rows(state, runtime)
@@ -2839,6 +2845,12 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return scalar_at_state(x, state, status)
+
+    host_scalar_jit = _problem_jit(
+        problem_jit_key, "host_scalar", lambda: jax.jit(scalar_at_state))
     scalar_loss_jit = _problem_jit(
         problem_jit_key, "scalar_loss", lambda: jax.jit(scalar_loss))
     value_grad_jit = _problem_jit(
@@ -3101,6 +3113,15 @@ def _least_squares_implicit(
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
+    def host_evaluate(x, evaluate):
+        # A retry can encounter new grid shapes. Compiling their GPU kernels
+        # inside a running GPU pure_callback can deadlock. The host optimizer
+        # owns this solve; stage only the objective evaluation on its result.
+        placed = _place(x)
+        params_np = jax.tree.map(np.asarray, params_of(placed))
+        state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+        return evaluate(placed, jax.tree.map(_place, state), status)
+
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
         if lin is not None and lin[0].shape == np.shape(x):
@@ -3112,7 +3133,7 @@ def _least_squares_implicit(
                 imp._PERTURB_SEED[cfg] = seed
         try:
             residual = np.asarray(
-                jax.device_get(rows_jit(_place(x))), dtype=float)
+                jax.device_get(host_evaluate(x, host_rows_jit)), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -3130,7 +3151,7 @@ def _least_squares_implicit(
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
         # A direct residual_jac(x) call need not be preceded by residual(x).
-        # Establish the point's status through the exception-free callback
+        # Establish the point's status through the exception-free host solve
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
@@ -3144,10 +3165,10 @@ def _least_squares_implicit(
             or imp._LAST_STATUS_ERROR.get(cfg) is not None
         ):
             # A cached converged point can be revisited after a different trial
-            # failed.  Refresh the status callback in that rare case so the old
+            # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
-            jax.device_get(rows_jit(_place(x)))
-        if imp._LAST_STATUS_ERROR.get(cfg) is not None:
+            fun(x)
+        if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
 
@@ -3302,7 +3323,7 @@ def _least_squares_implicit(
                     return value
             return failure_value_and_gradient(xh)[0]
         try:
-            value = float(jax.device_get(scalar_loss_jit(_place(xh))))
+            value = float(jax.device_get(host_evaluate(xh, host_scalar_jit)))
         except Exception:
             if not holder.get("scalar_certified"):
                 raise
@@ -3331,7 +3352,7 @@ def _least_squares_implicit(
     def equilibrium_from_x(
         x: np.ndarray, *, newton_iterations: int = 10
     ) -> Equilibrium:
-        """Materialize the exact accepted state already used by the objective."""
+        """Materialize the native solve and field views at the accepted point."""
         from .extender import VmecExtender, VmecInteriorField
 
         x = np.asarray(x, dtype=float)

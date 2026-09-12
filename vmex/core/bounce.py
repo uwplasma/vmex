@@ -17,6 +17,25 @@ __all__ = [
 ]
 
 
+def _boozer_field_strength(bmnc, bmns, xm, xn, iota, alpha, phi):
+    """Synthesize B(s, alpha, phi) without an (s, alpha, phi, mode) tape.
+
+    Along a field line, m*theta - n*phi = m*alpha + (m*iota-n)*phi.
+    The angle-addition identities separate alpha from the surface-dependent
+    phase, retaining both parities and derivatives with respect to iota.
+    """
+    phase = (iota[:, None] * xm - xn)[:, None, :] * phi[None, :, None]
+    label = alpha[:, None] * xm
+    cosine, sine = jnp.cos(phase), jnp.sin(phase)
+    c = cosine * bmnc[:, None, :]
+    s = -sine * bmnc[:, None, :]
+    if bmns is not None:
+        c = c + sine * bmns[:, None, :]
+        s = s + cosine * bmns[:, None, :]
+    return (jnp.einsum("am,spm->sap", jnp.cos(label), c, precision="highest")
+            + jnp.einsum("am,spm->sap", jnp.sin(label), s, precision="highest"))
+
+
 def _interp_uniform(values, x, *, length, periodic):
     """Linear interpolation on the uniform grid used by :func:`bounce_action`."""
     values = jnp.asarray(values)
@@ -306,10 +325,7 @@ def trace_boozer_field_lines(
     count = int(points_per_period) * int(num_periods) + 1
     length = 2.0 * np.pi * int(num_periods) / int(nfp)
     phi = jnp.linspace(0.0, length, count, dtype=dtype)
-    theta = alpha[None, :, None] + iota[:, None, None] * phi[None, None, :]
-    phase = theta[..., None] * xm - phi[None, None, :, None] * xn
-    bmag = jnp.einsum("sapm,sm->sap", jnp.cos(phase), bmnc_b)
-    bmag += jnp.einsum("sapm,sm->sap", jnp.sin(phase), sine)
+    bmag = _boozer_field_strength(bmnc_b, sine, xm, xn, iota, alpha, phi)
     current_factor = jnp.abs(
         jnp.atleast_1d(jnp.asarray(G_b, dtype=dtype))
         + iota * jnp.atleast_1d(jnp.asarray(I_b, dtype=dtype))
