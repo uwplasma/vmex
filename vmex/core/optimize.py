@@ -2804,9 +2804,8 @@ def _least_squares_implicit(
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
 
-    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+    def rows_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         return jax.lax.cond(
             status == 0,
@@ -2819,12 +2818,17 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return rows_at_state(x, state, status)
+
+    host_rows_jit = _problem_jit(
+        problem_jit_key, "host_rows", lambda: jax.jit(rows_at_state))
     rows_jit = _problem_jit(
         problem_jit_key, "rows", lambda: jax.jit(residual_rows))
 
-    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+    def scalar_at_state(x, state, status):
         params = params_of(x)
-        state, status, _, _ = imp.solve_implicit_status(params, cfg)
         runtime = imp.runtime_from_params(params, cfg)
         def accepted(_):
             rows = term_rows(state, runtime)
@@ -2836,6 +2840,12 @@ def _least_squares_implicit(
             operand=None,
         )
 
+    def scalar_loss(x: jnp.ndarray) -> jnp.ndarray:
+        state, status, _, _ = imp.solve_implicit_status(params_of(x), cfg)
+        return scalar_at_state(x, state, status)
+
+    host_scalar_jit = _problem_jit(
+        problem_jit_key, "host_scalar", lambda: jax.jit(scalar_at_state))
     scalar_loss_jit = _problem_jit(
         problem_jit_key, "scalar_loss", lambda: jax.jit(scalar_loss))
     value_grad_jit = _problem_jit(
@@ -3098,6 +3108,15 @@ def _least_squares_implicit(
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
+    def host_evaluate(x, evaluate):
+        # A retry can encounter new grid shapes. Compiling their GPU kernels
+        # inside a running GPU pure_callback can deadlock. The host optimizer
+        # owns this solve; stage only the objective evaluation on its result.
+        placed = _place(x)
+        params_np = jax.tree.map(np.asarray, params_of(placed))
+        state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+        return evaluate(placed, jax.tree.map(_place, state), status)
+
     def fun(x: np.ndarray) -> np.ndarray:
         lin = holder["lin"]
         if lin is not None and lin[0].shape == np.shape(x):
@@ -3109,7 +3128,7 @@ def _least_squares_implicit(
                 imp._PERTURB_SEED[cfg] = seed
         try:
             residual = np.asarray(
-                jax.device_get(rows_jit(_place(x))), dtype=float)
+                jax.device_get(host_evaluate(x, host_rows_jit)), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -3127,7 +3146,7 @@ def _least_squares_implicit(
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
         # A direct residual_jac(x) call need not be preceded by residual(x).
-        # Establish the point's status through the exception-free callback
+        # Establish the point's status through the exception-free host solve
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
@@ -3141,10 +3160,10 @@ def _least_squares_implicit(
             or imp._LAST_STATUS_ERROR.get(cfg) is not None
         ):
             # A cached converged point can be revisited after a different trial
-            # failed.  Refresh the status callback in that rare case so the old
+            # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
-            jax.device_get(rows_jit(_place(x)))
-        if imp._LAST_STATUS_ERROR.get(cfg) is not None:
+            fun(x)
+        if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
 
@@ -3299,7 +3318,7 @@ def _least_squares_implicit(
                     return value
             return failure_value_and_gradient(xh)[0]
         try:
-            value = float(jax.device_get(scalar_loss_jit(_place(xh))))
+            value = float(jax.device_get(host_evaluate(xh, host_scalar_jit)))
         except Exception:
             if not holder.get("scalar_certified"):
                 raise

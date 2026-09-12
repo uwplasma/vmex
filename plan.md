@@ -860,3 +860,54 @@ the callback completes in 11 ms. No total GPU optimizer timing is promoted.
 Next: move host-optimizer solve/retry setup outside the compiled callback,
 preserving status, penalties and warm seeds; validate direct Jacobian and
 staged JAX calls, then profile a complete fixed-objective run. P3 and the release hold remain open.
+
+**2026-09-12, PR #299 continuation; paused at user request.** User confirmed
+VMEX 0.3 as the historical baseline. Checkpoint adds a host-optimizer path
+that solves/refines the trial before staging its objective, preserving the
+existing status/penalty policy and warm seeds. Direct Jacobian calls now gate
+on the exact trial's certificate. Public staged JAX calls remain available;
+first-use GPU kernel compilation inside those callbacks is not claimed fixed.
+The new source and compact evidence are in the existing PR and
+`benchmarks/review_optimization_20260912.json`; raw profiles/arrays stay outside git.
+
+Completed comparisons: supplied Simsopt cap-three workflow 179.82 → 163.99 s
+on M3 Max, RSS 6493 → 4413 MiB, identical phase evaluation counts, final
+surface/coil metrics within 9.8e-8 relative. Full configured current-main
+workflow completes in 672.50 s (11.2 minutes), so the hour-long report is not
+reproduced on this environment. Joint BFGS stops for precision loss, and its
+reported cost 0.0326843 differs from the post-run 0.0333387 recomputation:
+first establish objective/state/gradient consistency, not time to convergence.
+The source of this discrepancy is unproven. Candidate full run was interrupted
+at the requested pause; it supplies no full-runtime comparison.
+
+All 18 unchanged-deck GPU cold CLI/Python comparisons completed (0.3, current
+main, candidate; QA nfp2, QH nfp4, QI nfp1). Iteration counts match. Current QA
+and QH are modestly faster; QI is about 5–7% slower than 0.3 (86 versus 90–92 s).
+No universal speedup claim. Stock 0.7 rejects the supplied Simsopt adapter;
+explicit compatibility forwarding enables a 212.88 s capped run, but its
+historical QI definition and final design differ. Refinement is disabled by
+the supplied wrapper in these runs; raising its tolerance cannot explain them.
+
+The GPU constructed-QI optimizer that previously stalled now completes with
+the same seven solves/14,484 iterations and final cost 0.0026945874913 as CPU,
+with certified derivatives. Its 163.36 s optimizer time remains expensive.
+New validation: 24 office CPU tests pass, one skipped, including direct-Jacobian
+and scalar host-thread regressions and missing/stale memo guards; Ruff/mypy pass.
+The extended suite was interrupted during full optimization-convergence tests;
+those four tests remain open. Previous head ef8a25fa had all 27 CI checks green;
+that result does not certify the new checkpoint. No merge, release, or active
+local/office experiment at pause.
+
+Resume in this order:
+1. Reconcile the full collaborator run's objective recomputation and precision
+   loss: replay identical accepted parameters, check geometry/cache restoration,
+   and compare directional derivatives before changing optimizer tolerances.
+2. Complete the candidate full-budget workflow and paired bounded cProfile runs;
+   compare evaluation counts and final physics, not just elapsed time. Keep the
+   missing collaborator-modified 0.7/dependency provenance explicit.
+3. Profile GPU retry compilation and QI cold-start overhead separately. Prepared
+   external workers cover native CLI/Python cold solves and supported historical
+   QA/QH/QI/QP optimization, including actual forward-device placement. Complete
+   CPU and GPU coverage without overlapping timed jobs on one machine.
+4. Finish full family convergence tests and checkpoint CI; review then merge
+   the focused PR only when these acceptance gates are satisfied. P3 remains open.
