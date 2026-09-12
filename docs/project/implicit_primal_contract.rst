@@ -66,7 +66,7 @@ performance task.
 
 
 Materializing cached equilibria
-------------------------------
+-------------------------------
 
 Each scalar-gradient and residual-Jacobian cache retains a read-only host copy
 of its certified coefficients and the source solve result. Materializing that
