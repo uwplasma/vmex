@@ -446,110 +446,33 @@
         "vmex_commit": "f09288b37bac7d7122e98220192795e76770cd1f",
         "total_seconds": 179.82486208400223,
         "peak_rss_mib": 6492.8125,
-        "phase_seconds": [
-          59.757709209021414,
-          1.7220814170141239,
-          1.413669708010275,
-          78.09552654100116,
-          0.515293208998628,
-          0.54135074999067
-        ],
-        "nfev": [
-          3,
-          5,
-          7,
-          12,
-          6,
-          6
-        ],
-        "njev": [
-          2,
-          5,
-          7,
-          12,
-          6,
-          6
-        ]
+        "phase_seconds": [59.757709209021414, 1.7220814170141239, 1.413669708010275, 78.09552654100116, 0.515293208998628, 0.54135074999067],
+        "nfev": [3, 5, 7, 12, 6, 6],
+        "njev": [2, 5, 7, 12, 6, 6]
       },
       "candidate": {
         "vmex_commit": "ef8a25fae8d6aaa7ea72051707eb65cb03ac408d",
         "total_seconds": 163.98722616699524,
         "peak_rss_mib": 4412.71875,
-        "phase_seconds": [
-          54.83702529099537,
-          1.8112860420078505,
-          1.489677000005031,
-          70.96848466599477,
-          0.5193696669884957,
-          0.5374387089977972
-        ],
-        "nfev": [
-          3,
-          5,
-          7,
-          12,
-          6,
-          6
-        ],
-        "njev": [
-          2,
-          5,
-          7,
-          12,
-          6,
-          6
-        ]
+        "phase_seconds": [54.83702529099537, 1.8112860420078505, 1.489677000005031, 70.96848466599477, 0.5193696669884957, 0.5374387089977972],
+        "nfev": [3, 5, 7, 12, 6, 6],
+        "njev": [2, 5, 7, 12, 6, 6]
       },
       "v07-compat": {
         "vmex_commit": "b365672204a66ab6c46931d7aec8bf026e5e4ad7",
         "total_seconds": 212.8801374169998,
         "peak_rss_mib": 5070.125,
-        "phase_seconds": [
-          64.31737516599242,
-          1.700744959001895,
-          1.5138890420203097,
-          85.58072204201017,
-          0.6507132920087315,
-          0.7342050000152085
-        ],
-        "nfev": [
-          3,
-          5,
-          8,
-          10,
-          7,
-          8
-        ],
-        "njev": [
-          2,
-          5,
-          8,
-          10,
-          7,
-          8
-        ]
+        "phase_seconds": [64.31737516599242, 1.700744959001895, 1.5138890420203097, 85.58072204201017, 0.6507132920087315, 0.7342050000152085],
+        "nfev": [3, 5, 8, 10, 7, 8],
+        "njev": [2, 5, 8, 10, 7, 8]
       }
     },
     "parity_main_candidate_max_relative": 9.776847044338697e-08,
     "parity_main_candidate_max_absolute": 2.388495090599463e-08,
     "compatibility": "0.7 needs explicit adapter compatibility; QI transform differs, evaluation counts and final design differ; not same-accuracy speed ratio",
-    "script_adjustments": [
-      "unused boozer_coils import removed for axis initialization",
-      "objective summaries use residual dot residual (same patch in every arm)",
-      "four optimization iteration caps overridden equally"
-    ],
-    "phase_order": [
-      "stage1",
-      "stage2_simple",
-      "stage2",
-      "joint",
-      "cleanup_simple",
-      "cleanup"
-    ],
-    "historical_adaptations": [
-      "Stock0.7 rejects supplied Simsopt capability gate; raising stub only for unused virtual-casing method.",
-      "Forward requested refine_tol=inf to existing ImplicitConfig; no changes to numerical source."
-    ]
+    "script_adjustments": ["unused boozer_coils import removed for axis initialization", "objective summaries use residual dot residual (same patch in every arm)", "four optimization iteration caps overridden equally"],
+    "phase_order": ["stage1", "stage2_simple", "stage2", "joint", "cleanup_simple", "cleanup"],
+    "historical_adaptations": ["Stock0.7 rejects supplied Simsopt capability gate; raising stub only for unused virtual-casing method.", "Forward requested refine_tol=inf to existing ImplicitConfig; no changes to numerical source."]
   },
   "cold_gpu_historical": {
     "scope": "One fresh process per arm, native CLI or solve_equilibrium plus write_wout; unchanged example decks, cache disabled, same clean GPU environment as host_optimizer_callback_fix. Timings include VMEX import, solve and WOUT export; exclude interpreter startup. All output arrays retained outside git.",
@@ -557,26 +480,10 @@
       {
         "input": "examples/data/input.nfp4_QH_warm_start",
         "driver": "cli",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          17.96439798013307,
-          1457.66015625,
-          450
-        ],
-        "main": [
-          17.515454882988706,
-          1421.73046875,
-          450
-        ],
-        "candidate": [
-          17.538800523849204,
-          1421.58203125,
-          450
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [17.96439798013307, 1457.66015625, 450],
+        "main": [17.515454882988706, 1421.73046875, 450],
+        "candidate": [17.538800523849204, 1421.58203125, 450],
         "max_array_relative_l2_vs_v03": {
           "baseline": 2.3095771503564316e-11,
           "host": 2.3095771503564316e-11
@@ -585,26 +492,10 @@
       {
         "input": "examples/data/input.nfp4_QH_warm_start",
         "driver": "python",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          18.429438021965325,
-          1457.53125,
-          450
-        ],
-        "main": [
-          16.162889366038144,
-          1333.8203125,
-          450
-        ],
-        "candidate": [
-          16.075880239950493,
-          1328.83203125,
-          450
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [18.429438021965325, 1457.53125, 450],
+        "main": [16.162889366038144, 1333.8203125, 450],
+        "candidate": [16.075880239950493, 1328.83203125, 450],
         "max_array_relative_l2_vs_v03": {
           "baseline": 2.1579389244241885e-11,
           "host": 2.1579389244241885e-11
@@ -613,26 +504,10 @@
       {
         "input": "examples/data/input.nfp2_QA",
         "driver": "cli",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          23.50699193496257,
-          1496.703125,
-          648
-        ],
-        "main": [
-          22.226769797038287,
-          1439.14453125,
-          648
-        ],
-        "candidate": [
-          22.319753519026563,
-          1440.14453125,
-          648
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [23.50699193496257, 1496.703125, 648],
+        "main": [22.226769797038287, 1439.14453125, 648],
+        "candidate": [22.319753519026563, 1440.14453125, 648],
         "max_array_relative_l2_vs_v03": {
           "baseline": 3.201850055654051e-08,
           "host": 3.201850055654051e-08
@@ -641,26 +516,10 @@
       {
         "input": "examples/data/input.nfp2_QA",
         "driver": "python",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          23.67618750082329,
-          1498.1171875,
-          648
-        ],
-        "main": [
-          20.848987246863544,
-          1353.30859375,
-          648
-        ],
-        "candidate": [
-          20.80004591192119,
-          1352.203125,
-          648
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [23.67618750082329, 1498.1171875, 648],
+        "main": [20.848987246863544, 1353.30859375, 648],
+        "candidate": [20.80004591192119, 1352.203125, 648],
         "max_array_relative_l2_vs_v03": {
           "baseline": 3.201850055654051e-08,
           "host": 3.201850055654051e-08
@@ -669,26 +528,10 @@
       {
         "input": "examples/data/input.nfp1_QI",
         "driver": "cli",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          86.34211546322331,
-          1495.0625,
-          6041
-        ],
-        "main": [
-          92.25728206895292,
-          1447.23828125,
-          6041
-        ],
-        "candidate": [
-          92.17181088496,
-          1446.40234375,
-          6041
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [86.34211546322331, 1495.0625, 6041],
+        "main": [92.25728206895292, 1447.23828125, 6041],
+        "candidate": [92.17181088496, 1446.40234375, 6041],
         "max_array_relative_l2_vs_v03": {
           "baseline": 1.1088756726054172e-09,
           "host": 1.908406172409773e-09
@@ -697,26 +540,10 @@
       {
         "input": "examples/data/input.nfp1_QI",
         "driver": "python",
-        "columns": [
-          "cold_import_solve_export_seconds",
-          "peak_rss_mib",
-          "iterations"
-        ],
-        "v0.3": [
-          86.4213385710027,
-          1496.4296875,
-          6041
-        ],
-        "main": [
-          90.45779553195462,
-          1358.63671875,
-          6041
-        ],
-        "candidate": [
-          90.59150942112319,
-          1358.66015625,
-          6041
-        ],
+        "columns": ["cold_import_solve_export_seconds", "peak_rss_mib", "iterations"],
+        "v0.3": [86.4213385710027, 1496.4296875, 6041],
+        "main": [90.45779553195462, 1358.63671875, 6041],
+        "candidate": [90.59150942112319, 1358.66015625, 6041],
         "max_array_relative_l2_vs_v03": {
           "baseline": 1.1088756726054172e-09,
           "host": 1.1088756726054172e-09
@@ -729,30 +556,9 @@
     "main_commit": "f09288b37bac7d7122e98220192795e76770cd1f",
     "main_total_seconds": 672.5047723749885,
     "main_peak_rss_mib": 5334.1875,
-    "phase_seconds": [
-      81.93514012501691,
-      2.7505125000025146,
-      201.35153400001582,
-      336.2277807079954,
-      1.2490422090049833,
-      9.541132207988994
-    ],
-    "phase_nfev": [
-      63,
-      15,
-      1845,
-      188,
-      13,
-      101
-    ],
-    "phase_success": [
-      true,
-      false,
-      false,
-      false,
-      false,
-      true
-    ],
+    "phase_seconds": [81.93514012501691, 2.7505125000025146, 201.35153400001582, 336.2277807079954, 1.2490422090049833, 9.541132207988994],
+    "phase_nfev": [63, 15, 1845, 188, 13, 101],
+    "phase_success": [true, false, false, false, false, true],
     "joint_optimizer": {
       "message": "Desired error not necessarily achieved due to precision loss.",
       "success": false,
@@ -767,19 +573,9 @@
     "interpretation": "Does not reproduce the reported hour-long run on this M3 Max/environment. Joint BFGS stopped for precision loss. Its reported cost and post-run recomputation differ by about 2%; investigate repeatability, state/cache restoration, and derivative consistency before interpreting convergence. Origin not established; not attributed to VMEX alone."
   },
   "pause_validation": {
-    "completed": [
-      "23 local regression tests before thread-location assertions, 1 skipped",
-      "24 office CPU regression tests including new direct-Jacobian/scalar host-thread assertions and stale/missing memo tests, 1 skipped",
-      "Ruff and mypy on changed code passed",
-      "GPU constructed-QI trial/retry completed with certified derivatives and matching CPU result"
-    ],
+    "completed": ["23 local regression tests before thread-location assertions, 1 skipped", "24 office CPU regression tests including new direct-Jacobian/scalar host-thread assertions and stale/missing memo tests, 1 skipped", "Ruff and mypy on changed code passed", "GPU constructed-QI trial/retry completed with certified derivatives and matching CPU result"],
     "interrupted": "Office suite stopped by user pause while entering full optimization-convergence tests; four QA/QH/QI/QP full tests not completed in this continuation. Earlier PR head had all 27 CI checks green; new checkpoint requires CI.",
-    "not_run": [
-      "CPU cold CLI/Python matrix",
-      "cross-version bounded QA/QH/QI/QP optimizer worker",
-      "new optimizer-phase XProf/cProfile diagnostics",
-      "paired full-budget candidate collaborator run"
-    ],
+    "not_run": ["CPU cold CLI/Python matrix", "cross-version bounded QA/QH/QI/QP optimizer worker", "new optimizer-phase XProf/cProfile diagnostics", "paired full-budget candidate collaborator run"],
     "state": "Paused at user request. No merge or release."
   },
   "resumed_correctness_review": {
@@ -916,268 +712,66 @@
     }
   },
   "repeatability_input": {
-    "ns_array": [
-      16
-    ],
-    "ftol_array": [
-      1e-12
-    ],
-    "niter_array": [
-      4000
-    ],
+    "ns_array": [16],
+    "ftol_array": [1e-12],
+    "niter_array": [4000],
     "delt": 0.9,
     "tcon0": 2.0,
     "phiedge": 0.04299515045,
     "nstep": 200,
     "ncurr": 1,
     "rbc": [
-      {
-        "m": 1,
-        "n": -3,
-        "value": -0.002258039859912594
-      },
-      {
-        "m": 2,
-        "n": -3,
-        "value": -0.0014072964015952242
-      },
-      {
-        "m": 3,
-        "n": -3,
-        "value": -9.051020221429007e-05
-      },
-      {
-        "m": 1,
-        "n": -2,
-        "value": -0.007042369469216212
-      },
-      {
-        "m": 2,
-        "n": -2,
-        "value": 0.0015025201277428365
-      },
-      {
-        "m": 3,
-        "n": -2,
-        "value": -0.0005073178910473561
-      },
-      {
-        "m": 1,
-        "n": -1,
-        "value": -0.05129612009764143
-      },
-      {
-        "m": 2,
-        "n": -1,
-        "value": 0.005100915776886109
-      },
-      {
-        "m": 3,
-        "n": -1,
-        "value": 0.0008806191863378449
-      },
-      {
-        "m": 0,
-        "n": 0,
-        "value": 1.0
-      },
-      {
-        "m": 1,
-        "n": 0,
-        "value": 0.13237958459772153
-      },
-      {
-        "m": 2,
-        "n": 0,
-        "value": -0.008430664196341019
-      },
-      {
-        "m": 3,
-        "n": 0,
-        "value": 0.0003516925322970672
-      },
-      {
-        "m": 0,
-        "n": 1,
-        "value": 0.11072676287386235
-      },
-      {
-        "m": 1,
-        "n": 1,
-        "value": -0.015697731806771573
-      },
-      {
-        "m": 2,
-        "n": 1,
-        "value": 0.010819220541650833
-      },
-      {
-        "m": 3,
-        "n": 1,
-        "value": -0.0009031662025365472
-      },
-      {
-        "m": 0,
-        "n": 2,
-        "value": -0.18159671487225684
-      },
-      {
-        "m": 1,
-        "n": 2,
-        "value": 0.0770021979292755
-      },
-      {
-        "m": 2,
-        "n": 2,
-        "value": -0.0044542936604470805
-      },
-      {
-        "m": 3,
-        "n": 2,
-        "value": -0.0014746097274417613
-      },
-      {
-        "m": 0,
-        "n": 3,
-        "value": -0.011051518113576707
-      },
-      {
-        "m": 1,
-        "n": 3,
-        "value": 0.0009658679625027923
-      },
-      {
-        "m": 2,
-        "n": 3,
-        "value": -0.002138540530441494
-      },
-      {
-        "m": 3,
-        "n": 3,
-        "value": 0.00019971130972554714
-      }
+      {"m": 1, "n": -3, "value": -0.002258039859912594},
+      {"m": 2, "n": -3, "value": -0.0014072964015952242},
+      {"m": 3, "n": -3, "value": -9.051020221429007e-05},
+      {"m": 1, "n": -2, "value": -0.007042369469216212},
+      {"m": 2, "n": -2, "value": 0.0015025201277428365},
+      {"m": 3, "n": -2, "value": -0.0005073178910473561},
+      {"m": 1, "n": -1, "value": -0.05129612009764143},
+      {"m": 2, "n": -1, "value": 0.005100915776886109},
+      {"m": 3, "n": -1, "value": 0.0008806191863378449},
+      {"m": 0, "n": 0, "value": 1.0},
+      {"m": 1, "n": 0, "value": 0.13237958459772153},
+      {"m": 2, "n": 0, "value": -0.008430664196341019},
+      {"m": 3, "n": 0, "value": 0.0003516925322970672},
+      {"m": 0, "n": 1, "value": 0.11072676287386235},
+      {"m": 1, "n": 1, "value": -0.015697731806771573},
+      {"m": 2, "n": 1, "value": 0.010819220541650833},
+      {"m": 3, "n": 1, "value": -0.0009031662025365472},
+      {"m": 0, "n": 2, "value": -0.18159671487225684},
+      {"m": 1, "n": 2, "value": 0.0770021979292755},
+      {"m": 2, "n": 2, "value": -0.0044542936604470805},
+      {"m": 3, "n": 2, "value": -0.0014746097274417613},
+      {"m": 0, "n": 3, "value": -0.011051518113576707},
+      {"m": 1, "n": 3, "value": 0.0009658679625027923},
+      {"m": 2, "n": 3, "value": -0.002138540530441494},
+      {"m": 3, "n": 3, "value": 0.00019971130972554714}
     ],
     "zbs": [
-      {
-        "m": 1,
-        "n": -3,
-        "value": -0.004117090788656811
-      },
-      {
-        "m": 2,
-        "n": -3,
-        "value": -0.0007113728931343971
-      },
-      {
-        "m": 3,
-        "n": -3,
-        "value": -0.00012546003779520914
-      },
-      {
-        "m": 1,
-        "n": -2,
-        "value": -0.003167501924255082
-      },
-      {
-        "m": 2,
-        "n": -2,
-        "value": -0.0007290833220281791
-      },
-      {
-        "m": 3,
-        "n": -2,
-        "value": -0.00048661026644303897
-      },
-      {
-        "m": 1,
-        "n": -1,
-        "value": -0.04825322901015365
-      },
-      {
-        "m": 2,
-        "n": -1,
-        "value": 0.004953641447818782
-      },
-      {
-        "m": 3,
-        "n": -1,
-        "value": 0.0015595558303988667
-      },
-      {
-        "m": 1,
-        "n": 0,
-        "value": 0.17286672231279776
-      },
-      {
-        "m": 2,
-        "n": 0,
-        "value": -0.006931420586735865
-      },
-      {
-        "m": 3,
-        "n": 0,
-        "value": -0.0009511512201245927
-      },
-      {
-        "m": 0,
-        "n": 1,
-        "value": -0.3499469387544589
-      },
-      {
-        "m": 1,
-        "n": 1,
-        "value": 0.05374779995893194
-      },
-      {
-        "m": 2,
-        "n": 1,
-        "value": -0.014353099982215631
-      },
-      {
-        "m": 3,
-        "n": 1,
-        "value": -0.0002666272935732307
-      },
-      {
-        "m": 0,
-        "n": 2,
-        "value": 0.1315511219020954
-      },
-      {
-        "m": 1,
-        "n": 2,
-        "value": -0.06913022379278892
-      },
-      {
-        "m": 2,
-        "n": 2,
-        "value": -0.008389780731229958
-      },
-      {
-        "m": 3,
-        "n": 2,
-        "value": 0.0029960386664800716
-      },
-      {
-        "m": 0,
-        "n": 3,
-        "value": 0.006491000381700828
-      },
-      {
-        "m": 1,
-        "n": 3,
-        "value": 0.002469063564004713
-      },
-      {
-        "m": 2,
-        "n": 3,
-        "value": 0.0016204244613096867
-      },
-      {
-        "m": 3,
-        "n": 3,
-        "value": -0.00041807316159090714
-      }
+      {"m": 1, "n": -3, "value": -0.004117090788656811},
+      {"m": 2, "n": -3, "value": -0.0007113728931343971},
+      {"m": 3, "n": -3, "value": -0.00012546003779520914},
+      {"m": 1, "n": -2, "value": -0.003167501924255082},
+      {"m": 2, "n": -2, "value": -0.0007290833220281791},
+      {"m": 3, "n": -2, "value": -0.00048661026644303897},
+      {"m": 1, "n": -1, "value": -0.04825322901015365},
+      {"m": 2, "n": -1, "value": 0.004953641447818782},
+      {"m": 3, "n": -1, "value": 0.0015595558303988667},
+      {"m": 1, "n": 0, "value": 0.17286672231279776},
+      {"m": 2, "n": 0, "value": -0.006931420586735865},
+      {"m": 3, "n": 0, "value": -0.0009511512201245927},
+      {"m": 0, "n": 1, "value": -0.3499469387544589},
+      {"m": 1, "n": 1, "value": 0.05374779995893194},
+      {"m": 2, "n": 1, "value": -0.014353099982215631},
+      {"m": 3, "n": 1, "value": -0.0002666272935732307},
+      {"m": 0, "n": 2, "value": 0.1315511219020954},
+      {"m": 1, "n": 2, "value": -0.06913022379278892},
+      {"m": 2, "n": 2, "value": -0.008389780731229958},
+      {"m": 3, "n": 2, "value": 0.0029960386664800716},
+      {"m": 0, "n": 3, "value": 0.006491000381700828},
+      {"m": 1, "n": 3, "value": 0.002469063564004713},
+      {"m": 2, "n": 3, "value": 0.0016204244613096867},
+      {"m": 3, "n": 3, "value": -0.00041807316159090714}
     ],
     "nvacskip": 6,
     "precon_type": "none",
@@ -1198,12 +792,7 @@
       "max_iota_extrema_absolute_difference": 2.8551050412772838e-11,
       "timing_claim": "None: shared host memory contention; local nice15 and one-thread settings."
     },
-    "qa_recorder_validation": {
-      "points": 7,
-      "all_exact_and_converged": true,
-      "all_derivatives_certified": true,
-      "max_value_pair_difference": 0.0
-    },
+    "qa_recorder_validation": {"points": 7, "all_exact_and_converged": true, "all_derivatives_certified": true, "max_value_pair_difference": 0.0},
     "canonical_hot_diagnostic": {
       "replay-canonical-hot-local": {
         "initial_cost": 0.005892269192352927,
