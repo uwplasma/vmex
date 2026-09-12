@@ -1279,3 +1279,15 @@ VMEX requests it when available; older dependencies retain the existing path.
 Native/high-order and symmetric/asymmetric checks pass on CPU and GPU without
 changing sampling or tolerances. The upstream PR remains unmerged; this is
 component evidence, not a completed optimization. Preserve the merge hold.
+
+The warm 48-parameter GPU trace now maps kernel time to source operations.
+A separate diagnostic replay disables CUDA command buffers to expose HLO
+origins; retain the ordinary trace for performance claims. Dense geometry
+Fourier synthesis accounts for 76.74 ms, including 49.34 ms in local
+`row_jacobian` VJP block assembly. Test the existing separable synthesis in
+that local AD shape before changing global transform policy. Compare value,
+JVP and VJP parity, compilation, temporary memory and warm CPU/GPU time.
+Do not repeat broad constraint/geometry fusion: branch commit c595c257
+records changed rounding and 15–25% slower concatenated contractions.
+Root-history consistency and complete optimization acceptance remain open;
+these component measurements do not close P3.

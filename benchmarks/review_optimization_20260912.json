@@ -1103,6 +1103,16 @@
     "attribution": "A sampled minimum changes phi index 53 to 52 on the third QI surface, alpha index 1. An independent NumPy surrogate reproduces JAX within 8.7e-19 and isolates the cost jump by holding minimum indices fixed only for diagnosis.",
     "limits": "No objective change or production minimum freezing. Three local halvings do not close the family-wide P3 gate. Projected residuals are not strong-force certificates. Global restart-history consistency remains unresolved."
   },
+  "warm_gpu_source_attribution": {
+    "parameters": 48,
+    "diagnostic": "CUDA command buffers disabled only to map runtime kernels to HLO source origins; not a production timing comparison.",
+    "device_kernel_ms": 390.30,
+    "dense_geometry_fourier_ms": 76.74,
+    "local_row_jacobian_fourier_ms": 49.34,
+    "local_row_jacobian_fourier_launches": 752,
+    "historical_exclusion_commit": "c595c25734a12acabf9d6028fe65b710b6f786f3",
+    "next_experiment": "Compare existing separable synthesis in local row-Jacobian AD shapes, preserving global policy; require value/JVP/VJP parity and compile, temporary-memory and warm CPU/GPU measurements."
+  },
   "magnetic_projection": {
     "upstream_pr": "https://github.com/uwplasma/booz_xform_jax/pull/8",
     "upstream_commit": "72d9ddc",
