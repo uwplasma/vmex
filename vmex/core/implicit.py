@@ -125,6 +125,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import os
 import sys
 import types
@@ -328,6 +329,9 @@ class ImplicitConfig:
     #: 5e-07 against the frozen-path FD, for 14-26% of a forward solve and
     #: 9-14% of a value-and-gradient across the gradient decks.
     refine_tol: float = 1.0e-10
+    #: Finite norm bound for the actual implicit primal residual. Independent
+    #: of the Newton budget: ``refine_tol=inf`` does not certify a non-root.
+    primal_tol: float = 1.0e-10
     #: Largest ``(fsqr + fsqz + fsql) / ftol`` accepted for implicit
     #: differentiation when a trial exhausts its iteration budget.
     max_fsq_ratio: float = 1.0e6
@@ -365,6 +369,7 @@ def make_config(
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     max_fsq_ratio: float = 1.0e6,
     hot_restart: bool = False,
     device: Any = None,
@@ -384,6 +389,8 @@ def make_config(
         max_iterations = int(np.asarray(inp.niter_array).ravel()[-1])
     if not np.isfinite(max_fsq_ratio) or max_fsq_ratio <= 0.0:
         raise ValueError("max_fsq_ratio must be finite and positive")
+    if not np.isfinite(primal_tol) or primal_tol <= 0.0:
+        raise ValueError("primal_tol must be finite and positive")
     refine_tol = float(refine_tol)
     if not refine_tol > 0.0:
         raise ValueError("refine_tol must be positive or numpy.inf")
@@ -397,7 +404,7 @@ def make_config(
         adjoint_restart=int(adjoint_restart),
         adjoint_maxiter=int(adjoint_maxiter),
         adjoint_gcrot_m=int(adjoint_gcrot_m), adjoint_gcrot_k=int(adjoint_gcrot_k),
-        refine_tol=refine_tol,
+        refine_tol=refine_tol, primal_tol=float(primal_tol),
         max_fsq_ratio=float(max_fsq_ratio),
         hot_restart=bool(hot_restart), device=device,
     ))
@@ -1468,8 +1475,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     ``P`` confines the correction to the evolved dofs, so the refined state
     solves exactly the equations the host solver iterates, only closer.  Any
     refinement that fails to improve the residual — a stalled Krylov step, a
-    non-finite iterate — leaves ``state`` untouched: the anchor is an
-    accuracy gain, never a precondition for returning a gradient.
+    non-finite iterate — leaves ``state`` untouched: the anchor is a
+    best-effort accuracy gain. The optimization status lane separately checks
+    the returned primal before permitting its implicit pullback.
     """
     tol = float(cfg.refine_tol)
     if not np.isfinite(tol) or tol <= 0.0:
@@ -1618,18 +1626,89 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     return as_np(state), mask
 
 
+# Exact-parameter certificate for the state returned by the status callback.
+# A host solver's historical stopping flag is not a certificate for a refined
+# state. Keep the measurements available to the public problem diagnostics.
+_LAST_PRIMAL_CERTIFICATE: weakref.WeakKeyDictionary[
+    ImplicitConfig, tuple[bytes, bytes, dict[str, Any]]
+] = weakref.WeakKeyDictionary()
+
+
+def _primal_state_key(state):
+    digest = hashlib.sha256()
+    for leaf in jax.tree.leaves(state):
+        array = np.ascontiguousarray(leaf, dtype=np.float64)
+        digest.update(str(array.shape).encode())
+        digest.update(array.data)
+    return digest.digest()
+
+
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _primal_measurements(state, params, mask, cfg):
+    P = _dof_projector(cfg, mask)
+    runtime = runtime_from_params(params, cfg)
+    assembled = _assemble(P(state), runtime, state, P, _edge_mask(cfg))
+    force, raw, diagnostics = evaluate_forces(assembled, runtime)
+    norm = _tree_norm(P(force))
+    fsq = raw.fsqr + raw.fsqz + raw.fsql
+    finite = jnp.all(jnp.stack([
+        jnp.all(jnp.isfinite(leaf)) for leaf in jax.tree.leaves(assembled)
+    ]))
+    return norm, fsq, finite & ~diagnostics.jacobian_sign_changed
+
+
+def _primal_is_eligible(norm, fsq, geometry_valid, cfg):
+    ratio = fsq / cfg.ftol
+    return (geometry_valid & jnp.isfinite(norm) & jnp.isfinite(ratio)
+            & (norm <= cfg.primal_tol) & (ratio >= 0.0)
+            & (ratio <= cfg.max_fsq_ratio))
+
+
+def _require_primal(cfg, params, state, mask):
+    measurements = _primal_measurements(state, params, mask, cfg)
+    eligible = _primal_is_eligible(*measurements, cfg)
+    if not isinstance(eligible, jax.core.Tracer) and not bool(eligible):
+        raise RuntimeError(
+            "implicit derivative requires a certified primal: "
+            f"residual={float(measurements[0]):.3e}, "
+            f"primal_tol={cfg.primal_tol:.3e}; use "
+            "solve_implicit_status for a value-only rejected trial")
+    return eligible
+
+
+def _primal_checked_tree(tree, eligible):
+    return jax.tree.map(lambda x: jnp.where(eligible, x, jnp.nan), tree)
+
+
+def _certify_primal(cfg, params, state, mask):
+    """Measure the returned fixed-boundary primal, not the host stop state.
+
+    The preconditioned norm gates the residual actually linearized; fresh raw
+    normalized FSQ prevents a small preconditioner from concealing force error.
+    Neither this nor a linear residual certificate bounds derivative error in
+    an ill-conditioned problem; re-solved Taylor tests remain necessary.
+    """
+    norm, fsq, geometry_valid = _primal_measurements(
+        _device_pin(cfg, state), params, _device_pin(cfg, mask), cfg)
+    certified = _primal_is_eligible(norm, fsq, geometry_valid, cfg)
+    norm, fsq = float(norm), float(fsq)
+    ratio = fsq / cfg.ftol
+    return dict(primal_residual_norm=norm, primal_tol=float(cfg.primal_tol),
+                primal_fsq=fsq, primal_fsq_ratio=ratio,
+                primal_geometry_valid=bool(geometry_valid),
+                derivative_certified=bool(certified))
+
+
 def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
     """Status-returning host callback for optimization trial points.
 
-    Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    when the iteration budget was exhausted above ``cfg.max_fsq_ratio``.
-    The final force residual and its ratio to ``ftol`` accompany the state so
-    every optimizer interface applies the same acceptance policy.  That
-    residual is the host solver's own, from before the fixed-point refinement
-    (which only lowers it), so the acceptance stays conservative.
+    Status 0 admits an implicit pullback, 1 denotes a failed solve, and 2
+    denotes an uncertified primal (value-only). Historical host FSQ is returned
+    for compatibility; fresh primal measurements are recorded separately.
     """
     with _device_context(cfg):
         _HOST_ERROR.clear()
+        _LAST_PRIMAL_CERTIFICATE.pop(cfg, None)
         error = None
         try:
             state, mask = _host_solve_and_mask_impl(cfg, params_np)
@@ -1671,7 +1750,10 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         result = hit[1]
         fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
         ratio = fsq / cfg.ftol
-        status = 0 if bool(result.converged) or ratio <= cfg.max_fsq_ratio else 2
+        certificate = _certify_primal(cfg, params, state, mask)
+        _LAST_PRIMAL_CERTIFICATE[cfg] = (
+            _params_key(params), _primal_state_key(state), certificate)
+        status = 0 if certificate["derivative_certified"] else 2
         if status != 0:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
         return state, mask, np.int32(status), np.float64(fsq), np.float64(ratio)
@@ -1795,8 +1877,9 @@ def solve_implicit_status(
     """Differentiable equilibrium with an exception-free trial status.
 
     Status is 0 for a derivative-certified state, 1 for a failed solve, and 2
-    for an under-converged state.  ``fsq`` and ``fsq_ratio`` expose the force
-    residual used for that decision.  Only status 0 has an implicit pullback.
+    for an uncertified primal. ``fsq`` and ``fsq_ratio`` expose historical
+    host force residuals; admission also requires the actual returned residual
+    and geometry to pass. Only status 0 has an implicit pullback.
     """
     state, _, status, fsq, fsq_ratio = _callback_solve_status(params, cfg)
     return state, status, fsq, fsq_ratio
@@ -2624,6 +2707,7 @@ def implicit_state_tangent_multi_rhs(
         params, x_star, dof_mask, tangent_batch = _device_pin(
             cfg, (params, x_star, dof_mask, tangent_batch)
         )
+        eligible = _require_primal(cfg, params, x_star, dof_mask)
         dz_batch, report = _implicit_evolved_tangent_multi_rhs(
             params, cfg, x_star, dof_mask, tangent_batch,
             active_fields=active_fields,
@@ -2645,6 +2729,8 @@ def implicit_state_tangent_multi_rhs(
             )[1]
 
         state_batch = jax.vmap(assemble_tangent)(dz_batch, tangent_batch)
+        state_batch = _primal_checked_tree(state_batch, eligible)
+        report = report._replace(converged=report.converged & eligible)
         return _device_pin(cfg, (state_batch, report))
 
 
@@ -2741,7 +2827,19 @@ def _solve_implicit_bwd(cfg, res, gbar):
     with _device_context(cfg):
         res = _device_pin(cfg, res)
         gbar = _device_pin(cfg, gbar)
-        return _device_pin(cfg, _solve_implicit_bwd_impl(cfg, res, gbar))
+        params, state, mask = res
+        eligible = _require_primal(cfg, params, state, mask)
+        if not isinstance(eligible, jax.core.Tracer):
+            # Preserve concrete adjoint certificates and their typed errors;
+            # staging an eager call would replace that policy with NaN output.
+            return _device_pin(cfg, _solve_implicit_bwd_impl(cfg, res, gbar))
+        gradient = jax.lax.cond(
+            eligible,
+            lambda _: _solve_implicit_bwd_impl(cfg, res, gbar)[0],
+            lambda _: jax.tree.map(lambda x: jnp.full_like(x, jnp.nan), params),
+            operand=None,
+        )
+        return (_device_pin(cfg, gradient),)
 
 
 def _solve_implicit_bwd_impl(cfg, res, gbar):
@@ -2859,11 +2957,13 @@ def implicit_state_pullback_multi_rhs(
         x_star = _device_pin(cfg, x_star)
         dof_mask = _device_pin(cfg, dof_mask)
         gbar_batch = _device_pin(cfg, gbar_batch)
-        return _device_pin(cfg, _implicit_state_pullback_multi_rhs_impl(
+        eligible = _require_primal(cfg, params, x_star, dof_mask)
+        gradient = _implicit_state_pullback_multi_rhs_impl(
             params, cfg, x_star, dof_mask, gbar_batch,
             solver=solver, active_fields=active_fields,
             probe_chunk_size=probe_chunk_size,
-            response_chunk_size=response_chunk_size))
+            response_chunk_size=response_chunk_size)
+        return _device_pin(cfg, _primal_checked_tree(gradient, eligible))
 
 
 def _implicit_state_pullback_multi_rhs_impl(
@@ -3128,6 +3228,7 @@ def run(
     adjoint_gcrot_m: int = 100,
     adjoint_gcrot_k: int = 20,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     device: Any = None,
 ) -> ImplicitSolution:
     """Differentiable fixed-boundary equilibrium: input -> outputs pytree.
@@ -3182,7 +3283,7 @@ def run(
         multigrid=multigrid, lconm1=lconm1, adjoint_tol=adjoint_tol,
         adjoint_restart=adjoint_restart, adjoint_maxiter=adjoint_maxiter,
         adjoint_gcrot_m=adjoint_gcrot_m, adjoint_gcrot_k=adjoint_gcrot_k,
-        refine_tol=refine_tol,
+        refine_tol=refine_tol, primal_tol=primal_tol,
     )
     dev = None
     inferred_home = False

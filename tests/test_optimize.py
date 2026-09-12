@@ -569,7 +569,7 @@ def test_scipy_bfgs_scalar_lane_completes_and_descends():
     np.testing.assert_array_equal(bad_gradient, np.zeros_like(problem.x0))
 
 
-def test_from_loss_honors_bound_scalar_method_literally():
+def test_from_loss_honors_bound_scalar_method_literally(monkeypatch):
     """The ``loss=`` lane uses a bound scalar objective method exactly as passed.
 
     ``QuasisymmetryRatioResidual.total_state`` is bound to an owner that also
@@ -584,14 +584,57 @@ def test_from_loss_honors_bound_scalar_method_literally():
     qs = opt.QuasisymmetryRatioResidual(SURFACES, 1, -1)
 
     problem = opt.VmecProblem.from_loss(inp, qs.total_state, max_mode=1)
-    value = float(problem.fun(problem.x0))
-    assert np.isfinite(value)
-    eq = problem.equilibrium_from_x(problem.x0)
+    from vmex.core import implicit as imp
+    cfg = problem.metadata["config"]
+    # With no derivative cache, ordinary materialization can recover a missing
+    # host memo; it must not require the newer snapshot path.
+    imp._LAST_SOLVE.pop(cfg, None)
+    uncached = problem.equilibrium_from_x(problem.x0)
+    assert uncached.result.converged
+    value, gradient = problem.value_and_grad(problem.x0)
+    assert np.isfinite(value) and np.all(np.isfinite(gradient))
+    saved_anchor = problem._vg_cache_anchor
+    assert saved_anchor is not None
+    # Materialization uses the per-problem copy even after global memo loss.
+    with monkeypatch.context() as patch:
+        patch.delitem(imp._LAST_SOLVE, cfg, raising=False)
+        patch.delitem(imp._LAST_REFINED, cfg, raising=False)
+        eq = problem.equilibrium_from_x(problem.x0)
+
+        def unexpected_solve(*args, **kwargs):
+            raise AssertionError("snapshot field attempted a live equilibrium solve")
+
+        patch.setattr(imp, "_host_solve", unexpected_solve)
+        with pytest.raises(RuntimeError, match="optimizable parameters"):
+            eq.field.B_vjp(jnp.zeros((1, 3)))
+
+        from vmex.core import virtual_casing as vc
+        from vmex.core.extender import VmecExtender
+
+        captured = []
+
+        def snapshot_surface(_inp, state, **kwargs):
+            captured.append(state)
+            return object()
+
+        external = lambda xyz: jnp.ones_like(xyz)  # noqa: E731
+        snapshot = VmecExtender(external)
+        patch.setattr(vc, "surface_field_data_from_state", snapshot_surface)
+        patch.setattr(VmecExtender, "from_surface_data", classmethod(
+            lambda cls, data, **kwargs: snapshot))
+        exterior = eq.exterior_field(external_field=external, nphi=2, ntheta=4)
+        assert captured[0] is eq.state
+        with pytest.raises(RuntimeError, match="optimizable parameters"):
+            exterior.B_vjp(jnp.zeros((1, 3)))
+        assert eq.exterior_field(plasma="vacuum", external_field=external) is not None
+        with pytest.raises(ValueError, match="parameterized field factories"):
+            eq.exterior_field(external_parameters=jnp.ones(1))
+    for actual, cached in zip(jax.tree.leaves(eq.state), jax.tree.leaves(saved_anchor.state)):
+        np.testing.assert_array_equal(actual, cached)
+    assert eq.result.fsqr == saved_anchor.fsqr
     expected = float(jax.device_get(qs.total_state(eq.state, eq.runtime)))
-    # The problem evaluates the guarded-refinement fixed point; the
-    # materialized equilibrium is the host solve, so agreement is at the
-    # solver-refinement level, not machine precision.
-    np.testing.assert_allclose(value, expected, rtol=1e-5, atol=1e-10)
+    # Materialization must use the same refined anchor as the scalar value.
+    np.testing.assert_allclose(value, expected, rtol=1e-12, atol=1e-12)
 
     with pytest.raises(ValueError, match="must return a scalar"):
         opt.VmecProblem.from_loss(inp, qs.residuals_state, max_mode=1)

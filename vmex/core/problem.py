@@ -545,6 +545,10 @@ class FunctionProblem:
         )
 
 
+class _PrimalAnchorError(RuntimeError):
+    """Cached derivatives cannot identify one materializable primal."""
+
+
 class VmecProblem(FunctionProblem):
     """A :class:`FunctionProblem` backed by a VMEX equilibrium solve.
 
@@ -762,6 +766,11 @@ class VmecProblem(FunctionProblem):
         """
         if self._equilibrium_from_x is None:
             raise AttributeError("this problem does not provide equilibria")
+        cached_factory = self.metadata.get("equilibrium_from_cached_result")
+        if callable(cached_factory):
+            cached_result = self._cached_primal_result(self._x(x))
+            if cached_result is not None:
+                return cached_factory(self._x(x), cached_result, int(newton_iterations))
         if int(newton_iterations) == 10:
             return self._equilibrium_from_x(self._x(x))
         return self._equilibrium_from_x(
@@ -994,8 +1003,77 @@ class VmecProblem(FunctionProblem):
             data, digits=digits, precision=precision)
         return interface.bnormal_residual(external_field) / Bmag
 
+    def _remember_primal_cache(self, name, previous):
+        cache = getattr(self, name)
+        if cache is not previous:
+            from . import implicit as imp
+            cfg = self.metadata.get("config")
+            certificate = (imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+                           if isinstance(cfg, imp.ImplicitConfig) else None)
+            refined = (imp._LAST_REFINED.get(cfg)
+                       if isinstance(cfg, imp.ImplicitConfig) else None)
+            if (certificate is None or refined is None
+                    or certificate[0] != refined[0]
+                    or certificate[1] != imp._primal_state_key(refined[1])):
+                certificate = None
+            if certificate is not None:
+                certificate = (*certificate[:2], dict(certificate[2]))
+            setattr(self, name + "_primal", certificate)
+            anchor = None
+            if certificate is not None and certificate[2]["derivative_certified"]:
+                source = imp._LAST_SOLVE.get(cfg)
+                if source is not None and source[0] == certificate[0]:
+                    def immutable_copy(value):
+                        copied = np.array(value, dtype=np.float64, copy=True)
+                        copied.setflags(write=False)
+                        return copied
+                    state = imp.jax.tree.map(immutable_copy, refined[1])
+                    anchor = replace(source[1], state=state)
+            setattr(self, name + "_anchor", anchor)
+
+    def _cached_primal_result(self, x):
+        """Return one immutable certified anchor; reject ambiguous cache pairs."""
+        with self._lock:
+            candidates = []
+            for name in ("_vg_cache", "_rj_cache"):
+                cache = getattr(self, name)
+                certificate = getattr(self, name + "_primal", None)
+                if (cache is not None and cache[0] == self._key(x)
+                        and certificate is not None and certificate[2]["derivative_certified"]):
+                    anchor = getattr(self, name + "_anchor", None)
+                    if anchor is None:
+                        raise _PrimalAnchorError("cached derivative lacks equilibrium materialization provenance")
+                    candidates.append((certificate, anchor))
+            if not candidates:
+                return None
+            if any(item[0][:2] != candidates[0][0][:2] for item in candidates[1:]):
+                raise _PrimalAnchorError("scalar and residual derivative caches have conflicting equilibrium anchors")
+            return candidates[0][1]
+
+    def value_and_grad(self, x: Array) -> tuple[float, np.ndarray]:
+        """Cache scalar derivatives together with their primal certificate."""
+        with self._lock:
+            previous = self._vg_cache
+            pair = super().value_and_grad(x)
+            self._remember_primal_cache("_vg_cache", previous)
+            return pair
+
+    fun_and_grad = value_and_grad
+
+    def residual_and_jac(self, x: Array) -> tuple[np.ndarray, np.ndarray]:
+        """Cache residual derivatives together with their primal certificate."""
+        with self._lock:
+            previous = self._rj_cache
+            pair = super().residual_and_jac(x)
+            self._remember_primal_cache("_rj_cache", previous)
+            return pair
+
     def evaluate(self, x: Array, *, derivatives: bool = True) -> Evaluation:
-        """Evaluate and attach VMEC solve/adjoint status diagnostics."""
+        """Evaluate and attach coherent solve/adjoint status diagnostics."""
+        with self._lock:
+            return self._evaluate_with_primal(x, derivatives=derivatives)
+
+    def _evaluate_with_primal(self, x: Array, *, derivatives: bool) -> Evaluation:
         evaluation = super().evaluate(x, derivatives=derivatives)
         cfg = self.metadata.get("config")
         if cfg is None:
@@ -1010,6 +1088,9 @@ class VmecProblem(FunctionProblem):
         equilibrium = None
         try:
             equilibrium = self.equilibrium_from_x(evaluation.x)
+        except _PrimalAnchorError as exc:
+            return replace(evaluation, status="under_converged", message=str(exc),
+                           diagnostics={**evaluation.diagnostics, "derivative_certified": False})
         except (AttributeError, RuntimeError):
             pass
         else:
@@ -1034,11 +1115,41 @@ class VmecProblem(FunctionProblem):
                 max_fsq_ratio=float(cfg.max_fsq_ratio),
                 derivative_certified=bool(result.converged or ratio <= cfg.max_fsq_ratio),
             )
+            if isinstance(cfg, imp.ImplicitConfig) and not bool(cfg.inp.lfreeb):
+                params = imp.params_from_input(self.input_from_x(evaluation.x))
+                certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+                refined = imp._LAST_REFINED.get(cfg)
+                matching = (certificate is not None and refined is not None
+                            and certificate[0] == imp._params_key(params)
+                            and refined[0] == certificate[0]
+                            and certificate[1] == imp._primal_state_key(refined[1]))
+                if derivatives:
+                    saved_certificates = [
+                        getattr(self, name + "_primal", None)
+                        for name in ("_vg_cache", "_rj_cache")
+                        if getattr(self, name) is not None
+                        and getattr(self, name)[0] == self._key(evaluation.x)
+                    ]
+                    if saved_certificates:
+                        certificate = saved_certificates[0]
+                        matching = (certificate is not None
+                                    and certificate[0] == imp._params_key(params)
+                                    and all(saved is not None and saved[:2] == certificate[:2]
+                                            for saved in saved_certificates))
+                        diagnostics["derivative_anchor_matches_current_refinement"] = bool(
+                            matching and refined is not None
+                            and refined[0] == certificate[0]
+                            and imp._primal_state_key(refined[1]) == certificate[1])
+                diagnostics["derivative_certified"] = False
+                if matching:
+                    diagnostics.update(certificate[2])
+                else:
+                    diagnostics["primal_certificate_missing"] = True
             if not diagnostics["derivative_certified"]:
                 return replace(
                     evaluation,
                     status="under_converged",
-                    message="FSQ exceeds the implicit-derivative threshold",
+                    message="Primal state lacks an implicit-derivative certificate",
                     diagnostics=diagnostics,
                 )
         error = imp._LAST_STATUS_ERROR.get(cfg)

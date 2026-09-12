@@ -18,6 +18,11 @@ revision it was measured at, and the pages that cite it.
 
 ### Changed
 
+- Ordinary implicit derivatives require a finite `primal_tol` on the returned
+  state, independently of Newton refinement controls. Cached derivative
+  equilibria retain their own coefficients and historical solve diagnostics;
+  their interior/exterior fields are coherent snapshots with spatial
+  derivatives, but do not expose optimization-parameter VJPs.
 - The gyrokinetic flux-tube `epsilon` is the field-line `|B|` modulation depth
   and `R0` the effective major radius, so GKX's minor radius is physical (#271).
 - Optimization seed refinement is a deferred per-configuration executable, on the
@@ -25,6 +30,9 @@ revision it was measured at, and the pages that cite it.
 
 ### Fixed
 
+- Radial lifts reject knot spans without an interior source sample before
+  evaluating fields. Primal admission checks fresh force and geometry, and
+  derivative-cache provenance is recorded atomically with its coefficients.
 - Polish sizes its force sweep from the deck's own mode table and checkpoints the
   per-point kernel: W7-X standard certifies at 3.0 GiB, not 34 (`benchmarks/polish_memory_w7x.json`).
 - Force-error reporting separates native accuracy from WOUT reconstruction; the
