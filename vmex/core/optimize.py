@@ -329,8 +329,12 @@ class Equilibrium:
 
 
 def _auto_jac_chunk(dim: int) -> int:
-    """Bound device-aware batching by the conservative square-root policy."""
-    return min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    """Avoid a second remainder graph without expanding the memory budget."""
+    bound = min(int(auto_chunk_size(dim)), int(np.ceil(np.sqrt(dim))))
+    # lax.map traces a separate vmap for the tail. Prefer a nearby divisor,
+    # but retain the original width when avoiding a tail would serialize it.
+    widths = range(bound, (bound + 1) // 2 - 1, -1)
+    return next((width for width in widths if dim % width == 0), bound)
 
 
 def _linear_response_summary(report: Any) -> jnp.ndarray:
@@ -2075,7 +2079,8 @@ def least_squares(
     :func:`solvax.chunk_map`: ``"auto"`` (default) caps SOLVAX's
     device-aware width by a conservative square-root policy, so an
     accelerator memory report cannot expand the full probe batch; an ``int``
-    fixes that many dofs at a time; ``None`` forces one wide batch.  Column
+    fixes that many dofs at a time; ``None`` forces one wide batch. Automatic
+    widths prefer a nearby divisor to avoid compiling a separate tail. Column
     blocks are mathematically independent, so the assembled Jacobian is
     identical across chunk sizes to float64 round-off.
 
@@ -3347,7 +3352,7 @@ def _least_squares_implicit(
     def equilibrium_from_x(
         x: np.ndarray, *, newton_iterations: int = 10
     ) -> Equilibrium:
-        """Materialize the exact accepted state already used by the objective."""
+        """Materialize the native solve and field views at the accepted point."""
         from .extender import VmecExtender, VmecInteriorField
 
         x = np.asarray(x, dtype=float)

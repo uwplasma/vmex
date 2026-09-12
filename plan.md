@@ -1125,3 +1125,48 @@ tradeoff in [linearize](https://docs.jax.dev/en/latest/_autosummary/jax.lineariz
 Refinement continues to test the full Newton residual, following the inexact
 Newton condition of [Eisenstat and Walker (1996)](https://doi.org/10.1137/0917003);
 raw-block seeding does not justify loosening the force acceptance threshold.
+
+
+### Resumption: derivative compilation and accepted-point reuse
+
+The parity-transpose correction at 9343b4b4 passes all CI. The next optimizer
+change keeps automatic Jacobian widths within the existing square-root/device
+cap but prefers a nearby divisor (8 columns: 2; 48: 6; prime 53 retains 8).
+[JAX lax.map](https://docs.jax.dev/en/latest/_autosummary/jax.lax.map.html)
+separately traces the remainder, so avoiding that remainder reduces duplicated
+large derivative graphs. Explicit widths and derivative tolerances are unchanged.
+An attempted final-equilibrium cache reuse is withheld: the reduced QA run
+returned no final equilibrium despite passing the small smoke test. Diagnose
+native convergence and accepted-point materialization before removing the
+diagnostic re-solve. Native and finite-refined states remain distinct.
+
+Office 48-DOF collaborator first derivative: 210.10 to 122.92 s against the
+selected two-row Thomas control (earlier pre-Thomas control: 190.65 s).
+At five identical parameter vectors, maximum relative Jacobian disagreement
+is 1.81e-12 and residual disagreement 1.56e-12. Reduced QA GPU four-evaluation
+run: 255.41 to 166.95 s, first Jacobian 180.90 to 114.67 s, same final cost
+1.39305e-5. The 166.95 s run omitted final physics and is excluded from validated speedup
+claims. These are component/capped results, not converged designs or a
+universal speedup. Repeat final comparisons without competing memory-heavy jobs.
+Raw reports remain external under results/divisor-collaborator-gpu and
+results/candidate-materialized-qa-gpu; use their source hashes because the
+measurement checkout is a rolling file snapshot.
+
+Free-boundary saved-pullback reuse passes the CTH current derivative against
+independent re-solves plus three guards on GPU (4 tests, 432 s). Keep it under
+review: the larger NCSX test exceeded memory limits with both implementations.
+Instrumented original source completes its forward solve in 68 s, then exceeds
+20 GiB during transpose compilation. This is an existing compiler bottleneck,
+not evidence that the proposed reuse passes the second-family gate.
+
+The CPU QH/QI/QP historical matrix is complete. QI takes 118.53/207.00/137.26 s
+for 0.3/0.7/candidate; QP takes 124.04/252.33/122.87 s. All are capped and QI
+objectives differ by version. QH 0.7/candidate reject uncertified columns;
+0.3's capped endpoint has aspect 71.3. Preserve these failure certificates;
+completion alone is not an accuracy benchmark.
+
+Next gates: validate and land the bounded optimizer change, resolve NCSX
+compilation memory, repeat full collaborator acceptance/recomputation checks,
+and rerun current-policy cold CLI/Python equilibria. SOLVAX PR #102 is reviewed
+independently for merge; VMEX #299 remains draft while workflow correctness
+and performance gates are open. No release.
