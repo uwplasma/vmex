@@ -494,7 +494,7 @@ and plotting before reorganizing modules;
 merge the duplicated `_tree_norm`, lazy-export block and matplotlib guard.
 About 1,600 lines leave `vmex/` with no product path touched; four of these
 need a changelog note. Track added and deleted lines, file count, installed
-size and artifact bytes per implementation PR. Profile `vmex --plotting`
+size and artifact bytes per implementation PR. Profile `vmex --plot`
 and representative examples separately from solving: imports, field evaluation,
 rendering and saving. Preserve figure content and numerical sampling; require
 measured runtime/memory benefit and image inspection before promotion. Reuse
@@ -1270,3 +1270,33 @@ independent frozen-state reproduction isolates the resulting 3.4e-6 cost jump.
 Document branch-local AD; do not freeze minima or change the objective silently.
 Projected residuals near 1e-13 do not establish strong force balance. P3
 remains open; neither this local test nor the capped runs certify a design.
+
+### Measured plotting startup (2026-09-13)
+
+The plotting implementation is stacked separately on the performance branch.
+For the complete six-figure `vmex --plot` workflow on one saved nfp=1 QI WOUT
+(ns=31, mpol=6, ntor=6), exact fresh-process times are 21.569→12.544 seconds
+on a Xeon W-2295 CPU and 31.230→16.383 seconds on its RTX A4000. Both pairs use
+identical data, package versions, sampling, disabled persistent JAX cache and
+one BLAS thread; device/source ledgers confirm CPU versus the same physical
+GPU. NEO_JAX was absent, so its optional diagnostic cost remains unmeasured.
+These measurements concern plotting, not solving or optimization.
+
+Angle-addition contractions remove three-dimensional Fourier phase tables.
+A shared row body bounds WOUT Gamma_c compilation (9.158→1.884 seconds and
+51.95→23.88 MB executable temporary storage); its warm runtime rises from
+0.0935 to 0.1393 seconds, so live optimization retains unrolled rows.
+The J map reuses one compiled per-surface bounce calculation. Default figures,
+physical sampling and status masks are preserved. Wrapped stability notes and
+one visible offset correct clipped text and duplicate near-unity force ticks;
+the vacuum-normalization limitation remains documented.
+
+All 73 plotting and mapped-row tests pass under coverage, including final
+layout, signed Fourier modes, batches, angular derivatives and CPU JVPs.
+The mapped-row tests also pass on GPU. All 27 changed executable lines are
+covered; individual bounce-status and NaN masks agree on ten surfaces,
+with action differences below 5.8e-15. The focused stacked draft PR awaits
+CI and review. Keep the coarse diagnostic images out of the README; release
+and GitHub merging require the existing gates and explicit user approval.
+Production source adds 20 net lines across two existing files;
+regression tests are counted separately, with no new repository files.

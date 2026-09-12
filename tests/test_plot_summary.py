@@ -628,12 +628,10 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     """A radial maximum-J diagnostic holds physical pitch fixed."""
     import vmex.core.bounce as bounce
 
-    pitches = []
-
     def _fake_bounce(*, alpha, pitch, **_kwargs):
-        pitches.append(float(np.asarray(pitch)[0]))
         shape = (1, len(alpha), 1, 1)
-        return {"action": np.ones(shape), "usable_mask": np.ones(shape, dtype=bool)}
+        return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
     booz = {
@@ -643,17 +641,15 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         "s_b": np.array([0.25, 0.75]),
     }
     result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05], rtol=0.0, atol=2e-4)
-    np.testing.assert_allclose(result["pitch"], pitches[0])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
+    np.testing.assert_allclose(result["j_map"], result["pitch"])
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 1.05, 1.0 / 1.05])
+    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
     np.testing.assert_allclose(result["pitch_inverse"], 1.05)
 
-    pitches.clear()
     result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4)
-    np.testing.assert_allclose(pitches, [1.0 / 0.85])
+    np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
     np.testing.assert_array_equal(result["trapped_surface"], [True, False])
     assert np.all(np.isfinite(result["j_map"][0]))
     assert np.all(np.isnan(result["j_map"][1]))
@@ -742,3 +738,58 @@ def test_plot_profiles_without_fsqt_history(solved_case, tmp_path):
     assert not np.any(np.asarray(wout.fsqt) > 0.0)  # in-memory wout: no history
     path = plotting.plot_profiles(wout, tmp_path / "profiles.png")
     assert path.exists() and path.stat().st_size > 0
+
+
+@pytest.mark.parametrize("derivative", ({}, {"dtheta": 1}, {"dphi": 1}))
+@pytest.mark.parametrize("parity", ("cos", "sin", "both"))
+@pytest.mark.parametrize("batch_shape", ((), (3,), (2, 3)))
+def test_plot_fourier_synthesis_matches_dense_series(derivative, parity, batch_shape):
+    """Signed modes, asymmetric partners and radial batches keep their series."""
+    rng = np.random.default_rng(918)
+    m, n = np.meshgrid(np.arange(16), np.arange(-12, 13), indexing="ij")
+    m, n = m.ravel(), 3 * n.ravel()
+    theta = np.linspace(0., 2 * np.pi, 31)
+    phi = np.linspace(0., 2 * np.pi / 3, 37)
+    c, s = rng.normal(size=(2, *batch_shape, m.size))
+    c = None if parity == "sin" else c
+    s = None if parity == "cos" else s
+    phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * phi
+    cosine, sine = np.cos(phase), np.sin(phase)
+    if derivative:
+        factor = m if "dtheta" in derivative else -n
+        cosine, sine = -sine * factor[:, None, None], cosine * factor[:, None, None]
+    expected = np.zeros((*batch_shape, theta.size, phi.size))
+    if c is not None:
+        expected += np.tensordot(c, cosine, axes=(-1, 0))
+    if s is not None:
+        expected += np.tensordot(s, sine, axes=(-1, 0))
+    actual = plotting._eval_modes(c, s, m, n, theta, phi, **derivative)
+    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-11)
+
+
+def test_near_unity_force_ticks_and_long_stability_status_fit():
+    """Vacuum-limit diagnostics keep distinct values and readable failure notes."""
+    plt = plotting._import_matplotlib()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
+    wout = SimpleNamespace(ns=31, equif=np.linspace(1 - 1e-10, 1., 31),
+                          DMerc=np.linspace(-1., -2., 31), betatotal=0.,
+                          vp=np.linspace(1., 2., 31))
+    try:
+        plotting._relative_force_error_panel(axes[0], wout)
+        plotting._stability_panel(axes[1], wout, {
+            "valid": False, "note": "D_R self-check failed (DMerc mismatch 3.8e-02)"
+        }, s_plot_ignore=.2)
+        fig.canvas.draw()
+        labels = [text.get_text() for text in _drawn_tick_labels(axes[0].yaxis)]
+        lo, hi = axes[0].get_ylim()
+        labels += [tick.label1.get_text() for tick in axes[0].yaxis.get_minor_ticks()
+                   if lo <= tick.get_loc() <= hi and tick.label1.get_text()]
+        assert len(labels) > 1 and len(labels) == len(set(labels))
+        assert axes[0].get_yscale() == "log"
+        assert axes[0].yaxis.get_offset_text().get_text()
+        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), wout.equif[1:-1])
+        extent = axes[1].title.get_window_extent(fig.canvas.get_renderer())
+        assert extent.x0 >= fig.bbox.x0 and extent.x1 <= fig.bbox.x1
+        assert "self-check failed" in axes[1].get_title()
+    finally:
+        plt.close(fig)

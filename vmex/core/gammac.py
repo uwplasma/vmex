@@ -518,6 +518,7 @@ def _rows_from_context(
     num_pitch: int,
     quadrature_order: int,
     max_wells: int,
+    map_rows: bool = False,
 ) -> dict[str, Array]:
     """``Gamma_c`` of the full-mesh rows ``rows`` of one spectral context.
 
@@ -530,23 +531,23 @@ def _rows_from_context(
     """
     length, alpha, x, level_nodes = _sampling_grids(
         ctx["s"].dtype, nalpha, num_transit, points_per_transit, num_pitch)
-    results = []
-    iotas = []
-    for j in rows:
+    def row(j):
         ing = _line_ingredients(ctx, j, jnp.asarray(zeta0, ctx["s"].dtype),
                                 alpha, x)
-        iotas.append(ing.pop("iota"))
+        iota = ing.pop("iota")
         pitch, weights = _pitch_grid(ing["bmag"], level_nodes, num_pitch)
-        results.append(gamma_c_from_fieldlines(
+        out = gamma_c_from_fieldlines(
             **ing, length=length, pitch=pitch, pitch_weights=weights,
-            max_wells=max_wells, quadrature_order=quadrature_order))
+            max_wells=max_wells, quadrature_order=quadrature_order)
+        return {**{name: out[name] for name in _ROW_FIELDS}, "iota": iota}
 
-    stacked: dict[str, Array] = {
-        name: jnp.stack([out[name] for out in results]) for name in _ROW_FIELDS
-    }
+    # WOUT diagnostics favor one small compilation; live optimization retains
+    # the unrolled rows and their faster repeated execution.
+    stacked = (jax.lax.map(row, jnp.asarray(rows)) if map_rows else
+               jax.tree.map(lambda *xs: jnp.stack(xs), *(row(j) for j in rows)))
     # The field-line map phi = x / iota is meaningless through iota ~ 0;
     # poison the result instead of returning a plausible number.
-    iota_row = jnp.stack(iotas)
+    iota_row = stacked["iota"]
     stacked["gamma_c"] = jnp.where(
         jnp.abs(iota_row) > 1.0e-6, stacked["gamma_c"], jnp.nan)
     stacked["s"] = ctx["s"][jnp.asarray(rows)]
@@ -595,7 +596,7 @@ def _gamma_c_rows_from_tables(
         dict(tables, lasym=lasym), zeta0, rows=rows, nalpha=nalpha,
         num_transit=num_transit, points_per_transit=points_per_transit,
         num_pitch=num_pitch, quadrature_order=quadrature_order,
-        max_wells=max_wells)
+        max_wells=max_wells, map_rows=True)
 
 
 #: Per-surface outputs of the smooth surrogate rows.
