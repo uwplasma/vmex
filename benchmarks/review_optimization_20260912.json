@@ -1059,5 +1059,32 @@
       "Matched source/parity and independent recurrence quadrature remain distinct from high-resolution physical force accuracy.",
       "Eager-versus-jitted high-mode discrepancies must not be attributed solely to contraction."
     ]
+  },
+  "boozer_lambda_consistency": {
+    "commit": "a6b13367",
+    "change": "Average odd lambda representation before sqrt(s_half), matching native magnetic fields and regular axis extension.",
+    "invariant": "B dot grad(theta+lambda) = iota B dot grad(phi)",
+    "validation": {
+      "gpu_boozer_table_tests_passed": 21,
+      "local_cpu_identity_jvp_tests_passed": 2,
+      "collaborator_four_surface_relative_defect": 1.35e-15,
+      "prior_source_rejected": "Every sampled point in the new symmetric and asymmetric kinematic tests fails on the previous implementation."
+    },
+    "frozen_state_qi": {
+      "before": 0.002688339629020725,
+      "after": 0.002687483403735618
+    },
+    "limits": [
+      "No resolution, caller oversampling, solver tolerance or surrogate formula change.",
+      "This kinematic identity does not certify force balance or covariant integrability of a coarse equilibrium.",
+      "Historical interpolation also has a first-surface defect; wholesale restoration is inappropriate."
+    ],
+    "accepted_surface_pre_fix_study": {
+      "step": 0.001,
+      "refinement_disabled_max_relative_return_error": 0.00014537116218016344,
+      "refinement_1e_minus10_max_relative_return_error": 4.7343919118425504e-08,
+      "max_refined_return_projected_residual": 2.3586340285930395e-11,
+      "canonical_reference_effect": "No numerical difference on these small excursions; not a global gauge-equivalence proof."
+    }
   }
 }

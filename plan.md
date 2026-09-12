@@ -1229,3 +1229,29 @@ than claiming the surrogate formula itself changed. Compare transform
 normalization, modes, coordinate inversion and resolution before considering
 an old-path restoration. The supplied Simsopt adapter rejects unmodified 0.3
 and 0.7 capabilities; that rejection is not a historical runtime result.
+
+
+### Native-field-consistent Boozer lambda
+
+Commit a6b13367 corrects a half-mesh interpolation inconsistency: lambda's
+odd representation must be averaged before multiplication by sqrt(s_half),
+matching the native magnetic field and its regular axis extension. The old
+current path averaged physical full-mesh rows. Reuse the existing parity
+interpolator; do not restore historical interpolation, which also fails on
+the first surface. Independent B·grad(theta+lambda)=iota B·grad(phi) tests
+cover first/middle/outer rows, symmetric and asymmetric geometry, and JVPs.
+The previous code fails every sampled test point; the correction restores
+all four collaborator surfaces to about 1e-15 relative. Twenty-one GPU
+Boozer-table tests and two local CPU identity/JVP tests pass, with static
+checks. The corrected frozen-state QI value is 0.002687483403735618 versus
+0.002688339629020725 before the fix. Resolution and caller oversampling
+are unchanged. This kinematic correction is not a force-balance certificate.
+
+The accepted-surface four-arm study (before this lambda correction) completed
+ordinary/canonical warm references with refinement disabled or at 1e-10.
+For +/-0.001 parameter excursions, refinement reduces maximum relative
+return-cost error from 1.4537e-4 to 4.7344e-8, with projected residual norms
+below 2.36e-11. Canonical reference freezing adds no numerical benefit on
+these excursions, and cold replays agree. This does not close the larger
+cross-problem root discrepancy. Repeat accepted-state derivative/accuracy
+checks after the interpolation correction before a full optimization rerun.
