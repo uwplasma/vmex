@@ -968,6 +968,6 @@
       "local_cpu_refined_qa_replay": "7 points; exact memo/status checked; achieved norms can exceed requested 1e-10, raw and evaluated states saved separately",
       "static": "Ruff, mypy benchmark, docs prose gate, strict Sphinx passed"
     },
-    "handoff": "Local /Users/rogeriojorge/local/vega_tests and office /home/rjorge/vega-performance-20260912. See INVESTIGATION.md for running labels. External profile_forward_block.py and profile_tridiagonal_backends.py save bounded traces/HLO outside git. SOLVAX experiment worktree /Users/rogeriojorge/local/solvax-vmex-small-tridiagonal, branch perf/small-batched-tridiagonal; unrelated SOLVAX PRs100/101 untouched."
+    "handoff": "Local <local-vega-tests> and office <office-benchmark-root>. See INVESTIGATION.md for running labels. External profile_forward_block.py and profile_tridiagonal_backends.py save bounded traces/HLO outside git. SOLVAX experiment worktree <solvax-experiment-worktree>, branch perf/small-batched-tridiagonal; unrelated SOLVAX PRs100/101 untouched."
   }
 }
