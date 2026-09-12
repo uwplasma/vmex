@@ -1111,7 +1111,18 @@
     "local_row_jacobian_fourier_ms": 49.34,
     "local_row_jacobian_fourier_launches": 752,
     "historical_exclusion_commit": "c595c25734a12acabf9d6028fe65b710b6f786f3",
-    "next_experiment": "Compare existing separable synthesis in local row-Jacobian AD shapes, preserving global policy; require value/JVP/VJP parity and compile, temporary-memory and warm CPU/GPU measurements."
+    "local_dense_vs_separable": {
+      "gpu_warm_ms": [6.713, 7.038],
+      "gpu_compile_seconds": [25.45, 38.11],
+      "gpu_temporary_MB": [7.46, 10.64],
+      "cpu_warm_ms": [25.33, 31.35],
+      "cpu_compile_seconds": [7.29, 8.27],
+      "cpu_temporary_MB": [23.82, 24.77],
+      "derivative_relative_difference_max": 1.8e-13,
+      "cpu_force_reference_norm": 3.218e-8,
+      "cpu_force_absolute_error_norm": 7.236e-14,
+      "decision": "Reject the separable switch: both devices are slower. No production source change; retain dense synthesis."
+    }
   },
   "magnetic_projection": {
     "upstream_pr": "https://github.com/uwplasma/booz_xform_jax/pull/8",
