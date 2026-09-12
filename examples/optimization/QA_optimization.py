@@ -441,7 +441,7 @@ def enclosed_volume(points, normals, tor_num, pol_num):
 
 
 
-def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos):
+def _calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos, *, periodic=False):
     tor_num, pol_num = WINDING_NPHI, WINDING_NTHETA
     winding_points, winding_normals, normal_lengths, raw_normals = points_normals_normal_lengths(dofs, winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos), nfp, tor_num, pol_num)
     
@@ -449,7 +449,14 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
     flat_unitnormals = winding_normals.reshape((-1, 3))
     induction = reduced_memory_induction_matrix(
         flat_points, plasma_points, flat_unitnormals, plasma_normals)
-    singular_values = jnp.linalg.svd(induction, compute_uv=False)
+    if periodic and nfp == 2 and tor_num % 2 == 0:
+        # Orthogonal block DFT retains both sectors and every singular value.
+        half = induction.shape[0] // 2
+        a, b = induction[:half, :half], induction[:half, half:]
+        singular_values = jnp.concatenate(tuple(
+            jnp.linalg.svd(block, compute_uv=False) for block in (a + b, a - b)))
+    else:
+        singular_values = jnp.linalg.svd(induction, compute_uv=False)
     singular_probabilities = singular_values / jnp.sum(singular_values)
     singular_entropy = -jnp.sum(
         singular_probabilities * jnp.log(
@@ -464,6 +471,19 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
 
 
 
+
+
+def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos):
+    return _calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
+
+
+def _periodic_objectives(dofs, plasma_dofs, plasma_rc, weights, winding_rc):
+    # Structural coefficient domain: arbitrary sampled-array tangents are excluded.
+    points, normals, _, _ = points_normals_normal_lengths(
+        plasma_dofs, plasma_rc.shape[0] - 1, _ntor_from_coefficients(plasma_rc),
+        nfp, WINDING_NPHI, WINDING_NTHETA)
+    return _calc_objectives(dofs, points.reshape((-1, 3)), normals.reshape((-1, 3)),
+                            weights, winding_rc, periodic=True)
 
 
 def mode_weights_from_coefficients(rc):
@@ -481,35 +501,23 @@ def mode_weights_from_coefficients(rc):
 
 
 
-def _winding_objective_value(dofs, plasma_points, plasma_normals, local_weights,
-                             winding_R_cos, scales):
-    pca, volume, spectral, distance, minimum_normal_length = calc_objectives(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
-    wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
-    invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
-    return (PCA_WEIGHT * pca / scales[0] # pca based objective
-            - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
-            + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
-            + DISTANCE_WALL_WEIGHT * wall + invalid)
+def _make_winding_objective(objectives):
+    def objective(dofs, plasma_geometry, plasma_reference, local_weights,
+                  winding_R_cos, scales):
+        pca, volume, spectral, distance, minimum_normal_length = objectives(
+            dofs, plasma_geometry, plasma_reference, local_weights, winding_R_cos)
+        wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
+        invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
+        return (PCA_WEIGHT * pca / scales[0] # pca based objective
+                - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
+                + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
+                + DISTANCE_WALL_WEIGHT * wall + invalid)
+    return objective
 
 
-def _winding_optimality(dofs, plasma_points, plasma_normals, local_weights,
-                        winding_R_cos, scales):
-    return jax.grad(_winding_objective_value)(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos, scales)
+_winding_objective_value = _make_winding_objective(calc_objectives)
+_periodic_objective_value = _make_winding_objective(_periodic_objectives)
 
-
-@jax.custom_jvp
-def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weights,
-                          winding_R_cos, scales):
-    # Retain JAXopt's compact while-loop forward solve. The custom JVP below
-    # supplies forward and reverse sensitivities through the certified linear
-    # solve, without unrolling the inner optimizer's 100 iterations.
-    optimizer = minimize(
-        fun=lambda d: _winding_objective_value(
-            d, plasma_points, plasma_normals, local_weights, winding_R_cos, scales),
-        maxiter=100, linesearch="backtracking", tol=1e-6)
-    return optimizer.run(init_dofs).params
 
 
 def _winding_linear_solve(matvec, rhs, *, rtol=1e-8, max_restarts=10):
@@ -524,14 +532,34 @@ def _winding_linear_solve(matvec, rhs, *, rtol=1e-8, max_restarts=10):
         operator, rhs, solve=solve, transpose_solve=solve)
 
 
-@_solve_winding_surface.defjvp
-def _solve_winding_surface_jvp(primals, tangents):
-    sol = _solve_winding_surface(*primals)
-    sol_tangent = root_jvp(optimality_fun=_winding_optimality, sol=sol,
-                           args=primals[1:], tangents=tangents[1:],
-                           solve=_winding_linear_solve)
-    stationary = jnp.linalg.norm(_winding_optimality(sol, *primals[1:])) <= 1e-6
-    return sol, jnp.where(stationary, sol_tangent, jnp.nan)
+def _make_winding_solver(objective):
+    optimality = jax.grad(objective)
+
+    @jax.custom_jvp
+    def _solve_winding_surface(init_dofs, plasma_geometry, plasma_reference, local_weights,
+                              winding_R_cos, scales):
+        # Retain JAXopt's compact while-loop forward solve. The custom JVP below
+        # supplies forward and reverse sensitivities through the certified linear
+        # solve, without unrolling the inner optimizer's 100 iterations.
+        optimizer = minimize(
+            fun=lambda d: objective(
+                d, plasma_geometry, plasma_reference, local_weights, winding_R_cos, scales),
+            maxiter=100, linesearch="backtracking", tol=1e-6)
+        return optimizer.run(init_dofs).params
+
+    @_solve_winding_surface.defjvp
+    def _solve_winding_surface_jvp(primals, tangents):
+        sol = _solve_winding_surface(*primals)
+        sol_tangent = root_jvp(optimality_fun=optimality, sol=sol,
+                               args=primals[1:], tangents=tangents[1:],
+                               solve=_winding_linear_solve)
+        stationary = jnp.linalg.norm(optimality(sol, *primals[1:])) <= 1e-6
+        return sol, jnp.where(stationary, sol_tangent, jnp.nan)
+    return _solve_winding_surface
+
+
+_solve_winding_surface = _make_winding_solver(_winding_objective_value)
+_solve_periodic_winding = _make_winding_solver(_periodic_objective_value)
 
 
 def winding_surface_objective(equilibrium_state, solver_context):
@@ -541,27 +569,21 @@ def winding_surface_objective(equilibrium_state, solver_context):
     R_cos, R_sin, Z_cos, Z_sin = vmex_boundary_to_dense(
         R_cos, R_sin, Z_cos, Z_sin, solver_context)
 
-    # Make plamsa points and normals for the winding surface objective
+    # Keep plasma geometry in its field-periodic Fourier coefficient space.
     plasma_dofs = coefficients_to_dofs(R_cos, Z_sin)
-    plasma_points, plasma_normals, _, _ = points_normals_normal_lengths(
-        plasma_dofs, R_cos.shape[0] - 1, _ntor_from_coefficients(R_cos), nfp,
-        WINDING_NPHI, WINDING_NTHETA)
-    plasma_points = plasma_points.reshape((-1, 3))
-    plasma_normals = plasma_normals.reshape((-1, 3))
-
     # Make winding surface points and normals for the winding surface objective after extending the plasma surface along its normal
     winding_R_cos, winding_Z_sin, winding_R_sin, winding_Z_cos = extend_via_normal_jax(
         R_cos, Z_sin, aminor, nfp, ntheta=WINDING_NTHETA, nphi=WINDING_NPHI)
     winding_dofs = coefficients_to_dofs(winding_R_cos, winding_Z_sin)
     local_weights = mode_weights_from_coefficients(winding_R_cos)
 
-    scales = calc_objectives(winding_dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    scales = _periodic_objectives(winding_dofs, plasma_dofs, R_cos, local_weights, winding_R_cos)
 
-    winding_solution = _solve_winding_surface(
-        winding_dofs, plasma_points, plasma_normals, local_weights,
+    winding_solution = _solve_periodic_winding(
+        winding_dofs, plasma_dofs, R_cos, local_weights,
         winding_R_cos, scales)
 
-    _, _, _, opt_distance, _ = calc_objectives(winding_solution, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    _, _, _, opt_distance, _ = _periodic_objectives(winding_solution, plasma_dofs, R_cos, local_weights, winding_R_cos)
 
     return 1 + jnp.tanh(-opt_distance+1)
 

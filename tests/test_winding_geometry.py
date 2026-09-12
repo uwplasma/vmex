@@ -10,6 +10,10 @@ import pytest
 
 @pytest.fixture(scope="module")
 def geometry():
+    from jaxopt import LBFGS
+    from jaxopt.implicit_diff import root_jvp
+    from solvax import gcrot
+
     # Load only pure helpers: importing the example starts a full optimization.
     path = Path(__file__).parents[1] / "examples/optimization/QA_optimization.py"
     names = {
@@ -18,13 +22,20 @@ def geometry():
         "surface_del_phi", "surface_del_theta", "surface_normal", "surface_unitnormal",
         "surface_coefficients_from_dofs", "points_normals_normal_lengths", "enclosed_volume",
         "_ntor_from_coefficients", "reduced_memory_induction_matrix", "spectral_width",
-        "smooth_minimum_distance", "calc_objectives", "_winding_objective_value",
+        "smooth_minimum_distance", "calc_objectives", "_calc_objectives",
+        "_periodic_objectives", "_make_winding_objective",
+        "_winding_linear_solve", "_make_winding_solver", "winding_surface_objective",
+        "coefficients_to_dofs", "_validate_matching_shape", "mode_weights_from_coefficients",
     }
     tree = ast.parse(path.read_text(), filename=str(path))
-    tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef)
-                 and node.name in names]
+    aliases = {"_winding_objective_value", "_periodic_objective_value",
+               "_solve_winding_surface", "_solve_periodic_winding"}
+    tree.body = [node for node in tree.body
+                 if (isinstance(node, ast.FunctionDef) and node.name in names)
+                 or (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                     and node.targets[0].id in aliases)]
     namespace = {
-        "jax": jax, "jnp": jnp, "MU0": 4 * np.pi * 1e-7, "nfp": 2,
+        "jax": jax, "jnp": jnp, "minimize": LBFGS, "root_jvp": root_jvp, "gcrot": gcrot, "MU0": 4 * np.pi * 1e-7, "nfp": 2,
         "WINDING_NPHI": 12, "WINDING_NTHETA": 12, "MINIMUM_DISTANCE": .05,
         "DISTANCE_WALL_SCALE": .01, "DISTANCE_WALL_WEIGHT": 10.,
         "PCA_WEIGHT": 1., "VOLUME_WEIGHT": .02, "SPECTRAL_WEIGHT": .02,
@@ -158,26 +169,8 @@ def test_float32_geometry_keeps_angular_precision(geometry):
 
 
 @pytest.fixture(scope="module")
-def response():
-    from jaxopt import LBFGS
-    from jaxopt.implicit_diff import root_jvp
-
-    path = Path(__file__).parents[1] / "examples/optimization/QA_optimization.py"
-    names = {"_winding_linear_solve", "_winding_optimality",
-             "_solve_winding_surface", "_solve_winding_surface_jvp"}
-    tree = ast.parse(path.read_text(), filename=str(path))
-    tree.body = [node for node in tree.body
-                 if (isinstance(node, ast.FunctionDef) and node.name in names)
-                 or (isinstance(node, ast.ImportFrom) and node.module == "solvax")]
-    namespace = {"jax": jax, "jnp": jnp, "minimize": LBFGS, "root_jvp": root_jvp}
-    exec(compile(tree, str(path), "exec"), namespace)
-    previous = jax.config.jax_enable_x64
-    jax.config.update("jax_enable_x64", True)
-    try:
-        with jax.disable_jit(False):
-            yield namespace
-    finally:
-        jax.config.update("jax_enable_x64", previous)
+def response(geometry):
+    return geometry
 
 
 @pytest.mark.parametrize("matrix", [
@@ -207,16 +200,16 @@ def test_winding_linear_failure_is_not_an_unchecked_gradient(response):
 
 def test_winding_root_response_and_curvature(response):
     matrix = jnp.array([[3., .4], [.4, 2.]])
-    response["_winding_objective_value"] = (
-        lambda d, p, *unused: .5 * d @ (matrix + jnp.diag(p**2)) @ d
+    solver = response["_make_winding_solver"](
+        lambda d, p, ref, weights, rc, scales: .5 * d @ (matrix + jnp.diag(p**2 + scales**2)) @ d
         - jnp.dot(p**2, d))
     def solve(p):
-        return response["_solve_winding_surface"](jnp.zeros(2), p, 0., 0., 0., 0.)
+        return solver(jnp.zeros(2), p, 0., 0., 0., .1 * p)
     p = jnp.array([.7, -.3])
     direction = jnp.array([.2, .8])
     value, tangent = jax.jvp(solve, (p,), (direction,))
     def exact(q):
-        return jnp.linalg.solve(matrix + jnp.diag(q**2), q**2)
+        return jnp.linalg.solve(matrix + jnp.diag(1.01 * q**2), q**2)
     np.testing.assert_allclose(value, exact(p), atol=5e-7)
     np.testing.assert_allclose(tangent, jax.jvp(exact, (p,), (direction,))[1], atol=2e-7)
     gradient = jax.grad(lambda q: jnp.sum(solve(q)))
@@ -227,8 +220,123 @@ def test_winding_root_response_and_curvature(response):
 
 
 def test_unstationary_winding_inner_solve_rejects_response(response):
-    response["_winding_objective_value"] = lambda d, p, *unused: jnp.dot(d, p)
+    solver = response["_make_winding_solver"](lambda d, p, *unused: jnp.dot(d, p))
     _, tangent = jax.jvp(
-        lambda p: response["_solve_winding_surface"](jnp.zeros(2), p, 0., 0., 0., 0.),
+        lambda p: solver(jnp.zeros(2), p, 0., 0., 0., 0.),
         (jnp.ones(2),), (jnp.ones(2),))
     assert np.all(np.isnan(tangent))
+
+
+@pytest.mark.parametrize("nfp,nphi", [(2, 12), (1, 12), (3, 12), (2, 11)])
+def test_periodic_objective_mixed_coefficient_hvp(geometry, monkeypatch, nfp, nphi):
+    monkeypatch.setitem(geometry, "nfp", nfp)
+    monkeypatch.setitem(geometry, "WINDING_NPHI", nphi)
+    rc, zs = np.zeros((3, 5)), np.zeros((3, 5))
+    rc[0, 2], rc[1, 2], zs[1, 2] = 3., .7, .7
+    dofs = np.r_[rc.ravel()[2:], zs.ravel()[3:]]
+    dofs = jnp.asarray(dofs + .003 * np.random.default_rng(12).normal(size=dofs.shape))
+    plasma = (.75 * dofs).at[0].set(dofs[0])
+    values = jnp.concatenate((dofs, plasma))
+    direction = jnp.asarray(np.random.default_rng(81).normal(size=values.shape))
+    direction /= jnp.linalg.norm(direction)
+    weights, scales = jnp.ones_like(dofs), jnp.ones(5)
+    structured = geometry["_make_winding_objective"](geometry["_periodic_objectives"])
+
+    def objective(value, periodic):
+        winding, boundary = jnp.split(value, 2)
+        if periodic:
+            return structured(winding, boundary, rc, weights, rc, scales)
+        points, normals, _, _ = geometry["points_normals_normal_lengths"](
+            boundary, 2, 2, nfp, nphi, 12)
+        return geometry["_winding_objective_value"](
+            winding, points.reshape(-1, 3), normals.reshape(-1, 3), weights, rc, scales)
+
+    def evaluate(periodic):
+        def fun(value):
+            return objective(value, periodic)
+        gradient = jax.grad(fun)
+        return jax.jit(lambda value: (fun(value), gradient(value),
+            jax.jvp(gradient, (value,), (direction,))[1]))(values)
+    full, reduced = evaluate(False), evaluate(True)
+    for expected, actual in zip(full, reduced):
+        assert np.all(np.isfinite(actual))
+        np.testing.assert_allclose(actual, expected, rtol=2e-8, atol=2e-8)
+    gradient = jax.jit(jax.grad(lambda value: objective(value, True)))
+    h = 1e-6
+    finite_difference = (gradient(values + h * direction)
+                         - gradient(values - h * direction)) / (2 * h)
+    np.testing.assert_allclose(reduced[2], finite_difference, rtol=2e-5, atol=2e-7)
+
+
+def test_raw_array_entropy_retains_symmetry_breaking_derivatives(geometry):
+    rng = np.random.default_rng(17)
+    rc, zs = np.zeros((3, 5)), np.zeros((3, 5))
+    rc[0, 2], rc[1, 2], zs[1, 2] = 3., .7, .7
+    dofs = np.r_[rc.ravel()[2:], zs.ravel()[3:]]
+    dofs = jnp.asarray(dofs + .003 * rng.normal(size=dofs.shape))
+    plasma = (.75 * dofs).at[0].set(dofs[0])
+    points = geometry["points_normals_normal_lengths"]
+    wp, wn, _, _ = points(dofs, 2, 2, 2, 12, 12)
+    pp, pn, _, _ = points(plasma, 2, 2, 2, 12, 12)
+    value = jnp.stack((pp.reshape(-1, 3), pn.reshape(-1, 3)))
+    direction = jnp.asarray(rng.normal(size=value.shape))
+    direction /= jnp.linalg.norm(direction)
+
+    def full_oracle(raw):
+        matrix = geometry["reduced_memory_induction_matrix"](
+            wp.reshape(-1, 3), raw[0], wn.reshape(-1, 3), raw[1])
+        spectrum = jnp.linalg.svd(matrix, compute_uv=False)
+        probabilities = spectrum / jnp.sum(spectrum)
+        return -1 / jnp.sum(probabilities * jnp.log(probabilities))
+
+    def generic(raw):
+        return geometry["calc_objectives"](dofs, raw[0], raw[1], jnp.ones_like(dofs), rc)[0]
+
+    def projected(raw):
+        return geometry["_calc_objectives"](
+            dofs, raw[0], raw[1], jnp.ones_like(dofs), rc, periodic=True)[0]
+
+    def evaluate(fun):
+        return jax.jit(lambda raw: (fun(raw), jax.grad(fun)(raw),
+            jax.jvp(jax.grad(fun), (raw,), (direction,))[1]))(value)
+    actual, expected, reduced = evaluate(generic), evaluate(full_oracle), evaluate(projected)
+    for result, oracle in zip(actual, expected):
+        np.testing.assert_allclose(result, oracle, rtol=2e-8, atol=2e-10)
+    np.testing.assert_allclose(actual[0], reduced[0], atol=1e-14)
+    # Equal values at symmetry do not authorize restricting arbitrary raw-array AD.
+    assert jnp.linalg.norm(actual[2] - reduced[2]) > .01 * jnp.linalg.norm(actual[2])
+    h = 1e-6
+    gradient = jax.jit(jax.grad(generic))
+    finite_difference = (gradient(value + h * direction)
+                         - gradient(value - h * direction)) / (2 * h)
+    np.testing.assert_allclose(actual[2], finite_difference, rtol=2e-5, atol=1e-8)
+
+
+def test_equilibrium_winding_routes_physical_coefficients(geometry, monkeypatch):
+    rc = jnp.array([[0., 3., .002], [.001, .7, .003]])
+    zs = jnp.array([[0., 0., .001], [.001, .7, .002]])
+    winding_rc, winding_zs = rc.at[1, 1].set(.9), zs.at[1, 1].set(.9)
+    zeros = jnp.zeros_like(rc)
+    monkeypatch.setitem(geometry, "_aspect_scalars", lambda *args: (.2,))
+    monkeypatch.setitem(geometry, "_geometry", lambda *args: ((rc, zeros, zeros, zs),))
+    monkeypatch.setitem(geometry, "vmex_boundary_to_dense", lambda *args: (rc, zeros, zeros, zs))
+    monkeypatch.setitem(geometry, "extend_via_normal_jax",
+                        lambda *args, **kwargs: (winding_rc, winding_zs, zeros, zeros))
+    plasma = geometry["coefficients_to_dofs"](rc, zs)
+    winding = geometry["coefficients_to_dofs"](winding_rc, winding_zs)
+    captured = []
+
+    def solve(initial, boundary, reference, weights, winding_reference, scales):
+        np.testing.assert_array_equal(boundary, plasma)
+        np.testing.assert_array_equal(reference, rc)
+        np.testing.assert_array_equal(initial, winding)
+        captured.append(scales)
+        return initial
+
+    monkeypatch.setitem(geometry, "_solve_periodic_winding", solve)
+    actual = geometry["winding_surface_objective"](None, None)
+    weights = geometry["mode_weights_from_coefficients"](winding_rc)
+    expected = geometry["_periodic_objectives"](winding, plasma, rc, weights, winding_rc)
+    assert len(captured) == 1
+    np.testing.assert_allclose(captured[0], expected)
+    np.testing.assert_allclose(actual, 1 + jnp.tanh(1 - expected[3]))
