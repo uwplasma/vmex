@@ -55,11 +55,11 @@ def iota_floor(equilibrium_state, solver_context):
 import jax
 jax.config.update("jax_enable_compilation_cache", False)
 
-from simsopt.geo import SurfaceRZFourier
 from vmex.core.statephysics import _aspect_scalars
 from vmex.core.solver import _geometry
 from jaxopt import LBFGS as minimize
 from jaxopt.implicit_diff import root_jvp
+from solvax import gcrot
 MINIMUM_DISTANCE = 0.05
 DISTANCE_WALL_SCALE = 0.01
 DISTANCE_WALL_WEIGHT = 10.0
@@ -69,69 +69,59 @@ SPECTRAL_WEIGHT = 0.02
 WINDING_NTHETA = 24
 WINDING_NPHI = 24
 
-def r_surface(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
+def _surface_series(cosine, sine, nfp, tor_angle, pol_angle, n_min, m_min,
+                    derivative=None):
+    """Contract Fourier modes without expanding one graph per coefficient."""
+    cosine = None if cosine is None else jnp.asarray(cosine)
+    sine = None if sine is None else jnp.asarray(sine)
+    if cosine is not None and sine is not None and cosine.shape != sine.shape:
+        raise ValueError("Cosine and sine coefficients must have matching shapes.")
+    coefficients = cosine if cosine is not None else sine
+    tor_angle, pol_angle = jnp.broadcast_arrays(tor_angle, pol_angle)
+    trailing = (1,) * tor_angle.ndim
+    angle_dtype = jnp.result_type(tor_angle, pol_angle, 1.0)
+    m = (jnp.arange(coefficients.shape[0], dtype=angle_dtype) + m_min).reshape(
+        (-1, 1) + trailing)
     if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    r = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r += rsurfacecc[m][n]*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r += rsurfacecs[m][n]*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return r
+        n_min = -(coefficients.shape[1] - 1) / 2
+    n = ((jnp.arange(coefficients.shape[1], dtype=angle_dtype) + n_min) * nfp).reshape(
+        (1, -1) + trailing)
+    angle = m * pol_angle - n * tor_angle
+    c, s = jnp.cos(angle), jnp.sin(angle)
+    if derivative is not None:
+        frequency = m if derivative == "theta" else -n
+        c, s = -frequency * s, frequency * c
+    result = 0.0
+    if cosine is not None:
+        result = result + jnp.sum(cosine.reshape(cosine.shape + trailing) * c, axis=(0, 1))
+    if sine is not None:
+        result = result + jnp.sum(sine.reshape(sine.shape + trailing) * s, axis=(0, 1))
+    return result
 
-def z_surface(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
-    if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    z = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z += zsurfacecs[m][n]*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z += zsurfacecc[m][n]*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return z
 
-def r_surface_prime_phi(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
-    if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    r_phi = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r_phi += rsurfacecc[m][n]*(n+n_min)*nfp*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r_phi += -rsurfacecs[m][n]*(n+n_min)*nfp*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return r_phi
+def r_surface(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs=None,
+              n_min=None, m_min=0):
+    return _surface_series(rsurfacecc, rsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min)
 
-def z_surface_prime_phi(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
-    if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    z_phi = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z_phi += -zsurfacecs[m][n]*(n+n_min)*nfp*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z_phi += zsurfacecc[m][n]*(n+n_min)*nfp*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return z_phi
+
+def z_surface(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc=None,
+              n_min=None, m_min=0):
+    return _surface_series(zsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min)
+
+
+def r_surface_prime_phi(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs=None,
+                        n_min=None, m_min=0):
+    return _surface_series(rsurfacecc, rsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min, "phi")
+
+
+def z_surface_prime_phi(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc=None,
+                        n_min=None, m_min=0):
+    return _surface_series(zsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min, "phi")
+
 
 def surface_del_phi(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacecs = None, zsurfacecc = None, n_min = None, m_min = 0):
     r = r_surface(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs=rsurfacecs, n_min=n_min, m_min=m_min)
@@ -141,37 +131,17 @@ def surface_del_phi(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacec
     sinterm = jnp.sin(tor_angle)
     return [r_phi*costerm - r*sinterm, r_phi*sinterm + r*costerm, z_phi]
 
-def r_surface_prime_theta(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs = None, n_min = None, m_min = 0):
-    num_m_modes = len(rsurfacecc)
-    num_n_modes = len(rsurfacecc[0])
-    if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    r_theta = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            r_theta += -rsurfacecc[m][n]*(m+m_min)*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if rsurfacecs is not None:
-        assert len(rsurfacecc) == len(rsurfacecs), 'If rsurfacecs is specified, it must be the same length as rsurfacecc.'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                r_theta += rsurfacecs[m][n]*(m+m_min)*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return r_theta
+def r_surface_prime_theta(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs=None,
+                          n_min=None, m_min=0):
+    return _surface_series(rsurfacecc, rsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min, "theta")
 
-def z_surface_prime_theta(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc = None, n_min = None, m_min=0):
-    num_m_modes = len(zsurfacecs)
-    num_n_modes = len(zsurfacecs[0])
-    if n_min is None:
-        n_min = -(num_n_modes - 1)/2
-    z_theta = 0
-    for m in range(num_m_modes):
-        for n in range(num_n_modes):
-            z_theta += zsurfacecs[m][n]*(m+m_min)*jnp.cos((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    if zsurfacecc is not None:
-        assert len(zsurfacecs) == len(zsurfacecc), 'If zsurfacecc is specified, it must be the same length as zsurfacecs'
-        for m in range(num_m_modes):
-            for n in range(num_n_modes):
-                z_theta += -zsurfacecc[m][n]*(m+m_min)*jnp.sin((m_min+m)*pol_angle - (n+n_min)*nfp*tor_angle)
-    return z_theta
+
+def z_surface_prime_theta(zsurfacecs, nfp, tor_angle, pol_angle, zsurfacecc=None,
+                          n_min=None, m_min=0):
+    return _surface_series(zsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle,
+                           n_min, m_min, "theta")
+
 
 def surface_del_theta(rsurfacecc, zsurfacecs, nfp, tor_angle, pol_angle, rsurfacecs = None, zsurfacecc = None, n_min = None, m_min = 0):
     r_theta = r_surface_prime_theta(rsurfacecc, nfp, tor_angle, pol_angle, rsurfacecs=rsurfacecs, n_min=n_min, m_min=m_min)
@@ -471,7 +441,7 @@ def enclosed_volume(points, normals, tor_num, pol_num):
 
 
 
-def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos):
+def _calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos, *, periodic=False):
     tor_num, pol_num = WINDING_NPHI, WINDING_NTHETA
     winding_points, winding_normals, normal_lengths, raw_normals = points_normals_normal_lengths(dofs, winding_R_cos.shape[0] - 1, _ntor_from_coefficients(winding_R_cos), nfp, tor_num, pol_num)
     
@@ -479,7 +449,14 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
     flat_unitnormals = winding_normals.reshape((-1, 3))
     induction = reduced_memory_induction_matrix(
         flat_points, plasma_points, flat_unitnormals, plasma_normals)
-    singular_values = jnp.linalg.svd(induction, compute_uv=False)
+    if periodic and nfp == 2 and tor_num % 2 == 0:
+        # Orthogonal block DFT retains both sectors and every singular value.
+        half = induction.shape[0] // 2
+        a, b = induction[:half, :half], induction[:half, half:]
+        singular_values = jnp.concatenate(tuple(
+            jnp.linalg.svd(block, compute_uv=False) for block in (a + b, a - b)))
+    else:
+        singular_values = jnp.linalg.svd(induction, compute_uv=False)
     singular_probabilities = singular_values / jnp.sum(singular_values)
     singular_entropy = -jnp.sum(
         singular_probabilities * jnp.log(
@@ -496,12 +473,17 @@ def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
 
 
 
-def mode_weights(surface):
-    weights = []
-    for name in surface.dof_names:
-        mode = int(name.split("(")[1].split(",")[0])
-        weights.append(mode ** 2)
-    return jnp.asarray(weights)
+def calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos):
+    return _calc_objectives(dofs, plasma_points, plasma_normals, weights, winding_R_cos)
+
+
+def _periodic_objectives(dofs, plasma_dofs, plasma_rc, weights, winding_rc):
+    # Structural coefficient domain: arbitrary sampled-array tangents are excluded.
+    points, normals, _, _ = points_normals_normal_lengths(
+        plasma_dofs, plasma_rc.shape[0] - 1, _ntor_from_coefficients(plasma_rc),
+        nfp, WINDING_NPHI, WINDING_NTHETA)
+    return _calc_objectives(dofs, points.reshape((-1, 3)), normals.reshape((-1, 3)),
+                            weights, winding_rc, periodic=True)
 
 
 def mode_weights_from_coefficients(rc):
@@ -516,54 +498,68 @@ def mode_weights_from_coefficients(rc):
         mode_matrix.reshape(-1)[ntor + 1:]))
 
 
-surface = SurfaceRZFourier(nfp=2, mpol=inp.mpol, ntor=inp.ntor)
-weights = mode_weights(surface)
 
 
 
-def _winding_objective_value(dofs, plasma_points, plasma_normals, local_weights,
-                             winding_R_cos, scales):
-    pca, volume, spectral, distance, minimum_normal_length = calc_objectives(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
-    wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
-    invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
-    return (PCA_WEIGHT * pca / scales[0] # pca based objective
-            - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
-            + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
-            + DISTANCE_WALL_WEIGHT * wall + invalid)
+def _make_winding_objective(objectives):
+    def objective(dofs, plasma_geometry, plasma_reference, local_weights,
+                  winding_R_cos, scales):
+        pca, volume, spectral, distance, minimum_normal_length = objectives(
+            dofs, plasma_geometry, plasma_reference, local_weights, winding_R_cos)
+        wall = 1 + jnp.tanh((MINIMUM_DISTANCE - distance) / DISTANCE_WALL_SCALE) # Penalize surfaces that are too close to the plasma
+        invalid = jnp.square(jnp.maximum(1e-6 - minimum_normal_length, 0)) * 1e12 # Avoid degenerate winding surfaces
+        return (PCA_WEIGHT * pca / scales[0] # pca based objective
+                - VOLUME_WEIGHT * volume / scales[1] # increase winding surface volume
+                + SPECTRAL_WEIGHT * spectral / jnp.maximum(scales[2], 1e-16) # penalize high poloidal spectral content
+                + DISTANCE_WALL_WEIGHT * wall + invalid)
+    return objective
 
 
-def _winding_optimality(dofs, plasma_points, plasma_normals, local_weights,
-                        winding_R_cos, scales):
-    return jax.grad(_winding_objective_value)(
-        dofs, plasma_points, plasma_normals, local_weights, winding_R_cos, scales)
+_winding_objective_value = _make_winding_objective(calc_objectives)
+_periodic_objective_value = _make_winding_objective(_periodic_objectives)
 
 
-@jax.custom_jvp
-def _solve_winding_surface(init_dofs, plasma_points, plasma_normals, local_weights,
-                          winding_R_cos, scales):
-    # implicit_diff defaults to True here (unlike the earlier implicit_diff=False
-    # attempt): this keeps jaxopt's compact jax.lax.while_loop forward solve
-    # (compiled size independent of maxiter) instead of unrolling 100 steps into
-    # every traced residual/Jacobian evaluation. The custom_jvp below supplies
-    # the (forward-mode-compatible) sensitivity in place of jaxopt's own
-    # reverse-mode-only custom_vjp rule, which VMEX's default forward-mode
-    # (jax.jvp) Jacobian construction cannot differentiate through. This gives
-    # a forward-mode derivative only: switching this problem's jac_solver to
-    # "reverse" would need a matching defvjp too.
-    optimizer = minimize(
-        fun=lambda d: _winding_objective_value(
-            d, plasma_points, plasma_normals, local_weights, winding_R_cos, scales),
-        maxiter=100, linesearch="backtracking", tol=1e-6)
-    return optimizer.run(init_dofs).params
+
+def _winding_linear_solve(matvec, rhs, *, rtol=1e-8, max_restarts=10):
+    """Solve the original Hessian equation; return NaNs if it is uncertified."""
+    _, operator = jax.linearize(matvec, jnp.zeros_like(rhs))
+
+    def solve(action, value):
+        result = gcrot(action, value, rtol=rtol, max_restarts=max_restarts)
+        return jnp.where(result.converged, result.x, jnp.nan)
+
+    return jax.lax.custom_linear_solve(
+        operator, rhs, solve=solve, transpose_solve=solve)
 
 
-@_solve_winding_surface.defjvp
-def _solve_winding_surface_jvp(primals, tangents):
-    sol = _solve_winding_surface(*primals)
-    sol_tangent = root_jvp(optimality_fun=_winding_optimality, sol=sol,
-                           args=primals[1:], tangents=tangents[1:])
-    return sol, sol_tangent
+def _make_winding_solver(objective):
+    optimality = jax.grad(objective)
+
+    @jax.custom_jvp
+    def _solve_winding_surface(init_dofs, plasma_geometry, plasma_reference, local_weights,
+                              winding_R_cos, scales):
+        # Retain JAXopt's compact while-loop forward solve. The custom JVP below
+        # supplies forward and reverse sensitivities through the certified linear
+        # solve, without unrolling the inner optimizer's 100 iterations.
+        optimizer = minimize(
+            fun=lambda d: objective(
+                d, plasma_geometry, plasma_reference, local_weights, winding_R_cos, scales),
+            maxiter=100, linesearch="backtracking", tol=1e-6)
+        return optimizer.run(init_dofs).params
+
+    @_solve_winding_surface.defjvp
+    def _solve_winding_surface_jvp(primals, tangents):
+        sol = _solve_winding_surface(*primals)
+        sol_tangent = root_jvp(optimality_fun=optimality, sol=sol,
+                               args=primals[1:], tangents=tangents[1:],
+                               solve=_winding_linear_solve)
+        stationary = jnp.linalg.norm(optimality(sol, *primals[1:])) <= 1e-6
+        return sol, jnp.where(stationary, sol_tangent, jnp.nan)
+    return _solve_winding_surface
+
+
+_solve_winding_surface = _make_winding_solver(_winding_objective_value)
+_solve_periodic_winding = _make_winding_solver(_periodic_objective_value)
 
 
 def winding_surface_objective(equilibrium_state, solver_context):
@@ -573,27 +569,21 @@ def winding_surface_objective(equilibrium_state, solver_context):
     R_cos, R_sin, Z_cos, Z_sin = vmex_boundary_to_dense(
         R_cos, R_sin, Z_cos, Z_sin, solver_context)
 
-    # Make plamsa points and normals for the winding surface objective
+    # Keep plasma geometry in its field-periodic Fourier coefficient space.
     plasma_dofs = coefficients_to_dofs(R_cos, Z_sin)
-    plasma_points, plasma_normals, _, _ = points_normals_normal_lengths(
-        plasma_dofs, R_cos.shape[0] - 1, _ntor_from_coefficients(R_cos), nfp,
-        WINDING_NPHI, WINDING_NTHETA)
-    plasma_points = plasma_points.reshape((-1, 3))
-    plasma_normals = plasma_normals.reshape((-1, 3))
-
     # Make winding surface points and normals for the winding surface objective after extending the plasma surface along its normal
     winding_R_cos, winding_Z_sin, winding_R_sin, winding_Z_cos = extend_via_normal_jax(
         R_cos, Z_sin, aminor, nfp, ntheta=WINDING_NTHETA, nphi=WINDING_NPHI)
     winding_dofs = coefficients_to_dofs(winding_R_cos, winding_Z_sin)
     local_weights = mode_weights_from_coefficients(winding_R_cos)
 
-    scales = calc_objectives(winding_dofs, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    scales = _periodic_objectives(winding_dofs, plasma_dofs, R_cos, local_weights, winding_R_cos)
 
-    winding_solution = _solve_winding_surface(
-        winding_dofs, plasma_points, plasma_normals, local_weights,
+    winding_solution = _solve_periodic_winding(
+        winding_dofs, plasma_dofs, R_cos, local_weights,
         winding_R_cos, scales)
 
-    _, _, _, opt_distance, _ = calc_objectives(winding_solution, plasma_points, plasma_normals, local_weights, winding_R_cos)
+    _, _, _, opt_distance, _ = _periodic_objectives(winding_solution, plasma_dofs, R_cos, local_weights, winding_R_cos)
 
     return 1 + jnp.tanh(-opt_distance+1)
 
