@@ -87,6 +87,22 @@ def test_free_boundary_config_validates_adjoint_fail():
         make_free_boundary_config(inp, field, adjoint_fail="warn")
 
 
+def test_host_adjoint_refreshes_saved_pullback_at_each_point():
+    """Reusing an executable must not reuse a previous root's linearization."""
+    def residual(z, p, *_args):
+        return jnp.asarray([z[0]**2 + p * z[1], z[0] * z[1] + z[1]**2])
+
+    cfg = SimpleNamespace(
+        adjoint_tol=1e-10, adjoint_gcrot_m=2, adjoint_gcrot_k=1,
+        adjoint_maxiter=10,
+    )
+    rhs = jnp.asarray([1., -2.])
+    for z, p in [(jnp.asarray([2., 3.]), 0.5), (jnp.asarray([3., 2.]), 1.5)]:
+        solved = fbi._host_adjoint(residual, z, p, None, None, None, None, rhs, cfg)
+        jacobian = np.array([[2 * z[0], p], [z[1], z[0] + 2 * z[1]]])
+        np.testing.assert_allclose(solved, np.linalg.solve(jacobian.T, rhs), rtol=1e-9)
+
+
 def test_host_adjoint_best_effort_warns_instead_of_raising(monkeypatch):
     """A stalled Krylov solve is a warning under the opt-in policy, not a stop.
 
