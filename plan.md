@@ -1146,7 +1146,8 @@ At five identical parameter vectors, maximum relative Jacobian disagreement
 is 1.81e-12 and residual disagreement 1.56e-12. Reduced QA GPU four-evaluation
 run: 255.41 to 166.95 s, first Jacobian 180.90 to 114.67 s, same final cost
 1.39305e-5. The 166.95 s run omitted final physics and is excluded from validated speedup
-claims. These are component/capped results, not converged designs or a
+claims. The divisor-only run retained converged final diagnostics and took
+224.94 s GPU (control 255.41 s), and 87.87 s CPU (control 103.42 s). These are component/capped results, not converged designs or a
 universal speedup. Repeat final comparisons without competing memory-heavy jobs.
 Raw reports remain external under results/divisor-collaborator-gpu and
 results/candidate-materialized-qa-gpu; use their source hashes because the
@@ -1170,3 +1171,8 @@ compilation memory, repeat full collaborator acceptance/recomputation checks,
 and rerun current-policy cold CLI/Python equilibria. SOLVAX PR #102 is reviewed
 independently for merge; VMEX #299 remains draft while workflow correctness
 and performance gates are open. No release.
+
+SOLVAX #102 merged as 9b37d6998240ac839e9dc5da35f3cbba8a560980 after all
+11 CI checks and source-matched CPU/GPU tests passed. Installed 0.20.0 does
+not automatically include this source change; use the pinned merge for
+validation. No release or dependency version bump was made.
