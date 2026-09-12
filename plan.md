@@ -405,6 +405,13 @@ figure with its kill criterion evaluated.
    do not solve the transposed, state-dependent adjoint. Use XProf, Perfetto
    and HLO inspection when stage timing points at compilation, transfers or
    kernels. A kernel speedup that worsens accepted optimization time fails.
+   **September 12 status:** repeated QI Jacobians improve with exact residual
+   linearization reuse and separable field-line synthesis; the capped CPU
+   constructed-QI optimizer does not improve overall. Evidence and exclusions:
+   [`review_optimization_20260912.json`](benchmarks/review_optimization_20260912.json).
+   This is partial progress, not passage of P3: next measure compilation,
+   accepted/rejected solves and time to a validated design using the existing
+   `benchmarks/optimization.py` before changing solver budgets or refinement.
 4. **Flagship.** Landreman and Paul precise QA from simsopt's
    `input.LandremanPaul2021_QA` and DESC's `precise_QA.py`: a reduced student
    example with a stated resolution gap, and a research run reproducing the
@@ -536,7 +543,7 @@ checkout; one heavy local job at a time; the office box takes one heavy job.
 | PR | Files | Verification |
 |---|---|---|
 | Resolution ladder on the QA deck (P2) | `benchmarks/ladder_qa.py`, artifacts, figure, validation page | kill criterion evaluated; office wall time recorded |
-| Profiled QA optimization (P3.3) | `benchmarks/profile_optimization.py`, artifacts, `docs/reference/performance.rst` | stage timings with changed parameters |
+| Profiled optimization (P3.3; QI response measured, full design pending) | existing `benchmarks/optimization.py`, artifacts, `docs/reference/performance.rst` | stage timings with changed parameters and total time to a validated design |
 
 **Phase 6, weeks 5–7: the flagship.**
 
@@ -813,3 +820,43 @@ remaining 28 lines are guard clauses and deep continuation branches; the guards
 are being given fast unit tests rather than bought with slow ones. Moving code
 should not lose it coverage, and a pure move exposing a pre-existing gap is
 worth closing rather than exempting.
+
+**2026-09-12, P3: reduce measured QI response work.** Base `f09288b3`, branch
+`perf/reuse-objective-linearization`; source hashes, commands and paired results
+in `benchmarks/review_optimization_20260912.json`. Reviewed #177/#224/#233/#240:
+current main already uses the maintained Boozer transform and deferred seed
+refinement. The supplied wrapper disables refinement, so raising its tolerance
+cannot explain or fix this workload's cost. Historical 0.3/current objectives
+differ; their timings alone do not establish a same-accuracy regression.
+
+An office XProf trace assigns about 375 of 908 ms of GPU kernels to short
+tridiagonal solves inside preconditioned GMRES JVPs. Reusing the primal
+linearization removes repeated work while retaining the preconditioner's full
+derivative. The other change factors the field-line Fourier phase into two
+smaller contractions, shared by QI, constructed QI, bounce and maximum-J.
+Both Fourier parities, iota derivatives and float32 dot precision are retained.
+VMEX owns this residual staging; SOLVAX's solvers and acceptance stay unchanged.
+See [JAX linearize](https://docs.jax.dev/en/latest/_autosummary/jax.linearize.html)
+for its reuse/memory tradeoff and
+[synchronized timing](https://docs.jax.dev/en/latest/async_dispatch.html).
+
+On the supplied 48-DOF QI case, warm Jacobian medians are 1.098 → 0.818 s on
+M3 Max and 0.961 → 0.741 s on RTX A4000; final residual/Jacobian relative
+agreement is better than 1e-12. CPU process RSS is 5438 → 3702 MiB. On the
+bundled ns31 constructed-QI case, the five-evaluation CPU optimizer takes
+22.816 → 22.986 s despite faster warm Jacobians: no total-runtime gain and no
+converged design. Both arms have the same iteration/evaluation counts and
+certified derivatives. Field-line derivative temporary allocations fall, but
+forward-only temporary allocations rise; the artifact records both.
+
+Validation: GPU dense-reference value/JVP/VJP tests pass in float32/64, both
+parities and nfp 1/3; six full QI/maximum-J physics AD tests pass, as do the
+implicit block/transpose/chunk checks, lint and typing. Raw traces and arrays
+remain outside git. Objective-only linearization and radial row batching were
+reverted after weak results. Both GPU optimizer arms stall on
+first-use compilation during a coarse-grid retry inside a GPU host callback;
+a tiny JAX-only reproduction stalls too, while priming that operation before
+the callback completes in 11 ms. No total GPU optimizer timing is promoted.
+Next: move host-optimizer solve/retry setup outside the compiled callback,
+preserving status, penalties and warm seeds; validate direct Jacobian and
+staged JAX calls, then profile a complete fixed-objective run. P3 and the release hold remain open.

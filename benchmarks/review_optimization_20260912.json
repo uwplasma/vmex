@@ -1,0 +1,395 @@
+{
+  "measurement_date": "2026-09-12",
+  "measurement_commit": "f09288b37bac7d7122e98220192795e76770cd1f",
+  "measurement_dirty": true,
+  "scope": "Paired current-main performance experiment; not a v0.3 regression reproduction or time-to-convergence benchmark.",
+  "candidate_source_sha256": {
+    "vmex/core/bounce.py": "364e543ac97ae54831ac498b6d192335d214f4974af3c450c60e55eeb7560e4a",
+    "vmex/core/implicit.py": "5021f18fe3541e33a08da30fdebc6e46166b0359346c77db97e6a176470fe958",
+    "vmex/core/maxj.py": "d7644c396ba9d965be54f2552aeee2684fa2b6a1e9ebd73331b8236a7d5b4dfd",
+    "vmex/core/omnigenity.py": "6271d02e33ad17780f3e6178c5032f54b849b3b688dcaf25ef57f4deef6ce486",
+    "vmex/core/optimize.py": "27d72848b6e048340d06b805f0b56504f522db9857c1a21eff9216c089c704cd"
+  },
+  "method": {
+    "dtype": "float64",
+    "persistent_compilation_cache": false,
+    "synchronization": "block_until_ready or NumPy host conversion",
+    "cpu_threads": {
+      "OPENBLAS_NUM_THREADS": 1,
+      "OMP_NUM_THREADS": 1
+    },
+    "gpu": "NVIDIA RTX A4000 16 GiB, driver 580.173.02",
+    "cpu": "Apple M3 Max",
+    "cpu_environment": {
+      "python": "3.11.14",
+      "jax": "0.9.2",
+      "jaxlib": "0.9.2",
+      "numpy": "2.4.6",
+      "scipy": "1.17.1",
+      "solvax": "0.20.0",
+      "booz_xform_jax": "0.2.0"
+    },
+    "gpu_component_environment": {
+      "python": "3.12.13",
+      "jax": "0.9.2",
+      "jaxlib": "0.9.2",
+      "numpy": "2.5.2",
+      "scipy": "1.18.1",
+      "solvax": "0.20.0",
+      "booz_xform_jax": "0.2.0"
+    },
+    "restrictions": "Compare within each machine/environment only. GPU first-derivative compilation overlapped other work, so no cold-start speed ratio is claimed. RSS includes host compiler memory; it is not device peak memory."
+  },
+  "changes": [
+    "Reuse jax.linearize of the preconditioned residual across parameter columns and Krylov matvecs. Preserve the derivative of the preconditioner, including dP times finite residual.",
+    "Separate m*alpha from (m*iota-n)*phi in Boozer field-line synthesis. Share the exact sine/cosine identity across surrogate QI, constructed QI, bounce tracing and maximum-J pitch selection. Highest dot precision for float32.",
+    "No change to grids, modes, Boozer transform, residual normalization, solve tolerances, certificate policy, or SOLVAX algorithms."
+  ],
+  "component_48_dof": {
+    "harness": "External profile_vmex.py: capture the residual/Jacobian passed by opt.least_squares without invoking the optimizer. The in-tree public optimizer benchmark below is separate.",
+    "input_sha256": "1ab88a8ba3e23a4264707e3204955bbffaa29e9e006965734d2475d5114fff4a",
+    "input_recipe": "The supplied deck has the same physics and Fourier coefficients as examples/data/input.nfp1_QI. Set MPOL=5, NTOR=5, NS_ARRAY=16, NITER_ARRAY=4000, FTOL_ARRAY=1e-12; remove the disabled BOOZ_XFORM_JAX namelist. Its formatting differs, so this recipe does not reproduce the byte hash.",
+    "terms": "[(aspect_ratio,7,1),(QIResidual([1/16,5/16,9/16,13/16],mboz=18,nboz=18,oversample=2,nphi=141,nalpha=27,n_levels=16,softness=.02).residuals_state,0,1)]",
+    "options": {
+      "max_mode": 3,
+      "jac": "implicit",
+      "jac_solver": "block",
+      "jac_chunk_size": "auto",
+      "warm_start": "perturbation",
+      "refine_tol": "inf",
+      "solve_kwargs": {
+        "mode": "cli",
+        "lconm1": true,
+        "use_fft": false
+      }
+    },
+    "samples": "x_i=x0+i*1e-6*linspace(-0.5,0.5,48); residual followed by Jacobian. CPU i=1..6; GPU i=1,3,4, excluding traced i=2.",
+    "cpu": {
+      "baseline": {
+        "warm_jacobian_seconds": [
+          1.0891962500172667,
+          1.1325277499854565,
+          1.0948662080045324,
+          1.1001582920143846,
+          1.096000167017337,
+          1.1140731659834273
+        ],
+        "median_seconds": 1.0980792295158608,
+        "peak_process_rss_mib": 5438.078125
+      },
+      "candidate": {
+        "warm_jacobian_seconds": [
+          0.8277812089945655,
+          0.8173629999801051,
+          0.8103514169924892,
+          0.811092624993762,
+          0.8261210829950869,
+          0.818075957999099
+        ],
+        "median_seconds": 0.8177194789896021,
+        "peak_process_rss_mib": 3702.390625
+      },
+      "parity_last": {
+        "x": {
+          "relative_l2": 0.0,
+          "max_absolute": 0.0
+        },
+        "residual": {
+          "relative_l2": 1.090658750614385e-13,
+          "max_absolute": 1.7329887525008303e-15
+        },
+        "jacobian": {
+          "relative_l2": 5.6608844048730435e-14,
+          "max_absolute": 2.8466118351389014e-13
+        }
+      }
+    },
+    "gpu": {
+      "baseline": {
+        "warm_jacobian_seconds": [
+          0.9900419048499316,
+          0.9611158790066838,
+          0.9418941650073975
+        ],
+        "median_seconds": 0.9611158790066838,
+        "peak_process_rss_mib": 4968.1484375
+      },
+      "candidate": {
+        "warm_jacobian_seconds": [
+          0.7752697670366615,
+          0.7413640590384603,
+          0.716717611066997
+        ],
+        "median_seconds": 0.7413640590384603,
+        "peak_process_rss_mib": 4594.05859375
+      },
+      "parity_last": {
+        "x": {
+          "relative_l2": 0.0,
+          "max_absolute": 0.0
+        },
+        "residual": {
+          "relative_l2": 4.6320385854981136e-14,
+          "max_absolute": 7.251144129583054e-16
+        },
+        "jacobian": {
+          "relative_l2": 2.902192112328804e-14,
+          "max_absolute": 2.5868196473766147e-13
+        }
+      }
+    }
+  },
+  "gpu_trace": {
+    "tool": "JAX profiler / XProf Chrome trace, GPU kernel events inspected with their HLO metadata",
+    "baseline_summed_kernel_ms": 907.529,
+    "baseline_tridiagonal_kernel_ms_approx": 375,
+    "linearization_only_summed_kernel_ms": 742.699,
+    "linearization_only_tridiagonal_kernel_ms": 236.261,
+    "finding": "Short cuSPARSE tridiagonal kernels recur inside GMRES JVPs of the preconditioned residual. Hoisting its exact linearization reduces repeated primal work. Summed kernel durations are not total optimizer wall time."
+  },
+  "gpu_fieldline_kernel": {
+    "dense_jvp": {
+      "compile_seconds": 0.38990096584893763,
+      "median_seconds": 0.0048837370704859495,
+      "temporary_bytes": 158615344
+    },
+    "dense_value": {
+      "compile_seconds": 0.3587341469246894,
+      "median_seconds": 0.0038393691647797823,
+      "temporary_bytes": 974864
+    },
+    "dense_vjp": {
+      "compile_seconds": 1.0868416531011462,
+      "median_seconds": 0.005054000997915864,
+      "temporary_bytes": 158981136
+    },
+    "devices": [
+      "cuda:0"
+    ],
+    "dtype": "float64",
+    "jax": "0.9.2",
+    "kernel": "fieldline_synthesis",
+    "parity_jvp": [
+      {
+        "max_absolute": 5.995204332975845e-15,
+        "relative_l2": 1.2579460541485524e-15
+      },
+      {
+        "max_absolute": 8.271161533457416e-15,
+        "relative_l2": 5.61047281716475e-15
+      }
+    ],
+    "parity_value": [
+      {
+        "max_absolute": 2.6645352591003757e-15,
+        "relative_l2": 6.144132947161748e-16
+      }
+    ],
+    "parity_vjp": [
+      {
+        "max_absolute": 3.251867525255747e-12,
+        "relative_l2": 1.3659204422423324e-15
+      },
+      {
+        "max_absolute": 4.523633204134292e-12,
+        "relative_l2": 3.923298628263052e-14
+      },
+      {
+        "max_absolute": 4.859072264560074e-15,
+        "relative_l2": 4.616675152408519e-11
+      }
+    ],
+    "separated_jvp": {
+      "compile_seconds": 0.3466865010559559,
+      "median_seconds": 0.0008281359914690256,
+      "temporary_bytes": 16273856
+    },
+    "separated_value": {
+      "compile_seconds": 0.26028681406751275,
+      "median_seconds": 0.0004972941242158413,
+      "temporary_bytes": 9173952
+    },
+    "separated_vjp": {
+      "compile_seconds": 0.4866683289874345,
+      "median_seconds": 0.0008096189703792334,
+      "temporary_bytes": 17543976
+    },
+    "shape": [
+      4,
+      27,
+      141,
+      648
+    ]
+  },
+  "public_cpu_constructed_qi": {
+    "command": "JAX_ENABLE_X64=1 JAX_PLATFORMS=cpu VMEX_COMPILATION_CACHE=disabled OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=. python benchmarks/optimization.py --case constructed_qi --input examples/data/input.nfp1_QI --keep-input-resolution --max-mode 1 --refine-tol inf --batch-size auto --warm-evaluations 3 --optimizer least_squares --nfev 5 --skip-jax-contract --device cpu --output /tmp/report.json",
+    "baseline_setup": "Copy the candidate benchmarks/optimization.py into a detached baseline worktree; keep baseline vmex/ unchanged. Use a separate fresh process and output path for each arm.",
+    "input_sha256": "60d7b1e3b37f4fa0d7858a80319ae54478f18d2a8f52f3d840a31bcf8a5f8f60",
+    "dofs": 8,
+    "baseline": {
+      "build_seconds": 18.831625082995743,
+      "derivative_seconds": 45.48194749999675,
+      "optimize_seconds": 22.81616991601186,
+      "warm_evaluations": [
+        {
+          "jacobian_seconds": 1.4173976249876432,
+          "residual_seconds": 1.8402489170257468
+        },
+        {
+          "jacobian_seconds": 1.3826645000081044,
+          "residual_seconds": 0.16908466699533165
+        },
+        {
+          "jacobian_seconds": 1.3861105410032906,
+          "residual_seconds": 0.08182083399151452
+        }
+      ],
+      "initial_cost": 0.009757185558119568,
+      "final_cost": 0.0026945874864950244,
+      "optimizer_result": {
+        "message": "The maximum number of function evaluations is exceeded.",
+        "nfev": 5,
+        "njev": 3,
+        "status": 0,
+        "success": false
+      },
+      "diagnostics": {
+        "derivative_certified": true,
+        "derivative_fallbacks": 0,
+        "failed_trials": 2,
+        "fsq": 1.3131113077852143e-13,
+        "fsq_ratio": 1.3131113077852143,
+        "max_fsq_ratio": 1000000.0,
+        "solve_stats": {
+          "iterations": 14484,
+          "solves": 7
+        }
+      }
+    },
+    "candidate": {
+      "build_seconds": 18.800351042009424,
+      "derivative_seconds": 46.78551795799285,
+      "optimize_seconds": 22.985896208003396,
+      "warm_evaluations": [
+        {
+          "jacobian_seconds": 1.218427415995393,
+          "residual_seconds": 2.2912653750099707
+        },
+        {
+          "jacobian_seconds": 1.230632541992236,
+          "residual_seconds": 0.13922099999035709
+        },
+        {
+          "jacobian_seconds": 1.21079845901113,
+          "residual_seconds": 0.056169416988268495
+        }
+      ],
+      "initial_cost": 0.009757185558119585,
+      "final_cost": 0.0026945874919393634,
+      "optimizer_result": {
+        "message": "The maximum number of function evaluations is exceeded.",
+        "nfev": 5,
+        "njev": 3,
+        "status": 0,
+        "success": false
+      },
+      "diagnostics": {
+        "derivative_certified": true,
+        "derivative_fallbacks": 0,
+        "failed_trials": 2,
+        "fsq": 1.3131348256276644e-13,
+        "fsq_ratio": 1.3131348256276645,
+        "max_fsq_ratio": 1000000.0,
+        "solve_stats": {
+          "iterations": 14484,
+          "solves": 7
+        }
+      }
+    },
+    "parity": {
+      "initial_value": {
+        "relative_l2": 1.7778932927366894e-15,
+        "max_absolute": 1.734723475976807e-17
+      },
+      "initial_gradient": {
+        "relative_l2": 5.864630532443208e-15,
+        "max_absolute": 5.218048215738236e-15
+      },
+      "final_x": {
+        "relative_l2": 3.785014269593758e-10,
+        "max_absolute": 1.0600236313718092e-10
+      },
+      "x_0": {
+        "relative_l2": 0.0,
+        "max_absolute": 0.0
+      },
+      "residual_0": {
+        "relative_l2": 4.8827692775741016e-14,
+        "max_absolute": 1.5037748607102386e-15
+      },
+      "jacobian_0": {
+        "relative_l2": 4.253882720653924e-13,
+        "max_absolute": 3.160915973410283e-12
+      },
+      "x_1": {
+        "relative_l2": 0.0,
+        "max_absolute": 0.0
+      },
+      "residual_1": {
+        "relative_l2": 5.0255777300210006e-14,
+        "max_absolute": 1.1872013788716274e-15
+      },
+      "jacobian_1": {
+        "relative_l2": 4.3006428454770963e-13,
+        "max_absolute": 3.502531598087444e-12
+      },
+      "x_2": {
+        "relative_l2": 0.0,
+        "max_absolute": 0.0
+      },
+      "residual_2": {
+        "relative_l2": 4.9909293941230935e-14,
+        "max_absolute": 5.313674847351457e-16
+      },
+      "jacobian_2": {
+        "relative_l2": 4.1405979994013113e-13,
+        "max_absolute": 2.5841551121175144e-12
+      }
+    },
+    "conclusion": "Warm Jacobian improves, but capped optimizer wall time does not: 22.816 versus 22.986 s. Both hit the five-evaluation cap; neither is a converged design. No end-to-end speedup claim."
+  },
+  "validation": [
+    "GPU float32/float64 dense-reference values, JVP, VJP; float64 central FD; symmetric/asymmetric and nfp=1,3: 8 passed (11.24 s).",
+    "CPU bounce, QI reference, maximum-J, omnigenity, QI residual/composition regressions: 50 passed, 7 skipped (236.37 s; prior helper precision setting, float64).",
+    "Combined implicit multi-RHS plus optimizer block/chunk parity: 10 passed, 4 full tests skipped (547.76 s).",
+    "RUN_FULL=1 pytest tests/test_omnigenity.py tests/test_qi_residuals.py tests/test_maxj.py -m full: 6 passed (249.09 s), including re-solved finite differences and LASYM.",
+    "ruff check vmex tests examples benchmarks tools; mypy vmex: passed (75 source files)."
+  ],
+  "rejected_experiments": [
+    "Linearize the objective G before directional chunks: CPU 1.14-1.25 s, no useful gain; reverted.",
+    "Batch raw-block radial rows in groups of four: about 4% GPU improvement with higher compilation/RSS, less useful than the retained changes; reverted."
+  ],
+  "limitations": [
+    "No full collaborator Simsopt run to convergence and no uniform optimization-runtime or precision guarantee from a small benchmark sample.",
+    "Field-line derivative temporary allocations fall from approximately 159 MB to 16-18 MB, but forward-only temporary allocation grows from approximately 1 MB to 9 MB.",
+    "Refinement is disabled to match the supplied wrapper; this experiment does not justify weakening default refinement or certification tolerances.",
+    "The historical v0.3 and current Boozer objectives differ numerically; their raw wall times do not isolate a same-accuracy regression."
+  ],
+  "sources": [
+    "https://github.com/uwplasma/VMEX/pull/224",
+    "https://github.com/uwplasma/VMEX/pull/240",
+    "https://github.com/uwplasma/VMEX/pull/177",
+    "https://github.com/uwplasma/VMEX/pull/233",
+    "https://docs.jax.dev/en/latest/_autosummary/jax.linearize.html",
+    "https://docs.jax.dev/en/latest/async_dispatch.html"
+  ],
+  "gpu_optimizer_blocker": {
+    "environment": "Standalone Python 3.11.15, JAX/JAXlib/cuda12 plugin 0.9.2, NumPy 2.4.6, SciPy 1.17.1, SOLVAX 0.20.0, booz_xform_jax 0.2.0; pip check passed.",
+    "command": "Same public constructed-QI command with JAX_PLATFORMS=cuda,cpu, device gpu and one CUDA_VISIBLE_DEVICES index per process.",
+    "observation": "Both arms completed initial compilation and reached scipy TRF trial evaluation. At 660 seconds both were still inside a coarse-grid NS=3 retry, compiling jnp.sum in setup.flux_profiles from the GPU pure_callback. Terminated after approximately 11 minutes. No valid optimizer timing.",
+    "independent_reproduction": "On the same GPU environment, jit(pure_callback(callback, scalar_float64, x)) stalls for at least 45 s when callback enters jax.default_device(gpu), creates arange(3) from NumPy and returns np.asarray(jnp.sum(a*a)). Calling callback once before the jitted invocation makes the latter finish in 0.01096 s. Reproduction contains no VMEX code.",
+    "inference": "First-use GPU compilation inside a running GPU host callback is a separate runtime/placement hazard. The component speedups do not fix it.",
+    "next_action": "Keep nonlinear solve/retry setup outside the compiled host-optimizer residual callback, preserving identical status, penalties, warm seeds and parameter-key memoization. Test direct Jacobian calls and the separate staged JAX API before promoting a fix. Do not change tolerances or add unconditional coarse-grid warmup as a numerical workaround.",
+    "exclusions": "Earlier runs with asynchronous faulthandler dumps crashed while dumping; excluded. Safe Python-thread stack sampling was used for this localization."
+  }
+}
