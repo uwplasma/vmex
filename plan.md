@@ -1064,3 +1064,33 @@ Evidence and exclusions are in `resumed_backend_investigation` of
 External `INVESTIGATION.md` records live jobs; inspect before restarting them.
 Continue with full GPU backend validation, the remaining historical optimizer
 matrix, accepted-design replay and the existing P3/free-boundary gates.
+
+### GPU backend and refinement follow-up
+
+The short-system checked-Thomas candidate now excludes narrow batches (fewer
+than four m>0 columns). Broad selection improved full nfp1 QI cold execution,
+but increased low-mode QH startup; the narrower policy reduced that regression.
+SOLVAX PR #102 keeps CPU arithmetic and backend selection intact. Two-row GPU
+scan unrolling retains the measured 0.49 s warm collaborator Jacobian while
+reducing first-derivative time from 264 s (eight rows) to 210 s. Compared with
+the control, saved residual/Jacobian relative differences are below
+3.2e-9/1.0e-9. These are component results, not a converged-design speed claim.
+The earlier SOLVAX candidate passed 748 CPU tests and all CI; the revised
+scalar/batched-gradient suite passed 63 CPU tests. Revised GPU checks remain.
+
+The canonical-reference/refinement diagnostic passes the small-step re-solve
+check (directional AD 1.45453080 versus central FD 1.45453356). Across valid
+larger trials, return-point cost drift is 1.7e-7 or less; the negative 0.01
+trial fails and is excluded. Tighter forward FTOL alone exhausted its budget
+and did not fix repeatability. A checked raw-block initial guess for the same
+Newton–GCROT operator reduces later refined residual evaluations from about
+20 s to 2–3 s, but increases cold compilation. Derivative validation is running;
+neither coordinate policy nor refinement seeding is ready for production.
+
+Next gates remain: completed GPU collaborator replay, paired whole-workflow
+and historical comparisons, independently evaluated accepted designs, and
+free-boundary response profiling. Investigate saving the coupled adjoint
+pullback once instead of recomputing its primal on every host Krylov matvec;
+measure memory and executable reuse before changing that path. PR #299's
+245cc9f4 CI failure was a personal path in the report, corrected at 678bb4da
+with the specific documentation gate passing. No release or merge yet.

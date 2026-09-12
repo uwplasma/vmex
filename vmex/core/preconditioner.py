@@ -665,9 +665,12 @@ def scalfor(
         Same ``jmax`` used to assemble ``matrices`` (static).
     tridiagonal_method:
         Forwarded to SOLVAX's checked tridiagonal solve
-        (``"auto"``/``"thomas"``/``"lax"``; static).  The default picks per
-        lowering platform: the bit-parity Thomas scan on CPU, the fused
-        backend on accelerators.
+        (``"auto"``/``"thomas"``/``"lax"``; static). The default selects
+        Thomas for at most 256 radial rows and at least four m>0 coefficient
+        columns; longer or narrower systems retain SOLVAX's
+        platform selection. Short, batched VMEC systems spend most CUDA
+        time launching cuSPARSE kernels; the checked Thomas sweep avoids
+        those launches while retaining the same acceptance checks.
     return_safe:
         Also return a scalar status.  Production calls use SOLVAX's
         unregularized pivot and backward-residual checks.  A rejected column
@@ -682,6 +685,8 @@ def scalfor(
         f = f[..., None]
     jmax = int(jmax)
     mpol = int(f.shape[1])
+    if tridiagonal_method == "auto" and jmax <= 256 and (mpol - 1) * f.shape[2] >= 4:
+        tridiagonal_method = "thomas"
     out = f
     safe = jnp.asarray(True)
 

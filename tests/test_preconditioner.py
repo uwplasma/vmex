@@ -244,9 +244,10 @@ def test_tridiagonal_solve_broadcast_rank():
         )
 
 
-def test_scalfor_checked_solve_reports_well_conditioned_system() -> None:
+@pytest.mark.parametrize("ns", [6, 16, 257])
+def test_scalfor_checked_solve_reports_well_conditioned_system(ns) -> None:
     """The production solve accepts a stable radial system without fallback."""
-    ns, mpol, nrange = 6, 2, 3
+    mpol, nrange = 2, 4
     matrices = newp.TridiagonalMatrices(
         ax=jnp.full((ns, mpol, nrange), -0.25),
         bx=jnp.full((ns, mpol, nrange), -0.25),
