@@ -1012,25 +1012,17 @@ test must separate a consistent discrete force/root and coordinate reference
 from finite-tolerance error, then check independent physics and directional
 derivatives. A repeat-value cache alone would hide the issue.
 
-Full supplied workflow handoff: local root is
-`/Users/rogeriojorge/local/vega_tests`, office root is
-`~/vega-performance-20260912`. Local `sources/performance` is this PR;
-`sources/latest` is frozen main f09288b3; office `host` contains the matching
-candidate source and `baseline` the frozen main source. Office snapshot git
-metadata is older than copied source: compare recorded source hashes.
-Both roots have `run_workflow.py`, driver/wrapper, `src/`, supplied input,
-and external results. Use office `env-clean/bin/python`; local
-`envs/latest/bin/python` needs the recorded Mac MPI library path. The exact
-Simsopt branch is csvega24's `codex/scalar-surface-gradient-phase0`, commit
-fa05207846283d8ad03c0cdf499318df22a15f0d. The full workflow still needs these
-external collaborator files; only the surface replay is self-contained in git.
-`run_workflow.py --label NEW_LABEL --cap 3 --no-profile` makes a fresh capped
-run; omit `--cap` for full budgets and `--no-profile` for cProfile. Set
-`PYTHONPATH` to the chosen VMEX checkout. Each phase now saves trial and
-accepted vectors/cost in NPZ. Never reuse an interrupted output label or treat
-imports as workflow completion. All numerical jobs launched here finished;
-no release/merge, no default solver or SOLVAX change. The PR body carries the
-remaining acceptance gates and environment/version table for handoff.
+Full supplied workflow handoff: machine-specific workspace paths, environment
+names, private helper scripts and raw artifact names are retained privately.
+Compare recorded source hashes, because copied source can differ from checkout
+metadata. The supplied Simsopt implementation is csvega24's
+`codex/scalar-surface-gradient-phase0`, commit
+fa05207846283d8ad03c0cdf499318df22a15f0d. The full workflow requires external
+collaborator inputs; the repository surface replay is self-contained. Use the
+same objective, convergence targets and dependency versions across candidate
+and baseline. Save trial and accepted vectors/cost, use fresh output locations,
+and distinguish imports from completed numerical validation. The PR body
+records public source revisions and remaining acceptance gates.
 
 ### 2026-09-12 — completed collaborator profile and GPU backend diagnosis
 
