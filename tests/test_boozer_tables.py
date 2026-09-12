@@ -638,3 +638,56 @@ def test_boozer_high_order_uses_the_symmetry_the_state_carries():
     vertical = _State()
     vertical.Z_cos[0, 0] = -2.0e-8
     assert _tables_are_asymmetric(vertical) is True
+
+
+@pytest.mark.parametrize("deck", ["input.li383_low_res", "input.basic_non_stellsym_simsopt"])
+def test_lambda_defines_straight_field_lines_on_native_half_mesh(deck):
+    """B·grad(theta+lambda) = iota B·grad(phi), including axis-adjacent rows.
+
+    This kinematic identity holds before force convergence and for both
+    parities, so a generated lambda perturbation needs no equilibrium solve.
+    It also holds under differentiation of the physical field and its labels.
+    """
+    import dataclasses
+    import jax.numpy as jnp
+    from vmex.core.fields import magnetic_fields, metric_elements
+    from vmex.core.geometry import half_mesh_jacobian
+
+    inp = VmecInput.from_file(str(DATA_DIR / deck))
+    rt = solver.prepare_runtime(inp, solver.resolution_from_input(inp, ns=9))
+    state = solver._initial_state(rt.setup)
+    radial = jnp.asarray(rt.setup.s_full)[:, None]
+    direction = radial * (0.03 + 0.01 * radial) * jnp.sin(
+        jnp.arange(state.L_sin.shape[1])[None, :] + 0.4)
+    shape = (rt.resolution.ntheta3, rt.resolution.nzeta)
+    theta = 2 * np.pi * np.arange(shape[0]) / rt.resolution.ntheta
+    phi = 2 * np.pi * np.arange(shape[1]) / (shape[1] * rt.resolution.nfp)
+
+    @jax.jit
+    def defect(scale):
+        trial = dataclasses.replace(
+            state, L_sin=state.L_sin + scale * direction,
+            L_cos=state.L_cos + (scale * direction if rt.setup.lasym else 0.))
+        _, geometry = solver._geometry(trial, rt)
+        fields = magnetic_fields(
+            geometry=geometry, jacobian=half_mesh_jacobian(geometry, s=rt.setup.s_full),
+            metrics=metric_elements(geometry, s=rt.setup.s_full), trig=rt.trig,
+            s=rt.setup.s_full, phips=rt.setup.phips, phipf=rt.setup.phipf,
+            chips=rt.setup.chips, signgs=rt.setup.signgs, gamma=rt.gamma,
+            mass=rt.setup.mass, ncurr=rt.setup.ncurr, enclosed_current=rt.setup.icurv)
+        errors = []
+        for row in (1, 4, 8):
+            table = boozer_input_tables(trial, rt, row)
+            m, n = table["xm"], table["xn"]
+            phase = theta[:, None, None] * m - phi[None, :, None] * n
+            angular = table["lmns"] * jnp.cos(phase) - table["lmnc"] * jnp.sin(phase)
+            lt, lp = jnp.sum(angular * m, axis=-1), -jnp.sum(angular * n, axis=-1)
+            bu, bv = fields.bsupu[row], fields.bsupv[row]
+            target = table["iota"] * bv
+            errors.append((bu * (1 + lt) + bv * lp - target)
+                          / jnp.maximum(jnp.abs(bu) + jnp.abs(target), 1e-20))
+        return jnp.stack(errors)
+
+    value, tangent = jax.jvp(defect, (jnp.asarray(0.7),), (jnp.asarray(1.),))
+    np.testing.assert_allclose(value, 0., atol=2e-12)
+    np.testing.assert_allclose(tangent, 0., atol=2e-11)
