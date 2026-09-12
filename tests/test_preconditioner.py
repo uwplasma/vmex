@@ -162,6 +162,34 @@ def test_lamcal_axis_row_convention(case):
     assert new_np[0, 0, 0] != 0.0
 
 
+@pytest.mark.usefixtures("_module_jit_enabled")
+@pytest.mark.parametrize("free_boundary", [False, True])
+def test_radial_matrix_transpose_with_half_mesh_padding(free_boundary):
+    """The compiled matrix pullback supports the extra free-boundary row."""
+    ns = 16
+    half = jnp.arange((ns - 1) * 2, dtype=float).reshape(ns - 1, 2) / 30
+    direction = jnp.cos(half)
+
+    def loss(axm):
+        coefficients = newp.RadialPreconditionerCoefficients(
+            axm=axm, bxm=half, axd=jnp.ones((ns, 2)),
+            bxd=jnp.ones((ns, 2)), cx=jnp.ones(ns),
+        )
+        matrices = newp.scalfor_matrices(
+            coefficients, delta_s=1 / (ns - 1), mpol=3, ntor=1,
+            nfp=5, ns=ns, jmax=ns if free_boundary else ns - 1,
+        )
+        return sum(jnp.sum(value**2) for value in matrices)
+
+    gradient = jax.jit(jax.grad(loss))(half)
+    step = 1e-4
+    finite_difference = (loss(half + step * direction)
+                         - loss(half - step * direction)) / (2 * step)
+    np.testing.assert_allclose(
+        jnp.sum(gradient * direction), finite_difference, rtol=1e-8,
+    )
+
+
 def test_edge_pedestal_and_zc00_values():
     """The scalfor.f edge constants: 0.05 pedestal and the 0.25 ZC00 factor."""
     case = CASES[0]

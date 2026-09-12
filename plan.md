@@ -1094,3 +1094,34 @@ pullback once instead of recomputing its primal on every host Krylov matvec;
 measure memory and executable reuse before changing that path. PR #299's
 245cc9f4 CI failure was a personal path in the report, corrected at 678bb4da
 with the specific documentation gate passing. No release or merge yet.
+
+
+### Coupled GPU transpose correction
+
+The existing free-boundary current-adjoint case exposed a CUDA XLA compilation
+failure on both the new backend and the earlier source. A standalone JAX
+reproducer isolates the cause: the transpose of a parity-column gather after
+padding a 15-row array to 16 rows simplifies into an invalid scatter. Replace
+the gather in radial matrix assembly with broadcast selection of the same two
+parity columns. Fixed/free-boundary compiled matrix gradients pass on CPU
+and GPU. The coupled GPU transpose now compiles and agrees with a separately
+staged pullback to 4.4e-15 relative; the full gradient/re-solve gate follows. This changes neither the
+edge pedestal nor the radial equations.
+
+SOLVAX 3e364fa now passes all CI and 62 GPU tridiagonal tests (one CPU-only
+skip). The VMEX backend passes 12 GPU preconditioner tests. The completed
+capped collaborator GPU run took 661 s, including 266 s surface startup and
+294 s joint optimization with rejected trials; faster warm kernels do not
+resolve this cold-start workload yet. The block-seeded refinement diagnostic
+passes AD versus re-solve FD to 1.4e-8 relative and reproduces its cold value
+and gradient, but that cold evaluation costs 313 s. Keep it experimental until
+family-wide startup and root-consistency checks justify a default change.
+
+The free-boundary CPU pullback probe retains about 21 MB of intermediates and
+reduces a warm
+transpose action from 28.4 to 23.0 ms, with 1.2e-15 operator disagreement.
+GPU profiling must follow the compiler fix. JAX documents the saved-value
+tradeoff in [linearize](https://docs.jax.dev/en/latest/_autosummary/jax.linearize.html).
+Refinement continues to test the full Newton residual, following the inexact
+Newton condition of [Eisenstat and Walker (1996)](https://doi.org/10.1137/0917003);
+raw-block seeding does not justify loosening the force acceptance threshold.

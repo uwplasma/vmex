@@ -559,10 +559,15 @@ def scalfor_matrices(
     bxd_rows = bxd[:jmax]
     cx_rows = cx[:jmax]
 
-    axm_m = axm_rows[:, m_parity]
-    bxm_m = bxm_rows[:, m_parity]
-    axd_m = axd_rows[:, m_parity]
-    bxd_m = bxd_rows[:, m_parity]
+    # Broadcast the two parity columns. A gather after radial padding creates
+    # a transposed scatter that CUDA XLA can simplify to incompatible bounds.
+    def parity_columns(rows):
+        return jnp.where(m_parity[None, :] == 0, rows[:, :1], rows[:, 1:2])
+
+    axm_m = parity_columns(axm_rows)
+    bxm_m = parity_columns(bxm_rows)
+    axd_m = parity_columns(axd_rows)
+    bxd_m = parity_columns(bxd_rows)
 
     ax = -(axm_m[:, :, None] + bxm_m[:, :, None] * m2)
     dx = -(axd_m[:, :, None] + bxd_m[:, :, None] * m2 + cx_rows[:, None, None] * n2)
