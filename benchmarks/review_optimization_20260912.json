@@ -1102,5 +1102,43 @@
     "cost_removed_by_diagnostic_fixed_minima": [3.4043033e-6, 3.4079934e-6, 3.4109075e-6],
     "attribution": "A sampled minimum changes phi index 53 to 52 on the third QI surface, alpha index 1. An independent NumPy surrogate reproduces JAX within 8.7e-19 and isolates the cost jump by holding minimum indices fixed only for diagnosis.",
     "limits": "No objective change or production minimum freezing. Three local halvings do not close the family-wide P3 gate. Projected residuals are not strong-force certificates. Global restart-history consistency remains unresolved."
+  },
+  "warm_gpu_source_attribution": {
+    "parameters": 48,
+    "diagnostic": "CUDA command buffers disabled only to map runtime kernels to HLO source origins; not a production timing comparison.",
+    "device_kernel_ms": 390.30,
+    "dense_geometry_fourier_ms": 76.74,
+    "local_row_jacobian_fourier_ms": 49.34,
+    "local_row_jacobian_fourier_launches": 752,
+    "historical_exclusion_commit": "c595c25734a12acabf9d6028fe65b710b6f786f3",
+    "local_dense_vs_separable": {
+      "gpu_warm_ms": [6.713, 7.038],
+      "gpu_compile_seconds": [25.45, 38.11],
+      "gpu_temporary_MB": [7.46, 10.64],
+      "cpu_warm_ms": [25.33, 31.35],
+      "cpu_compile_seconds": [7.29, 8.27],
+      "cpu_temporary_MB": [23.82, 24.77],
+      "derivative_relative_difference_max": 1.8e-13,
+      "cpu_force_reference_norm": 3.218e-8,
+      "cpu_force_absolute_error_norm": 7.236e-14,
+      "decision": "Reject the separable switch: both devices are slower. No production source change; retain dense synthesis."
+    }
+  },
+  "magnetic_projection": {
+    "upstream_pr": "https://github.com/uwplasma/booz_xform_jax/pull/8",
+    "upstream_commit": "72d9ddc",
+    "upstream_source_sha256": "cd37a7ac41883ea952ef46bb7e62dd17351c3bed7ed697b7577196542e00e2d5",
+    "scope": "Optional magnetic-only transform; original full-output backend unchanged. Same physics, quadrature and solver settings. Older dependencies retain their existing path.",
+    "gpu_spectrum_ms": [11.006, 3.186],
+    "gpu_state_gradient_ms": [19.069, 9.212],
+    "gpu_spectrum_temporary_MB": [68.56, 31.47],
+    "gpu_state_gradient_temporary_MB": [171.98, 107.14],
+    "collaborator_warm_jacobian_seconds": [[0.6572, 0.6592], [0.4361, 0.4310]],
+    "collaborator_warm_residual_seconds": [0.5985, 0.3843],
+    "collaborator_jacobian_relative_difference_max": 1.59e-9,
+    "collaborator_residual_relative_difference_max": 4.90e-10,
+    "collaborator_warm_jacobian_gpu_kernel_ms": [616.55, 394.17],
+    "integration_tests": {"old_backend_cpu": 1, "candidate_backend_cpu": 3, "candidate_backend_gpu": 3, "changed_executable_lines_covered": 3, "changed_executable_lines_total": 3},
+    "limits": "Unmerged upstream source is explicitly pinned. Cold timings overlap other host work and are not isolated speedup claims. This is matched surface evaluation, not a completed coil-and-equilibrium optimization or a physical acceptance certificate."
   }
 }
