@@ -149,7 +149,9 @@ from solvax import (
     gmres as _solvax_gmres,
 )
 
-from .device import AUTO, _put_numeric_leaves, resolve_implicit_device
+from .device import (
+    AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
+)
 from .errors import AdjointSolveError, VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
@@ -1485,10 +1487,12 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     as one compiled program.  Arguments are committed to ``cfg.device``
     exactly like the eager Krylov lane's RHS pin.
     """
+    # The first step receives eager arrays and later steps this executable's
+    # committed outputs; one commitment keeps one compiled step.
+    arguments = commit_to_single_device(tuple(
+        _pin_concrete(cfg, tree) for tree in (z, fz, params, frozen, dof_mask)))
     z, fz, residual_norm, iterations, converged = _refine_step_core(
-        _pin_concrete(cfg, z), _pin_concrete(cfg, fz),
-        _pin_concrete(cfg, params), _pin_concrete(cfg, frozen),
-        _pin_concrete(cfg, dof_mask), cfg)
+        *arguments, cfg)
     _count(cfg, refinement_steps=1,
            refinement_krylov_iterations=int(iterations))
     return z, fz, residual_norm, converged
@@ -1520,6 +1524,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     tol = float(cfg.refine_tol)
     if not np.isfinite(tol) or tol <= 0.0:
         return state
+    # A first trial passes eager arrays and a later one the previous refined,
+    # committed state; one commitment keeps one residual executable.
+    state, params, dof_mask = commit_to_single_device((state, params, dof_mask))
     P = _dof_projector(cfg, dof_mask)
     F = residual_fn(cfg, state, dof_mask)
     z0 = P(state)

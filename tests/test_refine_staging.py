@@ -192,12 +192,15 @@ def test_unconverged_step_without_progress_ends_refinement(
     so ``|F|`` roughly doubles instead of falling (a zero correction would
     leave compiled and eager norms a round-off apart). Unconverged, the
     refinement stops after that step; converged, the non-monotone Newton
-    budget is unchanged. Either way the host state is returned untouched.
+    budget is unchanged. Either way the host state is returned untouched. A
+    second trial starts from the first one's returned state, as the next
+    optimizer evaluation does, and neither staged lane compiles again.
     """
     inp, _, p0 = _small_solovev_setup()
     cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-300)
     params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
-    state, mask = im._host_solve_and_mask(cfg, params_np, refine=False)
+    state, mask = jax.tree.map(
+        jnp.asarray, im._host_solve_and_mask(cfg, params_np, refine=False))
     real_gcrot = im._solvax_gcrot
 
     def no_progress(matvec, b, **kwargs):
@@ -205,17 +208,22 @@ def test_unconverged_step_without_progress_ends_refinement(
         return solution._replace(x=-solution.x, converged=jnp.asarray(converged))
 
     monkeypatch.setattr(im, "_solvax_gcrot", no_progress)
+    lanes = (im._refine_step_core, im._preconditioned_residual_lane)
     previous = bool(jax.config.jax_disable_jit)
-    im._refine_step_core.clear_cache()
+    for lane in lanes:
+        lane.clear_cache()
     im._SOLVE_STATS.pop(cfg, None)
     jax.config.update("jax_disable_jit", False)  # the suite default is eager
     try:
         refined = im._refined_state(cfg, p0, state, mask)
-        assert im._refine_step_core._cache_size() >= 1  # the staged program ran
-        assert im._SOLVE_STATS[cfg]["refinement_steps"] == steps
+        again = im._refined_state(cfg, p0, refined, mask)
+        assert [lane._cache_size() for lane in lanes] == [1, 1]
+        assert im._SOLVE_STATS[cfg]["refinement_steps"] == 2 * steps
     finally:
         jax.config.update("jax_disable_jit", previous)
-        im._refine_step_core.clear_cache()
+        for lane in lanes:
+            lane.clear_cache()
         im._SOLVE_STATS.pop(cfg, None)
-    for refined_leaf, state_leaf in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
-        np.testing.assert_array_equal(np.asarray(refined_leaf), np.asarray(state_leaf))
+    for result in (refined, again):
+        for result_leaf, state_leaf in zip(jax.tree.leaves(result), jax.tree.leaves(state)):
+            np.testing.assert_array_equal(np.asarray(result_leaf), np.asarray(state_leaf))
