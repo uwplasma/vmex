@@ -1,0 +1,738 @@
+{
+ "schema": "vmex.research-review/1",
+ "review_date_utc": "2026-09-13",
+ "claim_scope": "Independent review of main f09288b3 and PR #299 de93e5e2. Timings are single runs on one shared laptop (load 3-11 of 14 cores) and are diagnostic, not rankings; the exterior-field errors are known-answer results and are not load dependent. No production solver behavior changes with this record.",
+ "_provenance": {
+  "measurement_commit": "f09288b37bac7d7122e98220192795e770cd1f",
+  "measurement_dirty": false,
+  "input_data_embedded": false,
+  "machine": "Apple Silicon laptop, 14 cores, 36 GiB, macOS 14 (Darwin 23.4)",
+  "python_a": "3.11 + JAX 0.9.2 + VMEC++ 0.5.3 (system site-packages)",
+  "python_b": "3.12.9 + JAX 0.11.1 + VMEC++ 0.7.4 (isolated venv)",
+  "threads": "OMP/OPENBLAS 4; VMEC++ max_threads=4",
+  "compilation_cache": "disabled",
+  "scripts": "benchmarks/review_20260913_equilibrium.py, benchmarks/review_20260913_exterior.py"
+ },
+ "equilibrium_timing": {
+  "deck": "examples/data/input.LandremanPaul2021_QA_lowres",
+  "ladder": "16/31/50 at ftol 1e-8/1e-10/1e-11",
+  "single_grid": "ns=50 ftol 1e-11 niter 5000",
+  "perturbation": "all boundary coefficients x1.01 except the largest",
+  "jax_0_9_2_vs_vmecpp_0_5_3": {
+   "vmecpp": {
+    "ladder_cold_s": 18.26792287826538,
+    "ns50_cold_s": 6.0941503047943115,
+    "ns50_perturbed_cold_s": 6.416795253753662,
+    "ns50_perturbed_hot_restart_s": 6.927479028701782,
+    "niter": [
+     808,
+     806,
+     813,
+     813
+    ],
+    "fsqr": [
+     9.864395443814086e-12,
+     9.864409995908931e-12,
+     9.710165940381357e-12,
+     9.710140268758409e-12
+    ]
+   },
+   "vmex_jit": {
+    "jax": "0.9.2",
+    "ladder_cold_s": 32.904289960861206,
+    "ladder_warm_s": 9.841675043106079,
+    "ns50_cold_s": 15.19129490852356,
+    "ns50_warm_same_s": 6.36208701133728,
+    "ns50_perturbed_warm_s": 7.52685284614563,
+    "ns50_perturbed_hot_restart_s": 3.500594139099121,
+    "info": [
+     {
+      "iterations": 656.0,
+      "fsqr": 9.74740584486308e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 656.0,
+      "fsqr": 9.74740584486308e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865090327810937e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865090327810937e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 813.0,
+      "fsqr": 9.712889624931037e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 391.0,
+      "fsqr": 9.773215695763186e-12,
+      "converged": 1.0
+     }
+    ],
+    "fields": [
+     "converged",
+     "fsq_history",
+     "fsql",
+     "fsqr",
+     "fsqz",
+     "ier_flag",
+     "iotaf",
+     "iterations",
+     "jacobian_resets",
+     "native_equilibrium",
+     "polish_context",
+     "polish_report",
+     "polished_state",
+     "r00",
+     "rmnc",
+     "rmns",
+     "state",
+     "strong_force",
+     "time_step",
+     "vacuum",
+     "wb",
+     "wmhd",
+     "wp",
+     "xm",
+     "xn",
+     "zmnc",
+     "zmns"
+    ]
+   },
+   "vmex_cli": {
+    "jax": "0.9.2",
+    "ladder_cold_s": 25.252562284469604,
+    "ladder_warm_s": 7.670830011367798,
+    "ns50_cold_s": 7.641778230667114,
+    "ns50_warm_same_s": 3.2026469707489014,
+    "ns50_perturbed_warm_s": 3.637145757675171,
+    "ns50_perturbed_hot_restart_s": 1.820255994796753,
+    "info": [
+     {
+      "iterations": 656.0,
+      "fsqr": 9.74740584486308e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 656.0,
+      "fsqr": 9.74740584486308e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865090327810937e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865090327810937e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 813.0,
+      "fsqr": 9.712889624931037e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 391.0,
+      "fsqr": 9.773215695763186e-12,
+      "converged": 1.0
+     }
+    ],
+    "fields": [
+     "converged",
+     "fsq_history",
+     "fsql",
+     "fsqr",
+     "fsqz",
+     "ier_flag",
+     "iotaf",
+     "iterations",
+     "jacobian_resets",
+     "native_equilibrium",
+     "polish_context",
+     "polish_report",
+     "polished_state",
+     "r00",
+     "rmnc",
+     "rmns",
+     "state",
+     "strong_force",
+     "time_step",
+     "vacuum",
+     "wb",
+     "wmhd",
+     "wp",
+     "xm",
+     "xn",
+     "zmnc",
+     "zmns"
+    ]
+   }
+  },
+  "jax_0_11_1_vs_vmecpp_0_7_4": {
+   "vmecpp": {
+    "ladder_cold_s": 0.9479970932006836,
+    "ns50_cold_s": 0.7391269207000732,
+    "ns50_perturbed_cold_s": 0.7287230491638184,
+    "ns50_perturbed_hot_restart_s": 0.7199201583862305,
+    "niter": [
+     487,
+     806,
+     813,
+     813
+    ],
+    "fsqr": [
+     9.512105515534218e-12,
+     9.864389524078639e-12,
+     9.710154406606775e-12,
+     9.710154406606775e-12
+    ]
+   },
+   "vmex_jit": {
+    "jax": "0.11.1",
+    "ladder_cold_s": 11.571962118148804,
+    "ladder_warm_s": 2.506988048553467,
+    "ns50_cold_s": 4.0488739013671875,
+    "ns50_warm_same_s": 1.940406084060669,
+    "ns50_perturbed_warm_s": 1.8298430442810059,
+    "ns50_perturbed_hot_restart_s": 0.9822170734405518,
+    "info": [
+     {
+      "iterations": 656.0,
+      "fsqr": 9.747430800426165e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 656.0,
+      "fsqr": 9.747430800426165e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865195743362565e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865195743362565e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 813.0,
+      "fsqr": 9.712932391286818e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 391.0,
+      "fsqr": 9.773203541288814e-12,
+      "converged": 1.0
+     }
+    ],
+    "fields": [
+     "converged",
+     "fsq_history",
+     "fsql",
+     "fsqr",
+     "fsqz",
+     "ier_flag",
+     "iotaf",
+     "iterations",
+     "jacobian_resets",
+     "native_equilibrium",
+     "polish_context",
+     "polish_report",
+     "polished_state",
+     "r00",
+     "rmnc",
+     "rmns",
+     "state",
+     "strong_force",
+     "time_step",
+     "vacuum",
+     "wb",
+     "wmhd",
+     "wp",
+     "xm",
+     "xn",
+     "zmnc",
+     "zmns"
+    ]
+   },
+   "vmex_cli": {
+    "jax": "0.11.1",
+    "ladder_cold_s": 7.522406339645386,
+    "ladder_warm_s": 3.7056729793548584,
+    "ns50_cold_s": 4.393608093261719,
+    "ns50_warm_same_s": 2.591520071029663,
+    "ns50_perturbed_warm_s": 2.865507125854492,
+    "ns50_perturbed_hot_restart_s": 1.3650782108306885,
+    "info": [
+     {
+      "iterations": 656.0,
+      "fsqr": 9.747430800426165e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 656.0,
+      "fsqr": 9.747430800426165e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865195743362565e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 806.0,
+      "fsqr": 9.865195743362565e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 813.0,
+      "fsqr": 9.712932391286818e-12,
+      "converged": 1.0
+     },
+     {
+      "iterations": 391.0,
+      "fsqr": 9.773203541288814e-12,
+      "converged": 1.0
+     }
+    ],
+    "fields": [
+     "converged",
+     "fsq_history",
+     "fsql",
+     "fsqr",
+     "fsqz",
+     "ier_flag",
+     "iotaf",
+     "iterations",
+     "jacobian_resets",
+     "native_equilibrium",
+     "polish_context",
+     "polish_report",
+     "polished_state",
+     "r00",
+     "rmnc",
+     "rmns",
+     "state",
+     "strong_force",
+     "time_step",
+     "vacuum",
+     "wb",
+     "wmhd",
+     "wp",
+     "xm",
+     "xn",
+     "zmnc",
+     "zmns"
+    ]
+   }
+  },
+  "hot_restart_vs_step_size_jax_0_11_1_vs_vmecpp_0_7_4": [
+   {
+    "frac": 0.01,
+    "vmecpp_cold": [
+     0.6752140522003174,
+     813
+    ],
+    "vmecpp_hot": [
+     0.6406347751617432,
+     813
+    ],
+    "vmex_warm": [
+     1.8377101421356201,
+     813
+    ],
+    "vmex_hot": [
+     0.9654619693756104,
+     391
+    ]
+   },
+   {
+    "frac": 0.001,
+    "vmecpp_cold": [
+     0.6831600666046143,
+     806
+    ],
+    "vmecpp_hot": [
+     0.7435038089752197,
+     910
+    ],
+    "vmex_warm": [
+     1.8110039234161377,
+     806
+    ],
+    "vmex_hot": [
+     0.6329069137573242,
+     272
+    ]
+   },
+   {
+    "frac": 0.0001,
+    "vmecpp_cold": [
+     0.6521821022033691,
+     806
+    ],
+    "vmecpp_hot": [
+     0.3867630958557129,
+     472
+    ],
+    "vmex_warm": [
+     1.8146631717681885,
+     806
+    ],
+    "vmex_hot": [
+     0.5072839260101318,
+     212
+    ]
+   }
+  ],
+  "summary": "VMEC++ 0.7.4: 0.92 ms/iteration (4 threads); VMEX warm 2.4 ms/iteration on JAX 0.11.1, 4.0 on 0.9.2; VMEX cold ladder 11.6 s vs 0.95 s. Hot restart on small steps: VMEX 212 iterations / 0.51 s at 1e-4 vs VMEC++ 472 / 0.39 s; at 1e-3 VMEC++ restart is worse than cold (910 vs 806)."
+ },
+ "exterior_field": {
+  "vacuum_identity": {
+   "targets": 40,
+   "deck": "examples/data/input.LandremanPaul2021_QA_lowres",
+   "ctor_A": -4.17e-11,
+   "volavgB_T": 0.999,
+   "a_m": 0.169,
+   "note": "exact plasma field outside is zero; direct path == full-torus trapezoid of the surface data (independent NumPy reimplementation agrees to 3 digits); errors relative to volavgB, median|max, verified-exterior targets",
+   "rows": [
+    {
+     "N": 32,
+     "d_over_a": 1.0,
+     "med": 2.2e-05,
+     "max": 0.0003
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.5,
+     "med": 0.0058,
+     "max": 0.015
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.2,
+     "med": 0.12,
+     "max": 0.25
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.1,
+     "med": 0.28,
+     "max": 0.91
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.05,
+     "med": 0.43,
+     "max": 2.4
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.02,
+     "med": 0.53,
+     "max": 4.0
+    },
+    {
+     "N": 64,
+     "d_over_a": 1.0,
+     "med": 2e-06,
+     "max": 4.6e-06
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.5,
+     "med": 3.2e-05,
+     "max": 0.00025
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.2,
+     "med": 0.018,
+     "max": 0.03
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.1,
+     "med": 0.13,
+     "max": 0.2
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.05,
+     "med": 0.31,
+     "max": 0.66
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.02,
+     "med": 0.48,
+     "max": 1.2
+    },
+    {
+     "N": 128,
+     "d_over_a": 0.5,
+     "med": 3.2e-06,
+     "max": 7.1e-06
+    },
+    {
+     "N": 128,
+     "d_over_a": 0.2,
+     "med": 0.00029,
+     "max": 0.0012
+    },
+    {
+     "N": 128,
+     "d_over_a": 0.1,
+     "med": 0.018,
+     "max": 0.03
+    },
+    {
+     "N": 128,
+     "d_over_a": 0.05,
+     "med": 0.13,
+     "max": 0.27
+    },
+    {
+     "N": 128,
+     "d_over_a": 0.02,
+     "med": 0.34,
+     "max": 1.8
+    },
+    {
+     "N": 256,
+     "d_over_a": 0.2,
+     "med": 6.9e-06,
+     "max": 1.4e-05
+    },
+    {
+     "N": 256,
+     "d_over_a": 0.1,
+     "med": 0.00032,
+     "max": 0.0011
+    },
+    {
+     "N": 256,
+     "d_over_a": 0.05,
+     "med": 0.019,
+     "max": 0.032
+    },
+    {
+     "N": 256,
+     "d_over_a": 0.02,
+     "med": 0.19,
+     "max": 0.34
+    }
+   ],
+   "on_surface_pou_64": {
+    "mean": 0.00021,
+    "max": 0.0011,
+    "cold_seconds": 91.0
+   }
+  },
+  "finite_beta_self_convergence": {
+   "deck": "examples/data/input.LandremanPaul2021_QA_beta2p5_bootstrap",
+   "reference": "direct path N=256 per period",
+   "note": "B_plasma is 3.6-5.2% of volavgB; errors relative to volavgB",
+   "rows": [
+    {
+     "d_over_a": 0.5,
+     "Bplasma_over_B": 0.036102364577610735,
+     "direct32_med": 0.004704852897251873,
+     "direct32_max": 0.011767308401267091,
+     "direct64_med": 2.629868333271696e-05,
+     "direct64_max": 0.00017386821170518415,
+     "taylor32_med": 0.0067180967924020465,
+     "taylor32_max": 0.020081434315212223,
+     "t_ref_s": 3.5694217681884766
+    },
+    {
+     "d_over_a": 0.2,
+     "Bplasma_over_B": 0.04331237122008609,
+     "direct32_med": 0.12375345808993295,
+     "direct32_max": 0.16925853960572998,
+     "direct64_med": 0.015660092064223093,
+     "direct64_max": 0.026741978038791824,
+     "taylor32_med": 0.001726537515703328,
+     "taylor32_max": 0.005849705964877548,
+     "t_ref_s": 0.5865070819854736
+    },
+    {
+     "d_over_a": 0.1,
+     "Bplasma_over_B": 0.046561622602482824,
+     "direct32_med": 0.31122981679925266,
+     "direct32_max": 0.5471561367361732,
+     "direct64_med": 0.12679560658672417,
+     "direct64_max": 0.16650218046713347,
+     "taylor32_med": 0.0011822772991194647,
+     "taylor32_max": 0.00485679678800753,
+     "t_ref_s": 0.5908651351928711
+    },
+    {
+     "d_over_a": 0.05,
+     "Bplasma_over_B": 0.05156860098690406,
+     "direct32_med": 0.47667313405046696,
+     "direct32_max": 1.2712428500028445,
+     "direct64_med": 0.30635707493953623,
+     "direct64_max": 0.6333160320202013,
+     "taylor32_med": 0.018232966047131136,
+     "taylor32_max": 0.02815006246528173,
+     "t_ref_s": 0.6115789413452148
+    }
+   ]
+  },
+  "near_surface_taylor_plan_vacuum": {
+   "note": "vacuum deck cannot expose the O(d^2) term; shows on-surface data quality and cost only",
+   "rows": [
+    {
+     "N": 32,
+     "d_over_a": 0.5,
+     "direct_med": 0.005849991137172477,
+     "direct_max": 0.013455491420972588,
+     "taylor_med": 1.9882583997703024e-05,
+     "taylor_max": 0.002357704218874462
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.2,
+     "direct_med": 0.11957970567065117,
+     "direct_max": 0.17601458613683282,
+     "taylor_med": 8.15768166006327e-06,
+     "taylor_max": 0.0021055744807930215
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.1,
+     "direct_med": 0.3095617619893322,
+     "direct_max": 0.558706542437515,
+     "taylor_med": 8.831564445834349e-06,
+     "taylor_max": 0.0013378747580559162
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.05,
+     "direct_med": 0.4496366529548015,
+     "direct_max": 1.3006660281006754,
+     "taylor_med": 9.920678387432427e-06,
+     "taylor_max": 0.000887275123350878
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.02,
+     "direct_med": 0.5479363747045564,
+     "direct_max": 2.6601949968616245,
+     "taylor_med": 1.0897257908414393e-05,
+     "taylor_max": 0.0005993723810223741
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.01,
+     "direct_med": 0.5953915054185885,
+     "direct_max": 3.3921802474267424,
+     "taylor_med": 1.1425316837194703e-05,
+     "taylor_max": 0.0005008456324402428
+    },
+    {
+     "N": 32,
+     "d_over_a": 0.005,
+     "direct_med": 0.5951196701946373,
+     "direct_max": 3.711786306616546,
+     "taylor_med": 1.1711290555869429e-05,
+     "taylor_max": 0.00045503147887281125
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.5,
+     "direct_med": 3.229536554561265e-05,
+     "direct_max": 0.00024651887801311077,
+     "taylor_med": 2.5919485982316158e-05,
+     "taylor_max": 0.004091020597737376
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.2,
+     "direct_med": 0.017718568427395262,
+     "direct_max": 0.030088142364122276,
+     "taylor_med": 1.0134490092758524e-05,
+     "taylor_max": 0.0023078148671671133
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.1,
+     "direct_med": 0.12638447435161132,
+     "direct_max": 0.1717330545276491,
+     "taylor_med": 1.022192720710322e-05,
+     "taylor_max": 0.0022324411892244746
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.05,
+     "direct_med": 0.3016545374371435,
+     "direct_max": 0.6231655503229613,
+     "taylor_med": 1.1594826204499209e-05,
+     "taylor_max": 0.001564161394360079
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.02,
+     "direct_med": 0.4882515535591495,
+     "direct_max": 1.8787143862579128,
+     "taylor_med": 1.2669717454900352e-05,
+     "taylor_max": 0.0009165448081739654
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.01,
+     "direct_med": 0.5763253473024561,
+     "direct_max": 2.5959154038754355,
+     "taylor_med": 1.3141808741595911e-05,
+     "taylor_max": 0.0006559707262149989
+    },
+    {
+     "N": 64,
+     "d_over_a": 0.005,
+     "direct_med": 0.6306483359156501,
+     "direct_max": 2.9029330388027654,
+     "taylor_med": 1.3068991215637419e-05,
+     "taylor_max": 0.0005169785255953236
+    }
+   ],
+   "build_seconds": {
+    "32x32": 56.0,
+    "64x64": 246.9,
+    "32x32_finite_beta": 96.1
+   },
+   "throughput_direct_path_warm": {
+    "batch_1": 0.424,
+    "batch_10": 0.453,
+    "batch_100": 0.495,
+    "batch_1000": 0.631,
+    "unit": "seconds per call",
+    "per_target_ms_at_1000": 0.63
+   },
+   "throughput_taylor_plan_per_target_ms": 0.04
+  }
+ },
+ "qi_cold_start_this_machine": {
+  "command": "benchmarks/optimization.py --case qi --max-mode 1 --optimizer none --nfev 2",
+  "jax": "0.9.2",
+  "dofs": 8,
+  "build_seconds": 11.41375162499753,
+  "derivative_seconds": 61.044564541,
+  "contract_jax_seconds": 80.256430292,
+  "solves": 1,
+  "iterations": 185,
+  "note": "the record has no split between descent, refinement, block assembly, per-column GMRES and compile: that is the A1 gap"
+ }
+}
