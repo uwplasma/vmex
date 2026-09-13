@@ -1,0 +1,4 @@
+hint-current-validation.patch -whitespace
+evidence/** linguist-generated=true
+inputs/** linguist-generated=true
+PACKAGE_SHA256.json linguist-generated=true

@@ -1,0 +1,10 @@
+{
+  "rmnc": {
+    "max_full_mesh_difference": 0.01446862580056174,
+    "max_edge_difference": 0.0
+  },
+  "zmns": {
+    "max_full_mesh_difference": 0.0050189865711596365,
+    "max_edge_difference": 0.0
+  }
+}

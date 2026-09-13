@@ -1,0 +1,13 @@
+{
+  "restart_source": "HINT_CHECKOUT/runs/qa-follow-beta0p5-001/hint.nc",
+  "restart_sha256": "b801cd321fce9473efd668143409f06efdc7166003fcd1a47e7b8ebb3a38ff62",
+  "nstep": 2,
+  "nstepb": 1000,
+  "dt_b": 0.0001,
+  "added_magnetic_time": 0.2,
+  "changed_parameters": [
+    "nstep",
+    "nstepb"
+  ],
+  "purpose": "Compare tracing cadence at matched magnetic time; does not certify temporal, grid, wall or current convergence"
+}

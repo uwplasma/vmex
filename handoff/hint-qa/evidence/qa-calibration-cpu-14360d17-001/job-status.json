@@ -1,0 +1,32 @@
+{
+  "host": "cpu-validation-host",
+  "runner_pid": 63680,
+  "command": [
+    ".venv/bin/python",
+    "local-support/calibrate_finite_beta_qa_energy.py",
+    "--vmex-root",
+    "UNBUNDLED_ARTIFACT",
+    "--solvax-root",
+    "HINT_CHECKOUT/runs/solvax-integrated-e4b5071",
+    "--input",
+    "QA_INPUTS/beta0p5/inputs/input.LandremanPaul2021_QA_beta0p5_bootstrap",
+    "--target",
+    "HINT_CHECKOUT/runs/qa-derivatives-cpu-14360d17-001",
+    "--output",
+    "runs/qa-calibration-cpu-14360d17-001"
+  ],
+  "cwd": "UNBUNDLED_ARTIFACT",
+  "resource": "cpu",
+  "timeout_seconds": 270,
+  "start_unix": 1789259534.4249659,
+  "state": "finished",
+  "pid": 63684,
+  "execution_environment": {
+    "OMP_NUM_THREADS": "2",
+    "JAX_PLATFORMS": "cpu",
+    "CUDA_VISIBLE_DEVICES": null,
+    "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+  },
+  "returncode": 124,
+  "elapsed_seconds": 180.3633110523224
+}
