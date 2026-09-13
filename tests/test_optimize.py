@@ -709,7 +709,10 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
 def test_auto_jac_chunk_stays_bounded_with_large_device(monkeypatch):
     """A reported accelerator budget must not turn ``auto`` into one vmap."""
     monkeypatch.setattr(opt, "auto_chunk_size", lambda dim: dim)
-    assert opt._auto_jac_chunk(120) == 11
+    assert opt._auto_jac_chunk(120) == 10
+    assert opt._auto_jac_chunk(8) == 2
+    assert opt._auto_jac_chunk(48) == 6
+    assert opt._auto_jac_chunk(53) == 8  # do not serialize a prime-size batch
 
 
 def test_jacobian_certificate_retains_the_worst_residual_evidence():
