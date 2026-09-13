@@ -18,23 +18,6 @@
       "note": "Closed-form plot of the exponential spectral scaling exp(-alpha*max(|m|,|n|)); it solves nothing and reads nothing, so there is no hardware to record. No docs page currently embeds it \u2014 it is kept as a generated asset for the objectives pages, and the empty used_in below records that honestly."
     },
     {
-      "path": "docs/_static/figures/gradient_stack_speedup.webp",
-      "sha256": "ea97c7e489ec4a953d1715baa96ec8438003d8cc00e8524338d6ce1f4e207caa",
-      "bytes": 20594,
-      "generator": "docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "command": "python docs/_static/figures/sources/make_optimization_docs_figures.py",
-      "inputs": [],
-      "record": null,
-      "generated": "2026-09-03",
-      "hardware": "Apple Silicon CPU",
-      "reproducible": "command",
-      "bytes_verified": true,
-      "used_in": [
-        "docs/explanation/adjoint-gradients.md"
-      ],
-      "note": "The bar heights are measurements from 2026-07-12 typed into the generator, not read from a committed artifact; re-running redraws the same typed numbers. Treat it as an illustration of the gradient-stack argument, not as a citable timing record. The `generated` date is the render, not the measurement."
-    },
-    {
       "path": "docs/_static/figures/mirror_fixed_boundary_3d.webp",
       "sha256": "8ee4a29853495875bb65bae21306b26111cce6dbd17f483f473ee8b483673fef",
       "bytes": 147018,
@@ -183,7 +166,9 @@
       "hardware": "Apple M3 Max (arm64), macOS 14.4.1, CPU",
       "reproducible": "command",
       "bytes_verified": true,
-      "used_in": [],
+      "used_in": [
+        "README.md"
+      ],
       "note": "The example writes its three-panel vmex_fieldline_tracing_finite_beta.png to the working directory and, outside the CI smoke run, crops the phi=0 Poincare panel pair from the same render into this file as lossless WebP, so the crop is no longer done by hand. Needs ESSOS branch rj/vmex-optimization-interfaces (uwplasma/ESSOS#58; run here at its merge commit 1b3210c). Re-rendered on 2026-09-05 and re-derived by a second run that reproduced the bytes."
     },
     {

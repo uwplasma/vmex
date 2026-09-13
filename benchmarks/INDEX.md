@@ -6,9 +6,9 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-87 committed artifacts: 33 standalone records and 1 grouped directory holding
-54 files. 31 of the 34 entries below are cited by a page, a test or another
-script; 3 are cited by nothing.
+88 committed artifacts: 34 standalone records and 1 grouped directory holding
+54 files. 31 of the 35 entries below are cited by a page, a test or another
+script; 4 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -34,6 +34,7 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
+| `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | *nothing* |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
 | `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `CHANGELOG.md`, `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `plan.md`, `tests/test_performance_docs.py` |
@@ -44,9 +45,9 @@ hand rather than by a script in this tree.
 | `benchmarks/polish_preconditioner_m4.json` | `benchmarks/polish_preconditioner.py` | `7bb306e0` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/profile.json` | `benchmarks/profile_production.py` |  |  | *nothing* |
-| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
+| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
 | `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | `plan.md` |
-| `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
+| `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | `plan.md` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `plan.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
@@ -57,7 +58,7 @@ hand rather than by a script in this tree.
 
 | directory | files | generator | commits | dates | cited by |
 | --- | --- | --- | --- | --- | --- |
-| `benchmarks/baselines/m4/` | 54 | `benchmarks/profile_workflows.py` | `8e6fdff4`, `9f77fdbd` | 2026-08-30 to 2026-08-31 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
+| `benchmarks/baselines/m4/` | 54 | `benchmarks/profile_workflows.py` | `8e6fdff4`, `9f77fdbd` | 2026-08-30 to 2026-08-31 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/howto/parameter-scans.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 
 Workflows in `benchmarks/baselines/m4/`: B1, B2, C1, C2, F1, F2, F3, F4, F5, F6, F7, F8, F10, F11, M1, M2, M3 in the regimes cache_reload, cold, reshape, warm, warm_newparams, plus `benchmarks/baselines/m4/traces_manifest.json`.
 
@@ -67,5 +68,6 @@ These records are committed evidence that no page, test or script
 reads. They are kept, not deleted; the list exists so that stays visible.
 
 - `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
+- `benchmarks/optimization_counters_20260913.json`
 - `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/profile.json`

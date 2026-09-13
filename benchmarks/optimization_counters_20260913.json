@@ -1,0 +1,595 @@
+{
+  "_provenance": {
+    "compilation_cache": "disabled",
+    "hardware": "Apple-silicon laptop, 14 cores, shared with other sessions",
+    "input_data_embedded": false,
+    "jax_enable_x64": true,
+    "limitation": "Single run per case on a laptop at load average 18.6-26.6 from unrelated sessions; seconds are diagnostic samples, not performance evidence. Adjoint entries are null once a compiled adjoint is traced (from the jax_value_and_grad phase on). Jacobians inside user-compiled programs are not counted, and their time is unattributed. GCROT/GMRES iterations are inner Arnoldi iterations and exclude one true-residual evaluation per solve.",
+    "load_average": {
+      "qa": {
+        "end": [
+          18.62890625,
+          23.45068359375,
+          22.97705078125
+        ],
+        "start": [
+          19.62255859375,
+          25.828125,
+          23.658203125
+        ]
+      },
+      "qi": {
+        "end": [
+          26.56494140625,
+          24.34375,
+          23.404296875
+        ],
+        "start": [
+          19.619140625,
+          23.57568359375,
+          23.02392578125
+        ]
+      }
+    },
+    "measurement_commit": "142d6c92e2dfcc68d7a43e8fe6eae9ce6a4e0014",
+    "measurement_date": "2026-09-13",
+    "measurement_dirty": false,
+    "platform": "macOS-14.4.1-arm64-arm-64bit",
+    "regenerate": "PYTHONPATH=. JAX_ENABLE_X64=1 OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 VMEX_COMPILATION_CACHE=disabled python benchmarks/optimization.py --case {qa,qi} --max-mode 1 --optimizer none --nfev 2, one fresh process per case; the two printed reports are stored unchanged under rows.qa and rows.qi",
+    "schema": 1,
+    "source_reports_sha256": {
+      "qa": "b8555e7e26e55fb36e999e4b40a173d017da605b74ae205e29d9fe6f6e164562",
+      "qi": "81788a8d7a251f902bca38171ac9aaf0d38f6f5017a97b03438ff2c459ad8f9f"
+    },
+    "threads": {
+      "OMP_NUM_THREADS": "4",
+      "OPENBLAS_NUM_THREADS": "4",
+      "XLA_FLAGS": "--xla_cpu_parallel_codegen_split_count=128"
+    },
+    "versions": {
+      "jax": "0.11.1",
+      "jaxopt": null,
+      "numpy": "2.5.3",
+      "optax": null,
+      "python": "3.12.9",
+      "scipy": "1.18.1",
+      "vmex": "0.8.1"
+    },
+    "what_is_measured": "Plan A1 counters for the QA and QI rows of benchmarks/optimization.py. For each phase (build, first derivative, JAX value and gradient, differentiated graph, optimize, final evaluation): wall seconds; deltas of the implicit configuration's counters (solves, descent iterations, refinement calls, steps and GCROT iterations, host Jacobian calls, columns and certifier GMRES iterations, host-eager adjoint calls and Krylov iterations, exclusive host seconds per part); XLA compile count; union compile seconds; compile seconds outside the counted parts; and the unattributed remainder."
+  },
+  "claim_scope": "Instrumentation record for plan A1: shows which parts an optimization evaluation spends its time and Krylov work in, and that the counted parts plus compile time outside them explain 96.7 % (QA) and 95.4 % (QI) of wall time. Timings are diagnostic under shared load; no performance claim or before/after comparison is made.",
+  "rows": {
+    "qa": {
+      "attributed_fraction": 0.9670000628772321,
+      "build_seconds": 6.442961125001602,
+      "case": "qa",
+      "compilation_cache": "disabled",
+      "compile_seconds": 87.54500436782837,
+      "compiles": 278,
+      "contract": {
+        "differentiated_graph_gradient_relative_error": 0.0,
+        "differentiated_graph_seconds": 1.4018093749982654,
+        "differentiated_graph_value_relative_error": 0.0,
+        "gradient_relative_error": 0.0,
+        "host_gradient_norm": 5.590748889048361,
+        "host_value": 0.6268904871584029,
+        "jax_seconds": 43.352655583999876,
+        "value_relative_error": 0.0
+      },
+      "counters": {
+        "adjoint_krylov_iterations": null,
+        "adjoint_seconds": null,
+        "adjoints": null,
+        "iterations": 185,
+        "jacobian_columns": 8,
+        "jacobian_krylov_iterations": 0,
+        "jacobian_seconds": 26.728202915997826,
+        "jacobians": 1,
+        "refinement_krylov_iterations": 6000,
+        "refinement_seconds": 29.438750334004,
+        "refinement_steps": 3,
+        "refinements": 1,
+        "solve_seconds": 2.756130834000942,
+        "solves": 1
+      },
+      "derivative_seconds": 56.49743383299938,
+      "derivatives": "implicit",
+      "diagnostics": {
+        "derivative_certified": true,
+        "derivative_fallbacks": 0,
+        "failed_trials": 0,
+        "fsq": 1.3976549179002876e-12,
+        "fsq_ratio": 1.3976549179002877,
+        "max_fsq_ratio": 1000000.0,
+        "solve_stats": {
+          "adjoint_krylov_iterations": null,
+          "adjoint_seconds": null,
+          "adjoints": null,
+          "iterations": 185,
+          "jacobian_columns": 8,
+          "jacobian_krylov_iterations": 0,
+          "jacobian_seconds": 26.728202915997826,
+          "jacobians": 1,
+          "refinement_krylov_iterations": 6000,
+          "refinement_seconds": 29.438750334004,
+          "refinement_steps": 3,
+          "refinements": 1,
+          "solve_seconds": 2.756130834000942,
+          "solves": 1
+        }
+      },
+      "dofs": 8,
+      "final_cost": 0.6268904871584029,
+      "forward_ftol": 1e-12,
+      "forward_max_iterations": 5500,
+      "initial_cost": 0.6268904871584029,
+      "input_data_embedded": false,
+      "input_sha256": "d76efbd4d584c91a985b147a07302660f7bb515f23dfdebc721bc35b703c9bbb",
+      "load_average": {
+        "end": [
+          18.62890625,
+          23.45068359375,
+          22.97705078125
+        ],
+        "start": [
+          19.62255859375,
+          25.828125,
+          23.658203125
+        ]
+      },
+      "max_mode": 1,
+      "measurement_commit": "142d6c92e2dfcc68d7a43e8fe6eae9ce6a4e0014",
+      "measurement_dirty": false,
+      "nfp": 2,
+      "optimize_seconds": 2.540997229516506e-06,
+      "optimizer": "none",
+      "phases": {
+        "build": {
+          "compile_seconds": 5.7105114459991455,
+          "compile_seconds_outside_parts": 3.3399744033813477,
+          "compiles": 244,
+          "counters": {
+            "adjoint_krylov_iterations": 0,
+            "adjoint_seconds": 0,
+            "adjoints": 0,
+            "iterations": 185,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 2.756130834000942,
+            "solves": 1
+          },
+          "unattributed_seconds": 0.34685588761931285,
+          "wall_seconds": 6.442961125001602
+        },
+        "differentiated_graph": {
+          "compile_seconds": 0.015514135360717773,
+          "compile_seconds_outside_parts": 0.015514135360717773,
+          "compiles": 1,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 1.3862952396375476,
+          "wall_seconds": 1.4018093749982654
+        },
+        "final_evaluation": {
+          "compile_seconds": 0.10768866539001465,
+          "compile_seconds_outside_parts": 0.10768866539001465,
+          "compiles": 1,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 0.032272209609800484,
+          "wall_seconds": 0.13996087499981513
+        },
+        "first_derivative": {
+          "compile_seconds": 40.14160776138306,
+          "compile_seconds_outside_parts": 0.32033729553222656,
+          "compiles": 30,
+          "counters": {
+            "adjoint_krylov_iterations": 0,
+            "adjoint_seconds": 0,
+            "adjoints": 0,
+            "iterations": 0,
+            "jacobian_columns": 8,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 26.728202915997826,
+            "jacobians": 1,
+            "refinement_krylov_iterations": 6000,
+            "refinement_seconds": 29.438750334004,
+            "refinement_steps": 3,
+            "refinements": 1,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 0.010143287465325557,
+          "wall_seconds": 56.49743383299938
+        },
+        "jax_value_and_grad": {
+          "compile_seconds": 41.569682359695435,
+          "compile_seconds_outside_parts": 41.569682359695435,
+          "compiles": 2,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 1.7829732243044418,
+          "wall_seconds": 43.352655583999876
+        },
+        "optimize": {
+          "compile_seconds": 0.0,
+          "compile_seconds_outside_parts": 0.0,
+          "compiles": 0,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 2.540997229516506e-06,
+          "wall_seconds": 2.540997229516506e-06
+        }
+      },
+      "platform": "macOS-14.4.1-arm64-arm-64bit",
+      "threads": {
+        "OMP_NUM_THREADS": "4",
+        "OPENBLAS_NUM_THREADS": "4",
+        "XLA_FLAGS": "--xla_cpu_parallel_codegen_split_count=128"
+      },
+      "unattributed_seconds": 3.558542389633658,
+      "versions": {
+        "jax": "0.11.1",
+        "jaxopt": null,
+        "numpy": "2.5.3",
+        "optax": null,
+        "python": "3.12.9",
+        "scipy": "1.18.1",
+        "vmex": "0.8.1"
+      },
+      "vmex_module": "vmex/__init__.py",
+      "wall_seconds": 107.83482333299617
+    },
+    "qi": {
+      "attributed_fraction": 0.9540750098959765,
+      "build_seconds": 14.358854208003322,
+      "case": "qi",
+      "compilation_cache": "disabled",
+      "compile_seconds": 134.1634805202484,
+      "compiles": 540,
+      "contract": {
+        "differentiated_graph_gradient_relative_error": 0.0,
+        "differentiated_graph_seconds": 1.9559230000013486,
+        "differentiated_graph_value_relative_error": 0.0,
+        "gradient_relative_error": 0.0,
+        "host_gradient_norm": 277.88841185606043,
+        "host_value": 1.2050123105439896,
+        "jax_seconds": 73.80696170799638,
+        "value_relative_error": 0.0
+      },
+      "counters": {
+        "adjoint_krylov_iterations": null,
+        "adjoint_seconds": null,
+        "adjoints": null,
+        "iterations": 185,
+        "jacobian_columns": 8,
+        "jacobian_krylov_iterations": 0,
+        "jacobian_seconds": 32.45686570899852,
+        "jacobians": 1,
+        "refinement_krylov_iterations": 6000,
+        "refinement_seconds": 40.01735570899473,
+        "refinement_steps": 3,
+        "refinements": 1,
+        "solve_seconds": 3.2026852920025703,
+        "solves": 1
+      },
+      "derivative_seconds": 74.39369004200125,
+      "derivatives": "implicit",
+      "diagnostics": {
+        "derivative_certified": true,
+        "derivative_fallbacks": 0,
+        "failed_trials": 0,
+        "fsq": 1.3976549179002876e-12,
+        "fsq_ratio": 1.3976549179002877,
+        "max_fsq_ratio": 1000000.0,
+        "solve_stats": {
+          "adjoint_krylov_iterations": null,
+          "adjoint_seconds": null,
+          "adjoints": null,
+          "iterations": 185,
+          "jacobian_columns": 8,
+          "jacobian_krylov_iterations": 0,
+          "jacobian_seconds": 32.45686570899852,
+          "jacobians": 1,
+          "refinement_krylov_iterations": 6000,
+          "refinement_seconds": 40.01735570899473,
+          "refinement_steps": 3,
+          "refinements": 1,
+          "solve_seconds": 3.2026852920025703,
+          "solves": 1
+        }
+      },
+      "dofs": 8,
+      "final_cost": 1.2050123105439896,
+      "forward_ftol": 1e-12,
+      "forward_max_iterations": 5500,
+      "initial_cost": 1.2050123105439896,
+      "input_data_embedded": false,
+      "input_sha256": "d76efbd4d584c91a985b147a07302660f7bb515f23dfdebc721bc35b703c9bbb",
+      "load_average": {
+        "end": [
+          26.56494140625,
+          24.34375,
+          23.404296875
+        ],
+        "start": [
+          19.619140625,
+          23.57568359375,
+          23.02392578125
+        ]
+      },
+      "max_mode": 1,
+      "measurement_commit": "142d6c92e2dfcc68d7a43e8fe6eae9ce6a4e0014",
+      "measurement_dirty": false,
+      "nfp": 2,
+      "optimize_seconds": 1.7166996258310974e-05,
+      "optimizer": "none",
+      "phases": {
+        "build": {
+          "compile_seconds": 11.29886770248413,
+          "compile_seconds_outside_parts": 8.546226739883423,
+          "compiles": 500,
+          "counters": {
+            "adjoint_krylov_iterations": 0,
+            "adjoint_seconds": 0,
+            "adjoints": 0,
+            "iterations": 185,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 3.2026852920025703,
+            "solves": 1
+          },
+          "unattributed_seconds": 2.609942176117329,
+          "wall_seconds": 14.358854208003322
+        },
+        "differentiated_graph": {
+          "compile_seconds": 0.029079675674438477,
+          "compile_seconds_outside_parts": 0.029079675674438477,
+          "compiles": 1,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 1.92684332432691,
+          "wall_seconds": 1.9559230000013486
+        },
+        "final_evaluation": {
+          "compile_seconds": 0.17742013931274414,
+          "compile_seconds_outside_parts": 0.17742013931274414,
+          "compiles": 1,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 0.17812781868997263,
+          "wall_seconds": 0.35554795800271677
+        },
+        "first_derivative": {
+          "compile_seconds": 51.62628889083862,
+          "compile_seconds_outside_parts": 1.8378379344940186,
+          "compiles": 36,
+          "counters": {
+            "adjoint_krylov_iterations": 0,
+            "adjoint_seconds": 0,
+            "adjoints": 0,
+            "iterations": 0,
+            "jacobian_columns": 8,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 32.45686570899852,
+            "jacobians": 1,
+            "refinement_krylov_iterations": 6000,
+            "refinement_seconds": 40.01735570899473,
+            "refinement_steps": 3,
+            "refinements": 1,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 0.081630689513986,
+          "wall_seconds": 74.39369004200125
+        },
+        "jax_value_and_grad": {
+          "compile_seconds": 71.03182411193848,
+          "compile_seconds_outside_parts": 71.03182411193848,
+          "compiles": 2,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 2.7751375960579026,
+          "wall_seconds": 73.80696170799638
+        },
+        "optimize": {
+          "compile_seconds": 0.0,
+          "compile_seconds_outside_parts": 0.0,
+          "compiles": 0,
+          "counters": {
+            "adjoint_krylov_iterations": null,
+            "adjoint_seconds": null,
+            "adjoints": null,
+            "iterations": 0,
+            "jacobian_columns": 0,
+            "jacobian_krylov_iterations": 0,
+            "jacobian_seconds": 0.0,
+            "jacobians": 0,
+            "refinement_krylov_iterations": 0,
+            "refinement_seconds": 0.0,
+            "refinement_steps": 0,
+            "refinements": 0,
+            "solve_seconds": 0.0,
+            "solves": 0
+          },
+          "unattributed_seconds": 1.7166996258310974e-05,
+          "wall_seconds": 1.7166996258310974e-05
+        }
+      },
+      "platform": "macOS-14.4.1-arm64-arm-64bit",
+      "threads": {
+        "OMP_NUM_THREADS": "4",
+        "OPENBLAS_NUM_THREADS": "4",
+        "XLA_FLAGS": "--xla_cpu_parallel_codegen_split_count=128"
+      },
+      "unattributed_seconds": 7.5716987717023585,
+      "versions": {
+        "jax": "0.11.1",
+        "jaxopt": null,
+        "numpy": "2.5.3",
+        "optax": null,
+        "python": "3.12.9",
+        "scipy": "1.18.1",
+        "vmex": "0.8.1"
+      },
+      "vmex_module": "vmex/__init__.py",
+      "wall_seconds": 164.87099408300128
+    }
+  },
+  "summary": {
+    "qa": {
+      "attributed_fraction": 0.9670000628772321,
+      "compiles": 278,
+      "counters": {
+        "adjoint_krylov_iterations": null,
+        "adjoint_seconds": null,
+        "adjoints": null,
+        "iterations": 185,
+        "jacobian_columns": 8,
+        "jacobian_krylov_iterations": 0,
+        "jacobian_seconds": 26.728202915997826,
+        "jacobians": 1,
+        "refinement_krylov_iterations": 6000,
+        "refinement_seconds": 29.438750334004,
+        "refinement_steps": 3,
+        "refinements": 1,
+        "solve_seconds": 2.756130834000942,
+        "solves": 1
+      },
+      "unattributed_seconds": 3.558542389633658,
+      "wall_seconds": 107.83482333299617
+    },
+    "qi": {
+      "attributed_fraction": 0.9540750098959765,
+      "compiles": 540,
+      "counters": {
+        "adjoint_krylov_iterations": null,
+        "adjoint_seconds": null,
+        "adjoints": null,
+        "iterations": 185,
+        "jacobian_columns": 8,
+        "jacobian_krylov_iterations": 0,
+        "jacobian_seconds": 32.45686570899852,
+        "jacobians": 1,
+        "refinement_krylov_iterations": 6000,
+        "refinement_seconds": 40.01735570899473,
+        "refinement_steps": 3,
+        "refinements": 1,
+        "solve_seconds": 3.2026852920025703,
+        "solves": 1
+      },
+      "unattributed_seconds": 7.5716987717023585,
+      "wall_seconds": 164.87099408300128
+    }
+  }
+}

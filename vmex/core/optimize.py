@@ -337,7 +337,11 @@ def _auto_jac_chunk(dim: int) -> int:
 
 
 def _linear_response_summary(report: Any) -> jnp.ndarray:
-    """Return ``[iterations, failed columns, residual, tolerance]``."""
+    """Return ``[iterations, failed columns, residual, tolerance, total, columns]``.
+
+    ``iterations`` is the largest per-column Krylov count and ``total`` their
+    sum over the ``columns`` solves.
+    """
     iterations = jnp.asarray(getattr(report, "iterations", 0)).ravel()
     converged = jnp.asarray(getattr(report, "converged", True)).ravel()
     residual = jnp.asarray(getattr(report, "residual_norm", 0.0)).ravel()
@@ -349,12 +353,19 @@ def _linear_response_summary(report: Any) -> jnp.ndarray:
         jnp.sum(jnp.logical_not(converged)).astype(jnp.float64),
         residual[worst].astype(jnp.float64),
         tolerance[worst].astype(jnp.float64),
+        jnp.sum(iterations).astype(jnp.float64),
+        jnp.asarray(iterations.size, dtype=jnp.float64),
     ))
 
 
 def _record_linear_response(holder: dict, summary: Any, cfg: Any = None) -> None:
     """Record solver effort and warn once before a failed-column fallback."""
     values = np.asarray(jax.device_get(summary), dtype=float).ravel()
+    if cfg is not None and values.size >= 6 and np.all(np.isfinite(values[4:6])):
+        from . import implicit as imp
+
+        imp._count(cfg, jacobians=1, jacobian_columns=int(values[5]),
+                   jacobian_krylov_iterations=int(values[4]))
     if values.size < 2 or not np.all(np.isfinite(values)):
         return
     iterations, unconverged = int(values[0]), int(values[1])
@@ -2132,8 +2143,8 @@ def least_squares(
     attributes: ``input`` (optimized :class:`VmecInput`), ``equilibrium``
     (last successfully solved :class:`Equilibrium`), ``stage_results``
     (per-``max_mode`` results for schedules) and, in implicit mode,
-    ``solve_stats`` (``{"solves", "iterations"}`` totals of the stage's host
-    forward solves).
+    ``solve_stats`` (cumulative solve, refinement, Jacobian and adjoint
+    counters of the stage's configuration, see ``implicit._SOLVE_STATS``).
     """
     import scipy.optimize
 
@@ -3134,6 +3145,10 @@ def _least_squares_implicit(
         return residual
 
     def jac_fn(x: np.ndarray) -> np.ndarray:
+        with imp._timed(cfg, "jacobian"):
+            return jacobian_host(x)
+
+    def jacobian_host(x: np.ndarray) -> np.ndarray:
         # A direct residual_jac(x) call need not be preceded by residual(x).
         # Establish the point's status through the exception-free callback
         # unless the exact-key solve memo already proves it usable.

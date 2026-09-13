@@ -338,6 +338,31 @@ def test_monitor_empty_optional_paths_raise_or_return_empty(tmp_path) -> None:
         monitor.plot(tmp_path / "empty.png")
 
 
+def test_counter_sections_charge_exclusive_host_time(monkeypatch) -> None:
+    """A nested part is charged once, and an unknown counter stays unknown."""
+    from vmex.core import implicit as imp
+
+    class Config:
+        pass
+
+    config = Config()
+    clock = iter([0.0, 1.0, 3.0, 10.0])
+    monkeypatch.setattr(imp, "time", SimpleNamespace(perf_counter=lambda: next(clock)))
+    try:
+        with imp._timed(config, "jacobian"):
+            with imp._timed(config, "solve"):
+                imp._count(config, solves=1)
+        stats = imp._SOLVE_STATS[config]
+        assert (stats["solve_seconds"], stats["jacobian_seconds"]) == (2.0, 8.0)
+        assert (stats["solves"], stats["adjoints"]) == (1, 0)
+        assert imp._OPEN_SECTIONS == []
+        stats["adjoints"] = None
+        imp._count(config, adjoints=1)
+        assert stats["adjoints"] is None
+    finally:
+        imp._SOLVE_STATS.pop(config, None)
+
+
 def test_monitor_callback_fallbacks_and_problem_counters() -> None:
     problem = FunctionProblem(
         [2.0],
@@ -350,6 +375,7 @@ def test_monitor_callback_fallbacks_and_problem_counters() -> None:
     assert monitor.records[0].optimality == 4.0
     assert monitor.records[0].rejected_trials == 3
     assert monitor.records[0].equilibrium_solves is None
+    assert monitor.records[0].counters == {}
 
     from vmex.core import implicit as imp
 
@@ -364,6 +390,9 @@ def test_monitor_callback_fallbacks_and_problem_counters() -> None:
     finally:
         imp._SOLVE_STATS.pop(config, None)
     assert monitor.records[-1].equilibrium_solves == 7
+    assert monitor.records[-1].counters == {"solves": 7}
+    explicit = monitor.record(np.array([2.0]), cost=4.0, counters={"jacobians": 2})
+    assert explicit.counters == {"jacobians": 2}
 
     with np.testing.assert_raises(ValueError):
         OptimizationMonitor(stream=None)({"x": np.array([1.0])})

@@ -723,7 +723,7 @@ def test_jacobian_certificate_retains_the_worst_residual_evidence():
         tolerance=jnp.array([1.0e-6, 1.0e-4]),
     )
     np.testing.assert_allclose(
-        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4]
+        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4, 8, 2]
     )
 
 
@@ -1065,6 +1065,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     evaluation = problem.evaluate(problem.x0)
     assert evaluation.success
     assert evaluation.diagnostics["solve_stats"]["solves"] >= 1
+    counters = evaluation.diagnostics["solve_stats"]
+    assert counters["jacobian_columns"] >= counters["jacobians"] >= 1
+    assert counters["jacobian_seconds"] > 0.0 and counters["solve_seconds"] > 0.0
+    assert counters["refinements"] >= 1
+    record = opt.OptimizationMonitor(problem, stream=None).record(
+        problem.x0, cost=0.0, terms={})
+    assert record.counters == counters
+    assert record.rejected_trials == problem.metadata["holder"]["failed_trials"]
     scalar = opt.VmecProblem.from_loss(
         inp,
         lambda state, runtime: 0.5 * (opt.aspect_ratio(state, runtime) - 4.0) ** 2,
