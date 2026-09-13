@@ -260,6 +260,7 @@ attribution. One heavy local job at a time; the office box takes one.
 
 | PR | change | gate |
 |---|---|---|
+| F-pre jit the free-boundary pullback | the free-boundary implicit pullback converts traced arrays to NumPy (`_solve_bwd_impl` → `_projected_residual` in `freeboundary_implicit.py`), so no free-boundary objective can be wrapped in `jax.jit` (found by A3, #311) | a jitted free-boundary objective's value and gradient match the eager path to 1e-12 relative on the CTH case |
 | F0 measure | warm split of one NESTOR call into Green's-function transform, kernel, mode-matrix assembly and LU on NCSX ns = 15 (flop counts put the LU near 5 %; VMEC++'s benchmark header says assembly and factorization dominate) | the measured split decides how much F1a can save before F1b |
 | F1a linearize once | hoist the coupled linearization out of the host GCROT lane; land #299's saved-pullback commit as its own PR; replace `lu_factor`/`lu_solve` in the vacuum pressure with a `custom_linear_solve` (the cached-LU tangent `dpot = A⁻¹(db − dA·pot)` is exact) | transpose identity at 1e-11 and the NCSX adjoint value unchanged to 1e-10 relative; cold compile peak not above today's |
 | F1b edge response matrix | a linearized NESTOR matvec cannot reach 0.1× a forward call (reverse sweeps cost 1–3× the forward kernel), so build NESTOR's dense response to the edge rows, the axis and `ctor` once per gradient with forward-mode columns (about 100 edge columns plus a rank-1 `ctor` term); every coupled matvec and the whole edge Schur matrix then cost a dense multiply plus the existing batched sparse solve | response build ≤ 300 NESTOR-call equivalents; matvec ≤ 0.1× one NESTOR call; JVP against finite differences of the vacuum pressure at 1e-6; coupled-residual acceptance unchanged |
@@ -372,10 +373,14 @@ at `f09288b3`; confirm them before editing.
   the file reformats every record and conflicts with every other branch).
 - Commits and PR bodies carry the maintainer's authorship and no tool
   attribution.
-- Heavy work (over two minutes or 2 GB) runs one job at a time on a shared
-  machine: take the machine's lock, four threads, fresh processes,
-  `VMEX_COMPILATION_CACHE=disabled` for any timing, and record commit,
-  versions, threads and load with the result.
+- Heavy work (over two minutes or 2 GB: example runs, benchmark rows, broad
+  test selections) runs one job at a time on a shared machine: take the
+  machine's lock, four threads, fresh processes, `VMEX_COMPILATION_CACHE=disabled`
+  for any timing, and record commit, versions, threads and load with the
+  result. Short jobs (a strict Sphinx build, focused tests) do not take the
+  lock, so a long record run never blocks another agent's push. When other
+  sessions load the machine, timings are diagnostic: alternate baseline and
+  candidate in fresh processes and gate on counts, identities and targets.
 - Before pushing: `python tools/preflight.py --static`; the focused tests of
   the brief; `python tools/test_manifest.py check` when tests are added;
   `python tools/render_benchmark_index.py --check` when a benchmark artifact is
@@ -704,3 +709,13 @@ iterations without converging) plus block Jacobian (27–32 s, certifier idle),
 with the solve at 3 s; the JAX lane then compiles for another 42–71 s. B1, B3,
 B4 and C1 are updated in place. Timings are diagnostic (load 18–31 from other
 sessions); the record is to be committed with #310 before it merges.
+
+**2026-09-13, A3 decisions.** Draft #311 (A3) seeds the example at mean ι
+0.408 and aspect 4.03 and constrains ι, aspect and B·n RMS with an augmented
+Lagrangian around L-BFGS-B (one solve and one scalar adjoint per trial). Two
+coordinator decisions: the shipped coil seed (0.5 m, length target 3.3 m) was
+geometrically inconsistent with aspect 4 and ι 0.42 under the 0.20 m clearance
+limit, so the coils move to 0.65 m and 4.1 m while every physics target stays;
+the free-boundary example keeps its ι hinge until the new F-pre item makes its
+pullback jittable. The coordination rules now keep short jobs out of the heavy
+lock.
