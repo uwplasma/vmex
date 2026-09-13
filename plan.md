@@ -335,7 +335,8 @@ check that may be red.
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
 | vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
-| vmex #307 | seven lines on #299's branch | B4 re-lands it on `main` |
+| vmex #319 (B4a) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
+| vmex #307 | seven lines on #299's branch, fails `test_ladder_compile_counts_and_walltime` | close; superseded by #319 |
 | vmex #301, #303, #304 | winding surface | parked |
 | booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merge and release 0.3.0 |
 | SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merge and tag; VMEX raises its floor to 0.21.0 with S1 (3) |
@@ -745,7 +746,13 @@ docstrings, `docs/explanation/adjoint-gradients.md`,
 and `objectives.rst` (`7c58c2ff`); the `least_squares` warm-start docstring
 (`2ebe0d50`); the `equilibrium_from_x` docstring (`cd667198`). After #310 and
 #313–#318 merge, re-state what is still true against the code and records on
-`main`, and drop what is not. Owns those docstrings and pages.
+`main`, and drop what is not. Also: the "handful of iterations" warm-restart
+claims in `examples/hot_restart_scan.py:6` and
+`docs/howto/restart-from-previous-run.md:77` (§2 measures 212–391 iterations);
+name the free-boundary single-stage example in the README once #311 prints its
+target status; and point the README's exterior-field distance rule at the
+section #312 adds to `nestor-vacuum.rst`. Owns those docstrings, pages and
+lines, after #309, #311, #312 and #313–#318 merge.
 
 ### Literature checks left open (optional)
 
@@ -867,3 +874,10 @@ iterations, identical results); B1b asks whether those modes are a discrete
 gauge to deflate before any certificate work; #302 and #306 stay held. The
 MPOL = NTOR = 8 QA deck is being measured next to see whether resolution
 changes the conditioning.
+
+**2026-09-13, A4 and B4a reported.** #309 (A4) traces every changed claim to a
+test or record, retires the typed-number gradient-stack figure, and corrects
+the QI anchors to what `tests/test_omnigenity.py` asserts (at least 20×, not
+36× and 138×). Its three open questions go to A4b. #319 (B4a) supersedes #307:
+the extra compile came from the donation copy seeing a partly committed carry,
+and normalizing before the copy restores the ladder's compile counts.
