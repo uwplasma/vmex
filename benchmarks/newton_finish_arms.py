@@ -31,7 +31,23 @@ the refinement's and the adjoint's GCROT solves (cycles run one at a time
 with the recycle space carried, so each warm start adds ``k`` operator
 applications that ``iterations`` excludes); the production adjoint GCROT for
 the QA and QI objectives; and how much of the QA and QI boundary gradients
-flows through the near-null modes. Timings are diagnostic under shared load.
+flows through the near-null modes. Two further arms:
+
+(f) the adjoint through the transposed block factorization. At the root
+    ``dF_p/dp = M dF_raw/dp`` with ``M`` the 1-D preconditioner, so
+    ``lambda^T dF_p/dp = (M^T lambda)^T dF_raw/dp`` and the gradient needs only
+    ``mu = J_raw^-T P gbar``: one transposed block solve and one parameter
+    pullback, with no preconditioner application. The adjoint residual is
+    measured by an independent pullback, and the boundary gradient is
+    compared with the block-tangent gradient and the production GCROT adjoint;
+(g) refinement with a stagnation abort: a GCROT solve stops at the first cycle
+    whose relative residual fell less than 25 % over the last 1,000 (or 500)
+    iterations. The policies are simulated with one-shot solves cut at that
+    cycle, and the returned state, residual, block-tangent Jacobian columns,
+    and QA and QI values and gradients are compared bit for bit with #320's
+    policy (stop after an unconverged step that does not lower ``|F|``).
+
+Timings are diagnostic under shared load.
 """
 
 from __future__ import annotations
@@ -243,17 +259,18 @@ def main() -> None:
                 solution.residual_norm / jnp.linalg.norm(b_flat),
                 solution.iterations, solution.converged)
 
-    def history(b, *, rtol, transpose, cycles):
+    def history(b, *, rtol, transpose, cycles, z=None):
+        z = z_deck if z is None else z
         x, recycle, rows, total = jnp.zeros_like(flat(b)), None, [], 0
         for _ in range(cycles):
             x, recycle, relative, iterations, converged = gcrot_cycles(
-                x, recycle, z_deck, deck.state, b, rtol, transpose, 1)
+                x, recycle, z, deck.state, b, rtol, transpose, 1)
             total += int(iterations)
             rows.append([total, float(relative)])
             if bool(converged):
                 break
         _, _, relative, iterations, converged = gcrot_cycles(
-            jnp.zeros_like(flat(b)), None, z_deck, deck.state, b, rtol, transpose, len(rows))
+            jnp.zeros_like(flat(b)), None, z, deck.state, b, rtol, transpose, len(rows))
         return {"cycles": rows, "one_shot_same_cycles": {
             "iterations": int(iterations), "relative_residual": float(relative),
             "converged": bool(converged)}}
@@ -388,10 +405,31 @@ def main() -> None:
         d_param = jax.jit(lambda z, frozen, t: jax.jvp(lambda prm: value(z, prm, frozen), (params,), (t,))[1])
         cotangent = jax.jit(lambda x: jax.grad(
             lambda s: half_square(s, imp.runtime_from_params(params, cfg)))(x))
-        return value_j, d_state, d_param, cotangent
+        grad_param = jax.jit(lambda z, frozen: jax.grad(lambda prm: value(z, prm, frozen))(params))
+        return value_j, d_state, d_param, cotangent, grad_param
+
+    @functools.partial(jax.jit, static_argnames=("formulation",))
+    def adjoint_parts(multiplier, b, z, frozen, formulation):
+        """Independent adjoint residual and the implicit parameter pullback."""
+        force = imp.residual_fn(cfg, frozen, mask, formulation=formulation)
+        _, pull_state = jax.vjp(lambda t: force(t, params), z)
+        defect = imp._tree_norm(jax.tree.map(
+            jnp.subtract, P(pull_state(multiplier)[0]), b)) / imp._tree_norm(b)
+        _, pull_param = jax.vjp(lambda prm: force(z, prm), params)
+        return pull_param(jax.tree.map(jnp.negative, multiplier))[0], defect
+
+    @jax.jit
+    def block_multiplier(factors, b):
+        return inverse(factors, b, transpose=True)
+
+    def boundary_entries(tree):
+        return np.asarray([float(getattr(tree, field)[ntor + n, m]) for field, m, n in boundary])
+
+    def relative(a, b):
+        return float(np.linalg.norm(np.asarray(a) - np.asarray(b)) / max(np.linalg.norm(b), 1e-300))
 
     def gradient_sensitivity(pieces, frozen, z, factors, V):
-        _, d_state, d_param, _ = pieces
+        d_state, d_param = pieces[1], pieces[2]
         gradient, amplitudes, defects = [], [], []
         g_v = np.asarray([float(d_state(z, frozen, unravel(jnp.asarray(V[:, i]))))
                           for i in range(V.shape[1])])
@@ -413,9 +451,9 @@ def main() -> None:
         return report
 
     objective_report = {}
-    for name, term_list in term_sets.items():
-        pieces = objective_pieces(term_list)
-        value_j, d_state, _, cotangent = pieces
+    pieces_by_name = {name: objective_pieces(term_list) for name, term_list in term_sets.items()}
+    for name, pieces in pieces_by_name.items():
+        value_j, cotangent, grad_param = pieces[0], pieces[3], pieces[4]
         entry = {"value": float(value_j(z_deck, params, deck.state)),
                  "sensitivity_at_deck": gradient_sensitivity(pieces, deck.state, z_deck, factors_deck, V_deck),
                  "value_change_along_near_null": [
@@ -426,15 +464,109 @@ def main() -> None:
         b = P(cotangent(deck.state))
         entry["adjoint_gcrot_history"] = history(
             b, rtol=cfg.adjoint_tol, transpose=True, cycles=history_cycles)
+        # (f) the adjoint through the transposed block factorization
+        direct = boundary_entries(grad_param(z_deck, deck.state))
+        mu = block_multiplier(factors_deck, b)
+        implicit_block, defect_block = adjoint_parts(mu, b, z_deck, deck.state, "raw")
+        gradient_block = boundary_entries(implicit_block) + direct
+        tangent_gradient = entry["sensitivity_at_deck"]["gradient"]
+        t_solve = timed(block_multiplier, factors_deck, b, repeats=3)
+        t_pullback = timed(adjoint_parts, mu, b, z_deck, deck.state, "raw", repeats=3)
+        entry["f_block_adjoint"] = {
+            "adjoint_relative_residual_raw": float(defect_block),
+            "gradient": gradient_block.tolist(),
+            "relative_difference_to_block_tangent_gradient": relative(gradient_block, tangent_gradient),
+            "transposed_solve_seconds": t_solve, "pullback_seconds": t_pullback,
+            "work_with_existing_factor": (t_solve + t_pullback) / t_force,
+            "work_with_fresh_factor": (t_factor + t_solve + t_pullback) / t_force,
+        }
         if not smoke:
             started = time.perf_counter()
-            _, stats = imp._adjoint_gcrot_core(params, z_deck, deck.state, mask, b, cfg)
+            lam, stats = imp._adjoint_gcrot_core(params, z_deck, deck.state, mask, b, cfg)
+            seconds = time.perf_counter() - started
+            implicit_production, defect_production = adjoint_parts(
+                lam, b, z_deck, deck.state, "preconditioned")
+            gradient_production = boundary_entries(implicit_production) + direct
             entry["adjoint_production"] = {
-                "seconds": time.perf_counter() - started, "iterations": int(stats.iterations),
+                "seconds": seconds, "iterations": int(stats.iterations),
                 "residual_norm": float(stats.residual_norm), "tolerance": float(stats.tolerance),
                 "accepted": bool(stats.converged), "max_restarts": cfg.adjoint_maxiter,
-                "m": cfg.adjoint_gcrot_m, "k": cfg.adjoint_gcrot_k, "rtol": cfg.adjoint_tol}
+                "m": cfg.adjoint_gcrot_m, "k": cfg.adjoint_gcrot_k, "rtol": cfg.adjoint_tol,
+                "work": float(stats.iterations) * units["c_jvp"],
+                "adjoint_relative_residual_preconditioned": float(defect_production),
+                "gradient": gradient_production.tolist(),
+                "relative_difference_to_block_adjoint": relative(gradient_production, gradient_block),
+                "relative_difference_to_block_tangent_gradient": relative(gradient_production, tangent_gradient),
+            }
         objective_report[name] = entry
+
+    # ---- (g) refinement with a stagnation abort ---------------------------------------
+    def stagnation_stop(rows, window, drop):
+        """First cycle (1-based) whose residual fell less than ``drop`` over ``window`` iterations."""
+        for index, (iterations, relative_residual) in enumerate(rows):
+            earlier = [r for its, r in rows[:index] if its <= iterations - window]
+            if earlier and relative_residual > (1.0 - drop) * earlier[-1]:
+                return index + 1
+        return None
+
+    def refine_with_policy(abort):
+        cycles_max = 2 if smoke else imp._REFINE_MAX_RESTARTS
+        base = norm(fz)
+        z, f_k, residual, best_z, best, steps = z_deck, fz, base, z_deck, base, []
+        for step in range(imp._REFINE_MAX_STEPS):
+            cycles, stop = cycles_max, None
+            if abort is not None:
+                rows = (refinement["gcrot_history_first_step"]["cycles"] if step == 0 else history(
+                    f_k, z=z, rtol=imp._REFINE_FORCING, transpose=False, cycles=cycles_max)["cycles"])
+                stop = stagnation_stop(rows, *abort)
+                cycles = stop or cycles_max
+            x, _, linear, iterations, converged = gcrot_cycles(
+                jnp.zeros_like(flat(f_k)), None, z, deck.state, f_k, imp._REFINE_FORCING, False, cycles)
+            z = jax.tree.map(jnp.subtract, z, unravel(x))
+            f_k = residual_deck(z, params)
+            previous, residual = residual, norm(f_k)
+            steps.append({"cycles": cycles, "aborted_by_rule": stop is not None,
+                          "iterations": int(iterations), "converged": bool(converged),
+                          "linear_relative_residual": float(linear), "certificate": residual})
+            if not np.isfinite(residual):
+                break
+            if residual < best:
+                best_z, best = z, residual
+            if best <= cfg.refine_tol:
+                break
+            if not bool(converged) and residual >= previous:
+                break
+        if best >= base:
+            return deck.state, steps
+        return jax.tree.map(jnp.add, deck.state, P(jax.tree.map(jnp.subtract, best_z, z_deck))), steps
+
+    def anchor_outputs(state):
+        z = P(state)
+        factors = block_system(state, z)
+        columns = [inverse(factors, jax.tree.map(jnp.negative, raw_parameter_jvp(z, state, t)))
+                   for t in tangents]
+        outputs = {"state": np.asarray(flat(state)), "residual": np.asarray(flat(evaluate(z, state)[0])),
+                   "jacobian": np.stack([np.asarray(flat(column)) for column in columns])}
+        for name, (value_j, d_state, d_param, _, _) in pieces_by_name.items():
+            outputs[f"value_{name}"] = np.asarray(value_j(z, params, state))
+            outputs[f"gradient_{name}"] = np.asarray([
+                float(d_state(z, state, column)) + float(d_param(z, state, t))
+                for column, t in zip(columns, tangents)])
+        return outputs
+
+    abort_report, reference = {}, None
+    for label, abort in (("pr320", None), ("window_1000_drop_25", (1000, 0.25)),
+                         ("window_500_drop_25", (500, 0.25))):
+        state, steps = refine_with_policy(abort)
+        outputs = anchor_outputs(state)
+        reference = outputs if reference is None else reference
+        total = sum(s["iterations"] for s in steps)
+        abort_report[label] = {
+            "steps": steps, "gcrot_iterations": total,
+            "iterations_saved_vs_pr320": abort_report["pr320"]["gcrot_iterations"] - total if abort else 0,
+            "bit_identical_to_pr320": {key: bool(np.array_equal(outputs[key], reference[key])) for key in outputs}}
+    abort_report["pr320"]["state_bit_identical_to_main_refined_state"] = bool(
+        np.array_equal(np.asarray(flat(refined)), reference["state"]))
 
     # ---- Newton arms ----------------------------------------------------------------
     newton_config = Prec2DConfig(threshold=np.inf, gmres_restart=50,
@@ -584,8 +716,7 @@ def main() -> None:
             if label == "deck":
                 factors_final = block_system(frozen, z_final)
                 result["objectives_at_final"] = {}
-                for name, term_list in term_sets.items():
-                    pieces = objective_pieces(term_list)
+                for name, pieces in pieces_by_name.items():
                     sensitivity = gradient_sensitivity(pieces, frozen, z_final, factors_final, V_deck)
                     reference = np.asarray(objective_report[name]["sensitivity_at_deck"]["gradient"])
                     result["objectives_at_final"][name] = {
@@ -609,7 +740,7 @@ def main() -> None:
         "resolution": {"mpol": cfg.resolution.mpol, "ntor": cfg.resolution.ntor,
                        "ns": cfg.resolution.ns, "nfp": cfg.resolution.nfp},
         "deck_ftol": cfg.ftol, "refine_tol": cfg.refine_tol, "descent_iterations_deck": int(deck.iterations),
-        "unit_costs": units, "refinement_from_deck": refinement,
+        "unit_costs": units, "refinement_from_deck": refinement, "refinement_abort": abort_report,
         "raw_jacobian_spectrum_at_deck": spectrum_report, "objectives": objective_report,
         "starts": starts,
         "threads": {name: os.environ.get(name) for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS")},
