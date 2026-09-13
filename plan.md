@@ -58,6 +58,10 @@ and does not authorize a release with a silently reduced scope.
 
 ### What is set aside, with the criterion that reopens it
 
+- **Winding-surface optimization.** Stopped by maintainer direction on
+  2026-09-13. Preserve draft #301/#303/#304 and their evidence; do not spend
+  further implementation or benchmark time here without renewed direction.
+  Prioritize cold equilibria, stage-1 QA/QH/QI/QP and single-stage optimization.
 - **Distributed single-solve sharding and multi-host scaling.** Reopen for a
   named workload that does not fit one device's memory or time. Placement
   tests and independent-case ensembles stay. No equilibrium code ships
@@ -1332,3 +1336,20 @@ with action differences below 5.8e-15. The focused stacked draft
 and GitHub merging require the existing gates and explicit user approval.
 Production source adds 20 net lines across two existing files;
 regression tests are counted separately, with no new repository files.
+
+### Performance priorities after plotting integration (2026-09-13)
+
+With explicit maintainer approval, #305 merged as b5dbcc95 into the
+performance branch underlying #299, not main. Local CPU/GPU checks and
+changed-line coverage passed; GitHub CI was still queued at integration.
+Keep checking that CI. All other PRs retain the merge hold.
+
+Stop winding-surface work. Next measure dense row-Jacobian divisor choices
+under memory bounds, preserving exact value and derivative contracts; test
+any winner in the complete collaborator workload. In parallel, reconcile
+equilibrium-history consistency with #302 and identify the dominant cold
+solve/compile costs from existing QA/QH/QI/QP evidence. Then repeat cold CLI
+and Python runs and stage-1/single-stage optimizations on CPU/GPU with pinned
+0.3/0.7/current sources. Report compilation, accepted progress, derivatives,
+memory and final physical accuracy separately. Do not rerun known-invalid
+long optimizations before fixing their acceptance or repeatability gaps.
