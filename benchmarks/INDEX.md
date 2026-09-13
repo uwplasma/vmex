@@ -6,9 +6,9 @@ that script after adding, moving or re-measuring anything under
 missing from this file, when a path named here does not exist, and when a
 grouped directory holds a different number of files than the count below.
 
-87 committed artifacts: 33 standalone records and 1 grouped directory holding
-54 files. 31 of the 34 entries below are cited by a page, a test or another
-script; 3 are cited by nothing.
+88 committed artifacts: 34 standalone records and 1 grouped directory holding
+54 files. 31 of the 35 entries below are cited by a page, a test or another
+script; 4 are cited by nothing.
 
 `commit` is the revision recorded inside the artifact (short form) and
 `date` its recorded measurement date; both are blank where the schema of
@@ -34,6 +34,7 @@ hand rather than by a script in this tree.
 | `benchmarks/mirror_free_boundary_axisymmetric.json` |  | `d4f56dae` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py`, `tests/test_capability_docs.py` |
 | `benchmarks/mirror_free_boundary_nonaxisymmetric.json` |  | `f9eb6a44` |  | `benchmarks/capabilities.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
 | `benchmarks/mirror_hybrid_fixed_boundary.json` |  | `56d7c4b7` |  | `benchmarks/capabilities.json`, `docs/_static/figures/figures.json`, `docs/explanation/mirror-geometry.rst`, `docs/reference/capabilities.rst`, `tests/mirror/test_output.py` |
+| `benchmarks/optimization_counters_20260913.json` | `benchmarks/optimization.py` | `142d6c92` | 2026-09-13 | *nothing* |
 | `benchmarks/polish3d_tuning.md` |  |  |  | `docs/explanation/validation.md`, `docs/reference/api/advanced.rst`, `vmex/core/polish_driver.py` |
 | `benchmarks/polish_cost_office.json` | `benchmarks/polish_cost.py` | `529f1789` |  | `docs/reference/performance.rst` |
 | `benchmarks/polish_force_error_2026-09-03.json` | `benchmarks/strong_polish.py` | `5efde0ee` |  | `CHANGELOG.md`, `benchmarks/polish_force_error_2026-09-03.md`, `docs/explanation/high-order-force-balance.rst`, `docs/explanation/validation.md`, `plan.md`, `tests/test_performance_docs.py` |
@@ -67,5 +68,6 @@ These records are committed evidence that no page, test or script
 reads. They are kept, not deleted; the list exists so that stays visible.
 
 - `benchmarks/fresh_decks_vs_vmec2000_2026-09-02.md`
+- `benchmarks/optimization_counters_20260913.json`
 - `benchmarks/polish_force_error_2026-09-03.md`
 - `benchmarks/profile.json`
