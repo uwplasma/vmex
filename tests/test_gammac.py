@@ -516,3 +516,41 @@ def test_optimize_reexports_the_gamma_c_family():
     assert opt.GammaCSmooth is gammac.GammaCSmooth
     assert opt.gamma_c_state is gammac.gamma_c_state
     assert opt.gamma_c_smooth_state is gammac.gamma_c_smooth_state
+
+
+@pytest.mark.parametrize("lasym", (False, True))
+def test_wout_row_map_preserves_values_and_directional_derivatives(lasym):
+    """A compact analytic torus retains every diagnostic and its JVP."""
+    s = jnp.linspace(0., 1., 7)
+    radius = 0.3 * jnp.sqrt(s)
+    rmnc = jnp.stack([3 * jnp.ones_like(s), radius, .02 * s], axis=-1)
+    zero = jnp.zeros_like(rmnc)
+    tables = dict(
+        s=s, hs=s[1] - s[0], psi_edge=jnp.array(.1),
+        iotas=.4 + .02 * s, phipf=jnp.full_like(s, .1),
+        m=jnp.array([0., 1., 1.]), xn=jnp.array([0., 0., 1.]),
+        rmnc=rmnc, zmns=rmnc.at[:, 0].set(0.), lmns=zero,
+        rmns=.01 * rmnc if lasym else None,
+        zmnc=.01 * rmnc if lasym else None,
+        lmnc=zero if lasym else None)
+    settings = dict(rows=(2, 4), nalpha=3, num_transit=2,
+                    points_per_transit=16, num_pitch=6,
+                    quadrature_order=8, max_wells=8)
+
+    def evaluate(coefficients, mapped):
+        ctx = dict(tables, rmnc=coefficients)
+        if mapped:
+            return gammac._gamma_c_rows_from_tables(
+                ctx, jnp.array(0.), lasym=lasym, **settings)
+        return gammac._rows_from_context(
+            dict(ctx, lasym=lasym), jnp.array(0.), **settings)
+
+    direction = jnp.reshape(jnp.linspace(-.001, .001, rmnc.size), rmnc.shape)
+    results = [jax.jit(lambda c: jax.jvp(
+        lambda x: evaluate(x, mapped), (c,), (direction,)))(rmnc)
+        for mapped in (False, True)]
+    for original, mapped in zip(*results):
+        assert original.keys() == mapped.keys()
+        for name in original:
+            np.testing.assert_array_equal(np.isnan(original[name]), np.isnan(mapped[name]))
+            np.testing.assert_allclose(original[name], mapped[name], rtol=2e-10, atol=2e-11)
