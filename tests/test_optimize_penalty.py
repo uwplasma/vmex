@@ -30,6 +30,28 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 OBJECTIVE = [(opt.aspect_ratio, 4.0, 1.0)]
 
 
+@pytest.mark.parametrize("size,expected", [(3, (3, 3)), (150, (100, 20))])
+def test_refinement_krylov_budget_independent_of_adjoint(monkeypatch, size, expected):
+    """An exhausted adjoint budget must not starve its prerequisite primal."""
+    seen = []
+
+    def linear_solve(matvec, rhs, **kwargs):
+        seen.append((kwargs["m"], kwargs["k"]))
+        np.testing.assert_allclose(matvec(rhs), rhs)
+        return SimpleNamespace(x=rhs)
+
+    monkeypatch.setattr(im, "residual_fn", lambda *_: lambda state, params: state)
+    monkeypatch.setattr(im, "_solvax_gcrot", linear_solve)
+    state = jax.numpy.ones(size)
+    cfg = SimpleNamespace(adjoint_gcrot_m=2, adjoint_gcrot_k=1)
+    refined, residual, norm = im._refine_step_core.__wrapped__(
+        state, state, None, None, None, cfg)
+    assert seen == [expected]
+    np.testing.assert_array_equal(refined, np.zeros(size))
+    np.testing.assert_array_equal(residual, np.zeros(size))
+    assert float(norm) == 0.0
+
+
 def _boom() -> VmecJacobianError:
     return VmecJacobianError(
         "INITIAL JACOBIAN CHANGED SIGN!",

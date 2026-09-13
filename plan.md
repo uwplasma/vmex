@@ -852,12 +852,25 @@ maximum derivative relative error5.09e-8. The GPU requires JAX CPU backend
 availability for pure callbacks alongside CUDA; a CUDA-only harness failed and
 was corrected. This GPU run predates later cache/field materialization changes;
 it certifies the tested ordinary derivative fixture, not exact current-source
-GPU parity. Final static preflight and 96.4% changed-line coverage (161/167
-executable lines) pass after the cache, snapshot-field and lock corrections.
+GPU parity. Static preflight and 96.4% changed-line coverage (161/167
+executable lines) passed at the initial cache, snapshot-field and lock checkpoint.
 The broad affected suite and QA Taylor/duality matrix remain outstanding.
 The traced batched path still constructs linear work before masking an invalid
 primal, so no invalid-trial performance speedup is claimed. PR299 must be
 rebased/reconciled before combining its performance changes with this contract.
+
+**2026-09-13, CI contract follow-up.** Newton refinement now uses independent
+GCROT dimensions, preserving its normal 100/20 budget when the adjoint budget
+is restricted. All three previously failing CI selections pass locally
+(247.98 seconds), including the two-host-device typed-adjoint failure test.
+The solver-control test checks the exhausted solve through its value-only
+graph and explicitly requires Jacobian rejection. The cached-equilibrium
+failure mock now intercepts the public materialization entry point.
+Another 32 focused cases pass (8.22 seconds), including dimension caps and
+independence from adjoint controls. Recollected implicit-module coverage plus
+unchanged-module evidence gives 167/170 changed executable lines (98.2%);
+three implicit integration lines remain uncovered. Static preflight passes;
+broader affected CI and exact-source GPU qualification remain pending.
 
 The cached materialization path now retains an immutable coefficient snapshot
 under the existing cache lock. Its interior/exterior fields use that same state

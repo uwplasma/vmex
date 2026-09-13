@@ -30,6 +30,8 @@ revision it was measured at, and the pages that cite it.
 
 ### Fixed
 
+- Newton refinement no longer inherits restricted adjoint GCROT dimensions,
+  so an adjoint-only budget change does not also constrain primal admission.
 - Radial lifts reject knot spans without an interior source sample before
   evaluating fields. Primal admission checks fresh force and geometry, and
   derivative-cache provenance is recorded atomically with its coefficients.

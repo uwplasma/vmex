@@ -1164,7 +1164,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     def rejected_equilibrium(_x):
         raise RuntimeError("no converged equilibrium for this point")
 
-    monkeypatch.setattr(problem, "_equilibrium_from_x", rejected_equilibrium)
+    monkeypatch.setattr(problem, "equilibrium_from_x", rejected_equilibrium)
     monkeypatch.setattr(
         FunctionProblem,
         "evaluate",

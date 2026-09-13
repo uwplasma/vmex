@@ -1374,6 +1374,12 @@ _REFINE_FORCING = 1.0e-6
 #: the worst landing measured across the gradient decks.
 _REFINE_MAX_RESTARTS = 20
 
+# Refinement must not inherit a deliberately restricted adjoint budget: the
+# primal is established before the adjoint is attempted. Preserve the normal
+# dimensions while allowing adjoint failure tests and tuning independently.
+_REFINE_GCROT_M = 100
+_REFINE_GCROT_K = 20
+
 
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
@@ -1424,8 +1430,8 @@ def _refine_step_core(z: SpectralState, fz: SpectralState,
     _, jvp = jax.linearize(lambda t: F(t, params), z)
     b_flat, unravel = ravel_pytree(fz)
     n = int(b_flat.shape[0])
-    m = min(int(cfg.adjoint_gcrot_m), n)
-    k = min(int(cfg.adjoint_gcrot_k), n)
+    m = min(_REFINE_GCROT_M, n)
+    k = min(_REFINE_GCROT_K, n)
 
     def matvec(v):
         return ravel_pytree(jvp(unravel(v)))[0]

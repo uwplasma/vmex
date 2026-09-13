@@ -6,6 +6,13 @@ The ordinary fixed-boundary implicit APIs require a finite residual tolerance
 ``refine_tol``: setting the latter to infinity disables Newton refinement,
 but does not qualify an approximate root for differentiation.
 
+Newton refinement uses its own fixed GCROT dimensions (100 inner vectors,
+20 recycling directions, capped by the state dimension), independently of
+``adjoint_gcrot_m`` and ``adjoint_gcrot_k``. Restricting the adjoint budget
+therefore does not also restrict the work establishing its primal anchor.
+An exhausted adjoint can raise ``AdjointSolveError`` only after the primal
+passes admission; a rejected primal still takes precedence.
+
 Admission measures the assembled state actually returned to the objective.
 A fresh force evaluation must have a finite projected preconditioned residual
 norm below ``primal_tol``, finite nonnegative normalized raw FSQ no larger
