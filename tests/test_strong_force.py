@@ -460,6 +460,19 @@ def test_overintegrated_certificate_reports_dimensional_and_normalized_force():
     plt.close(figure)
 
 
+@pytest.mark.parametrize("spans", [4, 6])
+def test_legacy_lift_rejects_unresolved_graded_spans_before_field_evaluation(spans):
+    """ns=17 cannot resolve the first rho-graded span at either span count."""
+    runtime = SimpleNamespace(
+        setup=SimpleNamespace(s_full=np.linspace(0.0, 1.0, 17)), modes=None
+    )
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, spans + 1) ** 2, degree=5)
+    with mock.patch("vmex.core.statephysics._field_chain") as field_chain:
+        with pytest.raises(ValueError, match="no interior source samples.*\\[0"):
+            lift_high_order_state(None, runtime, radial_basis=basis)
+        field_chain.assert_not_called()
+
+
 def test_legacy_lift_preserves_axis_boundary_and_lambda_gauge():
     path = "examples/data/input.circular_tokamak"
     inp = VmecInput.from_file(path)

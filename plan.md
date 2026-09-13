@@ -813,3 +813,70 @@ remaining 28 lines are guard clauses and deep continuation branches; the guards
 are being given fast unit tests rather than bought with slow ones. Moving code
 should not lose it coverage, and a pure move exposing a pre-existing gap is
 worth closing rather than exempting.
+
+
+**2026-09-12, radial lift source admission.** In the isolated
+`fix/hint-comparison-derivative-contract` worktree, `lift_high_order_state`
+now requires a source sample strictly inside every radial knot span before
+performing field evaluation. This rejects the ns=17, rho-graded 4- and 6-span
+reproducers instead of allowing an unfed least-squares fit. Samples at a span
+endpoint alone do not meet this conservative admission rule. The guard is
+necessary, not sufficient: conditioning, nestedness and physical force still
+need their independent checks, and the E2/near-axis decision is unchanged.
+Four focused legacy-lift tests pass in 82.74 seconds on macOS CPU/JAX 0.9.2,
+including preserved axis, boundary, lambda gauge and the existing smoothing
+regression. Ruff and the test-manifest collection pass. No full preflight or
+new high-order physics claim is attached to this checkpoint.
+
+The associated HINT comparison work has separately reproduced and fixed
+nonfinite-root false-success statuses in Solvax Newton–Krylov and
+pseudo-transient continuation. These changes are isolated in
+`../solvax-vmex-validation`; they are not installed into this worktree's pinned
+reference environment. Their 73 focused tests and CPU/GPU PDE calibration are
+solver evidence, not resolution of P0's ordinary VMEX derivative eligibility
+or the known history-dependent primal drift in the performance workstream.
+
+
+**2026-09-12, ordinary primal admission implementation.** The same isolated
+worktree adds a finite `primal_tol` independent of Newton iteration controls.
+Status, scalar reverse, batched responses and optimization diagnostics check
+the actual assembled anchor's projected residual, fresh raw FSQ and geometry.
+Certificates follow parameter/state fingerprints and derivative caches;
+materialized equilibria and predictor seeds use matching refined coefficients.
+Eager typed adjoint errors remain intact. This is a fixed-boundary admission
+contract, not proof of uniqueness or a coupled free-boundary certificate.
+
+A converged Solovev test passes four fresh central-difference comparisons on
+Mac CPU and office GPU. The CPU primal norm is 3.35e-14, raw FSQ5.43e-24 and
+maximum derivative relative error5.09e-8. The GPU requires JAX CPU backend
+availability for pure callbacks alongside CUDA; a CUDA-only harness failed and
+was corrected. This GPU run predates later cache/field materialization changes;
+it certifies the tested ordinary derivative fixture, not exact current-source
+GPU parity. Static preflight and 96.4% changed-line coverage (161/167
+executable lines) passed at the initial cache, snapshot-field and lock checkpoint.
+The broad affected suite and QA Taylor/duality matrix remain outstanding.
+The traced batched path still constructs linear work before masking an invalid
+primal, so no invalid-trial performance speedup is claimed. PR299 must be
+rebased/reconciled before combining its performance changes with this contract.
+
+**2026-09-13, CI contract follow-up.** Newton refinement now uses independent
+GCROT dimensions, preserving its normal 100/20 budget when the adjoint budget
+is restricted. All three previously failing CI selections pass locally
+(247.98 seconds), including the two-host-device typed-adjoint failure test.
+The solver-control test checks the exhausted solve through its value-only
+graph and explicitly requires Jacobian rejection. The cached-equilibrium
+failure mock now intercepts the public materialization entry point.
+Another 32 focused cases pass (8.22 seconds), including dimension caps and
+independence from adjoint controls. Recollected implicit-module coverage plus
+unchanged-module evidence gives 167/170 changed executable lines (98.2%);
+three implicit integration lines remain uncovered. Static preflight passes;
+broader affected CI and exact-source GPU qualification remain pending.
+
+The cached materialization path now retains an immutable coefficient snapshot
+under the existing cache lock. Its interior/exterior fields use that same state
+and retain spatial derivatives; optimization-parameter VJPs on these snapshots
+are explicitly unsupported. A differentiable continuation tied to an accepted
+anchor remains future work. This restriction is preferable to returning fields
+and derivatives from a different global refinement, but must be reviewed as a
+public API behavior change. The ordinary uncached parameterized path remains
+separate.

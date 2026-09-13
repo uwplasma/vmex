@@ -1,0 +1,237 @@
+{
+  "file": "runs/lhd-follow-noreset-001/r360_g12538_bq+100_lc10_ppkf2.b010.mag.h5",
+  "sha256": "556ac7e9dce07abef7f7bc9bbe7b8075c006a7ee74a66efd8ce1b86ae2de4f27",
+  "pressure_units": "HINT P is mu0 times pressure in Pa",
+  "integration": "uniform cylindrical rectangle sum over full torus; pressure-defined support is not a magnetic boundary",
+  "convergence_certified": false,
+  "snapshots": [
+    {
+      "time": 0.0,
+      "finite": true,
+      "max_pressure_Pa": 0.0,
+      "pressure_integral_J": 0.0,
+      "positive_pressure_volume_m3": 0.0,
+      "max_field_T": 5.733148310789062
+    },
+    {
+      "time": 5.0,
+      "finite": true,
+      "max_pressure_Pa": 26478.134564677566,
+      "pressure_integral_J": 334195.5926490604,
+      "positive_pressure_volume_m3": 23.127194573501235,
+      "max_field_T": 5.733231619769318,
+      "max_delta_B_T": 0.012814577231407357,
+      "rms_delta_B_T": 0.0026104751996455285,
+      "relative_pressure_l2": 1.0
+    },
+    {
+      "time": 10.0,
+      "finite": true,
+      "max_pressure_Pa": 26479.999214916697,
+      "pressure_integral_J": 328244.1768728916,
+      "positive_pressure_volume_m3": 23.234218253694387,
+      "max_field_T": 5.7331379914715805,
+      "max_delta_B_T": 0.003980716814002135,
+      "rms_delta_B_T": 0.000910878569322875,
+      "relative_pressure_l2": 0.03794811231732282
+    },
+    {
+      "time": 15.0,
+      "finite": true,
+      "max_pressure_Pa": 26478.76043749436,
+      "pressure_integral_J": 324150.53546957136,
+      "positive_pressure_volume_m3": 23.308504851593344,
+      "max_field_T": 5.732970299868257,
+      "max_delta_B_T": 0.0020877764374327883,
+      "rms_delta_B_T": 0.0004917479491889981,
+      "relative_pressure_l2": 0.02397546897357569
+    },
+    {
+      "time": 20.0,
+      "finite": true,
+      "max_pressure_Pa": 26476.79760645597,
+      "pressure_integral_J": 320908.73946845374,
+      "positive_pressure_volume_m3": 23.38428742086599,
+      "max_field_T": 5.732876661464019,
+      "max_delta_B_T": 0.0011599695386194575,
+      "rms_delta_B_T": 0.00027082736134889554,
+      "relative_pressure_l2": 0.018029631149046665
+    },
+    {
+      "time": 25.0,
+      "finite": true,
+      "max_pressure_Pa": 26486.891257995787,
+      "pressure_integral_J": 292965.38672803476,
+      "positive_pressure_volume_m3": 23.389966302488453,
+      "max_field_T": 5.732809377445899,
+      "max_delta_B_T": 0.0014342584706355129,
+      "rms_delta_B_T": 0.000274681601022851,
+      "relative_pressure_l2": 0.0987461832303885
+    },
+    {
+      "time": 30.0,
+      "finite": true,
+      "max_pressure_Pa": 26493.88465389695,
+      "pressure_integral_J": 290343.2984261983,
+      "positive_pressure_volume_m3": 23.433091671433463,
+      "max_field_T": 5.732797222232352,
+      "max_delta_B_T": 0.0006147935546611204,
+      "rms_delta_B_T": 0.0001210199799356304,
+      "relative_pressure_l2": 0.013281541914606534
+    },
+    {
+      "time": 35.0,
+      "finite": true,
+      "max_pressure_Pa": 26495.37811805178,
+      "pressure_integral_J": 288154.2199543958,
+      "positive_pressure_volume_m3": 23.448294662068534,
+      "max_field_T": 5.732791631999952,
+      "max_delta_B_T": 0.0004997972547811457,
+      "rms_delta_B_T": 9.63363575210907e-05,
+      "relative_pressure_l2": 0.010623483392600606
+    },
+    {
+      "time": 40.0,
+      "finite": true,
+      "max_pressure_Pa": 26495.531279165225,
+      "pressure_integral_J": 286258.9567112881,
+      "positive_pressure_volume_m3": 23.47130793043373,
+      "max_field_T": 5.732789032929916,
+      "max_delta_B_T": 0.00040269685282291404,
+      "rms_delta_B_T": 7.774086814804264e-05,
+      "relative_pressure_l2": 0.008876291440714985
+    },
+    {
+      "time": 45.0,
+      "finite": true,
+      "max_pressure_Pa": 26508.189501059394,
+      "pressure_integral_J": 291874.59207698295,
+      "positive_pressure_volume_m3": 23.471246203459575,
+      "max_field_T": 5.732801031517762,
+      "max_delta_B_T": 0.00044647542326912087,
+      "rms_delta_B_T": 7.817319305991336e-05,
+      "relative_pressure_l2": 0.02650759137084176
+    },
+    {
+      "time": 50.0,
+      "finite": true,
+      "max_pressure_Pa": 26505.34352644928,
+      "pressure_integral_J": 289419.37138938165,
+      "positive_pressure_volume_m3": 23.4569073904627,
+      "max_field_T": 5.732800668280634,
+      "max_delta_B_T": 0.0002498395562540946,
+      "rms_delta_B_T": 4.588567204541474e-05,
+      "relative_pressure_l2": 0.011612692795959592
+    },
+    {
+      "time": 55.0,
+      "finite": true,
+      "max_pressure_Pa": 26505.019998424457,
+      "pressure_integral_J": 287301.00596191117,
+      "positive_pressure_volume_m3": 23.43770667050133,
+      "max_field_T": 5.732800246957009,
+      "max_delta_B_T": 0.00030028079843336564,
+      "rms_delta_B_T": 4.3002156316513504e-05,
+      "relative_pressure_l2": 0.009566218841143729
+    },
+    {
+      "time": 60.0,
+      "finite": true,
+      "max_pressure_Pa": 26505.676259676908,
+      "pressure_integral_J": 285409.8747964428,
+      "positive_pressure_volume_m3": 23.43881775603616,
+      "max_field_T": 5.732797697691301,
+      "max_delta_B_T": 0.00028494417583677377,
+      "rms_delta_B_T": 4.00649732742127e-05,
+      "relative_pressure_l2": 0.008594217951856995
+    },
+    {
+      "time": 65.0,
+      "finite": true,
+      "max_pressure_Pa": 26519.395591060802,
+      "pressure_integral_J": 292100.2517409335,
+      "positive_pressure_volume_m3": 23.470367501827454,
+      "max_field_T": 5.732808842474116,
+      "max_delta_B_T": 0.00045994509221744734,
+      "rms_delta_B_T": 7.223253194033935e-05,
+      "relative_pressure_l2": 0.029071015480868812
+    },
+    {
+      "time": 70.0,
+      "finite": true,
+      "max_pressure_Pa": 26516.68141811284,
+      "pressure_integral_J": 289582.23687701253,
+      "positive_pressure_volume_m3": 23.44594903705056,
+      "max_field_T": 5.732805634734728,
+      "max_delta_B_T": 0.00026958255639638,
+      "rms_delta_B_T": 3.174956193548824e-05,
+      "relative_pressure_l2": 0.011636775837463486
+    },
+    {
+      "time": 75.0,
+      "finite": true,
+      "max_pressure_Pa": 26515.173941624427,
+      "pressure_integral_J": 287438.9129418345,
+      "positive_pressure_volume_m3": 23.440778495215273,
+      "max_field_T": 5.732802518728278,
+      "max_delta_B_T": 0.00029366852579819667,
+      "rms_delta_B_T": 3.057842719218265e-05,
+      "relative_pressure_l2": 0.00970179003512224
+    },
+    {
+      "time": 80.0,
+      "finite": true,
+      "max_pressure_Pa": 26514.40724929044,
+      "pressure_integral_J": 285591.2925462238,
+      "positive_pressure_volume_m3": 23.46599941065621,
+      "max_field_T": 5.732797278113804,
+      "max_delta_B_T": 0.00016567431534870024,
+      "rms_delta_B_T": 2.932735388555314e-05,
+      "relative_pressure_l2": 0.008343819233797707
+    },
+    {
+      "time": 85.0,
+      "finite": true,
+      "max_pressure_Pa": 26514.37208063641,
+      "pressure_integral_J": 283915.6599108979,
+      "positive_pressure_volume_m3": 23.458791878673736,
+      "max_field_T": 5.732791478450507,
+      "max_delta_B_T": 0.00016852830230103442,
+      "rms_delta_B_T": 2.7911109298806064e-05,
+      "relative_pressure_l2": 0.007507388032366187
+    },
+    {
+      "time": 90.0,
+      "finite": true,
+      "max_pressure_Pa": 26515.02956636567,
+      "pressure_integral_J": 282380.44701104285,
+      "positive_pressure_volume_m3": 23.45363586083237,
+      "max_field_T": 5.732786012018795,
+      "max_delta_B_T": 0.00014515446415695233,
+      "rms_delta_B_T": 2.628400085052639e-05,
+      "relative_pressure_l2": 0.006789147616472426
+    },
+    {
+      "time": 95.0,
+      "finite": true,
+      "max_pressure_Pa": 26515.955068678777,
+      "pressure_integral_J": 280937.9329929855,
+      "positive_pressure_volume_m3": 23.46420932840565,
+      "max_field_T": 5.732780705143666,
+      "max_delta_B_T": 0.00012574925326409278,
+      "rms_delta_B_T": 2.474485737595959e-05,
+      "relative_pressure_l2": 0.006240438573631489
+    },
+    {
+      "time": 100.0,
+      "finite": true,
+      "max_pressure_Pa": 26516.4854881325,
+      "pressure_integral_J": 279584.8257200945,
+      "positive_pressure_volume_m3": 23.449747061460464,
+      "max_field_T": 5.73277584101166,
+      "max_delta_B_T": 0.00011765719254331979,
+      "rms_delta_B_T": 2.331627175783352e-05,
+      "relative_pressure_l2": 0.005773298716169963
+    }
+  ]
+}

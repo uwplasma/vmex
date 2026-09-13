@@ -1,0 +1,51 @@
+{
+  "case": "beta2p5",
+  "label": "Landreman\u2013Buller\u2013Drevlak finite-beta QA (VMEX filename LandremanPaul)",
+  "nominal_beta_percent": 2.5,
+  "source_beta_percent": 2.5469063197490454,
+  "source_current_A": -272398.49652215367,
+  "nfp": 2,
+  "grid": [
+    16,
+    33,
+    33
+  ],
+  "box_m": [
+    0.5457157453512684,
+    1.4237146391978521,
+    -0.5527050933618284,
+    0.5527050933618284
+  ],
+  "padding_minor_radii": 1.0,
+  "axis_seed_m": [
+    1.1881566187233479,
+    0.0
+  ],
+  "reference_B_T": 5.135284908546196,
+  "hint_axis_beta": 0.06871217252551427,
+  "source_axis_pressure_Pa": 720979.4853000001,
+  "source_residuals": {
+    "fsqr": 9.97641832015731e-12,
+    "fsqz": 1.2227767459295994e-12,
+    "fsql": 3.2248928630333045e-12
+  },
+  "current_mapping": "lambda(s)=<J.B>/<B\u00b2>; shape from wout; HINT normalizes toroidal current at phi=0. Requires relaxed-profile validation.",
+  "flux_mapping": "Linear interpolation of full-mesh VMEX R,Z,s with explicit LCFS polygon mask; initializer only.",
+  "status": "prepared; HINT convergence and final beta not certified",
+  "sources": [
+    {
+      "path": "UNBUNDLED_ARTIFACT",
+      "sha256": "f1c5ab0704f8097f680e1caed519c899fdecd0f4b9b73d4e4a33d798c26a9bd5"
+    },
+    {
+      "path": "UNBUNDLED_ARTIFACT",
+      "sha256": "3866ec46424c394bad1656366643be0ab137fbaf40b49852841b5a6461482938"
+    },
+    {
+      "path": "UNBUNDLED_ARTIFACT",
+      "sha256": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d"
+    }
+  ],
+  "hint_commit": "08bf56415a1085d840416f7e39ef88bcbc57c187",
+  "vmex_commit": "4301678b5349b1a499e9d6891866a955a82f385a"
+}

@@ -1,0 +1,36 @@
+{
+  "host": "cpu-validation-host",
+  "runner_pid": 54945,
+  "command": [
+    ".venv/bin/python",
+    "local-support/qualify_finite_beta_qa_root.py",
+    "--vmex-root",
+    "UNBUNDLED_ARTIFACT",
+    "--solvax-root",
+    "HINT_CHECKOUT/runs/solvax-integrated-e4b5071",
+    "--input",
+    "QA_INPUTS/beta0p5/inputs/input.LandremanPaul2021_QA_beta0p5_bootstrap",
+    "--reference-wout",
+    "QA_INPUTS/beta0p5/inputs/wout_LandremanPaul2021_QA_beta0p5_bootstrap.nc",
+    "--cold-runs",
+    "1",
+    "--per-run-timeout",
+    "240",
+    "--output",
+    "runs/qa-root-cpu-14360d17-002"
+  ],
+  "cwd": "UNBUNDLED_ARTIFACT",
+  "resource": "cpu",
+  "timeout_seconds": 270,
+  "start_unix": 1789258857.545064,
+  "state": "finished",
+  "pid": 54947,
+  "execution_environment": {
+    "OMP_NUM_THREADS": "2",
+    "JAX_PLATFORMS": "cpu",
+    "CUDA_VISIBLE_DEVICES": null,
+    "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+  },
+  "returncode": 0,
+  "elapsed_seconds": 30.312764167785645
+}

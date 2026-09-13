@@ -1,0 +1,27 @@
+{
+  "grid": [
+    128,
+    128,
+    64
+  ],
+  "proposed_run": "qa-edge-fresh-n128-001",
+  "deck": "local-support/qa-edge-refinement-inputs-001/n128/hint.input",
+  "deck_sha256": "5b6cca19f2adc8d91e4d084e9b84e8a7bb861626bf136d34eb90ead5fb2ba63f",
+  "existing_inputs": {
+    "vacuum.nc": {
+      "office_path": "runs/qa-vacuum-grid/gpu/beta0p5/n128t64/vacuum.nc",
+      "sha256": "559f6be766900ad3c947b650114d033dd3384bf2716a880b84a7ef8f74e3305b"
+    },
+    "flux.nc": {
+      "office_path": "runs/qa-current-refinement/beta0p5/n128t64/flux.nc",
+      "sha256": "b84b1ad337cc8ec12e94f73fd2a62cddcff137551e37f95ee5f1f707480968c3"
+    },
+    "limiter-12.nc": {
+      "office_path": "runs/qa-edge-limiter-n128-001/limiter-12.nc",
+      "sha256": "8ec31cdda817d21965db6f9cf65c76fe0e3838138dbf373b88bae467ffe5b13f"
+    }
+  },
+  "limiter_status": "native completed, grid/domain/nfp verified, all89754 initial plasma cells inside",
+  "solver_launched": false,
+  "timeout_seconds": 1200
+}

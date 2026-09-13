@@ -1,0 +1,282 @@
+{
+  "device": "TFRT_CPU_0",
+  "jax_version": "0.9.2",
+  "direction": {
+    "family": "rbc",
+    "m": 1,
+    "n": 0,
+    "meters_per_unit_parameter": 1.016712828943485
+  },
+  "fixed_constraints": {
+    "ncurr": 1,
+    "pressure_axis_Pa": 144195.89706000002,
+    "curtor_A": -95673.86795711746,
+    "phiedge_Wb": 0.5186826591273498
+  },
+  "objective": "mhd_energy(state,runtime)[0] (VMEX wb normalization)",
+  "primal_tol": 1e-10,
+  "adjoint_tol": 1e-11,
+  "phases": [
+    {
+      "name": "base_primal",
+      "start_unix": 1789259050.8052301,
+      "elapsed_seconds": 22.959322929382324
+    },
+    {
+      "name": "live_reverse_energy_gradient",
+      "start_unix": 1789259073.764661,
+      "elapsed_seconds": 41.528769969940186
+    },
+    {
+      "name": "matrix_free_state_tangent_and_duality",
+      "start_unix": 1789259115.293621,
+      "elapsed_seconds": 22.60873007774353
+    },
+    {
+      "name": "taylor_0_plus_primal_and_value",
+      "start_unix": 1789259137.902876,
+      "elapsed_seconds": 8.878862142562866
+    },
+    {
+      "name": "taylor_0_minus_primal_and_value",
+      "start_unix": 1789259146.781974,
+      "elapsed_seconds": 6.869753122329712
+    },
+    {
+      "name": "taylor_1_plus_primal_and_value",
+      "start_unix": 1789259153.652599,
+      "elapsed_seconds": 7.471475839614868
+    },
+    {
+      "name": "taylor_1_minus_primal_and_value",
+      "start_unix": 1789259161.1245272,
+      "elapsed_seconds": 7.0681469440460205
+    },
+    {
+      "name": "taylor_2_plus_primal_and_value",
+      "start_unix": 1789259168.193354,
+      "elapsed_seconds": 7.2024571895599365
+    },
+    {
+      "name": "taylor_2_minus_primal_and_value",
+      "start_unix": 1789259175.396266,
+      "elapsed_seconds": 6.9064249992370605
+    },
+    {
+      "name": "taylor_3_plus_primal_and_value",
+      "start_unix": 1789259182.303605,
+      "elapsed_seconds": 7.064076900482178
+    },
+    {
+      "name": "taylor_3_minus_primal_and_value",
+      "start_unix": 1789259189.368269,
+      "elapsed_seconds": 6.73156213760376
+    }
+  ],
+  "taylor": [
+    {
+      "h": 0.0001,
+      "boundary_displacement_m": 0.00010167128289434851,
+      "plus": {
+        "value": 0.2549545648620883,
+        "primal": {
+          "primal_residual_norm": 8.61629242212272e-12,
+          "primal_tol": 1e-10,
+          "primal_fsq": 8.266677752699e-21,
+          "primal_fsq_ratio": 8.266677752699001e-10,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.3361073202121386e-11,
+          "host_fsq_ratio": 1.3361073202121387,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 2.490872203875325e-07
+      },
+      "minus": {
+        "value": 0.2554386960716879,
+        "primal": {
+          "primal_residual_norm": 4.5361358925979744e-11,
+          "primal_tol": 1e-10,
+          "primal_fsq": 1.604802650067021e-19,
+          "primal_fsq_ratio": 1.604802650067021e-08,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.5248293544576514e-11,
+          "host_fsq_ratio": 1.5248293544576514,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 2.4888315682368846e-07
+      },
+      "central_difference": -2.420656047998071,
+      "derivative_absolute_error": 1.0203178191225959e-06,
+      "derivative_relative_error": 4.21504488379453e-07,
+      "max_first_order_remainder": 2.490872203875325e-07
+    },
+    {
+      "h": 5e-05,
+      "boundary_displacement_m": 5.083564144717426e-05,
+      "plus": {
+        "value": 0.2550754118021721,
+        "primal": {
+          "primal_residual_norm": 1.7216001232028557e-12,
+          "primal_tol": 1e-10,
+          "primal_fsq": 6.784517332977826e-22,
+          "primal_fsq_ratio": 6.784517332977826e-11,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.2933381126368853e-11,
+          "host_fsq_ratio": 1.2933381126368855,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 6.317388838939441e-08
+      },
+      "minus": {
+        "value": 0.2553174765158354,
+        "primal": {
+          "primal_residual_norm": 4.503159816308014e-11,
+          "primal_tol": 1e-10,
+          "primal_fsq": 1.5835504288889235e-19,
+          "primal_fsq_ratio": 1.5835504288889237e-08,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.5248566466676705e-11,
+          "host_fsq_ratio": 1.5248566466676705,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 6.218072013730103e-08
+      },
+      "central_difference": -2.4206471366333693,
+      "derivative_absolute_error": 9.931682520836205e-06,
+      "derivative_relative_error": 4.102887042874651e-06,
+      "max_first_order_remainder": 6.317388838939441e-08,
+      "observed_remainder_order": 1.9792507261140777
+    },
+    {
+      "h": 2.5e-05,
+      "boundary_displacement_m": 2.541782072358713e-05,
+      "plus": {
+        "value": 0.25513588126131237,
+        "primal": {
+          "primal_residual_norm": 5.773722926724237e-12,
+          "primal_tol": 1e-10,
+          "primal_fsq": 4.646454773223387e-21,
+          "primal_fsq_ratio": 4.646454773223387e-10,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.3071459442021569e-11,
+          "host_fsq_ratio": 1.307145944202157,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 1.6206320780922875e-08
+      },
+      "minus": {
+        "value": 0.2552569134464254,
+        "primal": {
+          "primal_residual_norm": 4.4880801742592265e-11,
+          "primal_tol": 1e-10,
+          "primal_fsq": 1.5716842696036212e-19,
+          "primal_fsq_ratio": 1.5716842696036212e-08,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.5250883213807665e-11,
+          "host_fsq_ratio": 1.5250883213807667,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 1.553801804332378e-08
+      },
+      "central_difference": -2.4206437022611382,
+      "derivative_absolute_error": 1.3366054751884349e-05,
+      "derivative_relative_error": 5.521663901439553e-06,
+      "max_first_order_remainder": 1.6206320780922875e-08,
+      "observed_remainder_order": 1.9627717716193958
+    },
+    {
+      "h": 1.25e-05,
+      "boundary_displacement_m": 1.2708910361793564e-05,
+      "plus": {
+        "value": 0.25516612780756576,
+        "primal": {
+          "primal_residual_norm": 5.476975319388063e-12,
+          "primal_tol": 1e-10,
+          "primal_fsq": 3.85757324216021e-21,
+          "primal_fsq_ratio": 3.85757324216021e-10,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.3093948328696619e-11,
+          "host_fsq_ratio": 1.309394832869662,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 4.539220219702654e-09
+      },
+      "minus": {
+        "value": 0.2552266435775841,
+        "primal": {
+          "primal_residual_norm": 4.4808041743134556e-11,
+          "primal_tol": 1e-10,
+          "primal_fsq": 1.5726080312411e-19,
+          "primal_fsq_ratio": 1.5726080312411e-08,
+          "primal_geometry_valid": true,
+          "derivative_certified": true,
+          "status": 0,
+          "host_fsq": 1.5249833017120525e-11,
+          "host_fsq_ratio": 1.5249833017120527,
+          "certificate_matches_returned_state": true
+        },
+        "first_order_remainder": 3.88253068805844e-09
+      },
+      "central_difference": -2.4206308007346244,
+      "derivative_absolute_error": 2.626758126567097e-05,
+      "derivative_relative_error": 1.0851426089836825e-05,
+      "max_first_order_remainder": 4.539220219702654e-09,
+      "observed_remainder_order": 1.8360402147903676
+    }
+  ],
+  "completed": true,
+  "scope": "One fixed-boundary QA energy direction; no exterior-field, free-boundary, optimization or grid-convergence certificate.",
+  "active_phase": null,
+  "last_primal": {
+    "primal_residual_norm": 4.4808041743134556e-11,
+    "primal_tol": 1e-10,
+    "primal_fsq": 1.5726080312411e-19,
+    "primal_fsq_ratio": 1.5726080312411e-08,
+    "primal_geometry_valid": true,
+    "derivative_certified": true,
+    "status": 0,
+    "host_fsq": 1.5249833017120525e-11,
+    "host_fsq_ratio": 1.5249833017120527,
+    "certificate_matches_returned_state": true
+  },
+  "base_primal": {
+    "primal_residual_norm": 4.4748087001405284e-11,
+    "primal_tol": 1e-10,
+    "primal_fsq": 1.5666954831172382e-19,
+    "primal_fsq_ratio": 1.5666954831172384e-08,
+    "primal_geometry_valid": true,
+    "derivative_certified": true,
+    "status": 0,
+    "host_fsq": 1.5248695174993854e-11,
+    "host_fsq_ratio": 1.5248695174993854,
+    "certificate_matches_returned_state": true
+  },
+  "value": 0.2551963814816995,
+  "reverse_directional_derivative": -2.42065706831589,
+  "duality": {
+    "state_cotangent_dot_state_tangent": -2.4206570683224817,
+    "parameter_direction_dot_state_pullback": -2.42065706831589,
+    "explicit_parameter_derivative": 0.0,
+    "full_tangent_directional_derivative": -2.4206570683224817,
+    "absolute_error": 6.5916161418044794e-12,
+    "relative_error": 2.7230689667134377e-12,
+    "tangent_residual_norm": 5.837273781051296e-10,
+    "tangent_residual_bound": 5.8635099507450355e-09,
+    "note": "Energy state cotangent versus boundary direction; explicit metric parameter dependence is subtracted from the ordinary live-solve VJP."
+  },
+  "interpretation": "Inspect error magnitudes and an O(h^2) remainder region; completion alone is not derivative qualification. Small steps can reach solver/roundoff noise."
+}

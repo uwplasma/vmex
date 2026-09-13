@@ -1,0 +1,5 @@
+{
+  "source": "HINT_CHECKOUT/runs/qa-pilot-beta0p5-001/hint.nc",
+  "sha256": "74ac784831f9a51fd84db349c36d65b3e230e661eb54c825f736816581a92f3a",
+  "change": "100 to1000 magnetic steps per trace; same dt and tracing settings, pressure preserved"
+}

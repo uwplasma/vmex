@@ -1092,7 +1092,9 @@ def test_second_host_device_unconverged_adjoint_raises_typed_error():
     backward once discarded GCROT convergence info, turning an unconverged
     adjoint into a plausible gradient).  A 2-vector budget (m=2, k=1, one
     restart) against an unreachable tolerance forces non-convergence; the
-    reverse pass must surface the typed AdjointSolveError."""
+    reverse pass must surface the typed AdjointSolveError. Refinement must
+    retain its independent Krylov dimensions so this deliberately tiny
+    adjoint budget does not prevent primal certification first."""
     _assert_no_platform_pins()
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
     params = im.params_from_input(inp, device=HOST_DEVICES[1])

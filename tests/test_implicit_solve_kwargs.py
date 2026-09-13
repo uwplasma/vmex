@@ -57,21 +57,32 @@ def test_implicit_least_squares_honors_multigrid_solve_kwargs():
         )
 
     got = run(strict)
-    alternate = run({
+    alternate_controls = {
         "ns_array": [5],
         "ftol_array": [1.0e-6],
         "niter_array": [5],
         "device": "cpu",
-    })
+    }
+    alternate_problem = opt.VmecProblem.from_tuples(
+        inp, [(qh, 0.0, 1.0), (opt.aspect_ratio, 4.0, 1.0)],
+        max_mode=1, hot_restart=True, warm_start=None,
+        solve_kwargs=alternate_controls,
+    )
+    # Query the value-only graph: an intentionally exhausted forward solve
+    # cannot supply an ordinary implicit Jacobian under the primal contract.
+    alternate_value = np.asarray(
+        alternate_problem.jax_residual(alternate_problem.x0))
+    with pytest.raises(FloatingPointError, match="implicit-Jacobian certificate"):
+        alternate_problem.residual_and_jac(alternate_problem.x0)
     # The two requested ladders must produce finite, observable residuals.
     # This covers both the implicit callback and its hot-restart path without
     # asserting how the input object stores the controls internally.
     assert np.all(np.isfinite(got.fun))
-    assert np.all(np.isfinite(alternate.fun))
+    assert np.all(np.isfinite(alternate_value))
     # Before the fix, both calls silently used the deck's [5], 1e-10, 1000
     # ladder and produced the same implicit residual.
     assert not np.isclose(
-        np.linalg.norm(np.asarray(alternate.fun, dtype=float)),
+        np.linalg.norm(alternate_value),
         np.linalg.norm(np.asarray(got.fun, dtype=float)),
         rtol=1.0e-7,
         atol=1.0e-10,

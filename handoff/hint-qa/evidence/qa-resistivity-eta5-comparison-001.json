@@ -1,0 +1,46 @@
+{
+  "restart_sha256": "b801cd321fce9473efd668143409f06efdc7166003fcd1a47e7b8ebb3a38ff62",
+  "comparison": "Matched magnetic-time comparison: qa-cadence-n1000-001 vs qa-resistivity-eta5e-3-001; inspect input/restart provenance for changed numerical controls",
+  "runs": [
+    {
+      "run": "qa-cadence-n1000-001",
+      "elapsed_seconds": 90.69728469848633,
+      "time": 1.0800000000000185,
+      "pressure_current_A": -17692.41726885845,
+      "wall_current_A": -1110.1023991626023,
+      "force_ratio_squared_native_form": 0.014006101045468343
+    },
+    {
+      "run": "qa-resistivity-eta5e-3-001",
+      "elapsed_seconds": 89.0601212978363,
+      "time": 1.0800000000000185,
+      "pressure_current_A": -25520.89591518654,
+      "wall_current_A": -2718.9482841539807,
+      "force_ratio_squared_native_form": 0.019713754849808238
+    }
+  ],
+  "differences": {
+    "inside_wall": {
+      "rms_delta_B_T": 0.004310880768779867,
+      "max_delta_B_T": 0.008639556616616185
+    },
+    "outside_wall": {
+      "rms_delta_B_T": 0.0013662957017297641,
+      "max_delta_B_T": 0.06651126216244047
+    },
+    "all_interior": {
+      "rms_delta_B_T": 0.00269388326227565,
+      "max_delta_B_T": 0.06651126216244047
+    },
+    "relative_pressure_L2_full_grid": 0.003507901046691412
+  },
+  "qualified_equilibrium": false,
+  "limitation": "Coarse transient cadence sensitivity only; no order estimate, reference exterior-field agreement, wall/grid sensitivity or current convergence certificate.",
+  "given_boundary_targets": {
+    "count": 192,
+    "rms_delta_B_T": 0.0054080441356227525,
+    "max_delta_B_T": 0.008214118215983177,
+    "native_sampler_sha256": "a70b83f3fb1a7ed15bd4e14e9fddc7004f4f8159c20388e801bee42afad9b252",
+    "interpretation": "Same native spline and192fixed targets exterior to initialWOUT boundary, not certified exterior to relaxed current support."
+  }
+}

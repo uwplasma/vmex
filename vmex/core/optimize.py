@@ -1795,6 +1795,7 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e6,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -1864,9 +1865,9 @@ def make_problem(
     ``adjoint_tol`` is a relative Krylov tolerance with a certified true
     residual check; ``adjoint_maxiter`` is the restart budget.
 
-    ``refine_tol`` is the frozen fixed-point residual required before
-    implicit differentiation. The default preserves strict gradients;
-    ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+    ``refine_tol`` controls Newton refinement; ``numpy.inf`` disables it.
+    Independent finite ``primal_tol`` gates the actual residual before
+    implicit differentiation, together with fresh raw force and geometry checks.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -1956,7 +1957,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
-            refine_tol=refine_tol,
+            refine_tol=refine_tol, primal_tol=primal_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -1989,6 +1990,7 @@ def make_problem(
     problem.metadata["forward_max_iterations"] = int(np.asarray(inp.niter_array).ravel()[-1])
     problem.metadata["max_fsq_ratio"] = float(max_fsq_ratio)
     problem.metadata["refine_tol"] = float(refine_tol)
+    problem.metadata["primal_tol"] = float(primal_tol)
     return problem
 
 
@@ -2009,6 +2011,7 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e6,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2149,7 +2152,7 @@ def least_squares(
                 current_dofs=current_dofs, jac=jac,
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, primal_tol=primal_tol,
                 hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
@@ -2178,7 +2181,7 @@ def least_squares(
             current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, primal_tol=primal_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2259,6 +2262,7 @@ def minimize(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e6,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
@@ -2302,7 +2306,7 @@ def minimize(
                 device=device, solve_kwargs=solve_kwargs, verbose=verbose,
                 method=method, adjoint_tol=adjoint_tol,
                 adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
-                refine_tol=refine_tol,
+                refine_tol=refine_tol, primal_tol=primal_tol,
                 **scipy_kwargs)
             stage_results.append(result)
             current = result.input
@@ -2314,7 +2318,7 @@ def minimize(
         current_dofs=current_dofs, jac_solver="reverse",
         warm_start=("state" if hot_restart else None),
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, primal_tol=primal_tol,
         solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
         minimize_method=method, **scipy_kwargs)
 
@@ -2472,6 +2476,7 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e6,
     refine_tol: float = 1.0e-10,
+    primal_tol: float = 1.0e-10,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2587,7 +2592,7 @@ def _least_squares_implicit(
         jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
         adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio,
-        refine_tol=refine_tol,
+        refine_tol=refine_tol, primal_tol=primal_tol,
     )
     # Pin the residual/Jacobian graphs to the fastest device for this
     # launch-bound path (CPU by default; explicit device= honored; None
@@ -2911,6 +2916,8 @@ def _least_squares_implicit(
         """
         params = params_of(x)
         frozen = jax.lax.stop_gradient(imp.solve_implicit(params, cfg))
+        eligible = imp._require_primal(cfg, params, frozen, mask_const)
+        frozen = imp._primal_checked_tree(frozen, eligible)
         P = imp._dof_projector(cfg, mask_const)
         edge = imp._edge_mask(cfg)
         F = imp.residual_fn(cfg, frozen, mask_const)
@@ -3097,7 +3104,8 @@ def _least_squares_implicit(
         params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64),
                                  params_of(_place(x)))
         if hit is not None and hit[0] == imp._params_key(params_np):
-            holder["lin"] = (np.array(x, dtype=float), hit[1].state, dz_cols)
+            anchor = _result_at_implicit_anchor(hit[1], cfg, params_np).state
+            holder["lin"] = (np.array(x, dtype=float), anchor, dz_cols)
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
@@ -3329,35 +3337,38 @@ def _least_squares_implicit(
         return x
 
     def equilibrium_from_x(
-        x: np.ndarray, *, newton_iterations: int = 10
+        x: np.ndarray, *, newton_iterations: int = 10, cached_result=None
     ) -> Equilibrium:
-        """Materialize the exact accepted state already used by the objective."""
+        """Materialize the current parameter-matching host/refined anchor."""
         from .extender import VmecExtender, VmecInteriorField
 
         x = np.asarray(x, dtype=float)
         params_np = jax.tree.map(
             lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
         )
-        hit = imp._LAST_SOLVE.get(cfg)
-        if (
-            hit is None
-            or hit[0] != imp._params_key(params_np)
-            or imp._LAST_STATUS_ERROR.get(cfg) is not None
-        ):
-            # Problem construction and accepted optimizer evaluations already
-            # leave this exact equilibrium in the host cache.  Avoid compiling
-            # a second scalar graph merely to materialize that cached state.
-            if traceable_scalar is None:
-                fun(x)
-            else:
-                scalar_fun_host(x)
-            hit = imp._LAST_SOLVE.get(cfg)
-        if hit is None or hit[0] != imp._params_key(params_np):
-            raise RuntimeError(
-                "decision vector did not produce a usable VMEC equilibrium"
-            )
         result_input = input_from_x(x)
-        result = hit[1]
+        if cached_result is not None:
+            result = cached_result
+        else:
+            hit = imp._LAST_SOLVE.get(cfg)
+            if (
+                hit is None
+                or hit[0] != imp._params_key(params_np)
+                or imp._LAST_STATUS_ERROR.get(cfg) is not None
+            ):
+                # Problem construction and accepted optimizer evaluations already
+                # leave this exact equilibrium in the host cache.  Avoid compiling
+                # a second scalar graph merely to materialize that cached state.
+                if traceable_scalar is None:
+                    fun(x)
+                else:
+                    scalar_fun_host(x)
+                hit = imp._LAST_SOLVE.get(cfg)
+            if hit is None or hit[0] != imp._params_key(params_np):
+                raise RuntimeError(
+                    "decision vector did not produce a usable VMEC equilibrium"
+                )
+            result = _result_at_implicit_anchor(hit[1], cfg, params_np)
         ns = int(np.shape(result.state.R_cos)[0])
         runtime = prepare_runtime(
             result_input,
@@ -3382,6 +3393,19 @@ def _least_squares_implicit(
             if kwargs:
                 unexpected = ", ".join(sorted(kwargs))
                 raise TypeError(f"unexpected exterior-field options: {unexpected}")
+            if cached_result is not None:
+                if (external_parameters is not None or external_field_from_parameters is not None
+                        or external_dof_names):
+                    raise ValueError(
+                        "cached equilibrium snapshots require an evaluated external_field; "
+                        "parameterized field factories are unavailable")
+                if plasma == "vacuum":
+                    return VmecExtender(external_field)
+                surface = vc.surface_field_data_from_state(
+                    result_input, result.state, runtime=runtime, nphi=nphi, ntheta=ntheta)
+                return VmecExtender.from_surface_data(
+                    surface, external_field=external_field, digits=digits, levels=levels,
+                    chunk_size=chunk_size, target_chunk_size=target_chunk_size)
             if plasma == "vacuum":
                 return VmecExtender(external_field)
 
@@ -3403,9 +3427,14 @@ def _least_squares_implicit(
             state=result.state,
             runtime=runtime,
             result=result,
-            field_factory=lambda: VmecInteriorField.from_parameterized_state(
-                inp, jax_state_runtime, _place(x), dof_names=tuple(names),
-                newton_iterations=newton_iterations),
+            field_factory=(
+                (lambda: VmecInteriorField.from_state(
+                    result_input, result.state, runtime=runtime,
+                    newton_iterations=newton_iterations)) if cached_result is not None else
+                (lambda: VmecInteriorField.from_parameterized_state(
+                    inp, jax_state_runtime, _place(x), dof_names=tuple(names),
+                    newton_iterations=newton_iterations))
+            ),
             exterior_field_factory=exterior_field_factory,
         )
 
@@ -3528,6 +3557,8 @@ def _least_squares_implicit(
                 "config": cfg,
                 "holder": holder,
                 "input": inp,
+                "equilibrium_from_cached_result": lambda x, result, iterations: equilibrium_from_x(
+                    x, newton_iterations=iterations, cached_result=result),
                 "jax_state_runtime": jax_state_runtime,
                 "jax_state_runtime_status": jax_state_runtime_status,
                 "jax_residual_from_state": term_rows,
@@ -3587,6 +3618,22 @@ def _least_squares_implicit(
     except Exception:  # pragma: no cover - diagnostic attribute only
         result.equilibrium = None
     return result
+
+
+def _result_at_implicit_anchor(result, cfg, params):
+    """Materialize current refined coefficients; retain host stop diagnostics.
+
+    Before any refined objective evaluation there may only be a seed solve.
+    Never borrow a refinement belonging to a different parameter point.
+    ``fsqr/fsqz/fsql`` remain the historical host residuals, as in the status
+    API; actual-primal measurements are reported separately by VmecProblem.
+    """
+    from . import implicit as imp
+
+    refined = imp._LAST_REFINED.get(cfg)
+    if refined is None or refined[0] != imp._params_key(params):
+        return result
+    return dataclasses.replace(result, state=refined[1])
 
 
 def _configure_scipy_monitor(

@@ -1,0 +1,21 @@
+{
+  "max_absolute_differences": {
+    "mtor": 0.0,
+    "rminb": 0.0,
+    "rmaxb": 0.0,
+    "zminb": 0.0,
+    "zmaxb": 0.0,
+    "t_snap": 0.0,
+    "B_R": 6.661338147750939e-16,
+    "B_phi": 5.329070518200751e-15,
+    "B_Z": 2.168404344971009e-19,
+    "v_R": 9.914518699237562e-21,
+    "v_phi": 9.06020675853529e-20,
+    "v_Z": 3.245671667074116e-19,
+    "P": 0.0
+  },
+  "pressure_bit_identical": true,
+  "all_variables_agree_to_absolute_tolerance": 1e-13,
+  "undefined_diagnostic_replaced_with": "N/A",
+  "note": "Tiny B/velocity differences are at floating-point roundoff; no bit-identical claim for them."
+}

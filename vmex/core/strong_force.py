@@ -1087,6 +1087,11 @@ def lift_high_order_state(
     convention, enforces ``rho**abs(m)`` regularity, preserves the magnetic
     axis for m=0 and the fixed R/Z boundary exactly, and removes the lambda
     ``(m,n)=(0,0)`` gauge mode structurally.
+
+    Each knot span must contain a source sample strictly inside it. Endpoint
+    samples alone do not resolve a span; refine the source mesh or coarsen the
+    supplied basis if this admission check fails. Passing this check does not
+    certify conditioning, nested surfaces, or strong-force convergence.
     """
 
     from . import postprocess as _pp
@@ -1117,6 +1122,18 @@ def lift_high_order_state(
             np.linspace(0.0, 1.0, spans + 1),
             degree=degree,
             quadrature_order=degree + 3,
+        )
+
+    breaks = np.asarray(radial_basis.breakpoints)
+    samples_per_span = np.count_nonzero(
+        (s[:, None] > breaks[:-1]) & (s[:, None] < breaks[1:]), axis=0
+    )
+    unsupported = np.flatnonzero(samples_per_span == 0)
+    if unsupported.size:
+        raise ValueError(
+            "Radial lift has no interior source samples in knot spans "
+            f"{unsupported.tolist()}; refine the source mesh or coarsen the "
+            "radial basis. Endpoint samples do not resolve a span."
         )
 
     R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(

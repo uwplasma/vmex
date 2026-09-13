@@ -1,0 +1,186 @@
+diff --git a/src/GPRTS/cal_check.f90 b/src/GPRTS/cal_check.f90
+index 39b569e..168803f 100644
+--- a/src/GPRTS/cal_check.f90
++++ b/src/GPRTS/cal_check.f90
+@@ -1433,8 +1433,11 @@ SUBROUTINE cal_check
+ 
+   bdotgradp(1:nr,1:nz,1:ntor)   =  bvec1(1,1:nr,1:nz,1:ntor) * gradp(1,1:nr,1:nz,1:ntor) + bvec1(2,1:nr,1:nz,1:ntor) * gradp(2,1:nr,1:nz,1:ntor) + bvec1(3,1:nr,1:nz,1:ntor) * gradp(3,1:nr,1:nz,1:ntor)
+ 
++  ! Mask undefined ratios before evaluating the division.
++  WHERE((SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2) >= 1.0E-03_DP) .AND. ((SQRT(bvec1(1,1:nr,1:nz,1:ntor)**2 + bvec1(2,1:nr,1:nz,1:ntor)**2 + bvec1(3,1:nr,1:nz,1:ntor)**2) * SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2)) > 0.0_DP))
+   bdotgprel(1:nr,1:nz,1:ntor)   =  SQRT(bdotgradp(1:nr,1:nz,1:ntor)**2)                                                                                                                                                                 &
+     &                           / (SQRT(bvec1(1,1:nr,1:nz,1:ntor)**2 + bvec1(2,1:nr,1:nz,1:ntor)**2 + bvec1(3,1:nr,1:nz,1:ntor)**2) * SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2))
++  END WHERE
+ 
+   jxbforce(1,1:nr,1:nz,1:ntor)  = (jvec1(2,1:nr,1:nz,1:ntor) - jvec0(2,1:nr,1:nz,1:ntor)) * bvec1(3,1:nr,1:nz,1:ntor) - (jvec1(3,1:nr,1:nz,1:ntor) - jvec0(3,1:nr,1:nz,1:ntor)) * bvec1(2,1:nr,1:nz,1:ntor)
+   jxbforce(2,1:nr,1:nz,1:ntor)  = (jvec1(3,1:nr,1:nz,1:ntor) - jvec0(3,1:nr,1:nz,1:ntor)) * bvec1(1,1:nr,1:nz,1:ntor) - (jvec1(1,1:nr,1:nz,1:ntor) - jvec0(1,1:nr,1:nz,1:ntor)) * bvec1(3,1:nr,1:nz,1:ntor)
+@@ -1444,8 +1447,11 @@ SUBROUTINE cal_check
+   rforce(2,1:nr,1:nz,1:ntor)    =  jxbforce(2,1:nr,1:nz,1:ntor) - gradp(2,1:nr,1:nz,1:ntor)
+   rforce(3,1:nr,1:nz,1:ntor)    =  jxbforce(3,1:nr,1:nz,1:ntor) - gradp(3,1:nr,1:nz,1:ntor)
+ 
++  ! Mask undefined ratios before evaluating the division.
++  WHERE((SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2) >= 1.0E-03_DP) .AND. ((SQRT(jxbforce(1,1:nr,1:nz,1:ntor)**2 + jxbforce(2,1:nr,1:nz,1:ntor)**2 + jxbforce(3,1:nr,1:nz,1:ntor)**2) + SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2)) > 0.0_DP))
+   forcerel(1:nr,1:nz,1:ntor)    =  SQRT(rforce(1,1:nr,1:nz,1:ntor)**2 + rforce(2,1:nr,1:nz,1:ntor)**2 + rforce(3,1:nr,1:nz,1:ntor)**2)                                                                                               &
+     &                           / (SQRT(jxbforce(1,1:nr,1:nz,1:ntor)**2 + jxbforce(2,1:nr,1:nz,1:ntor)**2 + jxbforce(3,1:nr,1:nz,1:ntor)**2) + SQRT(gradp(1,1:nr,1:nz,1:ntor)**2 + gradp(2,1:nr,1:nz,1:ntor)**2 + gradp(3,1:nr,1:nz,1:ntor)**2))
++  END WHERE
+ 
+   WHERE(SQRT(gradp(1,:,:,:)**2 + gradp(2,:,:,:)**2 + gradp(3,:,:,:)**2) < 1.0E-03_DP) bdotgprel(:,:,:) =  0.0_DP
+   WHERE(SQRT(gradp(1,:,:,:)**2 + gradp(2,:,:,:)**2 + gradp(3,:,:,:)**2) < 1.0E-03_DP) forcerel(:,:,:)  =  0.0_DP
+diff --git a/src/HINT/cal_press.f90 b/src/HINT/cal_press.f90
+index c754c19..20bf843 100644
+--- a/src/HINT/cal_press.f90
++++ b/src/HINT/cal_press.f90
+@@ -246,9 +246,15 @@ SUBROUTINE cal_press
+   PRINT *, ' ------------------------------------------------------'
+   PRINT *, '    B0       p0         beta0       p0/<p>      npchg'
+ 
+-  fmt = '(F9.4, 2ES12.4, F10.3, I9)'
+-
+-  PRINT fmt, btor, p_0, beta, fpeak, npchg
++  ! Only the parabolic branch defines this profile diagnostic. Do not print
++  ! an undefined local value as a measured pressure peaking factor.
++  IF(TRIM(p_type) == 'parabolic')THEN
++    fmt = '(F9.4, 2ES12.4, F10.3, I9)'
++    PRINT fmt, btor, p_0, beta, fpeak, npchg
++  ELSE
++    fmt = '(F9.4, 2ES12.4, A10, I9)'
++    PRINT fmt, btor, p_0, beta, 'N/A', npchg
++  END IF
+ 
+   iskip =  10
+   IF(nr > 100) iskip =  20
+diff --git a/src/HINT/flux_mod.f90 b/src/HINT/flux_mod.f90
+index f37c2ce..6b38f3b 100644
+--- a/src/HINT/flux_mod.f90
++++ b/src/HINT/flux_mod.f90
+@@ -72,9 +72,9 @@ MODULE flux_mod
+     &                      flx(:,:,:), & ! 3-d array for normalized toroidal flux on grids
+     &                      ff(:,:,:)     ! 3-d array for interpolation of pressure
+ 
+-  LOGICAL :: lpedge, &
+-    &        lpfix,  &
+-    &        lpcut
++  LOGICAL :: lpedge = .false., &
++    &        lpfix  = .false., &
++    &        lpcut  = .false.
+ 
+   PUBLIC :: lpedge,  &
+     &       lpfix,   &
+@@ -179,29 +179,17 @@ CONTAINS
+     loop010 : DO k=1,ntor
+       loop020 : DO j=1,nz
+         loop030 : DO i=1,nr
+-          loop040 : DO l=2,np-1
+-            IF(p_rad(l) > p1(i,j,k))THEN
+-              m          =  l -1
+-              s          =  p1(i,j,k) - p_rad(m)
+-              flx(i,j,k) =  s * psi(m+1) + (1.0_DP - s) * psi(m)
+-              GOTO 100
+-            END IF
+-          END DO loop040
+-          IF((p1(i,j,k) < p_rad(np)) .AND. (p1(i,j,k) > p_rad(np-1)))THEN
+-            s          =  p1(i,j,k) - p_rad(np-1)
+-            flx(i,j,k) =  s * psi(np) + (1.0_DP - s) * psi(np-1)
+-          END IF
+-          IF(p1(i,j,k) >= p_rad(np))THEN
+-            flx(i,j,k) =  psi(np)
+-          END IF
+-          IF((p1(i,j,k) < p_rad(2)) .AND. (p1(i,j,k) > p_rad(1)))THEN
+-            s          =  p1(i,j,k) - p_rad(1)
+-            flx(i,j,k) =  s * psi(2) + (1.0_DP - s) * psi(1)
+-          END IF
++          ! Interpolation weights must be dimensionless. Clamp outside the
++          ! tabulated pressure range before finding the uniform-grid interval.
+           IF(p1(i,j,k) <= p_rad(1))THEN
+-            flx(i,j,k) =  psi(1)
++            flx(i,j,k) = psi(1)
++          ELSE IF(p1(i,j,k) >= p_rad(np))THEN
++            flx(i,j,k) = psi(np)
++          ELSE
++            m = MIN(np-1, MAX(1, INT((p1(i,j,k)-pbound)/delp)+1))
++            s = (p1(i,j,k)-p_rad(m)) / delp
++            flx(i,j,k) = (1.0_DP-s)*psi(m) + s*psi(m+1)
+           END IF
+-100       CONTINUE
+         END DO loop030
+       END DO loop020
+     END DO loop010
+@@ -256,8 +244,8 @@ CONTAINS
+ 
+     END IF
+  
+-    iskip =  nr / 64
+-    jskip =  nz / 64
++    iskip =  MAX(1, nr / 64)
++    jskip =  MAX(1, nz / 64)
+     kskip =  1
+     IF(ntor >= 4) kskip =  ntor / 4
+ 
+diff --git a/src/HINT/make_mem.f90 b/src/HINT/make_mem.f90
+index 94c6620..c985cf7 100644
+--- a/src/HINT/make_mem.f90
++++ b/src/HINT/make_mem.f90
+@@ -99,6 +99,7 @@ SUBROUTINE make_mem
+   vvec0(1:3,1:nr,1:nz,1:ntor) =  0.0_DP
+   vvec1(1:3,1:nr,1:nz,1:ntor) =  0.0_DP
+ 
++  p0(1:nr,1:nz,1:ntor)        =  0.0_DP
+   p1(1:nr,1:nz,1:ntor)        =  0.0_DP
+   flx(1:nr,1:nz,1:ntor)       =  0.0_DP
+ 
+diff --git a/src/HINT/stepb_mod.f90 b/src/HINT/stepb_mod.f90
+index 1e0580f..de07715 100644
+--- a/src/HINT/stepb_mod.f90
++++ b/src/HINT/stepb_mod.f90
+@@ -1218,7 +1218,7 @@ CONTAINS
+           d2vphi1dr2   =  cr2(1) * vphi1(i+2,j,  k  ) + cr2(2) * vphi1(i+1,j,  k  ) &
+             &          +  cr2(3) * vphi1(i  ,j,  k  ) + cr2(4) * vphi1(i-1,j,  k  ) &
+             &          +  cr2(5) * vphi1(i-2,j,  k  )
+-          d2vphi1dphi2 =  ct2(1) * vphi1(i,  j,  k+2) + ct2(2) * vphi1(i,  j,  k+2) &
++          d2vphi1dphi2 =  ct2(1) * vphi1(i,  j,  k+2) + ct2(2) * vphi1(i,  j,  k+1) &
+             &          +  ct2(3) * vphi1(i  ,j,  k  ) + ct2(4) * vphi1(i,  j,  k-1) &
+             &          +  ct2(5) * vphi1(i,  j,  k-2)
+           d2vphi1dz2   =  cz2(1) * vphi1(i,  j+2,k  ) + cz2(2) * vphi1(i,  j+1,k  ) &
+diff --git a/src/HMAG/cal_flxqnt.f90 b/src/HMAG/cal_flxqnt.f90
+index 19cebed..2a1d660 100644
+--- a/src/HMAG/cal_flxqnt.f90
++++ b/src/HMAG/cal_flxqnt.f90
+@@ -416,8 +416,10 @@ SUBROUTINE cal_flxqnt
+         thetak(ntheta+1) =  thetak(1) + pi2
+         thetak(ntheta+2) =  thetak(2) + pi2
+ 
+-        DO i=1,ntheta1
+-          loop_check : DO j=-1,ntheta+2
++        ! The periodic endpoint is copied below; its quadratic stencil can
++        ! otherwise run beyond the two upper ghost samples when theta(1)=0.
++        DO i=1,ntheta1-1
++          loop_check : DO j=0,ntheta+1
+             IF(thetak(j) > thetai(i))THEN
+               dtheta =  thetak(j) - thetak(j-1)
+               IF(dtheta <= 0.02_DP)THEN
+diff --git a/src/HMAG/libnr.f90 b/src/HMAG/libnr.f90
+index d723209..112e2fa 100644
+--- a/src/HMAG/libnr.f90
++++ b/src/HMAG/libnr.f90
+@@ -53,7 +53,7 @@ SUBROUTINE mrqmin(x,y,sig,ndata,a,ia,ma,covar,alpha,nca,chisq,funcs,alamda)
+ 
+   INTEGER, PARAMETER :: mmax =  1000
+   INTEGER :: ma,nca,ndata,ia(ma)
+-  REAL(DP) :: alamda,chisq,funcs,a(ma),alpha(nca,nca),covar(nca,nca),sig(ndata),x(ndata),y(ndata)
++  REAL(DP) :: alamda,chisq,a(ma),alpha(nca,nca),covar(nca,nca),sig(ndata),x(ndata),y(ndata)
+   EXTERNAL :: funcs
+ 
+ ! USEs covsrt,gaussj,mrqcof
+diff --git a/src/HMAG/read_field.f90 b/src/HMAG/read_field.f90
+index ec42672..7014a21 100644
+--- a/src/HMAG/read_field.f90
++++ b/src/HMAG/read_field.f90
+@@ -139,7 +139,7 @@ SUBROUTINE read_field
+ 
+           CALL h5open_f(ierror)
+ 
+-          CALL h5fopen_f(TRIM(mag_file), H5F_ACC_RDWR_F, h5id, ierror)
++          CALL h5fopen_f(TRIM(mag_file), H5F_ACC_RDONLY_F, h5id, ierror)
+ 
+           CALL h5dopen_f(h5id, 'kstep', dset_id, ierror)
+           CALL h5dread_f(dset_id, H5T_NATIVE_INTEGER, kstep, dim1id_h5, ierror)

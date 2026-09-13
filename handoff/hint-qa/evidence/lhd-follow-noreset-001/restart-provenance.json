@@ -1,0 +1,13 @@
+{
+  "source_run": "HINT_CHECKOUT/runs/lhd-reference-64",
+  "restart_sha256": "3adcb1814c7ce7001b6e8d1729f0fae5d4d63da68e377faee849c4db08f419e7",
+  "source_binary_sha256": "56faef4649083c9cb06c10764c2cd63bad78ce00d1576004f5a9fd3dcab18fb6",
+  "changes": {
+    "run_mode": "follow",
+    "lresetp": false,
+    "nstep": 20,
+    "npset": 0,
+    "npchg": 0
+  },
+  "purpose": "Post-reset coarse LHD temporal diagnostic; not a grid-convergence certificate"
+}

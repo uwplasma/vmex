@@ -1,0 +1,21 @@
+{
+  "command": [
+    "bash",
+    "-c",
+    "exec UNBUNDLED_ENVIRONMENT -n 4 env OMP_NUM_THREADS=1 HINT_CHECKOUT/build-release/HINT/hint.exe < hint.input"
+  ],
+  "cwd": "HINT_CHECKOUT/runs/qa-cadence-n1000-001",
+  "resource": "cpu",
+  "timeout_seconds": 600,
+  "start_unix": 1789252200.1192253,
+  "state": "finished",
+  "pid": 4092721,
+  "execution_environment": {
+    "OMP_NUM_THREADS": "2",
+    "JAX_PLATFORMS": "cpu",
+    "CUDA_VISIBLE_DEVICES": null,
+    "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+  },
+  "returncode": 0,
+  "elapsed_seconds": 90.69728469848633
+}

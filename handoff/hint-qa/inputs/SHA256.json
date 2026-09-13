@@ -1,0 +1,74 @@
+{
+  "inputs/beta0p5/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json": {
+    "bytes": 4503,
+    "sha256": "09485e34e6e4f90b0ac765ee068d1b6f5ca1e58e4c7bd47a8b9df25b0ddf3a73"
+  },
+  "inputs/beta0p5/current_mapping.csv": {
+    "bytes": 1601,
+    "sha256": "4faf985eb768e14cd02f969a17b2404f3a696eb49310eb59b7581cba166e6621"
+  },
+  "inputs/beta0p5/hint.pilot.input": {
+    "bytes": 3248,
+    "sha256": "1f796d0b70c2d8ba74f2fdb53e13d507aa5ac103fa7a89e77cb630d4729a7348"
+  },
+  "inputs/beta0p5/hint.smoke.input": {
+    "bytes": 3249,
+    "sha256": "faec1c2460dc890c3bbeeec9585e6bbee86097ba1a23fb46da0447aa5a62f958"
+  },
+  "inputs/beta0p5/input.LandremanPaul2021_QA_beta0p5_bootstrap": {
+    "bytes": 12453,
+    "sha256": "eba0e62e98712d34fdb6c0c6b7e2635f4c795c8c0b3173b4ced5277351254c79"
+  },
+  "inputs/beta0p5/manifest.json": {
+    "bytes": 1624,
+    "sha256": "457e0543cbb706343ed510efa5732308505e8d6fd365823fbd3f9809e0984a47"
+  },
+  "inputs/beta0p5/wout_LandremanPaul2021_QA_beta0p5_bootstrap.nc": {
+    "bytes": 583176,
+    "sha256": "bc676e94d047ad5133a0af1bc721415a6c178bf89b8d86caa4eadf288ba7b9a2"
+  },
+  "inputs/beta2p5/ESSOS_biot_savart_LandremanPaulQA_beta2p5_bootstrap.json": {
+    "bytes": 4505,
+    "sha256": "3888630f63d2c8662145b5d6a5a1ff18de893d265bb52105f931093d10263c1d"
+  },
+  "inputs/beta2p5/current_mapping.csv": {
+    "bytes": 1601,
+    "sha256": "b9edce598573e0117ec6cffd38fe29713acec511a0a7e4557ba47aa1e453ca8e"
+  },
+  "inputs/beta2p5/hint.pilot.input": {
+    "bytes": 3248,
+    "sha256": "4620437dc784533800bfecf4d4c2e05a79f52353ae54d8711dea67029a3370b1"
+  },
+  "inputs/beta2p5/hint.smoke.input": {
+    "bytes": 3249,
+    "sha256": "dcacf51cf5dd8f877fd20d07582994203a7f5ed3ab93a03a571b15d0443c2241"
+  },
+  "inputs/beta2p5/input.LandremanPaul2021_QA_beta2p5_bootstrap": {
+    "bytes": 12522,
+    "sha256": "f1c5ab0704f8097f680e1caed519c899fdecd0f4b9b73d4e4a33d798c26a9bd5"
+  },
+  "inputs/beta2p5/manifest.json": {
+    "bytes": 1623,
+    "sha256": "488b117ea4df5fae1987b842d571a8bf2a5d80a53bddffd5f50bb5464428ed5b"
+  },
+  "inputs/beta2p5/wout_LandremanPaul2021_QA_beta2p5_bootstrap.nc": {
+    "bytes": 583176,
+    "sha256": "3866ec46424c394bad1656366643be0ab137fbaf40b49852841b5a6461482938"
+  },
+  "inputs/edge-n128/hint.input": {
+    "bytes": 3204,
+    "sha256": "5b6cca19f2adc8d91e4d084e9b84e8a7bb861626bf136d34eb90ead5fb2ba63f"
+  },
+  "inputs/edge-n128/mklim.input": {
+    "bytes": 264,
+    "sha256": "90ade4ecda6cca44b6102d071961dd3522fa79a18ad5dd9a08171e472b772e20"
+  },
+  "inputs/edge-n64/hint.input": {
+    "bytes": 3202,
+    "sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d"
+  },
+  "inputs/exterior-targets.npz": {
+    "bytes": 3383,
+    "sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5"
+  }
+}

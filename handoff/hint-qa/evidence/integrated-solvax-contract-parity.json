@@ -1,0 +1,31 @@
+{
+  "source_commit": "e4b507185464851ac5e8de22041f2f8e384554e9",
+  "all_source_hashes_equal": true,
+  "source_files_compared": 24,
+  "helper_hash_equal": true,
+  "cpu_devices": [
+    "TFRT_CPU_0"
+  ],
+  "gpu_devices": [
+    "cuda:0"
+  ],
+  "amplitude_absolute_difference": 1.3322676295501878e-15,
+  "slope_absolute_difference": 7.216449660063518e-16,
+  "cpu_taylor_orders": [
+    2.022829148157325,
+    2.01156833835081,
+    2.0058232946704493,
+    2.0029214965253446
+  ],
+  "gpu_taylor_orders": [
+    2.0228291474061413,
+    2.0115683348698323,
+    2.005823309697411,
+    2.0029214936742954
+  ],
+  "cpu_nonlinear_residual": 1.5801443461435762e-12,
+  "gpu_nonlinear_residual": 1.8562927842917307e-12,
+  "cpu_nonfinite_cases_rejected": 10,
+  "gpu_nonfinite_cases_rejected": 10,
+  "scope": "Nonlinear PDE solver contract; not an MHD or QA derivative certificate"
+}
