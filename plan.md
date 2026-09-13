@@ -18,7 +18,7 @@ release follows the gates of §4 and §5.
 ## 0. How to use this plan
 
 An agent resuming this work reads §1, §3, §4 (phases and PR list), §6
-(dispositions), §7 (environment), §8 (the coordination rules and the brief it
+(dispositions and release candidate), §7 (environment), §8 (the coordination rules and the brief it
 was given) and the last entry of §9, in that order. It checks the remote PR
 state and dirty worktrees, and continues at the first unmet gate. An agent
 given one brief of §8 needs nothing else from the conversation that produced
@@ -317,17 +317,37 @@ These verdicts stand and are not reopened by this revision.
   average over `s ∈ [0.1, 0.99]`; the bounded `eps_F ≤ 2` is acceptance only;
   `solve()` reports near-axis, bulk and edge separately.
 
-## 6. Open pull requests
+## 6. Open pull requests and the release candidate
 
-| PR | disposition |
-|---|---|
-| #299 | Split. (i) the Boozer λ half-mesh correction with its tests: merge; (ii) the `jax.linearize` hoist, Thomas selection and parity-transpose fix: merge after latest-head CI; (iii) `host_evaluate`: merge; (iv) #305 plotting: merge; (v) the NESTOR contraction and saved pullbacks: own PR with the CTH/NCSX certificates, which is F1a's first step; (vi) the 630-line logbook: one entry of at most forty lines citing the record. The 1,159-line JSON stays as the record of (i)–(v). |
-| #308 | This plan. Merge on maintainer approval; until then agents read it from branch `review/plan-2026-09-13`. |
-| #300 | DESC bridge; independent; review and merge. |
-| #302, #306 | The right contract (derivatives only on a certified state), the wrong mechanism (a second solve); fold both into B1 and close. |
-| #307 | Seven lines that stop commitment-flag recompiles (next accepted residual 4.9 → 0.35 s in its record); retarget to main and merge as the first B4 item. |
-| #301, #303, #304 | Parked; winding-surface work stays stopped. |
-| #277 | Merge after B1 lands; its assertion is on the quantity B1 certifies. |
+State on 2026-09-13, evening. "Merge" always means after explicit maintainer
+approval with every real CI lane green; the unsigned-commit PR gate is the only
+check that may be red.
+
+| repository and PR | state | disposition |
+|---|---|---|
+| vmex #308 | this plan, documentation only | merge first; agents then read it from `main` |
+| vmex #300 | DESC input bridge; lanes green | merge |
+| vmex #309 (A4) | documentation matched to records | merge when CI is green |
+| vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; follow-up upstream: return the schedule error from virtual_casing_jax so VMEX drops its copy of the level selection |
+| vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR |
+| vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
+| vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | do not merge as is; S1 re-lands its source |
+| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence | do not merge as is; its three source commits are B1's candidate contract |
+| vmex #306 | four failing lanes, based on #302 | hold for B1 |
+| vmex #307 | seven lines on #299's branch | B4 re-lands it on `main` |
+| vmex #301, #303, #304 | winding surface | parked |
+| booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merge and release 0.3.0 |
+| SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merge and tag; VMEX raises its floor to 0.21.0 with S1 (3) |
+| virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | none |
+
+**Release candidate, VMEX 0.9.0.** Ready once #308, #300, #309, #310, #311,
+#312 and the S1 pieces merge, with booz_xform_jax 0.3.0 and SOLVAX 0.21.0 on
+PyPI. It ships the DESC bridge, documentation and examples that match their
+records, an exterior field that reports its achieved accuracy, per-evaluation
+counters, and #299's component speedups. It does not fix the slow
+optimizations users report: refinement (29–40 s of each first derivative,
+B1), recompilation in the jitted lane (42–71 s, B4) and Jacobian assembly
+(C1) follow in the next release, and the 0.9.0 notes say so.
 
 ## 7. Environment and runbook
 
@@ -390,6 +410,11 @@ at `f09288b3`; confirm them before editing.
   `vmex/core/virtual_casing.py` is excluded from coverage by `pyproject.toml`.
 - A result is an observation with units, not an exit code; a failed or capped
   run is reported as one. Do not change a tolerance to make a test pass.
+- Changes are concise and deliberate: prefer net-negative diffs, add no option
+  that does not remove a special case, and give every performance PR an A1
+  counter row before and after (the benchmark row, not a component timing).
+  New code paths must run under `jax.jit` in a test; a path that only works
+  eagerly is not done.
 - PR body: problem, change, evidence (numbers, commands, environment),
   limitations, what the reviewer should check. Draft. No merge without
   explicit maintainer approval.
@@ -564,7 +589,7 @@ retired. README stays at or under 300 lines.
 `docs/howto/parameter-scans.md`, `docs/howto/run-on-gpu.md`,
 `docs/_static/figures/figures.json`.
 
-### B1. Newton finish (starts after A1 merges)
+### B1. Newton finish (starts on top of #310; rebase when it merges)
 
 **Facts.** `_newton_step` (`solver.py:1088–1139`) is reachable only through
 `prec2d`, which no optimizer path configures. `_refined_state`
@@ -617,12 +642,70 @@ If both Newton arms die, test refining only where a derivative is requested.
 **Gate.** As in §4 B1; the kill rule of §4 applies. Owns `solver.py` and
 `implicit.py` (A1's counter lines stay).
 
-### B4a. Retarget #307
+### B4. One compiled path: full jit without recompilation
 
-#307's seven lines in `solver.py` (commitment-flag normalization; recorded
-next accepted residual 4.9 → 0.35 s) do not depend on #299. Retarget it to
-`main`, rerun its tests, and add the A1 counter row before and after once A1
-has merged.
+**Facts.** On A1's rows (#310) the JAX value-and-gradient lane spends 41.6 s
+(QA) and 71.0 s (QI) compiling after the host derivative has already
+compiled, and builds take 244–500 XLA compiles; a five-evaluation warm
+campaign recorded 102 compiles (`benchmarks/baselines/m4/F8_warm.json`). The
+problem jit cache key holds `x0.tobytes()` and `id(cfg)`
+(`optimize.py:2628–2646`); three staged lanes take `static_argnames=("cfg",)`
+(`implicit.py:1138, 1402, 2674`), so a new configuration object recompiles.
+The host solve runs `mode="cli"` behind `jax.pure_callback`
+(`implicit.py:1733`), while `mode="jit"` (`lax.while_loop`) costs the same
+warm (§2). #307's seven lines in `solver.py` cut `_block_lane` cache misses
+from 11 to 3 by normalizing array commitment flags, but sit on #299's branch.
+
+**Change.** (1) Re-land #307 on `main`. (2) Key compiled lanes by content:
+`x0` traced, configurations hashed by value. (3) Share the solve, refinement,
+Jacobian and adjoint executables between the host and JAX lanes. (4) Make one
+documented full-jit path — `jax.jit(jax.value_and_grad(loss))` with the
+equilibrium solve as a `lax.while_loop` inside the implicit rule and no host
+callback — the reference the host lane is tested against; SciPy's trial loop
+stays on the host.
+
+**Gate.** On A1's benchmark rows: the second lane adds under 5 s of
+compilation; zero recompiles across trials and `max_mode` stages; the
+full-jit value and gradient match the host lane to 1e-10 relative; warm
+evaluation time no worse; compile counts pinned in
+`tests/test_trace_budgets.py`.
+
+**Owns.** `vmex/core/optimize.py` (jit keys and lane sharing), the
+configuration keys in `vmex/core/implicit.py`, #307's lines in
+`vmex/core/solver.py`, `tests/test_trace_budgets.py`. B1 owns refinement in
+`implicit.py`; rebase on whichever merges first.
+
+### S1. Split #299 into focused PRs
+
+**Facts.** #299 (`perf/reuse-objective-linearization`, head `de93e5e2`, CI
+green) is 29 commits from another session, many mixing source with plan,
+logbook and record edits (2,719 lines). Its source changes and their recorded
+effects: residual linearization reuse and separable field-line synthesis
+(warm 48-dof QI Jacobian 1.10 → 0.82 s); checked Thomas selection, parity
+broadcast and divisor batching (GPU first derivative 210 → 123 s, a CUDA
+transpose failure fixed); host trial solves outside GPU callbacks (a stall
+removed); the Boozer λ half-mesh correction; analytic vacuum-mode contraction
+and saved per-adjoint pullbacks (an NCSX transpose compile above 20 GiB
+removed); plotting startup (#305, 21.6 → 12.5 s); and the optional
+magnetic-only Boozer projection.
+
+**Change.** Re-land those on `main` as at most six PRs, by file hunk rather
+than whole commit, each with the tests #299 added for it: (1) Boozer λ
+interpolation (`a6b13367`); (2) linearization reuse and field-line synthesis
+(`ef814252`); (3) Thomas selection, parity broadcast and divisor batching
+(`20762a29`, `9343b4b4`, `cd667198`); (4) host trial solves outside GPU
+callbacks (`f205c995`); (5) vacuum contraction and saved pullbacks (`931be2d5`,
+`9950781d`), which is F1a's first step; (6) plotting (`b5dbcc95`) and the
+magnetic-only projection (`b3ef8448`), which activates only with
+booz_xform_jax ≥ 0.3.0. Carry over no plan, logbook, handoff or private
+evidence; cite #299's record for the numbers. Never push to #299's branch.
+
+**Gate.** Each PR reproduces #299's recorded numerical tolerances, carries an
+A1 counter row where it claims speed (or is labeled correctness-only), keeps
+changed-line coverage at or above 95 %, and passes CI.
+
+**Owns.** Branches `s1/<topic>` and the files each hunk touches; rebase order
+is (1), (4), (3), (2), (5), (6).
 
 ### Literature checks left open (optional)
 
@@ -719,3 +802,12 @@ limit, so the coils move to 0.65 m and 4.1 m while every physics target stays;
 the free-boundary example keeps its ι hinge until the new F-pre item makes its
 pullback jittable. The coordination rules now keep short jobs out of the heavy
 lock.
+
+**2026-09-13, merge list and speed work.** Phase A PRs #309–#312 are open and
+in CI. §6 now lists the merge decisions across vmex, booz_xform_jax, SOLVAX
+and virtual_casing_jax, and a 0.9.0 release candidate that is explicit about
+what it does not fix. The speed work starts from §8: B1 (refinement), B4
+(one compiled full-jit path without recompilation) and S1 (#299's source
+re-landed as focused PRs). The coordination rules now require net-negative or
+minimal diffs, a counter row for every performance claim, and jit coverage for
+every new path.
