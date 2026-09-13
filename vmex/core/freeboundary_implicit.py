@@ -164,8 +164,8 @@ def _projected_residual(
     The returned closure is memoized on ``(cfg, formulation, mask content)``
     (``fixed_bsqvac=None`` only): the host callback hands each backward pass
     a fresh numpy mask tree of identical content, and a stable closure
-    identity is what lets :func:`_transpose_matvec` reuse its compiled
-    transpose across gradient calls.  A ``fixed_bsqvac`` closure changes
+    identity lets :func:`_prepare_transpose` reuse its compiled
+    linearization across gradient calls.  A ``fixed_bsqvac`` closure changes
     value every iterate and is never a jit key, so it is not cached; the
     pressure still enters the lane as a traced argument, never a baked
     constant.
@@ -478,13 +478,6 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     residual = _projected_residual(cfg, mask)
     z_star = project(state)
 
-    _, state_pullback = jax.vjp(
-        lambda z: residual(
-            z, params, field_parameters, frozen, rcon0, zcon0), z_star
-    )
-    def operator(cotangent):
-        return state_pullback(cotangent)[0]
-
     rhs = project(state_bar)
     traced = any(
         isinstance(value, jax.core.Tracer) for value in jax.tree.leaves(rhs)
@@ -493,7 +486,12 @@ def _solve_bwd_impl(cfg, saved, state_bar):
         # An outer jax.jit needs a staged Krylov loop. Ordinary SciPy/JAXopt
         # drivers call the concrete lane below, which compiles only one
         # transpose matvec and has a much smaller cold memory peak.
-        lam, _ = im._adjoint_solve_gcrot(operator, rhs, cfg.implicit)
+        _, state_pullback = jax.vjp(
+            lambda z: residual(
+                z, params, field_parameters, frozen, rcon0, zcon0), z_star
+        )
+        lam, _ = im._adjoint_solve_gcrot(
+            lambda cotangent: state_pullback(cotangent)[0], rhs, cfg.implicit)
     elif cfg.adjoint_solver == "boundary_schur":
         lam = _host_boundary_schur_adjoint(
             cfg, z_star, params, field_parameters, frozen, rcon0, zcon0,
@@ -851,12 +849,17 @@ def _solve_status_bwd(cfg, saved, cotangents):
 # The previous per-call ``@jax.jit`` closure re-lowered and recompiled this
 # transpose (the largest program of the backward pass) on every host adjoint.
 @functools.partial(jax.jit, static_argnames=("residual",))
-def _transpose_matvec(value, z, p, field, base, rcon, zcon, *, residual):
-    """One compiled action of the coupled residual transpose at ``z``."""
-    _, unravel = ravel_pytree(z)
-    _, pullback = jax.vjp(
+def _prepare_transpose(z, p, field, base, rcon, zcon, *, residual):
+    """Save the coupled primal once; return a pytree of pullback residuals."""
+    return jax.vjp(
         lambda zz: residual(zz, p, field, base, rcon, zcon), z
-    )
+    )[1]
+
+
+@jax.jit
+def _transpose_matvec(value, pullback, template):
+    """Apply the saved transpose without repeating the NESTOR/VMEC primal."""
+    _, unravel = ravel_pytree(template)
     return ravel_pytree(pullback(unravel(value))[0])[0]
 
 
@@ -870,15 +873,19 @@ def _host_adjoint(
     inline that large operator into every Arnoldi loop and greatly increases
     cold compilation memory. SciPy keeps the small Krylov bookkeeping on the
     host and calls one compiled JAX operator; only vectors cross the boundary.
+    Saved primal intermediates stay on the device for this solve and are
+    rebuilt at the next linearization point.
     """
     rhs_flat, unravel = ravel_pytree(rhs)
 
-    def matvec(value, *dynamic_args):
-        return _transpose_matvec(value, *dynamic_args, residual=residual)
+    pullback = _prepare_transpose(
+        z_star, params, field_parameters, frozen, rcon0, zcon0,
+        residual=residual)
 
-    dynamic = (z_star, params, field_parameters, frozen, rcon0, zcon0)
+    def matvec(value):
+        return _transpose_matvec(value, pullback, z_star)
 
-    matvec(rhs_flat, *dynamic).block_until_ready()
+    matvec(rhs_flat).block_until_ready()
     dtype = np.asarray(rhs_flat).dtype
     shape = rhs_flat.shape
     calls = 0
@@ -886,8 +893,7 @@ def _host_adjoint(
     def apply(value):
         nonlocal calls
         calls += 1
-        return np.asarray(matvec(
-            jnp.asarray(value, dtype=rhs_flat.dtype), *dynamic))
+        return np.asarray(matvec(jnp.asarray(value, dtype=rhs_flat.dtype)))
 
     matrix = LinearOperator((shape[0], shape[0]), matvec=apply, dtype=dtype)
     x0_flat = None if x0 is None else np.asarray(ravel_pytree(x0)[0])
