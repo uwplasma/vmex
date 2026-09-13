@@ -145,8 +145,7 @@ relative error versus distance `d` in minor radii and per-period source grid N:
 | 256 | — | — | 7e-6 | 3.2e-4 | 1.9e-2 | 0.19 \| 0.34 |
 
 The error is `exp(−2π d/h)` with `h` the full-torus toroidal spacing: 1e-4
-needs `d ≳ 1.7 h`. The jitted schedule returns its last level silently when the
-self-test fails (`virtual_casing_jax/integrals.py:754–777`); the shipped
+needs `d ≳ 1.7 h`. The jitted schedule returns its last level silently when the self-test fails (`virtual_casing_jax/integrals.py:754–777`), and it keeps a coarser level whenever that double-layer self-test passes, which in #312's calibration happened for errors as large as 0.30 at a 1e-4 tolerance, so VMEX's returned field can be worse than this table (the worst target at d = a is 3.1e-3); the shipped
 example evaluates 0.03 m outside a QA surface on a 12×12 grid. The on-surface
 partition-of-unity path is fine (2e-4 median, 1e-3 max), so the surface current
 is not the problem. The direct path carries a 0.42 s fixed latency per call
@@ -252,6 +251,7 @@ attribution. One heavy local job at a time; the office box takes one.
 
 | PR | change | gate |
 |---|---|---|
+| E0 level choice and per-period schedule | select schedule levels by #312's calibrated estimate instead of the double-layer self-test (which passes errors up to 0.30 at a 1e-4 tolerance), and scale the default levels by nfp (today the finest default level counts `2·nphi` toroidal points over the whole torus, so nfp = 5 with nphi = 32 gets 13 points per period); upstream in virtual_casing_jax, then VMEX's defaults | vacuum and interior identities on nfp = 2, 3 and 5 decks at the default grid meet the requested digits wherever `d ≥ 2h`; returned fields change only where the old level was under-resolved; cost per target recorded |
 | E1 equivalent-source exterior field | replace near-surface quadrature by a fit: point sources on a deflated interior surface (or the LCFS offset inward by ~0.25 a) plus the analytic net-current filament, fitted by least squares to the accurate on-surface partition-of-unity field on an upsampled grid (Stein–Barnett quadrature by fundamental solutions, [arXiv:2109.08802](https://arxiv.org/abs/2109.08802)); the field is then a smooth sum everywhere outside, uniform in `d`, spectral in the source count, differentiable through the on-surface data and the least-squares solve; the trapezoid rule stays beyond ~0.5 a; the fallback if the fit residual stalls is hedgehog extrapolation (p ≈ 8 trapezoid evaluations at ≥ 3h along the normal, [arXiv:2002.04143](https://arxiv.org/abs/2002.04143)) | vacuum identity ≤ 1e-5 for all `d ≥ 0.005 a` on the default grid (bounded by today's 2e-4 on-surface error until its parameters are raised); on-surface limit agrees with the partition-of-unity path; cost per target ≤ the source count in kernel evaluations, no fixed latency above 10 ms per call |
 | E2 tabulated field | (R,φ,Z) table through `MgridField.from_parameterized_cartesian_field`, divergence-cleaned interpolation, half-period symmetry; the Taylor plan retained below 0.2 a and the direct path above 0.5 a until E1 lands | field-line tracing outside the LCFS in seconds with a stated error; the `d ≳ 2h` rule enforced on the direct path |
 | E3 source data | LCFS covariant field from the NESTOR channel or the high-order state instead of the `1.5x[−1] − 0.5x[−2]` half-mesh extrapolation, once E1 exposes it | finite-β interior identity ≤ 1e-4 |
@@ -328,7 +328,7 @@ check that may be red.
 | vmex #308 | this plan, documentation only | merge first; agents then read it from `main` |
 | vmex #300 | DESC input bridge; lanes green | merge |
 | vmex #309 (A4) | documentation matched to records | merge when CI is green |
-| vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; follow-up upstream: return the schedule error from virtual_casing_jax so VMEX drops its copy of the level selection |
+| vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
 | vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR |
 | vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
 | vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
@@ -340,7 +340,7 @@ check that may be red.
 | vmex #301, #303, #304 | winding surface | parked |
 | booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merge and release 0.3.0 |
 | SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merge and tag; VMEX raises its floor to 0.21.0 with S1 (3) |
-| virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | none |
+| virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | open an upstream PR for E0 (level choice by a calibrated estimate, per-period default schedule); no release needed for 0.9.0 |
 
 **Release candidate, VMEX 0.9.0.** Ready once #308, #300, #309, #310, #311,
 #312 and #313–#318 merge, with booz_xform_jax 0.3.0 and SOLVAX 0.21.0 on
@@ -369,6 +369,7 @@ PYTHONPATH=. python benchmarks/optimization.py --case qi --max-mode 1 --optimize
 python tools/preflight.py --static
 ```
 
+- **Cross-version tolerance.** Solved quantities differ between JAX 0.9.2 and 0.11.1 by about 6e-8 relative on the seed deck (A1), consistent with its near-6e12 conditioning (B1): compare solved quantities across versions at that tolerance, not bit for bit.
 - **Discipline.** Never benchmark a shared checkout; pin the SHA and alternate
   A/B runs. Every artifact carries a `_provenance` block. A run that ends on an
   exit code without an observation is not a result. Verified-exterior targets
@@ -504,8 +505,7 @@ evaluates 0.5 m from a 12×12 torus (`146–209`).
    levels. The eager `VmecExtender.B` warns, or raises under a strict flag,
    when the estimate exceeds `10^-digits`; traced calls expose the estimate.
    State the choice and its cost in the PR.
-3. `nestor-vacuum.rst`: the rule `d ≳ 2h` with `h` the full-torus toroidal
-   spacing `2πR/(nfp·nphi)`, the default grid, the measured table
+3. `nestor-vacuum.rst`: the rule `d ≳ 2h` with `h` the finest level's full-torus toroidal spacing `2πR/n_t` (`n_t = 2·nphi` by default, independent of nfp), the default grid, the measured table
    (reproduced by the new test or `benchmarks/review_20260913_exterior.py`),
    the version fix, and when to use the near-surface continuation (below
    about 0.2 a) instead of the direct path (above about 0.5 a).
@@ -881,3 +881,13 @@ the QI anchors to what `tests/test_omnigenity.py` asserts (at least 20×, not
 36× and 138×). Its three open questions go to A4b. #319 (B4a) supersedes #307:
 the extra compile came from the donation copy seeing a partly committed carry,
 and normalizing before the copy restores the ladder's compile counts.
+
+**2026-09-13, A1 and A2 reported.** #310 (A1) keeps residual and Jacobian
+byte-identical on both JAX versions, explains 96.7 % and 95.4 % of the QA and
+QI benchmark rows, and records adjoint counts as unknown whenever the adjoint
+is compiled (B3's first step). #312 (A2) adds asset-free oracles (both
+identities and on-surface parity to 1e-4 at 3h) and a calibrated achieved-error
+estimate with no false pass in 816 targets, where the schedule's own self-test
+passed errors up to 0.30; eager calls warn by default. Its findings add E0 and
+correct the spacing rule; the exterior-field facade forwarding is a small
+follow-up.
