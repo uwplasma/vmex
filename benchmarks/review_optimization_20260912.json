@@ -1155,5 +1155,83 @@
     "collaborator_warm_jacobian_gpu_kernel_ms": [616.55, 394.17],
     "integration_tests": {"old_backend_cpu": 1, "candidate_backend_cpu": 3, "candidate_backend_gpu": 3, "changed_executable_lines_covered": 3, "changed_executable_lines_total": 3},
     "limits": "Unmerged upstream source is explicitly pinned. Cold timings overlap other host work and are not isolated speedup claims. This is matched surface evaluation, not a completed coil-and-equilibrium optimization or a physical acceptance certificate."
+  },
+  "rejected_trial_replay": {
+    "scope": "Reduced QP-objective trial sequence, not a completed optimized design or full single-stage workflow.",
+    "input_path": "examples/data/input.minimal_seed_nfp2",
+    "input_sha256": "d76efbd4d584c91a985b147a07302660f7bb515f23dfdebc721bc35b703c9bbb",
+    "control_source_sha256": {
+      "solver.py": "471a1c39975959dd2f9dacfdf5c240d5e41bd51a829da0f54afd190c2058bfd2",
+      "optimize.py": "cbc5cb4cb7ca3c55a40dacd6e75343d830316be1f5509cb6216443f6311b0596",
+      "implicit.py": "022bb72648bfc0d0d4380b439c1da6687309f75ba64bb65de6c7e2706aad23f6"
+    },
+    "resolution": {
+      "nfp": 2,
+      "ns": 13,
+      "mpol": 3,
+      "ntor": 3,
+      "ntheta": 12,
+      "nzeta": 8,
+      "ftol": 1e-09,
+      "niter": 800,
+      "delt": 0.5
+    },
+    "settings": {
+      "surfaces": [0.4, 0.9],
+      "helicity": [0, 1],
+      "aspect_target": 10,
+      "aspect_residual_weight": 0.01,
+      "max_mode": 1,
+      "jac_solver": "block",
+      "jac_chunk_size": "auto",
+      "warm_start": "perturbation",
+      "refine_tol": "inf",
+      "use_ess": false,
+      "weight_semantics": "residual",
+      "device": "cpu",
+      "jax": "0.9.2"
+    },
+    "packing": "RBC followed by ZBS, each in (m,n) order [(0,1),(1,-1),(1,0),(1,1)].",
+    "vectors": [
+      [0, 0, 0.1, 0.001, 0, 0, 0.1, 0.001],
+      [0.02833453070446928, -0.0033892251628751067, -0.001209561533993958, -0.0019361949283391443, 7.470306371471691e-05, -0.004362968455114702, 0.1944144045198004, -0.0005968972652451673],
+      [-0.0001578053889389896, -0.0004208831396692343, 0.06469364790575413, 0.0002173316376035897, 1.3144170395961931e-05, -0.0003660289978373074, 0.10159926453524049, 0.0007169985451332139],
+      [-0.0007810839439067021, -0.007792865222803857, 0.024863763288669703, 0.008530327906350884, 0.0012535661001244578, -0.014436194786281418, 0.15562500005419286, 0.01383002558668816]
+    ],
+    "sequence": [
+      ["residual", 0],
+      ["jacobian", 0],
+      ["residual", 1],
+      ["residual", 2],
+      ["jacobian", 2],
+      ["residual", 3],
+      ["jacobian", 3]
+    ],
+    "control_seconds": [0.525, 43.039, 18.93, 4.856, 0.108, 4.001, 0.104],
+    "control_backend_compile_seconds": [0.336, 28.669, 12.866, 3.864, 0, 3.1, 0],
+    "expected_norms": [0.16150551877727426, 3.3739892789916546, 4218880.899529375, 0.10947594755625255, 4.03773263429773, 0.07134915568325535, 5.1402387996504055],
+    "parity": "All four archived residual vectors match bit-for-bit; three Jacobians agree within 3.33e-15 relative.",
+    "rejected_trial": "Twelve loop invocations all stop at iteration one with bad Jacobian, including axis re-guesses and predictor/hot/cold recovery. Do not remove retries based on timing alone.",
+    "cache_diagnosis": "Eleven actual block-lane cache misses reduce to three physics structures (ns13/lflipFalse, ns13/lflipTrue, ns3/lflipTrue). Within each only leaf commitment differs; shape, dtype, weak_type and actual single-device sharding agree.",
+    "limits": "One instrumented CPU replay, not a paired end-to-end speedup. Candidate commitment normalization remains subject to placement, donation, prefetch and CPU/GPU parity gates."
+  },
+  "full_surface_probe_sweep": {
+    "scope": "Same four boundary vectors, including saved accepted boundary; no coils or outer optimization.",
+    "parameters": 48,
+    "row_dimension": 150,
+    "probe_widths": [10, 50],
+    "response_width": 6,
+    "gpu_first_jacobian_seconds": [124.52, 126.2],
+    "gpu_warm_jacobian_seconds": [
+      [0.428, 0.425],
+      [0.376, 0.378]
+    ],
+    "gpu_accepted_boundary_jacobian_seconds": [0.415, 0.376],
+    "gpu_accepted_kernel_ms": [385.87, 331.6],
+    "jacobian_temporary_storage_growth_bytes": 2816,
+    "relative_residual_difference_max": 2.77e-09,
+    "relative_jacobian_difference_max": 1.59e-09,
+    "linear_certificates": "All columns pass, zero failed columns and zero corrector iterations in both arms.",
+    "decision": "10–13% warm derivative improvement only; no cold or residual-evaluation gain. No global automatic policy or new public parameter adopted."
   }
 }

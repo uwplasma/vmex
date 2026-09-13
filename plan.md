@@ -1344,11 +1344,31 @@ performance branch underlying #299, not main. Local CPU/GPU checks and
 changed-line coverage passed; GitHub CI was still queued at integration.
 Keep checking that CI. All other PRs retain the merge hold.
 
-Stop winding-surface work. Next measure dense row-Jacobian divisor choices
-under memory bounds, preserving exact value and derivative contracts; test
-any winner in the complete collaborator workload. In parallel, reconcile
-equilibrium-history consistency with #302 and identify the dominant cold
-solve/compile costs from existing QA/QH/QI/QP evidence. Then repeat cold CLI
+Stop winding-surface work. The dense row-Jacobian sweep finds a warm winner:
+probe width 50 instead of 10, keeping boundary-response width 6, reduces the
+complete 48-parameter warm Jacobian from 0.43 to 0.38 seconds. The saved
+accepted boundary shows about 10% improvement; linear certificates pass and
+Jacobian differences stay below 1.6e-9 relative across independent solves.
+Compiled temporary storage increases only 2,816 bytes. Cold compilation
+does not improve (124.52→126.20 seconds), nor does residual evaluation.
+Keep this as bounded tuning evidence, not a global auto-policy change.
+
+Existing cli/jit forward lanes also show no substantial gain on small QA/QI
+warm trials; retain the current routing. Earlier expensive trials used much
+larger boundary changes. The exact QP replay now isolates 11 block-lane
+compilations for three physics structures: array commitment differs within
+each structure. Normalize placement only with donation, prefetch and sharding
+gates; preserve retries. The public evidence record contains all trial vectors
+and settings; #299 includes a tested public-API recipe (seven norm checks).
+The focused candidate reduces misses to three; obtain uncontended paired
+timings before claiming a cold or complete optimization gain.
+
+Reconcile equilibrium-history consistency with #302 and its dependent draft
+[#306](https://github.com/uwplasma/vmex/pull/306), commit `d3e1b6da`. Its
+primal admission and Jacobian/state guards pass 30 targeted CPU tests with
+95.65% changed executable coverage. Earlier integrated accepted-state tests
+show repeatable costs and quadratic Taylor convergence; retest current heads
+before integration. Review #302 handoff artifact footprint as well as source. Then repeat cold CLI
 and Python runs and stage-1/single-stage optimizations on CPU/GPU with pinned
 0.3/0.7/current sources. Report compilation, accepted progress, derivatives,
 memory and final physical accuracy separately. Do not rerun known-invalid
