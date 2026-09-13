@@ -132,6 +132,7 @@ from .device import (
     GPU_MAX_SPECTRAL_MODES,
     _placement_device,
     _put_numeric_leaves,
+    commit_to_single_device,
     device_context,
 )
 from .errors import (
@@ -2230,10 +2231,7 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     # the same device. Normalize once to reuse the lane executable, without
     # changing the selected device or imposing a layout on sharded solves.
     # Before the copy below, so the copy's own executable sees one commitment.
-    sharding = carry.state.R_cos.sharding
-    if all(isinstance(getattr(x, "sharding", None), jax.sharding.SingleDeviceSharding)
-           and x.sharding == sharding for x in jax.tree.leaves((carry, rt))):
-        carry, rt = jax.device_put((carry, rt), sharding)
+    carry, rt = commit_to_single_device((carry, rt))
     # The donated CLI lane (_block_lane, donate_argnums=0) requires every leaf
     # of the input carry to be a distinct buffer; _initial_carry aliases some
     # (xstore=state, shared cache zeros).  One copy to distinct buffers here

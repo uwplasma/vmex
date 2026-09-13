@@ -456,3 +456,35 @@ def test_free_boundary_uses_shared_device_context(monkeypatch):
     assert seen["solve"][1]["max_iterations"] == 3
     assert freeboundary.solve_free_boundary.__kwdefaults__["device"] == dev.AUTO
     assert multigrid.solve_free_boundary_multigrid.__kwdefaults__["device"] == dev.AUTO
+
+
+def test_commit_to_single_device_only_normalizes_one_shared_placement():
+    loose = jax.numpy.arange(3.0)
+    target = next(iter(loose.devices()))
+    pinned = jax.device_put(np.ones(2), target)
+    assert not loose._committed and pinned._committed
+    host = np.zeros(1)
+    tree = {"loose": loose, "pinned": pinned, "label": "kept", "host": host, "none": None}
+
+    out = dev.commit_to_single_device(tree)
+
+    assert out["loose"]._committed and out["pinned"]._committed
+    assert out["loose"].sharding == loose.sharding
+    np.testing.assert_array_equal(out["loose"], loose)
+    np.testing.assert_array_equal(out["pinned"], pinned)
+    assert out["label"] == "kept" and out["host"] is host and out["none"] is None
+
+    scalars = {"x": 1.0, "host": host}
+    assert dev.commit_to_single_device(scalars) is scalars
+    mesh = jax.sharding.Mesh(np.asarray([target]), ("device",))
+    named = jax.device_put(
+        np.ones(2), jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
+    )
+    mixed = (loose, named)
+    assert dev.commit_to_single_device(mixed) is mixed
+
+    traced = []
+    jax.make_jaxpr(
+        lambda x: traced.append(dev.commit_to_single_device((x, pinned))[0] is x) or x
+    )(loose)
+    assert traced == [True]
