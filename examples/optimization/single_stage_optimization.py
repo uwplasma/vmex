@@ -391,7 +391,7 @@ print(f"\nObjective: {initial_value:.6e} -> {final_value:.6e} after {stages} aug
       f"stages, {iterations} L-BFGS-B iterations and {counts['trials']} trials")
 print(f"Coil lengths = {np.asarray(coils_final.length[:N_COILS])}")
 print(f"B.n/B: area-weighted RMS = {100 * normal_field_rms_final:.3f}%, max = {100 * normal_field_max:.3f}% "
-      f"(target RMS <= {100 * NORMAL_FIELD_LIMIT:.1f}%)")
+      f"(target RMS <= {100 * NORMAL_FIELD_LIMIT:.1f}%; the maximum is reported, not optimized)")
 print(f"Minimum coil-surface distance = {coil_surface_distance:.4f} m "
       f"(target >= {COIL_SURFACE_DISTANCE_LIMIT:.4f} m)")
 print(f"Minimum coil-coil distance = {coil_distance:.4f} m (target >= {COIL_DISTANCE_LIMIT:.4f} m)")

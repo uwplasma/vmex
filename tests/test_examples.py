@@ -388,6 +388,12 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
         tmp_path, timeout=600)
     assert "no boundary dofs or mgrid file" in out
     assert re.search(r"\[final\] QA = ([0-9.eE+-]+)", out)
+    # Smoke mode exits 0 even when a target is missed, so the report must say so.
+    assert re.search(r"Minimum \|iota\| = [0-9.]+ \(target >= [0-9.]+\)", out)
+    summary = json.loads(
+        (tmp_path / "single_stage_free_boundary_optimization_summary.json").read_text())
+    assert summary["met"] == (not summary["unmet"])
+    assert summary["met"] or "did NOT meet its stated targets" in out
     for name in ("wout_single_stage_free_boundary_optimized.nc",
                  "single_stage_free_boundary_optimization.png",
                  "single_stage_free_boundary_objectives.png"):
