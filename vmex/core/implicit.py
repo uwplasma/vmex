@@ -1446,15 +1446,15 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
 def _refine_step_core(z: SpectralState, fz: SpectralState,
                       params: ImplicitParams, frozen: SpectralState,
                       dof_mask: SpectralState, cfg: ImplicitConfig):
-    """Staged inexact-Newton refinement step; returns ``(z, F(z), |F(z)|, its)``.
+    """Staged inexact-Newton step; returns ``(z, F(z), |F(z)|, its, converged)``.
 
     Linearizes the preconditioned residual at ``z``, runs the same
     GCROT(m, k) solve as the eager :func:`_adjoint_solve_gcrot` lane with
     the refinement's forcing term and cycle budget (best-effort: the host
     caller in :func:`_refined_state` applies the acceptance policy on the
-    concrete residual norm, so convergence is never enforced here), and
-    evaluates the residual at the stepped iterate inside the same
-    executable.
+    concrete residual norm and the inner solve's ``converged`` flag, so
+    convergence is never enforced here), and evaluates the residual at the
+    stepped iterate inside the same executable.
     """
     F = residual_fn(cfg, frozen, dof_mask)
     _, jvp = jax.linearize(lambda t: F(t, params), z)
@@ -1471,7 +1471,7 @@ def _refine_step_core(z: SpectralState, fz: SpectralState,
         max_restarts=_REFINE_MAX_RESTARTS)
     z_new = jax.tree.map(jnp.subtract, z, unravel(sol.x))
     fz_new = F(z_new, params)
-    return z_new, fz_new, _tree_norm(fz_new), sol.iterations
+    return z_new, fz_new, _tree_norm(fz_new), sol.iterations, sol.converged
 
 
 def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1485,13 +1485,13 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     as one compiled program.  Arguments are committed to ``cfg.device``
     exactly like the eager Krylov lane's RHS pin.
     """
-    z, fz, residual_norm, iterations = _refine_step_core(
+    z, fz, residual_norm, iterations, converged = _refine_step_core(
         _pin_concrete(cfg, z), _pin_concrete(cfg, fz),
         _pin_concrete(cfg, params), _pin_concrete(cfg, frozen),
         _pin_concrete(cfg, dof_mask), cfg)
     _count(cfg, refinement_steps=1,
            refinement_krylov_iterations=int(iterations))
-    return z, fz, residual_norm
+    return z, fz, residual_norm, converged
 
 
 def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1534,9 +1534,9 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
             # restarted GMRES on this fixed-point solve; the linearize +
             # solve + residual evaluation run as one staged per-config
             # executable (see _refine_step_core).
-            z, fz, residual_norm = _refine_step(
+            z, fz, residual_norm, converged = _refine_step(
                 cfg, params, state, dof_mask, z, fz)
-            residual = float(residual_norm)
+            previous, residual = residual, float(residual_norm)
             if not np.isfinite(residual):
                 break
             # Newton need not be monotone: iterate from the latest point but
@@ -1544,6 +1544,11 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
             if residual < best:
                 best_z, best = z, residual
             if best <= tol:
+                break
+            # Inexact Newton: an inner solve that missed its forcing term and
+            # did not lower |F| produced no Newton direction, so a further
+            # step from that iterate would spend the same budget again.
+            if not bool(converged) and residual >= previous:
                 break
         return best_z, best
 

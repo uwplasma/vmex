@@ -23,7 +23,9 @@ import dataclasses
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
+import pytest
 
 from vmex.core import implicit as im
 from vmex.core.errors import VmecError
@@ -179,3 +181,41 @@ def test_rejected_trial_charges_solve_time_but_counts_no_solve(monkeypatch) -> N
     finally:
         im._SOLVE_STATS.pop(cfg, None)
         im._LAST_STATUS_ERROR.pop(cfg, None)
+
+
+@pytest.mark.parametrize("converged, steps", [(False, 1), (True, im._REFINE_MAX_STEPS)])
+def test_unconverged_step_without_progress_ends_refinement(
+        monkeypatch, converged, steps) -> None:
+    """A missed forcing term with no decrease in ``|F|`` is not a Newton step.
+
+    The staged step runs compiled with its inner GCROT correction reversed,
+    so ``|F|`` roughly doubles instead of falling (a zero correction would
+    leave compiled and eager norms a round-off apart). Unconverged, the
+    refinement stops after that step; converged, the non-monotone Newton
+    budget is unchanged. Either way the host state is returned untouched.
+    """
+    inp, _, p0 = _small_solovev_setup()
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-300)
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
+    state, mask = im._host_solve_and_mask(cfg, params_np, refine=False)
+    real_gcrot = im._solvax_gcrot
+
+    def no_progress(matvec, b, **kwargs):
+        solution = real_gcrot(matvec, b, **kwargs)
+        return solution._replace(x=-solution.x, converged=jnp.asarray(converged))
+
+    monkeypatch.setattr(im, "_solvax_gcrot", no_progress)
+    previous = bool(jax.config.jax_disable_jit)
+    im._refine_step_core.clear_cache()
+    im._SOLVE_STATS.pop(cfg, None)
+    jax.config.update("jax_disable_jit", False)  # the suite default is eager
+    try:
+        refined = im._refined_state(cfg, p0, state, mask)
+        assert im._refine_step_core._cache_size() >= 1  # the staged program ran
+        assert im._SOLVE_STATS[cfg]["refinement_steps"] == steps
+    finally:
+        jax.config.update("jax_disable_jit", previous)
+        im._refine_step_core.clear_cache()
+        im._SOLVE_STATS.pop(cfg, None)
+    for refined_leaf, state_leaf in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
+        np.testing.assert_array_equal(np.asarray(refined_leaf), np.asarray(state_leaf))
