@@ -236,7 +236,7 @@ attribution. One heavy local job at a time; the office box takes one.
 |---|---|---|
 | C1 batched Jacobian | `jacobian_batch_size="auto"` with the measured-memory chunk, after reproducing in isolation the 0.5–2 % batch dependence of §2; the per-column GMRES certifier already takes zero iterations on the A1 rows (#310), so the Jacobian's 27–32 s first-call cost is block assembly, factorization and their compile, which is what to reduce | warm 48-dof Jacobian ≤ 0.4 s CPU; columns identical to 1e-10 across batch sizes |
 | C2 `minimize()` | route `objective_terms` through the block Jacobian or a scalar adjoint; docstring true | one linear solve per dof or per gradient, never per row |
-| C3 joint least squares | single stage as TRF/LM on `[r_plasma; r_coil]` with `[J_plasma; J_coil]` (coil block by `jacfwd`); Jacobian only at accepted points | stage 1 needed 63 nfev / 26 njev where joint BFGS needed 188 / 176 → joint phase ≤ 0.4× today; design meets targets; cold re-evaluation matches |
+| C3 joint least squares | single stage as TRF/LM on `[r_plasma; r_coil]` with `[J_plasma; J_coil]` (coil block by `jacfwd`); Jacobian only at accepted points; move #311's augmented-Lagrangian wrapper into one small library helper so examples stay short, and improve quasisymmetry while holding its constraints (#311 met them at 0.113 against 0.101 at its seed) | stage 1 needed 63 nfev / 26 njev where joint BFGS needed 188 / 176 → joint phase ≤ 0.4× today; design meets targets; cold re-evaluation matches |
 
 ### Phase D, weeks 3–6: the QI objective
 
@@ -330,7 +330,7 @@ check that may be red.
 | vmex #309 (A4) | documentation matched to records | merge when CI is green |
 | vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
 | vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR; then #319 → #320 → B4b |
-| vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
+| vmex #311 (A3) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
 | vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
 | vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
@@ -900,3 +900,12 @@ outputs, and commitment is part of the compile key — the mechanism #319 fixes
 in the solver. One helper in `vmex/core/device.py` (#319) now serves both
 call sites (#320), removing 12.5 s of a 25.8 s `max_mode` stage recompile with
 bit-identical results. Merge order: #310 → #319 → #320 → B4b.
+
+**2026-09-13, A3 reported.** #311 (A3): the fixed-boundary single-stage
+example now meets every stated target on a full run (min |ι| 0.4277, aspect
+3.979, B·n RMS 0.80 %, coil clearances and curvature within limits, converged
+ns = 101 check), using a rotating-ellipse seed at ι 0.408 and an augmented
+Lagrangian around L-BFGS-B with one solve and one adjoint per trial. Smoke mode
+is faster than main (136 s against 195 s). Quasisymmetry worsened slightly
+under the constraints; that and the wrapper's home go to C3. The free-boundary
+example waits for F-pre.
