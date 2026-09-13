@@ -10,10 +10,63 @@ import jax
 import jax.numpy as jnp
 
 from vmex.core.bounce import (
+    _boozer_field_strength,
     bounce_action,
     bounce_action_from_boozer,
     trace_boozer_field_lines,
 )
+
+
+@pytest.mark.parametrize("asymmetric", [False, True])
+@pytest.mark.parametrize("nfp", [1, 3])
+@pytest.mark.parametrize("dtype", [jnp.float32, jnp.float64])
+def test_field_line_synthesis_matches_dense_values_and_derivatives(asymmetric, nfp, dtype):
+    """Keep both Fourier parities, physical n, and the field-line slope AD."""
+    rng = np.random.default_rng(81)
+    xm = jnp.array([0., 1., 1., 2., 3., 5.])
+    xn = nfp * jnp.array([0., -2., 1., 0., 2., -3.])
+    alpha = jnp.array([-.3, .17, 1.4, 2.7])
+    phi = jnp.linspace(-.27, 4 * jnp.pi / nfp + .1, 31)
+    cosine = jnp.asarray(rng.normal(size=(2, 6)))
+    sine = jnp.asarray(rng.normal(size=(2, 6))) if asymmetric else None
+    args = (cosine, sine, jnp.array([.31, -.42]), alpha, phi)
+    args = jax.tree.map(lambda a: a.astype(dtype), args)
+    xm, xn = xm.astype(dtype), xn.astype(dtype)
+    direction = jax.tree.map(lambda a: jnp.asarray(rng.normal(size=a.shape), dtype=dtype) * .1, args)
+    tolerance = 1e-4 if dtype == jnp.float32 else 2e-11
+
+    def dense(c, s, iota, a, p):
+        theta = a[None, :, None] + iota[:, None, None] * p[None, None, :]
+        phase = theta[..., None] * xm - p[None, None, :, None] * xn
+        value = jnp.sum(c[:, None, None, :] * jnp.cos(phase), axis=-1)
+        return value if s is None else value + jnp.sum(
+            s[:, None, None, :] * jnp.sin(phase), axis=-1)
+
+    def separated(c, s, iota, a, p):
+        return _boozer_field_strength(c, s, xm, xn, iota, a, p)
+
+    with jax.disable_jit(False):
+        expected, tangent = jax.jit(lambda *x: jax.jvp(dense, x, direction))(*args)
+        actual, actual_tangent = jax.jit(lambda *x: jax.jvp(separated, x, direction))(*args)
+        np.testing.assert_allclose(actual, expected, rtol=tolerance, atol=tolerance)
+        np.testing.assert_allclose(actual_tangent, tangent, rtol=tolerance, atol=tolerance)
+        cotangent = jnp.asarray(rng.normal(size=expected.shape), dtype=dtype)
+        _, reference_vjp = jax.vjp(dense, *args)
+        _, candidate_vjp = jax.vjp(separated, *args)
+        for got, want in zip(jax.tree.leaves(candidate_vjp(cotangent)),
+                             jax.tree.leaves(reference_vjp(cotangent))):
+            if dtype == jnp.float32:
+                # Mixed-sign mode sums can nearly cancel individual entries.
+                assert np.linalg.norm(got - want) <= 2e-5 * max(np.linalg.norm(want), 1.)
+            else:
+                np.testing.assert_allclose(got, want, rtol=tolerance, atol=tolerance)
+        if dtype == jnp.float32:
+            return  # Central differences below resolve the float64 contract.
+        step = 1e-6
+        plus = jax.tree.map(lambda a, d: a + step * d, args, direction)
+        minus = jax.tree.map(lambda a, d: a - step * d, args, direction)
+        fd = (dense(*plus) - dense(*minus)) / (2 * step)
+        np.testing.assert_allclose(actual_tangent, fd, rtol=2e-6, atol=3e-8)
 
 
 def _sinusoidal_field(amplitude=0.2, n=1024):

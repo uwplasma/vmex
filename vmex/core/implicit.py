@@ -2543,6 +2543,12 @@ def _implicit_evolved_tangent_multi_rhs(
         cfg, frozen, dof_mask, formulation="raw"
     )
     residual = residual_fn(cfg, frozen, dof_mask)
+    # Reuse the primal preconditioner across columns and Krylov matvecs.
+    # This retains the derivative of the preconditioner itself; freezing it
+    # would change the operator away from an exact fixed point.
+    _, residual_tangent = jax.linearize(residual, z_star, params)
+    zero_state = jax.tree.map(jnp.zeros_like, z_star)
+    zero_params = jax.tree.map(jnp.zeros_like, params)
     def raw_rhs(tangent):
         value = jax.jvp(
             lambda prm: raw_residual(z_star, prm), (params,), (tangent,)
@@ -2557,16 +2563,10 @@ def _implicit_evolved_tangent_multi_rhs(
         tangent, x0 = args
         rhs = jax.tree.map(
             jnp.negative,
-            jax.jvp(
-                lambda prm: residual(z_star, prm),
-                (params,), (tangent,),
-            )[1],
+            residual_tangent(zero_state, tangent),
         )
         solution, krylov = _adjoint_solve(
-            lambda value: jax.jvp(
-                lambda z: residual(z, params),
-                (z_star,), (value,),
-            )[1],
+            lambda value: residual_tangent(value, zero_params),
             rhs, cfg, x0=x0, rtol=certify_rtol,
             max_restarts=certify_maxiter,
         )

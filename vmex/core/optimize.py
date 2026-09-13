@@ -127,6 +127,7 @@ from .statephysics import (
     volume,
     volume_average_beta,
 )
+from .bounce import _boozer_field_strength
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
 from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
@@ -930,12 +931,8 @@ def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, bmns_b=None, nfp: int, weights, nphi
     phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
     phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
     alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
-    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
-    angle = (theta[:, :, :, None] * xm_b[None, None, None, :]
-             - phi[None, :, None, None] * xn_b[None, None, None, :])
-    bmag = jnp.sum(
-        bmnc_b[:, None, None, :] * jnp.cos(angle)
-        + bmns_b[:, None, None, :] * jnp.sin(angle), axis=-1)
+    bmag = jnp.swapaxes(_boozer_field_strength(
+        bmnc_b, bmns_b, xm_b, xn_b, iota_b, alpha, phi), 1, 2)
 
     bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
     bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
