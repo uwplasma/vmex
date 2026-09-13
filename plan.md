@@ -1323,8 +1323,8 @@ All 73 plotting and mapped-row tests pass under coverage, including final
 layout, signed Fourier modes, batches, angular derivatives and CPU JVPs.
 The mapped-row tests also pass on GPU. All 27 changed executable lines are
 covered; individual bounce-status and NaN masks agree on ten surfaces,
-with action differences below 5.8e-15. The focused stacked draft PR awaits
-CI and review. Keep the coarse diagnostic images out of the README; release
+with action differences below 5.8e-15. The focused stacked draft
+[PR #305](https://github.com/uwplasma/vmex/pull/305) awaits CI and review. Keep the coarse diagnostic images out of the README; release
 and GitHub merging require the existing gates and explicit user approval.
 Production source adds 20 net lines across two existing files;
 regression tests are counted separately, with no new repository files.
