@@ -331,7 +331,8 @@ check that may be red.
 | vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; follow-up upstream: return the schedule error from virtual_casing_jax so VMEX drops its copy of the level selection |
 | vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR |
 | vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
-| vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | do not merge as is; S1 re-lands its source |
+| vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
+| vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
 | vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence | do not merge as is; its three source commits are B1's candidate contract |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
 | vmex #307 | seven lines on #299's branch | B4 re-lands it on `main` |
@@ -341,7 +342,7 @@ check that may be red.
 | virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | none |
 
 **Release candidate, VMEX 0.9.0.** Ready once #308, #300, #309, #310, #311,
-#312 and the S1 pieces merge, with booz_xform_jax 0.3.0 and SOLVAX 0.21.0 on
+#312 and #313–#318 merge, with booz_xform_jax 0.3.0 and SOLVAX 0.21.0 on
 PyPI. It ships the DESC bridge, documentation and examples that match their
 records, an exterior field that reports its achieved accuracy, per-evaluation
 counters, and #299's component speedups. It does not fix the slow
@@ -677,7 +678,7 @@ configuration keys in `vmex/core/implicit.py`, #307's lines in
 
 ### S1. Split #299 into focused PRs
 
-**Facts.** #299 (`perf/reuse-objective-linearization`, head `de93e5e2`, CI
+**Facts.** #299 (`perf/reuse-objective-linearization`, head `47de5a8b`, CI
 green) is 29 commits from another session, many mixing source with plan,
 logbook and record edits (2,719 lines). Its source changes and their recorded
 effects: residual linearization reuse and separable field-line synthesis
@@ -692,7 +693,7 @@ magnetic-only Boozer projection.
 **Change.** Re-land those on `main` as at most six PRs, by file hunk rather
 than whole commit, each with the tests #299 added for it: (1) Boozer λ
 interpolation (`a6b13367`); (2) linearization reuse and field-line synthesis
-(`ef814252`); (3) Thomas selection, parity broadcast and divisor batching
+(`ef8a25fa`); (3) Thomas selection, parity broadcast and divisor batching
 (`20762a29`, `9343b4b4`, `cd667198`); (4) host trial solves outside GPU
 callbacks (`f205c995`); (5) vacuum contraction and saved pullbacks (`931be2d5`,
 `9950781d`), which is F1a's first step; (6) plotting (`b5dbcc95`) and the
@@ -706,6 +707,18 @@ changed-line coverage at or above 95 %, and passes CI.
 
 **Owns.** Branches `s1/<topic>` and the files each hunk touches; rebase order
 is (1), (4), (3), (2), (5), (6).
+
+### A4b. Documentation left behind by S1
+
+S1 carried #299's source but not its guidance edits, which cite flags and a
+record that are not on `main`: validation guidance in `implicit.py`
+docstrings, `docs/explanation/adjoint-gradients.md`,
+`docs/reference/optimization.rst` and `docs/tutorials/first-gradient.md`
+(`43d1765a`); the QI "smooth" wording in `omnigenity.py`, `confinement.rst`
+and `objectives.rst` (`7c58c2ff`); the `least_squares` warm-start docstring
+(`2ebe0d50`); the `equilibrium_from_x` docstring (`cd667198`). After #310 and
+#313–#318 merge, re-state what is still true against the code and records on
+`main`, and drop what is not. Owns those docstrings and pages.
 
 ### Literature checks left open (optional)
 
@@ -811,3 +824,9 @@ what it does not fix. The speed work starts from §8: B1 (refinement), B4
 re-landed as focused PRs). The coordination rules now require net-negative or
 minimal diffs, a counter row for every performance claim, and jit coverage for
 every new path.
+
+**2026-09-13, S1 done.** #299's source is re-landed as #313–#318 against
+`main` (six pieces, 12–114 net lines, preflight and focused tests passing
+locally, CI queued). Speed claims cite #299's records until #310's counters are
+on `main`; #315 is correctness-only; #316's NCSX gradient check was not rerun
+here. #299's guidance edits that cite records not on `main` become A4b.
