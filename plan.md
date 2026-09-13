@@ -158,8 +158,10 @@ the direct default is 12–31 %, and 0.7–2 % at 0.5 a where the direct path is
 better. No test in the repository compares the exterior field with an oracle
 or places a target within a grid spacing.
 
-**Free boundary.** The reverse residual re-assembles and LU-solves NESTOR
-inside every transpose matvec (`freeboundary_implicit.py:224–229`); one
+**Free boundary.** In the host GCROT lane every transpose matvec re-runs the
+primal, including NESTOR's full assembly and LU, because `_transpose_matvec`
+builds its VJP inside the jitted matvec (`freeboundary_implicit.py:853–860`,
+`freeboundary.py:913–927`); the traced and Schur lanes hold one VJP closure. One
 gradient costs one forward solve plus `nedge` (≈100) coupled pullbacks or up to
 300 GCROT matvecs; the NCSX certificate is 280 s cold and its accuracy floor is
 2e-3 from root non-reproducibility. #299's analytic-term contraction removed a
@@ -258,9 +260,11 @@ attribution. One heavy local job at a time; the office box takes one.
 
 | PR | change | gate |
 |---|---|---|
-| F1 NESTOR out of the Krylov loop | differentiate the assembled system with the cached LU (`dpot = A⁻¹(db − dA·pot)`) so a transpose matvec is one linearized NESTOR, not a re-assembly | adjoint matvec ≤ 0.1× a forward NESTOR call |
-| F2 Schur Krylov | Krylov on the edge Schur complement preconditioned by the previous iterate's Schur matrix; warm λ | gradient ≤ 3× a forward solve at ns = 25 |
-| F3 inexact-gradient option | frozen-LU skip-path derivative with a certificate tied to the `nvacskip` cadence | documented error bound; free-boundary single-stage example ≤ 10 CPU minutes |
+| F0 measure | warm split of one NESTOR call into Green's-function transform, kernel, mode-matrix assembly and LU on NCSX ns = 15 (flop counts put the LU near 5 %; VMEC++'s benchmark header says assembly and factorization dominate) | the measured split decides how much F1a can save before F1b |
+| F1a linearize once | hoist the coupled linearization out of the host GCROT lane; land #299's saved-pullback commit as its own PR; replace `lu_factor`/`lu_solve` in the vacuum pressure with a `custom_linear_solve` (the cached-LU tangent `dpot = A⁻¹(db − dA·pot)` is exact) | transpose identity at 1e-11 and the NCSX adjoint value unchanged to 1e-10 relative; cold compile peak not above today's |
+| F1b edge response matrix | a linearized NESTOR matvec cannot reach 0.1× a forward call (reverse sweeps cost 1–3× the forward kernel), so build NESTOR's dense response to the edge rows, the axis and `ctor` once per gradient with forward-mode columns (about 100 edge columns plus a rank-1 `ctor` term); every coupled matvec and the whole edge Schur matrix then cost a dense multiply plus the existing batched sparse solve | response build ≤ 300 NESTOR-call equivalents; matvec ≤ 0.1× one NESTOR call; JVP against finite differences of the vacuum pressure at 1e-6; coupled-residual acceptance unchanged |
+| F2 Schur Krylov, fallback | only for `nedge > 512` or if F1b fails: GCROT on the edge Schur complement preconditioned by the previous optimizer iterate's Schur LU, with a persistent recycle space (`gcrotmk`'s `CU`, not passed today at `freeboundary_implicit.py:751, 894`) and a warm λ | mean preconditioned iterations ≤ `nedge`/5 on a recorded ten-iterate trajectory; with F1b, gradient ≤ 3× a forward solve at ns = 25 |
+| F3 inexact tolerance, not a frozen derivative | a frozen matrix derivative drops `A⁻¹ dA·pot`, the kernel's shape sensitivity and an order-one term (a lagged value, as in `nvacskip`, is harmless at the root; a frozen derivative is not); measure that term on CTH and NCSX, and offer cheap gradients as a looser Krylov tolerance certified by the exact adjoint residual | frozen-derivative gradient error reported and the option killed above 1e-2; free-boundary single-stage example ≤ 10 CPU minutes |
 
 ### Phase G, weeks 7–9: the comparison and the package
 
@@ -275,6 +279,8 @@ time-to-metric; the three-way gradient comparison and the Taylor test of the
   states by more than the certificate tolerance on the P1 matrix, or if
   Jacobian resets become more frequent on the shipped decks.
 - B5 is killed by its own gate; do not extend it to multi-host sharding.
+- F1b is killed if building the response matrix costs more wall time or
+  compile memory than today's GCROT lane on NCSX ns = 15; F2 is then the route.
 - D2 is killed if it cannot reach the current surrogate's final QI metric on
   the shipped cases.
 - E1 is killed if the fit cannot reach 1e-4 at `d = 0.02 a` on the vacuum
@@ -314,7 +320,7 @@ These verdicts stand and are not reopened by this revision.
 
 | PR | disposition |
 |---|---|
-| #299 | Split. (i) the Boozer λ half-mesh correction with its tests: merge; (ii) the `jax.linearize` hoist, Thomas selection and parity-transpose fix: merge after latest-head CI; (iii) `host_evaluate`: merge; (iv) #305 plotting: merge; (v) the NESTOR contraction and saved pullbacks: own PR with the CTH/NCSX certificates; (vi) the 630-line logbook: one entry of at most forty lines citing the record. The 1,159-line JSON stays as the record of (i)–(v). |
+| #299 | Split. (i) the Boozer λ half-mesh correction with its tests: merge; (ii) the `jax.linearize` hoist, Thomas selection and parity-transpose fix: merge after latest-head CI; (iii) `host_evaluate`: merge; (iv) #305 plotting: merge; (v) the NESTOR contraction and saved pullbacks: own PR with the CTH/NCSX certificates, which is F1a's first step; (vi) the 630-line logbook: one entry of at most forty lines citing the record. The 1,159-line JSON stays as the record of (i)–(v). |
 | #308 | This plan. Merge on maintainer approval; until then agents read it from branch `review/plan-2026-09-13`. |
 | #300 | DESC bridge; independent; review and merge. |
 | #302, #306 | The right contract (derivatives only on a certified state), the wrong mechanism (a second solve); fold both into B1 and close. |
@@ -609,10 +615,11 @@ has merged.
   first, dispatch before sharding). Unverified and still open: published
   iteration savings of VMEC2000's `PRECON_TYPE='GMRES'`, VMEC++'s
   single-thread time on this deck, and whether its wheel is built with FFTX.
-- **L2, behind F1–F3.** DESC's free-boundary Jacobian cost; VMEC++'s NESTOR
-  hot restart and whether its adjoint covers free boundary; the adjoint
-  free-boundary literature (Paul, Antonsen, Landreman and Cooper 2020); what a
-  frozen NESTOR factorization loses against differentiating the assembly.
+- **L2, behind F: done 2026-09-13.** Folded into Phase F (F0 measurement,
+  F1a/F1b split, F2 as fallback, F3 as a tolerance rather than a frozen
+  derivative). Unverified and still open: DESC's free-boundary cost relative to
+  fixed boundary, VMEC++'s free-boundary hot-restart iteration counts, and the
+  NESTOR cost split (F0 measures it).
 
 ## 9. Execution logbook
 
@@ -666,3 +673,14 @@ has no evidence above 1.3–2× for this problem class and stays a control arm.
 For B5, doing less per iteration (loop trips, thunk count, batched kernels)
 is more plausible than host-device sharding. §2 now states the timing deck's
 resolution (MPOL = NTOR = 8).
+
+**2026-09-13, L2 returned.** Literature check L2 (read-only): no other code
+has a free-boundary equilibrium adjoint (VMEC++'s excludes free boundary;
+DESC solves free boundary as an outer least-squares problem; Paul et al. 2020
+use perturbed nonlinear equilibria at 4e-2 accuracy; SPEC, STELLOPT and
+simsopt use finite differences, simsopt resetting its axis guess to fight the
+same history dependence). Phase F is rewritten: measure NESTOR's cost split
+first, hoist the linearization, build the edge response matrix once per
+gradient, keep previous-iterate Schur preconditioning as the fallback, and
+replace the frozen-derivative option, which drops an order-one term, by a
+certified looser tolerance.
