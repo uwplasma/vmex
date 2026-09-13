@@ -72,8 +72,14 @@ def test_implicit_least_squares_honors_multigrid_solve_kwargs():
     # cannot supply an ordinary implicit Jacobian under the primal contract.
     alternate_value = np.asarray(
         alternate_problem.jax_residual(alternate_problem.x0))
-    with pytest.raises(FloatingPointError, match="implicit-Jacobian certificate"):
-        alternate_problem.residual_and_jac(alternate_problem.x0)
+    # Host optimizers receive the finite penalty pair without constructing
+    # an equilibrium derivative; the actual primal remains explicitly rejected.
+    rejected_residual, rejected_jacobian = alternate_problem.residual_and_jac(alternate_problem.x0)
+    assert np.all(np.isfinite(rejected_residual))
+    assert np.all(np.isfinite(rejected_jacobian))
+    rejected = alternate_problem.evaluate(alternate_problem.x0)
+    assert rejected.status == "under_converged"
+    assert not rejected.diagnostics["derivative_certified"]
     # The two requested ladders must produce finite, observable residuals.
     # This covers both the implicit callback and its hot-restart path without
     # asserting how the input object stores the controls internally.

@@ -2786,13 +2786,8 @@ def _least_squares_implicit(
         )
         return scalar_wall_base * growth ** 2, gradient
 
-    def certified_trial(x: np.ndarray) -> bool:
-        """Whether the memoized solve at ``x`` is a usable fixed point.
-
-        True when the last host solve belongs to this ``x`` and converged, or
-        its final ``FSQ / ftol`` is at most ``cfg.max_fsq_ratio``.  Call only
-        after evaluating the trial so the memo describes the same point.
-        """
+    def certified_trial(x: np.ndarray, *, require_eligible: bool = True) -> bool:
+        """Check exact primal evidence, optionally requiring derivative admission."""
         x = np.asarray(x, dtype=float)
         if x.shape != x0.shape:  # malformed input stays on the penalty path
             return False
@@ -2806,11 +2801,12 @@ def _least_squares_implicit(
         )
         if hit[0] != imp._params_key(params_np):
             return False
-        result = hit[1]
-        if bool(result.converged):
-            return True
-        fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
-        return bool(np.isfinite(fsq) and fsq <= cfg.max_fsq_ratio * cfg.ftol)
+        certificate = imp._LAST_PRIMAL_CERTIFICATE.get(cfg)
+        refined = imp._LAST_REFINED.get(cfg)
+        return bool(certificate is not None and refined is not None
+                    and certificate[0] == hit[0] == refined[0]
+                    and certificate[1] == imp._primal_state_key(refined[1])
+                    and (not require_eligible or certificate[2]["derivative_certified"]))
 
     def residual_rows(x: jnp.ndarray) -> jnp.ndarray:
         params = params_of(x)
@@ -3142,22 +3138,22 @@ def _least_squares_implicit(
         # unless the exact-key solve memo already proves it usable.
         x = np.asarray(x, dtype=float)
         x_key = FunctionProblem._key(x)
-        params_np = jax.tree.map(
-            lambda a: np.asarray(a, dtype=np.float64), params_of(_place(x))
-        )
-        hit = imp._LAST_SOLVE.get(cfg)
-        if (
-            hit is None
-            or hit[0] != imp._params_key(params_np)
-            or imp._LAST_STATUS_ERROR.get(cfg) is not None
-        ):
+        if not certified_trial(x, require_eligible=False):
             # A cached converged point can be revisited after a different trial
-            # failed.  Refresh the status callback in that rare case so the old
+            # failed. Refresh the status callback in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
             jax.device_get(rows_jit(_place(x)))
-        if imp._LAST_STATUS_ERROR.get(cfg) is not None:
+        if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
+        x_key = (x_key, imp._LAST_PRIMAL_CERTIFICATE[cfg][1])
+
+        def require_response_anchor():
+            if (not certified_trial(x)
+                    or imp._LAST_PRIMAL_CERTIFICATE[cfg][1] != x_key[1]):
+                raise AdjointSolveError(
+                    message="implicit response primal changed during derivative evaluation",
+                    hint="re-evaluate the primal before requesting its derivative")
 
         def reverse_candidate() -> np.ndarray:
             candidate = np.asarray(
@@ -3168,6 +3164,7 @@ def _least_squares_implicit(
                     message="certified reverse Jacobian fallback failed",
                     hint="increase the reverse-adjoint Krylov budget",
                 )
+            require_response_anchor()
             holder["lin"] = None
             return candidate
 
@@ -3187,6 +3184,7 @@ def _least_squares_implicit(
                     jac, summary, jac_solver=jac_solver,
                     reverse_candidate=reverse_candidate,
                 )
+                require_response_anchor()
                 if used_reverse:
                     holder["derivative_fallbacks"] += 1
                 elif warm_start == "perturbation":
@@ -3196,6 +3194,8 @@ def _least_squares_implicit(
                 raise
             primary_error = exc
             jac = None
+
+        require_response_anchor()
 
         # The amortized block factorization is fastest, but a difficult new
         # accepted point can occasionally make its warm corrector non-finite.
@@ -3211,6 +3211,7 @@ def _least_squares_implicit(
                         candidate, summary, jac_solver=jac_solver,
                         reverse_candidate=reverse_candidate,
                     )
+                    require_response_anchor()
                     if np.all(np.isfinite(candidate)):
                         holder["derivative_fallbacks"] += 1
                         if warm_start == "perturbation" and not used_reverse:
@@ -3220,6 +3221,7 @@ def _least_squares_implicit(
                         return candidate
                 except Exception as exc:
                     primary_error = exc
+            require_response_anchor()
             # Memoization is valid only at the identical parameter point. A
             # Jacobian certified at a different x is not a derivative here.
             holder["failed_trials"] += 1
@@ -3258,10 +3260,20 @@ def _least_squares_implicit(
         if traceable_scalar is None:
             residual = fun(xh)
             if certified_trial(xh):
+                primal_key = (FunctionProblem._key(xh), imp._LAST_PRIMAL_CERTIFICATE[cfg][1])
                 value = 0.5 * float(residual @ residual)
-                gradient = jac_fn(xh).T @ residual
+                try:
+                    gradient = jac_fn(xh).T @ residual
+                except AdjointSolveError:
+                    if (not certified_trial(xh)
+                            or imp._LAST_PRIMAL_CERTIFICATE[cfg][1] != primal_key[1]):
+                        holder["failed_trials"] += 1
+                        return failure_value_and_gradient(xh)
+                    raise
                 if (
-                    holder.get("last_jac_key") == FunctionProblem._key(xh)
+                    certified_trial(xh)
+                    and imp._LAST_PRIMAL_CERTIFICATE[cfg][1] == primal_key[1]
+                    and holder.get("last_jac_key") == primal_key
                     and np.isfinite(value)
                     and np.all(np.isfinite(gradient))
                 ):
