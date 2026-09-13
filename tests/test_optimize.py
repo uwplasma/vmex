@@ -922,9 +922,30 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
 
     from vmex.core import implicit as implicit_module
 
+    config = problem.metadata["config"]
+    # Cold trial/retry kernels must compile on the optimizer's host thread,
+    # outside a running GPU callback. Cached derivative callbacks are fine.
+    import threading
+
+    solve_threads = []
+    real_host_solve = implicit_module._host_solve
+
+    def record_uncached_solve(cfg, params):
+        hit = implicit_module._LAST_SOLVE.get(cfg)
+        if hit is None or hit[0] != implicit_module._params_key(params):
+            solve_threads.append(threading.get_ident())
+        return real_host_solve(cfg, params)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = problem.x0.copy()
+        trial[0] += 2.0e-5
+        direct_jacobian = problem.residual_jac(trial)
+        np.testing.assert_allclose(
+            direct_jacobian, problem.jax_residual_jac(trial), rtol=1e-6, atol=1e-8)
+    assert solve_threads == [threading.get_ident()]
     # A rejected equilibrium gets the exact derivative of its smooth penalty
     # residual, never a Jacobian cached for a different physical point.
-    config = problem.metadata["config"]
     rejected_trial = problem.x0.copy()
     rejected_trial[0] += 1.0e-5
     real_device_get = opt.jax.device_get
@@ -1074,6 +1095,13 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     assert scalar.fun(np.full_like(scalar.x0, np.nan)) == 1.0e12
     assert np.isfinite(float(scalar.jax_fun(scalar.x0)))
     assert scalar.equilibrium_from_x(scalar.x0).result.converged
+    solve_threads.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(implicit_module, "_host_solve", record_uncached_solve)
+        trial = scalar.x0.copy()
+        trial[0] += 2.0e-5
+        np.testing.assert_allclose(scalar.fun(trial), scalar.jax_fun(trial), rtol=1e-10)
+    assert solve_threads == [threading.get_ident()]
 
     holder = scalar.metadata["holder"]
     real_device_get = opt.jax.device_get
