@@ -368,8 +368,11 @@ def main() -> None:
         return jax.jvp(lambda prm: raw(z, prm), (params,), (direction,))[1]
 
     def objective_pieces(term_list):
-        # The problem factory's own adapter: residuals_state for term objects.
-        traced = [(core_optimize._traceable_term(f), t, w) for f, t, w in term_list]
+        # Resolved as make_problem does: residuals_state for term objects and
+        # the default cost semantics (row scale sqrt(w)); cost 0.5 r.r.
+        traced = [(core_optimize._traceable_term(f), float(t),
+                   jnp.asarray(core_optimize._least_squares_weight(w, "cost")))
+                  for f, t, w in term_list]
 
         def half_square(x, runtime):
             rows = jnp.concatenate([jnp.atleast_1d(w * (jnp.asarray(f(x, runtime)) - t)).ravel()
