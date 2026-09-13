@@ -1292,8 +1292,12 @@ rises from 6.71 to 7.04 ms and temporary memory from 7.46 to 10.64 MB;
 CPU time rises from 25.33 to 31.35 ms. Derivative differences are below
 1.8e-13 relative. Retain the dense path and investigate reuse within local
 block assembly before adding transform implementations or global policy.
-The traced workload uses 10-column chunks; its exact-shape comparison remains
-required before applying the representative result to that workload.
+The traced 10-column workload also rejects the switch: GPU 9.84→10.54 ms,
+CPU 42.30→52.38 ms, with higher compilation time and temporary memory.
+The public optimizer's square-root/divisor policy selects 10 for 150 rows;
+this path bypasses measured-memory chunk selection. Next compare divisors
+under an explicit memory bound, then validate any winner in the complete
+48-parameter workload before changing the policy.
 Do not repeat broad constraint/geometry fusion: branch commit c595c257
 records changed rounding and 15–25% slower concatenated contractions.
 Root-history consistency and complete optimization acceptance remain open;

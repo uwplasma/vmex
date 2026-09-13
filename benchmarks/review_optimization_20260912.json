@@ -1125,7 +1125,18 @@
       "derivative_relative_difference_max": 1.8e-13,
       "cpu_force_reference_norm": 3.218e-8,
       "cpu_force_absolute_error_norm": 7.236e-14,
-      "decision": "Reject the separable switch for representative chunk32: both devices are slower. Exact traced chunk10 comparison pending. No production source change; retain dense synthesis."
+      "decision": "Reject the separable switch for representative chunk32: both devices are slower. No production source change; retain dense synthesis."
+    },
+    "traced_chunk10_dense_vs_separable": {
+      "gpu_warm_ms": [9.844, 10.541],
+      "gpu_compile_seconds": [17.40, 18.17],
+      "gpu_temporary_MB": [2.09, 2.90],
+      "cpu_warm_ms": [42.30, 52.38],
+      "cpu_compile_seconds": [4.72, 5.75],
+      "cpu_temporary_MB": [5.31, 5.66],
+      "gpu_force_absolute_error_norm": 7.60e-14,
+      "derivative_relative_difference_max": 1.78e-13,
+      "decision": "Actual traced chunk10 confirms rejection on both devices. Existing auto square-root/divisor policy selects10 for150rows and bypasses measured-memory chunk selection. Next test divisors under a memory bound before proposing policy changes."
     }
   },
   "magnetic_projection": {
