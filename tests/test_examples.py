@@ -8,6 +8,7 @@ this module keeps their example wiring explicit.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import runpy
@@ -735,13 +736,21 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     pytest.importorskip("essos")
     out = _run_example(
         EXAMPLES / "optimization" / "single_stage_optimization.py", tmp_path, timeout=1800)
+    # Smoke mode is one stage at fixed multipliers, so its objective must fall.
     match = re.search(r"Objective: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
     assert match is not None and float(match.group(2)) < float(match.group(1))
+    assert re.search(r"\[stage 1\] \d+ L-BFGS-B iterations, \d+ trials, violation = ", out)
     for diagnostic in ("B.n/B: area-weighted RMS", "Minimum coil-surface distance",
-                       "Minimum coil-coil distance", "Maximum curvature", "Coil lengths"):
+                       "Minimum coil-coil distance", "Maximum curvature", "Coil lengths",
+                       "Minimum |iota| = ", "Aspect ratio = "):
         assert diagnostic in out
     normal = re.search(r"B\.n/B: area-weighted RMS = ([0-9.]+)%, max = ([0-9.]+)%", out)
     assert normal is not None and all(np.isfinite(float(value)) for value in normal.groups())
+    summary = json.loads((tmp_path / "single_stage_optimization_summary.json").read_text())
+    assert summary["smoke"] and summary["trials"] >= 1
+    assert summary["met"] == (not summary["unmet"])
+    verdict = "All stated targets met." if summary["met"] else "did NOT meet its stated targets"
+    assert verdict in out
     for name in ("wout_single_stage_optimized.nc", "single_stage_objectives.png",
                  "surface_single_stage_initial.vts", "coils_single_stage_initial.vtu",
                  "surface_single_stage_optimized.vts", "coils_single_stage_optimized.vtu"):
@@ -820,6 +829,25 @@ def test_single_stage_examples_use_general_surface_output_and_movie_colors() -> 
     assert "surface_initial.to_vtk" in finite and "extra_data=" in finite
     for source in (vacuum, finite):
         assert "MOVIE_SURFACE_COLOR" in source and "surface_color=" in source
+
+
+def test_single_stage_examples_enforce_targets_and_fail_loudly() -> None:
+    """Targets are constraints checked at the end; a missed one is a non-zero exit."""
+    fixed = (EXAMPLES / "optimization" / "single_stage_optimization.py").read_text()
+    free = (EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py").read_text()
+    assert "def augmented_lagrangian(" in fixed and 'method="L-BFGS-B"' in fixed
+    for constraint in ("IOTA_CONSTRAINT", "ASPECT_CONSTRAINT", "NORMAL_FIELD_CONSTRAINT"):
+        assert constraint in fixed
+    # One equilibrium solve and one scalar adjoint per trial: no residual
+    # Jacobian lane and no second residual callback.
+    assert "jax_objective_from_state" in fixed
+    assert "jax_value_and_grad" not in fixed and "jax_residual" not in fixed
+    # The free-boundary pullback is host-eager; everything after the solve is jitted.
+    assert "@jax.jit\ndef accepted_terms(" in free
+    for source in (fixed, free):
+        assert "did NOT meet its stated targets" in source
+        assert "if unmet and not ci_smoke:\n    raise SystemExit(1)" in source
+        assert "_summary.json" in source
 
 
 @pytest.mark.full  # nightly: two bounded ESSOS tracing integrations (~40 s total)
