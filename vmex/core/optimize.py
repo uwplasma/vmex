@@ -2535,7 +2535,7 @@ def _least_squares_implicit(
     import scipy.optimize
 
     from . import implicit as imp
-    from .device import resolve_implicit_device
+    from .device import commit_to_single_device, resolve_implicit_device
 
     # ``jac=None`` forwards the complete ``solve_kwargs`` dictionary to
     # ``solve_equilibrium``.  The implicit lane has a static solver config,
@@ -3141,8 +3141,8 @@ def _least_squares_implicit(
         if lin is not None and lin[0].shape == np.shape(x):
             seed = jax.tree.map(
                 lambda a: np.asarray(a, dtype=np.float64),
-                jax.device_get(predicted_state(
-                    _place(x), _place(lin[0]), lin[1], lin[2])))
+                jax.device_get(predicted_state(*commit_to_single_device(
+                    (_place(x), _place(lin[0]), lin[1], lin[2])))))
             if all(np.all(np.isfinite(a)) for a in jax.tree.leaves(seed)):
                 imp._PERTURB_SEED[cfg] = seed
         try:
