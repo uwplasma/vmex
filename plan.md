@@ -18,10 +18,12 @@ release follows the gates of §4 and §5.
 ## 0. How to use this plan
 
 An agent resuming this work reads §1, §3, §4 (phases and PR list), §6
-(dispositions), §7 (environment) and the last entry of §8, in that order. It
-checks the remote PR state and dirty worktrees, and continues at the first
-unmet gate. After each implementation PR it appends one logbook entry in the
-format of §8 and updates the affected gate in place. It does not add a work
+(dispositions), §7 (environment), §8 (the coordination rules and the brief it
+was given) and the last entry of §9, in that order. It checks the remote PR
+state and dirty worktrees, and continues at the first unmet gate. An agent
+given one brief of §8 needs nothing else from the conversation that produced
+it. After each merged implementation PR the coordinator appends one logbook
+entry in the format of §9 and updates the affected gate in place. It does not add a work
 package because another code has a feature, does not rerun the historical
 inventories, and does not launch a multi-hour run before the counters of
 Phase A exist.
@@ -312,6 +314,7 @@ These verdicts stand and are not reopened by this revision.
 | PR | disposition |
 |---|---|
 | #299 | Split. (i) the Boozer λ half-mesh correction with its tests: merge; (ii) the `jax.linearize` hoist, Thomas selection and parity-transpose fix: merge after latest-head CI; (iii) `host_evaluate`: merge; (iv) #305 plotting: merge; (v) the NESTOR contraction and saved pullbacks: own PR with the CTH/NCSX certificates; (vi) the 630-line logbook: one entry of at most forty lines citing the record. The 1,159-line JSON stays as the record of (i)–(v). |
+| #308 | This plan. Merge on maintainer approval; until then agents read it from branch `review/plan-2026-09-13`. |
 | #300 | DESC bridge; independent; review and merge. |
 | #302, #306 | The right contract (derivatives only on a certified state), the wrong mechanism (a second solve); fold both into B1 and close. |
 | #307 | Seven lines that stop commitment-flag recompiles (next accepted residual 4.9 → 0.35 s in its record); retarget to main and merge as the first B4 item. |
@@ -344,7 +347,251 @@ python tools/preflight.py --static
   truncation term; use a finite-β self-convergence for that. Push and base
   retargets within the same minute start two CI runs; wait on the survivor.
 
-## 8. Execution logbook
+## 8. Agent briefs
+
+Each brief is self-contained: an agent reads §0–§1, its phase table in §4,
+the coordination rules below and its own brief, and starts. Line numbers are
+at `f09288b3`; confirm them before editing.
+
+### Coordination rules (every brief)
+
+- One brief, one branch, one draft PR against `main`, opened from a fresh
+  worktree, never from a shared checkout. Branches: `a1/optimization-counters`,
+  `a2/exterior-field-oracles`, `a3/single-stage-honest`, `a4/documentation-truth`.
+- Edit only the files your brief owns. A needed change elsewhere goes in your
+  report, not in your branch. No agent edits `plan.md`; the coordinator writes
+  the logbook entry when a PR merges. Prefer extending existing test files; if
+  `tests/manifest.json` needs a line, edit that line as text (re-serializing
+  the file reformats every record and conflicts with every other branch).
+- Commits and PR bodies carry the maintainer's authorship and no tool
+  attribution.
+- Heavy work (over two minutes or 2 GB) runs one job at a time on a shared
+  machine: take the machine's lock, four threads, fresh processes,
+  `VMEX_COMPILATION_CACHE=disabled` for any timing, and record commit,
+  versions, threads and load with the result.
+- Before pushing: `python tools/preflight.py --static`; the focused tests of
+  the brief; `python tools/test_manifest.py check` when tests are added;
+  `python tools/render_benchmark_index.py --check` when a benchmark artifact is
+  added; strict Sphinx (`python -m sphinx -W -j 1 -b html docs <tmp>`) when
+  documentation changes. Changed executable lines are at least 95 % covered;
+  CI's diff-cover is the measurement (`pytest --cov` aborts on macOS), and
+  `vmex/core/virtual_casing.py` is excluded from coverage by `pyproject.toml`.
+- A result is an observation with units, not an exit code; a failed or capped
+  run is reported as one. Do not change a tolerance to make a test pass.
+- PR body: problem, change, evidence (numbers, commands, environment),
+  limitations, what the reviewer should check. Draft. No merge without
+  explicit maintainer approval.
+- Report back: PR number and head commit, verification results, deviations
+  from the brief, open questions.
+
+### A1. Optimization counters
+
+**Why.** No record splits an optimization evaluation into descent,
+refinement, Jacobian, adjoint and compilation; every gate of Phases B–D is a
+before/after row of those parts. Today's record gives build 11.4 s and first
+derivative 61 s with nothing in between (§2).
+
+**Existing seams.** `_SOLVE_STATS[cfg] = {"solves", "iterations"}`
+(`implicit.py:1269, 1346`) is surfaced as `result.solve_stats`
+(`optimize.py:3569`) and `diagnostics["solve_stats"]` (`problem.py:1021`);
+`OptimizationRecord` carries `equilibrium_solves` and `rejected_trials`
+(`monitoring.py:113–172`); refinement is `_refined_state` and
+`_refine_step_core` with GCROT (`implicit.py:1403–1473`) behind the memo
+`_LAST_REFINED` (`1288, 1374–1390`); the adjoint solves are
+`_adjoint_solve`, `_adjoint_solve_gcrot` and `_adjoint_gcrot_core`
+(`2000–2095`, `~2674`); the block Jacobian is `_raw_block_system` with its
+per-column certifier (`2259–2470`; note the placeholder
+`iterations=jnp.ones(...)` at 2468). `tests/test_trace_budgets.py:141–190`
+shows how to count compilations with `jax_log_compiles`.
+
+**Change.** Extend the per-configuration stats into cumulative counters:
+solves, descent iterations, refinement calls, steps and matvecs, Jacobian
+calls and columns, certifier iterations, adjoint calls and matvecs, and host
+wall time spent in solve, refinement, Jacobian and adjoint. Read them from
+values the host already receives: no new device-to-host synchronization inside
+compiled code and no change to any numerical path. Expose them through the
+existing `solve_stats` channel and one `counters` mapping on
+`OptimizationRecord` (empty when unavailable, never zero-as-unknown).
+`benchmarks/optimization.py` records the counters with build time, first
+derivative time, and compile count and seconds; compile counting stays in the
+benchmark, not the library.
+
+**Gate.** Residual and Jacobian at `x0` are bit-identical with and without
+the change on `--case qa --max-mode 1`; the QA and QI rows of
+`benchmarks/optimization.py` show parts that sum to within 10 % of the
+measured wall time; tests cover the eager and staged paths and a rejected
+trial. Out of scope: any change to refinement, batching or defaults.
+
+**Owns.** `vmex/core/monitoring.py`, `vmex/core/implicit.py` (counter lines
+only), `vmex/core/optimize.py` (counter lines only), `vmex/core/problem.py`
+(diagnostics only), `benchmarks/optimization.py`, and the tests that exercise
+`solve_stats` (`grep -rn solve_stats tests/`).
+
+**Commands.**
+`PYTHONPATH=. python benchmarks/optimization.py --case qa --max-mode 1 --optimizer none --nfev 2`,
+the same with `--case qi`, and the focused tests found by the grep above.
+
+### A2. Exterior-field oracles and loud failure
+
+**Why.** §2's exterior table: the default grid is 12–28 % wrong at 0.1–0.2
+minor radii and says nothing; no test compares the exterior field with an
+oracle.
+
+**Facts.** The direct path is `VirtualCasingExteriorField.B_plasma_xyz` →
+`_call_vc_B` → `compute_internal_B_offsurf_schedule` in `virtual_casing_jax`
+(`exterior_field.py:388–418`), which calls
+`computeB_offsurface_adaptive_schedule` (`integrals.py`, end of the function):
+it computes the self-test error `err_best` and returns only `B_best`. The
+package is `uwplasma/virtual_casing_jax` 0.0.5; VMEX requires
+`virtual-casing-jax>=0.0.5` in the `freeb` extra while
+`docs/explanation/nestor-vacuum.rst:132` still says 0.0.4. `from_wout`
+defaults to 32×32 with one doubling (`extender.py:946, 1053–1056`). The tests
+are in `tests/test_virtual_casing_physics.py` (lane `pr-parity-a1`, skipped
+without the package); its `_synthetic_surface` helper already builds a
+circular torus carrying a purely toroidal field. The existing field test
+evaluates 0.5 m from a 12×12 torus (`146–209`).
+
+**Change.**
+1. Asset-free oracles. On the synthetic torus with `B = B0 R0/R φ̂` (its source
+   current lies on the z-axis, outside the surface) the internal-branch plasma
+   field is zero at exterior targets and minus the applied field at interior
+   targets. Assert agreement to the requested digits at `d ≥ 3h` and assert
+   that the error estimate of item 2 flags targets at `d < h`. Optional
+   finite-current oracle: a circular filament on the magnetic axis, checked
+   against an independent Biot–Savart evaluation.
+2. Achieved error. Make the attained accuracy observable on the public path:
+   surface the schedule's `err` (a small change in `virtual_casing_jax`, then
+   read here) or estimate it in `extender.py` from the last two schedule
+   levels. The eager `VmecExtender.B` warns, or raises under a strict flag,
+   when the estimate exceeds `10^-digits`; traced calls expose the estimate.
+   State the choice and its cost in the PR.
+3. `nestor-vacuum.rst`: the rule `d ≳ 2h` with `h` the full-torus toroidal
+   spacing `2πR/(nfp·nphi)`, the default grid, the measured table
+   (reproduced by the new test or `benchmarks/review_20260913_exterior.py`),
+   the version fix, and when to use the near-surface continuation (below
+   about 0.2 a) instead of the direct path (above about 0.5 a).
+4. `examples/vmex_get_B_outside_plasma.py` evaluates 0.03 m outside on 12×12
+   with `digits=4`: choose settings that pass the new check and print the
+   estimate.
+
+**Gate.** New tests pass in under a minute each; the example prints an
+estimate below its requested tolerance; returned fields are unchanged wherever
+the check passes.
+
+**Owns.** `tests/test_virtual_casing_physics.py`, `vmex/core/extender.py`,
+`vmex/core/virtual_casing.py`, `docs/explanation/nestor-vacuum.rst`,
+`examples/vmex_get_B_outside_plasma.py`. README wording belongs to A4.
+
+### A3. An honest single-stage example
+
+**Facts.** `examples/optimization/single_stage_optimization.py` seeds
+`input.minimal_seed_nfp2` with a 0.02 (1,1) perturbation (`84–89`), a mean ι
+near 0.08 against `IOTA_FLOOR = 0.42` (`43`); ι is a hinge with weight 100
+(`99–109`) while B·n carries 1e3 and 2e5 (`56–59`); `METHOD = "BFGS"` (`72`);
+each trial makes two host callbacks (`212–213`). Smoke mode
+(`VMEX_EXAMPLES_CI=1`, ESSOS with #58) took 224 s and 3.9 GB and ended at
+ι 0.071, aspect 10.2 and B·n RMS 3.1 %. The free-boundary example does not jit
+its objective (`single_stage_free_boundary_optimization.py:145`).
+`tests/test_examples.py` asserts literal strings in both scripts (`290–300`)
+and runs the free-boundary one under `full` (`383–398`). ESSOS ships an
+augmented Lagrangian (`essos/augmented_lagrangian.py`: `eq`, `ineq`,
+`combine`) used by its coil examples.
+
+**Change.** A seed whose solved mean ι is at least 0.3 (measure it;
+`input.minimal_seed_nfp2_target_helicity` or a larger rotating-ellipse
+amplitude are candidates); the ι floor and aspect as constraints (SciPy
+`trust-constr` or SLSQP with their implicit gradients, or the ESSOS augmented
+Lagrangian), not hinges; one host callback per trial; the free-boundary
+objective jitted; the QS residual normalized by ι only if the constrained run
+still collapses ι, and then say so. Keep the final target report and make a
+missed target a non-zero exit.
+
+**Gate.** A full (non-smoke) run meets the ι, aspect and B·n targets within
+a stated budget, or the PR reports the attained values and why; smoke mode is
+no slower than 224 s; a committed profile record for both examples (wall
+time, trials, solves, peak memory, final targets) written by a committed
+script and indexed.
+
+**Owns.** The two example scripts, their assertions in
+`tests/test_examples.py`, and the new record and script. No library code:
+library needs go in the report.
+
+### A4. Documentation that matches the records
+
+**Claims without a record, or contradicted by one.**
+- `docs/reference/performance.rst:365–373` and
+  `docs/reference/objectives.rst:268`: QA in 14.5 min, QI 25× in 17.3 min, 33×,
+  3.7× fewer iterations; no committed record, and
+  `docs/_static/figures/figures.json` says the gradient-stack numbers were
+  typed into the generator.
+- `docs/explanation/adjoint-gradients.md:189–197`: 20.35 s to 0.61 s, 23,685
+  to 6,364 iterations.
+- `docs/howto/parameter-scans.md:3–5`: warm restarts converge in about one
+  iteration; §2 measures 212–391 iterations for boundary moves of 1e-4–1e-2.
+- `README.md:19`: CPU or GPU execution, without the optimization caveat that
+  `docs/howto/run-on-gpu.md:66–70` states.
+- `README.md:142–143, 219–222`: the exterior field with no accuracy
+  qualification ("away from source surfaces" is undefined).
+- `README.md:145–149`: the single-stage example "optimizes the plasma boundary
+  and the coils"; the shipped run misses its own targets.
+- `docs/_static/figures/readme_extender_exterior_islands.webp` is cited by
+  nothing.
+
+**Change.** Every number either gains a committed record and generator or is
+removed; qualitative statements replace unrecorded quantities; the README
+qualifies GPU optimization and the exterior field (pointing to
+`nestor-vacuum.rst`) and states that the single-stage example reports whether
+it met its targets; the orphaned figure is cited with its distance limit or
+retired. README stays at or under 300 lines.
+
+**Gate.** `python tools/check_docs_prose.py`, `tests/test_cited_paths.py`,
+`tests/test_performance_docs.py`, strict Sphinx.
+
+**Owns.** `README.md`, `docs/reference/performance.rst`,
+`docs/reference/objectives.rst`, `docs/explanation/adjoint-gradients.md`,
+`docs/howto/parameter-scans.md`, `docs/howto/run-on-gpu.md`,
+`docs/_static/figures/figures.json`.
+
+### B1. Newton finish (starts after A1 merges)
+
+**Facts.** `_newton_step` (`solver.py:1088–1139`) is reachable only through
+`prec2d`, which no optimizer path configures. `_refined_state`
+(`implicit.py:1451`) runs after the descent on every trial, including
+value-only trials (`optimize.py:3122` → `implicit.py:1635`). On the public QA
+case refinement costs 14–20 s per evaluation against 0.4–0.9 s without it and
+changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
+contract to keep: derivatives only at a state with a fresh projected residual,
+raw FSQ and admissible geometry, and caches keyed by state identity.
+
+**First step, before code.** With A1's counters on the QA and QI cases,
+measure the matvecs refinement spends and the descent iterations between
+`fsq = 1e-8` and the deck tolerance. Implement the in-descent Newton finish
+only if it reaches the refined residual in fewer total matvecs plus
+iterations; otherwise record the numbers, and test refining only at points
+where a derivative is requested.
+
+**Gate.** As in §4 B1; the kill rule of §4 applies. Owns `solver.py` and
+`implicit.py` (A1's counter lines stay).
+
+### B4a. Retarget #307
+
+#307's seven lines in `solver.py` (commitment-flag normalization; recorded
+next accepted residual 4.9 → 0.35 s) do not depend on #299. Retarget it to
+`main`, rerun its tests, and add the A1 counter row before and after once A1
+has merged.
+
+### Literature checks left open (optional)
+
+- **L1, behind B5.** Nonlinear iterations and linear matvecs to force balance
+  for VMEC's `PRECON_TYPE` modes, SIESTA and DESC's least squares; XLA CPU
+  threading for millisecond-scale kernels; `shard_map` across host CPU
+  devices; what VMEC++'s OpenMP partitions.
+- **L2, behind F1–F3.** DESC's free-boundary Jacobian cost; VMEC++'s NESTOR
+  hot restart and whether its adjoint covers free boundary; the adjoint
+  free-boundary literature (Paul, Antonsen, Landreman and Cooper 2020); what a
+  frozen NESTOR factorization loses against differentiating the assembly.
+
+## 9. Execution logbook
 
 Format: date, PR (base and head), gate, command and environment, result with
 units, limitation, next action. The 2026-09-05 to 2026-09-08 entries (Phase 1
@@ -380,3 +627,10 @@ material for the next session: the eight review reports and every script and
 log under the reviewer's `vmex-review-evidence` directory, and the worktree
 `vmex-review-main` on this branch. Next action unchanged: Phase A, A1 first,
 then A2 with the vacuum and interior identities as the exterior-field oracles.
+
+**2026-09-13, reconvened.** #308 green on every lane including the PR gate;
+main unchanged at `f09288b3`. Agent briefs for A1–A4, B1, B4a and the two open
+literature checks added as §8, so Phase A executes from this document alone.
+Phase A starts with A1–A4 in parallel on disjoint files; the office
+workstation is unavailable for heavy runs (disk full), so heavy local jobs are
+serialized.
