@@ -22,6 +22,9 @@ revision it was measured at, and the pages that cite it.
   and `R0` the effective major radius, so GKX's minor radius is physical (#271).
 - Optimization seed refinement is a deferred per-configuration executable, on the
   scalar, free-boundary implicit and mirror Newton-Krylov paths (#240, #241).
+- A concrete call to `problem.jax_value_and_grad` returns the host lane's pair, and
+  shares its solve memo, warm-start stash and counters; with `jac_solver="block"`
+  forced it raises the typed error instead of falling back. Traced calls are unchanged (#321).
 
 ### Fixed
 

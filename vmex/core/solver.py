@@ -848,7 +848,7 @@ def _constraint_baselines(
     state, rt = commit_to_single_device((state, replace(rt, rcon0=None, zcon0=None)))
     arrays = [leaf for leaf in jax.tree.leaves((state, rt)) if isinstance(leaf, jax.Array)]
     if arrays and all(
-        not isinstance(leaf, jax.core.Tracer) and leaf._committed for leaf in arrays
+        not isinstance(leaf, jax.core.Tracer) and leaf.committed for leaf in arrays
     ):
         with jax.default_device(None):
             return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
