@@ -169,7 +169,7 @@ from .residuals import (
     preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
     zero_m1_z_force,
 )
-from .setup import RunSetup, guess_axis, interior_guess, run_setup
+from .setup import GUESS_AXIS_GRID_POINTS, RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
     DAMPING_CAP, GROWTH_BACKOFF_DIVISOR, GROWTH_LIMIT, GROWTH_MIN_ITERATIONS,
     JACOBIAN_RESET_FACTOR, NDAMP, RESTART_GROWTH, RESTART_JACOBIAN, STEP_OK,
@@ -1506,8 +1506,93 @@ def _evaluation_nonfinite(result: _EvalResult) -> Array:
     )
 
 
+def _guess_axis_traced(geometry, *, s, trig, signgs, grid_points=GUESS_AXIS_GRID_POINTS):
+    """Fixed-shape JAX port of :func:`~vmex.core.setup.guess_axis` for traced solves.
+
+    The same ``guess_axis.f`` grid search and tie-breaks, vectorized over
+    zeta planes; up-down-symmetric planes scan a zero ``z`` grid of full size,
+    which selects the same point as the host's single ``z = 0`` row.  The host
+    solver keeps the NumPy routine.
+    """
+    lasym = bool(trig.lasym)
+    ntheta1, ntheta2, ntheta3 = int(trig.ntheta1), int(trig.ntheta2), int(trig.ntheta3)
+    ns, nzeta = int(s.shape[0]), int(geometry.R_even.shape[2])
+    sqrts = jnp.sqrt(jnp.maximum(s, 0.0))
+    ns12 = (ns + 1) // 2 - 1
+    ds = (ns - 1 - ns12) * (s[1] - s[0])
+    # Products stay out of fused multiply-adds, so the near-tied minima the
+    # search compares round exactly as in NumPy.
+    exact = lax.optimization_barrier
+    ru0 = geometry.dR_dtheta_even + exact(sqrts[:, None, None] * geometry.dR_dtheta_odd)
+    zu0 = geometry.dZ_dtheta_even + exact(sqrts[:, None, None] * geometry.dZ_dtheta_odd)
+    reduced = (
+        geometry.R_even[ns - 1, :ntheta3] + geometry.R_odd[ns - 1, :ntheta3],
+        geometry.Z_even[ns - 1, :ntheta3] + geometry.Z_odd[ns - 1, :ntheta3],
+        geometry.R_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.R_odd[ns12, :ntheta3]),
+        geometry.Z_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.Z_odd[ns12, :ntheta3]),
+        0.5 * (ru0[ns - 1, :ntheta3] + ru0[ns12, :ntheta3]),
+        0.5 * (zu0[ns - 1, :ntheta3] + zu0[ns12, :ntheta3]),
+    )
+    full = [jnp.zeros((ntheta1, nzeta), a.dtype).at[:ntheta3].set(a) for a in reduced]
+    if not lasym:  # R(v,-u) = R(2pi-v,u), Z(v,-u) = -Z(2pi-v,u)
+        rows = (ntheta1 - np.arange(ntheta2, ntheta1))[:, None]
+        cols = ((nzeta - np.arange(nzeta)) % nzeta)[None, :]
+        for k, flip in enumerate((False, True, False, True, True, False)):
+            mirrored = reduced[k][rows, cols]
+            full[k] = full[k].at[ntheta2:].set(-mirrored if flip else mirrored)
+    r1b, z1b, r12, z12, ru12, zu12 = full
+    frac = jnp.arange(grid_points, dtype=s.dtype) / float(max(grid_points - 1, 1))
+    planes = np.arange(nzeta if lasym else nzeta // 2 + 1)
+    fixed_z = np.zeros(planes.size, bool) if lasym else (planes == 0) | (planes == nzeta // 2)
+
+    def plane(iv, zero_z):
+        rmin, rmax = jnp.min(r1b[:, iv]), jnp.max(r1b[:, iv])
+        zmin, zmax = jnp.min(z1b[:, iv]), jnp.max(z1b[:, iv])
+        rmid, zmid = 0.5 * (rmax + rmin), 0.5 * (zmax + zmin)
+        rs = (r1b[:, iv] - r12[:, iv]) / ds + geometry.R_even[0, 0, iv]
+        zs = (z1b[:, iv] - z12[:, iv]) / ds + geometry.Z_even[0, 0, iv]
+        tau0 = exact(ru12[:, iv] * zs) - exact(zu12[:, iv] * rs)
+        r_grid = rmin + exact((rmax - rmin) * frac)
+        z_grid = jnp.where(zero_z, 0.0, zmin + exact((zmax - zmin) * frac))
+        tau = signgs * ((tau0[None, None, :] - exact(ru12[:, iv][None, None, :] * z_grid[:, None, None]))
+                        + exact(zu12[:, iv][None, None, :] * r_grid[None, :, None]))
+        min_tau = jnp.min(tau, axis=2)
+        max_tau = jnp.max(min_tau)
+        z_abs = jnp.abs(z_grid)
+
+        def nearest_row(rows):  # first row of smallest |z| among ``rows``
+            smallest = jnp.min(jnp.where(rows, z_abs, jnp.inf))
+            return jnp.argmax(rows & (z_abs == smallest)), jnp.any(rows)
+
+        best = min_tau == max_tau
+        first = jnp.argmax(best.reshape(-1))
+        z_first = z_grid[first // grid_points]
+        row, found = nearest_row(jnp.any(best, axis=1))
+        z_pos = jnp.where(found & (jnp.abs(z_first) > z_abs[row]), z_grid[row], z_first)
+        row, found = nearest_row(jnp.any(min_tau == 0.0, axis=1) & (z_abs < jnp.abs(zmid)))
+        z_zero = jnp.where(found, z_grid[row], zmid)
+        rbest = jnp.where(max_tau > 0.0, r_grid[first % grid_points], rmid)
+        zbest = jnp.where(max_tau > 0.0, z_pos, jnp.where(max_tau == 0.0, z_zero, zmid))
+        return rbest, zbest
+
+    rcom, zcom = jax.vmap(plane)(jnp.asarray(planes), jnp.asarray(fixed_z))
+    if not lasym:
+        mirror = nzeta - np.arange(nzeta // 2 + 1, nzeta)
+        rcom = jnp.concatenate([rcom, rcom[mirror]])
+        zcom = jnp.concatenate([zcom, -zcom[mirror]])
+    cosnv, sinnv, nscale = (np.asarray(t, dtype=float) for t in (trig.cosnv, trig.sinnv, trig.nscale))
+    dzeta = 2.0 / float(nzeta)
+    half = np.ones(nscale.size)
+    half[0] = 0.5
+    if nzeta % 2 == 0 and nzeta // 2 <= nscale.size - 1:
+        half[nzeta // 2] = 0.5
+    return (dzeta * (cosnv.T @ rcom) / nscale * half, -dzeta * (sinnv.T @ rcom) / nscale,
+            dzeta * (cosnv.T @ zcom) / nscale * half, -dzeta * (sinnv.T @ zcom) / nscale)
+
+
 def reguess_initial_axis(
-    rt: SolverRuntime, state: SpectralState, *, use_fft: bool = False
+    rt: SolverRuntime, state: SpectralState, *, use_fft: bool = False,
+    guess=guess_axis,
 ) -> tuple[SolverRuntime, SpectralState, tuple[Array, Array, Array, Array]]:
     """Apply VMEC2000's first-pass magnetic-axis retry.
 
@@ -1515,11 +1600,12 @@ def reguess_initial_axis(
     for ``LMOVE_AXIS=T`` with a first raw-force sum above ``1e2``.  Besides
     rebuilding the ``profil3d`` state, this updates the setup's axis arrays
     and rebinds the constraint baselines to that state
-    (``funct3d.f: iter2 == iter1``).
+    (``funct3d.f: iter2 == iter1``).  ``guess`` is the host
+    :func:`~vmex.core.setup.guess_axis`, or :func:`_guess_axis_traced` inside a trace.
     """
     setup = rt.setup
     _, geometry = _geometry_lane(state, rt, use_fft=use_fft)
-    axis = guess_axis(
+    axis = guess(
         geometry, s=setup.s_full, trig=rt.trig, signgs=setup.signgs
     )
     arrays = interior_guess(
@@ -2447,6 +2533,46 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
             attempt_residuals=(carry.fsqr, carry.fsqz, carry.fsql),
         )
     return carry
+
+
+def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
+                        time_step0: float, use_fft: bool = False) -> _LoopCarry:
+    """:func:`_solve_stage` as one traceable program, for a solve inside ``jax.jit``.
+
+    Runs the ``lax.while_loop`` lane and, on the host driver's condition (a
+    first-iteration bad Jacobian or raw-force axis transfer with
+    ``ijacob == 0`` and ``ns >= 3``), re-guesses the axis with
+    :func:`_guess_axis_traced` and runs the same lane once more with the same
+    state, velocity and residual continuation.  The JAC75 retries stay on the
+    host: they change the static ``lmove_axis``, so a traced solve returns
+    that flag instead.
+    """
+    lane = _while_lane_fft if use_fft else _while_lane
+    state0 = _initial_state(rt.setup) if state0 is None else state0
+    zeros = jax.tree.map(jnp.zeros_like, state0)
+    one = jnp.ones((), dtype=rt.setup.s_full.dtype)
+    start = jax.tree.map(jnp.array, _initial_carry(state0, rt, ijacob=0, time_step0=time_step0))
+
+    def trip(loop):
+        _, first, state, runtime, ijacob, xcdot, residuals, _ = loop
+        carry = _initial_carry(state, runtime, ijacob=0, time_step0=time_step0,
+                               xcdot=xcdot, residuals=residuals)
+        carry = lane(jax.tree.map(jnp.array, replace(carry, ijacob=ijacob)), runtime)
+        axis_transfer = carry.ier == AXIS_REGUESS_FLAG
+        retry = (first & ((carry.ier == BAD_JACOBIAN_FLAG) | axis_transfer)
+                 & (carry.ijacob == 0) & (runtime.resolution.ns >= 3))
+
+        def reguess(_):
+            new_rt, new_state, _axis = reguess_initial_axis(
+                runtime, state, use_fft=use_fft, guess=_guess_axis_traced)
+            return (new_state, new_rt, jnp.ones_like(ijacob),
+                    _select(axis_transfer, carry.xcdot, zeros), (carry.fsqr, carry.fsqz, carry.fsql))
+
+        following = lax.cond(retry, reguess, lambda _: (state, runtime, ijacob, xcdot, residuals), None)
+        return (retry, jnp.zeros((), bool), *following, carry)
+
+    loop = (jnp.ones((), bool), jnp.ones((), bool), state0, rt, start.ijacob, zeros, (one, one, one), start)
+    return lax.while_loop(lambda loop: loop[0], trip, loop)[-1]
 
 
 def _finalize(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
