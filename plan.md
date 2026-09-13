@@ -60,8 +60,9 @@ PR is merged or explicitly deferred and the gates of A–F hold.
 Measured 2026-09-13 on one Apple-silicon laptop (14 cores, shared, load 3–11)
 unless a record is cited; timings are diagnostic samples, not rankings.
 
-**Equilibrium solve against VMEC++** (`input.LandremanPaul2021_QA_lowres`, ns = 50,
-FTOL 1e-11, four threads; the shipped 1e-13 is unreachable for both codes):
+**Equilibrium solve against VMEC++** (`input.LandremanPaul2021_QA_lowres`, nfp = 2,
+MPOL = NTOR = 8, ns = 50, FTOL 1e-11, four threads; the shipped 1e-13 is
+unreachable for both codes):
 
 | case | VMEC++ 0.7.4 | VMEX, JAX 0.11.1 | VMEX, JAX 0.9.2 |
 |---|---|---|---|
@@ -226,7 +227,7 @@ attribution. One heavy local job at a time; the office box takes one.
 | B2 warm starts everywhere | perturbation predictor into the free-boundary cache; rung skipping for `initial_state`; hot restart for CLI and `solve_file` sequences; `mode="jit"` inside the callback | 806 → 212 iterations at a 1e-4 move | iterations per accepted trial ≤ 0.3× cold on the QI example |
 | B3 Krylov recycling | warm-start λ across trials; reuse the GCROT deflation space across Newton and adjoint solves; freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5× |
 | B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows | 102 compiles in a five-evaluation warm campaign | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages |
-| B5 per-iteration constant | one bounded experiment (≤ 1 week): `shard_map` over radial blocks on host CPU devices, mirroring VMEC++'s OpenMP partition, plus the HLO census of the block lane | 2.4 vs 0.9 ms per iteration | keep only if warm ns = 50 QA drops below 1.5 ms per iteration with bit-identical trajectories; otherwise record and stop |
+| B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration |
 
 ### Phase C, weeks 2–4: derivatives sized to the problem
 
@@ -563,12 +564,33 @@ changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
 contract to keep: derivatives only at a state with a fresh projected residual,
 raw FSQ and admissible geometry, and caches keyed by state identity.
 
-**First step, before code.** With A1's counters on the QA and QI cases,
-measure the matvecs refinement spends and the descent iterations between
-`fsq = 1e-8` and the deck tolerance. Implement the in-descent Newton finish
-only if it reaches the refined residual in fewer total matvecs plus
-iterations; otherwise record the numbers, and test refining only at points
-where a derivative is requested.
+**Precedent and risk.** Every code that finishes a VMEC-type descent with
+Krylov (VMEC2000's `PRECON_TYPE` modes, PARVMEC, SIESTA) preconditions it with
+the 2-D radial block operator; SIESTA reaches a 1e-19 residual in 6–11
+Hessian builds and 348–1,123 block back-solves. `_newton_step` preconditions
+GMRES only through the 1-D preconditioned force (`solver.py:1093–1132`), so
+its GMRES sees the conditioning that makes the descent take ~800 iterations.
+VMEX already assembles and factors the exact radial block-tridiagonal raw
+force Jacobian for its implicit derivatives (`_raw_block_system` and the block
+Thomas factor, `implicit.py:2259–2470`): that factorization is the natural
+2-D preconditioner.
+
+**First step, before code.** With A1's counters on the QA (MPOL = NTOR = 8,
+ns = 50) and QI cases, save states at `fsq` = 1e-6, 1e-8 and 1e-10. From each,
+record (a) descent iterations to the deck tolerance plus the matvecs today's
+refinement spends, (b) a forced `_newton_step` with the 1-D preconditioner:
+Newton steps, GMRES matvecs per step, line-search evaluations, (c) the same
+with the block factorization as preconditioner, refactored at most once per
+trial, and (d) a control: Anderson acceleration (window 5–10) on the descent
+map. Count work as `W = force evaluations + c·JVPs + f·factorizations` with
+`c` and `f` the measured warm cost ratios to one force evaluation. Implement
+the arm with the lowest `W` to the same certified residual only if it beats
+(a); drop (d) below 1.5× fewer evaluations.
+
+**Kill per arm.** More than 50 matvecs per Newton step at rtol 1e-3; `fsq`
+falling less than 10× in two of the first three steps; a Jacobian reset; or a
+final state farther from the refined state than the certificate tolerance.
+If both Newton arms die, test refining only where a derivative is requested.
 
 **Gate.** As in §4 B1; the kill rule of §4 applies. Owns `solver.py` and
 `implicit.py` (A1's counter lines stay).
@@ -582,10 +604,11 @@ has merged.
 
 ### Literature checks left open (optional)
 
-- **L1, behind B5.** Nonlinear iterations and linear matvecs to force balance
-  for VMEC's `PRECON_TYPE` modes, SIESTA and DESC's least squares; XLA CPU
-  threading for millisecond-scale kernels; `shard_map` across host CPU
-  devices; what VMEC++'s OpenMP partitions.
+- **L1, behind B1 and B5: done 2026-09-13.** Folded into the B1 brief (block
+  preconditioner arm, work metric, kill rules) and the B5 row (thread scaling
+  first, dispatch before sharding). Unverified and still open: published
+  iteration savings of VMEC2000's `PRECON_TYPE='GMRES'`, VMEC++'s
+  single-thread time on this deck, and whether its wheel is built with FFTX.
 - **L2, behind F1–F3.** DESC's free-boundary Jacobian cost; VMEC++'s NESTOR
   hot restart and whether its adjoint covers free boundary; the adjoint
   free-boundary literature (Paul, Antonsen, Landreman and Cooper 2020); what a
@@ -634,3 +657,12 @@ literature checks added as §8, so Phase A executes from this document alone.
 Phase A starts with A1–A4 in parallel on disjoint files; the office
 workstation is unavailable for heavy runs (disk full), so heavy local jobs are
 serialized.
+
+**2026-09-13, L1 returned.** Literature check L1 (read-only): every Krylov
+finish of a VMEC-type descent uses a 2-D block preconditioner, while
+`_newton_step` has only the 1-D one; B1 gains a block-factorization arm, a
+work metric and per-arm kill rules. Anderson or nonlinear-GMRES acceleration
+has no evidence above 1.3–2× for this problem class and stays a control arm.
+For B5, doing less per iteration (loop trips, thunk count, batched kernels)
+is more plausible than host-device sharding. §2 now states the timing deck's
+resolution (MPOL = NTOR = 8).
