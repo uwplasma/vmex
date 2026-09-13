@@ -196,7 +196,7 @@ QI or single-stage paper publishes wall times except Dudt's.
 
 | complaint | cause, verified in code or record |
 |---|---|
-| slow QI | two nonlinear solves per trial (descent to 1e-12, then refinement); serial Jacobian with a per-dof GMRES corrector; 45–190 s recompile per `max_mode` stage; a non-smooth surrogate residual (`argmin`, `cummax`, `interp`) with 17,712 rows that fails trials; a circular-torus seed where every published QI result used a near-axis one |
+| slow QI | two nonlinear solves per trial (descent to 1e-12, then a refinement that on the seed deck exhausts 6,000 GCROT iterations and returns the state unchanged, because the raw Jacobian's edge λ modes put its condition number near 6e12); serial Jacobian with a per-dof GMRES corrector; 45–190 s recompile per `max_mode` stage; a non-smooth surrogate residual (`argmin`, `cummax`, `interp`) with 17,712 rows that fails trials; a circular-torus seed where every published QI result used a near-axis one |
 | slow single-stage | path-dependent objective, so BFGS line searches fail; refinement and the full Jacobian on every trial; penalty BFGS instead of least squares; a seed at ι ≈ 0.08 against a 0.42 floor, with B·n weighted 70× the ι term |
 | slow free-boundary single-stage | 59 s solves with no predictor; NESTOR inside every adjoint matvec; un-jitted objective |
 | exterior field | trapezoid rule off-surface with silent non-convergence; O(N_src) per target with 0.42 s latency; no oracle test |
@@ -333,7 +333,7 @@ check that may be red.
 | vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
 | vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
-| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence | do not merge as is; its three source commits are B1's candidate contract |
+| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
 | vmex #307 | seven lines on #299's branch | B4 re-lands it on `main` |
 | vmex #301, #303, #304 | winding surface | parked |
@@ -612,6 +612,33 @@ design (`implicit.py:1403–1430`: convergence "is never enforced here") and
 `_refined_state` keeps the lowest-residual iterate, so a capped step is
 applied silently. Refinement today is a budget, not a solve.
 
+**Measured premise failure (B1, 2026-09-13; record to be committed with the
+B1 script).** On the seed deck behind the A1 rows (`input.minimal_seed_nfp2`,
+mpol = ntor = 5, ns = 31, ftol 1e-12) the raw force Jacobian on the 4,352
+active degrees of freedom has σ_max ≈ 9.0e3 and σ_min ≈ 1.4e-9 (condition
+number ≈ 6e12); its near-null right singular vectors are edge-localized λ
+(`L_sin`) modes, (m, n) = (1, 0), (4, 0) and (0, 1). No arm certifies
+|F| ≤ 1e-10: Newton with the 1-D preconditioner stalls at 1,000 matvecs per
+step; Newton preconditioned by the exact block factorization (one GMRES
+iteration to 7e-11) takes a step of 6e-2 along those modes against a true gap
+of 1.3e-4 and stalls; a Levenberg–Marquardt shift floors at 6.8e-8; Anderson
+acceleration reaches the deck tolerance with 7–11× fewer force evaluations
+from `fsq` = 1e-8 to 1e-10 but certifies nothing. Today's refinement runs 3 ×
+2,000 GCROT iterations (34.6 s) and returns the descent state unchanged. The
+achievable floor is |F| ≈ 1e-7, which the descent already reaches.
+
+**Decisions.** (B1a) Stop refinement when a step's inner solve misses its
+forcing term and the step does not lower |F| — an unconverged, non-improving
+inner solve is not a Newton direction; results are identical where refinement
+works and 6,000 → 2,000 GCROT iterations on the A1 rows. (B1b) Before any
+further finish or certificate work, determine whether the near-null λ modes
+are a discrete gauge of the equations: if the residual is invariant along them
+to first order, deflate them from the Newton step, the adjoint and the
+certificate, and test whether the projected residual then certifies 1e-10 and
+whether objectives and gradients are insensitive to them. #302's and #306's
+1e-10 primal certificate would reject every state on this deck until B1b
+answers this.
+
 **Precedent and risk.** Every code that finishes a VMEC-type descent with
 Krylov (VMEC2000's `PRECON_TYPE` modes, PARVMEC, SIESTA) preconditions it with
 the 2-D radial block operator; SIESTA reaches a 1e-19 residual in 6–11
@@ -830,3 +857,13 @@ every new path.
 locally, CI queued). Speed claims cite #299's records until #310's counters are
 on `main`; #315 is correctness-only; #316's NCSX gradient check was not rerun
 here. #299's guidance edits that cite records not on `main` become A4b.
+
+**2026-09-13, B1 premise fails.** B1's measurement on the seed deck: condition
+number ≈ 6e12 from edge-localized λ modes, no Newton arm certifies 1e-10,
+today's refinement is a 34.6 s no-op, and the achievable floor (|F| ≈ 1e-7)
+is what the descent already reaches. Decisions recorded in the B1 brief: B1a
+exits refinement on an unconverged, non-improving step (6,000 → 2,000 GCROT
+iterations, identical results); B1b asks whether those modes are a discrete
+gauge to deflate before any certificate work; #302 and #306 stay held. The
+MPOL = NTOR = 8 QA deck is being measured next to see whether resolution
+changes the conditioning.
