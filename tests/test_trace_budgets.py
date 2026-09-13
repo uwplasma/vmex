@@ -403,12 +403,18 @@ class CompileCounter(logging.Handler):
     def __init__(self):
         super().__init__(level=logging.DEBUG)
         self.names = []
+        self.signatures = []
 
     def emit(self, record):
         message = record.getMessage()
         if "Finished XLA compilation of" in message:
             self.names.append(message.split("Finished XLA compilation of ")[1]
                               .rsplit(" in ", 1)[0])
+        elif (message.startswith("Compiling ")
+              and " with global shapes and types " in message):
+            name, shapes = message[len("Compiling "):].split(
+                " with global shapes and types ", 1)
+            self.signatures.append((name, shapes.split(". Argument mapping")[0]))
 
 
 counter = CompileCounter()
@@ -451,6 +457,19 @@ graph_pair = new_programs(
 new_programs("repeat", lambda: problem.jax_value_and_grad(x0))
 report["jax_rel"] = relative(jax_pair, host)
 report["graph_rel"] = relative(graph_pair, host)
+
+# Later host trials must reuse the commitment-sensitive lanes: one compile
+# per argument signature, whatever commitment the trial's seed arrives with.
+for step in (1.0e-3, 2.0e-3):
+    problem.value_and_grad(problem.x0 + step)
+report["signatures"] = {}
+for lane in ("jit(_block_lane)", "jit(_constraint_baselines_lane)",
+             "jit(predicted_state)"):
+    counts = {}
+    for name, shapes in counter.signatures:
+        if name == lane:
+            counts[shapes] = counts.get(shapes, 0) + 1
+    report["signatures"][lane] = sorted(counts.values())
 
 # Full-jit reference: the same objective with the host callback replaced by
 # the solver's while-loop lane inside the implicit rule.
@@ -530,3 +549,13 @@ def test_jax_lanes_reuse_host_executables_and_full_jit_reference_agrees():
     assert 0 < len(report["full_jit"]) <= _FULL_JIT_PROGRAMS, report
     assert report["full_jit_warm"] == [], report
     assert report["full_jit_rel"] <= _FULL_JIT_HOST_AGREEMENT, report
+    # Compiles per argument signature over the construction solve and three
+    # host trials.  The baselines lane and the perturbation predictor compile
+    # once.  _block_lane still compiles twice for its one signature: the
+    # construction solve runs without a default device and the trial solves
+    # inside one, and jax keys executables on that context (measured
+    # 2026-09-13, jax 0.9.2 and 0.11.1).  Move this pin to [1] with that fix.
+    signatures = report["signatures"]
+    assert signatures["jit(_constraint_baselines_lane)"] == [1], report
+    assert signatures["jit(predicted_state)"] == [1], report
+    assert signatures["jit(_block_lane)"] == [2], report

@@ -832,8 +832,31 @@ def runtime_with_baselines(
     return replace(rt, rcon0=rcon0, zcon0=zcon0)
 
 
-@functools.partial(jax.jit, static_argnames="use_fft")
 def _constraint_baselines(
+    state: SpectralState, rt: SolverRuntime, *, use_fft: bool = False
+):
+    """:func:`_constraint_baselines_lane` with one executable per structure.
+
+    Callers differ in ways the lane does not read but a jit key does: the
+    runtime's own ``rcon0/zcon0`` (a scalar placeholder or earlier
+    baselines), the arguments' commitment, the default-device context, and
+    whether ``use_fft`` is passed.  The baselines are dropped from the
+    runtime, the arguments committed to their shared placement (which then
+    fixes where the lane runs, so the context is cleared), and ``use_fft``
+    always passed by keyword.  Values are unchanged.
+    """
+    state, rt = commit_to_single_device((state, replace(rt, rcon0=None, zcon0=None)))
+    arrays = [leaf for leaf in jax.tree.leaves((state, rt)) if isinstance(leaf, jax.Array)]
+    if arrays and all(
+        not isinstance(leaf, jax.core.Tracer) and leaf._committed for leaf in arrays
+    ):
+        with jax.default_device(None):
+            return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
+    return _constraint_baselines_lane(state, rt, use_fft=bool(use_fft))
+
+
+@functools.partial(jax.jit, static_argnames="use_fft")
+def _constraint_baselines_lane(
     state: SpectralState, rt: SolverRuntime, *, use_fft: bool = False
 ):
     """One-time ``rcon0/zcon0 = s * rcon(ns)`` (funct3d.f, iter2 == iter1).
