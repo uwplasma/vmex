@@ -3483,6 +3483,13 @@ def _least_squares_implicit(
         problem_jit_key, "residual_value_grad",
         lambda: jax.jit(residual_value_and_gradient))
 
+    def residual_value_grad(x: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Concrete calls reuse the host lane's executables; traces inline."""
+        if isinstance(x, jax.core.Tracer):
+            return residual_value_grad_jit(x)
+        value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
+        return _place(np.asarray(value)), _place(gradient)
+
     def jax_state_runtime(x: jnp.ndarray):
         """Converged implicit state/runtime pair for differentiable field APIs."""
         params = params_of(x)
@@ -3500,7 +3507,7 @@ def _least_squares_implicit(
         return scalar_loss_jit(x)
 
     def residual_scalar_public_fwd(x):
-        value, gradient = residual_value_grad_jit(x)
+        value, gradient = residual_value_grad(x)
         return value, gradient
 
     def residual_scalar_public_bwd(gradient, cotangent):
@@ -3535,7 +3542,7 @@ def _least_squares_implicit(
             ),
             jax_value_and_grad=(
                 value_grad_jit if traceable_scalar is not None
-                else residual_value_grad_jit
+                else residual_value_grad
             ),
             jax_residual=(None if traceable_scalar is not None else rows_jit),
             jax_residual_jac=(None if traceable_scalar is not None else jax_jac_public),
