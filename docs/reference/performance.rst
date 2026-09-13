@@ -362,15 +362,19 @@ problem sizes (see the GPU guidance below).
 Optimization wall time
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Whole-campaign numbers, from a near-circular torus to a precise
-configuration on a 36-core office CPU (details and scripts in
-:doc:`/explanation/adjoint-gradients`): QA to QS 7.2e-6 in **14.5 min** with a single
-ESS-scaled ``least_squares`` call (the staged ``max_mode`` 1–5 ladder
-reaches 3.7e-7 in 25.5 min), and QI to a 25x omnigenity-residual reduction
-in **17.3 min**. Two measured gradient-stack optimizations make that
-possible — the block-tridiagonal implicit Jacobian (33x on the Jacobian
-phase) and the perturbation warm start (3.7x fewer trial-solve iterations)
-— both on by default and documented in :doc:`/explanation/adjoint-gradients`.
+No committed record times a whole optimization campaign from a seed to a
+final design, so this page states no campaign duration.  The committed
+records time parts of one: rows F4 and F8 above (one implicit scalar value
+and gradient; five least-squares evaluations) and the QA startup records
+``benchmarks/qa_optimization_startup_least_squares_m4.json`` and
+``benchmarks/qa_optimization_startup_scalar_m4.json`` (48 boundary degrees
+of freedom on one Apple CPU host; read in :doc:`/reference/optimization`).
+None of them splits a warm evaluation into the equilibrium solve, its
+refinement, and the Jacobian or adjoint, so none of them says where the warm
+time goes.  The block-tridiagonal implicit Jacobian and the perturbation warm
+start are on by default and described in
+:doc:`/explanation/adjoint-gradients`; neither has a committed before/after
+record.
 
 Parity with VMEC2000
 --------------------
