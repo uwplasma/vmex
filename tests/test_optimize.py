@@ -370,22 +370,37 @@ def test_qi_residual_golden_pin():
     assert float(ours["total"]) > 0.0
 
 
-def test_qi_regression_pin_and_jit(solovev_eq):
-    """QI residual on a cached converged state: pin, finiteness, jit parity.
-    Pin recorded 2026-07-09 (x64 CPU; solovev ns=11 ftol 1e-14, surfaces
-    (0.5, 1.0), mboz=nboz=8) -> total = 0.13626; rtol 1e-3 because the
-    residual amplifies convergence-path drift (~1e-4 between BLAS/jit
-    configurations)."""
+def test_qi_regression_pin_and_jit():
+    """QI residual on the golden li383_low_res wout: pin, finiteness, jit parity.
+
+    Pin recorded 2026-09-13 (x64 CPU, JAX 0.9.2 and 0.11.1 agree; surfaces
+    (0.5, 1.0), mboz=nboz=8) -> total = 0.357984; rtol 1e-3 as before. The
+    golden VMEC2000 wout needs no solve and no /tmp state cache. The former
+    solovev pin sat on an argmin tie: an axisymmetric |B| has equal minima
+    along each field line, so rounding picked the well and the total flipped
+    between 0.13626 and 0.13500. The guard below keeps the pinned wells
+    unique; smooth wells (plan D1) remove the argmin altogether."""
     pytest.importorskip("booz_xform_jax")
-    booz = opt.boozer_modes_from_wout(solovev_eq.wout, surfaces=[0.5, 1.0],
-                                      mboz=8, nboz=8)
+    w = _golden_wout("li383_low_res")
+    booz = opt.boozer_modes_from_wout(w, surfaces=[0.5, 1.0], mboz=8, nboz=8)
     out = opt.quasi_isodynamic_residual(
         bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
         iota_b=booz["iota_b"], nfp=booz["nfp"], **QI_KW)
     res = np.asarray(out["residuals1d"])
     total = float(out["total"])
     assert np.all(np.isfinite(res))
-    np.testing.assert_allclose(total, 0.1362660686195369, rtol=1e-3)
+    # The residual's two argmins read normalized |B| (range 1) per field line
+    # over the periodic and the endpoint-inclusive samples.
+    grid = opt._qi_grid(
+        booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
+        weights=None, phimin=0.0,
+        **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
+                                 "include_bounce_endpoints", "softness")})
+    bnorm = np.swapaxes(np.asarray(grid[6]), 1, 2)
+    for samples in (bnorm[..., :-1], bnorm):
+        ordered = np.sort(samples, axis=-1)
+        assert np.min(ordered[..., 1] - ordered[..., 0]) > 1.0e-6, "tied well minimum"
+    np.testing.assert_allclose(total, 0.35798447568604536, rtol=1e-3)
 
     total_jit = jax.jit(
         lambda bm: opt.quasi_isodynamic_residual(
@@ -394,7 +409,7 @@ def test_qi_regression_pin_and_jit(solovev_eq):
     np.testing.assert_allclose(float(total_jit), total, rtol=1e-12)
     # the wout-level convenience wrapper agrees (same booz configuration)
     total_wrap = float(opt.quasi_isodynamic_residual_from_wout(
-        solovev_eq.wout, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
+        w, surfaces=[0.5, 1.0], mboz=8, nboz=8, **QI_KW)["total"])
     np.testing.assert_allclose(total_wrap, total, rtol=1e-12)
 
 
@@ -709,7 +724,10 @@ def test_least_squares_implicit_jac_chunking(solovev_eq):
 def test_auto_jac_chunk_stays_bounded_with_large_device(monkeypatch):
     """A reported accelerator budget must not turn ``auto`` into one vmap."""
     monkeypatch.setattr(opt, "auto_chunk_size", lambda dim: dim)
-    assert opt._auto_jac_chunk(120) == 11
+    assert opt._auto_jac_chunk(120) == 10
+    assert opt._auto_jac_chunk(8) == 2
+    assert opt._auto_jac_chunk(48) == 6
+    assert opt._auto_jac_chunk(53) == 8  # do not serialize a prime-size batch
 
 
 def test_jacobian_certificate_retains_the_worst_residual_evidence():
@@ -720,7 +738,7 @@ def test_jacobian_certificate_retains_the_worst_residual_evidence():
         tolerance=jnp.array([1.0e-6, 1.0e-4]),
     )
     np.testing.assert_allclose(
-        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4]
+        opt._linear_response_summary(report), [5, 1, 2.0e-3, 1.0e-4, 8, 2]
     )
 
 
@@ -1083,6 +1101,14 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     evaluation = problem.evaluate(problem.x0)
     assert evaluation.success
     assert evaluation.diagnostics["solve_stats"]["solves"] >= 1
+    counters = evaluation.diagnostics["solve_stats"]
+    assert counters["jacobian_columns"] >= counters["jacobians"] >= 1
+    assert counters["jacobian_seconds"] > 0.0 and counters["solve_seconds"] > 0.0
+    assert counters["refinements"] >= 1
+    record = opt.OptimizationMonitor(problem, stream=None).record(
+        problem.x0, cost=0.0, terms={})
+    assert record.counters == counters
+    assert record.rejected_trials == problem.metadata["holder"]["failed_trials"]
     scalar = opt.VmecProblem.from_loss(
         inp,
         lambda state, runtime: 0.5 * (opt.aspect_ratio(state, runtime) - 4.0) ** 2,

@@ -20,8 +20,23 @@ from .mgrid import MgridField, read_mgrid
 
 Array = Any
 PlasmaMode = Literal["auto", "include", "vacuum"]
+AccuracyCheck = Literal["warn", "raise", "off"]
 
-__all__ = ["MagneticField", "VmecInteriorField", "VmecExtender"]
+__all__ = [
+    "ExteriorFieldAccuracyError",
+    "ExteriorFieldAccuracyWarning",
+    "MagneticField",
+    "VmecInteriorField",
+    "VmecExtender",
+]
+
+
+class ExteriorFieldAccuracyWarning(UserWarning):
+    """Direct virtual-casing quadrature missed its requested ``digits``."""
+
+
+class ExteriorFieldAccuracyError(RuntimeError):
+    """Raised instead of the warning when ``accuracy_check="raise"``."""
 
 
 def _check_points(points: Array, name: str = "points") -> Array:
@@ -865,11 +880,21 @@ class VmecExtender(MagneticField):
         Taylor continuation off the boundary instead of the full off-surface
         virtual-casing schedule, which is accurate only near the surface.
         It requires ``plasma_field``.
+    accuracy_check:
+        What an eager :meth:`B` call does when the direct virtual-casing
+        quadrature misses the ``digits`` it was built with, judged by
+        :meth:`B_error_estimate`: ``"warn"`` (default) emits
+        :class:`ExteriorFieldAccuracyWarning`, ``"raise"`` raises
+        :class:`ExteriorFieldAccuracyError`, ``"off"`` skips the estimate.
+        Traced calls (``jit``, ``grad``, field-line integrators) never check;
+        call :meth:`B_error_estimate` there.  The returned field is the same
+        in every mode.  The attribute may also be set after construction.
     """
 
     def __init__(
         self, external_field: Any, plasma_field: Any | None = None,
-        near_surface_plan: Any | None = None,
+        near_surface_plan: Any | None = None, *,
+        accuracy_check: AccuracyCheck = "warn",
     ) -> None:
         if external_field is None and plasma_field is None:
             raise ValueError("at least one external or plasma field is required")
@@ -878,6 +903,7 @@ class VmecExtender(MagneticField):
         self.external_field = external_field
         self.plasma_field = plasma_field
         self.near_surface_plan = near_surface_plan
+        self.accuracy_check = accuracy_check
 
         def B_fn(points: Array) -> Array:
             value = jnp.zeros_like(points)
@@ -895,6 +921,83 @@ class VmecExtender(MagneticField):
         # both simpler and avoids the cylindrical-axis singularity in older
         # virtual_casing_jax ``gradB_plasma_xyz`` implementations.
         super().__init__(B_fn)
+
+    @property
+    def accuracy_check(self) -> AccuracyCheck:
+        """``"warn"``, ``"raise"`` or ``"off"``; see the class documentation."""
+        return self._accuracy_check
+
+    @accuracy_check.setter
+    def accuracy_check(self, mode: AccuracyCheck) -> None:
+        """Set the eager accuracy-check mode; any other value raises ``ValueError``."""
+        if mode not in ("warn", "raise", "off"):
+            raise ValueError("accuracy_check must be 'warn', 'raise', or 'off'")
+        self._accuracy_check = mode
+
+    def B(self, points: Array | None = None) -> Array:
+        """Return Cartesian ``B``; eager calls check the quadrature accuracy."""
+        value = super().B(points)
+        if (self._accuracy_check != "off" and self.near_surface_plan is None
+                and hasattr(self.plasma_field, "schedule_levels")
+                and not isinstance(value, jax.core.Tracer)):
+            xyz = self._require_points() if points is None else _check_points(points)
+            plasma = value
+            if self.external_field is not None:
+                plasma = value - _field_cartesian(self.external_field, xyz)
+            self._check_accuracy(xyz, plasma)
+        return value
+
+    def B_error_estimate(self, points: Array | None = None) -> Array:
+        """Estimated relative error of the plasma field, shape ``(n,)``.
+
+        Per point, the difference between the value the virtual-casing
+        schedule returned and its finest source grid, or, for points already
+        on the finest grid, that grid's double-layer quadrature error
+        (:func:`~vmex.core.virtual_casing.offsurface_error_estimate`).  It is
+        relative to the RMS surface ``|B|``, compares with ``10**-digits``,
+        and ``-log10`` of it is the achieved digits.  The error decays as
+        ``exp(-2 pi d / h)`` with ``d`` the distance to the surface and ``h``
+        the largest spacing of the finest level, whose toroidal part is
+        ``2 pi R / n_toroidal`` over the full torus.  Points must lie outside
+        the surface.  Derivatives lose accuracy faster than ``B``.  Costs
+        slightly more than the plasma part of a :meth:`B` call (1.2 to 1.5
+        times, warm) and is traceable; ``accuracy_check="off"`` avoids paying
+        it on every eager call.
+        """
+        if self.plasma_field is None:
+            raise RuntimeError("the field has no virtual-casing plasma contribution")
+        if self.near_surface_plan is not None:
+            raise RuntimeError(
+                "the near-surface continuation has no quadrature error estimate")
+        from . import virtual_casing as vc
+
+        xyz = self._require_points() if points is None else _check_points(points)
+        return vc.offsurface_error_estimate(self.plasma_field, xyz)
+
+    def _check_accuracy(self, xyz: Array, plasma: Array) -> None:
+        from . import virtual_casing as vc
+
+        estimate = np.asarray(vc.offsurface_error_estimate(
+            self.plasma_field, xyz, B_plasma=plasma))
+        digits = int(self.plasma_field.config.digits)
+        missed = ~(estimate <= 10.0 ** (-digits))
+        if not np.any(missed):
+            return
+        worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
+        nt, npol = self.plasma_field.schedule_levels[-1]
+        message = (
+            f"virtual-casing exterior field: {int(missed.sum())} of {missed.size} "
+            f"points have estimated quadrature error up to {worst:.1e}, above the "
+            f"requested 1e-{digits}. The direct quadrature on the finest source "
+            f"grid ({nt} toroidal x {npol} poloidal points over the full torus) "
+            "needs targets about two grid spacings off the surface; move the "
+            "points out, raise nphi/ntheta or levels, or use "
+            "with_near_surface_continuation().")
+        if self._accuracy_check == "raise":
+            raise ExteriorFieldAccuracyError(message)
+        import warnings
+
+        warnings.warn(message, ExteriorFieldAccuracyWarning, stacklevel=3)
 
     @property
     def uses_virtual_casing(self) -> bool:
@@ -920,7 +1023,8 @@ class VmecExtender(MagneticField):
             raise RuntimeError("near-surface continuation requires virtual casing")
         plan = self.plasma_field.plan_near_surface(
             digits=digits, precision=precision, B_surface=B_surface)
-        return type(self)(self.external_field, self.plasma_field, plan)
+        return type(self)(self.external_field, self.plasma_field, plan,
+                          accuracy_check=self._accuracy_check)
 
     @classmethod
     def from_surface_data(
@@ -932,12 +1036,18 @@ class VmecExtender(MagneticField):
         levels: tuple[tuple[int, int], ...] | None = None,
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
         """Construct the finite-beta path from traceable VMEX surface data.
 
         ``chunk_size`` bounds source points per virtual-casing batch;
         ``target_chunk_size`` bounds evaluation points. ``"auto"`` delegates
         both memory/performance choices to virtual-casing-jax.
+
+        ``levels`` are full-torus ``(n_toroidal, n_poloidal)`` source grids
+        (toroidal counts rounded up to a multiple of ``nfp``); the default
+        ``((nphi, ntheta), (2 nphi, 2 ntheta))`` therefore has ``2 nphi``
+        toroidal points on the whole torus, not per field period.
         """
         from . import virtual_casing as vc
 
@@ -954,7 +1064,7 @@ class VmecExtender(MagneticField):
             branch="internal",
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
-        return cls(external_field, plasma_field)
+        return cls(external_field, plasma_field, accuracy_check=accuracy_check)
 
     @classmethod
     def from_parameterized_surface_data(
@@ -971,6 +1081,7 @@ class VmecExtender(MagneticField):
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         dof_names: tuple[str, ...] = (),
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
         """Construct a virtual-casing field with VJPs in ``parameters``.
 
@@ -1037,7 +1148,7 @@ class VmecExtender(MagneticField):
         field = cls.from_surface_data(
             initial_surface_data, external_field=initial_external_field,
             digits=digits, levels=levels, chunk_size=chunk_size,
-            target_chunk_size=target_chunk_size)
+            target_chunk_size=target_chunk_size, accuracy_check=accuracy_check)
         field._parameters = all_parameters
         field._parameter_data_fn = differentiable_surface_data
         field._B_from_data = B_from_surface_arrays
@@ -1058,6 +1169,7 @@ class VmecExtender(MagneticField):
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
         base_dir: str | Path | None = None,
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
         """Construct an exterior field from a wout-like object."""
         if plasma not in ("auto", "include", "vacuum"):
@@ -1084,13 +1196,14 @@ class VmecExtender(MagneticField):
                 levels=levels,
                 chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
+                accuracy_check=accuracy_check,
             )
 
         if external_field is None and plasma_field is None:
             raise ValueError(
                 "a vacuum extension needs an mgrid file or external_field"
             )
-        return cls(external_field, plasma_field)
+        return cls(external_field, plasma_field, accuracy_check=accuracy_check)
 
     @classmethod
     def from_file(cls, path: str | Path, **kwargs: Any) -> "VmecExtender":
@@ -1113,6 +1226,7 @@ class VmecExtender(MagneticField):
         levels: tuple[tuple[int, int], ...] | None = None,
         chunk_size: int | str = "auto",
         target_chunk_size: int | str = "auto",
+        accuracy_check: AccuracyCheck = "warn",
     ) -> "VmecExtender":
         """Construct the differentiable finite-beta path from a live VMEX state."""
         from . import virtual_casing as vc
@@ -1127,6 +1241,7 @@ class VmecExtender(MagneticField):
             levels=levels,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
+            accuracy_check=accuracy_check,
         )
 
     @classmethod
