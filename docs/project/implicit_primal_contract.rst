@@ -72,6 +72,14 @@ a runtime conditional and measuring its compile/runtime effects is still a
 performance task.
 
 
+Host optimizer derivatives refresh missing or stale primal evidence before
+linear work. A current rejected certificate takes the penalty path. Cached
+Jacobian fallback requires both the same design and certified coefficients.
+A detected primal change during a response raises ``AdjointSolveError`` before
+updating the Jacobian cache or predictor. Scalar pairs also retain the residual's
+anchor; losing it returns the consistent penalty pair. Unrelated errors propagate.
+
+
 Materializing cached equilibria
 -------------------------------
 

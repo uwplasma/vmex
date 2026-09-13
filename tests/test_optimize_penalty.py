@@ -10,6 +10,8 @@ traceback.
 
 from __future__ import annotations
 
+import ast
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -453,3 +455,136 @@ def test_batched_response_requires_its_actual_primal(monkeypatch, lane):
     values, accepted = jax.jit(response)(state)
     assert np.isnan(np.asarray(values)).all()
     assert not np.asarray(accepted).any()
+
+
+@pytest.fixture
+def host_response():
+    # Exercise the real nested host guards with controlled callback outcomes;
+    # equilibrium, field and linear-solver accuracy have independent tests.
+    path = Path(opt.__file__)
+    owner = next(node for node in ast.parse(path.read_text()).body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_least_squares_implicit")
+    nodes = [node for node in owner.body if isinstance(node, ast.FunctionDef)
+             and node.name in ("certified_trial", "jac_fn", "value_and_grad")]
+    cfg = type("Config", (), {"ftol": 1e-12, "max_fsq_ratio": 1e6})()
+    x = np.array([1.])
+    def key(value):
+        return np.asarray(value, dtype=float).tobytes()
+    cache = SimpleNamespace(_LAST_STATUS_ERROR={}, _LAST_SOLVE={},
+        _LAST_PRIMAL_CERTIFICATE={}, _LAST_REFINED={}, _params_key=key, _primal_state_key=key)
+    control = dict(eligible=True, event=None, phase="reverse", status=0, linear=0, stashes=0)
+    holder = dict(nres=2, lin=None, failed_trials=0, derivative_fallbacks=0,
+                  last_jac=None, last_jac_key=None)
+
+    def status(value):
+        control["status"] += 1
+        state = np.array([2.])
+        cache._LAST_SOLVE[cfg] = (key(value), SimpleNamespace(
+            converged=True, fsqr=1e-15, fsqz=0., fsql=0.))
+        cache._LAST_REFINED[cfg] = (key(value), state)
+        cache._LAST_PRIMAL_CERTIFICATE[cfg] = (
+            key(value), key(state), {"derivative_certified": control["eligible"]})
+        return np.array([2.])
+
+    def linear(value, phase):
+        control["linear"] += 1
+        if phase == "block" and control["phase"] == "gmres":
+            raise ValueError("primary failed")
+        if control["event"] == "failure":
+            raise ValueError("fresh derivative failed")
+        if phase == control["phase"]:
+            if control["event"] == "remove":
+                cache._LAST_PRIMAL_CERTIFICATE.pop(cfg, None)
+            elif control["event"] == "change":
+                state = np.array([8.])
+                cache._LAST_REFINED[cfg] = (key(value), state)
+                cache._LAST_PRIMAL_CERTIFICATE[cfg] = (
+                    key(value), key(state), {"derivative_certified": True})
+        matrix = np.ones((1, 1))
+        return matrix if phase == "reverse" else (matrix, matrix, np.zeros(4))
+
+    def stash(*args):
+        control["stashes"] += 1
+
+    namespace = dict(np=np, cfg=cfg, x0=x, imp=cache, jax=jax,
+        params_of=lambda value: value, _place=lambda value: value,
+        FunctionProblem=SimpleNamespace(_key=key), fun=status, rows_jit=status,
+        holder=holder, jac_solver="reverse", traceable_scalar=None, warm_start="perturbation",
+        reverse_jit=lambda value: linear(value, "reverse"),
+        jac_jit=lambda value: linear(value, "block"),
+        gmres_jit=lambda value: linear(value, "gmres"),
+        _record_linear_response=lambda *args: None,
+        _select_host_jacobian=lambda matrix, summary, **kwargs: (matrix, False),
+        _stash_linearization=stash, AdjointSolveError=opt.AdjointSolveError,
+        failure_jacobian=lambda value: np.zeros((1, 1)),
+        failure_value_and_gradient=lambda value: (99., np.zeros_like(value)))
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), namespace)
+    status(x)
+    return namespace, cache, cfg, control, holder, key
+
+
+def test_host_primal_admission_refresh_and_same_state_fallback(host_response):
+    ns, cache, cfg, control, holder, key = host_response
+    x = ns["x0"]
+    control["eligible"] = False
+    ns["fun"](x)
+    calls = control["status"]
+    np.testing.assert_array_equal(ns["jac_fn"](x), [[0.]])
+    assert control["linear"] == 0 and control["status"] == calls
+    control["eligible"] = True
+    cache._LAST_PRIMAL_CERTIFICATE.pop(cfg)
+    np.testing.assert_array_equal(ns["jac_fn"](x), [[1.]])
+    assert control["status"] == calls + 1
+    for missing in (False, True):
+        if missing:
+            cache._LAST_REFINED.pop(cfg)
+        else:
+            cache._LAST_REFINED[cfg] = (key(x), np.array([7.]))
+        calls = control["status"]
+        np.testing.assert_array_equal(ns["jac_fn"](x), [[1.]])
+        assert control["status"] == calls + 1
+    control["event"] = "failure"
+    np.testing.assert_array_equal(ns["jac_fn"](x), [[1.]])
+    state = np.array([9.])
+    cache._LAST_REFINED[cfg] = (key(x), state)
+    cache._LAST_PRIMAL_CERTIFICATE[cfg] = (key(x), key(state), {"derivative_certified": True})
+    with pytest.raises(ValueError, match="fresh derivative failed"):
+        ns["jac_fn"](x)
+    control.update(event=None, eligible=True)
+    np.testing.assert_array_equal(ns["jac_fn"](x + .1), [[1.]])
+    assert holder["last_jac_key"] == (key(x + .1), cache._LAST_PRIMAL_CERTIFICATE[cfg][1])
+    value, gradient = ns["value_and_grad"](x + .1)
+    assert value == 2.
+    np.testing.assert_array_equal(gradient, [2.])
+    control["eligible"] = False
+    cache._LAST_PRIMAL_CERTIFICATE.pop(cfg)
+    calls = control["linear"]
+    np.testing.assert_array_equal(ns["jac_fn"](x + .1), [[0.]])
+    assert control["linear"] == calls
+
+
+@pytest.mark.parametrize("lane", ["reverse", "block", "gmres"])
+@pytest.mark.parametrize("event", ["remove", "change"])
+def test_host_response_drift_preserves_cache_predictor_and_scalar_pair(host_response, lane, event):
+    ns, cache, cfg, control, holder, key = host_response
+    control.update(phase=lane, event=event)
+    ns["jac_solver"] = "reverse" if lane == "reverse" else "block"
+    with pytest.raises(opt.AdjointSolveError, match="primal changed"):
+        ns["jac_fn"](ns["x0"])
+    assert holder["last_jac"] is None and control["stashes"] == 0
+    value, gradient = ns["value_and_grad"](ns["x0"])
+    assert value == 99.
+    np.testing.assert_array_equal(gradient, [0.])
+    assert holder["last_jac"] is None and control["stashes"] == 0
+
+
+@pytest.mark.parametrize("drop_certificate", [False, True])
+def test_host_scalar_preserves_unrelated_derivative_error(host_response, drop_certificate):
+    ns, cache, cfg, control, holder, key = host_response
+    def fail(value):
+        if drop_certificate:
+            cache._LAST_PRIMAL_CERTIFICATE.pop(cfg)
+        raise RuntimeError("unrelated derivative failure")
+    ns["jac_fn"] = fail
+    with pytest.raises(RuntimeError, match="unrelated derivative failure"):
+        ns["value_and_grad"](ns["x0"])
