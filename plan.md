@@ -325,22 +325,22 @@ check that may be red.
 
 | repository and PR | state | disposition |
 |---|---|---|
-| vmex #308 | this plan, documentation only | merge first; agents then read it from `main` |
+| vmex #308 | this plan, documentation only | merged; agents read `plan.md` on `main` |
 | vmex #300 | DESC input bridge; lanes green | merge |
-| vmex #309 (A4) | documentation matched to records | merge when CI is green |
+| vmex #309 (A4) | documentation matched to records | merged `1aa5465e` |
 | vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
-| vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR; then #319 → #320 → B4b |
-| vmex #311 (A3) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
-| vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
+| vmex #310 (A1) | optimization counters and their record `benchmarks/optimization_counters_20260913.json` | merged `2b9d3a3e`; next #319 → #320 → B4b |
+| vmex #311 (A3, conflicts with `main` in the generated index after #309 and #310; refreshed after #308) | fixed-boundary single stage meets every target on a full run (min |ι| 0.4277 ≥ 0.42, aspect 3.979 ≤ 4, B·n RMS 0.80 % ≤ 1 %, coil clearances and curvature within limits, independent ns = 101 check converged; 2,959 s, 301 trials); smoke mode 136 s against main's 195 s; record `benchmarks/single_stage_profile_m4.json` | merge when CI is green; follow-ups: quasisymmetry worsened 0.101 → 0.113 under the constraints (C3), the constraint wrapper moves into a library helper with C3, and a second full run measures run-to-run spread |
+| vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; #314 fails `tests/test_optimize.py::test_qi_regression_pin_and_jit` (non-finite residual, lane c3d) and is under investigation; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
-| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
+| vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck: at the reachable |P(gc)| ≈ 1.88e-7 every trial would fail `primal_tol` and return value-only, so the optimizer would never receive an implicit gradient (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
-| vmex #319 (B4a) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
+| vmex #319 (B4a, retargeted to `main`, being rebased onto it) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
 | vmex #320 (B1a) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); being stacked on #319 to call the shared commitment helper, which removes refinement's duplicate compile | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
 | vmex #307 | seven lines on #299's branch, fails `test_ladder_compile_counts_and_walltime` | close; superseded by #319 |
 | vmex #301, #303, #304 | winding surface | parked |
-| booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merge and release 0.3.0 |
-| SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merge and tag; VMEX raises its floor to 0.21.0 with S1 (3) |
+| booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merged `8e0208ae`; tagging 0.3.0 is the maintainer's release step |
+| SOLVAX #105 | release 0.21.0 of merged #100–#104: checked Thomas GPU launch overhead, halved principal inverses, nonfinite root rejection | merged `60a87b21`; tagging 0.21.0 publishes it to PyPI and is the maintainer's release step; VMEX raises its floor once 0.21.0 is on PyPI |
 | virtual_casing_jax | nothing open; 0.0.5 suffices for #312 | open an upstream PR for E0 (level choice by a calibrated estimate, per-period default schedule); no release needed for 0.9.0 |
 
 **Release candidate, VMEX 0.9.0.** Ready once #308, #300, #309, #310, #311,
@@ -603,8 +603,7 @@ changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
 contract to keep: derivatives only at a state with a fresh projected residual,
 raw FSQ and admissible geometry, and caches keyed by state identity.
 
-**Measured (#310, A1 counters; shared laptop under other sessions' load, so
-seconds are diagnostic).** On the 8-dof QA and QI rows of
+**Measured (A1 counters, `benchmarks/optimization_counters_20260913.json`; shared laptop under other sessions' load, so seconds are diagnostic).** On the 8-dof QA and QI rows of
 `benchmarks/optimization.py`, one evaluation's first derivative spends 29.4 s
 (QA) and 40.0 s (QI) in refinement, against 2.8–3.2 s for the 185-iteration
 solve: all three refinement steps exhaust their GCROT budget (`m = 100` ×
@@ -674,7 +673,7 @@ If both Newton arms die, test refining only where a derivative is requested.
 
 ### B4. One compiled path: full jit without recompilation
 
-**Facts.** On A1's rows (#310) the JAX value-and-gradient lane spends 41.6 s
+**Facts.** On A1's rows (`benchmarks/optimization_counters_20260913.json`) the JAX value-and-gradient lane spends 41.6 s
 (QA) and 71.0 s (QI) compiling after the host derivative has already
 compiled, and builds take 244–500 XLA compiles; a five-evaluation warm
 campaign recorded 102 compiles (`benchmarks/baselines/m4/F8_warm.json`). The
@@ -909,3 +908,13 @@ Lagrangian around L-BFGS-B with one solve and one adjoint per trial. Smoke mode
 is faster than main (136 s against 195 s). Quasisymmetry worsened slightly
 under the constraints; that and the wrapper's home go to C3. The free-boundary
 example waits for F-pre.
+
+**2026-09-13, first merges.** On maintainer authorization to admin-merge
+finalized, concise PRs with every real CI lane green: booz_xform_jax #8
+(`8e0208ae`), SOLVAX #105 (`60a87b21`, untagged), vmex #309 (A4, `1aa5465e`)
+and #310 (A1, `2b9d3a3e`); this plan (#308) follows, verified locally because
+runners are saturated by another project. #319 is retargeted to `main`. B1
+confirms #302's `primal_tol` would make every trial value-only on the seed
+deck. #314 fails the QI regression pin under jit and is being investigated
+before any further S1 merge. Package tags and PyPI releases stay with the
+maintainer.
