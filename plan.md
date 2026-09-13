@@ -991,3 +991,31 @@ refinement. The block tangent is exact at the state, while the QI adjoint's
 Krylov solve stalls and takes 78 s; B3 now starts from an exact adjoint
 through the same block factorization. The committed record, the
 MPOL = NTOR = 8 deck and the adjoint arm are still being measured.
+
+**2026-09-13, paused.** Stopped on maintainer request; no agent, watch or
+heavy job is running and the heavy-job lock is released. State to resume from:
+
+- Awaiting CI, then admin-merge when every real lane is green: #300 (a
+  re-run Python 3.12 fast lane), #311, #312, #313, #319 (build-compile
+  explanation accepted), #322 (this logbook) and #323 (S1's test-only fix
+  for the tied QI pin: golden `wout_li383_low_res`, minimum-gap guard 2.6e-4,
+  pinned 0.3579844756860454 on both JAX versions, no solve and no shared
+  cache).
+- After #323 and #313: refresh #314–#318 against `main` and merge them in
+  the order #315, #314, #318, #316, #317.
+- After #319: retarget #320 to `main`; its re-verification at `9b77a10e`
+  (bit-identity and compile counts against `f0b12ed2`) was queued and not
+  run. Then rebase #321 onto `main`.
+- #321 (B4b) still needs `jax.Array.committed` in place of `leaf._committed`,
+  a named test that runs the traced value-and-gradient program against the
+  host pair, and a CHANGELOG line for the eager `jax_value_and_grad`
+  behaviour change. B4c starts with passing `use_fft` in the Jacobian retry
+  (`solver.py` near line 2410), then traces the recovery path; B4d and the
+  B4e design note follow.
+- B1: the MPOL = NTOR = 8 QA deck run was stopped before it finished and has
+  no record; the adjoint-through-block-factorization arm (f) and the
+  refinement stagnation-abort arm (g) were not run. The seed-deck results
+  above are interim until `benchmarks/newton_finish_arms_20260913.json` is
+  committed from branch `b1/newton-finish`.
+- Five other tests in `tests/test_optimize.py` still read the shared `/tmp`
+  Solov'ev state (a test-isolation follow-up). No package was tagged.
