@@ -734,5 +734,194 @@
   "solves": 1,
   "iterations": 185,
   "note": "the record has no split between descent, refinement, block assembly, per-column GMRES and compile: that is the A1 gap"
+ },
+ "objective_replay_public": {
+  "case": "QA terms of benchmarks/optimization.py, input.minimal_seed_nfp2, mpol=ntor=5, max_mode=1 (8 dof), JAX 0.9.2, loaded machine (three jobs)",
+  "method": "f(x0) cold; warm excursion x0+d with |d| = 1e-3, 1e-2, 1e-1 (random direction); return to x0 perturbed by 1e-13 to defeat the parameter memo; three problems: default refinement + hot restart, refine_tol=inf + hot restart, default refinement + hot_restart=False",
+  "rows": [
+   {
+    "label": "refine_default_hot",
+    "build_s": 6.191731929779053,
+    "f0": 0.62689041502154,
+    "f0_repeat_rel": 1.150701491244204e-07,
+    "t_first": 23.871069192886353,
+    "t_repeat": 34.47797679901123,
+    "excursions": [
+     {
+      "step": 0.001,
+      "f_excursion": 0.632839698280638,
+      "f_return": 0.6268905475005184,
+      "return_rel_drift": 2.113271718303102e-07,
+      "t_excursion": 19.820262908935547,
+      "t_return": 14.159995794296265
+     },
+     {
+      "step": 0.01,
+      "f_excursion": 0.6885663419085,
+      "f_return": 0.6268905234772354,
+      "return_rel_drift": 1.7300582817297743e-07,
+      "t_excursion": 16.7758731842041,
+      "t_return": 16.51251196861267
+     },
+     {
+      "step": 0.1,
+      "f_excursion": 1644.7127341383546,
+      "f_return": 0.6268904281758054,
+      "return_rel_drift": 2.0983357121868713e-08,
+      "t_excursion": 4.564397096633911,
+      "t_return": 14.325494766235352
+     }
+    ]
+   },
+   {
+    "label": "refine_off_hot",
+    "build_s": 0.33102917671203613,
+    "f0": 0.6268904871584033,
+    "f0_repeat_rel": 3.5207479107863907e-13,
+    "t_first": 0.34018564224243164,
+    "t_repeat": 0.027956008911132812,
+    "excursions": [
+     {
+      "step": 0.001,
+      "f_excursion": 0.622757806713041,
+      "f_return": 0.6268905394378133,
+      "return_rel_drift": 8.339480496702639e-08,
+      "t_excursion": 0.4468982219696045,
+      "t_return": 0.42308783531188965
+     },
+     {
+      "step": 0.01,
+      "f_excursion": 0.6178093660519302,
+      "f_return": 0.6268905564736643,
+      "return_rel_drift": 1.105699677939243e-07,
+      "t_excursion": 0.922421932220459,
+      "t_return": 0.6551122665405273
+     },
+     {
+      "step": 0.1,
+      "f_excursion": 1691.6826205990603,
+      "f_return": 0.6268905564748016,
+      "return_rel_drift": 1.1057178200627834e-07,
+      "t_excursion": 0.12759184837341309,
+      "t_return": 0.027058124542236328
+     }
+    ]
+   },
+   {
+    "label": "refine_default_cold",
+    "build_s": 0.2950320243835449,
+    "f0": 0.62689041502154,
+    "f0_repeat_rel": 1.8079897286936822e-08,
+    "t_first": 23.679755926132202,
+    "t_repeat": 33.5281662940979,
+    "excursions": [
+     {
+      "step": 0.001,
+      "f_excursion": 0.6247784959759356,
+      "f_return": 0.6268904034295539,
+      "return_rel_drift": 1.8491247848047937e-08,
+      "t_excursion": 17.307888984680176,
+      "t_return": 15.5521879196167
+     },
+     {
+      "step": 0.01,
+      "f_excursion": 0.6076734399936686,
+      "f_return": 0.6268904338318606,
+      "return_rel_drift": 3.000575568506233e-08,
+      "t_excursion": 15.995081901550293,
+      "t_return": 15.50890302658081
+     },
+     {
+      "step": 0.1,
+      "f_excursion": 57.60477424765363,
+      "f_return": 0.6268903970099239,
+      "return_rel_drift": 2.8731682054637754e-08,
+      "t_excursion": 12.799776554107666,
+      "t_return": 17.770207405090332
+     }
+    ]
+   }
+  ],
+  "summary": "refinement on: return drift 2.1e-7/1.7e-7/2e-8, 14-20 s per evaluation; refinement off: 8e-8/1.1e-7/1.1e-7, 0.4-0.9 s per evaluation; cold: 2-3e-8, 15-17 s. On this public case refinement gives no reproducibility gain and costs about twenty solves per evaluation."
+ },
+ "jacobian_batch_probe": {
+  "case": "same QA terms, max_mode=3 (48 dof, 6,722 rows), one problem object per batch size, loaded machine",
+  "rows": [
+   {
+    "batch": "1",
+    "dofs": 48,
+    "rows": 6722,
+    "build_s": 6.143815040588379,
+    "jac_first_s": 62.852784872055054,
+    "jac_warm_s": [
+     39.59190011024475,
+     16.490997791290283
+    ],
+    "jac_norm": 264.27487417484195
+   },
+   {
+    "batch": "auto",
+    "dofs": 48,
+    "rows": 6722,
+    "build_s": 0.1816110610961914,
+    "jac_first_s": 83.86573219299316,
+    "jac_warm_s": [
+     16.414785861968994,
+     16.207701921463013
+    ],
+    "jac_norm": 264.28680124601095,
+    "rel_diff_vs_batch1": 0.021322189764853186
+   },
+   {
+    "batch": "8",
+    "dofs": 48,
+    "rows": 6722,
+    "build_s": 0.08731293678283691,
+    "jac_first_s": 62.01815390586853,
+    "jac_warm_s": [
+     27.78653597831726,
+     27.81930899620056
+    ],
+    "jac_norm": 264.2893927935097,
+    "rel_diff_vs_batch1": 0.0048657527972230195
+   },
+   {
+    "batch": "16",
+    "dofs": 48,
+    "rows": 6722,
+    "build_s": 0.0635378360748291,
+    "jac_first_s": 45.078088998794556,
+    "jac_warm_s": [
+     16.047249794006348,
+     15.088205099105835
+    ],
+    "jac_norm": 264.28680124683206,
+    "rel_diff_vs_batch1": 0.021322189995345946
+   }
+  ],
+  "flag": "batched Jacobians differ from the serial one by 0.5-2 % relative (auto == 16); must be reproduced in isolation before C1 changes the default"
+ },
+ "single_stage_example_smoke": {
+  "command": "VMEX_EXAMPLES_CI=1 python examples/optimization/single_stage_optimization.py (ESSOS #58 checkout)",
+  "wall_s": 224.45,
+  "user_s": 402.0,
+  "peak_rss_bytes": 3876929536,
+  "trials": 3,
+  "bfgs_iterations": 1,
+  "objective": "1.577e2 -> 1.387e2",
+  "min_abs_iota": 0.0712,
+  "iota_floor": 0.42,
+  "aspect": 10.19,
+  "aspect_target": 4.0,
+  "bn_rms_percent": 3.091,
+  "bn_target_percent": 1.0,
+  "note": "smoke budget; the example itself reports that it did not meet its targets"
+ },
+ "vmecpp_autodiff_probe": {
+  "wheel": "vmecpp 0.7.4 (pip, macOS arm64)",
+  "deck": "examples/data/input.circular_tokamak (ncurr=0)",
+  "forward": "ok",
+  "value_and_grad": "RuntimeError: This VMEC++ build has no exact residual transpose. Rebuild with VMECPP_ENABLE_ENZYME to differentiate a solved equilibrium. No finite-difference derivative is used.",
+  "constraints": "lfreeb=false, ncurr=0, lasym=false, single ns; backward re-solves the equilibrium"
  }
 }

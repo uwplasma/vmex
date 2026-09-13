@@ -44,7 +44,7 @@ old plan lacked entirely: an accuracy contract for the exterior field.
 | A | Counters, known-answer oracles and honest examples | every optimization record splits solve, refinement, Jacobian, adjoint and compile; the exterior field reports its achieved digits; the shipped single-stage example meets its stated targets or fails loudly |
 | B | One certified equilibrium solve per trial | the objective at a repeated `x` agrees to 1e-9; a gradient call costs at most half of today's; the joint single-stage phase no longer exits with precision loss |
 | C | Derivatives sized to the problem | one linear solve per degree of freedom or per gradient, never per residual row; batched by default |
-| D | A smooth QI objective | the QI example reaches today's final metric in at most a third of the time with zero failed trials |
+| D | A QI example that converges: near-axis seed, then a smooth objective | the QI example reaches today's final metric in at most a third of the time with zero failed trials |
 | E | An exterior field with a stated error | vacuum identity below 1e-6 at every distance down to 0.005 minor radii on the default grid; tracing outside the plasma in seconds |
 | F | A free-boundary gradient that costs at most three forward solves | the free-boundary single-stage example converges to a stated design in under ten CPU minutes |
 | G | The published comparison and the paper-1 package | cross-code table from committed records on named hardware; then §5's E3 and ladder |
@@ -91,6 +91,30 @@ surrounds the solve.** `mode="jit"` and `mode="cli"` cost the same warm (2.5 vs
 | collaborator full run, CPU | 672 s: stage 1 82 s / 63 nfev; coils only 201 s / 1,845 nfev; joint BFGS 336 s / 188 nfev / 176 njev, exit "precision loss" | #299 record |
 | warm campaign F8 | 5 evaluations in 146.6 s with 102 compiles and 1,890 traces, 11.9 GB | [`baselines/m4/F8_warm.json`](benchmarks/baselines/m4/F8_warm.json) |
 | constructed QI, 8 dof, this laptop, JAX 0.9.2 | build 11.4 s, first derivative 61.0 s, contract check 80.3 s, one solve of 185 iterations; no split between descent, refinement, block assembly, per-column GMRES and compile exists in the record | [`review_20260913.json`](benchmarks/review_20260913.json) |
+
+**Objective replay on public data** (QA terms of `benchmarks/optimization.py`,
+8 dof, warm excursions of 1e-3, 1e-2 and 1e-1 then return to `x0`; loaded
+machine, three jobs): with the default refinement the return drift is
+2.1e-7 / 1.7e-7 / 2e-8 and each evaluation takes 14–20 s; with
+`refine_tol=inf` the drift is 8e-8 / 1.1e-7 / 1.1e-7 and each evaluation
+takes 0.4–0.9 s; cold solves reproduce to 2–3e-8 and take 15–17 s. On this
+case refinement buys no reproducibility and costs about twenty solves per
+evaluation. The 1.5 % drift in the #299 record is on a QI objective whose
+well locations move with the solve, so that drift is objective sensitivity,
+not solver noise (Phase D), while the refinement cost is the anchor (Phase B).
+
+**Jacobian batching probe** (QA, 48 dof, 6,722 rows, same loaded machine):
+warm block Jacobians 16–40 s at `jacobian_batch_size=1`, 15–16 s at 16 and
+`"auto"` (which resolves to 16), 28 s at 8; the batched Jacobians differ from
+the serial one by 0.5–2 % relative, which a correct implementation cannot do.
+That difference must be reproduced in isolation before C1 changes the default.
+
+**Shipped single-stage example, smoke mode** (`VMEX_EXAMPLES_CI=1`, ESSOS #58):
+224 s wall, 3.9 GB peak, three trials and one BFGS iteration; ends at
+min |ι| 0.071 against its 0.42 floor, aspect 10.2 against 4, B·n RMS 3.1 %
+against 1 %. `vmecpp.autodiff.DifferentiableVmec` in the 0.7.4 wheel raises
+"no exact residual transpose, rebuild with Enzyme": pip users of VMEC++ have
+no derivatives, and its backward pass re-solves the equilibrium.
 
 Verified in code: refinement runs on every value-only trial
 (`optimize.py:3122` → `implicit.py:1635`, `refine=True`); `jacobian_batch_size`
@@ -167,7 +191,7 @@ QI or single-stage paper publishes wall times except Dudt's.
 
 | complaint | cause, verified in code or record |
 |---|---|
-| slow QI | two nonlinear solves per trial (descent to 1e-12, then refinement); serial Jacobian with a per-dof GMRES corrector; 45–190 s recompile per `max_mode` stage; a non-smooth surrogate residual (`argmin`, `cummax`, `interp`) with 17,712 rows that fails trials |
+| slow QI | two nonlinear solves per trial (descent to 1e-12, then refinement); serial Jacobian with a per-dof GMRES corrector; 45–190 s recompile per `max_mode` stage; a non-smooth surrogate residual (`argmin`, `cummax`, `interp`) with 17,712 rows that fails trials; a circular-torus seed where every published QI result used a near-axis one |
 | slow single-stage | path-dependent objective, so BFGS line searches fail; refinement and the full Jacobian on every trial; penalty BFGS instead of least squares; a seed at ι ≈ 0.08 against a 0.42 floor, with B·n weighted 70× the ι term |
 | slow free-boundary single-stage | 59 s solves with no predictor; NESTOR inside every adjoint matvec; un-jitted objective |
 | exterior field | trapezoid rule off-surface with silent non-convergence; O(N_src) per target with 0.42 s latency; no oracle test |
@@ -214,8 +238,9 @@ attribution. One heavy local job at a time; the office box takes one.
 
 | PR | change | gate |
 |---|---|---|
-| D1 smooth residual | replace `argmin`/`cummax`/`interp` in `quasi_isodynamic_residual` by softplus/logsumexp wells and a differentiable shuffle; per-well moments instead of 17,712 point rows | Taylor test passes in both directions; failed-trial rate on the QI example → 0; same final QI metric within 5 % |
-| D2 target-field lane | Dudt-style omnigenity: parametrized `|B|(ρ,η)` plus a deformation `h`, residual = Boozer-spectrum evaluation at mapped angles, well parameters co-optimized; scalar adjoint viable | QI example reaches today's final metric in ≤ 1/3 the time; ε_eff and the Boozer spectrum of the result reported |
+| D0 near-axis seed and ladder | seed the QI example from a pyQIC near-axis QI boundary (the shipped, unused `examples/data/input.QI_stel_seed_3127` or `from_paper("QI NFP2 r2")` truncated to modes ≤ 2), run a `[2, 3]` / `[20, 60]` ladder, and add Goodman's `phimin` sign rule to the residual; every published QI result started from a near-axis seed and none from a circular torus | validation-grid QI before/after; failed trials and nfev per stage recorded; time to the current final metric ≤ 1/2 |
+| D1 smooth residual | replace the two `argmin`s (`optimize.py:1039, 1068`), the five `cummax` calls and `interp` in `quasi_isodynamic_residual` by softplus/logsumexp wells with a differentiable well location (the frozen well location has zero derivative today); per-well moments instead of 17,712 point rows | Taylor test passes in both directions; failed-trial rate → 0; same final QI metric within 5 % |
+| D2 target-field lane | Dudt-style omnigenity: monotone-spline `|B|(ρ,η)` plus a deformation `h`, residual = Boozer-spectrum evaluation at mapped angles (30–130 smooth rows per surface, bounce points by construction), well parameters co-optimized; scalar adjoint viable; DESC's tutorial does 100 iterations in two CPU minutes | QI example reaches today's final metric in ≤ 1/3 the time; ε_eff and the Boozer spectrum of the result reported |
 | D3 Boozer cost | `oversample=1` validated by the existing fine-grid check; volume physics hoisted out of the per-surface loop; `magnetic_only` when upstream booz_xform_jax #8 merges | Boozer share of residual + JVP ≤ 1/3 |
 
 ### Phase E, weeks 3–6: the exterior field
@@ -288,7 +313,8 @@ These verdicts stand and are not reopened by this revision.
 |---|---|
 | #299 | Split. (i) the Boozer λ half-mesh correction with its tests: merge; (ii) the `jax.linearize` hoist, Thomas selection and parity-transpose fix: merge after latest-head CI; (iii) `host_evaluate`: merge; (iv) #305 plotting: merge; (v) the NESTOR contraction and saved pullbacks: own PR with the CTH/NCSX certificates; (vi) the 630-line logbook: one entry of at most forty lines citing the record. The 1,159-line JSON stays as the record of (i)–(v). |
 | #300 | DESC bridge; independent; review and merge. |
-| #302 | The right contract, the wrong mechanism; fold into B1 and close. |
+| #302, #306 | The right contract (derivatives only on a certified state), the wrong mechanism (a second solve); fold both into B1 and close. |
+| #307 | Seven lines that stop commitment-flag recompiles (next accepted residual 4.9 → 0.35 s in its record); retarget to main and merge as the first B4 item. |
 | #301, #303, #304 | Parked; winding-surface work stays stopped. |
 | #277 | Merge after B1 lands; its assertion is on the quantity B1 certifies. |
 
@@ -332,6 +358,25 @@ one adjoint per residual row; the exterior field's off-surface path is an
 unconverged trapezoid rule with no oracle test; VMEC++ 0.7.4 is 2.6× faster per
 iteration and 12× faster cold, but at parity inside a hot-restarted loop. The
 2026-09-06 plan is reordered around those findings; §5 keeps its force-balance
-verdicts. Limitations: single-run laptop timings; the QI stage split on this
-machine was not completed within the review; the near-surface method choice
-in E1 is left to its bounded experiment. Next action: Phase A, starting with A1.
+verdicts. Limitations: single-run laptop timings; the record has no stage split for the
+QI example (the A1 gap). Next action: Phase A, starting with A1.
+
+**2026-09-13, third pass and handoff.** Added to the same record: the public
+objective-replay test (refinement gives no reproducibility gain on the QA case
+and costs about twenty solves per evaluation; the #299 QI drift is objective
+sensitivity), the Jacobian batching probe (0.5–2 % batch dependence, to be
+reproduced in isolation before C1), the shipped single-stage example in smoke
+mode (224 s, ends at ι 0.07 and aspect 10.2), and the VMEC++ 0.7.4 autodiff
+probe (no derivatives in the wheel). Literature and code review of the QI
+objective moved a near-axis seed to the front of Phase D (D0) and documented
+the frozen well location in the residual; #306 and #307 were reviewed and
+dispositioned in §6. Paused before two checks finished: the precedents for
+Newton finishing and CPU parallelism behind B5, and the free-boundary
+derivative practice behind F1–F3 (DESC's free-boundary Jacobian, VMEC++'s
+NESTOR hot restart, the adjoint literature); both are literature checks, not
+gates, and B5 and F keep their kill rules. CI on this revision: every lane
+green except the two manifest parity lanes still running at the pause. Raw
+material for the next session: the eight review reports and every script and
+log under the reviewer's `vmex-review-evidence` directory, and the worktree
+`vmex-review-main` on this branch. Next action unchanged: Phase A, A1 first,
+then A2 with the vacuum and interior identities as the exterior-field oracles.
