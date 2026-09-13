@@ -2407,7 +2407,9 @@ def _solve_stage(rt: SolverRuntime, state0: SpectralState | None, *,
             break
         attempt_delt0 = min(0.5, 0.5 * attempt_delt0)
         attempt_state = carry.xstore
-        attempt_rt = runtime_with_baselines(attempt_rt, attempt_state)
+        attempt_rt = runtime_with_baselines(
+            attempt_rt, attempt_state, use_fft=use_fft
+        )
         if verbose:
             emit(
                 " JACOBIAN RECOVERY RETRY "
