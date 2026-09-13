@@ -329,13 +329,14 @@ check that may be red.
 | vmex #300 | DESC input bridge; lanes green | merge |
 | vmex #309 (A4) | documentation matched to records | merge when CI is green |
 | vmex #312 (A2) | exterior-field oracles and achieved-error estimate | merge when CI is green; warn-by-default kept (a checked eager call costs 2.2–2.5×, traced calls are unchanged); follow-ups: E0, and forward `accuracy_check` through the `exterior_field` facades in `optimize.py` and `problem.py` |
-| vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR |
+| vmex #310 (A1) | optimization counters and their record | merge when CI is green, before any B, C or S1 PR; then #319 → #320 → B4b |
 | vmex #311 (A3) | single-stage examples with constraints and a record | merge when CI is green and the record states target attainment |
 | vmex #313, #315, #314, #318, #316, #317 (S1) | #299's source re-landed as six focused PRs, in merge order: Boozer λ (#313), host trial solves (#315), Thomas selection and batching (#314), linearization reuse and field-line synthesis (#318), vacuum contraction and saved pullbacks (#316), plotting and optional magnetic-only projection (#317); 12–114 net lines each, no plan, record or handoff files | merge in that order when CI is green; raise the SOLVAX floor to 0.21.0 once it is on PyPI |
 | vmex #299 | green, but source mixed with a 630-line logbook and a 1,159-line record | close once #313–#318 merge; S1 carried all of its source |
 | vmex #302 | green, but two commits add about 57,000 lines of HINT handoff evidence; its 1e-10 primal certificate is unreachable on the seed deck (B1) | do not merge; its three source commits wait for B1b's answer on the near-null λ modes |
 | vmex #306 | four failing lanes, based on #302 | hold for B1 |
 | vmex #319 (B4a) | #307's seven lines re-landed on #310's branch plus a two-line reorder that removes the extra compile #307 caused (the donation copy recompiled for a partly committed carry; cth ladder compiles cold/warm/direct 243/0/0, as before #307) | merge after #310, when CI is green |
+| vmex #320 (B1a) | refinement stops after an unconverged step that does not lower |F| (+14/−9 in `implicit.py`, jit-exercised test on both JAX versions); being stacked on #319 to call the shared commitment helper, which removes refinement's duplicate compile | merge after #319, when its benchmark rows show 6,000 → 2,000 GCROT iterations with bit-identical outputs and CI is green |
 | vmex #307 | seven lines on #299's branch, fails `test_ladder_compile_counts_and_walltime` | close; superseded by #319 |
 | vmex #301, #303, #304 | winding surface | parked |
 | booz_xform_jax #8 | opt-in magnetic-only projection, checks green; magnetic-only value 2.99 → 0.99 ms (symmetric) and 5.02 → 1.50 ms (asymmetric) on an RTX A4000 | merge and release 0.3.0 |
@@ -682,8 +683,7 @@ problem jit cache key holds `x0.tobytes()` and `id(cfg)`
 (`implicit.py:1138, 1402, 2674`), so a new configuration object recompiles.
 The host solve runs `mode="cli"` behind `jax.pure_callback`
 (`implicit.py:1733`), while `mode="jit"` (`lax.while_loop`) costs the same
-warm (§2). #307's seven lines in `solver.py` cut `_block_lane` cache misses
-from 11 to 3 by normalizing array commitment flags, but sit on #299's branch.
+warm (§2). #307's seven lines in `solver.py` cut `_block_lane` cache misses from 11 to 3 by normalizing array commitment flags, but sit on #299's branch. Commitment flags are part of JAX's compile key, so any lane whose first call receives eagerly computed (uncommitted) arrays and whose later calls receive its own committed outputs compiles twice: B4's census found this in the staged refinement step, where it accounts for 12.5 s of a 25.8 s recompile on a `[1, 1]` `max_mode` schedule. One helper in `vmex/core/device.py`, introduced by #319 and called by #320, normalizes commitment wherever a tree shares a single device; B4b lists every other lane of this class.
 
 **Change.** (1) Re-land #307 on `main`. (2) Key compiled lanes by content:
 `x0` traced, configurations hashed by value. (3) Share the solve, refinement,
@@ -891,3 +891,12 @@ estimate with no false pass in 816 targets, where the schedule's own self-test
 passed errors up to 0.30; eager calls warn by default. Its findings add E0 and
 correct the spacing rule; the exterior-field facade forwarding is a small
 follow-up.
+
+**2026-09-13, B1a opened and a recompile class named.** #320 (B1a) stops
+refinement after an unconverged, non-improving step. B4's census traced
+refinement's duplicate compile to commitment flags: the first step's
+arguments are computed eagerly and uncommitted, later steps receive committed
+outputs, and commitment is part of the compile key — the mechanism #319 fixes
+in the solver. One helper in `vmex/core/device.py` (#319) now serves both
+call sites (#320), removing 12.5 s of a 25.8 s `max_mode` stage recompile with
+bit-identical results. Merge order: #310 → #319 → #320 → B4b.
