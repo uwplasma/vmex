@@ -73,12 +73,11 @@ and [CLI](https://vmex.readthedocs.io/en/latest/reference/cli.html) guides cover
 resolution changes, devices, profiles and output controls.
 
 ```console
-pip install 'vmex[desc]'
 vmex equilibrium.h5  # writes input.equilibrium and solves it to write wout_equilibrium.nc
-vmex input.equilibrium  # reproduce the WOUT without DESC
+vmex input.equilibrium  # reproduce the WOUT
 ```
 
-Reads DESC text inputs and HDF5/pickle outputs, using the final stage or equilibrium.
+Reads DESC text inputs and HDF5/pickle outputs without installing DESC, using the final stage or equilibrium.
 `--desc-tol 0` retains all boundary modes. The default 1% boundary tolerance does not guarantee magnetic-field accuracy.
 WOUT iota has the opposite sign to DESC.
 

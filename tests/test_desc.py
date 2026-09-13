@@ -30,12 +30,6 @@ def test_invalid_tolerance(tmp_path, tol):
         write_desc_input(tmp_path / "eq.h5", tolerance=tol)
 
 
-def test_missing_optional_dependency(tmp_path, monkeypatch):
-    monkeypatch.setitem(sys.modules, "desc.equilibrium", None)
-    with pytest.raises(VmecInputError, match="desc-opt"):
-        write_desc_input(tmp_path / "eq.h5")
-
-
 @pytest.mark.parametrize("asymmetric", [False, True])
 def test_truncation_is_minimal_and_bounds_off_grid_geometry(asymmetric):
     rng = np.random.default_rng(392)
@@ -77,8 +71,10 @@ def desc_equilibrium():
     jax.config.update("jax_disable_jit", previous)
 
 
-@pytest.mark.parametrize("family,current,asymmetric", [(False, False, False), (True, True, True)])
-def test_hdf5_preserves_physical_profiles_and_surface(tmp_path, desc_equilibrium, family, current, asymmetric):
+@pytest.mark.parametrize("family,current,asymmetric,extension", [
+    (False, False, False, "h5"), (True, True, True, "h5"), (True, False, True, "pkl"),
+])
+def test_saved_physical_profiles_and_surface(tmp_path, desc_equilibrium, family, current, asymmetric, extension):
     from desc.equilibrium import EquilibriaFamily
     from desc.geometry import FourierRZToroidalSurface
     from vmex.core.profiles import current as evaluate_current, iota, pressure
@@ -90,7 +86,7 @@ def test_hdf5_preserves_physical_profiles_and_surface(tmp_path, desc_equilibrium
     eq = desc_equilibrium(L=4, M=4, N=3, surface=surface, Psi=2.3,
                           pressure=np.array([[0, 1200], [2, -1000]]),
                           **({"current": np.array([[2, 8e3], [4, 3e3]])} if current else {"iota": np.array([[0, 0.4], [2, 0.1]])}))
-    source = tmp_path / "eq.h5"
+    source = tmp_path / f"eq.{extension}"
     (EquilibriaFamily(desc_equilibrium(), eq) if family else eq).save(str(source))
     inp = VmecInput.from_file(write_desc_input(source))
     assert (inp.nfp, inp.lasym, inp.phiedge) == (3, asymmetric, 2.3)
@@ -218,3 +214,162 @@ def test_native_final_continuation_stage(tmp_path, desc_equilibrium):
     assert inp.ntor == 2
     assert inp.nfp == 3
     assert np.max(abs(inp.rbc[[1, 3]])) > 0.01
+
+
+@pytest.mark.parametrize("extension", ["h5", "pkl", "desc"])
+def test_conversion_never_imports_desc(tmp_path, desc_equilibrium, extension):
+    import subprocess
+
+    source = tmp_path / f"equilibrium.{extension}"
+    if extension == "desc":
+        source.write_text("sym=1\nM_pol=2\nl:0 i=0.4\nm:0 n:0 R1=10 Z1=0\n"
+                          "m:1 n:0 R1=1 Z1=0\nm:-1 n:0 R1=0 Z1=-1\n")
+    else:
+        desc_equilibrium(L=2, M=2, N=0).save(str(source))
+    # A fresh interpreter blocks even indirect imports; fixture generation is
+    # the only part of this contract permitted to use DESC.
+    subprocess.run([sys.executable, "-c", '''
+import sys
+class NoDesc:
+    def find_spec(self, fullname, *args):
+        if fullname == "desc" or fullname.startswith("desc."):
+            raise AssertionError("runtime imported DESC")
+sys.meta_path.insert(0, NoDesc())
+from pathlib import Path
+from vmex.core.desc import write_desc_input
+assert write_desc_input(Path(sys.argv[1])).is_file()
+assert not any(k == "desc" or k.startswith("desc.") for k in sys.modules)
+''', str(source)], check=True)
+
+
+@pytest.mark.parametrize("kind", ["nearest", "linear", "cubic", "cubic2", "catmull-rom",
+                                   "HermiteSplineProfile", "TwoPowerProfile", "MTanhProfile",
+                                   "ScaledProfile", "PowerProfile", "SumProfile", "ProductProfile",
+                                   "PowerSeriesProfile"])
+def test_saved_profile_values_match_desc(tmp_path, desc_equilibrium, kind):
+    import h5py
+    import desc.profiles as profiles
+    from vmex.core.desc import _hdf5, _profile
+
+    x = np.linspace(0, 1, 19)**1.2
+    y = 1000*(1 - x**2) + 30*np.sin(4*x)
+    base = profiles.PowerSeriesProfile([1000, -600], modes=[0, 2])
+    if kind in ("nearest", "linear", "cubic", "cubic2", "catmull-rom"):
+        p = profiles.SplineProfile(y, knots=x, method=kind)
+    else:
+        args = {"HermiteSplineProfile": (y, -2000*x+120*np.cos(4*x), x),
+                "TwoPowerProfile": ([1200, 2, 1.2],), "MTanhProfile": ([1000, 10, .9, .06, .2],),
+                "ScaledProfile": (2, base), "PowerProfile": (2, base),
+                "SumProfile": (base, base), "ProductProfile": (base, base),
+                "PowerSeriesProfile": ([1000, -100, -800], [0, 1, 4])}[kind]
+        p = getattr(profiles, kind)(*args)
+    source = tmp_path / "profile.h5"
+    desc_equilibrium(L=4, M=4, N=0, pressure=p).save(str(source))
+    rho = np.random.default_rng(936).uniform(0, 1, 137)
+    with h5py.File(source) as stream:
+        loaded = _hdf5(stream)["_pressure"]
+    np.testing.assert_allclose(_profile(loaded, rho), p(rho), rtol=2e-13, atol=1e-9)
+    assert write_desc_input(source).is_file()
+
+
+def test_kinetic_pressure(tmp_path, desc_equilibrium):
+    from scipy.constants import elementary_charge
+    from vmex.core.profiles import pressure
+
+    eq = desc_equilibrium(L=2, M=2, N=0, electron_density=1e19,
+                          electron_temperature=1000, ion_temperature=700, atomic_number=2)
+    source = tmp_path / "kinetic.h5"
+    eq.save(str(source))
+    inp = VmecInput.from_file(write_desc_input(source))
+    values = pressure(inp.pmass_type, inp.am, inp.am_aux_s, inp.am_aux_f, np.linspace(0, 1, 31))
+    np.testing.assert_allclose(values, elementary_charge * 1e19 * 1350)
+
+
+@pytest.mark.parametrize("fault,match", [("profile", "unsupported DESC profile"),
+    ("spline", "unsupported DESC spline"), ("anisotropy", "anisotropic"),
+    ("boundary", "fixed outer boundary"), ("rho", "rho=1"), ("nan", "nonfinite"),
+    ("current", "vanish on axis")])
+def test_unsupported_saved_data_fails_before_writing(tmp_path, desc_equilibrium, fault, match):
+    import h5py
+    from desc.profiles import SplineProfile
+
+    source = tmp_path / "invalid.h5"
+    eq = desc_equilibrium(L=2, M=2, N=0, current=np.array([[0, 0], [2, 1000]]),
+                          **({"pressure": SplineProfile([1000, 500, 0])} if fault == "spline" else {}))
+    eq.save(str(source))
+    with h5py.File(source, "a") as stream:
+        path, value = {"profile": ("_pressure/__class__", "desc.profiles.UnknownProfile"),
+                       "spline": ("_pressure/_method", "unknown"), "anisotropy": ("_anisotropy", 1),
+                       "boundary": ("_bdry_mode", "poincare"), "rho": ("_surface/_rho", .5),
+                       "nan": ("_pressure/_params", np.full(stream["_pressure/_params"].shape, np.nan)),
+                       "current": ("_current/_params", stream["_current/_params"][()] + 1)}[fault]
+        del stream[path]
+        stream[path] = value
+    with pytest.raises(VmecInputError, match=match):
+        write_desc_input(source)
+    assert not (tmp_path / "input.invalid").exists()
+
+
+def test_pickle_cannot_execute_globals(tmp_path):
+    import pickle
+
+    class Payload:
+        def __reduce__(self):
+            return eval, ("1/0",)
+    source = tmp_path / "untrusted.pkl"
+    source.write_bytes(pickle.dumps(Payload()))
+    with pytest.raises(VmecInputError, match="unsupported pickle global"):
+        write_desc_input(source)
+
+
+@pytest.mark.parametrize("stage", ["pres_ratio=0:0.5:1\nbdry_ratio=1x3\n", "pres_ratio=0:0.3:1\n", "objective=vacuum\n", ""])
+def test_native_coordinates_and_continuation_match_saved(tmp_path, desc_equilibrium, stage):
+    # Positive Z-sine describes left-handed coordinates: DESC reverses theta
+    # and current/iota. Exercise the same convention without calling DESC.
+    source = tmp_path / "equilibrium.desc"
+    source.write_text("sym=1\nNFP=2\nM_pol=4\nN_tor=1\n" + stage +
+                      "l:0 p=1000\nl:2 p=-800 c=1000\n"
+                      "m:0 n:0 R1=10 Z1=0\nm:1 n:0 R1=1 Z1=0\n"
+                      "m:-1 n:0 R1=0 Z1=1\nm:1 n:1 R1=.1 Z1=0\n")
+    saved = tmp_path / "equilibrium.h5"
+    desc_equilibrium.from_input_file(str(source)).save(str(saved))
+    actual = VmecInput.from_file(write_desc_input(source))
+    expected = VmecInput.from_file(write_desc_input(saved))
+    for key in ("rbc", "zbs", "am", "ac", "curtor", "raxis_c", "zaxis_s"):
+        np.testing.assert_allclose(getattr(actual, key), getattr(expected, key), atol=1e-12)
+
+
+@pytest.mark.parametrize("text,match", [("sym=1\nl:0 i=.4 c=1\n", "both current and iota"),
+                                        ("sym=1\n", "no boundary")])
+def test_invalid_native_input(tmp_path, text, match):
+    source = tmp_path / "invalid.desc"
+    source.write_text(text)
+    with pytest.raises(VmecInputError, match=match):
+        write_desc_input(source)
+
+
+def test_all_fourier_families_and_axis_match_desc(tmp_path, desc_equilibrium):
+    from desc.geometry import FourierRZToroidalSurface
+    from desc.grid import Grid
+
+    rng = np.random.default_rng(683)
+    modes = np.array([(m, n) for m in range(-3, 4) for n in range(-2, 3)])
+    r, z = rng.normal(0, .003, (2, len(modes)))
+    r[np.all(modes == [0, 0], axis=1)] = 10
+    r[np.all(modes == [1, 0], axis=1)] = 1
+    z[np.all(modes == [-1, 0], axis=1)] = -1
+    surface = FourierRZToroidalSurface(R_lmn=r, Z_lmn=z, modes_R=modes, modes_Z=modes, NFP=3, sym=False)
+    eq = desc_equilibrium(L=6, M=3, N=2, surface=surface)
+    source = tmp_path / "asymmetric.h5"
+    eq.save(str(source))
+    inp = VmecInput.from_file(write_desc_input(source, tolerance=0))
+    theta, zeta = rng.uniform(0, 2*np.pi, (2, 71))
+    grid = Grid(np.column_stack([np.ones(71), theta, zeta]), sort=False)
+    data = eq.surface.compute(["R", "Z"], grid=grid)
+    phase = np.arange(inp.mpol)*theta[:, None, None] - np.arange(-inp.ntor, inp.ntor+1)[None, :, None]*3*zeta[:, None, None]
+    for key, c, ss in [("R", inp.rbc, inp.rbs), ("Z", inp.zbc, inp.zbs)]:
+        np.testing.assert_allclose(np.sum(c*np.cos(phase)+ss*np.sin(phase), axis=(1, 2)), data[key], atol=1e-12)
+    data = eq.get_axis().compute("x", grid=grid, basis="rpz")["x"]
+    phase = -np.arange(inp.ntor+1)*3*zeta[:, None]
+    for i, c, ss in [(0, inp.raxis_c, inp.raxis_s), (2, inp.zaxis_c, inp.zaxis_s)]:
+        np.testing.assert_allclose(np.sum(c*np.cos(phase)+ss*np.sin(phase), axis=1), data[:, i], atol=1e-12)

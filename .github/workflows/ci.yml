@@ -121,9 +121,9 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install . pytest pytest-cov pytest-xdist
-      - name: Install optional DESC bridge for interoperability coverage
+      - name: Install DESC to generate interoperability fixtures
         if: matrix.python-version == '3.12'
-        run: python -m pip install '.[desc]'
+        run: python -m pip install 'desc-opt>=0.17'
       - name: Check repository size
         run: |
           size_kb=$(du -sk --exclude=.git . | cut -f1)
