@@ -227,7 +227,7 @@ error grows rapidly near that surface: evaluate at distances of at least about
 twice the toroidal source-grid spacing from the plasma surface. Closer in,
 `with_near_surface_continuation` uses a first-order continuation of the
 on-surface field. Targets must also stay away from coil filaments, and an MGRID
-field has a finite tabulated domain. See the [exterior-field explanation](docs/explanation/nestor-vacuum.rst)
+field has a finite tabulated domain. See the [exterior-field explanation](https://vmex.readthedocs.io/en/latest/explanation/nestor-vacuum.html)
 and [field and coil usage](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
 ![Exterior field lines of a finite-beta QA with coils only and with coils plus plasma](docs/_static/figures/readme_extender_exterior_islands.webp)
