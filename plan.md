@@ -227,15 +227,15 @@ attribution. One heavy local job at a time; the office box takes one.
 |---|---|---|---|
 | B1 Newton finish | in `solver.py`/`implicit.py`: when `fsq` falls below a switch threshold, take matrix-free Newton–GCROT steps inside the descent (the `_newton_step` lane with exact JVPs and the true-residual check) so the returned state is a certified root; delete the separate refinement pass; value-only trials get the same root; #302's anchor contract folds in here | refinement is 51 % of a gradient call; drift 1.5 % → 6e-8 when refined | objective replay at a repeated `x` agrees to 1e-9 on the QI and single-stage cases; the joint phase exits without precision loss; gradient call ≤ 0.5× today; certificate values unchanged on the P1 matrix |
 | B2 warm starts everywhere | perturbation predictor into the free-boundary cache; rung skipping for `initial_state`; hot restart for CLI and `solve_file` sequences; `mode="jit"` inside the callback | 806 → 212 iterations at a 1e-4 move | iterations per accepted trial ≤ 0.3× cold on the QI example |
-| B3 Krylov recycling | warm-start λ across trials; reuse the GCROT deflation space across Newton and adjoint solves; freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5× |
-| B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows | 102 compiles in a five-evaluation warm campaign | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages |
+| B3 Krylov recycling | first return the adjoint's Krylov iteration count from compiled programs (A1's counters report `None` for every compiled adjoint, which covers scalar `minimize()` gradients); then warm-start λ across trials, reuse the GCROT deflation space across Newton and adjoint solves, and freeze the preconditioner in the matvec at the root | three solves of one operator per gradient today | adjoint matvecs per gradient ≤ 0.5×, measured by the returned count |
+| B4 compile hygiene | `x0` out of the jit key; configs keyed by content; one compile per resolution; persistent cache where jaxlib allows; the JAX value-and-gradient lane must reuse the host lane's executables instead of compiling its own | 102 compiles in a five-evaluation warm campaign; on the A1 rows (#310) the JAX value-and-gradient lane spends 41.6 s (QA) and 71.0 s (QI) compiling after the host derivative has already compiled, and builds take 244–500 XLA compiles | cold to first gradient ≤ 20 s CPU on the QI example; zero recompiles across `max_mode` stages; the second lane adds under 5 s of compile |
 | B5 per-iteration constant | one bounded experiment (≤ 1 week), in this order: ms per iteration for VMEX and VMEC++ at 1, 2 and 4 threads; an HLO census of the iteration (ops, loops, loop trips; the CPU tridiagonal solve is two `lax.scan` Thomas sweeps, about 100 serial trips per iteration at ns = 50); a dispatch arm with a batched tridiagonal kernel; and only if the thread scaling shows headroom, `shard_map` with radial slabs and the tridiagonal solve split over modes, as VMEC++'s OpenMP does | 2.4 vs 0.9 ms per iteration; JAX's CPU thunk runtime has documented 2.5–14× regressions on many-small-kernel workloads and host devices share one thread pool | warm ns = 50 QA below 1.5 ms per iteration; the dispatch arm keeps iteration counts identical and the final state within 1e-12 relative; kill sharding below 1.25× on four devices or with collectives above 30 % of the iteration |
 
 ### Phase C, weeks 2–4: derivatives sized to the problem
 
 | PR | change | gate |
 |---|---|---|
-| C1 batched Jacobian | `jacobian_batch_size="auto"` with the measured-memory chunk; skip the GMRES corrector when the block solve already certifies (instrument first with A1) | warm 48-dof Jacobian ≤ 0.4 s CPU; columns identical to 1e-10 |
+| C1 batched Jacobian | `jacobian_batch_size="auto"` with the measured-memory chunk, after reproducing in isolation the 0.5–2 % batch dependence of §2; the per-column GMRES certifier already takes zero iterations on the A1 rows (#310), so the Jacobian's 27–32 s first-call cost is block assembly, factorization and their compile, which is what to reduce | warm 48-dof Jacobian ≤ 0.4 s CPU; columns identical to 1e-10 across batch sizes |
 | C2 `minimize()` | route `objective_terms` through the block Jacobian or a scalar adjoint; docstring true | one linear solve per dof or per gradient, never per row |
 | C3 joint least squares | single stage as TRF/LM on `[r_plasma; r_coil]` with `[J_plasma; J_coil]` (coil block by `jacfwd`); Jacobian only at accepted points | stage 1 needed 63 nfev / 26 njev where joint BFGS needed 188 / 176 → joint phase ≤ 0.4× today; design meets targets; cold re-evaluation matches |
 
@@ -570,6 +570,17 @@ changes the return drift from 1e-7 to 2e-7 (§2). #302 and #306 carry the
 contract to keep: derivatives only at a state with a fresh projected residual,
 raw FSQ and admissible geometry, and caches keyed by state identity.
 
+**Measured (#310, A1 counters; shared laptop under other sessions' load, so
+seconds are diagnostic).** On the 8-dof QA and QI rows of
+`benchmarks/optimization.py`, one evaluation's first derivative spends 29.4 s
+(QA) and 40.0 s (QI) in refinement, against 2.8–3.2 s for the 185-iteration
+solve: all three refinement steps exhaust their GCROT budget (`m = 100` ×
+`_REFINE_MAX_RESTARTS = 20` = 2,000 iterations each, 6,000 per evaluation)
+without reaching the 1e-6 forcing term. `_refine_step_core` is best-effort by
+design (`implicit.py:1403–1430`: convergence "is never enforced here") and
+`_refined_state` keeps the lowest-residual iterate, so a capped step is
+applied silently. Refinement today is a budget, not a solve.
+
 **Precedent and risk.** Every code that finishes a VMEC-type descent with
 Krylov (VMEC2000's `PRECON_TYPE` modes, PARVMEC, SIESTA) preconditions it with
 the 2-D radial block operator; SIESTA reaches a 1e-19 residual in 6–11
@@ -684,3 +695,12 @@ first, hoist the linearization, build the edge response matrix once per
 gradient, keep previous-iterate Schur preconditioning as the fallback, and
 replace the frozen-derivative option, which drops an order-one term, by a
 certified looser tolerance.
+
+**2026-09-13, A1 measured.** Draft #310 (A1, head `142d6c92`) passes its
+bit-identity gate on JAX 0.9.2 and 0.11.1 and attributes 96.7 % (QA, 107.8 s)
+and 95.4 % (QI, 164.9 s) of benchmark wall time. Its rows re-rank Phase B: the
+first derivative is refinement (29–40 s, every GCROT step capped at 2,000
+iterations without converging) plus block Jacobian (27–32 s, certifier idle),
+with the solve at 3 s; the JAX lane then compiles for another 42–71 s. B1, B3,
+B4 and C1 are updated in place. Timings are diagnostic (load 18–31 from other
+sessions); the record is to be committed with #310 before it merges.
