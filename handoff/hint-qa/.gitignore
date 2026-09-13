@@ -1,1 +1,2 @@
 !inputs/**/*.nc
+!inputs/exterior-targets.npz

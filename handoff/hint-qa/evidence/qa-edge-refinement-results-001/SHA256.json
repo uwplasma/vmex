@@ -1,0 +1,22 @@
+{
+  "QA_EDGE_REFINEMENT_RESULT.md": "fdccc46d28dc78f432d0de8dfc7b22cb346301e048cae6d14e0bf1caec342287",
+  "compare_qa_edge_refinement.py": "64141fb6905aa9ef9b5a181bec4394077a427defccc222983ff3a2cc60433469",
+  "comparison.json": "35a77631161e45a3c8c29b882b0737112790c0e5452f9e1a9de913b38d895fcb",
+  "input-manifest.json": "b983d21a186786c68508534d0a0274b857cf6c4d60d116dd1178b159f5d5c93a",
+  "qa-edge-fresh-n128-001/current-profile-diagnostic-001.json": "7b4b45be62076403216bf45b4511ac507abb5f92380c305a08029f4320521fa5",
+  "qa-edge-fresh-n128-001/job-status.json": "46a0292144de7768973020a26d9ac32298c7a3252e5dbd84370380ebb59fc3fa",
+  "qa-edge-fresh-n128-001/native-total-field-points.csv": "99e9faff94baacb85a4bd154073a732f8213c258541a959bf5708312f599d710",
+  "qa-edge-fresh-n128-001/pilot-summary.json": "eb4ec01ee747849f9308a4fe31dad6c263343289b515e9204b8345f39f6acb68",
+  "qa-edge-fresh-n128-001/preparation-provenance.json": "e8f437a99a378ce4d1097f23ba282c5c35f904c9cce705130c0b54b0ee5db8b3",
+  "qa-edge-fresh-n128-001/resource-watch.json": "8d12a41151379e1481ea927ae38791c67a2773c07fa2c7d5e80c3d8dc1423452",
+  "qa-edge-fresh-n128-001/return-current-diagnostic-001.json": "4c490c77064ad1c119a029f03ab465dae69d5d7467a70c1a68c99bc7fb44e29d",
+  "qa-edge-fresh-n128-001/return-current-section-001.png": "552f163acb08affabeaadff6e715eec5837e5b8f2cf5ab926a1197d24916d25b",
+  "qa-edge-fresh-n64-001/current-profile-diagnostic-001.json": "7466b251e2fd4e2724d29c04906efd02b2876cf5cc10c396477924660f770757",
+  "qa-edge-fresh-n64-001/job-status.json": "e2c446a537236321db1620790833b89bed7c5321acc35a26e8779af715097d3d",
+  "qa-edge-fresh-n64-001/native-total-field-points.csv": "5430421b1e13c5ff90d786ac8bcbc114dc10537fd52a06135cd7b331660313a8",
+  "qa-edge-fresh-n64-001/pilot-summary.json": "d3f3c53dd9033e37ee61b53b3e3910931f784d6e61e47d049b9084e545b90a80",
+  "qa-edge-fresh-n64-001/preparation-provenance.json": "ec33b1b135dc35b7cac8ca48c988dabbfe2d0cfb287378db5427d6f5a7555d32",
+  "qa-edge-fresh-n64-001/resource-watch.json": "6bfe602c274c0c0f0e252d96b2881ab7cf497e871cbf64067f9007383773ca6a",
+  "qa-edge-fresh-n64-001/return-current-diagnostic-001.json": "5548453a5bed341f767eb5884900959e2fc924d1ef985a0fa9a261e1266e1077",
+  "qa-edge-fresh-n64-001/return-current-section-001.png": "11a135796f66e58845d9bff7086e075d5a2a62b47ae8404666ba4fe33a0e798a"
+}

@@ -26,7 +26,14 @@ def main():
             if destination.exists() and destination.read_bytes() != item.read_bytes():
                 raise FileExistsError(f'Refusing to replace different input: {destination.name}')
             shutil.copy2(item, destination)
-    print('Bundled checksums verified; both QA cases staged.')
+    geometry = args.hint_root.resolve() / 'runs/qa-native-inputs'
+    geometry.mkdir(parents=True, exist_ok=True)
+    source = bundle / 'inputs/exterior-targets.npz'
+    destination = geometry / source.name
+    if destination.exists() and destination.read_bytes() != source.read_bytes():
+        raise FileExistsError('Refusing to replace different fixed targets')
+    shutil.copy2(source, destination)
+    print('Bundled checksums verified; both QA cases and fixed targets staged.')
 
 
 if __name__ == '__main__':

@@ -66,5 +66,9 @@
   "inputs/edge-n64/hint.input": {
     "bytes": 3202,
     "sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d"
+  },
+  "inputs/exterior-targets.npz": {
+    "bytes": 3383,
+    "sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5"
   }
 }

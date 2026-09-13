@@ -1,0 +1,24 @@
+{
+  "host": "pop-os",
+  "runner_pid": 591,
+  "command": [
+    "bash",
+    "-c",
+    "export OMP_NUM_THREADS=1; exec mpirun -np 4 build-release/HINT/hint.exe < hint.input"
+  ],
+  "cwd": "runs/qa-edge-fresh-n64-001",
+  "resource": "cpu",
+  "timeout_seconds": 180,
+  "start_unix": 1789259603.0717528,
+  "state": "finished",
+  "pid": 592,
+  "execution_environment": {
+    "OMP_NUM_THREADS": "2",
+    "JAX_PLATFORMS": "cpu",
+    "CUDA_VISIBLE_DEVICES": null,
+    "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+  },
+  "returncode": 0,
+  "elapsed_seconds": 108.70124793052673,
+  "execution_environment_note": "Runner inherited OMP_NUM_THREADS=2; recorded shell command explicitly overrides to1 for mpirun/HINT."
+}

@@ -7,12 +7,12 @@
       "sha256": "f9bca4fd47b285489c21fd9b8094b3d8c785bba19f21239d5c476732c19d3d73"
     },
     ".gitignore": {
-      "bytes": 16,
-      "sha256": "50e88e45631f388fb61caba5ede7e48418f1fe1dbf4638b26e4b362ef451cd9e"
+      "bytes": 45,
+      "sha256": "6265c547467f498e8f7a4e976f8ef18d2a0262ecf49974fbc25629e4327c2b82"
     },
     "README.md": {
-      "bytes": 18414,
-      "sha256": "7da3dfda577c53d11c1967f41941744dba88065576472d8293c8bf950e9c8c6b"
+      "bytes": 18836,
+      "sha256": "f1926319c419ea74ff83e75d6ce3c455bbef29c219ad911188c52f9ebdae2b2f"
     },
     "context/EXECUTION_PRIORITIES.md": {
       "bytes": 5376,
@@ -154,6 +154,90 @@
       "bytes": 10012,
       "sha256": "0d4906414e9f2d453d03bf1fad0cd4309cef47c20a4f6d904dc9eb4ad040908c"
     },
+    "evidence/qa-edge-refinement-results-001/QA_EDGE_REFINEMENT_RESULT.md": {
+      "bytes": 5507,
+      "sha256": "fdccc46d28dc78f432d0de8dfc7b22cb346301e048cae6d14e0bf1caec342287"
+    },
+    "evidence/qa-edge-refinement-results-001/SHA256.json": {
+      "bytes": 2348,
+      "sha256": "752c7d27d145ff5a77a20f0000388ed278f14aed05911dffb9204e25305e6643"
+    },
+    "evidence/qa-edge-refinement-results-001/compare_qa_edge_refinement.py": {
+      "bytes": 2429,
+      "sha256": "64141fb6905aa9ef9b5a181bec4394077a427defccc222983ff3a2cc60433469"
+    },
+    "evidence/qa-edge-refinement-results-001/comparison.json": {
+      "bytes": 178494,
+      "sha256": "35a77631161e45a3c8c29b882b0737112790c0e5452f9e1a9de913b38d895fcb"
+    },
+    "evidence/qa-edge-refinement-results-001/input-manifest.json": {
+      "bytes": 2949,
+      "sha256": "b983d21a186786c68508534d0a0274b857cf6c4d60d116dd1178b159f5d5c93a"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/current-profile-diagnostic-001.json": {
+      "bytes": 95035,
+      "sha256": "7b4b45be62076403216bf45b4511ac507abb5f92380c305a08029f4320521fa5"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/job-status.json": {
+      "bytes": 704,
+      "sha256": "46a0292144de7768973020a26d9ac32298c7a3252e5dbd84370380ebb59fc3fa"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/native-total-field-points.csv": {
+      "bytes": 14976,
+      "sha256": "99e9faff94baacb85a4bd154073a732f8213c258541a959bf5708312f599d710"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/pilot-summary.json": {
+      "bytes": 70015,
+      "sha256": "eb4ec01ee747849f9308a4fe31dad6c263343289b515e9204b8345f39f6acb68"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/preparation-provenance.json": {
+      "bytes": 979,
+      "sha256": "e8f437a99a378ce4d1097f23ba282c5c35f904c9cce705130c0b54b0ee5db8b3"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/resource-watch.json": {
+      "bytes": 54,
+      "sha256": "8d12a41151379e1481ea927ae38791c67a2773c07fa2c7d5e80c3d8dc1423452"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/return-current-diagnostic-001.json": {
+      "bytes": 63410,
+      "sha256": "4c490c77064ad1c119a029f03ab465dae69d5d7467a70c1a68c99bc7fb44e29d"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n128-001/return-current-section-001.png": {
+      "bytes": 86934,
+      "sha256": "552f163acb08affabeaadff6e715eec5837e5b8f2cf5ab926a1197d24916d25b"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/current-profile-diagnostic-001.json": {
+      "bytes": 67318,
+      "sha256": "7466b251e2fd4e2724d29c04906efd02b2876cf5cc10c396477924660f770757"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/job-status.json": {
+      "bytes": 701,
+      "sha256": "e2c446a537236321db1620790833b89bed7c5321acc35a26e8779af715097d3d"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/native-total-field-points.csv": {
+      "bytes": 14976,
+      "sha256": "5430421b1e13c5ff90d786ac8bcbc114dc10537fd52a06135cd7b331660313a8"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/pilot-summary.json": {
+      "bytes": 40997,
+      "sha256": "d3f3c53dd9033e37ee61b53b3e3910931f784d6e61e47d049b9084e545b90a80"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/preparation-provenance.json": {
+      "bytes": 888,
+      "sha256": "ec33b1b135dc35b7cac8ca48c988dabbfe2d0cfb287378db5427d6f5a7555d32"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/resource-watch.json": {
+      "bytes": 53,
+      "sha256": "6bfe602c274c0c0f0e252d96b2881ab7cf497e871cbf64067f9007383773ca6a"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/return-current-diagnostic-001.json": {
+      "bytes": 34064,
+      "sha256": "5548453a5bed341f767eb5884900959e2fc924d1ef985a0fa9a261e1266e1077"
+    },
+    "evidence/qa-edge-refinement-results-001/qa-edge-fresh-n64-001/return-current-section-001.png": {
+      "bytes": 69767,
+      "sha256": "11a135796f66e58845d9bff7086e075d5a2a62b47ae8404666ba4fe33a0e798a"
+    },
     "evidence/qa-follow-beta0p5-001/pilot-summary.json": {
       "bytes": 141178,
       "sha256": "850460fe43b49a2a650fef48c1974895d734c529c49279ac89fc715a6796277d"
@@ -284,11 +368,11 @@
     },
     "helpers/script-sha256.json": {
       "bytes": 758,
-      "sha256": "8c1a0103579e83af60bed4357dd88018ae9f3732c7291e8be9d382598697d5ce"
+      "sha256": "14c4005ca30694c46f88a18e58b1993bef594512e8225c626c959892e2bf8224"
     },
     "helpers/stage_inputs.py": {
-      "bytes": 1424,
-      "sha256": "b9067910ab27df9263cc6b0fa4966a1a085f97caf24c8d7b6c5203b1c091d4b3"
+      "bytes": 1845,
+      "sha256": "46d2816d47665ab5ae766ff99a765ab2c9d912de2efba2bc3ee2d7be69c0f535"
     },
     "helpers/tested-cpu-14360d17/qualify_finite_beta_qa_derivatives.py": {
       "bytes": 10834,
@@ -329,6 +413,10 @@
     "hint-support/compare_qa_cadence.py": {
       "bytes": 3036,
       "sha256": "3d941f21ba2a94d0b30749c7e70663f9c62ad3a9e49423cc7f80b638819faaef"
+    },
+    "hint-support/compare_qa_edge_refinement.py": {
+      "bytes": 2429,
+      "sha256": "64141fb6905aa9ef9b5a181bec4394077a427defccc222983ff3a2cc60433469"
     },
     "hint-support/diagnose_qa_current_profile.py": {
       "bytes": 10506,
@@ -379,8 +467,8 @@
       "sha256": "b1d8f0460173f3bfb5b58a8a973b8afab40964e36e6c56889a157b6edb1878ee"
     },
     "inputs/SHA256.json": {
-      "bytes": 2640,
-      "sha256": "e98a3e19a857b14c1d5973ed8e57e962940954435c7b298f3ceff90cf516c9b6"
+      "bytes": 2780,
+      "sha256": "bbc1fa2a9dd6467321eaff106a8d062f58d76e6871899e2de5db268814522e83"
     },
     "inputs/beta0p5/ESSOS_biot_savart_LandremanPaulQA_beta0p5_bootstrap.json": {
       "bytes": 4503,
@@ -449,6 +537,10 @@
     "inputs/edge-n64/hint.input": {
       "bytes": 3202,
       "sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d"
+    },
+    "inputs/exterior-targets.npz": {
+      "bytes": 3383,
+      "sha256": "c2c38f8349b9aec38d351403f90cd3746e86797d96261c3b3a78288d13b6f9f5"
     }
   }
 }

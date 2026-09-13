@@ -1,0 +1,27 @@
+{
+  "grid": [
+    64,
+    64,
+    32
+  ],
+  "proposed_run": "qa-edge-fresh-n64-001",
+  "deck": "local-support/qa-edge-refinement-inputs-001/n64/hint.input",
+  "deck_sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d",
+  "existing_inputs": {
+    "vacuum.nc": {
+      "office_path": "runs/qa-vacuum-grid/gpu/beta0p5/n64t32/vacuum.nc",
+      "sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2"
+    },
+    "flux.nc": {
+      "office_path": "runs/qa-native-inputs/beta0p5/flux.nc",
+      "sha256": "5db733f99b4a518f4d462a4f7b6b6b3161f2280bc23271cf5d42079c0f09a778"
+    },
+    "limiter-12.nc": {
+      "office_path": "runs/qa-native-inputs/beta0p5/limiter-12.nc",
+      "sha256": "0f4d81fc679eb674d76619b55bffdd73843d39e283a6d9d7aaf388e7d3a5c8d1"
+    }
+  },
+  "limiter_status": "existing",
+  "solver_launched": false,
+  "timeout_seconds": 180
+}

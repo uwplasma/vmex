@@ -1,0 +1,86 @@
+{
+  "prepared_utc_date": "2026-09-13",
+  "mode": "matched fresh initial conditions; native grid-changing restart rejected by source",
+  "original_deck_sha256": "1f796d0b70c2d8ba74f2fdb53e13d507aa5ac103fa7a89e77cb630d4729a7348",
+  "controls": {
+    "nstep": 4,
+    "nstepb": 250,
+    "dt_b": 1e-05,
+    "final_magnetic_time": 0.01,
+    "npchg": 1,
+    "npset": 0,
+    "eta0": 0.001,
+    "h_in": 0.01,
+    "lc_in": 20.0,
+    "MPI_ranks": 4,
+    "OMP_threads": 1
+  },
+  "runs": [
+    {
+      "grid": [
+        64,
+        64,
+        32
+      ],
+      "proposed_run": "qa-edge-fresh-n64-001",
+      "deck": "local-support/qa-edge-refinement-inputs-001/n64/hint.input",
+      "deck_sha256": "ccf3dae79f3a858966036f599f339174750d0bdd65bac139a6ac91552aa5903d",
+      "existing_inputs": {
+        "vacuum.nc": {
+          "office_path": "runs/qa-vacuum-grid/gpu/beta0p5/n64t32/vacuum.nc",
+          "sha256": "392689512f2a9803fbf8a69e9812c8dd9af865a35426197593a72a4c7abab5c2"
+        },
+        "flux.nc": {
+          "office_path": "runs/qa-native-inputs/beta0p5/flux.nc",
+          "sha256": "5db733f99b4a518f4d462a4f7b6b6b3161f2280bc23271cf5d42079c0f09a778"
+        },
+        "limiter-12.nc": {
+          "office_path": "runs/qa-native-inputs/beta0p5/limiter-12.nc",
+          "sha256": "0f4d81fc679eb674d76619b55bffdd73843d39e283a6d9d7aaf388e7d3a5c8d1"
+        }
+      },
+      "limiter_status": "existing",
+      "solver_launched": true,
+      "timeout_seconds": 180,
+      "solver_returncode": 0
+    },
+    {
+      "grid": [
+        128,
+        128,
+        64
+      ],
+      "proposed_run": "qa-edge-fresh-n128-001",
+      "deck": "local-support/qa-edge-refinement-inputs-001/n128/hint.input",
+      "deck_sha256": "5b6cca19f2adc8d91e4d084e9b84e8a7bb861626bf136d34eb90ead5fb2ba63f",
+      "existing_inputs": {
+        "vacuum.nc": {
+          "office_path": "runs/qa-vacuum-grid/gpu/beta0p5/n128t64/vacuum.nc",
+          "sha256": "559f6be766900ad3c947b650114d033dd3384bf2716a880b84a7ef8f74e3305b"
+        },
+        "flux.nc": {
+          "office_path": "runs/qa-current-refinement/beta0p5/n128t64/flux.nc",
+          "sha256": "b84b1ad337cc8ec12e94f73fd2a62cddcff137551e37f95ee5f1f707480968c3"
+        },
+        "limiter-12.nc": {
+          "office_path": "runs/qa-edge-limiter-n128-001/limiter-12.nc",
+          "sha256": "8ec31cdda817d21965db6f9cf65c76fe0e3838138dbf373b88bae467ffe5b13f"
+        }
+      },
+      "limiter_status": "native completed, grid/domain/nfp verified, all89754 initial plasma cells inside",
+      "solver_launched": true,
+      "timeout_seconds": 1200,
+      "solver_returncode": 0
+    }
+  ],
+  "pending": [],
+  "office_free_disk_observed_GiB_approx": 6.6,
+  "added_disk_budget_GiB": 0.5,
+  "fine_RSS_watch_limit_GiB": 16,
+  "estimated_runtime_is_measured": false,
+  "limiter_validation": "limiter-validation.json",
+  "host_capacity_at_preprocess": {
+    "RAM_available_GiB": 38,
+    "disk_free_GiB_approx": 6.6
+  }
+}
