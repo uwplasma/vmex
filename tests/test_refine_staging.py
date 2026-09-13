@@ -26,6 +26,7 @@ import jax
 import numpy as np
 
 from vmex.core import implicit as im
+from vmex.core.errors import VmecError
 from vmex.core.input import VmecInput
 
 DATA = Path(__file__).resolve().parents[1] / "examples" / "data"
@@ -114,6 +115,8 @@ def test_preflight_skips_refinement_and_first_derivative_pays_it_once() -> None:
         assert calls == {"refine": 1, "solve": 2}
         stats = im._SOLVE_STATS.get(cfg)
         assert stats is not None and stats["solves"] == 1
+        assert stats["refinements"] >= 1 and stats["refinement_seconds"] > 0.0
+        assert stats["refinement_krylov_iterations"] >= stats["refinement_steps"] >= 1
     finally:
         im._refine_fixed_point = original_refine
         im._host_solve = original_solve
@@ -126,3 +129,53 @@ def test_preflight_skips_refinement_and_first_derivative_pays_it_once() -> None:
     ):
         np.testing.assert_array_equal(
             np.asarray(refined_leaf), np.asarray(memo_leaf))
+
+
+def test_adjoint_counters_cover_eager_and_staged_gradients() -> None:
+    """Host-eager adjoints are counted; a compiled adjoint makes them unknown."""
+    _, cfg, p0 = _small_solovev_setup()
+
+    def volume(params):
+        return im.plasma_volume(im.solve_implicit(params, cfg),
+                                im.runtime_from_params(params, cfg))
+
+    im._SOLVE_STATS.pop(cfg, None)
+    try:
+        jax.grad(volume)(p0)
+        stats = im._SOLVE_STATS[cfg]
+        assert stats["adjoints"] == 1 and stats["adjoint_seconds"] > 0.0
+        assert stats["adjoint_krylov_iterations"] >= 1
+        previous = bool(jax.config.jax_disable_jit)
+        jax.config.update("jax_disable_jit", False)  # the suite default is eager
+        try:
+            jax.jit(jax.grad(volume))(p0)
+        finally:
+            jax.config.update("jax_disable_jit", previous)
+        assert stats["adjoints"] is None
+        assert stats["adjoint_krylov_iterations"] is None
+        assert stats["adjoint_seconds"] is None
+    finally:
+        im._SOLVE_STATS.pop(cfg, None)
+
+
+def test_rejected_trial_charges_solve_time_but_counts_no_solve(monkeypatch) -> None:
+    """A failed trial solve adds host seconds, not a solve or its iterations."""
+    _, cfg, p0 = _small_solovev_setup()
+    trial = dataclasses.replace(p0, rbc=p0.rbc * (1.0 + 1.0e-3))
+    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), trial)
+
+    def fail(*_args, **_kwargs):
+        raise VmecError(message="synthetic failed trial")
+
+    monkeypatch.setattr(im, "solve", fail)
+    monkeypatch.setattr(im, "solve_multigrid", fail)
+    im._SOLVE_STATS.pop(cfg, None)
+    try:
+        status = im._host_solve_and_mask_status(cfg, params_np)[2]
+        stats = im._SOLVE_STATS[cfg]
+        assert int(status) == 1
+        assert (stats["solves"], stats["iterations"]) == (0, 0)
+        assert stats["solve_seconds"] > 0.0
+    finally:
+        im._SOLVE_STATS.pop(cfg, None)
+        im._LAST_STATUS_ERROR.pop(cfg, None)

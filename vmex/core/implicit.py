@@ -127,6 +127,7 @@ import dataclasses
 import functools
 import os
 import sys
+import time
 import types
 import weakref
 from dataclasses import dataclass
@@ -1262,12 +1263,53 @@ _LAST_SOLVE: weakref.WeakKeyDictionary[ImplicitConfig, tuple[bytes, SolveResult]
 _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
     weakref.WeakKeyDictionary()
 
-# cfg -> {"solves": int, "iterations": int}: cumulative host forward-solve
-# effort of a config (memo hits excluded) — the instrumentation behind the
-# R25.4 warm-start benchmarks (``optimize.least_squares`` attaches it to the
-# scipy result as ``solve_stats``).
-_SOLVE_STATS: weakref.WeakKeyDictionary[ImplicitConfig, dict[str, int]] = \
+# cfg -> cumulative effort counters of a config, surfaced as ``solve_stats``
+# (``optimize.least_squares`` results, ``VmecProblem.evaluate`` diagnostics)
+# and ``OptimizationRecord.counters``.  Memo hits are excluded.  ``solves`` and
+# ``iterations`` are host forward solves and their descent iterations;
+# ``refinements``, ``refinement_steps`` and ``refinement_krylov_iterations``
+# the fixed-point anchor; ``jacobians``, ``jacobian_columns`` and
+# ``jacobian_krylov_iterations`` the host residual-Jacobian lanes (certifier
+# GMRES iterations summed over columns); ``adjoints`` and
+# ``adjoint_krylov_iterations`` host-eager reverse adjoints.  ``<part>_seconds``
+# is host wall time exclusive of nested parts (compilation inside a part
+# included).  Every count is read from a value the host already receives.  An
+# adjoint traced into a compiled program runs an unobservable number of times,
+# so from that trace on the three adjoint entries are ``None``, never a
+# zero standing in for unknown.
+_SOLVE_STATS: weakref.WeakKeyDictionary[ImplicitConfig, dict[str, Any]] = \
     weakref.WeakKeyDictionary()
+_COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
+             "refinement_steps", "refinement_krylov_iterations",
+             "refinement_seconds", "jacobians", "jacobian_columns",
+             "jacobian_krylov_iterations", "jacobian_seconds", "adjoints",
+             "adjoint_krylov_iterations", "adjoint_seconds")
+# Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
+# while their caller waits, so one process-wide stack nests correctly.
+_OPEN_SECTIONS: list[float] = []
+
+
+def _count(cfg: ImplicitConfig, **increments: float) -> None:
+    """Add to the counters of ``cfg``; an entry that is ``None`` stays unknown."""
+    stats = _SOLVE_STATS.setdefault(cfg, dict.fromkeys(_COUNTERS, 0))
+    for key, value in increments.items():
+        if stats.get(key, 0) is not None:
+            stats[key] = stats.get(key, 0) + value
+
+
+@contextlib.contextmanager
+def _timed(cfg: ImplicitConfig, part: str):
+    """Charge the block's host wall time, minus nested sections, to ``part``."""
+    _OPEN_SECTIONS.append(0.0)
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        elapsed = time.perf_counter() - started
+        nested = _OPEN_SECTIONS.pop()
+        if _OPEN_SECTIONS:
+            _OPEN_SECTIONS[-1] += elapsed
+        _count(cfg, **{f"{part}_seconds": elapsed - nested})
 
 # Single-slot relay for typed host exceptions (module docstring, "Zero-crash
 # typed errors through the callback"): ``_host_solve_and_mask`` deposits the
@@ -1332,20 +1374,19 @@ def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     # A bad warm seed must not fail the trial (only the initial guess is at
     # stake — every rung converges to the same fixed point).
     attempts = [s for s in (perturb, hot) if s is not None] + [None]
-    for k, init in enumerate(attempts):
-        try:
-            result = run(init)
-            break
-        except VmecError:
-            if k == len(attempts) - 1:
-                _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
-                raise
-    if cfg.hot_restart and bool(result.converged):
-        _HOT_CACHE[cfg] = result.state
-    _LAST_SOLVE[cfg] = (key, result)
-    stats = _SOLVE_STATS.setdefault(cfg, {"solves": 0, "iterations": 0})
-    stats["solves"] += 1
-    stats["iterations"] += int(result.iterations)
+    with _timed(cfg, "solve"):
+        for k, init in enumerate(attempts):
+            try:
+                result = run(init)
+                break
+            except VmecError:
+                if k == len(attempts) - 1:
+                    _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
+                    raise
+        if cfg.hot_restart and bool(result.converged):
+            _HOT_CACHE[cfg] = result.state
+        _LAST_SOLVE[cfg] = (key, result)
+        _count(cfg, solves=1, iterations=int(result.iterations))
     return result
 
 
@@ -1375,12 +1416,14 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
     key = _params_key(params)
     hit = _LAST_REFINED.get(cfg)
     if hit is None or hit[0] != key:
-        refined = _refined_state(
-            cfg, params, state, dof_mask,
-            initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
-        )
-        correction = jax.tree.map(jnp.subtract, refined, state)
-        correction_norm = float(_tree_norm(correction))
+        with _timed(cfg, "refinement"):
+            _count(cfg, refinements=1)
+            refined = _refined_state(
+                cfg, params, state, dof_mask,
+                initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
+            )
+            correction = jax.tree.map(jnp.subtract, refined, state)
+            correction_norm = float(_tree_norm(correction))
         if np.isfinite(correction_norm) and correction_norm > 0.0:
             _LAST_REFINEMENT_CORRECTION[cfg] = correction
         else:
@@ -1403,7 +1446,7 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
 def _refine_step_core(z: SpectralState, fz: SpectralState,
                       params: ImplicitParams, frozen: SpectralState,
                       dof_mask: SpectralState, cfg: ImplicitConfig):
-    """Staged inexact-Newton refinement step; returns ``(z, F(z), |F(z)|)``.
+    """Staged inexact-Newton refinement step; returns ``(z, F(z), |F(z)|, its)``.
 
     Linearizes the preconditioned residual at ``z``, runs the same
     GCROT(m, k) solve as the eager :func:`_adjoint_solve_gcrot` lane with
@@ -1428,7 +1471,7 @@ def _refine_step_core(z: SpectralState, fz: SpectralState,
         max_restarts=_REFINE_MAX_RESTARTS)
     z_new = jax.tree.map(jnp.subtract, z, unravel(sol.x))
     fz_new = F(z_new, params)
-    return z_new, fz_new, _tree_norm(fz_new)
+    return z_new, fz_new, _tree_norm(fz_new), sol.iterations
 
 
 def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1442,10 +1485,13 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     as one compiled program.  Arguments are committed to ``cfg.device``
     exactly like the eager Krylov lane's RHS pin.
     """
-    return _refine_step_core(
+    z, fz, residual_norm, iterations = _refine_step_core(
         _pin_concrete(cfg, z), _pin_concrete(cfg, fz),
         _pin_concrete(cfg, params), _pin_concrete(cfg, frozen),
         _pin_concrete(cfg, dof_mask), cfg)
+    _count(cfg, refinement_steps=1,
+           refinement_krylov_iterations=int(iterations))
+    return z, fz, residual_norm
 
 
 def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
@@ -2738,7 +2784,7 @@ def _solve_implicit_bwd(cfg, res, gbar):
     # and, decisively, PIN the residuals and the incoming cotangent with
     # explicit device_put, which binds into the staged computation where a
     # context cannot (see _device_pin).
-    with _device_context(cfg):
+    with _device_context(cfg), _timed(cfg, "adjoint"):
         res = _device_pin(cfg, res)
         gbar = _device_pin(cfg, gbar)
         return _device_pin(cfg, _solve_implicit_bwd_impl(cfg, res, gbar))
@@ -2773,6 +2819,13 @@ def _solve_implicit_bwd_impl(cfg, res, gbar):
         _debug_stage("operator application (dF/dz)^T b", dbg_vjp_z(b)[0])
     lam, stats = _adjoint_gcrot_core(params, z_star, frozen, dof_mask, b, cfg)
     _enforce_adjoint_stats(cfg, stats)
+    if any(isinstance(value, jax.core.Tracer) for value in stats):
+        # A compiled adjoint: how often it runs is not observable on the host.
+        _SOLVE_STATS.setdefault(cfg, dict.fromkeys(_COUNTERS, 0)).update(
+            adjoints=None, adjoint_krylov_iterations=None, adjoint_seconds=None)
+    else:
+        _count(cfg, adjoints=1,
+               adjoint_krylov_iterations=int(np.asarray(stats.iterations)))
     if debug:
         _debug_stage("recovered lambda", lam)
 
