@@ -2226,19 +2226,20 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
 
     if mode != "cli":
         raise ValueError(f"unknown mode {mode!r}; expected 'cli' or 'jit'")
+    # Predictors and axis retries mix committed and uncommitted arrays on
+    # the same device. Normalize once to reuse the lane executable, without
+    # changing the selected device or imposing a layout on sharded solves.
+    # Before the copy below, so the copy's own executable sees one commitment.
+    sharding = carry.state.R_cos.sharding
+    if all(isinstance(getattr(x, "sharding", None), jax.sharding.SingleDeviceSharding)
+           and x.sharding == sharding for x in jax.tree.leaves((carry, rt))):
+        carry, rt = jax.device_put((carry, rt), sharding)
     # The donated CLI lane (_block_lane, donate_argnums=0) requires every leaf
     # of the input carry to be a distinct buffer; _initial_carry aliases some
     # (xstore=state, shared cache zeros).  One copy to distinct buffers here
     # (values bit-for-bit unchanged) makes the per-block donation valid and is
     # amortized over the whole solve.
     carry = jax.tree.map(jnp.array, carry)
-    # Predictors and axis retries mix committed and uncommitted arrays on
-    # the same device. Normalize once to reuse the lane executable, without
-    # changing the selected device or imposing a layout on sharded solves.
-    sharding = carry.state.R_cos.sharding
-    if all(isinstance(getattr(x, "sharding", None), jax.sharding.SingleDeviceSharding)
-           and x.sharding == sharding for x in jax.tree.leaves((carry, rt))):
-        carry, rt = jax.device_put((carry, rt), sharding)
     if verbose and emit_banner:
         # initialize_radial.f prints the total Fourier mode count (mnmax), not mpol.
         emit(stage_banner(rt.resolution.ns, rt.resolution.mnmax, float(rt.ftol), rt.max_iterations), end="")
