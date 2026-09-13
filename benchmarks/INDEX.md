@@ -44,9 +44,9 @@ hand rather than by a script in this tree.
 | `benchmarks/polish_preconditioner_m4.json` | `benchmarks/polish_preconditioner.py` | `7bb306e0` |  | `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 | `benchmarks/preconditioner_2d_stiff_cases.json` | `benchmarks/preconditioner_2d_stiff.py` | `8b1c5ffe` | 2026-09-03 | `benchmarks/make_readme_figures.py`, `docs/_static/figures/figures.json`, `docs/reference/performance.rst`, `tests/test_figure_provenance.py` |
 | `benchmarks/profile.json` | `benchmarks/profile_production.py` |  |  | *nothing* |
-| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
+| `benchmarks/qa_optimization_startup_least_squares_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
 | `benchmarks/qa_optimization_startup_main_m4.json` | `benchmarks/qa_optimization_startup.py` | `980b602a` |  | `plan.md` |
-| `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst` |
+| `benchmarks/qa_optimization_startup_scalar_m4.json` | `benchmarks/qa_optimization_startup.py` | `63b1f512` |  | `docs/reference/optimization.rst`, `docs/reference/performance.rst` |
 | `benchmarks/review_20260905.json` |  |  | 2026-09-06 | `plan.md` |
 | `benchmarks/strong_force_cases_m4.json` | `benchmarks/make_strong_force_comparison.py` | `aa34952d` |  | `benchmarks/strong_force_comparison_m4.json`, `docs/_static/figures/figures.json`, `docs/explanation/high-order-force-balance.rst`, `plan.md`, `tests/test_performance_docs.py` |
 | `benchmarks/strong_force_comparison_m4.json` | `benchmarks/make_strong_force_comparison.py` |  |  | `docs/_static/figures/figures.json`, `docs/explanation/validation.md`, `tests/test_performance_docs.py` |
@@ -57,7 +57,7 @@ hand rather than by a script in this tree.
 
 | directory | files | generator | commits | dates | cited by |
 | --- | --- | --- | --- | --- | --- |
-| `benchmarks/baselines/m4/` | 54 | `benchmarks/profile_workflows.py` | `8e6fdff4`, `9f77fdbd` | 2026-08-30 to 2026-08-31 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
+| `benchmarks/baselines/m4/` | 54 | `benchmarks/profile_workflows.py` | `8e6fdff4`, `9f77fdbd` | 2026-08-30 to 2026-08-31 | `benchmarks/make_strong_force_comparison.py`, `benchmarks/strong_force_comparison_m4.json`, `docs/howto/parameter-scans.md`, `docs/reference/performance.rst`, `tests/test_performance_docs.py` |
 
 Workflows in `benchmarks/baselines/m4/`: B1, B2, C1, C2, F1, F2, F3, F4, F5, F6, F7, F8, F10, F11, M1, M2, M3 in the regimes cache_reload, cold, reshape, warm, warm_newparams, plus `benchmarks/baselines/m4/traces_manifest.json`.
 
